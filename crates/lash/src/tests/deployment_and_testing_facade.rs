@@ -76,46 +76,39 @@ async fn testing_facade_run_tool_granted_honors_the_granted_source_binding() {
 #[tokio::test]
 async fn definition_args_checks_partial_and_complete_inputs_without_starting() {
     use crate::process::{ArgsMismatch, ArgsMode};
-    use lash_vm::testing::ast_builders as b;
     let backend = sqlite_memory_store_backend().await;
     let core = explicit_ephemeral_facets(rlm_core_builder_over(backend))
         .build(crate::testing::runtime_lease_owner())
         .expect("the core builds");
-    let environment = lash_vm_runtime::LashVmSurface::default()
-        .host_environment(&lash_core::ToolCatalog::default())
-        .unwrap();
-    let compiled = lash_vm::compile_module(lash_vm::ModuleCompileRequest {
-        source: "args-check",
-        program: b::module(
-            vec![b::process_returning(
-                "handler",
-                vec![
-                    b::param("event", lash_vm::TypeExpr::Str),
-                    b::param("count", lash_vm::TypeExpr::Int),
-                ],
-                lash_vm::TypeExpr::Str,
-                b::finish(b::var("event")),
-            )],
-            Vec::new(),
-        ),
-        environment: &environment,
-    })
+    let document = crate::workflow::document::parse_document(
+        "kernel 1\nnumbers float\nentry handler(event: Text, count: Int) -> Text\n\n\
+         fn handler(event, count) {\n  return event\n}\n\nmain {\n  finish null\n}\n",
+    )
     .unwrap();
     let pin = crate::process::HostArtifactPin::mint();
-    core.host_artifacts()
-        .publish_module(&pin, &compiled.artifact)
-        .await
-        .unwrap();
-    let draft =
-        lash_vm::ProcessDefinitionIdentity::from_artifact_export(&compiled.artifact, "handler")
-            .unwrap()
-            .draft()
-            .unwrap();
-    let definition = core
+    let environment = lash_core::ProcessExecutionEnvSpec::new(
+        lash_core::AdmittedPluginConfig::default(),
+        lash_core::SessionPolicy::new(
+            crate::TurnBudget::bounded(32),
+            crate::MaxToolCalls::new(1024),
+            crate::NoProgressBudget::bounded(12),
+        ),
+        lash_core::SessionToolAccess::ambient(),
+    );
+    let crate::workflow::WorkflowPublish::Published(publication) = core
         .host_artifacts()
-        .publish_definition(&pin, &draft)
+        .publish_workflow(
+            &pin,
+            &crate::workflow::edit::Draft::open(document, None).unwrap(),
+            &crate::workflow::document::Name::new("handler"),
+            &environment,
+        )
         .await
-        .unwrap();
+        .unwrap()
+    else {
+        panic!("the document publishes");
+    };
+    let definition = publication.definition;
     let checker = core.process_definitions();
     let partial = serde_json::json!({"event": "ready"})
         .as_object()

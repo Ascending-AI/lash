@@ -262,8 +262,8 @@ const SLEEP_NODE: &str = "sleep-node";
 
 /// The first occurrence of `node`, as the law engine's document
 /// would name it.
-fn law_site(node: &str) -> lash_sansio::WorkflowOccurrence {
-    lash_sansio::WorkflowOccurrence::fixture(node, 1)
+fn law_site(node: &str) -> lash_sansio::EffectIdentity {
+    lash_sansio::effect_identity_fixture(node, 1)
 }
 
 fn settled_name(outcome: &SettledOutput) -> &'static str {

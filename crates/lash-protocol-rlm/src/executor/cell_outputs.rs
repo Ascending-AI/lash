@@ -29,7 +29,7 @@ pub(super) async fn record_cell_outputs(
     ctx: &RuntimeExecutionContext<'_>,
     cell: &cell_run::CellRun,
     code_renderer: &crate::render::CodeRendererSlot,
-    values: Vec<lash_vm::Value>,
+    values: Vec<lash_kernel_doc::Datum>,
     response: &mut ExecResponse,
 ) {
     // Only prints are rendered: a cell that finished without printing needs
@@ -72,13 +72,7 @@ pub(super) async fn record_cell_outputs(
                 return;
             }
         };
-    let namespace = cell
-        .identities()
-        .namespace()
-        .as_str()
-        .trim_end_matches(":lk2")
-        .to_string();
-    let key = format!("{namespace}:outputs");
+    let key = cell.outputs_key();
     let attachments = ctx.attachment_store();
     let finish_value = response.finish_value().cloned();
     let recorded_finish = finish_value.clone();
@@ -91,13 +85,13 @@ pub(super) async fn record_cell_outputs(
                 let mut observations = Vec::new();
                 if let Some(params) = &params {
                     for value in values {
+                        let typed = datum_json(&value);
                         let observation = crate::render::rendered_print(
                             renderer.as_ref(),
-                            &value,
+                            &typed,
                             &params.print,
                             history_index,
                             observations.len(),
-                            flow_to_json_value(&value),
                         );
                         observations.push(observation);
                     }

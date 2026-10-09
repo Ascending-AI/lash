@@ -290,8 +290,8 @@ pub fn cell(source: &str) -> LlmResponse {
 /// The RLM protocol factory a code law's core runs on `workers`, its cell
 /// budgets generous.
 pub fn rlm(
-    backend: &lash::Backend,
-    resolver: Option<lash_vm_runtime::SharedDeferredToolResolver>,
+    _backend: &lash::Backend,
+    resolver: Option<lash::tools::SharedDeferredToolResolver>,
     workers: lash::vm::WorkerService,
 ) -> lash::rlm::RlmProtocolPluginFactory {
     let factory = lash::rlm::RlmProtocolPluginFactory::new(
@@ -300,8 +300,7 @@ pub fn rlm(
             .instruction_limit(lash::rlm::InstructionBound::instructions(10_000_000))
             .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
             .build(),
-        Arc::new(lash::rlm::TypescriptDialect),
-        backend,
+        lash::rlm::CellDialect::typescript(),
     )
     .with_worker_service(workers);
     match resolver {

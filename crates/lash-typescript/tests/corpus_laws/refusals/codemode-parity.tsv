@@ -1,5 +1,0 @@
-# Corpus programs the lens printer refuses, typed (FIG-3599). Each row names
-# the program, the exact refusal and why the printer cannot spell it. A row
-# whose program now round-trips, or whose refusal changed, fails the law
-# until it is deleted or corrected.
-# program id	refusal	reason

@@ -13,7 +13,7 @@ use lash_core::{
 
 use super::super::{Args, Case, Meter, Receipt};
 use super::{
-    BLANK_SOURCE, Flavor, Fleet, Node, QUIET_SOURCE, commit_source, publish, settled, start,
+    BLANK_DOCUMENT, Flavor, Fleet, Node, QUIET_DOCUMENT, commit_document, publish, settled, start,
     within, within_population,
 };
 
@@ -193,7 +193,7 @@ fn replay_counts(fleet: &Fleet) -> Vec<super::probes::ProcessReplayCounts> {
 /// behind.
 async fn dispatcher(args: &Args, fleet: &Fleet, meter: &Meter) -> Outcome {
     let node = &fleet.nodes[0];
-    let published = publish(&node.core, &commit_source(args.operations)).await?;
+    let published = publish(&node.core, &commit_document(args.operations)).await?;
     let window = Instant::now();
     let mut feeds = Vec::new();
     let mut processes = Vec::new();
@@ -248,7 +248,7 @@ async fn dispatcher(args: &Args, fleet: &Fleet, meter: &Meter) -> Outcome {
 /// recovers.
 async fn feeds(args: &Args, fleet: &Fleet, meter: &Meter) -> Outcome {
     let node = &fleet.nodes[0];
-    let published = publish(&node.core, &commit_source(args.operations)).await?;
+    let published = publish(&node.core, &commit_document(args.operations)).await?;
     // SQLite statements are counted by the store's own witness; another
     // collector in this OS process leaves the field absent.
     let witness = lash_core::perf_witness::Collector::install().ok();
@@ -316,8 +316,8 @@ async fn feeds(args: &Args, fleet: &Fleet, meter: &Meter) -> Outcome {
 async fn burst(args: &Args, fleet: &Fleet, meter: &Meter) -> Outcome {
     let node = &fleet.nodes[0];
     let observer = fleet.nodes.last().context("a node")?;
-    let chatty = publish(&node.core, &commit_source(args.operations)).await?;
-    let quiet = publish(&node.core, QUIET_SOURCE).await?;
+    let chatty = publish(&node.core, &commit_document(args.operations)).await?;
+    let quiet = publish(&node.core, QUIET_DOCUMENT).await?;
     let quiet = start(&node.core, &quiet, "burst-quiet").await?;
     let quiet_feed = observe(observer, &quiet, meter, "process.feed.quiet.next").await?;
     // The quiet feed is attached before the burst starts.
@@ -387,7 +387,7 @@ async fn burst(args: &Args, fleet: &Fleet, meter: &Meter) -> Outcome {
 /// arrival at the two consumers.
 async fn convergence(args: &Args, fleet: &Fleet, meter: &Meter) -> Outcome {
     let node = &fleet.nodes[0];
-    let published = publish(&node.core, &commit_source(args.operations)).await?;
+    let published = publish(&node.core, &commit_document(args.operations)).await?;
     let window = Instant::now();
     let process = start(&node.core, &published, "convergence").await?;
     let mut open = Vec::new();
@@ -517,7 +517,7 @@ async fn reconcile(args: &Args, fleet: &Fleet, meter: &Meter) -> Outcome {
         };
         append_facts(node, args.operations, stale, meter).await?
     } else {
-        let published = publish(&node.core, &commit_source(args.operations)).await?;
+        let published = publish(&node.core, &commit_document(args.operations)).await?;
         let process = start(&node.core, &published, "reconcile").await?;
         let observed = stalled.core.processes().observe(&process);
         let snapshot = within("process snapshot", observed.snapshot()).await??;
@@ -572,7 +572,7 @@ async fn reconcile(args: &Args, fleet: &Fleet, meter: &Meter) -> Outcome {
 async fn roster(args: &Args, fleet: &Fleet, meter: &Meter) -> Outcome {
     let node = &fleet.nodes[0];
     let processes = node.core.processes();
-    let published = publish(&node.core, BLANK_SOURCE).await?;
+    let published = publish(&node.core, BLANK_DOCUMENT).await?;
     let window = Instant::now();
     let mut started = 0;
     while started < args.operations {

@@ -42,6 +42,16 @@ pub fn lower(source: &str, environment: &Environment<'_>) -> Result<Lowered, Dia
     lower::lower(&program, source, environment)
 }
 
+/// Reads `source` as the dialect's syntax and lowers nothing: what a host
+/// asks of text it only shows, such as an example in a prompt.
+///
+/// # Errors
+///
+/// The diagnostic of source outside the dialect's syntax.
+pub fn parse(source: &str) -> Result<(), Diagnostic> {
+    adapter::parse(source).map(|_| ())
+}
+
 /// A parser one serial caller owns and reuses.
 ///
 /// The first source starts one thread with the stack a maximum-sized source

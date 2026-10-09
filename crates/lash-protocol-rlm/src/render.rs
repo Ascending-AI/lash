@@ -6,11 +6,15 @@ use lash_rlm_types::RlmRenderPatch;
 pub trait CodeRenderer: Send + Sync {
     fn id(&self) -> &str;
 
-    fn print(&self, value: &lash_vm::Value, params: &RenderParams) -> Rendered<String> {
+    fn print(&self, value: &serde_json::Value, params: &RenderParams) -> Rendered<String> {
         render(value, params)
     }
 
-    fn variable_preview(&self, value: &lash_vm::Value, params: &RenderParams) -> Rendered<String> {
+    fn variable_preview(
+        &self,
+        value: &serde_json::Value,
+        params: &RenderParams,
+    ) -> Rendered<String> {
         render(value, params)
     }
 }
@@ -22,9 +26,13 @@ impl CodeRenderer for BuiltinCodeRenderer {
         "lash.ax.v1"
     }
 
-    fn variable_preview(&self, value: &lash_vm::Value, params: &RenderParams) -> Rendered<String> {
+    fn variable_preview(
+        &self,
+        value: &serde_json::Value,
+        params: &RenderParams,
+    ) -> Rendered<String> {
         let mut rendered = render(value, params);
-        if matches!(value, lash_vm::Value::String(_)) {
+        if matches!(value, serde_json::Value::String(_)) {
             rendered.body =
                 serde_json::to_string(&rendered.body).unwrap_or_else(|_| "\"\"".to_string());
             rendered.cuts.original_chars = rendered.body.chars().count();
@@ -103,11 +111,10 @@ impl ResolvedRlmRender {
 
 pub(crate) fn rendered_print(
     renderer: &dyn CodeRenderer,
-    value: &lash_vm::Value,
+    value: &serde_json::Value,
     params: &RenderParams,
     history_index: usize,
     print_index: usize,
-    typed: serde_json::Value,
 ) -> lash_sansio::CellPrint {
     let rendered = truncate_chars(renderer.print(value, params), params.max_chars);
     let projected_chars = rendered.body.chars().count();
@@ -135,7 +142,7 @@ pub(crate) fn rendered_print(
     };
     lash_sansio::CellPrint {
         text,
-        value: typed,
+        value: value.clone(),
         projection,
     }
 }
@@ -157,19 +164,12 @@ mod tests {
 
     #[test]
     fn print_keeps_typed_value_and_places_cut_header_outside_body_budget() {
-        let value = lash_vm::Value::String("abcdef".into());
+        let value = serde_json::Value::String("abcdef".into());
         let params = RenderParams {
             max_chars: 3,
             ..RenderParams::default()
         };
-        let observation = rendered_print(
-            &BuiltinCodeRenderer,
-            &value,
-            &params,
-            4,
-            2,
-            serde_json::json!("abcdef"),
-        );
+        let observation = rendered_print(&BuiltinCodeRenderer, &value, &params, 4, 2);
         assert_eq!(observation.value, serde_json::json!("abcdef"));
         assert_eq!(
             observation.text,

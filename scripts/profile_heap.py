@@ -200,36 +200,20 @@ def profile_pair(args: argparse.Namespace) -> None:
     out = args.out_dir.resolve()
     out.mkdir(parents=True, exist_ok=False)
     modes = ("off", "dhat")
-    paths = {}
-    labels = {}
-    if args.population == "vm-worker":
-        matrix = feature_binary(root, "lash-perf", "vm-worker-matrix", set())
-        workers = [feature_binary(root, "lash-vm-worker", "lash-vm-worker", features)
-                   for features in ({"testing"}, {"testing", "dhat-heap"})]
-        labels = {"off": workers[0], "dhat": workers[1]}
-        paths = artifacts(root, [matrix, *workers], build=not args.no_build,
-                          report=args.build_report or out / "build.json",
-                          optimized=True, symbolized=True)
-    else:
-        labels = {mode: feature_binary(root, "lash-perf", "lash-perf", features)
-                  for mode, features in zip(modes, (set(), {"dhat-heap"}))}
-        paths = artifacts(root, list(labels.values()), build=not args.no_build,
-                          report=args.build_report or out / "build.json",
-                          optimized=True, symbolized=True)
-        if args.population == "boundary":
-            modes = ("off", "future-sizes", "dhat")
-            labels["future-sizes"] = labels["off"]
+    labels = {mode: feature_binary(root, "lash-perf", "lash-perf", features)
+              for mode, features in zip(modes, (set(), {"dhat-heap"}))}
+    paths = artifacts(root, list(labels.values()), build=not args.no_build,
+                      report=args.build_report or out / "build.json",
+                      optimized=True, symbolized=True)
+    if args.population == "boundary":
+        modes = ("off", "future-sizes", "dhat")
+        labels["future-sizes"] = labels["off"]
     observations = []
     for mode in modes:
         directory = out / mode
         directory.mkdir()
-        executable = paths[matrix] if args.population == "vm-worker" else paths[labels[mode]]
-        if args.population == "vm-worker":
-            command = [str(executable), "--heap-smoke", "--worker", str(paths[labels[mode]]),
-                       "--out", str(directory)]
-            if mode == "dhat":
-                command += ["--heap-profile-dir", str(directory / "profiles")]
-        elif args.population == "latency":
+        executable = paths[labels[mode]]
+        if args.population == "latency":
             command = [str(executable), "latency", "--cases", args.case,
                        "--lanes", "1", "--scale-down", "--out", str(directory / "latency.json"),
                        "--store-dir", str(directory / "store")]
@@ -238,7 +222,7 @@ def profile_pair(args: argparse.Namespace) -> None:
                        "--operations", str(args.operations), "--callers", str(args.callers),
                        "--out", str(directory / "boundary.json"),
                        "--store-dir", str(directory / "store")]
-        if mode == "dhat" and args.population != "vm-worker":
+        if mode == "dhat":
             command += ["--dhat-out", str(directory / "parent.dhat.json"), "--dhat-frames", "16"]
         if mode == "future-sizes":
             command += ["--future-out", str(directory / "future-sizes.json"), "--future-top", "20"]
@@ -279,17 +263,16 @@ def profile_pair(args: argparse.Namespace) -> None:
     baseline = observations[0]["elapsed_ns"]
     configuration = ({"operations": args.operations, "callers": args.callers}
                      if args.population == "boundary" else
-                     {"lanes": 1, "scale_down": True}
-                     if args.population == "latency" else {"max_workers": 1})
+                     {"lanes": 1, "scale_down": True})
     receipt = {"kind": "lash.heap-profile-overhead", "population": args.population,
-               "case": "heap-smoke" if args.population == "vm-worker" else args.case,
+               "case": args.case,
                "configuration": configuration,
                "statistic": "one_matched_population_pair_per_instrument",
                "quantity": "observed_population_wall_duration_difference", "unit": "nanoseconds",
                "window": "parent_spawn_through_exit_including_children_and_profile_flush",
                "process_id": "separate_processes_per_mode; see_process_profile_receipts",
                "order": list(modes), "certifying": False, "growth_gate": None,
-               "off_mode": "stats_alloc" if args.population != "vm-worker" else "System",
+               "off_mode": "stats_alloc",
                "build": "same_symbolized_optimized_platform; feature_lanes_differ_by_instrument",
                "observations": observations,
                "on_minus_off_ns": {row["mode"]: row["elapsed_ns"] - baseline
@@ -299,7 +282,7 @@ def profile_pair(args: argparse.Namespace) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--population", choices=("boundary", "latency", "vm-worker"), default="boundary")
+    parser.add_argument("--population", choices=("boundary", "latency"), default="boundary")
     parser.add_argument("--case", default="root-redrive")
     parser.add_argument("--operations", type=int, default=1)
     parser.add_argument("--callers", type=int, default=1)

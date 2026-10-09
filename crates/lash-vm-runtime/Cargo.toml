@@ -8,7 +8,7 @@ repository.workspace = true
 homepage.workspace = true
 readme.workspace = true
 rust-version.workspace = true
-description = "Lash VM runtime integration for lash-core process engines and tool surfaces."
+description = "The lash side of the kernel machine's host boundary."
 keywords = ["lash", "agent", "runtime", "lashvm"]
 categories = ["asynchronous", "api-bindings"]
 
@@ -24,35 +24,35 @@ name = "lash_vm_runtime"
 doctest = false
 
 [features]
-testing = ["dep:lash-vm-worker", "lash-vm-client/testing", "lash-core/testing", "lash-vm/testing"]
+# Prints a workflow document as TypeScript.
+typescript = ["dep:lash-dialect-typescript"]
+testing = ["lash-vm-client/testing", "lash-vm-worker/testing", "lash-core/testing"]
+# The worker this crate links and the client it drives move protocol
+# versions together.
+synthetic-next = ["lash-vm-client/synthetic-next", "lash-vm-worker/synthetic-next"]
 
 [lints]
 workspace = true
 
 [dependencies]
 lash-vm-client = { workspace = true }
-lash-vm-worker = { workspace = true, optional = true, features = ["testing"] }
-rmp-serde = { workspace = true }
 lash-sansio = { workspace = true }
 async-trait = { workspace = true }
-chrono = { workspace = true }
 lash-core = { workspace = true }
-lash-core-worker = { workspace = true }
-lash-tool-support = { workspace = true }
-lash-trace = { workspace = true }
-lash-vm = { workspace = true }
+lash-core-execution = { workspace = true }
 lash-vm-broker = { workspace = true }
-lash-vm-protocol = { workspace = true }
-serde = { workspace = true, features = ["derive", "rc"] }
-serde_json = { workspace = true }
-tokio = { workspace = true, features = ["sync", "time", "rt", "macros"] }
-tokio-util = { workspace = true, features = ["rt"] }
+lash-kernel-doc = { workspace = true }
+lash-kernel-vm = { workspace = true }
+lash-vm-worker = { workspace = true }
+lash-kernel-check = { workspace = true }
+lash-kernel-dialect = { workspace = true }
+lash-dialect-typescript = { workspace = true, optional = true }
+lash-trace = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+tokio-util = { workspace = true }
 tracing = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
-lash-core = { workspace = true, features = ["testing"] }
-lash-core-execution = { workspace = true }
-lash-vm = { workspace = true, features = ["testing"] }
-lash-sqlite-store = { workspace = true, features = ["testing"] }
-tempfile = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt"] }

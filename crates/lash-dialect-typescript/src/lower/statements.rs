@@ -295,6 +295,20 @@ impl Lowerer<'_> {
 
     fn lower_declaration(&mut self, kind: VarKind, declaration: &ast::Var) -> Lowering<()> {
         let value = match &declaration.init {
+            // A `const` of the cell bound to an `async` arrow names a process.
+            Some(init)
+                if kind == VarKind::Const
+                    && self.in_cell_code()
+                    && matches!(declaration.pattern, ast::Pattern::Ident(..))
+                    && self.process_arrow(init).is_some() =>
+            {
+                let (ast::Pattern::Ident(name, _), Some(function)) =
+                    (&declaration.pattern, self.process_arrow(init))
+                else {
+                    unreachable!("the guard matched a named process arrow");
+                };
+                self.lower_process(Some(name), function)?
+            }
             Some(init) => self.lower_expr(init)?,
             None if kind == VarKind::Var => {
                 // `var x;` makes `x` exist and assigns nothing.

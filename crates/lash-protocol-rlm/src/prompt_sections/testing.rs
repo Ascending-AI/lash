@@ -37,8 +37,7 @@ impl RlmSections {
 
     pub(crate) fn typescript() -> Self {
         Self::cell(SessionDialect::prompt_only(
-            Arc::new(crate::dialect::TypescriptDialect),
-            lash_vm_runtime::LashVmSurface::default(),
+            crate::dialect::CellDialect::typescript(),
         ))
     }
 }

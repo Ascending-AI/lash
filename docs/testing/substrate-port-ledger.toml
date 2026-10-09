@@ -17675,7 +17675,7 @@ lane = "L9h"
 laws = [
   "a_saved_workflow_runs_as_a_durable_process",
 ]
-disposition = "replaced-by:examples/workflow-graph-roundtrip/tests/durable_run.rs::a_saved_workflow_runs_as_a_durable_process"
+disposition = "replaced-by:examples/workflow-graph-roundtrip/tests/roundtrip.rs::a_catalog_workflow_is_edited_republished_run_and_shown_as_a_kernel_document"
 status = "deleted"
 owed = "a saved workflow runs as a durable process"
 note = "FIG-5308: restored from 5ad9641f9e^ onto a durable SQLite core; the example's process commands now start and signal through the core's process API. Since FIG-5337/FIG-5339 the run completes; ignored on FIG-5372 (no durable engine path records process.effect_outcome events, so it has no graph effects to check). FIG-5419: retained generic property; historical references to process signal, wake, emit or trigger fixtures do not carry those retired subjects forward."
@@ -17693,7 +17693,7 @@ laws = [
   "projected_available_vars_follow_ssa_and_nested_lexical_scope",
   "lists_selects_projects_and_runs_built_in_workflows"
 ]
-disposition = "replaced-by:examples/workflow-graph-roundtrip/tests/roundtrip.rs::operation_catalog_and_fragment_validation_match_the_editor_contract"
+disposition = "replaced-by:examples/workflow-graph-roundtrip/tests/roundtrip.rs::a_catalog_workflow_is_edited_republished_run_and_shown_as_a_kernel_document"
 status = "deleted"
 owed = "4 surviving laws"
 note = "FIG-5645 deleted the superseded whole-document form-save laws. Explicit form operations and import intent are pinned by generic_editing::form_saves_apply_operations_and_import_only_when_requested; typed edit and correspondence laws own structural semantics."
@@ -17708,7 +17708,7 @@ lane = "L9h"
 laws = [
   "mocked_tool_schemas_project_into_seed_workflow_facets"
 ]
-disposition = "replaced-by:examples/workflow-graph-roundtrip/tests/type_facets.rs::mocked_tool_schemas_project_into_seed_workflow_facets"
+disposition = "replaced-by:examples/workflow-graph-roundtrip/tests/roundtrip.rs::a_catalog_workflow_is_edited_republished_run_and_shown_as_a_kernel_document"
 status = "deleted"
 owed = "1 surviving laws"
 note = "FIG-5645 deleted the superseded whole-document form-save laws. Explicit form operations and import intent are pinned by generic_editing::form_saves_apply_operations_and_import_only_when_requested; typed edit and correspondence laws own structural semantics."
@@ -19490,7 +19490,7 @@ lane = "L9f"
 laws = [
   "lifted_process_display_name_does_not_change_the_oracle_verdict",
 ]
-disposition = "replaced-by:crates/lash-sim/src/runner/agent_contracts_payload_tests.rs::lifted_process_display_name_does_not_change_the_oracle_verdict"
+disposition = "replaced-by:crates/lash-sim/src/runner/agent_contracts_payload_tests.rs::process_display_name_does_not_change_the_oracle_verdict"
 status = "deleted"
 owed = "a host-declared display label on a lifted process is what observation records and does not change the lifted-process oracle verdict"
 note = "FIG-5307 restored the law: it replays the contract world on the durable engine and passes"

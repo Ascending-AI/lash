@@ -24,7 +24,7 @@ pub(super) const AGENT_CONTRACT_FACT_SPECS: &[ContractFactSpec] = &[
             "agent.started_process_tool_call_graph",
         ),
         fact: "agent_started_process_tool_call_graph_execution",
-        assertion: "Agent facade starts a Lash VM process that executes app_lookup and records a completed labeled process graph",
+        assertion: "Agent facade starts a Lash VM process that executes app_lookup and records its completed `tools.app_lookup` effect on the process graph",
         check: check_agent_started_process_tool_call_graph,
         extras_before: &[],
         extras_after: &[ExtraFact::ToolReentry {
@@ -52,7 +52,7 @@ pub(super) const AGENT_CONTRACT_FACT_SPECS: &[ContractFactSpec] = &[
             "agent.started_process_child_spawn",
         ),
         fact: "agent_started_process_child_spawn_execution",
-        assertion: "Agent facade starts a Lash VM process that spawns a default subagent, preserves the labeled child-session graph, and returns the typed child value",
+        assertion: "Agent facade starts a Lash VM process that spawns a default subagent, preserves the child-session graph of its `agents.spawn` effect, and returns the typed child value",
         check: check_agent_started_process_child_spawn,
         extras_before: &[],
         extras_after: &[],
@@ -166,12 +166,12 @@ fn check_agent_started_process_tool_call_graph(
     contract: &'static str,
 ) -> Result<Value, String> {
     require_agent_final_value(result, &json!({ "ok": true }), contract)?;
-    require_agent_lifted_process_entries(result, 1, contract)?;
-    require_agent_completed_labeled_resource(result, "Lookup app state in process", contract)?;
+    require_agent_document_entry_processes(result, 1, contract)?;
+    require_agent_completed_effect(result, "tools.app_lookup", contract)?;
     Ok(json!({
         "final_value": { "ok": true },
-        "completed_lifted_processes": 1,
-        "labeled_resource": "Lookup app state in process",
+        "completed_document_entry_processes": 1,
+        "completed_effect": "tools.app_lookup",
     }))
 }
 
@@ -200,7 +200,7 @@ fn check_agent_durable_input_suspension_resolution(
         true,
         contract,
     )?;
-    require_agent_lifted_process_entries(result, 1, contract)?;
+    require_agent_document_entry_processes(result, 1, contract)?;
     require_agent_process_event(
         result,
         "process.waiting",
@@ -213,7 +213,7 @@ fn check_agent_durable_input_suspension_resolution(
         "final_value": "approved",
         "await_tool_call_id_present": true,
         "suspended_before_resolution": true,
-        "completed_lifted_processes": 1,
+        "completed_document_entry_processes": 1,
         "process_event": "process.waiting",
     }))
 }
@@ -223,9 +223,9 @@ fn check_agent_started_process_child_spawn(
     contract: &'static str,
 ) -> Result<Value, String> {
     require_agent_final_value(result, &json!({ "len": 2 }), contract)?;
-    require_agent_lifted_process_entries(result, 1, contract)?;
+    require_agent_document_entry_processes(result, 1, contract)?;
     require_agent_completed_process_entry(result, "spawn", contract)?;
-    require_agent_completed_labeled_resource(result, "Spawn subagent with web search", contract)?;
+    require_agent_completed_effect(result, "agents.spawn", contract)?;
     require_agent_min_u64(
         result,
         "/graph_facts/child_session_exec_completed_count",
@@ -234,9 +234,9 @@ fn check_agent_started_process_child_spawn(
     )?;
     Ok(json!({
         "final_value": { "len": 2 },
-        "completed_lifted_processes": 1,
+        "completed_document_entry_processes": 1,
         "completed_process": "spawn",
-        "labeled_resource": "Spawn subagent with web search",
+        "completed_effect": "agents.spawn",
         "child_session_exec_completed_count": result.pointer("/graph_facts/child_session_exec_completed_count").cloned().unwrap_or(Value::Null),
     }))
 }
@@ -257,8 +257,8 @@ fn check_agent_nested_process_start_await(
     contract: &'static str,
 ) -> Result<Value, String> {
     require_agent_final_value(result, &json!({ "parent": "done" }), contract)?;
-    require_agent_lifted_process_entries(result, 2, contract)?;
-    require_agent_completed_labeled_node(result, "Start nested child process", contract)?;
+    require_agent_document_entry_processes(result, 2, contract)?;
+    require_agent_completed_effect(result, "processes.start", contract)?;
     require_agent_min_u64(result, "/process_facts/process_count", 2, contract)?;
     require_agent_min_u64(
         result,
@@ -268,8 +268,8 @@ fn check_agent_nested_process_start_await(
     )?;
     Ok(json!({
         "final_value": { "parent": "done" },
-        "completed_lifted_processes": 2,
-        "labeled_node": "Start nested child process",
+        "completed_document_entry_processes": 2,
+        "completed_effect": "processes.start",
     }))
 }
 
@@ -279,7 +279,7 @@ fn check_agent_failed_child_preserves_failure_graph(
 ) -> Result<Value, String> {
     require_agent_no_final_value(result, contract)?;
     require_bool(result, "/process_facts/all_terminal", true, contract)?;
-    require_agent_failed_labeled_resource(result, "Spawn failing subagent", contract)?;
+    require_agent_failed_effect(result, "agents.spawn", contract)?;
     require_agent_min_u64(
         result,
         "/graph_facts/child_session_exec_completed_count",
@@ -304,7 +304,7 @@ fn check_agent_failed_child_preserves_failure_graph(
     )?;
     Ok(json!({
         "final_value_present": false,
-        "failed_labeled_resource": "Spawn failing subagent",
+        "failed_effect": "agents.spawn",
         "child_task_fail_reason": "child boom",
         "child_session_exec_completed_count": result.pointer("/graph_facts/child_session_exec_completed_count").cloned().unwrap_or(Value::Null),
         "all_processes_terminal": true,
@@ -447,72 +447,49 @@ pub(super) fn require_agent_completed_process_entry(
     )
 }
 
-/// A process lifted out of a cell carries no author-chosen name, and a host
-/// may replace even the runtime's derived label with its own display label:
-/// neither spelling is evidence. The lifted count a contract asserts comes
-/// from the structural `ProcessOrigin::Lifted` on the module IR's process
-/// declaration, resolved per observed process and aggregated as
-/// `completed_lifted_process_count`. The identifying evidence alongside it
-/// stays the `@label` node/resource titles the executed graph carries.
-pub(crate) fn require_agent_lifted_process_entries(
+/// A process a cell creates carries no author-chosen name, and a host may
+/// replace even the runtime's derived label with its own display label:
+/// neither spelling is evidence. The count a contract asserts is of the
+/// completed processes whose definition reads as an entry of an admitted
+/// kernel document, aggregated as `completed_document_entry_process_count`.
+/// The identifying evidence alongside it is the effects the executed
+/// document performs at its completed sites.
+pub(crate) fn require_agent_document_entry_processes(
     result: &Value,
     expected: usize,
     contract: &str,
 ) -> Result<(), String> {
-    let lifted = result
-        .pointer("/process_facts/completed_lifted_process_count")
+    let observed = result
+        .pointer("/process_facts/completed_document_entry_process_count")
         .and_then(Value::as_u64)
         .ok_or_else(|| {
-            format!("{contract} missing /process_facts/completed_lifted_process_count")
+            format!("{contract} missing /process_facts/completed_document_entry_process_count")
         })?;
-    if lifted == expected as u64 {
+    if observed == expected as u64 {
         Ok(())
     } else {
         Err(format!(
-            "{contract} expected {expected} completed lifted process entries, observed {lifted}"
+            "{contract} expected {expected} completed document-entry processes, observed {observed}"
         ))
     }
 }
 
-/// The scenario's cell named this resource operation with an `@label` doc
-/// comment (FIG-3047), so the executed graph must carry that title.
-pub(super) fn require_agent_completed_labeled_resource(
+/// The executed document performs `effect` at a site its overlay saw
+/// complete. The name is the document's, never the overlay's.
+pub(super) fn require_agent_completed_effect(
     result: &Value,
-    title: &str,
+    effect: &str,
     contract: &str,
 ) -> Result<(), String> {
-    require_agent_array_str_contains(
-        result,
-        "/graph_facts/completed_labeled_resources",
-        title,
-        contract,
-    )
+    require_agent_array_str_contains(result, "/graph_facts/completed_effects", effect, contract)
 }
 
-pub(super) fn require_agent_completed_labeled_node(
+pub(super) fn require_agent_failed_effect(
     result: &Value,
-    title: &str,
+    effect: &str,
     contract: &str,
 ) -> Result<(), String> {
-    require_agent_array_str_contains(
-        result,
-        "/graph_facts/completed_labeled_nodes",
-        title,
-        contract,
-    )
-}
-
-pub(super) fn require_agent_failed_labeled_resource(
-    result: &Value,
-    title: &str,
-    contract: &str,
-) -> Result<(), String> {
-    require_agent_array_str_contains(
-        result,
-        "/graph_facts/failed_labeled_resources",
-        title,
-        contract,
-    )
+    require_agent_array_str_contains(result, "/graph_facts/failed_effects", effect, contract)
 }
 
 pub(super) fn require_agent_array_str_contains(

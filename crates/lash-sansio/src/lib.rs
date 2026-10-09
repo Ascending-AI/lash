@@ -162,7 +162,7 @@ pub use schema_contract::{
     project_anthropic_bedrock_schema, project_for_dialect, resolve_schema,
 };
 pub use session::{
-    CellFailure, CellFailureKind, CellOutcome, CellPrint, CellRecord, DegradedBinding,
+    CellDefect, CellFailure, CellFailureKind, CellOutcome, CellPrint, CellRecord, DegradedBinding,
     ExecCodeFailure, ExecCodeFailureReason, ExecResponse, ExecutedCall, ExecutedCallOutcome,
     OmittedToolCalls, TextProjectionMetadata,
 };
@@ -215,9 +215,7 @@ pub use turn_driver::{
     reasoning_part, visible_response_parts, visible_response_text_from_parts,
 };
 pub use workflow_site::{
-    EmptyWorkflowNodeId, ExprSlot, WorkflowLoopFrame, WorkflowLoopPosition, WorkflowNodeId,
-    WorkflowOccurrence, WorkflowSiteDescriptor, WorkflowSitePath, WorkflowSiteRef,
-    WorkflowSiteRole, WorkflowSlotPath,
+    EffectIdentity, LoopIteration, Site, SpawnIdentity, TaskIdentity, Unit, effect_identity_fixture,
 };
 mod execution_node_kind;
 pub use execution_node_kind::ExecutionNodeKind;

@@ -4,7 +4,6 @@ use lash_sansio::ReportedFailure;
 mod process_fixtures;
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
-use lash_vm_client::service::runtime_ops::ServiceRuntimeOps as _;
 use process_fixtures::*;
 
 thread_local! {
@@ -291,7 +290,6 @@ async fn agent_foreground_tool_call_round_trip_execution() -> Result<Value, Fixe
         "Call the app lookup tool and finish its value.",
         vec![
             r#"<typescript>
-/** @label Lookup app state */
 const value = await tools.app_lookup({});
 finish(value);
 </typescript>"#,
@@ -322,7 +320,6 @@ async fn agent_failed_child_preserves_failure_graph_execution()
         "lash_runtime agent failed child graph",
         vec![
             r#"<typescript>
-/** @label Spawn failing subagent */
 const result = await agents.spawn({
   task: "Fail with reason child boom.",
   seed: {},
@@ -478,8 +475,7 @@ async fn facade_final_value_execution_inner(
             .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),
-        std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
-        &backend,
+        lash_protocol_rlm::CellDialect::typescript(),
     );
     let mut builder = lash::LashCore::rlm_builder(backend, factory)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
@@ -684,10 +680,10 @@ async fn facade_agent_durable_input_execution_with(
         "lash_runtime agent durable input",
         vec![
             r#"<typescript>
-const requestAnswer = await processes.create({ dialect: "typescript", source: `const requestAnswer = async () => {
+const requestAnswer = async () => {
   const result = await tools.mock_input_request({ question: "Need input?" });
   return result;
-};` });
+};
 const handle = await processes.start({ definition: requestAnswer });
 const result = await handle;
 finish(result.answer);
@@ -820,8 +816,7 @@ async fn agent_process_contract_core_with_options(
             .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),
-        std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
-        &backend,
+        lash_protocol_rlm::CellDialect::typescript(),
     );
     let tracing = lash_core::trace::TraceRuntime::new(backend.clock())
         .with_product_observer(graph_store.clone());
@@ -1033,7 +1028,6 @@ struct AgentContractProcessObservation {
 async fn agent_contract_process_observations(
     core: &lash::LashCore,
 ) -> Result<Vec<AgentContractProcessObservation>, FixedScriptRunnerError> {
-    let artifacts = lash::persistence::LashVmArtifacts::of_backend(core.backend());
     let processes = core.processes();
     let filter = lash_core::ProcessListFilter {
         status: lash_core::ProcessStatusFilter::Any,
@@ -1052,8 +1046,7 @@ async fn agent_contract_process_observations(
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
         for process in page.processes {
             let process_ref = agent_contract_process_ref(&process);
-            let process_origin =
-                agent_contract_process_origin(core.backend(), &artifacts, &process).await?;
+            let document_entry = agent_contract_process_document_entry(core, &process).await?;
             observed.push(AgentContractProcessObservation {
                 raw_process_id: process.process_id.clone(),
                 process_ref: process_ref.clone(),
@@ -1064,7 +1057,7 @@ async fn agent_contract_process_observations(
                     "status": process.status().label(),
                     "terminal": process.terminal().is_some(),
                     "definition_present": process.identity.definition_id.is_some(),
-                    "process_origin": process_origin.map(Value::from).unwrap_or(Value::Null),
+                    "document_entry": document_entry.map(Value::from).unwrap_or(Value::Null),
                     "child_session_present": process.child_session_id.is_some(),
                 }),
             });
@@ -1078,68 +1071,40 @@ async fn agent_contract_process_observations(
     Ok(observed)
 }
 
-/// The structural origin an observed process's pinned definition resolves to
-/// in its module IR (`ProcessOrigin` on the Lash VM declaration), never the
-/// display label the process row carries. `None` for a process that pins no
-/// Lash VM definition at all; an unresolvable pinned definition is a defect
-/// the contract run reports rather than quietly uncounting.
-async fn agent_contract_process_origin(
-    backend: &lash::Backend,
-    artifacts: &lash::persistence::LashVmArtifacts,
+/// The entry of the kernel document an observed process runs, read through
+/// the process's own definition, never the display label the process row
+/// carries. `None` for a process of another engine; a kernel process whose
+/// document lash no longer answers is a defect the contract run reports
+/// rather than quietly uncounting.
+async fn agent_contract_process_document_entry(
+    core: &lash::LashCore,
     process: &lash_core::facade_support::ObservedProcess,
-) -> Result<Option<&'static str>, FixedScriptRunnerError> {
-    if process.identity.kind.as_str() != lash_vm_runtime::LASH_VM_ENGINE_KIND {
+) -> Result<Option<String>, FixedScriptRunnerError> {
+    if process.identity.kind.as_str() != lash_vm_runtime::LASH_VM_ENGINE_KIND
+        || process.identity.definition_id.is_none()
+    {
         return Ok(None);
     }
-    let Some(id) = process.identity.definition_id.as_ref() else {
-        return Ok(None);
-    };
-    let bytes = backend
-        .definition_store()
-        .get_process_definition(id)
+    let read = core
+        .processes()
+        .graph(&process.process_id)
         .await
-        .map_err(|error| FixedScriptRunnerError::Runtime(error.to_string()))?
-        .ok_or_else(|| {
-            FixedScriptRunnerError::Runtime(format!(
-                "process {} has an unretained definition {id}",
-                process.process_id
-            ))
-        })?;
-    let draft = lash_core::ProcessDefinitionDraft::from_store_bytes(id, &bytes)
         .map_err(|error| FixedScriptRunnerError::Runtime(error.to_string()))?;
-    let identity = lash::vm::ProcessDefinitionIdentity::from_process_value(draft.value().as_json())
-        .map_err(|err| {
-            FixedScriptRunnerError::Runtime(format!(
-                "lash_vm process {} pins a definition that is not a process identity: {err}",
+    let lash::workflow::WorkflowRead::Inspected(inspection) = read else {
+        return Err(FixedScriptRunnerError::Runtime(format!(
+            "lash_vm process {} has no workflow document: {read:?}",
+            process.process_id
+        )));
+    };
+    match &inspection.document.reference().entry {
+        lash::workflow::WorkflowDocumentEntry::Entry { function } => Ok(Some(function.to_string())),
+        lash::workflow::WorkflowDocumentEntry::Main => {
+            Err(FixedScriptRunnerError::Runtime(format!(
+                "lash_vm process {} enters its document at `main`, not at an entry",
                 process.process_id
-            ))
-        })?;
-    let artifact = lash_vm_client::service::Service::default()
-        .inspect_artifact(artifacts, &identity.module_ref)
-        .await
-        .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?
-        .ok_or_else(|| {
-            FixedScriptRunnerError::Runtime(format!(
-                "lash_vm process {} pins module artifact `{}`, which the store no longer retains",
-                process.process_id, identity.module_ref
-            ))
-        })?;
-    let process_name = artifact
-        .process_name_for_ref(&identity.process_ref)
-        .ok_or_else(|| {
-            FixedScriptRunnerError::Runtime("definition has no matching module export".into())
-        })?;
-    let declaration = artifact.process(process_name).ok_or_else(|| {
-        FixedScriptRunnerError::Runtime(format!(
-            "module artifact `{}` exports no process `{}`",
-            identity.module_ref, process_name
-        ))
-    })?;
-    Ok(Some(if declaration.lifted {
-        "lifted"
-    } else {
-        "declared"
-    }))
+            )))
+        }
+    }
 }
 
 fn agent_contract_process_ref(process: &lash_core::facade_support::ObservedProcess) -> String {
@@ -1182,7 +1147,7 @@ fn hex_prefix(bytes: &[u8], len: usize) -> String {
 fn agent_contract_process_facts(processes: &[AgentContractProcessObservation]) -> Value {
     let mut completed_entries = BTreeSet::new();
     let mut completed_lash_vm_process_refs = BTreeSet::new();
-    let mut completed_lifted_process_refs = BTreeSet::new();
+    let mut completed_document_entry_process_refs = BTreeSet::new();
     let mut statuses = BTreeMap::<String, usize>::new();
     let mut kinds = BTreeMap::<String, usize>::new();
     for process in processes {
@@ -1211,11 +1176,10 @@ fn agent_contract_process_facts(processes: &[AgentContractProcessObservation]) -
                 completed_lash_vm_process_refs.insert(process.process_ref.clone());
                 if process
                     .observed
-                    .get("process_origin")
-                    .and_then(Value::as_str)
-                    == Some("lifted")
+                    .get("document_entry")
+                    .is_some_and(Value::is_string)
                 {
-                    completed_lifted_process_refs.insert(process.process_ref.clone());
+                    completed_document_entry_process_refs.insert(process.process_ref.clone());
                 }
             }
         }
@@ -1228,7 +1192,7 @@ fn agent_contract_process_facts(processes: &[AgentContractProcessObservation]) -
             .count(),
         "completed_entries": completed_entries.into_iter().collect::<Vec<_>>(),
         "completed_lash_vm_process_count": completed_lash_vm_process_refs.len(),
-        "completed_lifted_process_count": completed_lifted_process_refs.len(),
+        "completed_document_entry_process_count": completed_document_entry_process_refs.len(),
         "completed_lash_vm_process_refs": completed_lash_vm_process_refs.into_iter().collect::<Vec<_>>(),
         "status_counts": statuses,
         "kind_counts": kinds,

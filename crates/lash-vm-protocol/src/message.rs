@@ -1,15 +1,19 @@
 //! The typed messages a parent and its worker exchange.
 //!
-//! Parent to worker: [`ParentMessage`] (`Start`, `EffectResponse`, `Park`,
-//! `Cancel`, `Reset`, `Shutdown`). Worker to parent: [`WorkerMessage`]
-//! (`Progress`, `LimitExceeded`, `Ready`, `EffectRequest`,
-//! `Suspended`, `Complete`, `GuestError`, `Cancelled`, `ResetDone`). Every message travels under a [`MessageHeader`], and a
-//! receiver admits it through a [`MessageFence`].
+//! The worker hosts one kernel machine per execution, and the parent drives
+//! it through the machine's own interface: [`ParentMessage::Start`] compiles
+//! the document, [`ParentMessage::Run`] runs ready tasks until the run parks,
+//! spends its slice or ends, [`ParentMessage::Deliver`] hands it one
+//! committed outcome and [`ParentMessage::Export`] asks for its state. While
+//! a slice runs the worker asks the parent what the machine reads from its
+//! host ([`WorkerMessage::HostRead`]) and hands over what it prints
+//! ([`WorkerMessage::Printed`]). Every message travels under a
+//! [`MessageHeader`], and a receiver admits it through a [`MessageFence`].
 //!
-//! Effect requests and results carry their values as [`EncodedPayload`]
-//! bytes. The request is a *request*: its operation, receiver and claimed call
-//! site confer no authority. The parent resolves every request against the
-//! execution context it admitted, with its own grants, bindings and ordinals.
+//! Documents, requests, outcomes and ends cross as [`EncodedPayload`] bytes
+//! in the kernel's own encoding. A request is a *request*: its effect name
+//! and arguments confer no authority. The parent admits every one against
+//! the execution it admitted, with its own grants and identities.
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -206,154 +210,76 @@ impl MessageFence {
     }
 }
 
-/// Encoded value bytes. The protocol does not know the value model; the
-/// parent's broker and the worker's VM agree on it under the shared build.
+/// Encoded bytes of the kernel's own vocabulary. The protocol does not know
+/// it; the parent's broker and the worker's machine agree on it under the
+/// kernel version.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct EncodedPayload(#[serde(with = "serde_bytes")] pub Vec<u8>);
 
-/// Where the program to run comes from. The worker parses, links and compiles
-/// it: the parent never compiles model code.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub enum ProgramSource {
-    /// Model-authored source in a front end's dialect.
-    Source { dialect: String, text: String },
-    /// A stored module artifact and the entry to compile from it.
-    Artifact {
-        module_ref: String,
-        entry: ProgramEntry,
-        #[serde(with = "serde_bytes")]
-        artifact: Vec<u8>,
-    },
-}
-
-/// The module entry is explicit: a process named `main` is still a process.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub enum ProgramEntry {
-    Main,
-    Process { component: String, position: u32 },
-}
-
-/// One explicit description of the context the program runs in: a tool
-/// contract, a projected binding's shape, a module. Descriptions, never
-/// handles: nothing in one lets the worker act.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ContextDescription {
-    pub kind: String,
-    pub name: String,
-    pub body: EncodedPayload,
-}
-
-/// The VM state a run starts from.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum StartState {
-    Fresh,
-    Snapshot(OpaqueVmState),
-    Continuation(OpaqueVmState),
-}
-
-/// The VM limits a run is held to. `None` is unbounded.
+/// The bounds a run is held to, as the machine counts them. Passing one ends
+/// the run with a typed bound error; it is the run's own end, not a worker
+/// failure.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct VmLimits {
-    pub instruction_budget: Option<u64>,
-    pub memory_limit_bytes: Option<u64>,
-    pub max_frame_depth: u64,
+pub struct RunBounds {
+    /// The most the run may be charged, in the kernel's charge units.
+    pub charge: u64,
+    /// The most heap the run may hold, in bytes as the machine accounts them.
+    pub memory: u64,
+    pub call_depth: u32,
+    pub live_tasks: u32,
+    pub requests_per_park: u32,
+    pub join_members: u32,
+}
+
+/// What a run starts from.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StartFrom {
+    /// A new run: its target, arguments and session bindings, in the
+    /// kernel's encoding.
+    Fresh(EncodedPayload),
+    /// A parked run, as the worker that exported it sealed it.
+    Parked(OpaqueVmState),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Start {
     pub owner: VmOwner,
-    pub program: ProgramSource,
-    pub contexts: Vec<ContextDescription>,
-    pub state: StartState,
-    pub limits: VmLimits,
+    /// The admitted document, in its JSON encoding. The worker validates
+    /// and compiles it: the parent never compiles model code.
+    pub document: EncodedPayload,
+    pub from: StartFrom,
+    pub bounds: RunBounds,
 }
 
-/// Names one effect request within a run, so its result answers exactly it.
+/// Names one host read within a run, so its answer answers exactly it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct EffectRequestId(pub u64);
+pub struct HostReadId(pub u64);
 
-/// The kind of operation a worker requests. Mirrors the VM's suspension
-/// vocabulary; the payload carries the operation itself.
+/// What a machine reads from its host while it runs. None is a wait: the
+/// parent answers at once, and a read in a stretch that was not saved is
+/// drawn again after a crash.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum EffectKind {
-    ProjectionRead,
-    ResourceOperation,
-    ResourceOperationBatch,
-    Await,
-    Print,
-    Finish,
-    Fail,
-    Sleep,
-    /// The run reached a cancel checkpoint; the parent answers with its
-    /// journaled observation of cancellation.
-    CancelCheckpoint,
-    /// Process-mode parking seam after an effect has completed.
-    ProcessBoundary,
-    /// The run could not be captured where its parent asked it to park; the
-    /// parent acknowledges, and a declined park on an effect issues that
-    /// effect's request again.
-    ParkDeclined,
+pub enum HostReadKind {
+    Clock,
+    Random,
+    /// A read through a projection handle: the payload names the handle and
+    /// the request, and the answer is kernel data or a kernel error.
+    Projection,
 }
 
-impl EffectKind {
-    /// Whether the parent may answer a request of this kind with
-    /// [`ParentMessage::Park`] instead of a response (FIG-4159, FIG-4275): a
-    /// resource operation, a resource-operation batch, a process await, a
-    /// sleep or an await, which a continuation can issue again, and a
-    /// process boundary. It mirrors the VM's `VmRequest::parkable` and grants
-    /// nothing.
-    pub fn parkable(self) -> bool {
-        matches!(
-            self,
-            Self::ResourceOperation
-                | Self::ResourceOperationBatch
-                | Self::Await
-                | Self::Sleep
-                | Self::ProcessBoundary
-        )
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// What a run has used so far, as its machine meters it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct EffectRequest {
-    pub id: EffectRequestId,
-    pub kind: EffectKind,
-    pub payload: EncodedPayload,
-}
-
-/// What the parent answers an effect request with.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum EffectOutcome {
-    /// The effect journal observed cancellation; no later guest effect may start.
-    Cancelled,
-    Value(EncodedPayload),
-    Unit,
-    /// The parent handed an operation to a successor segment.
-    HandedOver,
-    /// The effect failed; the payload is the host error the guest may catch.
-    Failed(EncodedPayload),
-    /// A cancel checkpoint's journaled observation.
-    Checkpoint {
-        cancelled: bool,
-    },
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct EffectResponse {
-    pub id: EffectRequestId,
-    pub outcome: EffectOutcome,
+pub struct RunMeters {
+    pub charged: u64,
+    pub memory: u64,
+    pub live_tasks: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -365,24 +291,32 @@ pub enum ParentMessage {
         owner: VmOwner,
         request: EncodedPayload,
     },
-    #[serde(rename = "effect_result")]
-    EffectResponse(EffectResponse),
-    /// Cooperative cancellation. It never decides the durable winner: that is
-    /// the journaled checkpoint observation (ADR 0039).
+    /// Run ready tasks until none is ready, the run ends, or `slice` charge
+    /// units are spent. With `cancel`, the machine observes a run cancel at
+    /// its next safe point and ends cancelled; the durable winner is still
+    /// the parent's to decide (ADR 0039).
+    Run {
+        slice: u64,
+        cancel: bool,
+    },
+    /// One committed outcome, for the wait the machine named.
+    Deliver {
+        wait: u64,
+        outcome: EncodedPayload,
+    },
+    /// The answer to the worker's pending [`WorkerMessage::HostRead`].
+    HostAnswer {
+        id: HostReadId,
+        answer: EncodedPayload,
+    },
+    /// Write the run's state as it stands. Legal between runs: every task
+    /// is between statements.
+    Export,
+    /// Physical cancellation: drop the machine where it stands.
     Cancel,
-    /// Drop the VM instance and install a pristine one. Sent only after a
-    /// clean completion or release; any failure discards the worker instead.
+    /// Drop the machine and everything guest-derived. Sent only after a
+    /// clean end or release; any failure discards the worker instead.
     Reset,
-    /// Park the run on its pending request instead of answering it: a process
-    /// boundary, or a parkable effect ([`EffectKind::parkable`]) whose
-    /// operation the parent settles without holding the worker, such as one
-    /// that needs a worker of its own (FIG-4159). The worker serializes its VM
-    /// and answers [`WorkerMessage::Suspended`], or asks
-    /// [`EffectKind::ParkDeclined`] when the run cannot be captured where it
-    /// stands. A run started from a state parked on an effect issues that
-    /// effect's request again, and the parent answers it with the outcome it
-    /// held. No effect is re-executed locally.
-    Park,
     Shutdown,
 }
 
@@ -396,8 +330,8 @@ pub enum WorkerMessage {
         encode_ns: u64,
         guest_ns: u64,
     },
-    /// The worker refuses the exchange or the run. Run limits use
-    /// `LimitExceeded`, and how a worker ended is never its own to say.
+    /// The worker refuses the exchange or the run. How a worker ended is
+    /// never its own to say.
     Refused {
         refusal: crate::WorkerRefusal,
     },
@@ -415,27 +349,40 @@ pub enum WorkerMessage {
         protocol_version: u32,
         crate_version: String,
     },
-    EffectRequest(EffectRequest),
-    /// Ordered execution observations, with no authority.
-    Observations {
+    /// The machine exists and has run nothing.
+    Started,
+    /// The machine reads its host; it runs on once the parent answers.
+    HostRead {
+        id: HostReadId,
+        kind: HostReadKind,
+        request: EncodedPayload,
+    },
+    /// What the run printed, in order, with no authority.
+    Printed {
         payload: EncodedPayload,
     },
-    /// The run parked, at a boundary or on the request its parent asked it
-    /// to park on; the state resumes it.
-    Suspended {
-        state: OpaqueVmState,
+    /// No task is ready: the effects and sleeps requested since the last
+    /// park, and the waits withdrawn since.
+    Parked {
+        park: EncodedPayload,
+        meters: RunMeters,
     },
-    /// The run finished. A fully received `Complete` wins over a later EOF or
+    /// The slice is spent and a task is still ready.
+    Slice {
+        meters: RunMeters,
+    },
+    /// The run is over. A fully received `Ended` wins over a later EOF or
     /// exit.
-    Complete {
-        state: OpaqueVmState,
-        value: EncodedPayload,
+    Ended {
+        end: EncodedPayload,
+        meters: RunMeters,
     },
-    /// The guest raised an error the VM surfaced; the state is what the cell's
-    /// error semantics keep.
-    GuestError {
-        state: Option<OpaqueVmState>,
-        error: EncodedPayload,
+    /// The outcome was taken; `dropped` when its wait had been withdrawn.
+    Delivered {
+        dropped: bool,
+    },
+    Exported {
+        state: OpaqueVmState,
     },
     Cancelled,
     ResetDone {
@@ -456,11 +403,14 @@ impl WorkerMessage {
             Self::Progress { .. } => WorkerFrameKind::Progress,
             Self::LimitExceeded { .. } => WorkerFrameKind::LimitExceeded,
             Self::Ready { .. } => WorkerFrameKind::Ready,
-            Self::EffectRequest(_) => WorkerFrameKind::EffectRequest,
-            Self::Observations { .. } => WorkerFrameKind::Observations,
-            Self::Suspended { .. } => WorkerFrameKind::Suspended,
-            Self::Complete { .. } => WorkerFrameKind::Complete,
-            Self::GuestError { .. } => WorkerFrameKind::GuestError,
+            Self::Started => WorkerFrameKind::Started,
+            Self::HostRead { .. } => WorkerFrameKind::HostRead,
+            Self::Printed { .. } => WorkerFrameKind::Printed,
+            Self::Parked { .. } => WorkerFrameKind::Parked,
+            Self::Slice { .. } => WorkerFrameKind::Slice,
+            Self::Ended { .. } => WorkerFrameKind::Ended,
+            Self::Delivered { .. } => WorkerFrameKind::Delivered,
+            Self::Exported { .. } => WorkerFrameKind::Exported,
             Self::Cancelled => WorkerFrameKind::Cancelled,
             Self::ResetDone { .. } => WorkerFrameKind::ResetDone,
             Self::Prepared { .. } => WorkerFrameKind::Prepared,

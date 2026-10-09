@@ -357,8 +357,10 @@ impl PluginHost {
         process_lifecycle_available: bool,
     ) -> Result<crate::RuntimeHostConfig, PluginError> {
         let trace_runtime = runtime_host.tracing.clone();
+        let backend = runtime_host.backend().clone();
         let ctx = super::ProcessEngineContributionContext::new(
             self,
+            &backend,
             &trace_runtime,
             process_lifecycle_available,
         );

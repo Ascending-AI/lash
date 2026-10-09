@@ -180,18 +180,31 @@ fn the_marker_list_and_the_example_rewriter_are_not_vacuous() {
     // example names host modules and free identifiers that no isolated
     // environment has, so `TS_UNKNOWN_BINDING` is expected and a *syntax* error
     // is not.
-    let typescript = crate::dialect::TypescriptDialect;
+    let typescript = crate::dialect::TypescriptPrompts;
+    let embedding = lash_vm_worker::standard(&lash_vm_client::WorkerTuning::standard())
+        .expect("the standard worker embedding");
+    let (effects, bindings) = (
+        std::collections::BTreeMap::new(),
+        std::collections::BTreeSet::new(),
+    );
     let mut unparseable = Vec::new();
     for example in authored_tool_examples() {
         let rendered = typescript
             .render_tool_example(example)
             .expect("TypeScript spells every authored example");
-        if let Err(error) = lash_typescript::parse(&rendered) {
+        if let Err(error) = lash_dialect_typescript::lower(
+            &rendered,
+            &lash_kernel_dialect::Environment {
+                library: embedding.library(),
+                effects: &effects,
+                bindings: &bindings,
+            },
+        ) {
             let code = format!("{:?}", error.code);
-            if code.contains("UnknownBinding") || code.contains("LinkError") {
+            if code.contains("UnknownBinding") || code.contains("MethodUnsupported") {
                 continue;
             }
-            unparseable.push(format!("`{example}` → `{rendered}`: {error}"));
+            unparseable.push(format!("`{example}` → `{rendered}`: {}", error.message));
         }
     }
     assert!(
@@ -227,7 +240,7 @@ fn the_marker_list_and_the_example_rewriter_are_not_vacuous() {
     assert!(RETIRED_SURFACE_MARKERS.contains(&"<lash_vm>"));
     assert!(RETIRED_SURFACE_MARKERS.contains(&"finish <value>"));
     assert_ne!(
-        crate::dialect::TypescriptDialect
+        crate::dialect::TypescriptPrompts
             .prompt_vocabulary()
             .cell_tags
             .open,
@@ -403,19 +416,19 @@ async fn assembled_prompt_fragments_with_projection(
     ));
 
     // The deferred-tool advertisement, which is prose a *lower* crate composes
-    // (`lash_vm_runtime::catalogue_preview`) and a host states in its
+    // (`catalogue_preview`) and a host states in its
     // prompt config. It is model-facing on every turn of any session with a
     // deferred catalogue, it takes no vocabulary, and neither this walker nor
     // the tool-prose gate saw it: a judged TypeScript session was advertised
     // `await tools.search({ query: "..." })?`, try-operator included.
     fragments.push((
         "deferred-tool advertisement",
-        lash_vm_runtime::catalogue_preview(
-            [lash_vm_runtime::CataloguePreviewEntry {
+        crate::catalogue_preview(
+            [crate::CataloguePreviewEntry {
                 module_path: vec!["workbench_deferred".to_string()],
                 call: "stats".to_string(),
             }],
-            &lash_vm_runtime::CataloguePreviewOptions::default(),
+            &crate::CataloguePreviewOptions::default(),
         )
         .expect("one catalogued entry renders an advertisement"),
     ));

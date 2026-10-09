@@ -62,10 +62,8 @@ fn pair(step: CellRecord) -> Vec<SessionHistoryRecord> {
     vec![context(&step.id, &step.id), trajectory(step)]
 }
 fn render(events: &[SessionHistoryRecord]) -> Vec<LlmMessage> {
-    let dialect = crate::dialect::SessionDialect::prompt_only(
-        std::sync::Arc::new(crate::dialect::TypescriptDialect),
-        lash_vm_runtime::LashVmSurface::default(),
-    );
+    let dialect =
+        crate::dialect::SessionDialect::prompt_only(crate::dialect::CellDialect::typescript());
     let turn_messages = lash_core::facade_support::MessageSequence::default();
     render_history_messages(&RlmHistoryRenderInput {
         dialect: &dialect,

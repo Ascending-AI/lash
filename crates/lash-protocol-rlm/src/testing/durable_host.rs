@@ -77,35 +77,15 @@ impl DurableHost {
         }
     }
 
-    /// The backend the host's store set serves.
-    pub(crate) fn backend(&self) -> &lash_core::Backend {
-        &self.backend
-    }
-
     /// The claimed context a cell runs under.
     pub(crate) fn context(&self) -> lash_core::ActorContext {
         self.context.clone()
     }
 
-    /// The module store a cell's artifacts live in: the backend's.
-    pub(crate) fn artifacts(&self) -> lash_vm::LashVmArtifacts {
-        lash_vm::LashVmArtifacts::of_backend(&self.backend)
-    }
-
     /// Every port of the host's backend, its claimed context serving the
-    /// effects, and the lash_vm process engine over the backend's module
-    /// store.
+    /// effects.
     pub(crate) fn ports(&self) -> lash_core::testing::TestExecutionPorts {
-        let mut ports = lash_core::testing::TestExecutionPorts::lent(&self.backend, self.context());
-        ports.process_engines = lash_core::ProcessEngineRegistry::new().with_registration(
-            lash_vm_runtime::lash_vm_process_engine_registration(
-                lash_vm_runtime::LashVmProcessEngine::new(
-                    lash_vm::LashVmArtifacts::of_backend(&self.backend),
-                    lash_vm_runtime::LashVmSurface::default(),
-                ),
-            ),
-        );
-        ports
+        lash_core::testing::TestExecutionPorts::lent(&self.backend, self.context())
     }
 
     /// The node serving the actor dies without releasing it, and another

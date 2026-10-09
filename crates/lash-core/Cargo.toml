@@ -34,6 +34,7 @@ synthetic-next = ["lash-core-store/synthetic-next", "lash-core-execution/synthet
 workspace = true
 
 [dependencies]
+lash-kernel-doc = { workspace = true }
 lash-durable = { workspace = true }
 lash-core-ids = { workspace = true }
 lash-core-llm = { workspace = true }

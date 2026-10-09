@@ -459,6 +459,19 @@ pub mod tools {
         ToolIntentSubmissionAdmission, ToolIntentSubmissionOutcome, ToolIntentSubmissionRecord,
         ToolIntentSubmissionSettlement,
     };
+    #[cfg(feature = "rlm")]
+    pub use lash_protocol_rlm::{
+        CataloguePreviewEntry, CataloguePreviewOptions, DEFAULT_CATALOGUE_PREVIEW_CALL_NAME_LIMIT,
+        DEFAULT_CATALOGUE_PREVIEW_MODULE_LIMIT, catalogue_preview,
+        catalogue_preview_entries_from_catalog_records, catalogue_preview_entries_from_manifests,
+        catalogue_preview_entry_from_catalog_record, catalogue_preview_entry_from_manifest,
+    };
+    #[cfg(feature = "rlm")]
+    pub use lash_protocol_rlm::{
+        DeferredResolutionError, DeferredResolveContext, DeferredToolResolver,
+        RecordedGrantInstallError, Resolution as DeferredToolResolution,
+        SharedDeferredToolResolver, ToolGrant as DeferredToolGrant,
+    };
     /// The whole tool-authoring support surface: [`StaticToolProvider`] /
     /// [`StaticToolExecute`] for fixed-set providers plus the shared helpers
     /// (`invalid_tool_args`, `object_schema`, `parse_optional_usize_arg`,
@@ -469,18 +482,7 @@ pub mod tools {
     pub use lash_tool_support::*;
     #[cfg(feature = "rlm")]
     pub use lash_vm_runtime::{
-        CataloguePreviewEntry, CataloguePreviewOptions, DEFAULT_CATALOGUE_PREVIEW_CALL_NAME_LIMIT,
-        DEFAULT_CATALOGUE_PREVIEW_MODULE_LIMIT, ToolBindingResolutionExt, ToolManifestBindingExt,
-        catalogue_preview, catalogue_preview_entries_from_catalog_records,
-        catalogue_preview_entries_from_manifests, catalogue_preview_entry_from_catalog_record,
-        catalogue_preview_entry_from_manifest, required_tool_binding,
-    };
-    #[cfg(feature = "rlm")]
-    pub use lash_vm_runtime::{
-        DeferredLink, DeferredLinkError, DeferredResolutionError, DeferredResolutionLinkKey,
-        DeferredResolveContext, DeferredToolResolver, RecordedGrantInstallError,
-        Resolution as DeferredToolResolution, SharedDeferredToolResolver,
-        ToolGrant as DeferredToolGrant, compile_with_deferred_resolution,
+        ToolBindingResolutionExt, ToolManifestBindingExt, required_tool_binding,
     };
 }
 
@@ -722,9 +724,6 @@ pub mod persistence {
         ContentMismatchDetail, ProviderFileCacheLimits, ProviderFileDelivery, ProviderFileUploader,
         UploadedProviderFile,
     };
-    /// The typed view an RLM host reads and writes its module artifacts through.
-    #[cfg(feature = "rlm")]
-    pub use lash_vm_runtime::LashVmArtifacts;
 }
 
 /// Prompt sections (ADR 0133): the host's plan and the records of what a
@@ -1024,7 +1023,8 @@ pub mod plugins {
     };
     /// Code-executor request, response, and runtime capability context.
     pub use lash_core::{
-        CellFailure, CellFailureKind, ExecRequest, ExecResponse, RuntimeExecutionContext,
+        CellDefect, CellFailure, CellFailureKind, ExecRequest, ExecResponse,
+        RuntimeExecutionContext,
     };
     pub use lash_core::{CompletedToolCall, PluginOptions};
     /// A host process engine's state machine (ADR 0132 §6): the state it
@@ -1215,7 +1215,7 @@ pub mod process {
         RetainedProcessView, StepBodyStartedObservation,
     };
     #[cfg(feature = "rlm")]
-    pub use lash_vm_runtime::{LASH_VM_ENGINE_KIND, LashVmProcessInput};
+    pub use lash_vm_runtime::{KernelProcessDefinition, KernelProcessInput, LASH_VM_ENGINE_KIND};
 }
 
 /// Store-author durability configuration and backend contracts.
@@ -1419,10 +1419,19 @@ pub mod process_controls {
     };
 }
 
-/// TypeScript process dialect.
+/// The dialect seam of the kernel: what a worker installs for a language
+/// (its front end, printer and helper functions), the library a front end
+/// names functions through, and the diagnostics both answer.
+#[cfg(any(feature = "rlm", feature = "typescript"))]
+pub mod dialect {
+    pub use lash_kernel_dialect::*;
+}
+
+/// The TypeScript dialect of the kernel: its front end, its printer and
+/// their diagnostics.
 #[cfg(feature = "typescript")]
 pub mod typescript {
-    pub use lash_typescript::*;
+    pub use lash_dialect_typescript::*;
 }
 
 /// HTTP transport for provider and ingress traffic.

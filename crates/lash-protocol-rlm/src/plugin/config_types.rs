@@ -41,8 +41,8 @@ macro_rules! nonzero_bound_serde {
     };
 }
 
-/// How many VM instructions (plus the collection work builtins charge) an
-/// execution may run for.
+/// How much kernel charge (`K-COST-001`: steps, plus the work library
+/// functions charge) an execution may run for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct InstructionBound(Option<NonZeroU64>);
 
@@ -70,28 +70,20 @@ impl InstructionBound {
     pub const fn limit(self) -> Option<NonZeroU64> {
         self.0
     }
-
-    fn into_engine(self) -> lash_vm::ExecutionBound<NonZeroU64> {
-        match self.0 {
-            Some(value) => lash_vm::ExecutionBound::Bounded(value),
-            None => lash_vm::ExecutionBound::Unbounded,
-        }
-    }
 }
 
 nonzero_bound_serde!(InstructionBound);
 
-/// How many live logical heap bytes an execution may hold, metered by the
-/// Lash VM heap size schedule rather than by the allocator or RSS.
+/// How many live logical bytes an execution may hold, metered by the
+/// kernel's size schedule rather than by the allocator or RSS.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MemoryBound(Option<NonZeroU64>);
 
 impl MemoryBound {
     /// A finite logical heap limit, in bytes.
     ///
-    /// Named for the engine's own `ExecutionBound::logical_bytes`, and named
-    /// *logical* on purpose: the ceiling is metered by the Lash VM heap size
-    /// schedule, not by the allocator or by RSS. A host reading `bytes(..)` at
+    /// Named *logical* on purpose: the ceiling is metered by the kernel's
+    /// size schedule, not by the allocator or by RSS. A host reading `bytes(..)` at
     /// a call site had to know which axis the value landed on to know what it
     /// meant; this one says so.
     ///
@@ -128,13 +120,6 @@ impl MemoryBound {
     pub const fn limit(self) -> Option<NonZeroU64> {
         self.0
     }
-
-    fn into_engine(self) -> lash_vm::ExecutionBound<NonZeroU64> {
-        match self.0 {
-            Some(value) => lash_vm::ExecutionBound::Bounded(value),
-            None => lash_vm::ExecutionBound::Unbounded,
-        }
-    }
 }
 
 nonzero_bound_serde!(MemoryBound);
@@ -161,50 +146,6 @@ impl ExecutionBounds {
 
     pub const fn unbounded() -> Self {
         Self::new(InstructionBound::unbounded(), MemoryBound::unbounded())
-    }
-
-    pub(crate) fn into_engine(self) -> lash_vm::ExecutionBounds {
-        lash_vm::ExecutionBounds::new(
-            self.instruction_limit.into_engine(),
-            self.memory_limit.into_engine(),
-        )
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(default)]
-pub struct RlmLanguageFeatures {
-    pub label_annotations: bool,
-}
-
-impl RlmLanguageFeatures {
-    pub fn union(self, other: Self) -> Self {
-        Self {
-            label_annotations: self.label_annotations || other.label_annotations,
-        }
-    }
-
-    pub fn satisfies(self, required: Self) -> bool {
-        !required.label_annotations || self.label_annotations
-    }
-
-    pub fn with_label_annotations(mut self) -> Self {
-        self.label_annotations = true;
-        self
-    }
-
-    pub(crate) fn into_engine(self) -> lash_vm::LashVmLanguageFeatures {
-        lash_vm::LashVmLanguageFeatures {
-            label_annotations: self.label_annotations,
-        }
-    }
-}
-
-impl From<lash_vm::LashVmLanguageFeatures> for RlmLanguageFeatures {
-    fn from(value: lash_vm::LashVmLanguageFeatures) -> Self {
-        Self {
-            label_annotations: value.label_annotations,
-        }
     }
 }
 

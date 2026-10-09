@@ -265,14 +265,6 @@ jobs:
         run: |
           python3 scripts/profile_lash_vm.py --iterations 2500 --profile-iterations 2500 --enforce-budgets --out .benchmarks/perf-guard/lash_vm.json --no-build --build-report .benchmarks/perf-guard/build-report.json
 
-      - name: Check TypeScript string loop scaling
-        if: '!cancelled()'
-        run: |
-          binary="$(python3 tools/buck2/outputs.py \
-            --report .benchmarks/perf-guard/build-report.json \
-            --label //crates/lash-perf:lash-perf__bin --single)"
-          "$binary" string-scaling --out .benchmarks/perf-guard/string-scaling.json
-
       - name: Publish performance summaries
         if: '!cancelled()'
         run: |

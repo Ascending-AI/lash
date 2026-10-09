@@ -176,7 +176,7 @@ impl std::fmt::Display for RlmRenderRefusal {
 #[derive(Clone, Debug)]
 pub struct RlmConfigOwner {
     pub(crate) channel: RlmChannel,
-    pub(crate) dialect: &'static str,
+    pub(crate) dialect: String,
     pub(crate) config: RlmProtocolPluginConfig,
 }
 
@@ -198,7 +198,7 @@ impl ConfigOwner for RlmConfigOwner {
             render: stated.render,
             termination: stated.termination,
             channel: Some(self.channel),
-            dialect: Some(self.dialect.to_string()),
+            dialect: Some(self.dialect.clone()),
             behaviour,
         }))
     }
@@ -325,7 +325,7 @@ mod tests {
     fn owner() -> RlmConfigOwner {
         RlmConfigOwner {
             channel: RlmChannel::Cell,
-            dialect: "typescript",
+            dialect: "typescript".to_string(),
             config: config(),
         }
     }
@@ -464,8 +464,7 @@ mod tests {
     fn set_render_replaces_the_render_and_keeps_the_facts() {
         let factory = crate::RlmProtocolPluginFactory::new(
             config(),
-            std::sync::Arc::new(crate::TypescriptDialect),
-            &crate::testing::sqlite_recording_backend_blocking().clone(),
+            crate::dialect::CellDialect::typescript(),
         );
         let registry =
             lash_core::ConfigRegistry::build(&[std::sync::Arc::new(factory)]).expect("registry");

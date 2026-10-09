@@ -1,21 +1,9 @@
-//! VM state as the parent holds it: opaque bytes under structural checks.
+//! A parked run as the parent holds it: opaque bytes under structural checks.
 
-use crate::{VmContract, VmContractComponent, VmContractReads};
 use base64::Engine as _;
 use lash_sansio::VersionRange;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
-
-/// Which VM state the bytes are.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum VmStateKind {
-    /// A suspended execution: a parked process segment or a suspended run.
-    Continuation,
-    /// A session's guest heap and roots between runs (the RLM worker
-    /// envelope).
-    Snapshot,
-}
 
 /// Whose state it is: the session, or the durable process, the bytes belong
 /// to. A worker is handed state only for the owner its lease runs under.
@@ -46,7 +34,7 @@ pub struct StateDigest([u8; 32]);
 impl StateDigest {
     pub fn of(bytes: &[u8]) -> Self {
         Self(
-            *blake3::Hasher::new_derive_key("lash-vm-protocol opaque vm state v1")
+            *blake3::Hasher::new_derive_key("lash-vm-protocol parked run v1")
                 .update(bytes)
                 .finalize()
                 .as_bytes(),
@@ -83,28 +71,29 @@ impl<'de> Deserialize<'de> for StateDigest {
     }
 }
 
-/// VM state the parent stores, forwards and receives without understanding.
+/// A parked run the parent stores, forwards and receives without
+/// understanding.
 ///
-/// The parent may check the structure: the byte count, the owner, the VM
-/// contract the bytes were written under, the kind and the hash. It never decodes the bytes. Decoding them means restoring guest
-/// values, which validates and compiles regular expressions and checks
-/// artifacts against guest-controlled input, and that work belongs in the
-/// worker's crash domain, not the parent's. This type offers no decoder, and
-/// this crate depends on nothing that has one.
+/// The parent may check the structure: the byte count, the owner, the kernel
+/// version the bytes were written under, the document they were parked
+/// under, and the hash. It never decodes the bytes. Decoding them rebuilds
+/// guest values and compiles the document against guest-controlled input,
+/// and that work belongs in the worker's crash domain, not the parent's.
+/// This type offers no decoder, and this crate depends on nothing that has
+/// one.
 ///
-/// `vm_contract` carries the version of each VM component, and the bytes'
-/// own format version is the component their kind names
-/// ([`Self::format_version`]). A reader admits every component against its
-/// own declared read range. A live transfer
-/// between a parent and its worker also checks the wire protocol version;
-/// parked state can cross builds within these VM contract ranges.
+/// A live transfer between a parent and its worker also checks the wire
+/// protocol version; parked state crosses builds within the kernel versions
+/// a reader admits.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OpaqueVmState {
-    definition_ids: Vec<lash_sansio::ProcessDefinitionId>,
-    kind: VmStateKind,
     owner: VmOwner,
-    vm_contract: VmContract,
+    /// The kernel version the run was parked under.
+    kernel: u32,
+    /// The identity of the document the run was parked under, as the worker
+    /// stated it.
+    document: String,
     hash: StateDigest,
     #[serde(
         serialize_with = "serialize_bytes",
@@ -116,9 +105,11 @@ pub struct OpaqueVmState {
 /// What a holder of opaque state expects it to be.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StateExpectation<'a> {
-    pub kind: VmStateKind,
     pub owner: &'a VmOwner,
-    pub reads: &'a VmContractReads,
+    /// The kernel versions the holder's workers resume.
+    pub kernel: VersionRange,
+    /// The document the run is resumed under, when the holder knows it.
+    pub document: Option<&'a str>,
     pub max_bytes: u64,
 }
 
@@ -126,58 +117,29 @@ pub struct StateExpectation<'a> {
 #[derive(Clone, Debug, PartialEq, Eq, Error, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum OpaqueStateRefusal {
-    #[error("opaque VM state is {found:?}, expected {expected:?}")]
-    WrongKind {
-        expected: VmStateKind,
-        found: VmStateKind,
-    },
-    #[error("opaque VM state belongs to `{found}`, expected `{expected}`")]
+    #[error("the parked run belongs to `{found}`, expected `{expected}`")]
     WrongOwner { expected: VmOwner, found: VmOwner },
-    #[error("opaque VM state component {component} version {found} is outside read range {reads}")]
-    ComponentOutsideReadRange {
-        component: VmContractComponent,
-        found: u32,
-        reads: VersionRange,
-    },
-    #[error("opaque VM state is {len} bytes, over the {limit}-byte bound")]
+    #[error("the parked run was written under kernel version {found}, outside read range {reads}")]
+    KernelOutsideReadRange { found: u32, reads: VersionRange },
+    #[error("the parked run was parked under document {found}, expected {expected}")]
+    WrongDocument { expected: String, found: String },
+    #[error("the parked run is {len} bytes, over the {limit}-byte bound")]
     TooLarge { limit: u64, len: u64 },
-    #[error("opaque VM state hash does not match its bytes")]
+    #[error("the parked run's hash does not match its bytes")]
     HashMismatch,
 }
 
 impl OpaqueVmState {
     /// Seals bytes the worker produced (or the parent read from its store)
     /// under their structural facts.
-    pub fn seal(
-        kind: VmStateKind,
-        owner: VmOwner,
-        vm_contract: VmContract,
-        bytes: Vec<u8>,
-    ) -> Self {
+    pub fn seal(owner: VmOwner, kernel: u32, document: impl Into<String>, bytes: Vec<u8>) -> Self {
         Self {
-            definition_ids: Vec::new(),
-            kind,
             owner,
-            vm_contract,
+            kernel,
+            document: document.into(),
             hash: StateDigest::of(&bytes),
             bytes,
         }
-    }
-
-    /// Worker-computed candidates. The parent validates each descriptor and
-    /// acquires its complete manifest under its own admitted referrer.
-    pub fn with_definition_ids(
-        mut self,
-        ids: impl IntoIterator<Item = lash_sansio::ProcessDefinitionId>,
-    ) -> Self {
-        self.definition_ids = ids.into_iter().collect();
-        self.definition_ids.sort();
-        self.definition_ids.dedup();
-        self
-    }
-
-    pub fn definition_ids(&self) -> &[lash_sansio::ProcessDefinitionId] {
-        &self.definition_ids
     }
 
     /// The structural check, and the only check the parent makes.
@@ -188,44 +150,44 @@ impl OpaqueVmState {
                 len: self.len(),
             });
         }
-        if self.kind != expected.kind {
-            return Err(OpaqueStateRefusal::WrongKind {
-                expected: expected.kind,
-                found: self.kind,
-            });
-        }
         if &self.owner != expected.owner {
             return Err(OpaqueStateRefusal::WrongOwner {
                 expected: expected.owner.clone(),
                 found: self.owner.clone(),
             });
         }
-        expected.reads.admit(self.vm_contract)?;
+        if !expected.kernel.contains(self.kernel) {
+            return Err(OpaqueStateRefusal::KernelOutsideReadRange {
+                found: self.kernel,
+                reads: expected.kernel,
+            });
+        }
+        if let Some(document) = expected.document
+            && document != self.document
+        {
+            return Err(OpaqueStateRefusal::WrongDocument {
+                expected: document.to_owned(),
+                found: self.document.clone(),
+            });
+        }
         if StateDigest::of(&self.bytes) != self.hash {
             return Err(OpaqueStateRefusal::HashMismatch);
         }
         Ok(())
     }
 
-    pub fn kind(&self) -> VmStateKind {
-        self.kind
-    }
-
     pub fn owner(&self) -> &VmOwner {
         &self.owner
     }
 
-    pub fn vm_contract(&self) -> &VmContract {
-        &self.vm_contract
+    /// The kernel version the run was parked under.
+    pub fn kernel(&self) -> u32 {
+        self.kernel
     }
 
-    /// The version the bytes were written under: the contract component
-    /// their kind names.
-    pub fn format_version(&self) -> u32 {
-        match self.kind {
-            VmStateKind::Continuation => self.vm_contract.continuation,
-            VmStateKind::Snapshot => self.vm_contract.snapshot,
-        }
+    /// The identity of the document the run was parked under.
+    pub fn document(&self) -> &str {
+        &self.document
     }
 
     pub fn len(&self) -> u64 {

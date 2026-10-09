@@ -222,8 +222,7 @@ pub(super) async fn run(args: &Args) -> Result<Receipt> {
             .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),
-        Arc::new(lash_protocol_rlm::TypescriptDialect),
-        &backend,
+        lash_protocol_rlm::CellDialect::typescript(),
     );
     let mut plugins = lash::PluginStack::new();
     plugins.push(Arc::new(

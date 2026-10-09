@@ -1,8 +1,5 @@
-use std::sync::Arc;
-
 use lash_core::{SessionAppendNode, ToolArgumentProjectionPolicy};
 use lash_rlm_types::{PROJECTED_JSON_TAG, RlmProjectedSeedEntry};
-use lash_vm::{ImageValue, Record as FlowRecord, Value as FlowValue};
 use serde_json::Value;
 
 #[derive(Debug, thiserror::Error)]
@@ -89,14 +86,6 @@ pub(crate) fn normalize_tool_args_for_projection(
             normalize_seed_preserving_tool_args(args, field)
         }
     }
-}
-
-#[cfg(test)]
-pub(crate) async fn flow_record_to_tool_args(
-    record: &FlowRecord,
-    policy: &ToolArgumentProjectionPolicy,
-) -> Result<Value, ProjectionTransportError> {
-    normalize_tool_args_for_projection(flow_record_to_json_value(record), policy)
 }
 
 fn normalize_seed_preserving_tool_args(
@@ -273,111 +262,20 @@ fn unescape_projected_key(key: String) -> String {
     }
 }
 
-pub(crate) fn flow_to_json_value(value: &FlowValue) -> Value {
+/// A value a cell computed, as the tool-argument transport carries plain
+/// data: every record key in the reserved prefix is escaped, so nothing a
+/// cell writes reads as a projected-value wrapper on the host side.
+pub(crate) fn plain_json_for_transport(value: Value) -> Value {
     match value {
-        FlowValue::Null | FlowValue::Undefined => Value::Null,
-        FlowValue::Bool(value) => Value::Bool(*value),
-        FlowValue::Number(value) => json_number(*value),
-        FlowValue::String(value) => Value::String(value.to_string()),
-        FlowValue::Image(image) => {
-            serde_json::to_value(image).unwrap_or_else(|_| Value::Object(serde_json::Map::new()))
-        }
-        FlowValue::Resource(resource) => {
-            serde_json::to_value(resource).unwrap_or_else(|_| Value::Object(serde_json::Map::new()))
-        }
-        FlowValue::Tuple(values) | FlowValue::List(values) => {
-            let mut out = Vec::with_capacity(values.len());
-            for value in values.iter() {
-                out.push(flow_to_json_value(value));
-            }
-            Value::Array(out)
-        }
-        FlowValue::Record(record) => flow_record_to_json_value(record),
-        FlowValue::Projected(value) => {
-            let entry = RlmProjectedSeedEntry::Materialized(match value.materialize() {
-                Ok(value) => flow_to_json_value(&value),
-                // A projection that cannot materialize leaves nothing to seed
-                // with (FIG-2865).
-                Err(_) => Value::Null,
-            });
-            projected_wrapper(entry)
-        }
-        FlowValue::Ref(_) => {
-            unreachable!("VM heap references must be materialized before JSON rendering")
-        }
-    }
-}
-
-pub(crate) fn flow_record_to_json_value(record: &FlowRecord) -> Value {
-    let mut object = serde_json::Map::with_capacity(record.len());
-    for (key, value) in record.iter() {
-        if matches!(value, FlowValue::Undefined) {
-            continue;
-        }
-        object.insert(escape_projected_key(key), flow_to_json_value(value));
-    }
-    Value::Object(object)
-}
-
-fn json_number(value: f64) -> Value {
-    if value.is_finite() && value.fract() == 0.0 {
-        let as_i64 = value as i64 as f64;
-        if as_i64 == value {
-            return Value::Number(serde_json::Number::from(value as i64));
-        }
-        let as_u64 = value as u64 as f64;
-        if as_u64 == value {
-            return Value::Number(serde_json::Number::from(value as u64));
-        }
-    }
-    serde_json::Number::from_f64(value)
-        .map(Value::Number)
-        .unwrap_or(Value::Null)
-}
-
-pub(crate) fn json_to_flow_value(value: Value) -> FlowValue {
-    match value {
-        Value::Null => FlowValue::Null,
-        Value::Bool(value) => FlowValue::Bool(value),
-        Value::Number(value) => FlowValue::Number(value.as_f64().unwrap_or_default()),
-        Value::String(value) => FlowValue::String(value.into()),
         Value::Array(values) => {
-            FlowValue::List(values.into_iter().map(json_to_flow_value).collect())
+            Value::Array(values.into_iter().map(plain_json_for_transport).collect())
         }
-        Value::Object(map) => json_map_to_image(&map)
-            .map(|image| FlowValue::Image(Box::new(image)))
-            .unwrap_or_else(|| {
-                FlowValue::Record(Arc::new(
-                    map.into_iter()
-                        .map(|(key, value)| (key, json_to_flow_value(value)))
-                        .collect::<FlowRecord>(),
-                ))
-            }),
-    }
-}
-
-fn json_map_to_image(map: &serde_json::Map<String, Value>) -> Option<ImageValue> {
-    if map.get("type")?.as_str()? != "image" {
-        return None;
-    }
-    Some(ImageValue::new(
-        map.get("id")?.as_str()?.to_string(),
-        lash_core::MediaType::parse(map.get("mime")?.as_str()?).ok()?,
-        map.get("label")?.as_str()?.to_string(),
-        map.get("size")?.as_u64()?,
-        optional_json_u32(map.get("width")?)?,
-        optional_json_u32(map.get("height")?)?,
-    ))
-}
-
-fn optional_json_u32(value: &Value) -> Option<Option<u32>> {
-    match value {
-        Value::Null => Some(None),
-        Value::Number(number) => number
-            .as_u64()
-            .and_then(|value| u32::try_from(value).ok())
-            .map(Some),
-        _ => None,
+        Value::Object(map) => Value::Object(
+            map.into_iter()
+                .map(|(key, value)| (escape_projected_key(&key), plain_json_for_transport(value)))
+                .collect(),
+        ),
+        scalar => scalar,
     }
 }
 
@@ -385,73 +283,36 @@ fn optional_json_u32(value: &Value) -> Option<Option<u32>> {
 mod tests {
     use super::*;
 
-    #[tokio::test]
-    async fn undefined_uses_json_stringify_container_rules() {
-        let record = FlowRecord::from_iter([
-            ("absent".to_string(), FlowValue::Undefined),
-            ("present".to_string(), FlowValue::Null),
-            (
-                "items".to_string(),
-                FlowValue::List(vec![FlowValue::Undefined, FlowValue::Null].into()),
-            ),
-        ]);
-
-        assert_eq!(
-            flow_record_to_json_value(&record),
-            serde_json::json!({"present": null, "items": [null, null]})
-        );
-        assert_eq!(
-            json_to_flow_value(serde_json::Value::Null),
-            FlowValue::Null,
-            "JSON has no representation that can manufacture undefined"
-        );
-    }
-
-    #[tokio::test]
-    async fn reserved_projection_key_round_trips_as_plain_record() {
+    #[test]
+    fn reserved_projection_key_round_trips_as_plain_record() {
         let already_prefixed = format!("{PROJECTED_JSON_TAG}{PROJECTED_JSON_TAG}");
-        let plain = FlowValue::Record(Arc::new(FlowRecord::from_iter([
-            (
-                PROJECTED_JSON_TAG.to_string(),
-                FlowValue::String("plain data".into()),
-            ),
-            (
-                already_prefixed,
-                FlowValue::String("also plain data".into()),
-            ),
-        ])));
+        let plain = serde_json::json!({
+            PROJECTED_JSON_TAG: "plain data",
+            already_prefixed: "also plain data",
+        });
 
-        let encoded = flow_to_json_value(&plain);
         let host_value = normalize_tool_args_for_projection(
-            encoded,
+            plain_json_for_transport(plain.clone()),
             &ToolArgumentProjectionPolicy::MaterializeProjectedValues,
         )
         .expect("escaped plain record should decode");
-        let recovered = json_to_flow_value(host_value);
 
         assert_eq!(
-            recovered, plain,
-            "plain reserved-key records must survive lash-vm-to-host-to-lash_vm"
+            host_value, plain,
+            "plain reserved-key records must survive cell-to-host transport"
         );
     }
 
-    #[tokio::test]
-    async fn reserved_projection_key_survives_in_plain_seed_data() {
-        let plain = FlowValue::Record(Arc::new(FlowRecord::from_iter([(
-            PROJECTED_JSON_TAG.to_string(),
-            FlowValue::String("plain seed data".into()),
-        )])));
-        let seed = FlowValue::Record(Arc::new(FlowRecord::from_iter([(
-            "data".to_string(),
-            plain,
-        )])));
-        let args = FlowRecord::from_iter([("seed".to_string(), seed)]);
+    #[test]
+    fn reserved_projection_key_survives_in_plain_seed_data() {
+        let args = serde_json::json!({
+            "seed": { "data": { PROJECTED_JSON_TAG: "plain seed data" } },
+        });
 
-        let host_args = flow_record_to_tool_args(
-            &args,
+        let host_args = normalize_tool_args_for_projection(
+            plain_json_for_transport(args),
             &ToolArgumentProjectionPolicy::preserve_projected_refs_in_field("seed"),
         )
-        .await
         .expect("escaped seed data should decode");
         let seed = RlmSeed::from_tool_args(&host_args).expect("seed should classify");
 

@@ -11,67 +11,6 @@ use lash_sansio::SessionId;
 // Runtime dependencies come from one backend
 // =============================================================================
 //
-/// `LashCore` is not `Debug`, so `Result::expect_err` is unavailable; this
-/// extracts the build error or panics with the given message.
-fn expect_build_error<T>(result: std::result::Result<T, EmbedError>, message: &str) -> EmbedError {
-    match result {
-        Ok(_) => panic!("{message}"),
-        Err(err) => err,
-    }
-}
-
-/// FIG-3633: the RLM protocol keeps its Lash VM artifacts in the backend it
-/// was built over, so a core over any other backend refuses it at build. A
-/// core's plugin set is the only one its sessions and workers run
-/// (FIG-4396). Otherwise a
-/// resumed session would look for its modules in a substrate that never held
-/// them, and the core's artifact cleanup would sweep a store nobody wrote.
-#[cfg(feature = "rlm")]
-#[tokio::test]
-async fn a_core_refuses_an_rlm_factory_built_over_another_backend() -> Result<()> {
-    let artifacts = sqlite_memory_store_backend().await;
-    let core_backend = sqlite_memory_store_backend().await;
-    // Precondition: two memory store sets are two substrates.
-    assert_ne!(
-        artifacts.binding_identity(),
-        core_backend.binding_identity(),
-        "two memory store sets must name two substrates"
-    );
-    let build = |factory_backend: &lash_core::Backend| {
-        LashCore::rlm_builder(core_backend.clone(), rlm_factory(factory_backend))
-            .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
-            .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
-            .data_retention(crate::DataRetention::standard())
-            .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
-            .tool_source_policy(crate::tools::ToolSourcePolicy::Tolerate)
-            .execution_budgets(crate::ExecutionBudgets::recommended())
-            .delta_coalescing(crate::DeltaCoalescing::recommended())
-            .build(crate::testing::runtime_lease_owner())
-    };
-
-    // Control: the same factory over the core's own backend builds.
-    build(&core_backend)?;
-
-    let error = expect_build_error(
-        build(&artifacts),
-        "an RLM factory over another backend must be refused",
-    );
-    match error {
-        EmbedError::PluginBackendMismatch {
-            plugin_id,
-            plugin_backend,
-            backend,
-        } => {
-            assert_eq!(plugin_id, lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID);
-            assert_eq!(plugin_backend, artifacts.binding_identity().to_string());
-            assert_eq!(backend, core_backend.binding_identity().to_string());
-        }
-        other => panic!("expected PluginBackendMismatch, got {other}"),
-    }
-
-    Ok(())
-}
-
 /// The backend's process registry stamps an event from the backend's clock:
 /// the one clock the core and every store share.
 #[tokio::test]

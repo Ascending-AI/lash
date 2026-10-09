@@ -106,10 +106,7 @@ async fn typescript_restored_process_handle_await_crosses_turn_boundary(tier: Ti
     world.script(
         "start-the-worker",
         vec![served::cell(
-            "const worker = await processes.create({\n\
-               dialect: \"typescript\",\n\
-               source: 'const worker = async () => { return \"done\"; };'\n\
-             });\n\
+            "const worker = async () => { return \"done\"; };\n\
              const handle = await processes.start({ definition: worker });\n\
              finish(\"started\");",
         )],
@@ -141,10 +138,7 @@ async fn typescript_cell_reads_process_handle_id_and_invokes_subsequent_operatio
         return;
     };
     let cell = served::cell(
-        "const worker = await processes.create({\n\
-           dialect: \"typescript\",\n\
-           source: 'const worker = async () => { return \"done\"; };'\n\
-         });\n\
+        "const worker = async () => { return \"done\"; };\n\
          const handle = await processes.start({ definition: worker });\n\
          const processId = handle.process_id;\n\
          const status = await status_tool.inspect({ process_id: processId });\n\

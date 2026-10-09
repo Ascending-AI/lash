@@ -18,7 +18,6 @@ mod served;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use lash::rlm::Dialect as _;
 use lash::tools::{StaticToolExecute, StaticToolProvider};
 use lash_core::ToolDefinitionBindingExt as _;
 use lash_core::llm::types::LlmRequest;
@@ -155,10 +154,7 @@ impl Request {
 }
 
 async fn setup_crash_case(tier: Tier, request: Request) {
-    let mut config = lash::rlm::TypescriptDialect
-        .worker_service()
-        .config()
-        .clone();
+    let mut config = lash::vm::WorkerService::default().config().clone();
     config.max_workers = 1;
     let receipts = lash::vm::WorkerService::new(config).with_worker_receipts();
     let killer = Arc::new(Killer {

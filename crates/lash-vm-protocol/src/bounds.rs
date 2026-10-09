@@ -10,12 +10,13 @@ use crate::codec::DecodeLimits;
 pub struct ProtocolBounds {
     /// Each frame's decode bounds.
     pub decode: DecodeLimits,
-    /// The largest opaque VM state, a continuation or a guest snapshot, a
-    /// worker may hand its parent or be started from.
+    /// The largest parked run a worker may hand its parent or be started
+    /// from.
     pub max_vm_state_bytes: u64,
     /// The largest encoded effect request or result value.
     pub max_effect_value_bytes: u64,
-    /// The largest model program source a `Start` carries.
+    /// The largest document a `Start` carries, or source a worker is asked to
+    /// lower.
     pub max_source_bytes: u64,
     /// How long a worker may go without any frame before its parent treats
     /// it as unresponsive. Host waits pause it, and it is not a guest

@@ -1,28 +1,22 @@
 use super::*;
 
-const CONTRACT: VmContract = VmContract {
-    bytecode: 30,
-    continuation: 29,
-    snapshot: 14,
-    accounting: 3,
-    abi: 14,
-};
-const READS: VmContractReads = CONTRACT.exact_reads();
+const KERNEL: u32 = 1;
+const DOCUMENT: &str = "d0c0";
 
 fn state() -> OpaqueVmState {
     OpaqueVmState::seal(
-        VmStateKind::Continuation,
         VmOwner::new("process-1"),
-        CONTRACT,
-        b"continuation bytes".to_vec(),
+        KERNEL,
+        DOCUMENT,
+        b"parked run bytes".to_vec(),
     )
 }
 
 fn expectation(owner: &VmOwner) -> StateExpectation<'_> {
     StateExpectation {
-        kind: VmStateKind::Continuation,
         owner,
-        reads: &READS,
+        kernel: VersionRange::exactly(KERNEL),
+        document: Some(DOCUMENT),
         max_bytes: 1024,
     }
 }
@@ -36,39 +30,39 @@ fn the_structural_check_names_each_mismatch() {
         state().check(&expectation(&other)),
         Err(OpaqueStateRefusal::WrongOwner { .. })
     ));
-    assert!(matches!(
+    for reads in [VersionRange::exactly(2), VersionRange::between(2, 3)] {
+        assert_eq!(
+            state().check(&StateExpectation {
+                kernel: reads,
+                ..expectation(&owner)
+            }),
+            Err(OpaqueStateRefusal::KernelOutsideReadRange {
+                found: KERNEL,
+                reads
+            })
+        );
+    }
+    assert_eq!(
         state().check(&StateExpectation {
-            kind: VmStateKind::Snapshot,
+            kernel: VersionRange::between(1, 2),
             ..expectation(&owner)
         }),
-        Err(OpaqueStateRefusal::WrongKind { .. })
-    ));
+        Ok(())
+    );
     assert!(matches!(
         state().check(&StateExpectation {
-            reads: &VmContractReads {
-                abi: VersionRange::exactly(15),
-                ..READS
-            },
+            document: Some("0ther"),
             ..expectation(&owner)
         }),
-        Err(OpaqueStateRefusal::ComponentOutsideReadRange {
-            component: VmContractComponent::Abi,
-            ..
-        })
+        Err(OpaqueStateRefusal::WrongDocument { .. })
     ));
-    assert!(matches!(
+    assert_eq!(
         state().check(&StateExpectation {
-            reads: &VmContractReads {
-                continuation: VersionRange::exactly(30),
-                ..READS
-            },
+            document: None,
             ..expectation(&owner)
         }),
-        Err(OpaqueStateRefusal::ComponentOutsideReadRange {
-            component: VmContractComponent::Continuation,
-            ..
-        })
-    ));
+        Ok(())
+    );
     assert!(matches!(
         state().check(&StateExpectation {
             max_bytes: 4,
@@ -98,12 +92,9 @@ fn tampered_bytes_fail_the_hash() {
 #[test]
 fn json_carries_the_bytes_as_base64_and_the_facts_readably() {
     let json = serde_json::to_value(state()).unwrap();
-    assert_eq!(json["kind"], "continuation");
-    assert_eq!(
-        json["vm_contract"],
-        serde_json::json!({"bytecode":30,"continuation":29,"snapshot":14,"accounting":3,"abi":14})
-    );
-    assert_eq!(json["bytes"], "Y29udGludWF0aW9uIGJ5dGVz");
+    assert_eq!(json["kernel"], 1);
+    assert_eq!(json["document"], DOCUMENT);
+    assert_eq!(json["bytes"], "cGFya2VkIHJ1biBieXRlcw==");
     let back: OpaqueVmState = serde_json::from_value(json).unwrap();
     assert_eq!(back, state());
 }
@@ -113,58 +104,4 @@ fn an_unknown_field_is_refused() {
     let mut json = serde_json::to_value(state()).unwrap();
     json["deferred_resolutions"] = serde_json::json!({});
     assert!(serde_json::from_value::<OpaqueVmState>(json).is_err());
-    let mut json = serde_json::to_value(state()).unwrap();
-    json["vm_contract"]["future_component"] = serde_json::json!(1);
-    assert!(serde_json::from_value::<OpaqueVmState>(json).is_err());
-    let mut json = serde_json::to_value(state()).unwrap();
-    json["vm_contract"] = serde_json::json!("legacy-whole-contract");
-    assert!(serde_json::from_value::<OpaqueVmState>(json).is_err());
-}
-
-#[test]
-fn every_component_is_checked_against_both_range_bounds() {
-    let widened = VmContractReads {
-        bytecode: VersionRange::between(30, 31),
-        continuation: VersionRange::between(29, 30),
-        snapshot: VersionRange::between(14, 15),
-        accounting: VersionRange::between(3, 4),
-        abi: VersionRange::between(14, 15),
-    };
-    assert_eq!(widened.admit(CONTRACT), Ok(()));
-    assert_eq!(
-        widened.admit(VmContract {
-            bytecode: 31,
-            continuation: 30,
-            snapshot: 15,
-            accounting: 4,
-            abi: 15
-        }),
-        Ok(())
-    );
-    for (component, min, max) in [
-        (VmContractComponent::Bytecode, 30, 31),
-        (VmContractComponent::Continuation, 29, 30),
-        (VmContractComponent::Snapshot, 14, 15),
-        (VmContractComponent::Accounting, 3, 4),
-        (VmContractComponent::Abi, 14, 15),
-    ] {
-        for found in [min - 1, max + 1] {
-            let mut contract = CONTRACT;
-            match component {
-                VmContractComponent::Bytecode => contract.bytecode = found,
-                VmContractComponent::Continuation => contract.continuation = found,
-                VmContractComponent::Snapshot => contract.snapshot = found,
-                VmContractComponent::Accounting => contract.accounting = found,
-                VmContractComponent::Abi => contract.abi = found,
-            }
-            assert_eq!(
-                widened.admit(contract),
-                Err(OpaqueStateRefusal::ComponentOutsideReadRange {
-                    component,
-                    found,
-                    reads: VersionRange::between(min, max)
-                })
-            );
-        }
-    }
 }

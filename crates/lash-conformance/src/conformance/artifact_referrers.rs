@@ -4,29 +4,18 @@
 //! uses freshly minted pins so no test relies on another test's rows.
 
 use crate::fused_artifact_store::ReopenableArtifactStore;
+use crate::module_artifact_store::SampleArtifact;
 use lash_core::testing::Gate;
 use lash_core::{
     ArtifactCarry, ArtifactName, ArtifactReferrer, ArtifactReferrerKind, ArtifactStoreError,
     ArtifactStoreId, FrameEnvironmentId, HostArtifactPin, ModuleArtifactStore, ReferrerClaim,
     ReferrerGuard, ResolvedArtifactCleanup,
 };
-use lash_vm::testing::ast_builders as b;
-use lash_vm::{ModuleArtifact, TypeExpr};
 use pretty_assertions::assert_eq;
 use std::sync::Arc;
 
-#[expect(clippy::expect_used, reason = "test fixture constructs a valid module")]
-fn module(name: &str) -> ModuleArtifact {
-    ModuleArtifact::from_program(b::module(
-        vec![b::process_returning(
-            name,
-            vec![b::param("root", TypeExpr::Str)],
-            TypeExpr::Str,
-            b::finish(b::var("root")),
-        )],
-        Vec::new(),
-    ))
-    .expect("module fixture")
+fn module(name: &str) -> SampleArtifact {
+    SampleArtifact::named(name)
 }
 
 #[expect(clippy::expect_used, reason = "test fixture constructs a valid claim")]

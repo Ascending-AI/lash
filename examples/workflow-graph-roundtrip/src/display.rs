@@ -1,4 +1,4 @@
-use lash::vm::{ExecutionHostError, Record, Value};
+use serde_json::{Map, Value};
 
 use crate::{DisplayDelta, DisplayState};
 
@@ -25,11 +25,6 @@ pub(crate) struct DisplayField {
     pub name: &'static str,
     pub field_type: &'static str,
 }
-
-/// The host receiver every display operation is reached through. The catalog
-/// serves it so the editor and the backend synthesize the same receiver call
-/// instead of both hardcoding the name (FIG-3178).
-pub(crate) const RECEIVER: &str = "display";
 
 pub(crate) const OPERATIONS: &[DisplayOperation] = &[
     DisplayOperation {
@@ -109,17 +104,15 @@ pub(crate) const OPERATIONS: &[DisplayOperation] = &[
 pub(crate) fn apply_tool(
     display: &mut DisplayState,
     operation: &str,
-    args: &[Value],
-) -> Result<(Value, DisplayDelta), ExecutionHostError> {
+    args: &Value,
+) -> Result<DisplayDelta, String> {
     let display_operation = OPERATIONS
         .iter()
         .find(|candidate| candidate.operation == operation)
-        .ok_or_else(|| {
-            ExecutionHostError::new(format!("unknown display operation `{operation}`"))
-        })?;
-    let args = args.first().and_then(Value::as_record).ok_or_else(|| {
-        ExecutionHostError::new(format!("{operation} expects one record argument"))
-    })?;
+        .ok_or_else(|| format!("unknown display operation `{operation}`"))?;
+    let args = args
+        .as_object()
+        .ok_or_else(|| format!("{operation} expects one record argument"))?;
     let mut delta = DisplayDelta::default();
     match display_operation.kind {
         DisplayOperationKind::ShowMessage => {
@@ -164,35 +157,28 @@ pub(crate) fn apply_tool(
             delta.highlighted = Some(target);
         }
     }
-    Ok((Value::Null, delta))
+    Ok(delta)
 }
 
-fn string_arg(args: &Record, key: &str) -> Result<String, ExecutionHostError> {
+fn string_arg(args: &Map<String, Value>, key: &str) -> Result<String, String> {
     match args.get(key) {
-        Some(Value::String(value)) => Ok(value.to_string()),
-        _ => Err(ExecutionHostError::new(format!(
-            "missing string argument `{key}`"
-        ))),
+        Some(Value::String(value)) => Ok(value.clone()),
+        _ => Err(format!("missing string argument `{key}`")),
     }
 }
 
-fn number_arg(args: &Record, key: &str) -> Result<f64, ExecutionHostError> {
-    match args.get(key) {
-        Some(Value::Number(value)) => Ok(*value),
-        _ => Err(ExecutionHostError::new(format!(
-            "missing number argument `{key}`"
-        ))),
-    }
+fn number_arg(args: &Map<String, Value>, key: &str) -> Result<f64, String> {
+    args.get(key)
+        .and_then(Value::as_f64)
+        .ok_or_else(|| format!("missing number argument `{key}`"))
 }
 
-fn scalar_text_arg(args: &Record, key: &str) -> Result<String, ExecutionHostError> {
+fn scalar_text_arg(args: &Map<String, Value>, key: &str) -> Result<String, String> {
     match args.get(key) {
-        Some(Value::String(value)) => Ok(value.to_string()),
+        Some(Value::String(value)) => Ok(value.clone()),
         Some(Value::Number(value)) => Ok(value.to_string()),
         Some(Value::Bool(value)) => Ok(value.to_string()),
-        _ => Err(ExecutionHostError::new(format!(
-            "missing scalar argument `{key}`"
-        ))),
+        _ => Err(format!("missing scalar argument `{key}`")),
     }
 }
 
@@ -267,19 +253,12 @@ impl lash::tools::StaticToolExecute for HostTools {
             return ToolAttemptOutcome::pending(PendingCompletion::new());
         }
         let Some(operation) = call.name().strip_prefix("display_") else {
-            return match crate::sample_tools::apply_tool(
-                call.name(),
-                &[lash::vm::from_json(call.args.clone())],
-            ) {
+            return match crate::sample_tools::apply_tool(call.name(), call.args) {
                 Ok(value) => ToolOutcome::ok(value).into(),
                 Err(error) => ToolOutcome::err_fmt(error).into(),
             };
         };
-        if let Err(error) = apply_tool(
-            &mut DisplayState::default(),
-            operation,
-            &[lash::vm::from_json(call.args.clone())],
-        ) {
+        if let Err(error) = apply_tool(&mut DisplayState::default(), operation, call.args) {
             return ToolOutcome::err_fmt(error).into();
         }
         let Some(process) = call.context.enclosing_process() else {
@@ -297,4 +276,71 @@ impl lash::tools::StaticToolExecute for HostTools {
         }
         ToolOutcome::ok(serde_json::Value::Null).into()
     }
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "the example declares valid schemas and bindings"
+)]
+pub(crate) fn tool_definitions() -> Vec<lash::tools::ToolDefinition> {
+    use lash::tools::{ToolBinding, ToolDeclaration, ToolDefinition, ToolDefinitionBindingExt};
+    let mut definitions = Vec::new();
+    for operation in OPERATIONS {
+        let properties = operation
+            .fields
+            .iter()
+            .map(|field| {
+                let schema = match (operation.operation, field.name, field.field_type) {
+                    ("add_item", "item", _) | ("set_light", "state", _) => {
+                        serde_json::json!({"type": ["string", "number", "boolean"]})
+                    }
+                    (_, _, "number") => serde_json::json!({"type": "number"}),
+                    _ => serde_json::json!({"type": "string"}),
+                };
+                (field.name.to_owned(), schema)
+            })
+            .collect::<serde_json::Map<_, _>>();
+        let name = format!("display_{}", operation.operation);
+        definitions.push(ToolDefinition::raw(format!("tool:{name}"), name, operation.label,
+            serde_json::json!({"type":"object", "properties":properties, "required":operation.fields.iter().map(|field| field.name).collect::<Vec<_>>(), "additionalProperties":false}),
+            serde_json::json!({"type":"null"})).expect("display schema").with_execution(std::time::Duration::from_secs(120))
+            .with_tool_binding(ToolBinding::new(["display"], operation.operation).with_authority_type("ToyDisplay")));
+    }
+    definitions.push(ToolDefinition::raw(
+        "tool:host_approval", "host_approval", "Park until the operator approves this request.",
+        serde_json::json!({"type":"object", "properties":{}, "additionalProperties":false}),
+        serde_json::json!({"type":"object", "properties":{"approved":{"type":"boolean"}}, "required":["approved"], "additionalProperties":false}),
+    ).expect("approval schema")
+        .with_execution(std::time::Duration::from_secs(120))
+        .with_tool_binding(ToolBinding::new(["host"], "approval"))
+        .with_declaration(ToolDeclaration::deferring())
+        // The operator decides in their own time: the park lasts until the
+        // decision or the end of the run that asked.
+        .with_park(lash::tools::ParkBound::UntilScopeEnd));
+    for operation in crate::sample_tools::OPERATIONS {
+        let name = operation.host_operation.replace('.', "_");
+        let definition = ToolDefinition::raw(
+            format!("tool:{name}"),
+            name,
+            operation.label,
+            operation.input_schema(),
+            operation.output_schema(),
+        )
+        .expect("example schema")
+        .with_execution(std::time::Duration::from_secs(120))
+        .with_tool_binding(
+            ToolBinding::new([operation.module], operation.operation)
+                .with_authority_type(operation.resource_type),
+        );
+        definitions.push(match operation.output_from_input() {
+            Some((field, default)) => definition.with_output_from_input_schema(
+                field,
+                default.map(|schema| {
+                    lash::schema::JsonSchema::admit(schema).expect("valid output schema")
+                }),
+            ),
+            None => definition,
+        });
+    }
+    definitions
 }

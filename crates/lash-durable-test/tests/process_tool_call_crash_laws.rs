@@ -141,7 +141,7 @@ fn cell() -> lash_core::llm::types::LlmResponse {
            return raced;\n}};"
     );
     served::cell(&format!(
-        "const body = await processes.create({{ dialect: \"typescript\", source: `{body}` }});\n\
+        "{body}\n\
          const held = await processes.start({{ definition: body }});\n\
          finish(await held);"
     ))
@@ -511,7 +511,7 @@ fn sleeping_cell() -> lash_core::llm::types::LlmResponse {
            return both[1] === undefined ? \"woke\" : \"early\";\n}};"
     );
     served::cell(&format!(
-        "const body = await processes.create({{ dialect: \"typescript\", source: `{body}` }});\n\
+        "{body}\n\
          await processes.start({{ definition: body }});\n\
          finish(\"started\");"
     ))

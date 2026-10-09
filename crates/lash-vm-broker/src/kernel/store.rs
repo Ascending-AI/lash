@@ -53,9 +53,8 @@ use super::ledger::{
 };
 use super::value::datum_from_json;
 use crate::effects::MemberDraft;
-use crate::ledger::QuietPointRefusal;
 use crate::members::{Decide, Driven};
-use crate::snapshot::{DurableSnapshotStore, OperationId, refused};
+use crate::snapshot::{DurableSnapshotStore, OperationId, QuietPointRefusal, refused};
 
 /// The error kind of an effect that reported a failure of its own; its
 /// `data` is what the effect reported.
@@ -177,6 +176,12 @@ pub fn outcome_of(output: &SettledOutput) -> Option<Outcome> {
     })
 }
 
+/// How the parent reads an admitted effect's final record as the outcome
+/// its `perform` is answered with; `None` while the record is not final. It
+/// is called on every read of a settled wait, so it is a function of its
+/// arguments alone: a resume reads the same records again.
+pub type OutcomeOf<'a> = &'a (dyn Fn(&AdmittedEffect, &SettledOutput) -> Option<Outcome> + Sync);
+
 /// Every wait `ledger` stands on that `folded` and `now` settle, in
 /// identity order.
 fn settled_in(
@@ -184,14 +189,14 @@ fn settled_in(
     exec: &ExecKey,
     folded: &RunFold,
     now: DurableInstant,
+    outcome: OutcomeOf<'_>,
 ) -> Vec<Settled> {
     ledger
         .pending()
         .filter_map(|(identity, entry)| {
             let outcome = match &entry.standing {
-                Standing::Admitted(admitted) => {
-                    final_output(folded, exec, admitted).and_then(outcome_of)?
-                }
+                Standing::Admitted(admitted) => final_output(folded, exec, admitted)
+                    .and_then(|output| outcome(admitted, output))?,
                 Standing::Sleeping { until_ms } => {
                     (now.0 >= *until_ms).then_some(Outcome::Elapsed)?
                 }
@@ -436,9 +441,24 @@ impl DurableSnapshotStore {
     ///
     /// [`QuietPointRefusal`]: a store failure, or records that do not fold.
     pub async fn settled(&self, ledger: &EffectLedger) -> Result<Vec<Settled>, QuietPointRefusal> {
+        self.settled_as(ledger, &|_, output| outcome_of(output))
+            .await
+    }
+
+    /// [`settled`](Self::settled), with the parent reading each final record
+    /// through `outcome`.
+    ///
+    /// # Errors
+    ///
+    /// [`QuietPointRefusal`]: a store failure, or records that do not fold.
+    pub async fn settled_as(
+        &self,
+        ledger: &EffectLedger,
+        outcome: OutcomeOf<'_>,
+    ) -> Result<Vec<Settled>, QuietPointRefusal> {
         let folded = self.members.lock().await.fold().await.map_err(refused)?;
         let now = self.cx.durable_now().await.map_err(refused)?;
-        Ok(settled_in(ledger, &self.exec, &folded, now))
+        Ok(settled_in(ledger, &self.exec, &folded, now, outcome))
     }
 
     /// Run the run's open executions until at least one wait `ledger`
@@ -457,12 +477,30 @@ impl DurableSnapshotStore {
         ledger: &EffectLedger,
         cancel: &CancellationToken,
     ) -> Result<Driven<Vec<Settled>>, QuietPointRefusal> {
+        self.drive_effects_as(ledger, cancel, &|_, output| outcome_of(output), None)
+            .await
+    }
+
+    /// [`drive_effects`](Self::drive_effects), with the parent reading each
+    /// final record through `outcome`. `quiet` is notified once nothing
+    /// runs and only rows or sleeps are left to wait on.
+    ///
+    /// # Errors
+    ///
+    /// As [`drive_effects`](Self::drive_effects).
+    pub async fn drive_effects_as(
+        &self,
+        ledger: &EffectLedger,
+        cancel: &CancellationToken,
+        outcome: OutcomeOf<'_>,
+        quiet: Option<&tokio::sync::Notify>,
+    ) -> Result<Driven<Vec<Settled>>, QuietPointRefusal> {
         let exec = &self.exec;
         self.members
             .lock()
             .await
-            .drive_by(cancel, &mut |_, folded, now| {
-                let settled = settled_in(ledger, exec, folded, now);
+            .drive_by(cancel, quiet, &mut |_, folded, now| {
+                let settled = settled_in(ledger, exec, folded, now, outcome);
                 if settled.is_empty() {
                     Decide::Wait {
                         until: ledger.next_wake(),

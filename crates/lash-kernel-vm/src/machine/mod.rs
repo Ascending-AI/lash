@@ -602,10 +602,10 @@ impl KernelMachine {
         }
         match ending {
             Ending::Returned(value) => match copy_out(&self.heap, &value) {
-                Ok(result) => End::Finished(self.finished(result)),
+                Ok(result) => End::Finished(self.finished(result, false)),
                 Err(raised) => End::Error(RunError::Uncaught(raised.into_datum())),
             },
-            Ending::Finished(result) => End::Finished(self.finished(result)),
+            Ending::Finished(result) => End::Finished(self.finished(result, true)),
             Ending::Failed(reason) => End::Failed(reason),
         }
     }

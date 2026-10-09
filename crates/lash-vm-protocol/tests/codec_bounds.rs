@@ -9,9 +9,8 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 
 use lash_vm_protocol::{
-    CodecRefusal, DecodeLimits, EffectKind, EffectRequest, EffectRequestId, EncodedPayload,
-    ExecutionLease, FRAME_MAGIC, FrameCodec, FrameEpoch, MessageFence, OwnerEpoch, WorkerFrame,
-    WorkerMessage,
+    CodecRefusal, DecodeLimits, EncodedPayload, ExecutionLease, FRAME_MAGIC, FrameCodec,
+    FrameEpoch, HostReadId, HostReadKind, MessageFence, OwnerEpoch, WorkerFrame, WorkerMessage,
 };
 
 struct CountingAllocator;
@@ -133,11 +132,11 @@ fn a_frame_is_encoded_into_one_allocation_of_its_size() {
     const VALUE_BYTES: usize = 512 * 1024;
     let frame = WorkerFrame {
         header: MessageFence::new(ExecutionLease(1), OwnerEpoch(1), FrameEpoch(1)).next_header(),
-        message: WorkerMessage::EffectRequest(EffectRequest {
-            id: EffectRequestId(0),
-            kind: EffectKind::ResourceOperation,
-            payload: EncodedPayload(vec![b'x'; VALUE_BYTES]),
-        }),
+        message: WorkerMessage::HostRead {
+            id: HostReadId(0),
+            kind: HostReadKind::Projection,
+            request: EncodedPayload(vec![b'x'; VALUE_BYTES]),
+        },
     };
     let (bytes, allocated) = allocated_during(|| codec().encode_worker(&frame));
     let bytes = bytes.expect("the frame encodes");

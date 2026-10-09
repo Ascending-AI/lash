@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Keep portable Cargo contracts and frontend type checks in one bounded group.
+# Keep the portable Cargo contracts in one bounded group.
 # Trusted events prove the OFF release resolution in the
 # feature-lanes job and run the schema actions alongside Clippy.
 set -euo pipefail
@@ -13,7 +13,7 @@ if [[ -f env.sh ]]; then
   source ./env.sh
 fi
 # These Cargo commands share a target directory. Keep them in one sequential
-# leg while Node checks run beside them, and collect both failures.
+# leg and collect both failures.
 cargo_contracts() {
   local status=0
   if [[ "$BUCK2_TRUSTED" == false ]]; then
@@ -26,5 +26,4 @@ export -f cargo_contracts
 export BUCK2_TRUSTED
 printf '%s\n' \
   'cargo_contracts' \
-  'npm --prefix examples/workflow-graph-roundtrip/frontend run check:generated-types' \
-  | bash scripts/ci/run-gate-commands.sh --jobs 2
+  | bash scripts/ci/run-gate-commands.sh --jobs 1

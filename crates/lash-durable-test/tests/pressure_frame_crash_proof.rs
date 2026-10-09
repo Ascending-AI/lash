@@ -380,8 +380,7 @@ impl PressureFrame {
                                 ))
                                 .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
                                 .build(),
-                            Arc::new(lash::rlm::TypescriptDialect),
-                            &backend,
+                            lash::rlm::CellDialect::typescript(),
                         )
                         .with_worker_service(sim::workers(&clock)),
                     )

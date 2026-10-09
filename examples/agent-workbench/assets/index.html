@@ -6111,15 +6111,13 @@
       kind.textContent = kindLabel(node.kind);
       const title = document.createElement("div");
       title.className = "diagram-node-title";
-      const labelTitle = node.label_metadata && node.label_metadata.title ? node.label_metadata.title : "";
-      const labelDescription = node.label_metadata && node.label_metadata.description ? node.label_metadata.description : "";
-      const nodeTitle = labelTitle || node.label || node.id;
-      title.title = labelDescription ? nodeTitle + "\n" + labelDescription : nodeTitle;
+      const nodeTitle = node.label || node.id;
+      title.title = nodeTitle;
       title.textContent = nodeTitle;
       const description = document.createElement("div");
       description.className = "diagram-node-description";
-      description.title = labelDescription;
-      description.textContent = labelDescription;
+      description.title = node.id;
+      description.textContent = node.id === nodeTitle ? "" : node.id;
       const meta = document.createElement("div");
       meta.className = "diagram-node-meta";
       meta.textContent = diagramNodeMeta(node);
@@ -6150,18 +6148,21 @@
       }
       const title = document.createElement("h3");
       title.className = "inspector-title";
-      title.textContent = (node.label_metadata && node.label_metadata.title) || node.label || node.id;
-      const descriptionText = (node.label_metadata && node.label_metadata.description) || "";
+      title.textContent = node.label || node.id;
       const description = document.createElement("p");
       description.className = "inspector-description";
-      description.textContent = descriptionText || kindLabel(node.kind);
+      description.textContent = kindLabel(node.kind);
       const grid = document.createElement("div");
       grid.className = "inspector-grid";
       const rows = [
         ["status", statusLabel(node.status)],
         ["kind", kindLabel(node.kind)],
         ["duration", node.duration_ms !== null && node.duration_ms !== undefined ? node.duration_ms + "ms" : "—"],
-        ["occurrence", node.occurrence || "—"],
+        ["occurrence", node.occurrence ?? "—"],
+        ["started", node.summary ? node.summary.started_count : "—"],
+        ["site", node.id],
+        ["tasks", node.tasks ?? "—"],
+        ["loop depth", node.loop_depth ?? "—"],
       ];
       for (const [key, value] of rows) {
         const row = document.createElement("div");
@@ -6453,8 +6454,8 @@
       const status = statusClass(node.status || "unobserved");
       const unobserved = isUnobservedStatus(node.status);
       const border = nodeBorderColor(status, colors);
-      const title = (node.label_metadata && node.label_metadata.title) || node.label || node.id;
-      const description = (node.label_metadata && node.label_metadata.description) || "";
+      const title = node.label || node.id;
+      const description = node.id === title ? "" : node.id;
       const titleLines = wrapExportText(title, 26, 1);
       const descriptionLines = wrapExportText(description, 44, 2);
       const meta = truncateExportText(diagramNodeMeta(node), 42);
@@ -6532,7 +6533,8 @@
     function diagramNodeMeta(node) {
       return [
         statusLabel(node.status),
-        node.occurrence ? "x" + node.occurrence : "",
+        node.summary && node.summary.started_count > 1 ? "x" + node.summary.started_count : "",
+        node.tasks > 1 ? node.tasks + " tasks" : "",
         node.duration_ms !== null && node.duration_ms !== undefined ? node.duration_ms + "ms" : "",
         node.latest_error || "",
       ].filter(Boolean).join(" · ");

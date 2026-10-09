@@ -12,8 +12,6 @@ pub mod offered_load;
 pub mod perf_support;
 pub mod receipt_tail;
 pub mod runtime_perf;
-pub mod string_scaling;
-pub mod vm_worker_matrix;
 pub mod workload;
 
 /// Allocation instrumentation used by the runtime performance harness.

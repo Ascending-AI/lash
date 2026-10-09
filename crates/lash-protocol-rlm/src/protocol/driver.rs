@@ -59,12 +59,9 @@ pub struct RlmDriver {
 
 impl RlmDriver {
     /// A prompt-only driver in the host's selected `dialect` (ADR 0096).
-    pub fn new(dialect: Arc<dyn crate::dialect::Dialect>) -> Self {
+    pub fn new(dialect: crate::dialect::CellDialect) -> Self {
         Self {
-            dialect: Arc::new(crate::dialect::SessionDialect::prompt_only(
-                dialect,
-                lash_vm_runtime::LashVmSurface::default(),
-            )),
+            dialect: Arc::new(crate::dialect::SessionDialect::prompt_only(dialect)),
         }
     }
 

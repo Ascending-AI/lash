@@ -423,7 +423,7 @@ pub(super) async fn compare_bounded_process_event_pages(
         }
         recorded.push(
             lash_core::ProcessEffectOccurrence::new(
-                lash_sansio::WorkflowOccurrence::fixture("repeated-node", occurrence),
+                lash_sansio::effect_identity_fixture("repeated-node", occurrence),
                 if is_failure { "fixture.write" } else { "now" },
                 class,
                 is_failure

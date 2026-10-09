@@ -281,8 +281,8 @@ impl DeferredSearchResult {
     /// A catalogued tool as the session's dialect shows it: the same
     /// signature and examples its resident tool docs would carry.
     fn new(call_path: &str, definition: &ToolDefinition) -> Self {
-        use lash::rlm::Dialect as _;
-        let dialect = lash::rlm::TypescriptDialect;
+        use lash::rlm::DialectPrompts as _;
+        let dialect = lash::rlm::TypescriptPrompts;
         let contract = definition.contract();
         Self {
             call_path: call_path.to_string(),

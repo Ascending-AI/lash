@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use chrono::{DateTime, Utc};
-use lash_sansio::WorkflowSiteRef;
+use lash_sansio::Site;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -23,16 +23,13 @@ pub(super) const MISMATCH_LIMIT: usize = 64;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WorkflowOverlayDocument {
     reference: WorkflowDocumentRef,
-    sites: BTreeSet<WorkflowSiteRef>,
+    sites: BTreeSet<Site>,
 }
 
 impl WorkflowOverlayDocument {
     /// The document `reference` names, with the execution `sites` of the
     /// entry it selects.
-    pub fn new(
-        reference: WorkflowDocumentRef,
-        sites: impl IntoIterator<Item = WorkflowSiteRef>,
-    ) -> Self {
+    pub fn new(reference: WorkflowDocumentRef, sites: impl IntoIterator<Item = Site>) -> Self {
         Self {
             reference,
             sites: sites.into_iter().collect(),
@@ -44,8 +41,46 @@ impl WorkflowOverlayDocument {
     }
 
     /// Whether the document has `site`.
-    pub fn contains(&self, site: &WorkflowSiteRef) -> bool {
+    pub fn contains(&self, site: &Site) -> bool {
         self.sites.contains(site)
+    }
+}
+
+/// One execution site as one task of the run reaches it. The machine counts
+/// a site's occurrences per task (`K-EFF-008`), so the overlay keeps one
+/// row for each task that ran the site: every element of a fan-out has its
+/// own.
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, schemars::JsonSchema,
+)]
+#[serde(deny_unknown_fields)]
+pub struct WorkflowTaskSite {
+    /// The site in the document.
+    pub site: Site,
+    /// The task that ran it.
+    pub task: lash_sansio::TaskIdentity,
+}
+
+impl WorkflowTaskSite {
+    /// The site and task of the occurrence `at`.
+    pub fn of(at: &lash_sansio::EffectIdentity) -> Self {
+        Self {
+            site: at.site.clone(),
+            task: at.task.clone(),
+        }
+    }
+}
+
+impl std::fmt::Display for WorkflowTaskSite {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.task {
+            lash_sansio::TaskIdentity::Main => write!(f, "{}", self.site),
+            lash_sansio::TaskIdentity::Spawned(spawn) => write!(
+                f,
+                "{} in the task of {}#{}",
+                self.site, spawn.site, spawn.occurrence
+            ),
+        }
     }
 }
 
@@ -97,7 +132,7 @@ pub enum WorkflowOverlayMismatch {
     /// The execution's start names another document than the one loaded.
     Document { claimed: WorkflowDocumentRef },
     /// An observation names a site the loaded document does not have.
-    SiteOutsideDocument { site: WorkflowSiteRef },
+    SiteOutsideDocument { site: WorkflowTaskSite },
 }
 
 /// Canonical identity of one observation within its execution: two
@@ -114,11 +149,11 @@ pub enum WorkflowOverlayEventIdentity {
         transition: WorkflowOverlayExecutionTransition,
     },
     Node {
-        at: lash_sansio::WorkflowOccurrence,
+        at: lash_sansio::EffectIdentity,
         transition: WorkflowOverlayNodeTransition,
     },
     StepBody {
-        at: lash_sansio::WorkflowOccurrence,
+        at: lash_sansio::EffectIdentity,
         attempt: u32,
     },
 }
@@ -126,7 +161,7 @@ pub enum WorkflowOverlayEventIdentity {
 impl WorkflowOverlayEventIdentity {
     /// The occurrence the observation is about; `None` for a fact about the
     /// whole execution.
-    pub const fn at(&self) -> Option<&lash_sansio::WorkflowOccurrence> {
+    pub const fn at(&self) -> Option<&lash_sansio::EffectIdentity> {
         match self {
             Self::Execution { .. } => None,
             Self::Node { at, .. } | Self::StepBody { at, .. } => Some(at),
@@ -328,7 +363,7 @@ pub(super) fn execution_key(
 /// occurrence `archived` shows.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WorkflowOverlaySiteRetention {
-    pub site: WorkflowSiteRef,
+    pub site: WorkflowTaskSite,
     pub truncation_watermark: u64,
     /// What the occurrences below the watermark folded to.
     pub archived: WorkflowOverlaySiteState,
@@ -485,7 +520,7 @@ pub struct WorkflowOverlayCall {
 /// What was observed at one execution site of the document.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WorkflowOverlaySite {
-    pub site: WorkflowSiteRef,
+    pub site: WorkflowTaskSite,
     #[serde(flatten)]
     pub state: WorkflowOverlaySiteState,
 }
@@ -512,7 +547,7 @@ pub struct WorkflowOverlaySiteState {
 /// parent execution is the overlay's own.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WorkflowOverlayChildLink {
-    pub parent_site: WorkflowSiteRef,
+    pub parent_site: WorkflowTaskSite,
     pub child: TraceLanguageChildExecution,
 }
 

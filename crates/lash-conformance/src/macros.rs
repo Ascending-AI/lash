@@ -898,7 +898,6 @@ macro_rules! artifact_store_reopenable_tests {
             (lash_vm_carry_preserves_module, "lash-vm-artifact-carry"),
             (lash_vm_ended_referrer_fences_late_publication, "lash-vm-artifact-referrer-fence"),
             (lash_vm_hostile_module_references_are_rejected, "lash-vm-artifact-hostile-reference"),
-            (lash_vm_alpha_variants_publish_distinct_refs, "lash-vm-artifact-alpha-variants"),
             (lash_vm_artifact_survives_reopen, "lash-vm-artifact-reopen"),
             (process_execution_env_store_fresh_instances, "process-env-fresh-instances"),
             (process_environment_namespace, "process-env-hostile-reference"),

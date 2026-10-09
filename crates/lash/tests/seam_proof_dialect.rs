@@ -1,6 +1,6 @@
 //! The dialect seam, proven by a second front end that exists only here.
 //!
-//! `SeamProofDialect` is a test fixture, not a supported language: it is
+//! The seam-proof dialect is a test fixture, not a supported language: it is
 //! selected through the same public constructor a host uses for TypeScript,
 //! runs a real code-mode turn on the core's durable node, and keeps its
 //! selection across a cold reopen (ADR 0096).
@@ -18,14 +18,12 @@ use std::sync::{Arc, Mutex};
 
 use lash::direct::LlmOutputPart;
 use lash::provider::LlmResponse;
-use lash::rlm::Dialect;
 use lash::{LashCore, TurnInput, TurnOutput};
 use lash_core::{ToolDefinitionBindingExt as _, ToolProvider};
 use lash_sansio::sync::MutexExt;
 
 #[path = "seam_proof_dialect/dialect.rs"]
 mod dialect;
-use dialect::SeamProofDialect;
 
 fn worker_executable() -> &'static str {
     env!("CARGO_BIN_EXE_lash-seam-proof-worker")
@@ -190,7 +188,7 @@ impl Script {
     }
 }
 
-fn core(double: &Double, dialect: Arc<dyn Dialect>, script: &Script) -> LashCore {
+fn core(double: &Double, dialect: lash::rlm::CellDialect, script: &Script) -> LashCore {
     let replies = Arc::clone(&script.replies);
     let requests = Arc::clone(&script.requests);
     let provider = lash::testing::TestProvider::builder()
@@ -225,8 +223,8 @@ fn core(double: &Double, dialect: Arc<dyn Dialect>, script: &Script) -> LashCore
             .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
             .build(),
         dialect,
-        &backend,
-    );
+    )
+    .with_worker_service(dialect::worker_service());
     LashCore::rlm_builder(backend, factory)
         .serve_test_llm_profile(
             provider,
@@ -300,7 +298,7 @@ async fn a_seam_proof_dialect_runs_a_real_turn_through_the_host() {
     let script = Script::new(&[&cell(
         "take reply from probe.echo WITH {\"text\": \"seam\"}\ngive reply.value",
     )]);
-    let core = core(&double, Arc::new(SeamProofDialect), &script);
+    let core = core(&double, dialect::cell_dialect(), &script);
     let session = session(&core, "seam-proof-turn").await;
     let output = session
         .send(TurnInput::text("echo seam"))
@@ -338,7 +336,7 @@ async fn a_suspended_session_keeps_its_selected_dialect(tier: Tier) {
     ]);
     let session_id = "seam-proof-resume";
 
-    let first = core(&double, Arc::new(SeamProofDialect), &script);
+    let first = core(&double, dialect::cell_dialect(), &script);
     let output = session(&first, session_id)
         .await
         .send(TurnInput::text("bind"))
@@ -349,7 +347,7 @@ async fn a_suspended_session_keeps_its_selected_dialect(tier: Tier) {
     assert_eq!(final_value(&output), Some(serde_json::json!("bound")));
     drop(first);
 
-    let resumed = core(&double, Arc::new(SeamProofDialect), &script);
+    let resumed = core(&double, dialect::cell_dialect(), &script);
     let output = session(&resumed, session_id)
         .await
         .send(TurnInput::text("read"))
@@ -376,7 +374,7 @@ async fn a_suspended_session_keeps_its_selected_dialect(tier: Tier) {
     let substitute_script = Script::new(&[]);
     let substituted = core(
         &double,
-        Arc::new(lash::rlm::TypescriptDialect),
+        lash::rlm::CellDialect::typescript(),
         &substitute_script,
     );
     let refused = match substituted

@@ -36,7 +36,7 @@ pub(super) async fn run(args: &Args) -> Result<Receipt> {
         | Case::TraceSinkCustom
         | Case::TraceSinkOtel
         | Case::TraceSinkSlow => Box::pin(trace::run(args)).await,
-        Case::OverlayFold | Case::OverlayAttribution => Box::pin(overlay::run(args)).await,
+        Case::OverlayFold => Box::pin(overlay::run(args)).await,
         other => anyhow::bail!("{other:?} is not an observation workload"),
     }
 }
@@ -201,8 +201,7 @@ impl Fleet {
                             ))
                             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
                             .build(),
-                        Arc::new(lash_protocol_rlm::TypescriptDialect),
-                        &backend,
+                        lash_protocol_rlm::CellDialect::typescript(),
                     );
                     lash::LashCore::rlm_builder(backend, factory)
                         .tools(Arc::new(Tools::new(meter)?))
@@ -302,24 +301,41 @@ fn environment() -> ProcessExecutionEnvSpec {
     )
 }
 
-/// A workflow lash admitted from TypeScript source and holds under a pin.
+/// A workflow lash admitted from a kernel document and holds under a pin.
 pub(super) struct Published {
     definition: ProcessDefinition,
     env_ref: ProcessExecutionEnvRef,
 }
 
-pub(super) async fn publish(core: &lash::LashCore, source: &str) -> Result<Published> {
-    use lash::workflow::{WorkflowDraft, WorkflowEntry, WorkflowPublish};
-    let graph = lash_typescript::workflow_graph::workflow_graph_from_source(source)
-        .map_err(|error| anyhow::anyhow!("workflow source: {error}"))?;
-    let draft = WorkflowDraft::open(&graph)
-        .map_err(|error| anyhow::anyhow!("workflow draft: {error:?}"))?;
-    let pin = HostArtifactPin::mint();
+/// Admit `document`, written in kernel text, as a definition of its entry
+/// `observed`.
+pub(super) async fn publish(core: &lash::LashCore, document: &str) -> Result<Published> {
+    use lash::workflow::WorkflowPublish;
+    use lash::workflow::document::{Name, parse_document};
+    use lash::workflow::edit::Draft;
+    let mut document =
+        parse_document(document).map_err(|error| anyhow::anyhow!("workflow document: {error}"))?;
     let environment = environment();
     let artifacts = core.host_artifacts();
+    // The document performs each effect under the signature this host
+    // offers it under.
+    let offered = artifacts
+        .workflow_environment(&environment)
+        .await?
+        .context("this core reads no workflow documents")?;
+    for (effect, signature) in &mut document.manifest.effects {
+        *signature = offered
+            .effects()
+            .get(effect)
+            .with_context(|| format!("this host offers no effect `{effect}`"))?
+            .clone();
+    }
+    let draft = Draft::open(document, None)
+        .map_err(|error| anyhow::anyhow!("workflow draft: {error:?}"))?;
+    let pin = HostArtifactPin::mint();
     let publication = match within(
         "workflow publication",
-        artifacts.publish_workflow(&pin, &draft, WorkflowEntry::Sole, &environment),
+        artifacts.publish_workflow(&pin, &draft, &Name::new(ENTRY), &environment),
     )
     .await??
     {
@@ -357,36 +373,42 @@ pub(super) async fn start(
     .process_id)
 }
 
+/// The entry every workload document declares and its processes start.
+const ENTRY: &str = "observed";
+
 /// A process of `iterations` loop turns, each of `steps` tool calls. A step
-/// is a committed effect the VM observes at its own site.
-pub(super) fn loop_source(iterations: usize, steps: usize) -> String {
+/// is a committed effect the machine observes at its own site.
+pub(super) fn loop_document(iterations: usize, steps: usize) -> String {
     let items = (0..iterations)
         .map(|n| n.to_string())
         .collect::<Vec<_>>()
         .join(", ");
-    let mut source =
-        format!("const observed = async () => {{\n  for (const item of [{items}]) {{\n");
+    let mut document = format!(
+        "kernel 1\nnumbers float\neffect tools.mark(input: Any) -> Any\nentry {ENTRY}() -> Any\n\n\
+         fn {ENTRY}() {{\n  let input = {{key: \"step\"}}\n  for item in [{items}] {{\n"
+    );
     for _ in 0..steps {
-        source.push_str("    await tools.mark({ key: \"step\" });\n");
+        document.push_str("    do perform tools.mark(input) as Any\n");
     }
-    source.push_str("  }\n  return 0;\n};\n");
-    source
+    document.push_str("  }\n  return 0\n}\n\nmain {\n  finish null\n}\n");
+    document
 }
 
 /// A process that commits about `commits` effect facts. A site's committed
 /// outcomes stop at the effect summary's occurrence cap, so the facts are
 /// spread over as many step sites as that takes.
-pub(super) fn commit_source(commits: usize) -> String {
+pub(super) fn commit_document(commits: usize) -> String {
     let cap = usize::try_from(lash::process::PROCESS_EFFECT_OCCURRENCE_CAP).unwrap_or(8);
-    loop_source(commits.min(cap), commits.div_ceil(cap))
+    loop_document(commits.min(cap), commits.div_ceil(cap))
 }
 
-/// A process that waits until it is cancelled.
-pub(super) const QUIET_SOURCE: &str =
-    "const quiet = async () => {\n  await sleep(\"1h\");\n  return 0;\n};\n";
+/// A process that waits an hour, until it is cancelled.
+pub(super) const QUIET_DOCUMENT: &str = "kernel 1\nnumbers float\nentry observed() -> Any\n\n\
+    fn observed() {\n  do sleep 3600000\n  return 0\n}\n\nmain {\n  finish null\n}\n";
 
 /// A process that ends at once.
-pub(super) const BLANK_SOURCE: &str = "const blank = async () => {\n  return 0;\n};\n";
+pub(super) const BLANK_DOCUMENT: &str = "kernel 1\nnumbers float\nentry observed() -> Any\n\n\
+    fn observed() {\n  return 0\n}\n\nmain {\n  finish null\n}\n";
 
 pub(super) const SETTLE: Duration = Duration::from_secs(60);
 /// A whole population's bound: long runs settle well inside it.

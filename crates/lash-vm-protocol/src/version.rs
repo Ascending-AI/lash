@@ -8,8 +8,8 @@ use thiserror::Error;
 ///     shapes(
 ///         path = "crates/lash-vm-protocol/src/*.rs",
 ///         cover(
-///             MessageHeader, Start, EffectRequest, EffectResponse, ParentMessage, WorkerMessage,
-///             ParentFrame, WorkerFrame, VmContract,
+///             MessageHeader, Start, StartFrom, RunBounds, RunMeters, ParentMessage, WorkerMessage,
+///             ParentFrame, WorkerFrame,
 ///         ),
 ///     ),
 ///     roots(path = "crates/lash-sansio/src/compat.rs", VersionRange),

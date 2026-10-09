@@ -749,8 +749,7 @@ finish({ baton: baton });
             .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),
-        std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
-        &backend,
+        lash_protocol_rlm::CellDialect::typescript(),
     );
     let core = lash::LashCore::rlm_builder(backend, factory)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
@@ -878,8 +877,7 @@ await control.continue_as({
             .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),
-        std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
-        &backend,
+        lash_protocol_rlm::CellDialect::typescript(),
     );
     let core = lash::LashCore::rlm_builder(backend, factory)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))

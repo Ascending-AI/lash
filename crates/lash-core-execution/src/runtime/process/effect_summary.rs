@@ -93,7 +93,7 @@ pub struct ProcessEffectOccurrence {
     pub vocabulary_version: u32,
     /// The occurrence of the execution site the effect ran at: two calls of
     /// one node stay apart after the live window.
-    pub at: lash_sansio::WorkflowOccurrence,
+    pub at: lash_sansio::EffectIdentity,
     pub operation: String,
     pub outcome_class: ProcessEffectOutcomeClass,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -107,7 +107,7 @@ pub struct ProcessEffectOccurrence {
 #[serde(deny_unknown_fields)]
 struct ProcessEffectOccurrenceFields {
     vocabulary_version: u32,
-    at: lash_sansio::WorkflowOccurrence,
+    at: lash_sansio::EffectIdentity,
     operation: String,
     outcome_class: ProcessEffectOutcomeClass,
     #[serde(default, deserialize_with = "nonempty_failure_code")]
@@ -161,7 +161,7 @@ fn nonempty_identifier(
 
 impl ProcessEffectOccurrence {
     pub fn new(
-        at: lash_sansio::WorkflowOccurrence,
+        at: lash_sansio::EffectIdentity,
         operation: impl Into<String>,
         outcome_class: ProcessEffectOutcomeClass,
         code: Option<lash_sansio::FailureCode>,
@@ -424,6 +424,7 @@ pub fn tool_failure_code(failure: &crate::ToolFailure) -> lash_sansio::FailureCo
 /// One node's recorded occurrences and its omitted counts.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProcessEffectNodeReport {
+    /// The node's site in the process's document, as the site spells itself.
     pub node_id: String,
     pub occurrences: Vec<ProcessEffectOccurrence>,
     pub omitted: ProcessEffectOmittedCounts,
@@ -463,14 +464,11 @@ impl ProcessEffectReport {
         match fact {
             super::ProcessLifecycleFact::EffectOutcome(outcome) => {
                 outcome.admit(fleet_format)?;
-                let node = self.node_entry(outcome.at.site.node_id.as_str());
-                // Site order, then occurrence: one order whatever page the
+                let node = self.node_entry(&outcome.at.site.to_string());
+                // Task order, then occurrence: one order whatever page the
                 // facts arrived in.
                 let key = |occurrence: &ProcessEffectOccurrence| {
-                    (
-                        occurrence.at.site.site_path.clone(),
-                        occurrence.at.occurrence,
-                    )
+                    (occurrence.at.task.clone(), occurrence.at.occurrence)
                 };
                 let position = node
                     .occurrences
@@ -537,35 +535,36 @@ fn vocabulary_version_schema() -> serde_json::Value {
     }
 }
 
-/// The shape of an occurrence. The typed decode is strict about its site
-/// paths; admission only bounds the envelope.
+/// The shape of an occurrence: the machine's effect identity. The typed
+/// decode is strict about its task and sites; admission only bounds the
+/// envelope.
 fn occurrence_schema() -> serde_json::Value {
     let site = serde_json::json!({
         "type": "object",
         "additionalProperties": false,
-        "required": ["node_id"],
+        "required": ["unit"],
         "properties": {
-            "node_id": { "type": "string", "minLength": 1 },
-            "site_path": { "type": "object" }
+            "unit": {},
+            "path": { "type": "array", "items": { "type": "integer", "minimum": 0 } }
         }
     });
     serde_json::json!({
         "type": "object",
         "additionalProperties": false,
-        "required": ["site", "occurrence"],
+        "required": ["task", "site", "occurrence"],
         "properties": {
+            "task": {},
             "site": site,
-            "occurrence": { "type": "integer", "minimum": 1, "maximum": u64::MAX },
+            "occurrence": { "type": "integer", "minimum": 0, "maximum": u64::MAX },
             "loops": {
                 "type": "array",
                 "items": {
                     "type": "object",
                     "additionalProperties": false,
-                    "required": ["site", "activation", "position"],
+                    "required": ["site", "iteration"],
                     "properties": {
                         "site": site,
-                        "activation": { "type": "integer", "minimum": 1, "maximum": u64::MAX },
-                        "position": { "type": "object" }
+                        "iteration": { "type": "integer", "minimum": 0, "maximum": u64::MAX }
                     }
                 }
             }

@@ -264,8 +264,7 @@ fn core(
                 .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
                 .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
                 .build(),
-            Arc::new(lash::rlm::TypescriptDialect),
-            &backend,
+            lash::rlm::CellDialect::typescript(),
         ),
         contributed_engines: Arc::clone(contributed_engines),
     };

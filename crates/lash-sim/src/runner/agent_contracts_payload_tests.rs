@@ -110,24 +110,23 @@ fn durable_input_row_hashes_identically_however_late_its_host_resolves() {
     }
 }
 
-/// A process lifted out of a cell carries no author-chosen name: the runtime's
-/// derived label is a `__process_` digest, but a host-declared `label` replaces
-/// it as display metadata without touching the process's identity. The lifted
-/// evidence is structural — `ProcessOrigin::Lifted` on the module IR's process
-/// declaration — so a renamed display label must not change the oracle's
-/// verdict.
+/// A process a cell creates carries no author-chosen name: a host-declared
+/// `label` replaces the runtime's derived one as display metadata without
+/// touching the process's identity. The evidence is structural (the
+/// process's definition reads as an entry of an admitted kernel document),
+/// so a renamed display label must not change the oracle's verdict.
 #[tokio::test]
-async fn lifted_process_display_name_does_not_change_the_oracle_verdict() {
+async fn process_display_name_does_not_change_the_oracle_verdict() {
     let expected = json!({ "ok": true });
     let result = facade_agent_process_execution(
-        "lash_runtime agent renamed lifted process",
-        &SessionId::from("sim-agent-renamed-lifted-process-contract"),
+        "lash_runtime agent renamed process",
+        &SessionId::from("sim-agent-renamed-process-contract"),
         "Start a process under a declared display label and return its value.",
         vec![
             r#"<typescript>
-const lookup = await processes.create({ dialect: "typescript", source: `const lookup = async () => {
+const lookup = async () => {
   return { ok: true };
-};` });
+};
 const handle = await processes.start({ definition: lookup, label: "renamed display label" });
 const result = await handle;
 finish(result);
@@ -137,7 +136,7 @@ finish(result);
         None,
     )
     .await
-    .expect("renamed lifted process contract world");
+    .expect("renamed process contract world");
 
     let entries = result
         .pointer("/process_facts/completed_entries")
@@ -146,9 +145,9 @@ finish(result);
     assert_eq!(
         entries.iter().filter_map(Value::as_str).collect::<Vec<_>>(),
         vec!["renamed display label"],
-        "the display label, not the lift digest, is what observation records",
+        "the display label, not a derived name, is what observation records",
     );
 
-    crate::oracles::require_agent_lifted_process_entries(&result, 1, "test")
-        .expect("a renamed display label must not change the lifted-process verdict");
+    crate::oracles::require_agent_document_entry_processes(&result, 1, "test")
+        .expect("a renamed display label must not change the document-entry verdict");
 }

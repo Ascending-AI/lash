@@ -187,16 +187,12 @@ mod host_wrapping_inventory {
 /// RLM factory and resolvers name.
 #[cfg(feature = "rlm")]
 mod rlm_host_wrapping_inventory {
-    use lash::rlm::RlmLanguageFeatures as _;
     use lash::rlm::RlmProjectedSeedEntry as _;
     use lash::rlm::RlmProjectedSeedSnapshot as _;
     use lash::rlm::RlmPromptFeatures as _;
     use lash::rlm::RlmSeedPluginBody as _;
     use lash::rlm::UnsetChannel as _;
-    use lash::tools::DeferredLinkError as _;
     use lash::tools::DeferredResolutionError as _;
-    use lash::vm::LashVmProcessAdmissionRefusal as _;
-    use lash::vm::LashVmRuntimeError as _;
     use lash::vm::ToolBindingError as _;
 }
 
@@ -204,59 +200,28 @@ mod rlm_host_wrapping_inventory {
 
 #[cfg(feature = "rlm")]
 mod rlm_inventory {
-    use lash::persistence::LashVmArtifacts as _;
     // The code-mode dialect seam (ADR 0096).
+    use lash::rlm::CellDialect as _;
     use lash::rlm::CellTags as _;
-    use lash::rlm::Dialect as _;
     use lash::rlm::DialectPromptVocabulary as _;
+    use lash::rlm::DialectPrompts as _;
     use lash::rlm::DialectRefusal as _;
     use lash::rlm::DialectRefusalKind as _;
     use lash::rlm::ExecutionSectionRequest as _;
     use lash::rlm::ExtraKeys as _;
-    use lash::rlm::ModuleCompileOutput as _;
     use lash::rlm::ObjectShape as _;
     use lash::rlm::ProcessParamShape as _;
     use lash::rlm::ProcessShape as _;
+    use lash::rlm::ProjectedBindingError as _;
+    use lash::rlm::PythonPrompts as _;
     use lash::rlm::ResolvedToolBinding as _;
     use lash::rlm::SchemaShape as _;
     use lash::rlm::ShapeConstraints as _;
     use lash::rlm::ShapeField as _;
     use lash::rlm::ShapeKind as _;
-    use lash::rlm::TypescriptDialect as _;
-    use lash::tools::compile_with_deferred_resolution as _;
-    use lash::vm::LashVmHostEnvironment as _;
-    use lash::vm::LinkedModule as _;
-    use lash::vm::NamedDataType as _;
-    use lash::vm::ir::TypeExpr as _;
-    use lash::vm::ir::TypeField as _;
-    use lash::vm::lash_vm_surface_extension as _;
+    use lash::rlm::TypescriptPrompts as _;
 
     // The Lash VM language vocabulary, re-exported whole as `lash::vm::ir`.
-    use lash::vm::AbilityOp as _;
-    use lash::vm::AbilityOutcome as _;
-    use lash::vm::ContentHash as _;
-    use lash::vm::Entry as _;
-    use lash::vm::ExecutionEnvironment as _;
-    use lash::vm::ExecutionHost as _;
-    use lash::vm::ExecutionHostError as _;
-    use lash::vm::HostDescriptor as _;
-    use lash::vm::HostRequirementsRef as _;
-    use lash::vm::ImageValue as _;
-    use lash::vm::ModuleCompileRequest as _;
-    use lash::vm::ModuleIntrospection as _;
-    use lash::vm::ModuleRef as _;
-    use lash::vm::NamedDataTypeIntrospection as _;
-    use lash::vm::ProcessIntrospection as _;
-    use lash::vm::ResourceOperation as _;
-    use lash::vm::ResourceOperationBatchOutcome as _;
-    use lash::vm::ResourceOperationOutcome as _;
-    use lash::vm::State as _;
-    use lash::vm::Value as _;
-    use lash::vm::compile as _;
-    use lash::vm::compile_module as _;
-    use lash::vm::execute as _;
-    use lash::vm::from_json as _;
-    use lash::vm::ir::Expr as _;
 }
 
 // --- `testing`: embedder test helpers ---
@@ -274,11 +239,8 @@ mod testing_inventory {
 mod rlm_testing_inventory {
     // The durable-store laws are not facade surface: a host depends on
     // `lash-internal-conformance` directly.
-    use lash::testing::deferred_resolution_link_key as _;
-    use lash::vm::testing::conformance::ReopenableLashVmArtifactStore as _;
     // The host names `lash_vm_artifact_store_reopenable`; the live name of the
     // same conformance entry point is `survives_reopen`.
-    use lash::vm::testing::conformance::survives_reopen as _;
 }
 
 // --- Host-wired extension features: one module per feature ---
@@ -326,9 +288,7 @@ mod mcp_inventory {
 }
 
 #[cfg(feature = "typescript")]
-mod typescript_inventory {
-    use lash::typescript::{link as _, parse as _};
-}
+mod typescript_inventory {}
 
 #[cfg(feature = "http-transport")]
 mod http_transport_inventory {

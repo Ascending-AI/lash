@@ -48,25 +48,30 @@ pub fn process_language_observation(
                     process_id: process_id.clone(),
                 },
                 document: lash_trace::WorkflowDocumentRef {
-                    source_identity: "fixture-source".to_string(),
-                    module_ref: lash_sansio::ModuleRef::new(&lash_sansio::ContentHash::new(
-                        "fixture-module",
-                    )),
-                    entry: lash_trace::WorkflowDocumentEntry::Process {
-                        process_ref: "0:0".to_string(),
+                    document: lash_kernel_doc::DocumentId::from_bytes([0x5a; 32]),
+                    entry: lash_trace::WorkflowDocumentEntry::Entry {
+                        function: lash_kernel_doc::Name::new("fixture"),
                     },
-                    ir_version: 1,
                 },
                 entry_name: "fixture".to_string(),
                 engine_execution_id: None,
                 generation: None,
             },
             payload: lash_trace::TraceLanguageExecutionPayload::Node {
-                at: lash_sansio::WorkflowOccurrence::fixture(label, 1),
+                at: lash_sansio::effect_identity_fixture(label, 1),
                 fact: lash_trace::TraceNodeFact::Started { call_id: None },
             },
         },
         observed_at_ms: 0,
+    }
+}
+
+/// The label a fixture site was built from
+/// ([`lash_sansio::effect_identity_fixture`]).
+fn fixture_label(site: &lash_sansio::Site) -> String {
+    match &site.unit {
+        lash_sansio::Unit::Function(name) => name.to_string(),
+        _ => site.to_string(),
     }
 }
 
@@ -79,14 +84,15 @@ pub fn process_observation_label(event: &crate::ProcessObservationEvent) -> Stri
                 lash_trace::TraceLanguageExecutionPayload::Node {
                     at,
                     fact: lash_trace::TraceNodeFact::Started { .. },
-                } => at.site.node_id.to_string(),
+                } => fixture_label(&at.site),
                 other => format!("language:{other:?}"),
             }
         }
         crate::ProcessObservationEventPayload::StepBodyStarted(observation) => {
             format!(
                 "step body {} attempt {}",
-                observation.step.at.site.node_id, observation.step.attempt
+                fixture_label(&observation.step.at.site),
+                observation.step.attempt
             )
         }
         crate::ProcessObservationEventPayload::Committed { event } => {
@@ -106,7 +112,7 @@ pub fn process_step_body_started(
     lash_trace::StepBodyStartedObservation {
         step: lash_trace::StepBodyStarted {
             process_id: process.clone(),
-            at: lash_sansio::WorkflowOccurrence::fixture(label, 1),
+            at: lash_sansio::effect_identity_fixture(label, 1),
             call_id: crate::ToolCallId::fixture(label),
             attempt,
         },

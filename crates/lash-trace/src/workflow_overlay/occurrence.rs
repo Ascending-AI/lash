@@ -221,7 +221,7 @@ pub(super) enum Transition {
 pub(super) enum Placement {
     Execution(WorkflowOverlayExecutionTransition),
     Occurrence {
-        site: WorkflowSiteRef,
+        site: WorkflowTaskSite,
         occurrence: u64,
         transition: Transition,
     },
@@ -257,8 +257,8 @@ impl Placement {
             },
         };
         Self::Occurrence {
-            site: at.site.clone(),
-            occurrence: at.occurrence.get(),
+            site: WorkflowTaskSite::of(at),
+            occurrence: at.occurrence,
             transition,
         }
     }
@@ -267,7 +267,7 @@ impl Placement {
 impl Observation {
     /// The occurrence the observation is about, loops and all; `None` for a
     /// fact about the whole execution.
-    fn at(&self) -> Option<&lash_sansio::WorkflowOccurrence> {
+    fn at(&self) -> Option<&lash_sansio::EffectIdentity> {
         match &self.fact {
             WorkflowOverlayFact::StepBodyStarted { step } => Some(&step.at),
             WorkflowOverlayFact::Language { payload, .. } => payload.at(),

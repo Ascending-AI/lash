@@ -134,8 +134,7 @@ impl CellDetector {
     #[cfg(test)]
     fn new() -> Self {
         Self::with_dialect(Arc::new(SessionDialect::prompt_only(
-            std::sync::Arc::new(crate::dialect::TypescriptDialect),
-            lash_vm_runtime::LashVmSurface::default(),
+            crate::dialect::CellDialect::typescript(),
         )))
     }
 
@@ -661,8 +660,7 @@ mod tests {
         // Another worker: a fresh detector rebuilt from the journal alone.
         let mut elsewhere = CellDetector::from_recorded(
             Arc::new(SessionDialect::prompt_only(
-                std::sync::Arc::new(crate::dialect::TypescriptDialect),
-                lash_vm_runtime::LashVmSurface::default(),
+                crate::dialect::CellDialect::typescript(),
             )),
             journaled,
         )

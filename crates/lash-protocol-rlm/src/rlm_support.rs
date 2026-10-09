@@ -3,13 +3,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
-use crate::dialect::Dialect;
+use crate::dialect::DialectPrompts;
 use crate::render::CodeRenderer;
 use lash_core::LlmUsage;
 use lash_render::{RenderNode, RenderParams, RenderValue, truncate_chars};
 use lash_rlm_types::{RlmTermination, RlmTurnOptions};
 use lash_sansio::{ExtraKeys, ObjectShape, SchemaShape, ShapeField, ShapeKind};
-use lash_vm::Value as FlowValue;
+use serde_json::Value as FlowValue;
 
 /// What a turn runs under, read from `namespace`, the RLM namespace the
 /// turn's run recorded. A session that recorded none runs under the
@@ -37,7 +37,7 @@ pub(crate) fn decode_rlm_termination_options(
 /// breakpoint, never inside the cached system prompt.
 /// It is worded in `dialect`, the session's selected dialect.
 pub fn format_budget_suffix(
-    dialect: &dyn crate::dialect::Dialect,
+    dialect: &dyn DialectPrompts,
     turn_index: usize,
     usage: Option<&LlmUsage>,
     max_budget_tokens: Option<usize>,
@@ -155,31 +155,19 @@ pub(crate) struct ReadOnlyVariableDoc {
 }
 
 impl ReadOnlyVariableDoc {
-    pub(crate) fn from_flow_value(name: String, value: &FlowValue) -> Self {
-        let (descriptor_type, value) = match value {
-            FlowValue::Projected(projected) => (
-                projected.type_name().to_string(),
-                projected
-                    .materialize()
-                    .ok()
-                    .and_then(|value| serde_json::to_value(value).ok()),
-            ),
-            other => (
-                flow_value_descriptor_type(other).to_string(),
-                serde_json::to_value(other).ok(),
-            ),
-        };
+    /// A read-only binding as the host materialized it for a cell.
+    pub(crate) fn from_json(name: String, descriptor_type: String, value: &FlowValue) -> Self {
         Self {
             name,
             descriptor_type,
-            value,
+            value: Some(value.clone()),
         }
     }
 }
 
 pub(crate) fn render_read_only_variables(
     mut docs: Vec<ReadOnlyVariableDoc>,
-    dialect: &dyn Dialect,
+    dialect: &dyn DialectPrompts,
 ) -> String {
     let vocabulary = dialect.prompt_vocabulary();
     docs.sort_by(|left, right| left.name.cmp(&right.name));
@@ -227,7 +215,7 @@ pub(crate) fn render_bound_variables(
     cache: &mut BoundVariableRenderCache,
     globals: &[(String, FlowValue)],
     opaque: &[(String, String)],
-    dialect: &dyn Dialect,
+    dialect: &dyn DialectPrompts,
     renderer: &dyn CodeRenderer,
     params: &RenderParams,
     max_inline_keys: usize,
@@ -339,7 +327,7 @@ pub(crate) fn render_bound_variables(
 fn append_schema_registry(
     lines: &mut Vec<String>,
     registry: &SchemaRegistry,
-    dialect: &dyn Dialect,
+    dialect: &dyn DialectPrompts,
 ) {
     if !registry.definitions.is_empty() {
         lines.push(String::new());
@@ -357,7 +345,7 @@ fn render_read_only_line(
     name: &str,
     type_text: &str,
     descriptor_type: &str,
-    dialect: &dyn Dialect,
+    dialect: &dyn DialectPrompts,
 ) -> String {
     format!(
         "- `{name}`: `{type_text}`, read-only (descriptor: `{}`)",
@@ -366,7 +354,7 @@ fn render_read_only_line(
 }
 
 /// A value descriptor's type through the same shape spelling as tool schemas.
-fn normalize_descriptor_type(type_name: &str, dialect: &dyn Dialect) -> String {
+fn normalize_descriptor_type(type_name: &str, dialect: &dyn DialectPrompts) -> String {
     let kind = match type_name {
         "string" => ShapeKind::Str,
         "number" => ShapeKind::Float,
@@ -384,29 +372,15 @@ fn normalize_descriptor_type(type_name: &str, dialect: &dyn Dialect) -> String {
     dialect.schema_type(&kind.into())
 }
 
-fn flow_value_descriptor_type(value: &FlowValue) -> &'static str {
-    match value {
-        FlowValue::Null => "null",
-        FlowValue::Undefined => "undefined",
-        FlowValue::Bool(_) => "boolean",
-        FlowValue::Number(_) => "number",
-        FlowValue::String(_) => "string",
-        FlowValue::Image(_) => "image",
-        FlowValue::Resource(_) => "resource",
-        FlowValue::Tuple(_) | FlowValue::List(_) => "list",
-        FlowValue::Record(_) => "record",
-        FlowValue::Projected(_) => "projected",
-        FlowValue::Ref(_) => {
-            unreachable!("VM heap references must be materialized before schema rendering")
-        }
-    }
-}
-
 #[expect(
     clippy::expect_used,
     reason = "the inline arm above returns early, so only hinted rows reach this point and every hinted row carries an inferred shape"
 )]
-fn render_row_line(row: &WorkRow, registry: &SchemaRegistry, dialect: &dyn Dialect) -> String {
+fn render_row_line(
+    row: &WorkRow,
+    registry: &SchemaRegistry,
+    dialect: &dyn DialectPrompts,
+) -> String {
     let vocabulary = dialect.prompt_vocabulary();
     if let Some(inline) = &row.inline {
         // Value shown explicitly; no type/size hint needed.
@@ -451,11 +425,10 @@ fn build_bound_variable_row(
         };
     }
 
-    let json = serde_json::to_value(value).unwrap_or(serde_json::Value::Null);
     BuiltRow {
         inline: None,
-        shape: Some(infer_value_shape(&json)),
-        size_hint: render_value_size_hint(&json, max_inline_keys),
+        shape: Some(infer_value_shape(value)),
+        size_hint: render_value_size_hint(value, max_inline_keys),
         preview: Some(result.body),
     }
 }
@@ -813,7 +786,7 @@ mod bound_variable_tests {
                 descriptor_type: "object".to_string(),
                 value: Some(value["payload"].clone()),
             }],
-            &crate::dialect::TypescriptDialect,
+            &crate::dialect::TypescriptPrompts,
         );
         for prompt in [&*bound, &*read_only] {
             assert!(prompt.contains(r#""two words": string"#), "{prompt}");
@@ -849,7 +822,7 @@ mod bound_variable_tests {
             .as_object()
             .expect("object")
             .iter()
-            .map(|(key, value)| (key.clone(), lash_vm::from_json(value.clone())))
+            .map(|(key, value)| (key.clone(), value.clone()))
             .collect()
     }
 
@@ -859,7 +832,7 @@ mod bound_variable_tests {
             cache,
             &globals,
             &[],
-            &crate::dialect::TypescriptDialect,
+            &crate::dialect::TypescriptPrompts,
             &crate::render::BuiltinCodeRenderer,
             &lash_render::RenderParams::preview(),
             crate::RlmPresentationConfig::standard().max_inline_keys,
@@ -900,7 +873,7 @@ mod bound_variable_tests {
             &mut cache,
             &g,
             &[],
-            &crate::dialect::TypescriptDialect,
+            &crate::dialect::TypescriptPrompts,
             &crate::render::BuiltinCodeRenderer,
             &lash_render::RenderParams::preview(),
             crate::RlmPresentationConfig::standard().max_inline_keys,
@@ -936,23 +909,19 @@ mod bound_variable_tests {
     #[tokio::test]
     async fn model_visible_reserved_prefix_key_matches_preview_and_schema() {
         let reserved_key = "__projected__payload";
-        let value = FlowValue::Record(Arc::new(lash_vm::Record::from_iter([
-            (
-                reserved_key.to_string(),
-                FlowValue::String("z".repeat(2_000).into()),
-            ),
-            ("body".to_string(), FlowValue::String("plain".into())),
-        ])));
+        let value = serde_json::json!({
+            reserved_key: "z".repeat(2_000),
+            "body": "plain",
+        });
 
-        let encoded = crate::projection::flow_to_json_value(&value);
+        let encoded = crate::projection::plain_json_for_transport(value.clone());
         let decoded = crate::projection::normalize_tool_args_for_projection(
             encoded,
             &lash_core::ToolArgumentProjectionPolicy::MaterializeProjectedValues,
         )
         .expect("transport codec should decode its escaped record key");
         assert_eq!(
-            crate::projection::json_to_flow_value(decoded),
-            value,
+            decoded, value,
             "transport codec must preserve the reserved-prefix record key"
         );
 
@@ -961,7 +930,7 @@ mod bound_variable_tests {
             &mut cache,
             &[("payload".to_string(), value)],
             &[],
-            &crate::dialect::TypescriptDialect,
+            &crate::dialect::TypescriptPrompts,
             &crate::render::BuiltinCodeRenderer,
             &lash_render::RenderParams::preview(),
             crate::RlmPresentationConfig::standard().max_inline_keys,
@@ -1023,13 +992,13 @@ mod bound_variable_tests {
         let params = RenderParams::preview();
         assert_ne!(
             value_hash(
-                &lash_vm::from_json(first),
+                &first,
                 &params,
                 "lash.ax.v1",
                 crate::RlmPresentationConfig::standard().max_inline_keys
             ),
             value_hash(
-                &lash_vm::from_json(second),
+                &second,
                 &params,
                 "lash.ax.v1",
                 crate::RlmPresentationConfig::standard().max_inline_keys

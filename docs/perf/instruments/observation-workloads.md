@@ -23,7 +23,6 @@ process replay stores, in replay schemas of its own.
 | `trace-sink-otel` | sends / unused | The OpenTelemetry adapter over an SDK tracer provider: exports, spans, per-export latency. |
 | `trace-sink-slow` | sends / sink delay in ms | A sink that blocks for the delay and refuses every fourth record: time the emitter was blocked, records lost, and the sends' settle latency. |
 | `overlay-fold` | loop turns / step sites | The execution overlay folded from what a process's feed delivered: per-observation fold, per-observation snapshot, and the settlement, by document nodes and sites. |
-| `overlay-attribution` | loop turns / branch sites per turn | One program in the VM with and without an observing host: observations per run and the median overhead per observation. No store takes part. |
 
 Every boundary receipt carries `latency` (p50, p95, p99, max and mean per
 boundary, in microseconds), `throughput` (operations over each wall-clock

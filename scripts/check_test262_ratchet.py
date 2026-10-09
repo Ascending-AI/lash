@@ -34,7 +34,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-TEST262 = "crates/lash-typescript/tests/test262"
+TEST262 = "crates/lash-dialect-typescript/tests/test262"
 OUTCOMES = f"{TEST262}/outcomes.tsv"
 OUTCOMES_DIR = f"{TEST262}/outcomes"
 CENSUS = f"{TEST262}/census.tsv"

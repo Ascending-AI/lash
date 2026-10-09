@@ -79,14 +79,6 @@
     "peak_bytes": 1325207552,
     "samples": 227
   },
-  "lash-internal-vm/lash_vm": {
-    "cpu_count": 1,
-    "memory_kb": 4718592,
-    "p95_cores": 1.26,
-    "p99_peak_bytes": 3228221440,
-    "peak_bytes": 3262640128,
-    "samples": 224
-  },
   "lash-internal-plugin-mcp/lash_plugin_mcp": {
     "cpu_count": 1,
     "memory_kb": 1835008,
@@ -174,14 +166,6 @@
     "p99_peak_bytes": 1111703552,
     "peak_bytes": 1116446720,
     "samples": 208
-  },
-  "lash-internal-typescript/integration": {
-    "cpu_count": 1,
-    "memory_kb": 4194304,
-    "p95_cores": 1.35,
-    "p99_peak_bytes": 3326590976,
-    "peak_bytes": 3365543936,
-    "samples": 141
   },
   "lash-perf/lash_perf": {
     "cpu_count": 1,

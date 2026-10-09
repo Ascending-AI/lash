@@ -39,6 +39,7 @@ mod calls;
 mod expressions;
 mod functions;
 mod patterns;
+mod process;
 mod statements;
 mod walk;
 
@@ -266,6 +267,13 @@ pub(crate) struct Lowerer<'a> {
     /// What tests have shown of names, innermost last, for the code being
     /// lowered now.
     narrowed: Vec<(String, Ty)>,
+    /// The functions the document declares: its processes.
+    declared: BTreeMap<Name, lash_kernel_doc::Function>,
+    /// The declared functions a host may start, with their signatures.
+    entries: BTreeMap<Name, Signature>,
+    /// While a process body is lowered: the cell's names, none of which the
+    /// body may read.
+    lifting: Option<HashSet<String>>,
 }
 
 /// Lowers a parsed program against `environment`.
@@ -307,6 +315,9 @@ pub(crate) fn lower(
         private: BTreeSet::new(),
         facts: Facts::analyse(program, environment.bindings),
         narrowed: Vec::new(),
+        declared: BTreeMap::new(),
+        entries: BTreeMap::new(),
+        lifting: None,
     };
     lowerer.push_scope();
     lowerer.declare_vars(&program.statements);
@@ -316,6 +327,8 @@ pub(crate) fn lower(
     let main = std::mem::take(&mut lowerer.buf);
     let mut document = Document::new(NumberPolicy::Float, main.stmts);
     document.private_bindings = lowerer.private;
+    document.functions = lowerer.declared;
+    document.entries = lowerer.entries;
     document.manifest.functions = reachable(lowerer.used, environment.library);
     document.manifest.effects = lowerer.performed;
     let annotations = annotate::annotations(&document, &main.notes, source)?;
@@ -505,6 +518,9 @@ impl Lowerer<'_> {
     fn resolve(&mut self, name: &str, span: Option<SourceSpan>) -> Lowering<Option<Name>> {
         let function = self.functions.len() - 1;
         let Some((scope, binding)) = self.binding_mut(name) else {
+            if let Some(captured) = self.captured(name) {
+                return Err(captured);
+            }
             return Ok(self
                 .session
                 .contains(&Name::new(name))
@@ -546,6 +562,11 @@ impl Lowerer<'_> {
 
     /// The variable a source name writes.
     fn resolve_for_write(&mut self, name: &str, span: Option<SourceSpan>) -> Lowering<Name> {
+        if self.binding_mut(name).is_none()
+            && let Some(captured) = self.captured(name)
+        {
+            return Err(captured);
+        }
         if let Some((_, binding)) = self.binding_mut(name) {
             if binding.kind == BindingKind::Const {
                 return Err(Diagnostic::new(

@@ -12,11 +12,10 @@ pub(super) async fn agent_started_process_tool_call_graph_execution()
         "Start a process that calls the app lookup tool.",
         vec![
             r#"<typescript>
-const definition = await processes.create({ dialect: "typescript", source: `const lookup = async () => {
-  /** @label Lookup app state in process */
+const definition = async () => {
   const value = await tools.app_lookup({});
   return value;
-};` });
+};
 const handle = await processes.start({ definition });
 const result = await handle;
 finish(result);
@@ -44,12 +43,11 @@ pub(super) async fn agent_nested_process_start_await_execution()
         "Start a parent process that starts and awaits a child process.",
         vec![
             r#"<typescript>
-const parent = await processes.create({ dialect: "typescript", source: `const parent = async () => {
-  const child = await processes.create({ dialect: "typescript", source: "const child = async () => { return { child: 'done' }; };" });
-  /** @label Start nested child process */
+const parent = async () => {
+  const child = async () => { return { child: 'done' }; };
   const inner = await (await processes.start({ definition: child }));
   return { parent: inner.child };
-};` });
+};
 const handle = await processes.start({ definition: parent });
 const result = await handle;
 finish(result);
@@ -71,15 +69,14 @@ pub(super) async fn agent_started_process_child_spawn_execution()
         "Run a Lash VM process that spawns a subagent and returns its value.",
         vec![
             r#"<typescript>
-const spawnChild = await processes.create({ dialect: "typescript", source: `const spawnChild = async () => {
-  /** @label Spawn subagent with web search */
+const spawnChild = async () => {
   const result = await agents.spawn({
-    task: "Finish \`{ len: chunk.length }\` using the seeded \`chunk\` variable.",
+    task: "Finish `{ len: chunk.length }` using the seeded `chunk` variable.",
     seed: { chunk: ["a", "b"] },
     output: { len: "int" }
   });
   return result;
-};` });
+};
 const handle = await processes.start({ definition: spawnChild });
 const result = await handle;
 finish(result);
@@ -105,7 +102,7 @@ pub(super) async fn agent_session_turn_process_child_execution()
         &SessionId::from("sim-agent-session-turn-process-child-contract"),
         "Start a child process and await its result.",
         r#"<typescript>
-const child = await processes.create({ dialect: "typescript", source: "const child = async () => { return { child: 'done' }; };" });
+const child = async () => { return { child: 'done' }; };
 const handle = await processes.start({ definition: child });
 const result = await handle;
 finish(result);
@@ -124,10 +121,8 @@ pub(super) async fn agent_parallel_spawn_and_join_execution()
         &SessionId::from("sim-agent-parallel-spawn-join-contract"),
         "Start two processes, await both, and finish their joined result.",
         r#"<typescript>
-const child = await processes.create({ dialect: "typescript", source: "const child = async (value: string) => { return value; };" });
-/** @label Start left process */
+const child = async (value: string) => { return value; };
 const left = await processes.start({ definition: child, args: { value: "left" } });
-/** @label Start right process */
 const right = await processes.start({ definition: child, args: { value: "right" } });
 const leftValue = await left;
 const rightValue = await right;

@@ -298,6 +298,8 @@ impl EffectLedger {
 pub enum RecordedEnd {
     Finished {
         result: Datum,
+        /// Whether a `finish` ended the run.
+        finish: bool,
         variables: BTreeMap<Name, Value>,
         objects: Vec<(ObjectId, Object)>,
         not_carried: Vec<Name>,
@@ -341,6 +343,7 @@ impl RecordedEnd {
         Some(match end {
             End::Finished(finished) => Self::Finished {
                 result: finished.result.clone(),
+                finish: finished.finish,
                 variables: finished.bindings.variables.clone(),
                 objects: finished
                     .bindings
@@ -389,11 +392,13 @@ impl RecordedEnd {
         match self {
             Self::Finished {
                 result,
+                finish,
                 variables,
                 objects,
                 not_carried,
             } => End::Finished(Finished {
                 result,
+                finish,
                 bindings: Bindings {
                     variables,
                     objects: objects.into_iter().collect(),

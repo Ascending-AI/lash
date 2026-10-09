@@ -513,8 +513,9 @@ impl Processes {
     }
 
     /// Read the process as its workflow: the identity and signature of the
-    /// definition it runs, its graph, its canonical TypeScript and its entry
-    /// process, or the typed reason there is none.
+    /// definition it runs and its document entered at its entry, or the
+    /// typed reason there is none. The document is the one the process was
+    /// admitted under, whatever was published after it started.
     ///
     /// The read names the definition through the process's own recorded
     /// input, so it answers for as long as the row is retained, on any core

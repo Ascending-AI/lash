@@ -702,7 +702,7 @@ fn started_process_id(output: &lash::TurnOutput) -> lash_core::ProcessId {
 /// finishes with its id.
 fn start_process_cell(params: &str, body: &str, args: &str) -> Scripted {
     cell(format!(
-        "const child = await processes.create({{ dialect: \"typescript\", source: `const child = async ({params}) => {body};` }});
+        "const child = async ({params}) => {body};
 const handle = await processes.start({{ definition: child, args: {args} }});
 finish(handle.process_id);"
     ))

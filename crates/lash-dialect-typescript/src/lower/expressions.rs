@@ -247,6 +247,31 @@ impl Lowerer<'_> {
         self.invoke("ts.spread", &[parts], Ty::Unknown)
     }
 
+    /// A plain object whose `at`-th property is a process: the process is
+    /// lifted, and the others are evaluated in source order around it.
+    fn lower_object_with_process(
+        &mut self,
+        names: &[&str],
+        values: &[&ast::Expr],
+        at: usize,
+    ) -> Lowering<Operand> {
+        let mut entries = Vec::with_capacity(names.len());
+        for (index, (field, value)) in names.iter().zip(values).enumerate() {
+            let value = match self.process_arrow(value) {
+                Some(function) if index == at => self.lower_process(None, function)?,
+                _ => {
+                    let value = self.lower_expr(value)?;
+                    self.pin(value)
+                }
+            };
+            entries.push(RecordEntry {
+                field: (*field).to_string(),
+                value: value.expr(),
+            });
+        }
+        Ok(self.let_expr(Expr::Record(entries), Ty::Unknown))
+    }
+
     fn lower_object(&mut self, properties: &[ast::ObjectProperty]) -> Lowering<Operand> {
         let mut names: Vec<&str> = Vec::new();
         let plain = properties.iter().all(|property| match property {
@@ -265,6 +290,17 @@ impl Lowerer<'_> {
                     ast::ObjectProperty::Spread(_) => None,
                 })
                 .collect();
+            // A process written inline as an object's `definition`.
+            if let Some(at) = properties.iter().position(|property| {
+                matches!(
+                    property,
+                    ast::ObjectProperty::KeyValue(ast::PropertyKey::Static(name), value)
+                        if name == super::process::DEFINITION_PROPERTY
+                            && self.process_arrow(value).is_some()
+                )
+            }) {
+                return self.lower_object_with_process(&names, &values, at);
+            }
             let operands = self.operands(&values)?;
             let entries = names
                 .into_iter()

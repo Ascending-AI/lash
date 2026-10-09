@@ -10,7 +10,7 @@ pub struct WorkflowExecutionOverlayAccumulator {
     document_state: DocumentState,
     settlement: Option<WorkflowOverlaySettlement>,
     execution_history: ExecutionHistory,
-    sites: BTreeMap<WorkflowSiteRef, SiteHistory>,
+    sites: BTreeMap<WorkflowTaskSite, SiteHistory>,
 }
 
 /// One site's occurrences above its watermark, in occurrence order, and
@@ -150,8 +150,8 @@ impl WorkflowExecutionOverlayAccumulator {
                 WorkflowOverlayEventIdentity::Node { at, .. }
                 | WorkflowOverlayEventIdentity::StepBody { at, .. } => {
                     if let Some(history) = sites
-                        .get_mut(&at.site)
-                        .and_then(|site| site.occurrences.get_mut(&at.occurrence.get()))
+                        .get_mut(&WorkflowTaskSite::of(at))
+                        .and_then(|site| site.occurrences.get_mut(&at.occurrence))
                     {
                         history.restore_conflict(&conflict.identity, &conflict.variants);
                     }

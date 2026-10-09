@@ -156,33 +156,46 @@ pub use lash_protocol_rlm::{
     RlmProtocolPluginConfig, RlmProtocolPluginConfigBuilder, RlmProtocolPluginFactory,
     RlmSessionConfigDecodeError, UnsetBound, rlm_protocol_event,
 };
-/// The code-mode dialect seam: a host selects one [`Dialect`] where it
-/// constructs the RLM protocol; [`TypescriptDialect`] is the shipped one.
+/// The stable codes of the typed observations a cell's failure carries, and
+/// the error kinds a cell's program catches from a tool call.
 pub use lash_protocol_rlm::{
-    CellTags, Dialect, DialectPromptVocabulary, DialectRefusal, DialectRefusalKind,
-    ExecutionSection, ExecutionSectionRequest, ResolvedToolBinding, TypescriptDialect,
+    CELL_BOUND_EXCEEDED, CELL_DEADLOCK, CELL_TASKS_OUTSTANDING, SESSION_BINDING_NOT_CARRIED,
+    TOOL_ARGUMENTS, TOOL_CALL_LIMIT, TOOL_FAILED, UNKNOWN_EFFECT,
 };
-/// The schema shapes a [`Dialect`] is handed to spell: one reading of a tool's
+/// The code-mode dialect seam: a host selects the [`CellDialect`] its new
+/// sessions write where it constructs the RLM protocol, and installs any
+/// other a recorded session may name. A dialect is a kernel dialect package
+/// by name with the [`DialectPrompts`] that word prompts in it;
+/// [`CellDialect::typescript`] and [`CellDialect::python`] are the shipped
+/// ones.
+pub use lash_protocol_rlm::{
+    CellDialect, CellTags, DialectPromptVocabulary, DialectPrompts, DialectRefusal,
+    DialectRefusalKind, ExecutionSection, ExecutionSectionRequest, PythonPrompts,
+    ResolvedToolBinding, TypescriptPrompts,
+};
+/// The schema shapes a [`DialectPrompts`] is handed to spell: one reading of a tool's
 /// JSON Schemas, shared by every prompt surface.
 pub use lash_protocol_rlm::{
     ExtraKeys, ObjectShape, ProcessParamShape, ProcessShape, SchemaShape, ShapeConstraints,
     ShapeField, ShapeKind, ShapeRow,
+};
+/// Projection vocabulary: bind projected values to the active session via
+/// [`rlm_session_projection_extension`], a durable session extension the
+/// session's command lane records as an [`RlmSeed`] event (FIG-5134).
+pub use lash_protocol_rlm::{
+    ProjectedBindingError, RlmProjectedBindings, RlmSeed, rlm_session_projection_extension,
 };
 /// The RLM protocol's config owner and its command (FIG-4379).
 pub use lash_protocol_rlm::{
     RlmConfigOwner, RlmConfigRefusal, RlmCreateConfig, RlmRecordedBehaviour, RlmRecordedConfig,
     RlmRenderRefusal, RlmRunOptions, SetRlmRender,
 };
-/// The config groups and builder state an [`RlmProtocolPluginConfig`] is
-/// assembled from.
-pub use lash_protocol_rlm::{RlmLanguageFeatures, RlmPromptFeatures, UnsetChannel};
-/// Projection vocabulary: bind projected values to the active session via
-/// [`rlm_session_projection_extension`], a durable session extension the
-/// session's command lane records as an [`RlmSeed`] event (FIG-5134).
-pub use lash_protocol_rlm::{RlmProjectedBindings, RlmSeed, rlm_session_projection_extension};
 /// The code-mode prompt sections (ADR 0133): the keys the protocol
 /// registers its sections under, and its built-in intro.
 pub use lash_protocol_rlm::{RlmProjectorConfig, section_id, section_keys as rlm_section_keys};
+/// The config groups and builder state an [`RlmProtocolPluginConfig`] is
+/// assembled from.
+pub use lash_protocol_rlm::{RlmPromptFeatures, UnsetChannel};
 pub use lash_render::{RenderParams, RenderParamsPatch};
 /// The committed RLM event variants the protocol owns and
 /// the record types their fields name.
@@ -194,15 +207,6 @@ pub use lash_rlm_types::{
     RlmCreateExtras, RlmRenderPatch, RlmSessionConfig, RlmTermination, RlmTurnOptions,
 };
 pub use lash_rlm_types::{RlmProjectedSeedEntry, RlmProjectedSeedSnapshot, RlmSeedPluginBody};
-
-/// The Lash VM compile APIs are operations over an
-/// [`RlmProtocolPluginFactory`] and a plugin host; they live in
-/// `lash-protocol-rlm` and are re-exported here.
-#[cfg(feature = "rlm")]
-pub use lash_protocol_rlm::{
-    LashVmCompileSurface, LashVmCompileSurfaceRequest, LashVmModuleCompileError,
-    LashVmModuleCompileRequest, ModuleCompileOutput,
-};
 
 /// `current`, the RLM run options a send already states, with their
 /// termination set to `termination`. Options that are not the RLM owner's
@@ -225,6 +229,3 @@ fn rlm_termination_options(
 }
 
 pub use lash_protocol_rlm::recorded_extraction_decisions;
-
-#[cfg(all(test, feature = "sqlite", feature = "typescript"))]
-mod worker_policy_tests;

@@ -380,13 +380,10 @@ fn build_turn_core(
                 .build();
             config.prompt_features.images = false;
             config.prompt_features.decomposition = false;
-            config.lash_vm_language_features.label_annotations = false;
-
             config.continue_as_soft_warn_tokens = None;
             let factory = lash::rlm::RlmProtocolPluginFactory::new(
                 config,
-                std::sync::Arc::new(lash::rlm::TypescriptDialect),
-                &backend,
+                lash::rlm::CellDialect::typescript(),
             );
             LashCore::rlm_builder(backend, factory)
         }

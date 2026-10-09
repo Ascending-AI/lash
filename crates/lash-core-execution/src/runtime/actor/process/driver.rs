@@ -102,7 +102,7 @@ pub(super) enum Blocked {
         wait: StoredWaitId,
         /// The node that waits, when the engine named one.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        site: Option<lash_sansio::WorkflowOccurrence>,
+        site: Option<lash_sansio::EffectIdentity>,
     },
     /// Another process's terminal.
     Process {
@@ -112,7 +112,7 @@ pub(super) enum Blocked {
         wait: StoredWaitId,
         /// The node that waits, when the engine named one.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        site: Option<lash_sansio::WorkflowOccurrence>,
+        site: Option<lash_sansio::EffectIdentity>,
     },
     /// A durable instant.
     Sleep {
@@ -120,7 +120,7 @@ pub(super) enum Blocked {
         until: i64,
         /// The node that sleeps, when the engine named one.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        site: Option<lash_sansio::WorkflowOccurrence>,
+        site: Option<lash_sansio::EffectIdentity>,
     },
     /// Nothing but its mailbox.
     Idle,

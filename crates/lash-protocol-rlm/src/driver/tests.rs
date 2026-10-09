@@ -95,8 +95,7 @@ pub(super) fn projector(max_output_chars: usize) -> RlmContextProjector {
     RlmContextProjector {
         max_output_chars,
         dialect: Arc::new(SessionDialect::prompt_only(
-            std::sync::Arc::new(crate::dialect::TypescriptDialect),
-            LashVmSurface::default(),
+            crate::dialect::CellDialect::typescript(),
         )),
     }
 }
@@ -109,13 +108,13 @@ pub(crate) fn rendered_bound_variables(
         .as_object()
         .expect("globals object")
         .iter()
-        .map(|(name, value)| (name.clone(), lash_vm::from_json(value.clone())))
+        .map(|(name, value)| (name.clone(), value.clone()))
         .collect::<Vec<_>>();
     crate::rlm_support::render_bound_variables(
         cache,
         &globals,
         &[],
-        &crate::dialect::TypescriptDialect,
+        &crate::dialect::TypescriptPrompts,
         &crate::render::BuiltinCodeRenderer,
         &lash_render::RenderParams::preview(),
         crate::RlmPresentationConfig::standard().max_inline_keys,
@@ -226,9 +225,9 @@ pub(super) fn projection_test_config(
 ) -> lash_core::TurnMachineConfig {
     lash_core::TurnMachineConfig {
         model_tool_calls: lash_core::sansio::ModelToolCalls::fixture(),
-        protocol_driver: Arc::new(crate::protocol::RlmDriver::new(Arc::new(
-            crate::dialect::TypescriptDialect,
-        ))),
+        protocol_driver: Arc::new(crate::protocol::RlmDriver::new(
+            crate::dialect::CellDialect::typescript(),
+        )),
         projector: Arc::new(lash_core::sansio::ChatContextProjector),
         model: lash_sansio::llm_profile::LlmProfileConfig::new(
             lash_sansio::llm_profile::RecordedLlmProfile::mint(

@@ -33,7 +33,7 @@ use lash::process::{
 use lash::sync::MutexExt;
 use lash::tracing::{TraceLanguageExecutionIdentity, TraceLanguageExecutionPayload};
 use lash::workflow::{
-    WorkflowDocumentRead, WorkflowDocumentRef, WorkflowExecutionDocument,
+    WorkflowDocument, WorkflowDocumentRead, WorkflowDocumentRef,
     WorkflowExecutionOverlayAccumulator, WorkflowOverlaySettlement, WorkflowOverlayTerminal,
 };
 use lash::{ProcessId, SessionId};
@@ -67,7 +67,7 @@ struct CachedGraph {
     /// The document the execution names, and the document once lash
     /// answered it.
     wants: Option<WorkflowDocumentRef>,
-    document: Option<Arc<WorkflowExecutionDocument>>,
+    document: Option<Arc<WorkflowDocument>>,
     /// The cache's feed count when this graph was last fed.
     fed: u64,
 }
@@ -88,7 +88,7 @@ struct Cache {
     /// committed settlement and the document its snapshot names together.
     processes: BTreeMap<ProcessId, CachedProcess>,
     /// The documents lash answered, by the reference that names each.
-    documents: BTreeMap<WorkflowDocumentRef, Arc<WorkflowExecutionDocument>>,
+    documents: BTreeMap<WorkflowDocumentRef, Arc<WorkflowDocument>>,
 }
 
 impl Cache {
@@ -237,7 +237,7 @@ impl Cache {
     }
 
     /// Lash answered the document `reference` names.
-    fn loaded(&mut self, document: WorkflowExecutionDocument) {
+    fn loaded(&mut self, document: WorkflowDocument) {
         self.documents
             .insert(document.reference().clone(), Arc::new(document));
         self.attach_documents();
@@ -641,14 +641,7 @@ mod tests {
                     subject: TraceRuntimeSubject::Process {
                         process_id: process_id.clone(),
                     },
-                    document: WorkflowDocumentRef {
-                        source_identity: "source".to_string(),
-                        module_ref: lash::vm::ModuleRef::new(&lash::vm::ContentHash::new("module")),
-                        entry: WorkflowDocumentEntry::Process {
-                            process_ref: "0:0".to_string(),
-                        },
-                        ir_version: 1,
-                    },
+                    document: document(0).reference().clone(),
                     entry_name: "worker".to_string(),
                     engine_execution_id: Some(process_id.to_string()),
                     generation: None,
@@ -657,6 +650,21 @@ mod tests {
             },
             observed_at_ms,
         }
+    }
+
+    /// The kernel document `main { finish <index> }`, entered at `main`:
+    /// each index is a document of its own.
+    fn document(index: usize) -> WorkflowDocument {
+        let document = lash::workflow::document::parse_document(&format!(
+            "kernel 1\nnumbers float\n\nmain {{\n  do sleep 1\n  finish {index}\n}}\n"
+        ))
+        .expect("the document parses");
+        WorkflowDocument::derive(
+            document,
+            WorkflowDocumentEntry::Main,
+            &lash::workflow::document::FunctionRegistry::default(),
+        )
+        .expect("the document links")
     }
 
     fn started(process_id: &ProcessId) -> LanguageExecutionObservation {
@@ -674,7 +682,12 @@ mod tests {
             "node-started",
             1_100,
             TraceLanguageExecutionPayload::Node {
-                at: lash::vm::WorkflowOccurrence::fixture("sleep", 1),
+                at: lash::workflow::document::EffectIdentity {
+                    task: lash::workflow::document::TaskIdentity::Main,
+                    site: document(0).graph().execution_sites()[0].site.clone(),
+                    occurrence: 0,
+                    loops: Vec::new(),
+                },
                 fact: lash::tracing::TraceNodeFact::Started { call_id: None },
             },
         )
@@ -756,31 +769,20 @@ mod tests {
     #[test]
     fn serial_completions_release_entries_and_documents_with_their_last_graph() {
         let graphs = ExecutionGraphs::default();
-        let document_graph =
-            lash::typescript::workflow_graph::workflow_graph_from_source_with_facets(
-                "finish(1);",
-                None,
-            )
-            .expect("a workflow document");
         let mut released_documents = Vec::new();
         for index in 0..MAX_GRAPHS * 2 {
             let process_id = ProcessId::fixture(&format!("serial-{index}"));
             let mut start = started(&process_id);
-            let document = &mut start.execution.identity.document;
-            document.source_identity = format!("document-{index}");
-            document.entry = WorkflowDocumentEntry::Main;
-            let document = document.clone();
+            let answered = document(index + 1);
+            let document = answered.reference().clone();
+            start.execution.identity.document = document.clone();
             {
                 let mut cache = graphs.inner.cache.lock_recover();
                 cache.follow_process(&process_id);
                 cache.names_document(&process_id, document.clone());
                 cache.settle(&process_id, cancelled_at(2_000));
                 cache.observe(Source::Process(process_id.clone()), &start);
-                cache.loaded(WorkflowExecutionDocument::fixture(
-                    document.clone(),
-                    document_graph.clone(),
-                    None,
-                ));
+                cache.loaded(answered);
                 released_documents.push(Arc::downgrade(
                     cache
                         .documents

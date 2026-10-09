@@ -1858,7 +1858,7 @@ fn drive_rlm_to_second_llm_request(
             plugin_extensions: Default::default(),
             writer_formats: lash_core::build_newest_writer_formats(),
         },
-        lash_protocol_rlm::RlmProjectorConfig::new(Arc::new(lash_protocol_rlm::TypescriptDialect)),
+        lash_protocol_rlm::RlmProjectorConfig::new(lash_protocol_rlm::CellDialect::typescript()),
     );
     let mut config = test_config();
     config.protocol_driver = preamble.config.protocol;
@@ -1936,7 +1936,7 @@ fn answer_one_cell(
             plugin_extensions: Default::default(),
             writer_formats: lash_core::build_newest_writer_formats(),
         },
-        lash_protocol_rlm::RlmProjectorConfig::new(Arc::new(lash_protocol_rlm::TypescriptDialect)),
+        lash_protocol_rlm::RlmProjectorConfig::new(lash_protocol_rlm::CellDialect::typescript()),
     );
     let mut config = test_config();
     config.protocol_driver = preamble.config.protocol;

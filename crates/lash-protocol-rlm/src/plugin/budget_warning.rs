@@ -15,8 +15,9 @@ mod tests {
     #[test]
     fn disabled_decomposition_finishes_at_budget_thresholds() {
         {
-            let vocabulary =
-                crate::dialect::Dialect::prompt_vocabulary(&crate::dialect::TypescriptDialect);
+            let vocabulary = crate::dialect::DialectPrompts::prompt_vocabulary(
+                &crate::dialect::TypescriptPrompts,
+            );
             for used in [60, 90, 100, 110] {
                 let usage = LlmUsage {
                     input_tokens: used as i64,
@@ -54,7 +55,9 @@ mod tests {
                 0,
                 Some(&prompt_usage(threshold)),
                 Some(threshold),
-                crate::dialect::Dialect::prompt_vocabulary(&crate::dialect::TypescriptDialect),
+                crate::dialect::DialectPrompts::prompt_vocabulary(
+                    &crate::dialect::TypescriptPrompts,
+                ),
                 true,
             )
             .expect("budget suffix should render");
@@ -71,7 +74,9 @@ mod tests {
                 0,
                 Some(&usage),
                 None,
-                crate::dialect::Dialect::prompt_vocabulary(&crate::dialect::TypescriptDialect),
+                crate::dialect::DialectPrompts::prompt_vocabulary(
+                    &crate::dialect::TypescriptPrompts
+                ),
                 true,
             )
             .is_none()
@@ -87,7 +92,9 @@ mod tests {
                 0,
                 Some(&usage),
                 Some(200_000),
-                crate::dialect::Dialect::prompt_vocabulary(&crate::dialect::TypescriptDialect),
+                crate::dialect::DialectPrompts::prompt_vocabulary(
+                    &crate::dialect::TypescriptPrompts
+                ),
                 true,
             )
             .is_none()

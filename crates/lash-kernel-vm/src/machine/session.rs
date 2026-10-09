@@ -200,9 +200,10 @@ impl KernelMachine {
     /// The run's result with the session's bindings as `main` left them.
     /// A binding that reaches a closure or a task handle is not carried
     /// (`K-SES-003`).
-    pub(super) fn finished(&self, result: Datum) -> Finished {
+    pub(super) fn finished(&self, result: Datum, finish: bool) -> Finished {
         let mut finished = Finished {
             result,
+            finish,
             bindings: Bindings::default(),
             not_carried: Vec::new(),
         };

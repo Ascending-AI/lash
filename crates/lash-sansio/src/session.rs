@@ -95,6 +95,29 @@ pub struct CellFailure {
     pub schema_admission: Option<Box<crate::SchemaAdmissionError>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value_mismatch: Option<Box<crate::ValueMismatch>>,
+    /// The rule of a session's cells the program broke, when that is why
+    /// the cell failed, kept typed through the plugin and host result.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub defect: Option<CellDefect>,
+}
+
+/// A rule of a session's cells that a cell's program broke.
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum CellDefect {
+    /// The cell used a binding an earlier cell left that held a function or
+    /// a task: neither outlives the cell that created it, so the binding
+    /// was not carried.
+    BindingNotCarried { binding: String },
+    /// The cell ended with tasks it started and did not await: some still
+    /// running, some failed with an error nothing observed. Each is named
+    /// by the site that started it and which run of that site it was.
+    TasksOutstanding {
+        unfinished: Vec<String>,
+        unobserved: Vec<String>,
+    },
 }
 
 impl CellFailure {
@@ -107,7 +130,13 @@ impl CellFailure {
             exec_failure: None,
             schema_admission: None,
             value_mismatch: None,
+            defect: None,
         }
+    }
+
+    pub fn with_defect(mut self, defect: CellDefect) -> Self {
+        self.defect = Some(defect);
+        self
     }
 
     pub fn with_value_mismatch(mut self, source: crate::ValueMismatch) -> Self {

@@ -31,11 +31,6 @@ constant_path = "crates/lash-perf/src/main.rs"
 reason = "mirrors the package version"
 
 [[unregistered]]
-constant = "LASH_VM_COMPILER_VERSION"
-constant_path = "crates/lash-vm/src/artifact.rs"
-reason = "mirrors the package version"
-
-[[unregistered]]
 constant = "HISTORY_RECORD_VERSION"
 constant_path = "crates/lash-perf/src/runtime_perf/duration_trend.rs"
 reason = "versions lash-perf's own benchmark history records, developer tooling rather than state a lash build writes"
@@ -61,19 +56,14 @@ constant_path = "crates/lash-sim/src/generator.rs"
 reason = "versions a generated test artifact"
 
 [[unregistered]]
-constant = "SOURCE_CACHE_VERSION"
-constant_path = "crates/lash-vm/src/runtime/cache.rs"
-reason = "identifies a process-local cache rather than a serialized shape"
-
-[[unregistered]]
 constant = "ERROR_VERSION"
 constant_path = "crates/lash-core-execution/src/plugin/actions.rs"
 reason = "plugin-owned per-operation error codec version supplied by each PluginOperation implementation, not a lash surface counter"
 
 [[unregistered]]
-constant = "FAKE_STATE_FORMAT"
-constant_path = "crates/lash-vm-broker/src/testing/worker.rs"
-reason = "the scripted fake worker's state format; a test double's contract versions no durable format"
+constant = "KERNEL_VERSION"
+constant_path = "crates/lash-kernel-doc/src/document.rs"
+reason = "the kernel states its own version and knows no fleet machinery; lash declares it for the fleet as LASH_KERNEL_VERSION in crates/lash-vm-runtime/src/formats.rs, which asserts the two equal"
 
 [[unregistered]]
 constant = "MIN_SUPPORTED_WORKER_PROTOCOL_VERSION"

@@ -45,7 +45,6 @@ results; their old launchers have been retired.
 - [heap-over-time](instruments/heap-over-time.md): which allocation stacks retain bytes over time beside the RSS series.
 - [heap-profiles](instruments/heap-profiles.md): what DHAT attributes to lifecycle, child and worker heap windows.
 - [independent-boundaries](instruments/independent-boundaries.md): what each independent 1.0 boundary case measures.
-- [lash-vm](instruments/lash-vm.md): what the LashVm perf, profile and function-perf measurements cover.
 - [load-models](instruments/load-models.md): how a receipt's operations were generated and which model certifies tails and capacity.
 - [observation-workloads](instruments/observation-workloads.md): what crosses the store boundary under process, session, trace-sink and overlay observation workloads.
 - [offered-load](instruments/offered-load.md): how the scheduled-arrival generator measures offered-load latency and the saturation knee.
@@ -56,4 +55,3 @@ results; their old launchers have been retired.
 - [sql-operation-windows](instruments/sql-operation-windows.md): what physical SQL work one operation window performed.
 - [startup-provider-http](instruments/startup-provider-http.md): what startup phases and loopback provider HTTP exchanges cost.
 - [trace-records-spans-metrics](instruments/trace-records-spans-metrics.md): which records, spans and counters the instrumentation contract defines and who produces them.
-- [vm-worker-matrix](instruments/vm-worker-matrix.md): what the optimized VM worker exchange matrix certifies.

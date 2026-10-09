@@ -1173,13 +1173,6 @@ jobs:
         with:
           components: clippy, rustfmt
 
-      - name: Install Node for workflow graph contract checks
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: examples/workflow-graph-roundtrip/frontend/package-lock.json
-
 
       - name: Install protoc
         uses: ./.github/actions/install-tools
@@ -1266,9 +1259,6 @@ jobs:
           # shellcheck disable=SC2086
           cargo clippy --workspace --all-targets --locked ${LASH_CI_FEATURES} -- -D warnings
 
-      - name: Install workflow graph frontend dependencies
-        run: npm --prefix examples/workflow-graph-roundtrip/frontend ci
-
       # `cargo check --workspace --all-targets` never exercises the
       # package-only `--no-default-features` resolution, and the repo-gates
       # boundary leg is `cargo tree`-only: it proves the resolved graph, not
@@ -1304,9 +1294,6 @@ jobs:
 
       - name: Check history readers
         run: bash scripts/check-history-readers.sh
-
-      - name: Check workflow graph model
-        run: bash scripts/check-workflow-graph-model.sh
 
       - name: Check production file-size budget
         run: python3 scripts/check-production-file-size.py
@@ -1835,17 +1822,9 @@ jobs:
         include:
           - name: agent-workbench-transcript
             recipe: workbench-transcript-projection-e2e
-            node: false
             artifact: transcript-projection
             browser: true
             buck2: true
-            runner: ubuntu-24.04
-          - name: workflow-graph-roundtrip
-            recipe: workflow-graph-integration-verify
-            node: true
-            artifact: none
-            browser: false
-            buck2: false
             runner: ubuntu-24.04
 
     steps:
@@ -1904,14 +1883,6 @@ jobs:
       - name: Install mold
         if: env.RUN_FUNCTIONAL_E2E == 'true' && !matrix.buck2
         uses: ./.github/actions/setup-mold
-
-      - name: Install Node
-        if: env.RUN_FUNCTIONAL_E2E == 'true' && matrix.node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: examples/workflow-graph-roundtrip/frontend/package-lock.json
 
       - name: Install uv
         if: env.RUN_FUNCTIONAL_E2E == 'true' && matrix.browser

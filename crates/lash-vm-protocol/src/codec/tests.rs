@@ -1,7 +1,7 @@
 use super::*;
 use crate::message::{
-    EffectKind, EffectRequest, EffectRequestId, EncodedPayload, ExecutionLease, FrameEpoch,
-    MessageFence, OwnerEpoch, WorkerMessage,
+    EncodedPayload, ExecutionLease, FrameEpoch, HostReadId, HostReadKind, MessageFence, OwnerEpoch,
+    WorkerMessage,
 };
 
 fn codec() -> FrameCodec {
@@ -15,11 +15,11 @@ fn fence() -> MessageFence {
 fn request_frame() -> WorkerFrame {
     WorkerFrame {
         header: fence().next_header(),
-        message: WorkerMessage::EffectRequest(EffectRequest {
-            id: EffectRequestId(0),
-            kind: EffectKind::ResourceOperation,
-            payload: EncodedPayload(b"{\"op\":\"echo\"}".to_vec()),
-        }),
+        message: WorkerMessage::HostRead {
+            id: HostReadId(0),
+            kind: HostReadKind::Projection,
+            request: EncodedPayload(b"{\"op\":\"echo\"}".to_vec()),
+        },
     }
 }
 
@@ -309,7 +309,7 @@ fn observation_chunks_each_cross_in_one_frame_within_the_bounds() {
             let frame = codec
                 .encode_worker(&WorkerFrame {
                     header: fence.next_header(),
-                    message: WorkerMessage::Observations {
+                    message: WorkerMessage::Printed {
                         payload: chunk.clone(),
                     },
                 })

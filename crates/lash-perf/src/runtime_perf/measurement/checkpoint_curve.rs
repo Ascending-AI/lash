@@ -193,7 +193,7 @@ pub(crate) async fn run_once_durable_checkpoint_curve(
             .await?;
         let store: Arc<dyn lash_core::RuntimeStore> = store_factory.clone();
         let fixture = CheckpointBindingFixture::new(
-            std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
+            lash_protocol_rlm::CellDialect::typescript(),
             point.component_count,
             point.transcript_bytes,
         )
@@ -316,7 +316,7 @@ pub(crate) async fn run_once_durable_checkpoint_curve(
                         .execution_state_hydration()?
                         .ok_or_else(|| anyhow::anyhow!("{prefix} load omitted execution state"))?;
                     lash_protocol_rlm::RlmCheckpointPerfFixture::restore(
-                        &lash_protocol_rlm::TypescriptDialect,
+                        &lash_protocol_rlm::CellDialect::typescript(),
                         &execution_state,
                     )
                     .await

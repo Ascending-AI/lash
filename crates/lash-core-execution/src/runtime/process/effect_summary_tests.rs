@@ -2,7 +2,7 @@ use super::*;
 
 fn occurrence(node: &str, occurrence: u64) -> ProcessEffectOccurrence {
     ProcessEffectOccurrence::new(
-        lash_sansio::WorkflowOccurrence::fixture(node, occurrence),
+        lash_sansio::effect_identity_fixture(node, occurrence),
         "fixture.operation",
         ProcessEffectOutcomeClass::Success,
         None,
@@ -11,10 +11,17 @@ fn occurrence(node: &str, occurrence: u64) -> ProcessEffectOccurrence {
     )
 }
 
+/// The report's key for the fixture site `label`: the site's own spelling.
+fn node_key(label: &str) -> String {
+    lash_sansio::effect_identity_fixture(label, 0)
+        .site
+        .to_string()
+}
+
 #[test]
 fn the_append_payload_is_the_serde_encoding_and_round_trips() {
     let outcome = ProcessEffectOccurrence::new(
-        lash_sansio::WorkflowOccurrence::fixture("node", 3),
+        lash_sansio::effect_identity_fixture("node", 3),
         "fixture.disable",
         ProcessEffectOutcomeClass::Failure,
         Some(lash_sansio::FailureCode::lash(
@@ -57,7 +64,7 @@ fn only_failed_effects_can_carry_failure_codes() {
         ] {
             let allowed = class == ProcessEffectOutcomeClass::Failure || code.is_none();
             let outcome = ProcessEffectOccurrence::new(
-                lash_sansio::WorkflowOccurrence::fixture("node", 1),
+                lash_sansio::effect_identity_fixture("node", 1),
                 "fixture.disable",
                 class,
                 code,
@@ -69,7 +76,10 @@ fn only_failed_effects_can_carry_failure_codes() {
             let result = report.fold_event(&request.fact, fleet);
             if allowed {
                 result.expect("a valid class-and-code pair must fold");
-                assert_eq!(report.node("node").unwrap().occurrences, vec![outcome]);
+                assert_eq!(
+                    report.node(&node_key("node")).unwrap().occurrences,
+                    vec![outcome]
+                );
                 schema.validate(&request.fact.payload()).unwrap();
             } else {
                 assert!(
@@ -93,7 +103,7 @@ fn only_failed_effects_can_carry_failure_codes() {
 }
 
 #[test]
-fn decode_refuses_other_versions_unknown_fields_and_a_zero_occurrence() {
+fn decode_refuses_other_versions_and_unknown_fields() {
     let mut payload = occurrence("node", 1).append_request().fact.payload();
     payload["vocabulary_version"] = serde_json::json!(0);
     assert!(matches!(
@@ -108,14 +118,9 @@ fn decode_refuses_other_versions_unknown_fields_and_a_zero_occurrence() {
         Err(ProcessEffectReportError::InvalidPayload(_))
     ));
 
-    // A site's occurrences count from 1, with no ceiling of their own: the
-    // per-node cap is the writer's count of what it recorded.
-    let mut payload = occurrence("node", 1).append_request().fact.payload();
-    payload["at"]["occurrence"] = serde_json::json!(0);
-    assert!(matches!(
-        ProcessEffectOccurrence::decode(payload, crate::FleetFormat::current()),
-        Err(ProcessEffectReportError::InvalidPayload(_))
-    ));
+    // A task's occurrences of a site count from 0 (`K-EFF-002`), with no
+    // ceiling of their own: the per-node cap is the writer's count of what
+    // it recorded.
     let beyond = PROCESS_EFFECT_OCCURRENCE_CAP + 1;
     assert_eq!(
         ProcessEffectOccurrence::decode(
@@ -124,8 +129,7 @@ fn decode_refuses_other_versions_unknown_fields_and_a_zero_occurrence() {
         )
         .unwrap()
         .at
-        .occurrence
-        .get(),
+        .occurrence,
         beyond
     );
 }
@@ -176,7 +180,7 @@ fn the_fold_reads_the_written_bound_in_any_page_order() {
         occurrence("node-a", 2).append_request(),
         occurrence("node-a", 1).append_request(),
         ProcessEffectOmissions::new(
-            BTreeMap::from([("node-a".to_string(), counts)]),
+            BTreeMap::from([(node_key("node-a"), counts)]),
             crate::FleetFormat::current(),
         )
         .append_request("omissions"),
@@ -199,11 +203,11 @@ fn the_fold_reads_the_written_bound_in_any_page_order() {
             .unwrap();
     }
     assert_eq!(forward, reverse);
-    let node = forward.node("node-a").unwrap();
+    let node = forward.node(&node_key("node-a")).unwrap();
     assert_eq!(
         node.occurrences
             .iter()
-            .map(|outcome| outcome.at.occurrence.get())
+            .map(|outcome| outcome.at.occurrence)
             .collect::<Vec<_>>(),
         vec![1, 2]
     );
@@ -212,14 +216,17 @@ fn the_fold_reads_the_written_bound_in_any_page_order() {
         "an omitted failure stays a failure"
     );
     assert_eq!(node.omitted.total(), 3);
-    assert_eq!(forward.node("node-b").unwrap().omitted.total(), 0);
+    assert_eq!(
+        forward.node(&node_key("node-b")).unwrap().omitted.total(),
+        0
+    );
 }
 
 #[test]
 fn effect_identifiers_and_positive_omissions_match_the_host_schemas() {
     let fleet = crate::FleetFormat::current();
     let schema = effect_outcome_payload_schema();
-    for field in ["/at/site/node_id", "/operation", "/replay_key"] {
+    for field in ["/operation", "/replay_key"] {
         let mut payload = occurrence("node", 1).append_request().fact.payload();
         *payload.pointer_mut(field).expect(field) = serde_json::json!("");
         assert!(schema.validate(&payload).is_err());
@@ -228,20 +235,15 @@ fn effect_identifiers_and_positive_omissions_match_the_host_schemas() {
             "{field}"
         );
         assert!(serde_json::from_value::<ProcessEffectOccurrence>(payload).is_err());
-        // A typed occurrence cannot hold an empty node id; the two strings
-        // it still holds are checked when it is admitted.
+        // The two strings a typed occurrence holds are checked when it is
+        // admitted.
         let mut typed = occurrence("node", 1);
         match field {
-            "/at/site/node_id" => continue,
             "/operation" => typed.operation.clear(),
             _ => typed.replay_key.clear(),
         }
         assert!(typed.admit(fleet).is_err());
     }
-    let mut zeroth = occurrence("node", 1).append_request().fact.payload();
-    zeroth["at"]["occurrence"] = serde_json::json!(0);
-    assert!(schema.validate(&zeroth).is_err());
-    assert!(ProcessEffectOccurrence::decode(zeroth, fleet).is_err());
     for code in [serde_json::Value::Null, serde_json::json!("")] {
         let mut payload = occurrence("node", 1).append_request().fact.payload();
         payload["outcome_class"] = serde_json::json!("failure");

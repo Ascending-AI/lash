@@ -42,7 +42,6 @@ lash-postgres-store = { workspace = true, features = ["testing"] }
 lash-sqlite-store = { workspace = true, features = ["testing"] }
 lash-vm-client = { workspace = true }
 lash-vm-protocol = { workspace = true }
-lash-vm = { workspace = true, features = ["testing"] }
 serde_json = { workspace = true }
 sqlx = { workspace = true, features = ["postgres", "runtime-tokio-rustls"] }
 tempfile = { workspace = true }

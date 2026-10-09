@@ -268,9 +268,9 @@ const MAX_ARRAY_HEADER_BYTES: u64 = 5;
 /// 8-bit length becomes a 32-bit one.
 const MAX_BIN_HEADER_GROWTH: u64 = 3;
 
-/// Packs a step's execution observations into the payloads of
-/// [`WorkerMessage::Observations`](crate::WorkerMessage::Observations)
-/// frames (FIG-4458).
+/// Packs what a step printed into the payloads of
+/// [`WorkerMessage::Printed`](crate::WorkerMessage::Printed) frames
+/// (FIG-4458).
 ///
 /// Each observation arrives encoded as one MessagePack value, and each
 /// payload is an array of whole observations, in order, sized so that its
@@ -306,7 +306,7 @@ impl FrameCodec {
                 frame_epoch: crate::FrameEpoch(u64::MAX),
                 sequence: crate::TransportSequence(u64::MAX),
             },
-            message: crate::WorkerMessage::Observations {
+            message: crate::WorkerMessage::Printed {
                 payload: crate::EncodedPayload(Vec::new()),
             },
         })?;

@@ -24,6 +24,7 @@ otel = ["dep:opentelemetry"]
 workspace = true
 
 [dependencies]
+lash-kernel-doc = { workspace = true }
 lash-sansio = { workspace = true }
 chrono = { workspace = true, features = ["serde"] }
 opentelemetry = { version = "0.33", optional = true }

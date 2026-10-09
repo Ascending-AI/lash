@@ -440,14 +440,9 @@ pub const GUARDED_SURFACES: &[GuardedSurface] = &[
         reads: SurfaceReads::Mutable,
     },
     GuardedSurface {
-        constant: "LASH_VM_SNAPSHOT_VERSION",
-        owner: "lashvm",
+        constant: "KERNEL_PARKED_STATE_VERSION",
+        owner: "lash-vm-runtime",
         reads: SurfaceReads::History { floor: 1 },
-    },
-    GuardedSurface {
-        constant: "WORKFLOW_GRAPH_SCHEMA_VERSION",
-        owner: "lashvm",
-        reads: SurfaceReads::Derived,
     },
     GuardedSurface {
         constant: "RLM_SNAPSHOT_VERSION",

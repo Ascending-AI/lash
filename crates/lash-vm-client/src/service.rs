@@ -1,8 +1,10 @@
-//! Pure compiler and guest-state operations performed by the worker.
+//! Pure work a worker does for its parent: lowering and printing source.
+//! None of it has parent authority, and all of it reads guest-controlled input, so it runs in the
+//! worker's crash domain.
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
-use lash_vm::{LashVmHostEnvironment, Record, Value};
+use lash_kernel_doc::{EffectName, Name, Signature};
 use lash_vm_protocol::{EncodedPayload, FrameEpoch, OwnerEpoch, VmOwner};
 use serde::{Deserialize, Serialize};
 
@@ -11,211 +13,55 @@ use crate::{ExecutionBudget, PoolConfig, PoolError, WorkerEntry, WorkerPool};
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum Request {
-    References {
+    /// Lower `source`, written in `dialect`, to a kernel document against
+    /// the effects the host supplies and the session bindings in scope.
+    Lower {
+        dialect: String,
         source: String,
+        effects: BTreeMap<EffectName, Signature>,
+        bindings: BTreeSet<Name>,
     },
-    VerifyArtifact {
+    /// Print `document` (its JSON encoding) as source in `dialect`.
+    Print {
+        dialect: String,
         #[serde(with = "serde_bytes")]
-        bytes: Vec<u8>,
-    },
-    InspectArtifact {
-        module_ref: lash_vm::ModuleRef,
-        #[serde(with = "serde_bytes")]
-        bytes: Vec<u8>,
-    },
-    /// Admit a workflow document: reconstruct its IR and link it against
-    /// `environment`. No dialect front-end runs.
-    AdmitDocument {
-        graph: Box<lash_vm::WorkflowGraph>,
-        environment: LashVmHostEnvironment,
-    },
-    ContinuationInfo {
-        bytes: Vec<u8>,
-    },
-    /// Whether this worker's VM reads `state`: its contract versions against
-    /// the VM's read ranges, then its bytes through the VM's own decoder.
-    /// A holder of parked state asks before it hands the state to a run.
-    CheckState {
-        state: lash_vm_protocol::OpaqueVmState,
-    },
-    #[cfg(feature = "testing")]
-    ContinuationProbe {
-        bytes: Vec<u8>,
-        remove_first_reference: bool,
-    },
-    CreateDefinition {
-        source: String,
-        environment: LashVmHostEnvironment,
-    },
-    LinkAst {
-        program: lash_vm::Program,
-        environment: LashVmHostEnvironment,
-    },
-    CompileModule {
-        source: String,
-        environment: LashVmHostEnvironment,
-        cell: bool,
-    },
-    OpaqueBindings {
-        snapshot: serde_bytes::ByteBuf,
-        config: lash_vm::BindingSummaryConfig,
-    },
-    State {
-        snapshot: Option<serde_bytes::ByteBuf>,
-        action: StateAction,
-    },
-    Restore {
-        header: serde_bytes::ByteBuf,
-        globals: BTreeMap<String, serde_bytes::ByteBuf>,
-        fleet: u32,
-    },
-    Capture {
-        snapshot: serde_bytes::ByteBuf,
-        baseline: BTreeMap<String, String>,
-        fleet: u32,
+        document: Vec<u8>,
     },
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub enum StateAction {
-    Inspect,
-    Insert {
-        name: String,
-        #[serde(with = "lash_vm::effect_value")]
-        value: Value,
-    },
-    Remove {
-        names: BTreeSet<String>,
-    },
-    Defaults {
-        #[serde(with = "lash_vm::effect_value::map")]
-        values: BTreeMap<String, Value>,
-        protected: BTreeSet<String>,
-    },
-}
-
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+/// A front end's or printer's typed refusal of a source or a document.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct StateMetadata {
-    pub definition_ids: BTreeSet<lash_core_execution::ProcessDefinitionId>,
-    #[serde(with = "lash_vm::effect_value::record")]
-    pub globals: Record,
-    pub names: BTreeSet<String>,
-    pub expired: BTreeSet<String>,
-    pub opaque: Vec<(String, String)>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct StateView {
-    #[serde(with = "serde_bytes")]
-    pub snapshot: Vec<u8>,
-    pub metadata: StateMetadata,
-}
-
-/// A resident cell's result and metadata, emitted with its opaque snapshot.
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct CellCompletion {
-    pub outcome: lash_vm::ExecutionOutcome,
-    /// Independently bounded, as the separate state-view response was.
-    pub state: EncodedPayload,
+pub struct DialectRefusal {
+    pub code: String,
+    pub message: String,
+    /// The byte span in the source, when the refusal has one.
+    pub span: Option<(usize, usize)>,
+    /// Whether the dialect chose not to support the construct, as opposed
+    /// to the source being malformed.
+    pub unsupported: bool,
+    pub repairs: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum Response {
-    References(BTreeSet<String>),
-    ArtifactVerification(ArtifactVerification),
-    Module(Box<CompiledModule>),
-    Definition(CreatedDefinition),
-    Artifact(crate::InspectedArtifact),
-    Admitted(Box<crate::AdmittedDocument>),
-    AdmissionRefused(lash_vm::WorkflowAdmissionRefusal),
-    ArtifactRefused(lash_vm::ModuleArtifactRefusal),
-    CompileRefused {
-        error: lash_vm::ModuleCompileError,
-        policy: bool,
+    Lowered {
+        /// The document's JSON encoding.
+        #[serde(with = "serde_bytes")]
+        document: Vec<u8>,
+        /// Its annotations' JSON encoding.
+        #[serde(with = "serde_bytes")]
+        annotations: Vec<u8>,
     },
-    ContinuationInfo {
-        iterator_count: usize,
+    Printed {
+        source: String,
     },
-    /// The answer to [`Request::CheckState`]: the refusal a run handed the
-    /// state would meet, or `None` when the VM reads it.
-    StateCheck {
-        refusal: Option<lash_vm_protocol::RunRefusal>,
+    DialectRefused(DialectRefusal),
+    /// The worker has no such dialect installed.
+    UnknownDialect {
+        dialect: String,
     },
-    #[cfg(feature = "testing")]
-    ContinuationProbe {
-        bytes: Vec<u8>,
-        closure_root: bool,
-    },
-    OpaqueBindings(Vec<(String, String)>),
-    State(StateView),
-    Captured(Capture),
-    Restored {
-        view: StateView,
-        baseline: BTreeMap<String, String>,
-    },
-    Refused {
-        message: String,
-        policy: bool,
-    },
-    SnapshotRefused(lash_vm::SnapshotDecodeError),
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub enum ArtifactVerification {
-    Match,
-    Refused(lash_vm::ModuleArtifactRefusal),
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Capture {
-    pub definition_ids: BTreeSet<lash_core_execution::ProcessDefinitionId>,
-    #[serde(with = "serde_bytes")]
-    pub header: Vec<u8>,
-    pub fragments: BTreeMap<String, lash_vm::DurableFragment>,
-    pub baseline: BTreeMap<String, String>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct CreatedDefinition {
-    pub draft: lash_core_execution::ProcessDefinitionDraft,
-    pub signature: lash_core_execution::ProcessSignature,
-    pub process_name: String,
-    pub module: lash_core_execution::DeclaredModuleArtifact,
-}
-
-/// A module compiled and semantically verified by a worker.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct CompiledModule {
-    pub module_ref: lash_vm::ModuleRef,
-    pub host_requirements_ref: lash_vm::HostRequirementsRef,
-    pub artifact: crate::InspectedArtifact,
-    pub introspection: lash_vm::ModuleIntrospection,
-}
-impl CompiledModule {
-    /// Decode a fixture's artifact for low-level VM assertions.
-    #[cfg(feature = "testing")]
-    pub fn into_fixture_output(self) -> Result<lash_vm::ModuleCompileOutput, PoolError> {
-        let artifact =
-            lash_vm::ModuleArtifact::from_store_bytes(&self.artifact.bytes).map_err(|error| {
-                PoolError::refused(lash_vm_protocol::RunRefusal::Undecodable {
-                    input: lash_vm_protocol::RunInput::Artifact,
-                    detail: lash_vm_protocol::Detail::new(error),
-                })
-            })?;
-        Ok(lash_vm::ModuleCompileOutput {
-            module_ref: self.module_ref,
-            host_requirements_ref: self.host_requirements_ref,
-            artifact,
-            introspection: self.introspection,
-        })
-    }
 }
 
 /// What holds a simulation's virtual clock while a worker call is in
@@ -258,7 +104,7 @@ pub struct Service {
     call_hold: Option<CallHold>,
     config: Arc<PoolConfig>,
     pool: Arc<Mutex<Option<WorkerPool>>>,
-    budget: Option<ExecutionBudget>,
+    pub(crate) budget: Option<ExecutionBudget>,
 }
 impl Service {
     /// Select the helper executable explicitly, using the RLM/process bounds.
@@ -368,13 +214,11 @@ impl Default for Service {
 #[cfg(feature = "testing")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum WorkerPath {
-    References,
-    Compile,
-    CreateDefinition,
-    Admit,
-    Artifact,
-    State,
+    Lower,
+    Print,
+    /// A run of a document's `main`.
     Cell,
+    /// A run of one of a document's entries.
     Process,
 }
 #[cfg(feature = "testing")]
@@ -385,11 +229,10 @@ pub struct WorkerReceipt {
 }
 
 /// Runtime-only operations on a [`Service`]: the pool, requests, and the
-/// per-execution budget the Lash VM runtime and the RLM protocol drive a
-/// worker through. A dialect only constructs a service; these members are
-/// the cross-crate runtime seam, which the `lash` facade does not re-export,
-/// and the impl is hidden from docs because it is support plumbing rather
-/// than dialect surface (ADR 0051).
+/// per-execution budget the runtime drives a worker through. A host only
+/// constructs a service; these members are the cross-crate runtime seam,
+/// which the `lash` facade does not re-export, and the impl is hidden from
+/// docs because it is support plumbing rather than host surface (ADR 0051).
 pub mod runtime_ops {
     use std::future::Future;
 
@@ -408,43 +251,7 @@ pub mod runtime_ops {
             request: Request,
         ) -> impl Future<Output = Result<Response, PoolError>> + Send;
 
-        fn inspect_artifact(
-            &self,
-            store: &lash_vm::LashVmArtifacts,
-            module_ref: &lash_vm::ModuleRef,
-        ) -> impl Future<
-            Output = Result<
-                Option<crate::InspectedArtifact>,
-                lash_core_execution::ArtifactStoreError,
-            >,
-        > + Send;
-
-        /// `graph` admitted against `environment`, or the typed reason it
-        /// is not.
-        fn admit_document(
-            &self,
-            graph: lash_vm::WorkflowGraph,
-            environment: LashVmHostEnvironment,
-        ) -> impl Future<
-            Output = Result<
-                Result<crate::AdmittedDocument, lash_vm::WorkflowAdmissionRefusal>,
-                PoolError,
-            >,
-        > + Send;
-
         fn pool_accounted(&self) -> impl Future<Output = Result<WorkerPool, PoolError>> + Send;
-    }
-
-    fn inspection_error(error: PoolError) -> lash_core_execution::ArtifactStoreError {
-        match error {
-            PoolError::Infrastructure(lash_vm_protocol::InfrastructureOutcome::RunRefused {
-                refusal: lash_vm_protocol::RunRefusal::UnusableSchema { source },
-            }) => lash_core_execution::ArtifactStoreError::UnusableSchema { source },
-            PoolError::CheckoutTimedOut => {
-                lash_core_execution::ArtifactStoreError::WorkerCheckoutTimedOut
-            }
-            error => lash_core_execution::ArtifactStoreError::Backend(error.to_string()),
-        }
     }
 
     #[doc(hidden)]
@@ -475,56 +282,6 @@ pub mod runtime_ops {
                 })?
         }
 
-        async fn inspect_artifact(
-            &self,
-            store: &lash_vm::LashVmArtifacts,
-            module_ref: &lash_vm::ModuleRef,
-        ) -> Result<Option<crate::InspectedArtifact>, lash_core_execution::ArtifactStoreError>
-        {
-            let Some(bytes) = store
-                .store()
-                .get_module_artifact(module_ref.as_str())
-                .await?
-            else {
-                return Ok(None);
-            };
-            match self
-                .request_accounted(Request::InspectArtifact {
-                    module_ref: module_ref.clone(),
-                    bytes,
-                })
-                .await
-                .map_err(inspection_error)?
-            {
-                Response::Artifact(artifact) => Ok(Some(artifact)),
-                Response::ArtifactRefused(refusal) => Err(refusal.into()),
-                _ => Err(lash_core_execution::ArtifactStoreError::Backend(
-                    "unexpected worker artifact inspection response".into(),
-                )),
-            }
-        }
-
-        async fn admit_document(
-            &self,
-            graph: lash_vm::WorkflowGraph,
-            environment: LashVmHostEnvironment,
-        ) -> Result<Result<crate::AdmittedDocument, lash_vm::WorkflowAdmissionRefusal>, PoolError>
-        {
-            match self
-                .request_accounted(Request::AdmitDocument {
-                    graph: Box::new(graph),
-                    environment,
-                })
-                .await?
-            {
-                Response::Admitted(admitted) => Ok(Ok(*admitted)),
-                Response::AdmissionRefused(refusal) => Ok(Err(refusal)),
-                _ => Err(PoolError::breach(
-                    lash_vm_protocol::SequenceFault::UnexpectedServiceResponse,
-                )),
-            }
-        }
-
         async fn pool_accounted(&self) -> Result<WorkerPool, PoolError> {
             let service = self.clone();
             let _held = CallHeld::of(Some(self));
@@ -540,13 +297,7 @@ pub mod runtime_ops {
 
     impl Service {
         fn request_blocking(&self, request: Request) -> Result<Response, PoolError> {
-            let source = match &request {
-                Request::References { source }
-                | Request::CreateDefinition { source, .. }
-                | Request::CompileModule { source, .. } => Some(source),
-                _ => None,
-            };
-            if let Some(source) = source
+            if let Request::Lower { source, .. } = &request
                 && source.len() as u64 > self.config.protocol.max_source_bytes
             {
                 return Err(PoolError::refused(
@@ -568,14 +319,8 @@ pub mod runtime_ops {
             #[cfg(feature = "testing")]
             self.record_worker(
                 match &request {
-                    Request::References { .. } => WorkerPath::References,
-                    Request::CompileModule { .. } | Request::LinkAst { .. } => WorkerPath::Compile,
-                    Request::CreateDefinition { .. } => WorkerPath::CreateDefinition,
-                    Request::AdmitDocument { .. } => WorkerPath::Admit,
-                    Request::InspectArtifact { .. } | Request::VerifyArtifact { .. } => {
-                        WorkerPath::Artifact
-                    }
-                    _ => WorkerPath::State,
+                    Request::Lower { .. } => WorkerPath::Lower,
+                    Request::Print { .. } => WorkerPath::Print,
                 },
                 &worker,
             )?;

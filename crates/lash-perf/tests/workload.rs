@@ -358,69 +358,10 @@ fn streams_and_retry_ids_are_independent_and_shared_blobs_have_two_owners() {
     panic!("no shared attachment fixture");
 }
 
-fn provider_host() -> anyhow::Result<lash_vm::LashVmHostEnvironment> {
-    let mut catalog = lash_vm::LashVmHostCatalog::new();
-    catalog.add_module_operation_contract(
-        ["tools"],
-        "Tools",
-        "synthetic",
-        "synthetic",
-        &lash_vm::OperationContract::new(
-            lash_perf::workload::tool_schema(),
-            lash_perf::workload::tool_result_schema(),
-        ),
-    )?;
-    for (name, arguments) in [
-        ("mark", lash_perf::workload::mark_schema()),
-        ("attach", lash_perf::workload::attach_schema()),
-    ] {
-        catalog.add_module_operation_contract(
-            ["tools"],
-            "Tools",
-            name,
-            name,
-            &lash_vm::OperationContract::new(arguments, json!({"type": "object"})),
-        )?;
-    }
-    use lash_plugin_process_controls::{ProcessControlTool, process_tool_definition};
-    for (name, definition) in [
-        ("create", lash_vm_runtime::process_create_tool_definition()),
-        ("start", process_tool_definition(ProcessControlTool::Start)),
-        ("await", process_tool_definition(ProcessControlTool::Await)),
-    ] {
-        let contract = definition.contract();
-        catalog.add_module_operation_contract(
-            ["processes"],
-            "Processes",
-            name,
-            name,
-            &lash_vm::OperationContract::new(
-                contract.input_schema.canonical().clone(),
-                contract.output_schema.canonical().clone(),
-            ),
-        )?;
-    }
-    Ok(lash_vm::LashVmHostEnvironment::new(catalog))
-}
-
-fn created_process_source(expr: &lash_vm::Expr) -> Option<&str> {
-    if let lash_vm::Expr::Record(fields) = expr {
-        for (name, value) in fields {
-            if name.as_str() == "source"
-                && let lash_vm::Expr::String(source) = value
-            {
-                return Some(source.as_str());
-            }
-        }
-    }
-    expr.children().find_map(created_process_source)
-}
-
 #[test]
-fn provider_cells_and_durable_bodies_parse_and_stream_to_the_sampled_latency() {
+fn provider_cells_stream_to_the_sampled_latency() {
     let workload = Workload::v1().unwrap();
     let generator = Generator::new(&workload, "provider").unwrap();
-    let host = provider_host().unwrap();
     let mut witnessed = BTreeSet::new();
     for ordinal in 0..300 {
         let mut plan = generator.plan(0, ordinal).unwrap();
@@ -456,8 +397,6 @@ fn provider_cells_and_durable_bodies_parse_and_stream_to_the_sampled_latency() {
         );
         assert!(first.chunks.windows(2).all(|c| c[0].due_ms <= c[1].due_ms));
         if let Some(code) = first.cell_source {
-            let linked =
-                lash_typescript::link(&code, &host).unwrap_or_else(|e| panic!("{e:?}\n{code}"));
             if !plan.child_processes.is_empty() {
                 // A process handle read back from a list is null at run
                 // time (FIG-4168 smoke): cells keep each handle in a name.
@@ -465,23 +404,6 @@ fn provider_cells_and_durable_bodies_parse_and_stream_to_the_sampled_latency() {
                 for index in 0..plan.child_processes.len() {
                     assert!(code.contains(&format!("const h{index}=await processes.start(")));
                 }
-                let source = created_process_source(&linked.artifact.ir().main)
-                    .expect("the cell supplies the child definition's source");
-                let child = lash_typescript::link(source, &host)
-                    .unwrap_or_else(|error| panic!("{error:?}\n{source}"));
-                let _process = child
-                    .artifact
-                    .ir()
-                    .declarations
-                    .iter()
-                    .find_map(|declaration| {
-                        if let lash_vm::Declaration::Process(process) = declaration {
-                            Some(process)
-                        } else {
-                            None
-                        }
-                    })
-                    .expect("child body is a durable module definition");
             }
             witnessed.insert("cell");
             if !plan.tool_batches.is_empty() {
@@ -501,26 +423,11 @@ fn provider_cells_and_durable_bodies_parse_and_stream_to_the_sampled_latency() {
             assert_eq!(plain.chunks.last().unwrap().due_ms, request.latency_ms);
             witnessed.insert("plain");
         }
-        for process in &plan.host_processes {
-            let linked = lash_typescript::link(&generator.process_body(process), &host).unwrap();
-            let bodies: Vec<_> = linked
-                .artifact
-                .ir()
-                .declarations
-                .iter()
-                .filter_map(|declaration| match declaration {
-                    lash_vm::Declaration::Process(process) => Some(process),
-                    _ => None,
-                })
-                .collect();
-            let [_body] = bodies.as_slice() else {
-                panic!("a host start links exactly one durable body");
-            };
+        if !plan.host_processes.is_empty() {
             witnessed.insert("host");
         }
         for queued in &plan.queued_inputs {
             let response = generator.queued_response(&plan, queued).unwrap();
-            lash_typescript::link(response.cell_source.as_ref().unwrap(), &host).unwrap();
             assert!(response.text.contains(&queued.idempotency_key));
             witnessed.insert("queued");
         }
@@ -550,7 +457,6 @@ fn provider_cells_and_durable_bodies_parse_and_stream_to_the_sampled_latency() {
         worst.parallel_tools = parallel;
         let response = generator.provider_response(&worst, 1).unwrap();
         let source = response.cell_source.as_ref().unwrap();
-        lash_typescript::link(source, &host).unwrap();
         // The worst cell overflows the smallest bucket: it is served whole.
         assert!(response.text.len() > 1024);
         assert_eq!(
@@ -578,7 +484,7 @@ fn provider_cells_and_durable_bodies_parse_and_stream_to_the_sampled_latency() {
         (1, 1, 2)
     );
     eprintln!(
-        "provider fixtures: 300 responses and identical retries; plain, tools, durable body, await parse"
+        "provider fixtures: 300 responses and identical retries; plain, tools, durable body, await"
     );
 }
 
@@ -845,44 +751,6 @@ fn smoke_workload_covers_every_durable_operation_class_in_its_first_turns() {
     assert_eq!(covered.len(), 15);
 }
 
-struct PaddingHost;
-
-impl lash_vm::ExecutionHost for PaddingHost {
-    async fn perform(
-        &self,
-        op: lash_vm::AbilityOp,
-    ) -> Result<lash_vm::AbilityOutcome, lash_vm::ExecutionHostError> {
-        match op {
-            lash_vm::AbilityOp::Finish(value) => Ok(lash_vm::AbilityOutcome::Value(value)),
-            lash_vm::AbilityOp::ResourceOperation(op) if op.operation == "synthetic" => {
-                let bytes = op
-                    .args
-                    .first()
-                    .and_then(lash_vm::Value::as_record)
-                    .and_then(|argument| argument.get("record"))
-                    .and_then(lash_vm::Value::as_record)
-                    .and_then(|record| record.get("result_bytes"));
-                let Some(lash_vm::Value::Number(bytes)) = bytes else {
-                    return Err(lash_vm::ExecutionHostError::new("missing result bytes"));
-                };
-                Ok(lash_vm::AbilityOutcome::Value(lash_vm::from_json(
-                    json!({"record":{"kind":"synthetic"},"payload":"x".repeat(*bytes as usize)}),
-                )))
-            }
-            _ => Err(lash_vm::ExecutionHostError::new(
-                "padding probe only finishes",
-            )),
-        }
-    }
-
-    fn execution_bounds(&self) -> lash_vm::ExecutionBounds {
-        lash_vm::ExecutionBounds::new(
-            lash_vm::ExecutionBound::instructions(1_000_000),
-            lash_vm::ExecutionBounds::memory_bounded_default().memory_limit,
-        )
-    }
-}
-
 #[tokio::test]
 async fn an_admitted_turn_and_an_earlier_queued_input_keep_every_tool_plan() {
     let load = Workload::named("smoke-v1").unwrap();
@@ -914,60 +782,4 @@ async fn an_admitted_turn_and_an_earlier_queued_input_keep_every_tool_plan() {
         assert!(source.contains(key), "input {key} was omitted");
     }
     assert_eq!(source.matches("finish(").count(), 1);
-    let host = provider_host().unwrap();
-    lash_typescript::link(&source, &host).unwrap_or_else(|error| panic!("{error:?}\n{source}"));
-    // These two adjacent primaries both appeared in a live admitted prefix.
-    let primaries = vec![
-        generator.operation(3, 6).key(),
-        generator.operation(3, 7).key(),
-    ];
-    let combined = generator
-        .admitted_response(&primaries, 2)
-        .unwrap()
-        .cell_source
-        .unwrap();
-    lash_typescript::link(&combined, &host).unwrap_or_else(|error| panic!("{error:?}\n{combined}"));
-    // Exercise the actual generated argument builders together under the live
-    // cell bound, and compare every byte to the independently generated plan.
-    for pair in [[(3, 6), (3, 7)], [(2, 17), (2, 18)]] {
-        let mut probe = String::from("const out=[];\n");
-        let mut expected = Vec::new();
-        for (actor, ordinal) in pair {
-            let plan = generator.plan(actor, ordinal).unwrap();
-            let cell = generator
-                .provider_response(&plan, 2)
-                .unwrap()
-                .cell_source
-                .unwrap();
-            if plan.tool_batches.is_empty() {
-                continue;
-            }
-            probe.push_str("{\n");
-            for line in cell.lines().filter(|line| {
-                line.starts_with("const w=")
-                    || line.starts_with("const arg=")
-                    || line.starts_with("const batches=")
-            }) {
-                probe.push_str(line);
-                probe.push('\n');
-            }
-            probe.push_str("for(const calls of batches){for(const c of calls){const a=arg(\"probe\",c);await tools.synthetic(a);out.push(a.payload);}}\n}\n");
-            for call in plan.tool_batches.iter().flatten() {
-                expected.push(
-                    generator.tool_argument(actor, ordinal, call).unwrap()["payload"].clone(),
-                );
-            }
-        }
-        probe.push_str("finish(out);");
-        let linked = lash_typescript::link(&probe, &host).unwrap();
-        let program =
-            lash_vm::compile(&linked.artifact, lash_vm::Entry::Main, Some(linked.spans())).unwrap();
-        let outcome = lash_vm::execute(&program, &mut lash_vm::State::new(), &PaddingHost)
-            .await
-            .unwrap();
-        assert_eq!(
-            outcome,
-            lash_vm::ExecutionOutcome::Finished(lash_vm::from_json(json!(expected)))
-        );
-    }
 }

@@ -1,5 +1,6 @@
-use lash::vm::{ExecutionHostError, Record, Value};
-use serde_json::{Value as JsonValue, json};
+use serde_json::{Map, Value as JsonValue, json};
+
+type Record = Map<String, JsonValue>;
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct SampleOperation {
@@ -9,7 +10,6 @@ pub(crate) struct SampleOperation {
     pub operation: &'static str,
     pub host_operation: &'static str,
     pub label: &'static str,
-    pub fields: &'static [SampleField],
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -22,30 +22,6 @@ enum SampleOperationKind {
     GithubRecent,
 }
 
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct SampleField {
-    pub name: &'static str,
-    pub field_type: &'static str,
-    pub default: SampleDefault,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) enum SampleDefault {
-    String(&'static str),
-    Number(f64),
-    Expression(&'static str),
-}
-
-impl SampleDefault {
-    pub(crate) fn editable(self) -> crate::EditableValue {
-        match self {
-            Self::String(value) => crate::EditableValue::String(value.to_string()),
-            Self::Number(value) => crate::EditableValue::Number(value),
-            Self::Expression(value) => crate::EditableValue::Expr(value.to_string()),
-        }
-    }
-}
-
 pub(crate) const OPERATIONS: &[SampleOperation] = &[
     SampleOperation {
         kind: SampleOperationKind::GmailListRecent,
@@ -54,11 +30,6 @@ pub(crate) const OPERATIONS: &[SampleOperation] = &[
         operation: "list_recent",
         host_operation: "gmail.list_recent",
         label: "List recent emails",
-        fields: &[SampleField {
-            name: "count",
-            field_type: "number",
-            default: SampleDefault::Number(5.0),
-        }],
     },
     SampleOperation {
         kind: SampleOperationKind::LlmQuery,
@@ -67,29 +38,6 @@ pub(crate) const OPERATIONS: &[SampleOperation] = &[
         operation: "query",
         host_operation: "llm_query",
         label: "Query LLM",
-        fields: &[
-            SampleField {
-                name: "task",
-                field_type: "string",
-                default: SampleDefault::String("Summarize the supplied input"),
-            },
-            SampleField {
-                name: "inputs",
-                field_type: "expression",
-                default: SampleDefault::Expression("{}"),
-            },
-            SampleField {
-                name: "output",
-                field_type: "expression",
-                // A catalog default is authored source the fragment validator
-                // has to accept: a type expression (`Type { .. }`) is not an
-                // expression, so a palette insertion carrying one could never
-                // be saved. The empty record is the unconstrained output shape
-                // the workflows that call this operation already imply by
-                // leaving the argument off (FIG-3179).
-                default: SampleDefault::Expression("{}"),
-            },
-        ],
     },
     SampleOperation {
         kind: SampleOperationKind::WebSearch,
@@ -98,18 +46,6 @@ pub(crate) const OPERATIONS: &[SampleOperation] = &[
         operation: "search",
         host_operation: "search_web",
         label: "Search the web",
-        fields: &[
-            SampleField {
-                name: "query",
-                field_type: "string",
-                default: SampleDefault::String("NVIDIA stock outlook"),
-            },
-            SampleField {
-                name: "limit",
-                field_type: "number",
-                default: SampleDefault::Number(5.0),
-            },
-        ],
     },
     SampleOperation {
         kind: SampleOperationKind::AgentsSpawn,
@@ -118,34 +54,6 @@ pub(crate) const OPERATIONS: &[SampleOperation] = &[
         operation: "spawn",
         host_operation: "spawn_agent",
         label: "Spawn subagent",
-        fields: &[
-            SampleField {
-                name: "capability",
-                field_type: "string",
-                default: SampleDefault::String("explore"),
-            },
-            SampleField {
-                name: "task",
-                field_type: "string",
-                default: SampleDefault::String("Research the supplied material"),
-            },
-            SampleField {
-                name: "seed",
-                field_type: "expression",
-                default: SampleDefault::Expression("{}"),
-            },
-            SampleField {
-                name: "output",
-                field_type: "expression",
-                // A catalog default is authored source the fragment validator
-                // has to accept: a type expression (`Type { .. }`) is not an
-                // expression, so a palette insertion carrying one could never
-                // be saved. The empty record is the unconstrained output shape
-                // the workflows that call this operation already imply by
-                // leaving the argument off (FIG-3179).
-                default: SampleDefault::Expression("{}"),
-            },
-        ],
     },
     SampleOperation {
         kind: SampleOperationKind::SlackRecent,
@@ -154,18 +62,6 @@ pub(crate) const OPERATIONS: &[SampleOperation] = &[
         operation: "recent",
         host_operation: "slack.recent",
         label: "Get recent Slack messages",
-        fields: &[
-            SampleField {
-                name: "channel",
-                field_type: "string",
-                default: SampleDefault::String("team-platform"),
-            },
-            SampleField {
-                name: "since",
-                field_type: "string",
-                default: SampleDefault::String("yesterday"),
-            },
-        ],
     },
     SampleOperation {
         kind: SampleOperationKind::GithubRecent,
@@ -174,18 +70,6 @@ pub(crate) const OPERATIONS: &[SampleOperation] = &[
         operation: "recent",
         host_operation: "github.recent",
         label: "Get recent GitHub activity",
-        fields: &[
-            SampleField {
-                name: "repo",
-                field_type: "string",
-                default: SampleDefault::String("acme/widgets"),
-            },
-            SampleField {
-                name: "since",
-                field_type: "string",
-                default: SampleDefault::String("yesterday"),
-            },
-        ],
     },
 ];
 
@@ -254,12 +138,12 @@ impl SampleOperation {
         match self.kind {
             SampleOperationKind::GmailListRecent => array_schema(
                 json!({
-                    "from": { "type": "string" },
+                    "sender": { "type": "string" },
                     "subject": { "type": "string" },
                     "snippet": { "type": "string" },
                     "unread": { "type": "boolean" }
                 }),
-                &["from", "subject", "snippet", "unread"],
+                &["sender", "subject", "snippet", "unread"],
             ),
             SampleOperationKind::LlmQuery | SampleOperationKind::AgentsSpawn => json!({}),
             SampleOperationKind::WebSearch => object_schema(
@@ -322,15 +206,14 @@ fn array_schema(properties: JsonValue, required: &[&str]) -> JsonValue {
     })
 }
 
-pub(crate) fn apply_tool(name: &str, args: &[Value]) -> Result<JsonValue, ExecutionHostError> {
+pub(crate) fn apply_tool(name: &str, args: &JsonValue) -> Result<JsonValue, String> {
     let operation = OPERATIONS
         .iter()
         .find(|operation| operation.host_operation.replace('.', "_") == name)
-        .ok_or_else(|| ExecutionHostError::new(format!("unknown sample tool `{name}`")))?;
+        .ok_or_else(|| format!("unknown sample tool `{name}`"))?;
     let args = args
-        .first()
-        .and_then(Value::as_record)
-        .ok_or_else(|| ExecutionHostError::new("a sample tool expects one record"))?;
+        .as_object()
+        .ok_or_else(|| "a sample tool expects one record".to_owned())?;
     match operation.kind {
         SampleOperationKind::GmailListRecent => list_recent_emails(args),
         SampleOperationKind::LlmQuery => llm_query(args),
@@ -341,46 +224,44 @@ pub(crate) fn apply_tool(name: &str, args: &[Value]) -> Result<JsonValue, Execut
     }
 }
 
-fn list_recent_emails(args: &Record) -> Result<JsonValue, ExecutionHostError> {
+fn list_recent_emails(args: &Record) -> Result<JsonValue, String> {
     let count = number_arg(args, "count")?;
     if !count.is_finite() || count < 0.0 {
-        return Err(ExecutionHostError::new(
-            "`count` must be a non-negative number",
-        ));
+        return Err("`count` must be a non-negative number".to_owned());
     }
     let mut emails = vec![
         json!({
-            "from": "Priya Shah <priya@example.com>",
+            "sender": "Priya Shah <priya@example.com>",
             "subject": "Q3 planning decisions",
             "snippet": "We agreed to move the launch to September 18 and need final owners by Friday.",
             "unread": true
         }),
         json!({
-            "from": "Alex Moreno <alex@example.com>",
+            "sender": "Alex Moreno <alex@example.com>",
             "subject": "Design review follow-up",
             "snippet": "The new checkout flow is approved pending the accessibility notes in the prototype.",
             "unread": true
         }),
         json!({
-            "from": "Finance Team <finance@example.com>",
+            "sender": "Finance Team <finance@example.com>",
             "subject": "July expense deadline",
             "snippet": "Please submit July receipts by Thursday at 5 PM so payroll can close on time.",
             "unread": false
         }),
         json!({
-            "from": "Mina Park <mina@example.com>",
+            "sender": "Mina Park <mina@example.com>",
             "subject": "Customer interview themes",
             "snippet": "Customers like saved views but want clearer sharing controls and faster exports.",
             "unread": true
         }),
         json!({
-            "from": "Build Bot <ci@example.com>",
+            "sender": "Build Bot <ci@example.com>",
             "subject": "Nightly build recovered",
             "snippet": "The flaky integration suite passed after the retry fix; all main checks are green.",
             "unread": false
         }),
         json!({
-            "from": "Jordan Lee <jordan@example.com>",
+            "sender": "Jordan Lee <jordan@example.com>",
             "subject": "Friday team lunch",
             "snippet": "Lunch is booked for 12:30 at Little Lemon; reply with dietary needs by tomorrow.",
             "unread": true
@@ -390,7 +271,7 @@ fn list_recent_emails(args: &Record) -> Result<JsonValue, ExecutionHostError> {
     Ok(JsonValue::Array(emails))
 }
 
-fn llm_query(args: &Record) -> Result<JsonValue, ExecutionHostError> {
+fn llm_query(args: &Record) -> Result<JsonValue, String> {
     let task = string_arg(args, "task")?;
     if task.to_ascii_lowercase().contains("format") {
         return Ok(json!(
@@ -415,13 +296,11 @@ fn llm_query(args: &Record) -> Result<JsonValue, ExecutionHostError> {
     Ok(json!(summary))
 }
 
-fn web_search(args: &Record) -> Result<JsonValue, ExecutionHostError> {
+fn web_search(args: &Record) -> Result<JsonValue, String> {
     let query = string_arg(args, "query")?;
     let limit = optional_number_arg(args, "limit")?.unwrap_or(5.0);
     if !(1.0..=20.0).contains(&limit) || limit.fract() != 0.0 {
-        return Err(ExecutionHostError::new(
-            "`limit` must be an integer between 1 and 20",
-        ));
+        return Err("`limit` must be an integer between 1 and 20".to_owned());
     }
     let mut results = vec![
         json!({
@@ -444,12 +323,10 @@ fn web_search(args: &Record) -> Result<JsonValue, ExecutionHostError> {
     Ok(json!({ "results": results }))
 }
 
-fn spawn_agent(args: &Record) -> Result<JsonValue, ExecutionHostError> {
+fn spawn_agent(args: &Record) -> Result<JsonValue, String> {
     let capability = string_arg(args, "capability")?;
     if capability != "explore" && capability != "peer" {
-        return Err(ExecutionHostError::new(format!(
-            "unknown capability `{capability}`"
-        )));
+        return Err(format!("unknown capability `{capability}`"));
     }
     let task = string_arg(args, "task")?;
     let _seed = record_arg(args, "seed")?;
@@ -466,7 +343,7 @@ fn spawn_agent(args: &Record) -> Result<JsonValue, ExecutionHostError> {
     }
 }
 
-fn recent_slack(args: &Record) -> Result<JsonValue, ExecutionHostError> {
+fn recent_slack(args: &Record) -> Result<JsonValue, String> {
     let channel = string_arg(args, "channel")?;
     let _since = string_arg(args, "since")?;
     Ok(json!([
@@ -488,7 +365,7 @@ fn recent_slack(args: &Record) -> Result<JsonValue, ExecutionHostError> {
     ]))
 }
 
-fn recent_github(args: &Record) -> Result<JsonValue, ExecutionHostError> {
+fn recent_github(args: &Record) -> Result<JsonValue, String> {
     let repo = string_arg(args, "repo")?;
     let _since = string_arg(args, "since")?;
     Ok(json!([
@@ -510,36 +387,31 @@ fn recent_github(args: &Record) -> Result<JsonValue, ExecutionHostError> {
     ]))
 }
 
-fn string_arg(args: &Record, key: &str) -> Result<String, ExecutionHostError> {
+fn string_arg(args: &Record, key: &str) -> Result<String, String> {
     match args.get(key) {
-        Some(Value::String(value)) => Ok(value.to_string()),
-        _ => Err(ExecutionHostError::new(format!(
-            "missing string argument `{key}`"
-        ))),
+        Some(JsonValue::String(value)) => Ok(value.clone()),
+        _ => Err(format!("missing string argument `{key}`")),
     }
 }
 
-fn number_arg(args: &Record, key: &str) -> Result<f64, ExecutionHostError> {
-    match args.get(key) {
-        Some(Value::Number(value)) => Ok(*value),
-        _ => Err(ExecutionHostError::new(format!(
-            "missing number argument `{key}`"
-        ))),
-    }
+fn number_arg(args: &Record, key: &str) -> Result<f64, String> {
+    args.get(key)
+        .and_then(JsonValue::as_f64)
+        .ok_or_else(|| format!("missing number argument `{key}`"))
 }
 
-fn optional_number_arg(args: &Record, key: &str) -> Result<Option<f64>, ExecutionHostError> {
+fn optional_number_arg(args: &Record, key: &str) -> Result<Option<f64>, String> {
     match args.get(key) {
-        Some(Value::Number(value)) => Ok(Some(*value)),
-        Some(_) => Err(ExecutionHostError::new(format!(
-            "argument `{key}` must be a number"
-        ))),
+        Some(value) => value
+            .as_f64()
+            .map(Some)
+            .ok_or_else(|| format!("argument `{key}` must be a number")),
         None => Ok(None),
     }
 }
 
-fn record_arg<'a>(args: &'a Record, key: &str) -> Result<&'a Record, ExecutionHostError> {
+fn record_arg<'a>(args: &'a Record, key: &str) -> Result<&'a Record, String> {
     args.get(key)
-        .and_then(Value::as_record)
-        .ok_or_else(|| ExecutionHostError::new(format!("missing record argument `{key}`")))
+        .and_then(JsonValue::as_object)
+        .ok_or_else(|| format!("missing record argument `{key}`"))
 }

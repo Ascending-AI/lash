@@ -158,14 +158,19 @@ impl lash_core::plugin::PluginTask for AssignCheckpointBinding {}
 
 impl CheckpointBindingFixture {
     pub(super) async fn new(
-        dialect: Arc<dyn lash_protocol_rlm::Dialect>,
+        dialect: lash_protocol_rlm::CellDialect,
         bindings: usize,
         bytes: usize,
     ) -> anyhow::Result<Self> {
         let backend = durable_backend(Arc::new(sqlite_memory_stores().await?))?;
         let fixture = Arc::new(tokio::sync::Mutex::new(
-            lash_protocol_rlm::RlmCheckpointPerfFixture::new(dialect, &backend, bindings, bytes)
-                .await?,
+            lash_protocol_rlm::RlmCheckpointPerfFixture::new(
+                &dialect,
+                lash_vm_client::service::Service::default(),
+                bindings,
+                bytes,
+            )
+            .await?,
         ));
         let task_fixture = Arc::clone(&fixture);
         let task_backend = backend.clone();
@@ -285,7 +290,7 @@ pub(super) async fn run_once_checkpoint_state_hot_paths(
             // Cells run on the production effect controller over a memory
             // store set; their captured state is what is measured.
             let fixture = CheckpointBindingFixture::new(
-                std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
+                lash_protocol_rlm::CellDialect::typescript(),
                 CHECKPOINT_STATE_BINDINGS,
                 CHECKPOINT_STATE_BODY_BYTES,
             )
@@ -429,7 +434,7 @@ pub(super) async fn run_once_checkpoint_state_hot_paths(
                 .sum::<usize>()) as u64;
 
         let (_, phase) = measure_runtime_perf_async_phase("checkpoint_state.execution_restore", async {
-            lash_protocol_rlm::RlmCheckpointPerfFixture::restore(&lash_protocol_rlm::TypescriptDialect, &loaded_execution_state).await
+            lash_protocol_rlm::RlmCheckpointPerfFixture::restore(&lash_protocol_rlm::CellDialect::typescript(), &loaded_execution_state).await
                 .map_err(anyhow::Error::from)
         }).await?;
         phase_profile.insert(phase.0, phase.1);

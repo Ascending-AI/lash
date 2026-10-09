@@ -18,7 +18,6 @@ chrono = { workspace = true }
 lash = { workspace = true, features = ["rlm", "typescript", "sqlite"] }
 reqwest = { workspace = true, features = ["json", "rustls"] }
 thiserror = { workspace = true }
-schemars = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["fs", "macros", "net", "rt-multi-thread", "sync", "time"] }

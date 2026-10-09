@@ -21,7 +21,7 @@ test = false
 
 [features]
 dhat-heap = ["dep:dhat"]
-synthetic-next = ["lash-vm-protocol/synthetic-next", "lash-vm-client/synthetic-next", "lash-vm/synthetic-next", "lash-core-execution/synthetic-next"]
+synthetic-next = ["lash-vm-protocol/synthetic-next", "lash-vm-client/synthetic-next", "lash-core-execution/synthetic-next"]
 testing = ["lash-vm-client/testing"]
 
 [[bin]]
@@ -39,9 +39,17 @@ blake3 = { workspace = true }
 lash-vm-client = { workspace = true }
 lash-core-execution = { workspace = true }
 lash-vm-protocol = { workspace = true }
-lash-vm = { workspace = true }
-lash-typescript = { workspace = true }
+lash-kernel-doc = { workspace = true }
+lash-kernel-vm = { workspace = true }
+lash-kernel-lib = { workspace = true }
+lash-kernel-state = { workspace = true }
+lash-kernel-dialect = { workspace = true }
+lash-dialect-typescript = { workspace = true }
+lash-ext-date-ecma = { workspace = true }
+lash-ext-regex-ecma = { workspace = true }
+lash-ext-url-whatwg = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
+thiserror = { workspace = true }
 rmp-serde = { workspace = true }
 serde_json = { workspace = true }
 
@@ -49,16 +57,9 @@ serde_json = { workspace = true }
 libc = { workspace = true }
 
 [dev-dependencies]
-async-trait = { workspace = true }
-lash-core-execution = { workspace = true, features = ["testing"] }
-lash-durable = { workspace = true }
-lash-sansio = { workspace = true, features = ["testing"] }
-lash-sqlite-store = { workspace = true }
-lash-vm-broker = { workspace = true, features = ["testing"] }
 lash-vm-worker = { package = "lash-internal-vm-worker", path = ".", features = ["testing"] }
-lash-vm = { workspace = true, features = ["testing"] }
-tempfile = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+rmp-serde = { workspace = true }
+serde_bytes = { workspace = true }
 
 [[test]]
 name = "pool_laws"

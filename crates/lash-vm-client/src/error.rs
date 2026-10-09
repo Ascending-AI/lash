@@ -186,7 +186,7 @@ mod tests {
             WorkerLimit::EffectValue { size: 2, bound: 1 },
             WorkerLimit::VmState { size: 2, bound: 1 },
             WorkerLimit::Frame {
-                kind: lash_vm_protocol::WorkerFrameKind::Complete,
+                kind: lash_vm_protocol::WorkerFrameKind::Ended,
                 size: 2,
                 bound: 1,
             },

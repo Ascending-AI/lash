@@ -75,7 +75,8 @@ impl Lowerer<'_> {
             return self.wait_in_place(wait, args);
         }
         let value = self.lower_expr(value)?;
-        self.invoke("ts.await", &[value], Ty::Unknown)
+        let awaited = self.invoke("ts.await", &[value], Ty::Unknown)?;
+        self.await_process(awaited, span)
     }
 
     /// A tool call or a `sleep` that is not awaited where it stands: a

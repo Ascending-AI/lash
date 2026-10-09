@@ -1,8 +1,8 @@
 //! Typed infrastructure outcomes: what a worker's failure is, kept apart from
 //! anything the guest did.
 //!
-//! A guest error is the program's own failure and travels as
-//! [`crate::WorkerMessage::GuestError`]. Everything here is the worker's
+//! A guest error is the program's own failure and is part of how its run
+//! ended ([`crate::WorkerMessage::Ended`]). Everything here is the worker's
 //! failure: the parent fences the lease, settles the operations it already
 //! admitted, and retries transient worker failures. A deterministic run limit
 //! or a refusal of the run's own inputs is recorded as the run's terminal
@@ -16,7 +16,7 @@ use thiserror::Error;
 
 use crate::codec::CodecRefusal;
 use crate::message::HeaderRefusal;
-use crate::state::{OpaqueStateRefusal, VmStateKind};
+use crate::state::OpaqueStateRefusal;
 use crate::version::ProtocolVersionRefusal;
 
 /// What the supervisor observed of a worker's end. Evidence, never testimony:
@@ -88,11 +88,10 @@ pub enum Exchange {
     Handshake,
     /// A step of the run.
     Run,
-    /// The parent was performing the run's request.
-    RequestInFlight,
-    Park,
-    /// The run declined a park, and owed its request again.
-    DeclinedPark,
+    /// The parent was answering the machine's host read.
+    HostRead,
+    Deliver,
+    Export,
     Prepare,
     Reset,
 }
@@ -102,9 +101,9 @@ impl std::fmt::Display for Exchange {
         f.write_str(match self {
             Self::Handshake => "as its handshake",
             Self::Run => "mid-run",
-            Self::RequestInFlight => "while its request was performed",
-            Self::Park => "in answer to a park",
-            Self::DeclinedPark => "after a declined park",
+            Self::HostRead => "while its host read was answered",
+            Self::Deliver => "in answer to a delivery",
+            Self::Export => "in answer to an export",
             Self::Prepare => "in answer to pure work",
             Self::Reset => "in answer to a reset",
         })
@@ -130,22 +129,18 @@ pub enum SequenceFault {
     PrepareBeforeReset,
     #[error("the checkout already started")]
     CheckoutAlreadyStarted,
-    #[error("a result answers no pending request")]
-    NoPendingRequest,
-    #[error("a result names another request than the pending one")]
-    WrongRequestId,
-    #[error("a request repeats an id the run already used")]
-    RepeatedRequestId,
-    #[error("a control request was answered with another outcome")]
-    WrongControlResult,
-    #[error("a checkpoint result answered an effect")]
-    CheckpointAnsweredEffect,
-    #[error("park answers no parkable request")]
-    ParkWithoutParkableRequest,
-    #[error("the resumed run issued another request than the one it parked on")]
-    ResumedRequestChanged,
-    #[error("a projection read was answered with another control")]
-    ProjectionOtherControl,
+    #[error("an answer answers no pending host read")]
+    NoPendingRead,
+    #[error("an answer names another host read than the pending one")]
+    WrongReadId,
+    #[error("a host read repeats an id the run already used")]
+    RepeatedReadId,
+    #[error("a host read was answered with another message")]
+    ReadOtherControl,
+    #[error("the exchange needs a started run")]
+    NoRun,
+    #[error("the run already ended")]
+    RunEnded,
     #[error("a worker phase is out of order")]
     InvalidPhase,
     #[error("worker CPU accounting regressed")]
@@ -162,8 +157,6 @@ pub enum SequenceFault {
     LeaseSpaceExhausted,
     #[error("pure work was answered with another response")]
     UnexpectedServiceResponse,
-    #[error("a completion names other definitions than its snapshot")]
-    CompletionDefinitionsMismatch,
     #[error("the worker receipt probe overflowed")]
     ReceiptProbeOverflow,
 }
@@ -173,19 +166,15 @@ pub enum SequenceFault {
 #[serde(rename_all = "snake_case")]
 pub enum PayloadKind {
     Bootstrap,
-    EffectRequest,
-    EffectOutcome,
-    CancelCheckpoint,
-    ParkDecline,
-    ProjectionRead,
-    ProjectionResponse,
-    ProjectedValue,
-    Observation,
+    Document,
+    Start,
+    Park,
+    End,
+    Outcome,
+    HostRead,
+    HostAnswer,
+    Printed,
     ParkedRun,
-    Continuation,
-    Snapshot,
-    Completion,
-    GuestError,
     ServiceRequest,
     ServiceResponse,
 }
@@ -256,8 +245,8 @@ pub enum ProtocolBreach {
     /// State the worker itself produced fails the parent's structural check.
     #[error("the worker's state is refused: {refusal}")]
     State { refusal: OpaqueStateRefusal },
-    #[error("the VM refused a step the protocol drove: {detail}")]
-    Vm { detail: Detail },
+    #[error("the machine refused a step the protocol drove: {detail}")]
+    Machine { detail: Detail },
     #[error("{fault}")]
     Bootstrap { fault: BootstrapFault },
     /// Worker code, or the parent task driving it, panicked.
@@ -271,22 +260,17 @@ pub enum ProtocolBreach {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RunInput {
-    Context,
-    Artifact,
-    State { kind: VmStateKind },
+    Document,
+    Start,
+    ParkedRun,
 }
 
 impl std::fmt::Display for RunInput {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
-            Self::Context => "context",
-            Self::Artifact => "artifact",
-            Self::State {
-                kind: VmStateKind::Continuation,
-            } => "continuation",
-            Self::State {
-                kind: VmStateKind::Snapshot,
-            } => "snapshot",
+            Self::Document => "document",
+            Self::Start => "start",
+            Self::ParkedRun => "parked run",
         })
     }
 }
@@ -306,32 +290,13 @@ pub enum RunRefusal {
     Undecodable { input: RunInput, detail: Detail },
     #[error("a payload of {size} bytes exceeds the {limit}-byte bound")]
     PayloadTooLarge { limit: u64, size: u64 },
-    #[error("the run names a context this worker does not know")]
-    UnknownContext,
-    #[error("the source is in another dialect than the worker's")]
-    SourceDialect,
-    #[error("the source does not parse: {detail}")]
-    Parse { detail: Detail },
-    #[error("the program does not compile: {detail}")]
-    Compile { detail: Detail },
-    #[error("the artifact is not the module the run names")]
-    ArtifactIdentityMismatch,
-    #[error("the artifact is inconsistent: {detail}")]
-    Artifact { detail: Detail },
-    #[error("a run limit is zero")]
-    ZeroLimit,
-    #[error("a projected binding is refused: {detail}")]
-    ProjectedBinding { detail: Detail },
-    #[error("a global is refused: {detail}")]
-    Global { detail: Detail },
-    #[error("a protected global cannot be patched")]
-    ProtectedGlobal,
-    #[error("the VM refuses to start the run: {detail}")]
+    /// The document is not admitted, names a library function the worker
+    /// has not registered, or has no such entry.
+    #[error("the machine refuses to start the run: {detail}")]
     Start { detail: Detail },
-    #[error("the resumed run stands on another request than the one it parked on")]
-    ParkedRequestChanged,
-    #[error("the terminal value nests deeper than {limit}")]
-    ValueTooDeep { limit: u32 },
+    /// The parked run is not one this machine resumes.
+    #[error("the machine refuses to resume the run: {detail}")]
+    Resume { detail: Detail },
 }
 
 /// What a worker may say of its own failure: that the protocol was broken, or
@@ -407,9 +372,9 @@ impl InfrastructureOutcome {
     pub fn input_state(refusal: OpaqueStateRefusal) -> Self {
         match refusal {
             OpaqueStateRefusal::TooLarge { limit, len } => Self::state_limit(limit, len),
-            refusal @ (OpaqueStateRefusal::WrongKind { .. }
-            | OpaqueStateRefusal::WrongOwner { .. }
-            | OpaqueStateRefusal::ComponentOutsideReadRange { .. }
+            refusal @ (OpaqueStateRefusal::WrongOwner { .. }
+            | OpaqueStateRefusal::KernelOutsideReadRange { .. }
+            | OpaqueStateRefusal::WrongDocument { .. }
             | OpaqueStateRefusal::HashMismatch) => RunRefusal::State { refusal }.into(),
         }
     }
@@ -419,9 +384,9 @@ impl InfrastructureOutcome {
     pub fn output_state(refusal: OpaqueStateRefusal) -> Self {
         match refusal {
             OpaqueStateRefusal::TooLarge { limit, len } => Self::state_limit(limit, len),
-            refusal @ (OpaqueStateRefusal::WrongKind { .. }
-            | OpaqueStateRefusal::WrongOwner { .. }
-            | OpaqueStateRefusal::ComponentOutsideReadRange { .. }
+            refusal @ (OpaqueStateRefusal::WrongOwner { .. }
+            | OpaqueStateRefusal::KernelOutsideReadRange { .. }
+            | OpaqueStateRefusal::WrongDocument { .. }
             | OpaqueStateRefusal::HashMismatch) => ProtocolBreach::State { refusal }.into(),
         }
     }
@@ -536,9 +501,9 @@ mod tests {
     #[test]
     fn a_refused_input_state_is_terminal_and_a_broken_frame_is_retryable() {
         for refusal in [
-            OpaqueStateRefusal::WrongKind {
-                expected: VmStateKind::Snapshot,
-                found: VmStateKind::Continuation,
+            OpaqueStateRefusal::WrongDocument {
+                expected: "a".into(),
+                found: "b".into(),
             },
             OpaqueStateRefusal::WrongOwner {
                 expected: VmOwner::new("a"),
@@ -583,8 +548,10 @@ mod tests {
             None
         );
         for outcome in [
-            InfrastructureOutcome::from(ProtocolBreach::from(SequenceFault::WrongRequestId)),
-            InfrastructureOutcome::from(RunRefusal::UnknownContext),
+            InfrastructureOutcome::from(ProtocolBreach::from(SequenceFault::WrongReadId)),
+            InfrastructureOutcome::from(RunRefusal::Start {
+                detail: Detail::new("no entry"),
+            }),
         ] {
             let Some(WorkerMessage::Refused { refusal }) =
                 WorkerRefusal::testimony(outcome.clone())
@@ -618,13 +585,13 @@ mod tests {
         for text in ["short".to_owned(), "é".repeat(1 << 20)] {
             for (outcome, retryable) in [
                 (
-                    InfrastructureOutcome::from(RunRefusal::Parse {
+                    InfrastructureOutcome::from(RunRefusal::Start {
                         detail: Detail::new(&text),
                     }),
                     false,
                 ),
                 (
-                    InfrastructureOutcome::from(ProtocolBreach::Vm {
+                    InfrastructureOutcome::from(ProtocolBreach::Machine {
                         detail: Detail::new(&text),
                     }),
                     true,

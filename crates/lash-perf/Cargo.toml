@@ -23,18 +23,8 @@ name = "lash-perf"
 path = "src/main.rs"
 
 [[bin]]
-name = "vm-worker-matrix"
-path = "src/bin/vm_worker_matrix.rs"
-test = false
-
-[[bin]]
 name = "postgres-substrate"
 path = "src/bin/postgres_substrate.rs"
-test = false
-
-[[bin]]
-name = "vm-snapshot"
-path = "src/bin/vm_snapshot.rs"
 test = false
 
 [[bin]]
@@ -47,8 +37,6 @@ workspace = true
 
 [dependencies]
 lash-sansio = { workspace = true }
-lash-vm = { workspace = true }
-lash-typescript = { workspace = true }
 lash-vm-client = { workspace = true, features = ["perf-witness"] }
 lash-vm-worker = { workspace = true }
 lash-vm-protocol = { workspace = true }

@@ -35,7 +35,7 @@ LIVE_STORES = (
 QUICK = "LASH_QUICK"
 # Comma-separated shards/paths the quick test262 selection keeps whole.
 QUICK_TEST262_INCLUDE = "LASH_TEST262_QUICK_INCLUDE"
-TEST262_PREFIX = "crates/lash-typescript/tests/test262/"
+TEST262_PREFIX = "crates/lash-dialect-typescript/tests/test262/"
 SUMMARY_LINES = 40
 
 

@@ -30,22 +30,20 @@ impl LanguageExecutionObservation {
 }
 
 /// Which workflow document an execution runs, and where it enters it. It
-/// names the document; it is never the document. A host reads the graph the
-/// reference names through the facade's workflow inspection and may cache
-/// it under this value, which is immutable for a process.
+/// names the document; it is never the document. A host reads the document
+/// the reference names through the facade's workflow inspection and may
+/// cache it under this value, which is immutable for a process: a running
+/// instance keeps the document it was admitted under.
 #[derive(
     Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, schemars::JsonSchema,
 )]
+#[serde(deny_unknown_fields)]
 pub struct WorkflowDocumentRef {
-    /// The definition identity of the admitted module the document
-    /// projects; the document's own `source_identity`.
-    pub source_identity: String,
-    /// The stored module the document is read from.
-    pub module_ref: lash_sansio::ModuleRef,
+    /// The identity of the admitted kernel document: the hash of its
+    /// content, kernel version and manifest included.
+    pub document: lash_kernel_doc::DocumentId,
     /// Where the execution enters the document.
     pub entry: WorkflowDocumentEntry,
-    /// The interpretation of the IR the document is written under.
-    pub ir_version: u32,
 }
 
 /// The entry of a [`WorkflowDocumentRef`].
@@ -54,11 +52,11 @@ pub struct WorkflowDocumentRef {
 )]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum WorkflowDocumentEntry {
-    /// The module's main body.
+    /// The document's `main`: a session cell.
     Main,
-    /// One exported process, by the persisted reference the module's
-    /// exports name it with.
-    Process { process_ref: String },
+    /// One entry of the document: a declared function a host may start,
+    /// which is what a process runs.
+    Entry { function: lash_kernel_doc::Name },
 }
 
 /// The admitted body of a process step started: the step's actor committed
@@ -74,7 +72,7 @@ pub struct StepBodyStarted {
     pub process_id: lash_sansio::ProcessId,
     /// The occurrence of the site in the process's workflow document the
     /// step runs for.
-    pub at: lash_sansio::WorkflowOccurrence,
+    pub at: lash_sansio::EffectIdentity,
     /// The call the admission bound the step to.
     pub call_id: lash_sansio::ToolCallId,
     /// The one-based attempt of the admitted body.
@@ -117,7 +115,7 @@ pub enum TraceLanguageExecutionPayload {
     },
     /// One fact about one occurrence of one execution site.
     Node {
-        at: lash_sansio::WorkflowOccurrence,
+        at: lash_sansio::EffectIdentity,
         fact: TraceNodeFact,
     },
 }
@@ -125,7 +123,7 @@ pub enum TraceLanguageExecutionPayload {
 impl TraceLanguageExecutionPayload {
     /// The occurrence this fact is about; `None` for a fact about the whole
     /// execution.
-    pub fn at(&self) -> Option<&lash_sansio::WorkflowOccurrence> {
+    pub fn at(&self) -> Option<&lash_sansio::EffectIdentity> {
         match self {
             Self::ExecutionStarted | Self::ExecutionFinished { .. } => None,
             Self::Node { at, .. } => Some(at),

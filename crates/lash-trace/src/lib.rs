@@ -94,7 +94,7 @@ pub use workflow_overlay::{
     WorkflowOverlayOccurrence, WorkflowOverlaySettlement, WorkflowOverlaySite,
     WorkflowOverlaySiteReport, WorkflowOverlaySiteRetention, WorkflowOverlaySiteState,
     WorkflowOverlayTerminal, WorkflowOverlayTerminalRecord, WorkflowOverlayTerminalStatus,
-    fold_workflow_overlay,
+    WorkflowTaskSite, fold_workflow_overlay,
 };
 
 /// Version of the durable trace JSONL schema, written to

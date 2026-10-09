@@ -35,7 +35,7 @@ async fn rlm_core_at(path: &std::path::Path, budgets: crate::ExecutionBudgets) -
             .expect("open the SQLite file store"),
     );
     let backend = lash_conformance::backend_over(stores);
-    let factory = rlm_factory(&backend);
+    let factory = rlm_factory();
     LashCore::rlm_builder(backend, factory)
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(crate::DataRetention::standard())

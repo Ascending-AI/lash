@@ -57,7 +57,7 @@ async fn started(
 
 fn occurrence(node: &str, occurrence: u64, replay_key: &str) -> ProcessEventAppendRequest {
     lash_core::ProcessEffectOccurrence::new(
-        lash_sansio::WorkflowOccurrence::fixture(node, occurrence),
+        lash_sansio::effect_identity_fixture(node, occurrence),
         "tool:batch_law",
         lash_core::ProcessEffectOutcomeClass::Success,
         None,

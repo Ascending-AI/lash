@@ -8,10 +8,6 @@
 // language as the execution section.
 
 /// The Workbench's tutorial share of the system prompt.
-///
-/// Every program below is link-verified against a Workbench-shaped host
-/// environment by `typescript_prompt_programs_link`, so this copy cannot drift
-/// into teaching code the language refuses.
 pub(crate) fn workbench_prompt() -> &'static str {
     WORKBENCH_PROMPT_TYPESCRIPT
 }
@@ -22,20 +18,17 @@ Available host features:
 - Web access is provided by the free Parallel Search MCP server (`parallel`): use its web search and web fetch tools. The server is attached without an API key, and its tools are simply absent while the connection is down.
 - You may call `agents.spawn(...)` for independent investigation.
 - You may use durable process definitions for work that should run independently. `processes.start` creates a process run immediately; `workbench.register_trigger` registers a definition the workbench starts on every event of one of its sources.
-- Create an immutable definition record with `await processes.create({ source: "const p = async () => { return true; };", dialect: "typescript" })`, or resolve one with `processes.get({ definition_id: id })`. Pass that returned record as `definition`.
+- Write a process as an `async` arrow the cell never calls, `const p = async () => { return true; };`, or resolve a stored one with `processes.get({ definition_id: id })`. Pass it as `definition`.
 - `await processes.start({ definition: p, args: { ...args } })` returns a handle; `await handle` waits for the run and gives you the value it returned — there is no result wrapper, so read its fields directly. An un-awaited handle can still be awaited later.
 - To run subagents or slow tool branches in parallel, define one branch process and start every handle before awaiting any of them. Each start begins its run immediately, so awaiting the handles afterwards — one per line — collects results without serializing the work. Do not write several `const x = await agents.spawn(...)` lines and call that parallel. `Promise.all` joins tool promises and plain values only; a process handle is awaited directly on its own line:
 
     <typescript>
-    const research = await processes.create({ dialect: "typescript", source: `
     const research = async (task: unknown) => {
       return await agents.spawn({
         task: task,
         output: { summary: "str", key_metrics: "list[str]" }
       });
     };
-
-    ` });
 
     const first = await processes.start({ definition: research, args: { task: "Research the first topic" } });
     const second = await processes.start({ definition: research, args: { task: "Research the second topic" } });
@@ -47,11 +40,9 @@ Available host features:
 - For schedule requests, register a definition on a cron source: `source: { kind: "cron", expr: "0 8 * * *", tz: "Europe/Berlin" }` (`tz` is optional, UTC by default). The workbench starts the definition on each tick and passes the tick, `{ fired_at: str }`, in the argument `event_arg` names; `args` fixes the definition's other arguments. Use a seconds expression such as `*/10 * * * * *` when the user wants a quick smoke test. When a started process ends, this chat receives a short note saying so.
 
     <typescript>
-    const on_tick = await processes.create({ dialect: "typescript", source: `
     const on_tick = async (tick: unknown) => {
       return tick.fired_at;
     };
-    ` });
 
     await workbench.register_trigger({
       source: { kind: "cron", expr: "0 8 * * *" },
@@ -71,7 +62,6 @@ Available host features:
 - When a message is delivered from the Accounts tab or sent with `inbox.<account>.send(...)`, the workbench starts every definition registered on the mail source with the event `{ account: str, title: str, text: str }`. `account` carries the account SLUG, not its display name: use the slug from the account enumeration (for example `work` or `personal`), not a display name such as `Work`, when filtering deliveries. Register an inbox concierge once and it will run on every delivery:
 
     <typescript>
-    const on_mail = await processes.create({ dialect: "typescript", source: `
     const on_mail = async (event: unknown) => {
       const boxes = await Promise.all([inbox.work.list({}), inbox.personal.list({})]);
       return {
@@ -80,7 +70,6 @@ Available host features:
         waiting: boxes[0].messages.length + boxes[1].messages.length
       };
     };
-    ` });
 
     await workbench.register_trigger({
       source: { kind: "mail" },

@@ -36,12 +36,11 @@ impl RlmRuntimeState {
     /// arriving after the first was cancelled — actually sees.
     #[cfg(test)]
     fn new_for_tests_with_resolver(
-        deferred_tool_resolver: Option<lash_vm_runtime::SharedDeferredToolResolver>,
+        deferred_tool_resolver: Option<crate::SharedDeferredToolResolver>,
     ) -> Result<Self, SessionError> {
         let services = crate::dialect::RlmDialectServices {
             presentation: crate::RlmPresentationConfig::standard(),
             workers: lash_vm_client::service::Service::default(),
-            artifact_store: crate::testing::sqlite_memory_artifact_store_blocking(),
             deferred_tool_resolver,
 
             execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
@@ -49,8 +48,7 @@ impl RlmRuntimeState {
             channel: crate::plugin::RlmChannel::Cell,
         };
         Self::new(Arc::new(crate::dialect::SessionDialect::new(
-            std::sync::Arc::new(crate::dialect::TypescriptDialect),
-            lash_vm_runtime::LashVmSurface::default(),
+            crate::dialect::CellDialect::typescript(),
             services,
         )))
     }
@@ -384,20 +382,22 @@ impl CodeExecutorPlugin for RlmCodeExecutor {
         &self,
         snapshot: &str,
     ) -> Result<Result<(), String>, lash_core::RuntimeError> {
-        crate::executor::check_cell_snapshot(&self.state.dialect.worker_service(), snapshot).await
+        Ok(crate::executor::check_cell_snapshot(snapshot))
     }
 
+    /// A session's cells publish no module artifacts: a frame switch has
+    /// none to carry.
     async fn frame_switch_carries(
         &self,
         _ctx: ProtocolSessionContext<'_>,
         _successor: &lash_core::FrameNodeId,
-        initial_nodes: &[lash_core::SessionAppendNode],
+        _initial_nodes: &[lash_core::SessionAppendNode],
     ) -> Result<Vec<lash_core::ArtifactName>, SessionError> {
-        frame_switch_carries(initial_nodes)
+        Ok(Vec::new())
     }
 
     fn executable_generation(&self) -> Option<lash_core::ExecutableGeneration> {
-        Some(lash_vm_runtime::lash_vm_cell_generation())
+        Some(crate::executor::cell_generation())
     }
 
     async fn snapshot_execution_state(
@@ -451,40 +451,6 @@ impl CodeExecutorPlugin for RlmCodeExecutor {
     ) -> Result<(), SessionError> {
         self.state.settle_code_execution(outcome).await
     }
-}
-
-/// The module artifacts a frame switch carries (ADR 0113 §3.1): every module
-/// a value in the switch's seed and globals events references. Only these
-/// survive into the successor frame; the ended frame's other modules are
-/// severed once the switching turn settles.
-fn frame_switch_carries(
-    nodes: &[lash_core::SessionAppendNode],
-) -> Result<Vec<lash_core::ArtifactName>, SessionError> {
-    let mut definitions = BTreeSet::new();
-    for node in nodes {
-        let lash_core::SessionAppendNode::ProtocolEvent { event, .. } = node else {
-            continue;
-        };
-        let values = match decode_rlm_protocol_event(event).map_err(history_corruption)? {
-            Some(RlmProtocolEvent::RlmSeed(seed)) => serde_json::to_value(&seed),
-            Some(RlmProtocolEvent::RlmGlobalsPatch(patch)) => serde_json::to_value(&patch),
-            _ => continue,
-        };
-        // Both bodies are JSON maps, so encoding them cannot fail; a body
-        // that did would carry nothing.
-        if let Ok(values) = values {
-            definitions.extend(lash_vm::referenced_definition_ids(
-                &crate::projection::json_to_flow_value(values.clone()),
-            ));
-        }
-    }
-    Ok(definitions
-        .into_iter()
-        .map(|id| lash_core::ArtifactName {
-            store: lash_core::ArtifactStoreId::ProcessDefinition,
-            artifact_ref: id.to_string(),
-        })
-        .collect())
 }
 
 pub(crate) fn reject_reserved_projected_binding_names(
@@ -653,12 +619,12 @@ mod tests {
     }
 
     #[async_trait::async_trait]
-    impl lash_vm_runtime::DeferredToolResolver for ParkingResolver {
+    impl crate::DeferredToolResolver for ParkingResolver {
         async fn resolve(
             &self,
-            _cx: &lash_vm_runtime::DeferredResolveContext<'_>,
+            _cx: &crate::DeferredResolveContext<'_>,
             paths: &[&str],
-        ) -> std::collections::BTreeMap<String, lash_vm_runtime::Resolution> {
+        ) -> std::collections::BTreeMap<String, crate::Resolution> {
             self.entered.fetch_add(1, Ordering::SeqCst);
             // A self-waking park: every poll re-reads the flag, so a release
             // is never missed whichever waker happens to execute the future.
@@ -673,12 +639,7 @@ mod tests {
             .await;
             paths
                 .iter()
-                .map(|path| {
-                    (
-                        (*path).to_string(),
-                        lash_vm_runtime::Resolution::NotAvailable,
-                    )
-                })
+                .map(|path| ((*path).to_string(), crate::Resolution::NotAvailable))
                 .collect()
         }
     }
@@ -686,7 +647,7 @@ mod tests {
     fn parked_session() -> (Arc<ParkingResolver>, RlmRuntimeState) {
         let resolver = Arc::new(ParkingResolver::default());
         let state = RlmRuntimeState::new_for_tests_with_resolver(Some(
-            Arc::clone(&resolver) as lash_vm_runtime::SharedDeferredToolResolver
+            Arc::clone(&resolver) as crate::SharedDeferredToolResolver
         ))
         .expect("runtime state");
         (resolver, state)
@@ -919,77 +880,6 @@ mod tests {
                     "the rolled-back append's binding must not survive the restore"
                 );
             });
-    }
-
-    /// A process definition value naming a module built from `source`.
-    fn definition_json(source: &str) -> (String, serde_json::Value) {
-        let module_ref = lash_vm::ModuleRef::new(&lash_vm::ContentHash::new(source));
-        let identity = lash_vm::ProcessDefinitionIdentity::new(
-            module_ref.clone(),
-            lash_vm::HostRequirementsRef::new(&lash_vm::ContentHash::new("host")),
-            lash_vm::ProcessRef::new(lash_vm::ContentHash::new("component"), 0),
-            "run",
-        );
-        (
-            identity.draft().expect("descriptor").id().to_string(),
-            serde_json::to_value(
-                identity
-                    .definition(lash_core::ProcessSignature::Unknown)
-                    .expect("definition"),
-            )
-            .expect("definition JSON"),
-        )
-    }
-
-    #[test]
-    fn a_frame_switch_carries_exactly_the_definition_ids_its_seed_references() {
-        let (carried, carried_value) = definition_json("carried");
-        let (projected, projected_value) = definition_json("projected");
-        let mut seed = crate::projection::RlmSeed::from_seed_value(&serde_json::json!({
-            "plain": 1,
-            "nested": { "list": [carried_value.clone(), carried_value] },
-        }))
-        .expect("seed value");
-        seed.projected.push(
-            "projected_definition".to_string(),
-            lash_rlm_types::RlmProjectedSeedEntry::Materialized(projected_value),
-        );
-        let mut nodes =
-            crate::projection::rlm_seed_initial_nodes(seed, lash_core::FleetFormat::current());
-        // A globals patch in the initial nodes is replayed into the new
-        // frame too, so what it names is carried.
-        let (patched, patched_value) = definition_json("patched");
-        nodes.push(lash_core::SessionAppendNode::protocol_event(
-            crate::projection::rlm_protocol_event(
-                RlmProtocolEvent::RlmGlobalsPatch(RlmGlobalsPatchPluginBody {
-                    set_default: serde_json::Map::from_iter([(
-                        "patched".to_string(),
-                        patched_value,
-                    )]),
-                }),
-                lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
-                    crate::RLM_PROTOCOL_EVENT_VERSION
-                )),
-            ),
-        ));
-
-        let mut expected = [carried, projected, patched]
-            .into_iter()
-            .map(|artifact_ref| lash_core::ArtifactName {
-                store: lash_core::ArtifactStoreId::ProcessDefinition,
-                artifact_ref,
-            })
-            .collect::<Vec<_>>();
-        expected.sort();
-        assert_eq!(
-            frame_switch_carries(&nodes).expect("valid history fixture"),
-            expected
-        );
-        assert!(
-            frame_switch_carries(&[])
-                .expect("valid history fixture")
-                .is_empty()
-        );
     }
 
     /// The regression test for the defect FIG-1729 fixes.

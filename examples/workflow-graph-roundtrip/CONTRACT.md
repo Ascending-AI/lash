@@ -1,498 +1,99 @@
-# Workflow graph backend contract
+# Workflow round-trip backend contract
 
-The backend listens on `http://127.0.0.1:3031` by default. The conventional
-demo address is selected explicitly with
-`WORKFLOW_GRAPH_ADDR=127.0.0.1:3057`; any other `IP:PORT` is also accepted.
+The backend listens on `http://127.0.0.1:3031` by default;
+`WORKFLOW_GRAPH_ADDR` selects another `IP:PORT`. CORS permits `GET`, `POST`
+and `OPTIONS` with a `content-type` header.
 
-```sh
-just workflow-graph-roundtrip
-```
-
-All JSON property names are camelCase. CORS permits `GET`, `POST`, and
-`OPTIONS` with a `content-type` header, so a Vite/Svelte dev server can call the
-backend directly. A built frontend may instead place `index.html` and assets
-in `examples/workflow-graph-roundtrip/frontend/dist/` (or directly in
-`frontend/`) for the backend to serve.
+Property names of the example's own objects are camelCase. A kernel
+document, a site, an edit and a correspondence are lash's own serialized
+shapes and pass through unchanged (snake_case).
 
 ## Endpoints
 
 | Method | Path | Response |
 | --- | --- | --- |
-| `GET` | `/workflows` | Built-in catalog as a list of `WorkflowCatalogEntry` objects |
-| `GET` | `/workflow` | Current saved workflow as a `WorkflowDocument` |
-| `POST` | `/workflow/select` | Reset the current workflow to a built-in example and return its `WorkflowDocument` |
-| `POST` | `/workflow` | Apply explicit edits or an explicit source import; returns the new canonical version |
-| `GET` | `/workflow/ir` | The saved workflow as Lash's typed document, with every node's statement and replaceable expressions |
-| `POST` | `/workflow/ir` | Open a workflow given as a typed document; returns its `WorkflowDocument` |
-| `POST` | `/workflow/edits` | Apply typed edits as one transaction; returns the new canonical version |
-| `POST` | `/run` | Create a fresh invocation and return its `text/event-stream` |
+| `GET` | `/workflows` | The built-in catalog: `[{ id, name, description }]` |
+| `GET` | `/environment` | What a document must be written against: `{ effects, functions }` |
+| `GET` | `/workflow` | The saved workflow as a `WorkflowView` |
+| `POST` | `/workflow/select` | `{ id }`: save a built-in example as the next version; its `WorkflowView` |
+| `POST` | `/workflow` | `{ document, entry }`: save a kernel document as the next version; its `WorkflowView` |
+| `POST` | `/workflow/edits` | `{ version, edits }`: apply one edit transaction and publish; `{ workflow, correspondence }` |
+| `POST` | `/run` | Start a run of the saved version; its `text/event-stream` |
+| `POST` | `/approvals/{key}` | `{ approved }`: resolve a parked approval |
 | `GET` | `/healthz` | `{ "service": "workflow-graph-roundtrip", "status": "ok" }` |
-| `GET` | `/` and `/{path}` | Optional files from `frontend/` |
+| `GET` | `/` and `/{path}` | Files from `frontend/` |
 
-## Built-in workflow catalog
+An error is `{ "error": { code, message, details } }`. An unknown catalog id
+is HTTP 404 `unknown_workflow`; a stale `version` is HTTP 409
+`version_conflict`; everything the host refuses about a request is HTTP 422.
 
-`GET /workflows` returns the four built-in examples in display order:
+## Environment
 
-```json
-[
-  {
-    "id": "onboarding",
-    "name": "Onboarding",
-    "description": "A labeled onboarding flow with a host approval call, branch, and mixed display updates."
-  },
-  {
-    "id": "traffic-lights",
-    "name": "Traffic Lights",
-    "description": "A visual red, amber, and green light sequence repeated twice."
-  },
-  {
-    "id": "branching-approval",
-    "name": "Branching Approval",
-    "description": "An if-heavy approval flow with a visible host approval call and distinct outcomes."
-  },
-  {
-    "id": "counter-loop",
-    "name": "Counter Loop",
-    "description": "A structured while loop followed by an editable for container and progress updates."
-  }
-]
-```
+`effects` maps each effect name to the signature the host offers it under.
+`functions` maps each library function's name to its identity. `POST
+/workflow` fills both into the manifest of the document it is given, so a
+client writes `effect display.show_message(input: Any) -> Any` and the host
+replaces the signature; a library function is called by the identity read
+here.
 
-Select an example with its catalog ID:
+## WorkflowView
 
-```http
-POST /workflow/select
-Content-Type: application/json
+| Property | Meaning |
+| --- | --- |
+| `version` | The host's revision of the saved workflow. An edit names the version it was written against. |
+| `entry` | The entry of the document a run starts. |
+| `identity` | The content identity of the document: the base of an edit transaction, and the `definition` of a run event. |
+| `definition` | The id of the definition lash admitted this version as. Absent when lash refused it; `notAdmitted` then says why. Such a version is saved and editable but cannot run. |
+| `document` | The kernel document. |
+| `text` | The document in kernel notation. |
+| `statements` | The entry's statements in document order: `{ site, block, depth, summary, action? }`. `action` is the site of the statement's action, which is where a run reports. `summary` is this host's wording. |
+| `executionSites` | The sites a run can report at: `{ site, statement, kind, loops }`. |
+| `source` | The document as the TypeScript printer spells it. Read-only. Absent with a `sourceUnavailable` reason when the document has no TypeScript spelling. |
 
-{ "id": "traffic-lights" }
-```
+A site is `{ "unit": { "function": "onboarding" }, "path": [3, 0] }`.
 
-A successful selection resets the current workflow to that example's canonical
-source, appends a new in-memory version, and returns the resulting
-`WorkflowDocument` in the same shape as `GET /workflow`. Subsequent
-`GET /workflow`, `POST /workflow`, and `POST /run` requests use that selected
-version. Selecting an example again discards any edits to the current draft and
-loads the built-in source again.
-
-An unknown ID returns HTTP `404`:
-
-```json
-{
-  "error": {
-    "code": "unknown_workflow",
-    "message": "workflow example `missing` does not exist",
-    "details": { "id": "missing" }
-  }
-}
-```
-
-## WorkflowDocument
-
-The current machine-readable contracts are:
-
-- [current `WorkflowGraph` JSON Schema](../../schemas/host/workflow-graph/)
-- [current workflow type-facet JSON Schema](../../schemas/host/workflow-type-facets/)
-- [generated graph declarations](frontend/src/generated/workflow-graph.d.ts)
-- [generated facet declarations](frontend/src/generated/workflow-type-facets.d.ts)
-- [example-owned `WorkflowDocument` schema](frontend/src/generated/workflow-document.schema.json)
-- [generated `WorkflowDocument` declarations](frontend/src/generated/workflow-document.d.ts)
-- [example-owned error-response schema](frontend/src/generated/error-response.schema.json)
-- [generated error-response declarations](frontend/src/generated/error-response.d.ts)
-
-The example generates its camel-case HTTP schemas from the Rust DTOs in
-[`src/contract.rs`](src/contract.rs). `npm run generate:types` regenerates that
-set and all declarations. `npm run check:types` checks generated bytes and
-runs TypeScript over the JSDoc-typed client in
-[`frontend/src/lib/api.js`](frontend/src/lib/api.js).
-
-The HTTP adapter adds the optimistic `version` and canonical `source`, flattens
-nested core subgraphs into `nodes`, `edges`, and `roots`, and formats type
-facets for display. `schemaVersion` copies the core graph version.
-`facetSchemaVersion` is present only when the backend projected facets.
-`definition` is the source identity of the admitted artifact the document's
-graph is the view of; it is absent when Lash did not admit the version, and
-`notAdmitted` then says why. Such a version is saved and editable but cannot
-run.
-
-`source` is the canonical TypeScript of the workflow, produced by the
-optional TypeScript lens for display and for the source pane. It is not what
-the backend stores or edits. A workflow the lens cannot spell has an empty
-`source` and a `sourceUnavailable` reason; every other part of the contract
-works for it unchanged.
-
-Optional adapter properties are omitted. `data.nameSource` is `label` for an
-authored `@label` and `derived` for an automatic name. A labeled node carries
-`data.title` and may carry `data.description`; a derived node carries only its
-recomputed title. The backend refuses a missing or unknown `nameSource`.
-
-An authored name is written back into the canonical source as a one-line JSDoc
-comment on the statement it names, `/** @label Title — Description */`, with an
-em-dash before the optional description. That is the only comment the lens
-reads or writes. A title that could not be read back the same way — one holding
-`*/`, a newline, or the separator itself — is refused with `canonical_source`
-rather than silently rewritten.
-
-`data.fields` maps argument names to recursive editable values. Each value has
-an explicit `kind` and `value`. The kinds are `null`, `bool`, `number`, `string`,
-`list`, `object`, and `expr`. Lists contain editable values; objects map arbitrary
-literal keys to editable values. Catalog field defaults use the same encoding.
-
-For example, literal source `inputs: {"$expr": "1 + 1"}` projects as:
-
-```json
-{"kind": "object", "value": {"$expr": {"kind": "string", "value": "1 + 1"}}}
-```
-
-The executable expression `inputs: 1 + 1` instead uses
-`{"kind": "expr", "value": "(1 + 1)"}`. An object's keys never decide its
-kind. Null uses `{"kind": "null", "value": null}`. Untagged values are rejected.
-This is an in-place contract change; the schema version stays unchanged.
-A `try` and a nested block are containers like `if` and `for`: `subkind` is
-`try` or `scope`, and their statements are ordinary nodes in child groups. A
-`try` carries `data.catchBinding` (absent when it has no catch clause) and
-`data.finally`. A `throw` is a node of kind `throw` with `data.expression`.
-There is no node kind that holds source text.
-
-The adapter renders structured expression slots as canonical TypeScript text:
-
-- `data.condition` is present on `if` and `while` containers.
-- `data.iterable` is present on `for` containers.
-- `data.clauses` exposes every list-comprehension `for` iterable and `if`
-  condition, plus each clause binding.
-- `data.target` and `data.expression` are present on `state_update` nodes.
-- `data.binding` and `data.expression` are present on `computation` nodes.
-
-Bindings are also returned on other assignment-producing structured nodes.
-On save, a string the client changed is parsed by the TypeScript fragment
-parser into the owning typed IR field. A string the client left as it was
-served is not read back: that field keeps its typed IR exactly. The text
-fields are a convenience of this host's forms; the structured editor below
-changes the same expressions without any text.
-
-Containers carry ordered child groups in `data.children`. `roots.processes`
-lists the top-level process containers. A process container uses slot `body`;
-`if` uses `then` and `else`; `for`, `while` and `scope` use `body`; `try` uses
-`body`, `catch` and `finally`; list comprehension uses `element`. `parentId` is supplied for SvelteFlow
-nesting. `roots` and each `children[].nodeIds` are the source order and are
-therefore also the reorder controls.
-
-Edges have `data.kind` equal to `sequence` or `data`. Data edges additionally
-carry `variable` and SSA `version`. `data.scope` identifies the subgraph that
-owns the edge and must be preserved.
-
-There is intentionally no `position` property anywhere. The frontend should
-auto-layout, then persist dragged positions outside this document keyed by
-node ID (for example, in `localStorage`).
-
-## Saving
-
-Send the recorded operations and the saved version as JSON:
+## Editing
 
 ```http
-POST /workflow
+POST /workflow/edits
 Content-Type: application/json
-```
 
-The editable surface is:
-
-- `data.title`, `data.description`, and `data.nameSource`; set `nameSource` to
-  `label` to author a label, and send it with every node. A `derived` title is
-  recomputed after save and must not carry a description.
-- `data.fields` literal values.
-- `data.binding`, `data.target`, `data.expression`, `data.condition`,
-  `data.iterable`, and `data.clauses` canonical Lash VM text where present.
-- `data.catchBinding` and `data.finally` on a `try`. Switching a clause on
-  adds its child group (omit the group and it starts empty); switching it off
-  removes the clause with its body.
-- Explicit insert, move and remove operations for structural edits.
-
-The structured text fields and their render-time validation are:
-
-| Field | Accepted node kinds | Typed error for an invalid edit |
-| --- | --- | --- |
-| `data.condition` | `if`, `while` | `invalid_expression` |
-| `data.iterable` | `for` | `invalid_expression` |
-| `data.binding` | `data`, `call`, `effect`, `computation`, `if`, `for`, `list_comprehension` | `invalid_assignment_target`; a syntactically valid non-simple binding is `invalid_node_payload` |
-| `data.target` | `state_update` | `invalid_assignment_target` |
-| `data.expression` | `computation`, `state_update`, `throw` | `invalid_expression` |
-| `data.clauses[].iterable` / `.condition` | `list_comprehension` `for` / `if` clauses | `invalid_expression` (`clause iterable` or `clause condition`) |
-| `data.clauses[].binding` | `list_comprehension` `for` clauses | `invalid_assignment_target` (`clause binding`); a syntactically valid non-simple binding is `invalid_node_payload` |
-
-Typed documents opened through `/workflow/ir` carry the graph's schema
-version. Form saves address the already opened draft and do not echo schema
-versions, edges or child membership.
-
-`POST /workflow` accepts an explicit save request:
-
-```json
-{ "kind": "edit", "version": 1, "edits": [] }
-```
-
-The form editor records actions as operations: `insertForm` (request-local `id`,
-`body`, optional `before`, `data`), `insertFormProcess` (`id`, `data`),
-`setForm` (`node`, `data`), and the typed `moveNode`, `removeNode` and
-`removeProcess` operations listed below. Child membership and edges are views;
-they are never read back from a form. A request-local insertion id may be used
-by later operations in the same save, including children of a new container.
-Undo/redo retain both the view and its operation list.
-
-The backend lowers only the addressed form's edited text fields to
-`WorkflowEdit`s against its existing `WorkflowDraft`. Untouched IR, child
-handles and process wrappers stay in the draft. No target graph is rebuilt or
-diffed. Lash owns signature updates, including parameter pass-through in
-existing wrappers. The host never asks a dialect to rebuild a wrapper.
-
-A save is optimistic: `version` must still be current. Operations run on a
-private draft; a refusal saves and publishes nothing. A successful save
-publishes the edited IR with `HostArtifacts::publish_workflow` and holds the
-new definition under the version's pin. TypeScript is printed only as the
-response's source view, never to choose the save's meaning.
-
-When a workflow is opened, the host selects its sole top-level process (a
-declaration or a process bound directly in module main, as a literal in a
-source-authored draft or a reference in an admitted document), and keeps that
-`WorkflowEntry` in the saved draft state. The shared IR projection supplies the
-literal's site to resolve its process container. Inline processes nested inside
-it are not candidate entries. Edits carry the selection through the process's
-draft handle, even when its name or document id changes or another top-level
-process is added. Removing the selected process makes the version unrunnable;
-it never falls back to another export. Opening a document with zero or several
-top-level processes saves an unrunnable version because this editor has no
-entry chooser.
-
-The success response is a new `WorkflowDocument` with incremented `version`
-and the ids of the admitted document, plus `idMap`: for every id the
-request named, the id that node has now. The map is read from
-Lash's edit correspondence, never from positions; a removed node has no
-entry. Replace the frontend's whole document with this response before Play.
-
-Source import is an explicit request choice, including when its text equals
-the current source view:
-
-```json
-{ "kind": "importSource", "version": 1, "source": "const flow = async () => { return 0; };", "edits": [] }
-```
-
-This opens a new draft from that source and applies the listed operations to
-it. Operations address the ids returned by `POST /project` for the import.
-
-Invalid graph edits return HTTP `422`:
-
-```json
 {
-  "error": {
-    "code": "invalid_expression",
-    "message": "node `...` has invalid `condition` expression text: ...",
-    "details": { "nodeId": "container:...", "field": "condition", "reason": "..." }
-  }
-}
-```
-
-Typed render codes are `unsupported_schema_version`, `unsupported_ir_version`,
-`duplicate_node_id`, `missing_required_child`, `invalid_node_payload`,
-`invalid_expression`, `invalid_assignment_target`,
-`duplicate_process_name`, `process_origin_mismatch`, `invalid_program`, and
-`canonical_source`. A transaction the draft refuses returns the draft's own
-code: `unresolved_binding`, `binding_captured`, `binding_name_taken`,
-`unknown_binding`, `unknown_process`, `unknown_function`, `derived_process`,
-`move_into_own_subtree`, `anchor_outside_body`, `unknown_slot`,
-`slot_in_child_body`, `edit_does_not_apply` or `unknown_body`, with every
-diagnostic of the refusal in `details.diagnostics`. Nothing is saved.
-Malformed host DTO structure uses
-`invalid_graph_document`. A stale save returns HTTP `409` with
-`version_conflict`.
-
-## Structured editing
-
-The forms above cover the common nodes. The structured editor reaches every
-construct of the workflow, through typed IR and with no source text.
-
-`GET /workflow/ir` returns the saved workflow as the typed document it is:
-
-```json
-{
-  "version": 3,
-  "graph": { "schema_version": 21, "ir_version": 1, "declarations": [] },
-  "nodes": {
-    "<node id>": {
-      "statement": { "SleepFor": { "String": "10ms" } },
-      "slots": [
-        { "path": [{ "expr": "operand" }], "variant": "String",
-          "expression": { "String": "10ms" } }
-      ]
-    }
-  }
-}
-```
-
-`graph` is the draft's own
-[`WorkflowGraph`](../../schemas/host/workflow-graph/). `nodes` is keyed by
-the ids of the served `WorkflowDocument`; each entry is the statement the
-node spells and every expression inside it, at any depth, as a slot: the
-typed slot `path` from the statement, the IR `variant` there and the
-`expression` itself. The statements of a container's child bodies are nodes
-of their own and are not listed as slots of the container. The outline above
-is abbreviated; the IR is `lash::vm::ir::Expr` in its serde form.
-
-`POST /workflow/edits` applies typed edits to the saved version as one
-transaction and publishes the result:
-
-```json
-{
-  "version": 3,
+  "version": 2,
   "edits": [
-    { "op": "replaceExpression", "node": "<node id>",
-      "slot": [{ "expr": "operand" }], "expression": { "String": "20ms" } },
-    { "op": "insertNode",
-      "body": { "kind": "child", "node": "<try node id>", "slot": "body" },
-      "statement": { "SleepFor": { "String": "5ms" } } }
+    { "replace_expression": {
+        "expression": { "unit": { "function": "onboarding" }, "path": [3, 0, 0] },
+        "with": { "literal": { "text": "Hello" } } } }
   ]
 }
 ```
 
-The response has the shape of a save's. There is one `op` for each
-`lash::workflow::WorkflowEdit`:
+`edits` is a list of `lash::workflow::edit::Edit` values; every site in it
+is a site of the saved version's document. The transaction applies whole or
+not at all. On success the draft is saved as the next version and published,
+and the response is `{ workflow, correspondence }`: `correspondence.entries`
+lists each surviving node as `{ from, to, edited }`. A node of the old
+version with no entry was removed; a site of the new version no entry ends
+at is new.
 
-| `op` | Fields |
+A refused transaction is HTTP 422 `edit_refused` with
+`details.diagnostics: [{ edit, site, message }]`, and the saved version is
+unchanged.
+
+## Running
+
+`POST /run` answers an SSE stream. Each `run_event` is:
+
+| Property | Meaning |
 | --- | --- |
-| `insertNode` | `body`, `before?`, `statement` |
-| `cloneNode`, `moveNode` | `node`, `body`, `before?` |
-| `removeNode` | `node` |
-| `replaceNode` | `node`, `statement` |
-| `replaceExpression` | `node`, `slot`, `expression` |
-| `setBinding` | `node`, `binding?` |
-| `renameBinding` | `binding`, `name` |
-| `setCondition` | `node`, `condition` |
-| `setLabel` | `target`, `label?` |
-| `setLoopBinding` | `node`, `element`, `authored_element?`, `bind?` |
-| `setCatch` | `node`, `binding?` |
-| `setFinally` | `node`, `present` |
-| `setBodyLayout` | `body`, `layout`: `{ form: "list", items, completion? }` with each item `{ node }` or `{ group: { items, value } }`, or `{ form: "statement", node }`; it names exactly the body's statements, in order |
-| `insertProcess` | `name`, `params`, `return_ty?` |
-| `removeProcess`, `renameProcess` | `process`, and `name` to rename |
-| `setProcessSignature` | `process`, `params`, `return_ty?` |
-| `setProcessWrapper` | `process`, `wrapper?` |
-| `insertFunction`, `replaceFunction` | `function` |
-| `removeFunction` | `name` |
-| `setPrivateBindings` | `bindings` |
+| `runId` | The process id. |
+| `workflowVersion`, `definition` | The saved version the run started from and the identity of the document it executes. |
+| `sequence` | The event's position in this stream. |
+| `site` | The site the event is about, a site of that document. Absent for the run as a whole. |
+| `status` | `started`, `waiting`, `succeeded` or `failed`. |
+| `displayDelta`, `display` | What this event changed in the host's display, and the display after it. |
+| `error` | Why a site or the run failed. |
+| `approvalKey` | The key to resolve when the run is parked on `host.approval`. |
 
-`node`, `process`, `target` and `before` are ids of the served document. A
-`body` is `{ "kind": "main" }`, `{ "kind": "process", "process": id }` or
-`{ "kind": "child", "node": id, "slot": name }` with the child group's slot
-name. A `binding` to rename is
-`{ "kind": "variable", "at": id, "name": name }`,
-`{ "kind": "nested", "node": id, "function": slot path, "name": name }` or
-`{ "kind": "function", "function": name, "name": name }`. Statements,
-expressions, targets, labels, parameters, types and functions are Lash IR as
-JSON. A refused transaction returns HTTP `422` as above and saves nothing.
-
-`POST /workflow/ir` with `{ "graph": <WorkflowGraph> }` opens a workflow
-given as a typed document, for example one a program generated, and returns
-its `WorkflowDocument`. The graph's version is checked first
-(`unsupported_schema_version`).
-
-## Running and SSE
-
-`POST /run` snapshots the current saved version, creates a new run, and
-responds with `Content-Type: text/event-stream`. Consume it with streaming
-`fetch`; browser `EventSource` cannot issue POST. Each Play click must make a
-new POST.
-
-Every SSE frame is named `run_event`; its SSE `id` equals `sequence`:
-
-```text
-event: run_event
-id: 7
-data: {"runId":"<process id>","workflowVersion":2,"definition":"<source identity>","sequence":7,"nodeId":"call:stable-id","status":"succeeded","displayDelta":{"messagesAppended":["Welcome"]},"display":{"messages":["Welcome"],"statuses":{},"lists":{},"lights":{},"progress":0.0}}
-```
-
-The data JSON shape is:
-
-```json
-{
-  "runId": "canonical durable process ID for this POST",
-  "workflowVersion": 2,
-  "definition": "source identity of the admitted artifact",
-  "sequence": 7,
-  "nodeId": "call:stable-id",
-  "status": "started",
-  "displayDelta": {
-    "messagesAppended": ["message"],
-    "statuses": { "phase": "starting" },
-    "listItemsAppended": { "steps": ["Approved"] },
-    "lights": { "ready": "green" },
-    "progress": 35.0,
-    "highlighted": "checklist"
-  },
-  "display": {
-    "messages": ["message"],
-    "statuses": { "phase": "starting" },
-    "lists": { "steps": ["Approved"] },
-    "lights": { "ready": "green" },
-    "progress": 35.0,
-    "highlighted": "checklist"
-  },
-  "error": "present only for failed"
-}
-```
-
-`status` is `started`, `succeeded`, `waiting`, or `failed`. Empty delta fields
-are omitted; `displayDelta` itself is always present. `display` is the full
-state after that event, which lets a client either apply deltas or replace its
-view. Sleep and ordinary deferred host calls produce `waiting`. Approval
-remains pending until the operator resolves it. Loop body nodes can produce
-multiple occurrences.
-Stream EOF means the run is complete; the correlated
-terminal node's `succeeded` event is the final normal event.
-
-Every emitted event carries the runtime site's `nodeId` directly. That id
-refers to a node in the exact saved graph version identified by
-`workflowVersion`; no pairing map or join helper is involved. `definition` is
-the source identity of the admitted artifact the run executes. Each saved
-version holds the definition its save published, so a run starts that
-definition and never selects a process by name. The overlay is folded over
-the document the process itself names, read from Lash; an observation of a
-site that document does not have ends the stream with a `run_error`. A
-client shows only events whose `definition` is its loaded document's and
-discards the rest. A preparation
-failure before SSE starts is JSON with HTTP `500`; an execution failure is a
-correlated `failed` event before EOF.
-
-## Toy display tools
-
-The in-process `display` module has no network or external dependencies:
-
-| Host tool call | Display effect |
-| --- | --- |
-| `display.show_message({ text })` | Append to `display.messages` |
-| `display.set_status({ key, value })` | Set `display.statuses[key]` |
-| `display.add_item({ list, item })` | Append to `display.lists[list]` |
-| `display.set_light({ name, state })` | Set `display.lights[name]` |
-| `display.set_progress({ pct })` | Clamp and set progress to 0–100 |
-| `display.highlight({ target })` | Set the highlighted panel/node |
-
-## Durable runs
-
-`POST /run` starts the definition the current saved version published, as a
-durable Lash process. Each SSE `run_event` retains the saved version and
-artifact identity; `runId` is the canonical process ID. Node statuses come
-from Lash's execution overlay
-(`lash::workflow::WorkflowExecutionOverlayAccumulator`), folded from the
-process's one recovering observation feed over the document the process
-names, and from the process's recorded effect outcomes. Display snapshots fold host-owned tool effects when the engine's language
-observation completes the call from its recorded result. Stable tool-call IDs
-correlate host records with graph nodes; retries reuse the same host record.
-Display delivery does not depend on the bounded per-node effect summary,
-so later loop occurrences continue to update the display.
-The example keeps those records in memory. A production host persists them
-before it prunes any process and maintains its own delivery ledger.
-A terminal process event closes the stream. A `run_error` SSE event reports a
-failed observation and does not end the durable process.
-
-A waiting event may include `approvalKey`, the host's completion key. The
-operator posts `{ "approved": true }` (or `false`) to `POST /approvals/{key}`.
-The host passes the result to `Completions::resolve`; an identical redelivery
-is accepted, while a conflicting or revoked resolution is refused. The key
-is disclosed after the wait commits. The host authorizes key access and
-chooses approval deadlines separately.
-Dropping a stream stops observation and leaves the process running.
+The last event has no `site` and carries the run's terminal status. A
+`run_error` event carries a message and ends the stream.

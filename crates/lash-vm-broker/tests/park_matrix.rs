@@ -59,8 +59,8 @@ use lash_kernel_vm::{
 };
 use lash_sansio::{SessionId, ToolCallId, ToolId, TurnId};
 use lash_vm_broker::kernel::{
-    AdmitAs, EFFECT_INTERRUPTED, EffectAdmission, EffectLedger, KernelBroker, KernelCeilings,
-    KernelEffects, KernelEnd, ParkSave, ParkedCheckpoint, Settled, datum_to_json,
+    AdmitAs, EFFECT_INTERRUPTED, EffectAdmission, EffectLedger, InProcess, KernelBroker,
+    KernelCeilings, KernelEffects, KernelEnd, ParkSave, ParkedCheckpoint, Settled, datum_to_json,
 };
 use lash_vm_broker::{
     CodeCallIdentities, Driven, DurableSnapshotStore, MemberDraft, OperationId, ParentFault,
@@ -243,6 +243,7 @@ impl Machine for FanOut {
             self.state.ended = true;
             return Ok(Step::Ended(End::Finished(Finished {
                 result: Datum::List(self.state.results.values().cloned().collect()),
+                finish: true,
                 bindings: Bindings::default(),
                 not_carried: Vec::new(),
             })));
@@ -591,15 +592,10 @@ impl Activation for ParkActivation {
                 }
                 continue;
             }
-            let run = broker
-                .run::<FanOut>(
-                    program(self.numbers),
-                    bounds(),
-                    start(),
-                    &mut NoReads,
-                    &CancellationToken::new(),
-                )
-                .await;
+            let machines =
+                InProcess::<FanOut, _>::new(program(self.numbers), bounds(), start(), NoReads)
+                    .expect("the document has an identity");
+            let run = broker.run(&machines, &CancellationToken::new()).await;
             match run {
                 Ok(KernelEnd::Ended(End::Finished(finished))) => {
                     self.shared.ends.lock().expect("ends").push(finished.result);

@@ -5,15 +5,12 @@ use lash::LashCore;
 use lash::persistence::ProcessStartReceipt;
 use lash::process::*;
 use lash::tracing::{TraceLanguageExecutionPayload, TraceNodeFact};
-use lash::vm::ir::{
-    AssignPathStep, Expr, WorkflowDeclaration, WorkflowNodeId, WorkflowProjection,
-    lifted_process_identity,
-};
+use lash::workflow::document::{Document, Name, Site};
+use lash::workflow::edit::{Correspondence, Draft};
 use lash::workflow::{
-    WorkflowCorrespondence, WorkflowCorrespondenceEntry, WorkflowDocumentRead, WorkflowDraft,
-    WorkflowDraftHandle, WorkflowEntry, WorkflowExecutionDocument,
-    WorkflowExecutionOverlayAccumulator, WorkflowGraph, WorkflowOverlayOccurrence,
-    WorkflowOverlaySettlement, WorkflowOverlayTerminal, WorkflowPublish,
+    WorkflowDocument, WorkflowDocumentRead, WorkflowEnvironment,
+    WorkflowExecutionOverlayAccumulator, WorkflowOverlayOccurrence, WorkflowOverlaySettlement,
+    WorkflowOverlayTerminal, WorkflowPublish,
 };
 use tokio::sync::mpsc;
 use tokio_stream::StreamExt as _;
@@ -24,16 +21,12 @@ use crate::{DisplayDelta, DisplayState, RunEvent, RunStatus};
 pub(crate) enum RunError {
     #[error(transparent)]
     Lash(#[from] lash::EmbedError),
-    #[error(transparent)]
-    Refused(#[from] lash::workflow::WorkflowAdmissionRefusal),
+    #[error("{0}")]
+    Refused(lash::workflow::WorkflowAdmissionRefusal),
     #[error(transparent)]
     Overlay(#[from] lash::workflow::WorkflowOverlayFoldError),
     #[error(transparent)]
-    Display(#[from] lash::vm::ExecutionHostError),
-    #[error(transparent)]
     Json(#[from] serde_json::Error),
-    #[error(transparent)]
-    Graph(#[from] lash::workflow::WorkflowGraphError),
     #[error("{0}")]
     Invalid(String),
 }
@@ -56,7 +49,7 @@ fn environment() -> ProcessExecutionEnvSpec {
 /// environment it starts under, and the pin that retains both.
 #[derive(Clone)]
 pub(crate) struct Published {
-    definition: ProcessDefinition,
+    pub(crate) definition: ProcessDefinition,
     env_ref: ProcessExecutionEnvRef,
     pub(crate) pin: HostArtifactPin,
 }
@@ -77,96 +70,47 @@ impl Published {
     }
 }
 
-/// A draft lash admitted: what it published, the admitted document, and the
-/// admitted id of every node the draft still holds.
+/// A draft lash admitted: what it published, and where each node of the
+/// draft's base is in the admitted document.
 pub(crate) struct Publication {
     pub(crate) published: Published,
-    pub(crate) graph: WorkflowGraph,
-    pub(crate) ids: BTreeMap<WorkflowDraftHandle, WorkflowNodeId>,
+    pub(crate) correspondence: Correspondence,
 }
 
-/// Where each node a correspondence still holds ended up.
-pub(crate) fn surviving_ids(
-    correspondence: &WorkflowCorrespondence,
-) -> BTreeMap<WorkflowDraftHandle, WorkflowNodeId> {
-    let mut ids = BTreeMap::new();
-    for entry in &correspondence.entries {
-        match entry {
-            WorkflowCorrespondenceEntry::Retained { handle, to, .. }
-            | WorkflowCorrespondenceEntry::Moved { handle, to, .. }
-            | WorkflowCorrespondenceEntry::Inserted { handle, to, .. } => {
-                ids.insert(*handle, to.clone());
-            }
-            WorkflowCorrespondenceEntry::Split { into, .. } => {
-                ids.extend(into.iter().cloned());
-            }
-            _ => {}
-        }
+/// What this host offers a workflow document: its effects with their
+/// signatures, and its library functions.
+pub(crate) async fn workflow_environment(core: &LashCore) -> Result<WorkflowEnvironment, RunError> {
+    core.host_artifacts()
+        .workflow_environment(&environment())
+        .await?
+        .ok_or_else(|| RunError::Invalid("this core reads no workflow documents".into()))
+}
+
+/// `document` with the manifest this host admits it under: every effect
+/// carries the signature the host offers it under, and every library
+/// function the code reaches is listed by identity.
+pub(crate) fn complete(
+    mut document: Document,
+    environment: &WorkflowEnvironment,
+) -> Result<Document, RunError> {
+    for (effect, signature) in &mut document.manifest.effects {
+        *signature = environment
+            .effects()
+            .get(effect)
+            .ok_or_else(|| RunError::Invalid(format!("this host offers no effect `{effect}`")))?
+            .clone();
     }
-    ids
+    document.manifest.functions =
+        lash::workflow::graph::requirements(&document, environment.functions()).functions;
+    Ok(document)
 }
 
-/// The host opens one top-level workflow for editing. Inline processes inside
-/// it remain part of its document, but are not the workflow selected to run.
-/// A document with several top-level workflows needs an explicit host choice.
-pub(crate) fn select_entry(draft: &WorkflowDraft) -> Result<WorkflowEntry, RunError> {
-    let program = lash::workflow::workflow_program_from_graph(draft.document())?;
-    let main = WorkflowProjection::for_main(&program);
-    // Source-authored drafts still bind process literals; admitted documents
-    // bind references instead. The projection supplies the literal's exact
-    // site, so its container is resolved without walking nested process bodies.
-    let bound_in_main = main
-        .body()
-        .statements
-        .iter()
-        .filter_map(|statement| {
-            let (expression, path) = match statement.expr {
-                Expr::LabelAnnotated { expr, .. } => (expr.as_ref(), statement.ast_path.child(0)),
-                expression => (expression, statement.ast_path.clone()),
-            };
-            let Expr::Assign { target, expr } = expression else {
-                return None;
-            };
-            let value_index = target
-                .steps
-                .iter()
-                .filter(|step| matches!(step, AssignPathStep::Index(_)))
-                .count() as u32;
-            match expr.as_ref() {
-                Expr::ProcessRef { process } => Some(process.to_string()),
-                Expr::ProcessLiteral(literal) => Some(lifted_process_identity(
-                    &literal.body,
-                    &path.child(value_index).steps,
-                )),
-                _ => None,
-            }
-        })
-        .collect::<BTreeSet<_>>();
-    let mut workflows = draft
-        .document()
-        .declarations
-        .iter()
-        .filter_map(|declaration| {
-            let WorkflowDeclaration::Process(process) = declaration else {
-                return None;
-            };
-            (process.origin.is_declared() || bound_in_main.contains(&process.name))
-                .then_some(process)
-        });
-    match (workflows.next(), workflows.next()) {
-        (Some(process), None) => Ok(WorkflowEntry::Process(process.id.clone())),
-        _ => Err(RunError::Invalid(
-            "open a document with one top-level workflow to select its entry".into(),
-        )),
-    }
-}
-
-/// Publishes the host-selected `entry` of `draft` under a pin of its own.
-/// Lash admits the document's IR against the run environment in its VM workers.
+/// Publishes entry `entry` of `draft` under a pin of its own. Lash admits
+/// the document against the run environment.
 pub(crate) async fn publish(
     core: &LashCore,
-    draft: &WorkflowDraft,
-    entry: WorkflowEntry,
+    draft: &Draft,
+    entry: &Name,
 ) -> Result<Publication, RunError> {
     let pin = HostArtifactPin::mint();
     let artifacts = core.host_artifacts();
@@ -184,8 +128,7 @@ pub(crate) async fn publish(
                         env_ref,
                         pin: pin.clone(),
                     },
-                    graph: publication.document.graph,
-                    ids: surviving_ids(&publication.correspondence),
+                    correspondence: publication.correspondence,
                 })
             }
             WorkflowPublish::Refused(refusal) => Err(RunError::Refused(refusal)),
@@ -267,7 +210,7 @@ pub(crate) async fn observe(
 async fn execution_document(
     core: &LashCore,
     view: &ProcessReadView,
-) -> Result<WorkflowExecutionDocument, RunError> {
+) -> Result<WorkflowDocument, RunError> {
     let ProcessReadView::Retained(view) = view else {
         return Err(RunError::Invalid(
             "the process is no longer retained".into(),
@@ -307,41 +250,30 @@ fn settlement(
 }
 
 /// One run as this host shows it: lash's execution overlay of the process,
-/// reduced to a status per node, beside the host's own display state.
+/// reduced to a status per site, beside the host's own display state.
 struct Overlay {
     accumulator: WorkflowExecutionOverlayAccumulator,
     process: lash::ProcessId,
     workflow_version: u64,
     definition: String,
-    root_node: String,
-    /// What each node was last sent as: its status and how many of its
+    /// What each site was last sent as: its status and how many of its
     /// occurrences had started and ended by then.
-    shown: BTreeMap<String, (RunStatus, u64, u64)>,
+    shown: BTreeMap<Site, (RunStatus, u64, u64)>,
     sequence: u64,
     display: DisplayState,
-    completed_calls: BTreeMap<String, String>,
+    completed_calls: BTreeMap<String, Site>,
     delivered: BTreeSet<String>,
     host: Arc<crate::display::HostTools>,
 }
 
 impl Overlay {
     fn new(
-        document: &WorkflowExecutionDocument,
+        document: &WorkflowDocument,
         process: lash::ProcessId,
         workflow_version: u64,
         host: Arc<crate::display::HostTools>,
     ) -> Result<Self, RunError> {
-        let definition = document
-            .graph()
-            .source_identity
-            .clone()
-            .ok_or_else(|| RunError::Invalid("the run's graph names no artifact".into()))?;
-        let root_node = document
-            .entry_name()
-            .and_then(|entry| document.graph().process(entry))
-            .ok_or_else(|| RunError::Invalid("the run's process has no graph".into()))?
-            .id
-            .to_string();
+        let definition = document.identity().to_string();
         let mut accumulator = WorkflowExecutionOverlayAccumulator::default();
         accumulator.set_document(document.overlay_document());
         Ok(Self {
@@ -349,7 +281,6 @@ impl Overlay {
             process,
             workflow_version,
             definition,
-            root_node,
             shown: BTreeMap::new(),
             sequence: 0,
             display: DisplayState::default(),
@@ -359,9 +290,10 @@ impl Overlay {
         })
     }
 
+    /// An event at `site`, or about the run as a whole when there is none.
     fn event(
         &mut self,
-        node_id: String,
+        site: Option<Site>,
         status: RunStatus,
         display_delta: DisplayDelta,
         error: Option<String>,
@@ -372,7 +304,7 @@ impl Overlay {
             workflow_version: self.workflow_version,
             definition: self.definition.clone(),
             sequence: self.sequence,
-            node_id,
+            site,
             status,
             display_delta,
             display: self.display.clone(),
@@ -381,13 +313,13 @@ impl Overlay {
         }
     }
 
-    /// The nodes whose state in lash's overlay changed since they were last
-    /// sent. A node shows its site in flight, else its latest ended one.
+    /// The sites whose state in lash's overlay changed since they were last
+    /// sent. A site shows its task in flight, else its latest ended one.
     fn changed(&mut self) -> Vec<RunEvent> {
         let Some(overlay) = self.accumulator.snapshot() else {
             return Vec::new();
         };
-        let mut nodes = BTreeMap::<&str, (u8, RunStatus, Option<String>, u64, u64)>::new();
+        let mut nodes = BTreeMap::<Site, (u8, RunStatus, Option<String>, u64, u64)>::new();
         for site in &overlay.sites {
             let (rank, status, error) = match &site.state.occurrence {
                 WorkflowOverlayOccurrence::Unobserved => continue,
@@ -406,7 +338,7 @@ impl Overlay {
                 },
             };
             let node = nodes
-                .entry(site.site.node_id.as_str())
+                .entry(site.site.site.clone())
                 .or_insert((0, status, None, 0, 0));
             if rank > node.0 {
                 (node.0, node.1, node.2) = (rank, status, error);
@@ -417,11 +349,11 @@ impl Overlay {
         let mut events = Vec::new();
         for (node, (_, status, error, started, ended)) in nodes {
             let shown = (status, started, ended);
-            if self.shown.get(node) == Some(&shown) {
+            if self.shown.get(&node) == Some(&shown) {
                 continue;
             }
-            self.shown.insert(node.to_owned(), shown);
-            events.push(self.event(node.to_owned(), status, DisplayDelta::default(), error));
+            self.shown.insert(node.clone(), shown);
+            events.push(self.event(Some(node), status, DisplayDelta::default(), error));
         }
         events
     }
@@ -450,7 +382,7 @@ impl Overlay {
                 events.extend(self.changed());
                 events.extend(self.deliver_display()?);
                 events.push(self.event(
-                    self.root_node.clone(),
+                    None,
                     status,
                     DisplayDelta::default(),
                     (status == RunStatus::Failed).then(|| format!("{outcome:?}")),
@@ -461,14 +393,14 @@ impl Overlay {
         Ok(events)
     }
 
-    /// A committed effect outcome: durable evidence of one call of a node,
+    /// A committed effect outcome: durable evidence of one call at a site,
     /// which outlives the provisional overlay.
     fn effect(&mut self, occurrence: &ProcessEffectOccurrence) -> Vec<RunEvent> {
         let status = match occurrence.outcome_class {
             ProcessEffectOutcomeClass::Success => {
                 if let Some(call) = &occurrence.call_id {
                     self.completed_calls
-                        .insert(call.to_string(), occurrence.at.site.node_id.to_string());
+                        .insert(call.to_string(), occurrence.at.site.clone());
                 }
                 RunStatus::Succeeded
             }
@@ -477,7 +409,7 @@ impl Overlay {
             }
         };
         vec![self.event(
-            occurrence.at.site.node_id.to_string(),
+            Some(occurrence.at.site.clone()),
             status,
             DisplayDelta::default(),
             occurrence.code.as_ref().map(ToString::to_string),
@@ -486,7 +418,7 @@ impl Overlay {
 
     fn waiting(&mut self, wait: &WaitState) -> RunEvent {
         let mut event = self.event(
-            self.root_node.clone(),
+            wait.site.as_ref().map(|at| at.site.clone()),
             RunStatus::Waiting,
             DisplayDelta::default(),
             None,
@@ -507,12 +439,13 @@ impl Overlay {
                 break;
             };
             self.delivered.insert(operation.call_id.clone());
-            let (_, delta) = crate::display::apply_tool(
+            let delta = crate::display::apply_tool(
                 &mut self.display,
                 &operation.operation,
-                &[lash::vm::from_json(operation.args)],
-            )?;
-            events.push(self.event(node, RunStatus::Succeeded, delta, None));
+                &operation.args,
+            )
+            .map_err(RunError::Invalid)?;
+            events.push(self.event(Some(node), RunStatus::Succeeded, delta, None));
         }
         Ok(events)
     }
@@ -553,7 +486,7 @@ impl Overlay {
         } else {
             events.push(
                 self.event(
-                    self.root_node.clone(),
+                    None,
                     status,
                     DisplayDelta::default(),
                     view.process
@@ -581,17 +514,13 @@ impl Overlay {
         } = &observation.execution.payload
         {
             self.completed_calls
-                .insert(call.to_string(), at.site.node_id.to_string());
+                .insert(call.to_string(), at.site.clone());
         }
         self.accumulator.observe(observation)?;
         let mut events = self.changed();
         events.extend(self.deliver_display()?);
         Ok(events)
     }
-}
-
-pub(crate) fn host_environment() -> lash::vm::LashVmHostEnvironment {
-    crate::operations::host_environment()
 }
 
 /// The example's engine and the host tools whose effect ledger it observes.
@@ -609,23 +538,17 @@ impl WorkflowHost {
 
 pub fn core(backend: lash::Backend) -> lash::Result<WorkflowHost> {
     let tools = Arc::new(crate::display::HostTools::default());
-    let mut config = lash::rlm::RlmProtocolPluginConfig::builder()
+    let config = lash::rlm::RlmProtocolPluginConfig::builder()
         .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
         .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
         .channel(lash::rlm::RlmChannel::Cell)
         .build();
 
-    config.lash_vm_language_features = lash::vm::LashVmLanguageFeatures::default()
-        .with_label_annotations()
-        .into();
-    let factory = lash::rlm::RlmProtocolPluginFactory::new(
-        config,
-        Arc::new(lash::rlm::TypescriptDialect),
-        &backend,
-    );
+    let factory =
+        lash::rlm::RlmProtocolPluginFactory::new(config, lash::rlm::CellDialect::typescript());
     let core = LashCore::rlm_builder(backend, factory)
         .tools(Arc::new(lash::tools::StaticToolProvider::new(
-            crate::operations::tool_definitions(),
+            crate::display::tool_definitions(),
             tools.as_ref().clone(),
         )))
         .trace_level(lash::tracing::TraceLevel::Extended)

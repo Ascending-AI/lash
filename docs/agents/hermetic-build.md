@@ -813,7 +813,7 @@ publication. The trusted facade seal stays `//crates/lash:ui_fixtures`, comparin
 the same `.stderr` pins. Beside it, `//crates/lash:facade_completeness` runs
 `scripts/facade_completeness.py` over the `doc-json` subtarget (rustdoc JSON)
 of the facade and every first-party library in its closure; `[facade]` in
-`tools/buck2/package-policy.toml` names the package. Runtime trybuild, workflow-graph frontend gates and
+`tools/buck2/package-policy.toml` names the package. Runtime trybuild and
 Git-consumer checks retain their supported recipes. Workbench
 projection remains a declared pool test with pinned Node; full browser/service
 E2E remains separate.

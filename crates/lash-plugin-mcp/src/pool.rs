@@ -1532,8 +1532,3 @@ mod tests;
 #[cfg(test)]
 #[path = "catalog_peer_tests.rs"]
 mod catalog_peer_tests;
-
-#[cfg(test)]
-#[cfg(feature = "lash-vm")]
-#[path = "naming_cell_tests.rs"]
-mod naming_cell_tests;

@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::PoolError;
-use lash_vm_protocol::{ProtocolBounds, VmLimits};
+use lash_vm_protocol::{ProtocolBounds, RunBounds};
 
 /// An explicit helper executable, or the host executable with an early entry.
 #[derive(Clone, Debug)]
@@ -66,26 +66,24 @@ pub struct WorkerTuning {
     /// Parent reads while idle or awaiting a host projection. This is not compute spend.
     pub parent_wait: Duration,
     pub inbound_buffer_bytes: std::num::NonZeroUsize,
-    pub linked_program_cache_capacity: usize,
-    pub compiled_process_cache_capacity: usize,
     pub parser_stack_base_bytes: usize,
     pub parser_stack_bytes_per_source_byte: usize,
-    pub vm_pacing: lash_vm::VmPacing,
+    /// The charge units one `Run` exchange may spend before the machine
+    /// returns to the parent, where a run cancel is observed.
+    pub slice: u64,
 }
 impl WorkerTuning {
-    /// Existing presets: parent wait 86,400 s; inbound buffer 16 KiB; both
-    /// caches 64 entries; parser stack 8 MiB plus 40,000 bytes/source byte;
-    /// [`lash_vm::VmPacing::standard`]. Parser slope is measured at 1.8x the
-    /// worst observed frames; the other working values have no workload measurements.
+    /// Existing presets: parent wait 86,400 s; inbound buffer 16 KiB; parser
+    /// stack 8 MiB plus 40,000 bytes/source byte; a slice of one million
+    /// charge units. Parser slope is measured at 1.8x the worst observed
+    /// frames; the other working values have no workload measurements.
     pub const fn standard() -> Self {
         Self {
             parent_wait: Duration::from_secs(86_400),
             inbound_buffer_bytes: std::num::NonZeroUsize::MIN.saturating_add(16 * 1024 - 1),
-            linked_program_cache_capacity: 64,
-            compiled_process_cache_capacity: 64,
             parser_stack_base_bytes: 8 * 1024 * 1024,
             parser_stack_bytes_per_source_byte: 40_000,
-            vm_pacing: lash_vm::VmPacing::standard(),
+            slice: 1_000_000,
         }
     }
 }
@@ -103,7 +101,8 @@ pub struct PoolConfig {
     pub max_queue_items: usize,
     pub max_queue_bytes: usize,
     pub protocol: ProtocolBounds,
-    pub vm_limits: VmLimits,
+    /// The most any run's bounds may allow.
+    pub run_bounds: RunBounds,
     pub deadlines: Deadlines,
     pub tuning: WorkerTuning,
     pub restart_window: Duration,
@@ -113,7 +112,8 @@ pub struct PoolConfig {
 impl PoolConfig {
     /// Prewarm one process, admit at most four, and bound waiting input to
     /// two items and eight MiB. Protocol bounds use `ProtocolBounds::standard`;
-    /// VM bounds are 50 million instructions, 64 MiB and 1,024 frames;
+    /// run bounds are 50 million charge units, 64 MiB, 1,024 nested calls,
+    /// 1,024 live tasks, 256 requests a park and 1,024 members a join;
     /// deadlines use `Deadlines::standard`; restarts allow eight per 60 seconds;
     /// working policy uses `WorkerTuning::standard`. FIG-4157/4162 measured
     /// synthetic workloads, not optimal concurrency or arbitrary guest spend.
@@ -125,10 +125,13 @@ impl PoolConfig {
             max_queue_items: 2,
             max_queue_bytes: 8 * 1024 * 1024,
             protocol: ProtocolBounds::standard(),
-            vm_limits: VmLimits {
-                instruction_budget: Some(50_000_000),
-                memory_limit_bytes: Some(64 * 1024 * 1024),
-                max_frame_depth: 1024,
+            run_bounds: RunBounds {
+                charge: 50_000_000,
+                memory: 64 * 1024 * 1024,
+                call_depth: 1024,
+                live_tasks: 1024,
+                requests_per_park: 256,
+                join_members: 1024,
             },
             deadlines: Deadlines::standard(),
             tuning: WorkerTuning::standard(),
@@ -162,9 +165,13 @@ impl PoolConfig {
             || self.protocol.decode.max_depth == 0
             || self.protocol.decode.max_nodes == 0
             || self.protocol.decode.max_allocation_bytes == 0
-            || self.vm_limits.max_frame_depth == 0
-            || self.vm_limits.instruction_budget == Some(0)
-            || self.vm_limits.memory_limit_bytes == Some(0)
+            || self.tuning.slice == 0
+            || self.run_bounds.charge == 0
+            || self.run_bounds.memory == 0
+            || self.run_bounds.call_depth == 0
+            || self.run_bounds.live_tasks == 0
+            || self.run_bounds.requests_per_park == 0
+            || self.run_bounds.join_members == 0
             || self.max_workers == 0
             || self.min_workers > self.max_workers
             || self.max_restarts == 0

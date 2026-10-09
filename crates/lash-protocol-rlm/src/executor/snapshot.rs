@@ -10,71 +10,17 @@ use thiserror::Error;
 ///
 /// version_guard(
 ///     shapes(
-///         path = "crates/lash-protocol-rlm/src/executor/state.rs",
-///         path = "crates/lash-vm-runtime/src/deferred.rs",
+///         path = "crates/lash-protocol-rlm/src/executor/session.rs",
+///         path = "crates/lash-protocol-rlm/src/deferred.rs",
 ///         cover(RlmSnapshotRoot),
 ///     ),
 ///     roots(path = "crates/lash-rlm-types/src/lib.rs", RlmProjectedSeedEntry),
 ///     roots(path = "crates/lash-sansio/src/causal.rs", CausalRef),
 /// )
-// v26 carries Lash VM snapshot v13 and VM continuation v25, whose heaps may
-// hold a binding cell (FIG-3707). A v25 body embeds the v12/v24 substrate
-// shapes this reader does not decode, so the boundary is a version.
-// v25 carries Lash VM snapshot v12 and VM continuation v24, whose heaps may
-// hold a built-in method value (`'x'.includes`, FIG-3701). A v24 body embeds
-// the v11/v23 substrate shapes this reader does not decode, so the boundary is
-// a version.
-// v24 carries Lash VM snapshot v11 and VM continuation v22, whose closures
-// carry their own `name`/`length` metadata (FIG-3655). A v23 body embeds the
-// v10/v21 substrate shapes this reader does not decode, so the boundary is a
-// version.
-// v23 persists the session's runtime roots and heap instead of their host
-// view (FIG-3605, FIG-3606). The root carries LashVm's durable heap header
-// and each binding's body is a durable fragment — the binding's value and the
-// heap objects it carries — so a `Map`, `Set`, `Date`, `RegExp`, `URL` or
-// `URLSearchParams`, one object named by two bindings, and an object's
-// property order all survive a reload. A v22 body is a one-binding host-view
-// snapshot that this reader does not decode, so the boundary is a version.
-// v22 nests ToolDefinition's manifest and contract under named fields instead
-// of `serde(flatten)`, so the canonical pre-pass can declare field order
-// through the whole envelope (FIG-1210). A pre-cutover flat definition fails
-// decode rather than being normalized, so the boundary is a version.
-// v21 carries VM continuation v14 and bytecode v15. TypeScript is the only RLM
-// language (ADR 0096), so the instruction set loses the deep-copy instructions
-// the retired surface compiled to: a snapshot written before the cutover parks
-// a continuation over an instruction stream this reader cannot reproduce, so
-// the boundary is a version rather than a decode failure.
-// v20 pins the attempt bound this execution stamps onto the children its code
-// starts. An older reader would drop the pin and let a redrive re-resolve the
-// host default, which re-registers an existing child with a different
-// fingerprint, so the boundary is a version rather than an optional field.
-// v19 adds a dedicated durable deferred-trigger definition record. Older
-// readers cannot preserve its provider route or distinguish it from tool
-// authority, so this is an explicit drain-or-recreate boundary.
-// v18 carries admitted effect addresses and independently optional attribution
-// through deferred protocol state. Older snapshots fail closed rather than
-// inventing an execution scope or session owner.
-// v17 cuts serialized protocol driver scratch state over to its collapsed
-// step representation: typed failure state and a required code field. Older
-// snapshots fail closed with the standard drain-or-recreate remedy.
-// v16 cuts the projection reference carrier over to the shared typed seed
-// entry family used by durable RLM seed events. Older snapshots fail closed
-// with the standard drain-or-recreate remedy.
-// v14 removes the obsolete guest scratch-file section. Older snapshots fail
-// closed with the standard drain-or-recreate remedy.
-// v13 carries Lash VM snapshot v7 and VM continuation v8: a heap error's brand
-// serializes by name, and the two substrate-minted brands are names an older
-// reader cannot decode, so the boundary has to be a version and not a decode
-// failure.
-// v12 carried Lash VM snapshot v6 and its durable RegExpMatch heap kind.
-// v11 carried Lash VM snapshot v5, whose stricter heap reference wire shape
-// changes embedded global bytes and therefore their component identities.
-// v10 added serializable lash_vm call frames and closure heap objects. v9 was
-// one shape carrying two changes that each claimed v8 independently:
-// the inline-versus-leaf size line applies to globals and files alike, and a
-// persisted value body is the canonical Lash VM envelope, which now carries
-// heap meters. Neither v8 is decodable — a store written by either one drains
-// or is recreated, like every version boundary before it.
+// The root is a session's bindings in the kernel's parked-run terms: a
+// header and one fragment per binding (`lash-kernel-state`), each fragment
+// inline or a content-addressed leaf. The kernel version the header states
+// is the kernel's own; this version covers the root that carries it.
 #[cfg(not(feature = "synthetic-next"))]
 /// version_surface = "migrate"
 /// format_manifest = "RlmSnapshotEnvelope"
@@ -92,31 +38,25 @@ const CUTOVER_REMEDY: &str = "drain in-flight sessions on the old build before d
 
 #[derive(Debug, Error)]
 pub(crate) enum RlmSnapshotError {
-    #[error("worker snapshot service is unavailable: {0}")]
-    WorkerUnavailable(lash_vm_client::PoolError),
-    #[error("RLM snapshot envelope exceeds the maximum MessagePack nesting depth of {limit}")]
-    EnvelopeDepthLimitExceeded { limit: usize },
-    #[error("non-canonical RLM snapshot envelope at `{location}`: {reason}")]
-    NonCanonicalEnvelope { location: String, reason: String },
-    #[error(
-        "RLM snapshot format is incompatible with canonical typed MessagePack: {details}; {CUTOVER_REMEDY}"
-    )]
+    #[error("RLM snapshot root is not this build's: {details}; {CUTOVER_REMEDY}")]
     FormatMismatch { details: String },
     #[error(
         "RLM snapshot version {found} is incompatible with version {expected}; {CUTOVER_REMEDY}"
     )]
     VersionMismatch { expected: u32, found: u32 },
-    #[error("RLM snapshot engine `{found}` is unsupported; expected `{expected}`")]
-    EngineMismatch { expected: String, found: String },
     #[error(
-        "RLM snapshot logical key `{logical_key}` references missing leaf component `{component}`"
+        "RLM snapshot was recorded by a `{found}` session; this session's dialect is `{expected}`"
+    )]
+    DialectMismatch { expected: String, found: String },
+    #[error(
+        "RLM snapshot binding `{logical_key}` references missing leaf component `{component:?}`"
     )]
     MissingLeaf {
         logical_key: String,
         component: lash_core::plugin::ExecutionLeafName,
     },
     #[error(
-        "RLM snapshot logical key `{logical_key}` references leaf component `{component}` whose content address is `{actual_component}`"
+        "RLM snapshot binding `{logical_key}` references leaf component `{component:?}` whose content address is `{actual_component:?}`"
     )]
     LeafHashMismatch {
         logical_key: String,
@@ -130,17 +70,12 @@ pub(crate) enum RlmSnapshotError {
         missing: Vec<lash_core::plugin::ExecutionLeafName>,
         unexpected: Vec<lash_core::plugin::ExecutionLeafName>,
     },
-    #[error("RLM canonical Lash VM snapshot is invalid: {0}")]
-    LashVm(#[from] lash_vm::SnapshotDecodeError),
+    #[error("RLM session bindings are not a kernel state this build reads: {0}")]
+    Kernel(#[from] lash_kernel_state::LoadError),
 }
 
 impl From<RlmSnapshotError> for lash_core::SessionError {
     fn from(error: RlmSnapshotError) -> Self {
-        match error {
-            RlmSnapshotError::WorkerUnavailable(error) => {
-                Self::Plugin(lash_core::PluginError::Runtime(error.into_runtime_error()))
-            }
-            error => Self::Protocol(error.to_string()),
-        }
+        Self::Protocol(error.to_string())
     }
 }

@@ -14,7 +14,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::{DateTime, Utc};
-use lash_sansio::WorkflowSiteRef;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
@@ -207,8 +206,8 @@ impl DocumentState {
     }
 
     /// Whether `site` belongs to `document`. One that does not is reported.
-    fn admits(&mut self, document: &WorkflowOverlayDocument, site: &WorkflowSiteRef) -> bool {
-        let known = document.contains(site);
+    fn admits(&mut self, document: &WorkflowOverlayDocument, site: &WorkflowTaskSite) -> bool {
+        let known = document.contains(&site.site);
         if !known {
             self.report(WorkflowOverlayMismatch::SiteOutsideDocument { site: site.clone() });
         }

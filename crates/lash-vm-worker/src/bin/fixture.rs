@@ -54,60 +54,10 @@ fn main() {
         return;
     }
     let mut started = false;
-    let mut cpu_ceiling = None;
     let mut hook = |message: &lash_vm_protocol::ParentMessage| {
-        #[cfg(target_os = "linux")]
-        if let lash_vm_protocol::ParentMessage::EffectResponse(response) = message {
-            let phase = match (mode, &response.outcome) {
-                (
-                    "native_oom_compute",
-                    lash_vm_protocol::EffectOutcome::Checkpoint { cancelled: false },
-                ) => Some("compute_before_effect_dispatch"),
-                ("native_oom_recorded", lash_vm_protocol::EffectOutcome::Value(_)) => {
-                    Some("recorded_effect_before_delivery")
-                }
-                _ => None,
-            };
-            if let Some(phase) = phase {
-                assert!(
-                    started,
-                    "allocation failure belongs to a running computation"
-                );
-                native_allocation_failure(args.get(2).expect("allocation witness path"), phase);
-            }
-        }
-        if mode == "cpu_ceiling"
-            && matches!(message, lash_vm_protocol::ParentMessage::EffectResponse(_))
-        {
-            let mut limit = libc::rlimit {
-                rlim_cur: 0,
-                rlim_max: 0,
-            };
-            #[expect(unsafe_code, reason = "the fixture observes its own kernel CPU bound")]
-            let result = unsafe { libc::getrlimit(libc::RLIMIT_CPU, &mut limit) };
-            assert_eq!(result, 0);
-            if let Some(previous) = cpu_ceiling {
-                assert_eq!(
-                    limit.rlim_cur, previous,
-                    "effect responses must not renew the checkout CPU bound"
-                );
-            } else {
-                assert!(limit.rlim_cur > 1 && limit.rlim_cur < libc::RLIM_INFINITY);
-                // Tighten the finite bound by one second. Any renewal from
-                // current CPU usage would raise it again, even without burning
-                // CPU or depending on the host giving us a scheduling slice.
-                limit.rlim_cur -= 1;
-                #[expect(
-                    unsafe_code,
-                    reason = "the fixture tightens its own kernel CPU bound to detect a renewal"
-                )]
-                let result = unsafe { libc::setrlimit(libc::RLIMIT_CPU, &limit) };
-                assert_eq!(result, 0);
-                cpu_ceiling = Some(limit.rlim_cur);
-            }
-        }
-        if mode == "abort" && matches!(message, lash_vm_protocol::ParentMessage::EffectResponse(_))
-        {
+        // `abort` dies in the middle of a run: at the first outcome the
+        // parent hands back.
+        if mode == "abort" && matches!(message, lash_vm_protocol::ParentMessage::Deliver { .. }) {
             std::process::abort();
         }
         if matches!(message, lash_vm_protocol::ParentMessage::Reset) {
@@ -143,67 +93,4 @@ fn main() {
         Ok(true) => {}
         _ => std::process::exit(1),
     }
-}
-
-#[cfg(target_os = "linux")]
-#[expect(
-    clippy::disallowed_methods,
-    reason = "the child fault fixture records its allocator refusal before aborting"
-)]
-fn native_allocation_failure(path: &str, phase: &str) {
-    use std::alloc::{Layout, handle_alloc_error};
-    use std::io::Write;
-
-    let mut witness = match std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(path)
-    {
-        Ok(file) => file,
-        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => return,
-        Err(error) => panic!("allocation witness: {error}"),
-    };
-    let layout = Layout::from_size_align(16 * 1024 * 1024, 16).expect("bounded allocation");
-    let receipt = format!(
-        "{{\"phase\":\"{phase}\",\"pid\":{},\"requested_bytes\":{},\"address_space_ceiling_bytes\":0,\"allocation_failed\":true,\"errno\":{}}}",
-        std::process::id(),
-        layout.size(),
-        libc::ENOMEM,
-    );
-    let mut limit = libc::rlimit {
-        rlim_cur: 0,
-        rlim_max: 0,
-    };
-    // SAFETY: this is the disposable child. The ceiling prevents new mappings,
-    // preserving existing memory, and cannot change the parent's limits.
-    #[expect(
-        unsafe_code,
-        reason = "test-only memory ceiling forces a bounded child allocation to fail without exhausting the host"
-    )]
-    unsafe {
-        assert_eq!(libc::getrlimit(libc::RLIMIT_AS, &mut limit), 0);
-        limit.rlim_cur = 0;
-        assert_eq!(libc::setrlimit(libc::RLIMIT_AS, &limit), 0);
-        let pointer = libc::mmap(
-            std::ptr::null_mut(),
-            layout.size(),
-            libc::PROT_READ | libc::PROT_WRITE,
-            libc::MAP_PRIVATE | libc::MAP_ANONYMOUS,
-            -1,
-            0,
-        );
-        let errno = std::io::Error::last_os_error().raw_os_error();
-        if pointer != libc::MAP_FAILED {
-            libc::munmap(pointer, layout.size());
-            panic!("the child ceiling did not refuse its native allocation");
-        }
-        assert_eq!(errno, Some(libc::ENOMEM));
-    }
-    witness
-        .write_all(receipt.as_bytes())
-        .expect("allocation failure evidence");
-    witness
-        .sync_all()
-        .expect("retain allocation failure evidence");
-    handle_alloc_error(layout);
 }

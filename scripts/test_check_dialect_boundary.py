@@ -21,15 +21,15 @@ FIXTURE_TAG = "<" + "seam>"
 
 CLEAN = {
     ADAPTER: (
-        "pub struct TypescriptDialect;\n"
-        "impl Dialect for TypescriptDialect {}\n"
+        "pub struct TypescriptPrompts;\n"
+        "impl DialectPrompts for TypescriptPrompts {}\n"
         "const OPEN: &str = \"<typescript>\";\n"
-        "fn x() { TypescriptDialect::parse; }\n"
+        "fn x() { TypescriptPrompts::parse; }\n"
     ),
     SHARED: "pub(crate) fn render() -> &'static str { \"shape\" }\n",
     HOST: (
-        "use lash::rlm::TypescriptDialect;\n"
-        "fn host() { factory(config, Arc::new(TypescriptDialect), &backend); }\n"
+        "use lash::rlm::TypescriptPrompts;\n"
+        "fn host() { factory(config, CellDialect::typescript()); }\n"
     ),
     FIXTURE_TEST: (
         f"struct {FIXTURE_NAME};\n"
@@ -40,7 +40,7 @@ CLEAN = {
         "fn prompt() {}\n"
         "#[cfg(test)]\n"
         "mod tests {\n"
-        "    fn t() { let _ = \"<typescript>\"; let _ = TypescriptDialect::default(); }\n"
+        "    fn t() { let _ = \"<typescript>\"; let _ = TypescriptPrompts::default(); }\n"
         "}\n"
     ),
     "docs/adr/0096-typescript-is-the-sole-rlm-dialect.md": (
@@ -117,9 +117,9 @@ class DialectBoundaryTests(unittest.TestCase):
 
     def test_the_concrete_type_carried_outside_the_adapter_fails(self) -> None:
         for line in (
-            "struct Driver { dialect: Arc<TypescriptDialect> }",
-            "fn render(dialect: &TypescriptDialect) {}",
-            "fn parse() { TypescriptDialect::parse_source(\"\"); }",
+            "struct Driver { dialect: Arc<TypescriptPrompts> }",
+            "fn render(dialect: &TypescriptPrompts) {}",
+            "fn parse() { TypescriptPrompts::parse_source(\"\"); }",
         ):
             with self.subTest(line=line):
                 self.assert_fails(

@@ -1,6 +1,7 @@
 //! A seam proof, not a language: the smallest code-mode dialect that shows a
-//! second front end plugs into the host through the public `Dialect` seam.
-//! The host adapter selects the compiled worker that owns its source parser.
+//! second front end plugs into the host through the public dialect seam:
+//! [`cell_dialect`] names the package the test worker installs and words
+//! its prompts, and [`worker_service`] selects that worker.
 //! Both live only in this test target.
 //!
 //! One statement per line, two forms:
@@ -11,8 +12,9 @@
 //! ```
 
 use lash::rlm::{
-    CellTags, Dialect, DialectPromptVocabulary, DialectRefusal, DialectRefusalKind,
-    ExecutionSection, ExecutionSectionRequest, ResolvedToolBinding, RlmChannel, SchemaShape,
+    CellDialect, CellTags, DialectPromptVocabulary, DialectPrompts, DialectRefusal,
+    DialectRefusalKind, ExecutionSection, ExecutionSectionRequest, ResolvedToolBinding, RlmChannel,
+    SchemaShape,
 };
 
 pub const LANGUAGE_ID: &str = "seam-proof";
@@ -22,18 +24,24 @@ pub const CELL_TAGS: CellTags = CellTags {
     close: "</seam>",
 };
 
-pub struct SeamProofDialect;
+/// The seam-proof dialect as a host selects it.
+pub fn cell_dialect() -> CellDialect {
+    CellDialect::new(
+        LANGUAGE_ID,
+        lash::workflow::document::NumberPolicy::Float,
+        std::sync::Arc::new(SeamProofPrompts),
+    )
+}
 
-impl Dialect for SeamProofDialect {
-    fn language_id(&self) -> &'static str {
-        LANGUAGE_ID
-    }
+/// The worker pool whose entry installs the seam-proof package.
+pub fn worker_service() -> lash::vm::WorkerService {
+    let entry = lash::vm::WorkerEntry::helper(super::worker_executable());
+    lash::vm::WorkerService::new(lash::vm::WorkerPoolConfig::standard(entry))
+}
 
-    fn worker_service(&self) -> lash::vm::WorkerService {
-        let entry = lash::vm::WorkerEntry::helper(super::worker_executable());
-        lash::vm::WorkerService::new(lash::vm::WorkerPoolConfig::standard(entry))
-    }
+struct SeamProofPrompts;
 
+impl DialectPrompts for SeamProofPrompts {
     fn tool_call_path(&self, binding: &ResolvedToolBinding) -> Result<String, DialectRefusal> {
         let path = binding.call_path();
         if path.split('.').all(is_name) {
@@ -83,6 +91,8 @@ impl Dialect for SeamProofDialect {
             continue_as_call: "take r from control.continue_as WITH {...}",
             continue_as_example: r#"take r from control.continue_as WITH {"task": "go on"}"#,
             field_miss_rule: "Use only the field names listed below.",
+            not_carried_repair: "Take the value again in this cell.",
+            unjoined_task_repair: "Take every result before the cell ends.",
         }
     }
 

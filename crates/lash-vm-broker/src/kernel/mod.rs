@@ -9,8 +9,8 @@
 //! - [`store`]: the park transaction (saved state and the admission of
 //!   every effect requested since the last park, together), delivery of
 //!   committed outcomes in any order, and settlement over tasks.
-//! - [`run`]: the loop that drives a [`Machine`](lash_kernel_vm::Machine)
-//!   through its parks, and resumes one from its checkpoint.
+//! - [`run`]: the loop that drives a machine through its parks, in this
+//!   process or in a worker, and resumes one from its checkpoint.
 //! - [`value`]: effect values as JSON text, every number carried as
 //!   written.
 
@@ -23,9 +23,12 @@ pub use ledger::{
     AdmittedEffect, EffectLedger, LedgerRefusal, ParkedCheckpoint, PendingEffect, RecordedBound,
     RecordedEnd, Standing,
 };
-pub use run::{KernelBroker, KernelCeilings, KernelEffects, KernelEnd, KernelFailure, park_bound};
+pub use run::{
+    DrivenMachine, InProcess, InProcessMachine, KernelBroker, KernelCeilings, KernelEffects,
+    KernelEnd, KernelFailure, Machines, park_bound,
+};
 pub use store::{
     AdmitAs, EFFECT_CANCELLED, EFFECT_FAILED, EFFECT_INTERRUPTED, EFFECT_RESULT, EFFECT_TIMED_OUT,
-    EffectAdmission, EndSave, ParkSave, Saved, Settled, outcome_of,
+    EffectAdmission, EndSave, OutcomeOf, ParkSave, Saved, Settled, outcome_of,
 };
 pub use value::{InvalidJson, JsonlessKind, NotJson, datum_from_json, datum_to_json};

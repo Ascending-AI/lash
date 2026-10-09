@@ -5,7 +5,7 @@ pub(crate) struct LanguageCallAttribution {
     pub language: String,
     pub identity: lash_trace::TraceLanguageExecutionIdentity,
     /// The occurrence of the call's site.
-    pub at: lash_sansio::WorkflowOccurrence,
+    pub at: lash_sansio::EffectIdentity,
 }
 
 pub(crate) type LanguageCallAttributions = std::sync::Arc<
@@ -71,7 +71,7 @@ impl<'scope> ProcessOpScope<'scope> {
                     }
                     _ => None,
                 },
-                graph_node_id: Some(call.at.site.node_id.to_string()),
+                graph_node_id: Some(call.at.site.to_string()),
                 ..Default::default()
             };
             let event = lash_trace::TraceLanguageExecution {

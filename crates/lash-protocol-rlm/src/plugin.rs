@@ -20,11 +20,8 @@ pub use config_owner::{
     RlmConfigOwner, RlmConfigRefusal, RlmCreateConfig, RlmRecordedConfig, RlmRenderRefusal,
     RlmRunOptions, SetRlmRender,
 };
-pub use config_types::{ExecutionBounds, InstructionBound, MemoryBound, RlmLanguageFeatures};
-pub use factory::{
-    LashVmCompileSurface, LashVmCompileSurfaceRequest, LashVmModuleCompileError,
-    LashVmModuleCompileRequest, ModuleCompileOutput, RlmProtocolPluginFactory, rlm_lash_vm_surface,
-};
+pub use config_types::{ExecutionBounds, InstructionBound, MemoryBound};
+pub use factory::RlmProtocolPluginFactory;
 pub use protocol_session::{RlmSessionConfigDecodeError, rlm_session_config};
 
 mod channel;

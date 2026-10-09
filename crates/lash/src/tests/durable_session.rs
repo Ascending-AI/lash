@@ -2025,8 +2025,7 @@ async fn a_cells_recorded_tool_calls_are_bounded_by_the_recorded_presentation() 
         config.presentation.max_tool_call_records = 1;
         let factory = crate::rlm::RlmProtocolPluginFactory::new(
             config,
-            Arc::new(crate::rlm::TypescriptDialect),
-            &backend,
+            crate::rlm::CellDialect::typescript(),
         )
         .with_worker_service(untimed_fixture_workers());
         explicit_ephemeral_facets(LashCore::rlm_builder(backend, factory))
@@ -2141,8 +2140,7 @@ async fn a_cells_assistant_context_and_record_read_back_from_the_transcript_afte
                 .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
                 .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
                 .build(),
-            Arc::new(lash_protocol_rlm::TypescriptDialect),
-            &backend,
+            lash_protocol_rlm::CellDialect::typescript(),
         )
         .with_worker_service(untimed_fixture_workers());
         explicit_ephemeral_facets(LashCore::rlm_builder(backend, factory))

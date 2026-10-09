@@ -68,9 +68,8 @@ pub(crate) fn recorded_namespace(options: RlmTurnOptions) -> lash_core::Protocol
 pub(crate) fn test_config_with_protocol_turn_options(
     termination: lash_core::ProtocolTurnOptions,
 ) -> TurnMachineConfig {
-    let protocol_driver: Arc<dyn ProtocolDriverHandle<lash_core::HostTurnProtocol>> = Arc::new(
-        RlmDriver::new(Arc::new(lash_protocol_rlm::TypescriptDialect)),
-    );
+    let protocol_driver: Arc<dyn ProtocolDriverHandle<lash_core::HostTurnProtocol>> =
+        Arc::new(RlmDriver::new(lash_protocol_rlm::CellDialect::typescript()));
     TurnMachineConfig {
         model_tool_calls: lash_core::sansio::ModelToolCalls::fixture(),
         protocol_driver,
@@ -1030,34 +1029,6 @@ impl RlmProtocolRun {
     }
 }
 
-/// A storage-only backend for the plugin's Lash VM artifacts, opened on a
-/// runtime of its own thread so a synchronous scenario can build one.
-#[expect(
-    clippy::expect_used,
-    reason = "test support: a memory backend that cannot open is a broken fixture, named by each message"
-)]
-fn memory_artifact_backend() -> lash_core::Backend {
-    std::thread::scope(|scope| {
-        scope
-            .spawn(|| {
-                tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .expect("build a current-thread runtime")
-                    .block_on(async {
-                        let stores: Arc<dyn lash_core::StoreSet> = Arc::new(
-                            lash_sqlite_store::SqliteStoreSet::memory()
-                                .await
-                                .expect("open the artifact store set"),
-                        );
-                        lash_conformance::backend_over(stores)
-                    })
-            })
-            .join()
-            .expect("open the artifact backend on its own thread")
-    })
-}
-
 pub(crate) fn rlm_protocol_plugin_factory() -> Arc<dyn PluginFactory> {
     Arc::new(RlmProtocolPluginFactory::new(
         RlmProtocolPluginConfig::builder()
@@ -1065,8 +1036,7 @@ pub(crate) fn rlm_protocol_plugin_factory() -> Arc<dyn PluginFactory> {
             .instruction_limit(lash_protocol_rlm::InstructionBound::unbounded())
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),
-        std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
-        &memory_artifact_backend(),
+        lash_protocol_rlm::CellDialect::typescript(),
     ))
 }
 

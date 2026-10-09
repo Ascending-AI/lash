@@ -1,20 +1,32 @@
 use std::collections::BTreeMap;
 
-use lash_vm::{ProjectedBindingError, ProjectedBindings, ProjectedValue, Value as FlowValue};
-
-#[derive(Clone, Default)]
-pub struct RlmProjectedBindings {
-    bindings: BTreeMap<String, FlowValue>,
-    /// The JSON each host binding was bound from: its durable seed form
-    /// (FIG-5134). A cell's recorded bindings carry none.
-    sources: BTreeMap<String, serde_json::Value>,
+/// A read-only binding could not be bound: its name is taken.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("projected binding `{name}` is already bound")]
+pub struct ProjectedBindingError {
+    name: String,
 }
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
-#[serde(transparent)]
-pub(crate) struct RecordedProjection(#[serde(with = "lash_vm::effect_value")] FlowValue);
+impl ProjectedBindingError {
+    fn duplicate(name: String) -> Self {
+        Self { name }
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+}
+
+/// The session's read-only variables: JSON the host bound, which every cell
+/// starts with.
+#[derive(Clone, Default)]
+pub struct RlmProjectedBindings {
+    bindings: BTreeMap<String, serde_json::Value>,
+}
 
 impl RlmProjectedBindings {
+    /// The bindings as the cell under `cell_key` records them: a redrive of
+    /// the cell starts with the values its first run started with.
     pub(crate) async fn journaled(
         self,
         ctx: &lash_core::RuntimeExecutionContext<'_>,
@@ -25,13 +37,7 @@ impl RlmProjectedBindings {
                 format!("{cell_key}:projected-bindings"),
                 "rlm.projected-bindings".into(),
                 move || async move {
-                    serde_json::to_value(
-                        self.bindings
-                            .into_iter()
-                            .map(|(name, value)| (name, RecordedProjection(value)))
-                            .collect::<BTreeMap<_, _>>(),
-                    )
-                    .map_err(|error| {
+                    serde_json::to_value(self.bindings).map_err(|error| {
                         lash_core::RuntimeEffectControllerError::retryable_response_derivation(
                             error.to_string(),
                         )
@@ -39,39 +45,12 @@ impl RlmProjectedBindings {
                 },
             )
             .await?;
-        let bindings: BTreeMap<String, RecordedProjection> = serde_json::from_value(recorded)
-            .map_err(|error| {
-                lash_core::RuntimeEffectControllerError::retryable_response_derivation(
-                    error.to_string(),
-                )
-            })?;
-        Ok(Self {
-            bindings: bindings
-                .into_iter()
-                .map(|(name, RecordedProjection(value))| (name, value))
-                .collect(),
-            sources: BTreeMap::new(),
-        })
-    }
-
-    /// The bindings as a cell records them, for a segment boundary inside
-    /// the cell: the successor segment links against these through
-    /// [`Self::from_recorded`], never against its own live projections.
-    pub(crate) fn recorded(&self) -> BTreeMap<String, RecordedProjection> {
-        self.bindings
-            .iter()
-            .map(|(name, value)| (name.clone(), RecordedProjection(value.clone())))
-            .collect()
-    }
-
-    pub(crate) fn from_recorded(bindings: BTreeMap<String, RecordedProjection>) -> Self {
-        Self {
-            bindings: bindings
-                .into_iter()
-                .map(|(name, RecordedProjection(value))| (name, value))
-                .collect(),
-            sources: BTreeMap::new(),
-        }
+        let bindings = serde_json::from_value(recorded).map_err(|error| {
+            lash_core::RuntimeEffectControllerError::retryable_response_derivation(
+                error.to_string(),
+            )
+        })?;
+        Ok(Self { bindings })
     }
 
     pub fn new() -> Self {
@@ -89,9 +68,7 @@ impl RlmProjectedBindings {
         if self.bindings.contains_key(&name) {
             return Err(ProjectedBindingError::duplicate(name));
         }
-        self.bindings
-            .insert(name.clone(), lash_vm::from_json(value.clone()));
-        self.sources.insert(name, value);
+        self.bindings.insert(name, value);
         Ok(self)
     }
 
@@ -99,7 +76,7 @@ impl RlmProjectedBindings {
     /// [`Self::from_snapshot`] binds again.
     pub(crate) fn to_snapshot(&self) -> lash_rlm_types::RlmProjectedSeedSnapshot {
         let mut snapshot = lash_rlm_types::RlmProjectedSeedSnapshot::new();
-        for (name, value) in &self.sources {
+        for (name, value) in &self.bindings {
             snapshot.push(
                 name.clone(),
                 lash_rlm_types::RlmProjectedSeedEntry::Materialized(value.clone()),
@@ -116,22 +93,18 @@ impl RlmProjectedBindings {
         self.bindings
             .iter()
             .map(|(name, value)| {
-                crate::rlm_support::ReadOnlyVariableDoc::from_flow_value(name.clone(), value)
+                crate::rlm_support::ReadOnlyVariableDoc::from_json(
+                    name.clone(),
+                    json_descriptor_type(value).to_owned(),
+                    value,
+                )
             })
             .collect()
     }
 
-    #[expect(
-        clippy::expect_used,
-        reason = "projected bindings refuse duplicate names at assembly, so try_insert in this one-shot build cannot conflict"
-    )]
-    pub(crate) fn into_projected_bindings(self) -> ProjectedBindings {
-        let mut out = ProjectedBindings::new();
-        for (name, value) in self.bindings {
-            out.try_insert(name.clone(), ProjectedValue::scalar(name, value))
-                .expect("RLM projected bindings already reject duplicates");
-        }
-        out
+    /// The bindings, by name.
+    pub(crate) fn into_values(self) -> BTreeMap<String, serde_json::Value> {
+        self.bindings
     }
 
     pub fn merge(mut self, other: Self) -> Result<Self, ProjectedBindingError> {
@@ -141,7 +114,6 @@ impl RlmProjectedBindings {
             }
             self.bindings.insert(name, value);
         }
-        self.sources.extend(other.sources);
         Ok(self)
     }
 
@@ -159,6 +131,17 @@ impl RlmProjectedBindings {
     }
 }
 
+fn json_descriptor_type(value: &serde_json::Value) -> &'static str {
+    match value {
+        serde_json::Value::Null => "null",
+        serde_json::Value::Bool(_) => "boolean",
+        serde_json::Value::Number(_) => "number",
+        serde_json::Value::String(_) => "string",
+        serde_json::Value::Array(_) => "list",
+        serde_json::Value::Object(_) => "record",
+    }
+}
+
 /// The heading the read-only variables render under.
 pub(crate) const READ_ONLY_VARIABLES_TITLE: &str = "Read-Only Variables";
 
@@ -166,7 +149,7 @@ pub(crate) const READ_ONLY_VARIABLES_TITLE: &str = "Read-Only Variables";
 /// binds none.
 pub(crate) fn read_only_variables_prompt(
     bindings: &RlmProjectedBindings,
-    dialect: &dyn crate::dialect::Dialect,
+    dialect: &dyn crate::dialect::DialectPrompts,
 ) -> Option<String> {
     let docs = bindings.prompt_docs();
     (!docs.is_empty()).then(|| crate::rlm_support::render_read_only_variables(docs, dialect))
@@ -242,7 +225,10 @@ mod tests {
         let bindings = RlmProjectedBindings::from_snapshot(&snapshot).expect("snapshot");
 
         assert!(
-            matches!(bindings.bindings.get("data"), Some(FlowValue::Record(_))),
+            matches!(
+                bindings.bindings.get("data"),
+                Some(serde_json::Value::Object(_))
+            ),
             "materialized projection-ref-shaped data must stay ordinary data"
         );
     }
@@ -258,7 +244,7 @@ mod tests {
                 }),
             )
             .expect("bind task payload");
-        let declaration = read_only_variables_prompt(&bindings, &crate::dialect::TypescriptDialect)
+        let declaration = read_only_variables_prompt(&bindings, &crate::dialect::TypescriptPrompts)
             .expect("read-only variables declaration");
 
         assert!(

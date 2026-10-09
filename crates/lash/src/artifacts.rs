@@ -17,9 +17,8 @@ pub use lash_core::HostArtifactPin;
 use lash_core::store::ArtifactCleanupLedger;
 use lash_core::{
     ArtifactCleanup, ArtifactReferrer, ArtifactReferrerPorts, Clock, DefinitionAcquisition,
-    ModuleArtifactStore, ProcessDefinition, ProcessDefinitionDraft, ProcessDefinitionId,
-    ProcessEngineRegistry, ProcessExecutionEnvRef, ProcessExecutionEnvSpec,
-    ProcessExecutionEnvStore, ReferrerClaim,
+    ProcessDefinition, ProcessDefinitionDraft, ProcessDefinitionId, ProcessEngineRegistry,
+    ProcessExecutionEnvRef, ProcessExecutionEnvSpec, ProcessExecutionEnvStore, ReferrerClaim,
 };
 
 use crate::Result;
@@ -27,11 +26,6 @@ use crate::Result;
 /// The artifact stores of one core, as a host publishes into them.
 #[derive(Clone)]
 pub struct HostArtifacts {
-    #[cfg_attr(
-        not(feature = "rlm"),
-        expect(dead_code, reason = "modules are published only with lash_vm")
-    )]
-    modules: Arc<dyn ModuleArtifactStore>,
     process_env: Arc<dyn ProcessExecutionEnvStore>,
     cleanup: Arc<dyn ArtifactCleanupLedger>,
     clock: Arc<dyn Clock>,
@@ -52,7 +46,7 @@ impl HostArtifacts {
         let cleanup = core.backend().artifact_cleanup();
         let clock = Arc::clone(&core.env.core.clock);
         let definition_ports = ArtifactReferrerPorts::new(
-            Arc::clone(&modules),
+            modules,
             Arc::clone(&process_env),
             core.backend().definition_store(),
             core.backend().attachment_referrers(),
@@ -60,7 +54,6 @@ impl HostArtifacts {
             Arc::clone(&clock),
         );
         Self {
-            modules,
             process_env,
             cleanup,
             clock,
@@ -69,20 +62,6 @@ impl HostArtifacts {
             #[cfg(feature = "rlm")]
             core: core.clone(),
         }
-    }
-
-    /// Publish `artifact` and hold it under `pin`. A released pin is refused.
-    #[cfg(feature = "rlm")]
-    pub async fn publish_module<T: lash_vm::ModuleArtifactBytes + ?Sized>(
-        &self,
-        pin: &HostArtifactPin,
-        artifact: &T,
-    ) -> Result<()> {
-        lash_vm::LashVmArtifacts::new(Arc::clone(&self.modules))
-            .publish_module_artifact(&claim(pin)?, artifact)
-            .await
-            .map_err(lash_core::PluginError::from)?;
-        Ok(())
     }
 
     /// Publish `spec` and hold it under `pin`, answering its reference. A
@@ -158,33 +137,53 @@ impl HostArtifacts {
             .map(|resolved| resolved.definition))
     }
 
-    /// Admit the document `draft` exports as a definition and hold it under
-    /// `pin`: the module the linker derives from it and the descriptor of
-    /// every process that module exports. The answer names the one `entry`
-    /// selects; the others are what a process of it starts by value, an
-    /// inline process among them, so one publication is all a run needs.
+    /// What a workflow document is edited and admitted against for
+    /// processes that run under `environment`: the effects their tool
+    /// catalogue offers, in the kernel's type grammar, and the library
+    /// functions the workers hold. `None` when no engine of this core
+    /// reads workflow documents.
+    #[cfg(feature = "rlm")]
+    pub async fn workflow_environment(
+        &self,
+        environment: &ProcessExecutionEnvSpec,
+    ) -> Result<Option<crate::workflow::WorkflowEnvironment>> {
+        let Some(provider) = self
+            .engines
+            .document_provider(lash_vm_runtime::LASH_VM_ENGINE_KIND)
+        else {
+            return Ok(None);
+        };
+        let request = lash_vm_runtime::WorkflowEnvironmentRequest {
+            tool_catalog: self.core.process_tool_catalog(environment)?,
+        };
+        let answer = provider
+            .environment(lash_core::ProcessDocument::new(request))
+            .await?;
+        Ok(answer.downcast().ok())
+    }
+
+    /// Admit the document `draft` holds as the definition of its entry
+    /// `entry`, and hold it under `pin`: the document, and the descriptor
+    /// of every entry it lists. The answer names the one `entry` selects;
+    /// the others are what a process of it starts by function reference,
+    /// so one publication is all a run needs.
     ///
-    /// Lash reconstructs the document's IR in its VM workers and links it
-    /// against `environment`, the environment a process of the definition
-    /// would run under: the surface its engine records for it and the tool
-    /// catalogue its plugins resolve. No source dialect is printed or
-    /// parsed. Ids, types, signatures, lifted processes and host
-    /// requirements are all derived again; nothing the document states about
-    /// itself is taken as true.
+    /// The checker admits the document against `environment`, the
+    /// environment a process of the definition would run under. No source
+    /// is printed or parsed, and nothing the document states about itself
+    /// is taken as true: its view, its types and its effect sets are
+    /// derived again.
     ///
-    /// The answer names the definition with its authoritative signature, the
-    /// admitted document, and what became of every node since the draft was
-    /// opened, ending at the admitted ids. Equal content publishes to the
-    /// same id and changes nothing, and an unchanged admitted document is
-    /// the definition it was read from. A refused document publishes
-    /// nothing. A released pin is refused. Processes already started keep
-    /// the definition they were admitted under.
+    /// Equal content publishes to the same id and changes nothing, so an
+    /// unchanged document is the definition it was read from. A refused
+    /// document publishes nothing. A released pin is refused. Processes
+    /// already started keep the document they were admitted under.
     #[cfg(feature = "rlm")]
     pub async fn publish_workflow(
         &self,
         pin: &HostArtifactPin,
-        draft: &crate::workflow::WorkflowDraft,
-        entry: crate::workflow::WorkflowEntry,
+        draft: &crate::workflow::edit::Draft,
+        entry: &crate::workflow::document::Name,
         environment: &ProcessExecutionEnvSpec,
     ) -> Result<crate::workflow::WorkflowPublish> {
         use crate::workflow::{WorkflowPublication, WorkflowPublish};
@@ -199,9 +198,8 @@ impl HostArtifacts {
         };
         let claim = claim(pin)?;
         let request = lash_vm_runtime::WorkflowAdmissionRequest {
-            graph: draft.document().clone(),
-            entry,
-            env_spec: environment.clone(),
+            document: draft.document().clone(),
+            entry: entry.clone(),
             tool_catalog: self.core.process_tool_catalog(environment)?,
         };
         let outcome = provider
@@ -216,9 +214,9 @@ impl HostArtifacts {
                 return Ok(WorkflowPublish::Refused(refusal));
             }
         };
-        // The module is held under the pin from here; the entry's
+        // The document is held under the pin from here; the entry's
         // descriptor joins it, checked by the engine against the stored
-        // module, with the descriptor of every other process it exports.
+        // document, with the descriptor of every other entry.
         let definition = self
             .definition_ports
             .publish_definition(&self.engines, &claim, &admitted.draft)
@@ -226,13 +224,13 @@ impl HostArtifacts {
         Ok(WorkflowPublish::Published(Box::new(WorkflowPublication {
             definition,
             document: admitted.document,
-            correspondence: draft.correspondence_since_open().through(&admitted.nodes),
+            correspondence: draft.correspondence_since_open().clone(),
         })))
     }
 
     /// Read the definition `id` names as its workflow: its identity and
-    /// signature, its graph and its entry process, or the typed reason there
-    /// is none. This acquires no lasting pin.
+    /// signature and its document entered at its entry, or the typed reason
+    /// there is none. This acquires no lasting pin.
     #[cfg(feature = "rlm")]
     pub async fn definition_graph(
         &self,
@@ -280,7 +278,7 @@ impl HostArtifacts {
         };
         Ok(match provider.execution_document(reference).await? {
             lash_core::ProcessExecutionDocumentRead::Read(document) => {
-                match document.downcast::<crate::workflow::WorkflowExecutionDocument>() {
+                match document.downcast::<crate::workflow::WorkflowDocument>() {
                     Ok(document) => WorkflowDocumentRead::Read(Box::new(document)),
                     Err(_) => WorkflowDocumentRead::Unsupported,
                 }

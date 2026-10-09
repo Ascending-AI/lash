@@ -77,7 +77,7 @@ async fn root_and_child_materialization_install_the_same_plugin_owned_engines() 
     }
     let duplicate = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
-        .plugin(Arc::new(rlm_factory(&backend)))
+        .plugin(Arc::new(rlm_factory()))
         .build(crate::testing::runtime_lease_owner());
     assert!(
         matches!(duplicate, Err(EmbedError::Plugin(_))),

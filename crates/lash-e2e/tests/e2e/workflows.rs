@@ -1,30 +1,33 @@
 //! S38: one workflow through the whole workflow layer on a real host.
 //!
 //! The host is `examples/e2e-consumer` in its workflow mode: it is built on
-//! `lash::workflow` and the facade, and holds no source lens. The case hands
-//! it a generated workflow as a typed document, reads the published
-//! definition back through the facade, edits inside the `try` region and
-//! inside the inner loop with typed edits, publishes, and runs the old and
-//! the new definition side by side. Both runs park inside the inner loop;
-//! the node is killed and another takes them over. A follower that attaches
-//! there has missed the start of the execution, and what it folds is checked
-//! against a count of the loops made from the order the runs were given.
+//! `lash::workflow` and the facade, and holds no source language. The case
+//! hands it a generated workflow as a kernel document written against the
+//! host's environment, reads the published definition back through the
+//! facade, edits inside the `try` region and inside the inner loop with
+//! kernel edits, publishes, and runs the old and the new definition side by
+//! side. Both runs park inside the inner loop; the node is killed and
+//! another takes them over. A follower that attaches there has missed the
+//! start of the execution, and what it folds is checked against a count of
+//! the loops made from the order the runs were given.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{Context as _, Result, bail, ensure};
-use lash::vm::ir::{
-    Expr, ExprSlot, ExprSlotVisitor, ProcessOrigin, WorkflowContainer, WorkflowDeclaration,
-    WorkflowNode, WorkflowNodeKind, WorkflowSlotPath, WorkflowSubgraph, walk_expr_slots,
+use lash::workflow::document::{
+    Action, Document, Expr, Literal, Name, Node, Rhs, Site, Stmt, Unit, parse_document,
 };
-use lash::workflow::{WorkflowGraph, workflow_node_statement};
+use lash::workflow::edit::{Correspondence, Edit, Position};
 use lash_e2e::{Case, Host, NodeOptions};
 use serde_json::{Value, json};
 
-/// The checked-in workflow, as a model wrote it.
-const FIXTURE: &str = "crates/lash-e2e/tests/e2e/workflows/order_review.ts";
-/// The name the fixture binds its workflow to.
+/// The checked-in workflow, as a generator wrote it: a kernel document
+/// whose library functions are named and resolved against the host.
+const FIXTURE: &str = "examples/e2e-consumer/src/workflow/order_review.kernel";
+/// The entry of the fixture a run starts.
 const WORKFLOW: &str = "order_review";
+/// The entry the workflow starts as a process of its own.
+const AUDIT: &str = "audit";
 
 /// The order both runs are given: three groups of two lines.
 fn order() -> Value {
@@ -82,220 +85,172 @@ async fn boot(case: &mut Case, node: &str) -> Result<()> {
     Ok(())
 }
 
-fn graph(value: &Value) -> Result<WorkflowGraph> {
-    serde_json::from_value(value.clone()).context("the host's document is a typed workflow graph")
+fn document(value: &Value) -> Result<Document> {
+    serde_json::from_value(value.clone()).context("the host's document is a kernel document")
 }
 
-/// The path to the first expression of `statement` that `wanted` accepts.
-fn slot_where(statement: &Expr, wanted: impl Fn(&Expr) -> bool) -> Option<Vec<ExprSlot>> {
-    struct Find<F>(F, Option<Vec<ExprSlot>>);
-    impl<F: Fn(&Expr) -> bool> ExprSlotVisitor for Find<F> {
-        fn visit_slot(&mut self, path: &[ExprSlot], expr: &Expr) {
-            if self.1.is_none() && (self.0)(expr) {
-                self.1 = Some(path.to_vec());
-            }
+/// Every site of the workflow entry's body whose node `wanted` accepts, in
+/// document order.
+fn sites(document: &Document, wanted: impl Fn(Node<'_>) -> bool) -> Result<Vec<Site>> {
+    fn walk(node: Node<'_>, site: Site, wanted: &impl Fn(Node<'_>) -> bool, found: &mut Vec<Site>) {
+        if wanted(node) {
+            found.push(site.clone());
+        }
+        for (index, child) in (0u32..).zip(node.children()) {
+            walk(child, site.child(index), wanted, found);
         }
     }
-    let mut find = Find(wanted, None);
-    walk_expr_slots(&mut find, statement);
-    find.1
-}
-
-fn is_string(expr: &Expr, text: &str) -> bool {
-    matches!(expr, Expr::String(value) if value.as_str() == text)
-}
-
-fn statement(node: &WorkflowNode) -> Expr {
-    workflow_node_statement(node)
-}
-
-/// `statement` with the expression at `path` replaced.
-fn replaced(mut statement: Expr, path: &[ExprSlot], with: Expr) -> Result<Expr> {
-    let mut at = &mut statement;
-    for slot in path {
-        at = at
-            .slot_mut(*slot)
-            .context("the slot path reaches an expression")?;
-    }
-    *at = with;
-    Ok(statement)
-}
-
-fn calls(node: &WorkflowNode, operation: &str) -> bool {
-    matches!(&node.kind, WorkflowNodeKind::Call { operation: called, .. } if called == operation)
-}
-
-/// Every node of `body` and of the bodies under it, in document order.
-fn all_nodes<'g>(body: &'g WorkflowSubgraph, nodes: &mut Vec<&'g WorkflowNode>) {
-    for node in body.nodes() {
-        nodes.push(node);
-        if let WorkflowNodeKind::Container(container) = &node.kind {
-            for (_, child) in container.child_subgraphs() {
-                all_nodes(child, nodes);
-            }
-        }
-    }
-}
-
-/// The nodes of the entry process the case edits, runs and reads sites of.
-struct Shape<'g> {
-    region: &'g WorkflowNode,
-    try_body: &'g WorkflowSubgraph,
-    catch_record: &'g WorkflowNode,
-    outer: &'g WorkflowNode,
-    inner: &'g WorkflowNode,
-    inner_body: &'g WorkflowSubgraph,
-    /// The `if` that decides whether a line is reviewed.
-    threshold: &'g WorkflowNode,
-    /// The `review.request` call a run parks on.
-    review: &'g WorkflowNode,
-    /// The `if` that reads the decision after the park.
-    decision: &'g WorkflowNode,
-    /// The `ledger.record` call that ends the inner loop body.
-    record: &'g WorkflowNode,
-    /// The assignment that ends the `try` body in the generated workflow.
-    status: &'g WorkflowNode,
-    /// The statement that binds the inline process.
-    inline: &'g WorkflowNode,
-    /// The `processes.start` of the inline process.
-    start: &'g WorkflowNode,
-}
-
-/// The process the document's main body binds as the workflow: its name
-/// and the id of its container. A generated workflow's processes are lifted
-/// literals named by digest, so it is told from the inline process inside
-/// it by where its literal sits: the workflow's is the outermost.
-fn workflow_process(graph: &WorkflowGraph) -> Result<(String, String)> {
-    ensure!(
-        graph.main.nodes().into_iter().any(|node| matches!(
-            &node.kind,
-            WorkflowNodeKind::Data {
-                binding: Some(binding),
-                expression: Expr::ProcessRef { .. } | Expr::ProcessLiteral(_),
-            } if binding.root.as_str() == WORKFLOW
-        )),
-        "the document's main body binds a process as `{WORKFLOW}`"
+    let entry = Name::new(WORKFLOW);
+    let function = document
+        .functions
+        .get(&entry)
+        .context("the document declares the workflow")?;
+    let mut found = Vec::new();
+    walk(
+        Node::Block(&function.body),
+        Site::new(Unit::Function(entry), Vec::new()),
+        &wanted,
+        &mut found,
     );
-    graph
-        .declarations
-        .iter()
-        .filter_map(|declaration| match declaration {
-            WorkflowDeclaration::Process(process) => match &process.origin {
-                ProcessOrigin::Lifted { site, .. } => Some((site.steps.len(), process)),
-                ProcessOrigin::Declared => None,
-            },
-            WorkflowDeclaration::Function(_) => None,
-        })
-        .min_by_key(|(depth, _)| *depth)
-        .map(|(_, process)| (process.name.clone(), process.id.to_string()))
-        .context("the document lifts the workflow's process")
+    Ok(found)
 }
 
-/// The first `for` of `body`, with its own body.
-fn loop_in(body: &WorkflowSubgraph) -> Option<(&WorkflowNode, &WorkflowSubgraph)> {
-    body.nodes().into_iter().find_map(|node| match &node.kind {
-        WorkflowNodeKind::Container(WorkflowContainer::For { body, .. }) => {
-            Some((node, body.as_ref()))
-        }
-        _ => None,
-    })
-}
-
-fn shape<'g>(graph: &'g WorkflowGraph, entry: &str) -> Result<Shape<'g>> {
-    let process = graph.process(entry).context("the document has the entry")?;
-    let top = process.body.nodes();
-    top.iter()
-        .find(|node| {
-            slot_where(&statement(node), |expr| matches!(expr, Expr::Function(_))).is_some()
-        })
-        .context("the closure is a typed function value in a statement")?;
-    let region = top
-        .iter()
-        .find(|node| {
-            matches!(
-                node.kind,
-                WorkflowNodeKind::Container(WorkflowContainer::Try { .. })
-            )
-        })
-        .context("the try region is a container")?;
-    let WorkflowNodeKind::Container(WorkflowContainer::Try {
-        body: try_body,
-        catch: Some(catch),
-        ..
-    }) = &region.kind
-    else {
-        bail!("the try region has a catch clause");
+fn one(document: &Document, what: &str, wanted: impl Fn(Node<'_>) -> bool) -> Result<Site> {
+    let found = sites(document, wanted)?;
+    let [site] = found.as_slice() else {
+        bail!("the workflow has one {what}: {found:?}");
     };
-    let catch_record = catch
-        .body
-        .nodes()
+    Ok(site.clone())
+}
+
+fn is_text(node: Node<'_>, text: &str) -> bool {
+    matches!(node, Node::Expr(Expr::Literal(Literal::Text(value))) if value == text)
+}
+
+fn performs(node: Node<'_>, effect: &str) -> bool {
+    matches!(node, Node::Action(Action::Perform { effect: performed, .. })
+        if performed.to_string() == effect)
+}
+
+/// Whether `site` is `under` or a node beneath it.
+fn within(site: &Site, under: &Site) -> bool {
+    site.unit == under.unit && site.path.starts_with(&under.path)
+}
+
+/// The statement an action is the right-hand side of.
+fn statement_of(action: &Site) -> Site {
+    let mut statement = action.clone();
+    statement.path.pop();
+    statement
+}
+
+/// The statements of `main { <text> }`, as kernel text spells them.
+fn statements(text: &str) -> Result<Vec<Stmt>> {
+    Ok(parse_document(&format!(
+        "kernel 1\nnumbers float\neffect ledger.record(input: Any) -> Any\n\nmain {{\n{text}\n}}\n"
+    ))
+    .with_context(|| format!("`{text}` parses"))?
+    .main)
+}
+
+fn expression(text: &str) -> Result<Expr> {
+    let Ok([Stmt::Finish { value }]) =
+        <[Stmt; 1]>::try_from(statements(&format!("finish {text}"))?)
+    else {
+        bail!("`finish {text}` is one statement");
+    };
+    Ok(value)
+}
+
+/// The sites of the workflow the case edits, runs and reads the overlay at.
+struct Shape {
+    /// The `try` statement and its two blocks.
+    region: Site,
+    try_body: Site,
+    catch_body: Site,
+    /// The two `for` statements, and the inner one's body block.
+    outer: Site,
+    inner: Site,
+    inner_body: Site,
+    /// The literal the threshold condition compares a quantity with.
+    threshold: Site,
+    /// The `review.request` action a run parks on.
+    review: Site,
+    /// The `ledger.record` actions of the inner loop body, in order: one in
+    /// the generated workflow, two once it is cloned.
+    records: Vec<Site>,
+    /// The `ledger.record` action an edit authored at the end of the `try`
+    /// body; the generated workflow has none.
+    authored: Option<Site>,
+    /// The literal the `try` body's last assignment sets the status to.
+    status: Site,
+    /// The `processes.start` and `processes.await` of the audit process.
+    start: Site,
+    wait: Site,
+}
+
+fn shape(document: &Document, status: &str) -> Result<Shape> {
+    let region = one(document, "try", |node| {
+        matches!(node, Node::Stmt(Stmt::Try(_)))
+    })?;
+    let (try_body, catch_body) = (region.child(0), region.child(1));
+    let loops = sites(document, |node| {
+        matches!(node, Node::Stmt(Stmt::For { .. }))
+    })?;
+    let [outer, inner] = loops.as_slice() else {
+        bail!("the workflow has an outer and an inner loop: {loops:?}");
+    };
+    ensure!(
+        within(outer, &try_body) && within(inner, &outer.child(1)),
+        "the loops nest inside the try body"
+    );
+    let inner_body = inner.child(1);
+    let threshold = one(document, "threshold literal", |node| {
+        matches!(node, Node::Expr(Expr::Literal(Literal::Int(_))))
+    })?;
+    let review = one(document, "review", |node| performs(node, "review.request"))?;
+    ensure!(
+        within(&threshold, &inner_body) && within(&review, &inner_body),
+        "the threshold and the review are in the inner loop"
+    );
+    let records: Vec<Site> = sites(document, |node| performs(node, "ledger.record"))?
         .into_iter()
-        .find(|node| calls(node, "record"))
-        .context("the catch body records")?;
-    let (outer, outer_body) = loop_in(try_body).context("the outer loop is in the try body")?;
-    let (inner, inner_body) = loop_in(outer_body).context("the inner loop is in the outer")?;
-    let (threshold, then_graph) = inner_body
-        .nodes()
+        .filter(|site| within(site, &inner_body))
+        .collect();
+    ensure!(!records.is_empty(), "the inner loop records");
+    let authored = sites(document, |node| performs(node, "ledger.record"))?
         .into_iter()
-        .find_map(|node| match &node.kind {
-            WorkflowNodeKind::Container(WorkflowContainer::If { then_graph, .. }) => {
-                Some((node, then_graph.as_ref()))
-            }
-            _ => None,
-        })
-        .context("the inner loop branches")?;
-    let review = then_graph
-        .nodes()
-        .into_iter()
-        .find(|node| calls(node, "request"))
-        .context("the branch asks for a review")?;
-    let decision = then_graph
-        .nodes()
-        .into_iter()
-        .find(|node| {
-            matches!(
-                node.kind,
-                WorkflowNodeKind::Container(WorkflowContainer::If { .. })
-            )
-        })
-        .context("the branch reads the decision")?;
-    let record = inner_body
-        .nodes()
-        .into_iter()
-        .find(|node| calls(node, "record"))
-        .context("the inner loop records")?;
-    let status = try_body
-        .nodes()
-        .into_iter()
-        .find(|node| matches!(node.kind, WorkflowNodeKind::StateUpdate(_)))
-        .context("the try body ends by setting the status")?;
-    let inline = top
-        .iter()
-        .find(|node| {
-            slot_where(&statement(node), |expr| {
-                matches!(expr, Expr::ProcessRef { .. })
-            })
-            .is_some()
-        })
-        .context("a statement holds the inline process")?;
-    let start = top
-        .iter()
-        .find(|node| calls(node, "start"))
-        .context("the workflow starts its inline process")?;
+        .find(|site| within(site, &try_body) && !within(site, &inner_body));
+    ensure!(
+        sites(document, |node| performs(node, "ledger.record"))?
+            .iter()
+            .any(|site| within(site, &catch_body)),
+        "the catch body records"
+    );
+    // An assignment to a variable has one child: its value.
+    let status = one(document, "assignment of the status", |node| {
+        matches!(
+            node,
+            Node::Stmt(Stmt::Assign { value: Rhs::Expr(Expr::Literal(Literal::Text(value))), .. })
+                if value == status
+        )
+    })?
+    .child(0);
+    ensure!(within(&status, &try_body), "the try body sets the status");
     Ok(Shape {
         region,
         try_body,
-        catch_record,
-        outer,
-        inner,
+        catch_body,
+        outer: outer.clone(),
+        inner: inner.clone(),
         inner_body,
         threshold,
         review,
-        decision,
-        record,
+        records,
+        authored,
         status,
-        inline,
-        start,
+        start: one(document, "start", |node| performs(node, "processes.start"))?,
+        wait: one(document, "await", |node| performs(node, "processes.await"))?,
     })
 }
 
@@ -336,7 +291,7 @@ async fn parked(case: &Case, node: &str, process: &str, nth: usize) -> Result<Va
                 return Ok(None);
             };
             let run = host.get(&format!("/workflow/runs/{process}")).await?;
-            let wait = json!({"kind": "call", "call_id": delivery["call_id"], "tool_id": "review_request"});
+            let wait = json!({"kind": "call", "call_id": delivery["call_id"], "tool_id": "tool:review_request"});
             let waits = run["waits"].as_array().cloned().unwrap_or_default();
             Ok((run["status"] == "Waiting" && waits == [wait]).then_some(delivery))
         })
@@ -367,177 +322,26 @@ async fn approve(case: &mut Case, node: &str, delivery: &Value) -> Result<()> {
     Ok(())
 }
 
-/// Whether two publications name different admitted modules.
-fn new_graph_identity(edited: &Value, generated: &Value) -> bool {
-    let identity = |publication: &Value| publication["graph"]["source_identity"].clone();
-    identity(edited).is_string() && identity(edited) != identity(generated)
-}
-
-/// Every string anywhere in `value`.
-fn strings<'v>(value: &'v Value, found: &mut Vec<&'v str>) {
-    match value {
-        Value::String(text) => found.push(text),
-        Value::Array(items) => items.iter().for_each(|item| strings(item, found)),
-        Value::Object(fields) => fields.values().for_each(|field| strings(field, found)),
-        _ => {}
-    }
-}
-
-/// The document carries no source: none of its strings is a line of the
-/// generated text or holds its syntax, and no node is of an opaque kind or
-/// has a field named for source text.
-fn carries_no_source(document: &Value, source: &str) -> Result<()> {
-    let mut found = Vec::new();
-    strings(document, &mut found);
-    let authored: BTreeSet<&str> = source
-        .lines()
-        .map(str::trim)
-        .filter(|line| line.len() > 12)
-        .collect();
-    for text in found {
-        ensure!(
-            !authored.contains(text.trim()),
-            "the document carries the source line `{text}`"
-        );
-        for syntax in ["=>", "await ", "const ", "${", "catch (", "for ("] {
-            ensure!(
-                !text.contains(syntax),
-                "the document carries source text `{text}`"
-            );
-        }
-    }
-    fn fields(value: &Value, path: &str) -> Result<()> {
-        match value {
-            Value::Object(object) => {
-                for (name, field) in object {
-                    ensure!(
-                        !matches!(name.as_str(), "source" | "source_text" | "text" | "code"),
-                        "the document has a source field at {path}.{name}"
-                    );
-                    ensure!(
-                        !(matches!(name.as_str(), "kind" | "container_kind")
-                            && matches!(field.as_str(), Some("opaque" | "code" | "source"))),
-                        "the document has an opaque node at {path}"
-                    );
-                    fields(field, &format!("{path}.{name}"))?;
-                }
-            }
-            Value::Array(items) => {
-                for (index, item) in items.iter().enumerate() {
-                    fields(item, &format!("{path}[{index}]"))?;
-                }
-            }
-            _ => {}
-        }
-        Ok(())
-    }
-    fields(document, "graph")
-}
-
-/// What a correspondence says became of each node.
-struct Correspondence {
-    /// Where each surviving node of the base ended, by its base id.
-    kept: BTreeMap<String, String>,
-    /// Each node only the new document has: its id and where it came from.
-    inserted: Vec<(String, Value)>,
-}
-
-fn correspondence(value: &Value) -> Result<Correspondence> {
-    let mut read = Correspondence {
-        kept: BTreeMap::new(),
-        inserted: Vec::new(),
-    };
-    for entry in value["entries"].as_array().into_iter().flatten() {
-        let id = |field: &str| entry[field].as_str().unwrap_or_default().to_owned();
-        match entry["outcome"].as_str() {
-            Some("retained") => {
-                ensure!(
-                    read.kept.insert(id("from"), id("to")).is_none(),
-                    "a node has two outcomes: {entry}"
-                );
-            }
-            Some("inserted") => read.inserted.push((id("to"), entry["source"].clone())),
-            _ => bail!("no edit moved, removed, split, merged or lost a node: {entry}"),
-        }
-    }
-    Ok(read)
-}
-
-fn ids(nodes: &[&WorkflowNode]) -> BTreeSet<String> {
-    nodes.iter().map(|node| node.id.to_string()).collect()
-}
-
-fn entry_nodes<'g>(graph: &'g WorkflowGraph, entry: &str) -> Result<Vec<&'g WorkflowNode>> {
-    let mut nodes = Vec::new();
-    all_nodes(
-        &graph.process(entry).context("the entry process")?.body,
-        &mut nodes,
-    );
-    Ok(nodes)
-}
-
-fn node<'g>(graph: &'g WorkflowGraph, entry: &str, id: &str) -> Result<&'g WorkflowNode> {
-    entry_nodes(graph, entry)?
-        .into_iter()
-        .find(|node| node.id.as_str() == id)
-        .with_context(|| format!("the document has node {id}"))
-}
-
-/// The one execution site of `node` whose label names `label`, as the
-/// overlay spells a site.
-fn site(node: &WorkflowNode, label: &str) -> Result<Value> {
-    let sites: Vec<_> = node
-        .execution_sites
-        .iter()
-        .filter(|site| site.label.contains(label))
-        .collect();
-    let [site] = sites.as_slice() else {
-        bail!(
-            "node {} has one site labelled {label}: {:?}",
-            node.id,
-            node.execution_sites
-        );
-    };
-    let mut reference = json!({"node_id": node.id});
-    if !site.site_path.is_empty() {
-        reference["site_path"] = serde_json::to_value(&site.site_path)?;
-    }
-    Ok(reference)
-}
-
-/// The frames a site inside the inner loop body runs under on `line`.
-fn frames(observed: &Value) -> Vec<(Value, u64, Value)> {
-    observed["loops"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .map(|frame| {
-            (
-                frame["site"].clone(),
-                frame["activation"].as_u64().unwrap_or_default(),
-                frame["position"].clone(),
-            )
-        })
-        .collect()
+/// A site as the overlay and the feed spell it.
+fn spelled(site: &Site) -> Result<Value> {
+    Ok(serde_json::to_value(site)?)
 }
 
 /// What one site of the document must show to a follower that attached
 /// while its run was parked.
 struct Expected {
     name: &'static str,
-    site: Value,
+    site: Site,
     /// How many times the site runs over the whole order.
     total: u64,
-    /// The first occurrence that ends after the follower attached.
+    /// The first run of the site (from 1) that ends after the follower
+    /// attached.
     first_seen: u64,
     /// Whether the follower sees the start of `first_seen` too.
     start_seen: bool,
-    /// Whether an occurrence reports a start at all (a branch does not).
-    starts: bool,
-    /// The line an occurrence runs on, or `None` outside the inner loop.
+    /// The line a run of the site (from 1) is on, or `None` outside the
+    /// loops.
     line: Box<dyn Fn(u64) -> Option<usize>>,
-    /// The arm a branch takes at an occurrence.
-    arm: Option<Box<dyn Fn(u64) -> &'static str>>,
 }
 
 /// The run a late follower followed.
@@ -550,22 +354,19 @@ struct Followed<'a> {
     last_review: &'a Value,
     /// The document reference the run's row names.
     reference: &'a Value,
+    /// The execution sites of the run's document, as the host lists them.
+    document_sites: &'a Value,
 }
 
 /// What the follower of `run` folded by the end, against the loops of the
 /// order.
-fn check_followed(
-    observed: &Value,
-    shape: &Shape<'_>,
-    clone: Option<&WorkflowNode>,
-    document_sites: &BTreeSet<String>,
-    run: &Followed<'_>,
-) -> Result<()> {
+fn check_followed(observed: &Value, shape: &Shape, run: &Followed<'_>) -> Result<()> {
     let Followed {
         threshold,
         parked,
         last_review,
         reference,
+        document_sites,
     } = *run;
     let overlay = &observed["overlay"];
     ensure!(
@@ -602,219 +403,130 @@ fn check_followed(
         .collect();
     let at = reviewed[parked - 1];
     let count = lines.len() as u64;
-    let on_line = |from: u64| -> Box<dyn Fn(u64) -> Option<usize>> {
-        Box::new(move |occurrence| Some((occurrence - from) as usize))
-    };
-    let reviewed_line = {
-        let reviewed = reviewed.clone();
-        move || -> Box<dyn Fn(u64) -> Option<usize>> {
+    let on_line =
+        || -> Box<dyn Fn(u64) -> Option<usize>> { Box::new(|run| Some(run as usize - 1)) };
+    let outside = || -> Box<dyn Fn(u64) -> Option<usize>> { Box::new(|_| None) };
+    let mut expected = vec![Expected {
+        name: "review",
+        site: shape.review.clone(),
+        total: reviewed.len() as u64,
+        first_seen: parked as u64,
+        start_seen: false,
+        line: {
             let reviewed = reviewed.clone();
-            Box::new(move |occurrence| reviewed.get(occurrence as usize - 1).copied())
-        }
-    };
-    let qty: Vec<u64> = lines.iter().map(|line| line.qty).collect();
-    let mut expected = vec![
-        Expected {
-            name: "outer loop",
-            site: site(shape.outer, "for")?,
-            total: lines.last().map_or(0, |line| line.outer),
-            first_seen: lines[at].outer + 1,
-            start_seen: true,
-            starts: true,
-            line: Box::new(|_| None),
-            arm: None,
+            Box::new(move |run| reviewed.get(run as usize - 1).copied())
         },
-        Expected {
-            name: "inner loop",
-            site: site(shape.inner, "for")?,
-            total: count,
-            first_seen: at as u64 + 2,
-            start_seen: true,
-            starts: true,
-            line: on_line(1),
-            arm: None,
-        },
-        Expected {
-            name: "threshold branch",
-            site: site(shape.threshold, "if")?,
-            total: count,
-            first_seen: at as u64 + 2,
-            start_seen: false,
-            starts: false,
-            line: on_line(1),
-            arm: Some(Box::new(move |occurrence| {
-                if qty[occurrence as usize - 1] > threshold {
-                    "then"
-                } else {
-                    "else"
-                }
-            })),
-        },
-        Expected {
-            name: "review",
-            site: site(shape.review, "request")?,
-            total: reviewed.len() as u64,
-            first_seen: parked as u64,
-            start_seen: false,
-            starts: true,
-            line: reviewed_line(),
-            arm: None,
-        },
-        Expected {
-            name: "decision branch",
-            site: site(shape.decision, "if")?,
-            total: reviewed.len() as u64,
-            first_seen: parked as u64,
-            start_seen: false,
-            starts: false,
-            line: reviewed_line(),
-            arm: Some(Box::new(|_| "else")),
-        },
-        Expected {
+    }];
+    for record in &shape.records {
+        expected.push(Expected {
             name: "record",
-            site: site(shape.record, "record")?,
+            site: record.clone(),
             total: count,
             first_seen: at as u64 + 1,
             start_seen: true,
-            starts: true,
-            line: on_line(1),
-            arm: None,
-        },
-        Expected {
-            name: "start of the inline process",
-            site: site(shape.start, "start")?,
+            line: on_line(),
+        });
+    }
+    for (name, site) in [
+        ("authored record", shape.authored.as_ref()),
+        ("start of the audit process", Some(&shape.start)),
+        ("await of the audit process", Some(&shape.wait)),
+    ] {
+        let Some(site) = site else {
+            continue;
+        };
+        expected.push(Expected {
+            name,
+            site: site.clone(),
             total: 1,
             first_seen: 1,
             start_seen: true,
-            starts: true,
-            line: Box::new(|_| None),
-            arm: None,
-        },
-    ];
-    if let Some(clone) = clone {
-        expected.push(Expected {
-            name: "cloned record",
-            site: site(clone, "record")?,
-            total: count,
-            first_seen: at as u64 + 1,
-            start_seen: true,
-            starts: true,
-            line: on_line(1),
-            arm: None,
+            line: outside(),
         });
     }
 
-    // The overlay lists only sites of the document, and never one of the
-    // catch clause, which no run entered.
+    // The overlay lists only execution sites of the document, each in the
+    // one task of the run, and never one of the catch clause, which no run
+    // entered.
     let listed = overlay["sites"].as_array().cloned().unwrap_or_default();
+    let known: BTreeSet<String> = document_sites
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|site| site["site"].to_string())
+        .collect();
     for entry in &listed {
         ensure!(
-            document_sites.contains(&entry["site"].to_string()),
+            known.contains(&entry["site"]["site"].to_string()) && entry["site"]["task"] == "main",
             "the overlay lists a site the document lacks: {}",
             entry["site"]
         );
+        let site: Site = serde_json::from_value(entry["site"]["site"].clone())?;
+        ensure!(
+            !within(&site, &shape.catch_body),
+            "the overlay invents no execution of the catch clause: {entry}"
+        );
     }
-    let untouched = site(shape.catch_record, "record")?;
     ensure!(
-        !listed.iter().any(|entry| entry["site"] == untouched
-            || entry["site"]["node_id"] == json!(shape.catch_record.id)),
-        "the overlay invents no execution of the catch clause"
+        listed.len() == expected.len(),
+        "the overlay lists the sites the run reached after the attach: {listed:?}"
     );
 
-    let (outer_site, inner_site) = (site(shape.outer, "for")?, site(shape.inner, "for")?);
-    let mut outer_activations = BTreeSet::new();
-    let mut inner_activations = BTreeMap::<u64, BTreeSet<u64>>::new();
+    let (outer, inner) = (spelled(&shape.outer)?, spelled(&shape.inner)?);
     for site in &expected {
-        // Per-site occurrences: the latest is the last the order causes,
-        // and the counts are the ones that ended, and started, after the
-        // follower attached.
+        // Per-site occurrences, counted from 0: the latest is the last the
+        // order causes, and the counts are the ones that ended, and
+        // started, after the follower attached.
+        let at_site = spelled(&site.site)?;
         let entry = listed
             .iter()
-            .find(|entry| entry["site"] == site.site)
+            .find(|entry| entry["site"]["site"] == at_site)
             .with_context(|| format!("the overlay lists the {} site", site.name))?;
         let seen = site.total + 1 - site.first_seen;
-        let started = match (site.starts, site.start_seen) {
-            (false, _) => 0,
-            (true, true) => seen,
-            (true, false) => seen - 1,
-        };
+        let started = if site.start_seen { seen } else { seen - 1 };
         ensure!(
             entry["status"] == "completed"
-                && entry["occurrence"] == site.total
+                && entry["occurrence"] == site.total - 1
                 && entry["summary"]["terminal_count"] == seen
                 && entry["summary"]["started_count"] == started,
             "the {} site ends at occurrence {} with {seen} ended and {started} started: {entry}",
             site.name,
-            site.total
-        );
-        ensure!(
-            entry["branch"]
-                == site
-                    .arm
-                    .as_ref()
-                    .map_or(Value::Null, |arm| json!(arm(site.total))),
-            "the {} site shows the arm its last occurrence took: {entry}",
-            site.name
+            site.total - 1
         );
 
-        // Every observation of the site: its occurrence is one the
-        // follower could see, on the loop iterations of the line it ran on.
-        let mut arms = BTreeMap::new();
+        // Every observation of the site: its occurrence is one the follower
+        // could see, on the loop iterations of the line it ran on.
         for item in &items {
             let fact = match item["item"].as_str() {
-                Some("language") => &item["execution"],
-                Some("step_body_started") => &item["step"],
+                Some("language") => &item["execution"]["at"],
+                Some("step_body_started") => &item["step"]["at"],
                 _ => continue,
             };
-            let mut at_site = json!({"node_id": fact["node_id"]});
-            if let Some(path) = fact["context"].get("site_path") {
-                at_site["site_path"] = path.clone();
-            }
-            if at_site != site.site {
+            if fact["site"] != at_site {
                 continue;
             }
-            let occurrence = fact["occurrence"].as_u64().context("an occurrence")?;
+            ensure!(fact["task"] == "main", "the run has one task: {fact}");
+            let run = fact["occurrence"].as_u64().context("an occurrence")? + 1;
             ensure!(
-                (site.first_seen..=site.total).contains(&occurrence),
-                "the {} site reports occurrence {occurrence} after the attach: {fact}",
+                (site.first_seen..=site.total).contains(&run),
+                "the {} site reports run {run} after the attach: {fact}",
                 site.name
             );
-            let loops = frames(&fact["context"]);
-            match (site.line)(occurrence) {
+            let loops = fact["loops"].as_array().cloned().unwrap_or_default();
+            match (site.line)(run) {
                 Some(line) => {
                     let line = &lines[line];
-                    let [
-                        (outer, outer_activation, outer_at),
-                        (inner, inner_activation, inner_at),
-                    ] = loops.as_slice()
-                    else {
-                        bail!("the {} site runs inside both loops: {fact}", site.name);
-                    };
                     ensure!(
-                        *outer == outer_site
-                            && *inner == inner_site
-                            && *outer_at == json!({"body": line.outer})
-                            && *inner_at == json!({"body": line.inner}),
-                        "occurrence {occurrence} of the {} site runs on outer iteration {} and inner iteration {}: {fact}",
+                        loops
+                            == [
+                                json!({"site": outer, "iteration": line.outer - 1}),
+                                json!({"site": inner, "iteration": line.inner - 1}),
+                            ],
+                        "run {run} of the {} site is on outer iteration {} and inner iteration {}: {fact}",
                         site.name,
-                        line.outer,
-                        line.inner
+                        line.outer - 1,
+                        line.inner - 1
                     );
-                    outer_activations.insert(*outer_activation);
-                    inner_activations
-                        .entry(line.outer)
-                        .or_default()
-                        .insert(*inner_activation);
-                }
-                None if site.site == outer_site => {
-                    let [(outer, activation, position)] = loops.as_slice() else {
-                        bail!("the outer loop runs inside itself alone: {fact}");
-                    };
-                    ensure!(
-                        *outer == outer_site && *position == json!({"body": occurrence}),
-                        "occurrence {occurrence} of the outer loop is its body iteration: {fact}"
-                    );
-                    outer_activations.insert(*activation);
                 }
                 None => ensure!(
                     loops.is_empty(),
@@ -822,64 +534,19 @@ fn check_followed(
                     site.name
                 ),
             }
-            if fact["kind"] == "branch_selected" {
-                arms.insert(occurrence, fact["selected"].clone());
-            }
-        }
-        // Branch choices: each occurrence the follower could see took the
-        // arm the line's quantity decides.
-        if let Some(arm) = &site.arm {
-            let chosen: BTreeMap<u64, Value> = (site.first_seen..=site.total)
-                .map(|occurrence| (occurrence, json!(arm(occurrence))))
-                .collect();
-            ensure!(
-                arms == chosen,
-                "the {} site took {chosen:?}: {arms:?}",
-                site.name
-            );
         }
     }
-    // One entry of the outer loop; one entry of the inner loop per outer
-    // iteration, each its own activation, in order.
-    let inner: Vec<u64> = inner_activations
-        .values()
-        .flat_map(|activations| activations.iter().copied())
-        .collect();
-    ensure!(
-        outer_activations.len() == 1
-            && inner_activations.values().all(|entered| entered.len() == 1)
-            && inner.windows(2).all(|pair| pair[0] < pair[1]),
-        "the loops are entered once per iteration around them: {outer_activations:?} {inner_activations:?}"
-    );
     // The overlay binds the last review to the call its body was admitted as.
     let review = listed
         .iter()
-        .find(|entry| entry["site"] == expected[3].site)
+        .find(|entry| entry["site"]["site"] == spelled(&shape.review).unwrap_or_default())
         .context("the review site")?;
     ensure!(
         review["call"]["call_id"] == last_review["call_id"]
-            && review["call"]["occurrence"] == expected[3].total,
+            && review["call"]["occurrence"] == expected[0].total - 1,
         "the review site is bound to the call that ran: {review}"
     );
     Ok(())
-}
-
-/// Every execution site of `body` and the bodies under it, as the overlay
-/// spells a site.
-fn sites_of(body: &WorkflowSubgraph) -> Result<BTreeSet<String>> {
-    let mut nodes = Vec::new();
-    all_nodes(body, &mut nodes);
-    let mut sites = BTreeSet::new();
-    for node in nodes {
-        for site in &node.execution_sites {
-            let mut reference = json!({"node_id": node.id});
-            if !site.site_path.is_empty() {
-                reference["site_path"] = serde_json::to_value(&site.site_path)?;
-            }
-            sites.insert(reference.to_string());
-        }
-    }
-    Ok(sites)
 }
 
 case!(
@@ -895,34 +562,56 @@ case!(
     s38
 );
 
+/// The fixture as a document `host` admits: each `@{name}` is the identity
+/// the host's environment gives that library function, each effect carries
+/// the signature the host offers it under, and the manifest lists every
+/// function the host says the code reaches.
+async fn generated(host: &lash_e2e::Node, text: &str) -> Result<Document> {
+    let environment = host.get("/workflow/environment").await?;
+    let mut text = text.to_owned();
+    for (name, id) in environment["functions"]
+        .as_object()
+        .context("the environment names its functions")?
+    {
+        text = text.replace(
+            &format!("@{{{name}}}"),
+            &format!("@{}", id.as_str().context("an identity")?),
+        );
+    }
+    let mut document = parse_document(&text).context("the generated workflow parses")?;
+    for (effect, signature) in &mut document.manifest.effects {
+        *signature = serde_json::from_value(environment["effects"][effect.to_string()].clone())
+            .with_context(|| format!("the host offers `{effect}`"))?;
+    }
+    let required = host
+        .post("/workflow/requirements", &serde_json::to_value(&document)?)
+        .await?;
+    document.manifest.functions = serde_json::from_value(required["functions"].clone())
+        .context("the functions the document reaches")?;
+    Ok(document)
+}
+
 async fn s38(case: &mut Case) -> Result<()> {
     let repo = std::env::var("LASH_E2E_REPO").context("LASH_E2E_REPO is required")?;
-    let source = std::fs::read_to_string(std::path::Path::new(&repo).join(FIXTURE))?;
+    let text = std::fs::read_to_string(std::path::Path::new(&repo).join(FIXTURE))?;
     boot(case, "node-a").await?;
+    let entry = json!({"kind": "entry", "function": WORKFLOW});
 
-    // (a) The generated workflow reaches the host as a typed document. The
-    // lens that lowers the model's text runs here, outside the host.
-    let generated = lash::typescript::workflow_graph::workflow_graph_from_source(&source)
-        .context("the generated workflow lowers to a document")?;
+    // (a) The generated workflow reaches the host as a kernel document. It
+    // is written here, outside the host, against what the host offers.
     let host = case.node("node-a")?;
-    let opened = host
-        .post("/workflow/draft", &json!({"graph": generated}))
-        .await?;
-    let (_, entry) = workflow_process(&graph(&opened["graph"])?)?;
+    let generated = generated(host, &text).await?;
+    host.post(
+        "/workflow/draft",
+        &json!({"document": serde_json::to_value(&generated)?}),
+    )
+    .await?;
     let first = host
-        .post("/workflow/draft/publish", &json!({"entry": entry}))
+        .post("/workflow/draft/publish", &json!({"entry": WORKFLOW}))
         .await?;
     ensure!(
-        first["published"] == true,
-        "the generated workflow is admitted: {first}"
-    );
-    let old_entry = first["entry"]
-        .as_str()
-        .context("the publication names its entry")?
-        .to_owned();
-    ensure!(
-        workflow_process(&graph(&first["graph"])?)?.0 == old_entry,
-        "the definition starts the process the document binds as the workflow"
+        first["published"] == true && first["workflow"]["reference"]["entry"] == entry,
+        "the generated workflow is admitted as a definition of its entry: {first}"
     );
     case.write("published-generated.json", &first)?;
 
@@ -932,58 +621,31 @@ async fn s38(case: &mut Case) -> Result<()> {
         .post("/workflow/definition", &json!({"definition": old["id"]}))
         .await?;
     ensure!(
-        read["read"] == "inspected"
-            && read["definition"] == old
-            && read["entry"] == old_entry.as_str(),
+        read["read"] == "inspected" && read["definition"] == old,
         "the facade reads the definition that was published: {read}"
     );
     ensure!(
-        read["graph"] == first["graph"],
+        read["workflow"] == first["workflow"],
         "the definition reads as the document its publication answered"
     );
-    carries_no_source(&read["graph"], &source)?;
-    let old_graph = graph(&read["graph"])?;
-    let old_shape = shape(&old_graph, &old_entry)?;
-    let lifted: Vec<_> = old_graph
-        .declarations
-        .iter()
-        .filter_map(|declaration| match declaration {
-            WorkflowDeclaration::Process(process) if process.name != old_entry => Some(process),
-            _ => None,
-        })
-        .collect();
+    let old_document = document(&read["workflow"]["document"])?;
     ensure!(
-        lifted.len() == 1
-            && !lifted[0].origin.is_declared()
-            && lifted[0]
-                .body
-                .nodes()
-                .iter()
-                .any(|node| calls(node, "record")),
-        "the inline process is lifted into a declaration with a typed body"
+        old_document == generated,
+        "the admitted document is the one the case wrote"
     );
-    // The inline process is a typed reference a statement binds, and the
-    // start reads that binding.
-    let WorkflowNodeKind::Data {
-        binding: Some(audit),
-        ..
-    } = &old_shape.inline.kind
-    else {
-        bail!("a statement binds the inline process");
-    };
+    let old_shape = shape(&old_document, "reviewed")?;
+    // The audit process is an entry of the same document, and the start
+    // names it by function reference.
     ensure!(
-        slot_where(&statement(old_shape.inline), |expr| matches!(
-            expr,
-            Expr::ProcessRef { process } if process.as_str() == lifted[0].name
-        ))
-        .is_some()
-            && slot_where(&statement(old_shape.start), |expr| matches!(
-                expr,
-                Expr::Variable(name) if name.as_str() == audit.root.as_str()
-            ))
-            .is_some(),
-        "the start names the lifted process through its binding"
+        old_document.entries.contains_key(&Name::new(AUDIT))
+            && old_document.entries.contains_key(&Name::new(WORKFLOW)),
+        "the document lists the workflow and its audit process as entries"
     );
+    one(
+        &old_document,
+        "reference to the audit entry",
+        |node| matches!(node, Node::Expr(Expr::Literal(Literal::Function(name))) if name.as_str() == AUDIT),
+    )?;
 
     // (f, first half) A run of the generated definition, parked inside the
     // inner loop before anything is edited.
@@ -994,169 +656,127 @@ async fn s38(case: &mut Case) -> Result<()> {
         "the generated run parks on its first reviewed line: {old_first}"
     );
 
-    // (c) Typed edits of the admitted document, inside the try region and
+    // (c) Kernel edits of the admitted document, inside the try region and
     // inside the inner loop, as one transaction.
     let host = case.node("node-a")?;
     let opened = host
         .post("/workflow/draft", &json!({"definition": old["id"]}))
         .await?;
-    let draft_graph = graph(&opened["graph"])?;
-    let (draft_entry, draft_entry_id) = workflow_process(&draft_graph)?;
-    let draft = shape(&draft_graph, &draft_entry)?;
-    let status = statement(draft.status);
-    let status_slot =
-        slot_where(&status, |expr| is_string(expr, "reviewed")).context("the status literal")?;
-    let threshold = statement(draft.threshold);
-    let threshold_slot = slot_where(
-        &threshold,
-        |expr| matches!(expr, Expr::Number(two) if *two == 2.0),
-    )
-    .context("the threshold literal")?;
-    let rejected = statement(draft.catch_record);
-    let rejected_slot = slot_where(&rejected, |expr| is_string(expr, "rejected"))
-        .context("the recorded literal")?;
-    let signed_off = Expr::String("signed-off".into());
+    let draft = shape(&document(&opened["document"])?, "reviewed")?;
+    let Ok([bind, record]) = <[Stmt; 2]>::try_from(statements(
+        "let signed = {entry: \"signed-off\"}\ndo perform ledger.record(signed) as Any",
+    )?) else {
+        bail!("the authored statements are two");
+    };
     let edits = json!({"edits": [
-        // In the try region: one more recorded entry, authored as IR.
-        {
-            "op": "insert_node",
-            "body": {"node": draft.region.id, "slot": "try_body"},
-            "statement": replaced(rejected, &rejected_slot, signed_off.clone())?,
-        },
+        // In the try region: one more recorded entry, authored as kernel
+        // statements.
+        Edit::InsertStatement { at: Position::end(draft.try_body.clone()), statement: bind },
+        Edit::InsertStatement { at: Position::end(draft.try_body.clone()), statement: record },
         // In the try region: the status a completed review ends with.
-        {
-            "op": "replace_expression",
-            "node": draft.status.id,
-            "slot": WorkflowSlotPath::new(status_slot),
-            "expression": signed_off,
+        Edit::ReplaceExpression {
+            expression: draft.status.clone(),
+            with: expression("\"signed-off\"")?,
         },
         // In the inner loop: only larger lines are reviewed.
-        {
-            "op": "replace_expression",
-            "node": draft.threshold.id,
-            "slot": WorkflowSlotPath::new(threshold_slot),
-            "expression": Expr::Number(3.0),
-        },
+        Edit::ReplaceExpression { expression: draft.threshold.clone(), with: expression("3")? },
         // In the inner loop: every line is recorded twice.
-        {
-            "op": "clone_node",
-            "node": draft.record.id,
-            "body": {"node": draft.inner.id, "slot": "loop_body"},
+        Edit::CloneStatement {
+            statement: statement_of(&draft.records[0]),
+            to: Position::end(draft.inner_body.clone()),
         },
     ]});
     case.write("edits.json", &edits)?;
     let edited = host.post("/workflow/draft/edits", &edits).await?;
     ensure!(edited["applied"] == true, "the edits apply: {edited}");
     let second = host
-        .post("/workflow/draft/publish", &json!({"entry": draft_entry_id}))
+        .post("/workflow/draft/publish", &json!({"entry": WORKFLOW}))
         .await?;
     case.write("published-edited.json", &second)?;
     ensure!(
-        second["published"] == true,
+        second["published"] == true && second["workflow"]["reference"]["entry"] == entry,
         "the edited workflow is admitted: {second}"
     );
     let new = second["definition"].clone();
     ensure!(
-        new["id"] != old["id"] && new_graph_identity(&second, &first),
-        "an edit publishes a new definition"
+        new["id"] != old["id"]
+            && second["workflow"]["reference"]["document"].is_string()
+            && second["workflow"]["reference"]["document"]
+                != first["workflow"]["reference"]["document"],
+        "an edit publishes a new definition of a new document"
     );
-    carries_no_source(&second["graph"], &source)?;
-    let new_graph = graph(&second["graph"])?;
-    let new_entry = second["entry"]
-        .as_str()
-        .context("the publication names its entry")?
-        .to_owned();
-    ensure!(
-        workflow_process(&new_graph)?.0 == new_entry,
-        "the edited definition starts the workflow, too"
-    );
-    let new_shape = shape(&new_graph, &new_entry)?;
+    let new_document = document(&second["workflow"]["document"])?;
+    let new_shape = shape(&new_document, "signed-off")?;
 
-    // Correspondence: every node of the generated definition's document is
-    // retained and ends at a node of the edited one; the edited nodes end
-    // at the nodes that hold the edits; the two new nodes say where they
-    // came from.
-    let moved = correspondence(&second["correspondence"])?;
-    let (old_nodes, new_nodes) = (
-        entry_nodes(&old_graph, &old_entry)?,
-        entry_nodes(&new_graph, &new_entry)?,
-    );
-    for id in ids(&old_nodes) {
-        let to = moved
-            .kept
-            .get(&id)
-            .with_context(|| format!("node {id} of the generated document has an outcome"))?;
-        node(&new_graph, &new_entry, to)?;
+    // Correspondence: every node of the generated document survives into
+    // the edited one; the two replaced expressions are the only nodes an
+    // edit wrote; the nodes the case edits around end where the edited
+    // document holds them; and the only new nodes are the two authored
+    // statements and the clone.
+    let moved: Correspondence = serde_json::from_value(second["correspondence"].clone())
+        .context("the publication answers a correspondence")?;
+    let old_sites = sites(&old_document, |_| true)?;
+    for site in &old_sites {
+        let survivor = moved
+            .survivor(site)
+            .with_context(|| format!("node {site} of the generated document survives"))?;
+        ensure!(
+            survivor.edited == (*site == old_shape.status || *site == old_shape.threshold),
+            "only the replaced expressions were edited: {survivor:?}"
+        );
     }
     for (was, now) in [
-        (old_shape.region, new_shape.region),
-        (old_shape.outer, new_shape.outer),
-        (old_shape.inner, new_shape.inner),
-        (old_shape.threshold, new_shape.threshold),
-        (old_shape.review, new_shape.review),
-        (old_shape.decision, new_shape.decision),
-        (old_shape.record, new_shape.record),
-        (old_shape.status, new_shape.status),
-        (old_shape.start, new_shape.start),
+        (&old_shape.region, &new_shape.region),
+        (&old_shape.outer, &new_shape.outer),
+        (&old_shape.inner, &new_shape.inner),
+        (&old_shape.threshold, &new_shape.threshold),
+        (&old_shape.review, &new_shape.review),
+        (&old_shape.records[0], &new_shape.records[0]),
+        (&old_shape.status, &new_shape.status),
+        (&old_shape.start, &new_shape.start),
+        (&old_shape.wait, &new_shape.wait),
     ] {
         ensure!(
-            moved.kept.get(was.id.as_str()).map(String::as_str) == Some(now.id.as_str()),
-            "node {} corresponds to {}: {:?}",
-            was.id,
-            now.id,
-            moved.kept.get(was.id.as_str())
+            moved.successor(was) == Some(now),
+            "node {was} corresponds to {now}: {:?}",
+            moved.successor(was)
         );
     }
     ensure!(
-        slot_where(&statement(new_shape.status), |expr| is_string(
-            expr,
-            "signed-off"
-        ))
-        .is_some()
-            && slot_where(&statement(new_shape.threshold), |expr| {
-                matches!(expr, Expr::Number(three) if *three == 3.0)
-            })
-            .is_some(),
-        "the corresponding nodes hold the edited expressions"
+        old_shape.authored.is_none() && new_shape.authored.is_some(),
+        "only the edited workflow records the authored entry"
     );
-    let authored = new_shape
-        .try_body
-        .nodes()
-        .last()
-        .copied()
-        .context("the edited try body")?;
-    let cloned = new_shape
-        .inner_body
-        .nodes()
-        .last()
-        .copied()
-        .context("the edited inner loop body")?;
+    let [_, cloned] = new_shape.records.as_slice() else {
+        bail!(
+            "the edited inner loop records twice: {:?}",
+            new_shape.records
+        );
+    };
+    let signed = sites(&new_document, |node| is_text(node, "signed-off"))?;
     ensure!(
-        slot_where(&statement(authored), |expr| is_string(expr, "signed-off")).is_some()
-            && calls(authored, "record")
-            && calls(cloned, "record")
-            && cloned.id != new_shape.record.id,
-        "the inserted and the cloned statement are where the edits put them"
+        signed.len() == 2 && signed.iter().all(|site| within(site, &new_shape.try_body)),
+        "the status and the authored entry are in the try body: {signed:?}"
     );
-    let inserted: BTreeMap<&str, &Value> = moved
-        .inserted
-        .iter()
-        .map(|(id, source)| (id.as_str(), source))
+    let new_sites: Vec<Site> = sites(&new_document, |_| true)?
+        .into_iter()
+        .filter(|site| moved.predecessor(site).is_none())
         .collect();
+    let try_statements = sites(&new_document, |node| matches!(node, Node::Stmt(_)))?
+        .into_iter()
+        .filter(|site| site.path.len() == new_shape.try_body.path.len() + 1)
+        .filter(|site| within(site, &new_shape.try_body))
+        .collect::<Vec<_>>();
+    let [.., bound, recorded] = try_statements.as_slice() else {
+        bail!("the edited try body ends with the authored statements");
+    };
+    let cloned_statement = statement_of(cloned);
     ensure!(
-        inserted.len() == 2
-            && inserted
-                .get(authored.id.as_str())
-                .map(|source| &source["kind"])
-                == Some(&json!("authored"))
-            && inserted.get(cloned.id.as_str()).copied()
-                == Some(&json!({"kind": "clone", "of": draft.record.id})),
-        "the new nodes are the authored statement and the clone of the record: {:?}",
-        moved.inserted
-    );
-    ensure!(
-        ids(&new_nodes).len() == ids(&old_nodes).len() + 2,
-        "the edited document has exactly the two new nodes"
+        new_sites.len() == 7
+            && new_sites.iter().all(|site| {
+                within(site, bound) || within(site, recorded) || within(site, &cloned_statement)
+            })
+            && sites(&new_document, |_| true)?.len() == old_sites.len() + 7,
+        "the only new nodes are the authored statements and the clone: {new_sites:?}"
     );
 
     // (d) A run of the edited definition: it parks inside the inner loop,
@@ -1177,9 +797,9 @@ async fn s38(case: &mut Case) -> Result<()> {
     boot(case, "node-b").await?;
     let host = case.node("node-b")?;
     let mut observers = BTreeMap::new();
-    for (name, run, definition, document, entry) in [
-        ("generated", &old_run, &old, &first["graph"], &old_entry),
-        ("edited", &new_run, &new, &second["graph"], &new_entry),
+    for (name, run, definition, publication) in [
+        ("generated", &old_run, &old, &first),
+        ("edited", &new_run, &new, &second),
     ] {
         let read = host.get(&format!("/workflow/runs/{run}")).await?;
         ensure!(
@@ -1194,9 +814,8 @@ async fn s38(case: &mut Case) -> Result<()> {
         case.write(&format!("attached-{name}.json"), &attached)?;
         let overlay = &attached["attached"]["overlay"];
         ensure!(
-            attached["attached"]["document"]["graph"] == *document
-                && attached["attached"]["document"]["reference"] == read["document"]
-                && attached["attached"]["document"]["entry"] == entry.as_str(),
+            attached["attached"]["document"] == publication["workflow"]
+                && attached["attached"]["document"]["reference"] == read["document"],
             "the {name} follower read the document its run was admitted under"
         );
         ensure!(
@@ -1239,7 +858,7 @@ async fn s38(case: &mut Case) -> Result<()> {
             // wait, which the run's row answers), bound to its call, and
             // still says it missed the start.
             let shape = if edited { &new_shape } else { &old_shape };
-            let review = site(shape.review, "request")?;
+            let review = json!({"site": spelled(&shape.review)?, "task": "main"});
             let host = case.node("node-b")?;
             let observer = &observers[name];
             let waiting = case
@@ -1252,7 +871,7 @@ async fn s38(case: &mut Case) -> Result<()> {
                         .any(|entry| {
                             entry["site"] == review
                                 && entry["status"] == "running"
-                                && entry["occurrence"] == nth as u64 + 1
+                                && entry["occurrence"] == nth as u64
                                 && entry["call"]["call_id"] == delivery["call_id"]
                         });
                     Ok(shown.then_some(observed))
@@ -1320,21 +939,20 @@ async fn s38(case: &mut Case) -> Result<()> {
             observed["error"],
             observed["terminal"]
         );
-        let (graph, entry, shape) = if edited {
-            (&new_graph, &new_entry, &new_shape)
+        let (publication, shape) = if edited {
+            (&second, &new_shape)
         } else {
-            (&old_graph, &old_entry, &old_shape)
+            (&first, &old_shape)
         };
         check_followed(
             &observed,
             shape,
-            edited.then_some(cloned),
-            &sites_of(&graph.process(entry).context("the entry")?.body)?,
             &Followed {
                 threshold: threshold_of(edited),
                 parked: parked_on,
                 last_review: &last_review[name],
                 reference: &read["document"],
+                document_sites: &publication["workflow"]["execution_sites"],
             },
         )
         .with_context(|| format!("the {name} run's late follower"))?;

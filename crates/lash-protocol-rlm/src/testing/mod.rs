@@ -1,16 +1,8 @@
-mod cell_conformance;
 mod durable_host;
-mod kernel_door_tests;
 
 pub(crate) use durable_host::DurableHost;
 
 use std::sync::Arc;
-use std::sync::Mutex;
-
-/// A fresh storage backend for tests that do not execute durable effects.
-pub(crate) async fn sqlite_recording_backend() -> lash_core::Backend {
-    sqlite_memory_store_backend().await
-}
 
 std::thread_local! {
     /// The store sets the running test opened, held as its backends are.
@@ -19,8 +11,7 @@ std::thread_local! {
 }
 
 /// A fresh SQLite memory store set, storage only (no engine), held for the
-/// rest of the running test: the twin of [`sqlite_recording_backend`] for a test that reaches
-/// only store ports.
+/// rest of the running test.
 pub(crate) async fn sqlite_memory_store_set() -> std::sync::Arc<lash_sqlite_store::SqliteStoreSet> {
     let stores = std::sync::Arc::new(
         lash_sqlite_store::SqliteStoreSet::memory()
@@ -30,38 +21,6 @@ pub(crate) async fn sqlite_memory_store_set() -> std::sync::Arc<lash_sqlite_stor
     TEST_STORE_SETS.with(|held| held.borrow_mut().push(std::sync::Arc::clone(&stores)));
     lash_core::testing::process_execution_env_fixture(stores.process_env_store().as_ref()).await;
     stores
-}
-
-/// [`sqlite_memory_store_set`] as a backend whose effect host is the recording
-/// double: for a test that needs a `Backend` value but runs no effect.
-pub(crate) async fn sqlite_memory_store_backend() -> lash_core::Backend {
-    lash_conformance::backend_over(sqlite_memory_store_set().await)
-}
-
-thread_local! {
-    /// A fixture's selected SQLite module store. Contexts and process workers
-    /// share the slot even when the fixture creates the store after the context.
-    static ARTIFACT_SLOT: Arc<Mutex<Option<lash_core::Backend>>> =
-        Arc::new(Mutex::new(None));
-}
-
-pub(crate) fn sqlite_recording_backend_blocking() -> lash_core::Backend {
-    std::thread::scope(|scope| {
-        scope
-            .spawn(|| {
-                tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .expect("build a current-thread runtime")
-                    .block_on(sqlite_recording_backend())
-            })
-            .join()
-            .expect("open the memory backend on its own thread")
-    })
-}
-
-pub(crate) fn sqlite_memory_artifact_store_blocking() -> lash_vm::LashVmArtifacts {
-    lash_vm::LashVmArtifacts::of_backend(&sqlite_recording_backend_blocking())
 }
 
 /// The scope a context built with no parent invocation claims: the builder's
@@ -86,51 +45,122 @@ pub(crate) fn recorded_test_render() -> lash_core::RecordedRender {
     }
 }
 
-// The executor's TypeScript entry points for cell-level tests: each runs one
-// cell under the TypeScript dialect a host would select.
-
-/// Run one TypeScript cell through the production executor entry.
-#[allow(clippy::too_many_arguments)]
-pub(crate) async fn execute_code_with_channel_and_bounds(
-    state: &mut crate::executor::RlmExecutionState,
-    ctx: lash_core::RuntimeExecutionContext<'_>,
-    request: lash_core::ExecRequest,
-    artifact_store: lash_vm::LashVmArtifacts,
-    lash_vm_surface: lash_vm_runtime::LashVmSurface,
-    deferred_tool_resolver: Option<lash_vm_runtime::SharedDeferredToolResolver>,
-    session_projected_bindings: crate::projection::RlmProjectedBindings,
-    execution_trace: Option<lash_core::plugin::PluginExecutionTrace>,
-    execution_bounds: lash_vm::ExecutionBounds,
-    channel: crate::plugin::RlmChannel,
-    code_renderer: crate::render::CodeRendererSlot,
-) -> lash_core::ExecResponse {
-    let ctx = match execution_trace {
-        Some(trace) => ctx.with_trace_standing(trace.into_standing()),
-        None => ctx,
-    };
-    Box::pin(crate::executor::execute_code_with_channel_and_bounds(
-        &crate::dialect::TypescriptDialect,
-        state,
-        ctx,
-        request,
-        artifact_store,
-        lash_vm_surface,
+/// What a cell of `dialect` needs of its session, with no bounds and the
+/// builtin renderer, on the cell channel.
+pub(crate) fn cell_services(
+    dialect: &crate::CellDialect,
+    workers: lash_vm_client::service::Service,
+    deferred_tool_resolver: Option<crate::SharedDeferredToolResolver>,
+) -> crate::executor::CellServices {
+    crate::executor::CellServices {
+        workers,
         deferred_tool_resolver,
-        session_projected_bindings,
-        execution_bounds,
-        channel,
-        code_renderer,
-    ))
-    .await
+        execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
+        channel: crate::plugin::RlmChannel::Cell,
+        code_renderer: crate::render::CodeRendererSlot::default(),
+        prompts: dialect.prompts(),
+    }
 }
 
-#[cfg(test)]
-pub(crate) fn deferred_link() -> lash_vm_runtime::DeferredLink {
-    lash_vm_runtime::DeferredLink::new(lash_vm_runtime::DeferredResolutionLinkKey {
-        address: lash_core::EffectAddress::new(
-            lash_core::ExecutionScope::turn("test-session", "turn-1"),
-            "replay:effect-1",
-        )
-        .expect("valid fixture link"),
-    })
+/// Run one cell through the production executor entry and settle it as
+/// its turn would: accepted.
+pub(crate) async fn run_cell(
+    state: &mut crate::executor::RlmExecutionState,
+    ctx: lash_core::RuntimeExecutionContext<'_>,
+    services: &crate::executor::CellServices,
+    code: &str,
+) -> lash_core::ExecResponse {
+    let response = Box::pin(crate::executor::execute_cell(
+        state,
+        ctx.with_recorded_render(recorded_test_render()),
+        lash_core::ExecRequest {
+            code: code.to_string(),
+        },
+        services,
+        crate::projection::RlmProjectedBindings::default(),
+    ))
+    .await;
+    if !response.suspended {
+        state.mark_code_execution_response_returned();
+        state.accept_code_execution();
+    }
+    response
+}
+
+/// The context of the cell `replay_key` of `session`'s turn `turn`, with
+/// `provider`'s tools as the cell's catalog.
+pub(crate) fn cell_context(
+    host: &DurableHost,
+    session: &'static str,
+    turn: &'static str,
+    replay_key: &'static str,
+    provider: Arc<dyn lash_core::ToolProvider>,
+) -> lash_core::RuntimeExecutionContext<'static> {
+    let catalog = lash_core::ToolCatalog::from_tool_definitions(
+        provider
+            .tool_manifests()
+            .into_iter()
+            .filter_map(|manifest| {
+                let contract = provider.resolve_contract(&manifest.name)?;
+                Some(lash_core::ToolDefinition::from_parts(
+                    manifest,
+                    contract.as_ref().clone(),
+                ))
+            })
+            .collect(),
+    );
+    lash_core::testing::code_execution_context_with_tool_provider_catalog_and_invocation(
+        host.ports(),
+        provider,
+        catalog,
+        lash_core::testing::exec_code_invocation(session, turn, 0, 0, "exec-code", replay_key),
+    )
+}
+
+/// The name of [`python_worker_entry`], as libtest spells it.
+const PYTHON_WORKER_ENTRY: &str = "testing::python_worker_entry";
+
+/// What a worker with the Python dialect runs: the kernel library and
+/// `lash-dialect-python`.
+fn python_embedding(
+    _tuning: &lash_vm_client::WorkerTuning,
+) -> Result<lash_vm_worker::Embedding, lash_vm_worker::EmbedError> {
+    let mut embedder = lash_vm_worker::Embedder::kernel()?;
+    let mut library = embedder.library()?;
+    let functions = lash_dialect_python::define_helpers(&mut library).map_err(|error| {
+        lash_vm_worker::EmbedError::Dialect {
+            dialect: lash_dialect_python::DIALECT.to_owned(),
+            message: error.to_string(),
+        }
+    })?;
+    embedder.install(lash_dialect_python::package(functions))?;
+    embedder.finish()
+}
+
+/// The worker entry of [`python_workers`]: a pool execs this test binary
+/// with this one test selected, and the test becomes the worker. Run by a
+/// test runner, it is no worker and passes.
+#[test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a worker's process ends when its pool closes it, not when libtest returns"
+)]
+fn python_worker_entry() {
+    if lash_vm_worker::worker_entry_with(&python_embedding).expect("serve as a Python worker") {
+        std::process::exit(0);
+    }
+}
+
+/// A worker service whose workers have the Python dialect installed: this
+/// test binary, entered at [`python_worker_entry`].
+pub(crate) fn python_workers() -> lash_vm_client::service::Service {
+    let mut entry = lash_vm_client::WorkerEntry::reexec().expect("this test binary's path");
+    entry.args = vec![
+        "--exact".to_owned(),
+        "--nocapture".to_owned(),
+        "--test-threads=1".to_owned(),
+        "--".to_owned(),
+        PYTHON_WORKER_ENTRY.to_owned(),
+    ];
+    lash_vm_client::service::Service::new(lash_vm_client::PoolConfig::rlm(entry))
 }

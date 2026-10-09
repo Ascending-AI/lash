@@ -115,9 +115,69 @@
       ],
       "type": "string"
     },
+    "CellDefect": {
+      "description": "A rule of a session's cells that a cell's program broke.",
+      "oneOf": [
+        {
+          "description": "The cell used a binding an earlier cell left that held a function or\na task: neither outlives the cell that created it, so the binding\nwas not carried.",
+          "properties": {
+            "binding": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "binding_not_carried",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "binding"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The cell ended with tasks it started and did not await: some still\nrunning, some failed with an error nothing observed. Each is named\nby the site that started it and which run of that site it was.",
+          "properties": {
+            "kind": {
+              "const": "tasks_outstanding",
+              "type": "string"
+            },
+            "unfinished": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "unobserved": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "kind",
+            "unfinished",
+            "unobserved"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "CellFailure": {
       "description": "Structured failure returned by a code executor.",
       "properties": {
+        "defect": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CellDefect"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The rule of a session's cells the program broke, when that is why\nthe cell failed, kept typed through the plugin and host result."
+        },
         "exec_failure": {
           "anyOf": [
             {
@@ -224,6 +284,10 @@
         }
       ]
     },
+    "DocumentId": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
     "Duration": {
       "properties": {
         "nanos": {
@@ -256,6 +320,38 @@
       "required": [
         "execution_scope",
         "replay_key"
+      ],
+      "type": "object"
+    },
+    "EffectIdentity": {
+      "additionalProperties": false,
+      "description": "Which wait of a run: one execution of a `perform` or a `sleep`.",
+      "properties": {
+        "loops": {
+          "description": "The loops the task was inside when it ran the site, outermost first,\nacross its active calls.",
+          "items": {
+            "$ref": "#/$defs/LoopIteration"
+          },
+          "type": "array"
+        },
+        "occurrence": {
+          "description": "How many times the task had run that site before, from 0.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "site": {
+          "$ref": "#/$defs/Site",
+          "description": "The site of the `perform` or the `sleep`."
+        },
+        "task": {
+          "$ref": "#/$defs/TaskIdentity"
+        }
+      },
+      "required": [
+        "task",
+        "site",
+        "occurrence"
       ],
       "type": "object"
     },
@@ -444,135 +540,11 @@
         }
       ]
     },
-    "ExprSlot": {
-      "description": "The role one child expression plays in its parent expression of the\nshared workflow IR.",
-      "oneOf": [
-        {
-          "enum": [
-            "condition",
-            "then",
-            "else",
-            "iterable",
-            "receiver",
-            "callee",
-            "this",
-            "catch",
-            "finally",
-            "target",
-            "index",
-            "left",
-            "right"
-          ],
-          "type": "string"
-        },
-        {
-          "additionalProperties": false,
-          "description": "A statement of a block or an element of a list.",
-          "properties": {
-            "item": {
-              "format": "uint32",
-              "minimum": 0,
-              "type": "integer"
-            }
-          },
-          "required": [
-            "item"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "The value of a record entry, by entry position.",
-          "properties": {
-            "entry": {
-              "format": "uint32",
-              "minimum": 0,
-              "type": "integer"
-            }
-          },
-          "required": [
-            "entry"
-          ],
-          "type": "object"
-        },
-        {
-          "const": "inner",
-          "description": "The expression a label or a structural role wraps.",
-          "type": "string"
-        },
-        {
-          "additionalProperties": false,
-          "description": "A dynamic index of an assignment target's path, by position.",
-          "properties": {
-            "assign_index": {
-              "format": "uint32",
-              "minimum": 0,
-              "type": "integer"
-            }
-          },
-          "required": [
-            "assign_index"
-          ],
-          "type": "object"
-        },
-        {
-          "const": "value",
-          "description": "The value an assignment stores.",
-          "type": "string"
-        },
-        {
-          "const": "bind",
-          "description": "The generated statements that bind a loop element to authored names.",
-          "type": "string"
-        },
-        {
-          "const": "body",
-          "description": "The body of a loop, a function, a process literal or a `try`.",
-          "type": "string"
-        },
-        {
-          "const": "input",
-          "description": "The input of a host descriptor constructor.",
-          "type": "string"
-        },
-        {
-          "additionalProperties": false,
-          "description": "A call argument, by position.",
-          "properties": {
-            "arg": {
-              "format": "uint32",
-              "minimum": 0,
-              "type": "integer"
-            }
-          },
-          "required": [
-            "arg"
-          ],
-          "type": "object"
-        },
-        {
-          "const": "operand",
-          "description": "The single operand of a unary form.",
-          "type": "string"
-        },
-        {
-          "const": "method_key",
-          "description": "The computed member a method call reads its callee from.",
-          "type": "string"
-        },
-        {
-          "const": "items",
-          "description": "The collection a map intrinsic reads.",
-          "type": "string"
-        },
-        {
-          "const": "function",
-          "description": "The callback a map intrinsic applies.",
-          "type": "string"
-        }
-      ]
-    },
     "FailureCode": {
+      "type": "string"
+    },
+    "FunctionId": {
+      "pattern": "^[0-9a-f]{64}$",
       "type": "string"
     },
     "GenerationOptionOutcome": {
@@ -866,14 +838,35 @@
       ],
       "type": "object"
     },
+    "LoopIteration": {
+      "additionalProperties": false,
+      "description": "One enclosing loop and the iteration it was on.",
+      "properties": {
+        "iteration": {
+          "description": "The iteration, from 0.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "site": {
+          "$ref": "#/$defs/Site",
+          "description": "The site of the `for` or the `while`."
+        }
+      },
+      "required": [
+        "site",
+        "iteration"
+      ],
+      "type": "object"
+    },
     "MaxToolCalls": {
       "description": "The number of tool calls one execution may make: the host's required\ndecision, with no default and no built-in ceiling (FIG-4546).\n\nWhat it counts depends on the execution. A cell \u2014 one code cell of a turn,\nor one tool step of a protocol without cells \u2014 may make at most this many\ntool calls in total. A process may hold at most this many at once: a call\ncounts from its acceptance until the process no longer depends on it, so\na long-running process is bounded in what it retains, never in what it\ndoes over its life. The call that passes the limit fails with\n[`ToolCallLimitExceeded`]; every call under it runs untouched. The limit\npaces nothing: rate limits and throttling are the host's own.",
       "format": "uint",
       "minimum": 1,
       "type": "integer"
     },
-    "ModuleRef": {
-      "description": "The content-addressed stored VM module an execution document names.",
+    "Name": {
+      "description": "A variable, parameter or declared-function name.\n\nAny text is a name; the kernel gives none of them meaning. Structural\nvalidation refuses the empty name.",
       "type": "string"
     },
     "NormalizedError": {
@@ -1416,12 +1409,58 @@
         }
       ]
     },
+    "Site": {
+      "additionalProperties": false,
+      "description": "A node's address: the code it belongs to and the chain of\n[`Node::children`] indexes that reaches it from that code's body.\n\nA site is derived from the document and is never written by a host\n(`K-ID-004`). An empty chain addresses the body itself.",
+      "properties": {
+        "path": {
+          "items": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "unit": {
+          "$ref": "#/$defs/Unit"
+        }
+      },
+      "required": [
+        "unit"
+      ],
+      "type": "object"
+    },
+    "SpawnIdentity": {
+      "additionalProperties": false,
+      "properties": {
+        "occurrence": {
+          "description": "How many times the parent had run that site before, from 0.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "parent": {
+          "$ref": "#/$defs/TaskIdentity",
+          "description": "The task that ran the `spawn`."
+        },
+        "site": {
+          "$ref": "#/$defs/Site",
+          "description": "The site of the `spawn`."
+        }
+      },
+      "required": [
+        "parent",
+        "site",
+        "occurrence"
+      ],
+      "type": "object"
+    },
     "StepBodyStarted": {
       "additionalProperties": false,
       "description": "The admitted body of a process step started: the step's actor committed\nits admission, bound it to a call, and is about to run it. A step that is\nrefused never produces one, and a retried body produces one more with the\nsame site, occurrence and call and the next attempt.\n\nIt names no language and no document: the process's own definition scopes\nthe site.",
       "properties": {
         "at": {
-          "$ref": "#/$defs/WorkflowOccurrence",
+          "$ref": "#/$defs/EffectIdentity",
           "description": "The occurrence of the site in the process's workflow document the\nstep runs for."
         },
         "attempt": {
@@ -1561,6 +1600,29 @@
           "const": "reasoning",
           "description": "Reasoning summary (\"thinking\") text, kept separate from assistant\nresponse text.",
           "type": "string"
+        }
+      ]
+    },
+    "TaskIdentity": {
+      "description": "Which task of a run: `main`, or the task one execution of a `spawn`\nstarted.",
+      "oneOf": [
+        {
+          "enum": [
+            "main"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "spawned": {
+              "$ref": "#/$defs/SpawnIdentity"
+            }
+          },
+          "required": [
+            "spawned"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -2375,7 +2437,7 @@
           "description": "One fact about one occurrence of one execution site.",
           "properties": {
             "at": {
-              "$ref": "#/$defs/WorkflowOccurrence"
+              "$ref": "#/$defs/EffectIdentity"
             },
             "fact": {
               "$ref": "#/$defs/TraceNodeFact"
@@ -3675,6 +3737,42 @@
         }
       ]
     },
+    "Unit": {
+      "description": "The code a node belongs to.",
+      "oneOf": [
+        {
+          "const": "main",
+          "description": "The document's `main`.",
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A declared function of the document.",
+          "properties": {
+            "function": {
+              "$ref": "#/$defs/Name"
+            }
+          },
+          "required": [
+            "function"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The kernel-code body of a library function.",
+          "properties": {
+            "library": {
+              "$ref": "#/$defs/FunctionId"
+            }
+          },
+          "required": [
+            "library"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "ValueMismatch": {
       "properties": {
         "instance_path": {
@@ -3697,11 +3795,14 @@
         "progress",
         "limit_exceeded",
         "ready",
-        "effect_request",
-        "observations",
-        "suspended",
-        "complete",
-        "guest_error",
+        "started",
+        "host_read",
+        "printed",
+        "parked",
+        "slice",
+        "ended",
+        "delivered",
+        "exported",
         "cancelled",
         "reset_done",
         "prepared"
@@ -3756,7 +3857,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "A snapshot or continuation exceeds its configured bound.",
+          "description": "A parked run exceeds its configured bound.",
           "properties": {
             "vm_state": {
               "properties": {
@@ -3822,7 +3923,7 @@
       "description": "The entry of a [`WorkflowDocumentRef`].",
       "oneOf": [
         {
-          "description": "The module's main body.",
+          "description": "The document's `main`: a session cell.",
           "properties": {
             "kind": {
               "const": "main",
@@ -3835,195 +3936,42 @@
           "type": "object"
         },
         {
-          "description": "One exported process, by the persisted reference the module's\nexports name it with.",
+          "description": "One entry of the document: a declared function a host may start,\nwhich is what a process runs.",
           "properties": {
-            "kind": {
-              "const": "process",
-              "type": "string"
+            "function": {
+              "$ref": "#/$defs/Name"
             },
-            "process_ref": {
+            "kind": {
+              "const": "entry",
               "type": "string"
             }
           },
           "required": [
             "kind",
-            "process_ref"
+            "function"
           ],
           "type": "object"
         }
       ]
     },
     "WorkflowDocumentRef": {
-      "description": "Which workflow document an execution runs, and where it enters it. It\nnames the document; it is never the document. A host reads the graph the\nreference names through the facade's workflow inspection and may cache\nit under this value, which is immutable for a process.",
+      "additionalProperties": false,
+      "description": "Which workflow document an execution runs, and where it enters it. It\nnames the document; it is never the document. A host reads the document\nthe reference names through the facade's workflow inspection and may\ncache it under this value, which is immutable for a process: a running\ninstance keeps the document it was admitted under.",
       "properties": {
+        "document": {
+          "$ref": "#/$defs/DocumentId",
+          "description": "The identity of the admitted kernel document: the hash of its\ncontent, kernel version and manifest included."
+        },
         "entry": {
           "$ref": "#/$defs/WorkflowDocumentEntry",
           "description": "Where the execution enters the document."
-        },
-        "ir_version": {
-          "description": "The interpretation of the IR the document is written under.",
-          "format": "uint32",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "module_ref": {
-          "$ref": "#/$defs/ModuleRef",
-          "description": "The stored module the document is read from."
-        },
-        "source_identity": {
-          "description": "The definition identity of the admitted module the document\nprojects; the document's own `source_identity`.",
-          "type": "string"
         }
       },
       "required": [
-        "source_identity",
-        "module_ref",
-        "entry",
-        "ir_version"
+        "document",
+        "entry"
       ],
       "type": "object"
-    },
-    "WorkflowLoopFrame": {
-      "additionalProperties": false,
-      "description": "One enclosing loop of an occurrence, outermost first in a context.",
-      "properties": {
-        "activation": {
-          "description": "Which entry of that loop this is, unique within the execution: a loop\nreentered by an outer iteration gets a new activation.",
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "position": {
-          "$ref": "#/$defs/WorkflowLoopPosition"
-        },
-        "site": {
-          "$ref": "#/$defs/WorkflowSiteRef",
-          "description": "The loop's own site."
-        }
-      },
-      "required": [
-        "site",
-        "activation",
-        "position"
-      ],
-      "type": "object"
-    },
-    "WorkflowLoopPosition": {
-      "description": "Where inside one loop activation something ran. Numbers are one-based.",
-      "oneOf": [
-        {
-          "additionalProperties": false,
-          "description": "The `n`-th evaluation of a `while` condition. The check after the last\nbody iteration, which reads false, is a check with no body of its\nnumber.",
-          "properties": {
-            "check": {
-              "format": "uint64",
-              "minimum": 0,
-              "type": "integer"
-            }
-          },
-          "required": [
-            "check"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "The `n`-th run of the loop body.",
-          "properties": {
-            "body": {
-              "format": "uint64",
-              "minimum": 0,
-              "type": "integer"
-            }
-          },
-          "required": [
-            "body"
-          ],
-          "type": "object"
-        }
-      ]
-    },
-    "WorkflowNodeId": {
-      "description": "A deterministic node identifier of a workflow document, minted from the\nnode's structural owner and AST path. It is never empty.",
-      "type": "string"
-    },
-    "WorkflowOccurrence": {
-      "additionalProperties": false,
-      "description": "One occurrence of one execution site: the site, which run of that site\nthis is (from 1, counted per site within an execution), and the loop\nactivations that enclosed the occurrence when it began, outermost first.\n\nEvery layer that names an occurrence (durable effect and wait records,\ntrace facts, the overlay and the VM) holds this value.",
-      "properties": {
-        "loops": {
-          "items": {
-            "$ref": "#/$defs/WorkflowLoopFrame"
-          },
-          "type": "array"
-        },
-        "occurrence": {
-          "format": "uint64",
-          "minimum": 1,
-          "type": "integer"
-        },
-        "site": {
-          "$ref": "#/$defs/WorkflowSiteRef"
-        }
-      },
-      "required": [
-        "site",
-        "occurrence"
-      ],
-      "type": "object"
-    },
-    "WorkflowSitePath": {
-      "additionalProperties": false,
-      "description": "The address of one execution site inside a workflow node: the slot path\nfrom the node's statement to the site's expression, and the synthetic\nsite of that expression it names, if it is not the expression's own. The\ndefault is the statement's own site.",
-      "properties": {
-        "role": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/WorkflowSiteRole"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "slots": {
-          "$ref": "#/$defs/WorkflowSlotPath"
-        }
-      },
-      "type": "object"
-    },
-    "WorkflowSiteRef": {
-      "additionalProperties": false,
-      "description": "The static address of one execution site in a workflow document: the node\nthat owns it and the path to the executable subexpression inside it.",
-      "properties": {
-        "node_id": {
-          "$ref": "#/$defs/WorkflowNodeId"
-        },
-        "site_path": {
-          "$ref": "#/$defs/WorkflowSitePath"
-        }
-      },
-      "required": [
-        "node_id"
-      ],
-      "type": "object"
-    },
-    "WorkflowSiteRole": {
-      "description": "What a site that is not an expression of its own stands for.",
-      "oneOf": [
-        {
-          "const": "labeled_step",
-          "description": "The step a label declares over the expression it wraps, when that\nexpression is not itself the labeled operation.",
-          "type": "string"
-        }
-      ]
-    },
-    "WorkflowSlotPath": {
-      "description": "The typed path from a workflow node's statement to one expression inside\nit: the child slot taken at each step. The empty path is the statement\nitself.\n\nThe serialized list is authoritative. [`Display`](std::fmt::Display) is a\nderived spelling for text-only host contracts.",
-      "items": {
-        "$ref": "#/$defs/ExprSlot"
-      },
-      "type": "array"
     }
   },
   "$id": "https://lash.dev/schemas/trace-record/v36",

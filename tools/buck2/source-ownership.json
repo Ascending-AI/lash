@@ -49,7 +49,12 @@
   "crates/lash-dialect-typescript": {
     "compile_data": [
       "src/helpers/*.kernel"
-    ]
+    ],
+    "test_data": {
+      "test262_kernel": [
+        "tests/test262/test/**/*.js"
+      ]
+    }
   },
   "crates/lash-conformance": {
     "compile_data": [
@@ -143,22 +148,6 @@
       "provider-scripts/**/*"
     ]
   },
-  "crates/lash-typescript": {
-    "test_data": {
-      "corpus_laws": [
-        "tests/test262/test/**/*.js"
-      ],
-      "test262": [
-        "tests/test262/test/**/*.js"
-      ],
-      "test262_full": [
-        "tests/test262/test/**/*.js"
-      ],
-      "test262_ratchet": [
-        "tests/test262/test/**/*.js"
-      ]
-    }
-  },
   "examples/agent-workbench": {
     "compile_data": [
       "assets/index.html",
@@ -185,8 +174,7 @@
       "wire_schema": [
         "tests/wire_schema.rs",
         "src/service.rs",
-        "src/artifact.rs",
-        "src/context.rs"
+        "src/wire.rs"
       ]
     },
     "test_data": {

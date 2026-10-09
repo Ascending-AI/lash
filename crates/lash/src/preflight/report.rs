@@ -529,18 +529,14 @@ impl PreflightReport {
             .collect();
         for component in self.refusals() {
             // The identity-only formats refuse without a version to print:
-            // bytecode names the build that produced it, so there is no found
-            // integer, and rendering an empty list would leave the operator
-            // reading "`bytecode` is at  and this build writes ...".
+            // a start stamp names the generation that produced it, so there
+            // is no found integer, and rendering an empty list would leave
+            // the operator reading "`kernel version` is at  and this build
+            // writes ...".
             if component.found.is_empty() {
-                let remedy = if component.format_key == DurableFormat::ModuleArtifact {
-                    "; recompile and republish the module"
-                } else {
-                    ""
-                };
                 reasons.push(format!(
-                    "`{}` holds {} item(s) written by another build, and this build writes {}{}",
-                    component.format, component.refused_without_version, component.expected, remedy
+                    "`{}` holds {} item(s) written by another build, and this build writes {}",
+                    component.format, component.refused_without_version, component.expected
                 ));
                 continue;
             }
@@ -729,7 +725,7 @@ mod tests {
 
     fn tally_row(tally: FormatTally, expected: FormatVersion) -> ComponentReadability {
         tally.into_row(
-            DurableFormat::VmContinuation,
+            DurableFormat::KernelDocument,
             expected,
             FormatProbe::Comparable,
             FormatEvidence::Direct,
@@ -778,14 +774,14 @@ mod tests {
         // The honest limit made machine-readable: a gate can tell a directly
         // probed row from one whose boundary is enforced by an envelope.
         let row = FormatTally::default().into_row(
-            DurableFormat::LashVmSnapshot,
+            DurableFormat::RlmDriverState,
             FormatVersion::Counter(2),
             FormatProbe::Comparable,
-            FormatEvidence::CarriedBy(DurableFormat::RlmSnapshotEnvelope.name()),
+            FormatEvidence::CarriedBy(DurableFormat::TurnCheckpoint.name()),
         );
         let json = serde_json::to_value(row).expect("the row serializes");
         assert_eq!(json["evidence"]["kind"], "carried_by");
-        assert_eq!(json["evidence"]["carrier"], "RLM snapshot envelope");
+        assert_eq!(json["evidence"]["carrier"], "turn checkpoint");
         assert!(json.get("format_key").is_none());
     }
 

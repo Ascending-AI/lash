@@ -28,8 +28,7 @@ async fn sleeping_cell_session(
             .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),
-        Arc::new(lash_protocol_rlm::TypescriptDialect),
-        &backend,
+        lash_protocol_rlm::CellDialect::typescript(),
     )
     .with_worker_service(untimed_fixture_workers());
     let (calls, started) = (Arc::clone(calls), Arc::clone(started));

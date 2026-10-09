@@ -178,12 +178,6 @@ async fn overlay_fold_receipt_folds_every_delivered_observation() {
     assert!(count(&receipt.counters["document_sites"]) >= 2);
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn overlay_attribution_receipt_observes_only_the_observed_run() {
-    let receipt = receipt(Case::OverlayAttribution, 50, 2).await;
-    assert!(count(&receipt.counters["observations_per_run"]) >= 50);
-}
-
 /// FIG-5637's rule: the owner id is the durable node name, and a second boot
 /// under one name fences the first.
 #[test]

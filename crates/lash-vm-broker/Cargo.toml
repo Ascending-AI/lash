@@ -18,15 +18,11 @@ doctest = false
 workspace = true
 
 [features]
-synthetic-next = ["lash-vm-protocol/synthetic-next", "lash-vm/synthetic-next"]
-# The in-process fake worker the broker's laws run behind the protocol types.
-testing = []
+synthetic-next = ["lash-vm-protocol/synthetic-next"]
 
-# The broker shares the VM's detached effect vocabulary, but never opens VM
-# snapshots or continuations and never compiles or executes model code.
-# The broker is parent code: it depends on the protocol and the parent's
-# identity vocabulary, and on nothing that could decode or run guest state
-# (ADR 0123).
+# The broker is parent code: it depends on the protocol, the kernel's
+# vocabulary and the parent's identity vocabulary. It drives a machine
+# through its interface and never compiles model code (ADR 0123).
 [dependencies]
 lash-core-execution = { workspace = true }
 lash-core-store = { workspace = true }
@@ -34,7 +30,6 @@ lash-durable = { workspace = true }
 lash-kernel-doc = { workspace = true }
 lash-kernel-vm = { workspace = true }
 lash-sansio = { workspace = true }
-lash-vm = { workspace = true }
 lash-vm-protocol = { workspace = true }
 async-trait = { workspace = true }
 blake3 = { workspace = true }
@@ -47,9 +42,8 @@ tokio-util = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
-# The durable laws drive the broker's fake worker over the durable store,
-# cut by the substrate harness at every commit.
-lash-vm-broker = { package = "lash-internal-vm-broker", path = ".", features = ["testing"] }
+# The durable laws drive the broker over the durable store, cut by the
+# substrate harness at every commit.
 lash-core-execution = { workspace = true, features = ["testing"] }
 lash-durable-test = { workspace = true }
 lash-sqlite-store = { workspace = true }

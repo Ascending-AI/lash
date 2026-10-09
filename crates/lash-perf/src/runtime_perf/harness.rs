@@ -733,7 +733,6 @@ pub(crate) fn benchmark_rlm_instruction_limit(scenario: RuntimePerfScenario) -> 
 
 fn benchmark_rlm_protocol_factory(
     scenario: RuntimePerfScenario,
-    backend: &lash::Backend,
 ) -> lash_protocol_rlm::RlmProtocolPluginFactory {
     lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()
@@ -743,8 +742,7 @@ fn benchmark_rlm_protocol_factory(
             ))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),
-        std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
-        backend,
+        lash_protocol_rlm::CellDialect::typescript(),
     )
 }
 
@@ -902,7 +900,7 @@ pub(crate) async fn build_embed_core(
         ExecutionMode::Rlm => benchmark_rlm_builder(
             backend.clone(),
             provider,
-            benchmark_rlm_protocol_factory(scenario, &backend),
+            benchmark_rlm_protocol_factory(scenario),
         )
         .with_explicit_ephemeral_facets()
         .tools(Arc::new(BenchmarkEchoTool::new(effect_host)))
@@ -983,7 +981,7 @@ pub(crate) async fn build_runtime(
             BenchmarkCore::Standard(builder.build(runtime_perf_owner())?)
         }
         ExecutionMode::Rlm => {
-            let factory = benchmark_rlm_protocol_factory(scenario, &backend);
+            let factory = benchmark_rlm_protocol_factory(scenario);
             let mut tracing = lash_core::trace::TraceRuntime::new(backend.clock());
             if let Some(path) = trace_config
                 .as_ref()
@@ -1169,7 +1167,7 @@ fn durable_benchmark_core(
     let builder = match mode_id {
         ExecutionMode::Standard => benchmark_standard_builder(backend, provider),
         ExecutionMode::Rlm => {
-            let factory = benchmark_rlm_protocol_factory(RuntimePerfScenario::Rlm, &backend);
+            let factory = benchmark_rlm_protocol_factory(RuntimePerfScenario::Rlm);
             benchmark_rlm_builder(backend, provider, factory)
         }
     };

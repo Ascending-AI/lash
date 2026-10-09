@@ -95,8 +95,7 @@ fn check_snapshot(testing: bool) {
     );
     for source in [
         include_str!("../src/service.rs"),
-        include_str!("../src/artifact.rs"),
-        include_str!("../src/context.rs"),
+        include_str!("../src/wire.rs"),
     ] {
         for declaration in declarations(source, testing) {
             schema.push_str(&declaration);

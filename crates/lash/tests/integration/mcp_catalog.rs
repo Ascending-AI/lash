@@ -242,7 +242,6 @@ async fn server_instructions_render_once_per_module_on_every_prompt_surface() {
         ]).with_env([("INITIALIZE", initialize.to_string()), ("TOOLS", tools.to_string())]))
     )])).await.expect("instruction peer connects"));
     assert_eq!(factory.pool().advertised_tools().len(), 2);
-    let backend = crate::support::sqlite_memory_store_backend().await;
     let mut observations = Vec::new();
     for surface in ["standard", "cell", "native"] {
         let (protocol, protocol_id): (Arc<dyn PluginFactory>, &str) = if surface == "standard" {
@@ -262,8 +261,7 @@ async fn server_instructions_render_once_per_module_on_every_prompt_surface() {
                         .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1000))
                         .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(1))
                         .build(),
-                    Arc::new(lash_protocol_rlm::TypescriptDialect),
-                    &backend,
+                    lash_protocol_rlm::CellDialect::typescript(),
                 )),
                 lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID,
             )

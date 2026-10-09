@@ -11,6 +11,8 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+#[path = "support/kernel_process.rs"]
+mod kernel_process;
 #[path = "support/served.rs"]
 mod served;
 #[path = "support/sim.rs"]
@@ -123,7 +125,6 @@ fn rlm_redeploying() -> lash::rlm::RlmProtocolPluginConfig {
         .memory_limit(lash::rlm::MemoryBound::mebibytes(1))
         .build();
     config.prompt_features.decomposition = false;
-    config.lash_vm_language_features.label_annotations = false;
     config.max_output_chars = 100;
     config.continue_as_soft_warn_tokens = None;
     config
@@ -168,8 +169,7 @@ impl Deployment {
                 };
                 let factory = lash::rlm::RlmProtocolPluginFactory::new(
                     config,
-                    Arc::new(lash::rlm::TypescriptDialect),
-                    backend,
+                    lash::rlm::CellDialect::typescript(),
                 )
                 .with_worker_service(sim::untimed_workers());
                 (
@@ -299,64 +299,22 @@ async fn an_rlm_run_executes_under_its_recorded_behaviour(tier: Tier) {
     );
 }
 
-/// The host process's lash_vm module: a loop far past the redeploying
-/// bound and far inside the recorded one, then its count. Published under a
-/// host pin; answers the start payload of its `looper` process.
+/// The host process's kernel document: a loop of [`LOOP_ITERATIONS`] turns,
+/// far past the redeploying bound and far inside the recorded one, then its
+/// answer. Published under a host pin; answers the start payload of its
+/// `looper` entry.
 async fn looping_process_payload(backend: &lash::Backend) -> serde_json::Value {
-    use lash_vm::CoercingBinaryOp::{Add, Less};
-    use lash_vm::testing::ast_builders as b;
-    let environment = lash_vm_runtime::LashVmSurface::default()
-        .host_environment(&lash_core::ToolCatalog::default())
-        .expect("the host environment");
-    let output = lash_vm::compile_module(lash_vm::ModuleCompileRequest {
-        source: "process looper() -> str { i = 0; while i < 5000 { i = i + 1 }; finish \"ran \" + i }",
-        program: b::module(
-            vec![b::process_returning(
-                "looper",
-                Vec::new(),
-                lash_vm::TypeExpr::Str,
-                b::block(vec![
-                    b::assign("i", b::num(0.0)),
-                    b::while_loop(
-                        b::binary(b::var("i"), Less, b::num(LOOP_ITERATIONS as f64)),
-                        b::block(vec![b::assign(
-                            "i",
-                            b::binary(b::var("i"), Add, b::num(1.0)),
-                        )]),
-                    ),
-                    b::finish(b::concat(b::string("ran "), b::var("i"))),
-                ]),
-            )],
-            Vec::new(),
-        ),
-        environment: &environment,
-    })
-    .expect("the looping module compiles");
-    lash_vm::LashVmArtifacts::of_backend(backend)
-        .publish_module_artifact(
-            &lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(
-                lash_core::HostArtifactPin::mint(),
-            ))
-            .expect("a host pin is unguarded"),
-            &output.artifact,
-        )
-        .await
-        .expect("the looping module publishes");
-    serde_json::to_value(lash_vm_runtime::LashVmProcessInput {
-        module_ref: output.module_ref.clone(),
-        process_ref: output
-            .artifact
-            .process_ref("looper")
-            .expect("the looper export")
-            .clone(),
-        host_requirements_ref: output.host_requirements_ref.clone(),
-        process_name: "looper".to_owned(),
-        args: serde_json::Map::new(),
-    })
-    .expect("the input encodes")
+    let tens = "[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]";
+    let text = format!(
+        "kernel 1\nnumbers float\nentry looper() -> Any\n\nfn looper() {{\n  let last = 0\n  \
+         for a in {tens} {{\n    for b in {tens} {{\n      for c in {tens} {{\n        \
+         for d in [0, 1, 2, 3, 4] {{\n          set last = d\n        }}\n      }}\n    }}\n  }}\n  \
+         return \"ran {LOOP_ITERATIONS}\"\n}}\n\nmain {{\n  finish null\n}}\n"
+    );
+    kernel_process::payload(backend, &text, "looper").await
 }
 
-/// A host starts a lash_vm process on the creating deployment under an
+/// A host starts a kernel process on the creating deployment under an
 /// environment with no RLM namespace: its row records that deployment's
 /// behaviour, and the redeploying deployment's node runs it under the
 /// recorded behaviour, so its loop finishes where the running deployment's
@@ -419,8 +377,8 @@ async fn a_host_started_process_runs_under_the_behaviour_its_creation_recorded(t
         .as_ref()
         .expect("creation records engine settings");
     assert_eq!(
-        recorded["execution_bounds"]["instruction_budget"],
-        serde_json::json!({ "bounded": 1_000_000 }),
+        recorded["charge"],
+        serde_json::json!(1_000_000),
         "the row records the creating deployment's bound"
     );
 

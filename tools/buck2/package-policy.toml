@@ -244,41 +244,9 @@ reason = "the generated-profile, minimizer and replay-artifact cases run 109--21
 shards = 8
 timeout = "long"
 
-# The no-abort guarantee forks a dozen children that each parse deliberately
-# deep sources right up to the stack bound. At the 4 GiB test floor
-# `the_abort_corpus_survives_without_the_preflight` and
-# `fuzzed_sources_survive_without_the_preflight` died of SIGKILL, so the label
-# used to be pinned to the runner with `no-remote-exec`, where it ran on every
-# CI leg (about 70 s of the tail's local time). The run is sized from its
-# measured runs now and executes on the pool like any other.
-[[rule]]
-packages = ["lash-internal-typescript"]
-kinds = ["test"]
-targets = ["carrier_laws", "corpus_laws", "integration", "race_any_runtime"]
-tags = ["dev-deferred"]
-reason = "the no-abort stress binary runs 43 s; too slow for the developer loop; the merge group runs it in the Buck2 tail"
 
-# The whole Test262 selection (FIG-3646): about 19,000 programs, measured at
-# 165 s of one core. The developer loop runs the stratified sample
-# (`test262`); the PR partition's tail runs this, and so does the nightly
-# Test262 workflow, uncached. The corpus cases partition the selection so the
-# Buck2 shards spread it (FIG-4733).
-[[rule]]
-packages = ["lash-internal-typescript"]
-kinds = ["test"]
-targets = ["test262_full"]
-tags = ["dev-deferred"]
-reason = "the full Test262 selection runs about 19,000 programs; the developer loop runs its stratified sample, and the PR tail and the nightly Test262 workflow run it whole"
-shards = 8
 
-# The whole-selection ratchet keeps the check in one case so the
-# `TEST262_BLESS` re-record recipe sees the selection whole (FIG-4733).
-[[rule]]
-packages = ["lash-internal-typescript"]
-kinds = ["test"]
-targets = ["test262_ratchet"]
-tags = ["dev-deferred"]
-reason = "the whole-selection Test262 ratchet runs about 19,000 programs in one case so TEST262_BLESS rewrites the record from the run it makes; too slow for the developer partition"
+
 
 [[rule]]
 packages = ["lash-regress"]
@@ -307,18 +275,13 @@ kinds = ["unit-test"]
 compile_data = ["//:perf_guard_budgets", "//:perf_duration_level_shifts"]
 serial = true
 
-[[rule]]
-packages = ["lash-runtime", "lash-internal-sqlite-store"]
-kinds = ["unit-test"]
-compile_data = ["//crates/lash-vm:old_module_fixture"]
-
 # The Node session oracle (FIG-3599) runs the dialect's session corpora through
 # the RLM executor; the corpora, their Node answers and the census the
 # session generator (FIG-3608) draws rejected cells from live with the dialect.
 [[rule]]
 packages = ["lash-internal-protocol-rlm"]
 kinds = ["unit-test"]
-compile_data = ["//crates/lash-typescript:session_oracle_corpus", "//:Cargo.toml"]
+compile_data = ["//crates/lash-dialect-typescript:session_oracle_corpus", "//:Cargo.toml"]
 
 # Numeric conformance cases are compiled into their owning unit laws.
 [[rule]]
@@ -342,12 +305,12 @@ packages = ["lash-dialect-typescript"]
 kinds = ["unit-test"]
 compile_data = ["//crates/lash-kernel-conformance:package_files", "//crates/lash-kernel-lib:package_files"]
 
-# Test262 on the kernel reads the corpus where it is vendored.
+# Test262 on the kernel reads the vendored corpus.
 [[rule]]
 packages = ["lash-dialect-typescript"]
 kinds = ["bin", "test", "example", "bench"]
 targets = ["test262_kernel"]
-data = ["//crates/lash-typescript:test262_corpus"]
+data = ["//crates/lash-dialect-typescript:test262_corpus"]
 
 # These carry the relocated suites that assert over captured `tracing` events.
 # Capture installs a scoped default subscriber, so other cases in the same
@@ -365,39 +328,12 @@ kinds = ["bin", "test", "example", "bench"]
 targets = ["integration"]
 serial = true
 
-# These cost laws read a process-global counting allocator.
-[[rule]]
-packages = ["lash-internal-vm"]
-kinds = ["bin", "test", "example", "bench"]
-targets = ["append_cost", "dialect_cost"]
-serial = true
-
 [[rule]]
 packages = ["agent-workbench", "e2e-consumer", "toolbench", "workflow-graph-roundtrip", "rlm-smoke-host"]
 kinds = ["bin", "test", "example", "bench"]
 compile_data = ["//examples:shared_rust_sources"]
 
-# The TypeScript host-flow module links the checked-in `examples/typescript-host-flows/*.ts`
-# cells with `include_str!`, the schema agreement test compiles the published
-# graph schema in and validates real serialized graph documents, and the
-# deviation-register census reads ADR 0062's register the same way.
-[[rule]]
-packages = ["lash-internal-typescript"]
-kinds = ["bin", "test", "example", "bench"]
-targets = ["integration"]
-compile_data = [
-    "//examples:typescript_host_flow_cells",
-    "//:workflow_graph_schema",
-    "//:dialect_deviation_register",
-]
 
-# The corpus laws (FIG-3599) run over every corpus, the TypeScript host-flow cells
-# among them.
-[[rule]]
-packages = ["lash-internal-typescript"]
-kinds = ["bin", "test", "example", "bench"]
-targets = ["corpus_laws"]
-compile_data = ["//examples:typescript_host_flow_cells"]
 
 # The schema agreement tests compile the published trace record and graph
 # snapshot schemas in and validate real serialized records against them.
@@ -407,25 +343,11 @@ kinds = ["bin", "test", "example", "bench"]
 targets = ["schema"]
 compile_data = ["//:host_schemas"]
 
-# It holds the dialect to the corpus's own checked-in budget by reading the
-# budget file with `include_str!`, the way lash-perf does.
-[[rule]]
-packages = ["lash-internal-vm"]
-kinds = ["bin", "test", "example", "bench"]
-targets = ["dialect_cost"]
-compile_data = ["//:perf_guard_budgets"]
-
 [[rule]]
 packages = ["lash-internal-postgres-store", "lash-internal-sqlite-store"]
 kinds = ["bin", "test", "example", "bench"]
 targets = ["durable_read_fixture"]
 compile_data = ["//crates/lash-core:durable_read_fixture_source"]
-
-[[rule]]
-packages = ["lash-internal-postgres-store"]
-kinds = ["bin", "test", "example", "bench"]
-targets = ["preflight_durable_walk"]
-compile_data = ["//crates/lash-vm:old_module_fixture"]
 
 # Architecture lints that read sibling crates' sources at run time. A library's
 # runfiles carry only its declared non-Rust inputs, so a test that scans
@@ -517,17 +439,6 @@ service_floor = { memory_kb = 1048576, packages = ["lash-internal-postgres-store
 [test_runs.large_suites]
 "agent-workbench/agent_workbench" = { cpu_count = 8, memory_kb = 4194304 }
 "lash-internal-core/lash_core" = { cpu_count = 8, memory_kb = 6815744 }
-# The no-abort stress binary forks a dozen children that each parse
-# deliberately deep sources up to the stack bound. Measured 2026-09-23 as one
-# cgroup at four test threads: 7612 MiB peak, 2.6 cores over 37 s.
-"lash-internal-typescript/integration" = { cpu_count = 4, memory_kb = 12058624 }
-# The full Test262 selection spreads its programs over every core it gets;
-# measured 2026-09-24 at 165 s of one core in total, 37 s for the slowest
-# test, with a 0.7 GiB peak -- 1.5 GiB keeps the margin the sizing rule asks.
-# The same request covers the corpus shards and the whole-selection ratchet
-# (FIG-4733).
-"lash-internal-typescript/test262_full" = { cpu_count = 8, memory_kb = 1572864 }
-"lash-internal-typescript/test262_ratchet" = { cpu_count = 8, memory_kb = 1572864 }
 "lash-runtime/lash" = { cpu_count = 8, memory_kb = 4194304 }
 
 # Requests pinned per Buck2 label, for runs and batches whose size is policy
@@ -554,7 +465,6 @@ service_floor = { memory_kb = 1048576, packages = ["lash-internal-postgres-store
 "//crates/lash-durable-test:vertical_crash_proof__test" = { cpu_count = 4, memory_kb = 524288 }
 "//crates/lash-durable-test:lash-durable-test__unit_test" = { cpu_count = 4, memory_kb = 524288 }
 
-"//crates/lash-typescript:test_batch" = { cpu_count = 4, memory_kb = 1048576 }
 # The facade check runs rustdoc over the facade and its closure in one test
 # action. At the 1.5 GiB default it held 1.91 GiB of anonymous memory and
 # peaked at 2.06 GiB of the dense workers' 2.08 GiB slot share in all 38 runs
@@ -583,20 +493,16 @@ provider-wire-fixtures = ["//crates/lash-sim:package_files"]
 [filegroups.lash-internal-core]
 durable_read_fixture_source = { srcs = ["tests/support/durable_read_fixture.rs"] }
 
-[filegroups.lash-internal-vm]
-old_module_fixture = { srcs = ["tests/fixtures/module-artifact-old.json"] }
-
-[filegroups.lash-internal-typescript]
+[filegroups.lash-dialect-typescript]
 # FIG-3727: the corpora are shard trees — one file per session, generated
 # session or census row — so parallel corpus changes never meet in a file.
 session_oracle_corpus = { glob = [
-    "README.md",
     "tests/differential/sessions/expectations/**",
     "tests/differential/sessions/generated/**",
     "tests/test262/census/**",
 ] }
 # The vendored Test262 selection, its harness renderings and main's outcome
-# record, which the kernel dialect's runner reads until the corpus moves.
+# record, which the kernel dialect's runner reads.
 test262_corpus = { glob = [
     "tests/test262/harness-shim/**",
     "tests/test262/outcomes/**",
@@ -614,11 +520,6 @@ test262_corpus = { glob = [
 [exported_files]
 # The schema `postgres_action_runner.py` applies to a hermetic test's database.
 lash-internal-postgres-store = ["schema.sql"]
-workflow-graph-roundtrip = [
-    "scripts/generate-contract-schema.py",
-    "frontend/src/generated/error-response.schema.json",
-    "frontend/src/generated/workflow-document.schema.json",
-]
 
 # --- trybuild fixtures ---------------------------------------------------------
 

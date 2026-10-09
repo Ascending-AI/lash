@@ -31,8 +31,7 @@ async fn durable_transcript_projection_fixture() -> Vec<crate::ChatRow> {
             .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
             .build(),
-        Arc::new(lash::rlm::TypescriptDialect),
-        &backend,
+        lash::rlm::CellDialect::typescript(),
     );
     let core = lash::LashCore::rlm_builder(backend, rlm_factory)
         .serve_test_llm_profile(

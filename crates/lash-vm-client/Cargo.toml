@@ -15,7 +15,7 @@ name = "lash_vm_client"
 doctest = false
 
 [features]
-synthetic-next = ["lash-vm-protocol/synthetic-next", "lash-vm-broker/synthetic-next", "lash-vm/synthetic-next"]
+synthetic-next = ["lash-vm-protocol/synthetic-next", "lash-vm-broker/synthetic-next"]
 testing = []
 perf-witness = ["lash-core-execution/perf-witness"]
 
@@ -31,7 +31,9 @@ lash-vm-broker = { workspace = true }
 async-trait = { workspace = true }
 tokio = { workspace = true, features = ["rt", "sync"] }
 lash-vm-protocol = { workspace = true }
-lash-vm = { workspace = true }
+lash-sansio = { workspace = true }
+lash-kernel-doc = { workspace = true }
+lash-kernel-vm = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 rmp-serde = { workspace = true }
 serde_json = { workspace = true }

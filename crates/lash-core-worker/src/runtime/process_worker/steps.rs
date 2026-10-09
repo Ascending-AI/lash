@@ -129,7 +129,7 @@ impl DurableProcessWorker {
             attempt: execution.attempt(),
         };
         let mut context = tracing.trace_runtime().base_context().clone();
-        context.graph_node_id = Some(site.site.node_id.to_string());
+        context.graph_node_id = Some(site.site.to_string());
         tracing.observe_language(&started.event_key(), || {
             (
                 context.clone(),

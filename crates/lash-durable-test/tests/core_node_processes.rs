@@ -1674,15 +1674,27 @@ async fn a_host_starts_preparation_is_held_by_its_own_start(tier: Tier) {
 
 on_every_tier!(a_host_starts_preparation_is_held_by_its_own_start);
 
-// --- lash_vm ---------------------------------------------------------------
+// --- kernel processes ------------------------------------------------------
 
-/// The lash_vm program a law's process runs: two sleeps, then its answer.
-const LASH_VM_SOURCE: &str = "process worker() -> str { sleep(5); sleep(7); finish \"done\" }";
+/// `worker()`: two sleeps, then its answer.
+const WORKER: &str = r#"kernel 1
+numbers float
+entry worker() -> Any
 
-/// An RLM core over `backend`: its protocol plugin contributes the lash_vm
-/// engine and its `vm_run` body.
+fn worker() {
+  do sleep 5
+  do sleep 7
+  return "done"
+}
+
+main {
+  finish null
+}
+"#;
+
+/// An RLM core over `backend`: its protocol plugin contributes the kernel
+/// process engine and its `kernel_run` body.
 fn rlm_core(backend: &lash::Backend) -> lash::LashCoreBuilder {
-    use lash::rlm::Dialect as _;
     lash::LashCore::rlm_builder(
         backend.clone(),
         lash::rlm::RlmProtocolPluginFactory::new(
@@ -1691,82 +1703,20 @@ fn rlm_core(backend: &lash::Backend) -> lash::LashCoreBuilder {
                 .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
                 .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
                 .build(),
-            Arc::new(lash::rlm::TypescriptDialect),
-            backend,
+            lash::rlm::CellDialect::typescript(),
         )
-        .with_worker_service(lash::rlm::TypescriptDialect.worker_service()),
+        .with_worker_service(lash::vm::WorkerService::default()),
     )
 }
 
-/// Publish the worker module under a host pin, and answer the start payload
-/// of its `worker` process.
+/// Publish the worker document under a host pin, and answer the start
+/// payload of its `worker` entry.
 async fn worker_payload(backend: &lash::Backend) -> serde_json::Value {
-    use lash_vm::testing::ast_builders as b;
-    lash_vm_payload(
-        backend,
-        LASH_VM_SOURCE,
-        b::process_returning(
-            "worker",
-            Vec::new(),
-            lash_vm::TypeExpr::Str,
-            b::block(vec![
-                b::sleep_for(b::num(5.0)),
-                b::sleep_for(b::num(7.0)),
-                b::finish(b::string("done")),
-            ]),
-        ),
-    )
-    .await
+    kernel_process::payload(backend, WORKER, "worker").await
 }
 
-/// Compile the module of the one process `declaration` declares from
-/// `source`, publish it under a host pin, and answer that process's start
-/// payload.
-async fn lash_vm_payload(
-    backend: &lash::Backend,
-    source: &str,
-    declaration: lash_vm::Declaration,
-) -> serde_json::Value {
-    use lash_vm::testing::ast_builders as b;
-    let lash_vm::Declaration::Process(process) = &declaration else {
-        panic!("the module declares a process");
-    };
-    let name = process.name.to_string();
-    let environment = lash_vm_runtime::LashVmSurface::default()
-        .host_environment(&lash_core::ToolCatalog::default())
-        .expect("the host environment");
-    let output = lash_vm::compile_module(lash_vm::ModuleCompileRequest {
-        source,
-        program: b::module(vec![declaration], Vec::new()),
-        environment: &environment,
-    })
-    .expect("the process module compiles");
-    lash_vm::LashVmArtifacts::of_backend(backend)
-        .publish_module_artifact(
-            &lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(
-                lash_core::HostArtifactPin::mint(),
-            ))
-            .expect("a host pin is unguarded"),
-            &output.artifact,
-        )
-        .await
-        .expect("the process module publishes");
-    serde_json::to_value(lash_vm_runtime::LashVmProcessInput {
-        module_ref: output.module_ref.clone(),
-        process_ref: output
-            .artifact
-            .process_ref(&name)
-            .expect("the process export")
-            .clone(),
-        host_requirements_ref: output.host_requirements_ref.clone(),
-        process_name: name,
-        args: serde_json::Map::new(),
-    })
-    .expect("the input encodes")
-}
-
-/// A lash_vm process started through the core's process API runs on the
-/// core's node: its VM runs only in its `vm_run` engine steps, from one
+/// A kernel process started through the core's process API runs on the
+/// core's node: its machine runs only in its `kernel_run` engine steps, from one
 /// committed snapshot to the next across its sleeps, to its terminal.
 async fn lash_vm_process_runs_to_its_terminal(tier: Tier) {
     let deployment = deploy_with(tier, Vec::new(), rlm_core).await;
@@ -1788,8 +1738,8 @@ async fn lash_vm_process_runs_to_its_terminal(tier: Tier) {
     assert!(
         steps
             .iter()
-            .any(|row| format!("{row:?}").contains(lash_vm_runtime::engine::VM_RUN_STEP)),
-        "the VM ran in its vm_run steps: {steps:?}"
+            .any(|row| format!("{row:?}").contains(lash_vm_runtime::KERNEL_RUN_STEP)),
+        "the machine ran in its kernel_run steps: {steps:?}"
     );
 }
 
@@ -2008,6 +1958,9 @@ async fn an_unbound_isolated_tool_is_refused_typed_before_any_body(tier: Tier) {
 
 on_every_tier!(an_isolated_rlm_tool_starts_one_process_and_answers_its_descriptor);
 on_every_tier!(an_unbound_isolated_tool_is_refused_typed_before_any_body);
+
+#[path = "support/kernel_process.rs"]
+mod kernel_process;
 
 #[path = "core_node_processes/process_endstates.rs"]
 mod process_endstates;

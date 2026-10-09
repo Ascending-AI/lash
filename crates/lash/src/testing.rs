@@ -1,16 +1,3 @@
-// Test-support module: these helpers run inside a test and a broken fixture
-// assumption must abort it loudly rather than be reshaped into a runtime error
-// the test under way would then report as a runtime defect. Clippy's
-// `allow-expect-in-tests` reaches `#[test]` functions only, not the fixtures
-// they call.
-#![cfg_attr(
-    feature = "rlm",
-    expect(
-        clippy::expect_used,
-        reason = "test-support fixtures: a broken setup assumption aborts the test"
-    )
-)]
-
 /// Derives a durable frame-node identity through the runtime's canonical
 /// producer for integration fixtures that need to enqueue frame-scoped work.
 pub use lash_core::facade_support::frame_node_id;
@@ -68,22 +55,6 @@ pub use lash_core::testing::{
     code_execution_context_with_tool_provider_catalog_scoped_effect_controller_and_invocation,
     exec_code_invocation,
 };
-
-/// The [`DeferredResolutionLinkKey`](crate::tools::DeferredResolutionLinkKey) a
-/// deferred link admits for an [`exec_code_invocation`]-built invocation —
-/// the infallible counterpart of
-/// [`DeferredResolutionLinkKey::from_exec_code_invocation`](crate::tools::DeferredResolutionLinkKey::from_exec_code_invocation)
-/// for a fixture known to carry an admitted `ExecCode` effect address. Construct a
-/// [`DeferredLink`](crate::tools::DeferredLink) with it
-/// when a host test executes
-/// [`compile_with_deferred_resolution`](crate::tools::compile_with_deferred_resolution).
-#[cfg(feature = "rlm")]
-pub fn deferred_resolution_link_key(
-    invocation: &lash_core::RuntimeInvocation,
-) -> crate::tools::DeferredResolutionLinkKey {
-    crate::tools::DeferredResolutionLinkKey::from_exec_code_invocation(invocation)
-        .expect("an exec_code_invocation carries an admitted ExecCode effect address")
-}
 
 #[cfg(test)]
 pub(crate) fn runtime_lease_owner() -> lash_core::LeaseOwnerIdentity {

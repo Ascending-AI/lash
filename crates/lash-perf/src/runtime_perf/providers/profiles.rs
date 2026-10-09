@@ -313,13 +313,13 @@ finish(first.value);"#,
         RuntimePerfScenario::RlmProcessHandles => {
             let text = typescript_block(
                 r#"
-const benchmarkEchoProcess = await processes.create({ dialect: "typescript", source: `const benchmarkEchoProcess = async (value: string, ordinal: number) => {
+const benchmarkEchoProcess = async (value: string, ordinal: number) => {
   return await tools.benchmark_echo({ value: value, ordinal: ordinal });
-};` });
+};
 
-const benchmarkSlowProcess = await processes.create({ dialect: "typescript", source: `const benchmarkSlowProcess = async (value: string, delay_ms: number) => {
+const benchmarkSlowProcess = async (value: string, delay_ms: number) => {
   return await tools.benchmark_slow({ value: value, delay_ms: delay_ms });
-};` });
+};
 
 const first = await processes.start({ definition: benchmarkEchoProcess, args: { value: "runtime perf benchmark ok", ordinal: 1 } });
 const second = await processes.start({ definition: benchmarkEchoProcess, args: { value: "runtime perf benchmark ok", ordinal: 2 } });
@@ -335,9 +335,9 @@ finish(first_result.value);"#,
         RuntimePerfScenario::RlmProcessAsyncToolCompletion => {
             let text = typescript_block(
                 r#"
-const benchmarkAsyncProcess = await processes.create({ dialect: "typescript", source: `const benchmarkAsyncProcess = async (value: string) => {
+const benchmarkAsyncProcess = async (value: string) => {
   return await tools.benchmark_async({ value: value, delay_ms: 0 });
-};` });
+};
 
 const first = await processes.start({ definition: benchmarkAsyncProcess, args: { value: "runtime perf benchmark ok" } });
 const second = await processes.start({ definition: benchmarkAsyncProcess, args: { value: "runtime perf benchmark ok" } });
@@ -362,9 +362,9 @@ finish(first_result.value);"#,
                 .join("\n");
             let text = typescript_block(&format!(
                 r#"
-const settlementChild = await processes.create({{ dialect: "typescript", source: `const settlementChild = async (value: string) => {{
+const settlementChild = async (value: string) => {{
   return await tools.benchmark_async({{ value: value, delay_ms: 0 }});
-}};` }});
+}};
 
 {starts}
 finish("runtime perf benchmark ok");"#
@@ -391,13 +391,13 @@ finish("runtime perf benchmark ok");"#,
         RuntimePerfScenario::RlmObliqueStackMix => {
             let text = typescript_block(
                 r#"
-const explore = await processes.create({ dialect: "typescript", source: `const explore = async () => {
+const explore = async () => {
   return await agents.spawn({
-    task: "Return \`{ len: chunk.length }\` using the seeded chunk.",
+    task: "Return `{ len: chunk.length }` using the seeded chunk.",
     seed: { chunk: ["obliq", "retrieval", "rerank", "trace"] },
     output: { len: "int" }
   });
-};` });
+};
 
 const first_pool = await obliq.search({
   queries: [
@@ -463,7 +463,7 @@ finish("runtime perf benchmark ok");"#,
             }
             let text = typescript_block(
                 r#"
-const deepChild = await processes.create({ dialect: "typescript", source: `const deepChild = async () => {
+const deepChild = async () => {
   const pending = await tools.benchmark_async({ value: "parent tool loop", delay_ms: 0 });
   await sleep(0);
   const child = await agents.spawn({
@@ -472,7 +472,7 @@ const deepChild = await processes.create({ dialect: "typescript", source: `const
     output: { len: "int" }
   });
   return { pending: pending.value, child: child.len };
-};` });
+};
 
 const handle = await processes.start({ definition: deepChild });
 const result = await handle;

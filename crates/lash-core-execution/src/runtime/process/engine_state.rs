@@ -87,7 +87,7 @@ pub enum StepRequest {
         /// site's `process.effect_outcome`, and the start of its admitted
         /// body is observed there ([`lash_trace::StepBodyStarted`]).
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        site: Option<lash_sansio::WorkflowOccurrence>,
+        site: Option<lash_sansio::EffectIdentity>,
     },
     /// A body of the process's own engine, run through the [`EngineSteps`]
     /// its registration declares, under the retry policy its kind declares
@@ -124,7 +124,7 @@ impl StepRequest {
 
     /// The effect node the step runs for, if its engine named one.
     #[must_use]
-    pub fn site(&self) -> Option<&lash_sansio::WorkflowOccurrence> {
+    pub fn site(&self) -> Option<&lash_sansio::EffectIdentity> {
         match self {
             Self::Tool { site, .. } => site.as_ref(),
             Self::Engine { .. } => None,
@@ -269,7 +269,7 @@ pub enum EngineAction {
         /// The wait's name.
         name: KeyName,
         /// The node that waits, when the engine's workflow document names one.
-        site: Option<lash_sansio::WorkflowOccurrence>,
+        site: Option<lash_sansio::EffectIdentity>,
     },
     /// Wait for another process's terminal.
     AwaitProcess {
@@ -279,14 +279,14 @@ pub enum EngineAction {
         /// lash default or ceiling.
         bound: crate::ParkBound,
         /// The node that waits, when the engine's workflow document names one.
-        site: Option<lash_sansio::WorkflowOccurrence>,
+        site: Option<lash_sansio::EffectIdentity>,
     },
     /// Sleep until a durable instant.
     Sleep {
         /// When the process wakes.
         until: DurableInstant,
         /// The node that sleeps, when the engine's workflow document names one.
-        site: Option<lash_sansio::WorkflowOccurrence>,
+        site: Option<lash_sansio::EffectIdentity>,
     },
     /// Nothing to do and no deadline: the process waits until the next
     /// mailbox event (`Cancelled`, a resolved wait or a settled step)

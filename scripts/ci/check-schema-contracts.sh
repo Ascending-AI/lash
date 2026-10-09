@@ -31,8 +31,6 @@ if [[ "$context" == untrusted ]]; then
   cargo build --locked -p lash-internal-vm --bin workflow_schema_generator \
     --message-format=json-render-diagnostics > "$build_dir/host-build.json"
 fi
-cargo build --locked -p workflow-graph-roundtrip --bin workflow_contract_schema \
-  --message-format=json-render-diagnostics > "$build_dir/example-build.json"
 executable() {
   python3 - "$1" "$2" <<'PY'
 import json
@@ -50,5 +48,3 @@ if [[ "$context" == untrusted ]]; then
   python3 scripts/generate-workflow-schemas.py --check \
     --generator "$(executable "$build_dir/host-build.json" workflow_schema_generator)"
 fi
-python3 examples/workflow-graph-roundtrip/scripts/generate-contract-schema.py --check \
-  --generator "$(executable "$build_dir/example-build.json" workflow_contract_schema)"

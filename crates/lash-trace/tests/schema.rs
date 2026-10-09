@@ -43,7 +43,11 @@ fn trace_retry_attempt_refuses_the_shared_llm_tool_shape() {
 fn node_failure_requires_typed_provenance() {
     let legacy = json!({
         "kind": "node",
-        "at": { "site": { "node_id": "node-1" }, "occurrence": 1 },
+        "at": {
+            "task": "main",
+            "site": { "unit": { "function": "node-1" }, "path": [] },
+            "occurrence": 1
+        },
         "fact": { "kind": "failed", "error": "permission denied" }
     });
     let refusal = serde_json::from_value::<TraceLanguageExecutionPayload>(legacy)
@@ -51,7 +55,7 @@ fn node_failure_requires_typed_provenance() {
     assert!(refusal.to_string().contains("failure"), "{refusal}");
 
     let payload = TraceLanguageExecutionPayload::Node {
-        at: lash_sansio::WorkflowOccurrence::fixture("node-1", 1),
+        at: lash_sansio::effect_identity_fixture("node-1", 1),
         fact: lash_trace::TraceNodeFact::Failed {
             call_id: Some(lash_sansio::ToolCallId::fixture("effect-1")),
             failure: lash_trace::TraceLanguageExecutionFailure::Effect {
@@ -126,12 +130,10 @@ fn lash_vm_identity() -> TraceLanguageExecutionIdentity {
             process_id: lash_sansio::ProcessId::fixture("p1"),
         },
         document: lash_trace::WorkflowDocumentRef {
-            source_identity: "source".to_string(),
-            module_ref: lash_sansio::ModuleRef::new(&lash_sansio::ContentHash::new("module")),
-            entry: lash_trace::WorkflowDocumentEntry::Process {
-                process_ref: "component:0".to_string(),
+            document: lash_kernel_doc::DocumentId::from_bytes([1; 32]),
+            entry: lash_trace::WorkflowDocumentEntry::Entry {
+                function: lash_kernel_doc::Name::new("worker"),
             },
-            ir_version: 1,
         },
         entry_name: "main".to_string(),
         engine_execution_id: None,
@@ -548,27 +550,27 @@ fn language_execution_payload_samples() -> Vec<TraceLanguageExecutionPayload> {
     vec![
         TraceLanguageExecutionPayload::ExecutionStarted,
         TraceLanguageExecutionPayload::Node {
-            at: lash_sansio::WorkflowOccurrence::fixture("branch", 1),
+            at: lash_sansio::effect_identity_fixture("branch", 1),
             fact: lash_trace::TraceNodeFact::Started { call_id: None },
         },
         TraceLanguageExecutionPayload::Node {
-            at: lash_sansio::WorkflowOccurrence::fixture("branch", 1),
+            at: lash_sansio::effect_identity_fixture("branch", 1),
             fact: lash_trace::TraceNodeFact::BranchSelected {
                 selected: TraceBranchSelection::Then,
             },
         },
         TraceLanguageExecutionPayload::Node {
-            at: lash_sansio::WorkflowOccurrence::fixture("branch", 1),
+            at: lash_sansio::effect_identity_fixture("branch", 1),
             fact: lash_trace::TraceNodeFact::Completed { call_id: None },
         },
         TraceLanguageExecutionPayload::Node {
-            at: lash_sansio::WorkflowOccurrence::fixture("then", 1),
+            at: lash_sansio::effect_identity_fixture("then", 1),
             fact: lash_trace::TraceNodeFact::Started {
                 call_id: Some(lash_sansio::ToolCallId::fixture("call-1")),
             },
         },
         TraceLanguageExecutionPayload::Node {
-            at: lash_sansio::WorkflowOccurrence::fixture("then", 1),
+            at: lash_sansio::effect_identity_fixture("then", 1),
             fact: lash_trace::TraceNodeFact::Waiting {
                 awaited: lash_trace::TraceNodeAwaited::Signal {
                     name: "approved".to_string(),
@@ -577,13 +579,13 @@ fn language_execution_payload_samples() -> Vec<TraceLanguageExecutionPayload> {
             },
         },
         TraceLanguageExecutionPayload::Node {
-            at: lash_sansio::WorkflowOccurrence::fixture("then", 1),
+            at: lash_sansio::effect_identity_fixture("then", 1),
             fact: lash_trace::TraceNodeFact::Resumed {
                 resolution: lash_trace::TraceNodeWaitResolution::Resumed,
             },
         },
         TraceLanguageExecutionPayload::Node {
-            at: lash_sansio::WorkflowOccurrence::fixture("then", 1),
+            at: lash_sansio::effect_identity_fixture("then", 1),
             fact: lash_trace::TraceNodeFact::ChildStarted {
                 child: TraceLanguageChildExecution {
                     scope: TraceRuntimeScope::new("s1"),
@@ -594,7 +596,7 @@ fn language_execution_payload_samples() -> Vec<TraceLanguageExecutionPayload> {
             },
         },
         TraceLanguageExecutionPayload::Node {
-            at: lash_sansio::WorkflowOccurrence::fixture("then", 1),
+            at: lash_sansio::effect_identity_fixture("then", 1),
             fact: lash_trace::TraceNodeFact::Failed {
                 call_id: Some(lash_sansio::ToolCallId::fixture("call-1")),
                 failure: lash_trace::TraceLanguageExecutionFailure::Runtime {
@@ -604,11 +606,11 @@ fn language_execution_payload_samples() -> Vec<TraceLanguageExecutionPayload> {
             },
         },
         TraceLanguageExecutionPayload::Node {
-            at: lash_sansio::WorkflowOccurrence::fixture("then", 2),
+            at: lash_sansio::effect_identity_fixture("then", 2),
             fact: lash_trace::TraceNodeFact::Started { call_id: None },
         },
         TraceLanguageExecutionPayload::Node {
-            at: lash_sansio::WorkflowOccurrence::fixture("then", 2),
+            at: lash_sansio::effect_identity_fixture("then", 2),
             fact: lash_trace::TraceNodeFact::Cancelled,
         },
         TraceLanguageExecutionPayload::ExecutionFinished {
@@ -741,12 +743,10 @@ fn published_overlay_schema_accepts_a_folded_overlay_and_enforces_its_row() {
     // other is reported as a mismatch.
     let document = lash_trace::WorkflowOverlayDocument::new(
         lash_trace::WorkflowDocumentRef {
-            source_identity: "source-2".to_string(),
-            module_ref: lash_sansio::ModuleRef::new(&lash_sansio::ContentHash::new("module-1")),
+            document: lash_kernel_doc::DocumentId::from_bytes([2; 32]),
             entry: lash_trace::WorkflowDocumentEntry::Main,
-            ir_version: 1,
         },
-        [lash_sansio::WorkflowOccurrence::fixture("then", 1).site],
+        [lash_sansio::effect_identity_fixture("then", 1).site],
     );
     let overlay = lash_trace::fold_workflow_overlay(None, Some(&document), &records, 1)
         .expect("fold every payload kind");
@@ -779,7 +779,7 @@ fn published_overlay_schema_accepts_a_folded_overlay_and_enforces_its_row() {
 fn step_body_started() -> lash_trace::StepBodyStarted {
     lash_trace::StepBodyStarted {
         process_id: lash_sansio::ProcessId::fixture("p1"),
-        at: lash_sansio::WorkflowOccurrence::fixture("then", 2),
+        at: lash_sansio::effect_identity_fixture("then", 2),
         call_id: lash_sansio::ToolCallId::fixture("call-2"),
         attempt: 1,
     }
@@ -1041,7 +1041,7 @@ fn content_bearing_events() -> Vec<TraceEvent> {
             error: Some(CONTENT.to_string()),
         }),
         language(TraceLanguageExecutionPayload::Node {
-            at: lash_sansio::WorkflowOccurrence::fixture("n1", 1),
+            at: lash_sansio::effect_identity_fixture("n1", 1),
             fact: lash_trace::TraceNodeFact::Failed {
                 call_id: Some(lash_sansio::ToolCallId::fixture("call-1")),
                 failure: lash_trace::TraceLanguageExecutionFailure::Runtime {
@@ -1146,7 +1146,7 @@ fn omitted_content_policy_empties_every_content_field_and_keeps_identity() {
 #[test]
 fn execution_identity_requires_its_process_document() {
     let wire = serde_json::to_value(lash_vm_identity()).expect("identity wire");
-    for missing in ["document", "process_ref"] {
+    for missing in ["document", "function"] {
         let mut incomplete = wire.clone();
         if missing == "document" {
             incomplete

@@ -490,7 +490,7 @@ async fn an_rlm_run_options_prompt_is_refused() -> Result<()> {
     let served: Served = Arc::default();
     let script = Arc::new(Script::default());
     let backend = sqlite_memory_store_backend().await;
-    let factory = rlm_factory(&backend);
+    let factory = rlm_factory();
     let core = explicit_ephemeral_facets(LashCore::rlm_builder(backend, factory))
         .serve_test_llm_profile(scripted_provider(&served, &script), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;

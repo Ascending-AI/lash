@@ -926,6 +926,7 @@ pub trait PluginFactory: PluginMetadata + Send + Sync {
 /// `lash::plugins::ProcessEngineContributionContext` (FIG-4373).
 pub struct ProcessEngineContributionContext<'a> {
     plugin_host: &'a super::PluginHost,
+    backend: &'a crate::Backend,
     trace_runtime: &'a crate::trace::TraceRuntime,
     process_lifecycle_available: bool,
 }
@@ -933,11 +934,13 @@ pub struct ProcessEngineContributionContext<'a> {
 impl<'a> ProcessEngineContributionContext<'a> {
     pub fn new(
         plugin_host: &'a super::PluginHost,
+        backend: &'a crate::Backend,
         trace_runtime: &'a crate::trace::TraceRuntime,
         process_lifecycle_available: bool,
     ) -> Self {
         Self {
             plugin_host,
+            backend,
             trace_runtime,
             process_lifecycle_available,
         }
@@ -950,6 +953,13 @@ impl<'a> ProcessEngineContributionContext<'a> {
     /// The host whose factories supply creation-time process resource grants.
     pub fn plugin_host(&self) -> &super::PluginHost {
         self.plugin_host
+    }
+
+    /// The backend the runtime is built over: an engine keeps what its
+    /// processes run in this backend's stores, so a process resumed after a
+    /// restart finds it and the backend's cleanup sweeps it.
+    pub fn backend(&self) -> &crate::Backend {
+        self.backend
     }
 
     pub fn trace_runtime(&self) -> &crate::trace::TraceRuntime {

@@ -51,7 +51,6 @@ pub enum Case {
     TraceSinkOtel,
     TraceSinkSlow,
     OverlayFold,
-    OverlayAttribution,
 }
 
 /// Run exactly one population so setup and boundary costs cannot be conflated.

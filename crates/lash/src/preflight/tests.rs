@@ -282,7 +282,7 @@ async fn a_store_this_build_wrote_is_ready_with_an_empty_drain_list() {
         ComponentVerdict::AllReadable
     );
     assert_eq!(
-        component(&report, DurableFormat::ModuleArtifact).verdict,
+        component(&report, DurableFormat::KernelDocument).verdict,
         ComponentVerdict::Empty
     );
 }
@@ -439,7 +439,7 @@ async fn summary_mode_names_the_per_session_walk_it_skipped() {
         "a format whose surface was skipped must not read as empty"
     );
     assert_eq!(
-        component(&report, DurableFormat::ModuleArtifact).verdict,
+        component(&report, DurableFormat::KernelDocument).verdict,
         ComponentVerdict::Empty,
         "the cheap surfaces are still walked"
     );
@@ -506,7 +506,7 @@ async fn a_backend_that_cannot_walk_a_surface_says_so_verbatim() {
         report.not_scanned
     );
     assert_eq!(
-        component(&report, DurableFormat::Bytecode).verdict,
+        component(&report, DurableFormat::KernelVersion).verdict,
         ComponentVerdict::NotScanned,
         "an unwalked surface must never read as an empty one"
     );
@@ -598,60 +598,6 @@ async fn a_cursor_that_never_advances_stops_the_walk() {
         stopped.reason().contains("session-1") && stopped.reason().contains("again"),
         "the reason names the repeated cursor: {}",
         stopped.reason()
-    );
-}
-
-#[tokio::test]
-async fn a_carried_format_inherits_its_carriers_verdict_in_both_directions() {
-    // The honest limit: neither format is stored on its own, so the boundary
-    // that decides them is the envelope's. The report says which envelope.
-    let healthy = probe_store(&healthy_store(), PreflightOptions::deep())
-        .await
-        .expect("the probe reads the store");
-    let snapshot = component(&healthy, DurableFormat::LashVmSnapshot);
-    assert_eq!(
-        snapshot.evidence,
-        FormatEvidence::CarriedBy(DurableFormat::RlmSnapshotEnvelope.name())
-    );
-    assert_eq!(snapshot.verdict, ComponentVerdict::AllReadable);
-
-    let store = healthy_store().with_items(
-        DurableSurface::SessionExecutionState,
-        vec![execution_state_item("s-1", RLM_SNAPSHOT_VERSION - 1)],
-    );
-    let refused = probe_store(&store, PreflightOptions::deep())
-        .await
-        .expect("the probe reads the store");
-    assert_eq!(
-        component(&refused, DurableFormat::LashVmSnapshot).verdict,
-        ComponentVerdict::Refused,
-        "a refused carrier refuses everything it carries"
-    );
-}
-
-#[test]
-fn a_carrier_absent_from_the_report_is_a_failed_join_not_an_unscanned_surface() {
-    let verdict = carrier_verdict(&BTreeMap::new(), DurableFormat::VmContinuation);
-
-    assert_eq!(
-        verdict,
-        ComponentVerdict::CarrierJoinFailed,
-        "a broken report join must not claim that nobody scanned the carrier's surface"
-    );
-}
-
-#[tokio::test]
-async fn the_vm_abi_is_reported_without_a_verdict_it_cannot_have() {
-    let report = probe_store(&healthy_store(), PreflightOptions::deep())
-        .await
-        .expect("the probe reads the store");
-    let abi = component(&report, DurableFormat::VmAbi);
-    assert_eq!(abi.evidence, FormatEvidence::NotPersisted);
-    assert_eq!(abi.scanned, 0);
-    assert_eq!(
-        abi.verdict,
-        ComponentVerdict::Empty,
-        "nothing durable exists to refuse, so it is empty rather than unscanned"
     );
 }
 

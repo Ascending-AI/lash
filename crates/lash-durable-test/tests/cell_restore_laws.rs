@@ -296,12 +296,12 @@ struct GrantingResolver {
 }
 
 #[async_trait::async_trait]
-impl lash_vm_runtime::DeferredToolResolver for GrantingResolver {
+impl lash::tools::DeferredToolResolver for GrantingResolver {
     async fn resolve(
         &self,
-        _cx: &lash_vm_runtime::DeferredResolveContext<'_>,
+        _cx: &lash::tools::DeferredResolveContext<'_>,
         paths: &[&str],
-    ) -> BTreeMap<String, lash_vm_runtime::Resolution> {
+    ) -> BTreeMap<String, lash::tools::DeferredToolResolution> {
         self.world
             .resolved
             .fetch_add(paths.len(), std::sync::atomic::Ordering::SeqCst);
@@ -313,12 +313,12 @@ impl lash_vm_runtime::DeferredToolResolver for GrantingResolver {
             .iter()
             .map(|path| {
                 let resolution = if *path == format!("tools.{GRANTED}") && !redeployed {
-                    lash_vm_runtime::Resolution::Resolved(Box::new(
-                        lash_vm_runtime::ToolGrant::new(granted(GRANTED))
+                    lash::tools::DeferredToolResolution::Resolved(Box::new(
+                        lash::tools::DeferredToolGrant::new(granted(GRANTED))
                             .with_source_id(lash::tools::PLUGIN_TOOL_SOURCE_ID),
                     ))
                 } else {
-                    lash_vm_runtime::Resolution::NotAvailable
+                    lash::tools::DeferredToolResolution::NotAvailable
                 };
                 ((*path).to_owned(), resolution)
             })
@@ -609,8 +609,7 @@ impl CellTurn {
                         .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
                         .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
                         .build(),
-                    Arc::new(lash::rlm::TypescriptDialect),
-                    &backend,
+                    lash::rlm::CellDialect::typescript(),
                 )
                 .with_worker_service(sim::workers(&clock));
                 let (factory, tools) = if self.cell == Cell::Deferred {

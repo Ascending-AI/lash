@@ -173,7 +173,7 @@ const INPUT_SOURCE_KEY: &str = "durable-read-input-source";
 
 fn fixture_effect_outcome() -> lash_core::ProcessEffectOccurrence {
     lash_core::ProcessEffectOccurrence::new(
-        lash_sansio::WorkflowOccurrence::fixture("durable-read-tool-node", 1),
+        lash_sansio::effect_identity_fixture("durable-read-tool-node", 1),
         "tool:fixture",
         lash_core::ProcessEffectOutcomeClass::Failure,
         Some(lash_core::FailureCode::provider("durable-read-fixture")),

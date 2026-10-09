@@ -51,11 +51,9 @@ impl lash::runtime::Clock for FrozenClock {
 
 /// The turn that registers a process on the mail source.
 const MAIL_REGISTRATION: &str = r#"<typescript>
-const on_mail = await processes.create({ dialect: "typescript", source: `
 const on_mail = async (event: unknown) => {
   return true;
 };
-` });
 await workbench.register_trigger({
   source: { kind: "mail" },
   definition: on_mail,
@@ -481,11 +479,9 @@ async fn a_delivery_that_cannot_start_is_recorded_failed_and_not_retried() {
 
 /// The turn that registers two processes on the mail source.
 const TWO_MAIL_REGISTRATIONS: &str = r#"<typescript>
-const on_mail = await processes.create({ dialect: "typescript", source: `
 const on_mail = async (event: unknown) => {
   return true;
 };
-` });
 await workbench.register_trigger({
   source: { kind: "mail" },
   definition: on_mail,
@@ -504,11 +500,9 @@ finish("registered");
 /// The turn that registers a process on a cron source that ticks at every
 /// even hour.
 const CRON_REGISTRATION: &str = r#"<typescript>
-const on_tick = await processes.create({ dialect: "typescript", source: `
 const on_tick = async (event: unknown) => {
   return true;
 };
-` });
 await workbench.register_trigger({
   source: { kind: "cron", expr: "0 0 */2 * * *" },
   definition: on_tick,

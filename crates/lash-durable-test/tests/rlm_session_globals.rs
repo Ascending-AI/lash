@@ -49,8 +49,8 @@ fn builder(backend: &lash::Backend) -> lash::LashCoreBuilder {
 }
 
 /// The names the production prompt binds in `request` (a rendered request):
-/// every entry of its last `BOUND VARIABLES` section but the read-only
-/// `history`.
+/// every bound entry of its last `BOUND VARIABLES` section but the
+/// read-only `history`.
 fn bound_names(request: &str) -> BTreeSet<String> {
     fn texts(value: &serde_json::Value, into: &mut Vec<String>) {
         match value {
@@ -85,6 +85,9 @@ fn bound_names(request: &str) -> BTreeSet<String> {
     section
         .lines()
         .filter_map(|line| line.trim().strip_prefix("- `"))
+        // A name listed as not bound is not a binding: it held a function
+        // or a task, which no later cell reads (`K-SES-003`).
+        .filter(|entry| !entry.contains("not bound:"))
         .filter_map(|entry| entry.split_once('`').map(|(name, _)| name.to_owned()))
         .filter(|name| name != "history")
         .collect()
@@ -223,10 +226,7 @@ if (counter > 0) {
   let answer = 5;
   reader = () => answer;
 }
-const worker = await processes.create({
-  dialect: "typescript",
-  source: 'const worker = async () => { await sleep(60000); return null; };'
-});
+const worker = async () => { await sleep(60000); return null; };
 const handle = await processes.start({ definition: worker });
 const later = reader() + answer;
 const from_host = host_config.label;"#,

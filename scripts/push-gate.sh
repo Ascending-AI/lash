@@ -209,9 +209,6 @@ run_rust_source_guards() {
   step "Durability engine SQL guard"
   python3 scripts/check-durable-sql.py
 
-  step "Workflow graph model guard"
-  bash scripts/check-workflow-graph-model.sh
-
   step "Judged build geometry"
   python3 scripts/check_judged_build_geometry.py
 
@@ -252,11 +249,6 @@ api_surface_touched() {
 run_api_surface_seal() {
   step "API surface seal (ui fixtures)"
   just seal
-}
-
-run_workflow_graph_integration() {
-  step "Workflow graph example integration"
-  just workflow-graph-integration-verify
 }
 
 run_runtime_feature_boundary_check() {
@@ -417,6 +409,5 @@ scoped RUST_COMPILE "lash-runtime feature boundary" run_runtime_feature_boundary
 scoped RUST_COMPILE "Postgres conformance" run_postgres_conformance
 scoped RUST_COMPILE "S3 conformance" run_s3_conformance
 scoped RUST_COMPILE "Workspace tests" run_workspace_tests
-scoped RUST_COMPILE "Workflow graph example integration" run_workflow_graph_integration
 
 step "Push gate passed (scope: ${GATE_SCOPE_CLASSIFICATION})"

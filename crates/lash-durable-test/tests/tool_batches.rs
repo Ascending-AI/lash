@@ -306,22 +306,22 @@ impl lash_core::ToolProvider for Leaves {
 struct GrantedLeaves;
 
 #[async_trait::async_trait]
-impl lash_vm_runtime::DeferredToolResolver for GrantedLeaves {
+impl lash::tools::DeferredToolResolver for GrantedLeaves {
     async fn resolve(
         &self,
-        _cx: &lash_vm_runtime::DeferredResolveContext<'_>,
+        _cx: &lash::tools::DeferredResolveContext<'_>,
         paths: &[&str],
-    ) -> BTreeMap<String, lash_vm_runtime::Resolution> {
+    ) -> BTreeMap<String, lash::tools::DeferredToolResolution> {
         paths
             .iter()
             .map(|path| {
                 let resolution = if *path == format!("tools.{GRANTED_LEAF}") {
-                    lash_vm_runtime::Resolution::Resolved(Box::new(
-                        lash_vm_runtime::ToolGrant::new(leaf_definition(GRANTED_LEAF))
+                    lash::tools::DeferredToolResolution::Resolved(Box::new(
+                        lash::tools::DeferredToolGrant::new(leaf_definition(GRANTED_LEAF))
                             .with_source_id(lash::tools::PLUGIN_TOOL_SOURCE_ID),
                     ))
                 } else {
-                    lash_vm_runtime::Resolution::NotAvailable
+                    lash::tools::DeferredToolResolution::NotAvailable
                 };
                 ((*path).to_owned(), resolution)
             })

@@ -114,8 +114,7 @@ async fn discovery_hidden_tool_executes_through_rlm_and_standard_batch_but_not_n
                         .with_discovery(lash_core::ToolDiscovery {
                             operation: "tools.search".into(),
                         }),
-                    std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
-                    &backend.clone(),
+                    lash_protocol_rlm::CellDialect::typescript(),
                 ),
             )
         } else {

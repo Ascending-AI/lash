@@ -10,11 +10,14 @@ pub enum WorkerFrameKind {
     Progress,
     LimitExceeded,
     Ready,
-    EffectRequest,
-    Observations,
-    Suspended,
-    Complete,
-    GuestError,
+    Started,
+    HostRead,
+    Printed,
+    Parked,
+    Slice,
+    Ended,
+    Delivered,
+    Exported,
     Cancelled,
     ResetDone,
     Prepared,
@@ -36,7 +39,7 @@ pub enum WorkerLimit {
         size: u64,
         bound: u64,
     },
-    /// A snapshot or continuation exceeds its configured bound.
+    /// A parked run exceeds its configured bound.
     VmState {
         size: u64,
         bound: u64,

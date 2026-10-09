@@ -163,7 +163,7 @@ fn typescript_block(source: &str) -> String {
 /// An RLM core builder over `backend`, with the default test factory.
 #[cfg(feature = "rlm")]
 fn rlm_core_builder_over(backend: lash_core::Backend) -> crate::core::LashCoreBuilder {
-    let factory = rlm_factory(&backend);
+    let factory = rlm_factory();
     LashCore::rlm_builder(backend, factory)
 }
 
@@ -369,18 +369,16 @@ fn app_tool_definition() -> lash_core::ToolDefinition {
     ))
 }
 
-/// Default RLM protocol factory for tests, over `backend`, the substrate its
-/// Lash VM artifacts live in.
+/// Default RLM protocol factory for tests.
 #[cfg(feature = "rlm")]
-fn rlm_factory(backend: &lash_core::Backend) -> lash_protocol_rlm::RlmProtocolPluginFactory {
+fn rlm_factory() -> lash_protocol_rlm::RlmProtocolPluginFactory {
     lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()
             .channel(lash_protocol_rlm::RlmChannel::Cell)
             .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),
-        std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
-        backend,
+        lash_protocol_rlm::CellDialect::typescript(),
     )
     .with_worker_service(untimed_fixture_workers())
 }
@@ -395,10 +393,7 @@ fn rlm_factory(backend: &lash_core::Backend) -> lash_protocol_rlm::RlmProtocolPl
 fn untimed_fixture_workers() -> crate::vm::WorkerService {
     /// Longer than any run the instruction budget admits.
     const OFF_THE_CLOCK: std::time::Duration = std::time::Duration::from_secs(365 * 24 * 60 * 60);
-    let mut config =
-        lash_protocol_rlm::Dialect::worker_service(&lash_protocol_rlm::TypescriptDialect)
-            .config()
-            .clone();
+    let mut config = lash_vm_client::service::Service::default().config().clone();
     config.deadlines.compute = OFF_THE_CLOCK;
     config.deadlines.serialization = OFF_THE_CLOCK;
     config.deadlines.cumulative_cpu = OFF_THE_CLOCK;
@@ -482,7 +477,5 @@ mod turn_cancel_modes;
 mod turn_cancel_waits;
 mod turn_checkpoints;
 mod turn_streaming;
-#[cfg(all(feature = "rlm", feature = "typescript"))]
-mod workflow_publish;
 mod workflow_reads;
 mod writer_fence;

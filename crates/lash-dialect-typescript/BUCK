@@ -47,6 +47,9 @@ lash_rust_unit_test(
     crate_root = "src/lib.rs",
     declared_features = [],
     exec_properties = sized_exec_properties("lash-dialect-typescript", "lash_dialect_typescript", "//crates/lash-dialect-typescript:lash-dialect-typescript__unit_test"),
+    data_exclude = [
+        "tests/test262/test/**/*.js",
+    ],
     extra_compile_data = [
         "//crates/lash-kernel-conformance:package_files",
         "//crates/lash-kernel-lib:package_files",
@@ -66,7 +69,7 @@ lash_rust_integration_test(
     exec_properties = sized_exec_properties("lash-dialect-typescript", "test262_kernel", "//crates/lash-dialect-typescript:test262_kernel__test"),
     extra_compile_data = [],
     extra_data = [
-        "//crates/lash-typescript:test262_corpus",
+        "//crates/lash-dialect-typescript:test262_corpus",
     ],
     library = ":lash-dialect-typescript",
     library_crate_name = "lash_dialect_typescript",
@@ -75,6 +78,29 @@ lash_rust_integration_test(
     rustc_env = {},
     tags = [],
     version = "0.0.0-dev",
+)
+
+filegroup(
+    name = "session_oracle_corpus",
+    srcs = glob([
+        "tests/differential/sessions/expectations/**",
+        "tests/differential/sessions/generated/**",
+        "tests/test262/census/**",
+    ]),
+    copy = False,
+    visibility = ["PUBLIC"],
+)
+
+filegroup(
+    name = "test262_corpus",
+    srcs = glob([
+        "tests/test262/harness-shim/**",
+        "tests/test262/outcomes/**",
+        "tests/test262/sample.tsv",
+        "tests/test262/test/**",
+    ]),
+    copy = False,
+    visibility = ["PUBLIC"],
 )
 
 load("//tools/buck2:test_batch.bzl", "lash_batch_test")

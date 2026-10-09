@@ -922,26 +922,6 @@ def inventory_payload(model_payload: dict, workspace_bzl: str, feature_bzl: str)
     return result
 
 
-WORKFLOW_GRAPH_SCHEMA_DIRECTORY = "schemas/host/workflow-graph"
-
-
-def workflow_graph_schema() -> str:
-    """The one committed workflow-graph schema document, whatever its version.
-
-    The Rust version constant is feature-gated, so the generator follows the
-    file the schema generator wrote. Any other count is a half-applied version
-    change, which must fail here instead of selecting a document silently.
-    """
-    pattern = f"{WORKFLOW_GRAPH_SCHEMA_DIRECTORY}/v*.schema.json"
-    found = sorted(path.relative_to(ROOT).as_posix() for path in ROOT.glob(pattern))
-    if len(found) != 1:
-        raise SystemExit(
-            f"tools/buck2/sync.py: //:workflow_graph_schema needs exactly one {pattern}, "
-            f"found {', '.join(found) if found else 'none'}"
-        )
-    return found[0]
-
-
 def main_test_inventory(inventory: dict, outputs: dict[pathlib.Path, str]) -> None:
     """The scheduled suite executes all generated tests except live-service laws.
 
@@ -1051,14 +1031,7 @@ def root_buck(inventory: dict) -> str:
             suite("feature_lane_tests", inventory["feature_lane_test_targets"]),
         ]
     )
-    return aggregates + (
-        "filegroup(\n"
-        '    name = "workflow_graph_schema",\n'
-        f"    srcs = [{json.dumps(workflow_graph_schema())}],\n"
-        "    copy = False,\n"
-        '    visibility = ["PUBLIC"],\n'
-        ")\n"
-    ) + '''
+    return aggregates + '''
 filegroup(
     name = "dialect_deviation_register",
     srcs = ["docs/adr/0062-the-typescript-dialect-is-an-exact-ecma-262-subset.md"],
@@ -1156,7 +1129,6 @@ export_file(
 schema_documents(
     name = "host_schema_documents",
     generators = [
-        "//crates/lash-vm:workflow_schema_generator__bin",
         "//crates/lash-trace:trace_schema_generator__bin",
         "//crates/lash-core-execution:process_event_schema_generator__bin",
         "//crates/lash-kernel-doc:kernel_schema_generator__bin",
@@ -1173,25 +1145,9 @@ schema_check(
     script = "scripts/generate-workflow-schemas.py",
 )
 
-schema_documents(
-    name = "example_schema_documents",
-    generators = ["//examples/workflow-graph-roundtrip:workflow_contract_schema__bin"],
-    script = "//examples/workflow-graph-roundtrip:scripts/generate-contract-schema.py",
-)
-
-schema_check(
-    name = "example_schema_check",
-    documents = ":example_schema_documents",
-    checked = [
-        "//examples/workflow-graph-roundtrip:frontend/src/generated/error-response.schema.json",
-        "//examples/workflow-graph-roundtrip:frontend/src/generated/workflow-document.schema.json",
-    ],
-    script = "//examples/workflow-graph-roundtrip:scripts/generate-contract-schema.py",
-)
-
 schema_check_group(
     name = "schema_checks",
-    checks = [":host_schema_check", ":example_schema_check"],
+    checks = [":host_schema_check"],
 )
 '''
 

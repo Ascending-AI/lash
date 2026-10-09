@@ -17,6 +17,7 @@ mod machine;
 mod package;
 mod printer;
 mod printer_corpus;
+mod process;
 mod remaining_builtins;
 mod typed;
 

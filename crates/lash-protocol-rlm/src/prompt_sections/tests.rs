@@ -12,7 +12,7 @@ use lash_core::prompt_sections::{
     PromptPlacement, PromptPlan, PromptSectionPlacement, PromptWrapKey,
 };
 use lash_rlm_types::{RlmTermination, RlmTurnOptions};
-use lash_vm_runtime::{LashVmSurface, ToolBinding, ToolDefinitionBindingExt};
+use lash_vm_runtime::{ToolBinding, ToolDefinitionBindingExt};
 
 use super::testing::{Call, RlmSections, compose, compose_rlm};
 use super::*;
@@ -57,14 +57,9 @@ fn catalog() -> lash_core::ToolCatalog {
 
 /// The sections of a TypeScript session whose host surface offers `catalog`.
 fn sections(catalog: &lash_core::ToolCatalog) -> RlmSections {
+    let _ = catalog;
     RlmSections::cell(SessionDialect::prompt_only(
-        Arc::new(crate::dialect::TypescriptDialect),
-        LashVmSurface::new(
-            lash_vm::LashVmLanguageFeatures::default(),
-            lash_vm::LashVmHostCatalog::tool_default(
-                catalog.tool_names().iter().map(String::as_str),
-            ),
-        ),
+        crate::dialect::CellDialect::typescript(),
     ))
 }
 
@@ -77,7 +72,7 @@ fn facts() -> RlmPromptFacts {
         bound_variables: Arc::from(""),
         read_only_variables: crate::projection::read_only_variables_prompt(
             &bindings,
-            &crate::dialect::TypescriptDialect,
+            &crate::dialect::TypescriptPrompts,
         ),
     }
 }
@@ -151,15 +146,21 @@ const total = 1 + 2;
 finish(total);
 </typescript>
 
-Top-level bindings persist across executions. Return exactly the value and type the task asks for with `finish(value)`; do not finish an unexamined whole tool result. Putting an object into a string — with `+`, `` `${...}` `` or `String(...)` — gives the placeholder `[object Object]`, never its contents; read the value with `console.log(value)` or serialize it with `JSON.stringify(value)`.
+Top-level bindings persist across executions as data. A function or a pending promise does not outlive the cell that created it: a later cell that uses such a binding fails with `SESSION_BINDING_NOT_CARRIED`, so define the function again where it is used and keep a promise's awaited result, not the promise. Return exactly the value and type the task asks for with `finish(value)`; do not finish an unexamined whole tool result. Putting an object into a string — with `+`, `` `${...}` `` or `String(...)` — gives the placeholder `[object Object]`, never its contents; read the value with `console.log(value)` or serialize it with `JSON.stringify(value)`.
 
-`Math`, `Date` (UTC), `String`, `Array`, `Object`, `JSON`, `Map`/`Set`, `RegExp` and `URL` are available; this is not Node or a browser, and classes and generators are not supported.
+`Math`, `Date` (UTC), `String`, `Array`, `Object`, `JSON`, `Map`/`Set`, `RegExp` and `URL` are available; this is not Node or a browser, and classes, generators and `new Promise(...)` are not supported.
+
+Type annotations are trusted and enforced where they are used: arithmetic, comparison, `!`, a condition, a template or an index on a value declared `number`, `string`, `boolean` or an array raises `type_error` when the value is not that type, and an index outside a declared array raises `index_out_of_range`, where JavaScript would convert or give `undefined`. Annotate only what is true, or leave the annotation off to keep JavaScript's conversions.
+
+### Concurrency
+
+An `async` function starts running when it is called, and async callbacks run concurrently: `items.map(async (item) => ...)` starts every call at once, and `await Promise.all(...)` collects them. Await every promise before the cell ends. A cell that ends while work it started is still running, or after a promise rejected with nothing awaiting it, fails with `CELL_TASKS_OUTSTANDING` and names the async code that is still running; `Promise.race([])` rejects instead of waiting forever.
 
 ### Host API
 
-`console.log(value)` shows output in the next step; `print(value)` shows a structured value, summarised field by field rather than cut off when it is large; `finish(value)` ends the turn. A failed tool call throws an `Error` whose `cause` is `{ code, details }`.
+`console.log(value)` shows output in the next step; `finish(value)` ends the turn. A failed tool call throws; wrap it in `try`/`catch` to carry on.
 
-`await sleep(ms)` pauses the program. For a timeout, race a call against a timer — `await Promise.race([call, sleep(ms)])` is `undefined` when the timer wins, and the losing call keeps running until the turn ends."##;
+`await sleep(ms)` pauses the program. For a timeout, race a call against a timer — `await Promise.race([call, sleep(ms)])` is `undefined` when the timer wins, and the losing call is cancelled."##;
 /// The declaration of the fixture binding.
 const READ_ONLY_VARIABLES: &str = r##"### Read-Only Variables
 

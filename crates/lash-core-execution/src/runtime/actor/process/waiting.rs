@@ -10,7 +10,7 @@ use crate::{ProcessId, ProcessRecord, StepRequest, WaitKind, WaitState};
 use lash_durable::ActorTx;
 
 /// What the engine itself waits for, beside its steps.
-fn engine_blocker(driver: &Driver) -> Option<(WaitKind, Option<lash_sansio::WorkflowOccurrence>)> {
+fn engine_blocker(driver: &Driver) -> Option<(WaitKind, Option<lash_sansio::EffectIdentity>)> {
     match driver.blocked.as_ref()? {
         Blocked::External { name, site, .. } => {
             Some((WaitKind::Key { name: name.clone() }, site.clone()))
@@ -38,7 +38,7 @@ pub(super) fn project(
     fold: &RunFold,
     since_ms: i64,
 ) {
-    let mut blockers: Vec<(WaitKind, Option<lash_sansio::WorkflowOccurrence>)> = fold
+    let mut blockers: Vec<(WaitKind, Option<lash_sansio::EffectIdentity>)> = fold
         .rounds()
         .flat_map(|round| round.members())
         .filter(|member| matches!(member.state(), MemberState::Waiting { .. }))

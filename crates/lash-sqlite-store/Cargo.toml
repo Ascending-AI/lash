@@ -60,7 +60,6 @@ lash-conformance = { workspace = true, features = ["lash-vm"] }
 lash-core = { workspace = true, features = ["testing"] }
 # The guarded-surface laws (FIG-3802) this crate runs over its own decoders.
 lash-core-store = { workspace = true, features = ["testing"] }
-lash-vm = { workspace = true, features = ["testing"] }
 lash-sqlite-store = { package = "lash-internal-sqlite-store", path = ".", features = ["testing"] }
 # `hooks`: the commit hook a law refuses a `COMMIT` with (FIG-5748).
 rusqlite = { version = "0.37", features = ["bundled", "hooks", "trace"] }

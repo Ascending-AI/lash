@@ -307,8 +307,7 @@ pub(crate) async fn workbench_core_builder(
             }
             let factory = lash::rlm::RlmProtocolPluginFactory::new(
                 rlm_config,
-                std::sync::Arc::new(lash::rlm::TypescriptDialect),
-                &host_backend,
+                lash::rlm::CellDialect::typescript(),
             )
             .with_worker_service(rlm_workers.context("RLM worker was not prewarmed")?)
             .with_deferred_tool_resolver(deferred_tools.resolver());

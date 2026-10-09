@@ -39,16 +39,11 @@ workflow-graph-roundtrip port='3031':
   #!/usr/bin/env bash
   set -euo pipefail
   target_dir="${WORKFLOW_GRAPH_TARGET_DIR:-/tmp/lash-workflow-graph-{{port}}}"
-  npm --prefix "{{repo}}/examples/workflow-graph-roundtrip/frontend" ci
-  npm --prefix "{{repo}}/examples/workflow-graph-roundtrip/frontend" run build
   # The host finds the VM worker beside its own executable.
   CARGO_TARGET_DIR="$target_dir" \
     cargo build -p lash-internal-vm-worker --bin lash-vm-worker --profile judged
   WORKFLOW_GRAPH_ADDR="127.0.0.1:{{port}}" CARGO_TARGET_DIR="$target_dir" \
     cargo run -p workflow-graph-roundtrip --bin workflow-graph-roundtrip --profile judged
-
-workflow-graph-integration-verify:
-  bash "{{repo}}/scripts/workflow-graph-integration-verify.sh"
 
 # FIG-4042: token-free RLM warning and frame-switch companion for the manual
 # workbench continue_as runbook. The provider responses are scripted in-process.
@@ -177,7 +172,6 @@ floor:
   #!/usr/bin/env bash
   set -euo pipefail
   cd "{{repo}}"
-  npm --prefix examples/workflow-graph-roundtrip/frontend ci
   printf '%s\n' \
     'kiln test //:dev_tests //:feature_lane_tests' \
     'kiln clippy //:workspace_clippy' \
@@ -185,7 +179,6 @@ floor:
     'kiln fmt -- --check' \
     'git diff --check' \
     'scripts/ci/repository-gates.sh' \
-    'npm --prefix examples/workflow-graph-roundtrip/frontend run check:generated-types' \
     'python3 scripts/check_format_registry.py' \
     'python3 scripts/check_writer_stamps.py' \
     | scripts/gate-table.sh

@@ -1071,16 +1071,6 @@ lash_conformance::checkpoint_profile_tests!({
     (guard, stores)
 });
 
-#[tokio::test]
-async fn nested_process_arguments_reject_forged_aliases_and_try_later_union_arms() {
-    let Some((_database_fixture, storage)) = storage().await else {
-        eprintln!("PENDING: PostgreSQL service not configured");
-        return;
-    };
-    reset(storage.pool()).await;
-    lash_vm_runtime::testing::nested_process_arguments_reject_forged_aliases_and_try_later_union_arms(Arc::new(storage.lash_vm_artifact_store())).await;
-}
-
 lash_conformance::process_prune_start_staging_tests!({
     let Some((database_fixture, storage)) = storage().await else {
         eprintln!(

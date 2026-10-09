@@ -91,7 +91,7 @@ pub(crate) fn rlm_prompt_tool_docs(
 
 fn validate_rlm_language_bindings(
     tools: &[lash_core::ToolManifest],
-    language: &dyn crate::dialect::Dialect,
+    language: &dyn crate::dialect::DialectPrompts,
 ) -> Result<(), PluginError> {
     for tool in tools {
         let binding = required_tool_executable(tool)
@@ -101,9 +101,9 @@ fn validate_rlm_language_bindings(
         // advertised as a callable nothing, so it is refused here instead.
         language.tool_call_path(&binding).map_err(|refusal| {
             PluginError::Registration(format!(
-                "tool `{}` has a `lash.tool` binding the `{}` dialect cannot call: {refusal}",
+                "tool `{}` has a `lash.tool` binding the {} dialect cannot call: {refusal}",
                 tool.name,
-                language.language_id()
+                language.prompt_vocabulary().language_name
             ))
         })?;
     }
@@ -119,7 +119,7 @@ mod tests {
         test_support::ToolCatalogBuildInput,
     };
     use lash_sansio::SessionId;
-    use lash_vm_runtime::{LashVmSurface, ToolBinding, ToolDefinitionBindingExt};
+    use lash_vm_runtime::{ToolBinding, ToolDefinitionBindingExt};
     use serde_json::json;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -193,15 +193,20 @@ mod tests {
             crate::protocol::RlmPromptFeatures::default(),
         );
         assert!(docs.contains("pinned"), "{docs}");
-        let resources = lash_vm_runtime::lash_vm_resources_from_tool_catalog(&catalog)
-            .expect("pinned contract imports into RLM bindings");
-        let operation = resources
-            .resolve_operation("Authority", "pinned")
-            .expect("resident operation");
+        // The effect a cell performs carries the pinned contract's types.
+        let mut boundary = lash_vm_runtime::HostBoundary::new();
+        boundary
+            .offer_bound_tool(
+                &catalog.tools[0].manifest,
+                catalog.tools[0].contract.input_schema.canonical(),
+                catalog.tools[0].contract.output_schema.canonical(),
+            )
+            .expect("pinned contract binds as an effect");
+        let signatures = boundary.signatures();
+        let signature = format!("{:?}", signatures.values().next().expect("one effect"));
         assert!(
-            matches!(operation.input_ty, lash_vm::TypeExpr::Object(ref fields)
-            if fields.iter().any(|field| field.name == "pinned")
-                && fields.iter().all(|field| field.name != "drifted"))
+            signature.contains("pinned") && !signature.contains("drifted"),
+            "{signature}"
         );
         assert!(
             lash_sansio::validate_tool_input(
@@ -367,14 +372,21 @@ mod tests {
         );
         assert!(!docs.contains("update_plan("), "{docs}");
 
-        let host_environment = LashVmSurface::default()
-            .host_environment(&catalog)
-            .expect("explicit binding builds host environment");
-        let program = lash_typescript::parse(
-            r#"await plan.update({ plan: [{ step: "Patch", status: "pending" }] });"#,
-        )
-        .expect("module call lowers");
-        lash_vm::LinkedModule::link(program, host_environment).expect("module call links");
+        // The advertised path is the effect a cell performs.
+        let mut boundary = lash_vm_runtime::HostBoundary::new();
+        boundary
+            .offer_bound_tool(
+                &catalog.tools[0].manifest,
+                catalog.tools[0].contract.input_schema.canonical(),
+                catalog.tools[0].contract.output_schema.canonical(),
+            )
+            .expect("explicit binding binds as an effect");
+        assert!(
+            boundary
+                .signatures()
+                .keys()
+                .any(|effect| effect.as_str() == "plan.update")
+        );
     }
 
     /// FIG-4544. An MCP server hands its schemas through as written, and

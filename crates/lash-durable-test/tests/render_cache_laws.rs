@@ -467,7 +467,7 @@ impl lash::rlm::CodeRenderer for SwitchingCodeRenderer {
 
     fn print(
         &self,
-        value: &lash_vm::Value,
+        value: &serde_json::Value,
         params: &lash::rlm::RenderParams,
     ) -> lash::render::Rendered<String> {
         if self.mode.load(Ordering::SeqCst) == 0 {
@@ -491,7 +491,7 @@ impl lash::rlm::CodeRenderer for CountingCodeRenderer {
 
     fn print(
         &self,
-        value: &lash_vm::Value,
+        value: &serde_json::Value,
         params: &lash::rlm::RenderParams,
     ) -> lash::render::Rendered<String> {
         self.prints.fetch_add(1, Ordering::SeqCst);
@@ -540,12 +540,9 @@ fn rlm_core(
         .build();
     config.code_renderer = lash::rlm::CodeRendererSlot(renderer);
     config.render.print.max_chars = Some(max_chars);
-    let factory = lash::rlm::RlmProtocolPluginFactory::new(
-        config,
-        Arc::new(lash::rlm::TypescriptDialect),
-        backend,
-    )
-    .with_worker_service(sim::untimed_workers());
+    let factory =
+        lash::rlm::RlmProtocolPluginFactory::new(config, lash::rlm::CellDialect::typescript())
+            .with_worker_service(sim::untimed_workers());
     lash::LashCore::rlm_builder(backend.clone(), factory)
         .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
         .data_retention(lash::DataRetention::standard())

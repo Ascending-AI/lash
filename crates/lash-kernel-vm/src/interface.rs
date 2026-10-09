@@ -217,6 +217,9 @@ pub enum End {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Finished {
     pub result: Datum,
+    /// Whether a `finish` ended the run. Otherwise `main` or the entry
+    /// returned, and `result` is what it returned.
+    pub finish: bool,
     /// The session's bindings after `main`. Empty for an entry.
     pub bindings: Bindings,
     /// The session bindings that were not carried because they reach a

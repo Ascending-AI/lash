@@ -135,18 +135,11 @@ impl DevProviderScenario {
         })))
     }
 
-    /// The scripted cells, for the fixture that walks every scenario.
-    #[cfg(test)]
-    pub(crate) fn scripted_cell_for_test(self, call: usize) -> Option<String> {
-        self.scripted_cell(call)
-    }
-
     /// The cell this scenario scripts for `call`.
     ///
-    /// One table rather than literals scattered through `complete`, so the
-    /// fixture test can walk every scenario and link what a judged row would
-    /// actually execute. A cell the session cannot execute does not fail a
-    /// scenario — the turn never reaches a terminal state and the row hangs.
+    /// One table rather than literals scattered through `complete`. A cell
+    /// the session cannot execute does not fail a scenario: the turn never
+    /// reaches a terminal state and the row hangs.
     fn scripted_cell(self, call: usize) -> Option<String> {
         Some(match (self, call) {
             (Self::McpFixture, _) => return None,
@@ -163,11 +156,9 @@ impl DevProviderScenario {
             }
             (Self::RetryResetPartial, _) => finish_cell("\"FIG-1350 retry replacement\""),
             (Self::FailedProcess, _) => cell(
-                r#"const FIG425_deterministic_failure = await processes.create({ dialect: "typescript", source: `
-const fail = async (request: unknown) => {
+                r#"const FIG425_deterministic_failure = async (request: unknown) => {
   throw "deterministic durable process failure";
 };
-` });
 await processes.start({ definition: FIG425_deterministic_failure, args: { request: 1 } });
 finish("started deterministic failing process");"#,
             ),

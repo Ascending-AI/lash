@@ -723,16 +723,18 @@ fn scenario_contract_generated_facts_fail_on_contract_specific_mutations() {
         "agent.started_process_tool_call_graph",
         |execution| {
             execution
-                .pointer_mut("/result/graph_facts/completed_labeled_resources/0")
-                .expect("started process labeled resource")
-                .clone_from(&json!("wrong label"));
+                .pointer_mut("/result/graph_facts/completed_effects/0")
+                .expect("started process completed effect")
+                .clone_from(&json!("tools.other"));
         },
     );
     let err = scenario_contract_generated_facts_for_semantic(
         "agent.started_process_tool_call_graph",
         &started_process_graph_lost,
     )
-    .expect_err("Agent started process fact must require labeled process graph evidence");
+    .expect_err(
+        "Agent started process fact must require the completed effect on the process graph",
+    );
     assert!(
         err.contains("fixed-source replay validation"),
         "unexpected Agent started-process replay failure: {err}"

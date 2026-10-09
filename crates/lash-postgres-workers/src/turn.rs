@@ -13,7 +13,6 @@ use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 use std::sync::Arc;
 use std::time::Duration;
 
-use lash::rlm::Dialect as _;
 use lash::tools::{StaticToolExecute, StaticToolProvider};
 use lash_core::ToolDefinitionBindingExt as _;
 use lash_core::facade_support::ProviderHandle;
@@ -211,10 +210,7 @@ fn metadata() -> lash_core::LlmProfileMetadata {
 /// held tool call keeps its cell waiting for as long as the case holds it.
 fn untimed_workers() -> lash::vm::WorkerService {
     const OFF_THE_CLOCK: Duration = Duration::from_secs(365 * 24 * 60 * 60);
-    let mut config = lash::rlm::TypescriptDialect
-        .worker_service()
-        .config()
-        .clone();
+    let mut config = lash::vm::WorkerService::default().config().clone();
     config.deadlines.compute = OFF_THE_CLOCK;
     config.deadlines.serialization = OFF_THE_CLOCK;
     config.deadlines.cumulative_cpu = OFF_THE_CLOCK;
@@ -237,8 +233,7 @@ pub fn core(backend: &Backend, witness: Witness, hold: Hold) -> Result<lash::Las
                 .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
                 .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
                 .build(),
-            Arc::new(lash::rlm::TypescriptDialect),
-            backend,
+            lash::rlm::CellDialect::typescript(),
         )
         .with_worker_service(untimed_workers()),
     )

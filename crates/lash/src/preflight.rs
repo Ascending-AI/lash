@@ -59,7 +59,7 @@ use lash_core::{
     StoreReleaseState, StoreSchemaOutcome, StoreSchemaStatus,
 };
 
-use crate::formats::{DurableFormat, FormatProbe, durable_formats};
+use crate::formats::{DurableFormat, durable_formats};
 use extract::{Extraction, extract, primary_format};
 use report::{FormatTally, reads_version};
 
@@ -175,8 +175,6 @@ pub async fn probe_store(
 #[derive(Default)]
 struct Walk {
     max_undecodable_reasons: usize,
-    #[cfg(feature = "rlm")]
-    workers: lash_vm_client::service::Service,
     tallies: BTreeMap<DurableFormat, FormatTally>,
     drain: Vec<DrainBlocker>,
     not_scanned: Vec<NotScanned>,
@@ -185,8 +183,8 @@ struct Walk {
 /// Where a durable format gets its readability evidence.
 ///
 /// This is deliberately exhaustive over [`DurableFormat`]. A new durable
-/// format must choose a bounded surface, a carrier, an explicit unwalkable
-/// disposition or the non-persisted case before the preflight can compile;
+/// format must choose a bounded surface or an explicit unwalkable
+/// disposition before the preflight can compile;
 /// an engine-registered format carries its disposition on the row the
 /// engine declares (ADR 0104 §2).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -197,17 +195,13 @@ enum SurfaceRelation {
         surface: DurableSurface,
         primary: bool,
     },
-    /// The format's boundary is enforced by another durable format.
-    CarriedBy(DurableFormat),
     /// No bounded preflight surface enumerates this format.
     Unwalkable(&'static str),
-    /// The format has no stored counterpart.
-    NotPersisted,
 }
 
 const PRIMARY_FORMATS: [DurableFormat; 4] = [
-    DurableFormat::ModuleArtifact,
-    DurableFormat::Bytecode,
+    DurableFormat::KernelDocument,
+    DurableFormat::KernelVersion,
     DurableFormat::SessionCheckpointManifest,
     DurableFormat::RlmSnapshotEnvelope,
 ];
@@ -223,10 +217,6 @@ fn format_surface(format: DurableFormat) -> SurfaceRelation {
                 "plugin-owned session-history payload; refused by its decoder",
             )
         }
-        DurableFormat::ModuleArtifact => SurfaceRelation::Walk {
-            surface: DurableSurface::ModuleArtifact,
-            primary: true,
-        },
         DurableFormat::SessionCheckpointManifest => SurfaceRelation::Walk {
             surface: DurableSurface::SessionCheckpoint,
             primary: true,
@@ -272,39 +262,29 @@ fn format_surface(format: DurableFormat) -> SurfaceRelation {
             "no bounded surface: one row per committed turn, each receipt refused at decode \
              rather than at rest",
         ),
-        // Every started process's start stamp is the program identity it runs
-        // under (FIG-3571).
-        DurableFormat::Bytecode => SurfaceRelation::Walk {
-            surface: DurableSurface::StartedProcess,
+        // The module store holds admitted documents and nothing else.
+        DurableFormat::KernelDocument => SurfaceRelation::Walk {
+            surface: DurableSurface::ModuleArtifact,
             primary: true,
         },
-        DurableFormat::VmContinuation => {
-            SurfaceRelation::CarriedBy(DurableFormat::LashVmSegmentHandover)
-        }
-        DurableFormat::LashVmSnapshot => {
-            SurfaceRelation::CarriedBy(DurableFormat::RlmSnapshotEnvelope)
-        }
-        DurableFormat::LashVmSegmentHandover => SurfaceRelation::Unwalkable(
-            "no bounded surface: a lash_vm process's engine state is its snapshot row, refused \
-             when the process activation restores it rather than at rest",
+        DurableFormat::KernelParkedState => SurfaceRelation::Unwalkable(
+            "no bounded surface: a parked run is its execution's snapshot row, refused when the \
+             activation resumes it rather than at rest",
         ),
         DurableFormat::RlmSnapshotEnvelope => SurfaceRelation::Walk {
             surface: DurableSurface::SessionExecutionState,
             primary: true,
         },
-        DurableFormat::WorkflowGraphSchema => SurfaceRelation::Unwalkable(
-            "no bounded surface: the graph is projected for a host to store, so the bytes this \
-             version gates live outside lash's own store",
-        ),
-        DurableFormat::WorkflowTypeFacet => SurfaceRelation::Unwalkable(
-            "no bounded surface: the type facet rides the projected graph a host stores, so the \
-             bytes this version gates live outside lash's own store",
-        ),
         DurableFormat::RlmDriverState => SurfaceRelation::Unwalkable(
             "no bounded surface: carried by TurnCheckpoint; refused when either RLM channel resumes",
         ),
         DurableFormat::Engine(format) => SurfaceRelation::Unwalkable(format.unwalkable_reason),
-        DurableFormat::VmAbi => SurfaceRelation::NotPersisted,
+        // Every started process's start stamp is the generation it runs
+        // under (FIG-3571), which names the kernel version.
+        DurableFormat::KernelVersion => SurfaceRelation::Walk {
+            surface: DurableSurface::StartedProcess,
+            primary: true,
+        },
     }
 }
 
@@ -365,13 +345,7 @@ impl Walk {
     }
 
     async fn item(&mut self, item: &DurableItem) {
-        for extraction in extract(
-            item,
-            #[cfg(feature = "rlm")]
-            &self.workers,
-        )
-        .await
-        {
+        for extraction in extract(item) {
             match extraction {
                 Extraction::Found { format, version } => {
                     let expected =
@@ -473,32 +447,13 @@ impl Walk {
     fn components(&mut self) -> Vec<ComponentReadability> {
         let mut rows: Vec<ComponentReadability> = Vec::new();
         for entry in durable_formats() {
-            let evidence = evidence_for(entry.format, entry.probe);
+            let evidence = FormatEvidence::Direct;
             let tally = self.tallies.remove(&entry.format).unwrap_or_default();
             let mut row = tally.into_row(entry.format, entry.version, entry.probe, evidence);
-            if matches!(evidence, FormatEvidence::NotPersisted) {
-                // Nothing durable to find, so "empty" is the whole truth: there
-                // is no store this could have been read from.
-                row.verdict = ComponentVerdict::Empty;
-            } else if row.verdict == ComponentVerdict::Empty && !self.walked(entry.format) {
+            if row.verdict == ComponentVerdict::Empty && !self.walked(entry.format) {
                 row.verdict = ComponentVerdict::NotScanned;
             }
             rows.push(row);
-        }
-        // Carried formats resolve in a second pass, because a carrier can
-        // appear after the format it carries in manifest order and a
-        // single-pass lookup would silently report the earlier row as unscanned.
-        let verdicts: BTreeMap<DurableFormat, ComponentVerdict> = rows
-            .iter()
-            .map(|row| (row.format_key, row.verdict))
-            .collect();
-        for (row, entry) in rows.iter_mut().zip(durable_formats()) {
-            if let Some(carrier) = carrier_of(entry.format) {
-                // A carried format has no evidence of its own by construction:
-                // its verdict is the carrier's, because the carrier's version
-                // moves whenever the carried format changes.
-                row.verdict = carrier_verdict(&verdicts, carrier);
-            }
         }
         for (format, reason) in unwalkable_formats() {
             self.not_scanned.push(NotScanned::Format {
@@ -520,46 +475,7 @@ impl Walk {
         };
         match format_surface(format) {
             SurfaceRelation::Walk { surface, .. } => !unwalked(surface),
-            SurfaceRelation::CarriedBy(carrier) => self.walked(carrier),
-            SurfaceRelation::Unwalkable(_) | SurfaceRelation::NotPersisted => false,
-        }
-    }
-}
-
-fn carrier_verdict(
-    verdicts: &BTreeMap<DurableFormat, ComponentVerdict>,
-    carrier: DurableFormat,
-) -> ComponentVerdict {
-    verdicts
-        .get(&carrier)
-        .copied()
-        .unwrap_or(ComponentVerdict::CarrierJoinFailed)
-}
-
-/// Which format's envelope enforces a carried format's boundary.
-///
-/// Both relationships are stated by the constants themselves: the segment
-/// handover documents that it embeds the VM continuation and Lash VM snapshot
-/// formats its build carries, and the RLM snapshot envelope's history records
-/// which Lash VM snapshot version each of its versions carries. A probe that
-/// invented an independent check for them would be reporting a boundary that
-/// does not exist.
-fn carrier_of(format: DurableFormat) -> Option<DurableFormat> {
-    match format_surface(format) {
-        SurfaceRelation::CarriedBy(carrier) => Some(carrier),
-        SurfaceRelation::Walk { .. }
-        | SurfaceRelation::Unwalkable(_)
-        | SurfaceRelation::NotPersisted => None,
-    }
-}
-
-fn evidence_for(format: DurableFormat, probe: FormatProbe) -> FormatEvidence {
-    match format_surface(format) {
-        SurfaceRelation::NotPersisted => FormatEvidence::NotPersisted,
-        SurfaceRelation::CarriedBy(carrier) => FormatEvidence::CarriedBy(carrier.name()),
-        SurfaceRelation::Walk { .. } | SurfaceRelation::Unwalkable(_) => {
-            debug_assert_ne!(probe, FormatProbe::NotPersisted);
-            FormatEvidence::Direct
+            SurfaceRelation::Unwalkable(_) => false,
         }
     }
 }
@@ -575,9 +491,7 @@ fn evidence_for(format: DurableFormat, probe: FormatProbe) -> FormatEvidence {
 fn unwalkable_formats() -> impl Iterator<Item = (DurableFormat, &'static str)> {
     durable_formats().filter_map(|entry| match format_surface(entry.format) {
         SurfaceRelation::Unwalkable(reason) => Some((entry.format, reason)),
-        SurfaceRelation::Walk { .. }
-        | SurfaceRelation::CarriedBy(_)
-        | SurfaceRelation::NotPersisted => None,
+        SurfaceRelation::Walk { .. } => None,
     })
 }
 

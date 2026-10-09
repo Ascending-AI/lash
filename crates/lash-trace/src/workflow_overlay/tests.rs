@@ -1,5 +1,6 @@
 use chrono::{TimeZone, Utc};
-use lash_sansio::{ExprSlot, ProcessId, SessionId, TurnId, WorkflowSitePath};
+use lash_kernel_doc::{DocumentId, Name};
+use lash_sansio::{ProcessId, SessionId, Site, TaskIdentity, TurnId, Unit};
 
 use super::*;
 use crate::{
@@ -23,12 +24,7 @@ fn identity() -> LanguageIdentity {
             .expect("valid trace test effect address"),
             effect_id: "exec-1".to_string(),
         },
-        document: crate::WorkflowDocumentRef {
-            source_identity: "source-1".to_string(),
-            module_ref: lash_sansio::ModuleRef::new(&lash_sansio::ContentHash::new("module-1")),
-            entry: crate::WorkflowDocumentEntry::Main,
-            ir_version: 1,
-        },
+        document: reference(),
         entry_name: "main".to_string(),
         engine_execution_id: None,
         generation: None,
@@ -48,23 +44,27 @@ fn process_identity(process: &ProcessId) -> LanguageIdentity {
 
 fn reference() -> WorkflowDocumentRef {
     WorkflowDocumentRef {
-        source_identity: "source-1".to_string(),
-        module_ref: lash_sansio::ModuleRef::new(&lash_sansio::ContentHash::new("module-1")),
+        document: DocumentId::from_bytes([1; 32]),
         entry: WorkflowDocumentEntry::Main,
-        ir_version: 1,
     }
 }
 
-fn site(node: &str) -> WorkflowSiteRef {
-    WorkflowSiteRef::node(lash_sansio::WorkflowNodeId::fixture(node))
+/// The body of the function `node`, as `main` runs it.
+fn site(node: &str) -> WorkflowTaskSite {
+    WorkflowTaskSite {
+        site: Site::new(Unit::Function(Name::new(node)), Vec::new()),
+        task: TaskIdentity::Main,
+    }
 }
 
 /// Occurrence `occurrence` of `site`, outside every loop.
-fn occurrence_at(site: &WorkflowSiteRef, occurrence: u64) -> lash_sansio::WorkflowOccurrence {
-    lash_sansio::WorkflowOccurrence::new(
-        site.clone(),
-        std::num::NonZeroU64::new(occurrence).expect("occurrences count from 1"),
-    )
+fn occurrence_at(site: &WorkflowTaskSite, occurrence: u64) -> lash_sansio::EffectIdentity {
+    lash_sansio::EffectIdentity {
+        task: site.task.clone(),
+        site: site.site.clone(),
+        occurrence,
+        loops: Vec::new(),
+    }
 }
 
 /// A fact about occurrence `occurrence` of the node `node`'s own site.
@@ -81,20 +81,20 @@ fn document() -> WorkflowOverlayDocument {
     WorkflowOverlayDocument::new(
         reference(),
         [
-            site("branch"),
-            site("then"),
-            site("else"),
-            arg_site("pair", 0),
-            arg_site("pair", 1),
+            site("branch").site,
+            site("then").site,
+            site("else").site,
+            arg_site("pair", 0).site,
+            arg_site("pair", 1).site,
         ],
     )
 }
 
-fn arg_site(node: &str, arg: u32) -> WorkflowSiteRef {
-    WorkflowSiteRef::new(
-        lash_sansio::WorkflowNodeId::fixture(node),
-        WorkflowSitePath::at([ExprSlot::Arg(arg)]),
-    )
+fn arg_site(node: &str, arg: u32) -> WorkflowTaskSite {
+    WorkflowTaskSite {
+        site: Site::new(Unit::Function(Name::new(node)), vec![arg]),
+        task: TaskIdentity::Main,
+    }
 }
 
 fn at(ms: i64) -> chrono::DateTime<Utc> {
@@ -113,7 +113,7 @@ fn started_event(event_key: &str) -> TraceLanguageExecution {
     language(event_key, TraceLanguageExecutionPayload::ExecutionStarted)
 }
 
-fn started_at(event_key: &str, site: &WorkflowSiteRef, occurrence: u64) -> TraceLanguageExecution {
+fn started_at(event_key: &str, site: &WorkflowTaskSite, occurrence: u64) -> TraceLanguageExecution {
     language(
         event_key,
         TraceLanguageExecutionPayload::Node {
@@ -125,7 +125,7 @@ fn started_at(event_key: &str, site: &WorkflowSiteRef, occurrence: u64) -> Trace
 
 fn completed_at(
     event_key: &str,
-    site: &WorkflowSiteRef,
+    site: &WorkflowTaskSite,
     occurrence: u64,
 ) -> TraceLanguageExecution {
     language(
@@ -247,7 +247,7 @@ fn fold(
 
 fn state<'a>(
     overlay: &'a WorkflowExecutionOverlay,
-    site: &WorkflowSiteRef,
+    site: &WorkflowTaskSite,
 ) -> &'a WorkflowOverlaySiteState {
     overlay
         .sites
@@ -393,7 +393,7 @@ fn a_site_outside_the_document_is_a_typed_mismatch_and_never_a_site() {
     let stray = site("another-document");
     let mut other_start = started_event("seed");
     let claimed = &mut other_start.identity.document;
-    claimed.source_identity = "source-2".to_string();
+    claimed.document = DocumentId::from_bytes([2; 32]);
     let claimed = claimed.clone();
     let records = [
         record_at(other_start, 900),
@@ -412,12 +412,11 @@ fn a_site_outside_the_document_is_a_typed_mismatch_and_never_a_site() {
         ]
     );
     assert!(overlay.sites.iter().all(|state| state.site != stray));
-    assert!(
-        overlay
-            .history
-            .iter()
-            .all(|item| item.identity.at().is_none_or(|at| at.site != stray))
-    );
+    assert!(overlay.history.iter().all(|item| {
+        item.identity
+            .at()
+            .is_none_or(|at| WorkflowTaskSite::of(at) != stray)
+    }));
     assert!(overlay.coverage.start_observed, "the execution did start");
 
     let unloaded = fold(None, &records).expect("no document");
@@ -878,8 +877,8 @@ fn per_site_history_is_bounded_with_a_canonical_watermark() {
             .history
             .iter()
             .filter_map(|item| item.identity.at())
-            .filter(|at| at.site == *site)
-            .map(|at| at.occurrence.get())
+            .filter(|at| WorkflowTaskSite::of(at) == *site)
+            .map(|at| at.occurrence)
             .collect::<BTreeSet<_>>();
         assert_eq!(retained, BTreeSet::from([2]));
     }
@@ -1036,8 +1035,8 @@ fn a_child_link_names_the_parent_site_and_the_child_execution() {
                             process_id: child.clone(),
                             attempt: Some(1),
                             document: Some(WorkflowDocumentRef {
-                                entry: WorkflowDocumentEntry::Process {
-                                    process_ref: "0:1".to_owned(),
+                                entry: WorkflowDocumentEntry::Entry {
+                                    function: Name::new("child"),
                                 },
                                 ..reference()
                             }),
@@ -1054,8 +1053,8 @@ fn a_child_link_names_the_parent_site_and_the_child_execution() {
     assert_eq!(link.parent_site, site("then"));
     assert_eq!(
         link.child.document.as_ref().map(|document| &document.entry),
-        Some(&WorkflowDocumentEntry::Process {
-            process_ref: "0:1".to_owned()
+        Some(&WorkflowDocumentEntry::Entry {
+            function: Name::new("child"),
         })
     );
     assert_eq!(
@@ -1319,4 +1318,69 @@ fn a_snapshot_costs_what_it_retains_and_an_append_one_occurrence() {
         state(&evicted, &sites[0]).summary.retained_occurrences,
         occurrences + 2
     );
+}
+
+/// The site `then` as the task the `element`-th run of a spawn started
+/// reaches it.
+fn element_site(element: u64) -> WorkflowTaskSite {
+    WorkflowTaskSite {
+        task: TaskIdentity::Spawned(lash_sansio::SpawnIdentity {
+            parent: std::sync::Arc::new(TaskIdentity::Main),
+            site: site("branch").site,
+            occurrence: element,
+        }),
+        ..site("then")
+    }
+}
+
+/// `K-EFF-008` in the overlay: a fan-out runs one site once in each
+/// element's task, so every element has occurrence 0 of it. The overlay
+/// keeps one row for each task, and what one element did never folds into
+/// another's: one completed, one failed and one still running stay three
+/// states of the one site.
+#[test]
+fn a_fan_out_keeps_one_row_for_each_elements_run_of_a_site() {
+    let (done, failed, running) = (element_site(0), element_site(1), element_site(2));
+    let failure = language(
+        "fail-1",
+        TraceLanguageExecutionPayload::Node {
+            at: occurrence_at(&failed, 0),
+            fact: TraceNodeFact::Failed {
+                call_id: None,
+                failure: TraceLanguageExecutionFailure::Runtime {
+                    code: "test_failure".to_string(),
+                    message: "element 1".to_string(),
+                },
+            },
+        },
+    );
+    let records = [
+        record_at(started_event("seed"), 900),
+        record_at(started_at("start-0", &done, 0), 1_000),
+        record_at(started_at("start-1", &failed, 0), 1_001),
+        record_at(started_at("start-2", &running, 0), 1_002),
+        record_at(failure, 1_100),
+        record_at(completed_at("end-0", &done, 0), 1_200),
+    ];
+    let overlay = assert_fold_law(Some(&document()), &records, 8);
+    assert!(overlay.mismatches.is_empty(), "{:?}", overlay.mismatches);
+    let rows: Vec<_> = overlay
+        .sites
+        .iter()
+        .filter(|row| row.site.site == site("then").site)
+        .map(|row| &row.site.task)
+        .collect();
+    assert_eq!(rows, vec![&done.task, &failed.task, &running.task]);
+    assert!(matches!(
+        state(&overlay, &done).occurrence,
+        WorkflowOverlayOccurrence::Completed { occurrence: 0, .. }
+    ));
+    assert!(matches!(
+        state(&overlay, &failed).occurrence,
+        WorkflowOverlayOccurrence::Failed { occurrence: 0, .. }
+    ));
+    assert!(matches!(
+        state(&overlay, &running).occurrence,
+        WorkflowOverlayOccurrence::Running { occurrence: 0, .. }
+    ));
 }

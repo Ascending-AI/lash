@@ -10,7 +10,6 @@ use lash_core::{
     LlmRequest, ProjectorContext, ProtocolBuildInput, TurnDriverConfig, TurnDriverPreamble,
 };
 use lash_rlm_types::RlmTermination;
-use lash_vm_runtime::LashVmSurface;
 
 use crate::dialect::SessionDialect;
 #[cfg(test)]
@@ -24,9 +23,8 @@ use history::{RlmHistoryRenderInput, build_rlm_history_messages_from_turn};
 /// and the prompt knobs.
 #[derive(Clone)]
 pub struct RlmProjectorConfig {
-    pub dialect: Arc<dyn crate::dialect::Dialect>,
+    pub dialect: crate::dialect::CellDialect,
     pub max_output_chars: usize,
-    pub lash_vm_surface: LashVmSurface,
 }
 
 pub(crate) struct RlmPreambleConfig {
@@ -35,11 +33,10 @@ pub(crate) struct RlmPreambleConfig {
 
 impl RlmProjectorConfig {
     /// A preamble in `dialect`, with the default prompt knobs.
-    pub fn new(dialect: Arc<dyn crate::dialect::Dialect>) -> Self {
+    pub fn new(dialect: crate::dialect::CellDialect) -> Self {
         Self {
             dialect,
             max_output_chars: 10_000,
-            lash_vm_surface: LashVmSurface::default(),
         }
     }
 }
@@ -48,10 +45,8 @@ pub fn build_rlm_preamble(
     input: ProtocolBuildInput,
     config: RlmProjectorConfig,
 ) -> TurnDriverPreamble {
-    let dialect: Arc<SessionDialect> = Arc::new(SessionDialect::prompt_only(
-        Arc::clone(&config.dialect),
-        config.lash_vm_surface.clone(),
-    ));
+    let dialect: Arc<SessionDialect> =
+        Arc::new(SessionDialect::prompt_only(config.dialect.clone()));
     build_rlm_preamble_with_dialect(
         input,
         RlmPreambleConfig {
@@ -181,10 +176,7 @@ impl RlmContextProjector {
 pub(crate) fn render_conformance_history_message(
     message: lash_core::Message,
 ) -> Result<LlmMessage, String> {
-    let dialect = SessionDialect::prompt_only(
-        Arc::new(crate::dialect::TypescriptDialect),
-        LashVmSurface::default(),
-    );
+    let dialect = SessionDialect::prompt_only(crate::dialect::CellDialect::typescript());
     let events = [lash_core::SessionHistoryRecord::Conversation(
         lash_core::session_model::ConversationRecord::from_message(message),
     )];

@@ -1,1094 +1,105 @@
+//! The example's HTTP shapes. Property names of the example's own objects
+//! are camelCase; a kernel document, a site, an edit and a correspondence
+//! are lash's own serialized shapes, passed through unchanged.
+
 use std::collections::BTreeMap;
 
 use axum::http::StatusCode;
-use lash::typescript::workflow_graph::{GraphRenderError, WorkflowGraphBuildError};
-use lash::vm::ir::{
-    LabelMetadata, Span, WorkflowDiagnosticClassification, WorkflowEdgeKind, WorkflowEffectKind,
-    WorkflowTerminalKind,
-};
-use lash::workflow::WorkflowGraphError;
-use schemars::JsonSchema;
+use lash::workflow::document::{Document, Name, Site};
+use lash::workflow::edit::{Correspondence, Edit};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::Value;
 
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+/// The saved workflow as clients are served it.
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct WorkflowDocument {
-    pub schema_version: u32,
-    /// The source identity of the admitted artifact this document's graph
-    /// is the view of; absent for a draft whose source does not admit. A run
-    /// overlay shows a run's events only when their `definition` is this one.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub definition: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub facet_schema_version: Option<u32>,
+pub struct WorkflowView {
+    /// The host's optimistic revision of the saved workflow.
     pub version: u64,
-    /// The workflow's canonical TypeScript, a view the optional TypeScript
-    /// lens gives of the document. Empty when the lens has no spelling for
-    /// it; the document is complete and editable either way.
-    pub source: String,
-    /// Why the TypeScript lens has no spelling for this workflow.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub source_unavailable: Option<String>,
-    /// Why Lash did not admit this version as a definition. It is saved as
-    /// a draft and cannot run until an edit makes it admissible.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// The entry of the document a run starts.
+    pub entry: Name,
+    /// The identity of the draft's document: the base an edit transaction
+    /// of this version is applied to.
+    pub identity: String,
+    /// The definition lash admitted this version as; absent when it did
+    /// not, and `notAdmitted` then says why.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub definition: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub not_admitted: Option<String>,
-    pub nodes: Vec<FlowNode>,
-    pub edges: Vec<FlowEdge>,
-    pub roots: GraphRoots,
+    /// The kernel document.
+    pub document: Document,
+    /// The document in kernel notation.
+    pub text: String,
+    /// The entry's statements in document order, each with its site.
+    pub statements: Vec<StatementView>,
+    /// The sites of the document a run can report an occurrence at.
+    pub execution_sites: Vec<ExecutionSiteView>,
+    /// The document as the TypeScript printer spells it: a read-only lens.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_unavailable: Option<String>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+/// One statement of the entry: where it is and how this host words it.
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SaveWorkflowResponse {
-    #[serde(flatten)]
-    pub document: WorkflowDocument,
-    pub id_map: BTreeMap<String, String>,
+pub struct StatementView {
+    pub site: Site,
+    /// The block the statement is in.
+    pub block: Site,
+    /// How many blocks enclose the statement inside the entry's body.
+    pub depth: usize,
+    pub summary: String,
+    /// The site of the statement's action, when it has one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub action: Option<Site>,
 }
 
-/// Save operations against the current version, or explicitly import source
-/// and apply operations against the projected document.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExecutionSiteView {
+    pub site: Site,
+    pub statement: Site,
+    pub kind: String,
+    /// The loops enclosing the site, outermost first.
+    pub loops: Vec<Site>,
+}
+
+/// What this host offers a workflow document.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EnvironmentView {
+    /// Each effect a document may perform, with its signature.
+    pub effects: Value,
+    /// Each library function by name, with its identity.
+    pub functions: BTreeMap<String, String>,
+}
+
+/// Open a workflow given as a kernel document.
 #[derive(Clone, Debug, Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
-pub enum SaveWorkflowRequest {
-    Edit {
-        version: u64,
-        edits: Vec<crate::edits::EditOperation>,
-    },
-    ImportSource {
-        version: u64,
-        source: String,
-        edits: Vec<crate::edits::EditOperation>,
-    },
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct OpenWorkflowRequest {
+    pub document: Box<Document>,
+    pub entry: Name,
 }
 
-/// A set of typed edits to apply to the saved workflow as one transaction.
+/// One edit transaction against the saved version.
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct EditWorkflowRequest {
     pub version: u64,
-    pub edits: Vec<crate::edits::EditOperation>,
+    pub edits: Vec<Edit>,
 }
 
-/// A workflow to open, given as Lash's typed workflow document.
-#[derive(Clone, Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct OpenWorkflowRequest {
-    /// The document as JSON. Its version is checked before anything else.
-    pub graph: Value,
-}
-
-/// The saved workflow as Lash's typed document, for a generic editor.
+/// The version an edit transaction saved, and where each node of the
+/// version it edited is now.
 #[derive(Clone, Debug, Serialize)]
-pub struct WorkflowIrResponse {
-    pub version: u64,
-    pub graph: lash::workflow::WorkflowGraph,
-    /// Each node's statement and replaceable expressions, by node id.
-    pub nodes: BTreeMap<String, crate::edits::NodeIr>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-pub struct ProjectWorkflowRequest {
-    pub source: String,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct ProjectWorkflowResponse {
-    pub document: WorkflowDocument,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct SourceProjectionErrorBody {
-    pub error: SourceProjectionError,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct SourceProjectionError {
-    pub code: String,
-    pub message: String,
-}
-
-#[derive(Clone, Debug)]
-pub struct SourceProjectionErrorResponse {
-    pub(crate) body: SourceProjectionErrorBody,
-}
-
-impl SourceProjectionErrorResponse {
-    pub(crate) fn invalid_source(message: impl Into<String>) -> Self {
-        Self {
-            body: SourceProjectionErrorBody {
-                error: SourceProjectionError {
-                    code: "invalid_source".to_string(),
-                    message: message.into(),
-                },
-            },
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct OperationCatalogEntry {
-    pub id: String,
-    pub label: String,
-    pub node_kind: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub subkind: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub operation: Option<String>,
-    /// The host receiver the operation is reached through (`display`, `gmail`,
-    /// `llm`, …). A call entry's synthesized expression is
-    /// `await {receiver}.{operation}({..})`, and both the editor and the
-    /// backend fallback read the receiver from here rather than assuming
-    /// `display` (FIG-3178).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub receiver: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub effect: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub terminal_kind: Option<String>,
-    pub fields: Vec<OperationField>,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct OperationField {
-    pub name: String,
-    #[serde(rename = "type")]
-    pub field_type: String,
-    pub default: EditableValue,
-}
-
-#[derive(Clone, Copy, Debug, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ValidationKind {
-    Expression,
-    AssignmentTarget,
-    Identifier,
-}
-
-impl ValidationKind {
-    pub(crate) fn error_code(self) -> &'static str {
-        match self {
-            Self::Expression => GraphRenderError::InvalidExpression {
-                node_id: String::new(),
-                field: String::new(),
-                message: String::new(),
-            }
-            .code(),
-            Self::AssignmentTarget => GraphRenderError::InvalidAssignmentTarget {
-                node_id: String::new(),
-                field: "target",
-                message: String::new(),
-            }
-            .code(),
-            Self::Identifier => "invalid_identifier",
-        }
-    }
-}
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ValidateRequest {
-    pub kind: ValidationKind,
-    pub text: String,
-    /// The identifiers live where the fragment sits. A TypeScript fragment is
-    /// parsed by the dialect's own front-end, which rejects an unknown binding,
-    /// so the editor sends the node's available variables with the text.
-    #[serde(default)]
-    pub available_vars: Vec<String>,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct ValidateResponse {
-    pub ok: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<ValidationError>,
-}
-
-impl ValidateResponse {
-    pub(crate) fn valid() -> Self {
-        Self {
-            ok: true,
-            error: None,
-        }
-    }
-
-    pub(crate) fn invalid(kind: ValidationKind, message: impl Into<String>) -> Self {
-        Self {
-            ok: false,
-            error: Some(ValidationError {
-                code: kind.error_code().to_string(),
-                message: message.into(),
-            }),
-        }
-    }
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct ValidationError {
-    pub code: String,
-    pub message: String,
-}
-
-#[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct GraphRoots {
-    pub main: Vec<String>,
-    #[serde(default)]
-    pub processes: Vec<String>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct FlowNode {
-    pub id: String,
-    #[serde(rename = "type")]
-    pub node_type: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub parent_id: Option<String>,
-    pub data: NodeData,
-}
-
-#[derive(Clone, Debug, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-#[schemars(transform = close_flattened_union)]
-pub struct NodeData {
-    #[serde(flatten)]
-    pub name: NodeName,
-    #[serde(default)]
-    pub available_vars: Vec<TypedVariable>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub expected_arg_types: Vec<ExpectedArgumentType>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub diagnostics: Vec<TypeDiagnostic>,
-    #[serde(flatten)]
-    pub body: NodeBody,
-}
-
-impl<'de> Deserialize<'de> for NodeData {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        #[derive(Deserialize)]
-        #[serde(rename_all = "camelCase")]
-        struct Envelope {
-            #[serde(default)]
-            available_vars: Vec<TypedVariable>,
-            #[serde(default)]
-            expected_arg_types: Vec<ExpectedArgumentType>,
-            #[serde(default)]
-            diagnostics: Vec<TypeDiagnostic>,
-            #[serde(flatten)]
-            body: BTreeMap<String, Value>,
-        }
-        let mut payload = BTreeMap::<String, Value>::deserialize(deserializer)?;
-        let name = Value::Object(
-            ["nameSource", "title", "description"]
-                .into_iter()
-                .filter_map(|field| payload.remove(field).map(|value| (field.to_owned(), value)))
-                .collect(),
-        );
-        let name = serde_json::from_value(name).map_err(serde::de::Error::custom)?;
-        let envelope: Envelope =
-            serde_json::from_value(Value::Object(payload.into_iter().collect()))
-                .map_err(serde::de::Error::custom)?;
-        let body = serde_json::from_value(Value::Object(envelope.body.into_iter().collect()))
-            .map_err(serde::de::Error::custom)?;
-        Ok(Self {
-            name,
-            available_vars: envelope.available_vars,
-            expected_arg_types: envelope.expected_arg_types,
-            diagnostics: envelope.diagnostics,
-            body,
-        })
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(
-    tag = "kind",
-    rename_all = "snake_case",
-    rename_all_fields = "camelCase",
-    deny_unknown_fields
-)]
-pub enum NodeBody {
-    Process {
-        #[serde(rename = "name")]
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        process_name: Option<String>,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        params: Vec<EditableProcessField>,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        children: Vec<ChildGroup>,
-    },
-    Data {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        binding: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        expression: Option<String>,
-        #[serde(default)]
-        fields: BTreeMap<String, EditableValue>,
-    },
-    Call {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        binding: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        operation: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        receiver: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        expression: Option<String>,
-        #[serde(default)]
-        fields: BTreeMap<String, EditableValue>,
-    },
-    Effect {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        binding: Option<String>,
-        effect: WorkflowEffectKind,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        expression: Option<String>,
-        #[serde(default)]
-        fields: BTreeMap<String, EditableValue>,
-    },
-    StateUpdate {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        target: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        expression: Option<String>,
-        #[serde(default)]
-        fields: BTreeMap<String, EditableValue>,
-    },
-    Computation {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        binding: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        expression: Option<String>,
-        #[serde(default)]
-        fields: BTreeMap<String, EditableValue>,
-    },
-    Terminal {
-        terminal_kind: WorkflowTerminalKind,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        expression: Option<String>,
-    },
-    Throw {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        expression: Option<String>,
-    },
-    Container(NodeContainer),
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "subkind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum NodeContainer {
-    If {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        binding: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        condition: Option<String>,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        children: Vec<ChildGroup>,
-    },
-    While {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        condition: Option<String>,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        children: Vec<ChildGroup>,
-    },
-    For {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        binding: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        iterable: Option<String>,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        children: Vec<ChildGroup>,
-    },
-    /// A `try`: its `body` child group runs, `catch` runs with the thrown
-    /// value bound to `catchBinding`, and `finally` runs on every exit.
-    #[serde(rename_all = "camelCase")]
-    Try {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        binding: Option<String>,
-        /// The name the catch clause binds; absent when there is no clause.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        catch_binding: Option<String>,
-        /// Whether the `try` has a `finally` body.
-        #[serde(default)]
-        finally: bool,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        children: Vec<ChildGroup>,
-    },
-    /// A nested statement block with its own `body` child group.
-    Scope {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        binding: Option<String>,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        children: Vec<ChildGroup>,
-    },
-}
-
-impl NodeData {
-    pub fn kind(&self) -> &'static str {
-        match &self.body {
-            NodeBody::Process { .. } => "process",
-            NodeBody::Data { .. } => "data",
-            NodeBody::Call { .. } => "call",
-            NodeBody::Effect { .. } => "effect",
-            NodeBody::StateUpdate { .. } => "state_update",
-            NodeBody::Computation { .. } => "computation",
-            NodeBody::Terminal { .. } => "terminal",
-            NodeBody::Throw { .. } => "throw",
-            NodeBody::Container(_) => "container",
-        }
-    }
-    pub fn subkind(&self) -> Option<&'static str> {
-        match &self.body {
-            NodeBody::Container(NodeContainer::If { .. }) => Some("if"),
-            NodeBody::Container(NodeContainer::While { .. }) => Some("while"),
-            NodeBody::Container(NodeContainer::For { .. }) => Some("for"),
-            NodeBody::Container(NodeContainer::Try { .. }) => Some("try"),
-            NodeBody::Container(NodeContainer::Scope { .. }) => Some("scope"),
-            _ => None,
-        }
-    }
-    pub fn process_name(&self) -> &Option<String> {
-        match &self.body {
-            NodeBody::Process { process_name, .. } => process_name,
-            _ => &None,
-        }
-    }
-    pub fn process_name_mut(&mut self) -> Option<&mut Option<String>> {
-        match &mut self.body {
-            NodeBody::Process { process_name, .. } => Some(process_name),
-            _ => None,
-        }
-    }
-    pub fn params(&self) -> &Vec<EditableProcessField> {
-        match &self.body {
-            NodeBody::Process { params, .. } => params,
-            _ => {
-                static EMPTY: std::sync::LazyLock<Vec<EditableProcessField>> =
-                    std::sync::LazyLock::new(Vec::new);
-                &EMPTY
-            }
-        }
-    }
-    pub fn params_mut(&mut self) -> Option<&mut Vec<EditableProcessField>> {
-        match &mut self.body {
-            NodeBody::Process { params, .. } => Some(params),
-            _ => None,
-        }
-    }
-    pub fn children(&self) -> &Vec<ChildGroup> {
-        match &self.body {
-            NodeBody::Process { children, .. } => children,
-            NodeBody::Container(NodeContainer::If { children, .. }) => children,
-            NodeBody::Container(NodeContainer::While { children, .. }) => children,
-            NodeBody::Container(NodeContainer::For { children, .. }) => children,
-            NodeBody::Container(NodeContainer::Try { children, .. }) => children,
-            NodeBody::Container(NodeContainer::Scope { children, .. }) => children,
-            _ => {
-                static EMPTY: std::sync::LazyLock<Vec<ChildGroup>> =
-                    std::sync::LazyLock::new(Vec::new);
-                &EMPTY
-            }
-        }
-    }
-    pub fn children_mut(&mut self) -> Option<&mut Vec<ChildGroup>> {
-        match &mut self.body {
-            NodeBody::Process { children, .. } => Some(children),
-            NodeBody::Container(NodeContainer::If { children, .. }) => Some(children),
-            NodeBody::Container(NodeContainer::While { children, .. }) => Some(children),
-            NodeBody::Container(NodeContainer::For { children, .. }) => Some(children),
-            NodeBody::Container(NodeContainer::Try { children, .. }) => Some(children),
-            NodeBody::Container(NodeContainer::Scope { children, .. }) => Some(children),
-            _ => None,
-        }
-    }
-    pub fn binding(&self) -> &Option<String> {
-        match &self.body {
-            NodeBody::Data { binding, .. } => binding,
-            NodeBody::Call { binding, .. } => binding,
-            NodeBody::Effect { binding, .. } => binding,
-            NodeBody::Computation { binding, .. } => binding,
-            NodeBody::Container(NodeContainer::If { binding, .. }) => binding,
-            NodeBody::Container(NodeContainer::For { binding, .. }) => binding,
-            NodeBody::Container(NodeContainer::Try { binding, .. }) => binding,
-            NodeBody::Container(NodeContainer::Scope { binding, .. }) => binding,
-            _ => &None,
-        }
-    }
-    pub fn binding_mut(&mut self) -> Option<&mut Option<String>> {
-        match &mut self.body {
-            NodeBody::Data { binding, .. } => Some(binding),
-            NodeBody::Call { binding, .. } => Some(binding),
-            NodeBody::Effect { binding, .. } => Some(binding),
-            NodeBody::Computation { binding, .. } => Some(binding),
-            NodeBody::Container(NodeContainer::If { binding, .. }) => Some(binding),
-            NodeBody::Container(NodeContainer::For { binding, .. }) => Some(binding),
-            NodeBody::Container(NodeContainer::Try { binding, .. }) => Some(binding),
-            NodeBody::Container(NodeContainer::Scope { binding, .. }) => Some(binding),
-            _ => None,
-        }
-    }
-    pub fn expression(&self) -> &Option<String> {
-        match &self.body {
-            NodeBody::Data { expression, .. } => expression,
-            NodeBody::Call { expression, .. } => expression,
-            NodeBody::Effect { expression, .. } => expression,
-            NodeBody::StateUpdate { expression, .. } => expression,
-            NodeBody::Computation { expression, .. } => expression,
-            NodeBody::Terminal { expression, .. } => expression,
-            NodeBody::Throw { expression } => expression,
-            _ => &None,
-        }
-    }
-    pub fn expression_mut(&mut self) -> Option<&mut Option<String>> {
-        match &mut self.body {
-            NodeBody::Data { expression, .. } => Some(expression),
-            NodeBody::Call { expression, .. } => Some(expression),
-            NodeBody::Effect { expression, .. } => Some(expression),
-            NodeBody::StateUpdate { expression, .. } => Some(expression),
-            NodeBody::Computation { expression, .. } => Some(expression),
-            NodeBody::Terminal { expression, .. } => Some(expression),
-            NodeBody::Throw { expression } => Some(expression),
-            _ => None,
-        }
-    }
-    pub fn fields(&self) -> &BTreeMap<String, EditableValue> {
-        match &self.body {
-            NodeBody::Data { fields, .. } => fields,
-            NodeBody::Call { fields, .. } => fields,
-            NodeBody::Effect { fields, .. } => fields,
-            NodeBody::StateUpdate { fields, .. } => fields,
-            NodeBody::Computation { fields, .. } => fields,
-            _ => {
-                static EMPTY: std::sync::LazyLock<BTreeMap<String, EditableValue>> =
-                    std::sync::LazyLock::new(BTreeMap::new);
-                &EMPTY
-            }
-        }
-    }
-    pub fn fields_mut(&mut self) -> Option<&mut BTreeMap<String, EditableValue>> {
-        match &mut self.body {
-            NodeBody::Data { fields, .. } => Some(fields),
-            NodeBody::Call { fields, .. } => Some(fields),
-            NodeBody::Effect { fields, .. } => Some(fields),
-            NodeBody::StateUpdate { fields, .. } => Some(fields),
-            NodeBody::Computation { fields, .. } => Some(fields),
-            _ => None,
-        }
-    }
-    pub fn operation(&self) -> &Option<String> {
-        match &self.body {
-            NodeBody::Call { operation, .. } => operation,
-            _ => &None,
-        }
-    }
-    pub fn operation_mut(&mut self) -> Option<&mut Option<String>> {
-        match &mut self.body {
-            NodeBody::Call { operation, .. } => Some(operation),
-            _ => None,
-        }
-    }
-    pub fn receiver(&self) -> &Option<String> {
-        match &self.body {
-            NodeBody::Call { receiver, .. } => receiver,
-            _ => &None,
-        }
-    }
-    pub fn receiver_mut(&mut self) -> Option<&mut Option<String>> {
-        match &mut self.body {
-            NodeBody::Call { receiver, .. } => Some(receiver),
-            _ => None,
-        }
-    }
-    pub fn target(&self) -> &Option<String> {
-        match &self.body {
-            NodeBody::StateUpdate { target, .. } => target,
-            _ => &None,
-        }
-    }
-    pub fn target_mut(&mut self) -> Option<&mut Option<String>> {
-        match &mut self.body {
-            NodeBody::StateUpdate { target, .. } => Some(target),
-            _ => None,
-        }
-    }
-    pub fn condition(&self) -> &Option<String> {
-        match &self.body {
-            NodeBody::Container(NodeContainer::If { condition, .. }) => condition,
-            NodeBody::Container(NodeContainer::While { condition, .. }) => condition,
-            _ => &None,
-        }
-    }
-    pub fn condition_mut(&mut self) -> Option<&mut Option<String>> {
-        match &mut self.body {
-            NodeBody::Container(NodeContainer::If { condition, .. }) => Some(condition),
-            NodeBody::Container(NodeContainer::While { condition, .. }) => Some(condition),
-            _ => None,
-        }
-    }
-    pub fn iterable(&self) -> &Option<String> {
-        match &self.body {
-            NodeBody::Container(NodeContainer::For { iterable, .. }) => iterable,
-            _ => &None,
-        }
-    }
-    pub fn iterable_mut(&mut self) -> Option<&mut Option<String>> {
-        match &mut self.body {
-            NodeBody::Container(NodeContainer::For { iterable, .. }) => Some(iterable),
-            _ => None,
-        }
-    }
-    pub fn effect(&self) -> Option<WorkflowEffectKind> {
-        match self.body {
-            NodeBody::Effect { effect, .. } => Some(effect),
-            _ => None,
-        }
-    }
-    pub fn effect_mut(&mut self) -> Option<&mut WorkflowEffectKind> {
-        match &mut self.body {
-            NodeBody::Effect { effect, .. } => Some(effect),
-            _ => None,
-        }
-    }
-    pub fn terminal_kind(&self) -> Option<&WorkflowTerminalKind> {
-        match &self.body {
-            NodeBody::Terminal { terminal_kind, .. } => Some(terminal_kind),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct TypedVariable {
-    pub name: String,
-    #[serde(rename = "type")]
-    pub variable_type: String,
-}
-
-impl PartialEq<&str> for TypedVariable {
-    fn eq(&self, other: &&str) -> bool {
-        self.name == *other
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct ExpectedArgumentType {
-    pub slot: String,
-    #[serde(rename = "type")]
-    pub expected_type: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct TypeDiagnostic {
-    pub node_id: String,
-    pub kind: String,
-    pub classification: WorkflowDiagnosticClassification,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub slot: Option<String>,
-    pub message: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub span: Option<Span>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct EditableProcessField {
-    pub name: String,
-    #[serde(rename = "type")]
-    pub field_type: String,
-}
-
-/// A node's display name together with the one fact that decides whether the
-/// host may throw it away: who chose it.
-///
-/// Rendering emits an `@label` annotation only for an authored name, so a
-/// payload that carries a title without saying where the name came from is a
-/// rename waiting to evaporate. The tag is therefore mandatory and carries the
-/// title inside the variant: "title present, tag absent" is unrepresentable,
-/// and an unknown tag is a decode error rather than a silent `derived`. The
-/// wire values (`label`, `derived`) are the ones the browser client already
-/// writes on every node.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "nameSource", rename_all = "camelCase", deny_unknown_fields)]
-pub enum NodeName {
-    /// The author named this node: the title and its optional description are
-    /// theirs, and the save path renders them back as an `@label` annotation.
-    #[serde(rename = "label")]
-    Authored {
-        title: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        description: Option<String>,
-    },
-    /// The name is a rendering of the node's own expression. The title is
-    /// output, not input: the save path recomputes it and it carries no
-    /// description.
-    Derived { title: String },
-}
-
-impl NodeName {
-    /// The title to display for this node, authored or rendered.
-    pub fn title(&self) -> &str {
-        match self {
-            Self::Authored { title, .. } | Self::Derived { title } => title,
-        }
-    }
-
-    /// The authored description, which only an authored name can carry.
-    pub fn description(&self) -> Option<&str> {
-        match self {
-            Self::Authored { description, .. } => description.as_deref(),
-            Self::Derived { .. } => None,
-        }
-    }
-
-    /// The label an authored name is in the document; a derived name is none.
-    pub fn label(&self) -> Option<LabelMetadata> {
-        match self {
-            Self::Authored { title, description } => Some(LabelMetadata {
-                title: title.as_str().into(),
-                description: description.as_deref().map(Into::into),
-            }),
-            Self::Derived { .. } => None,
-        }
-    }
-
-    /// The name of a node or process the document labels with `label`, or
-    /// else names `derived`.
-    pub fn projected(label: Option<&LabelMetadata>, derived: &str) -> Self {
-        match label {
-            Some(label) => Self::Authored {
-                title: label.title.to_string(),
-                description: label.description.as_ref().map(ToString::to_string),
-            },
-            None => Self::Derived {
-                title: derived.to_string(),
-            },
-        }
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct ChildGroup {
-    pub slot: String,
-    pub scope: String,
-    pub node_ids: Vec<String>,
-}
-
-/// An editable field carries its authored kind at every depth. Literal keys
-/// are data, including `$expr`, `kind` and `value`.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(
-    tag = "kind",
-    content = "value",
-    rename_all = "snake_case",
-    deny_unknown_fields
-)]
-pub enum EditableValue {
-    Null(()),
-    Bool(bool),
-    Number(f64),
-    String(String),
-    List(Vec<EditableValue>),
-    Expr(String),
-    Object(BTreeMap<String, EditableValue>),
-}
-
-#[cfg(test)]
-mod editable_value_tests {
-    use super::*;
-
-    #[test]
-    fn nested_literal_records_keep_arbitrary_keys_and_expression_kinds() {
-        let value = EditableValue::List(vec![
-            EditableValue::Object(BTreeMap::from([
-                (
-                    "$expr".to_string(),
-                    EditableValue::String("1 + 1".to_string()),
-                ),
-                (
-                    "kind".to_string(),
-                    EditableValue::String("expr".to_string()),
-                ),
-                (
-                    "value".to_string(),
-                    EditableValue::Object(BTreeMap::from([(
-                        "$expr".to_string(),
-                        EditableValue::String("not valid code!".to_string()),
-                    )])),
-                ),
-            ])),
-            EditableValue::Expr("1 + 1".to_string()),
-        ]);
-        let bytes = serde_json::to_vec(&value).expect("encode nested values");
-        assert_eq!(
-            serde_json::from_slice::<EditableValue>(&bytes).expect("decode nested values"),
-            value
-        );
-    }
-
-    #[test]
-    fn every_variant_uses_explicit_kind_and_value() {
-        for (editable, encoded) in [
-            (
-                EditableValue::Null(()),
-                json!({ "kind": "null", "value": null }),
-            ),
-            (
-                EditableValue::Bool(true),
-                json!({ "kind": "bool", "value": true }),
-            ),
-            (
-                EditableValue::Number(5.0),
-                json!({ "kind": "number", "value": 5.0 }),
-            ),
-            (
-                EditableValue::String("s".to_string()),
-                json!({ "kind": "string", "value": "s" }),
-            ),
-            (
-                EditableValue::Expr("1 + 1".to_string()),
-                json!({ "kind": "expr", "value": "1 + 1" }),
-            ),
-            (
-                EditableValue::List(vec![EditableValue::Null(())]),
-                json!({ "kind": "list", "value": [{ "kind": "null", "value": null }] }),
-            ),
-            (
-                EditableValue::Object(BTreeMap::from([(
-                    "$expr".to_string(),
-                    EditableValue::String("1 + 1".to_string()),
-                )])),
-                json!({ "kind": "object", "value": { "$expr": { "kind": "string", "value": "1 + 1" } } }),
-            ),
-        ] {
-            assert_eq!(
-                serde_json::to_value(&editable).expect("encode value"),
-                encoded
-            );
-            assert_eq!(
-                serde_json::from_value::<EditableValue>(encoded).expect("decode value"),
-                editable
-            );
-        }
-    }
-
-    #[test]
-    fn untagged_or_malformed_values_are_rejected() {
-        for value in [
-            json!({ "$expr": "1 + 1" }),
-            json!("text"),
-            json!([1]),
-            json!({ "kind": "expression", "value": "1 + 1" }),
-            json!({ "kind": "expr", "value": { "$expr": "1 + 1" } }),
-            json!({ "kind": "object", "value": { "$expr": "1 + 1" } }),
-            json!({ "kind": "list", "value": [true] }),
-        ] {
-            assert!(
-                serde_json::from_value::<EditableValue>(value.clone()).is_err(),
-                "accepted {value}"
-            );
-        }
-    }
-}
-
-#[cfg(test)]
-mod node_name_tests {
-    use super::*;
-
-    #[test]
-    fn node_kinds_reject_foreign_payloads_and_unknown_discriminants() {
-        for body in [
-            json!({"kind":"process"}),
-            json!({"kind":"data"}),
-            json!({"kind":"call"}),
-            json!({"kind":"effect","effect":"sleep_for"}),
-            json!({"kind":"state_update"}),
-            json!({"kind":"computation"}),
-            json!({"kind":"terminal","terminalKind":"finish"}),
-            json!({"kind":"throw"}),
-            json!({"kind":"container","subkind":"if"}),
-            json!({"kind":"container","subkind":"while"}),
-            json!({"kind":"container","subkind":"for"}),
-            json!({"kind":"container","subkind":"try"}),
-            json!({"kind":"container","subkind":"scope"}),
-        ] {
-            let mut payload = body;
-            payload["title"] = json!("node");
-            payload["nameSource"] = json!("derived");
-            let decoded: NodeData = serde_json::from_value(payload.clone()).expect("valid node");
-            let round: NodeData =
-                serde_json::from_value(serde_json::to_value(&decoded).expect("encode node"))
-                    .expect("round trip");
-            assert_eq!(round.kind(), payload["kind"].as_str().expect("kind"));
-        }
-        for body in [
-            json!({"kind": "cal", "operation": "greet"}),
-            json!({"kind": "call", "operation": "greet", "condition": "true"}),
-            json!({"kind": "data", "expression": "1", "effect": "print"}),
-            json!({"kind": "terminal", "expression": "1", "terminalKind": "finsh"}),
-            json!({"kind": "effect", "effect": "sleep"}),
-            json!({"kind": "container", "subkind": "whlie"}),
-        ] {
-            let mut payload = body;
-            payload["title"] = json!("node");
-            payload["nameSource"] = json!("derived");
-            assert!(
-                serde_json::from_value::<NodeData>(payload.clone()).is_err(),
-                "invalid node decoded: {payload}"
-            );
-        }
-    }
-
-    #[test]
-    fn edge_kinds_reject_control_data_and_incomplete_versions() {
-        for payload in [
-            json!({"kind":"sequence","scope":"main"}),
-            json!({"kind":"data_dependency","scope":"main","variable":"x","version":1}),
-        ] {
-            let decoded: EdgeData = serde_json::from_value(payload.clone()).expect("valid edge");
-            assert_eq!(serde_json::to_value(decoded).expect("encode edge"), payload);
-        }
-        for payload in [
-            json!({"kind": "sequence", "scope": "main", "variable":"x", "version":1}),
-            json!({"kind": "data_dependency", "scope":"main", "variable":"x"}),
-            json!({"kind": "contrl", "scope": "main"}),
-            json!({"kind": "control", "scope": "main", "variable": "x", "version": 1}),
-            json!({"kind": "data", "scope": "main", "variable": "x"}),
-        ] {
-            assert!(
-                serde_json::from_value::<EdgeData>(payload.clone()).is_err(),
-                "invalid edge decoded: {payload}"
-            );
-        }
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct FlowEdge {
-    pub id: String,
-    pub source: String,
-    pub target: String,
-    pub data: EdgeData,
-}
-
-#[derive(Clone, Debug, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-#[schemars(transform = close_flattened_union)]
-pub struct EdgeData {
-    #[serde(flatten)]
-    pub body: WorkflowEdgeKind,
-    pub scope: String,
-}
-
-impl<'de> Deserialize<'de> for EdgeData {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut payload = BTreeMap::<String, Value>::deserialize(deserializer)?;
-        let scope = payload
-            .remove("scope")
-            .ok_or_else(|| serde::de::Error::missing_field("scope"))?;
-        let scope = serde_json::from_value(scope).map_err(serde::de::Error::custom)?;
-        let body: WorkflowEdgeKind =
-            serde_json::from_value(Value::Object(payload.clone().into_iter().collect()))
-                .map_err(serde::de::Error::custom)?;
-        let canonical = serde_json::to_value(&body).map_err(serde::de::Error::custom)?;
-        if let Some(field) = payload.keys().find(|field| canonical.get(*field).is_none()) {
-            return Err(serde::de::Error::custom(format!(
-                "unknown edge field `{field}`"
-            )));
-        }
-        Ok(Self { body, scope })
-    }
-}
-
-/// Flatten the generated intersections into closed object variants, so schema
-/// validators and the TypeScript compiler enforce the same owned payloads.
-#[expect(
-    clippy::expect_used,
-    reason = "the derive emits inline object branches for these flattened tagged unions"
-)]
-fn close_flattened_union(schema: &mut schemars::Schema) {
-    fn merge(
-        mut left: serde_json::Map<String, Value>,
-        right: serde_json::Map<String, Value>,
-    ) -> serde_json::Map<String, Value> {
-        for (key, value) in right {
-            match (key.as_str(), left.get_mut(&key), value) {
-                ("properties", Some(Value::Object(current)), Value::Object(properties)) => {
-                    current.extend(properties)
-                }
-                ("required", Some(Value::Array(current)), Value::Array(required)) => {
-                    current.extend(required)
-                }
-                (_, _, value) => {
-                    left.insert(key, value);
-                }
-            }
-        }
-        left
-    }
-    fn variants(mut object: serde_json::Map<String, Value>) -> Vec<serde_json::Map<String, Value>> {
-        let alternatives = object.remove("oneOf");
-        let intersections = object.remove("allOf");
-        object.remove("additionalProperties");
-        object.remove("unevaluatedProperties");
-        let mut result = vec![object];
-        if let Some(Value::Array(alternatives)) = alternatives {
-            result = result
-                .into_iter()
-                .flat_map(|base| {
-                    alternatives.iter().flat_map(move |alternative| {
-                        variants(
-                            alternative
-                                .as_object()
-                                .expect("object union variant")
-                                .clone(),
-                        )
-                        .into_iter()
-                        .map({
-                            let base = base.clone();
-                            move |variant| merge(base.clone(), variant)
-                        })
-                    })
-                })
-                .collect();
-        }
-        if let Some(Value::Array(intersections)) = intersections {
-            for intersection in intersections {
-                let members = variants(
-                    intersection
-                        .as_object()
-                        .expect("object intersection")
-                        .clone(),
-                );
-                result = result
-                    .into_iter()
-                    .flat_map(|base| {
-                        members
-                            .iter()
-                            .cloned()
-                            .map(move |member| merge(base.clone(), member))
-                    })
-                    .collect();
-            }
-        }
-        result
-    }
-    let object = schema.as_object().expect("flattened object schema").clone();
-    let variants = variants(object)
-        .into_iter()
-        .map(|mut variant| {
-            variant.insert("additionalProperties".into(), Value::Bool(false));
-            Value::Object(variant)
-        })
-        .collect::<Vec<_>>();
-    *schema = schemars::Schema::from(serde_json::Map::from_iter([(
-        "oneOf".into(),
-        Value::Array(variants),
-    )]));
+pub struct EditWorkflowResponse {
+    pub workflow: WorkflowView,
+    pub correspondence: Correspondence,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -1134,11 +145,13 @@ pub enum RunStatus {
 pub struct RunEvent {
     pub run_id: String,
     pub workflow_version: u64,
-    /// The source identity of the admitted artifact the run executes; the
-    /// run overlay's node ids are that artifact's.
+    /// The identity of the document the run executes; the event's site is
+    /// a site of that document.
     pub definition: String,
     pub sequence: u64,
-    pub node_id: String,
+    /// The site the event is about; absent for the run as a whole.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub site: Option<Site>,
     pub status: RunStatus,
     #[serde(default)]
     pub display_delta: DisplayDelta,
@@ -1149,13 +162,13 @@ pub struct RunEvent {
     pub approval_key: Option<String>,
 }
 
-#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ErrorBody {
     pub error: ErrorDetail,
 }
 
-#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ErrorDetail {
     pub code: String,
@@ -1164,180 +177,28 @@ pub struct ErrorDetail {
 }
 
 #[derive(Clone, Debug)]
-pub struct RenderErrorResponse {
-    pub(crate) status: StatusCode,
-    pub(crate) body: ErrorBody,
+pub struct ErrorResponse {
+    pub status: StatusCode,
+    pub body: ErrorBody,
 }
 
-impl RenderErrorResponse {
-    pub(crate) fn render(error: GraphRenderError) -> Self {
-        let message = error.to_string();
-        let code = error.code();
-        let mut details = match &error {
-            GraphRenderError::UnsupportedSchemaVersion(refusal) => json!({
-                "found": refusal.found,
-                "supportedRange": refusal.reads.supported(),
-                "fleetWriterVersion": refusal.reads.recorded(),
-            }),
-            GraphRenderError::Document(WorkflowGraphError::DuplicateNodeId { id }) => {
-                json!({ "id": id })
-            }
-            GraphRenderError::InvalidExpression { message, .. }
-            | GraphRenderError::InvalidAssignmentTarget { message, .. } => {
-                json!({ "reason": message })
-            }
-            GraphRenderError::Document(WorkflowGraphError::DuplicateProcessName { name }) => {
-                json!({ "name": name })
-            }
-            GraphRenderError::InvalidProgram(error) => json!({ "reason": error.to_string() }),
-            GraphRenderError::CanonicalSource(_) => json!({}),
-            // Future render failures retain their stable library code without
-            // the example inventing an unowned detail schema.
-            _ => json!({}),
-        };
-        if !matches!(
-            &error,
-            GraphRenderError::Document(WorkflowGraphError::DuplicateNodeId { .. })
-        ) && let Some(node_id) = error.node_id()
-        {
-            details["nodeId"] = json!(node_id);
-        }
-        if let Some(field) = error.field() {
-            details["field"] = json!(field);
-        }
-        Self::new(StatusCode::UNPROCESSABLE_ENTITY, code, message, details)
-    }
-
-    pub(crate) fn projection(error: WorkflowGraphBuildError) -> Self {
-        Self::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "projection_failed",
-            error.to_string(),
-            json!({}),
-        )
-    }
-
-    pub(crate) fn document(message: impl Into<String>, details: Value) -> Self {
-        Self::new(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "invalid_graph_document",
-            message,
-            details,
-        )
-    }
-
-    pub(crate) fn invalid_expression(
-        node_id: &str,
-        field: &str,
-        message: impl Into<String>,
+impl ErrorResponse {
+    pub(crate) fn new(
+        status: StatusCode,
+        code: &str,
+        message: impl std::fmt::Display,
+        details: Value,
     ) -> Self {
-        Self::render(GraphRenderError::InvalidExpression {
-            node_id: node_id.to_string(),
-            field: field.to_string(),
-            message: message.into(),
-        })
-    }
-
-    pub(crate) fn invalid_assignment_target(
-        node_id: &str,
-        field: &'static str,
-        message: impl Into<String>,
-    ) -> Self {
-        Self::render(GraphRenderError::InvalidAssignmentTarget {
-            node_id: node_id.to_string(),
-            field,
-            message: message.into(),
-        })
-    }
-
-    pub(crate) fn invalid_node_payload(node_id: &str, message: impl Into<String>) -> Self {
-        let message = message.into();
-        Self::new(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "invalid_node_payload",
-            format!("node `{node_id}` has an invalid payload: {message}"),
-            json!({ "reason": message, "nodeId": node_id }),
-        )
-    }
-
-    /// A typed document this build does not read.
-    pub(crate) fn decode(error: lash::vm::ir::WorkflowGraphDecodeError) -> Self {
-        use lash::vm::ir::WorkflowGraphDecodeError as Decode;
-        match error {
-            Decode::UnsupportedSchemaVersion(refusal) => Self::render(refusal.into()),
-            error => Self::document(error.to_string(), json!({})),
+        Self {
+            status,
+            body: ErrorBody {
+                error: ErrorDetail {
+                    code: code.to_owned(),
+                    message: message.to_string(),
+                    details,
+                },
+            },
         }
-    }
-
-    /// A document that does not open as a draft.
-    pub(crate) fn open(error: lash::workflow::WorkflowDraftOpenError) -> Self {
-        use lash::workflow::WorkflowDraftOpenError as Open;
-        Self::render(match error {
-            Open::Document(error) => GraphRenderError::Document(error),
-            Open::Program(error) => GraphRenderError::InvalidProgram(error),
-        })
-    }
-
-    /// A set of typed edits the draft refused. Nothing was saved.
-    pub(crate) fn edit(error: crate::edits::EditError) -> Self {
-        use crate::edits::EditError;
-        use lash::workflow::WorkflowEditDiagnosticKind as Kind;
-        let refusal = match error {
-            EditError::Form(response) => return *response,
-            EditError::Refused(refusal) => refusal,
-            unknown @ (EditError::UnknownNode { .. } | EditError::UnknownSlot { .. }) => {
-                return Self::document(unknown.to_string(), json!({}));
-            }
-        };
-        let diagnostics = refusal
-            .diagnostics
-            .iter()
-            .map(|diagnostic| {
-                json!({
-                    "edit": diagnostic.edit,
-                    "code": diagnostic.kind.code(),
-                    "message": diagnostic.kind.to_string(),
-                })
-            })
-            .collect::<Vec<_>>();
-        let mut response = match refusal
-            .diagnostics
-            .into_iter()
-            .next()
-            .map(|first| first.kind)
-        {
-            Some(Kind::InvalidDocument(error)) => Self::render(GraphRenderError::Document(error)),
-            Some(Kind::InvalidProgram(error)) => {
-                Self::render(GraphRenderError::InvalidProgram(error))
-            }
-            Some(kind) => Self::new(
-                StatusCode::UNPROCESSABLE_ENTITY,
-                kind.code(),
-                kind.to_string(),
-                json!({}),
-            ),
-            None => Self::document("the edit was refused", json!({})),
-        };
-        response.body.error.details["diagnostics"] = json!(diagnostics);
-        response
-    }
-
-    pub(crate) fn run_preparation(message: impl ToString) -> Self {
-        Self::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "run_preparation_failed",
-            message.to_string(),
-            json!({}),
-        )
-    }
-
-    pub(crate) fn version_conflict(submitted: u64, current: u64) -> Self {
-        Self::new(
-            StatusCode::CONFLICT,
-            "version_conflict",
-            format!("workflow version {submitted} is stale; current version is {current}"),
-            json!({ "submitted": submitted, "current": current }),
-        )
     }
 
     pub(crate) fn unknown_workflow(id: &str) -> Self {
@@ -1345,25 +206,20 @@ impl RenderErrorResponse {
             StatusCode::NOT_FOUND,
             "unknown_workflow",
             format!("workflow example `{id}` does not exist"),
-            json!({ "id": id }),
+            serde_json::json!({ "id": id }),
         )
     }
 
-    fn new(
-        status: StatusCode,
-        code: impl Into<String>,
-        message: impl Into<String>,
-        details: Value,
-    ) -> Self {
-        Self {
-            status,
-            body: ErrorBody {
-                error: ErrorDetail {
-                    code: code.into(),
-                    message: message.into(),
-                    details,
-                },
-            },
-        }
+    pub(crate) fn version_conflict(sent: u64, current: u64) -> Self {
+        Self::new(
+            StatusCode::CONFLICT,
+            "version_conflict",
+            format!("the saved workflow is version {current}, not {sent}"),
+            serde_json::json!({ "sent": sent, "current": current }),
+        )
+    }
+
+    pub(crate) fn invalid(code: &str, message: impl std::fmt::Display) -> Self {
+        Self::new(StatusCode::UNPROCESSABLE_ENTITY, code, message, Value::Null)
     }
 }

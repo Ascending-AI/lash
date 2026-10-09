@@ -1,12 +1,244 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>LashVm · Workflow Graph Studio</title>
-  </head>
-  <body>
-    <div id="app"></div>
-    <script type="module" src="/src/main.js"></script>
-  </body>
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Workflow round-trip</title>
+<style>
+  :root { --ink: #1c2330; --muted: #6a7385; --line: #d9dee8; --bg: #f6f7fa; --panel: #fff;
+          --run: #2f6fed; --ok: #1f9d55; --wait: #c98a00; --bad: #c93434; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.45 system-ui, sans-serif; color: var(--ink); background: var(--bg); }
+  header { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; padding: 10px 16px;
+           background: var(--panel); border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 15px; margin: 0 8px 0 0; }
+  main { display: grid; grid-template-columns: minmax(260px, 1fr) minmax(320px, 1.3fr) minmax(300px, 1fr);
+         gap: 12px; padding: 12px 16px; }
+  @media (max-width: 1000px) { main { grid-template-columns: 1fr; } }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 12px; min-width: 0; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0 0 8px; }
+  button, select { font: inherit; padding: 5px 10px; border: 1px solid var(--line); border-radius: 4px; background: #fff; cursor: pointer; }
+  button.primary { background: var(--run); border-color: var(--run); color: #fff; }
+  button:disabled { opacity: .5; cursor: default; }
+  pre, textarea, code { font: 12px/1.5 ui-monospace, monospace; }
+  pre { margin: 0; overflow: auto; max-height: 60vh; white-space: pre; }
+  textarea { width: 100%; min-height: 150px; border: 1px solid var(--line); border-radius: 4px; padding: 8px; }
+  .meta { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+  .refused { color: var(--bad); }
+  ol.statements { list-style: none; margin: 0; padding: 0; }
+  ol.statements li { display: flex; gap: 8px; align-items: baseline; padding: 3px 6px; border-radius: 4px; cursor: pointer; }
+  ol.statements li:hover { background: var(--bg); }
+  ol.statements li.picked { outline: 1px solid var(--run); }
+  .site { color: var(--muted); font: 11px ui-monospace, monospace; margin-left: auto; white-space: nowrap; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--line); flex: none; }
+  .started .dot { background: var(--run); } .succeeded .dot { background: var(--ok); }
+  .waiting .dot { background: var(--wait); } .failed .dot { background: var(--bad); }
+  .tabs { display: flex; gap: 6px; margin-bottom: 8px; }
+  .tabs button.on { border-color: var(--run); color: var(--run); }
+  .bar { height: 8px; background: var(--bg); border-radius: 4px; overflow: hidden; margin: 6px 0; }
+  .bar div { height: 100%; background: var(--run); width: 0; transition: width .2s; }
+  dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; margin: 6px 0; }
+  dt { color: var(--muted); } dd { margin: 0; overflow-wrap: anywhere; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 8px 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Workflow round-trip</h1>
+  <select id="catalog" aria-label="Built-in workflow"></select>
+  <span class="meta" id="version"></span>
+  <span class="meta" id="admission"></span>
+</header>
+<main>
+  <section>
+    <h2>Statements</h2>
+    <ol class="statements" id="statements"></ol>
+  </section>
+  <section>
+    <div class="tabs">
+      <button id="tab-text" class="on">Kernel text</button>
+      <button id="tab-source">TypeScript</button>
+      <button id="tab-document">Document</button>
+    </div>
+    <pre id="pane"></pre>
+  </section>
+  <section>
+    <h2>Edit transaction</h2>
+    <div class="meta">A JSON list of kernel edits against this version. Click a statement to copy its site.</div>
+    <textarea id="edits" spellcheck="false">[]</textarea>
+    <div class="row">
+      <button id="apply">Apply and publish</button>
+      <span class="meta" id="picked"></span>
+    </div>
+    <pre id="edit-result"></pre>
+    <h2 style="margin-top:16px">Run</h2>
+    <div class="row">
+      <button id="run" class="primary">Run</button>
+      <button id="approve" hidden>Approve</button>
+      <span class="meta" id="run-status"></span>
+    </div>
+    <div class="bar"><div id="progress"></div></div>
+    <dl id="display"></dl>
+  </section>
+</main>
+<script type="module">
+const $ = (id) => document.getElementById(id);
+const key = (site) => JSON.stringify([site.unit, site.path]);
+let workflow = null;
+let tab = "text";
+let statuses = new Map();
+let running = false;
+
+async function call(path, body) {
+  const response = await fetch(path, body === undefined ? {} : {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+  });
+  const answer = await response.json();
+  if (!response.ok) throw answer.error ?? { message: response.statusText };
+  return answer;
+}
+
+function show(next) {
+  workflow = next;
+  statuses = new Map();
+  $("version").textContent = `version ${workflow.version} · entry ${workflow.entry}`;
+  const admission = $("admission");
+  admission.textContent = workflow.definition
+    ? `definition ${workflow.definition}` : `not admitted: ${workflow.notAdmitted}`;
+  admission.classList.toggle("refused", !workflow.definition);
+  $("run").disabled = !workflow.definition || running;
+  renderStatements();
+  renderPane();
+}
+
+function renderStatements() {
+  const list = $("statements");
+  list.replaceChildren(...workflow.statements.map((statement) => {
+    const item = document.createElement("li");
+    const status = statement.action ? statuses.get(key(statement.action)) : undefined;
+    if (status) item.className = status;
+    item.style.paddingLeft = `${6 + statement.depth * 18}px`;
+    const dot = document.createElement("span");
+    dot.className = "dot";
+    const summary = document.createElement("span");
+    summary.textContent = statement.summary;
+    const site = document.createElement("span");
+    site.className = "site";
+    site.textContent = statement.site.path.join(".");
+    item.append(dot, summary, site);
+    item.addEventListener("click", () => {
+      navigator.clipboard?.writeText(JSON.stringify(statement.site));
+      $("picked").textContent = `site ${JSON.stringify(statement.site)}`;
+      list.querySelectorAll(".picked").forEach((other) => other.classList.remove("picked"));
+      item.classList.add("picked");
+    });
+    return item;
+  }));
+}
+
+function renderPane() {
+  for (const name of ["text", "source", "document"]) $(`tab-${name}`).classList.toggle("on", tab === name);
+  $("pane").textContent = tab === "text" ? workflow.text
+    : tab === "source" ? (workflow.source ?? `unavailable: ${workflow.sourceUnavailable}`)
+    : JSON.stringify(workflow.document, null, 2);
+}
+
+function renderDisplay(display) {
+  $("progress").style.width = `${display.progress}%`;
+  const rows = [
+    ...Object.entries(display.statuses).map(([name, value]) => [`status ${name}`, value]),
+    ...Object.entries(display.lights).map(([name, value]) => [`light ${name}`, value]),
+    ...Object.entries(display.lists).map(([name, items]) => [`list ${name}`, items.join(", ")]),
+    ...display.messages.map((message) => ["message", message]),
+    ...(display.highlighted ? [["highlighted", display.highlighted]] : []),
+  ];
+  $("display").replaceChildren(...rows.flatMap(([name, value]) => {
+    const term = document.createElement("dt");
+    term.textContent = name;
+    const detail = document.createElement("dd");
+    detail.textContent = value;
+    return [term, detail];
+  }));
+}
+
+async function run() {
+  running = true;
+  $("run").disabled = true;
+  statuses = new Map();
+  renderStatements();
+  $("run-status").textContent = "starting";
+  try {
+    const response = await fetch("/run", { method: "POST" });
+    if (!response.ok) throw (await response.json()).error;
+    const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+    let pending = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      pending += value;
+      let end;
+      while ((end = pending.indexOf("\n\n")) >= 0) {
+        const frame = pending.slice(0, end);
+        pending = pending.slice(end + 2);
+        const data = frame.split("\n").find((line) => line.startsWith("data: "))?.slice(6);
+        if (frame.includes("event: run_error")) throw { message: data };
+        if (frame.includes("event: run_event") && data) observe(JSON.parse(data));
+      }
+    }
+  } catch (error) {
+    $("run-status").textContent = `failed: ${error?.message ?? error}`;
+  }
+  running = false;
+  $("approve").hidden = true;
+  $("run").disabled = !workflow.definition;
+}
+
+function observe(event) {
+  if (event.site) statuses.set(key(event.site), event.status);
+  else $("run-status").textContent = `${event.status}${event.error ? `: ${event.error}` : ""}`;
+  const approve = $("approve");
+  if (event.approvalKey) {
+    approve.hidden = false;
+    approve.onclick = async () => {
+      approve.hidden = true;
+      await call(`/approvals/${event.approvalKey}`, { approved: true });
+    };
+  }
+  renderStatements();
+  renderDisplay(event.display);
+}
+
+$("apply").addEventListener("click", async () => {
+  const result = $("edit-result");
+  try {
+    const answer = await call("/workflow/edits", { version: workflow.version, edits: JSON.parse($("edits").value) });
+    const edited = answer.correspondence.entries.filter((entry) => entry.edited).length;
+    result.textContent = `saved version ${answer.workflow.version}: ${answer.correspondence.entries.length} nodes kept, ${edited} edited`;
+    show(answer.workflow);
+  } catch (error) {
+    result.textContent = error.details?.diagnostics
+      ? error.details.diagnostics.map((d) => `${d.message}${d.site ? ` at ${JSON.stringify(d.site)}` : ""}`).join("\n")
+      : `${error.message ?? error}`;
+  }
+});
+$("run").addEventListener("click", run);
+for (const name of ["text", "source", "document"]) {
+  $(`tab-${name}`).addEventListener("click", () => { tab = name; renderPane(); });
+}
+$("catalog").addEventListener("change", async (event) => {
+  show(await call("/workflow/select", { id: event.target.value }));
+});
+
+const catalog = await call("/workflows");
+$("catalog").replaceChildren(...catalog.map((entry) => {
+  const option = document.createElement("option");
+  option.value = entry.id;
+  option.textContent = entry.name;
+  option.title = entry.description;
+  return option;
+}));
+$("catalog").value = "onboarding";
+show(await call("/workflow"));
+</script>
+</body>
 </html>

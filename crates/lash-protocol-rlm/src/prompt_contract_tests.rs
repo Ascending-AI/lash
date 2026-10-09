@@ -5,7 +5,7 @@
 
 use crate::dialect::SessionDialect;
 
-use lash_vm_runtime::{LashVmSurface, ToolBinding, ToolDefinitionBindingExt};
+use lash_vm_runtime::{ToolBinding, ToolDefinitionBindingExt};
 
 fn catalog() -> lash_core::ToolCatalog {
     lash_core::ToolCatalog::from_tool_definitions(catalog_definitions())
@@ -52,19 +52,8 @@ fn process_catalog() -> lash_core::ToolCatalog {
     lash_core::ToolCatalog::from_tool_definitions(tools)
 }
 
-fn dialect(enabled: bool) -> SessionDialect {
-    let surface = LashVmSurface {
-        language_features: if enabled {
-            lash_vm::LashVmLanguageFeatures::default().with_label_annotations()
-        } else {
-            lash_vm::LashVmLanguageFeatures::default()
-        },
-        ..LashVmSurface::default()
-    };
-    crate::dialect::SessionDialect::prompt_only(
-        std::sync::Arc::new(crate::dialect::TypescriptDialect),
-        surface,
-    )
+fn dialect() -> SessionDialect {
+    crate::dialect::SessionDialect::prompt_only(crate::dialect::CellDialect::typescript())
 }
 
 fn system_with(
@@ -105,7 +94,7 @@ fn the_native_prompt_names_its_transport_and_carries_no_cell_syntax() {
     // syntax may survive into it — wording-only assertions let a derivation
     // silently produce incoherent copy.
     for enabled in [false, true] {
-        let dialect = dialect(enabled);
+        let dialect = dialect();
         for catalog in [catalog(), process_catalog()] {
             let prompt = system_with(&dialect, true, enabled, catalog);
             assert!(prompt.contains("### Tool transport"), "{prompt}");
@@ -129,7 +118,7 @@ fn the_native_prompt_names_its_transport_and_carries_no_cell_syntax() {
 /// independently of optional prompt features and process catalog membership.
 #[test]
 fn durable_sleep_is_taught_in_every_execution_channel() {
-    let dialect = dialect(false);
+    let dialect = dialect();
     for native in [false, true] {
         for catalog in [catalog(), process_catalog()] {
             let prompt = system_with(&dialect, native, false, catalog);

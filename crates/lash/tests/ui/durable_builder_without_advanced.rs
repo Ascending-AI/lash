@@ -27,8 +27,7 @@ async fn durable_core_without_advanced(
             .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),
-        std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
-        &backend,
+        lash_protocol_rlm::CellDialect::typescript(),
     );
     lash::LashCore::rlm_builder(backend, factory)
         .llm_profiles(std::sync::Arc::new(

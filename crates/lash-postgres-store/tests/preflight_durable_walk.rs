@@ -105,10 +105,7 @@ async fn module_artifact_surface_reads_the_persisted_json() {
     )
     .await
     .expect("open provisioned Postgres storage");
-    let artifact = lash_vm::ModuleArtifact::from_program(lash_vm::Program::block(vec![
-        lash_vm::Expr::Finish(Box::new(lash_vm::Expr::String("done".into()))),
-    ]))
-    .expect("a one-statement module forms an artifact");
+    let artifact = lash_conformance::module_artifact_store::SampleArtifact::named("done");
     let claim = ReferrerClaim::unguarded(ArtifactReferrer::HostPin(HostArtifactPin::mint()))
         .expect("host pin is unguarded");
     let bytes = artifact.to_store_bytes().expect("encode module artifact");

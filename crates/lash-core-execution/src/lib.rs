@@ -432,8 +432,8 @@ pub use lash_sansio::llm::types::{
 };
 pub use lash_sansio::{
     AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentTypeMetadata, Backoff, BatchId,
-    BoundedRetry, CancelOrigin, CancelRequest, CellFailure, CellFailureKind, CellOutcome,
-    CellPrint, CellRecord, CheckpointDelivery, CheckpointKind, CompactToolContract,
+    BoundedRetry, CancelOrigin, CancelRequest, CellDefect, CellFailure, CellFailureKind,
+    CellOutcome, CellPrint, CellRecord, CheckpointDelivery, CheckpointKind, CompactToolContract,
     DeclarationRefusal, DegradedBinding, ExecCodeFailure, ExecCodeFailureReason, ExecResponse,
     ExecutedCall, ExecutedCallOutcome, ExecutionBudgets, ExecutionBudgetsConfig,
     ExecutionBudgetsError, ExecutionLimit, ExecutionPolicy, FrameKey, FrameKeyError, InputId,

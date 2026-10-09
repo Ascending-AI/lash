@@ -5,31 +5,35 @@
 //! socket. The language is the sandbox; the process contains native crashes.
 //! Pool failures fence the checkout and never retry guest execution locally.
 
-mod frontend;
+mod embedding;
 #[cfg(feature = "dhat-heap")]
 mod heap_profile;
-pub use frontend::{Frontend, FrontendRefusal};
+pub use embedding::{EmbedError, Embedder, Embedding, standard, typescript};
 
 #[cfg(unix)]
 mod entry;
 #[cfg(unix)]
-mod process;
+mod host;
 #[cfg(unix)]
-mod projection;
+mod process;
 #[cfg(unix)]
 mod service;
 #[cfg(unix)]
 mod worker;
 #[cfg(unix)]
-pub use entry::{worker_entry, worker_entry_with_frontend};
+pub use entry::{Embed, worker_entry, worker_entry_with};
 pub use lash_vm_client::PoolError;
 #[cfg(not(unix))]
 pub fn worker_entry() -> Result<bool, PoolError> {
     Err(PoolError::UnsupportedPlatform)
 }
 
+/// Assembles what a worker runs from the parent's working policy.
 #[cfg(not(unix))]
-pub fn worker_entry_with_frontend(_frontend: &dyn Frontend) -> Result<bool, PoolError> {
+pub type Embed = dyn Fn(&lash_vm_client::WorkerTuning) -> Result<Embedding, EmbedError>;
+
+#[cfg(not(unix))]
+pub fn worker_entry_with(_embed: &Embed) -> Result<bool, PoolError> {
     Err(PoolError::UnsupportedPlatform)
 }
 

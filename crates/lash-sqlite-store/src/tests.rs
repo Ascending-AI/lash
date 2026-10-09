@@ -7,23 +7,6 @@ use super::*;
 use crate::session_listing::list_session_views;
 use std::collections::BTreeMap;
 
-/// `process <name>(<param>: str) -> str { finish <param> }`, the publishable
-/// one-process module these store fixtures need. ADR 0096 retired the Lash VM
-/// front-end, so the fixture states its AST.
-fn one_process_module(process_name: &str, param: &str) -> lash_vm::Program {
-    use lash_vm::testing::ast_builders as b;
-
-    b::module(
-        vec![b::process_returning(
-            process_name,
-            vec![b::param(param, lash_vm::TypeExpr::Str)],
-            lash_vm::TypeExpr::Str,
-            b::finish(b::var(param)),
-        )],
-        Vec::new(),
-    )
-}
-
 use lash_core_execution::{SessionCatalogStore as _, SessionHistoryStore as _};
 use lash_sansio::{ProcessId, SessionId};
 use std::sync::atomic::Ordering;
@@ -807,107 +790,6 @@ async fn lookup_session_aborts_on_unreadable_requested_session_meta() {
     assert!(
         result.is_err(),
         "unreadable requested session metadata must not look absent"
-    );
-}
-
-#[tokio::test]
-async fn sqlite_lash_vm_artifact_store_round_trips_verified_module_artifacts() {
-    let store = crate::test_support::sqlite_memory_store()
-        .await
-        .expect("memory store");
-    let artifacts = lash_vm::LashVmArtifacts::new(store.clone());
-    // process scan(root: str) -> str { finish root }
-    let module = one_process_module("scan", "root");
-    let linked = lash_vm::LinkedModule::link(
-        module,
-        lash_vm::LashVmHostEnvironment::new(lash_vm::LashVmHostCatalog::new()),
-    )
-    .expect("link module");
-
-    let claim =
-        lash_core_execution::ReferrerClaim::unguarded(
-            lash_core_execution::ArtifactReferrer::HostPin(
-                lash_core_execution::HostArtifactPin::mint(),
-            ),
-        )
-        .expect("host pin claim");
-    lash_core_execution::ModuleArtifactStore::publish_module_artifact(
-        store.as_ref(),
-        &claim,
-        linked.artifact.module_ref().as_str(),
-        &linked.artifact.to_store_bytes().expect("encode module"),
-    )
-    .await
-    .expect("put artifact");
-    let restored = artifacts
-        .get_module_artifact(linked.artifact.module_ref())
-        .await
-        .expect("get artifact")
-        .expect("artifact exists");
-
-    assert_eq!(restored.module_ref(), linked.artifact.module_ref());
-    assert_eq!(
-        restored.process_ref("scan"),
-        linked.artifact.process_ref("scan")
-    );
-}
-
-#[tokio::test]
-async fn sqlite_artifact_view_does_not_resurrect_artifact_reclaimed_by_another_handle() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("artifacts.db");
-    let releasing = Arc::new(
-        SqliteStore::open_file_for_testing(&path)
-            .await
-            .expect("open releasing store"),
-    );
-    let artifacts = lash_vm::LashVmArtifacts::new(Arc::new(
-        SqliteStore::open_file_for_testing(&path)
-            .await
-            .expect("open reading store"),
-    ));
-    // process liveness_probe(root: str) -> str { finish root }
-    let module =
-        lash_vm::ModuleArtifact::from_program(one_process_module("liveness_probe", "root"))
-            .expect("build module artifact");
-    let referrer = lash_core_execution::ArtifactReferrer::HostPin(
-        lash_core_execution::HostArtifactPin::mint(),
-    );
-    let claim =
-        lash_core_execution::ReferrerClaim::unguarded(referrer.clone()).expect("host pin claim");
-
-    lash_core_execution::ModuleArtifactStore::publish_module_artifact(
-        releasing.as_ref(),
-        &claim,
-        module.module_ref().as_str(),
-        &module.to_store_bytes().expect("encode module"),
-    )
-    .await
-    .expect("publish module through first handle");
-    assert!(
-        artifacts
-            .get_module_artifact(module.module_ref())
-            .await
-            .expect("read through second handle")
-            .is_some()
-    );
-    lash_core_execution::ModuleArtifactStore::end_module_referrer(
-        releasing.as_ref(),
-        &lash_core_execution::ResolvedArtifactCleanup {
-            referrer,
-            carries: Vec::new(),
-        },
-    )
-    .await
-    .expect("end final referrer");
-
-    assert!(
-        artifacts
-            .get_module_artifact(module.module_ref())
-            .await
-            .expect("read after cross-handle reclamation")
-            .is_none(),
-        "an artifact view must not resurrect durably reclaimed bytes"
     );
 }
 

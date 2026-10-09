@@ -13,7 +13,6 @@ use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
-use lash::rlm::Dialect as _;
 use lash::tools::{StaticToolExecute, StaticToolProvider};
 use lash_core::ToolDefinitionBindingExt as _;
 use lash_core::facade_support::ProviderHandle;
@@ -67,8 +66,7 @@ fn core(
                 .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
                 .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
                 .build(),
-            Arc::new(lash::rlm::TypescriptDialect),
-            backend,
+            lash::rlm::CellDialect::typescript(),
         )
         .with_worker_service(untimed_workers(clock)),
     )
@@ -132,16 +130,13 @@ pub async fn send(core: &lash::LashCore, session: &SessionId, run: &TurnId) -> R
         .map_err(|error| format!("send the cell turn: {error}"))
 }
 
-/// The dialect's worker service with its run deadlines off the clock: a
+/// The default worker service with its run deadlines off the clock: a
 /// held body keeps its cell waiting for as long as the host holds it. A
 /// worker runs off the runtime, so each worker call holds `clock` while it
 /// is in flight.
 fn untimed_workers(clock: &Arc<SimClock>) -> lash::vm::WorkerService {
     const OFF_THE_CLOCK: Duration = Duration::from_secs(365 * 24 * 60 * 60);
-    let mut config = lash::rlm::TypescriptDialect
-        .worker_service()
-        .config()
-        .clone();
+    let mut config = lash::vm::WorkerService::default().config().clone();
     config.deadlines.compute = OFF_THE_CLOCK;
     config.deadlines.serialization = OFF_THE_CLOCK;
     config.deadlines.cumulative_cpu = OFF_THE_CLOCK;

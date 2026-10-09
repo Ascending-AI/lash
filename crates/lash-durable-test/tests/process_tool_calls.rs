@@ -142,8 +142,7 @@ async fn world(tier: Tier, witness: &Arc<Witness>) -> Option<World> {
 /// terminal.
 fn process_cell(labels: &[&str]) -> lash_core::llm::types::LlmResponse {
     let body = format!(
-        "const body = await processes.create({{ dialect: \"typescript\", source: \
-         `const body = async (label: string) => {{\n  return await tools.{PROBE}({{ label: label }});\n}};` }});"
+        "const body = async (label: string) => {{\n  return await tools.{PROBE}({{ label: label }});\n}};"
     );
     let starts = labels
         .iter()
@@ -226,7 +225,7 @@ async fn tool_call_limit_counts_what_a_process_holds(tier: Tier) {
            return raced;\n}};"
     );
     let cell = served::cell(&format!(
-        "const body = await processes.create({{ dialect: \"typescript\", source: `{body}` }});\n\
+        "{body}\n\
          const held = await processes.start({{ definition: body }});\n\
          finish(await held);"
     ));
@@ -298,8 +297,7 @@ fn groups_cell(groups: &[&[&str]]) -> lash_core::llm::types::LlmResponse {
         })
         .collect::<String>();
     served::cell(&format!(
-        "const body = await processes.create({{ dialect: \"typescript\", source: \
-         `const body = async () => {{\n{awaits}  return \"done\";\n}};` }});\n\
+        "const body = async () => {{\n{awaits}  return \"done\";\n}};\n\
          const held = await processes.start({{ definition: body }});\n\
          finish(await held);"
     ))
@@ -410,12 +408,11 @@ async fn typescript_process_body_resolves_journaled_clock_and_randomness(tier: T
         return;
     };
     let cell = served::cell(
-        "const worker = await processes.create({ dialect: \"typescript\", source: \
-         `const worker = async () => {\n  \
+        "const worker = async () => {\n  \
             const stamp = new Date().toISOString();\n  \
             const ms = Date.now();\n  \
             const roll = Math.random();\n  \
-            return { stamp: stamp, ms: ms, roll: roll };\n};` });\n\
+            return { stamp: stamp, ms: ms, roll: roll };\n};\n\
          const held = await processes.start({ definition: worker });\n\
          finish(JSON.stringify(await held));",
     );

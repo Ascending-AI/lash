@@ -18,8 +18,7 @@ pub(super) fn config(native: bool, termination: RlmTermination) -> TurnMachineCo
             .instruction_limit(crate::InstructionBound::instructions(1000))
             .memory_limit(crate::MemoryBound::mebibytes(1))
             .build(),
-        std::sync::Arc::new(crate::TypescriptDialect),
-        &crate::testing::sqlite_recording_backend_blocking().clone(),
+        crate::dialect::CellDialect::typescript(),
     );
     let host = lash_core::facade_support::PluginHost::new(
         vec![Arc::new(factory)],
@@ -83,8 +82,7 @@ fn rlm_catalog_distinguishes_ambient_from_restricted_empty_access() {
                 .instruction_limit(crate::InstructionBound::instructions(1000))
                 .memory_limit(crate::MemoryBound::mebibytes(1))
                 .build(),
-            std::sync::Arc::new(crate::TypescriptDialect),
-            &crate::testing::sqlite_recording_backend_blocking().clone(),
+            crate::dialect::CellDialect::typescript(),
         );
         lash_core::facade_support::PluginHost::new(
             vec![Arc::new(factory)],
@@ -149,9 +147,9 @@ fn phased_text(phase: &str, text: &str) -> LlmOutputPart {
 }
 fn typescript_cell_config(termination: RlmTermination) -> TurnMachineConfig {
     let mut config = config(false, termination);
-    config.protocol_driver = Arc::new(crate::protocol::RlmDriver::new(Arc::new(
-        crate::dialect::TypescriptDialect,
-    )));
+    config.protocol_driver = Arc::new(crate::protocol::RlmDriver::new(
+        crate::dialect::CellDialect::typescript(),
+    ));
     config
 }
 pub(super) fn call(id: &str, name: &str, args: &str) -> LlmOutputPart {
@@ -759,8 +757,7 @@ async fn factory_selects_native_abi_and_completed_cell_events() {
             .instruction_limit(crate::InstructionBound::instructions(1000))
             .memory_limit(crate::MemoryBound::mebibytes(1))
             .build(),
-        std::sync::Arc::new(crate::TypescriptDialect),
-        &crate::testing::sqlite_recording_backend().await,
+        crate::dialect::CellDialect::typescript(),
     );
     let host = lash_core::facade_support::PluginHost::new(
         vec![Arc::new(factory)],

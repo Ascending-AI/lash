@@ -5,7 +5,7 @@
 //! `lash_vm` beside the read types they answer (`ProjectedReadRequest`,
 //! `ProjectedReadResponse`), because the VM sits above this crate. The
 //! backend carries the built catalog behind [`ProjectionProviders`], and the
-//! VM half reads it back as `lash_vm::ProjectionCatalog`.
+//! VM half reads it back as `lash_vm_runtime::ProjectionCatalog`.
 
 use std::any::Any;
 

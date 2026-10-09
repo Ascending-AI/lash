@@ -14,7 +14,6 @@ python3 scripts/profile_heap.py --case process-lifecycle --operations 2 \
   --out-dir "$E/lifecycle" --no-build --build-report "$E/redrive/build.json"
 python3 scripts/profile_heap.py --population latency --case cross-worker \
   --out-dir "$E/latency-heap" --no-build --build-report "$E/redrive/build.json"
-python3 scripts/profile_heap.py --population vm-worker --out-dir "$E/worker-heap"
 python3 scripts/profile_heap.py --case persistent-node-waves --operations 3 \
   --callers 2 --out-dir "$E/waves" --no-build --build-report "$E/redrive/build.json"
 ```
@@ -36,10 +35,7 @@ It writes `vm-worker-<pid>.dhat.json`, covering bootstrap validation after the
 empty-environment check through
 the **first clean reset**, and flushes before `ResetDone`. The pool kills and
 reaps retired workers, so waiting for process-exit destructors would lose the
-profile. Abruptly failed workers do not promise a profile. The matrix's
-`--heap-smoke --worker <helper> --out <directory>` runs one zero-effect case;
-adding `--heap-profile-dir <directory>` selects the worker profile. This smoke
-mode carries no worker performance gate.
+profile. Abruptly failed workers do not promise a profile.
 
 DHAT's `tb`, `gb` and `eb` are cumulative requested bytes, site live bytes at
 the simultaneous process heap peak, and site live bytes at profile end.

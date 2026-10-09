@@ -1,0 +1,60 @@
+kernel 1
+numbers float
+effect review.request(input: Any) -> Any
+effect ledger.record(input: Any) -> Any
+effect processes.start(input: Any) -> Any
+effect processes.await(input: Any) -> Any
+use num.gt = @{num.gt}
+use eq = @{eq}
+use text.concat = @{text.concat}
+use list.push = @{list.push}
+entry audit(summary: Any) -> Any
+entry order_review(order: Any) -> Any
+
+fn audit(summary) {
+  let note = {entry: text.concat("audit:", summary.status)}
+  do perform ledger.record(note) as Any
+  return summary
+}
+
+fn order_review(order) {
+  let approved = []
+  let skipped = []
+  let status = "open"
+  try {
+    for group in order.groups {
+      for line in group.lines {
+        let sku = line.sku
+        let item = text.concat(text.concat(group.name, "/"), sku)
+        if num.gt(line.qty, 2) {
+          let request = {item: item}
+          let decision = perform review.request(request) as Any
+          if eq(decision.approved, false) {
+            throw {code: "REJECTED", sku: sku}
+          }
+          do invoke list.push(approved, item)
+        } else {
+          do invoke list.push(skipped, sku)
+        }
+        let note = {entry: item}
+        do perform ledger.record(note) as Any
+      }
+    }
+    set status = "reviewed"
+  } catch error {
+    set status = "rejected"
+    let rejected = {entry: "rejected"}
+    do perform ledger.record(rejected) as Any
+  }
+  let summary = {status: status}
+  let args = {summary: summary}
+  let start = {definition: &audit, args: args}
+  let audit_run = perform processes.start(start) as Any
+  let wait = {handle: audit_run}
+  let audited = perform processes.await(wait) as Any
+  return {status: status, approved: approved, skipped: skipped, audited: audited}
+}
+
+main {
+  finish null
+}

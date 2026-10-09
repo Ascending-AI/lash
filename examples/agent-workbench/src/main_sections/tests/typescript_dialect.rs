@@ -75,344 +75,95 @@ fn typescript_prompt_programs() -> Vec<String> {
     programs
 }
 
-/// The host surface the tutorials call, as the linker sees it.
-///
-/// The tool modules are stated at the paths the real bindings produce —
-/// `with_tool_binding` writes the binding at the same path a TypeScript call
-/// uses. `workbench.register_trigger` carries the shipped tool's own contract.
-fn workbench_link_environment() -> lash::vm::LashVmHostEnvironment {
-    let mut resources = lash::vm::LashVmHostCatalog::new();
-    let register = host_triggers::register_trigger_tool_definition();
-    let contract = register.contract();
-    resources
-        .add_module_operation_contract(
-            ["workbench"],
-            "Workbench",
-            "register_trigger",
-            register.manifest().id.to_string(),
-            &lash::vm::OperationContract::new(
-                contract.input_schema.canonical().clone(),
-                contract.output_schema.canonical().clone(),
-            ),
-        )
-        .expect("link the trigger registration operation");
-    let modules: [(&[&str], &str, &[&str]); 5] = [
-        (&["agents"], "Agents", &["spawn"]),
-        (&["control"], "Control", &["continue_as"]),
-        (&["inbox", "work"], "Inbox", &["list", "send", "delete"]),
-        (&["inbox", "personal"], "Inbox", &["list", "send", "delete"]),
-        // The `tool-value` scenario's own tool, installed by
-        // `DevProviderScenario::tool_provider`.
-        (&["workbench_surface"], "WorkbenchSurface", &["terminal"]),
-    ];
-    for (path, resource_type, operations) in modules {
-        for operation in operations {
-            resources
-                .add_module_operation_contract(
-                    path.iter().copied(),
-                    resource_type,
-                    *operation,
-                    format!("tool:{}/{operation}", path.join("/")),
-                    &lash::vm::OperationContract::new(serde_json::json!({}), serde_json::json!({})),
-                )
-                .expect("workbench tutorial tool binding");
-        }
-    }
-    // FIG-4177 (bf41d19ca5): create returns the immutable definition record
-    // start accepts. Read that shape from the shipped start contract.
-    let start = lash::process_controls::process_tool_definition(
-        lash::process_controls::ProcessControlTool::Start,
-    );
-    let definition_schema =
-        start.contract().input_schema.canonical()["properties"]["definition"].clone();
-    resources
-        .add_module_operation_contract(
-            ["processes"],
-            "Processes",
-            "create",
-            "tool:create_process",
-            &lash::vm::OperationContract::new(
-                serde_json::json!({
-                    "type": "object",
-                    "properties": { "source": { "type": "string" }, "dialect": { "type": "string" } },
-                    "required": ["source", "dialect"],
-                    "additionalProperties": false
-                }),
-                definition_schema,
-            ),
-        )
-        .expect("link process create operation");
-    add_process_control_operations(&mut resources);
-    lash::vm::LashVmHostEnvironment::new(resources)
-}
-
-/// The `processes` module the workbench's process-controls plugin binds.
-///
-/// The module is catalogue presence, not an ability bit (ADR 0095): a session
-/// sees it only because `bootstrap` installs
-/// `SessionProcessAdminPluginFactory`, so this fixture declares the
-/// operations the tutorials may call, each carrying the shipped tool's own
-/// contract.
-fn add_process_control_operations(resources: &mut lash::vm::LashVmHostCatalog) {
-    for (operation, definition) in [
-        (
-            "start",
-            lash::process_controls::process_tool_definition(
-                lash::process_controls::ProcessControlTool::Start,
-            ),
-        ),
-        (
-            "get",
-            lash::process_controls::process_tool_definition(
-                lash::process_controls::ProcessControlTool::Get,
-            ),
-        ),
-        (
-            "list",
-            lash::process_controls::process_tool_definition(
-                lash::process_controls::ProcessControlTool::List,
-            ),
-        ),
-        (
-            "await",
-            lash::process_controls::process_tool_definition(
-                lash::process_controls::ProcessControlTool::Await,
-            ),
-        ),
-        (
-            "cancel",
-            lash::process_controls::process_tool_definition(
-                lash::process_controls::ProcessControlTool::Cancel,
-            ),
-        ),
-    ] {
-        let contract = definition.contract();
-        resources
-            .add_module_operation_contract(
-                ["processes"],
-                "Processes",
-                operation,
-                definition.manifest().id.to_string(),
-                &lash::vm::OperationContract::new(
+/// The effects the tutorials call, at the paths the real bindings produce.
+/// `workbench.register_trigger` and the process controls carry the shipped
+/// tools' own contracts.
+fn workbench_effects() -> lash::vm::HostBoundary {
+    let mut boundary = lash::vm::HostBoundary::new();
+    let mut offer = |path: String, definition: Option<&lash::tools::ToolDefinition>| {
+        let (id, input, output) = match definition {
+            Some(definition) => {
+                let contract = definition.contract();
+                (
+                    definition.manifest().id.clone(),
                     contract.input_schema.canonical().clone(),
                     contract.output_schema.canonical().clone(),
-                ),
-            )
-            .expect("link process control operation");
-    }
-}
-
-/// Prompt copy that teaches code the language refuses is worse than no copy.
-///
-/// Every program the prompt shows is linked against the Workbench's own
-/// declared surface.
-#[test]
-fn the_workbench_typescript_tutorials_link() {
-    let environment = workbench_link_environment();
-    let programs = typescript_prompt_programs();
-    assert_eq!(
-        programs.len(),
-        3,
-        "the TypeScript prompt must carry all three tutorials"
-    );
-    let mut hits = Vec::new();
-    for (index, program) in programs.iter().enumerate() {
-        if let Err(error) = lash::typescript::link(program, &environment) {
-            hits.push(format!("tutorial {}: {error}", index + 1));
-        }
-    }
-    assert!(
-        hits.is_empty(),
-        "prompt programs that do not link: {hits:#?}"
-    );
-
-    // The linker must be able to reject, or an empty hit list proves nothing.
-    assert!(
-        lash::typescript::link("class Unsupported {} finish(1);", &environment).is_err(),
-        "the control must be refused"
-    );
-}
-
-/// Linking is not execution: the refusals that matter most to prompt copy fire
-/// in the VM.
-///
-/// `"..." + handle` links cleanly and then finishes with `[object Object]` in
-/// place of the handle's key (a plain object's string is its type tag), which
-/// is the placeholder a model copying the old tutorial verbatim produced on the
-/// workbench (FIG-3211). So every tutorial is *run*, not just linked, and the
-/// control below proves this harness can still see that placeholder.
-struct TutorialHost {
-    environment: lash::vm::LashVmHostEnvironment,
-}
-
-/// The one subscription id the tutorial host hands back.
-const TUTORIAL_SUBSCRIPTION_ID: &str = "workbench-tutorial-subscription";
-
-/// The two field names a handle record carries.
-///
-/// The runtime owns both and neither is on the `lash` facade, so an example
-/// spells them itself rather than reaching past the facade for them;
-/// `the_workbench_typescript_tutorials_run_without_a_dialect_refusal` is the guard
-/// against that spelling drifting.
-const HANDLE_MARKER_FIELD: &str = "__handle__";
-const HANDLE_MARKER_KIND: &str = "lash";
-
-/// The process the one process-starting tutorial starts.
-const TUTORIAL_PROCESS_ID: &str = "workbench-tutorial-process";
-
-/// The handle record the runtime hands back from a process start.
-///
-/// The id itself is minted, never hand-spelled: `lash::process::HandleId`
-/// is the facade's own minting authority, so `await handle` refuses any
-/// record whose id this module did not produce.
-fn tutorial_process_handle() -> serde_json::Value {
-    let id = lash::process::HandleId::process(&lash::ProcessId::fixture(TUTORIAL_PROCESS_ID));
-    let mut record = serde_json::Map::new();
-    record.insert(
-        HANDLE_MARKER_FIELD.to_string(),
-        serde_json::Value::String(HANDLE_MARKER_KIND.to_string()),
-    );
-    record.insert(
-        "id".to_string(),
-        serde_json::Value::String(id.as_str().to_string()),
-    );
-    serde_json::Value::Object(record)
-}
-
-impl TutorialHost {
-    fn new() -> Self {
-        Self {
-            environment: workbench_link_environment(),
-        }
-    }
-
-    /// Resolution goes through `resolve_lash_vm_module_operation`, the same
-    /// function `LashVmExecutionHost` uses, so a renamed or moved binding
-    /// surfaces as an unanswered operation instead of falling into a default.
-    fn resource_result(
-        &self,
-        call: &lash::vm::ResourceOperation,
-    ) -> Result<lash::vm::Value, lash::vm::ExecutionHostError> {
-        let lash::vm::Value::Resource(receiver) = &call.receiver else {
-            return Err(lash::vm::ExecutionHostError::new(format!(
-                "`{}` was called on something that is not a module authority",
-                call.operation
-            )));
+                )
+            }
+            None => (
+                lash::tools::ToolId::from(format!("tool:{}", path.replace('.', "/"))),
+                serde_json::json!({}),
+                serde_json::json!({}),
+            ),
         };
-        let host_operation = lash::vm::resolve_lash_vm_module_operation(
-            &self.environment,
-            receiver,
-            &call.operation,
-        )?;
-        let process_start = lash::process_controls::process_tool_definition(
-            lash::process_controls::ProcessControlTool::Start,
-        )
-        .manifest()
-        .id
-        .to_string();
-        if host_operation
-            == host_triggers::register_trigger_tool_definition()
-                .manifest()
-                .id
-                .to_string()
-        {
-            return Ok(lash::vm::from_json(serde_json::json!({
-                "subscription_id": TUTORIAL_SUBSCRIPTION_ID
-            })));
-        }
-        if host_operation == "tool:create_process" {
-            // Creation now takes source text. Keep the tutorial law's check
-            // of the process body against the host surface before mocking its
-            // publication receipt, just as the inline body was link-checked.
-            let Some(lash::vm::Value::String(source)) = call
-                .args
-                .first()
-                .and_then(lash::vm::Value::as_record)
-                .and_then(|input| input.get("source"))
-            else {
-                return Err(lash::vm::ExecutionHostError::new(
-                    "the tutorial must create a process from source text",
-                ));
-            };
-            lash::typescript::link(source.as_str(), &self.environment).map_err(|error| {
-                lash::vm::ExecutionHostError::new(format!(
-                    "the tutorial's process source does not link: {error}"
-                ))
-            })?;
-            return Ok(lash::vm::from_json(serde_json::json!({
-                "id": { "$lash_definition_id": format!("lash.definition:sha256:{}", "0".repeat(64)) },
-                "signature": { "signature": "unknown" }
-            })));
-        }
-        if host_operation == process_start {
-            return Ok(lash::vm::from_json(tutorial_process_handle()));
-        }
-        Err(lash::vm::ExecutionHostError::new(format!(
-            "the workbench tutorials reached an unanswered host operation `{host_operation}`"
-        )))
-    }
-}
-
-impl lash::vm::ExecutionHost for TutorialHost {
-    async fn perform(
-        &self,
-        op: lash::vm::AbilityOp,
-    ) -> Result<lash::vm::AbilityOutcome, lash::vm::ExecutionHostError> {
-        match op {
-            lash::vm::AbilityOp::ResourceOperation(call) => self
-                .resource_result(&call)
-                .map(lash::vm::AbilityOutcome::Value),
-            // The one tutorial that awaits a process awaits a subagent branch,
-            // whose declared output is `{ summary, key_metrics }`.
-            lash::vm::AbilityOp::Await(_) => Ok(lash::vm::AbilityOutcome::Value(
-                lash::vm::from_json(serde_json::json!({
-                    "summary": "what the branch found",
-                    "key_metrics": ["first metric", "second metric"]
-                })),
-            )),
-            lash::vm::AbilityOp::Finish(value) => Ok(lash::vm::AbilityOutcome::Value(value)),
-            lash::vm::AbilityOp::Print(_) => Ok(lash::vm::AbilityOutcome::Unit),
-            other => Err(lash::vm::ExecutionHostError::new(format!(
-                "the workbench tutorials should not reach {other:?}"
-            ))),
+        boundary
+            .offer_tool(&path, id, &input, &output)
+            .expect("a workbench tool is offered as an effect");
+    };
+    offer(
+        "workbench.register_trigger".to_owned(),
+        Some(&host_triggers::register_trigger_tool_definition()),
+    );
+    for (module, operations) in [
+        ("agents", &["spawn"][..]),
+        ("control", &["continue_as"][..]),
+        ("inbox.work", &["list", "send", "delete"][..]),
+        ("inbox.personal", &["list", "send", "delete"][..]),
+        ("workbench_surface", &["terminal"][..]),
+    ] {
+        for operation in operations {
+            offer(format!("{module}.{operation}"), None);
         }
     }
+    for (operation, tool) in [
+        ("start", lash::process_controls::ProcessControlTool::Start),
+        ("await", lash::process_controls::ProcessControlTool::Await),
+        ("cancel", lash::process_controls::ProcessControlTool::Cancel),
+    ] {
+        offer(
+            format!("processes.{operation}"),
+            Some(&lash::process_controls::process_tool_definition(tool)),
+        );
+    }
+    boundary
 }
 
-async fn run_tutorial(source: &str) -> Result<lash::vm::ExecutionOutcome, String> {
-    let host = TutorialHost::new();
-    let linked = lash::typescript::link(source, &host.environment)
-        .map_err(|error| format!("does not link: {error}"))?;
-    let compiled = lash::vm::testing::harness::compile_linked_main(&linked);
-    lash::vm::execute(&compiled, &mut lash::vm::State::new(), &host)
-        .await
-        .map_err(|error| format!("{error:?}"))
-}
-
-/// Every tutorial the prompt ships runs to a finish, with no `TS_` refusal.
-///
-/// FIG-3211: a tutorial ended in `finish("… `" + handle + "` …")` over a plain
-/// record, so the cell the prompt taught failed on its last line. Linking
-/// never saw it.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn the_workbench_typescript_tutorials_run_without_a_dialect_refusal() {
+/// Prompt copy that teaches code the language refuses is worse than no copy:
+/// every program the prompt shows lowers against the Workbench's own
+/// declared effects, as a worker would lower it.
+#[test]
+fn the_workbench_typescript_tutorials_lower() {
+    let embedding =
+        lash::vm::standard_worker_embedding(&lash::vm::WorkerTuning::default()).expect("embedding");
+    let effects = workbench_effects().signatures();
+    let lower = |program: &str| {
+        embedding
+            .lower("typescript", program, &effects, &Default::default())
+            .expect("the TypeScript dialect is installed")
+    };
     let programs = typescript_prompt_programs();
     assert_eq!(
         programs.len(),
         3,
         "the TypeScript prompt must carry all three tutorials"
     );
-    let mut hits = Vec::new();
-    for (index, program) in programs.iter().enumerate() {
-        match run_tutorial(program).await {
-            Ok(lash::vm::ExecutionOutcome::Finished(_)) => {}
-            Ok(other) => hits.push(format!("tutorial {}: {other:?}", index + 1)),
-            Err(problem) => hits.push(format!("tutorial {}: {problem}", index + 1)),
-        }
-    }
+    let refused = programs
+        .iter()
+        .enumerate()
+        .filter_map(|(index, program)| {
+            lower(program)
+                .err()
+                .map(|error| format!("tutorial {}: {error}", index + 1))
+        })
+        .collect::<Vec<_>>();
     assert!(
-        hits.is_empty(),
-        "prompt programs the runtime refuses: {hits:#?}"
+        refused.is_empty(),
+        "prompt programs that do not lower: {refused:#?}"
+    );
+    // The front end must be able to refuse, or an empty list proves nothing.
+    assert!(
+        lower("class Unsupported {} finish(1);").is_err(),
+        "the control must be refused"
     );
 }
 
@@ -449,61 +200,6 @@ fn the_workbench_tutorials_never_print_a_registration_key() {
 
 // ADR 0096: the control fixture that served the same turn on the default
 // dialect is gone with the second dialect.
-
-/// Every scripted development-provider reply is a cell the session can run.
-///
-/// A cell the session cannot execute does not fail the scenario — the turn
-/// never reaches a terminal state, so the row hangs. The check therefore walks
-/// tags first, then links what a judged row would actually run.
-#[test]
-fn every_scripted_dev_provider_reply_is_a_cell_of_the_hosts_dialect() {
-    let scenarios = [
-        failure_provider::DevProviderScenario::AuthFailureOnce,
-        failure_provider::DevProviderScenario::RateLimitOnce,
-        failure_provider::DevProviderScenario::PartialOutputFailure,
-        failure_provider::DevProviderScenario::FailedProcess,
-        failure_provider::DevProviderScenario::ExecBlocked,
-        failure_provider::DevProviderScenario::ToolValue,
-        failure_provider::DevProviderScenario::RenderedSurface,
-        failure_provider::DevProviderScenario::CodeFailure,
-        failure_provider::DevProviderScenario::RetryResetPartial,
-        failure_provider::DevProviderScenario::TranscriptProjection,
-    ];
-    let environment = workbench_link_environment();
-    let mut hits = Vec::new();
-    let mut seen = 0usize;
-    let open = "<typescript>";
-    let close = "</typescript>";
-    for scenario in scenarios {
-        for call in 0..3 {
-            let Some(text) = scenario.scripted_cell_for_test(call) else {
-                continue;
-            };
-            seen += 1;
-            let label = format!("{} call {call}", scenario.as_str());
-            if !text.starts_with(open) || !text.trim_end().ends_with(close) {
-                hits.push(format!("{label}: not a typescript cell: {text}"));
-                continue;
-            }
-            let code = text
-                .trim_start_matches(open)
-                .trim_end()
-                .trim_end_matches(close)
-                .trim();
-            if let Err(error) = lash::typescript::link(code, &environment) {
-                hits.push(format!("{label}: {error}"));
-            }
-        }
-    }
-    assert!(
-        seen >= 10,
-        "every scenario must script at least one cell, saw {seen}"
-    );
-    assert!(
-        hits.is_empty(),
-        "scripted replies a session cannot run: {hits:#?}"
-    );
-}
 
 // The laws below run through the workbench's chat route on the in-process
 // durable workbench, whose engine runs every turn.

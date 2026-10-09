@@ -1,86 +1,89 @@
-mod globals;
-use globals::{apply_global_defaults, process_handle_names};
-use lash_vm_client::service::runtime_ops::ServiceRuntimeOps as _;
-mod definition_holds;
-use definition_holds::{
-    hold_continuation_definitions, hold_global_definitions, publish_cell_module,
-};
+//! A session cell on the kernel.
+//!
+//! A cell is one kernel program (`K-SES-001`). Its source is lowered by the
+//! session's dialect, in a worker, to a document against the effects the
+//! session offers; a worker-hosted machine runs the document's `main` from
+//! the session's bindings; and the kernel broker commits each park with the
+//! admission of every tool call the cell asked for since the last. The
+//! cell's end leaves the session its bindings.
+//!
+//! A cell is durable through its parked state (ADR 0132 §8): one with a
+//! committed park under its execution resumes from it, on the document and
+//! with the envelope its first activation recorded, and runs no saved
+//! statement again.
+
 mod cell_outputs;
 use cell_outputs::record_cell_outputs;
 mod cell_run;
-mod cell_segment;
-mod host_bridge;
+mod envelope;
+mod host;
+mod processes;
+mod session;
 mod snapshot;
-mod state;
+mod trace;
 
-pub(crate) use cell_segment::{check_cell_snapshot, snapshot_tool_calls};
+pub(crate) use envelope::{check_cell_snapshot, snapshot_tool_calls};
+pub(crate) use host::site_label;
+pub use host::{TOOL_ARGUMENTS, TOOL_CALL_LIMIT, TOOL_FAILED, UNKNOWN_EFFECT};
+pub use session::RlmExecutionState;
 pub use snapshot::RLM_SNAPSHOT_VERSION;
-pub use state::RlmExecutionState;
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::Arc;
-#[cfg(any(test, feature = "testing"))]
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
-use lash_core::{
-    ExecRequest, ExecResponse, RuntimeExecutionContext, facade_support::TraceRuntimeScope,
-    facade_support::TraceRuntimeSubject,
-};
-// Cell execution itself is infallible, so the only fallible surface left in
-// this module is the feature-gated performance fixture.
-#[cfg(feature = "testing")]
-use lash_core::SessionError;
-use lash_vm::ExecutionOutcome;
-use lash_vm_runtime::{
-    LashVmSurface, TraceLanguageExecution, TraceLanguageExecutionGeneration,
-    TraceLanguageExecutionIdentity, TraceLanguageExecutionPayload, TraceLanguageExecutionStatus,
-};
+use lash_core::{ExecRequest, ExecResponse, RuntimeExecutionContext};
+use lash_kernel_doc::{Datum, Document, Name};
+use lash_kernel_vm::{Bindings, Bounds, End, Start, Target};
+use lash_sansio::sync::MutexExt;
+use lash_vm_broker::kernel::{KernelBroker, KernelCeilings, KernelEnd, KernelFailure};
+use lash_vm_client::service::runtime_ops::ServiceRuntimeOps as _;
+use lash_vm_client::service::{Request, Response};
+use lash_vm_runtime::HostBoundary;
 
-use self::host_bridge::{
-    CollectedExecutionOutput, HostBridge, HostBridgeConfig, LashVmExecutionTrace,
-};
-use crate::projection::{
-    RlmProjectedBindings, flow_to_json_value, json_to_flow_value, projected_bindings,
-};
+use self::envelope::CellEnvelope;
+use self::host::{CellHost, CellHostLedgers};
+use crate::cell_value::datum_json;
+use crate::feedback::CellObservation;
+use crate::projection::RlmProjectedBindings;
 
-#[cfg(any(test, feature = "testing"))]
-static EXECUTION_BOUND_EXHAUSTION_LOUD: AtomicBool = AtomicBool::new(true);
-
-/// Turns the loud panic on a confidence run's bound exhaustion off or on,
-/// answering what it was: a law of the recorded limit failure needs it off.
-#[cfg(test)]
-fn set_execution_bound_exhaustion_loud(loud: bool) -> bool {
-    EXECUTION_BOUND_EXHAUSTION_LOUD.swap(loud, Ordering::SeqCst)
+/// What a cell needs of the session that runs it, beside its state.
+#[derive(Clone)]
+pub(crate) struct CellServices {
+    /// The workers that lower the cell and host its machine.
+    pub workers: lash_vm_client::service::Service,
+    pub deferred_tool_resolver: Option<crate::deferred::SharedDeferredToolResolver>,
+    pub execution_bounds: crate::plugin::ExecutionBounds,
+    /// The transport the program arrived on.
+    pub channel: crate::plugin::RlmChannel,
+    pub code_renderer: crate::render::CodeRendererSlot,
+    /// How the session's dialect words what a model reads.
+    pub prompts: Arc<dyn crate::dialect::DialectPrompts>,
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(crate) async fn execute_code_with_channel_and_bounds(
-    dialect: &dyn crate::dialect::Dialect,
+/// Runs one cell of `state`'s session, or resumes it from its parked state.
+pub(crate) async fn execute_cell(
     state: &mut RlmExecutionState,
     ctx: RuntimeExecutionContext<'_>,
     request: ExecRequest,
-    artifact_store: lash_vm::LashVmArtifacts,
-    lash_vm_surface: LashVmSurface,
-    deferred_tool_resolver: Option<lash_vm_runtime::SharedDeferredToolResolver>,
+    services: &CellServices,
     session_projected_bindings: RlmProjectedBindings,
-    execution_bounds: lash_vm::ExecutionBounds,
-    channel: crate::plugin::RlmChannel,
-    code_renderer: crate::render::CodeRendererSlot,
 ) -> ExecResponse {
     let clean_code = clean_model_code(&request.code);
-    // The cell's run (FIG-3586): every command it issues is keyed by the
-    // ordinal its broker admitted it under, inside the cell's own replay
-    // key. A cell is durable through
-    // its snapshot (ADR 0132 §8): one with a committed snapshot under its
-    // execution resumes from it, with the envelope its last quiet point
-    // committed, and never runs its earlier code again.
     let opened = cell_run::CellRun::open(&ctx);
-    let exec = match cell_run::cell_exec(&ctx, &opened) {
-        Ok(exec) => exec,
-        Err(error) => {
+    let identities = match &opened {
+        Ok(cell) => Ok(cell.identities().clone()),
+        Err(_) => cell_run::pure_cell_identities(&ctx),
+    };
+    let exec = identities
+        .as_ref()
+        .map_err(Clone::clone)
+        .and_then(|identities| cell_run::cell_exec(&ctx, identities));
+    let (identities, exec) = match (identities, exec) {
+        (Ok(identities), Ok(exec)) => (identities, exec),
+        (Err(error), _) | (_, Err(error)) => {
             return exec_setup_failure(lash_core::CellFailure::new(
                 lash_core::CellFailureKind::Host,
-                format!("the cell has no execution to file its snapshot under: {error}"),
+                format!("the cell has no execution to file its parked state under: {error}"),
             ));
         }
     };
@@ -89,19 +92,20 @@ pub(crate) async fn execute_code_with_channel_and_bounds(
         exec.clone(),
     ));
     let resumed = match &opened {
-        Ok(_) => match cell_segment::ResumedCell::latest(&snapshots, &clean_code).await {
+        Ok(_) => match envelope::resumed_cell(&snapshots, &clean_code).await {
             Ok(resumed) => resumed,
             Err(error) => {
+                let message = format!("the cell's parked state cannot be resumed: {error}");
                 let mut response = exec_setup_failure(lash_core::CellFailure::new(
                     lash_core::CellFailureKind::Host,
-                    format!("the cell's snapshot cannot be resumed: {error}"),
+                    message.clone(),
                 ));
                 fail_cell_on_nested_error(
                     &ctx,
                     &mut response,
                     lash_core::RuntimeEffectControllerError::new(
                         lash_core::RuntimeErrorCode::ExecutionStateCaptureFailed,
-                        format!("the cell's snapshot cannot be resumed: {error}"),
+                        message,
                     ),
                 );
                 return response;
@@ -109,85 +113,59 @@ pub(crate) async fn execute_code_with_channel_and_bounds(
         },
         Err(_) => None,
     };
-    // A cell with no snapshot enters its program from the start: the one
-    // entry no resume may repeat (ADR 0132 §8, NR).
+    // A cell with no parked state enters its program from the start: the
+    // one entry no resume may repeat (ADR 0132 §8).
     if resumed.is_none() && opened.is_ok() {
         ctx.actor_context().probe().vm_program_entered(&exec);
     }
-    let cell = Arc::new(opened);
-    // Boxed: the cell's outputs are recorded under the same context after the
-    // cell, and an unboxed context held across the cell would size every
-    // caller's future.
+    // Boxed: the cell's outputs are recorded under the same context after
+    // the cell, and an unboxed context held across the cell would size
+    // every caller's future.
     let seal_ctx = Box::new(ctx.clone());
-    let prints = Arc::new(std::sync::Mutex::new(
+    let prints = Arc::new(Mutex::new(
         resumed
             .as_ref()
-            .map(|resumed| {
-                resumed
-                    .envelope
-                    .prints
-                    .iter()
-                    .map(|print| print.0.clone())
-                    .collect()
-            })
+            .map(|resumed| resumed.state.prints.clone())
             .unwrap_or_default(),
     ));
-    let mut response = Box::pin(execute_code_inner(
-        dialect,
+    let mut response = Box::pin(run_cell(
         state,
         ctx,
-        Arc::clone(&cell),
         &clean_code,
-        artifact_store,
-        lash_vm_surface,
-        deferred_tool_resolver,
+        services,
         session_projected_bindings,
-        execution_bounds,
-        channel,
+        identities,
         Arc::clone(&prints),
         &snapshots,
-        resumed.map(Box::new),
+        resumed,
     ))
     .await;
-    // A cell stopped at a segment boundary has no answer yet: it records no
-    // outputs. The segment that ends it does.
+    // A cell parked beyond this activation has no answer yet: it records no
+    // outputs. The activation that ends it does.
     if response.suspended {
         return response;
     }
-    // Every module a global of this frame references is held by the frame
-    // (I-frame, ADR 0113 §3.1): a value the cell bound or a tool returned
-    // outlives the execution that published its module.
-    if !seal_ctx.is_cancelled() {
-        let _phase = seal_ctx.named_phase("rlm_lash_vm.hold_frame_definitions");
-        if let Err(err) = hold_global_definitions(state, &seal_ctx).await
-            && !response.result.is_failed()
-        {
-            fail_cell(
-                &mut response,
-                lash_core::CellFailure::new(
-                    lash_core::CellFailureKind::Host,
-                    format!("failed to retain definition artifacts for this frame: {err}"),
-                ),
-            );
-        }
-    }
-    if let Ok(cell) = cell.as_ref()
+    if let Ok(cell) = &opened
         && !seal_ctx.is_cancelled()
         && !seal_ctx.has_nested_effect_error()
     {
-        let values = prints
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone();
+        let values = prints.lock_recover().clone();
         if !values.is_empty() || response.finish_value().is_some() {
-            record_cell_outputs(&seal_ctx, cell, &code_renderer, values, &mut response).await;
+            record_cell_outputs(
+                &seal_ctx,
+                cell,
+                &services.code_renderer,
+                values,
+                &mut response,
+            )
+            .await;
         }
     }
     response
 }
 
-/// Stops the cell on a nested effect's failure: the error is recorded for the
-/// turn, and the cell answers it as a host failure.
+/// Stops the cell on a nested effect's failure: the error is recorded for
+/// the turn, and the cell answers it as a host failure.
 fn fail_cell_on_nested_error(
     ctx: &RuntimeExecutionContext<'_>,
     response: &mut ExecResponse,
@@ -208,128 +186,6 @@ fn fail_cell(response: &mut ExecResponse, failure: lash_core::CellFailure) {
     response.retained_finish_value = None;
 }
 
-/// Feature-gated fixture that lets the repository's performance harness shift
-/// the production RLM execution-state capture without exposing executor
-/// internals as public protocol API.
-#[cfg(feature = "testing")]
-pub struct RlmCheckpointPerfFixture {
-    dialect: Arc<dyn crate::dialect::Dialect>,
-    state: RlmExecutionState,
-    artifact_store: lash_vm::LashVmArtifacts,
-    binding_count: usize,
-    payload_bytes: usize,
-}
-
-#[cfg(feature = "testing")]
-impl RlmCheckpointPerfFixture {
-    /// A fixture whose cells keep their Lash VM artifacts in `backend`.
-    pub async fn new(
-        dialect: Arc<dyn crate::dialect::Dialect>,
-        backend: &lash_core::Backend,
-        binding_count: usize,
-        payload_bytes: usize,
-    ) -> Result<Self, SessionError> {
-        let mut state = RlmExecutionState::for_engine_with_workers(
-            dialect.language_id(),
-            dialect.worker_service(),
-        );
-        // The snapshot's globals became a read-only projection when the heap
-        // took ownership of them, so seed through the state's own insert.
-        for index in 0..binding_count {
-            state
-                .vm
-                .state_mut()
-                .insert_global(
-                    format!("mid_{index}"),
-                    json_to_flow_value(serde_json::json!([format!(
-                        "binding-{index}-{}",
-                        "x".repeat(payload_bytes)
-                    )])),
-                )
-                .await
-                .map_err(|error| {
-                    SessionError::Plugin(lash_core::PluginError::Runtime(
-                        error.into_runtime_error(),
-                    ))
-                })?;
-        }
-        Ok(Self {
-            dialect,
-            state,
-            artifact_store: lash_vm::LashVmArtifacts::of_backend(backend),
-            binding_count,
-            payload_bytes,
-        })
-    }
-
-    pub async fn capture(
-        &mut self,
-    ) -> Result<lash_core::plugin::ExecutionStateCapture, SessionError> {
-        self.state
-            .snapshot_execution_state(lash_core::FleetFormat::current())
-            .await
-    }
-
-    pub fn acknowledge_capture(&mut self) {
-        self.state.acknowledge_execution_state_capture();
-    }
-
-    /// Run the edit under the backend's scoped controller and this cell's
-    /// invocation, including the production projected-bindings journal.
-    pub async fn assign_one(
-        &mut self,
-        index: usize,
-        turn: usize,
-        ctx: RuntimeExecutionContext<'_>,
-    ) -> Result<(), SessionError> {
-        let binding = index % self.binding_count.max(1);
-        // A seeded global is an ambient `const` to a TypeScript cell, so the
-        // per-turn edit is a re-declaration carrying an equivalent payload
-        // rather than an append. What the fixture measures is unchanged: one
-        // binding is dirtied per turn, at the same order of bytes.
-        let code = format!(
-            "let mid_{binding} = [\"binding-{binding}-{}\", \"turn-{turn}-{}\"];",
-            "x".repeat(self.payload_bytes),
-            "y".repeat(self.payload_bytes / 8)
-        );
-        let response = execute_code_with_channel_and_bounds(
-            self.dialect.as_ref(),
-            &mut self.state,
-            ctx,
-            ExecRequest { code },
-            self.artifact_store.clone(),
-            LashVmSurface::default(),
-            None,
-            RlmProjectedBindings::default(),
-            lash_vm::ExecutionBounds::unbounded(),
-            crate::plugin::RlmChannel::Cell,
-            crate::render::CodeRendererSlot::default(),
-        )
-        .await;
-        if let Some(error) = response.error() {
-            return Err(SessionError::Protocol(format!(
-                "RLM checkpoint perf assignment failed: {}",
-                error.message,
-            )));
-        }
-        Ok(())
-    }
-
-    pub async fn restore(
-        dialect: &dyn crate::dialect::Dialect,
-        state: &lash_core::plugin::HydratedExecutionState,
-    ) -> Result<(), SessionError> {
-        let mut restored = RlmExecutionState::for_engine_with_workers(
-            dialect.language_id(),
-            dialect.worker_service(),
-        );
-        restored
-            .restore_execution_state(state, lash_core::FleetFormat::current())
-            .await
-            .map_err(SessionError::from)
-    }
-}
-
 fn clean_model_code(code: &str) -> String {
     code.lines()
         .filter(|line| {
@@ -344,424 +200,317 @@ fn clean_model_code(code: &str) -> String {
         .join("\n")
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn execute_code_inner(
-    dialect: &dyn crate::dialect::Dialect,
-    state: &mut RlmExecutionState,
-    ctx: RuntimeExecutionContext<'_>,
-    cell: Arc<Result<cell_run::CellRun, cell_run::LashVmCellOpener>>,
-    code: &str,
-    artifact_store: lash_vm::LashVmArtifacts,
-    lash_vm_surface: LashVmSurface,
-    deferred_tool_resolver: Option<lash_vm_runtime::SharedDeferredToolResolver>,
-    session_projected_bindings: RlmProjectedBindings,
-    execution_bounds: lash_vm::ExecutionBounds,
-    channel: crate::plugin::RlmChannel,
-    prints: Arc<std::sync::Mutex<Vec<lash_vm::Value>>>,
-    snapshots: &Arc<lash_vm_broker::DurableSnapshotStore>,
-    resumed: Option<Box<cell_segment::ResumedCell>>,
-) -> ExecResponse {
-    if let Err(error) = hold_global_definitions(state, &ctx).await {
-        return exec_setup_failure_or_stop(state, &ctx, lash_core::CellFailureKind::Host, error);
-    }
-    let workers = state.vm.state().service().begin_execution();
-    let previous_service = state.vm.state_mut().replace_service(workers.clone());
-    let response = Box::pin(execute_code_in_worker_scope(
-        dialect,
-        state,
-        ctx.clone(),
-        cell,
-        code,
-        artifact_store,
-        lash_vm_surface,
-        deferred_tool_resolver,
-        session_projected_bindings,
-        execution_bounds,
-        channel,
-        prints,
-        workers,
-        snapshots,
-        resumed,
-    ))
-    .await;
-    state.vm.state_mut().replace_service(previous_service);
-    response
+/// A cell that was lowered and admitted: what it runs and what its host
+/// holds of it.
+struct LinkedCell {
+    envelope: CellEnvelope,
+    document: Document,
+    boundary: HostBoundary,
+    /// The session's bindings and the host's read-only ones, as `main`
+    /// starts with them.
+    start: Bindings,
+    ledgers: CellHostLedgers,
+    /// The requests of the calls a resumed cell's ledger holds open.
+    open_calls: Vec<lash_vm_protocol::EncodedPayload>,
+    /// The effect identity each of those calls was performed at.
+    open_sites: BTreeMap<lash_core::ToolCallId, lash_kernel_doc::EffectIdentity>,
+    resumed: bool,
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn execute_code_in_worker_scope(
-    dialect: &dyn crate::dialect::Dialect,
-    state: &mut RlmExecutionState,
-    ctx: RuntimeExecutionContext<'_>,
-    cell: Arc<Result<cell_run::CellRun, cell_run::LashVmCellOpener>>,
-    code: &str,
-    artifact_store: lash_vm::LashVmArtifacts,
-    lash_vm_surface: LashVmSurface,
-    deferred_tool_resolver: Option<lash_vm_runtime::SharedDeferredToolResolver>,
-    session_projected_bindings: RlmProjectedBindings,
-    execution_bounds: lash_vm::ExecutionBounds,
-    channel: crate::plugin::RlmChannel,
-    prints: Arc<std::sync::Mutex<Vec<lash_vm::Value>>>,
-    workers: lash_vm_client::service::Service,
-    snapshots: &Arc<lash_vm_broker::DurableSnapshotStore>,
-    resumed: Option<Box<cell_segment::ResumedCell>>,
-) -> ExecResponse {
-    state.mark_execution_started();
-    let execution_checkpoint = state.execution_checkpoint();
-    state.begin_code_execution(execution_checkpoint);
-    select_deferred_resolution_link(state, &ctx);
-    if let Some(resumed) = &resumed {
-        resumed.envelope.restore_context(&ctx);
+/// A cell that did not get as far as running.
+enum Refused {
+    /// The cell's answer.
+    Cell(Box<lash_core::CellFailure>),
+    /// A nested effect of the cell's setup failed: recorded for the turn.
+    Nested(Box<lash_core::RuntimeEffectControllerError>),
+    /// A worker fault.
+    Worker(Box<lash_vm_client::PoolError>),
+}
+
+impl From<lash_core::CellFailure> for Refused {
+    fn from(failure: lash_core::CellFailure) -> Self {
+        Self::Cell(Box::new(failure))
     }
-    // A resumed cell links against what its first segment recorded: those
-    // records live in that segment's journal, so their contents came with
-    // the cell and nothing here journals them again (FIG-4739).
-    let (session_projected_bindings, cell_bindings, host_environment) =
-        if let Some(resumed) = &resumed {
-            let projected = crate::projection::RlmProjectedBindings::from_recorded(
-                resumed.envelope.projected_bindings.clone(),
-            );
-            let bindings = lash_vm_runtime::CellToolBindings::from_record(
-                resumed.envelope.cell_bindings.clone(),
-                ctx.live_tool_catalog().as_ref(),
-            );
-            (
-                projected,
-                bindings,
-                resumed.envelope.host_environment.clone(),
-            )
-        } else {
-            // A frame handoff changes the session's live projections. Re-execution
-            // links against this cell's recorded inputs, under the exec_code address
-            // its parent installed, before it reaches its recorded command keys.
-            let session_projected_bindings = match ctx
-                .parent_invocation()
-                .and_then(lash_core::RuntimeInvocation::effect_address)
-            {
-                Some(address) => match session_projected_bindings
-                    .journaled(&ctx, &address.replay_key)
-                    .await
-                {
-                    Ok(bindings) => bindings,
-                    Err(error) => {
-                        let message = error.message.clone();
-                        ctx.record_nested_runtime_effect_error(cell_run::setup_effect_error(
-                            &cell, error,
-                        ));
-                        return exec_setup_failure_or_stop(
-                            state,
-                            &ctx,
-                            lash_core::CellFailureKind::Host,
-                            message,
-                        );
-                    }
-                },
-                None => session_projected_bindings,
-            };
-            let (parsed, referenced) = match workers
-                .request_accounted(lash_vm_client::service::Request::References {
-                    source: code.to_string(),
-                })
-                .await
-            {
-                Ok(lash_vm_client::service::Response::References(referenced)) => (true, referenced),
-                Ok(lash_vm_client::service::Response::CompileRefused { .. }) => {
-                    (false, BTreeSet::new())
-                }
-                Ok(other) => {
-                    return exec_setup_failure_or_stop(
-                        state,
-                        &ctx,
-                        lash_core::CellFailureKind::Host,
-                        format!("unexpected source analysis response: {other:?}"),
-                    );
-                }
-                Err(error) => return worker_setup_failure(state, &ctx, error),
-            };
+}
 
-            // gather → journal → mask → fold: every parsed resource-bearing cell first
-            // consults the deferred journal, even if no live resolver and no checkpoint
-            // projection are available. This is what closes the postcommit / before-
-            // projection crash window. Journal outcomes then mask exact paths while the
-            // ambient Tool Catalog is built, before its collision validation can
-            // preempt recorded authority. Unrelated catalog errors remain ordinary host
-            // failures.
-            let effective_surface = lash_vm_surface;
+fn host_failure(message: impl Into<String>) -> Refused {
+    Refused::Cell(Box::new(lash_core::CellFailure::new(
+        lash_core::CellFailureKind::Host,
+        message,
+    )))
+}
 
-            // The cell's ambient binding set is journaled before its first effect
-            // and a redrive links against the recorded set, not the live registry
-            // (FIG-3587): a tool removed or changed since keeps its recorded binding,
-            // and calls on it are served only from their recorded results.
-            let cell_bindings = match state
-                .deferred_link
-                .as_ref()
-                .filter(|_| !referenced.is_empty())
-            {
-                Some(link) => {
-                    let _phase = ctx.named_phase("rlm_lash_vm.cell_tool_bindings");
-                    let excluded = link.outcomes.keys().cloned().collect::<BTreeSet<_>>();
-                    match lash_vm_runtime::journal_cell_tool_bindings(
-                        &referenced,
-                        ctx.tool_catalog().as_ref(),
-                        &excluded,
-                        &link.key.address.replay_key,
-                        &ctx,
-                    )
-                    .await
-                    {
-                        Ok(bindings) => bindings,
-                        Err(error) => {
-                            let message = error.message.clone();
-                            ctx.record_nested_runtime_effect_error(cell_run::setup_effect_error(
-                                &cell, error,
-                            ));
-                            return exec_setup_failure_or_stop(
-                                state,
-                                &ctx,
-                                lash_core::CellFailureKind::Host,
-                                message,
-                            );
-                        }
-                    }
-                }
-                None => lash_vm_runtime::CellToolBindings::default(),
-            };
-            let live_catalog = ctx.tool_catalog();
-            let link_catalog = cell_bindings.link_catalog(&live_catalog);
-
-            let mut host_environment =
-                if let Some(link) = state.deferred_link.as_mut().filter(|_| parsed) {
-                    let _phase = ctx.named_phase("rlm_lash_vm.deferred_resolve");
-                    match lash_vm_runtime::resolve_and_build_deferred_environment_from_references(
-                        &referenced,
-                        &effective_surface,
-                        &link_catalog,
-                        deferred_tool_resolver.as_ref(),
-                        link,
-                        &ctx,
-                    )
-                    .await
-                    {
-                        Ok(environment) => environment,
-                        Err(error) => {
-                            ctx.record_nested_runtime_effect_error(cell_run::setup_effect_error(
-                                &cell,
-                                error.runtime_effect_error(),
-                            ));
-                            return exec_setup_failure_or_stop(
-                                state,
-                                &ctx,
-                                lash_core::CellFailureKind::Host,
-                                error.to_string(),
-                            );
-                        }
-                    }
-                } else {
-                    match effective_surface.host_environment(&link_catalog) {
-                        Ok(environment) => environment,
-                        Err(error) => {
-                            emit_step_trace(
-                                &ctx,
-                                Err(&format!("invalid Lash VM host tool surface: {error}")),
-                            );
-                            return exec_setup_failure_or_stop(
-                                state,
-                                &ctx,
-                                lash_core::CellFailureKind::Host,
-                                format!("invalid Lash VM host tool surface: {error}"),
-                            );
-                        }
-                    }
-                };
-
-            // Every binding the session holds, read from the roots that own them: a
-            // `Map` or a `Date` has no host view, but a later cell names it all the
-            // same (ADR 0076: no existence decision reads the view).
-            let mut live_global_names = state
-                .vm
-                .state()
-                .binding_names()
-                .map(str::to_string)
-                .collect::<BTreeSet<_>>();
-            live_global_names.insert("history".to_string());
-            live_global_names.extend(session_projected_bindings.names());
-            host_environment = host_environment.with_globals(live_global_names);
-            host_environment = host_environment
-                .with_process_handles(process_handle_names(state.vm.state().globals()));
-            // A function an earlier cell bound did not survive its cell, and a
-            // reference to it is refused by name rather than as a name never bound.
-            host_environment = host_environment
-                .with_expired_functions(state.vm.state().expired_functions().iter().cloned());
-            (session_projected_bindings, cell_bindings, host_environment)
-        };
-    // What the cell linked against, as a segment boundary inside it hands it
-    // over.
-    let linked = (
-        session_projected_bindings.recorded(),
-        cell_bindings.record(),
-        host_environment.clone(),
-    );
-
-    // The kind is decided here, while the failure is still a typed diagnostic.
-    // "Compilation failed" is not enough to classify it: a misspelled name and a
-    // forbidden construct both fail here and need opposite advice.
-    let compile_result = match workers
-        .request_accounted(lash_vm_client::service::Request::CompileModule {
-            source: code.to_string(),
-            environment: host_environment.clone(),
-            cell: true,
-        })
-        .await
-    {
-        Ok(lash_vm_client::service::Response::Module(module)) => Ok(*module),
-        Ok(lash_vm_client::service::Response::CompileRefused { error, policy }) => {
-            let message = match error {
-                lash_vm::ModuleCompileError::Parse(_) => format_rlm_parse_diagnostic(
-                    dialect.render_parse_diagnostic(&error),
-                    channel,
-                    dialect.prompt_vocabulary().cell_tags,
-                ),
-                _ => error.to_string(),
-            };
-            Err((
-                if policy {
-                    lash_core::CellFailureKind::Policy
-                } else {
-                    lash_core::CellFailureKind::Program
-                },
-                message,
-            ))
+/// Lowers a fresh cell against what the session offers now, or takes a
+/// resumed cell as its first activation recorded it.
+async fn link_cell(
+    state: &RlmExecutionState,
+    ctx: &RuntimeExecutionContext<'_>,
+    code: &str,
+    services: &CellServices,
+    session_projected_bindings: RlmProjectedBindings,
+    resumed: Option<envelope::ResumedCell>,
+) -> Result<LinkedCell, Refused> {
+    if let Some(resumed) = resumed {
+        // A resumed cell runs what its first activation admitted: the
+        // envelope carries the document and everything it was lowered
+        // against, and nothing here is journaled or lowered again.
+        resumed.state.restore_context(ctx);
+        let envelope = resumed.state.cell;
+        if envelope.dialect != state.dialect() {
+            return Err(host_failure(format!(
+                "the cell was parked as `{}` and this session's dialect is `{}`",
+                envelope.dialect,
+                state.dialect()
+            )));
         }
-        Ok(_) => {
-            return worker_setup_failure(
-                state,
-                &ctx,
+        return Ok(LinkedCell {
+            document: envelope.document().map_err(host_failure)?,
+            boundary: envelope.boundary().map_err(host_failure)?,
+            envelope,
+            // The machine resumes from its parked state, not from a start.
+            start: Bindings::default(),
+            ledgers: resumed.state.host,
+            open_calls: resumed.open_calls,
+            open_sites: resumed.open_sites,
+            resumed: true,
+        });
+    }
+
+    // The host's read-only bindings are recorded under the cell's effect
+    // before it runs, so a redrive of the cell starts with the same ones.
+    let projected = {
+        let _phase = ctx.named_phase("rlm_lash_vm.resolve_projected_bindings");
+        crate::projection::cell_host_bindings(ctx, session_projected_bindings, code)
+            .await
+            .map_err(|error| match error {
+                crate::projection::HostBindingsError::Journal(error) => {
+                    Refused::Nested(Box::new(error))
+                }
+                crate::projection::HostBindingsError::Refused(message) => host_failure(message),
+            })?
+    };
+
+    // Each catalog tool is an effect, under the name a cell of this
+    // dialect calls it by.
+    let mut boundary = HostBoundary::new();
+    for tool in &ctx.tool_catalog().tools {
+        let surface = |error: String| host_failure(format!("invalid host tool surface: {error}"));
+        let binding = lash_vm_runtime::required_tool_executable(&tool.manifest)
+            .map_err(|error| surface(error.to_string()))?;
+        let path = services
+            .prompts
+            .tool_call_path(&binding)
+            .map_err(|refusal| surface(refusal.to_string()))?;
+        boundary
+            .offer_tool(
+                &path,
+                tool.manifest.id.clone(),
+                tool.contract.input_schema.canonical(),
+                tool.contract.output_schema.canonical(),
+            )
+            .map_err(|error| surface(error.to_string()))?;
+    }
+
+    // gather → journal → offer: the call paths the source writes that no
+    // catalog tool answers are decided durably before the cell is lowered,
+    // and each granted tool is offered as an effect.
+    let grants = match &services.deferred_tool_resolver {
+        Some(_) if ctx.parent_invocation().is_some() => {
+            let _phase = ctx.named_phase("rlm_lash_vm.deferred_resolve");
+            let offered = boundary.signatures();
+            let candidates = crate::deferred::called_paths(code)
+                .into_iter()
+                .filter(|path| {
+                    !lash_kernel_doc::EffectName::new(path.as_str())
+                        .is_ok_and(|name| offered.contains_key(&name))
+                })
+                .collect::<BTreeSet<_>>();
+            if candidates.is_empty() {
+                BTreeMap::new()
+            } else {
+                let resolver = services.deferred_tool_resolver.as_ref();
+                let outcomes =
+                    crate::deferred::journal_deferred_outcomes(candidates, resolver, ctx)
+                        .await
+                        .map_err(|error| Refused::Nested(Box::new(error.runtime_effect_error())))?;
+                crate::deferred::offer_deferred_grants(&mut boundary, &outcomes, resolver, ctx)
+                    .map_err(|error| Refused::Nested(Box::new(error.runtime_effect_error())))?
+            }
+        }
+        _ => BTreeMap::new(),
+    };
+
+    let session = state.bindings();
+    let mut names = session.names();
+    names.extend(projected.keys().map(|name| Name::new(name.as_str())));
+    let lowered = services
+        .workers
+        .request_accounted(Request::Lower {
+            dialect: state.dialect().to_owned(),
+            source: code.to_owned(),
+            effects: boundary.signatures(),
+            bindings: names,
+        })
+        .await;
+    let (document, annotations) = match lowered {
+        Ok(Response::Lowered {
+            document,
+            annotations,
+        }) => (document, annotations),
+        Ok(Response::DialectRefused(refusal)) => {
+            let observation = CellObservation::of_refusal(refusal, code, session.not_carried());
+            emit_step_trace(ctx, Err(&observation.code()));
+            return Err(Refused::Cell(Box::new(observation.failure(
+                code,
+                None,
+                services.channel,
+                services.prompts.as_ref(),
+            ))));
+        }
+        Ok(Response::UnknownDialect { dialect }) => {
+            return Err(host_failure(format!(
+                "this session's cells are written in `{dialect}`, and no worker has that dialect installed"
+            )));
+        }
+        Ok(Response::Printed { .. }) => {
+            return Err(Refused::Worker(Box::new(
                 lash_vm_client::PoolError::breach(
                     lash_vm_protocol::SequenceFault::UnexpectedServiceResponse,
                 ),
-            );
+            )));
         }
         Err(error) => {
-            emit_step_trace(&ctx, Err(&error.to_string()));
-            return worker_setup_failure(state, &ctx, error);
+            emit_step_trace(ctx, Err(&error.to_string()));
+            return Err(Refused::Worker(Box::new(error)));
         }
     };
-    emit_step_trace(
-        &ctx,
-        compile_result
-            .as_ref()
-            .map(|_| ())
-            .map_err(|(_, diagnostic)| diagnostic.as_str()),
-    );
-    let linked_module = match compile_result {
-        Ok(program) => program,
-        Err((kind, error)) => {
-            return exec_setup_failure_or_stop(state, &ctx, kind, error);
-        }
+    emit_step_trace(ctx, Ok(()));
+    let text = |bytes: Vec<u8>, what: &str| {
+        String::from_utf8(bytes)
+            .map_err(|error| host_failure(format!("the worker's {what} is not text: {error}")))
     };
-    if let Ok(cell) = cell.as_ref() {
-        cell.ran_module(linked_module.artifact.module_ref().to_string());
+    let envelope = CellEnvelope {
+        code: CellEnvelope::code_digest(code),
+        dialect: state.dialect().to_owned(),
+        document: text(document, "document")?,
+        annotations: text(annotations, "annotations")?,
+        effects: CellEnvelope::record_effects(&boundary),
+        grants,
+        projected: projected.keys().cloned().collect(),
+    };
+    let document = envelope
+        .document()
+        .map_err(|error| host_failure(format!("the worker's document is not one: {error}")))?;
+
+    // `main` starts with the session's bindings and, over them, the host's
+    // read-only ones.
+    let mut start = session.start();
+    let mut next = start
+        .objects
+        .keys()
+        .next_back()
+        .map_or(0, |id| id.0.saturating_add(1));
+    let mut allocate = || {
+        let id = lash_kernel_doc::ObjectId(next);
+        next += 1;
+        id
+    };
+    for (name, value) in &projected {
+        let value = crate::cell_value::bind_json(
+            value,
+            document.manifest.numbers,
+            &mut allocate,
+            &mut start.objects,
+        );
+        start.variables.insert(Name::new(name.as_str()), value);
     }
-    // A resumed cell's module was published, and held in the frame, by the
-    // segment that first ran the cell; the continuation holds what it names
-    // through its definitions. Publishing again would journal a step its
-    // first execution may have skipped on a frame hold only that worker
-    // knew of, and a replay rebuilt from the committed state would not.
-    //
-    // Every cell's module is published, whether or not it declares a process:
-    // the cell's start names its document by this module's reference, and a
-    // host reads it while the execution is unsettled (FIG-5576).
-    if resumed.is_none() {
-        let stored = {
-            let _phase = ctx.named_phase("rlm_lash_vm.store_module_artifact");
-            publish_cell_module(state, &ctx, &artifact_store, &linked_module.artifact).await
-        };
-        if let Err(err) = stored {
+    Ok(LinkedCell {
+        envelope,
+        document,
+        boundary,
+        start,
+        ledgers: CellHostLedgers::default(),
+        open_calls: Vec::new(),
+        open_sites: BTreeMap::new(),
+        resumed: false,
+    })
+}
+
+/// The bounds a cell's run is held to: the session's instruction and
+/// memory bounds over the worker pool's own, which also state the rest.
+fn cell_bounds(services: &CellServices) -> Bounds {
+    let pool = services.workers.config().run_bounds;
+    Bounds {
+        charge: services
+            .execution_bounds
+            .instruction_limit
+            .limit()
+            .map_or(u64::MAX, std::num::NonZeroU64::get),
+        memory: services
+            .execution_bounds
+            .memory_limit
+            .limit()
+            .map_or(u64::MAX, std::num::NonZeroU64::get),
+        call_depth: pool.call_depth,
+        live_tasks: pool.live_tasks,
+        requests_per_park: pool.requests_per_park,
+        join_members: pool.join_members,
+    }
+}
+
+/// The executable generation a session's cells run under (FIG-3571): the
+/// kernel version. A cell's document and everything it was lowered against
+/// are recorded in its envelope, so the kernel version is all of a build
+/// that decides how a recorded cell runs on.
+pub(crate) fn cell_generation() -> lash_core::ExecutableGeneration {
+    lash_core::ExecutableGeneration::new(format!("kernel:{}", lash_kernel_doc::KERNEL_VERSION))
+}
+
+#[expect(clippy::too_many_arguments, reason = "one cell's whole run")]
+async fn run_cell(
+    state: &mut RlmExecutionState,
+    ctx: RuntimeExecutionContext<'_>,
+    code: &str,
+    services: &CellServices,
+    session_projected_bindings: RlmProjectedBindings,
+    identities: lash_vm_broker::CodeCallIdentities,
+    prints: Arc<Mutex<Vec<Datum>>>,
+    snapshots: &Arc<lash_vm_broker::DurableSnapshotStore>,
+    resumed: Option<envelope::ResumedCell>,
+) -> ExecResponse {
+    state.begin_code_execution();
+    let workers = services.workers.begin_execution();
+    let services = &CellServices {
+        workers,
+        ..services.clone()
+    };
+    let linked = match link_cell(
+        state,
+        &ctx,
+        code,
+        services,
+        session_projected_bindings,
+        resumed,
+    )
+    .await
+    {
+        Ok(linked) => linked,
+        Err(Refused::Cell(failure)) => return exec_setup_failure_or_stop(state, &ctx, *failure),
+        Err(Refused::Nested(error)) => {
+            let message = error.to_string();
+            ctx.record_nested_runtime_effect_error(*error);
             return exec_setup_failure_or_stop(
                 state,
                 &ctx,
-                lash_core::CellFailureKind::Host,
-                format!("failed to store lash_vm module artifact: {err}"),
+                lash_core::CellFailure::new(lash_core::CellFailureKind::Host, message),
             );
         }
-    }
+        Err(Refused::Worker(error)) => return worker_setup_failure(state, &ctx, *error),
+    };
 
-    let (projected, providers) = {
-        let _phase = ctx.named_phase("rlm_lash_vm.resolve_projected_bindings");
-        match projected_bindings(&ctx, session_projected_bindings).and_then(
-            |(projected, history)| {
-                let mut providers =
-                    lash_vm::ProjectionCatalog::of_backend(ctx.projection_providers().as_deref());
-                providers
-                    .register(Arc::new(history))
-                    .map_err(|refusal| refusal.to_string())?;
-                Ok((projected, providers))
-            },
-        ) {
-            Ok(projected) => projected,
-            Err(err) => {
-                return exec_setup_failure_or_stop(
-                    state,
-                    &ctx,
-                    lash_core::CellFailureKind::Host,
-                    err,
-                );
-            }
-        }
-    };
-    let projected_names = projected.names().collect::<Vec<_>>();
-    if let Err(error) = state
-        .vm
-        .state_mut()
-        .remove_names(projected_names.iter().cloned().collect())
-        .await
-    {
-        return worker_setup_failure(state, &ctx, error);
-    }
-    let deferred_execution_grants = match &resumed {
-        Some(resumed) => resumed.envelope.deferred_execution_grants.clone(),
-        None => match state
-            .deferred_link
-            .as_ref()
-            .map(|record| deferred_execution_grants(record, &ctx))
-            .transpose()
-        {
-            Ok(grants) => grants.unwrap_or_default(),
-            Err(error) => {
-                ctx.record_nested_effect_error(error.clone().into());
-                return exec_setup_failure_or_stop(
-                    state,
-                    &ctx,
-                    lash_core::CellFailureKind::Host,
-                    error.to_string(),
-                );
-            }
-        },
-    };
-    let lash_vm_execution_trace =
-        foreground_lash_vm_execution_trace(&ctx, &linked_module.artifact, dialect.language_id());
-    if resumed.is_none()
-        && let Some(trace) = &lash_vm_execution_trace
-    {
-        emit_foreground_execution_started(trace);
-    }
-    let identities = match cell.as_ref() {
-        Ok(cell) => cell.identities().code().clone(),
-        Err(_) => match lash_core::EffectOpener::for_scope(&ctx.admitted_scope()) {
-            Ok(opener) => lash_vm_broker::CodeCallIdentities::cell(opener, "pure-cell"),
-            Err(error) => {
-                return exec_setup_failure_or_stop(
-                    state,
-                    &ctx,
-                    lash_core::CellFailureKind::Host,
-                    error.to_string(),
-                );
-            }
-        },
-    };
     // Every call the cell makes is its own admitted execution, run from
-    // these bodies (ADR 0132 §5): a resumed cell knows each call its
-    // snapshot holds open, so a call still running settles on this owner.
+    // these bodies (ADR 0132 §5): a resumed cell knows each call its ledger
+    // holds open, so a call still running settles on this owner.
     let members =
         match lash_core::tool_dispatch::CellMembers::new(&ctx, identities.opener().clone()) {
             Ok(members) => Arc::new(members),
@@ -769,52 +518,39 @@ async fn execute_code_in_worker_scope(
                 return exec_setup_failure_or_stop(
                     state,
                     &ctx,
-                    lash_core::CellFailureKind::Host,
-                    error.to_string(),
+                    lash_core::CellFailure::new(
+                        lash_core::CellFailureKind::Host,
+                        error.to_string(),
+                    ),
                 );
             }
         };
-    if let Some(resumed) = &resumed {
-        for open in resumed.from.ledger.operations.values() {
-            match lash_core::tool_dispatch::CellMember::decode(&open.request.0) {
-                Ok(member) => members.register(member),
-                Err(error) => {
-                    return exec_setup_failure_or_stop(
-                        state,
-                        &ctx,
+    for open in &linked.open_calls {
+        match lash_core::tool_dispatch::CellMember::decode(&open.0) {
+            Ok(member) => members.register(member),
+            Err(error) => {
+                return exec_setup_failure_or_stop(
+                    state,
+                    &ctx,
+                    lash_core::CellFailure::new(
                         lash_core::CellFailureKind::Host,
-                        format!("the cell's open call {} cannot be read: {error}", open.call),
-                    );
-                }
+                        format!("an open call of the cell cannot be read: {error}"),
+                    ),
+                );
             }
         }
     }
     snapshots
         .bind_members(Arc::clone(&members) as _, members.policies())
         .await;
-    let host = HostBridge::new(HostBridgeConfig {
-        ctx: ctx.clone(),
-        cell: Arc::clone(&cell),
-        prints: Arc::clone(&prints),
-        lash_vm_execution_trace: lash_vm_execution_trace.clone(),
-        host_environment,
-        deferred_execution_grants: deferred_execution_grants.clone(),
-        cell_bindings,
-        ledgers: resumed
-            .as_ref()
-            .map(|resumed| resumed.envelope.host.clone())
-            .unwrap_or_default(),
-        members,
-        snapshots: Arc::clone(snapshots),
-    });
+
     let scope = match ctx.session_scope() {
         Ok(scope) => scope,
         Err(error) => {
             return exec_setup_failure_or_stop(
                 state,
                 &ctx,
-                lash_core::CellFailureKind::Host,
-                error.to_string(),
+                lash_core::CellFailure::new(lash_core::CellFailureKind::Host, error.to_string()),
             );
         }
     };
@@ -822,399 +558,321 @@ async fn execute_code_in_worker_scope(
         "rlm:{}:{:?}",
         scope.session_id, scope.agent_frame_id
     ));
-    // A resumed cell runs on from its snapshot; a fresh one starts from the
-    // session's VM state.
-    let runs_on = resumed.is_some();
-    let from = match resumed {
-        Some(resumed) => {
-            if let Err(error) = hold_continuation_definitions(&ctx, &resumed.from.vm).await {
-                return exec_setup_failure_or_stop(
-                    state,
-                    &ctx,
-                    lash_core::CellFailureKind::Host,
-                    error,
-                );
-            }
-            Some(resumed.from)
-        }
-        None => None,
-    };
-    let start_state = state
-        .vm
-        .state()
-        .bytes()
-        .map(|bytes| {
-            lash_vm_protocol::StartState::Snapshot(lash_vm_protocol::OpaqueVmState::seal(
-                lash_vm_protocol::VmStateKind::Snapshot,
-                owner.clone(),
-                lash_vm::vm_contract_versions(),
-                bytes.to_vec(),
-            ))
-        })
-        .unwrap_or(lash_vm_protocol::StartState::Fresh);
-    // What each quiet point commits beside the VM: the cell's envelope, every
-    // parent ledger a resumed cell runs on with.
-    let envelope = || -> Result<Option<lash_vm_protocol::EncodedPayload>, String> {
-        // A cell with no opener has no execution to resume under.
-        cell.as_ref().as_ref().map_err(|error| error.to_string())?;
-        cell_segment::CellSegmentState::at_quiet_point(
-            &ctx,
-            &host,
-            code,
-            linked.clone(),
-            deferred_execution_grants.clone(),
-            &prints,
-        )
-        .encode()
-        .map(|bytes| Some(lash_vm_protocol::EncodedPayload(bytes)))
-    };
-    let admissions = lash_vm_runtime::RunAdmissions {
-        cx: ctx.actor_context(),
-        members: &host,
-        host_state: &envelope,
-    };
-    let run = lash_vm_runtime::WorkerRun {
-        service: &workers,
-        host: &host,
-        identities,
-        owner,
-        frame_epoch: lash_vm_protocol::FrameEpoch(0),
-        program: lash_vm_protocol::ProgramSource::Source {
-            dialect: dialect.language_id().into(),
-            text: code.to_string(),
-        },
-        context: lash_vm_client::RunContext {
-            environment: host.host_environment_description(),
-            mode: lash_vm::ExecutionMode::Foreground,
-            capture_state_view: true,
-            projected: Vec::new(),
-            observe_execution: lash_vm_execution_trace.is_some(),
-        },
-        projected,
-        bounds: execution_bounds,
-        state: start_state,
-        from,
-        snapshots: snapshots.as_ref(),
-        admissions: &admissions,
-        boundary: &|| false,
-        performing: Some(host.performing_gate()),
-        providers,
+    let LinkedCell {
+        envelope,
+        document,
+        boundary,
+        start,
+        ledgers,
+        open_sites,
+        resumed: runs_on,
+        ..
+    } = linked;
+    let projected = envelope.projected.clone();
+    let annotations =
+        serde_json::from_str::<lash_kernel_doc::Annotations>(&envelope.annotations).ok();
+    let document_identity = document.identity();
+    let trace = document_identity
+        .as_ref()
+        .ok()
+        .and_then(|identity| trace::CellTrace::new(&ctx, *identity, &envelope.dialect));
+    if let Some(trace) = &trace {
+        trace.started();
     }
-    .run()
-    .await;
-    let (result, runtime_failure) = match run {
-        Ok(lash_vm_broker::BrokeredEnd::Complete { value, checkpoint }) => {
-            let outcome = match state
-                .vm
-                .state_mut()
-                .install_completion(&checkpoint.vm, &value)
-            {
-                Ok(outcome) => outcome,
-                Err(error) => {
-                    let mut response = exec_setup_failure(lash_core::CellFailure::new(
-                        lash_core::CellFailureKind::Host,
-                        format!("invalid worker completion: {error}"),
-                    ));
-                    fail_cell_on_nested_error(
-                        &ctx,
-                        &mut response,
-                        lash_core::RuntimeEffectControllerError::new(
-                            lash_core::RuntimeErrorCode::ExecutionStateCaptureFailed,
-                            format!("invalid worker completion: {error}"),
-                        ),
-                    );
-                    return response;
-                }
-            };
-            (Ok(outcome), None)
-        }
-        Ok(lash_vm_broker::BrokeredEnd::GuestError { error, checkpoint }) => {
-            if let Some(checkpoint) = checkpoint
-                && let Err(error) = state
-                    .vm
-                    .state_mut()
-                    .install_bytes(checkpoint.vm.bytes().to_vec())
-                    .await
-            {
-                return worker_setup_failure(state, &ctx, error);
-            }
-            let failure: lash_vm::RuntimeFailure = match rmp_serde::from_slice(&error.0) {
-                Ok(failure) => failure,
-                Err(error) => {
-                    ctx.record_nested_effect_error(
-                        lash_core::RuntimeEffectControllerError::retryable_response_derivation(
-                            error.to_string(),
-                        ),
-                    );
-                    return exec_response_from(
-                        host.into_collected(),
-                        lash_core::CellOutcome::Failed(lash_core::CellFailure::new(
-                            lash_core::CellFailureKind::Host,
-                            error.to_string(),
-                        )),
-                    );
-                }
-            };
-            (Err(failure.error.clone()), Some(failure))
-        }
-        Ok(lash_vm_broker::BrokeredEnd::Cancelled) => {
-            (Err(lash_vm::RuntimeError::HostCancelled), None)
-        }
-        // The cell stopped on a wait its Run's successor segment takes over
-        // (FIG-4739): its snapshot, committed with its envelope, holds
-        // everything the cell holds, and the cell has no answer yet.
-        Ok(lash_vm_broker::BrokeredEnd::Suspended { checkpoint }) => {
-            return match hold_continuation_definitions(&ctx, &checkpoint.vm).await {
-                Ok(()) => ExecResponse {
-                    prints_retained: None,
-                    suspended: true,
-                    ..exec_response_from(host.into_collected(), lash_core::CellOutcome::Completed)
-                },
-                Err(error) => {
-                    let error = format!("the cell's continuation was not held: {error}");
-                    ctx.record_nested_effect_error(lash_core::RuntimeEffectControllerError::new(
-                        lash_core::RuntimeErrorCode::ExecutionStateCaptureFailed,
-                        error.clone(),
-                    ));
-                    exec_response_from(
-                        host.into_collected(),
-                        lash_core::CellOutcome::Failed(lash_core::CellFailure::new(
-                            lash_core::CellFailureKind::Host,
-                            error,
-                        )),
-                    )
-                }
-            };
-        }
+    let entries = match &document_identity {
+        Ok(identity) => processes::CellEntries {
+            document: document.clone(),
+            identity: *identity,
+        },
         Err(error) => {
-            // Only a limit the run itself exhausted is the cell's result. A
-            // deadline, or the host's cumulative CPU or attempt accounting,
-            // is this host's live verdict: it is retryable, so the attempt
-            // fails below and the cell seals nothing (FIG-4451).
-            let run_limit = match &error {
-                lash_vm_broker::BrokerFailure::WorkerLost {
-                    outcome: lash_vm_protocol::InfrastructureOutcome::WorkerLimitExceeded { limit },
-                    ..
-                }
-                | lash_vm_broker::BrokerFailure::Unavailable {
-                    refusal:
-                        lash_vm_broker::CheckoutRefusal::Infrastructure(
-                            lash_vm_protocol::InfrastructureOutcome::WorkerLimitExceeded { limit },
-                        ),
-                } if !limit.is_host_verdict() => Some(*limit),
-                _ => None,
-            };
-            if let Some(limit) = run_limit {
-                let message = match limit {
-                    lash_vm_protocol::WorkerLimit::Fuel => "instruction budget exceeded".to_owned(),
-                    lash_vm_protocol::WorkerLimit::Heap => {
-                        "logical memory limit exceeded".to_owned()
-                    }
-                    lash_vm_protocol::WorkerLimit::Depth => "frame depth limit exceeded".to_owned(),
-                    lash_vm_protocol::WorkerLimit::Observations => {
-                        "execution observations exceeded their bound".to_owned()
-                    }
-                    limit => limit.to_string(),
+            return exec_setup_failure_or_stop(
+                state,
+                &ctx,
+                lash_core::CellFailure::new(lash_core::CellFailureKind::Host, error.to_string()),
+            );
+        }
+    };
+    let published = if runs_on {
+        Ok(())
+    } else {
+        match processes::retain_document(&ctx, &entries).await {
+            Ok(()) => processes::publish_entries(&ctx, &entries).await,
+            Err(message) => Err(message),
+        }
+    };
+    if let Err(message) = published {
+        return exec_setup_failure_or_stop(
+            state,
+            &ctx,
+            lash_core::CellFailure::new(lash_core::CellFailureKind::Host, message),
+        );
+    }
+    let host = CellHost {
+        entries,
+        trace,
+        sites: Mutex::new(open_sites),
+        ctx: ctx.clone(),
+        boundary,
+        grants: envelope.grants.clone(),
+        members,
+        opener: identities.opener().clone(),
+        prints: Arc::clone(&prints),
+        ledgers: Mutex::new(ledgers),
+        envelope,
+    };
+    let printed = Arc::clone(&prints);
+    let random = std::collections::hash_map::RandomState::new();
+    let drawn = std::sync::atomic::AtomicU64::new(0);
+    let run_host = Arc::new(lash_vm_runtime::ParentHost {
+        store: Arc::clone(snapshots),
+        random: Arc::new(move || {
+            use std::hash::BuildHasher as _;
+            random.hash_one(drawn.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
+        }),
+        providers: lash_vm_runtime::ProjectionCatalog::of_backend(
+            ctx.projection_providers().as_deref(),
+        ),
+        printed: Arc::new(move |value| printed.lock_recover().push(value)),
+    });
+    let bounds = cell_bounds(services);
+    let machines = match lash_vm_client::RemoteMachines::new(
+        services.workers.clone(),
+        owner,
+        lash_vm_protocol::OwnerEpoch(0),
+        lash_vm_protocol::FrameEpoch(0),
+        run_host,
+        &document,
+        Start {
+            target: Target::Main,
+            args: Vec::new(),
+            bindings: start,
+        },
+        bounds,
+    ) {
+        Ok(machines) => machines,
+        Err(error) => {
+            return exec_setup_failure_or_stop(
+                state,
+                &ctx,
+                lash_core::CellFailure::new(lash_core::CellFailureKind::Host, error.to_string()),
+            );
+        }
+    };
+    let pool = services.workers.config();
+    let run = KernelBroker {
+        store: snapshots.as_ref(),
+        effects: &host,
+        identities: &identities,
+        ceilings: KernelCeilings {
+            requests_per_park: pool.run_bounds.requests_per_park,
+            join_members: pool.run_bounds.join_members,
+        },
+        slice: pool.tuning.slice,
+    }
+    .run(&machines, &ctx.cancellation())
+    .await;
+
+    // The rest answers the cell from what the run left; the execution's
+    // terminal fact follows its answer.
+    let answer = || -> ExecResponse {
+        let collected = host.ledgers();
+        let respond = |result| exec_response_from(&collected, result);
+        let failed = |kind, message: String| {
+            respond(lash_core::CellOutcome::Failed(lash_core::CellFailure::new(
+                kind, message,
+            )))
+        };
+        let end = match run {
+            Ok(KernelEnd::Ended(end)) => end,
+            // The cell stays parked on waits that outlive this activation: its
+            // checkpoint, committed with its envelope, holds everything the
+            // cell holds, and the cell has no answer yet.
+            Ok(KernelEnd::Suspended) => {
+                return ExecResponse {
+                    suspended: true,
+                    ..respond(lash_core::CellOutcome::Completed)
                 };
-                #[cfg(any(test, feature = "testing"))]
-                assert!(
-                    !EXECUTION_BOUND_EXHAUSTION_LOUD.load(Ordering::SeqCst),
-                    "confidence execution exhausted a required Lash VM bound: {message}"
-                );
+            }
+            Err(failure) => {
+                return broker_failure(state, &ctx, failure, runs_on, &collected);
+            }
+        };
+        // A cancelled tool call ends the cell, whatever its program made of the
+        // error; so does the turn's own cancel.
+        if collected.call_cancelled || ctx.is_cancelled() || matches!(end, End::Cancelled) {
+            state.rollback_code_execution();
+            return failed(
+                lash_core::CellFailureKind::Host,
+                "foreground execution stopped".to_owned(),
+            );
+        }
+        // A cell over `max_tool_calls` fails with the limit, at the call that
+        // met it, whatever its program made of the refusal.
+        if let Some(exceeded) = collected.tool_call_limit {
+            let mut failure = lash_core::CellFailure::new(
+                lash_core::CellFailureKind::Program,
+                exceeded.to_string(),
+            );
+            failure.tool_call_limit = Some(exceeded);
+            return respond(lash_core::CellOutcome::Failed(failure));
+        }
+        match end {
+            End::Finished(finished) => {
+                let document = match document_identity {
+                    Ok(document) => document,
+                    Err(error) => {
+                        return failed(lash_core::CellFailureKind::Host, error.to_string());
+                    }
+                };
+                let mut left = finished.bindings;
+                // A process the cell bound or answered with leaves it as its
+                // definition.
+                host.entries.bind_definitions(&mut left);
+                let result = host
+                    .entries
+                    .leaving(&finished.result)
+                    .unwrap_or(finished.result);
+                // The host's read-only bindings are the host's: what the cell
+                // made of its copy is not the session's.
+                left.variables
+                    .retain(|name, _| !projected.contains(name.as_str()));
+                state.settle_cell(document, left, finished.not_carried);
+                // `main` that ran to its end without a `finish` answered
+                // nothing: the cell completed. A `finish` gave the turn its
+                // answer.
+                respond(if finished.finish {
+                    lash_core::CellOutcome::Finished(datum_json(&result).into())
+                } else {
+                    lash_core::CellOutcome::Completed
+                })
+            }
+            End::Failed(reason) => failed(
+                lash_core::CellFailureKind::Program,
+                format!(
+                    "the program failed: {}",
+                    crate::feedback::datum_text(&reason)
+                ),
+            ),
+            End::Error(error) => {
+                let observation =
+                    CellObservation::of_run_error(error, state.bindings().not_carried());
+                respond(lash_core::CellOutcome::Failed(observation.failure(
+                    code,
+                    annotations.as_ref(),
+                    services.channel,
+                    services.prompts.as_ref(),
+                )))
+            }
+            End::Cancelled => failed(
+                lash_core::CellFailureKind::Host,
+                "foreground execution stopped".to_owned(),
+            ),
+        }
+    };
+    let response = answer();
+    if let Some(trace) = &host.trace
+        && !response.suspended
+    {
+        use lash_trace::TraceLanguageExecutionStatus as Status;
+        match &response.result {
+            lash_core::CellOutcome::Failed(failure) => {
+                trace.finished(Status::Failed, Some(failure.message.clone()));
+            }
+            _ => trace.finished(Status::Completed, None),
+        }
+    }
+    response
+}
+
+/// How a broker failure answers the cell. Nothing about the guest: the
+/// cell's last checkpoint stands.
+fn broker_failure(
+    state: &mut RlmExecutionState,
+    ctx: &RuntimeExecutionContext<'_>,
+    failure: KernelFailure,
+    runs_on: bool,
+    collected: &CellHostLedgers,
+) -> ExecResponse {
+    let message = failure.to_string();
+    let host = |message: String| {
+        exec_response_from(
+            collected,
+            lash_core::CellOutcome::Failed(lash_core::CellFailure::new(
+                lash_core::CellFailureKind::Host,
+                message,
+            )),
+        )
+    };
+    match failure {
+        KernelFailure::Worker { outcome } => {
+            // A limit the run itself exhausted is the cell's result.
+            if let lash_vm_protocol::InfrastructureOutcome::WorkerLimitExceeded { limit } = &outcome
+                && !limit.is_host_verdict()
+            {
                 return exec_response_from(
-                    host.into_collected(),
+                    collected,
                     lash_core::CellOutcome::Failed(
-                        lash_core::CellFailure::new(lash_core::CellFailureKind::Program, message)
-                            .with_worker_limit(limit),
+                        lash_core::CellFailure::new(
+                            lash_core::CellFailureKind::Program,
+                            limit.to_string(),
+                        )
+                        .with_worker_limit(*limit),
                     ),
                 );
             }
             // The state a resumed cell runs on from is refused: another
-            // build wrote it. That is no failure the model sees and nothing
-            // the cell records: the cell aborts with the typed refusal, and
-            // its turn parks on the cell's snapshot (FIG-5613).
-            if runs_on && let Some(refusal) = cell_segment::resumed_state_refusal(&error) {
+            // build wrote it. That is no failure the model sees: the cell
+            // aborts with the typed refusal, and its turn parks on the
+            // cell's checkpoint.
+            if runs_on
+                && let lash_vm_protocol::InfrastructureOutcome::RunRefused { refusal } = &outcome
+                && matches!(refusal, lash_vm_protocol::RunRefusal::State { .. })
+            {
                 let mut refused = lash_core::RuntimeError::new(
                     lash_core::RuntimeErrorCode::VmWorkerFailed,
-                    error.to_string(),
+                    message.clone(),
                 );
                 refused.cause = Some(lash_core::RuntimeErrorCause::CellSnapshotUndecodable {
-                    refusal: Box::new(refusal),
+                    refusal: Box::new(refusal.clone()),
                 });
                 ctx.record_nested_effect_error(
                     lash_core::RuntimeEffectControllerError::from(refused)
                         .retryable_uncommitted_derivation(),
                 );
-                return exec_response_from(
-                    host.into_collected(),
-                    lash_core::CellOutcome::Failed(lash_core::CellFailure::new(
-                        lash_core::CellFailureKind::Host,
-                        error.to_string(),
-                    )),
-                );
+                return host(message);
             }
-            let deployment = match &error {
-                lash_vm_broker::BrokerFailure::WorkerLost { outcome, .. }
-                | lash_vm_broker::BrokerFailure::Unavailable {
-                    refusal: lash_vm_broker::CheckoutRefusal::Infrastructure(outcome),
-                } if outcome.deployment_fault().is_some() => Some(outcome.clone()),
-                _ => None,
-            };
-            if let Some(outcome) = deployment {
-                fail_attempt_on_host_verdict(&ctx, &outcome.into());
-            } else if error.is_retryable() {
-                ctx.record_nested_effect_error(
-                    lash_core::RuntimeEffectControllerError::retryable_response_derivation(
-                        error.to_string(),
-                    ),
-                );
-            }
-            return exec_response_from(
-                host.into_collected(),
-                lash_core::CellOutcome::Failed(lash_core::CellFailure::new(
-                    lash_core::CellFailureKind::Host,
-                    error.to_string(),
-                )),
-            );
-        }
-    };
-    if let Some(trace) = &lash_vm_execution_trace {
-        emit_foreground_execution_finished(trace, &result, runtime_failure.as_ref());
-    }
-    let result = match result {
-        Ok(ExecutionOutcome::Finished(value)) => {
-            lash_core::CellOutcome::Finished(flow_to_json_value(&value).into())
-        }
-        Ok(ExecutionOutcome::Continued) => lash_core::CellOutcome::Completed,
-        Ok(ExecutionOutcome::Failed(value)) if host.cancellation_observed() => {
-            state.rollback_code_execution();
-            return exec_response_from(
-                host.into_collected(),
-                lash_core::CellOutcome::Failed(lash_core::CellFailure::new(
-                    lash_core::CellFailureKind::Host,
-                    format!("foreground execution stopped while returning failure: {value}"),
-                )),
-            );
-        }
-        Ok(ExecutionOutcome::Failed(value)) => {
-            return exec_response_from(
-                host.into_collected(),
-                lash_core::CellOutcome::Failed(lash_core::CellFailure::new(
-                    lash_core::CellFailureKind::Program,
-                    format!("process failed in foreground execution: {value}"),
-                )),
-            );
-        }
-        Err(error) => {
-            #[cfg(any(test, feature = "testing"))]
-            assert!(
-                !EXECUTION_BOUND_EXHAUSTION_LOUD.load(Ordering::SeqCst)
-                    || !error.is_execution_bound_exhausted(),
-                "confidence execution exhausted a required Lash VM bound: {error}"
-            );
-            let kind = lash_vm_runtime_feedback_kind(&error, host.cancellation_observed());
-            let failure = runtime_failure.unwrap_or(lash_vm::RuntimeFailure { error, span: None });
-            if host.cancellation_observed()
-                || matches!(&failure.error, lash_vm::RuntimeError::HostCancelled)
-            {
+            fail_attempt_on_host_verdict(ctx, &lash_vm_client::PoolError::from(outcome));
+            if ctx.is_cancelled() {
                 state.rollback_code_execution();
             }
-            // A `max_tool_calls` refusal is reported in its own words, at the
-            // call that met it: the model reads the limit, not the channel the
-            // refusal travelled on.
-            let tool_call_limit = match &failure.error {
-                lash_vm::RuntimeError::AggregateHostControl { source }
-                    if lash_vm_runtime::is_tool_call_limit_failure(&failure.error) =>
-                {
-                    Some(source.message().to_owned())
-                }
-                _ => None,
-            };
-            let message = match &tool_call_limit {
-                Some(refusal) => {
-                    lash_vm::format_source_diagnostic(code, failure.span, refusal, &[])
-                }
-                None => crate::feedback::render_runtime_failure(code, &failure),
-            };
-            let mut cell_failure = lash_core::CellFailure::new(kind, message);
-            if tool_call_limit.is_some() {
-                cell_failure.tool_call_limit = ctx.tool_call_limit_refusal();
-            }
-            return exec_response_from(
-                host.into_collected(),
-                lash_core::CellOutcome::Failed(cell_failure),
+            host(message)
+        }
+        // The parked state is refused where the machine imports it: the
+        // same account as a worker's refusal of it.
+        KernelFailure::Import(_) | KernelFailure::EmptyCheckpoint if runs_on => {
+            ctx.record_nested_effect_error(
+                lash_core::RuntimeEffectControllerError::new(
+                    lash_core::RuntimeErrorCode::ExecutionStateCaptureFailed,
+                    message.clone(),
+                )
+                .retryable_uncommitted_derivation(),
             );
+            host(message)
         }
-    };
-    exec_response_from(host.into_collected(), result)
-}
-
-/// The environment of the frame this execution was admitted on: the
-/// referrer that holds every module the frame's globals reference.
-fn frame_environment(ctx: &RuntimeExecutionContext<'_>) -> Option<lash_core::FrameEnvironmentId> {
-    let scope = ctx.session_scope().ok()?;
-    Some(lash_core::FrameEnvironmentId::new(
-        scope.session_id,
-        scope.agent_frame_id?,
-    ))
-}
-
-/// Why a frame could not hold a module.
-enum FrameHoldError {
-    /// The frame has ended: only a replay of the turn that switched away
-    /// from it runs here, and the frame's globals are gone, so no reader
-    /// needs the edge (ADR 0113 §4.1).
-    Ended,
-    Store(lash_core::ArtifactStoreError),
-}
-
-/// Add the frame's edge to a stored module.
-async fn acquire_frame_edge(
-    frame: &lash_core::FrameEnvironmentId,
-    artifact_store: &lash_vm::LashVmArtifacts,
-    module_ref: &lash_vm::ModuleRef,
-) -> Result<(), FrameHoldError> {
-    let claim = lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::FrameEnvironment(
-        frame.clone(),
-    ))
-    .map_err(|error| {
-        FrameHoldError::Store(lash_core::ArtifactStoreError::Backend(error.to_string()))
-    })?;
-    match artifact_store
-        .acquire_module_artifact(&claim, module_ref)
-        .await
-    {
-        Ok(()) => Ok(()),
-        Err(lash_core::ArtifactStoreError::ReferrerEnded { .. }) => Err(FrameHoldError::Ended),
-        Err(error) => Err(FrameHoldError::Store(error)),
-    }
-}
-
-/// Classifies a typed Lash VM runtime outcome before it enters the response.
-fn lash_vm_runtime_feedback_kind(
-    error: &lash_vm::RuntimeError,
-    host_cancelled: bool,
-) -> lash_core::CellFailureKind {
-    match error {
-        _ if host_cancelled => lash_core::CellFailureKind::Host,
-        lash_vm::RuntimeError::HostCancelled => lash_core::CellFailureKind::Host,
-        // The session's `max_tool_calls` refused the cell's tool calls
-        // (FIG-4546): the program asked for more than its recorded limit, and
-        // every replay refuses the same call.
-        error if lash_vm_runtime::is_tool_call_limit_failure(error) => {
-            lash_core::CellFailureKind::Program
+        // The parent's own store or host faulted: the attempt fails
+        // retryably, and the cell resumes from its last checkpoint.
+        KernelFailure::Checkpoint(_) | KernelFailure::Parent(_) => {
+            ctx.record_nested_effect_error(
+                lash_core::RuntimeEffectControllerError::retryable_response_derivation(
+                    message.clone(),
+                ),
+            );
+            if ctx.is_cancelled() {
+                state.rollback_code_execution();
+            }
+            host(message)
         }
-        // An aggregate with no members is the program's defect: the host ends
-        // the cell uncatchably (ADR 0099 §11 clause 5), but a retry of the
-        // identical cell fails the same way (FIG-4547).
-        lash_vm::RuntimeError::AggregateAwaitUnsettled { .. } => {
-            lash_core::CellFailureKind::Program
-        }
-        // An aggregate's infrastructure failure or host stop travels on the
-        // host-control channel (ADR 0099 §10 L3): the host's, not the program's.
-        lash_vm::RuntimeError::AggregateHostControl { .. } => lash_core::CellFailureKind::Host,
-        error if error.is_execution_bound_exhausted() => lash_core::CellFailureKind::Policy,
-        _ => lash_core::CellFailureKind::Program,
+        _ => host(message),
     }
 }
 
@@ -1235,8 +893,7 @@ fn exec_setup_failure(error: lash_core::CellFailure) -> ExecResponse {
 fn exec_setup_failure_or_stop(
     state: &mut RlmExecutionState,
     ctx: &RuntimeExecutionContext<'_>,
-    kind: lash_core::CellFailureKind,
-    error: impl Into<String>,
+    failure: lash_core::CellFailure,
 ) -> ExecResponse {
     if ctx.is_cancelled() {
         state.rollback_code_execution();
@@ -1245,16 +902,14 @@ fn exec_setup_failure_or_stop(
             "foreground execution stopped during setup",
         ));
     }
-    exec_setup_failure(lash_core::CellFailure::new(kind, error))
+    exec_setup_failure(failure)
 }
 
-/// A worker service fault in a cell. A host verdict — its retryable worker
-/// failure, worker budget or pool capacity
-/// ([`lash_vm_client::PoolError::is_host_verdict`]) — is read live, outside
+/// A worker service fault in a cell's setup. A host verdict (its retryable
+/// worker failure, worker budget or pool capacity) is read live, outside
 /// any recorded step, and a replay or another host with capacity answers it
 /// differently: it fails the attempt retryably, so the cell seals nothing
-/// and the model never sees it (FIG-4451, FIG-4459). Any other fault is the cell's
-/// host failure.
+/// and the model never sees it. Any other fault is the cell's host failure.
 fn worker_setup_failure(
     state: &mut RlmExecutionState,
     ctx: &RuntimeExecutionContext<'_>,
@@ -1268,34 +923,18 @@ fn worker_setup_failure(
         let mut response = exec_setup_failure_or_stop(
             state,
             ctx,
-            lash_core::CellFailureKind::Program,
-            limit.to_string(),
+            lash_core::CellFailure::new(lash_core::CellFailureKind::Program, limit.to_string()),
         );
         if let lash_core::CellOutcome::Failed(failure) = &mut response.result {
             failure.worker_limit = Some(*limit);
         }
         return response;
     }
-    if let lash_vm_client::PoolError::Infrastructure(
-        lash_vm_protocol::InfrastructureOutcome::RunRefused {
-            refusal: lash_vm_protocol::RunRefusal::UnusableSchema { source },
-        },
-    ) = &error
-    {
-        if ctx.is_cancelled() {
-            state.rollback_code_execution();
-        }
-        return exec_setup_failure(
-            lash_core::CellFailure::new(lash_core::CellFailureKind::Host, source.to_string())
-                .with_schema_admission(source.as_ref().clone()),
-        );
-    }
     fail_attempt_on_host_verdict(ctx, &error);
     exec_setup_failure_or_stop(
         state,
         ctx,
-        lash_core::CellFailureKind::Host,
-        error.to_string(),
+        lash_core::CellFailure::new(lash_core::CellFailureKind::Host, error.to_string()),
     )
 }
 
@@ -1313,100 +952,18 @@ fn fail_attempt_on_host_verdict(
     }
 }
 
-fn exec_response_from(
-    collected: CollectedExecutionOutput,
-    result: lash_core::CellOutcome,
-) -> ExecResponse {
+fn exec_response_from(collected: &CellHostLedgers, result: lash_core::CellOutcome) -> ExecResponse {
     ExecResponse {
         prints_retained: None,
-        prints: collected.observations,
-        calls: collected.calls,
-        tool_calls: collected.tool_calls,
-        printed_images: collected.printed_images,
+        prints: Vec::new(),
+        calls: collected.executed_calls(),
+        tool_calls: collected.tool_call_records(),
+        printed_images: Vec::new(),
         result,
         retained_finish_value: None,
         degraded_bindings: Vec::new(),
         suspended: false,
     }
-}
-
-/// Render a parse failure for the model, with the cell-delimiter warning only
-/// where a cell delimiter exists.
-///
-/// The warning explains a truncation the model cannot see: a closing delimiter
-/// line inside multiline source closes the cell early, so the executor
-/// receives a program that stops mid-literal. Native `execute_code` calls (ADR
-/// 0083) carry the program as a tool argument, where no delimiter can truncate
-/// anything — there the sentence names syntax the model never wrote and sends
-/// it looking for a cause that does not exist.
-///
-/// Gated on the channel alone, not on the source containing the closing tag:
-/// by the time the executor sees the code, cell extraction has already consumed
-/// the delimiter that truncated it, so an implicated delimiter is exactly the
-/// case where the source cannot mention one.
-fn format_rlm_parse_diagnostic(
-    diagnostic: String,
-    channel: crate::plugin::RlmChannel,
-    tags: crate::dialect::CellTags,
-) -> String {
-    match channel {
-        crate::plugin::RlmChannel::Cell => format!(
-            "{diagnostic}\n\nA standalone `{}` line terminates the outer cell even inside multiline source text; construct that content without a standalone delimiter line.",
-            tags.close,
-        ),
-        crate::plugin::RlmChannel::NativeTool => diagnostic,
-    }
-}
-
-fn select_deferred_resolution_link(
-    state: &mut RlmExecutionState,
-    ctx: &RuntimeExecutionContext<'_>,
-) {
-    let Some(invocation) = ctx.parent_invocation() else {
-        state.deferred_link = None;
-        return;
-    };
-    let Some(link_key) =
-        lash_vm_runtime::DeferredResolutionLinkKey::from_exec_code_invocation(invocation)
-    else {
-        state.deferred_link = None;
-        return;
-    };
-
-    match state.deferred_link.as_mut() {
-        Some(link) => link.select_link(link_key.clone()),
-        None => {
-            state.deferred_link = Some(lash_vm_runtime::DeferredLink::new(link_key.clone()));
-        }
-    }
-}
-
-fn deferred_execution_grants(
-    record: &lash_vm_runtime::DeferredLink,
-    ctx: &RuntimeExecutionContext<'_>,
-) -> Result<BTreeMap<lash_core::ToolId, lash_core::ToolExecutionGrant>, lash_core::PluginError> {
-    record
-        .outcomes
-        .values()
-        .filter_map(|resolution| {
-            let lash_vm_runtime::Resolution::Resolved(grant) = resolution else {
-                return None;
-            };
-            let owner = match ctx
-                .tool_execution_owner(&grant.definition.manifest.id, grant.source_id.as_deref())
-            {
-                Ok(owner) => owner,
-                Err(error) => return Some(Err(error)),
-            };
-            let mut execution_grant =
-                lash_core::ToolExecutionGrant::from_definition(owner, grant.definition.clone())
-                    .with_execution_binding(grant.execution_binding.clone());
-            if let Some(source_id) = grant.source_id.as_deref() {
-                execution_grant = execution_grant.with_source_id(source_id);
-            }
-            Some(Ok((execution_grant.manifest().id.clone(), execution_grant)))
-        })
-        .collect()
 }
 
 fn emit_step_trace(ctx: &RuntimeExecutionContext<'_>, result: Result<(), &str>) {
@@ -1444,94 +1001,107 @@ fn emit_step_trace(ctx: &RuntimeExecutionContext<'_>, result: Result<(), &str>) 
     });
 }
 
-fn foreground_lash_vm_execution_trace(
-    ctx: &RuntimeExecutionContext<'_>,
-    artifact: &lash_vm_client::InspectedArtifact,
-    language: &'static str,
-) -> Option<LashVmExecutionTrace> {
-    let tracing = lash_core::plugin::PluginExecutionTrace::new(ctx.trace_standing()?);
-    if !tracing.observes_language() {
-        return None;
-    }
-    let invocation = ctx.parent_invocation()?;
-    let effect_id = invocation.effect_id()?;
-    let address = invocation.effect_address()?.clone();
-    let generation = match ctx.admitted_process() {
-        Some(_) => Some(TraceLanguageExecutionGeneration::new(
-            ctx.admitted_process_attempt()?,
-        )),
-        None => None,
-    };
-    Some(LashVmExecutionTrace::new(
-        tracing,
-        language,
-        TraceLanguageExecutionIdentity {
-            scope: TraceRuntimeScope {
-                session_id: invocation.attribution.session_id.clone(),
-                turn_id: invocation.attribution.turn_id.clone(),
-                turn_index: invocation.attribution.turn_index,
-                protocol_iteration: invocation.attribution.protocol_iteration,
-            },
-            subject: TraceRuntimeSubject::Effect {
-                address,
-                effect_id: effect_id.to_string(),
-            },
-            document: lash_trace::WorkflowDocumentRef {
-                source_identity: artifact.source_identity(),
-                module_ref: artifact.module_ref().clone(),
-                entry: lash_trace::WorkflowDocumentEntry::Main,
-                ir_version: artifact.graph.ir_version,
-            },
-            entry_name: "main".to_string(),
-            engine_execution_id: ctx.engine_execution_id().map(str::to_string),
-            generation,
-        },
-    ))
+/// Feature-gated fixture that lets the repository's performance harness
+/// shift the production RLM execution-state capture without exposing
+/// executor internals as public protocol API.
+#[cfg(feature = "testing")]
+pub struct RlmCheckpointPerfFixture {
+    services: CellServices,
+    state: RlmExecutionState,
+    binding_count: usize,
+    payload_bytes: usize,
 }
 
-fn emit_foreground_execution_started(trace: &LashVmExecutionTrace) {
-    trace.emit(TraceLanguageExecution {
-        event_key: trace.event_key("started"),
-        identity: trace.identity().clone(),
-        payload: TraceLanguageExecutionPayload::ExecutionStarted,
-    });
-}
-
-fn emit_foreground_execution_finished(
-    trace: &LashVmExecutionTrace,
-    result: &Result<ExecutionOutcome, lash_vm::RuntimeError>,
-    runtime_failure: Option<&lash_vm::RuntimeFailure>,
-) {
-    let (status, error) = match result {
-        Ok(ExecutionOutcome::Finished(_)) | Ok(ExecutionOutcome::Continued) => {
-            (TraceLanguageExecutionStatus::Completed, None)
+#[cfg(feature = "testing")]
+impl RlmCheckpointPerfFixture {
+    /// A fixture whose session holds `binding_count` bindings of
+    /// `payload_bytes` each.
+    pub async fn new(
+        dialect: &crate::CellDialect,
+        workers: lash_vm_client::service::Service,
+        binding_count: usize,
+        payload_bytes: usize,
+    ) -> Result<Self, lash_core::SessionError> {
+        let mut state = RlmExecutionState::new(dialect.name(), dialect.numbers());
+        let mut patch = lash_rlm_types::RlmGlobalsPatchPluginBody::default();
+        for index in 0..binding_count {
+            patch.set_default.insert(
+                format!("mid_{index}"),
+                serde_json::json!([format!("binding-{index}-{}", "x".repeat(payload_bytes))]),
+            );
         }
-        Ok(ExecutionOutcome::Failed(value)) => (
-            TraceLanguageExecutionStatus::Failed,
-            Some(value.to_string()),
-        ),
-        Err(error) => (
-            TraceLanguageExecutionStatus::Failed,
-            Some(
-                runtime_failure
-                    .map(|failure| failure.error.to_string())
-                    .unwrap_or_else(|| error.to_string()),
-            ),
-        ),
-    };
-    trace.emit(TraceLanguageExecution {
-        event_key: trace.event_key("finished"),
-        identity: trace.identity().clone(),
-        payload: TraceLanguageExecutionPayload::ExecutionFinished { status, error },
-    });
+        state.patch_globals(&patch, &BTreeSet::new()).await?;
+        Ok(Self {
+            services: CellServices {
+                workers,
+                deferred_tool_resolver: None,
+                execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
+                channel: crate::plugin::RlmChannel::Cell,
+                code_renderer: crate::render::CodeRendererSlot::default(),
+                prompts: dialect.prompts(),
+            },
+            state,
+            binding_count,
+            payload_bytes,
+        })
+    }
+
+    pub async fn capture(
+        &mut self,
+    ) -> Result<lash_core::plugin::ExecutionStateCapture, lash_core::SessionError> {
+        self.state
+            .snapshot_execution_state(lash_core::FleetFormat::current())
+            .await
+    }
+
+    pub fn acknowledge_capture(&mut self) {
+        self.state.acknowledge_execution_state_capture();
+    }
+
+    /// Run the edit under the backend's scoped controller and this cell's
+    /// invocation: one binding is rebound per turn, at the same order of
+    /// bytes.
+    pub async fn assign_one(
+        &mut self,
+        index: usize,
+        turn: usize,
+        ctx: RuntimeExecutionContext<'_>,
+    ) -> Result<(), lash_core::SessionError> {
+        let binding = index % self.binding_count.max(1);
+        let code = format!(
+            "mid_{binding} = [\"binding-{binding}-{}\", \"turn-{turn}-{}\"];",
+            "x".repeat(self.payload_bytes),
+            "y".repeat(self.payload_bytes / 8)
+        );
+        let response = execute_cell(
+            &mut self.state,
+            ctx,
+            ExecRequest { code },
+            &self.services,
+            RlmProjectedBindings::default(),
+        )
+        .await;
+        self.state.accept_code_execution();
+        if let Some(error) = response.error() {
+            return Err(lash_core::SessionError::Protocol(format!(
+                "RLM checkpoint perf assignment failed: {}",
+                error.message,
+            )));
+        }
+        Ok(())
+    }
+
+    pub async fn restore(
+        dialect: &crate::CellDialect,
+        state: &lash_core::plugin::HydratedExecutionState,
+    ) -> Result<(), lash_core::SessionError> {
+        let mut restored = RlmExecutionState::new(dialect.name(), dialect.numbers());
+        restored
+            .restore_execution_state(state, lash_core::FleetFormat::current())
+            .await
+            .map_err(lash_core::SessionError::from)
+    }
 }
 
-/// Applies a `set_default` patch as one transaction.
-///
-/// Every key is checked before any of them is applied, and the accepted
-/// operations then go to the state as a single batch. A rejected patch — a
-/// protected or reserved name anywhere in it — therefore leaves the state
-/// exactly as it was, instead of committing the defaults that happened to come
-/// first while the caller's dirty tracking records nothing.
 #[cfg(test)]
 mod tests;

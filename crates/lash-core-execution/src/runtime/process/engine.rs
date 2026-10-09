@@ -292,6 +292,17 @@ pub trait ProcessDocumentProvider: Send + Sync {
         claim: &crate::ReferrerClaim,
         request: ProcessDocument,
     ) -> Result<ProcessDocument, crate::PluginError>;
+
+    /// What a document of this engine is written, edited and admitted
+    /// against, for the processes `request` describes. A host edits a
+    /// document against the same environment its publication is admitted
+    /// under, so an edit the engine would refuse is refused where it is
+    /// made. Nothing is stored. `request` and the answer are the
+    /// provider's own types.
+    async fn environment(
+        &self,
+        request: ProcessDocument,
+    ) -> Result<ProcessDocument, crate::PluginError>;
 }
 
 /// A process identity the engine registry produced.

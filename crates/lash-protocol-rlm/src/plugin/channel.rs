@@ -57,27 +57,6 @@ pub(super) fn validate_channel(
     }
 }
 
-/// The session's recorded dialect against the host's selection: the language
-/// id of the dialect the host selected when the session materialized
-/// (ADR 0096). A different id is a typed conflict, and a rematerialized
-/// session that recorded none is refused.
-pub(super) fn validate_dialect(
-    recorded: Option<&RlmRecordedConfig>,
-    selected: &'static str,
-    materialization: PluginSessionMaterialization,
-) -> Result<(), PluginError> {
-    match recorded.and_then(|recorded| recorded.dialect.as_deref()) {
-        Some(recorded) if recorded == selected => Ok(()),
-        Some(recorded) => Err(PluginError::RecordedSessionConfigConflict {
-            plugin_id: super::RLM_PROTOCOL_PLUGIN_ID.to_string(),
-            field: "dialect".to_string(),
-            recorded: recorded.to_string(),
-            requested: selected.to_string(),
-        }),
-        None => missing_pin("dialect", materialization),
-    }
-}
-
 /// A session being created has recorded no pin yet; a rebuilt one must have.
 fn missing_pin(
     field: &str,
@@ -137,21 +116,5 @@ mod tests {
                 Err(PluginError::MissingRecordedSessionConfig { field, .. }) if field == "channel"
             ));
         }
-    }
-
-    #[test]
-    fn recorded_dialect_refuses_substitution_and_missing_pin() {
-        let recorded = pinned(None, Some("typescript"));
-        validate_dialect(Some(&recorded), "typescript", REBUILT).unwrap();
-        assert!(matches!(
-            validate_dialect(Some(&recorded), "other-dialect", REBUILT),
-            Err(PluginError::RecordedSessionConfigConflict { field, recorded, requested, .. })
-                if field == "dialect" && recorded == "typescript" && requested == "other-dialect"
-        ));
-        assert!(matches!(
-            validate_dialect(None, "typescript", REBUILT),
-            Err(PluginError::MissingRecordedSessionConfig { field, .. }) if field == "dialect"
-        ));
-        validate_dialect(None, "typescript", PluginSessionMaterialization::Creation).unwrap();
     }
 }

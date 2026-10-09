@@ -2,34 +2,18 @@ worker protocol 1
 frame header 8 bytes
 testing true
 
-# [serde (rename_all = "snake_case" , deny_unknown_fields)] enum Request { References { source : String , } , VerifyArtifact { # [serde (with = "serde_bytes")] bytes : Vec < u8 > , } , InspectArtifact { module_ref : lash_vm :: ModuleRef , # [serde (with = "serde_bytes")] bytes : Vec < u8 > , } , AdmitDocument { graph : Box < lash_vm :: WorkflowGraph > , environment : LashVmHostEnvironment , } , ContinuationInfo { bytes : Vec < u8 > , } , CheckState { state : lash_vm_protocol :: OpaqueVmState , } , ContinuationProbe { bytes : Vec < u8 > , remove_first_reference : bool , } , CreateDefinition { source : String , environment : LashVmHostEnvironment , } , LinkAst { program : lash_vm :: Program , environment : LashVmHostEnvironment , } , CompileModule { source : String , environment : LashVmHostEnvironment , cell : bool , } , OpaqueBindings { snapshot : serde_bytes :: ByteBuf , config : lash_vm :: BindingSummaryConfig , } , State { snapshot : Option < serde_bytes :: ByteBuf > , action : StateAction , } , Restore { header : serde_bytes :: ByteBuf , globals : BTreeMap < String , serde_bytes :: ByteBuf > , fleet : u32 , } , Capture { snapshot : serde_bytes :: ByteBuf , baseline : BTreeMap < String , String > , fleet : u32 , } }
+# [serde (rename_all = "snake_case" , deny_unknown_fields)] enum Request { Lower { dialect : String , source : String , effects : BTreeMap < EffectName , Signature > , bindings : BTreeSet < Name > , } , Print { dialect : String , # [serde (with = "serde_bytes")] document : Vec < u8 > , } }
 
-# [serde (rename_all = "snake_case" , deny_unknown_fields)] enum StateAction { Inspect , Insert { name : String , # [serde (with = "lash_vm::effect_value")] value : Value , } , Remove { names : BTreeSet < String > , } , Defaults { # [serde (with = "lash_vm::effect_value::map")] values : BTreeMap < String , Value > , protected : BTreeSet < String > , } }
+# [serde (deny_unknown_fields)] struct DialectRefusal { code : String , message : String , span : Option < (usize , usize) > , unsupported : bool , repairs : Vec < String > , }
 
-# [serde (deny_unknown_fields)] struct StateMetadata { definition_ids : BTreeSet < lash_core_execution :: ProcessDefinitionId > , # [serde (with = "lash_vm::effect_value::record")] globals : Record , names : BTreeSet < String > , expired : BTreeSet < String > , opaque : Vec < (String , String) > , }
+# [serde (rename_all = "snake_case" , deny_unknown_fields)] enum Response { Lowered { # [serde (with = "serde_bytes")] document : Vec < u8 > , # [serde (with = "serde_bytes")] annotations : Vec < u8 > , } , Printed { source : String , } , DialectRefused (DialectRefusal) , UnknownDialect { dialect : String , } }
 
-# [serde (deny_unknown_fields)] struct StateView { # [serde (with = "serde_bytes")] snapshot : Vec < u8 > , metadata : StateMetadata , }
+# [serde (deny_unknown_fields)] struct StartWire { entry : Option < Name > , args : Vec < Datum > , variables : BTreeMap < Name , Value > , objects : Vec < (ObjectId , Object) > , }
 
-# [serde (deny_unknown_fields)] struct CellCompletion { outcome : lash_vm :: ExecutionOutcome , state : EncodedPayload , }
+# [serde (rename_all = "snake_case" , deny_unknown_fields)] enum RequestWire { Effect { wait : WaitId , identity : EffectIdentity , effect : EffectName , args : Vec < Datum > , result : Type , } , Sleep { wait : WaitId , identity : EffectIdentity , seconds : u64 , nanoseconds : u32 , } }
 
-# [serde (rename_all = "snake_case" , deny_unknown_fields)] enum Response { References (BTreeSet < String >) , ArtifactVerification (ArtifactVerification) , Module (Box < CompiledModule >) , Definition (CreatedDefinition) , Artifact (crate :: InspectedArtifact) , Admitted (Box < crate :: AdmittedDocument >) , AdmissionRefused (lash_vm :: WorkflowAdmissionRefusal) , ArtifactRefused (lash_vm :: ModuleArtifactRefusal) , CompileRefused { error : lash_vm :: ModuleCompileError , policy : bool , } , ContinuationInfo { iterator_count : usize , } , StateCheck { refusal : Option < lash_vm_protocol :: RunRefusal > , } , ContinuationProbe { bytes : Vec < u8 > , closure_root : bool , } , OpaqueBindings (Vec < (String , String) >) , State (StateView) , Captured (Capture) , Restored { view : StateView , baseline : BTreeMap < String , String > , } , Refused { message : String , policy : bool , } , SnapshotRefused (lash_vm :: SnapshotDecodeError) }
+# [serde (deny_unknown_fields)] struct ParkWire { requests : Vec < RequestWire > , withdrawn : Vec < WaitId > , }
 
-# [serde (rename_all = "snake_case" , deny_unknown_fields)] enum ArtifactVerification { Match , Refused (lash_vm :: ModuleArtifactRefusal) }
+# [serde (rename_all = "snake_case" , deny_unknown_fields)] enum OutcomeWire { Completed (Datum) , Failed (ErrorDatum) , Elapsed }
 
-struct Capture { definition_ids : BTreeSet < lash_core_execution :: ProcessDefinitionId > , # [serde (with = "serde_bytes")] header : Vec < u8 > , fragments : BTreeMap < String , lash_vm :: DurableFragment > , baseline : BTreeMap < String , String > , }
-
-struct CreatedDefinition { draft : lash_core_execution :: ProcessDefinitionDraft , signature : lash_core_execution :: ProcessSignature , process_name : String , module : lash_core_execution :: DeclaredModuleArtifact , }
-
-# [serde (deny_unknown_fields)] struct CompiledModule { module_ref : lash_vm :: ModuleRef , host_requirements_ref : lash_vm :: HostRequirementsRef , artifact : crate :: InspectedArtifact , introspection : lash_vm :: ModuleIntrospection , }
-
-# [serde (deny_unknown_fields)] struct ProcessMetadata { lifted : bool , params : BTreeMap < String , lash_vm :: TypeExpr > , process_type : Option < lash_vm :: TypeExpr > , }
-
-# [serde (deny_unknown_fields)] struct InspectedArtifact { # [serde (with = "serde_bytes")] bytes : Vec < u8 > , module_ref : lash_vm :: ModuleRef , host_requirements_ref : lash_vm :: HostRequirementsRef , host_requirements : lash_vm :: HostRequirements , exports : lash_vm :: ModuleExports , source_identity : String , processes : BTreeMap < String , ProcessMetadata > , graph : lash_vm :: WorkflowGraph , }
-
-# [serde (deny_unknown_fields)] struct AdmittedDocument { artifact : InspectedArtifact , nodes : BTreeMap < lash_vm :: WorkflowNodeId , lash_vm :: WorkflowNodeId > , }
-
-# [serde (deny_unknown_fields)] struct RunContext { environment : LashVmHostEnvironment , mode : ExecutionMode , # [serde (default)] projected : Vec < ProjectionDescription > , # [serde (default)] observe_execution : bool , capture_state_view : bool , }
-
-struct ProjectionDescription { name : String , # [serde (with = "lash_vm::effect_value")] value : lash_vm :: Value , }
-
-struct ProjectionRead { resource : lash_vm :: ResourceRef , requests : Vec < lash_vm :: ProjectedReadRequest > , }
+# [serde (deny_unknown_fields)] struct ProjectionRead { handle : Handle , request : Datum , }

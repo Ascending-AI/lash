@@ -14,8 +14,6 @@
 //! data it may not be able to read.
 
 use lash_core::{DurableItem, DurablePayload, DurableSurface};
-#[cfg(feature = "rlm")]
-use lash_vm_client::service::runtime_ops::ServiceRuntimeOps as _;
 
 use super::msgpack;
 use super::{PRIMARY_FORMATS, SurfaceRelation, format_surface};
@@ -68,10 +66,7 @@ pub(super) fn primary_format(surface: DurableSurface) -> DurableFormat {
                 surface: primary_surface,
                 primary: true,
             } if primary_surface == surface => Some(*format),
-            SurfaceRelation::Walk { .. }
-            | SurfaceRelation::CarriedBy(_)
-            | SurfaceRelation::Unwalkable(_)
-            | SurfaceRelation::NotPersisted => None,
+            SurfaceRelation::Walk { .. } | SurfaceRelation::Unwalkable(_) => None,
         })
         // A surface this build does not know is not a surface it can
         // attribute; the manifest row it lands on is the checkpoint manifest,
@@ -80,10 +75,7 @@ pub(super) fn primary_format(surface: DurableSurface) -> DurableFormat {
 }
 
 /// Every format observation one item yields.
-pub(super) async fn extract(
-    item: &DurableItem,
-    #[cfg(feature = "rlm")] workers: &lash_vm_client::service::Service,
-) -> Vec<Extraction> {
+pub(super) fn extract(item: &DurableItem) -> Vec<Extraction> {
     let format = primary_format(item.surface);
     let payload = match &item.payload {
         DurablePayload::Json(text) => Payload::Json(text.as_str()),
@@ -107,84 +99,30 @@ pub(super) async fn extract(
         DurableSurface::StartedProcess => started_process(payload),
         DurableSurface::SessionCheckpoint => session_checkpoint(payload),
         DurableSurface::SessionExecutionState => session_execution_state(payload),
-        DurableSurface::ModuleArtifact => {
-            module_artifact(
-                payload,
-                #[cfg(feature = "rlm")]
-                workers,
-            )
-            .await
-        }
+        DurableSurface::ModuleArtifact => kernel_document(payload),
         _ => Vec::new(),
     }
 }
 
-/// Inspect one persisted module artifact without inventing a version field.
-///
-/// With `rlm`, the artifact's module ref is the identity fence: a valid current
-/// artifact contributes a readable identity, while a hash mismatch or known
-/// future shape is a decided refusal. Without the verifier, the manifest row
-/// remains visible but stored artifacts are honestly undecidable. Malformed
-/// JSON is likewise undecidable because it is not evidence of another build.
-async fn module_artifact(
-    payload: Payload<'_>,
-    #[cfg(feature = "rlm")] workers: &lash_vm_client::service::Service,
-) -> Vec<Extraction> {
-    let format = DurableFormat::ModuleArtifact;
-    #[cfg(not(feature = "rlm"))]
+/// A stored kernel document states the kernel version it is written in, in
+/// its manifest: the module store holds nothing else. A text that is not a
+/// document is undecidable, since it is not evidence of another build.
+fn kernel_document(payload: Payload<'_>) -> Vec<Extraction> {
+    let format = DurableFormat::KernelDocument;
+    let document = match payload.json(format) {
+        Ok(document) => document,
+        Err(extraction) => return vec![extraction],
+    };
+    match document
+        .pointer("/manifest/kernel")
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|version| u32::try_from(version).ok())
     {
-        let _ = payload;
-        vec![Extraction::Undecodable {
+        Some(version) => vec![Extraction::Found { format, version }],
+        None => vec![Extraction::Undecodable {
             format,
-            reason: "module artifact identity verification requires the `rlm` feature".to_string(),
-        }]
-    }
-    #[cfg(feature = "rlm")]
-    {
-        let bytes = match payload {
-            Payload::Json(text) => text.as_bytes(),
-            Payload::MessagePack(_) => {
-                return vec![Extraction::Undecodable {
-                    format,
-                    reason: "payload is MessagePack where this format is JSON".to_string(),
-                }];
-            }
-        };
-        use lash_vm_client::service::{ArtifactVerification, Request, Response};
-        match workers
-            .request_accounted(Request::VerifyArtifact {
-                bytes: bytes.to_vec(),
-            })
-            .await
-        {
-            Ok(Response::ArtifactVerification(ArtifactVerification::Match)) => {
-                vec![Extraction::IdentityMatch { format }]
-            }
-            Ok(Response::ArtifactVerification(ArtifactVerification::Refused(refusal))) => {
-                match refusal {
-                    lash_vm::ModuleArtifactRefusal::Generation(source) => {
-                        vec![Extraction::IdentityMismatch {
-                            format,
-                            detail: format!("{source}; recompile and republish the module"),
-                        }]
-                    }
-                    lash_vm::ModuleArtifactRefusal::Corrupt(source) => {
-                        vec![Extraction::Undecodable {
-                            format,
-                            reason: source.to_string(),
-                        }]
-                    }
-                }
-            }
-            Ok(_) => vec![Extraction::Undecodable {
-                format,
-                reason: "unexpected worker artifact verification response".into(),
-            }],
-            Err(error) => vec![Extraction::Undecodable {
-                format,
-                reason: format!("worker artifact verification failed: {error}"),
-            }],
-        }
+            reason: "document manifest carries no readable `kernel` version".to_string(),
+        }],
     }
 }
 
@@ -229,7 +167,7 @@ impl<'a> Payload<'a> {
 /// started one whose stamp is missing or another build's parks at its next
 /// claim, so it is a refusal.
 fn started_process(payload: Payload<'_>) -> Vec<Extraction> {
-    let format = DurableFormat::Bytecode;
+    let format = DurableFormat::KernelVersion;
     let record = match payload.json(format) {
         Ok(record) => record,
         Err(extraction) => return vec![extraction],
@@ -248,9 +186,9 @@ fn started_process(payload: Payload<'_>) -> Vec<Extraction> {
 
 #[cfg(feature = "rlm")]
 fn start_generation(record: &serde_json::Value, stamp: Option<&str>) -> Option<Extraction> {
-    let format = DurableFormat::Bytecode;
+    let format = DurableFormat::KernelVersion;
     let input = record.get("input")?;
-    // Only a Lash VM engine process runs under a generation; a tool-call or
+    // Only a kernel engine process runs under a generation; a tool-call or
     // session-turn process has nothing to recompute and is not a gap.
     if input.get("type").and_then(serde_json::Value::as_str) != Some("engine")
         || input.get("kind").and_then(serde_json::Value::as_str)
@@ -259,11 +197,10 @@ fn start_generation(record: &serde_json::Value, stamp: Option<&str>) -> Option<E
         return None;
     }
     let payload = input.get("payload")?;
-    let Ok(parsed) = serde_json::from_value::<lash_vm_runtime::LashVmProcessInput>(payload.clone())
-    else {
+    let Ok(parsed) = lash_vm_runtime::KernelProcessDefinition::from_payload(payload) else {
         return Some(Extraction::Undecodable {
             format,
-            reason: "started process payload is not a lash_vm process input".to_string(),
+            reason: "started process payload is not a kernel process input".to_string(),
         });
     };
     let current = parsed.executable_generation();
@@ -273,10 +210,10 @@ fn start_generation(record: &serde_json::Value, stamp: Option<&str>) -> Option<E
         Extraction::IdentityMismatch {
             format,
             detail: format!(
-                "the process was started under executable generation {}; bytecode v{} runs it \
-                 as {current}, so its next claim parks it as a retired generation",
+                "the process was started under executable generation {}; kernel version {} \
+                 runs it as {current}, so its next claim parks it as a retired generation",
                 stamp.unwrap_or("none"),
-                crate::formats::BYTECODE_FORMAT_VERSION
+                crate::formats::LASH_KERNEL_VERSION
             ),
         }
     })
@@ -361,12 +298,7 @@ mod tests {
     use lash_sansio::SessionId;
 
     async fn extract(item: &DurableItem) -> Vec<Extraction> {
-        super::extract(
-            item,
-            #[cfg(feature = "rlm")]
-            &lash_vm_client::service::Service::default(),
-        )
-        .await
+        super::extract(item)
     }
 
     fn item(surface: DurableSurface, payload: DurablePayload) -> DurableItem {
@@ -417,54 +349,25 @@ mod tests {
         assert!(reasons[0].contains("sha256:abc"), "{reasons:?}");
     }
 
+    /// A stored document is judged by the kernel version its manifest
+    /// states; a text with none is undecidable, never another build's.
     #[tokio::test]
-    #[cfg(feature = "rlm")]
-    async fn a_frozen_predecessor_module_artifact_retains_its_generation_refusal() {
-        let mut raw: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../lash-vm/tests/fixtures/module-artifact-old.json"
-        ))
-        .expect("frozen fixture should be JSON");
-        let object = raw.as_object_mut().expect("artifact should be an object");
-        // Reach the predecessor carrier past its retired top-level fields.
-        object.remove("trigger_key_manifest");
-        object.remove("compilation_dialect");
-        let extractions = extract(&item(
-            DurableSurface::ModuleArtifact,
-            DurablePayload::Json(
-                serde_json::to_string(&raw).expect("legacy artifact should encode"),
-            ),
-        ))
-        .await;
-        let [
-            Extraction::IdentityMismatch {
-                format: DurableFormat::ModuleArtifact,
-                detail,
-            },
-        ] = extractions.as_slice()
-        else {
-            panic!("predecessor carrier must retain its generation refusal");
+    async fn a_stored_document_reports_the_kernel_version_it_is_written_in() {
+        let stored = |text: &str| {
+            item(
+                DurableSurface::ModuleArtifact,
+                DurablePayload::Json(text.to_string()),
+            )
         };
-        assert!(
-            detail.contains("unsupported artifact shape artifact shape: unknown field"),
-            "{detail}"
+        let extractions = extract(&stored(r#"{"manifest":{"kernel":7,"numbers":"exact"}}"#)).await;
+        assert_eq!(
+            versions(&extractions, DurableFormat::KernelDocument),
+            vec![7]
         );
-        assert!(detail.contains("recompile and republish"), "{detail}");
-    }
-
-    #[tokio::test]
-    #[cfg(not(feature = "rlm"))]
-    async fn a_module_artifact_is_undecidable_without_the_identity_verifier() {
-        let extractions = extract(&item(
-            DurableSurface::ModuleArtifact,
-            DurablePayload::Json("{}".to_string()),
-        ))
-        .await;
-        let reasons = undecodable(&extractions, DurableFormat::ModuleArtifact);
+        let extractions = extract(&stored("{}")).await;
+        let reasons = undecodable(&extractions, DurableFormat::KernelDocument);
         assert_eq!(reasons.len(), 1);
-        assert!(
-            reasons[0].contains("requires the `rlm` feature"),
-            "{reasons:?}"
-        );
+        assert!(reasons[0].contains("`kernel` version"), "{reasons:?}");
     }
 
     fn checkpoint_root(schema_version: u32, encodings: &[u32]) -> Vec<u8> {
@@ -532,15 +435,12 @@ mod tests {
     #[cfg(feature = "rlm")]
     #[tokio::test]
     async fn a_started_process_is_judged_by_its_start_stamp() {
-        let hash = lash_vm::ContentHash::new("00ff");
-        let input = lash_vm_runtime::LashVmProcessInput {
-            module_ref: lash_vm::ModuleRef::new(&hash),
-            process_ref: lash_vm::ProcessRef::new(hash.clone(), 0),
-            host_requirements_ref: lash_vm::HostRequirementsRef::new(&hash),
-            process_name: "worker".to_string(),
+        let input = lash_vm_runtime::KernelProcessInput {
+            document: lash_kernel_doc::DocumentId::from_bytes([0xff; 32]),
+            entry: lash_kernel_doc::Name::new("worker"),
             args: serde_json::Map::new(),
         };
-        let current = input.executable_generation();
+        let current = input.definition().executable_generation();
         let record = |first_started: serde_json::Value| {
             item(
                 DurableSurface::StartedProcess,
@@ -562,7 +462,7 @@ mod tests {
                 matches!(
                     extraction,
                     Extraction::IdentityMismatch {
-                        format: DurableFormat::Bytecode,
+                        format: DurableFormat::KernelVersion,
                         ..
                     }
                 )
@@ -577,7 +477,7 @@ mod tests {
             matches!(
                 stamped.as_slice(),
                 [Extraction::IdentityMatch {
-                    format: DurableFormat::Bytecode
+                    format: DurableFormat::KernelVersion
                 }]
             ),
             "a start stamped with the generation this build runs is readable"

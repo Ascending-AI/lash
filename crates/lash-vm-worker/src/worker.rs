@@ -5,14 +5,15 @@ use std::time::Duration;
 use std::time::Instant;
 
 use crate::PoolError;
-use lash_vm::{
-    AbilityOp, AbilityOutcome, Entry, ExecutionBound, ExecutionBounds, ModuleArtifact,
-    RuntimeError, State, VmExecutionStart, VmInstance, VmRequest, VmResume, VmRunConfig, VmStep,
-};
-use lash_vm_client::RunContext;
+use crate::embedding::Embedding;
+use crate::host::{Wire, WireHost};
+use lash_kernel_doc::{Datum, Document, KERNEL_VERSION};
+use lash_kernel_state::ParkedRun;
+use lash_kernel_vm::{Bounds, KernelMachine, Machine, Program, Step};
 #[cfg(test)]
 use lash_vm_client::ipc::read_frame;
 use lash_vm_client::ipc::{Bootstrap, FrameSource, write_frame, write_frames};
+use lash_vm_client::wire::{self, EndWire, OutcomeWire, ParkWire, RecordedEnd, StartWire};
 use lash_vm_protocol::*;
 
 #[derive(Default)]
@@ -25,33 +26,39 @@ struct ExchangeTiming {
     guest_ns: u64,
 }
 
-pub(crate) struct Server<'frontend, const MEASURE: bool = false> {
+/// The one run a worker hosts between resets.
+struct Hosted {
+    machine: KernelMachine,
+    /// The identity of the document the run executes, as its parked state
+    /// names it.
+    document: String,
+    /// The run's heap bound, which also bounds what one slice may print
+    /// (FIG-4458).
+    memory: u64,
+    ended: bool,
+}
+
+pub(crate) struct Server<'embedding, const MEASURE: bool = false> {
     timing: ExchangeTiming,
-    frontend: &'frontend dyn crate::Frontend,
+    embedding: &'embedding Embedding,
     pipe: UnixStream,
-    /// The parent's frames, shared with the run's projection reads.
+    /// The parent's frames, shared with the run's host reads.
     inbound: Arc<Mutex<FrameSource>>,
-    /// The run's projection wire, made at its start and reused by every
-    /// effect answer (FIG-4433).
-    wire: Option<Arc<crate::projection::Wire>>,
+    /// The run's host wire, made at its start and reused by every slice
+    /// (FIG-4433).
+    wire: Option<Arc<Wire>>,
     codec: FrameCodec,
     bootstrap: Bootstrap,
-    instance: VmInstance,
+    hosted: Option<Hosted>,
     fences: Arc<Mutex<Fences>>,
     owner: Option<VmOwner>,
-    pending: Option<EffectRequest>,
-    reissue: Option<RecordedRequest>,
-    capture_state_view: bool,
     cpu_ceiling: Option<libc::rlim_t>,
-    /// The run's heap budget, which also bounds the observations a step
-    /// holds until it hands them on (FIG-4458). `None` is unbounded.
-    observation_budget: Option<u64>,
 }
 
 pub(crate) struct Fences {
     pub incoming: Option<MessageFence>,
     pub outgoing: MessageFence,
-    pub next_effect: u64,
+    pub next_read: u64,
 }
 
 impl Fences {
@@ -92,49 +99,16 @@ fn encode_worker(
     (frame.message, bytes)
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct ParkedRun {
-    pub vm: EncodedPayload,
-    pub request: Option<RecordedRequest>,
-}
-
-#[derive(serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct RecordedRequest {
-    kind: EffectKind,
-    payload: EncodedPayload,
-}
-
-impl ParkedRun {
-    pub(crate) fn decode(bytes: &[u8]) -> Result<Self, PoolError> {
-        rmp_serde::from_slice(bytes).map_err(|error| {
-            PoolError::refused(RunRefusal::Undecodable {
-                input: RunInput::State {
-                    kind: VmStateKind::Continuation,
-                },
-                detail: Detail::new(error),
-            })
-        })
-    }
-
-    pub(crate) fn encode(&self) -> Result<Vec<u8>, PoolError> {
-        rmp_serde::to_vec_named(self)
-            .map_err(|error| PoolError::payload(PayloadKind::ParkedRun, error))
-    }
-}
-
-impl<'frontend, const MEASURE: bool> Server<'frontend, MEASURE> {
+impl<'embedding, const MEASURE: bool> Server<'embedding, MEASURE> {
     pub(crate) fn new(
         pipe: UnixStream,
         codec: FrameCodec,
         bootstrap: Bootstrap,
-        frontend: &'frontend dyn crate::Frontend,
+        embedding: &'embedding Embedding,
     ) -> Result<Self, PoolError> {
-        frontend.configure(&bootstrap.tuning);
         let tuning = bootstrap.tuning;
         let mut server = Self {
-            frontend,
+            embedding,
             timing: ExchangeTiming::default(),
             pipe,
             inbound: Arc::new(Mutex::new(FrameSource::with_capacity(
@@ -143,21 +117,14 @@ impl<'frontend, const MEASURE: bool> Server<'frontend, MEASURE> {
             wire: None,
             codec,
             bootstrap,
-            instance: VmInstance::with_cache_capacities(
-                tuning.linked_program_cache_capacity,
-                tuning.compiled_process_cache_capacity,
-            ),
+            hosted: None,
             fences: Arc::new(Mutex::new(Fences {
                 incoming: None,
                 outgoing: MessageFence::new(ExecutionLease(0), OwnerEpoch(0), FrameEpoch(0)),
-                next_effect: 0,
+                next_read: 0,
             })),
             owner: None,
-            pending: None,
-            reissue: None,
-            capture_state_view: false,
             cpu_ceiling: None,
-            observation_budget: None,
         };
         server.send(WorkerMessage::Ready {
             protocol_version: WORKER_PROTOCOL_VERSION,
@@ -248,7 +215,7 @@ impl<'frontend, const MEASURE: bool> Server<'frontend, MEASURE> {
             if MEASURE {
                 self.timing.active = matches!(
                     &frame.message,
-                    ParentMessage::Start(_) | ParentMessage::EffectResponse(_)
+                    ParentMessage::Start(_) | ParentMessage::Run { .. }
                 );
                 self.timing.decode_ns.set(
                     self.timing
@@ -299,8 +266,9 @@ impl<'frontend, const MEASURE: bool> Server<'frontend, MEASURE> {
                     }
                     self.owner = Some(start.owner.clone());
                     self.progress(WorkerPhase::Computing)?;
-                    let step = self.start(*start)?;
-                    self.deliver(step)?;
+                    self.hosted = Some(self.start(*start)?);
+                    self.progress(WorkerPhase::Serializing)?;
+                    self.respond(WorkerMessage::Started)?;
                 }
                 ParentMessage::Prepare { owner, request } => {
                     if self.owner.is_some() {
@@ -309,86 +277,57 @@ impl<'frontend, const MEASURE: bool> Server<'frontend, MEASURE> {
                     self.owner = Some(owner);
                     self.progress(WorkerPhase::Computing)?;
                     self.codec.check_payload(&request.0)?;
-                    let response =
-                        crate::service::perform(self.frontend, &mut self.instance, &request)?;
+                    let response = crate::service::perform(self.embedding, &request)?;
                     self.progress(WorkerPhase::Serializing)?;
                     self.respond(WorkerMessage::Prepared { response })?;
                 }
-                ParentMessage::EffectResponse(result) => {
-                    let request = self
-                        .pending
-                        .take()
-                        .ok_or_else(|| PoolError::breach(SequenceFault::NoPendingRequest))?;
-                    if result.id != request.id {
-                        return Err(PoolError::breach(SequenceFault::WrongRequestId));
-                    }
+                ParentMessage::Run { slice, cancel } => {
                     self.progress(WorkerPhase::Computing)?;
-                    let resume = match (request.kind, result.outcome) {
-                        (EffectKind::CancelCheckpoint, EffectOutcome::Checkpoint { cancelled }) => {
-                            VmResume::CancelCheckpoint { cancelled }
-                        }
-                        (
-                            EffectKind::ProcessBoundary | EffectKind::ParkDeclined,
-                            EffectOutcome::Unit,
-                        ) => VmResume::Continue,
-                        (
-                            EffectKind::CancelCheckpoint
-                            | EffectKind::ProcessBoundary
-                            | EffectKind::ParkDeclined,
-                            _,
-                        ) => return Err(PoolError::breach(SequenceFault::WrongControlResult)),
-                        (_, EffectOutcome::Cancelled) => VmResume::EffectCancelled,
-                        (_, EffectOutcome::Value(value)) => {
-                            let value: AbilityOutcome = self.decode(&value)?;
-                            VmResume::Effect(Ok(value))
-                        }
-                        (_, EffectOutcome::Unit) => VmResume::Effect(Ok(AbilityOutcome::Unit)),
-                        (_, EffectOutcome::HandedOver) => {
-                            VmResume::Effect(Ok(AbilityOutcome::HandedOver))
-                        }
-                        (_, EffectOutcome::Failed(error)) => {
-                            VmResume::Effect(Err(self.decode(&error)?))
-                        }
-                        (_, EffectOutcome::Checkpoint { .. }) => {
-                            return Err(PoolError::breach(SequenceFault::CheckpointAnsweredEffect));
-                        }
+                    let message = match self.slice(slice, cancel) {
+                        Err(PoolError::Infrastructure(
+                            InfrastructureOutcome::WorkerLimitExceeded { limit },
+                        )) => WorkerMessage::LimitExceeded { limit },
+                        result => result?,
                     };
-                    let guest_started = (MEASURE && self.timing.active).then(Instant::now);
-                    let step = self.instance.resume(resume).map_err(vm_breach)?;
-                    if let Some(guest_started) = guest_started {
-                        self.timing.guest_ns = guest_started.elapsed().as_nanos() as u64;
-                    }
-                    self.deliver(step)?;
+                    self.respond(message)?;
                 }
-                ParentMessage::Park => {
-                    // A process boundary, or an effect the run can issue again
-                    // once its continuation is resumed (FIG-4159).
-                    if !self
-                        .pending
-                        .as_ref()
-                        .is_some_and(|request| request.kind.parkable())
-                    {
-                        return Err(PoolError::breach(SequenceFault::ParkWithoutParkableRequest));
-                    }
+                ParentMessage::Deliver { wait, outcome } => {
                     self.progress(WorkerPhase::Computing)?;
-                    let step = self.instance.resume(VmResume::Park).map_err(vm_breach)?;
-                    self.deliver(step)?;
+                    let outcome: OutcomeWire = self.decode(PayloadKind::Outcome, &outcome)?;
+                    let delivered = self
+                        .running()?
+                        .machine
+                        .deliver(lash_kernel_vm::WaitId(wait), outcome.into())
+                        .map_err(machine_breach)?;
+                    self.progress(WorkerPhase::Serializing)?;
+                    self.respond(WorkerMessage::Delivered {
+                        dropped: delivered == lash_kernel_vm::Delivered::Dropped,
+                    })?;
+                }
+                ParentMessage::Export => {
+                    self.progress(WorkerPhase::Computing)?;
+                    let message = match self.export() {
+                        Err(PoolError::Infrastructure(
+                            InfrastructureOutcome::WorkerLimitExceeded { limit },
+                        )) => WorkerMessage::LimitExceeded { limit },
+                        result => WorkerMessage::Exported { state: result? },
+                    };
+                    self.progress(WorkerPhase::Serializing)?;
+                    self.respond(message)?;
+                }
+                ParentMessage::HostAnswer { .. } => {
+                    // A read is answered inside the slice that made it.
+                    return Err(PoolError::breach(SequenceFault::NoPendingRead));
                 }
                 ParentMessage::Cancel => {
-                    // Physical cancellation never decides the journaled winner.
-                    self.instance.reset();
-                    self.pending = None;
-                    self.reissue = None;
+                    // Physical cancellation never decides the durable winner.
+                    self.hosted = None;
                     self.wire = None;
                     self.send(WorkerMessage::Cancelled)?;
                 }
                 ParentMessage::Reset => {
                     self.cpu_ceiling = None;
-                    self.capture_state_view = false;
-                    self.observation_budget = None;
-                    self.instance.reset();
-                    self.pending = None;
-                    self.reissue = None;
+                    self.hosted = None;
                     self.wire = None;
                     self.owner = None;
                     #[cfg(feature = "dhat-heap")]
@@ -396,7 +335,7 @@ impl<'frontend, const MEASURE: bool> Server<'frontend, MEASURE> {
                     self.fences
                         .lock()
                         .unwrap_or_else(std::sync::PoisonError::into_inner)
-                        .next_effect = 0;
+                        .next_read = 0;
                     self.send(WorkerMessage::ResetDone {
                         cpu_nanos: cpu_nanos()?,
                     })?;
@@ -409,24 +348,26 @@ impl<'frontend, const MEASURE: bool> Server<'frontend, MEASURE> {
             }
         }
     }
-    /// The run's projection wire, on this socket and under this run's fences.
-    fn wire(&mut self) -> Result<Arc<crate::projection::Wire>, PoolError> {
+    /// The run's host wire, on this socket and under this run's fences.
+    fn wire(&mut self) -> Result<Arc<Wire>, PoolError> {
         if let Some(wire) = &self.wire {
             return Ok(wire.clone());
         }
-        let wire = Arc::new(crate::projection::Wire::new(
+        let wire = Arc::new(Wire::new(
             self.pipe.try_clone().map_err(PoolError::io)?,
             self.inbound.clone(),
             self.codec.clone(),
             self.fences.clone(),
             self.bootstrap.serialization,
             self.bootstrap.tuning.parent_wait,
+            self.bootstrap.effect,
         ));
         self.wire = Some(wire.clone());
         Ok(wire)
     }
     fn decode<T: serde::de::DeserializeOwned>(
         &self,
+        kind: PayloadKind,
         payload: &EncodedPayload,
     ) -> Result<T, PoolError> {
         if payload.0.len() as u64 > self.bootstrap.effect {
@@ -440,8 +381,7 @@ impl<'frontend, const MEASURE: bool> Server<'frontend, MEASURE> {
         }
         let measured = (MEASURE && self.timing.active).then(Instant::now);
         self.codec.check_payload(&payload.0)?;
-        let result = rmp_serde::from_slice(&payload.0)
-            .map_err(|error| PoolError::payload(PayloadKind::EffectOutcome, error));
+        let result = wire::decode(kind, payload);
         if let Some(measured) = measured {
             self.timing
                 .decode_ns
@@ -449,211 +389,216 @@ impl<'frontend, const MEASURE: bool> Server<'frontend, MEASURE> {
         }
         result
     }
-    fn start(&mut self, start: Start) -> Result<VmStep, PoolError> {
-        let mut context = RunContext::default();
-        for description in &start.contexts {
-            if description.kind != "vm_run" {
-                return Err(PoolError::refused(RunRefusal::UnknownContext));
-            }
-            self.codec.check_payload(&description.body.0)?;
-            context = rmp_serde::from_slice(&description.body.0).map_err(|error| {
-                PoolError::refused(RunRefusal::Undecodable {
-                    input: RunInput::Context,
-                    detail: Detail::new(error),
-                })
-            })?;
+    /// The run a `Start` put here, while it has not ended.
+    fn running(&mut self) -> Result<&mut Hosted, PoolError> {
+        match self.hosted.as_mut() {
+            None => Err(PoolError::breach(SequenceFault::NoRun)),
+            Some(hosted) if hosted.ended => Err(PoolError::breach(SequenceFault::RunEnded)),
+            Some(hosted) => Ok(hosted),
         }
+    }
+    /// A machine for the run: one that has executed nothing, or one rebuilt
+    /// from the parked state. The document is validated and compiled against
+    /// the registry this worker assembled when it started; nothing is loaded
+    /// from the document.
+    fn start(&mut self, start: Start) -> Result<Hosted, PoolError> {
         self.wire = None;
-        self.capture_state_view = context.capture_state_view;
-        self.observation_budget = start.limits.memory_limit_bytes;
-        let execution_start = match start.state {
-            StartState::Fresh => VmExecutionStart::Session,
-            StartState::Snapshot(state) => {
-                self.check(&state, VmStateKind::Snapshot)?;
-                let snapshot = self
-                    .instance
-                    .open_snapshot(state.bytes())
-                    .map_err(|error| undecodable_state(VmStateKind::Snapshot, error))?;
-                self.instance.replace_state(State::from_snapshot(snapshot));
-                VmExecutionStart::Session
-            }
-            StartState::Continuation(state) => {
-                self.check(&state, VmStateKind::Continuation)?;
-                let parked = ParkedRun::decode(state.bytes())?;
-                if let Some(request) = &parked.request {
-                    self.codec.check_payload(&request.payload.0)?;
-                }
-                self.reissue = parked.request;
-                VmExecutionStart::Continuation(Box::new(
-                    self.instance
-                        .open_continuation(&parked.vm.0)
-                        .map_err(|error| undecodable_state(VmStateKind::Continuation, error))?,
-                ))
-            }
+        self.codec.check_payload(&start.document.0)?;
+        let undecodable = |input: RunInput, error: &dyn std::fmt::Display| {
+            PoolError::refused(RunRefusal::Undecodable {
+                input,
+                detail: Detail::new(error),
+            })
         };
-        let program = match start.program {
-            ProgramSource::Source { dialect, text } => {
-                if dialect != self.frontend.language_id() {
-                    return Err(PoolError::refused(RunRefusal::SourceDialect));
-                }
-                if text.len() as u64 > self.bootstrap.source {
-                    return Err(PoolError::refused(RunRefusal::PayloadTooLarge {
-                        limit: self.bootstrap.source,
-                        size: text.len() as u64,
-                    }));
-                }
-                let ast = self
-                    .frontend
-                    .parse(&text, Some(&context.environment))
-                    .map_err(|refusal| {
-                        PoolError::refused(RunRefusal::Parse {
-                            detail: Detail::new(refusal.error),
-                        })
-                    })?;
-                let linked = self
-                    .instance
-                    .linked_programs_mut()
-                    .get_or_compile_ast(&text, ast, &context.environment)
-                    .map_err(compile_refusal)?;
-                linked.compiled_program().clone()
-            }
-            ProgramSource::Artifact {
-                module_ref,
-                entry,
-                artifact,
-            } => {
-                let artifact = ModuleArtifact::from_store_bytes(&artifact).map_err(|error| {
-                    PoolError::refused(RunRefusal::Undecodable {
-                        input: RunInput::Artifact,
+        let document = wire::unwrap(PayloadKind::Document, &start.document)?;
+        let document = std::str::from_utf8(&document)
+            .map_err(|error| undecodable(RunInput::Document, &error))
+            .and_then(|text| {
+                Document::from_json(text).map_err(|error| undecodable(RunInput::Document, &error))
+            })?;
+        let identity = document
+            .identity()
+            .map_err(|error| undecodable(RunInput::Document, &error))?
+            .to_string();
+        let program = Program {
+            document: Arc::new(document),
+            registry: Arc::clone(&self.embedding.registry),
+        };
+        let bounds = Bounds {
+            charge: start.bounds.charge,
+            memory: start.bounds.memory,
+            call_depth: start.bounds.call_depth,
+            live_tasks: start.bounds.live_tasks,
+            requests_per_park: start.bounds.requests_per_park,
+            join_members: start.bounds.join_members,
+        };
+        let machine = match start.from {
+            StartFrom::Fresh(payload) => {
+                self.codec.check_payload(&payload.0)?;
+                let from: StartWire = wire::decode(PayloadKind::Start, &payload)
+                    .map_err(|error| undecodable(RunInput::Start, &error))?;
+                KernelMachine::start(program, bounds, from.into()).map_err(|error| {
+                    PoolError::refused(RunRefusal::Start {
                         detail: Detail::new(error),
                     })
-                })?;
-                if artifact.module_ref().as_str() != module_ref {
-                    return Err(PoolError::refused(RunRefusal::ArtifactIdentityMismatch));
-                }
-                let process_ref;
-                let entry = match entry {
-                    ProgramEntry::Main => Entry::Main,
-                    ProgramEntry::Process {
-                        component,
-                        position,
-                    } => {
-                        process_ref = lash_vm::ProcessRef::new(
-                            lash_vm::ContentHash::new(component),
-                            position,
-                        );
-                        Entry::Process(&process_ref)
-                    }
-                };
-                match entry {
-                    Entry::Main => {
-                        lash_vm::compile(&artifact, entry, None).map_err(compile_refusal)?
-                    }
-                    Entry::Process(process_ref) => self
-                        .instance
-                        .compiled_processes_mut()
-                        .get_or_compile(&artifact, process_ref, artifact.host_requirements_ref())
-                        .map_err(compile_refusal)?
-                        .as_ref()
-                        .clone(),
-                }
+                })?
             }
-        };
-        let bound = |v: Option<u64>| -> Result<ExecutionBound<std::num::NonZeroU64>, PoolError> {
-            match v {
-                None => Ok(ExecutionBound::Unbounded),
-                Some(v) => std::num::NonZeroU64::new(v)
-                    .map(ExecutionBound::Bounded)
-                    .ok_or_else(|| PoolError::refused(RunRefusal::ZeroLimit)),
-            }
-        };
-        let depth = std::num::NonZeroU64::new(start.limits.max_frame_depth)
-            .ok_or_else(|| PoolError::refused(RunRefusal::ZeroLimit))?;
-        let mut config = VmRunConfig::new(
-            context.mode,
-            ExecutionBounds::new(
-                bound(start.limits.instruction_budget)?,
-                bound(start.limits.memory_limit_bytes)?,
-            )
-            .with_max_frame_depth(depth),
-        );
-        config.pacing = self.bootstrap.tuning.vm_pacing;
-        config.observe_execution = context.observe_execution;
-        config.trace_runtime_errors = true;
-        for description in context.projected {
-            let lash_vm::Value::Projected(value) = description.value else {
-                return Err(PoolError::refused(RunRefusal::ProjectedBinding {
-                    detail: Detail::new(format!(
-                        "projected binding `{}` is not a projection",
-                        description.name
-                    )),
-                }));
-            };
-            config
-                .projected
-                .try_insert(description.name, value)
-                .map_err(|error| {
-                    PoolError::refused(RunRefusal::ProjectedBinding {
+            StartFrom::Parked(state) => {
+                state
+                    .check(&StateExpectation {
+                        owner: &start.owner,
+                        kernel: lash_vm_client::kernel_reads(),
+                        document: Some(&identity),
+                        max_bytes: self.bootstrap.state,
+                    })
+                    .map_err(InfrastructureOutcome::input_state)?;
+                let parked: ParkedRun = wire::from_json(PayloadKind::ParkedRun, state.bytes())
+                    .map_err(|error| undecodable(RunInput::ParkedRun, &error))?;
+                KernelMachine::import(program, bounds, parked).map_err(|error| {
+                    PoolError::refused(RunRefusal::Resume {
                         detail: Detail::new(error),
                     })
-                })?;
+                })?
+            }
+        };
+        Ok(Hosted {
+            machine,
+            document: identity,
+            memory: start.bounds.memory,
+            ended: false,
+        })
+    }
+    /// Runs the machine one slice and says where the run stands. What it
+    /// printed leaves first, in frames of its own.
+    fn slice(&mut self, slice: u64, cancel: bool) -> Result<WorkerMessage, PoolError> {
+        let mut host = WireHost {
+            wire: self.wire()?,
+            cancel,
+            printed: Vec::new(),
+        };
+        let guest_started = (MEASURE && self.timing.active).then(Instant::now);
+        let hosted = self.running()?;
+        let step = hosted
+            .machine
+            .run(&mut host, slice)
+            .map_err(machine_breach)?;
+        let meters = hosted.machine.meters();
+        let memory = hosted.memory;
+        if matches!(step, Step::Ended(_)) {
+            hosted.ended = true;
         }
-        config.projected =
-            config
-                .projected
-                .with_reader(Arc::new(crate::projection::RemoteProjection {
-                    wire: self.wire()?,
-                }));
-        self.instance
-            .start(Arc::new(program), execution_start, config)
-            .map_err(|error| {
-                PoolError::refused(RunRefusal::Start {
-                    detail: Detail::new(error),
-                })
-            })
+        if let Some(guest_started) = guest_started {
+            self.timing.guest_ns = guest_started.elapsed().as_nanos() as u64;
+        }
+        let meters = RunMeters {
+            charged: meters.charged,
+            memory: meters.memory,
+            live_tasks: meters.live_tasks,
+        };
+        self.progress(WorkerPhase::Serializing)?;
+        let Some(chunks) = self.printed_chunks(&host.printed, memory)? else {
+            return Ok(WorkerMessage::LimitExceeded {
+                limit: WorkerLimit::Observations,
+            });
+        };
+        for payload in chunks {
+            self.send(WorkerMessage::Printed { payload })?;
+        }
+        let message = match step {
+            Step::Parked(park) => WorkerMessage::Parked {
+                park: self.encode(PayloadKind::Park, &ParkWire::from(park))?,
+                meters,
+            },
+            Step::Slice => WorkerMessage::Slice { meters },
+            Step::Ended(end) => {
+                let end: EndWire = RecordedEnd::of(&end);
+                WorkerMessage::Ended {
+                    end: self.encode(PayloadKind::End, &end)?,
+                    meters,
+                }
+            }
+        };
+        Ok(message)
     }
-    fn check(&self, state: &OpaqueVmState, kind: VmStateKind) -> Result<(), PoolError> {
-        state
-            .check(&StateExpectation {
-                kind,
-                owner: self
-                    .owner
-                    .as_ref()
-                    .ok_or_else(|| PoolError::breach(SequenceFault::MissingOwner))?,
-                reads: &lash_vm::vm_contract_reads(),
-                max_bytes: self.bootstrap.state,
-            })
-            .map_err(|refusal| InfrastructureOutcome::input_state(refusal).into())
+    fn encode<T: serde::Serialize>(
+        &self,
+        kind: PayloadKind,
+        value: &T,
+    ) -> Result<EncodedPayload, PoolError> {
+        let payload = wire::encode(kind, value)?;
+        if payload.0.len() as u64 > self.bootstrap.effect {
+            return Err(InfrastructureOutcome::WorkerLimitExceeded {
+                limit: WorkerLimit::EffectValue {
+                    size: payload.0.len() as u64,
+                    bound: self.bootstrap.effect,
+                },
+            }
+            .into());
+        }
+        Ok(payload)
     }
-    fn seal(&self, kind: VmStateKind, bytes: Vec<u8>) -> Result<OpaqueVmState, PoolError> {
-        if bytes.len() as u64 > self.bootstrap.state {
+    /// A slice's printed values as the payloads of the frames that carry
+    /// them, each within the frame's bounds (FIG-4458); `None` when they
+    /// outgrow the run's heap bound, or one alone outgrows a frame.
+    fn printed_chunks(
+        &self,
+        printed: &[Datum],
+        budget: u64,
+    ) -> Result<Option<Vec<EncodedPayload>>, PoolError> {
+        if printed.is_empty() {
+            return Ok(Some(Vec::new()));
+        }
+        let mut chunker = self.codec.observation_chunker()?;
+        for value in printed {
+            let encoded = wire::encode(PayloadKind::Printed, value)?;
+            match chunker.push(&encoded.0) {
+                Ok(()) => {}
+                Err(
+                    CodecRefusal::FrameTooLarge { .. }
+                    | CodecRefusal::NodeLimitExceeded { .. }
+                    | CodecRefusal::DepthExceeded { .. }
+                    | CodecRefusal::AllocationExceeded { .. },
+                ) => return Ok(None),
+                Err(
+                    refusal @ (CodecRefusal::Truncated { .. }
+                    | CodecRefusal::BadMagic
+                    | CodecRefusal::Malformed { .. }
+                    | CodecRefusal::TrailingBytes { .. }),
+                ) => return Err(refusal.into()),
+            }
+            if chunker.bytes() > budget {
+                return Ok(None);
+            }
+        }
+        Ok(Some(chunker.finish()))
+    }
+    /// The run's state as it stands, sealed under its owner, the kernel
+    /// version and its document.
+    fn export(&mut self) -> Result<OpaqueVmState, PoolError> {
+        let owner = self
+            .owner
+            .clone()
+            .ok_or_else(|| PoolError::breach(SequenceFault::MissingOwner))?;
+        let bound = self.bootstrap.state;
+        let hosted = self.running()?;
+        let parked = hosted.machine.export().map_err(machine_breach)?;
+        let bytes = serde_json::to_vec(&parked)
+            .map_err(|error| PoolError::payload(PayloadKind::ParkedRun, error))?;
+        if bytes.len() as u64 > bound {
             return Err(InfrastructureOutcome::WorkerLimitExceeded {
                 limit: WorkerLimit::VmState {
                     size: bytes.len() as u64,
-                    bound: self.bootstrap.state,
+                    bound,
                 },
             }
             .into());
         }
         Ok(OpaqueVmState::seal(
-            kind,
-            self.owner
-                .clone()
-                .ok_or_else(|| PoolError::breach(SequenceFault::MissingOwner))?,
-            lash_vm::vm_contract_versions(),
+            owner,
+            KERNEL_VERSION,
+            hosted.document.clone(),
             bytes,
-        )
-        .with_definition_ids(self.instance.state().referenced_definition_ids()))
-    }
-    fn snapshot(&self) -> Result<OpaqueVmState, PoolError> {
-        self.seal(
-            VmStateKind::Snapshot,
-            self.instance
-                .state()
-                .snapshot()
-                .to_canonical_bytes()
-                .map_err(|error| PoolError::payload(PayloadKind::Snapshot, error))?,
-        )
+        ))
     }
     /// Sends the step's answer, and hands its message back.
     fn respond(&mut self, message: WorkerMessage) -> Result<WorkerMessage, PoolError> {
@@ -731,213 +676,6 @@ impl<'frontend, const MEASURE: bool> Server<'frontend, MEASURE> {
         )?;
         Ok(message)
     }
-    fn deliver(&mut self, step: VmStep) -> Result<(), PoolError> {
-        let message = match self.deliver_inner(step) {
-            Err(PoolError::Infrastructure(InfrastructureOutcome::WorkerLimitExceeded {
-                limit,
-            })) => WorkerMessage::LimitExceeded { limit },
-            result => result?,
-        };
-        // The request is kept as it was sent, without a copy of its payload.
-        if let WorkerMessage::EffectRequest(request) = self.respond(message)? {
-            self.pending = Some(request);
-        }
-        Ok(())
-    }
-    /// A step's observations as the payloads of the frames that carry them,
-    /// each within the frame's bounds (FIG-4458); `None` when they outgrow
-    /// the run's heap budget, or one alone outgrows a frame.
-    fn observation_chunks(
-        &self,
-        observations: &[lash_vm::LashVmExecutionObservation],
-    ) -> Result<Option<Vec<EncodedPayload>>, PoolError> {
-        if observations.is_empty() {
-            return Ok(Some(Vec::new()));
-        }
-        let mut chunker = self.codec.observation_chunker()?;
-        for observation in observations {
-            let encoded = rmp_serde::to_vec_named(observation)
-                .map_err(|error| PoolError::payload(PayloadKind::Observation, error))?;
-            match chunker.push(&encoded) {
-                Ok(()) => {}
-                Err(
-                    CodecRefusal::FrameTooLarge { .. }
-                    | CodecRefusal::NodeLimitExceeded { .. }
-                    | CodecRefusal::DepthExceeded { .. }
-                    | CodecRefusal::AllocationExceeded { .. },
-                ) => return Ok(None),
-                Err(
-                    refusal @ (CodecRefusal::Truncated { .. }
-                    | CodecRefusal::BadMagic
-                    | CodecRefusal::Malformed { .. }
-                    | CodecRefusal::TrailingBytes { .. }),
-                ) => return Err(refusal.into()),
-            }
-            if self
-                .observation_budget
-                .is_some_and(|budget| chunker.bytes() > budget)
-            {
-                return Ok(None);
-            }
-        }
-        Ok(Some(chunker.finish()))
-    }
-    fn deliver_inner(&mut self, mut step: VmStep) -> Result<WorkerMessage, PoolError> {
-        // Lazy reads use the compute phase and the same request fence.
-        if let VmStep::Complete(complete) = &mut step {
-            complete.outcome = materialize_outcome(complete.outcome.clone())?;
-        }
-        self.progress(WorkerPhase::Serializing)?;
-        let observations = match &step {
-            VmStep::Suspended(step) => &step.observations,
-            VmStep::Parked(step) => &step.observations,
-            VmStep::Complete(step) => &step.observations,
-            VmStep::GuestError(step) => &step.observations,
-        };
-        let Some(chunks) = self.observation_chunks(observations)? else {
-            return Ok(WorkerMessage::LimitExceeded {
-                limit: WorkerLimit::Observations,
-            });
-        };
-        for payload in chunks {
-            self.send(WorkerMessage::Observations { payload })?;
-        }
-        let message = match step {
-            VmStep::Suspended(suspended) => {
-                let (kind, payload) = match suspended.request {
-                    VmRequest::Effect(op) => {
-                        let kind = match &op {
-                            AbilityOp::ResourceOperation(_) => EffectKind::ResourceOperation,
-                            AbilityOp::ResourceOperationBatch(_) => {
-                                EffectKind::ResourceOperationBatch
-                            }
-                            AbilityOp::Await(_) => EffectKind::Await,
-                            AbilityOp::Print(_) => EffectKind::Print,
-                            AbilityOp::Finish(_) => EffectKind::Finish,
-                            AbilityOp::Fail(_) => EffectKind::Fail,
-                            AbilityOp::Sleep(_) => EffectKind::Sleep,
-                        };
-                        // A request rebuilt from the continuation need not be
-                        // byte-for-byte the one already issued: resume reads
-                        // that request.
-                        match self.reissue.take() {
-                            Some(recorded) if recorded.kind == kind => {
-                                (recorded.kind, recorded.payload.0)
-                            }
-                            Some(_) => {
-                                return Err(PoolError::refused(RunRefusal::ParkedRequestChanged));
-                            }
-                            None => (
-                                kind,
-                                rmp_serde::to_vec_named(&op).map_err(|error| {
-                                    PoolError::payload(PayloadKind::EffectRequest, error)
-                                })?,
-                            ),
-                        }
-                    }
-                    VmRequest::CancelCheckpoint(n) => (
-                        EffectKind::CancelCheckpoint,
-                        rmp_serde::to_vec_named(&n).map_err(|error| {
-                            PoolError::payload(PayloadKind::CancelCheckpoint, error)
-                        })?,
-                    ),
-                    VmRequest::Boundary => (EffectKind::ProcessBoundary, Vec::new()),
-                    VmRequest::ParkDeclined(error) => (
-                        EffectKind::ParkDeclined,
-                        rmp_serde::to_vec_named(&error.to_string())
-                            .map_err(|error| PoolError::payload(PayloadKind::ParkDecline, error))?,
-                    ),
-                };
-                if payload.len() as u64 > self.bootstrap.effect {
-                    return Err(InfrastructureOutcome::WorkerLimitExceeded {
-                        limit: WorkerLimit::EffectValue {
-                            size: payload.len() as u64,
-                            bound: self.bootstrap.effect,
-                        },
-                    }
-                    .into());
-                }
-                let id = {
-                    let mut fences = self
-                        .fences
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner);
-                    let id = EffectRequestId(fences.next_effect);
-                    fences.next_effect += 1;
-                    id
-                };
-                WorkerMessage::EffectRequest(EffectRequest {
-                    id,
-                    kind,
-                    payload: EncodedPayload(payload),
-                })
-            }
-            VmStep::Parked(parked) => {
-                let bytes =
-                    ParkedRun {
-                        vm: EncodedPayload(parked.continuation.to_bytes().map_err(|error| {
-                            PoolError::payload(PayloadKind::Continuation, error)
-                        })?),
-                        request: self
-                            .pending
-                            .take()
-                            .filter(|request| request.kind != EffectKind::ProcessBoundary)
-                            .map(|request| RecordedRequest {
-                                kind: request.kind,
-                                payload: request.payload,
-                            }),
-                    }
-                    .encode()?;
-                WorkerMessage::Suspended {
-                    state: self
-                        .seal(VmStateKind::Continuation, bytes)?
-                        .with_definition_ids(parked.continuation.referenced_definition_ids()),
-                }
-            }
-            VmStep::Complete(complete) => {
-                let state = self.snapshot()?;
-                let value = if self.capture_state_view {
-                    rmp_serde::to_vec_named(&lash_vm_client::service::CellCompletion {
-                        outcome: complete.outcome,
-                        state: EncodedPayload(
-                            rmp_serde::to_vec_named(&crate::service::state_metadata(
-                                &self.instance,
-                            ))
-                            .map_err(|error| PoolError::payload(PayloadKind::Completion, error))?,
-                        ),
-                    })
-                } else {
-                    rmp_serde::to_vec_named(&complete.outcome)
-                }
-                .map_err(|error| PoolError::payload(PayloadKind::Completion, error))?;
-                WorkerMessage::Complete {
-                    state,
-                    value: EncodedPayload(value),
-                }
-            }
-            VmStep::GuestError(error) => {
-                let limit = match error.failure.error {
-                    RuntimeError::InstructionBudgetExceeded { .. }
-                    | RuntimeError::RegExpBudgetExceeded { .. } => Some(WorkerLimit::Fuel),
-                    RuntimeError::MemoryLimitExceeded { .. } => Some(WorkerLimit::Heap),
-                    RuntimeError::FrameDepthExceeded { .. } => Some(WorkerLimit::Depth),
-                    _ => None,
-                };
-                match limit {
-                    Some(limit) => WorkerMessage::LimitExceeded { limit },
-                    None => WorkerMessage::GuestError {
-                        state: Some(self.snapshot()?),
-                        error: EncodedPayload(
-                            rmp_serde::to_vec_named(&error.failure).map_err(|error| {
-                                PoolError::payload(PayloadKind::GuestError, error)
-                            })?,
-                        ),
-                    },
-                }
-            }
-        };
-        Ok(message)
-    }
 }
 
 pub(crate) fn cpu_nanos() -> Result<u64, PoolError> {
@@ -958,83 +696,9 @@ pub(crate) fn cpu_nanos() -> Result<u64, PoolError> {
         .saturating_add(time.tv_nsec as u64))
 }
 
-/// How deep a run's terminal value may nest.
-const TERMINAL_VALUE_DEPTH: usize = 64;
-
-fn vm_breach(error: impl std::fmt::Display) -> PoolError {
-    PoolError::breach(ProtocolBreach::Vm {
+fn machine_breach(error: impl std::fmt::Display) -> PoolError {
+    PoolError::breach(ProtocolBreach::Machine {
         detail: Detail::new(error),
-    })
-}
-
-fn undecodable_state(kind: VmStateKind, error: impl std::fmt::Display) -> PoolError {
-    PoolError::refused(RunRefusal::Undecodable {
-        input: RunInput::State { kind },
-        detail: Detail::new(error),
-    })
-}
-
-fn compile_refusal(error: impl std::fmt::Display) -> PoolError {
-    PoolError::refused(RunRefusal::Compile {
-        detail: Detail::new(error),
-    })
-}
-
-fn materialize_outcome(
-    outcome: lash_vm::ExecutionOutcome,
-) -> Result<lash_vm::ExecutionOutcome, PoolError> {
-    Ok(match outcome {
-        lash_vm::ExecutionOutcome::Finished(value) => {
-            lash_vm::ExecutionOutcome::Finished(materialize(value, 0)?)
-        }
-        lash_vm::ExecutionOutcome::Failed(value) => {
-            lash_vm::ExecutionOutcome::Failed(materialize(value, 0)?)
-        }
-        other => other,
-    })
-}
-fn materialize(value: lash_vm::Value, depth: usize) -> Result<lash_vm::Value, PoolError> {
-    use lash_vm::{Record, Value};
-    if depth > TERMINAL_VALUE_DEPTH {
-        return Err(PoolError::refused(RunRefusal::ValueTooDeep {
-            limit: TERMINAL_VALUE_DEPTH as u32,
-        }));
-    }
-    Ok(match value {
-        Value::Projected(value) => Value::Projected(lash_vm::ProjectedValue::scalar(
-            value.name().to_owned(),
-            materialize(
-                value
-                    .materialize()
-                    .map_err(|error| PoolError::payload(PayloadKind::ProjectedValue, error))?,
-                depth + 1,
-            )?,
-        )),
-        Value::List(values) => Value::List(
-            values
-                .iter()
-                .cloned()
-                .map(|value| materialize(value, depth + 1))
-                .collect::<Result<Vec<_>, _>>()?
-                .into(),
-        ),
-        Value::Tuple(values) => Value::Tuple(
-            values
-                .iter()
-                .cloned()
-                .map(|value| materialize(value, depth + 1))
-                .collect::<Result<Vec<_>, _>>()?
-                .into(),
-        ),
-        Value::Record(values) => Value::Record(Arc::new(
-            values
-                .iter()
-                .map(|(key, value)| {
-                    materialize(value.clone(), depth + 1).map(|value| (key.to_string(), value))
-                })
-                .collect::<Result<Record, _>>()?,
-        )),
-        other => other,
     })
 }
 
@@ -1050,9 +714,11 @@ mod tests {
         config.deadlines.serialization = Duration::from_millis(5);
         let codec = FrameCodec::new(config.protocol.decode);
         let (pipe, mut parent) = UnixStream::pair().expect("pipe");
-        let frontend = crate::frontend::TypeScriptFrontend::default();
+        let embedding = crate::embedding::Embedder::kernel()
+            .and_then(crate::embedding::Embedder::finish)
+            .expect("embedding");
         let mut server =
-            Server::<false>::new(pipe, codec.clone(), Bootstrap::from(&config), &frontend)
+            Server::<false>::new(pipe, codec.clone(), Bootstrap::from(&config), &embedding)
                 .expect("server");
         read_frame(&mut parent, &codec, Instant::now() + Duration::from_secs(1)).expect("ready");
         let drain = std::thread::spawn(move || {
@@ -1079,9 +745,11 @@ mod tests {
         config.protocol.decode.max_frame_bytes = 1024;
         let codec = FrameCodec::new(config.protocol.decode);
         let (pipe, mut parent) = UnixStream::pair().expect("pipe");
-        let frontend = crate::frontend::TypeScriptFrontend::default();
+        let embedding = crate::embedding::Embedder::kernel()
+            .and_then(crate::embedding::Embedder::finish)
+            .expect("embedding");
         let mut server =
-            Server::<false>::new(pipe, codec.clone(), Bootstrap::from(&config), &frontend)
+            Server::<false>::new(pipe, codec.clone(), Bootstrap::from(&config), &embedding)
                 .expect("server");
         let mut fence = MessageFence::new(ExecutionLease(0), OwnerEpoch(0), FrameEpoch(0));
         let ready = read_frame(&mut parent, &codec, Instant::now() + Duration::from_secs(1))
@@ -1127,130 +795,4 @@ mod tests {
         );
         assert!(!outcome.is_retryable());
     }
-
-    /// Runs `effects` echo effects through a server on its own thread, and
-    /// answers the socket calls that thread made.
-    fn server_socket_calls(effects: usize) -> u64 {
-        let config =
-            lash_vm_client::PoolConfig::standard(lash_vm_client::WorkerEntry::helper("unused"));
-        let codec = FrameCodec::new(config.protocol.decode);
-        let (pipe, mut parent) = UnixStream::pair().expect("pipe");
-        let server = std::thread::spawn({
-            let codec = codec.clone();
-            let bootstrap = Bootstrap::from(&config);
-            move || {
-                let frontend = crate::frontend::TypeScriptFrontend::default();
-                let mut server =
-                    Server::<false>::new(pipe, codec, bootstrap, &frontend).expect("server");
-                server.run(&mut None).expect("run");
-                lash_vm_client::ipc::socket_calls()
-            }
-        });
-        let deadline = || Instant::now() + Duration::from_secs(30);
-        let mut outgoing = MessageFence::new(ExecutionLease(1), OwnerEpoch(1), FrameEpoch(1));
-        let mut send = |parent: &mut UnixStream, message| {
-            let bytes = codec
-                .encode_parent(&ParentFrame {
-                    header: outgoing.next_header(),
-                    message,
-                })
-                .expect("parent frame");
-            write_frame(parent, &bytes, deadline()).expect("send");
-        };
-        let receive = |parent: &mut UnixStream| {
-            let bytes = read_frame(parent, &codec, deadline()).expect("worker frame");
-            codec.decode_worker(&bytes).expect("frame").message
-        };
-        assert!(matches!(receive(&mut parent), WorkerMessage::Ready { .. }));
-        send(
-            &mut parent,
-            ParentMessage::Start(Box::new(Start {
-                owner: VmOwner::new("session"),
-                program: ProgramSource::Source {
-                    dialect: "typescript".into(),
-                    text: format!(
-                        "for (let i = 0; i < {effects}; i++) {{ await tools.echo({{ value: i }}); }} finish(1);"
-                    ),
-                },
-                contexts: vec![ContextDescription {
-                    kind: "vm_run".into(),
-                    name: "context".into(),
-                    body: EncodedPayload(
-                        rmp_serde::to_vec_named(&RunContext {
-                            environment: lash_vm::testing::harness::test_environment(),
-                            ..RunContext::default()
-                        })
-                        .expect("context"),
-                    ),
-                }],
-                state: StartState::Fresh,
-                limits: config.vm_limits,
-            })),
-        );
-        let mut answered = 0;
-        loop {
-            match receive(&mut parent) {
-                WorkerMessage::Progress { .. } => {}
-                WorkerMessage::EffectRequest(request) => {
-                    let outcome = match request.kind {
-                        EffectKind::CancelCheckpoint => {
-                            EffectOutcome::Checkpoint { cancelled: false }
-                        }
-                        EffectKind::ResourceOperation => {
-                            answered += 1;
-                            EffectOutcome::Value(EncodedPayload(
-                                rmp_serde::to_vec_named(&AbilityOutcome::Value(
-                                    lash_vm::Value::Number(1.0),
-                                ))
-                                .expect("answer"),
-                            ))
-                        }
-                        EffectKind::Finish => {
-                            let AbilityOp::Finish(value) =
-                                rmp_serde::from_slice(&request.payload.0).expect("operation")
-                            else {
-                                panic!("a finish request carries its value")
-                            };
-                            EffectOutcome::Value(EncodedPayload(
-                                rmp_serde::to_vec_named(&AbilityOutcome::Value(value))
-                                    .expect("answer"),
-                            ))
-                        }
-                        other => panic!("unexpected effect {other:?}"),
-                    };
-                    send(
-                        &mut parent,
-                        ParentMessage::EffectResponse(EffectResponse {
-                            id: request.id,
-                            outcome,
-                        }),
-                    );
-                }
-                WorkerMessage::Complete { .. } => break,
-                other => panic!("expected Complete, received {other:?}"),
-            }
-        }
-        assert_eq!(answered, effects);
-        send(&mut parent, ParentMessage::Shutdown);
-        server.join().expect("server thread")
-    }
-
-    /// FIG-4433: one effect exchange costs the worker five socket calls: a
-    /// timeout and a read for the whole answer, then one write each for
-    /// Computing, Serializing, and Responding together with the next request.
-    #[test]
-    fn an_effect_exchange_costs_the_worker_five_socket_calls() {
-        const MORE: usize = 10;
-        let few = server_socket_calls(1);
-        let many = server_socket_calls(1 + MORE);
-        assert!(
-            many - few <= 5 * MORE as u64,
-            "{MORE} more effect exchanges cost the worker {} more socket calls",
-            many - few
-        );
-    }
 }
-
-#[cfg(test)]
-#[path = "../tests/performance/mod.rs"]
-mod performance_tests;

@@ -7,11 +7,11 @@
 //!
 //! - [`message`]: the typed messages, each under a [`MessageHeader`] naming its
 //!   execution lease, owner and frame epochs and transport sequence.
-//! - [`state`]: [`OpaqueVmState`], VM state as the parent sees it. The parent
-//!   checks size, owner, VM contract and hash, and nothing else: no function
-//!   here decodes the bytes, and this crate depends on nothing that could.
-//!   Semantic restore, regexp compilation and artifact validation happen only
-//!   in the worker.
+//! - [`state`]: [`OpaqueVmState`], a parked run as the parent sees it. The
+//!   parent checks size, owner, kernel version, document and hash, and
+//!   nothing else: no function here decodes the bytes, and this crate depends
+//!   on nothing that could. Validation, compilation and resumption happen
+//!   only in the worker.
 //! - [`codec`]: length-framed encoding and protocol-version admission, with
 //!   bounded decoding that charges frame size, depth, node count and
 //!   cumulative allocation before anything is allocated.
@@ -36,22 +36,17 @@ pub use codec::{
     ObservationChunker,
 };
 pub use message::{
-    ContextDescription, EffectKind, EffectOutcome, EffectRequest, EffectRequestId, EffectResponse,
-    EncodedPayload, ExecutionLease, FrameEpoch, HeaderRefusal, MessageFence, MessageHeader,
-    OwnerEpoch, ParentFrame, ParentMessage, ProgramEntry, ProgramSource, Start, StartState,
-    TransportSequence, VmLimits, WorkerFrame, WorkerMessage, WorkerPhase,
+    EncodedPayload, ExecutionLease, FrameEpoch, HeaderRefusal, HostReadId, HostReadKind,
+    MessageFence, MessageHeader, OwnerEpoch, ParentFrame, ParentMessage, RunBounds, RunMeters,
+    Start, StartFrom, TransportSequence, WorkerFrame, WorkerMessage, WorkerPhase,
 };
 pub use outcome::{
     BootstrapFault, Detail, Exchange, InfrastructureOutcome, PayloadKind, PoolFault,
     ProtocolBreach, RunInput, RunRefusal, SequenceFault, SupervisorEvidence, WorkerDeploymentFault,
     WorkerFrameKind, WorkerLimit, WorkerRefusal,
 };
-pub use state::{
-    OpaqueStateRefusal, OpaqueVmState, StateDigest, StateExpectation, VmOwner, VmStateKind,
-};
+pub use state::{OpaqueStateRefusal, OpaqueVmState, StateDigest, StateExpectation, VmOwner};
 pub use version::{
     MIN_SUPPORTED_WORKER_PROTOCOL_VERSION, ProtocolVersionRefusal, WORKER_PROTOCOL_VERSION,
     check_worker_protocol_version,
 };
-mod contract;
-pub use contract::{VmContract, VmContractComponent, VmContractReads};

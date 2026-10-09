@@ -1,25 +1,18 @@
+use super::typescript_types as types;
 use super::{
-    CellTags, Dialect, DialectPromptVocabulary, DialectRefusal, DialectRefusalKind,
+    CellTags, DialectPromptVocabulary, DialectPrompts, DialectRefusal, DialectRefusalKind,
     ExecutionSection, ExecutionSectionRequest,
 };
 
+/// The name `lash-dialect-typescript` is installed under.
 pub(crate) const LANGUAGE_ID: &str = "typescript";
 
-/// The TypeScript host adapter selects the shipped worker frontend and
-/// spells TypeScript prompts and tool paths. A host selects it by naming it
-/// (`Arc::new(TypescriptDialect)`) where it constructs the RLM protocol.
+/// TypeScript's prompt adapter: it spells TypeScript prompts, types and
+/// tool paths.
 #[derive(Clone, Copy, Debug, Default)]
-pub struct TypescriptDialect;
+pub struct TypescriptPrompts;
 
-impl Dialect for TypescriptDialect {
-    fn language_id(&self) -> &'static str {
-        LANGUAGE_ID
-    }
-
-    fn worker_service(&self) -> lash_vm_client::service::Service {
-        lash_vm_client::service::Service::default()
-    }
-
+impl DialectPrompts for TypescriptPrompts {
     /// Being a catalog member is being advertised, and the execution section
     /// advertises the binding's call path as a typed declaration the model
     /// calls verbatim. A path TypeScript resolves to anything but a tool call
@@ -31,11 +24,9 @@ impl Dialect for TypescriptDialect {
         binding: &lash_vm_runtime::ResolvedToolBinding,
     ) -> Result<String, DialectRefusal> {
         let call_path = binding.call_path();
-        lash_typescript::ensure_tool_call_path_addressable(&call_path).map_err(|error| {
-            DialectRefusal {
-                kind: DialectRefusalKind::UnaddressableToolPath,
-                message: format!("no TypeScript cell can call `{call_path}` as a tool: {error}"),
-            }
+        types::ensure_tool_call_path_addressable(&call_path).map_err(|error| DialectRefusal {
+            kind: DialectRefusalKind::UnaddressableToolPath,
+            message: format!("no TypeScript cell can call `{call_path}` as a tool: {error}"),
         })?;
         Ok(call_path)
     }
@@ -46,18 +37,18 @@ impl Dialect for TypescriptDialect {
         input: &lash_sansio::SchemaShape,
         output: &lash_sansio::SchemaShape,
     ) -> String {
-        let input = lash_typescript::render_schema_shape(input);
+        let input = types::render_schema_shape(input);
         let input = if input == "Record<string, never>" {
             "{}"
         } else {
             &input
         };
-        let output = lash_typescript::render_schema_shape(output);
+        let output = types::render_schema_shape(output);
         format!("{call_path}({input}): Promise<{output}>")
     }
 
     fn schema_type(&self, shape: &lash_sansio::SchemaShape) -> String {
-        lash_typescript::render_schema_shape(shape)
+        types::render_schema_shape(shape)
     }
 
     fn schema_definition(&self, name: &str, shape: &lash_sansio::SchemaShape) -> String {
@@ -112,107 +103,10 @@ const TYPESCRIPT_PROMPT_VOCABULARY: DialectPromptVocabulary = DialectPromptVocab
     // Every key of every value is written out — in the row itself where the
     // record is small enough, in the `Schema:` block otherwise — so there is
     // never a reason to write one from memory.
+    not_carried_repair: "Define the function again in this cell, or await the task and keep its result; keep data, not functions or pending work, in session variables.",
+    unjoined_task_repair: "Await every promise before the cell ends: `await` it, or collect them with `await Promise.all([...])`. A cell does not leave work running behind it.",
     field_miss_rule: "Never write a field name you haven't seen in the key sets below — guessed field names silently produce zeros rather than errors. If a name is not listed, it does not exist on that value.",
 };
-
-fn render_host_surface_section(
-    tool_catalog: &lash_core::ToolCatalog,
-    host_environment: &lash_vm::LashVmHostEnvironment,
-) -> String {
-    let inventory = crate::protocol::prompt::host_surface_inventory(host_environment);
-    // Catalog tools already have a fully typed declaration under **Tools**,
-    // rendered from the same contract; repeating them here would be a
-    // second, weaker copy of the same signature.
-    let documented_tools = tool_catalog
-        .tools
-        .iter()
-        .filter_map(|tool| {
-            lash_vm_runtime::required_tool_executable(&tool.manifest)
-                .ok()
-                .map(|binding| binding.call_path())
-        })
-        .collect::<std::collections::BTreeSet<_>>();
-    let operations = inventory
-        .operations
-        .iter()
-        .filter(|operation| {
-            !documented_tools.contains(&format!("{}.{}", operation.alias, operation.operation))
-        })
-        .collect::<Vec<_>>();
-    if operations.is_empty() && inventory.data_types.is_empty() && inventory.constructors.is_empty()
-    {
-        return String::new();
-    }
-    let mut section = String::from("\n\n### Host Surface");
-    if !operations.is_empty() {
-        let lines = operations
-            .iter()
-            .map(|operation| {
-                let signature = format!(
-                    "{}.{}(input: {}): Promise<{}>; // lash_vm `{}_{}`",
-                    operation.alias,
-                    operation.operation,
-                    lash_typescript::render_schema_shape(&operation.input)
-                        .replace("Record<string, never>", "{}"),
-                    lash_typescript::render_schema_shape(&operation.output),
-                    operation.alias,
-                    operation.operation,
-                );
-                match crate::protocol::prompt::host_operation_description(
-                    &operation.alias,
-                    &operation.operation,
-                ) {
-                    Some(description) => format!("{signature}\n{description}"),
-                    None => signature,
-                }
-            })
-            .collect::<Vec<_>>()
-            .join("\n    ");
-        section.push_str(&format!(
-                "\n\nAwaited runtime operations, called as `await <module>.<operation>(input)`:\n\n    {lines}"
-            ));
-    }
-    if !inventory.data_types.is_empty() {
-        let lines = inventory
-            .data_types
-            .iter()
-            .map(|(name, shape)| {
-                format!(
-                    "// {name}\n    type {} = {};",
-                    lash_typescript::render_type_name(name),
-                    lash_typescript::render_schema_shape(shape)
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n    ");
-        section.push_str(&format!("\n\nNamed host data types:\n\n    {lines}"));
-    }
-    if !inventory.constructors.is_empty() {
-        let lines = inventory
-            .constructors
-            .iter()
-            .map(|constructor| {
-                let output = match &constructor.output {
-                    crate::protocol::prompt::HostSurfaceConstructorOutput::Shape(shape) => {
-                        lash_typescript::render_schema_shape(shape)
-                    }
-                };
-                format!(
-                    "{}(input: {}): {}",
-                    constructor.path,
-                    lash_typescript::render_schema_shape(&constructor.input),
-                    output
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n    ");
-        section.push_str(&format!(
-                "\n\nPure value constructors. Never `await` these; use them wherever an expression is allowed:\n\n    {lines}"
-            ));
-    }
-
-    section
-}
 
 /// The process operations are leaf tools now (FIG-2999): nothing in the
 /// dialect gates them, so their availability is read off the catalogue the
@@ -234,7 +128,7 @@ pub(crate) fn typescript_process_prompt(process_surface: bool) -> String {
         return String::new();
     }
     r#"A process is an `async` arrow the cell never calls: `const review = async (request: string) => { ... };`, or one written inline in a process tool's argument. Its name is the `const` it is bound to, and start arguments key by the arrow's parameter names. Returning from it succeeds; throwing fails.
-Captures are by value: a name the body reads from the surrounding cell is copied when the process starts, so a later assignment is not seen, and a name that is not a durable `const` value is refused as a non-liftable capture.
+A process runs apart from the cell: its body sees its parameters and nothing of the surrounding cell, and a body that names one of the cell's bindings is refused as a non-liftable capture. Pass such a value through the start's `args`.
 A started handle outlives the turn; Stop cancels only the awaited handle; cancel is a request the child sees at its next step or wake."#
         .to_string()
 }
@@ -291,7 +185,6 @@ fn render_execution_section(request: ExecutionSectionRequest<'_>) -> ExecutionSe
         channel,
         tools,
         tool_catalog,
-        host_environment: environment,
         discovery_operation,
     } = request;
     // A host with a discovery tool says so where the model reads which
@@ -309,12 +202,7 @@ fn render_execution_section(request: ExecutionSectionRequest<'_>) -> ExecutionSe
     } else {
         format!("### Tools\n\n{}", tools.join("\n\n"))
     };
-    let host_surface = render_host_surface_section(tool_catalog, environment);
-    let allowed_sections = if host_surface.is_empty() {
-        "**Tools**"
-    } else {
-        "**Tools** or **Host Surface**"
-    };
+    let allowed_sections = "**Tools**";
     // Transport prose is authored per channel, side by side, rather than
     // derived from the cell wording by string replacement (FIG-2881).
     let action = match channel {
@@ -338,15 +226,21 @@ fn render_execution_section(request: ExecutionSectionRequest<'_>) -> ExecutionSe
     } else {
         format!("\n\n### Processes\n\n{durable}")
     };
-    let sleep = "\n\n`await sleep(ms)` pauses the program. For a timeout, race a call against a timer — `await Promise.race([call, sleep(ms)])` is `undefined` when the timer wins, and the losing call keeps running until the turn ends.";
+    let sleep = "\n\n`await sleep(ms)` pauses the program. For a timeout, race a call against a timer — `await Promise.race([call, sleep(ms)])` is `undefined` when the timer wins, and the losing call is cancelled.";
     let host_api = format!(
-        r#"Top-level bindings persist across executions. Return exactly the value and type the task asks for with `finish(value)`; do not finish an unexamined whole tool result. Putting an object into a string — with `+`, `` `${{...}}` `` or `String(...)` — gives the placeholder `[object Object]`, never its contents; read the value with `console.log(value)` or serialize it with `JSON.stringify(value)`.
+        r#"Top-level bindings persist across executions as data. A function or a pending promise does not outlive the cell that created it: a later cell that uses such a binding fails with `SESSION_BINDING_NOT_CARRIED`, so define the function again where it is used and keep a promise's awaited result, not the promise. Return exactly the value and type the task asks for with `finish(value)`; do not finish an unexamined whole tool result. Putting an object into a string — with `+`, `` `${{...}}` `` or `String(...)` — gives the placeholder `[object Object]`, never its contents; read the value with `console.log(value)` or serialize it with `JSON.stringify(value)`.
 
-`Math`, `Date` (UTC), `String`, `Array`, `Object`, `JSON`, `Map`/`Set`, `RegExp` and `URL` are available; this is not Node or a browser, and classes and generators are not supported.
+`Math`, `Date` (UTC), `String`, `Array`, `Object`, `JSON`, `Map`/`Set`, `RegExp` and `URL` are available; this is not Node or a browser, and classes, generators and `new Promise(...)` are not supported.
+
+Type annotations are trusted and enforced where they are used: arithmetic, comparison, `!`, a condition, a template or an index on a value declared `number`, `string`, `boolean` or an array raises `type_error` when the value is not that type, and an index outside a declared array raises `index_out_of_range`, where JavaScript would convert or give `undefined`. Annotate only what is true, or leave the annotation off to keep JavaScript's conversions.
+
+### Concurrency
+
+An `async` function starts running when it is called, and async callbacks run concurrently: `items.map(async (item) => ...)` starts every call at once, and `await Promise.all(...)` collects them. Await every promise before the cell ends. A cell that ends while work it started is still running, or after a promise rejected with nothing awaiting it, fails with `CELL_TASKS_OUTSTANDING` and names the async code that is still running; `Promise.race([])` rejects instead of waiting forever.
 
 ### Host API
 
-`console.log(value)` shows output in the next step; `print(value)` shows a structured value, summarised field by field rather than cut off when it is large; `finish(value)` ends the turn. A failed tool call throws an `Error` whose `cause` is `{{ code, details }}`.{sleep}{durable}"#
+`console.log(value)` shows output in the next step; `finish(value)` ends the turn. A failed tool call throws; wrap it in `try`/`catch` to carry on.{sleep}{durable}"#
     );
     // One worked program, rendered in each channel's own call shape.
     let example_program = "const total = 1 + 2;\nfinish(total);";
@@ -361,9 +255,7 @@ fn render_execution_section(request: ExecutionSectionRequest<'_>) -> ExecutionSe
             serde_json::json!({"code": example_program})
         ),
     };
-    // `host_surface` either carries its own leading `\n\n` or is empty, so
-    // it appends directly to a tools block; alone, it is the declarations.
-    let declarations = format!("{tools}{host_surface}").trim().to_string();
+    let declarations = tools.trim().to_string();
     ExecutionSection {
         prose: format!(
             "Use prose for conversation; use {action} for action or computation. Call tools as `await module.operation({{ ... }})`, only those listed under {allowed_sections}.\n\n{response_shape}\n{example}\n\n{host_api}"
@@ -374,23 +266,16 @@ fn render_execution_section(request: ExecutionSectionRequest<'_>) -> ExecutionSe
 
 #[cfg(test)]
 mod tests {
-    use lash_sansio::SessionId;
-
     use crate::dialect::{RlmDialectServices, SessionDialect};
-    use lash_core::plugin::ToolCatalogContext;
-    use lash_vm_runtime::LashVmSurface;
-
     use lash_vm_runtime::{ToolBinding, ToolDefinitionBindingExt};
 
     #[test]
     fn the_process_section_follows_the_catalogue_and_teaches_the_argument_convention() {
         let dialect = SessionDialect::new(
-            std::sync::Arc::new(crate::dialect::TypescriptDialect),
-            LashVmSurface::default(),
+            crate::dialect::CellDialect::typescript(),
             RlmDialectServices {
                 presentation: crate::RlmPresentationConfig::standard(),
                 workers: lash_vm_client::service::Service::default(),
-                artifact_store: crate::testing::sqlite_memory_artifact_store_blocking(),
                 deferred_tool_resolver: None,
                 execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
                 code_renderer: Default::default(),
@@ -441,8 +326,8 @@ mod tests {
             "the keys are the run arrow's parameter names: {with}"
         );
         assert!(
-            with.contains("Captures are by value"),
-            "capture-by-value is prompt-only knowledge: {with}"
+            with.contains("non-liftable capture"),
+            "what a process body may name is prompt-only knowledge: {with}"
         );
         // None of the deleted special forms may come back as prose.
         for retired in [
@@ -455,272 +340,27 @@ mod tests {
         }
     }
 
-    /// Every identifier the rendered catalog advertises must link to a binding.
-    ///
-    /// The instance defect — a reserved-word operation advertised only as
-    /// `__lash_tool_<hex>`, which rejects with `TS_UNKNOWN_BINDING` for itself —
-    /// is one member of a class: any name the renderer spells differently from
-    /// the way a cell must call it is a promise the catalog cannot keep. This
-    /// sweep holds both halves of the contract over every hazardous name in
-    /// every path position: registration refuses the paths no cell can address,
-    /// and every declaration rendered for the paths it admits is callable
-    /// exactly as advertised (FIG-1444).
+    /// Being a catalog member is being advertised under a path a cell
+    /// writes verbatim (FIG-1444): a path with no module, with a word no
+    /// cell can write in expression position, or under a namespace the
+    /// language resolves itself is refused at registration.
     #[test]
-    fn every_advertised_catalog_identifier_is_callable_verbatim() {
-        let mut hazards = lash_typescript::reserved_words().to_vec();
-        // Names the lowerer resolves itself rather than dispatching: the promise
-        // chaining refusal (`then`/`catch`/`finally`) and the instance stdlib
-        // collision matrix FIG-1443 fixed.
-        hazards.extend(["then", "catch", "finally"]);
-        hazards.extend(lash_typescript::accepted_instance_methods());
-        // Strict-mode-illegal *binding* names that are still legal member
-        // roots: `eval.op`/`arguments.op` lower and dispatch like any other
-        // tool path (the literal `undefined` does too, via RESERVED_WORDS).
-        // FIG-1483 records the decision to admit them — the catalog advertises
-        // the call path, which is exactly what the cell writes — so the sweep
-        // holds their admission rather than assuming a refusal.
-        hazards.extend(["eval", "arguments"]);
-        // Roots the lowerer treats as ECMA global namespaces, so a tool module
-        // can never be addressed under them.
-        hazards.extend([
-            "Math",
-            "Date",
-            "Promise",
-            "String",
-            "Object",
-            "Symbol",
-            "globalThis",
-            "Intl",
-            "Error",
-            "Set",
-            "URL",
-            "RegExp",
-            "JSON",
-            "Number",
-            "Array",
-            "Map",
-            "console",
-            "crypto",
-        ]);
-        hazards.sort_unstable();
-        hazards.dedup();
-
-        let candidates = hazards
-            .iter()
-            .flat_map(|word| {
-                [
-                    (vec![word.to_string()], "op".to_string()),
-                    (
-                        vec!["outer".to_string(), word.to_string()],
-                        "op".to_string(),
-                    ),
-                    (vec!["probe".to_string()], word.to_string()),
-                    (
-                        vec!["probe".to_string(), "inner".to_string()],
-                        word.to_string(),
-                    ),
-                ]
-            })
-            .collect::<Vec<_>>();
-
-        let dialect = crate::dialect::typescript_test_dialect();
-        let mut admitted = Vec::new();
-        let mut refused = Vec::new();
-        for (modules, operation) in &candidates {
-            let call_path = format!("{}.{operation}", modules.join("."));
-            let name = format!("t_{}", call_path.replace('.', "_"));
-            let tool = lash_core::ToolDefinition::raw(
-                format!("tool:test/{name}"),
-                name.clone(),
-                "Probe",
-                serde_json::json!({
-                    "type": "object",
-                    "additionalProperties": false,
-                    "properties": { "id": { "type": "string" } },
-                    "required": ["id"]
-                }),
-                serde_json::json!({ "type": "string" }),
-            )
-            .expect("valid declared tool schemas")
-            .with_execution(std::time::Duration::from_secs(120))
-            .with_tool_binding(ToolBinding::new(modules.clone(), operation.as_str()));
-            let registration = crate::tool_catalog::rlm_tool_catalog(
-                ToolCatalogContext {
-                    owner: lash_core::RuntimeOwner::Session(SessionId::from("session")),
-                    tools: vec![tool.manifest()],
-                    resolve_contract: None,
-                    tool_access: lash_core::SessionToolAccess::ambient(),
-                    extensions: Default::default(),
-                },
-                &dialect,
-            );
-            match registration {
-                Ok(_) => admitted.push((tool, modules.clone(), operation.clone(), call_path)),
-                Err(error) => {
-                    assert!(
-                        error.to_string().contains("no TypeScript cell can call"),
-                        "{call_path} was refused for an unrelated reason: {error}"
-                    );
-                    refused.push(call_path);
-                }
-            }
-        }
-
-        // The refusals are the paths a cell cannot write or the lowerer claims
-        // for itself; every one of them used to be advertised as a callable.
-        // `undefined`, `eval` and `arguments` joined them in FIG-3656: each
-        // now names a real global value, so `X.op` is that value's member
-        // call — never a tool path.
-        for expected in [
-            "delete.op",
-            "new.op",
-            "Math.op",
-            "probe.then",
-            "probe.catch",
-            "undefined.op",
-            "eval.op",
-            "arguments.op",
-        ] {
+    fn a_tool_path_no_cell_can_write_is_refused() {
+        use super::types::{ensure_tool_call_path_addressable, reserved_words};
+        ensure_tool_call_path_addressable("web.fetch").expect("an ordinary path is addressable");
+        ensure_tool_call_path_addressable("a.b.c").expect("a nested module path is addressable");
+        // A member name may be a reserved word; only the receiver is written
+        // as an identifier.
+        ensure_tool_call_path_addressable("processes.await")
+            .expect("a reserved word is a member name a cell can write");
+        assert!(ensure_tool_call_path_addressable("fetch").is_err());
+        assert!(ensure_tool_call_path_addressable("Math.floor").is_err());
+        assert!(ensure_tool_call_path_addressable("web.has-dash").is_err());
+        for word in reserved_words() {
             assert!(
-                refused.iter().any(|path| path == expected),
-                "registration must refuse `{expected}`: {refused:?}"
+                ensure_tool_call_path_addressable(&format!("{word}.run")).is_err(),
+                "`{word}` cannot root a tool path"
             );
         }
-        assert!(
-            admitted.len() > 200,
-            "the sweep must admit the bulk of the matrix, not just a handful: {}",
-            admitted.len()
-        );
-
-        let catalog = lash_core::ToolCatalog::from_tool_definitions(
-            admitted.iter().map(|(tool, ..)| tool.clone()).collect(),
-        );
-        let section = SessionDialect::prompt_only(
-            std::sync::Arc::new(crate::dialect::TypescriptDialect),
-            LashVmSurface::default(),
-        )
-        .render_execution_section(
-            crate::protocol::RlmPromptFeatures::default(),
-            &catalog,
-            crate::plugin::RlmChannel::Cell,
-            None,
-        )
-        .expect("render execution section");
-        let declarations = tool_declarations(&section);
-        assert_eq!(
-            declarations.len(),
-            admitted.len(),
-            "every admitted tool must be advertised once"
-        );
-
-        let advertised = declarations
-            .iter()
-            .map(|declaration| advertised_call_path(declaration))
-            .collect::<std::collections::BTreeSet<_>>();
-        for (_, modules, operation, call_path) in &admitted {
-            assert!(
-                advertised.contains(call_path),
-                "`{call_path}` is in the catalog but is not advertised under its call path: {declarations:?}"
-            );
-            lash_typescript::ensure_tool_call_path_addressable(call_path)
-                .expect("an admitted path is addressable");
-            assert_eq!(
-                dispatch_through(call_path, modules, operation),
-                vec![(modules.join("."), operation.clone())],
-                "`{call_path}` must dispatch the binding it advertises"
-            );
-        }
-    }
-
-    fn tool_declarations(section: &str) -> Vec<String> {
-        section
-            .split_once("### Tools")
-            .expect("Tools section")
-            .1
-            .split("\n### ")
-            .next()
-            .unwrap()
-            .lines()
-            .filter_map(|line| {
-                line.strip_prefix('`')
-                    .and_then(|line| line.strip_suffix('`'))
-            })
-            .filter(|line| line.contains("): Promise<"))
-            .map(str::to_string)
-            .collect()
-    }
-
-    fn advertised_call_path(signature: &str) -> String {
-        signature
-            .split_once('(')
-            .expect("method signature")
-            .0
-            .to_string()
-    }
-
-    /// Links and runs the advertised call against a host binding for
-    /// `modules`/`operation`, returning what the host was asked to dispatch.
-    fn dispatch_through(
-        call_path: &str,
-        modules: &[String],
-        operation: &str,
-    ) -> Vec<(String, String)> {
-        struct RecordingHost {
-            dispatched: std::sync::Mutex<Vec<(String, String)>>,
-        }
-        impl lash_vm::ExecutionHost for RecordingHost {
-            async fn perform(
-                &self,
-                op: lash_vm::AbilityOp,
-            ) -> Result<lash_vm::AbilityOutcome, lash_vm::ExecutionHostError> {
-                match op {
-                    lash_vm::AbilityOp::ResourceOperation(call) => {
-                        let alias = match &call.receiver {
-                            lash_vm::Value::Resource(handle) => handle.alias.clone(),
-                            other => format!("{other:?}"),
-                        };
-                        self.dispatched
-                            .lock()
-                            .expect("dispatched lock")
-                            .push((alias, call.operation));
-                        Ok(lash_vm::AbilityOutcome::Value(lash_vm::Value::String(
-                            "tool-ok".into(),
-                        )))
-                    }
-                    lash_vm::AbilityOp::Finish(value) => Ok(lash_vm::AbilityOutcome::Value(value)),
-                    other => Err(lash_vm::ExecutionHostError::new(format!(
-                        "unexpected ability {other:?}"
-                    ))),
-                }
-            }
-        }
-
-        let mut catalog = lash_vm::LashVmHostCatalog::new();
-        catalog
-            .add_module_operation_contract(
-                modules.to_vec(),
-                "ToolModule",
-                operation,
-                format!("tool:test/{}", modules.join("_")),
-                &lash_vm::OperationContract::new(serde_json::json!({}), serde_json::json!({})),
-            )
-            .expect("operation binding");
-        let environment = lash_vm::LashVmHostEnvironment::new(catalog);
-        let source = format!(r#"finish(await {call_path}({{ id: "m1" }}));"#);
-        let linked = lash_typescript::link(&source, &environment)
-            .unwrap_or_else(|error| panic!("`{source}` must link: {error:?}"));
-        let host = RecordingHost {
-            dispatched: std::sync::Mutex::new(Vec::new()),
-        };
-        tokio::runtime::Builder::new_current_thread()
-            .build()
-            .expect("runtime")
-            .block_on(lash_vm::execute(
-                &lash_vm::testing::harness::compile_linked_main(&linked),
-                &mut lash_vm::State::new(),
-                &host,
-            ))
-            .unwrap_or_else(|error| panic!("`{source}` must execute: {error:?}"));
-        host.dispatched.lock().expect("dispatched lock").clone()
     }
 }

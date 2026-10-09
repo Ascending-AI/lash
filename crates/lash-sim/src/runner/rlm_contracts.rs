@@ -740,9 +740,9 @@ fn rlm_contract_config_with_turn_options(
 ) -> Result<lash_core::TurnMachineConfig, FixedScriptRunnerError> {
     let protocol_driver: Arc<
         dyn lash_core::sansio::ProtocolDriverHandle<lash_core::HostTurnProtocol>,
-    > = Arc::new(lash_protocol_rlm::RlmDriver::new(Arc::new(
-        lash_protocol_rlm::TypescriptDialect,
-    )));
+    > = Arc::new(lash_protocol_rlm::RlmDriver::new(
+        lash_protocol_rlm::CellDialect::typescript(),
+    ));
     Ok(lash_core::TurnMachineConfig {
         protocol_driver,
         model_tool_calls: lash_core::sansio::ModelToolCalls::fixture(),

@@ -486,8 +486,7 @@ async fn main() -> Result<()> {
             .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
             .build(),
-        std::sync::Arc::new(lash::rlm::TypescriptDialect),
-        &backend,
+        lash::rlm::CellDialect::typescript(),
     );
     let trace_path = args.artifact_dir.join("trace.jsonl");
     let mut trace_context = lash::tracing::TraceContext {

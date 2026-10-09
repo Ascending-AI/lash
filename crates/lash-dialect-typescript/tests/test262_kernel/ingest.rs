@@ -14,12 +14,8 @@ use std::path::{Path, PathBuf};
 
 use super::metadata::{self, TestFlag};
 
-/// The vendored corpus, its harness renderings and main's outcome record
-/// stay with the front end they were recorded on until that crate goes.
-pub(crate) const ROOT: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../lash-typescript/tests/test262"
-);
+/// The vendored corpus, its harness renderings and main's outcome record.
+pub(crate) const ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/test262");
 
 pub(crate) fn data_path(relative: &str) -> PathBuf {
     Path::new(ROOT).join(relative)

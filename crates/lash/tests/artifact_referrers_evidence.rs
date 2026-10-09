@@ -7,7 +7,6 @@
 #![allow(clippy::disallowed_methods)]
 #![expect(
     clippy::expect_used,
-    clippy::unwrap_used,
     reason = "backend-parametrized acceptance laws assert each step's result"
 )]
 
@@ -22,182 +21,6 @@ use lash_sansio::sync::MutexExt;
 #[path = "artifact_referrers_evidence/fixture.rs"]
 mod fixture;
 use fixture::{Backend, Fixture};
-
-async fn stored_module_refusals_preserve_causes_and_terminal_semantics(backend: Backend) {
-    use lash_vm::testing::ast_builders as b;
-    use lash_vm_client::service::runtime_ops::ServiceRuntimeOps as _;
-    use lash_vm_runtime::LashVmProcessInput;
-
-    let artifact = lash_vm::ModuleArtifact::from_program(b::module(
-        vec![b::process_returning(
-            "refused",
-            Vec::new(),
-            lash_vm::TypeExpr::Null,
-            b::finish(b::null()),
-        )],
-        Vec::new(),
-    ))
-    .expect("valid module");
-    let value: serde_json::Value =
-        serde_json::from_slice(&artifact.to_store_bytes().unwrap()).unwrap();
-    let mut generation = value.clone();
-    generation["family"] = serde_json::json!("unsupported-family");
-    let mut corrupt_hash = value.clone();
-    corrupt_hash["artifact"]["module_ref"] = serde_json::json!("forged-module-ref");
-    let mut unlifted = value;
-    unlifted["artifact"]["ir"]["main"] = serde_json::to_value(b::list(vec![b::process_literal(
-        Vec::new(),
-        b::finish(b::null()),
-    )]))
-    .unwrap();
-    for (bytes, generation) in [
-        (b"invalid JSON".to_vec(), false),
-        (serde_json::to_vec(&generation).unwrap(), true),
-        (serde_json::to_vec(&corrupt_hash).unwrap(), false),
-        (serde_json::to_vec(&unlifted).unwrap(), false),
-    ]
-    .into_iter()
-    {
-        let fixture = Fixture::new(backend).await;
-        let backend = fixture.backend.clone();
-        let store = lash_vm::LashVmArtifacts::new(backend.module_artifacts());
-        let claim = lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(
-            lash_core::HostArtifactPin::mint(),
-        ))
-        .unwrap();
-        store
-            .store()
-            .publish_module_artifact(&claim, artifact.module_ref().as_str(), &bytes)
-            .await
-            .expect("persist immutable refused bytes");
-        let expected: lash_vm::ModuleArtifactRefusal =
-            lash_vm::ModuleArtifact::from_store_bytes(&bytes)
-                .unwrap_err()
-                .into();
-        assert_eq!(
-            matches!(expected, lash_vm::ModuleArtifactRefusal::Generation(_)),
-            generation
-        );
-        let verification = lash_vm_client::service::Service::default()
-            .request_accounted(lash_vm_client::service::Request::VerifyArtifact {
-                bytes: bytes.clone(),
-            })
-            .await
-            .unwrap();
-        let wire = rmp_serde::to_vec_named(&verification).unwrap();
-        let replay: lash_vm_client::service::Response = rmp_serde::from_slice(&wire).unwrap();
-        let lash_vm_client::service::Response::ArtifactVerification(
-            lash_vm_client::service::ArtifactVerification::Refused(refusal),
-        ) = replay
-        else {
-            panic!("worker must refuse the stored bytes: {replay:?}");
-        };
-        assert_eq!(refusal, expected, "worker preserves the complete cause");
-        let refusal = store
-            .get_module_artifact(artifact.module_ref())
-            .await
-            .unwrap_err();
-        let plugin: lash_core::PluginError = refusal.into();
-        assert!(plugin.is_terminal(), "permanent typed refusal: {plugin:?}");
-        assert!(!plugin.is_retryable());
-        let serialized = serde_json::to_value(&plugin).unwrap();
-        assert_eq!(
-            serialized["message"]["cause"]["refusal"],
-            serde_json::to_value(&expected).unwrap(),
-            "store and plugin preserve the complete cause"
-        );
-        let input = LashVmProcessInput {
-            module_ref: artifact.module_ref().clone(),
-            process_ref: artifact.process_ref("refused").unwrap().clone(),
-            host_requirements_ref: artifact.host_requirements_ref().clone(),
-            process_name: "refused".into(),
-            args: serde_json::Map::new(),
-        };
-        // The process runs on the core's node: its engine loads the stored
-        // module in its first VM step and owns the refusal.
-        let core = rlm_core(&fixture, Vec::new());
-        let env_ref = core
-            .host_artifacts()
-            .publish_process_env(&lash_core::HostArtifactPin::mint(), &process_environment())
-            .await
-            .expect("publish the process environment");
-        let started = core
-            .processes()
-            .start(
-                lash_core::ProcessStartRequest::new(
-                    lash_core::ProcessInput::Engine {
-                        kind: lash_vm_runtime::LASH_VM_ENGINE_KIND.to_owned(),
-                        payload: serde_json::to_value(&input).unwrap(),
-                    },
-                    lash_core::ProcessOriginator::host(),
-                    lash_core::LifetimeDecision::Detached,
-                )
-                .with_env_ref(env_ref),
-                core.effect_host(),
-            )
-            .await
-            .expect("the process starts")
-            .process_id;
-        let decoded = tokio::time::timeout(
-            std::time::Duration::from_secs(60),
-            core.processes().await_output(&started),
-        )
-        .await
-        .expect("the process ends within a minute")
-        .expect("read the process's end");
-        let encoded = serde_json::to_vec(&decoded).unwrap();
-        assert_eq!(
-            serde_json::from_slice::<lash_core::ProcessAwaitOutput>(&encoded).unwrap(),
-            decoded,
-            "durable terminal retains all evidence"
-        );
-        let lash_core::ProcessAwaitOutput::Abandoned { evidence, .. } = &decoded else {
-            panic!("artifact refusal must abandon before effects: {decoded:?}");
-        };
-        let lash_core::AbandonWriter::ResumeRefused { reason } = &evidence.writer else {
-            panic!("engine must own the refusal: {evidence:?}");
-        };
-        match expected {
-            lash_vm::ModuleArtifactRefusal::Generation(_) => assert_eq!(
-                reason,
-                &lash_core::ProcessResumeRefusal::RetiredGeneration {
-                    found: artifact.module_ref().to_string(),
-                }
-            ),
-            lash_vm::ModuleArtifactRefusal::Corrupt(source) => assert_eq!(
-                reason,
-                &lash_core::ProcessResumeRefusal::StoredArtifactCorrupt {
-                    artifact_ref: artifact.module_ref().to_string(),
-                    source,
-                }
-            ),
-        }
-        let registry = backend.process_registry();
-        let retained = registry
-            .get_process(&started)
-            .await
-            .expect("read durable terminal")
-            .expect("retained process");
-        assert_eq!(retained.outcome().as_ref(), Some(&decoded));
-        let events = registry
-            .recent_events(&started, 4)
-            .await
-            .expect("read durable terminal event");
-        let terminals: Vec<_> = events
-            .iter()
-            .filter_map(|event| match &event.fact {
-                lash_core::ProcessLifecycleFact::Terminal { outcome, .. } => Some(outcome),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(terminals.len(), 1, "the process writes one terminal event");
-        assert_eq!(
-            lash_core::ProcessAwaitOutput::from(terminals[0].clone()),
-            decoded,
-            "event retains the cause"
-        );
-    }
-}
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct Edge {
@@ -374,8 +197,7 @@ fn rlm_core_with_plugins(
             .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),
-        std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
-        &backend,
+        lash_protocol_rlm::CellDialect::typescript(),
     );
     let builder = LashCore::rlm_builder(backend, factory);
     let builder = plugins
@@ -414,7 +236,9 @@ async fn cold_reopen_globals_across_turns(backend: Backend) {
     // Both handles therefore draw from the two-turn script in call order.
     let responses = Arc::new(Mutex::new(VecDeque::from(vec![
         response("const saved = async () => 7; finish('bound');"),
-        response("const run = await processes.start({ definition: saved }); finish(await run);"),
+        response(
+            "const run = await processes.start({ definition: saved }); finish(await processes.await({ handle: run }));",
+        ),
     ])));
     let first_core = rlm_core_with_queue(&fixture, Arc::clone(&responses));
     let first_session = created_session(&first_core, "artifact-referrers-cold-reopen")
@@ -551,10 +375,10 @@ async fn continue_as_carries_only_seeded_definition(backend: Backend) {
             response("const dropped = async () => 22; finish('dropped bound');"),
             response("await control.continue_as({ task: 'use seed', seed: { carried } });"),
             response(
-                "const run = await processes.start({ definition: carried }); finish(await run);",
+                "const run = await processes.start({ definition: carried }); finish(await processes.await({ handle: run }));",
             ),
             response(
-                "const run = await processes.start({ definition: carried }); finish(await run);",
+                "const run = await processes.start({ definition: carried }); finish(await processes.await({ handle: run }));",
             ),
         ],
     );
@@ -664,8 +488,7 @@ impl lash_core::plugin::ContextPressureHook for SeedingPressureHook {
 async fn a_pressure_seed_carries_its_module_into_the_new_frame(backend: Backend) {
     let fixture = Fixture::new(backend).await;
     let session_id = "artifact-referrers-pressure-seed";
-    let run_carried =
-        "const run = await processes.start({ definition: carried }); finish(await run);";
+    let run_carried = "const run = await processes.start({ definition: carried }); finish(await processes.await({ handle: run }));";
     let responses = Arc::new(Mutex::new(VecDeque::from(vec![
         response("const carried = async () => 13; finish(carried);"),
         response(run_carried),
@@ -813,9 +636,7 @@ async fn carried_definition_id_retains_the_closure_across_frame_switch(backend: 
     let core = rlm_core(
         &fixture,
         vec![
-            response(
-                "const made = await processes.create({ source: 'const answer = async () => 31;', dialect: 'typescript' }); finish(made.id);",
-            ),
+            response("const made = async () => 31; finish(made);"),
             response(
                 "await control.continue_as({ task: 'carry id', seed: { kept_id: made.id } });",
             ),
@@ -833,7 +654,7 @@ async fn carried_definition_id_retains_the_closure_across_frame_switch(backend: 
         .await
         .expect("create turn");
     assert!(first.is_success(), "{first:?}");
-    let id_json = last_cell_finish(&first).expect("tagged id output");
+    let id_json = last_cell_finish(&first).expect("definition output")["id"].clone();
     let id = lash_core::ProcessDefinitionId::from_tagged_json(&id_json).expect("id");
     let before = wait_edges(&fixture, |edges| {
         edges.len() == 1 && edges[0].kind == "frame_environment"
@@ -897,9 +718,7 @@ async fn uncarried_frame_switch_loses_an_uncarried_definition(backend: Backend) 
     let core = rlm_core(
         &fixture,
         vec![
-            response(
-                "const made = await processes.create({ source: 'const answer = async () => 31;', dialect: 'typescript' }); finish(made.id);",
-            ),
+            response("const made = async () => 31; finish(made);"),
             response("await control.continue_as({ task: 'no carry' });"),
             response("finish('switched');"),
         ],
@@ -916,7 +735,7 @@ async fn uncarried_frame_switch_loses_an_uncarried_definition(backend: Backend) 
         .expect("create");
     assert!(first.is_success(), "{first:?}");
     let id = lash_core::ProcessDefinitionId::from_tagged_json(
-        &last_cell_finish(&first).expect("id output"),
+        &last_cell_finish(&first).expect("definition output")["id"],
     )
     .expect("id");
     let before = wait_edges(&fixture, |edges| {
@@ -951,9 +770,7 @@ async fn host_pin_keeps_a_definition_across_an_uncarried_switch(backend: Backend
     let core = rlm_core(
         &fixture,
         vec![
-            response(
-                "const made = await processes.create({ source: 'const answer = async () => 31;', dialect: 'typescript' }); finish(made.id);",
-            ),
+            response("const made = async () => 31; finish(made);"),
             response("await control.continue_as({ task: 'host keeps id' });"),
             response("finish('switched');"),
         ],
@@ -970,7 +787,7 @@ async fn host_pin_keeps_a_definition_across_an_uncarried_switch(backend: Backend
         .expect("create");
     assert!(first.is_success(), "{first:?}");
     let id = lash_core::ProcessDefinitionId::from_tagged_json(
-        &last_cell_finish(&first).expect("id output"),
+        &last_cell_finish(&first).expect("definition output")["id"],
     )
     .expect("id");
     let before = wait_edges(&fixture, |edges| {
@@ -1038,30 +855,15 @@ async fn host_pin_keeps_a_definition_across_an_uncarried_switch(backend: Backend
     );
 }
 
-/// The environment a host-started process runs under.
-fn process_environment() -> lash_core::ProcessExecutionEnvSpec {
-    lash_core::ProcessExecutionEnvSpec::new(
-        lash_core::AdmittedPluginConfig::default(),
-        lash_core::SessionPolicy::new(
-            lash::TurnBudget::Unbounded,
-            lash::MaxToolCalls::new(16),
-            lash::NoProgressBudget::bounded(12),
-        ),
-        lash_core::SessionToolAccess::ambient(),
-    )
-}
-
-/// The source every `processes.create` case compiles: one process, whose
-/// answer a later turn reads back to prove it ran the created module.
-const CREATED_SOURCE: &str = "const answer = async () => 40 + 2;";
+/// The process every case writes: its answer is what a later turn reads
+/// back to prove it ran the cell's document.
+const CREATED_SOURCE: &str = "async () => 40 + 2";
 
 fn create_definition_cell(binding: &str) -> String {
-    format!(
-        "const {binding} = await processes.create({{ source: {CREATED_SOURCE:?}, dialect: 'typescript' }}); finish('created');"
-    )
+    format!("const {binding} = {CREATED_SOURCE}; finish('created');")
 }
 
-/// FIG-3116: a definition `processes.create` returns is an RLM value like
+/// FIG-3116: the definition of a process a cell wrote is an RLM value like
 /// any other (ADR 0113 §6). The call's realization publishes its module under
 /// the realizing execution, the cell's global holds it in the frame, and a
 /// later turn in the same frame starts it by value after a cold reopen.
@@ -1069,7 +871,9 @@ async fn created_definition_survives_cold_reopen_and_starts_by_value(backend: Ba
     let fixture = Fixture::new(backend).await;
     let responses = Arc::new(Mutex::new(VecDeque::from(vec![
         response(&create_definition_cell("made")),
-        response("const run = await processes.start({ definition: made }); finish(await run);"),
+        response(
+            "const run = await processes.start({ definition: made }); finish(await processes.await({ handle: run }));",
+        ),
     ])));
     let first_core = rlm_core_with_queue(&fixture, Arc::clone(&responses));
     let first_session = created_session(&first_core, "processes-create-cold-reopen")
@@ -1082,7 +886,7 @@ async fn created_definition_survives_cold_reopen_and_starts_by_value(backend: Ba
         .output()
         .await
         .expect("first turn");
-    assert!(first.is_success(), "processes.create turn: {first:?}");
+    assert!(first.is_success(), "the defining turn: {first:?}");
     let created = wait_edges(&fixture, |edges| {
         edges.len() == 1 && edges[0].kind == "frame_environment"
     })
@@ -1141,7 +945,7 @@ async fn created_definition_is_reclaimed_after_session_deletion(backend: Backend
         .output()
         .await
         .expect("create turn");
-    assert!(created.is_success(), "processes.create turn: {created:?}");
+    assert!(created.is_success(), "the defining turn: {created:?}");
     let held = wait_edges(&fixture, |edges| {
         edges.len() == 1 && edges[0].kind == "frame_environment"
     })
@@ -1251,7 +1055,6 @@ macro_rules! tiered_ignored {
 }
 
 tiered!(
-    stored_module_refusals_preserve_causes_and_terminal_semantics,
     wait_edges_waits_for_condition_past_former_deadline,
     cold_reopen_globals_across_turns,
     overwrite_retains_old_module_until_frame_end,
@@ -1276,7 +1079,7 @@ tiered_ignored!(
 #[test]
 fn postgres_variants_never_pass_without_a_database_url() {
     let executable = std::env::current_exe().expect("test executable");
-    let law = "stored_module_refusals_preserve_causes_and_terminal_semantics::postgres";
+    let law = "wait_edges_waits_for_condition_past_former_deadline::postgres";
     for url in [None, Some(""), Some(" \t ")] {
         let mut command = std::process::Command::new(&executable);
         command

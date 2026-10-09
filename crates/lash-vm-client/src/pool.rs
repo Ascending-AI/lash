@@ -302,15 +302,27 @@ fn limit(limit: WorkerLimit) -> PoolError {
     InfrastructureOutcome::WorkerLimitExceeded { limit }.into()
 }
 
-/// How a worker answered [`Checkout::park`].
+/// Where a run stands after the parent drove it one exchange.
 #[derive(Debug)]
-pub enum ParkOutcome {
-    /// The run parked; the state resumes it.
-    Parked(OpaqueVmState),
-    /// The run could not be captured where it stands. The request is the
-    /// worker's [`EffectKind::ParkDeclined`]; answering it with
-    /// [`EffectOutcome::Unit`] runs on, and the run issues its request again.
-    Declined(EffectRequest),
+pub enum RunStep {
+    /// The machine reads its host; [`Checkout::host_answer`] runs it on.
+    HostRead {
+        id: HostReadId,
+        kind: HostReadKind,
+        request: EncodedPayload,
+    },
+    /// No task is ready.
+    Parked {
+        park: EncodedPayload,
+        meters: RunMeters,
+    },
+    /// The slice is spent and a task is still ready.
+    Slice { meters: RunMeters },
+    /// The run is over.
+    Ended {
+        end: EncodedPayload,
+        meters: RunMeters,
+    },
 }
 
 /// Owns one transport lease. Dropping without release kills and reaps the
@@ -328,15 +340,19 @@ pub struct Checkout {
     incoming: MessageFence,
     reservation: usize,
     started: bool,
-    pending: Option<(EffectRequestId, EffectKind)>,
+    /// The host read the worker waits on.
+    pending: Option<HostReadId>,
+    /// Whether the worker stands at a safe point, where it can be reset.
     resettable: bool,
     owner: Option<VmOwner>,
-    observations: Vec<EncodedPayload>,
-    /// The run's heap budget, which bounds the observations one step hands
-    /// its parent (FIG-4458). `None` is unbounded.
-    observation_budget: Option<u64>,
-    /// The observation bytes the current step has handed over.
-    observed_bytes: u64,
+    /// The document the run executes, as the parent named it at `start`.
+    document: Option<String>,
+    printed: Vec<EncodedPayload>,
+    /// The run's heap bound, which also bounds what one exchange prints
+    /// (FIG-4458).
+    print_budget: u64,
+    /// The printed bytes the current exchange has handed over.
+    printed_bytes: u64,
     execution_class: Option<ExecutionClass>,
     execution_recorded: bool,
 }
@@ -374,8 +390,9 @@ impl Checkout {
         }
         result
     }
-    pub fn take_observations(&mut self) -> Vec<EncodedPayload> {
-        std::mem::take(&mut self.observations)
+    /// What the run printed since this was last called, in order.
+    pub fn take_printed(&mut self) -> Vec<EncodedPayload> {
+        std::mem::take(&mut self.printed)
     }
     pub fn lease(&self) -> ExecutionLease {
         self.outgoing.next_header_copy().lease
@@ -394,80 +411,172 @@ impl Checkout {
     pub fn budget(&self) -> &ExecutionBudget {
         &self.budget
     }
-    pub fn start(&mut self, start: Start) -> Result<WorkerMessage, PoolError> {
-        self.start_inner::<false>(start)
-    }
 
-    /// Starts a run with request timing from the measured worker specialization.
-    pub fn start_measured(&mut self, start: Start) -> Result<WorkerMessage, PoolError> {
-        self.worker
-            .as_mut()
-            .ok_or_else(PoolError::eof)?
-            .exchange_timing = crate::ipc::ExchangeTiming::default();
-        self.start_inner::<true>(start)
-    }
-
-    fn start_inner<const MEASURE: bool>(
+    /// Hands the worker the run: it validates and compiles `start`'s
+    /// document and builds a machine that has executed nothing, or one
+    /// rebuilt from the parked state. `document` is the identity the parent
+    /// knows the document by, which a parked state must name; `class` is
+    /// what the pool's receipts call the execution.
+    pub fn start(
         &mut self,
         mut start: Start,
-    ) -> Result<WorkerMessage, PoolError> {
+        document: &str,
+        class: ExecutionClass,
+    ) -> Result<(), PoolError> {
         if self.started {
             return Err(PoolError::breach(SequenceFault::CheckoutAlreadyStarted));
         }
-        if let ProgramSource::Source { text, .. } = &start.program {
-            self.bound(
-                text.len() as u64,
-                self.pool.config.protocol.max_source_bytes,
-            )?;
-        }
-        let state = match &start.state {
-            StartState::Snapshot(state) => Some((state, VmStateKind::Snapshot)),
-            StartState::Continuation(state) => Some((state, VmStateKind::Continuation)),
-            StartState::Fresh => None,
-        };
-        if let Some((state, kind)) = state
+        if let StartFrom::Parked(state) = &start.from
             && let Err(error) = state.check(&StateExpectation {
-                kind,
                 owner: &start.owner,
-                reads: &lash_vm::vm_contract_reads(),
+                kernel: crate::kernel_reads(),
+                document: Some(document),
                 max_bytes: self.pool.config.protocol.max_vm_state_bytes,
             })
         {
             self.discard();
             return Err(InfrastructureOutcome::input_state(error).into());
         }
-        // The host configuration is the ceiling, never a worker's assertion.
-        let cap = |asked: Option<u64>, max: Option<u64>| match (asked, max) {
-            (Some(a), Some(b)) => Some(a.min(b)),
-            (None, b) => b,
-            (a, None) => a,
-        };
-        start.limits.instruction_budget = cap(
-            start.limits.instruction_budget,
-            self.pool.config.vm_limits.instruction_budget,
-        );
-        start.limits.memory_limit_bytes = cap(
-            start.limits.memory_limit_bytes,
-            self.pool.config.vm_limits.memory_limit_bytes,
-        );
-        start.limits.max_frame_depth = start
-            .limits
-            .max_frame_depth
-            .min(self.pool.config.vm_limits.max_frame_depth);
-        self.execution_class = Some(match &start.program {
-            ProgramSource::Artifact {
-                entry: ProgramEntry::Process { .. },
-                ..
-            } => ExecutionClass::Process,
-            _ => ExecutionClass::Cell,
-        });
+        // The host configuration is the ceiling, never a caller's assertion.
+        let ceiling = self.pool.config.run_bounds;
+        let bounds = &mut start.bounds;
+        bounds.charge = bounds.charge.min(ceiling.charge);
+        bounds.memory = bounds.memory.min(ceiling.memory);
+        bounds.call_depth = bounds.call_depth.min(ceiling.call_depth);
+        bounds.live_tasks = bounds.live_tasks.min(ceiling.live_tasks);
+        bounds.requests_per_park = bounds.requests_per_park.min(ceiling.requests_per_park);
+        bounds.join_members = bounds.join_members.min(ceiling.join_members);
+        self.execution_class = Some(class);
         self.owner = Some(start.owner.clone());
-        self.observation_budget = start.limits.memory_limit_bytes;
+        self.document = Some(document.to_owned());
+        self.print_budget = bounds.memory;
         self.started = true;
-        self.exchange::<MEASURE>(
+        match self.exchange::<false>(
             ParentMessage::Start(Box::new(start)),
             self.pool.config.protocol.no_response_watchdog,
-        )
+        )? {
+            WorkerMessage::Started => Ok(()),
+            message => Err(self.unexpected(Exchange::Run, &message)),
+        }
+    }
+
+    /// Runs ready tasks until the machine reads its host, parks, spends
+    /// `slice` charge units or ends. With `cancel` the machine observes a
+    /// run cancel at its next safe point.
+    pub fn run(&mut self, slice: u64, cancel: bool) -> Result<RunStep, PoolError> {
+        self.run_inner::<false>(slice, cancel)
+    }
+
+    /// [`run`](Self::run) through the clock-instrumented transport. The
+    /// configured worker must have `--lash-vm-measure` in its entry arguments.
+    pub fn run_measured(&mut self, slice: u64, cancel: bool) -> Result<RunStep, PoolError> {
+        self.worker
+            .as_mut()
+            .ok_or_else(PoolError::eof)?
+            .exchange_timing = crate::ipc::ExchangeTiming::default();
+        self.run_inner::<true>(slice, cancel)
+    }
+
+    fn run_inner<const MEASURE: bool>(
+        &mut self,
+        slice: u64,
+        cancel: bool,
+    ) -> Result<RunStep, PoolError> {
+        if self.pending.is_some() || !self.started {
+            return Err(PoolError::breach(SequenceFault::NoRun));
+        }
+        let message = self.exchange::<MEASURE>(
+            ParentMessage::Run { slice, cancel },
+            self.pool.config.protocol.no_response_watchdog,
+        )?;
+        self.step(message)
+    }
+
+    /// Answers the machine's pending host read; the slice runs on. The
+    /// parent's work on the answer may have taken any time: no worker
+    /// deadline ran while the parent owned the read.
+    pub fn host_answer(
+        &mut self,
+        id: HostReadId,
+        answer: EncodedPayload,
+    ) -> Result<RunStep, PoolError> {
+        if self.pending != Some(id) {
+            return Err(PoolError::breach(SequenceFault::WrongReadId));
+        }
+        if let Err(error) = self.effect_bound(answer.0.len()) {
+            self.discard();
+            return Err(error);
+        }
+        self.pending = None;
+        let message = self.exchange::<false>(
+            ParentMessage::HostAnswer { id, answer },
+            self.pool.config.protocol.no_response_watchdog,
+        )?;
+        self.step(message)
+    }
+
+    fn step(&mut self, message: WorkerMessage) -> Result<RunStep, PoolError> {
+        Ok(match message {
+            WorkerMessage::HostRead { id, kind, request } => {
+                RunStep::HostRead { id, kind, request }
+            }
+            WorkerMessage::Parked { park, meters } => RunStep::Parked { park, meters },
+            WorkerMessage::Slice { meters } => RunStep::Slice { meters },
+            WorkerMessage::Ended { end, meters } => RunStep::Ended { end, meters },
+            message => return Err(self.unexpected(Exchange::Run, &message)),
+        })
+    }
+
+    /// Hands the machine one committed outcome; `true` when its wait had
+    /// been withdrawn and the outcome was dropped.
+    pub fn deliver(&mut self, wait: u64, outcome: EncodedPayload) -> Result<bool, PoolError> {
+        if self.pending.is_some() || !self.started {
+            return Err(PoolError::breach(SequenceFault::NoRun));
+        }
+        if let Err(error) = self.effect_bound(outcome.0.len()) {
+            self.discard();
+            return Err(error);
+        }
+        match self.exchange::<false>(
+            ParentMessage::Deliver { wait, outcome },
+            self.pool.config.protocol.no_response_watchdog,
+        )? {
+            WorkerMessage::Delivered { dropped } => Ok(dropped),
+            message => Err(self.unexpected(Exchange::Deliver, &message)),
+        }
+    }
+
+    /// The run's state as it stands, sealed by the worker and checked here.
+    pub fn export(&mut self) -> Result<OpaqueVmState, PoolError> {
+        if self.pending.is_some() || !self.started {
+            return Err(PoolError::breach(SequenceFault::NoRun));
+        }
+        match self.exchange::<false>(
+            ParentMessage::Export,
+            self.pool.config.protocol.no_response_watchdog,
+        )? {
+            WorkerMessage::Exported { state } => Ok(state),
+            message => Err(self.unexpected(Exchange::Export, &message)),
+        }
+    }
+
+    fn effect_bound(&self, size: usize) -> Result<(), PoolError> {
+        let bound = self.pool.config.protocol.max_effect_value_bytes;
+        if size as u64 > bound {
+            return Err(limit(WorkerLimit::EffectValue {
+                size: size as u64,
+                bound,
+            }));
+        }
+        Ok(())
+    }
+
+    fn unexpected(&mut self, exchange: Exchange, message: &WorkerMessage) -> PoolError {
+        self.discard();
+        PoolError::breach(ProtocolBreach::Unexpected {
+            exchange,
+            found: message.kind(),
+        })
     }
     /// Performs pure compiler/state work in the worker, under this checkout.
     pub fn prepare(
@@ -491,80 +600,8 @@ impl Checkout {
             })),
         }
     }
-    /// Host effect work may take any time. No worker/CPU deadline runs while
-    /// the parent owns the pending request; this call starts a new phase.
-    pub fn effect_result(&mut self, result: EffectResponse) -> Result<WorkerMessage, PoolError> {
-        self.effect_result_inner::<false>(result)
-    }
-
-    /// Answers an effect through the clock-instrumented transport specialization.
-    /// The configured worker must have `--lash-vm-measure` in its entry arguments.
-    pub fn effect_result_measured(
-        &mut self,
-        result: EffectResponse,
-    ) -> Result<WorkerMessage, PoolError> {
-        self.worker
-            .as_mut()
-            .ok_or_else(PoolError::eof)?
-            .exchange_timing = crate::ipc::ExchangeTiming::default();
-        self.effect_result_inner::<true>(result)
-    }
-
-    fn effect_result_inner<const MEASURE: bool>(
-        &mut self,
-        result: EffectResponse,
-    ) -> Result<WorkerMessage, PoolError> {
-        if self.pending.map(|p| p.0) != Some(result.id) {
-            return Err(PoolError::breach(SequenceFault::WrongRequestId));
-        }
-        if let EffectOutcome::Value(value) | EffectOutcome::Failed(value) = &result.outcome
-            && value.0.len() as u64 > self.pool.config.protocol.max_effect_value_bytes
-        {
-            let error = limit(WorkerLimit::EffectValue {
-                size: value.0.len() as u64,
-                bound: self.pool.config.protocol.max_effect_value_bytes,
-            });
-            self.discard();
-            return Err(error);
-        }
-        self.pending = None;
-        self.exchange::<MEASURE>(
-            ParentMessage::EffectResponse(result),
-            self.pool.config.protocol.no_response_watchdog,
-        )
-    }
-    /// Parks the run on its pending request instead of answering it: a
-    /// process boundary, or an effect the run can issue again
-    /// ([`EffectKind::parkable`]), such as one whose operation needs a worker
-    /// of its own (FIG-4159). A parked run's state resumes it with `Start`,
-    /// and a run parked on an effect issues that effect's request again. The
-    /// run may decline when it cannot be captured where it stands: the worker
-    /// then asks [`EffectKind::ParkDeclined`], and once that is answered the
-    /// run issues its request again on this checkout.
-    pub fn park(&mut self) -> Result<ParkOutcome, PoolError> {
-        if !self.pending.is_some_and(|(_, kind)| kind.parkable()) {
-            return Err(PoolError::breach(SequenceFault::ParkWithoutParkableRequest));
-        }
-        self.pending = None;
-        match self.exchange::<false>(
-            ParentMessage::Park,
-            self.pool.config.protocol.no_response_watchdog,
-        )? {
-            WorkerMessage::Suspended { state } => Ok(ParkOutcome::Parked(state)),
-            WorkerMessage::EffectRequest(request) if request.kind == EffectKind::ParkDeclined => {
-                Ok(ParkOutcome::Declined(request))
-            }
-            message => {
-                self.discard();
-                Err(PoolError::breach(ProtocolBreach::Unexpected {
-                    exchange: Exchange::Park,
-                    found: message.kind(),
-                }))
-            }
-        }
-    }
-    /// Cooperative physical stop, followed by bounded hard kill on silence.
-    /// The broker retains the journaled cancellation and completion winner.
+    /// Physical stop, followed by bounded hard kill on silence. The broker
+    /// retains the durable cancellation and completion winner.
     pub fn cancel(&mut self) -> Result<WorkerMessage, PoolError> {
         let response = self.exchange::<false>(
             ParentMessage::Cancel,
@@ -573,8 +610,8 @@ impl Checkout {
         self.discard_for(false);
         response
     }
-    /// Call after clean completion or a broker-approved abandonment/park.
-    /// The broker must settle any admitted operation before abandoning it.
+    /// Call once the run stands at a safe point the broker stops at: its end,
+    /// or a park that outlives this activation.
     pub fn release(mut self) -> Result<(), PoolError> {
         if self.started && !self.resettable {
             self.discard();
@@ -624,15 +661,6 @@ impl Checkout {
                 Err(error)
             }
         }
-    }
-    fn bound(&self, size: u64, bound: u64) -> Result<(), PoolError> {
-        if size > bound {
-            return Err(PoolError::refused(RunRefusal::PayloadTooLarge {
-                limit: bound,
-                size,
-            }));
-        }
-        Ok(())
     }
     fn send<const MEASURE: bool>(
         &mut self,
@@ -705,7 +733,7 @@ impl Checkout {
         timeout: Duration,
     ) -> Result<WorkerMessage, PoolError> {
         self.resettable = false;
-        self.observed_bytes = 0;
+        self.printed_bytes = 0;
         self.send::<MEASURE>(message, timeout)?;
         let mut deadline = Instant::now() + timeout;
         let mut phase = None;
@@ -819,72 +847,51 @@ impl Checkout {
                 WorkerMessage::Refused { refusal } => {
                     return Err(refusal.into_outcome().into());
                 }
-                WorkerMessage::Observations { payload } => {
-                    // Each chunk crossed in one frame; the step's stream is
-                    // held to the run's heap budget, never to a transport
+                WorkerMessage::Printed { payload } => {
+                    // Each chunk crossed in one frame; the exchange's stream
+                    // is held to the run's heap bound, never to a transport
                     // bound (FIG-4458).
-                    self.observed_bytes =
-                        self.observed_bytes.saturating_add(payload.0.len() as u64);
-                    if self
-                        .observation_budget
-                        .is_some_and(|budget| self.observed_bytes > budget)
-                    {
+                    self.printed_bytes = self.printed_bytes.saturating_add(payload.0.len() as u64);
+                    if self.printed_bytes > self.print_budget {
                         return Err(limit(WorkerLimit::Observations));
                     }
-                    self.observations.push(payload);
+                    self.printed.push(payload);
                 }
                 WorkerMessage::LimitExceeded { limit: exhausted } => return Err(limit(exhausted)),
-                WorkerMessage::EffectRequest(request) => {
-                    if request.payload.0.len() as u64
-                        > self.pool.config.protocol.max_effect_value_bytes
-                    {
+                WorkerMessage::HostRead { id, kind, request } => {
+                    if request.0.len() as u64 > self.pool.config.protocol.max_effect_value_bytes {
                         return Err(limit(WorkerLimit::EffectValue {
-                            size: request.payload.0.len() as u64,
+                            size: request.0.len() as u64,
                             bound: self.pool.config.protocol.max_effect_value_bytes,
                         }));
                     }
-                    self.pending = Some((request.id, request.kind));
-                    self.resettable = true;
-                    return Ok(WorkerMessage::EffectRequest(request));
+                    self.pending = Some(id);
+                    return Ok(WorkerMessage::HostRead { id, kind, request });
                 }
-                message @ (WorkerMessage::Complete { .. }
-                | WorkerMessage::Suspended { .. }
-                | WorkerMessage::GuestError { .. }) => {
-                    let state = match &message {
-                        WorkerMessage::Complete { state, .. } => {
-                            Some((state, VmStateKind::Snapshot))
-                        }
-                        WorkerMessage::Suspended { state } => {
-                            Some((state, VmStateKind::Continuation))
-                        }
-                        WorkerMessage::GuestError { state, .. } => {
-                            state.as_ref().map(|state| (state, VmStateKind::Snapshot))
-                        }
-                        _ => None,
-                    };
-                    if let Some((state, kind)) = state {
-                        state
-                            .check(&StateExpectation {
-                                kind,
-                                owner: self.owner.as_ref().ok_or_else(|| {
-                                    PoolError::breach(SequenceFault::MissingOwner)
-                                })?,
-                                reads: &lash_vm::vm_contract_reads(),
-                                max_bytes: self.pool.config.protocol.max_vm_state_bytes,
-                            })
-                            .map_err(InfrastructureOutcome::output_state)?;
-                    }
-                    self.resettable = !matches!(message, WorkerMessage::GuestError { .. });
-                    if !self.resettable {
-                        self.discard_for(false);
-                        lock(&self.budget.0).replacement = false;
-                    }
-                    // Do not consult exit status after a fully decoded terminal.
+                WorkerMessage::Exported { state } => {
+                    state
+                        .check(&StateExpectation {
+                            owner: self
+                                .owner
+                                .as_ref()
+                                .ok_or_else(|| PoolError::breach(SequenceFault::MissingOwner))?,
+                            kernel: crate::kernel_reads(),
+                            document: self.document.as_deref(),
+                            max_bytes: self.pool.config.protocol.max_vm_state_bytes,
+                        })
+                        .map_err(InfrastructureOutcome::output_state)?;
+                    self.resettable = true;
+                    return Ok(WorkerMessage::Exported { state });
+                }
+                // Do not consult exit status after a fully decoded step.
+                message @ (WorkerMessage::Started
+                | WorkerMessage::Parked { .. }
+                | WorkerMessage::Slice { .. }
+                | WorkerMessage::Ended { .. }
+                | WorkerMessage::Delivered { .. }
+                | WorkerMessage::Prepared { .. }) => {
+                    self.resettable = true;
                     return Ok(message);
-                }
-                WorkerMessage::Prepared { response } => {
-                    self.resettable = true;
-                    return Ok(WorkerMessage::Prepared { response });
                 }
                 WorkerMessage::Cancelled => {
                     self.discard_for(false);
@@ -1074,9 +1081,10 @@ pub mod runtime_ops {
                         pending: None,
                         resettable: false,
                         owner: None,
-                        observations: Vec::new(),
-                        observation_budget: None,
-                        observed_bytes: 0,
+                        document: None,
+                        printed: Vec::new(),
+                        print_budget: u64::MAX,
+                        printed_bytes: 0,
                         execution_class: None,
                         execution_recorded: false,
                     });

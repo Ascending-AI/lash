@@ -10,7 +10,7 @@ use lash_sansio::SessionId;
 pub(super) struct ContractGraph {
     identity: lash::tracing::TraceLanguageExecutionIdentity,
     overlay: lash::workflow::WorkflowExecutionOverlay,
-    document: Option<lash::workflow::WorkflowExecutionDocument>,
+    document: Option<lash::workflow::WorkflowDocument>,
 }
 
 #[derive(Default)]
@@ -27,13 +27,13 @@ struct ObservedExecution {
 pub(super) struct ContractGraphs {
     executions: std::sync::Mutex<BTreeMap<String, ObservedExecution>>,
     documents: std::sync::Mutex<
-        BTreeMap<lash::workflow::WorkflowDocumentRef, lash::workflow::WorkflowExecutionDocument>,
+        BTreeMap<lash::workflow::WorkflowDocumentRef, lash::workflow::WorkflowDocument>,
     >,
 }
 
 impl ContractGraphs {
     /// Read from `core` each document an observed execution named and this
-    /// has not read yet. Lash holds a cell's module only while the cell's
+    /// has not read yet. Lash holds a cell's document only while the cell's
     /// turn executes, so a contract reads on every activity of the turn.
     async fn read_documents(&self, core: &lash::LashCore) {
         let wanted = {
@@ -146,29 +146,18 @@ impl lash::tracing::TraceSink for ContractGraphs {
     }
 }
 
-/// The document node that owns `site`, and the site's static description.
-fn contract_document_site<'a>(
-    body: &'a lash::vm::ir::WorkflowSubgraph,
-    site: &lash::vm::WorkflowSiteRef,
-) -> Option<(
-    &'a lash::vm::ir::WorkflowNode,
-    &'a lash::vm::WorkflowSiteDescriptor,
-)> {
-    body.nodes().into_iter().find_map(|node| {
-        if node.id == site.node_id {
-            return node
-                .execution_sites
-                .iter()
-                .find(|candidate| candidate.site_path == site.site_path)
-                .map(|found| (node, found));
-        }
-        let lash::vm::ir::WorkflowNodeKind::Container(container) = &node.kind else {
-            return None;
-        };
-        container
-            .child_subgraphs()
-            .find_map(|(_, child)| contract_document_site(child, site))
-    })
+/// The effect the document performs at `site`: the name a `perform` states.
+fn contract_document_effect<'a>(
+    document: &'a lash::workflow::WorkflowDocument,
+    site: &lash::workflow::document::Site,
+) -> Option<&'a lash::workflow::document::EffectName> {
+    match &document.graph().node_at(site)?.kind {
+        lash::workflow::graph::NodeKind::Action(lash::workflow::graph::ActionNode::Perform {
+            effect,
+            ..
+        }) => Some(effect),
+        _ => None,
+    }
 }
 
 pub(super) fn agent_contract_graph_facts(
@@ -176,9 +165,8 @@ pub(super) fn agent_contract_graph_facts(
     root_session_id: &SessionId,
 ) -> Value {
     let mut completed_process_entries = BTreeSet::new();
-    let mut completed_labeled_resources = BTreeSet::new();
-    let mut failed_labeled_resources = BTreeSet::new();
-    let mut completed_labeled_nodes = BTreeSet::new();
+    let mut completed_effects = BTreeSet::new();
+    let mut failed_effects = BTreeSet::new();
     let mut child_links = BTreeSet::new();
     let mut graph_status_counts = BTreeMap::<String, usize>::new();
     let mut child_session_exec_completed_count = 0usize;
@@ -210,7 +198,7 @@ pub(super) fn agent_contract_graph_facts(
         }
         if matches!(
             identity.document.entry,
-            lash::workflow::WorkflowDocumentEntry::Process { .. }
+            lash::workflow::WorkflowDocumentEntry::Entry { .. }
         ) && matches!(
             graph.subject,
             lash::tracing::TraceRuntimeSubject::Process { .. }
@@ -218,31 +206,21 @@ pub(super) fn agent_contract_graph_facts(
         {
             completed_process_entries.insert(identity.entry_name.clone());
         }
-        // A site's kind and its node's label are the document's: the overlay
-        // says only what the site was observed to do.
-        let body = document
-            .as_ref()
-            .map(lash::workflow::WorkflowExecutionDocument::body);
+        // Which effect a site performs is the document's: the overlay says
+        // only what the site was observed to do.
         for site in &graph.sites {
-            let Some((node, described)) =
-                body.and_then(|body| contract_document_site(body, &site.site))
+            let Some(effect) = document
+                .as_ref()
+                .and_then(|document| contract_document_effect(document, &site.site.site))
             else {
                 continue;
             };
-            let Some(label) = &node.label else {
-                continue;
-            };
-            let title = label.title.as_str();
-            let resource = described.kind == lash::tracing::ExecutionNodeKind::ResourceOperation;
             match &site.state.occurrence {
                 lash::workflow::WorkflowOverlayOccurrence::Completed { .. } => {
-                    if resource {
-                        completed_labeled_resources.insert(title.to_string());
-                    }
-                    completed_labeled_nodes.insert(title.to_string());
+                    completed_effects.insert(effect.to_string());
                 }
-                lash::workflow::WorkflowOverlayOccurrence::Failed { .. } if resource => {
-                    failed_labeled_resources.insert(title.to_string());
+                lash::workflow::WorkflowOverlayOccurrence::Failed { .. } => {
+                    failed_effects.insert(effect.to_string());
                 }
                 _ => {}
             }
@@ -251,12 +229,10 @@ pub(super) fn agent_contract_graph_facts(
             child_links.insert(format!(
                 "{}->{}",
                 identity.entry_name,
-                child
-                    .child
-                    .document
-                    .as_ref()
-                    .map(|document| document.module_ref.as_str())
-                    .unwrap_or("<unknown>")
+                child.child.document.as_ref().map_or_else(
+                    || "<unknown>".to_owned(),
+                    |document| document.document.to_string()
+                )
             ));
         }
     }
@@ -264,9 +240,8 @@ pub(super) fn agent_contract_graph_facts(
         "graph_count": graphs.len(),
         "status_counts": graph_status_counts,
         "completed_process_entries": completed_process_entries.into_iter().collect::<Vec<_>>(),
-        "completed_labeled_resources": completed_labeled_resources.into_iter().collect::<Vec<_>>(),
-        "failed_labeled_resources": failed_labeled_resources.into_iter().collect::<Vec<_>>(),
-        "completed_labeled_nodes": completed_labeled_nodes.into_iter().collect::<Vec<_>>(),
+        "completed_effects": completed_effects.into_iter().collect::<Vec<_>>(),
+        "failed_effects": failed_effects.into_iter().collect::<Vec<_>>(),
         "child_links": child_links.into_iter().collect::<Vec<_>>(),
         "child_session_exec_completed_count": child_session_exec_completed_count,
         "child_session_exec_failed_count": child_session_exec_failed_count,

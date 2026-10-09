@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """The code-mode dialect seam stays a seam (ADR 0096).
 
-A host selects its dialect by naming it where it constructs the RLM protocol,
-and everything language-specific lives in that dialect's adapter. This check
-fails when:
+A host selects its dialect by naming it where it constructs the RLM protocol
+(`CellDialect::typescript()`), and everything that words prompts in a language
+lives in that dialect's prompt adapter. This check fails when:
 
-- the TypeScript adapter's concrete type is used anywhere as more than a value
-  a host names (`TypescriptDialect::…`, `Arc<TypescriptDialect>`, a parameter
-  or return typed as it), outside the adapter itself;
+- the TypeScript prompt adapter's concrete type is used anywhere as more than
+  a value (`TypescriptPrompts::…`, `Arc<TypescriptPrompts>`, a parameter or
+  return typed as it), outside the adapter itself;
 - the retired TypeScript tool-binding names come back anywhere
   (`TYPESCRIPT_TOOL_BINDING_KEY`, `required_tool_typescript_*`, the
   `typescript.tool` key, `StreamMessageKind::TypescriptCode`);
@@ -36,11 +36,11 @@ TEST_PATH = re.compile(r"(^|/)(tests?|testing|[a-z_]*_tests)(/|\.rs$)|_tests\.rs
 # The adapter's concrete type used as a type or a namespace, not as a value a
 # host names.
 CONCRETE_TYPE_USE = re.compile(
-    r"TypescriptDialect\s*::"
-    r"|<\s*(?:[A-Za-z_][A-Za-z0-9_]*::)*TypescriptDialect\s*>"
-    r"|(?:->|(?<!:):(?!:))\s*&?\s*(?:[A-Za-z_][A-Za-z0-9_]*::)*TypescriptDialect\b"
-    r"|\bfor\s+(?:[A-Za-z_][A-Za-z0-9_]*::)*TypescriptDialect\b"
-    r"|\bstruct\s+TypescriptDialect\b"
+    r"TypescriptPrompts\s*::"
+    r"|<\s*(?:[A-Za-z_][A-Za-z0-9_]*::)*TypescriptPrompts\s*>"
+    r"|(?:->|(?<!:):(?!:))\s*&?\s*(?:[A-Za-z_][A-Za-z0-9_]*::)*TypescriptPrompts\b"
+    r"|\bfor\s+(?:[A-Za-z_][A-Za-z0-9_]*::)*TypescriptPrompts\b"
+    r"|\bstruct\s+TypescriptPrompts\b"
 )
 
 RETIRED_BINDING_NAMES = re.compile(
@@ -117,7 +117,7 @@ def violations(root: Path) -> list[str]:
                 continue
             if CONCRETE_TYPE_USE.search(line):
                 found.append(
-                    f"{path}:{number}: `TypescriptDialect` may only be named as a value a host "
+                    f"{path}:{number}: `TypescriptPrompts` may only be named as a value a host "
                     f"selects: {line.strip()}"
                 )
             if path.startswith(SHARED_CODE_MODE_ROOTS) and TYPESCRIPT_PROMPT_TEXT.search(line):

@@ -117,7 +117,7 @@ pub(crate) struct CronTick {
 #[serde(deny_unknown_fields)]
 struct TriggerRegistrationInput {
     source: TriggerSource,
-    /// A definition from `processes.create`.
+    /// The definition of a process a cell wrote.
     definition: lash::process::ProcessDefinition,
     /// The argument the event is passed in.
     event_arg: String,
@@ -1180,7 +1180,7 @@ pub(crate) fn register_trigger_tool_definition() -> ToolDefinition {
                 },
                 "definition": {
                     "type": "object",
-                    "description": "A process definition from `processes.create`."
+                    "description": "The definition of a process a cell wrote."
                 },
                 "event_arg": { "type": "string" },
                 "args": { "type": "object" },

@@ -91,12 +91,8 @@ fn event_is_failed_identifies_all_failure_outcomes() {
                         process_id: lash_sansio::ProcessId::fixture("p1"),
                     },
                     document: crate::WorkflowDocumentRef {
-                        source_identity: "source".to_string(),
-                        module_ref: lash_sansio::ModuleRef::new(&lash_sansio::ContentHash::new(
-                            "m",
-                        )),
+                        document: lash_kernel_doc::DocumentId::from_bytes([1; 32]),
                         entry: crate::WorkflowDocumentEntry::Main,
-                        ir_version: 1,
                     },
                     entry_name: "main".to_string(),
                     engine_execution_id: None,
@@ -146,7 +142,7 @@ fn event_is_failed_identifies_all_failure_outcomes() {
         (
             "language node failed",
             language_execution(TraceLanguageExecutionPayload::Node {
-                at: lash_sansio::WorkflowOccurrence::fixture("n1", 1),
+                at: lash_sansio::effect_identity_fixture("n1", 1),
                 fact: TraceNodeFact::Failed {
                     call_id: None,
                     failure: TraceLanguageExecutionFailure::Runtime {
@@ -220,7 +216,7 @@ fn event_is_failed_identifies_all_failure_outcomes() {
         (
             "started language node",
             language_execution(TraceLanguageExecutionPayload::Node {
-                at: lash_sansio::WorkflowOccurrence::fixture("n1", 1),
+                at: lash_sansio::effect_identity_fixture("n1", 1),
                 fact: TraceNodeFact::Started { call_id: None },
             }),
         ),

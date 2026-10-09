@@ -1304,20 +1304,20 @@ fn record_effect(
     // ran at: a site's own occurrence number says nothing about it.
     let recorded = driver
         .recorded_effects
-        .get(site.site.node_id.as_str())
+        .get(site.site.to_string().as_str())
         .copied()
         .unwrap_or_default();
     if recorded >= driver.effect_occurrence_cap {
         driver
             .omitted_effects
-            .entry(site.site.node_id.to_string())
+            .entry(site.site.to_string())
             .or_default()
             .record(class);
         return;
     }
     driver
         .recorded_effects
-        .insert(site.site.node_id.to_string(), recorded + 1);
+        .insert(site.site.to_string(), recorded + 1);
     let operation = match &step.request {
         StepRequest::Tool { tool, .. } => tool.as_str().to_owned(),
         StepRequest::Engine { kind, .. } => kind.0.clone(),

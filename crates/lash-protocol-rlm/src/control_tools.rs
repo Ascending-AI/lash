@@ -110,7 +110,7 @@ pub(crate) fn decode_output_archive(
 }
 
 /// The `continue_as` control tool as a session in `dialect` advertises it.
-pub fn continue_as_tool_definition(dialect: &dyn crate::dialect::Dialect) -> ToolDefinition {
+pub fn continue_as_tool_definition(dialect: &dyn crate::dialect::DialectPrompts) -> ToolDefinition {
     continue_as_tool_definition_for(dialect.prompt_vocabulary())
 }
 
@@ -524,8 +524,8 @@ mod tests {
             created: Mutex::new(Vec::new()),
         });
         let provider = RlmControlToolsProvider {
-            vocabulary: crate::dialect::Dialect::prompt_vocabulary(
-                &crate::dialect::TypescriptDialect,
+            vocabulary: crate::dialect::DialectPrompts::prompt_vocabulary(
+                &crate::dialect::TypescriptPrompts,
             ),
         };
 
@@ -586,8 +586,8 @@ mod tests {
     #[tokio::test]
     async fn continue_as_redrive_derives_the_same_frame_identity() {
         let provider = RlmControlToolsProvider {
-            vocabulary: crate::dialect::Dialect::prompt_vocabulary(
-                &crate::dialect::TypescriptDialect,
+            vocabulary: crate::dialect::DialectPrompts::prompt_vocabulary(
+                &crate::dialect::TypescriptPrompts,
             ),
         };
         let args = json!({ "task": "continue deterministically" });
@@ -610,8 +610,8 @@ mod tests {
     #[tokio::test]
     async fn identical_continue_as_tasks_at_distinct_calls_derive_distinct_keys() {
         let provider = RlmControlToolsProvider {
-            vocabulary: crate::dialect::Dialect::prompt_vocabulary(
-                &crate::dialect::TypescriptDialect,
+            vocabulary: crate::dialect::DialectPrompts::prompt_vocabulary(
+                &crate::dialect::TypescriptPrompts,
             ),
         };
         let args = json!({ "task": "same task" });
@@ -655,8 +655,8 @@ mod tests {
             created: Mutex::new(Vec::new()),
         });
         let provider = RlmControlToolsProvider {
-            vocabulary: crate::dialect::Dialect::prompt_vocabulary(
-                &crate::dialect::TypescriptDialect,
+            vocabulary: crate::dialect::DialectPrompts::prompt_vocabulary(
+                &crate::dialect::TypescriptPrompts,
             ),
         };
 
@@ -731,8 +731,8 @@ mod tests {
             created: Mutex::new(Vec::new()),
         });
         let provider = RlmControlToolsProvider {
-            vocabulary: crate::dialect::Dialect::prompt_vocabulary(
-                &crate::dialect::TypescriptDialect,
+            vocabulary: crate::dialect::DialectPrompts::prompt_vocabulary(
+                &crate::dialect::TypescriptPrompts,
             ),
         };
 

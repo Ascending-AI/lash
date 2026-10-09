@@ -227,7 +227,7 @@ async fn tool_completed_activity_is_canonical_while_model_observation_is_project
         #[cfg(feature = "rlm")]
         {
             let rlm_backend = sqlite_memory_store_backend().await;
-            let rlm_factory = rlm_factory(&rlm_backend);
+            let rlm_factory = rlm_factory();
             let rlm_core =
                 explicit_ephemeral_facets(LashCore::rlm_builder(rlm_backend, rlm_factory))
                     .serve_test_llm_profile(
@@ -449,11 +449,6 @@ async fn facade_rlm_presentation_and_runtime_cuts_reach_the_running_turn() -> Re
         .instruction_limit(crate::rlm::InstructionBound::instructions(1_000_000))
         .memory_limit(crate::rlm::MemoryBound::mebibytes(64))
         .build();
-    config.presentation.binding_summary = crate::vm::BindingSummaryConfig {
-        members: 1,
-        depth: 1,
-        max_chars: 18,
-    };
     config.presentation.max_tool_call_records = 0;
     config.presentation.max_inline_scalar_bytes = 2;
     config.presentation.max_inline_keys = 0;
@@ -464,12 +459,9 @@ async fn facade_rlm_presentation_and_runtime_cuts_reach_the_running_turn() -> Re
 
     let recorded = config.recorded_behaviour();
     assert_eq!(recorded.presentation, config.presentation);
-    let factory = crate::rlm::RlmProtocolPluginFactory::new(
-        config,
-        Arc::new(crate::rlm::TypescriptDialect),
-        &backend,
-    )
-    .with_worker_service(untimed_fixture_workers());
+    let factory =
+        crate::rlm::RlmProtocolPluginFactory::new(config, crate::rlm::CellDialect::typescript())
+            .with_worker_service(untimed_fixture_workers());
     let (provider, requests) =
         super::standard_compaction_persistence::standard_compaction_provider_recorded(vec![
             text_response(&typescript_block(

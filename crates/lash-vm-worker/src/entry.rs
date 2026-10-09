@@ -1,25 +1,33 @@
 //! Native bootstrap, entered before the host initializes credentials.
 use crate::PoolError;
+use crate::embedding::{EmbedError, Embedding};
 use crate::process::inherited_pipe;
 use crate::worker::Server;
 use lash_vm_client::ipc::Bootstrap;
 use lash_vm_protocol::*;
 
 /// Register as the host binary's first action. Returns false for a normal
-/// host invocation. The pool always execs with an empty environment.
+/// host invocation. The pool always execs with an empty environment. The
+/// worker runs [`crate::standard`]: the kernel library, lash's extensions
+/// and the TypeScript dialect.
 pub fn worker_entry() -> Result<bool, PoolError> {
-    worker_entry_with_frontend(&crate::frontend::TypeScriptFrontend::default())
+    worker_entry_with(&crate::embedding::standard)
 }
 
-/// Enter the credential-free worker with the host's compiled source frontend.
-/// Call this before constructing the host runtime or credentials.
-pub fn worker_entry_with_frontend(frontend: &dyn crate::Frontend) -> Result<bool, PoolError> {
-    worker_entry_inner(frontend, None)
+/// Enter the credential-free worker with the host's own embedding: the
+/// functions and dialects it registers, assembled once the process knows it
+/// is a worker. Call this before constructing the host runtime or
+/// credentials.
+pub fn worker_entry_with(embed: &Embed) -> Result<bool, PoolError> {
+    worker_entry_inner(embed, None)
 }
+
+/// Assembles what a worker runs from the parent's working policy.
+pub type Embed = dyn Fn(&lash_vm_client::WorkerTuning) -> Result<Embedding, EmbedError>;
 
 #[cfg(feature = "testing")]
 pub fn worker_entry_with_hook(hook: &mut dyn FnMut(&ParentMessage)) -> Result<bool, PoolError> {
-    worker_entry_inner(&crate::frontend::TypeScriptFrontend::default(), Some(hook))
+    worker_entry_inner(&crate::embedding::standard, Some(hook))
 }
 
 #[expect(
@@ -27,7 +35,7 @@ pub fn worker_entry_with_hook(hook: &mut dyn FnMut(&ParentMessage)) -> Result<bo
     reason = "early host entry inspects only bootstrap argv and verifies its empty environment"
 )]
 fn worker_entry_inner(
-    frontend: &dyn crate::Frontend,
+    embed: &Embed,
     mut hook: Option<&mut dyn FnMut(&ParentMessage)>,
 ) -> Result<bool, PoolError> {
     let args = std::env::args().collect::<Vec<_>>();
@@ -68,10 +76,17 @@ fn worker_entry_inner(
         max_nodes: bootstrap.nodes,
         max_allocation_bytes: bootstrap.allocation,
     });
+    // A registry that cannot be assembled is a defect of this build: the
+    // worker never becomes ready, and the pool reports its bootstrap.
+    let embedding = embed(&bootstrap.tuning).map_err(|error| {
+        PoolError::breach(ProtocolBreach::Machine {
+            detail: Detail::new(error),
+        })
+    })?;
     if args.iter().any(|arg| arg == "--lash-vm-measure") {
-        run_server::<true>(pipe, codec, bootstrap, frontend, &mut hook)?;
+        run_server::<true>(pipe, codec, bootstrap, &embedding, &mut hook)?;
     } else {
-        run_server::<false>(pipe, codec, bootstrap, frontend, &mut hook)?;
+        run_server::<false>(pipe, codec, bootstrap, &embedding, &mut hook)?;
     }
     Ok(true)
 }
@@ -80,10 +95,10 @@ fn run_server<const MEASURE: bool>(
     pipe: std::os::unix::net::UnixStream,
     codec: FrameCodec,
     bootstrap: Bootstrap,
-    frontend: &dyn crate::Frontend,
+    embedding: &Embedding,
     hook: &mut Option<&mut dyn FnMut(&ParentMessage)>,
 ) -> Result<(), PoolError> {
-    let mut server = Server::<MEASURE>::new(pipe, codec, bootstrap, frontend)?;
+    let mut server = Server::<MEASURE>::new(pipe, codec, bootstrap, embedding)?;
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| server.run(hook)))
         .unwrap_or_else(|panic| {
             let reason = panic

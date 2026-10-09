@@ -532,11 +532,9 @@ registrations.
 
 ```text
 <typescript>
-const on_mail = await processes.create({ dialect: "typescript", source: `
 const on_mail = async (event: unknown) => {
   return { arrived_in: event.account, title: event.title };
 };
-` });
 await workbench.register_trigger({
   source: { kind: "mail" },
   definition: on_mail,

@@ -54,7 +54,7 @@ impl SiteRetention {
         }
     }
 
-    pub(super) fn publish(&self, site: &WorkflowSiteRef) -> WorkflowOverlaySiteRetention {
+    pub(super) fn publish(&self, site: &WorkflowTaskSite) -> WorkflowOverlaySiteRetention {
         WorkflowOverlaySiteRetention {
             site: site.clone(),
             truncation_watermark: self.watermark,

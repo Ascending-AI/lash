@@ -3,8 +3,11 @@
 //! host-selected [`Dialect`]'s cells are executed, printed values yield
 //! observations, and the dialect's finish form yields the final value.
 
+mod catalogue_preview;
 mod cell_scan;
+mod cell_value;
 mod control_tools;
+mod deferred;
 mod dialect;
 mod driver;
 mod driver_state;
@@ -27,38 +30,52 @@ mod stream_mask;
 mod testing;
 mod tool_catalog;
 
+pub use catalogue_preview::{
+    CataloguePreviewEntry, CataloguePreviewOptions, DEFAULT_CATALOGUE_PREVIEW_CALL_NAME_LIMIT,
+    DEFAULT_CATALOGUE_PREVIEW_MODULE_LIMIT, catalogue_preview,
+    catalogue_preview_entries_from_catalog_records, catalogue_preview_entries_from_manifests,
+    catalogue_preview_entry_from_catalog_record, catalogue_preview_entry_from_manifest,
+};
 pub use control_tools::continue_as_tool_definition;
+pub use deferred::{
+    DeferredResolutionError, DeferredResolveContext, DeferredToolResolver,
+    RecordedGrantInstallError, Resolution, SharedDeferredToolResolver, ToolGrant,
+};
 pub use dialect::{
-    CellTags, Dialect, DialectPromptVocabulary, DialectRefusal, DialectRefusalKind,
-    ExecutionSection, ExecutionSectionRequest, TypescriptDialect,
+    CellDialect, CellTags, DialectPromptVocabulary, DialectPrompts, DialectRefusal,
+    DialectRefusalKind, ExecutionSection, ExecutionSectionRequest, PythonPrompts,
+    TypescriptPrompts,
 };
 pub use driver::{RlmProjectorConfig, build_rlm_preamble};
-pub use executor::RLM_SNAPSHOT_VERSION;
 #[cfg(feature = "testing")]
 pub use executor::RlmCheckpointPerfFixture;
-/// The schema shapes a [`Dialect`] spells: the contract layer's reading of a
+pub use executor::{
+    RLM_SNAPSHOT_VERSION, TOOL_ARGUMENTS, TOOL_CALL_LIMIT, TOOL_FAILED, UNKNOWN_EFFECT,
+};
+pub use feedback::{
+    CELL_BOUND_EXCEEDED, CELL_DEADLOCK, CELL_TASKS_OUTSTANDING, SESSION_BINDING_NOT_CARRIED,
+};
+/// The schema shapes a [`DialectPrompts`] spells: the contract layer's reading of a
 /// tool's JSON Schemas, also constructed directly by runtime-value inference.
 pub use lash_sansio::{
     ExtraKeys, ObjectShape, ProcessParamShape, ProcessShape, SchemaShape, ShapeConstraints,
     ShapeField, ShapeKind, ShapeRow,
 };
-pub use lash_vm::{NamedDataType, TypeExpr, TypeField, format_type_expr};
 pub use lash_vm_runtime::ResolvedToolBinding;
-pub use lash_vm_runtime::{LashVmHostCatalog, LashVmHostEnvironment, LashVmLanguageFeatures};
 pub use plugin::{
-    ExecutionBounds, InstructionBound, LashVmCompileSurface, LashVmCompileSurfaceRequest,
-    LashVmModuleCompileError, LashVmModuleCompileRequest, MemoryBound, ModuleCompileOutput,
-    RLM_PROTOCOL_PLUGIN_ID, RlmChannel, RlmConfigOwner, RlmConfigRefusal, RlmCreateConfig,
-    RlmLanguageFeatures, RlmPresentationConfig, RlmProtocolPluginConfig,
-    RlmProtocolPluginConfigBuilder, RlmProtocolPluginFactory, RlmRecordedBehaviour,
-    RlmRecordedConfig, RlmRenderRefusal, RlmRunOptions, RlmSessionConfigDecodeError, SetRlmRender,
-    UnsetBound, UnsetChannel, rlm_lash_vm_surface, rlm_session_config,
+    ExecutionBounds, InstructionBound, MemoryBound, RLM_PROTOCOL_PLUGIN_ID, RlmChannel,
+    RlmConfigOwner, RlmConfigRefusal, RlmCreateConfig, RlmPresentationConfig,
+    RlmProtocolPluginConfig, RlmProtocolPluginConfigBuilder, RlmProtocolPluginFactory,
+    RlmRecordedBehaviour, RlmRecordedConfig, RlmRenderRefusal, RlmRunOptions,
+    RlmSessionConfigDecodeError, SetRlmRender, UnsetBound, UnsetChannel, rlm_session_config,
 };
 pub use projection::{
     HISTORY_PROJECTION, RLM_PROTOCOL_EVENT_VERSION, RlmHistoryProjection, RlmSeed,
     is_rlm_protocol_output, rlm_history_projection, rlm_protocol_event, rlm_seed_initial_nodes,
 };
-pub use projection::{RlmProjectedBindings, rlm_session_projection_extension};
+pub use projection::{
+    ProjectedBindingError, RlmProjectedBindings, rlm_session_projection_extension,
+};
 // Harnesses read recorded RLM events through the protocol's own decoder; the
 // `lash::rlm` facade keeps decoding sealed (FIG-1530).
 #[cfg(feature = "testing")]

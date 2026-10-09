@@ -37,7 +37,7 @@ thiserror = { workspace = true }
 lash-kernel-conformance = { path = "../lash-kernel-conformance" }
 lash-kernel-check = { workspace = true }
 lash-kernel-edit = { workspace = true }
-lash-kernel-lib = { path = "../lash-kernel-lib" }
+lash-kernel-lib = { workspace = true }
 lash-ext-date-ecma = { workspace = true }
 lash-ext-url-whatwg = { workspace = true }
 lash-kernel-vm = { workspace = true }

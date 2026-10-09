@@ -169,6 +169,7 @@ The generated region below is checked against the live filenames and headings.
 | 0135 | [Attachments are durable refs delivered by the host store](0135-attachments-are-durable-refs-delivered-by-the-host-store.md) |
 | 0136 | [Hosts own their wire contracts](0136-hosts-own-their-wire-contracts.md) |
 | 0137 | [The host owns events, routing and scheduling](0137-the-host-owns-events-routing-and-scheduling.md) |
+| 0138 | [An RLM session's cells are kernel programs](0138-rlm-cells-are-kernel-programs.md) |
 <!-- adr-index:end -->
 
 ## Replaced and retired decisions

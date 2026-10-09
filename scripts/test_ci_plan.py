@@ -1172,7 +1172,7 @@ class PreciseDevTestScopeTests(unittest.TestCase):
         self.assertTrue(shared.broad)
 
     def test_a_schema_file_selects_its_declared_readers(self) -> None:
-        path = next((ROOT / "schemas/host/workflow-graph").glob("v*.schema.json")).relative_to(ROOT).as_posix()
+        path = next((ROOT / "schemas/host/kernel-document").glob("v*.schema.json")).relative_to(ROOT).as_posix()
         scope = self.scope(path)
         self.assertEqual((path,), scope.files)
         self.assertFalse(scope.broad or scope.repository)
@@ -1180,7 +1180,7 @@ class PreciseDevTestScopeTests(unittest.TestCase):
         _labels, builds = ci_plan.affected_buck2_labels(scope, set(), [], {})
         self.assertEqual(["//:schema_checks"], builds)
         # A deleted schema changes a glob; no file query can ask about it.
-        self.assertTrue(self.scope("schemas/host/workflow-graph/deleted.schema.json").broad)
+        self.assertTrue(self.scope("schemas/host/kernel-document/deleted.schema.json").broad)
 
     def test_the_justfile_selects_only_its_recipes_contract_tests(self) -> None:
         tests = frozenset({"scripts/test_with_service.py", "scripts/test_test_xml.py"})
@@ -2293,7 +2293,7 @@ class WorkflowRegistrationTests(unittest.TestCase):
         jobs = yaml.safe_load(CI_WORKFLOW.read_text())["jobs"]
         other = jobs["functional-e2e"]
         self.assertEqual("plan", other["needs"])
-        self.assertEqual({"agent-workbench-transcript", "workflow-graph-roundtrip"},
+        self.assertEqual({"agent-workbench-transcript"},
                          {leg["name"] for leg in other["strategy"]["matrix"]["include"]})
         transcript = next(leg for leg in other["strategy"]["matrix"]["include"]
                           if leg["name"] == "agent-workbench-transcript")

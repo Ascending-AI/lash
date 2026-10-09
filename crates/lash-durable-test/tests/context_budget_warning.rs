@@ -72,7 +72,6 @@ fn model(requests: Arc<Mutex<Vec<String>>>) -> lash_core::facade_support::Provid
 
 /// An RLM core whose protocol warns past [`WARN_AT`] prompt tokens.
 fn core(backend: &lash::Backend) -> lash::LashCoreBuilder {
-    use lash::rlm::Dialect as _;
     let mut config = lash::rlm::RlmProtocolPluginConfig::builder()
         .channel(lash::rlm::RlmChannel::Cell)
         .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
@@ -81,12 +80,8 @@ fn core(backend: &lash::Backend) -> lash::LashCoreBuilder {
     config.continue_as_soft_warn_tokens = Some(WARN_AT);
     lash::LashCore::rlm_builder(
         backend.clone(),
-        lash::rlm::RlmProtocolPluginFactory::new(
-            config,
-            Arc::new(lash::rlm::TypescriptDialect),
-            backend,
-        )
-        .with_worker_service(lash::rlm::TypescriptDialect.worker_service()),
+        lash::rlm::RlmProtocolPluginFactory::new(config, lash::rlm::CellDialect::typescript())
+            .with_worker_service(lash::vm::WorkerService::default()),
     )
 }
 

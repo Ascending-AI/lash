@@ -1,6 +1,8 @@
 # 0096: One IR and VM, extensible dialects, TypeScript today
 
 Status: Accepted. Amends ADRs 0037, 0055, 0060, 0061, 0062, 0063 and 0064.
+Amended by ADR 0138: a cell is a kernel program, and the dialect selection
+contract below is replaced by `CellDialect`.
 
 ## Decision
 
