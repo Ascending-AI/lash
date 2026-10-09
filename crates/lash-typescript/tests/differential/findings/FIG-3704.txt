@@ -37,3 +37,5 @@ new Set([2]).isSubsetOf(new Map([[2,'a']]))
 (() => { const o={size:2,has:()=>true,keys:()=>[9]}; return new Set().isSubsetOf(o); })()
 (() => { const o={size:1,has:()=>true,keys:()=>[9]}; return [...new Set([1]).union(o)].join(','); })()
 [0,0].fill(1,0,undefined).join(',')
+new Error(new Date(0)).message
+new Error([new Date(0)]).message

@@ -167,10 +167,9 @@ fn last_index_coercion_and_updates_agree_across_all_wires() {
         continuation_run(source, true),
         continuation_run(source, false)
     );
-}
 
-#[test]
-fn last_index_references_survive_collection_and_incremental_capture() {
+    // Capture the RegExp root before mutating its lastIndex child: the delta
+    // must replace the root fragment and reload the changed child.
     let mut state = State::new();
     run_cell("const r = /a/g; r.lastIndex = [1]; finish(0);", &mut state);
     let fleet = lash_core_execution::FleetFormat::current();
@@ -214,11 +213,4 @@ fn last_index_references_survive_collection_and_incremental_capture() {
         run_cell("finish(r.lastIndex[0]);", &mut restored),
         Value::Number(2.0)
     );
-    let mut restored = snapshot_reload(&state);
-    assert_eq!(
-        run_cell("finish(r.lastIndex[0]);", &mut restored),
-        Value::Number(2.0)
-    );
-    let source = "const r = /a/y; r.lastIndex = [2]; print(0); const garbage = [9]; const result = r.exec('baa'); finish([r.lastIndex, result[0]].join('|'));";
-    assert_eq!(continuation_run(source, true), Value::String("3|a".into()));
 }

@@ -2,12 +2,12 @@
 //! recursive production of the grammar SWC parses.
 //!
 //! `depth_guard.rs` proves that the units the argument in
-//! `src/adapter/nesting.rs` names are charged. These two tests attack the other
-//! half of the problem — whether the argument's list is complete — without
-//! asking anyone to read the grammar again:
+//! `src/adapter/nesting.rs` names are charged. The exhaustive matches and fuzz
+//! law attack the other half of the problem — whether the argument's list is
+//! complete — without asking anyone to read the grammar again:
 //!
-//! * [`every_swc_expression_kind_maps_to_a_charged_unit`] and its statement and
-//!   type siblings enumerate SWC's own AST node kinds in an exhaustive `match`
+//! * The expression, statement and type classification functions enumerate
+//!   SWC's own AST node kinds in an exhaustive `match`
 //!   with no wildcard arm, so the day SWC gains a node the test stops
 //!   compiling and someone has to classify it.
 //! * [`fuzzed_token_sequences_never_abort_the_parser`] generates sources from
@@ -195,30 +195,11 @@ impl<T> UnwrapErrCode for Result<T, lash_typescript::Diagnostic> {
     }
 }
 
-/// The classification functions above exist to be compiled, not called: an
-/// exhaustive match with no wildcard is the check. This test keeps them live
-/// and asserts the classification of one node of each kind the parser produces
-/// for a representative program.
-#[test]
-fn every_swc_node_kind_is_classified() {
-    // Constructing SWC nodes by hand is noise; parsing a program that contains
-    // one of each interesting kind proves the matches are reachable and total.
-    let charges = [
-        expression_charge(&swc::Expr::Invalid(swc::Invalid {
-            span: swc_common::DUMMY_SP,
-        })),
-        statement_charge(&swc::Stmt::Empty(swc::EmptyStmt {
-            span: swc_common::DUMMY_SP,
-        })),
-        type_charge(&swc::TsType::TsThisType(swc::TsThisType {
-            span: swc_common::DUMMY_SP,
-        })),
-    ];
-    assert!(
-        charges.iter().all(|charge| *charge == Charge::NonRecursive),
-        "terminals classify as non-recursive"
-    );
-}
+// These function references retain the exhaustive matches as compile-time
+// checks when SWC adds a node kind, without a vacuous runtime test.
+const _: fn(&swc::Expr) -> Charge = expression_charge;
+const _: fn(&swc::Stmt) -> Charge = statement_charge;
+const _: fn(&swc::TsType) -> Charge = type_charge;
 
 /// A deterministic PRNG: the corpus must be identical on every run and on every
 /// machine, so no clock and no system entropy are involved.

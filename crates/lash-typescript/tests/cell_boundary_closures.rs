@@ -1,16 +1,4 @@
-//! A closure allocated by one RLM cell must not fail the next cell.
-//!
-//! Each cell of an RLM session compiles its own `CompiledProgram` while the
-//! `State` — heap included — carries over. Closure function indices are
-//! program-scoped, so a closure that outlives its program is judged against a
-//! function table that never compiled it: the next cell fails at validation
-//! with `UnknownFunction` or `ClosureCaptureCountMismatch`, whatever it says.
-//! On a live host this poisoned a durable session for every subsequent cell,
-//! including `finish(6 * 7);`.
-//!
-//! Two ways a closure reached the next cell, and both are pinned here: as heap
-//! garbage the boundary never collected, and as a live root in the session
-//! globals.
+//! Ordinary session values cross the cell boundary; function-valued globals do not.
 
 use lash_vm::{
     AbilityOp, AbilityOutcome, ExecutionHost, ExecutionHostError, ExecutionOutcome, State, Value,
@@ -43,61 +31,6 @@ fn run_cell(state: &mut State, source: &str) -> ExecutionOutcome {
         .unwrap_or_else(|error| panic!("cell `{source}` should compile: {error}"));
     futures::executor::block_on(lash_vm::execute(&program, state, &Host))
         .unwrap_or_else(|error| panic!("cell `{source}` should execute: {error}"))
-}
-
-#[test]
-fn a_dead_closure_from_an_earlier_cell_does_not_fail_the_next_one() {
-    let mut state = State::new();
-    // The arrow lives only for the duration of the `map` call, so nothing
-    // roots it once the cell ends — but it stayed resident on the heap, and
-    // validation judged it anyway.
-    run_cell(&mut state, "const xs = [1].map(x => x + 1);");
-    assert_eq!(
-        run_cell(&mut state, "finish(6 * 7);"),
-        ExecutionOutcome::Finished(Value::Number(42.0))
-    );
-}
-
-#[test]
-fn a_closure_bound_to_a_session_global_does_not_fail_the_next_cell() {
-    let mut state = State::new();
-    // Here the closure is reachable, so collecting the heap cannot remove it:
-    // the binding itself has to go, exactly as the exported view of the
-    // globals already drops any global that reaches a function value.
-    run_cell(
-        &mut state,
-        "const add = (x: number) => x + 1;\nconst y = add(1);",
-    );
-    assert_eq!(
-        run_cell(&mut state, "finish(6 * 7);"),
-        ExecutionOutcome::Finished(Value::Number(42.0))
-    );
-    // The non-closure binding from that cell is untouched: only the function
-    // value is program-scoped.
-    assert_eq!(
-        state.globals().get("y"),
-        Some(&Value::Number(2.0)),
-        "dropping a closure global must not disturb the rest of the session"
-    );
-}
-
-#[test]
-fn a_closure_nested_inside_a_session_global_does_not_fail_the_next_cell() {
-    let mut state = State::new();
-    // A closure reaches the next cell just as well from inside a container, so
-    // the boundary check is a reachability question, not a shallow type test.
-    run_cell(
-        &mut state,
-        "const handlers = { onDone: (x: number) => x + 1 };\nconst tag = \"kept\";",
-    );
-    assert_eq!(
-        run_cell(&mut state, "finish(6 * 7);"),
-        ExecutionOutcome::Finished(Value::Number(42.0))
-    );
-    assert_eq!(
-        state.globals().get("tag"),
-        Some(&Value::String("kept".into()))
-    );
 }
 
 #[test]

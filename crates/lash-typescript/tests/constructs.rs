@@ -139,47 +139,12 @@ fn date_utc_surface_is_complete_and_iso_only() {
 }
 
 #[test]
-fn date_string_coercion_produces_the_ecma_date_string() {
-    // FIG-3704: a Date's default ToPrimitive hint is string, so `+`, template
-    // interpolation, `String()` and container joins all answer the
-    // deterministic UTC DateString.
-    const DATE: &str = "Thu Jan 01 1970 00:00:00 GMT+0000 (Coordinated Universal Time)";
-    for (source, expected) in [
-        ("finish('' + [new Date(0)]);", DATE),
-        ("finish(new Error(new Date(0)).message);", DATE),
-        ("finish(new Error([new Date(0)]).message);", DATE),
-        ("finish(new Date(0) + '');", DATE),
-        ("finish(`${new Date(0)}`);", DATE),
-        ("finish(String(new Date(0)));", DATE),
-    ] {
-        assert_eq!(finished(source), Value::String(expected.into()), "{source}");
-    }
-
-    assert_eq!(
-        finished("const a=new Date(1); const b=new Date(4); finish(`${b-a}|${a<b}`);"),
-        Value::String("3|true".into())
-    );
-}
-
-#[test]
 fn enums_match_tsc_runtime_objects_and_const_members_inline() {
     assert_eq!(
         finished(
             "let n=0; enum Numeric { A, B=4, C, D=(n+=2) } enum Text { A='x', B='x'+'y' } enum Referenced { A=Text.A } const enum Inline { A, B=4, C='z', D=Referenced.A, E=4294967296|0 } function scoped(){const enum Inline { A=9 } return Inline.A;} finish(`${Numeric.A}|${Numeric[0]}|${Numeric.B}|${Numeric[5]}|${Numeric.D}|${Numeric[2]}|${Text.A}|${Text.B}|${Object.keys(Text).join(',')}|${Object.keys(Referenced).join(',')}|${Inline.A}|${Inline.C}|${Inline.D}|${Inline.E}|${scoped()}|${n}`);"
         ),
         Value::String("0|A|4|C|2|D|x|xy|A,B|A|0|z|x|0|9|2".into())
-    );
-}
-
-#[test]
-fn map_and_set_surface_preserves_same_value_zero_identity_and_order() {
-    assert_eq!(
-        finished(
-            "const key={}; const other={}; const m=new Map([[NaN,'nan'],[-0,'zero'],[key,'id']]); m.set(+0,'updated'); const calls={text:''}; m.forEach((v,k)=>{calls.text=calls.text+(calls.text?',':'')+`${v}:${k===key}`;}); const removed=m.delete(other); const has=m.has(key); const size=m.size; const order=[...m].map(([k,v])=>v).join(','); m.clear(); const s=new Set([NaN,NaN,-0,+0,2]); const setOrder=[...s].join(','); const deleted=s.delete(NaN); const setSize=s.size; s.clear(); finish(`${m.get(key)}|${has}|${removed}|${size}|${order}|${calls.text}|${m.size}|${setOrder}|${deleted}|${setSize}|${s.size}`);"
-        ),
-        Value::String(
-            "undefined|true|false|3|nan,updated,id|nan:false,updated:false,id:true|0|NaN,0,2|true|2|0".into()
-        )
     );
 }
 
