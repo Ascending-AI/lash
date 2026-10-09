@@ -501,11 +501,15 @@ async fn a_published_workflow_starts_its_inline_process_after_the_host_pin_is_re
         "the run starts its inline process with the pin released"
     );
 
+    // Observe the descriptor's reclamation directly. Resolving an unpinned
+    // definition can race cleanup of its module before its descriptor.
     tokio::time::timeout(std::time::Duration::from_secs(60), async {
-        while artifacts
-            .get_definition(&witness.id)
+        while core
+            .backend()
+            .definition_store()
+            .get_process_definition(&witness.id)
             .await
-            .expect("the witness reads")
+            .expect("the witness descriptor reads")
             .is_some()
         {
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
