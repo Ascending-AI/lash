@@ -50,8 +50,13 @@ pub use driver::{RlmProjectorConfig, build_rlm_preamble};
 #[cfg(feature = "testing")]
 pub use executor::RlmCheckpointPerfFixture;
 pub use executor::{
-    RLM_SNAPSHOT_VERSION, TOOL_ARGUMENTS, TOOL_CALL_LIMIT, TOOL_FAILED, UNKNOWN_EFFECT,
+    RLM_SNAPSHOT_VERSION, RlmSnapshotError, TOOL_ARGUMENTS, TOOL_CALL_LIMIT, TOOL_FAILED,
+    UNKNOWN_EFFECT,
 };
+/// The kernel's typed snapshot validation causes and fragment roots.
+pub mod snapshot {
+    pub use lash_kernel_state::{LoadError, Root, SaveError};
+}
 pub use feedback::{
     CELL_BOUND_EXCEEDED, CELL_DEADLOCK, CELL_TASKS_OUTSTANDING, SESSION_BINDING_NOT_CARRIED,
 };

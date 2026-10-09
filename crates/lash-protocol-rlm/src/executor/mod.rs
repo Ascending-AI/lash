@@ -26,7 +26,7 @@ pub(crate) use envelope::{check_cell_snapshot, snapshot_tool_calls};
 pub(crate) use host::site_label;
 pub use host::{TOOL_ARGUMENTS, TOOL_CALL_LIMIT, TOOL_FAILED, UNKNOWN_EFFECT};
 pub use session::RlmExecutionState;
-pub use snapshot::RLM_SNAPSHOT_VERSION;
+pub use snapshot::{RLM_SNAPSHOT_VERSION, RlmSnapshotError};
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};

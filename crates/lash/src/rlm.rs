@@ -196,6 +196,9 @@ pub use lash_protocol_rlm::{RlmProjectorConfig, section_id, section_keys as rlm_
 /// The config groups and builder state an [`RlmProtocolPluginConfig`] is
 /// assembled from.
 pub use lash_protocol_rlm::{RlmPromptFeatures, UnsetChannel};
+/// Restore checks retained as the source of
+/// [`crate::SessionError::ExecutionStateRestore`].
+pub use lash_protocol_rlm::{RlmSnapshotError, snapshot};
 pub use lash_render::{RenderParams, RenderParamsPatch};
 /// The committed RLM event variants the protocol owns and
 /// the record types their fields name.

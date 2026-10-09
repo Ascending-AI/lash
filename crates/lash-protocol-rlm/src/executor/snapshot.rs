@@ -36,18 +36,28 @@ pub const RLM_SNAPSHOT_VERSION: u32 = 2;
 
 const CUTOVER_REMEDY: &str = "drain in-flight sessions on the old build before deploying this build, or recreate development/test stores";
 
+/// Why a saved RLM session could not be restored. No bindings are adopted
+/// when any check fails: fragments can share objects across bindings.
+///
+/// [`lash_core::SessionError::ExecutionStateRestore`] retains this error as
+/// its source, which hosts can downcast to inspect the failed check.
 #[derive(Debug, Error)]
-pub(crate) enum RlmSnapshotError {
+#[non_exhaustive]
+pub enum RlmSnapshotError {
+    /// The root cannot decode as this build's snapshot envelope.
     #[error("RLM snapshot root is not this build's: {details}; {CUTOVER_REMEDY}")]
     FormatMismatch { details: String },
+    /// The snapshot envelope version is outside the reader's window.
     #[error(
         "RLM snapshot version {found} is incompatible with version {expected}; {CUTOVER_REMEDY}"
     )]
     VersionMismatch { expected: u32, found: u32 },
+    /// The recorded dialect differs from the session's dialect.
     #[error(
         "RLM snapshot was recorded by a `{found}` session; this session's dialect is `{expected}`"
     )]
     DialectMismatch { expected: String, found: String },
+    /// A binding's content-addressed fragment was not supplied.
     #[error(
         "RLM snapshot binding `{logical_key}` references missing leaf component `{component:?}`"
     )]
@@ -55,6 +65,7 @@ pub(crate) enum RlmSnapshotError {
         logical_key: String,
         component: lash_core::plugin::ExecutionLeafName,
     },
+    /// A binding's fragment bytes do not match their content address.
     #[error(
         "RLM snapshot binding `{logical_key}` references leaf component `{component:?}` whose content address is `{actual_component:?}`"
     )]
@@ -63,6 +74,7 @@ pub(crate) enum RlmSnapshotError {
         component: lash_core::plugin::ExecutionLeafName,
         actual_component: lash_core::plugin::ExecutionLeafName,
     },
+    /// The supplied leaf set differs from the set the root references.
     #[error(
         "RLM snapshot root/leaf set is inconsistent; missing={missing:?}, unexpected={unexpected:?}"
     )]
@@ -70,12 +82,15 @@ pub(crate) enum RlmSnapshotError {
         missing: Vec<lash_core::plugin::ExecutionLeafName>,
         unexpected: Vec<lash_core::plugin::ExecutionLeafName>,
     },
+    /// The kernel refuses the decoded fragments as stored state.
     #[error("RLM session bindings are not a kernel state this build reads: {0}")]
     Kernel(#[from] lash_kernel_state::LoadError),
 }
 
 impl From<RlmSnapshotError> for lash_core::SessionError {
     fn from(error: RlmSnapshotError) -> Self {
-        Self::Protocol(error.to_string())
+        Self::ExecutionStateRestore {
+            source: Box::new(error),
+        }
     }
 }

@@ -300,6 +300,13 @@ pub enum SessionError {
     SessionConfigRefused(crate::ConfigRefusal),
     #[error(transparent)]
     Plugin(#[from] crate::PluginError),
+    /// A protocol refused its saved execution state. The source retains the
+    /// protocol's public restore error so hosts can inspect its typed cause.
+    #[error("execution state restore failed: {source}")]
+    ExecutionStateRestore {
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
     #[error("protocol error: {0}")]
     Protocol(String),
 }
@@ -345,6 +352,7 @@ impl SessionError {
             | Self::SessionCommandCancelled(_)
             | Self::SessionConfigRefused(_)
             | Self::Plugin(_)
+            | Self::ExecutionStateRestore { .. }
             | Self::Protocol(_) => crate::ExecCodeFailureReason::Session,
         };
         crate::ExecCodeFailure::new(reason, self.to_string())
@@ -407,6 +415,7 @@ impl ExecutionEnvironmentSyncError {
             | SessionError::LlmProfileUnknown { .. }
             | SessionError::SessionCommandCancelled(_)
             | SessionError::SessionConfigRefused(_)
+            | SessionError::ExecutionStateRestore { .. }
             | SessionError::Protocol(_)) => {
                 Self::Recorded(crate::sansio::ExecutionEnvironmentSyncFailure {
                     code: crate::TurnFailureCode::ReconfigureFailed.into(),

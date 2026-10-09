@@ -27,6 +27,62 @@ fn typescript_services(resolver: Option<crate::SharedDeferredToolResolver>) -> s
     )
 }
 
+/// FIG-5764: a corrupt fragment refuses the whole restore, and the host's
+/// error retains the typed hash mismatch and the binding it names.
+#[tokio::test]
+async fn a_corrupt_fragment_reports_its_binding_as_a_typed_restore_cause() {
+    use std::collections::BTreeSet;
+    use std::error::Error as _;
+
+    use super::snapshot::RlmSnapshotError;
+
+    let fleet = lash_core::FleetFormat::current();
+    let mut state = typescript_state();
+    state
+        .patch_globals(
+            &lash_rlm_types::RlmGlobalsPatchPluginBody {
+                set_default: serde_json::Map::from_iter([(
+                    "notes".to_string(),
+                    serde_json::json!(
+                        "x".repeat(lash_core::plugin::EXECUTION_STATE_LEAF_MIN_BODY_BYTES)
+                    ),
+                )]),
+            },
+            &BTreeSet::new(),
+        )
+        .await
+        .expect("bind a value stored as a leaf");
+    let mut saved = state
+        .hydrated_execution_state(fleet)
+        .await
+        .expect("capture the bindings");
+    let (component, body) = saved.components.first_key_value().expect("the notes leaf");
+    let component = component.clone();
+    let mut corrupt = body.to_vec();
+    corrupt.push(b' ');
+    saved.components.insert(component.clone(), corrupt.into());
+
+    let mut restored = typescript_state();
+    let error = restored
+        .restore_execution_state(&saved, fleet)
+        .await
+        .map_err(lash_core::SessionError::from)
+        .expect_err("a corrupt fragment refuses the restore");
+    let cause = error
+        .source()
+        .and_then(|source| source.downcast_ref::<RlmSnapshotError>())
+        .expect("the public restore error retains its typed cause");
+    assert!(matches!(
+        cause,
+        RlmSnapshotError::LeafHashMismatch {
+            logical_key,
+            component: expected,
+            actual_component,
+        } if logical_key == "notes" && expected == &component && actual_component != expected
+    ));
+    assert!(restored.bindings().names().is_empty());
+}
+
 async fn open_host() -> DurableHost {
     DurableHost::open(lash_core::AdmittedScope::turn(
         lash_core::SessionId::from(SESSION),
