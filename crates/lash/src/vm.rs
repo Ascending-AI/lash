@@ -119,18 +119,15 @@ pub mod ir {
     pub use lash_vm::{
         VariableVersion, WorkflowArgument, WorkflowContainer, WorkflowDeclaration,
         WorkflowDiagnosticClassification, WorkflowDiagnosticKind, WorkflowEdge, WorkflowEdgeKind,
-        WorkflowEffectKind, WorkflowExpectedArgument, WorkflowGraphAmbiguousNode,
-        WorkflowGraphDecodeError, WorkflowGraphReconcilePair, WorkflowGraphReconcileSide,
-        WorkflowGraphReconciliation, WorkflowGraphStructuralLocation, WorkflowGraphStructuralRoot,
-        WorkflowGraphStructuralSlot, WorkflowGraphUnmatchedNode, WorkflowGraphVersionRefusal,
-        WorkflowNode, WorkflowNodeId, WorkflowNodeKind, WorkflowNodeNameSource, WorkflowNodePath,
-        WorkflowNodeTypeFacets, WorkflowOwnership, WorkflowProcess, WorkflowProjection,
-        WorkflowResultStep, WorkflowSlotPath, WorkflowSlotPathSegment, WorkflowSubgraph,
-        WorkflowTerminalKind, WorkflowTypeDiagnostic, WorkflowTypedVariable, child_path,
-        execution_sites,
+        WorkflowEffectKind, WorkflowExpectedArgument, WorkflowGraphDecodeError,
+        WorkflowGraphVersionRefusal, WorkflowNode, WorkflowNodeId, WorkflowNodeKind,
+        WorkflowNodeNameSource, WorkflowNodePath, WorkflowNodeTypeFacets, WorkflowOwnership,
+        WorkflowProcess, WorkflowProjection, WorkflowResultStep, WorkflowSlotPath,
+        WorkflowSlotPathSegment, WorkflowSubgraph, WorkflowTerminalKind, WorkflowTypeDiagnostic,
+        WorkflowTypedVariable, child_path, execution_sites,
     };
     pub use lash_vm::{
-        projected_node_type_facets, reconcile, workflow_call_from_ir, workflow_call_to_ir,
+        projected_node_type_facets, workflow_call_from_ir, workflow_call_to_ir,
         workflow_effect_from_ir, workflow_effect_to_ir, workflow_node_id,
         workflow_slot_accepts_value, workflow_slot_value,
     };

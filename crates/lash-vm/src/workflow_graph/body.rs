@@ -76,6 +76,66 @@ impl WorkflowBodyForm {
         }
     }
 
+    /// The form after a statement is inserted at `index` of the body's nodes.
+    ///
+    /// Groups name their statements by position, so they are shifted around
+    /// the new one: a group after it moves down, a group it lands strictly
+    /// inside grows, and at a group's edge the statement stays outside. A
+    /// single-statement body becomes a block, which runs the same way.
+    pub fn with_inserted(&self, index: u32) -> Self {
+        self.shifted(|group| {
+            if index <= group.start {
+                group.start += 1;
+            } else if index < group.start + group.len {
+                group.len += 1;
+            }
+        })
+    }
+
+    /// The form after the statement at `index` of the body's nodes is
+    /// removed: a group after it moves up and the group that held it shrinks,
+    /// keeping its completion value.
+    pub fn with_removed(&self, index: u32) -> Self {
+        self.shifted(|group| {
+            if index < group.start {
+                group.start -= 1;
+            } else if index < group.start + group.len {
+                group.len -= 1;
+            }
+        })
+    }
+
+    fn shifted(&self, shift: impl Fn(&mut WorkflowCompletionGroup) + Copy) -> Self {
+        fn shift_all(
+            groups: &[WorkflowCompletionGroup],
+            shift: impl Fn(&mut WorkflowCompletionGroup) + Copy,
+        ) -> Vec<WorkflowCompletionGroup> {
+            groups
+                .iter()
+                .map(|group| {
+                    let mut group = WorkflowCompletionGroup {
+                        start: group.start,
+                        len: group.len,
+                        value: group.value.clone(),
+                        groups: shift_all(&group.groups, shift),
+                    };
+                    shift(&mut group);
+                    group
+                })
+                .collect()
+        }
+        match self {
+            Self::Block { groups } => Self::Block {
+                groups: shift_all(groups, shift),
+            },
+            Self::Completion { value, groups } => Self::Completion {
+                value: value.clone(),
+                groups: shift_all(groups, shift),
+            },
+            Self::Statement => Self::Block { groups: Vec::new() },
+        }
+    }
+
     /// The form of `body`, read the way [`super::statement_list`] reads its
     /// statements.
     pub(super) fn of(body: &Expr) -> Self {

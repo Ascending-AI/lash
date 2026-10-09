@@ -36,6 +36,27 @@
 //! variant names its slots exhaustively, in evaluation order, through
 //! `Expr::slots`.
 //!
+//! # Editing
+//!
+//! A [`WorkflowDraft`] opens a document for editing. It names each node by a
+//! [`WorkflowDraftHandle`] that survives the edits the node survives and
+//! applies [`WorkflowEdit`]s in atomic [`WorkflowEditTransaction`]s against a
+//! base revision: insert, clone, remove, move and replace a statement,
+//! replace any expression through its slot path, set bindings, conditions,
+//! labels, loop and `try` headers, body forms, process signatures and
+//! declarations, and rename a binding in its binders and uses. Bindings
+//! resolve lexically. A refused transaction changes nothing and answers
+//! [`WorkflowEditDiagnostic`]s at node and expression paths.
+//!
+//! Node ids follow structural paths, so they change under edits. Continuity
+//! is the [`WorkflowCorrespondence`] each applied transaction answers: every
+//! node of the base and of the result with its outcome (retained, moved,
+//! inserted, deleted, split, merged or unmatched), recorded from the edits
+//! and from normalization, never matched by position. A host keys layout by
+//! handle and reads new ids from the correspondence. Edges are derived: a
+//! host maps an edge drag to a move or to a use of a binding
+//! ([`WorkflowDraft::edit_for_edge_drag`]).
+//!
 //! The IR the document carries (`Expr`, its slots, declarations and types)
 //! is `lash::vm::ir`; this module is the document itself.
 
@@ -43,6 +64,12 @@ pub use lash_vm::{
     WORKFLOW_IR_VERSION, WorkflowBodyForm, WorkflowCatch, WorkflowCompletionGroup, WorkflowGraph,
     WorkflowGraphError, WorkflowIrVersionRefusal, WorkflowPinnedSlots, WorkflowProcessWrapper,
     WorkflowRunDriver, workflow_node_statement, workflow_program_from_graph,
+};
+pub use lash_vm::{
+    WorkflowBindingRef, WorkflowBodyRef, WorkflowCorrespondence, WorkflowCorrespondenceEntry,
+    WorkflowDraft, WorkflowDraftHandle, WorkflowDraftOpenError, WorkflowDraftRevision,
+    WorkflowEdgeDrag, WorkflowEdit, WorkflowEditDiagnostic, WorkflowEditDiagnosticKind,
+    WorkflowEditLocation, WorkflowEditRefusal, WorkflowEditTransaction, WorkflowNodeSource,
 };
 pub use lash_vm_runtime::WorkflowDocument;
 

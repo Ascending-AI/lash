@@ -87,6 +87,32 @@ impl WorkflowGraphError {
 /// reads one can only be the reference to it: a host that carried the
 /// expression holding the reference as text gets the reference back.
 pub fn workflow_program_from_graph(graph: &WorkflowGraph) -> Result<Program, WorkflowGraphError> {
+    let reconstruction = reconstruct(graph)?;
+    if let Some(name) = reconstruction.orphaned.into_iter().next() {
+        return Err(WorkflowGraphError::ProcessOriginMismatch {
+            name,
+            message: "no process literal or reference in the program carries it".to_string(),
+        });
+    }
+    Ok(reconstruction.program)
+}
+
+/// A document's program together with how its lifted process containers
+/// reached it.
+pub(super) struct Reconstruction {
+    pub(super) program: Program,
+    /// Each lifted container a literal of the program carries, with the
+    /// [`Expr::children`] path of that literal from `main`.
+    pub(super) carried: Vec<(String, Vec<u32>)>,
+    /// The lifted containers no literal and no reference carries, which the
+    /// program therefore does not hold.
+    pub(super) orphaned: Vec<String>,
+}
+
+/// [`workflow_program_from_graph`], reporting the lifted containers the
+/// program leaves out instead of refusing them: an edit that removes a
+/// literal removes its container with it.
+pub(super) fn reconstruct(graph: &WorkflowGraph) -> Result<Reconstruction, WorkflowGraphError> {
     WorkflowGraph::admit_ir_version(graph.ir_version)?;
     check_identities(graph)?;
     let lifted = graph
@@ -151,17 +177,15 @@ pub fn workflow_program_from_graph(graph: &WorkflowGraph) -> Result<Program, Wor
         }
     }
     splice_carried(&mut main, &mut Vec::new(), &mut Vec::new(), &mut carried)?;
-    if let Some(process) = carried.by_name.into_values().next() {
-        return Err(WorkflowGraphError::ProcessOriginMismatch {
-            name: process.name.clone(),
-            message: "no process literal or reference in the program carries it".to_string(),
-        });
-    }
-    Ok(Program {
-        declarations,
-        main,
-        private_bindings: graph.private_bindings.clone(),
-        spans: BTreeMap::new(),
+    Ok(Reconstruction {
+        program: Program {
+            declarations,
+            main,
+            private_bindings: graph.private_bindings.clone(),
+            spans: BTreeMap::new(),
+        },
+        carried: carried.claimed,
+        orphaned: carried.by_name.into_keys().collect(),
     })
 }
 
@@ -494,6 +518,8 @@ fn collect_process_references(expression: &Expr, names: &mut BTreeSet<String>) {
 #[derive(Default)]
 struct CarriedProcesses<'a> {
     by_name: BTreeMap<String, &'a WorkflowProcess>,
+    /// The containers taken so far, each with its literal's path.
+    claimed: Vec<(String, Vec<u32>)>,
 }
 
 impl<'a> CarriedProcesses<'a> {
@@ -564,6 +590,7 @@ fn splice_carried(
     if let Expr::ProcessLiteral(literal) = expression
         && let Some(process) = carried.take_for_literal(literal, path, unlabelled)?
     {
+        carried.claimed.push((process.name.clone(), path.clone()));
         literal.params = process.params.clone();
         literal.return_ty = match &process.origin {
             ProcessOrigin::Lifted {

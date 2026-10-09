@@ -42,7 +42,7 @@
 /// version_guard(items(LASH_WORKFLOW_NODE_DOMAIN_VERSION, workflow_node_id))
 const LASH_WORKFLOW_NODE_DOMAIN_VERSION: &str = "lash-workflow-node/v3";
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -57,6 +57,7 @@ use crate::ast::{
 use crate::span::Span;
 
 mod body;
+mod draft;
 mod execution_sites;
 mod facets;
 mod ownership;
@@ -66,6 +67,12 @@ mod reconstruction;
 mod totality_tests;
 
 pub use body::{WorkflowBodyForm, WorkflowCompletionGroup};
+pub use draft::{
+    WorkflowBindingRef, WorkflowBodyRef, WorkflowCorrespondence, WorkflowCorrespondenceEntry,
+    WorkflowDraft, WorkflowDraftHandle, WorkflowDraftOpenError, WorkflowDraftRevision,
+    WorkflowEdgeDrag, WorkflowEdit, WorkflowEditDiagnostic, WorkflowEditDiagnosticKind,
+    WorkflowEditLocation, WorkflowEditRefusal, WorkflowEditTransaction, WorkflowNodeSource,
+};
 pub use execution_sites::execution_sites;
 pub use facets::*;
 pub use ownership::{
@@ -418,243 +425,6 @@ impl<'de> Deserialize<'de> for WorkflowGraph {
     {
         let value = serde_json::Value::deserialize(deserializer)?;
         Self::decode_json_value(value).map_err(serde::de::Error::custom)
-    }
-}
-
-/// Pairs a submitted graph with its own canonical reprojection.
-///
-/// This is a structural check, not semantic matching across definition
-/// revisions. A node pairs only when exactly one node from each graph occupies
-/// the same root, nested container-slot path, and index. Missing or duplicate
-/// occupants are reported without choosing a candidate.
-pub fn reconcile(
-    submitted: &WorkflowGraph,
-    reprojected: &WorkflowGraph,
-) -> WorkflowGraphReconciliation {
-    let submitted = nodes_by_structural_location(submitted);
-    let reprojected = nodes_by_structural_location(reprojected);
-    let locations = submitted
-        .keys()
-        .chain(reprojected.keys())
-        .cloned()
-        .collect::<BTreeSet<_>>();
-    let mut result = WorkflowGraphReconciliation::default();
-    let mut candidates = Vec::new();
-
-    for location in locations {
-        let submitted_id = submitted.get(&location);
-        let reprojected_id = reprojected.get(&location);
-        match (submitted_id, reprojected_id) {
-            (Some(submitted), Some(reprojected)) => candidates.push(WorkflowGraphReconcilePair {
-                location,
-                submitted: submitted.clone(),
-                reprojected: reprojected.clone(),
-            }),
-            (None, Some(reprojected)) => {
-                result.unmatched.push(WorkflowGraphUnmatchedNode {
-                    location: location.clone(),
-                    side: WorkflowGraphReconcileSide::Reprojected,
-                    id: reprojected.clone(),
-                });
-            }
-            (Some(submitted), None) => {
-                result.unmatched.push(WorkflowGraphUnmatchedNode {
-                    location: location.clone(),
-                    side: WorkflowGraphReconcileSide::Submitted,
-                    id: submitted.clone(),
-                });
-            }
-            (None, None) => {}
-        }
-    }
-    let mut ambiguous_pairs = BTreeSet::new();
-    for (side, locations_by_id) in [
-        (
-            WorkflowGraphReconcileSide::Submitted,
-            structural_locations_by_id(&submitted),
-        ),
-        (
-            WorkflowGraphReconcileSide::Reprojected,
-            structural_locations_by_id(&reprojected),
-        ),
-    ] {
-        for (id, locations) in locations_by_id {
-            if locations.len() <= 1 {
-                continue;
-            }
-            let indexes = candidates
-                .iter()
-                .enumerate()
-                .filter_map(|(index, pair)| {
-                    let candidate_id = match side {
-                        WorkflowGraphReconcileSide::Submitted => &pair.submitted,
-                        WorkflowGraphReconcileSide::Reprojected => &pair.reprojected,
-                    };
-                    (candidate_id == &id).then_some(index)
-                })
-                .collect::<Vec<_>>();
-            ambiguous_pairs.extend(indexes.iter().copied());
-            result.ambiguous.push(WorkflowGraphAmbiguousNode {
-                side,
-                id,
-                locations,
-                candidates: indexes
-                    .into_iter()
-                    .map(|index| candidates[index].clone())
-                    .collect(),
-            });
-        }
-    }
-    result.pairs.extend(
-        candidates
-            .into_iter()
-            .enumerate()
-            .filter_map(|(index, pair)| (!ambiguous_pairs.contains(&index)).then_some(pair)),
-    );
-    result
-}
-
-/// Result of checked workflow-graph reprojection pairing.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct WorkflowGraphReconciliation {
-    pub pairs: Vec<WorkflowGraphReconcilePair>,
-    pub unmatched: Vec<WorkflowGraphUnmatchedNode>,
-    pub ambiguous: Vec<WorkflowGraphAmbiguousNode>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct WorkflowGraphReconcilePair {
-    pub location: WorkflowGraphStructuralLocation,
-    pub submitted: WorkflowNodeId,
-    pub reprojected: WorkflowNodeId,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct WorkflowGraphUnmatchedNode {
-    pub location: WorkflowGraphStructuralLocation,
-    pub side: WorkflowGraphReconcileSide,
-    pub id: WorkflowNodeId,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct WorkflowGraphAmbiguousNode {
-    pub side: WorkflowGraphReconcileSide,
-    pub id: WorkflowNodeId,
-    pub locations: Vec<WorkflowGraphStructuralLocation>,
-    pub candidates: Vec<WorkflowGraphReconcilePair>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum WorkflowGraphReconcileSide {
-    Submitted,
-    Reprojected,
-}
-
-/// One node's structural address inside a workflow document.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct WorkflowGraphStructuralLocation {
-    pub root: WorkflowGraphStructuralRoot,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub slot_path: Vec<WorkflowGraphStructuralSlot>,
-    pub index: usize,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum WorkflowGraphStructuralRoot {
-    Main,
-    Process(usize),
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct WorkflowGraphStructuralSlot {
-    pub parent_index: usize,
-    pub slot: String,
-}
-
-fn nodes_by_structural_location(
-    graph: &WorkflowGraph,
-) -> BTreeMap<WorkflowGraphStructuralLocation, WorkflowNodeId> {
-    let mut locations = BTreeMap::new();
-    collect_structural_locations(
-        &graph.main,
-        &WorkflowGraphStructuralRoot::Main,
-        &[],
-        &mut locations,
-    );
-    let mut process_index = 0;
-    for declaration in &graph.declarations {
-        let WorkflowDeclaration::Process(process) = declaration else {
-            continue;
-        };
-        let root = WorkflowGraphStructuralRoot::Process(process_index);
-        process_index += 1;
-        locations.insert(
-            WorkflowGraphStructuralLocation {
-                root: root.clone(),
-                slot_path: Vec::new(),
-                index: 0,
-            },
-            process.id.clone(),
-        );
-        collect_structural_locations(
-            &process.body,
-            &root,
-            &[WorkflowGraphStructuralSlot {
-                parent_index: 0,
-                slot: "body".to_string(),
-            }],
-            &mut locations,
-        );
-    }
-    locations
-}
-
-fn structural_locations_by_id(
-    nodes: &BTreeMap<WorkflowGraphStructuralLocation, WorkflowNodeId>,
-) -> BTreeMap<WorkflowNodeId, Vec<WorkflowGraphStructuralLocation>> {
-    let mut locations_by_id = BTreeMap::new();
-    for (location, id) in nodes {
-        locations_by_id
-            .entry(id.clone())
-            .or_insert_with(Vec::new)
-            .push(location.clone());
-    }
-    locations_by_id
-}
-
-fn collect_structural_locations(
-    graph: &WorkflowSubgraph,
-    root: &WorkflowGraphStructuralRoot,
-    slot_path: &[WorkflowGraphStructuralSlot],
-    locations: &mut BTreeMap<WorkflowGraphStructuralLocation, WorkflowNodeId>,
-) {
-    for (index, node) in graph.nodes.iter().enumerate() {
-        locations.insert(
-            WorkflowGraphStructuralLocation {
-                root: root.clone(),
-                slot_path: slot_path.to_vec(),
-                index,
-            },
-            node.id.clone(),
-        );
-        if let WorkflowNodeKind::Container(container) = &node.kind {
-            for (slot, child) in container.child_subgraphs() {
-                let mut child_path = slot_path.to_vec();
-                child_path.push(WorkflowGraphStructuralSlot {
-                    parent_index: index,
-                    slot: slot.to_string(),
-                });
-                collect_structural_locations(child, root, &child_path, locations);
-            }
-        }
     }
 }
 

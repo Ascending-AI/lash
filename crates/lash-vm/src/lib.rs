@@ -228,17 +228,21 @@ pub use workflow_graph::{
     VariableVersion, WORKFLOW_GRAPH_SCHEMA_VERSION, WORKFLOW_TYPE_FACET_SCHEMA_VERSION,
     WorkflowArgument, WorkflowContainer, WorkflowDeclaration, WorkflowDiagnosticClassification,
     WorkflowDiagnosticKind, WorkflowEdge, WorkflowEdgeKind, WorkflowEffectKind,
-    WorkflowExpectedArgument, WorkflowGraph, WorkflowGraphAmbiguousNode, WorkflowGraphDecodeError,
-    WorkflowGraphReconcilePair, WorkflowGraphReconcileSide, WorkflowGraphReconciliation,
-    WorkflowGraphStructuralLocation, WorkflowGraphStructuralRoot, WorkflowGraphStructuralSlot,
-    WorkflowGraphUnmatchedNode, WorkflowGraphVersionRefusal, WorkflowNode, WorkflowNodeId,
-    WorkflowNodeKind, WorkflowNodeNameSource, WorkflowNodePath, WorkflowNodeTypeFacets,
-    WorkflowOwnership, WorkflowProcess, WorkflowProjection, WorkflowResultStep, WorkflowSlotPath,
-    WorkflowSlotPathSegment, WorkflowSubgraph, WorkflowTerminalKind, WorkflowTypeDiagnostic,
-    WorkflowTypedVariable, child_path, execution_sites,
+    WorkflowExpectedArgument, WorkflowGraph, WorkflowGraphDecodeError, WorkflowGraphVersionRefusal,
+    WorkflowNode, WorkflowNodeId, WorkflowNodeKind, WorkflowNodeNameSource, WorkflowNodePath,
+    WorkflowNodeTypeFacets, WorkflowOwnership, WorkflowProcess, WorkflowProjection,
+    WorkflowResultStep, WorkflowSlotPath, WorkflowSlotPathSegment, WorkflowSubgraph,
+    WorkflowTerminalKind, WorkflowTypeDiagnostic, WorkflowTypedVariable, child_path,
+    execution_sites,
 };
 pub use workflow_graph::{
-    projected_node_type_facets, reconcile, workflow_call_from_ir, workflow_call_to_ir,
+    WorkflowBindingRef, WorkflowBodyRef, WorkflowCorrespondence, WorkflowCorrespondenceEntry,
+    WorkflowDraft, WorkflowDraftHandle, WorkflowDraftOpenError, WorkflowDraftRevision,
+    WorkflowEdgeDrag, WorkflowEdit, WorkflowEditDiagnostic, WorkflowEditDiagnosticKind,
+    WorkflowEditLocation, WorkflowEditRefusal, WorkflowEditTransaction, WorkflowNodeSource,
+};
+pub use workflow_graph::{
+    projected_node_type_facets, workflow_call_from_ir, workflow_call_to_ir,
     workflow_effect_from_ir, workflow_effect_to_ir, workflow_node_id, workflow_slot_accepts_value,
     workflow_slot_value,
 };

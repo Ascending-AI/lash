@@ -16,8 +16,9 @@ use std::collections::BTreeMap;
 
 use lash_vm::{
     Declaration, Expr, InvalidAst, LashVmHostEnvironment, ProcessDecl, Program, Span,
-    WorkflowGraph, WorkflowGraphError, WorkflowGraphProjector, WorkflowGraphVersionRefusal,
-    WorkflowNodeId, analyze_workflow_program, workflow_program_from_graph,
+    WorkflowDraft, WorkflowDraftOpenError, WorkflowGraph, WorkflowGraphError,
+    WorkflowGraphProjector, WorkflowGraphVersionRefusal, WorkflowNodeId, analyze_workflow_program,
+    workflow_program_from_graph,
 };
 use thiserror::Error;
 
@@ -396,9 +397,9 @@ pub struct SourceView {
 pub fn source_view(graph: &WorkflowGraph) -> Result<SourceView, GraphRenderError> {
     let program = validated_program(graph, lash_core_execution::FleetFormat::current())?;
     let source = typescript_program_source(&program)?;
-    // Spans come from the canonical text's own parse. The document's nodes
-    // are paired with the nodes of that projection by where they sit, so a
-    // host's own node ids key the result.
+    // Spans come from the canonical text's own parse, keyed by the canonical
+    // projection's ids. A draft of the document carries each of the host's
+    // own node ids onto the node it is there, so those ids key the result.
     let canonical = WorkflowGraphProjector::new(&program)
         .with_spans(canonical_spans(&program).unwrap_or_default())
         .project();
@@ -406,10 +407,13 @@ pub fn source_view(graph: &WorkflowGraph) -> Result<SourceView, GraphRenderError
         .nodes()
         .filter_map(|node| Some((node.id.clone(), node.source_span?)))
         .collect::<BTreeMap<_, _>>();
-    let spans = lash_vm::reconcile(graph, &canonical)
-        .pairs
-        .into_iter()
-        .filter_map(|pair| Some((pair.submitted, *located.get(&pair.reprojected)?)))
+    let draft = WorkflowDraft::open(graph).map_err(|error| match error {
+        WorkflowDraftOpenError::Document(error) => GraphRenderError::Document(error),
+        WorkflowDraftOpenError::Program(error) => GraphRenderError::InvalidProgram(error),
+    })?;
+    let spans = draft
+        .opened()
+        .filter_map(|(handle, id)| Some((id.clone(), *located.get(draft.node_id(handle)?)?)))
         .collect();
     Ok(SourceView {
         source_identity: graph.source_identity.clone(),

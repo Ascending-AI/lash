@@ -260,10 +260,6 @@ fn facet_echo_changes_no_execution_or_canonical_diff() {
         let reprojection = workflow_graph_from_source_with_facets(&rendered, Some(&environment))
             .expect("derive facets again");
         assert_eq!(reprojection, original);
-        assert_eq!(
-            reconcile(&echo, &reprojection),
-            reconcile(&original, &reprojection)
-        );
         let before = lash_typescript::link(source, &environment).expect("original artifact");
         let after = lash_typescript::link(&rendered, &environment).expect("echo artifact");
         assert_eq!(before.artifact.module_ref(), after.artifact.module_ref());

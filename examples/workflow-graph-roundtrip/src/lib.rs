@@ -244,6 +244,93 @@ async fn get_workflow(State(state): State<AppState>) -> Json<WorkflowDocument> {
     ))
 }
 
+/// Pairs each node of a submitted document with the node of its canonical
+/// reprojection at the same place, or names the submitted nodes with none.
+///
+/// This host saves by replacing the whole document through source, which
+/// carries no record of what was edited, so it matches the two documents
+/// itself and only where their shapes agree. An editor that applies typed
+/// edits through `lash::workflow::WorkflowDraft` reads continuity from the
+/// correspondence each transaction answers instead.
+fn pair_by_position(
+    submitted: &WorkflowGraph,
+    canonical: &WorkflowGraph,
+) -> Result<std::collections::BTreeMap<String, String>, Vec<String>> {
+    use lash::vm::ir::{WorkflowDeclaration, WorkflowNodeKind, WorkflowProcess, WorkflowSubgraph};
+
+    fn lose(body: &WorkflowSubgraph, unmatched: &mut Vec<String>) {
+        for node in &body.nodes {
+            unmatched.push(node.id.to_string());
+            if let WorkflowNodeKind::Container(container) = &node.kind {
+                for (_, child) in container.child_subgraphs() {
+                    lose(child, unmatched);
+                }
+            }
+        }
+    }
+    fn pair(
+        submitted: &WorkflowSubgraph,
+        canonical: &WorkflowSubgraph,
+        pairs: &mut std::collections::BTreeMap<String, String>,
+        unmatched: &mut Vec<String>,
+    ) {
+        if submitted.nodes.len() != canonical.nodes.len() {
+            lose(submitted, unmatched);
+            return;
+        }
+        for (submitted, canonical) in submitted.nodes.iter().zip(&canonical.nodes) {
+            pairs.insert(submitted.id.to_string(), canonical.id.to_string());
+            let WorkflowNodeKind::Container(container) = &submitted.kind else {
+                continue;
+            };
+            for (slot, child) in container.child_subgraphs() {
+                let twin = match &canonical.kind {
+                    WorkflowNodeKind::Container(canonical) => canonical
+                        .child_subgraphs()
+                        .find_map(|(canonical, body)| (canonical == slot).then_some(body)),
+                    _ => None,
+                };
+                match twin {
+                    Some(twin) => pair(child, twin, pairs, unmatched),
+                    None => lose(child, unmatched),
+                }
+            }
+        }
+    }
+    fn processes(graph: &WorkflowGraph) -> Vec<&WorkflowProcess> {
+        graph
+            .declarations
+            .iter()
+            .filter_map(|declaration| match declaration {
+                WorkflowDeclaration::Process(process) => Some(process),
+                WorkflowDeclaration::Function(_) => None,
+            })
+            .collect()
+    }
+
+    let mut pairs = std::collections::BTreeMap::new();
+    let mut unmatched = Vec::new();
+    pair(&submitted.main, &canonical.main, &mut pairs, &mut unmatched);
+    let canonical = processes(canonical);
+    for (index, process) in processes(submitted).into_iter().enumerate() {
+        match canonical.get(index) {
+            Some(twin) => {
+                pairs.insert(process.id.to_string(), twin.id.to_string());
+                pair(&process.body, &twin.body, &mut pairs, &mut unmatched);
+            }
+            None => {
+                unmatched.push(process.id.to_string());
+                lose(&process.body, &mut unmatched);
+            }
+        }
+    }
+    if unmatched.is_empty() {
+        Ok(pairs)
+    } else {
+        Err(unmatched)
+    }
+}
+
 async fn save_workflow(
     State(state): State<AppState>,
     Json(document): Json<WorkflowDocument>,
@@ -272,21 +359,12 @@ async fn save_workflow(
     let source = workflow_graph_to_source(&graph).map_err(RenderErrorResponse::from)?;
     let canonical_graph =
         workflow_graph_from_source(&source).map_err(RenderErrorResponse::projection)?;
-    let reconciliation = lash::vm::ir::reconcile(&graph, &canonical_graph);
-    if !reconciliation.unmatched.is_empty() || !reconciliation.ambiguous.is_empty() {
-        return Err(RenderErrorResponse::document(
-            "submitted workflow does not reconcile with its canonical reprojection",
-            serde_json::json!({
-                "unmatched": reconciliation.unmatched,
-                "ambiguous": reconciliation.ambiguous,
-            }),
-        ));
-    }
-    let id_map = reconciliation
-        .pairs
-        .into_iter()
-        .map(|pair| (pair.submitted.to_string(), pair.reprojected.to_string()))
-        .collect();
+    let id_map = pair_by_position(&graph, &canonical_graph).map_err(|unmatched| {
+        RenderErrorResponse::document(
+            "submitted workflow does not correspond to its canonical reprojection",
+            serde_json::json!({ "unmatched": unmatched }),
+        )
+    })?;
     let saved = state.save(source, canonical_graph);
     let environment = runtime::host_environment();
     let faceted_graph = workflow_graph_from_source_with_facets(&saved.source, Some(&environment))

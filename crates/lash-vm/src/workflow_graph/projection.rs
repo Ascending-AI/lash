@@ -655,7 +655,7 @@ impl Session<'_, '_> {
 }
 
 /// The expression at `path` in `program`, if the path addresses one.
-fn expr_at<'p>(program: &'p Program, path: &AstPath) -> Option<&'p Expr> {
+pub(super) fn expr_at<'p>(program: &'p Program, path: &AstPath) -> Option<&'p Expr> {
     let mut expression = match path.root {
         crate::ast::AstRoot::Main => &program.main,
         crate::ast::AstRoot::Declaration(index) => {
@@ -669,6 +669,55 @@ fn expr_at<'p>(program: &'p Program, path: &AstPath) -> Option<&'p Expr> {
         expression = expression.children().nth(*step as usize)?;
     }
     Some(expression)
+}
+
+/// Where every node of `program`'s document sits in the program: the node id
+/// the projector mints for each visible statement, with the statement's
+/// rooted AST path. A literal's statements are addressed under `main`, where
+/// the literal sits.
+pub(super) fn statement_addresses(program: &Program) -> Vec<(WorkflowNodeId, AstPath)> {
+    fn collect(body: &WorkflowBody<'_>, owner: &str, out: &mut Vec<(WorkflowNodeId, AstPath)>) {
+        for statement in &body.statements {
+            out.push((
+                workflow_node_id(owner, statement.node_path.indices()),
+                statement.ast_path.clone(),
+            ));
+            for child in &statement.bodies {
+                collect(child, owner, out);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    collect(
+        WorkflowProjection::for_main(program).body(),
+        "main",
+        &mut out,
+    );
+    for (index, declaration) in (0u32..).zip(&program.declarations) {
+        if let Declaration::Process(process) = declaration {
+            let projection = WorkflowProjection::for_process(
+                &process.body,
+                AstPath::declaration(index, Vec::new()),
+            );
+            collect(
+                projection.body(),
+                &format!("process:{}", process.name),
+                &mut out,
+            );
+        }
+    }
+    let mut literals = Vec::new();
+    collect_process_literals(&program.main, &mut Vec::new(), &mut literals);
+    for (path, literal) in literals {
+        let owner = format!(
+            "process:{}",
+            crate::lifted_process_identity(&literal.body, &path)
+        );
+        let projection =
+            WorkflowProjection::for_process(&literal.body, AstPath::main(path).child(0));
+        collect(projection.body(), &owner, &mut out);
+    }
+    out
 }
 
 /// The authored target and value of an attribute assignment whose object is a

@@ -19,9 +19,9 @@ use lash_vm::{
     LashVmHostCatalog, LashVmHostEnvironment, TypeExpr, TypeField, VariableVersion,
     WORKFLOW_GRAPH_SCHEMA_VERSION, WORKFLOW_TYPE_FACET_SCHEMA_VERSION, WorkflowArgument,
     WorkflowContainer, WorkflowDeclaration, WorkflowDiagnosticKind, WorkflowEdgeKind,
-    WorkflowGraph, WorkflowGraphDecodeError, WorkflowGraphReconcileSide, WorkflowNode,
-    WorkflowNodeId, WorkflowNodeKind, WorkflowNodeNameSource, WorkflowSlotPath,
-    WorkflowSlotPathSegment, WorkflowSubgraph, reconcile, workflow_call_to_ir, workflow_slot_value,
+    WorkflowGraph, WorkflowGraphDecodeError, WorkflowNode, WorkflowNodeId, WorkflowNodeKind,
+    WorkflowNodeNameSource, WorkflowSlotPath, WorkflowSlotPathSegment, WorkflowSubgraph,
+    workflow_call_to_ir, workflow_slot_value,
 };
 
 /// The one process a fixture lifts.
@@ -396,100 +396,6 @@ fn a_draft_claims_no_runtime_identity_and_identity_never_depends_on_printing() {
     let graph = lash_typescript::workflow_graph::workflow_graph_from_artifact(&artifact);
     assert_eq!(graph.source_identity, Some(artifact.source_identity()));
     assert!(graph.nodes().all(|node| node.source_span.is_none()));
-}
-
-#[test]
-fn reconcile_pairs_inserted_nodes_by_structural_location() {
-    let mut submitted = workflow_graph_from_source("finish(1);\n").expect("fixture projects");
-    let inserted_id = WorkflowNodeId::new("new:inserted".to_string());
-    submitted.main.nodes.insert(
-        0,
-        WorkflowNode {
-            id: inserted_id.clone(),
-            name: "computation".to_string(),
-            description: None,
-            name_source: WorkflowNodeNameSource::Derived,
-            kind: WorkflowNodeKind::Computation {
-                binding: None,
-                expression: lash_vm::Expr::Number(2.0),
-            },
-            available_variables: Vec::new(),
-            type_facets: None,
-            outputs: Vec::new(),
-            execution_sites: Vec::new(),
-            source_span: None,
-        },
-    );
-    let source = workflow_graph_to_source(&submitted).expect("submitted graph renders");
-    let reprojected = workflow_graph_from_source(&source).expect("source reprojects");
-
-    let result = reconcile(&submitted, &reprojected);
-    assert!(result.unmatched.is_empty());
-    assert!(result.ambiguous.is_empty());
-    assert_eq!(result.pairs.len(), 2);
-    assert!(
-        result
-            .pairs
-            .iter()
-            .any(|pair| pair.submitted == inserted_id)
-    );
-}
-
-#[test]
-fn reconcile_reports_unmatched_and_ambiguous_ids_without_guessing() {
-    let submitted = workflow_graph_from_source("1;\nfinish(1);\n").expect("fixture projects");
-    let mut missing = submitted.clone();
-    missing.main.nodes.remove(0);
-    let unmatched = reconcile(&submitted, &missing);
-    assert_eq!(unmatched.unmatched.len(), 1);
-    assert!(unmatched.ambiguous.is_empty());
-
-    let mut duplicate_ids = submitted.clone();
-    duplicate_ids.main.nodes[1].id = duplicate_ids.main.nodes[0].id.clone();
-    let ambiguous = reconcile(&duplicate_ids, &duplicate_ids);
-    assert!(ambiguous.unmatched.is_empty());
-    assert_eq!(ambiguous.ambiguous.len(), 2);
-    assert!(ambiguous.pairs.is_empty());
-}
-
-#[test]
-fn reconcile_suppresses_pairs_for_ids_duplicated_at_unmatched_locations() {
-    let two_nodes = workflow_graph_from_source("1;\nfinish(1);\n").expect("fixture projects");
-    let one_node = workflow_graph_from_source("finish(1);\n").expect("fixture projects");
-
-    let mut duplicate_submitted = two_nodes.clone();
-    duplicate_submitted.main.nodes[1].id = duplicate_submitted.main.nodes[0].id.clone();
-    let submitted_result = reconcile(&duplicate_submitted, &one_node);
-    assert!(submitted_result.pairs.is_empty());
-    assert_eq!(submitted_result.unmatched.len(), 1);
-    assert_eq!(submitted_result.ambiguous.len(), 1);
-    assert_eq!(
-        submitted_result.ambiguous[0].side,
-        WorkflowGraphReconcileSide::Submitted
-    );
-    assert_eq!(submitted_result.ambiguous[0].locations.len(), 2);
-    assert!(
-        submitted_result.ambiguous[0]
-            .locations
-            .contains(&submitted_result.unmatched[0].location)
-    );
-
-    let mut duplicate_reprojected = two_nodes;
-    duplicate_reprojected.main.nodes[1].id = duplicate_reprojected.main.nodes[0].id.clone();
-    let reprojected_result = reconcile(&one_node, &duplicate_reprojected);
-    assert!(reprojected_result.pairs.is_empty());
-    assert_eq!(reprojected_result.unmatched.len(), 1);
-    assert_eq!(reprojected_result.ambiguous.len(), 1);
-    assert_eq!(
-        reprojected_result.ambiguous[0].side,
-        WorkflowGraphReconcileSide::Reprojected
-    );
-    assert_eq!(reprojected_result.ambiguous[0].locations.len(), 2);
-    assert!(
-        reprojected_result.ambiguous[0]
-            .locations
-            .contains(&reprojected_result.unmatched[0].location)
-    );
 }
 
 #[test]
