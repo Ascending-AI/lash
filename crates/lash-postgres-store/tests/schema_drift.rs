@@ -85,22 +85,22 @@ async fn a_dropped_partial_unique_dedup_index_is_rejected() {
     .await;
 }
 
-/// A retyped column: `text` widened to `character varying(64)` truncates values
-/// lash writes, and nothing about the version stamp would notice.
+/// A plain column retyped from `text` to `character varying(64)` cannot hold all
+/// originator ids lash writes, and nothing about the version stamp would notice.
 #[tokio::test]
 async fn a_retyped_column_is_rejected() {
     assert_mutation_is_rejected(
-        "ALTER TABLE lash_processes ALTER COLUMN status TYPE VARCHAR(64)",
+        "ALTER TABLE lash_processes ALTER COLUMN originator_id TYPE VARCHAR(64)",
         &[
             "COLUMN DRIFT",
-            "lash_processes.status: expected text not-null, found character varying(64) not-null",
+            "lash_processes.originator_id: expected text not-null, found character varying(64) not-null",
         ],
         |finding| {
             matches!(
                 finding,
                 SchemaFinding::ColumnMismatch { table, expected, found }
                     if table == "lash_processes"
-                        && expected.name == "status"
+                        && expected.name == "originator_id"
                         && found.sql_type == "character varying(64)"
             )
         },
