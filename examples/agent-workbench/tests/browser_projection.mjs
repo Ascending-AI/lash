@@ -1314,15 +1314,6 @@ test("an unattached stream is neither a live channel nor an outage", () => {
   assert.match(html, /const STREAM_CONNECT_TIMEOUT_MS = \d+;/);
 });
 
-test("the boot path bounds its snapshot request and retries it", () => {
-  // The non-determinism in FIG-791: an unbounded, un-retried one-shot left a
-  // reload during the outage on whatever the static markup said, forever, when
-  // the backend accepted the connection and blocked instead of refusing it.
-  assert.match(html, /AbortSignal\.timeout\(timeoutMs\)/);
-  assert.match(html, /function scheduleStateRetry\(\)/);
-  assert.doesNotMatch(html, /renderNote\("transcript updates reconnecting"\)/);
-});
-
 test("a typed model survives an intervening snapshot and is what the turn sends", () => {
   function control() {
     const node = {

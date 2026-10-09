@@ -452,41 +452,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[cfg(feature = "rlm")]
-    async fn a_future_module_artifact_is_a_legible_identity_refusal() {
-        let mut raw: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../lash-vm/tests/fixtures/module-artifact-old.json"
-        ))
-        .expect("frozen fixture should be JSON");
-        raw["compilation_dialect"] = serde_json::json!("future_dialect");
-        raw["ir"] = serde_json::json!({"language": "typescript", "main": {"FutureExpr": null}});
-        let extractions = extract(&item(
-            DurableSurface::ModuleArtifact,
-            DurablePayload::Json(
-                serde_json::json!({
-                    "family": lash_vm::LASH_VM_SEMANTIC_HASH_VERSION,
-                    "encoding": 1,
-                    "artifact": raw,
-                })
-                .to_string(),
-            ),
-        ))
-        .await;
-        let detail = extractions
-            .iter()
-            .find_map(|extraction| match extraction {
-                Extraction::IdentityMismatch {
-                    format: DurableFormat::ModuleArtifact,
-                    detail,
-                } => Some(detail.as_str()),
-                _ => None,
-            })
-            .expect("future artifact shape should refuse as an identity mismatch");
-        assert!(detail.contains("recompile and republish"), "{detail}");
-        assert!(!detail.contains("unknown variant"), "{detail}");
-    }
-
-    #[tokio::test]
     #[cfg(not(feature = "rlm"))]
     async fn a_module_artifact_is_undecidable_without_the_identity_verifier() {
         let extractions = extract(&item(

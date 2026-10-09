@@ -450,8 +450,6 @@ mod adr_claims;
 mod agent_scenarios;
 #[cfg(feature = "rlm")]
 mod aggregate_await_comprehension;
-#[cfg(feature = "rlm")]
-mod aggregate_oracle;
 mod plugin_build_refusal;
 mod plugin_lifecycle;
 mod plugin_operations;

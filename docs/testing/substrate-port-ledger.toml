@@ -4,7 +4,7 @@
 # 1731 rows over 869 files, 4064 laws.
 # By class: mechanical 196, semantic 140, delete 954, replace 441.
 # By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 99, L9c 367, L9d 124, L9e 141, L9f 125, L9g 98, L9h 121, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49, P4 22, P5 2.
-# By status: todo 0, ported 191, deleted 1540.
+# By status: todo 0, ported 190, deleted 1541.
 #
 # New laws owed (replace rows), by owning lane:
 # - none
@@ -18338,9 +18338,9 @@ laws = [
   "the_standalone_list_batch_still_selects_the_first_written_rejection",
   "a_nested_list_is_one_batch_that_keeps_written_rejection_order",
 ]
-disposition = "port"
-status = "ported"
-note = "FIG-5190 deleted the tests of this file that needed an engine (their own rows); the tests left run without one."
+disposition = "covered-by:crates/lash-vm/src/runtime/tests/wrapup_await_cases.rs::retained_ir_batch_preserves_order_and_catchable_repair"
+status = "deleted"
+note = "FIG-5680 removes three verified duplicates and their exclusive host/builders; the retained VM batch law covers written rejection order and catchable repair."
 
 [[row]]
 path = "crates/lash/src/tests/deployment_and_testing_facade.rs"

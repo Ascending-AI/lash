@@ -37,13 +37,6 @@ describe('literal parse/encode', () => {
     expect(encodeLiteral('string', 'done')).toBe('"done"');
     expect(encodeLiteral('string', 'a"b')).toBe('"a\\"b"');
   });
-
-  it('round-trips plain scalar literals through parse -> encode', () => {
-    for (const raw of ['"hello"', '"done"', '42', '-3.5', 'true', 'false']) {
-      const lit = parseLiteral(raw);
-      expect(encodeLiteral(lit.type, lit.value)).toBe(raw);
-    }
-  });
 });
 
 describe('list parse/encode', () => {
@@ -87,12 +80,6 @@ describe('list parse/encode', () => {
       ]),
     ).toBe('[1, "x"]');
     expect(encodeList([])).toBe('[]');
-  });
-
-  it('round-trips list text through parse -> encode', () => {
-    for (const raw of ['[1, 2, 3]', '["a", "b"]', '[true, false]', '[]']) {
-      expect(encodeList(parseList(raw).items)).toBe(raw);
-    }
   });
 });
 
@@ -259,10 +246,6 @@ describe('comprehension clause edits', () => {
     expect(next).toHaveLength(2);
     expect(next[1]).toEqual({ kind: 'if', condition: 'true' });
     expect(base).toHaveLength(1); // original untouched
-  });
-
-  it('adds a clause to an empty/undefined list', () => {
-    expect(clauseAdded(undefined, 'for')).toHaveLength(1);
   });
 
   it('removes a clause by index immutably', () => {

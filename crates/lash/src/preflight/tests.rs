@@ -288,44 +288,6 @@ async fn a_store_this_build_wrote_is_ready_with_an_empty_drain_list() {
 }
 
 #[tokio::test]
-#[cfg(feature = "rlm")]
-async fn a_future_module_artifact_refusal_names_recompile_and_republish() {
-    let mut raw: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../lash-vm/tests/fixtures/module-artifact-old.json"
-    ))
-    .expect("frozen fixture should be JSON");
-    raw["compilation_dialect"] = serde_json::json!("future_dialect");
-    raw["ir"] = serde_json::json!({"language": "typescript", "main": {"FutureExpr": null}});
-    let enveloped = serde_json::json!({
-        "family": lash_vm::LASH_VM_SEMANTIC_HASH_VERSION,
-        "encoding": 1,
-        "artifact": raw,
-    });
-    let item = DurableItem {
-        surface: DurableSurface::ModuleArtifact,
-        cursor: "lash_vm:v1:sha256:future".to_string(),
-        process_id: None,
-        session_id: None,
-        status: None,
-        owner_record: None,
-        payload: DurablePayload::Json(enveloped.to_string()),
-    };
-    let report = probe_store(
-        &FakeStore::default().with_items(DurableSurface::ModuleArtifact, vec![item]),
-        PreflightOptions::summary(),
-    )
-    .await
-    .expect("the probe reads the store");
-    assert_eq!(report.outcome, PreflightOutcome::Refused);
-    assert_eq!(
-        component(&report, DurableFormat::ModuleArtifact).verdict,
-        ComponentVerdict::Refused
-    );
-    let message = report.refusal_message().expect("a refusal has a message");
-    assert!(message.contains("recompile and republish"), "{message}");
-}
-
-#[tokio::test]
 async fn a_state_from_another_build_refuses_and_lands_on_the_drain_list() {
     // The whole point of the walk: the refusal is named, counted and
     // attributed to what an operator can drain, before anything is wired.

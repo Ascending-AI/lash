@@ -629,26 +629,6 @@ mod tests {
     }
 
     #[test]
-    fn store_commit_contended_is_retryable_and_not_terminal() {
-        let errors = [
-            runtime_error(RuntimeErrorCode::StoreCommitContended),
-            EmbedError::Store(StoreError::Contended),
-            EmbedError::Session(SessionError::Store {
-                context: "failed to park a contended session".to_string(),
-                source: StoreError::Contended,
-            }),
-            EmbedError::Plugin(PluginError::RuntimeEffectController(
-                RuntimeEffectControllerError::from(StoreError::Contended),
-            )),
-        ];
-
-        for error in errors {
-            assert!(error.is_retryable(), "{error}");
-            assert!(!error.is_terminal(), "{error}");
-        }
-    }
-
-    #[test]
     fn contention_predicate_excludes_other_retryable_causes() {
         for error in [
             EmbedError::Store(StoreError::Contended),
@@ -949,36 +929,6 @@ mod tests {
                 assert_eq!(facade.is_terminal(), engine.is_terminal(), "{facade:?}");
                 assert_eq!(facade.is_retryable(), engine.is_retryable(), "{facade:?}");
             }
-        }
-    }
-
-    #[test]
-    fn the_facade_retries_exactly_the_store_faults_the_engine_retries() {
-        let transient: [fn() -> StoreError; 4] = [
-            || StoreError::Contended,
-            || StoreError::StorageFailure {
-                backend: "facade-law",
-                message: "the store is temporarily unavailable".to_string(),
-            },
-            || StoreError::Backend("the store is temporarily unavailable".to_string()),
-            || StoreError::MigrationOpenElsewhere {
-                database: "durable core".to_string(),
-                location: std::path::PathBuf::from("facade-law"),
-            },
-        ];
-        for error in transient {
-            assert!(error().is_transient(), "{}", error());
-            for facade in store_shapes(error) {
-                assert!(facade.is_retryable() && !facade.is_terminal(), "{facade:?}");
-            }
-        }
-        let corrupt = || StoreError::StoredDataCorrupt {
-            record_kind: "SessionHeadMeta",
-            message: "not the record".to_string(),
-        };
-        assert!(!corrupt().is_transient());
-        for facade in store_shapes(corrupt) {
-            assert!(facade.is_terminal() && !facade.is_retryable(), "{facade:?}");
         }
     }
 }

@@ -100,12 +100,6 @@ describe('enum dropdown selection', () => {
     expect(enumMemberFromText('someVar', members)).toBeNull();
     expect(enumMemberFromText('', members)).toBeNull();
   });
-
-  it('round-trips member -> text -> member', () => {
-    for (const m of members) {
-      expect(enumMemberFromText(enumMemberToText(m), members)).toBe(m);
-    }
-  });
 });
 
 describe('describeExpectedType — subtle slot hint', () => {

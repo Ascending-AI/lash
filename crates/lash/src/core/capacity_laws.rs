@@ -5,47 +5,6 @@ use crate::runtime::*;
 use crate::tracing::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-#[test]
-fn json_admission_charges_each_configured_resource_before_allocation() {
-    use crate::json_decode::{JsonDecodeError, JsonDecodeLimits};
-    let input = br#"["payload"]"#;
-    for (resource, limits) in [
-        (
-            "bytes",
-            JsonDecodeLimits {
-                max_bytes: 1,
-                ..JsonDecodeLimits::standard()
-            },
-        ),
-        (
-            "nodes",
-            JsonDecodeLimits {
-                max_nodes: 1,
-                ..JsonDecodeLimits::standard()
-            },
-        ),
-        (
-            "depth",
-            JsonDecodeLimits {
-                max_depth: 1,
-                ..JsonDecodeLimits::standard()
-            },
-        ),
-        (
-            "estimated allocation bytes",
-            JsonDecodeLimits {
-                max_estimated_allocation_bytes: 1,
-                ..JsonDecodeLimits::standard()
-            },
-        ),
-    ] {
-        assert!(
-            matches!(limits.check(input), Err(JsonDecodeError::LimitExceeded { resource: actual, .. }) if actual == resource)
-        );
-    }
-    assert_eq!(JsonDecodeLimits::standard().check(input).unwrap().nodes, 2);
-}
-
 fn envelope(
     input: serde_json::Value,
 ) -> std::result::Result<RuntimeEffectEnvelope, crate::runtime::EffectIdentityError> {

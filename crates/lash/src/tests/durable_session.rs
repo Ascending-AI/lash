@@ -193,7 +193,60 @@ async fn catalog_failure_matrix(failure: CatalogFailure) {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn catalog_contention_retains_its_type_and_retryability_across_existing_session_apis() {
+    use lash_core::{
+        PluginError, RuntimeEffectControllerError, RuntimeError, RuntimeErrorCode, SessionError,
+    };
+
     catalog_failure_matrix(CatalogFailure::Contended).await;
+
+    for error in [
+        EmbedError::Runtime(RuntimeError::new(
+            RuntimeErrorCode::StoreCommitContended,
+            "test",
+        )),
+        EmbedError::Plugin(PluginError::RuntimeEffectController(
+            RuntimeEffectControllerError::from(StoreError::Contended),
+        )),
+    ] {
+        assert!(error.is_retryable(), "{error}");
+        assert!(!error.is_terminal(), "{error}");
+    }
+
+    let transient: [fn() -> StoreError; 4] = [
+        || StoreError::Contended,
+        || StoreError::StorageFailure {
+            backend: "facade-law",
+            message: "the store is temporarily unavailable".to_string(),
+        },
+        || StoreError::Backend("the store is temporarily unavailable".to_string()),
+        || StoreError::MigrationOpenElsewhere {
+            database: "durable core".to_string(),
+            location: std::path::PathBuf::from("facade-law"),
+        },
+    ];
+    let store_shapes = |error: fn() -> StoreError| {
+        [
+            EmbedError::Store(error()),
+            EmbedError::Session(SessionError::Store {
+                context: "facade law".to_string(),
+                source: error(),
+            }),
+        ]
+    };
+    for error in transient {
+        assert!(error().is_transient(), "{}", error());
+        for facade in store_shapes(error) {
+            assert!(facade.is_retryable() && !facade.is_terminal(), "{facade:?}");
+        }
+    }
+    let corrupt = || StoreError::StoredDataCorrupt {
+        record_kind: "SessionHeadMeta",
+        message: "not the record".to_string(),
+    };
+    assert!(!corrupt().is_transient());
+    for facade in store_shapes(corrupt) {
+        assert!(facade.is_terminal() && !facade.is_retryable(), "{facade:?}");
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
