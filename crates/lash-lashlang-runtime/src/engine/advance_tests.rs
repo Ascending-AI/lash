@@ -39,6 +39,7 @@ fn snapshot(tag: &str) -> lash_vm_protocol::OpaqueVmState {
 
 fn step(name: &str, outcome: SettledOutput) -> EngineEvent {
     EngineEvent::StepSettled {
+        call_id: (!name.starts_with("vm_run.")).then(|| lash_core::ToolCallId::fixture(name)),
         step: StepName(name.to_owned()),
         outcome,
     }
@@ -259,7 +260,11 @@ fn a_parked_operation_is_one_step_and_its_outcome_feeds_the_next_vm_run() {
             operation: 0,
             decision: Decision::Single,
             leaves,
-        } => assert_eq!(leaves.len(), 1),
+        } => {
+            assert_eq!(leaves.len(), 1);
+            assert!(matches!(&leaves[0], Leaf::Step { call_id: Some(call), .. }
+                if *call == lash_core::ToolCallId::fixture("op.0.0")));
+        }
         other => panic!("the lone leaf's outcome, got {other:?}"),
     }
 

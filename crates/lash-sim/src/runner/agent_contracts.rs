@@ -1289,6 +1289,11 @@ struct ContractEventIdentities {
 impl ContractEventIdentities {
     fn normalize(&mut self, event_type: &str, payload: Value) -> Value {
         let mut payload = normalize_contract_process_event_payload(event_type, payload);
+        if event_type == "process.effect_outcome"
+            && let Some(call) = payload.get_mut("call_id")
+        {
+            self.normalize_call(call);
+        }
         if matches!(event_type, "process.waiting" | "process.resumed")
             && let Some(wait) = payload.get_mut("wait").and_then(Value::as_object_mut)
         {
@@ -1299,15 +1304,20 @@ impl ContractEventIdentities {
             }
             if let Some(kind) = wait.get_mut("kind").and_then(Value::as_object_mut)
                 && kind.get("kind").and_then(Value::as_str) == Some("call")
-                && let Some(call) = kind.get("call_id").and_then(Value::as_str)
-                && !call.is_empty()
+                && let Some(call) = kind.get_mut("call_id")
             {
-                let next = self.calls.len() + 1;
-                let ordinal = *self.calls.entry(call.to_owned()).or_insert(next);
-                kind.insert("call_id".to_owned(), json!(format!("call-{ordinal}")));
+                self.normalize_call(call);
             }
         }
         payload
+    }
+
+    fn normalize_call(&mut self, value: &mut Value) {
+        if let Some(call) = value.as_str().filter(|call| !call.is_empty()) {
+            let next = self.calls.len() + 1;
+            let ordinal = *self.calls.entry(call.to_owned()).or_insert(next);
+            *value = json!(format!("call-{ordinal}"));
+        }
     }
 }
 

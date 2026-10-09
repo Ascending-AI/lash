@@ -95,6 +95,8 @@ pub struct ProcessEffectOccurrence {
     pub outcome_class: ProcessEffectOutcomeClass,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub code: Option<lash_sansio::FailureCode>,
+    /// The tool call this effect records; engine-only effects have no tool call.
+    pub call_id: Option<crate::ToolCallId>,
     pub replay_key: String,
 }
 
@@ -108,6 +110,8 @@ struct ProcessEffectOccurrenceFields {
     outcome_class: ProcessEffectOutcomeClass,
     #[serde(default, deserialize_with = "nonempty_failure_code")]
     code: Option<lash_sansio::FailureCode>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    call_id: Option<crate::ToolCallId>,
     replay_key: String,
 }
 
@@ -124,6 +128,7 @@ impl TryFrom<ProcessEffectOccurrenceFields> for ProcessEffectOccurrence {
             operation: fields.operation,
             outcome_class: fields.outcome_class,
             code: fields.code,
+            call_id: fields.call_id,
             replay_key: fields.replay_key,
         };
         outcome.check()?;
@@ -172,6 +177,7 @@ impl ProcessEffectOccurrence {
             operation: operation.into(),
             outcome_class,
             code,
+            call_id: None,
             replay_key: replay_key.into(),
         }
     }
@@ -547,7 +553,7 @@ pub(super) fn effect_outcome_payload_schema() -> crate::JsonSchema {
         "additionalProperties": false,
         "required": [
             "vocabulary_version", "node_id", "occurrence", "operation",
-            "outcome_class", "replay_key"
+            "outcome_class", "call_id", "replay_key"
         ],
         "if": { "properties": { "outcome_class": { "const": "failure" } } },
         "else": { "not": { "required": ["code"] } },
@@ -565,6 +571,7 @@ pub(super) fn effect_outcome_payload_schema() -> crate::JsonSchema {
                 "enum": ["success", "failure", "cancelled"]
             },
             "code": { "type": "string", "minLength": 1 },
+            "call_id": { "type": ["string", "null"], "pattern": "^tc_[0-9a-f]{64}$" },
             "replay_key": { "type": "string", "minLength": 1 }
         }
     }))

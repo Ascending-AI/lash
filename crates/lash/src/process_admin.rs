@@ -52,6 +52,24 @@ impl Processes {
             .await?)
     }
 
+    /// Read a retained tool call by the typed id on its process effect
+    /// occurrence. Reads committed round outcomes, including after reopening
+    /// the deployment; it runs no engine, tool, hook or current catalog lookup.
+    /// Unknown calls, unfinished calls and outcomes without retained material
+    /// return `None`. Process pruning retires these records with their owner.
+    pub async fn tool_call(
+        &self,
+        process_id: &ProcessId,
+        call_id: &crate::ToolCallId,
+    ) -> Result<Option<crate::tools::ToolCallRecord>> {
+        Ok(lash_core::facade_support::read_process_tool_call(
+            &self.core.effect_host(),
+            process_id,
+            call_id,
+        )
+        .await?)
+    }
+
     fn registry(&self) -> Arc<dyn lash_core::ProcessRegistry> {
         self.core.process_registry()
     }

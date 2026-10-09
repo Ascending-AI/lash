@@ -102,8 +102,10 @@ Evidence: `crates/lash-trace/src/lashlang_graph/model.rs:24`,
 
 Result incorporation records the first `PROCESS_EFFECT_OCCURRENCE_CAP`, 8,
 occurrences per effect node. Each contains node id, occurrence, operation,
-outcome class, optional code, and idempotency key, with no payload, timing, or
-attempt. Later occurrences contribute to bounded omission counts. Progress and
+outcome class, optional code, a typed `call_id` for tool effects, and idempotency
+key, with no payload, timing, or attempt. The call id joins to the retained
+`ToolCallRecord` through `Processes::tool_call(process_id, call_id)`; engine-only
+effects carry `None`. Later occurrences contribute to bounded omission counts. Progress and
 pending entries travel in the VM snapshot.
 
 Pending occurrences commit at the next process boundary: entering or clearing

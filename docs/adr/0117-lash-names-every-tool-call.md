@@ -176,6 +176,18 @@ Sources: `crates/lash-core-execution/src/tool_dispatch/attempt_coordinator.rs`,
 `crates/lash-core-store/src/await_event_identity.rs`, and
 `crates/lash-sansio/src/frame_key.rs`.
 
+A process tool step retains that same `ToolCallRecord` in its committed round
+outcome. Its `ProcessEffectOccurrence::call_id` is the admitted typed id;
+engine-only effects carry `None`. A host joins the occurrence to
+`Processes::tool_call(process_id, call_id)`, which reads retained outcomes
+without a live trace or current catalog. The engine receives the record's
+output at incorporation. A parked call retains its request with its completion
+metadata, so resolving it produces the same record after a reopen. Pruning the
+process retires its tool records with its rounds. The actor also carries the
+typed id in `EngineEvent::StepSettled`. The VM retains it with the leaf
+settlement in its continuation input and binds its completion and failure
+observations to that id when answering the reissued operation.
+
 ### 7. Retained payload drift is refused before any effect
 
 Whole-round K1 admission records each call id, canonical request digest, prepared

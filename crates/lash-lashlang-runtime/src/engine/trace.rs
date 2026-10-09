@@ -17,6 +17,7 @@ pub(super) struct ProcessTrace {
     tracing: PluginExecutionTrace,
     identity: TraceLanguageExecutionIdentity,
     pending_resource_starts: Arc<Mutex<BTreeMap<(String, u64), TraceLanguageExecutionPayload>>>,
+    settled_calls: Arc<Mutex<BTreeMap<(String, u64), lash_core::ToolCallId>>>,
 }
 
 impl ProcessTrace {
@@ -34,6 +35,7 @@ impl ProcessTrace {
         Some(Self {
             tracing,
             pending_resource_starts: Arc::default(),
+            settled_calls: Arc::default(),
             identity: TraceLanguageExecutionIdentity {
                 scope: TraceRuntimeScope::none(),
                 subject: TraceRuntimeSubject::Process {
@@ -76,8 +78,26 @@ impl ProcessTrace {
         });
     }
 
-    pub(super) fn emit(&self, payload: TraceLanguageExecutionPayload) {
+    pub(super) fn emit(&self, mut payload: TraceLanguageExecutionPayload) {
         use TraceLanguageExecutionPayload as Payload;
+        if let Payload::NodeCompleted {
+            node_id,
+            occurrence,
+            call_id,
+            ..
+        }
+        | Payload::NodeFailed {
+            node_id,
+            occurrence,
+            call_id,
+            ..
+        } = &mut payload
+        {
+            *call_id = self
+                .settled_calls
+                .lock_recover()
+                .remove(&(node_id.clone(), *occurrence));
+        }
         match &payload {
             Payload::NodeStarted {
                 node_id,
@@ -116,6 +136,41 @@ impl ProcessTrace {
             _ => {}
         }
         self.emit_payload(payload);
+    }
+
+    /// Bind reissued VM operations to the actor identities retained in their
+    /// injection. VM observations name sites; only the actor admits calls.
+    pub(super) fn bind_calls(&self, op: &lashlang::AbilityOp, inject: &super::state::Injection) {
+        let super::state::Injection::Leaves { leaves, .. } = inject else {
+            return;
+        };
+        let sites = match op {
+            lashlang::AbilityOp::ResourceOperation(operation) => vec![operation.call_site.as_ref()],
+            lashlang::AbilityOp::ResourceOperationBatch(batch) => batch
+                .leaves
+                .iter()
+                .map(|leaf| match leaf {
+                    lashlang::ResourceOperationBatchLeaf::Operation(operation) => {
+                        operation.call_site.as_ref()
+                    }
+                    lashlang::ResourceOperationBatchLeaf::Timer(_) => None,
+                })
+                .collect(),
+            _ => return,
+        };
+        let mut calls = self.settled_calls.lock_recover();
+        for (site, leaf) in sites.into_iter().zip(leaves) {
+            if let (
+                Some(site),
+                super::state::Leaf::Step {
+                    call_id: Some(call),
+                    ..
+                },
+            ) = (site, leaf)
+            {
+                calls.insert((site.site.node_id.clone(), site.occurrence), call.clone());
+            }
+        }
     }
 
     /// Hand the observed start to the tool step. Its actor owns the call id;

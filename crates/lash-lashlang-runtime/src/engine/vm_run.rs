@@ -462,6 +462,7 @@ impl QuietPointHost {
         }
         if let Some(inject) = self.inject.lock_recover().take() {
             if let Some(trace) = &self.trace {
+                trace.bind_calls(&op, &inject);
                 trace.waiting(&op, self.now_ms, true);
             }
             return match injection::answer(&op, inject, &self.cancellation) {

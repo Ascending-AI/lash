@@ -278,6 +278,7 @@ const WRITE_TOOL: &str = "lifecycle_events_write";
 #[derive(Debug, Default)]
 struct World {
     writes: Mutex<Vec<serde_json::Value>>,
+    calls: Mutex<Vec<lash_core::ToolCallId>>,
     parked: Mutex<Option<(String, lash_core::ToolCallId)>>,
 }
 
@@ -298,6 +299,11 @@ impl lash::tools::StaticToolExecute for Write {
             return lash_core::ToolAttemptOutcome::Pending(lash_core::PendingCompletion::new());
         }
         self.world.writes.lock().unwrap().push(call.args.clone());
+        self.world
+            .calls
+            .lock()
+            .unwrap()
+            .push(call.context.call_id().clone());
         lash_core::ToolOutcome::ok(serde_json::json!({ "wrote": call.args })).into()
     }
 }
@@ -533,6 +539,93 @@ async fn each_committed_effect_is_one_effect_outcome_event(tier: Tier) {
 }
 
 on_every_tier!(each_committed_effect_is_one_effect_outcome_event);
+
+/// D-TOOLRECORD: both tool calls join from durable effect occurrences after
+/// the deployment and its SQLite file store have been reopened (FIG-5550).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn process_effects_name_their_tool_call_records_after_a_sqlite_reopen() {
+    fn advance(
+        state: &mut serde_json::Value,
+        event: lash_core::EngineEvent,
+    ) -> lash_core::EngineAction {
+        match event {
+            lash_core::EngineEvent::Started { .. } => write("first", 1, Some((NODE, 1))),
+            lash_core::EngineEvent::StepSettled { .. } if state.is_null() => {
+                *state = serde_json::json!("first");
+                write("second", 2, Some((NODE, 2)))
+            }
+            lash_core::EngineEvent::StepSettled { .. } => answer(serde_json::json!("done")),
+            _ => lash_core::EngineAction::Idle,
+        }
+    }
+    let directory = tempfile::tempdir().expect("a SQLite file directory");
+    let path = directory.path().join("lash.db");
+    let world = Arc::new(World::default());
+    let process = {
+        let stores: Arc<dyn StoreSet> = Arc::new(
+            lash_sqlite_store::SqliteStoreSet::open(
+                &path,
+                lash_sqlite_store::SqliteSynchronous::Normal,
+            )
+            .await
+            .expect("the SQLite file opens"),
+        );
+        let (_backend, core) = core(&stores, advance, &world, &Heard::default(), "before-reopen");
+        let process = start(&core).await;
+        ended(&core, &process).await;
+        core.shutdown().await.expect("the first deployment stops");
+        process
+    };
+    let stores: Arc<dyn StoreSet> = Arc::new(
+        lash_sqlite_store::SqliteStoreSet::open(
+            &path,
+            lash_sqlite_store::SqliteSynchronous::Normal,
+        )
+        .await
+        .expect("the SQLite file reopens"),
+    );
+    let (backend, core) = core(&stores, advance, &world, &Heard::default(), "after-reopen");
+    let events = log(&backend, &process).await;
+    let outcomes = of_type(&events, lash_core::PROCESS_EFFECT_OUTCOME_EVENT_TYPE);
+    assert_eq!(
+        outcomes.len(),
+        2,
+        "both calls retain their effect occurrences"
+    );
+    let executed = world.calls.lock().unwrap().clone();
+    assert_eq!(executed.len(), 2);
+    for (index, (event, expected)) in outcomes.iter().zip(&executed).enumerate() {
+        let occurrence = lash_core::ProcessEffectOccurrence::decode(
+            event.fact.payload(),
+            lash_core::FleetFormat::current(),
+        )
+        .expect("the stored occurrence decodes");
+        let call_id = occurrence
+            .call_id
+            .expect("a tool effect retains its call id");
+        assert_eq!(
+            &call_id, expected,
+            "the effect names the executed tool call"
+        );
+        let record = core
+            .processes()
+            .tool_call(&process, &call_id)
+            .await
+            .expect("the retained tool record reads")
+            .expect("the tool call has a record");
+        assert_eq!(record.call_id, call_id);
+        assert_eq!(record.tool, WRITE_TOOL);
+        let args = serde_json::json!({ "x": index + 1 });
+        assert_eq!(record.args, args);
+        assert_eq!(
+            record.output,
+            lash_core::ToolCallOutput::success(serde_json::json!({ "wrote": args }))
+        );
+    }
+    core.shutdown()
+        .await
+        .expect("the reopened deployment stops");
+}
 
 // --- publication across commits and cuts -------------------------------------------
 

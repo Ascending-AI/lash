@@ -38,6 +38,20 @@ fn process_effect_outcome_contract_normalizes_only_opaque_replay_identity() {
     );
     assert_eq!(original[0]["wait"]["kind"]["call_id"], "call-1");
     assert_eq!(original[0], original[1]);
+    let mut identities = ContractEventIdentities::default();
+    identities.normalize("process.waiting", wait("first", 100, "tool:a"));
+    let effect = |call: Value| json!({"call_id": call, "outcome_class": "success"});
+    assert_eq!(
+        identities.normalize("process.effect_outcome", effect(json!("first")))["call_id"],
+        "call-1"
+    );
+    assert_eq!(
+        identities.normalize("process.effect_outcome", effect(json!("other")))["call_id"],
+        "call-2"
+    );
+    assert!(
+        identities.normalize("process.effect_outcome", effect(Value::Null))["call_id"].is_null()
+    );
     for changed in [
         wait("other", 100, "tool:a"),
         wait("first", 101, "tool:a"),

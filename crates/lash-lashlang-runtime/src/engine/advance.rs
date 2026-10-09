@@ -92,7 +92,11 @@ fn transition(
             state.phase = Phase::Ended;
             Ok(EngineAction::Terminal(cancelled(origin)))
         }
-        EngineEvent::StepSettled { step, outcome } => step_settled(state, &step, outcome),
+        EngineEvent::StepSettled {
+            step,
+            call_id,
+            outcome,
+        } => step_settled(state, &step, call_id, outcome),
         EngineEvent::Woke => match &state.phase {
             Phase::Parked {
                 operation,
@@ -166,6 +170,7 @@ fn standing(state: &LashlangEngineState) -> Result<EngineAction, ProcessInfraErr
 fn step_settled(
     state: &mut LashlangEngineState,
     step: &StepName,
+    call_id: Option<lash_core::ToolCallId>,
     outcome: SettledOutput,
 ) -> Result<EngineAction, ProcessInfraError> {
     match &mut state.phase {
@@ -184,7 +189,13 @@ fn step_settled(
             }) else {
                 return standing(state);
             };
-            if let Leaf::Step { outcome: slot, .. } = &mut leaves[index] {
+            if let Leaf::Step {
+                outcome: slot,
+                call_id: identity,
+                ..
+            } = &mut leaves[index]
+            {
+                *identity = call_id;
                 *slot = Some(Box::new(outcome));
             }
             settled.push(index);
@@ -355,6 +366,7 @@ fn park(
                             });
                             Ok(Leaf::Step {
                                 step,
+                                call_id: None,
                                 outcome: None,
                             })
                         }

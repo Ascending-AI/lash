@@ -17,6 +17,13 @@
     }
   },
   "properties": {
+    "call_id": {
+      "pattern": "^tc_[0-9a-f]{64}$",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "code": {
       "minLength": 1,
       "type": "string"
@@ -56,6 +63,7 @@
     "occurrence",
     "operation",
     "outcome_class",
+    "call_id",
     "replay_key"
   ],
   "title": "ProcessEffectOccurrence",

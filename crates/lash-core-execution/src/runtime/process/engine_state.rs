@@ -314,6 +314,8 @@ pub enum EngineEvent {
     },
     /// One requested step settled.
     StepSettled {
+        /// The admitted tool identity; engine steps have no tool call.
+        call_id: Option<crate::ToolCallId>,
         /// The step's name.
         step: StepName,
         /// How its attempt ended, with its material's payload.

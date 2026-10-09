@@ -1381,7 +1381,7 @@ impl lash_core_execution::ProcessEngine for StateEngine {
                 },
                 wake: None,
             },
-            EngineEvent::StepSettled { step, outcome } => {
+            EngineEvent::StepSettled { step, outcome, .. } => {
                 settled.insert(step.0.clone(), step_answer(&outcome));
                 match (self.steps, step.0.as_str()) {
                     (Steps::Sequence, "set") => EngineAction::Steps {

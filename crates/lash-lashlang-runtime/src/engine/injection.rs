@@ -77,6 +77,7 @@ fn leaf_result(
         Leaf::Step {
             step,
             outcome: Some(outcome),
+            ..
         } => Ok(ResourceOperationOutcome::from_result(step_result(
             &step.0,
             outcome,
@@ -252,6 +253,7 @@ mod tests {
         let process = lash_core::ProcessId::fixture("leaf-law");
         let leaf = Leaf::Step {
             step: lash_core::StepName("op.0.0".to_owned()),
+            call_id: Some(lash_core::ToolCallId::fixture("leaf-law")),
             outcome: Some(Box::new(super::super::vm_run::completed(
                 &process,
                 "\"alpha\"".to_owned(),

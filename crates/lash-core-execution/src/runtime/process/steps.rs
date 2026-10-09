@@ -265,6 +265,19 @@ pub trait ProcessSteps: Send + Sync {
         execution: &AdmittedExecution,
     ) -> MemberBody;
 
+    /// The engine's view of a committed step outcome at incorporation.
+    /// This pure projection runs no body. Steps normally answer their stored
+    /// output directly; production catalog steps retain a ToolCallRecord and
+    /// expose its output here.
+    fn engine_output(
+        &self,
+        _process: &ProcessId,
+        _step: &StepRequest,
+        output: SettledOutput,
+    ) -> SettledOutput {
+        output
+    }
+
     /// The final answer of `execution`, an attempt of `step` of `process`
     /// that parked as `parked`, once one of its waits ended with
     /// `resolution`: a pure function of the resolution and the payload of
@@ -279,42 +292,87 @@ pub trait ProcessSteps: Send + Sync {
     ) -> SettledOutput;
 }
 
-/// A catalog tool's round answer as `process`'s step answer: the call's
-/// `ToolCallOutput` as the outcome's material, owned by the process, where
-/// the round's names the whole answered call. A step's payload is its tool
-/// output, which is what its engine reads.
+/// A parked process call retains the request beside its completion metadata,
+/// so its eventual ToolCallRecord needs no current catalog or live context.
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ParkedProcessToolCall {
+    call: crate::sansio::PendingToolCall,
+    parked: SettledOutput,
+}
+
+/// A catalog tool's round answer retained as the one ToolCallRecord for its
+/// process. The engine receives only its output, at incorporation.
 #[must_use]
-pub fn tool_step_output(process: &ProcessId, mut result: MemberResult) -> MemberResult {
-    result.output = tool_step_settled(process, result.output);
+pub fn tool_step_output(
+    process: &ProcessId,
+    call: &crate::sansio::PendingToolCall,
+    mut result: MemberResult,
+) -> MemberResult {
+    result.output = match result.output {
+        SettledOutput::Waiting(parked) => {
+            let source = parked.named().clone();
+            let retained = ParkedProcessToolCall {
+                call: call.clone(),
+                parked: SettledOutput::Waiting(parked),
+            };
+            match serde_json::to_string(&retained) {
+                Ok(text) => {
+                    let mut material = process_material(process, text).parked(source.wait);
+                    if let Some(terminal) = source.terminal {
+                        material.await_terminal(terminal);
+                    }
+                    SettledOutput::Waiting(material)
+                }
+                Err(_) => SettledOutput::Interrupted,
+            }
+        }
+        settled => {
+            let record = settled
+                .payload()
+                .and_then(decode_completed)
+                .map(|completed| crate::ToolCallRecord {
+                    call_id: completed.call_id,
+                    provider_call_id: completed.provider_call_id,
+                    tool: completed.tool_name,
+                    args: completed.args,
+                    output: completed.output,
+                });
+            replace_payload(
+                process,
+                settled,
+                record.and_then(|record| serde_json::to_string(&record).ok()),
+            )
+        }
+    };
     result
 }
 
-/// [`tool_step_output`]'s answer, for a settled output alone.
-#[must_use]
-pub fn tool_step_settled(process: &ProcessId, settled: SettledOutput) -> SettledOutput {
-    let output = settled
-        .payload()
-        .and_then(decode_completed)
-        .and_then(|completed| serde_json::to_string(&completed.output).ok());
-    let material = |text: String| {
-        Material::journal_local(
-            MaterialOwner::Process {
-                process_id: process.clone(),
-            },
-            MaterialRole::AttemptOutput,
-            text,
-        )
-    };
-    match (settled, output) {
-        (SettledOutput::Completed(_), Some(text)) => SettledOutput::Completed(material(text)),
+fn process_material(process: &ProcessId, text: String) -> Material {
+    Material::journal_local(
+        MaterialOwner::Process {
+            process_id: process.clone(),
+        },
+        MaterialRole::AttemptOutput,
+        text,
+    )
+}
+
+fn replace_payload(
+    process: &ProcessId,
+    settled: SettledOutput,
+    text: Option<String>,
+) -> SettledOutput {
+    match (settled, text) {
+        (SettledOutput::Completed(_), Some(text)) => {
+            SettledOutput::Completed(process_material(process, text))
+        }
         (SettledOutput::Failed(failure), Some(text)) => {
             let (failure, _) = failure.into_parts();
             SettledOutput::Failed(
-                material(text).failure(failure.reason, failure.suggested_delay_ms),
+                process_material(process, text).failure(failure.reason, failure.suggested_delay_ms),
             )
         }
-        // An answer that does not re-encode reached no durable form: the
-        // call may or may not have taken effect.
         (SettledOutput::Completed(_) | SettledOutput::Failed(_), None) => {
             SettledOutput::Interrupted
         }
@@ -322,25 +380,89 @@ pub fn tool_step_settled(process: &ProcessId, settled: SettledOutput) -> Settled
     }
 }
 
-/// The answer of `process`'s catalog tool step that parked as `parked`,
-/// once one of its waits ended with `resolution`: the tool output the
-/// resolution answers, as the step's material.
+/// Project a retained process tool record to the output its engine reads.
+#[must_use]
+pub fn tool_step_settled(process: &ProcessId, settled: SettledOutput) -> SettledOutput {
+    let output = settled
+        .payload()
+        .and_then(|payload| serde_json::from_str::<crate::ToolCallRecord>(payload).ok())
+        .and_then(|record| serde_json::to_string(&record.output).ok());
+    replace_payload(process, settled, output)
+}
+
+/// A parked process call's retained ToolCallRecord, rebuilt from its pinned
+/// request and the resolution of its completion wait.
 #[must_use]
 pub fn tool_step_resolved(
     process: &ProcessId,
     parked: &Material<CompletionSource>,
     resolution: Resolution,
 ) -> SettledOutput {
-    let output = crate::tool_dispatch::parked_call_output(parked, resolution);
-    match serde_json::to_string(&output) {
-        Ok(text) => SettledOutput::Completed(Material::journal_local(
-            MaterialOwner::Process {
-                process_id: process.clone(),
-            },
-            MaterialRole::AttemptOutput,
-            text,
-        )),
-        // An answer that does not encode reached no durable form.
+    let Ok(retained) = serde_json::from_str::<ParkedProcessToolCall>(parked.payload()) else {
+        return SettledOutput::Interrupted;
+    };
+    let SettledOutput::Waiting(parked) = retained.parked else {
+        return SettledOutput::Interrupted;
+    };
+    let output = crate::tool_dispatch::parked_call_output(&parked, resolution);
+    let record = crate::ToolCallRecord {
+        call_id: retained.call.call_id,
+        provider_call_id: retained.call.provider_call_id,
+        tool: retained.call.tool_name,
+        args: retained.call.args,
+        output,
+    };
+    match serde_json::to_string(&record) {
+        Ok(text) => SettledOutput::Completed(process_material(process, text)),
         Err(_) => SettledOutput::Interrupted,
     }
+}
+
+/// Read one retained process tool record without driving its owner or
+/// consulting its current catalog. Unknown, unfinished or unmaterialized
+/// calls have no retained record.
+///
+/// # Errors
+/// Failed durable reads or corrupt committed records.
+pub async fn read_process_tool_call(
+    host: &ActorContext,
+    process_id: &ProcessId,
+    call_id: &crate::ToolCallId,
+) -> Result<Option<crate::ToolCallRecord>, lash_durable::DurableError> {
+    use crate::runtime::actor::round::{self, PolicyView};
+    use lash_durable::domain::OwnerKey;
+    use lash_durable::{DurableError, StoreFailure, StoreFailureKind};
+
+    let corrupt = |message| {
+        DurableError::Store(StoreFailure {
+            kind: StoreFailureKind::Corrupt,
+            message,
+        })
+    };
+    let rows = host
+        .durable_reads()?
+        .run_records(&OwnerKey::Process(process_id.clone()))
+        .await?;
+    let fold = round::fold(&rows, &PolicyView::new([]))
+        .map_err(|error| corrupt(format!("the process's tool records: {error}")))?;
+    for member in fold.rounds().flat_map(|round| round.members()) {
+        if member.call() != call_id {
+            continue;
+        }
+        let Some(payload) = member.outcome().and_then(round::SettledOutput::payload) else {
+            return Ok(None);
+        };
+        let record: crate::ToolCallRecord = serde_json::from_str(payload).map_err(|error| {
+            corrupt(format!(
+                "call {call_id} has no readable tool record: {error}"
+            ))
+        })?;
+        if record.call_id != *call_id {
+            return Err(corrupt(format!(
+                "call {call_id} has another call's recorded answer"
+            )));
+        }
+        return Ok(Some(record));
+    }
+    Ok(None)
 }

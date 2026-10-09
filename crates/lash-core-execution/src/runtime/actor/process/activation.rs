@@ -909,8 +909,13 @@ impl ProcessActivation {
             }));
         }
         if let Some((step, outcome)) = settled_step(driver, fold) {
+            let outcome = self.steps.engine_output(process, &step.request, outcome);
             record_effect(tx, process, driver, &step, &outcome, self.fleet());
             return Ok(Next::Event(EngineEvent::StepSettled {
+                call_id: match &step.request {
+                    StepRequest::Tool { .. } => Some(step.call.clone()),
+                    StepRequest::Engine { .. } => None,
+                },
                 step: step.request.step().clone(),
                 outcome,
             }));
@@ -1296,7 +1301,7 @@ fn record_effect(
         StepRequest::Tool { tool, .. } => tool.as_str().to_owned(),
         StepRequest::Engine { kind, .. } => kind.0.clone(),
     };
-    let occurrence = crate::runtime::process::ProcessEffectOccurrence::new(
+    let mut occurrence = crate::runtime::process::ProcessEffectOccurrence::new(
         site.node_id.clone(),
         site.occurrence,
         operation,
@@ -1305,6 +1310,10 @@ fn record_effect(
         format!("process:{process}:effect:{}", step.call),
         fleet,
     );
+    occurrence.call_id = match &step.request {
+        StepRequest::Tool { .. } => Some(step.call.clone()),
+        StepRequest::Engine { .. } => None,
+    };
     append_event(tx, process, occurrence.append_request());
 }
 

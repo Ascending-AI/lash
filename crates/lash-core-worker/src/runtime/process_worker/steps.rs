@@ -10,7 +10,8 @@
 //!   those tools ([`StepRuntime::tools`]) and its later steps share them, so
 //!   each reduces against the process's committed plugin state. A
 //!   store-local effect commits with the step's outcome. The step's payload
-//!   is the call's `ToolCallOutput`.
+//!   retains the call's `ToolCallRecord`; incorporation projects its output
+//!   for the engine.
 //! - **Engine steps** run through the [`EngineSteps`](crate::EngineSteps)
 //!   the registration of the process's engine declares, under the pinned
 //!   `Repeatable` policy. A registration that declares none, or not this
@@ -25,6 +26,7 @@ use lash_core_execution::runtime::actor::round::{
 use lash_core_execution::runtime::actor::waits::Resolution;
 use lash_core_execution::runtime::process::steps::{
     ProcessSteps, StepAdmission, StepRefusal, StepRuntime, tool_step_output, tool_step_resolved,
+    tool_step_settled,
 };
 use lash_core_execution::tool_run::CompletionSource;
 use lash_core_execution::{
@@ -95,7 +97,7 @@ impl DurableProcessWorker {
             replay: None,
         };
         let result = step.tools.body(&call, &execution)(token).await;
-        tool_step_output(&process.id, result)
+        tool_step_output(&process.id, &call, result)
     }
 
     /// Bind only an admitted body to the node that issued its call. The
@@ -289,8 +291,20 @@ impl ProcessSteps for WorkerSteps {
         })
     }
 
-    /// A parked catalog tool step settles with the tool output its
-    /// resolution answers, as a round member does. An engine step never
+    fn engine_output(
+        &self,
+        process: &lash_core_execution::ProcessId,
+        step: &StepRequest,
+        output: SettledOutput,
+    ) -> SettledOutput {
+        match step {
+            StepRequest::Tool { .. } => tool_step_settled(process, output),
+            StepRequest::Engine { .. } => output,
+        }
+    }
+
+    /// A parked catalog tool step settles with the tool record its
+    /// resolution answers, retaining the request pinned when it parked. An engine step never
     /// parks.
     fn resolved(
         &self,

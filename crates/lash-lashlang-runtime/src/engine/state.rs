@@ -97,6 +97,8 @@ pub(crate) enum Leaf {
     /// A step: a catalog tool or a host operation.
     Step {
         step: StepName,
+        /// The actor's admitted tool identity, retained with its settlement.
+        call_id: Option<lash_core::ToolCallId>,
         outcome: Option<Box<SettledOutput>>,
     },
     /// A timer: the process sleeps until `until_ms` (epoch milliseconds)
