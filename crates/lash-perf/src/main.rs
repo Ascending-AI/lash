@@ -182,7 +182,19 @@ enum Command {
     LatencyWorker {
         #[arg(long)]
         store_dir: std::path::PathBuf,
+        #[arg(long)]
+        startup_out: Option<std::path::PathBuf>,
     },
+
+    /// Functional simultaneous 1/2/4 process startup phases; never a timing gate.
+    Startup {
+        #[arg(long)]
+        out: std::path::PathBuf,
+        #[arg(long)]
+        store_dir: std::path::PathBuf,
+    },
+    /// Functional loopback HTTP phases, retry/body-size and arrival-rate sweeps.
+    ProviderHttp(lash_perf::runtime_perf::http_population::HttpPopulationArgs),
 
     /// Run the send-to-completion latency gate (FIG-3843) on lash's durable
     /// engine over SQLite store sets under `--store-dir`.
@@ -237,7 +249,19 @@ fn tokio_thread_stack_bytes(args: &Args) -> usize {
 }
 
 fn main() -> anyhow::Result<()> {
+    lash_core::perf_witness::startup::initialize_epoch();
     let args = Args::parse();
+    let startup_recorder = if matches!(
+        &args.command,
+        Some(Command::LatencyWorker {
+            startup_out: Some(_),
+            ..
+        })
+    ) {
+        Some(lash_core::perf_witness::startup::Recorder::install()?)
+    } else {
+        None
+    };
     match &args.command {
         Some(Command::ReceiptTail {
             receipt,
@@ -302,12 +326,38 @@ fn main() -> anyhow::Result<()> {
             // Pure history reading: no runtime, no measurement, no exit code.
             return lash_perf::runtime_perf::run_duration_trend_cli(history, profile.as_deref());
         }
-        Some(Command::LatencyWorker { store_dir }) => {
+        Some(Command::LatencyWorker {
+            store_dir,
+            startup_out,
+        }) => {
+            let mut runtime = tokio::runtime::Builder::new_multi_thread();
+            runtime
+                .enable_all()
+                .thread_stack_size(tokio_thread_stack_bytes(&args));
+            if startup_out.is_some() {
+                runtime.worker_threads(2);
+            }
+            let runtime = runtime.build()?;
+            if let (Some(out), Some(recorder)) = (startup_out, &startup_recorder) {
+                return runtime.block_on(lash_perf::latency::startup::run_worker(
+                    store_dir, out, recorder,
+                ));
+            }
+            return runtime.block_on(lash_perf::latency::run_worker(store_dir));
+        }
+        Some(Command::Startup { out, store_dir }) => {
             let runtime = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
-                .thread_stack_size(tokio_thread_stack_bytes(&args))
+                .worker_threads(2)
                 .build()?;
-            return runtime.block_on(lash_perf::latency::run_worker(store_dir));
+            return runtime.block_on(lash_perf::latency::startup::run(out, store_dir));
+        }
+        Some(Command::ProviderHttp(options)) => {
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .worker_threads(2)
+                .build()?;
+            return runtime.block_on(lash_perf::runtime_perf::http_population::run(options));
         }
         Some(Command::Latency {
             out,

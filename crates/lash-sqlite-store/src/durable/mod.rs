@@ -839,40 +839,48 @@ impl DurableStore for SqliteDurableStore {
         };
         let formats = formats_json(&spec.decodes);
         let spec = spec.clone();
-        self.write(CommitLabel::NODE_REGISTER, move |tx, now| {
-            let boots = tx
-                .prepare_cached(SQL.node.delete_boots.sql())?
-                .query_map([spec.node.as_str()], |row| row.get::<_, String>(0))?
-                .collect::<rusqlite::Result<Vec<_>>>()?;
-            for boot in boots {
-                let earlier = Owner {
-                    node: spec.node.clone(),
-                    boot: BootId::new(boot),
-                };
-                if let Err(error) = release_owned_by(tx, &earlier, now)? {
-                    return refuse(error);
+        let answer = self
+            .write(CommitLabel::NODE_REGISTER, move |tx, now| {
+                let boots = tx
+                    .prepare_cached(SQL.node.delete_boots.sql())?
+                    .query_map([spec.node.as_str()], |row| row.get::<_, String>(0))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                for boot in boots {
+                    let earlier = Owner {
+                        node: spec.node.clone(),
+                        boot: BootId::new(boot),
+                    };
+                    if let Err(error) = release_owned_by(tx, &earlier, now)? {
+                        return refuse(error);
+                    }
                 }
-            }
-            let expires_at = now.after_millis(spec.ttl_millis);
-            cached_execute(
-                tx,
-                SQL.node.insert.sql(),
-                rusqlite::params![
-                    lease_owner.node.as_str(),
-                    lease_owner.boot.as_str(),
-                    formats,
-                    now.0,
-                    expires_at.0
-                ],
-            )?;
-            commit(NodeLease {
-                owner: lease_owner,
-                decodes: spec.decodes,
-                ttl_millis: spec.ttl_millis,
-                expires_at,
+                let expires_at = now.after_millis(spec.ttl_millis);
+                cached_execute(
+                    tx,
+                    SQL.node.insert.sql(),
+                    rusqlite::params![
+                        lease_owner.node.as_str(),
+                        lease_owner.boot.as_str(),
+                        formats,
+                        now.0,
+                        expires_at.0
+                    ],
+                )?;
+                commit(NodeLease {
+                    owner: lease_owner,
+                    decodes: spec.decodes,
+                    ttl_millis: spec.ttl_millis,
+                    expires_at,
+                })
             })
-        })
-        .await
+            .await;
+        #[cfg(feature = "perf-witness")]
+        if answer.is_ok() {
+            lash_core_execution::perf_witness::startup::record(
+                lash_core_execution::perf_witness::startup::Phase::NodeRegistered,
+            );
+        }
+        answer
     }
 
     async fn heartbeat(&self, node: &NodeLease) -> Result<HeartbeatOutcome, DurableError> {

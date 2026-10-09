@@ -216,6 +216,11 @@ impl Pool {
                     measurements.pending_replacements -= 1;
                     measurements.counters.replacements += 1;
                 }
+                #[cfg(feature = "perf-witness")]
+                lash_core_execution::perf_witness::startup::record_subject(
+                    lash_core_execution::perf_witness::startup::Phase::VmReady,
+                    worker.pid(),
+                );
                 Ok(worker)
             }
             message => Err(PoolError::breach(ProtocolBreach::Unexpected {

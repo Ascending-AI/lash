@@ -635,7 +635,15 @@ impl SqliteConnection {
         let gate = write_gate(target);
         let reads = read_gate(target);
         let path = target.open_name();
+        #[cfg(feature = "perf-witness")]
+        lash_core_execution::perf_witness::startup::record(
+            lash_core_execution::perf_witness::startup::Phase::StoreOpenStarted,
+        );
         let inner = AsyncConnection::start(move || Connection::open(path)).await?;
+        #[cfg(feature = "perf-witness")]
+        lash_core_execution::perf_witness::startup::record(
+            lash_core_execution::perf_witness::startup::Phase::StoreOpened,
+        );
         let pragmas = crate::connection_sql::open_pragmas(policy);
         let setup_gate = Arc::clone(&gate);
         inner
@@ -660,6 +668,10 @@ impl SqliteConnection {
                 Ok(())
             })
             .await?;
+        #[cfg(feature = "perf-witness")]
+        lash_core_execution::perf_witness::startup::record(
+            lash_core_execution::perf_witness::startup::Phase::StoreSetupFinished,
+        );
         Ok(Self {
             operational: policy.operational,
             inner,

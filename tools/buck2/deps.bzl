@@ -956,6 +956,7 @@ PACKAGE_DEPS = {
             "lash_core_execution": "//crates/lash-core-execution:lash-core-execution",
             "lash_core_store": "//crates/lash-core-store:lash-core-store",
             "lash_durable": "//crates/lash-durable:lash-durable",
+            "lash_http_transport": "//crates/lash-http-transport:lash-http-transport",
             "lash_llm_tools": "//crates/lash-llm-tools:lash-llm-tools",
             "lash_llm_transport": "//crates/lash-llm-transport:lash-llm-transport",
             "lash_plugin_process_controls": "//crates/lash-plugin-process-controls:lash-plugin-process-controls",

@@ -295,7 +295,7 @@
     "peak_bytes": 265068544,
     "samples": 61
   },
-  "//crates/lash-plugin-mcp:lash-plugin-mcp__unit_test__fv_18658cc3": {
+  "//crates/lash-plugin-mcp:lash-plugin-mcp__unit_test__fv_899c2ea8": {
     "cpu_count": 3,
     "memory_kb": 524288,
     "p95_cores": 2.37,
@@ -527,7 +527,7 @@
     "peak_bytes": 36495360,
     "samples": 171
   },
-  "//crates/lash-provider-google:lash-provider-google__unit_test__fv_d20021e9": {
+  "//crates/lash-provider-google:lash-provider-google__unit_test__fv_5a7d1297": {
     "cpu_count": 1,
     "memory_kb": 262144,
     "p95_cores": 1.05,

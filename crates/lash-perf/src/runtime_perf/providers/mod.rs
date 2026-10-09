@@ -286,3 +286,5 @@ pub(crate) use tools::{
     BenchmarkLargeToolCatalog, BenchmarkObliqueTools, BenchmarkToolCatalogObservation,
     BenchmarkToolCatalogObserver,
 };
+
+pub(crate) use profiles::empty_request;

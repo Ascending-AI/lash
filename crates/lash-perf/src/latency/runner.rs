@@ -321,6 +321,7 @@ pub(crate) async fn run_case(
                 Arc::clone(&timing),
                 holds.clone(),
                 &compat_server,
+                None,
             )?;
             let observer = build_observer(&stores_dir).await?;
             CaseTopology {
@@ -366,26 +367,28 @@ pub(crate) async fn run_case(
 
 /// Build the host core for a case: the latency provider, the benchmark echo
 /// tool plugin and the harness model spec.
-fn build_core(
+pub(super) fn build_core(
     backend: lash::Backend,
     spec: &CaseSpec,
     timing: Arc<ProviderTiming>,
     holds: Option<Arc<HoldRegistry>>,
     compat_server: &Option<OpenAiCompatBenchServer>,
+    transport: Option<Arc<dyn lash_http_transport::HttpTransport>>,
 ) -> Result<lash::LashCore> {
     let effect_host = lash::runtime::ActorContext::detached(backend.clone());
     let provider: lash::provider::ProviderHandle = if let Some(server) = compat_server {
-        lash::provider::ProviderHandle::new(
-            lash_provider_openai::OpenAiCompatibleProvider::new(
-                "latency-gate",
-                server.base_url.clone(),
-            )
-            .with_options(lash::provider::ProviderOptions {
-                reliability: lash::provider::ProviderReliability::disabled(),
-                ..lash::provider::ProviderOptions::default()
-            })
-            .into_components(),
+        let mut compat = lash_provider_openai::OpenAiCompatibleProvider::new(
+            "latency-gate",
+            server.base_url.clone(),
         )
+        .with_options(lash::provider::ProviderOptions {
+            reliability: lash::provider::ProviderReliability::disabled(),
+            ..lash::provider::ProviderOptions::default()
+        });
+        if let Some(transport) = transport {
+            compat = compat.with_transport(transport);
+        }
+        lash::provider::ProviderHandle::new(compat.into_components())
     } else {
         latency_provider(spec.provider, timing, holds).into_handle()
     };
@@ -444,17 +447,18 @@ async fn build_observer_with_mode(
         Arc::new(ProviderTiming::default()),
         None,
         &None,
+        None,
     )
 }
 
 /// The durable engine's backend over `stores`.
-fn durable_backend(stores: lash::sqlite::SqliteStoreSet) -> Result<lash::Backend> {
+pub(super) fn durable_backend(stores: lash::sqlite::SqliteStoreSet) -> Result<lash::Backend> {
     lash::durable::DurableBackendBuilder::new(Arc::new(stores))
         .build()
         .map_err(|error| anyhow::anyhow!("build the durable backend: {error}"))
 }
 
-fn latency_llm_profile_spec() -> Result<lash::LlmProfileMetadata> {
+pub(super) fn latency_llm_profile_spec() -> Result<lash::LlmProfileMetadata> {
     lash::LlmProfileMetadata::builder("latency-model")
         .cache_retention(lash::provider::CacheRetention::Short)
         .context_window_tokens(200_000)
@@ -1033,14 +1037,21 @@ async fn start_worker(stores_dir: &Path) -> Result<tokio::process::Child> {
         .await
         .context("latency worker startup timed out")??;
     anyhow::ensure!(
-        ready.as_deref() == Some("latency worker ready"),
+        ready.as_deref() == Some(READY_MARKER),
         "latency worker did not become ready: {ready:?}"
     );
     Ok(child)
 }
 
-pub(super) async fn run_worker(stores_dir: &Path) -> Result<()> {
+pub(super) const READY_MARKER: &str = "latency worker ready";
+pub(super) fn announce_ready() -> Result<()> {
     use std::io::Write;
+    println!("{READY_MARKER}");
+    std::io::stdout().flush()?;
+    Ok(())
+}
+
+pub(super) async fn run_worker(stores_dir: &Path) -> Result<()> {
     std::fs::create_dir_all(stores_dir)?;
     let stores = lash::sqlite::SqliteStoreSet::open(
         stores_dir.join("lash.db"),
@@ -1062,9 +1073,9 @@ pub(super) async fn run_worker(stores_dir: &Path) -> Result<()> {
         Arc::new(ProviderTiming::default()),
         None,
         &None,
+        None,
     )?;
-    println!("latency worker ready");
-    std::io::stdout().flush()?;
+    announce_ready()?;
     tokio::task::spawn_blocking(|| {
         let mut line = String::new();
         std::io::stdin().read_line(&mut line)
@@ -1081,6 +1092,39 @@ mod tests {
     use lash_core::SessionCatalogStore as _;
 
     use super::*;
+
+    #[tokio::test]
+    async fn startup_store_phases_are_complete_and_ordered() {
+        use lash_core::perf_witness::startup::{Phase, Recorder};
+        let recorder = Recorder::install().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let _stores = lash_sqlite_store::SqliteStoreSet::open(
+            dir.path().join("startup.db"),
+            lash_sqlite_store::SqliteSynchronous::Normal,
+        )
+        .await
+        .unwrap();
+        let markers = recorder.snapshot();
+        let positions: Vec<_> = [
+            Phase::StoreOpenStarted,
+            Phase::StoreOpened,
+            Phase::StoreSetupFinished,
+        ]
+        .iter()
+        .map(|phase| {
+            markers
+                .iter()
+                .position(|marker| &marker.phase == phase)
+                .unwrap_or_else(|| panic!("missing startup phase {phase:?}"))
+        })
+        .collect();
+        assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
+        assert!(
+            markers
+                .windows(2)
+                .all(|pair| pair[0].since_entry_ns <= pair[1].since_entry_ns)
+        );
+    }
 
     /// The store half of `poll_marks`' keyed-read contract (FIG-3974,
     /// FIG-4061): the admission, applied and settled marks come from point

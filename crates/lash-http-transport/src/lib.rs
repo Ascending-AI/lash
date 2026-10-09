@@ -15,3 +15,5 @@ pub use http::{
 pub use lash_sansio::session_model::FailureCode;
 pub use reqwest;
 pub use reqwest::Client as ReqwestClient;
+
+pub mod observation;

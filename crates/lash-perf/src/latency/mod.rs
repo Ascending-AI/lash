@@ -17,6 +17,7 @@
 
 mod provider;
 pub(crate) mod runner;
+pub mod startup;
 
 use crate::perf_support::dhat;
 pub(crate) use provider::LatencyProviderKind;

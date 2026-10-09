@@ -628,7 +628,7 @@ pub(super) fn request_text(request: &LlmRequest) -> String {
     out
 }
 
-pub(super) fn empty_request() -> LlmRequest {
+pub(crate) fn empty_request() -> LlmRequest {
     LlmRequest {
         instructions: None,
         model: lash_sansio::llm_profile::LlmProfileConfig::new(

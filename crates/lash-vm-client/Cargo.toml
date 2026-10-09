@@ -17,6 +17,7 @@ doctest = false
 [features]
 synthetic-next = ["lash-vm-protocol/synthetic-next", "lash-vm-broker/synthetic-next", "lash-vm/synthetic-next"]
 testing = []
+perf-witness = ["lash-core-execution/perf-witness"]
 
 [lints]
 workspace = true

@@ -75,9 +75,18 @@ impl Worker {
                 Ok(())
             });
         }
+        #[cfg(feature = "perf-witness")]
+        lash_core_execution::perf_witness::startup::record(
+            lash_core_execution::perf_witness::startup::Phase::VmSpawnStarted,
+        );
         let child = command
             .spawn()
             .map_err(|error| PoolError::spawn(error, &config.entry.executable))?;
+        #[cfg(feature = "perf-witness")]
+        lash_core_execution::perf_witness::startup::record_subject(
+            lash_core_execution::perf_witness::startup::Phase::VmSpawned,
+            child.id(),
+        );
         drop(child_pipe);
         #[cfg(target_os = "linux")]
         let process_epoch = std::fs::read_to_string(format!("/proc/{}/stat", child.id()))
