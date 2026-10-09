@@ -1,5 +1,7 @@
 //! Count and byte admission, including the single publication in flight.
-//! Losing any draft retires the whole class's provisional continuity.
+//! A queue that cannot take a draft loses every draft it holds, and retires
+//! the whole class's provisional continuity: it can no longer name what it
+//! lost.
 
 use std::collections::VecDeque;
 
@@ -32,8 +34,13 @@ impl<T> Ingress<T> {
         }
     }
 
-    /// The closure clones a draft only after count and byte admission.
-    pub(super) fn enqueue(&mut self, charge: Option<usize>, draft: impl FnOnce() -> T) {
+    /// The closure clones a draft only after count and byte admission. A
+    /// refusal answers the pending drafts it lost with the refused one.
+    pub(super) fn enqueue(
+        &mut self,
+        charge: Option<usize>,
+        draft: impl FnOnce() -> T,
+    ) -> Result<(), Vec<T>> {
         let accepted = charge.filter(|charge| {
             self.admitted < self.max_events && *charge <= self.max_bytes.saturating_sub(self.bytes)
         });
@@ -42,17 +49,23 @@ impl<T> Ingress<T> {
                 self.pending.push_back((draft(), charge));
                 self.admitted += 1;
                 self.bytes += charge;
+                Ok(())
             }
-            None => self.invalidate(),
+            None => Err(self.invalidate()),
         }
     }
 
-    pub(super) fn invalidate(&mut self) {
-        for (_, charge) in self.pending.drain(..) {
-            self.admitted -= 1;
-            self.bytes -= charge;
-        }
+    /// Lose every pending draft and owe the class's invalidation.
+    pub(super) fn invalidate(&mut self) -> Vec<T> {
         self.dirty = true;
+        self.pending
+            .drain(..)
+            .map(|(draft, charge)| {
+                self.admitted -= 1;
+                self.bytes -= charge;
+                draft
+            })
+            .collect()
     }
 
     pub(super) fn next(&mut self) -> Option<Work<T>> {
@@ -66,6 +79,12 @@ impl<T> Ingress<T> {
 
     pub(super) fn has_work(&self) -> bool {
         self.dirty || self.admitted != 0
+    }
+
+    /// Drafts admitted and not yet finished: pending or in flight.
+    #[cfg(test)]
+    pub(super) fn admitted(&self) -> usize {
+        self.admitted
     }
 
     pub(super) fn finish(&mut self, charge: usize) {

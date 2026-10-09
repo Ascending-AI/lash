@@ -37,6 +37,7 @@ struct Fixture {
     commits: ProcessChangeHub,
     registry: Arc<dyn ProcessRegistry>,
     replay: Arc<InMemoryProcessReplayStore>,
+    limits: lash_trace::ObservationWorkLimits,
     process_id: ProcessId,
     authority: lash_core::ProcessExecutionWriteAuthority,
     ticks: std::sync::atomic::AtomicU64,
@@ -46,6 +47,11 @@ impl Fixture {
     /// A registered, started process: its durable sequence is 1, and
     /// nothing was published.
     async fn new() -> Self {
+        Self::with_replay(InMemoryProcessReplayStoreConfig::standard()).await
+    }
+
+    /// The same process over a replay store that retains what `config` says.
+    async fn with_replay(config: InMemoryProcessReplayStoreConfig) -> Self {
         // Watched, so a commit ticks `commits`, as a core's registry does.
         let watched = lash_core::runtime::watch_process_registry(
             crate::tests::sqlite_memory_store_set()
@@ -83,9 +89,7 @@ impl Fixture {
             )
             .await
             .expect("record the execution start");
-        let replay = Arc::new(InMemoryProcessReplayStore::new(
-            InMemoryProcessReplayStoreConfig::standard(),
-        ));
+        let replay = Arc::new(InMemoryProcessReplayStore::new(config));
         let publisher = Arc::new(
             crate::language_observation::LanguageObservationPublisher::new(
                 replay.clone(),
@@ -103,6 +107,7 @@ impl Fixture {
             commits,
             registry,
             replay,
+            limits: lash_trace::ObservationWorkLimits::standard(),
             process_id,
             authority,
             ticks: std::sync::atomic::AtomicU64::new(0),
@@ -121,7 +126,7 @@ impl Fixture {
                 lash_core::facade_support::ProcessWorkObserver::new(Arc::clone(&self.registry)),
                 lash_core::ProcessEngineRegistry::default(),
                 self.replay.clone(),
-                lash_trace::ObservationWorkLimits::standard(),
+                self.limits,
                 self.reconcile.clone(),
             ),
         }
@@ -552,6 +557,31 @@ async fn a_process_that_is_not_retained_is_typed_absence_and_ends_the_feed() {
     );
     assert!(matches!(replacement.read_view, ProcessReadView::Unknown));
     assert!(feed.next().await.is_none(), "the feed ends");
+}
+
+/// FIG-5624: a snapshot of an id no process is retained under takes no
+/// replay window, so it cannot evict the window of a followed process.
+#[tokio::test]
+async fn a_snapshot_of_an_unretained_id_takes_no_replay_window() {
+    let fixture = Fixture::with_replay(InMemoryProcessReplayStoreConfig {
+        max_processes: 1,
+        ..InMemoryProcessReplayStoreConfig::standard()
+    })
+    .await;
+    let observed = fixture.observe();
+    let snapshot = observed.snapshot().await.expect("snapshot");
+    fixture.observe_node(1, "node kept").await;
+
+    let unknown = fixture
+        .observe_process(&ProcessId::fixture("never-registered"))
+        .snapshot()
+        .await
+        .expect("snapshot of an unknown id");
+    assert!(matches!(unknown.read_view, ProcessReadView::Unknown));
+
+    let mut feed = observed.subscribe_and_recover(snapshot.cursor);
+    expect_event(next(&mut feed).await, "node kept");
+    quiet(&mut feed).await;
 }
 
 #[path = "reconcile_tests.rs"]

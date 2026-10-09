@@ -23,8 +23,11 @@
 //! cadence when a tick was lost, it compares the durable sequence with the
 //! one its consumer holds and publishes the retained facts between to the
 //! replay store, which drops those it already holds. The feed then delivers
-//! them from the store like any other. Facts it cannot read within its
-//! budget, or that were released, are a gap.
+//! them from the store like any other. It bridges only a small distance
+//! that way: a consumer further behind than the bridge bound, facts that
+//! were released, and a fact whose publication was dropped or refused are
+//! each a gap, and the feed goes on from the durable process. Only a failed
+//! read ends a feed with an error.
 //!
 //! Delivery is at least once. A stream drops an event identity
 //! ([`ProcessObservationEventId`]) it already delivered within a bounded
@@ -52,6 +55,7 @@ use lash_core::{
 };
 use lash_sansio::ProcessId;
 
+use crate::language_observation::CommittedPublication;
 use crate::support::{Arc, EmbedError, Result, RuntimeErrorCode};
 
 /// How much of a process's durable history one snapshot may read to fold
@@ -294,14 +298,27 @@ impl ProcessFeedSource {
     /// bound to the view's sequence.
     ///
     /// The view is read first: a commit that races it is stamped past the
-    /// cursor's sequence, so the feed replays it or answers a gap.
+    /// cursor's sequence, so the feed replays it or answers a gap. A view
+    /// that retains no process asks the replay store for nothing: its
+    /// cursor names no store's continuity, so no id costs a replay window
+    /// by being read.
     pub(crate) async fn snapshot(&self) -> Result<ProcessObservation> {
         let read_view = self.read_view().await?;
-        let cursor = self
-            .replay
-            .earliest_cursor(&self.process_id, read_view.sequence())
-            .await
-            .map_err(process_replay_error)?;
+        let cursor = match read_view {
+            ProcessReadView::Retained(_) => self
+                .replay
+                .earliest_cursor(&self.process_id, read_view.sequence())
+                .await
+                .map_err(process_replay_error)?,
+            ProcessReadView::Retired { .. } | ProcessReadView::Unknown => {
+                ProcessObservationCursor::new(
+                    UNRETAINED_INCARNATION,
+                    &self.process_id,
+                    read_view.sequence(),
+                    0,
+                )
+            }
+        };
         Ok(ProcessObservation { read_view, cursor })
     }
 
@@ -338,6 +355,11 @@ impl ProcessFeedSource {
         Ok((observation, gap))
     }
 }
+
+/// The incarnation a cursor names when its snapshot retains no process. No
+/// replay store holds it, so a feed from the cursor is judged against the
+/// durable process alone.
+const UNRETAINED_INCARNATION: &str = "unretained";
 
 /// One item of a process feed.
 #[derive(Clone, Debug)]
@@ -442,7 +464,7 @@ type FeedStep = BoxFuture<'static, (Box<FeedState>, Option<Result<ProcessObserva
 
 impl ProcessObservationStream {
     pub(crate) fn new(source: ProcessFeedSource, cursor: ProcessObservationCursor) -> Self {
-        let limit = source.work_limits.session_dedup_ids;
+        let limit = source.work_limits.process_dedup_ids;
         // Watched before the feed's first read of the durable process, so a
         // commit after that read ticks.
         let changes = source.reconcile.changes.subscribe(&source.process_id);
@@ -614,8 +636,9 @@ impl FeedState {
     /// Subscribe from the feed's cursor, judged against the durable
     /// process: a gap replaces the consumer's state, and the feed continues
     /// from the gap's cursor. A replay that lacks facts between the cursor
-    /// and the durable process is brought up to it once before it is judged
-    /// a gap: their publication was lost, or another node committed them.
+    /// and the durable process is brought up to it once, within the bridge
+    /// bound, before it is judged a gap: their publication was lost, or
+    /// another node committed them.
     async fn subscribe(&mut self) -> Result<Option<ProcessObservationStreamItem>> {
         let requested = self.source.requested_sequence(&self.cursor)?;
         let mut reconciled = false;
@@ -660,9 +683,15 @@ impl FeedState {
 
     /// Bring the replay store up to the durable process: publish the retained
     /// facts after the sequence the consumer holds, which the store drops
-    /// where it already holds them and the feed then delivers in order. A
-    /// released or pruned history, or more facts than the feed's read budget,
-    /// is a gap instead.
+    /// where it already holds them and the feed then delivers in order.
+    ///
+    /// The feed bridges at most the host's bridge bound that way. A consumer
+    /// further behind gaps at once and the feed publishes nothing: the
+    /// durable read view is cheaper than the bridge, and facts pushed into a
+    /// window that cannot hold them evict other observers' evidence. A
+    /// released or pruned history is a gap too, and so is a fact the
+    /// dispatcher dropped or the store refused. Only a registry read that
+    /// fails is an error.
     async fn reconcile(&mut self) -> Result<Option<ProcessObservationStreamItem>> {
         let Some(held) = self.held else {
             return Ok(None);
@@ -673,21 +702,22 @@ impl FeedState {
                 .await
                 .map(Some);
         };
-        let budget = self.source.effect_budget;
+        let bridge = self.source.work_limits.process_reconcile_bridge_events as u64;
+        if durable.as_u64().saturating_sub(held.as_u64()) > bridge {
+            return self.unbridged().await;
+        }
         let mut after = held.as_u64();
-        let mut pages = 0;
-        while after < durable.as_u64() {
-            if pages >= budget.pages {
-                return self.unbridged().await;
-            }
-            pages += 1;
+        while let Some(missing) = usize::try_from(durable.as_u64().saturating_sub(after))
+            .ok()
+            .and_then(NonZeroUsize::new)
+        {
             let page = match self
                 .source
                 .registry
                 .event_page_after(
                     &self.source.process_id,
                     after,
-                    budget.page_size,
+                    missing,
                     ProcessEventQueryMode::Full,
                 )
                 .await?
@@ -709,19 +739,25 @@ impl FeedState {
                 break;
             };
             for event in facts {
-                self.source
+                match self
+                    .source
                     .reconcile
                     .publisher
                     .publish_committed(&self.source.process_id, event.into())
                     .await
-                    .map_err(process_replay_error)?;
+                {
+                    CommittedPublication::Published => {}
+                    CommittedPublication::ContinuityLost | CommittedPublication::Stopped => {
+                        return self.unbridged().await;
+                    }
+                }
             }
             after = last;
         }
         Ok(None)
     }
 
-    /// The gap of a consumer whose missing facts the feed cannot publish.
+    /// The gap of a consumer whose missing facts the feed does not bridge.
     async fn unbridged(&mut self) -> Result<Option<ProcessObservationStreamItem>> {
         self.rebuild(ProcessObservationGapCause::CommitUnbridged)
             .await

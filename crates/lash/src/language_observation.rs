@@ -1,5 +1,7 @@
 //! Language facts enter bounded replay outside VM execution. Each class has
 //! its own count/byte budget and worker; process facts keep one FIFO barrier.
+//! A process fact too large to admit loses its own process's continuity, in
+//! its place in that FIFO; a queue that overflows loses every process's.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -20,6 +22,7 @@ mod routing;
 mod worker;
 use ingress::Ingress;
 use routing::Subject;
+pub(crate) use worker::CommittedPublication;
 use worker::{Channel, ProcessPublication};
 
 pub(crate) struct LanguageObservationPublisher {
@@ -30,6 +33,8 @@ pub(crate) struct LanguageObservationPublisher {
     workers: Mutex<Option<[tokio::task::AbortHandle; 2]>>,
     runtime: Option<tokio::runtime::Handle>,
     closed: AtomicBool,
+    /// The most one draft may charge its ingress.
+    max_bytes: usize,
 }
 
 impl LanguageObservationPublisher {
@@ -59,7 +64,32 @@ impl LanguageObservationPublisher {
             workers: Mutex::new(None),
             runtime: tokio::runtime::Handle::try_current().ok(),
             closed: AtomicBool::new(false),
+            max_bytes: bytes,
         }
+    }
+
+    fn charge(&self, value: &impl serde::Serialize) -> Option<usize> {
+        worker::charge(value, self.max_bytes)
+    }
+
+    /// Admit one draft of `process` behind those already accepted. A `None`
+    /// charge is a fact the ingress cannot take: the worker invalidates that
+    /// process in the fact's place.
+    fn enqueue_process(
+        &self,
+        process: &ProcessId,
+        charge: Option<usize>,
+        draft: impl FnOnce() -> ProcessReplayEventDraft,
+    ) {
+        self.process
+            .enqueue(charge.or(Some(worker::LOST_CHARGE)), || {
+                ProcessPublication {
+                    id: process.clone(),
+                    draft: charge.map(|_| draft()),
+                    completion: None,
+                }
+            });
+        self.start();
     }
 
     fn start(&self) {
@@ -96,36 +126,45 @@ impl LanguageObservationPublisher {
         if self.closed.load(Ordering::Acquire) {
             return;
         }
-        let charge = worker::charge(&(process, &event));
-        self.process.enqueue(charge, || ProcessPublication {
-            id: process.clone(),
-            draft: ProcessReplayEventDraft::committed(event),
-            completion: None,
+        let charge = self.charge(&(process, &event));
+        self.enqueue_process(process, charge, || {
+            ProcessReplayEventDraft::committed(event)
         });
-        self.start();
     }
 
     /// Recovery waits for the same FIFO to publish the fact before checking
     /// its bridge. This acknowledgement is never awaited by execution.
+    ///
+    /// Every fact the dispatcher drops or the store refuses is answered
+    /// [`CommittedPublication::ContinuityLost`]. A fact too large to admit
+    /// is answered so without invalidating anything: no publication was
+    /// lost, and the feed that asked rebuilds from the durable process.
     pub(crate) async fn publish_committed(
         &self,
         process: &ProcessId,
         event: ObservedProcessEvent,
-    ) -> Result<(), lash_core::ProcessReplayStoreError> {
+    ) -> CommittedPublication {
         if self.closed.load(Ordering::Acquire) {
-            return Err(lash_core::ProcessReplayStoreError::Closed);
+            return CommittedPublication::Stopped;
         }
+        let Some(charge) = self.charge(&(process, &event)) else {
+            return CommittedPublication::ContinuityLost;
+        };
         let (completion, published) = tokio::sync::oneshot::channel();
-        let charge = worker::charge(&(process, &event));
-        self.process.enqueue(charge, || ProcessPublication {
+        let admitted = self.process.enqueue(Some(charge), || ProcessPublication {
             id: process.clone(),
-            draft: ProcessReplayEventDraft::committed(event),
+            draft: Some(ProcessReplayEventDraft::committed(event)),
             completion: Some(completion),
         });
         self.start();
-        published
-            .await
-            .unwrap_or(Err(lash_core::ProcessReplayStoreError::Closed))
+        if !admitted {
+            return CommittedPublication::ContinuityLost;
+        }
+        if self.closed.load(Ordering::Acquire) {
+            return CommittedPublication::Stopped;
+        }
+        // Only a stopped worker drops an acknowledgement unanswered.
+        published.await.unwrap_or(CommittedPublication::Stopped)
     }
 
     /// Stop after execution has stopped; any undrained draft is explicit loss.
@@ -148,6 +187,7 @@ impl LanguageObservationPublisher {
         {
             tracing::warn!(%error, "session language replay shutdown lost continuity");
         }
+        self.process.stop();
     }
 
     fn enqueue_language(
@@ -164,8 +204,8 @@ impl LanguageObservationPublisher {
         };
         let timestamp = u64::try_from(record.timestamp.timestamp_millis()).ok();
         let charge = timestamp.and_then(|_| match &subject {
-            Subject::Process(id) => worker::charge(&(id, language, execution)),
-            Subject::Session(id) => worker::charge(&(id, language, execution)),
+            Subject::Process(id) => self.charge(&(id, language, execution)),
+            Subject::Session(id) => self.charge(&(id, language, execution)),
         });
         let observation = || LanguageExecutionObservation {
             language: language.into(),
@@ -173,25 +213,22 @@ impl LanguageObservationPublisher {
             observed_at_ms: timestamp.unwrap_or(0),
         };
         match subject {
-            Subject::Process(process) => self.process.enqueue(charge, || ProcessPublication {
-                id: process,
-                draft: ProcessReplayEventDraft::language_execution(
-                    ProcessSequence(0),
-                    observation(),
-                ),
-                completion: None,
+            Subject::Process(process) => self.enqueue_process(&process, charge, || {
+                ProcessReplayEventDraft::language_execution(ProcessSequence(0), observation())
             }),
-            Subject::Session(session) => self.session.enqueue(charge, || {
-                (
-                    session,
-                    LiveReplayEventDraft::new(
-                        execution.identity.scope.turn_id.clone(),
-                        SessionObservationEventPayload::LanguageExecution(observation()),
-                    ),
-                )
-            }),
+            Subject::Session(session) => {
+                self.session.enqueue(charge, || {
+                    (
+                        session,
+                        LiveReplayEventDraft::new(
+                            execution.identity.scope.turn_id.clone(),
+                            SessionObservationEventPayload::LanguageExecution(observation()),
+                        ),
+                    )
+                });
+                self.start();
+            }
         }
-        self.start();
     }
 }
 
@@ -203,19 +240,16 @@ impl LanguageObservationPublisher {
             return;
         }
         let timestamp = u64::try_from(record.timestamp.timestamp_millis()).ok();
-        let charge = timestamp.and_then(|_| worker::charge(step));
-        self.process.enqueue(charge, || ProcessPublication {
-            id: step.process_id.clone(),
-            draft: ProcessReplayEventDraft::step_body_started(
+        let charge = timestamp.and_then(|_| self.charge(step));
+        self.enqueue_process(&step.process_id, charge, || {
+            ProcessReplayEventDraft::step_body_started(
                 ProcessSequence(0),
                 lash_trace::StepBodyStartedObservation {
                     step: step.clone(),
                     observed_at_ms: timestamp.unwrap_or(0),
                 },
-            ),
-            completion: None,
+            )
         });
-        self.start();
     }
 }
 

@@ -223,8 +223,7 @@ event sequence, which is the revision of this contract (`ProcessSequence`).
   made. The read budget is the core's
   `ObservationWorkLimits::process_effect_fold_pages` pages of
   `process_effect_fold_page_size` events (64 pages of 256 in the standard
-  preset), stated with `LashCoreBuilder::observation_work_limits`; an open
-  feed reads missed facts under the same budget.
+  preset), stated with `LashCoreBuilder::observation_work_limits`.
 - `Retired` is a pruned process's tombstone, and `Unknown` an id no row or
   tombstone names. Neither is an empty process at sequence zero.
 
@@ -385,9 +384,17 @@ core's publisher, so the feed looks for it: the registry's change signal
 ticks when a commit grew the process's log, on this node directly and on
 another through the backend's node wakes. At a tick the feed compares the
 durable sequence with the one its consumer holds, publishes the retained
-facts between to the replay store and delivers them in order. Facts it can
-no longer read (released, pruned, or more than its read budget) are a
-`CommitUnbridged` gap with the durable read view.
+facts between to the replay store and delivers them in order.
+
+The feed bridges a short distance that way, at most
+`ObservationWorkLimits::process_reconcile_bridge_events` facts (256 in the
+standard preset). A consumer further behind gets a `CommitUnbridged` gap
+with the durable read view at once, and the feed publishes nothing, so a
+stalled consumer never pushes other observers' node events out of the
+window. Facts the feed can no longer read (released or pruned), and a fact
+whose publication was dropped or refused, are the same gap. The feed stays
+open after it; only a failed read of the durable process ends a feed with an
+error.
 
 A tick can be lost, and a store may deliver no wake at all.
 `ObserverPacing::process_reconcile` is how long an open feed waits without a

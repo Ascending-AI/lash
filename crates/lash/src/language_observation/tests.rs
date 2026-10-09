@@ -411,82 +411,163 @@ async fn language_ingress_overflow_resnapshots_every_session_and_continues() {
     }
 }
 
+/// A dispatcher over a SQLite process registry and a replay store a law
+/// chooses, whose feeds look at the durable process only when told to.
+struct Dispatch {
+    registry: Arc<dyn lash_core::ProcessRegistry>,
+    replay: Arc<dyn ProcessReplayStore>,
+    publisher: Arc<LanguageObservationPublisher>,
+}
+
+impl Dispatch {
+    async fn new(replay: Arc<dyn ProcessReplayStore>, events: usize, bytes: usize) -> Self {
+        let publisher = Arc::new(LanguageObservationPublisher::with_limits(
+            replay.clone(),
+            Arc::new(lash_core::facade_support::InMemoryLiveReplayStore::new(
+                lash_core::facade_support::InMemoryLiveReplayStoreConfig::standard(),
+            )),
+            events,
+            bytes,
+        ));
+        Self {
+            registry: crate::tests::sqlite_memory_store_set()
+                .await
+                .process_registry(),
+            replay,
+            publisher,
+        }
+    }
+
+    async fn register(&self) -> ProcessId {
+        self.registry
+            .register_process(
+                lash_core::ProcessRegistration::new(
+                    lash_core::testing::held_engine_input(serde_json::Value::Null),
+                    lash_core::ProcessProvenance::host(),
+                    lash_core::Lifetime::Detached,
+                )
+                .with_execution_env_ref(Some(
+                    lash_core::testing::process_execution_env_fixture_ref(),
+                )),
+            )
+            .await
+            .expect("register process")
+            .id
+    }
+
+    fn observe(&self, process: &ProcessId) -> crate::process_feed::ObservableProcess {
+        crate::process_feed::ObservableProcess {
+            source: crate::process_feed::ProcessFeedSource::new(
+                process.clone(),
+                self.registry.clone(),
+                lash_core::facade_support::ProcessWorkObserver::new(self.registry.clone()),
+                lash_core::ProcessEngineRegistry::default(),
+                self.replay.clone(),
+                lash_trace::ObservationWorkLimits::standard(),
+                crate::process_feed::FeedReconcile {
+                    publisher: Arc::clone(&self.publisher),
+                    changes: lash_core::runtime::ProcessChangeHub::new(),
+                    pacing: lash_core::runtime::PollPacing::new(
+                        Duration::from_secs(3600),
+                        Duration::from_secs(3600),
+                    )
+                    .expect("pacing"),
+                },
+            ),
+        }
+    }
+
+    /// Commit the process's execution start, unpublished, and answer the
+    /// authority its later appends are written under.
+    async fn commit_started(
+        &self,
+        process: &ProcessId,
+    ) -> lash_core::ProcessExecutionWriteAuthority {
+        let authority =
+            lash_core::ProcessExecutionWriteAuthority::invocation(process.clone(), "dispatched")
+                .bind_attempt(1);
+        self.registry
+            .record_first_started_with_authority(
+                process,
+                authority.invocation_started().expect("started fact"),
+                &authority,
+            )
+            .await
+            .expect("commit without publishing");
+        authority
+    }
+
+    /// Admit one language observation of `process` without waking the
+    /// worker: a stalled worker leaves it queued.
+    fn admit_language(&self, process: &ProcessId, key: &str) {
+        let language = lash_core::testing::process_language_observation(process, key, key);
+        let charge = self.publisher.charge(&(process, &language));
+        self.publisher
+            .process
+            .enqueue(charge, || ProcessPublication {
+                id: process.clone(),
+                draft: Some(ProcessReplayEventDraft::language_execution(
+                    ProcessSequence(0),
+                    language,
+                )),
+                completion: None,
+            });
+    }
+
+    /// Wait until the worker holds nothing admitted and owes no invalidation.
+    async fn drained(&self) {
+        tokio::time::timeout(Duration::from_secs(30), async {
+            while self.publisher.process.has_work() {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("the dispatcher drains");
+    }
+}
+
+fn memory_replay(
+    config: lash_core::InMemoryProcessReplayStoreConfig,
+) -> Arc<lash_core::InMemoryProcessReplayStore> {
+    Arc::new(lash_core::InMemoryProcessReplayStore::new(config))
+}
+
+fn is_language(item: &crate::process::ProcessObservationStreamItem) -> bool {
+    matches!(item, crate::process::ProcessObservationStreamItem::Event(event)
+        if matches!(event.payload, crate::process::ProcessObservationEventPayload::LanguageExecution(_)))
+}
+
+#[track_caller]
+fn gap_cause(
+    item: crate::process::ProcessObservationStreamItem,
+) -> lash_core::ProcessObservationGapCause {
+    match item {
+        crate::process::ProcessObservationStreamItem::Gap { gap, .. } => gap.cause,
+        other => panic!("expected a gap, got {other:?}"),
+    }
+}
+
 /// FIG-5548: recovery uses the same FIFO barrier as after-commit publication.
 #[tokio::test]
 async fn a_reconciled_commit_cannot_overtake_an_accepted_language_observation() {
-    let stores = crate::tests::sqlite_memory_store_set().await;
-    let registry: Arc<dyn lash_core::ProcessRegistry> = stores.process_registry();
-    let process = registry
-        .register_process(
-            lash_core::ProcessRegistration::new(
-                lash_core::testing::held_engine_input(serde_json::Value::Null),
-                lash_core::ProcessProvenance::host(),
-                lash_core::Lifetime::Detached,
-            )
-            .with_execution_env_ref(Some(lash_core::testing::process_execution_env_fixture_ref())),
-        )
-        .await
-        .expect("register process")
-        .id;
-    let replay = Arc::new(lash_core::InMemoryProcessReplayStore::new(
-        lash_core::InMemoryProcessReplayStoreConfig::standard(),
-    ));
-    let publisher = Arc::new(LanguageObservationPublisher::new(
-        replay.clone(),
-        Arc::new(lash_core::facade_support::InMemoryLiveReplayStore::new(
-            lash_core::facade_support::InMemoryLiveReplayStoreConfig::standard(),
-        )),
-    ));
-    let observed = crate::process_feed::ObservableProcess {
-        source: crate::process_feed::ProcessFeedSource::new(
-            process.clone(),
-            registry.clone(),
-            lash_core::facade_support::ProcessWorkObserver::new(registry.clone()),
-            lash_core::ProcessEngineRegistry::default(),
-            replay.clone(),
-            lash_trace::ObservationWorkLimits::standard(),
-            crate::process_feed::FeedReconcile {
-                publisher: Arc::clone(&publisher),
-                changes: lash_core::runtime::ProcessChangeHub::new(),
-                pacing: lash_core::runtime::PollPacing::new(
-                    Duration::from_secs(3600),
-                    Duration::from_secs(3600),
-                )
-                .expect("pacing"),
-            },
-        ),
-    };
+    let dispatch = Dispatch::new(
+        memory_replay(lash_core::InMemoryProcessReplayStoreConfig::standard()),
+        ingress::MAX_EVENTS,
+        ingress::MAX_BYTES,
+    )
+    .await;
+    let process = dispatch.register().await;
+    let observed = dispatch.observe(&process);
     let snapshot = observed.snapshot().await.expect("snapshot before commit");
-    let language = lash_core::testing::process_language_observation(
-        &process,
-        "accepted-first",
-        "node started",
-    );
-    let charge = worker::charge(&(&process, &language));
     // A stalled worker may leave an admitted language fact queued when a
     // follower discovers a durable commit. Keep it queued until recovery
     // starts the publisher, making the ordering independent of scheduling.
-    publisher.process.enqueue(charge, || ProcessPublication {
-        id: process.clone(),
-        draft: ProcessReplayEventDraft::language_execution(ProcessSequence(0), language),
-        completion: None,
-    });
-    let authority =
-        lash_core::ProcessExecutionWriteAuthority::invocation(process.clone(), "ordered-recovery")
-            .bind_attempt(1);
-    registry
-        .record_first_started_with_authority(
-            &process,
-            authority.invocation_started().expect("started fact"),
-            &authority,
-        )
-        .await
-        .expect("commit without publishing");
+    dispatch.admit_language(&process, "accepted-first");
+    dispatch.commit_started(&process).await;
     let mut feed = observed.subscribe_and_recover(snapshot.cursor);
     let first = next(&mut feed).await;
     assert!(
-        matches!(first, crate::process::ProcessObservationStreamItem::Event(event)
-        if matches!(event.payload, crate::process::ProcessObservationEventPayload::LanguageExecution(_))),
+        is_language(&first),
         "a reconciled commit cannot overtake accepted language evidence"
     );
     let second = next(&mut feed).await;
@@ -494,5 +575,195 @@ async fn a_reconciled_commit_cannot_overtake_an_accepted_language_observation() 
         matches!(second, crate::process::ProcessObservationStreamItem::Event(event)
         if matches!(event.payload, crate::process::ProcessObservationEventPayload::Committed { .. }))
     );
-    publisher.shutdown().await;
+    dispatch.publisher.shutdown().await;
+}
+
+/// A replay store whose publications wait until a law lets them through.
+struct GatedReplay {
+    inner: Arc<lash_core::InMemoryProcessReplayStore>,
+    gate: tokio::sync::Semaphore,
+}
+
+#[async_trait::async_trait]
+impl ProcessReplayStore for GatedReplay {
+    async fn publish(
+        &self,
+        process_id: &ProcessId,
+        events: Vec<ProcessReplayEventDraft>,
+    ) -> Result<Vec<Arc<lash_core::ProcessObservationEvent>>, lash_core::ProcessReplayStoreError>
+    {
+        let _open = self.gate.acquire().await.expect("the gate stays");
+        self.inner.publish(process_id, events).await
+    }
+    async fn replay_after_cursor(
+        &self,
+        cursor: &lash_core::ProcessObservationCursor,
+    ) -> Result<lash_core::ProcessReplayOutcome, lash_core::ProcessReplayStoreError> {
+        self.inner.replay_after_cursor(cursor).await
+    }
+    async fn subscribe_after_cursor(
+        &self,
+        cursor: &lash_core::ProcessObservationCursor,
+    ) -> Result<lash_core::ProcessReplaySubscribeOutcome, lash_core::ProcessReplayStoreError> {
+        self.inner.subscribe_after_cursor(cursor).await
+    }
+    async fn current_cursor(
+        &self,
+        process_id: &ProcessId,
+        sequence: ProcessSequence,
+    ) -> Result<lash_core::ProcessObservationCursor, lash_core::ProcessReplayStoreError> {
+        self.inner.current_cursor(process_id, sequence).await
+    }
+    async fn earliest_cursor(
+        &self,
+        process_id: &ProcessId,
+        sequence: ProcessSequence,
+    ) -> Result<lash_core::ProcessObservationCursor, lash_core::ProcessReplayStoreError> {
+        self.inner.earliest_cursor(process_id, sequence).await
+    }
+    async fn invalidate_process(
+        &self,
+        process_id: &ProcessId,
+    ) -> Result<(), lash_core::ProcessReplayStoreError> {
+        self.inner.invalidate_process(process_id).await
+    }
+    async fn invalidate_all(&self) -> Result<(), lash_core::ProcessReplayStoreError> {
+        self.inner.invalidate_all().await
+    }
+    async fn trim_process(
+        &self,
+        process_id: &ProcessId,
+    ) -> Result<(), lash_core::ProcessReplayStoreError> {
+        self.inner.trim_process(process_id).await
+    }
+}
+
+/// FIG-5624: the dispatcher overflows while a feed's reconcile waits for
+/// its fact's acknowledgement behind a stalled publication. The dropped
+/// fact is continuity loss, not the end of the feed: the feed answers the
+/// unbridged commit with the durable process, the store-wide invalidation
+/// that follows is one more gap, and the feed delivers what comes after.
+#[tokio::test]
+async fn a_feed_whose_reconcile_publication_overflowed_gaps_and_keeps_delivering() {
+    const EVENTS: usize = 4;
+    let gated = Arc::new(GatedReplay {
+        inner: memory_replay(lash_core::InMemoryProcessReplayStoreConfig::standard()),
+        gate: tokio::sync::Semaphore::new(0),
+    });
+    let dispatch = Dispatch::new(gated.clone(), EVENTS, ingress::MAX_BYTES).await;
+    let followed = dispatch.register().await;
+    let noisy = ProcessId::fixture("noisy-process");
+    let observed = dispatch.observe(&followed);
+    let snapshot = observed.snapshot().await.expect("snapshot before commit");
+    dispatch.commit_started(&followed).await;
+
+    // The worker takes the noisy process's observation first and stalls in
+    // the store; the feed's reconciled fact waits behind it.
+    dispatch.admit_language(&noisy, "stalled");
+    let mut feed = observed.subscribe_and_recover(snapshot.cursor);
+    while dispatch.publisher.process.admitted() < 2 {
+        assert!(
+            tokio::time::timeout(Duration::from_millis(10), feed.next())
+                .await
+                .is_err(),
+            "the feed waits for its fact's acknowledgement"
+        );
+    }
+    for burst in 0..EVENTS {
+        dispatch.admit_language(&noisy, &format!("burst-{burst}"));
+    }
+    assert_eq!(
+        gap_cause(next(&mut feed).await),
+        lash_core::ProcessObservationGapCause::CommitUnbridged
+    );
+
+    gated.gate.add_permits(EVENTS);
+    dispatch.drained().await;
+    assert_eq!(
+        gap_cause(next(&mut feed).await),
+        lash_core::ProcessObservationGapCause::Replay {
+            reason: lash_core::ProcessReplayGapReason::Unavailable
+        },
+        "the overflow invalidated every process"
+    );
+    dispatch.admit_language(&followed, "after the overflow");
+    assert!(is_language(&next(&mut feed).await));
+    dispatch.publisher.shutdown().await;
+}
+
+/// FIG-5624: a committed fact too large for the ingress, or for the store's
+/// window, loses its own process's continuity and nothing else. Another
+/// process's observer sees no gap, and the process itself is still followed.
+#[tokio::test]
+async fn an_oversized_committed_fact_invalidates_only_its_own_process() {
+    const LIMIT: usize = 8 * 1024;
+    for refused_by_store in [false, true] {
+        let dispatch = if refused_by_store {
+            let config = lash_core::InMemoryProcessReplayStoreConfig {
+                max_bytes_per_process: LIMIT,
+                ..lash_core::InMemoryProcessReplayStoreConfig::standard()
+            };
+            Dispatch::new(
+                memory_replay(config),
+                ingress::MAX_EVENTS,
+                ingress::MAX_BYTES,
+            )
+            .await
+        } else {
+            let config = lash_core::InMemoryProcessReplayStoreConfig::standard();
+            Dispatch::new(memory_replay(config), ingress::MAX_EVENTS, LIMIT).await
+        };
+        let large = dispatch.register().await;
+        let other = dispatch.register().await;
+        let authority = dispatch.commit_started(&large).await;
+        let observed = dispatch.observe(&large);
+        let snapshot = observed.snapshot().await.expect("snapshot");
+        let mut large_feed = observed.subscribe_and_recover(snapshot.cursor);
+        let observed = dispatch.observe(&other);
+        let snapshot = observed.snapshot().await.expect("snapshot");
+        let mut other_feed = observed.subscribe_and_recover(snapshot.cursor);
+        dispatch.admit_language(&other, "other before");
+        dispatch.publisher.start();
+        assert!(is_language(&next(&mut other_feed).await));
+
+        let wait = lash_core::WaitState {
+            since_ms: 0,
+            kind: lash_core::WaitKind::Call {
+                call_id: lash_core::ToolCallId::fixture("oversized"),
+                tool_id: lash_core::ToolId::from("x".repeat(2 * LIMIT)),
+            },
+            site: None,
+        };
+        let oversized = dispatch
+            .registry
+            .append_event_with_authority(
+                &large,
+                lash_core::ProcessEventAppendRequest::wait_entered(&large, &wait),
+                &authority,
+            )
+            .await
+            .expect("commit the oversized fact")
+            .event;
+        dispatch
+            .publisher
+            .enqueue_committed(&large, oversized.into());
+        dispatch.drained().await;
+
+        assert_eq!(
+            gap_cause(next(&mut large_feed).await),
+            lash_core::ProcessObservationGapCause::Replay {
+                reason: lash_core::ProcessReplayGapReason::Unavailable
+            },
+            "refused by the store: {refused_by_store}"
+        );
+        dispatch.admit_language(&other, "other after");
+        dispatch.admit_language(&large, "large after");
+        dispatch.publisher.start();
+        assert!(
+            is_language(&next(&mut other_feed).await),
+            "another process's observer sees no gap (refused by the store: {refused_by_store})"
+        );
+        assert!(is_language(&next(&mut large_feed).await));
+        dispatch.publisher.shutdown().await;
+    }
 }

@@ -94,6 +94,47 @@ async fn a_follower_whose_missed_facts_were_released_gets_one_gap() {
     assert_eq!(held(&feed), last.sequence);
 }
 
+/// FIG-5624: a consumer further behind than the bridge bound rebuilds from
+/// the durable process at once. The feed republishes none of the facts it
+/// missed, so the window other observers fold keeps what it held.
+#[tokio::test]
+async fn a_follower_behind_the_bridge_bound_gaps_and_republishes_nothing() {
+    let mut fixture = Fixture::new().await;
+    fixture.limits.process_reconcile_bridge_events = 2;
+    let wake = ProcessChangeHub::new();
+    fixture.reconcile.changes = wake.clone();
+    let observed = fixture.observe();
+    let snapshot = observed.snapshot().await.expect("snapshot");
+    let window = snapshot.cursor.clone();
+    let mut feed = observed.subscribe_and_recover(snapshot.cursor);
+    fixture.observe_node(1, "node kept").await;
+    expect_event(next(&mut feed).await, "node kept");
+
+    fixture.commit().await;
+    fixture.commit().await;
+    let last = fixture.commit().await;
+    wake.notify(&fixture.process_id);
+
+    let (replacement, _) = expect_gap(
+        next(&mut feed).await,
+        ProcessObservationGapCause::CommitUnbridged,
+    );
+    assert_eq!(replacement.read_view.sequence().as_u64(), last.sequence);
+    let lash_core::ProcessReplayOutcome::Replayed(retained) = fixture
+        .replay
+        .replay_after_cursor(&window)
+        .await
+        .expect("read the window")
+    else {
+        panic!("the window keeps its continuity");
+    };
+    let retained: Vec<_> = retained
+        .iter()
+        .map(|event| process_observation_label(event))
+        .collect();
+    assert_eq!(retained, ["node kept"], "the feed published nothing");
+}
+
 /// One node of a SQLite database file: a core of its own over a store set
 /// of its own, whose feeds reconcile without a tick only every hour.
 async fn core_on(
