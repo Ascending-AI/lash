@@ -366,8 +366,7 @@ impl Lowerer<'_> {
                 ));
             };
             let value = self.lower_expr(left)?;
-            let args = self.let_expr(Expr::List(vec![value.expr()]), Ty::Unknown);
-            return self.invoke(test, &[Operand::undefined(), args], Ty::Bool);
+            return self.invoke(test, &[value], Ty::Bool);
         }
         let mut operands = self.operands(&[left, right])?.into_iter();
         let (Some(left), Some(right)) = (operands.next(), operands.next()) else {

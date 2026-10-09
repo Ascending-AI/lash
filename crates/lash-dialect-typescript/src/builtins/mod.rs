@@ -2,8 +2,9 @@
 //!
 //! Each built-in object has one file here that lists its rows, and one
 //! helper source in `helpers/` that defines the functions the rows name.
-//! Every function a row names has the dialect's calling convention,
-//! `(this: Any, args: List(Any)) -> Any`.
+//! Function, method and constructor rows use the dialect's calling convention,
+//! `(this: Any, args: List(Any)) -> Any`. Property and `instanceof` rows
+//! take the tested value alone; value rows take no arguments.
 //!
 //! The lowerer resolves a global path (`Math.max`, `new Map`) to its row's
 //! function when it lowers. A member's receiver is not known then, so for

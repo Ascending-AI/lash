@@ -292,3 +292,20 @@ fn the_promise_constructor_is_refused() {
     let error = lower("new Promise((resolve) => resolve(1));").expect_err("no constructor");
     assert_eq!(error.code, DiagnosticCode::NewUnsupported);
 }
+
+/// `instanceof Promise` calls its unary predicate with the tested value,
+/// including after the kernel document has been printed as TypeScript.
+#[test]
+fn promise_instanceof_preserves_its_operand_through_printing() {
+    let source = "const f = async () => {}; const p = f(); \
+                  console.log(p instanceof Promise, 1 instanceof Promise);";
+    let original = lower(source).expect("promise predicates lower");
+    let printed = crate::print(&original.document).expect("the document prints");
+    let re_lowered = lower(&printed).expect("printed promise predicates lower");
+    assert_eq!(original.document, re_lowered.document);
+    for source in [source, printed.as_str()] {
+        let recorded = run(source, &[]);
+        assert_eq!(recorded.lines(), ["true false"]);
+        assert_eq!(recorded.end, "ok");
+    }
+}
