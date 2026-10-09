@@ -21,13 +21,17 @@
 //! of the registry's change hub, which ticks at a commit on this node and,
 //! through node wakes, on another; at a tick, and on the host's reconcile
 //! cadence when a tick was lost, it compares the durable sequence with the
-//! one its consumer holds and publishes the retained facts between to the
-//! replay store, which drops those it already holds. The feed then delivers
-//! them from the store like any other. It bridges only a small distance
-//! that way: a consumer further behind than the bridge bound, facts that
-//! were released, and a fact whose publication was dropped or refused are
-//! each a gap, and the feed goes on from the durable process. Only a failed
-//! read ends a feed with an error.
+//! one its consumer holds. The window between a commit and its publication
+//! is closed by the session feed's rule: while this node is still
+//! publishing a fact behind the sequence it read, the feed waits for that
+//! publication and takes the fact from the replay. Only with none in flight
+//! (another node's commit, or a lost publication) does it publish the
+//! retained facts between to the replay store itself, which drops those it
+//! already holds, and deliver them from the store like any other. It
+//! bridges only a small distance that way: a consumer further behind than
+//! the bridge bound, facts that were released, and a fact whose publication
+//! was dropped or refused are each a gap, and the feed goes on from the
+//! durable process. Only a failed read ends a feed with an error.
 //!
 //! Delivery is at least once. A stream drops an event identity
 //! ([`ProcessObservationEventId`]) it already delivered within a bounded
@@ -320,6 +324,17 @@ impl ProcessFeedSource {
             }
         };
         Ok(ProcessObservation { read_view, cursor })
+    }
+
+    /// The publication window of the durable sequence `durable`, read just
+    /// now: whether this node is still publishing a fact at or before it.
+    fn publication_window(
+        &self,
+        durable: ProcessSequence,
+    ) -> lash_core::runtime::durable::services::PublicationWindow<ProcessId, ProcessSequence> {
+        self.reconcile
+            .publisher
+            .publication_window(&self.process_id, durable)
     }
 
     /// The sequence `cursor` names, refused when it is malformed or names
@@ -635,13 +650,19 @@ impl FeedState {
 
     /// Subscribe from the feed's cursor, judged against the durable
     /// process: a gap replaces the consumer's state, and the feed continues
-    /// from the gap's cursor. A replay that lacks facts between the cursor
-    /// and the durable process is brought up to it once, within the bridge
-    /// bound, before it is judged a gap: their publication was lost, or
-    /// another node committed them.
+    /// from the gap's cursor.
+    ///
+    /// A replay that lacks facts between the cursor and the durable process
+    /// is judged by the session feed's rule (`PublicationWindow`): while
+    /// this node is still publishing a fact at or before the sequence read,
+    /// the feed waits that out and judges again from a new read. With none
+    /// in flight the publication was lost, or another node committed, and
+    /// the feed brings the replay up to that sequence itself, within the
+    /// bridge bound and once for each sequence it reads, before it calls
+    /// the missing facts a gap.
     async fn subscribe(&mut self) -> Result<Option<ProcessObservationStreamItem>> {
         let requested = self.source.requested_sequence(&self.cursor)?;
-        let mut reconciled = false;
+        let mut reconciled = None;
         let cause = loop {
             let Some(durable) = self.source.durable_sequence().await? else {
                 break ProcessObservationGapCause::NotRetained;
@@ -649,6 +670,7 @@ impl FeedState {
             if requested > durable {
                 break ProcessObservationGapCause::AheadOfDurableProcess;
             }
+            let window = self.source.publication_window(durable);
             match self
                 .source
                 .replay
@@ -663,15 +685,19 @@ impl FeedState {
                     self.live = Some(subscription);
                     return Ok(None);
                 }
-                ProcessReplaySubscribeOutcome::Subscribed(_) if !reconciled => {
-                    reconciled = true;
-                    self.held = Some(self.held.map_or(requested, |held| held.max(requested)));
-                    if let Some(gap) = self.reconcile().await? {
+                ProcessReplaySubscribeOutcome::Subscribed(_) => {
+                    if window.closed().await {
+                        continue;
+                    }
+                    if reconciled.is_some_and(|through| through >= durable) {
+                        break ProcessObservationGapCause::CommitUnbridged;
+                    }
+                    reconciled = Some(durable);
+                    let held = self.held.map_or(requested, |held| held.max(requested));
+                    self.held = Some(held);
+                    if let Some(gap) = self.publish_missing(held, durable).await? {
                         return Ok(Some(gap));
                     }
-                }
-                ProcessReplaySubscribeOutcome::Subscribed(_) => {
-                    break ProcessObservationGapCause::CommitUnbridged;
                 }
                 ProcessReplaySubscribeOutcome::Gap(reason) => {
                     break ProcessObservationGapCause::Replay { reason };
@@ -681,17 +707,11 @@ impl FeedState {
         self.rebuild(cause).await.map(Some)
     }
 
-    /// Bring the replay store up to the durable process: publish the retained
-    /// facts after the sequence the consumer holds, which the store drops
-    /// where it already holds them and the feed then delivers in order.
-    ///
-    /// The feed bridges at most the host's bridge bound that way. A consumer
-    /// further behind gaps at once and the feed publishes nothing: the
-    /// durable read view is cheaper than the bridge, and facts pushed into a
-    /// window that cannot hold them evict other observers' evidence. A
-    /// released or pruned history is a gap too, and so is a fact the
-    /// dispatcher dropped or the store refused. Only a registry read that
-    /// fails is an error.
+    /// Look at the durable process from an open subscription. A sequence
+    /// past the one the consumer holds is the live tail's to deliver while
+    /// this node is still publishing a fact at or before it: the feed waits
+    /// that publication out and reads its tail. With none in flight it
+    /// brings the replay up to the durable process itself.
     async fn reconcile(&mut self) -> Result<Option<ProcessObservationStreamItem>> {
         let Some(held) = self.held else {
             return Ok(None);
@@ -702,6 +722,28 @@ impl FeedState {
                 .await
                 .map(Some);
         };
+        if durable <= held || self.source.publication_window(durable).closed().await {
+            return Ok(None);
+        }
+        self.publish_missing(held, durable).await
+    }
+
+    /// Bring the replay store up to the durable process: publish the retained
+    /// facts after `held` through `durable`, which the store drops where it
+    /// already holds them and the feed then delivers in order.
+    ///
+    /// The feed bridges at most the host's bridge bound that way. A consumer
+    /// further behind gaps at once and the feed publishes nothing: the
+    /// durable read view is cheaper than the bridge, and facts pushed into a
+    /// window that cannot hold them evict other observers' evidence. A
+    /// released or pruned history is a gap too, and so is a fact the
+    /// dispatcher dropped or the store refused. Only a registry read that
+    /// fails is an error.
+    async fn publish_missing(
+        &mut self,
+        held: ProcessSequence,
+        durable: ProcessSequence,
+    ) -> Result<Option<ProcessObservationStreamItem>> {
         let bridge = self.source.work_limits.process_reconcile_bridge_events as u64;
         if durable.as_u64().saturating_sub(held.as_u64()) > bridge {
             return self.unbridged().await;

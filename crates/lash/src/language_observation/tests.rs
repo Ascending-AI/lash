@@ -511,6 +511,7 @@ impl Dispatch {
                     language,
                 )),
                 completion: None,
+                mark: None,
             });
     }
 

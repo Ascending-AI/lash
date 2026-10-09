@@ -9,7 +9,7 @@ use lash_core_execution::core_internal::RuntimeExecutionContextRuntimeOps as _;
 use lash_core_execution::runtime::actor::round::RoundTools;
 
 use super::*;
-use crate::runtime::durable::commit_publication::{CommitBase, CommitInFlight, PublishedHeads};
+use crate::runtime::durable::commit_publication::{CommitBase, PublicationMark, PublishedHeads};
 use crate::runtime::durable::head::SessionHead;
 use crate::runtime::durable::session::{
     CellExit, CellToolCalls, CodeCell, ModelCallAttempt, OpenTurn, ParkedTurnState, PreparedCall,
@@ -45,7 +45,7 @@ pub(in crate::runtime) struct RuntimeDrive {
     /// The turn's commit, from its finish until its publication was
     /// attempted or the drive is dropped without one: a reader on this node
     /// that finds the head moved waits for it (FIG-5605).
-    committing: Option<CommitInFlight>,
+    committing: Option<PublicationMark<SessionId, SessionRevision>>,
     /// What the turn's commit carries for after its acknowledgement: the
     /// after-turn callbacks' staged state, and the finalized turn for the
     /// lifecycle observers. Dropped with a commit that was not acknowledged,

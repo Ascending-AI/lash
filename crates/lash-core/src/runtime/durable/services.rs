@@ -6,8 +6,10 @@ use std::sync::Arc;
 
 use tokio_util::sync::CancellationToken;
 
-pub use super::commit_publication::PublishedHeads;
 use super::commit_publication::{CommitBase, announce_head};
+pub use super::commit_publication::{
+    PublicationMark, PublicationMarks, PublicationWindow, PublishedHeads,
+};
 use super::head::{HeadCache, SessionHead};
 use super::session::{
     AdmittedInputs, CellToolCalls, OpenTurn, RecordedPreparation, TurnDrive, TurnError,

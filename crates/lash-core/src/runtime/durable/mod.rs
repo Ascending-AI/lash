@@ -23,6 +23,7 @@ pub(crate) mod head_commit;
 mod model_call;
 pub mod node;
 pub mod phases;
+mod publication_window;
 pub mod services;
 pub mod session;
 pub mod session_close;

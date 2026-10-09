@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use lash_core::{
     LiveReplayEventDraft, LiveReplayStore, ProcessReplayEventDraft, ProcessReplayStore,
-    SessionRevision,
+    ProcessSequence, SessionRevision,
 };
 use lash_sansio::sync::MutexExt;
 use lash_sansio::{ProcessId, SessionId};
@@ -43,7 +43,16 @@ pub(super) struct ProcessPublication {
     pub(super) draft: Option<ProcessReplayEventDraft>,
     /// Answered when a feed's reconcile waits for the fact.
     pub(super) completion: Option<tokio::sync::oneshot::Sender<CommittedPublication>>,
+    /// A commit's own publication holds its process's publication window
+    /// open until the store answered for this draft, or the draft was
+    /// dropped unpublished.
+    pub(super) mark: Option<ProcessPublicationMark>,
 }
+
+pub(crate) type ProcessPublicationMarks =
+    lash_core::runtime::durable::services::PublicationMarks<ProcessId, ProcessSequence>;
+pub(super) type ProcessPublicationMark =
+    lash_core::runtime::durable::services::PublicationMark<ProcessId, ProcessSequence>;
 
 /// What a queue tells a draft it drops unpublished.
 pub(super) trait Draft {
@@ -155,6 +164,9 @@ async fn publish(
         id,
         draft,
         completion,
+        // Held until the store answered, and until a refusal invalidated
+        // the process: a feed that waited then reads the outcome.
+        mark: _mark,
     } = publication;
     if let Some(draft) = draft {
         match store.publish(&id, vec![draft]).await {

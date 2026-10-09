@@ -23,13 +23,15 @@ mod worker;
 use ingress::Ingress;
 use routing::Subject;
 pub(crate) use worker::CommittedPublication;
-use worker::{Channel, ProcessPublication};
+use worker::{Channel, ProcessPublication, ProcessPublicationMarks};
 
 pub(crate) struct LanguageObservationPublisher {
     process: Arc<Channel<ProcessPublication>>,
     session: Arc<Channel<(SessionId, LiveReplayEventDraft)>>,
     process_store: Arc<dyn ProcessReplayStore>,
     session_store: Arc<dyn LiveReplayStore>,
+    /// The committed facts this node is still publishing, per process.
+    committing: Arc<ProcessPublicationMarks>,
     workers: Mutex<Option<[tokio::task::AbortHandle; 2]>>,
     runtime: Option<tokio::runtime::Handle>,
     closed: AtomicBool,
@@ -61,6 +63,7 @@ impl LanguageObservationPublisher {
             session: Arc::new(Channel::new(Ingress::new(events, bytes))),
             process_store,
             session_store,
+            committing: Arc::default(),
             workers: Mutex::new(None),
             runtime: tokio::runtime::Handle::try_current().ok(),
             closed: AtomicBool::new(false),
@@ -74,11 +77,15 @@ impl LanguageObservationPublisher {
 
     /// Admit one draft of `process` behind those already accepted. A `None`
     /// charge is a fact the ingress cannot take: the worker invalidates that
-    /// process in the fact's place.
+    /// process in the fact's place. A commit's own publication names the
+    /// sequence it stands on in `committed_over`, and once admitted holds
+    /// its process's publication window open until the worker is done with
+    /// it or it was dropped.
     fn enqueue_process(
         &self,
         process: &ProcessId,
         charge: Option<usize>,
+        committed_over: Option<ProcessSequence>,
         draft: impl FnOnce() -> ProcessReplayEventDraft,
     ) {
         self.process
@@ -87,6 +94,7 @@ impl LanguageObservationPublisher {
                     id: process.clone(),
                     draft: charge.map(|_| draft()),
                     completion: None,
+                    mark: committed_over.map(|base| self.committing.hold(process, base)),
                 }
             });
         self.start();
@@ -127,9 +135,21 @@ impl LanguageObservationPublisher {
             return;
         }
         let charge = self.charge(&(process, &event));
-        self.enqueue_process(process, charge, || {
+        let base = ProcessSequence::new(event.sequence.saturating_sub(1));
+        self.enqueue_process(process, charge, Some(base), || {
             ProcessReplayEventDraft::committed(event)
         });
+    }
+
+    /// The publication window of `process`'s durable sequence `durable`,
+    /// read just now: whether this node is still publishing a fact at or
+    /// before it.
+    pub(crate) fn publication_window(
+        &self,
+        process: &ProcessId,
+        durable: ProcessSequence,
+    ) -> lash_core::runtime::durable::services::PublicationWindow<ProcessId, ProcessSequence> {
+        self.committing.window(process, durable)
     }
 
     /// Recovery waits for the same FIFO to publish the fact before checking
@@ -155,6 +175,7 @@ impl LanguageObservationPublisher {
             id: process.clone(),
             draft: Some(ProcessReplayEventDraft::committed(event)),
             completion: Some(completion),
+            mark: None,
         });
         self.start();
         if !admitted {
@@ -213,7 +234,7 @@ impl LanguageObservationPublisher {
             observed_at_ms: timestamp.unwrap_or(0),
         };
         match subject {
-            Subject::Process(process) => self.enqueue_process(&process, charge, || {
+            Subject::Process(process) => self.enqueue_process(&process, charge, None, || {
                 ProcessReplayEventDraft::language_execution(ProcessSequence(0), observation())
             }),
             Subject::Session(session) => {
@@ -241,7 +262,7 @@ impl LanguageObservationPublisher {
         }
         let timestamp = u64::try_from(record.timestamp.timestamp_millis()).ok();
         let charge = timestamp.and_then(|_| self.charge(step));
-        self.enqueue_process(&step.process_id, charge, || {
+        self.enqueue_process(&step.process_id, charge, None, || {
             ProcessReplayEventDraft::step_body_started(
                 ProcessSequence(0),
                 lash_trace::StepBodyStartedObservation {

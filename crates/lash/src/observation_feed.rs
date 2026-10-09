@@ -162,88 +162,104 @@ impl FeedSource {
             .revision)
     }
 
-    /// The live replay after `cursor`, judged against the durable head read
-    /// now: a cursor past the head, or behind it without a replayed
-    /// `Committed` bridging to it, is a gap rebuilt from the head.
-    ///
-    /// A head this node's own commit moved is durable before its `Committed`
-    /// is published. A replay that does not bridge to it is judged again
-    /// once that publication was attempted, so the window between the two
-    /// is never a gap (FIG-5605).
+    /// The live replay after `cursor`, judged against the durable head: a
+    /// cursor past the head, or behind it without a replayed `Committed`
+    /// bridging to it, is a gap rebuilt from the head.
     pub(crate) async fn resume(&self, cursor: &SessionCursor) -> Result<SessionResume> {
-        let requested = self.requested_revision(cursor)?;
-        let mut settled = false;
-        let reason = loop {
-            let durable = self.durable_revision().await?;
-            if requested > durable {
-                break LiveReplayGapReason::Unavailable;
+        let live_replay = &self.live_replay;
+        let replayed = self
+            .continued(
+                cursor,
+                move || async move {
+                    Ok(match live_replay.replay_after_cursor(cursor).await? {
+                        LiveReplayOutcome::Replayed(events) => Ok(events),
+                        LiveReplayOutcome::Gap(reason) => Err(reason),
+                    })
+                },
+                |events, durable| events.iter().any(|event| bridges(event, durable)),
+            )
+            .await?;
+        match replayed {
+            Ok(events) => Ok(SessionResume::Replayed { events }),
+            Err(reason) => {
+                let (observation, gap) = self.gap(cursor, reason).await?;
+                Ok(SessionResume::Gap { observation, gap })
             }
-            match self
-                .live_replay
-                .replay_after_cursor(cursor)
-                .await
-                .map_err(live_replay_error)?
-            {
-                LiveReplayOutcome::Replayed(events)
-                    if requested == durable
-                        || events.iter().any(|event| bridges(event, durable)) =>
-                {
-                    return Ok(SessionResume::Replayed { events });
-                }
-                LiveReplayOutcome::Replayed(_) if settled => {
-                    break LiveReplayGapReason::Unavailable;
-                }
-                LiveReplayOutcome::Replayed(_) => {
-                    self.published_heads
-                        .settled(&self.session_id, durable)
-                        .await;
-                    settled = true;
-                }
-                LiveReplayOutcome::Gap(reason) => break reason,
-            }
-        };
-        let (observation, gap) = self.gap(cursor, reason).await?;
-        Ok(SessionResume::Gap { observation, gap })
+        }
     }
 
     /// A live replay subscription after `cursor`, judged against the
-    /// durable head read now, as [`resume`](Self::resume) judges a replay.
+    /// durable head as [`resume`](Self::resume) judges a replay.
     pub(crate) async fn subscribe(
         &self,
         cursor: &SessionCursor,
     ) -> Result<SessionObservationSubscription> {
+        let live_replay = &self.live_replay;
+        let subscribed = self
+            .continued(
+                cursor,
+                move || async move {
+                    Ok(match live_replay.subscribe_after_cursor(cursor).await? {
+                        LiveReplaySubscribeOutcome::Subscribed(subscription) => Ok(subscription),
+                        LiveReplaySubscribeOutcome::Gap(reason) => Err(reason),
+                    })
+                },
+                LiveReplaySubscription::bridges_to,
+            )
+            .await?;
+        match subscribed {
+            Ok(subscription) => Ok(SessionObservationSubscription::Subscribed(subscription)),
+            Err(reason) => {
+                let (observation, gap) = self.gap(cursor, reason).await?;
+                Ok(SessionObservationSubscription::Gap { observation, gap })
+            }
+        }
+    }
+
+    /// What `read` finds in the live replay after `cursor`, once it
+    /// continues the cursor to the durable head, or why it cannot.
+    ///
+    /// The head is read first, then its publication window is taken, then
+    /// the replay is read. A replay that does not bridge to the head is no
+    /// gap while this node is still publishing a commit behind that head:
+    /// the feed waits the publication out and judges again, from a new
+    /// read of the head, so a head a later commit moved is judged by that
+    /// commit's own publication (`PublicationWindow`, FIG-5605, FIG-5626).
+    /// With no publication in flight the replay is final: another node
+    /// committed, or the publication was lost, and the reader rebuilds
+    /// from the head.
+    async fn continued<T, Read>(
+        &self,
+        cursor: &SessionCursor,
+        read: impl Fn() -> Read,
+        bridges_to: impl Fn(&T, SessionRevision) -> bool,
+    ) -> Result<std::result::Result<T, LiveReplayGapReason>>
+    where
+        Read: Future<
+            Output = std::result::Result<
+                std::result::Result<T, LiveReplayGapReason>,
+                LiveReplayStoreError,
+            >,
+        >,
+    {
         let requested = self.requested_revision(cursor)?;
-        let mut settled = false;
-        let reason = loop {
+        loop {
             let durable = self.durable_revision().await?;
             if requested > durable {
-                break LiveReplayGapReason::Unavailable;
+                return Ok(Err(LiveReplayGapReason::Unavailable));
             }
-            match self
-                .live_replay
-                .subscribe_after_cursor(cursor)
-                .await
-                .map_err(live_replay_error)?
-            {
-                LiveReplaySubscribeOutcome::Subscribed(subscription)
-                    if requested == durable || subscription.bridges_to(durable) =>
-                {
-                    return Ok(SessionObservationSubscription::Subscribed(subscription));
-                }
-                LiveReplaySubscribeOutcome::Subscribed(_) if settled => {
-                    break LiveReplayGapReason::Unavailable;
-                }
-                LiveReplaySubscribeOutcome::Subscribed(_) => {
-                    self.published_heads
-                        .settled(&self.session_id, durable)
-                        .await;
-                    settled = true;
-                }
-                LiveReplaySubscribeOutcome::Gap(reason) => break reason,
+            let window = self.published_heads.window(&self.session_id, durable);
+            let replay = match read().await.map_err(live_replay_error)? {
+                Ok(replay) => replay,
+                Err(reason) => return Ok(Err(reason)),
+            };
+            if requested == durable || bridges_to(&replay, durable) {
+                return Ok(Ok(replay));
             }
-        };
-        let (observation, gap) = self.gap(cursor, reason).await?;
-        Ok(SessionObservationSubscription::Gap { observation, gap })
+            if !window.closed().await {
+                return Ok(Err(LiveReplayGapReason::Unavailable));
+            }
+        }
     }
 
     /// A gap from `requested`: the durable head, and the cursor a reader
