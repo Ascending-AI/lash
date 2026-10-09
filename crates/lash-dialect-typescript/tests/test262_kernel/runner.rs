@@ -803,3 +803,14 @@ fn map_group_by_checks_the_callback_before_iteration() {
         Datum::Float(lash_kernel_doc::Float::new(3.0)),
     );
 }
+
+/// Object.groupBy validates the callback even when its input is empty.
+#[test]
+fn object_group_by_checks_the_callback_before_iteration() {
+    assert_finished(
+        execute(
+            "let count = 0; for (const callback of [undefined, null, {}]) { try { Object.groupBy([], callback); } catch (e) { if (e.name === 'TypeError') count++; } } finish(count);",
+        ),
+        Datum::Float(lash_kernel_doc::Float::new(3.0)),
+    );
+}
