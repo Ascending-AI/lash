@@ -2,6 +2,7 @@ use crate::ActorContext;
 use crate::SessionId;
 use crate::TurnId;
 mod process_lifecycle;
+mod process_replay;
 pub(crate) mod replay;
 
 use crate::facade_support::ToolStateFacadeOps;
@@ -11,6 +12,16 @@ use tokio::sync::Mutex;
 
 use super::{LashRuntime, ProcessHandleView, ProcessRecord, ProcessRegistry};
 
+pub use process_replay::{
+    InMemoryProcessReplayStore, InMemoryProcessReplayStoreConfig, LanguageExecutionObservation,
+    ParsedProcessObservationCursor, ProcessEffectCoverage, ProcessEffectEvidence,
+    ProcessEffectGapReason, ProcessObservation, ProcessObservationCursor,
+    ProcessObservationCursorError, ProcessObservationEvent, ProcessObservationEventPayload,
+    ProcessObservationGapCause, ProcessObservationIdentity, ProcessReadView,
+    ProcessReplayEventDraft, ProcessReplayGap, ProcessReplayGapReason, ProcessReplayOutcome,
+    ProcessReplayStore, ProcessReplayStoreError, ProcessReplaySubscribeOutcome,
+    ProcessReplaySubscription, ProcessSequence, RetainedProcessView, commits_bridge,
+};
 pub(in crate::runtime) use replay::observation_revision;
 pub use replay::{
     InMemoryLiveReplayStore, InMemoryLiveReplayStoreConfig, LiveReplayEventDraft, LiveReplayGap,

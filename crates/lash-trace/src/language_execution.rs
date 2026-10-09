@@ -5,6 +5,29 @@ use crate::{
     TraceLanguageExecutionMap, TraceLanguageExecutionStatus,
 };
 
+/// One language execution fact as an observer receives it: the execution
+/// event itself, the language that produced it and when it was observed. It
+/// carries no trace envelope, so a consumer never filters unrelated trace
+/// variants to find it.
+///
+/// `execution.event_key` is the producer's stable identity of the
+/// observation: a publication retry keeps it, and `observed_at_ms` is not
+/// part of it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LanguageExecutionObservation {
+    pub language: String,
+    pub execution: crate::TraceLanguageExecution,
+    pub observed_at_ms: u64,
+}
+
+impl LanguageExecutionObservation {
+    /// Whether `other` states the same fact: the same language and
+    /// execution event, whenever each was observed.
+    pub fn same_fact(&self, other: &Self) -> bool {
+        self.language == other.language && self.execution == other.execution
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TraceLanguageExecutionPayload {

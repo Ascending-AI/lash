@@ -29,8 +29,7 @@ use std::time::{Duration, Instant};
 
 use lash_core::{
     PluginError, ProcessEffectReport, ProcessEvent, ProcessEventHistoryRetention,
-    ProcessEventPageEvents, ProcessEventPageMore, ProcessEventQueryMode, ProcessEventReadOutcome,
-    ProcessRegistry, ProcessStatus,
+    ProcessEventQueryMode, ProcessEventReadOutcome, ProcessRegistry, ProcessStatus,
 };
 use lash_sansio::sync::MutexExt;
 use lash_sansio::{PROCESS_CURSOR_UNROUTED_EPOCH, ProcessId};
@@ -711,75 +710,50 @@ async fn acquire_durable(
         Err(error) => return Err(error),
     };
     let high_water = record.last_event_sequence;
-    let fleet_format = registry.fleet_format();
-    let mut summary = ProcessEffectReport::default();
-    let mut completeness = ProcessDurableCompleteness::Complete;
-    let mut after = 0;
-    let mut pages = 0;
-    'pages: while after < high_water {
-        if pages >= config.snapshot_page_budget {
-            completeness = ProcessDurableCompleteness::Incomplete {
-                reason: ProcessDurableGapReason::AcquisitionBudgetExhausted,
-            };
-            break;
-        }
-        pages += 1;
-        let page = match registry
-            .event_page_after(
-                process_id,
-                after,
-                config.snapshot_page_size,
-                ProcessEventQueryMode::Full,
-            )
-            .await?
-        {
-            ProcessEventReadOutcome::Retained(page) => page,
-            ProcessEventReadOutcome::NoLongerRetained(ProcessEventHistoryRetention::Pruned {
+    let effects = match crate::process_feed::fold_effects(
+        registry,
+        process_id,
+        high_water,
+        crate::process_feed::EffectFoldBudget {
+            pages: config.snapshot_page_budget,
+            page_size: config.snapshot_page_size,
+        },
+    )
+    .await?
+    {
+        Ok(effects) => effects,
+        Err(crate::process_feed::Pruned {
+            terminal_label,
+            pruned_at_ms,
+        }) => {
+            return Ok(ProcessDurableSnapshot::NoLongerRetained {
                 terminal_label,
                 pruned_at_ms,
-            }) => {
-                return Ok(ProcessDurableSnapshot::NoLongerRetained {
-                    terminal_label,
-                    pruned_at_ms,
-                });
-            }
-            // A released prefix is a gap the summary reports, not a reason
-            // to drop the events after it: fold on from the horizon.
-            ProcessEventReadOutcome::NoLongerRetained(ProcessEventHistoryRetention::Released {
-                released_through,
-            }) => {
-                completeness = ProcessDurableCompleteness::Incomplete {
-                    reason: ProcessDurableGapReason::HistoryReleased,
-                };
-                after = released_through;
-                continue;
-            }
-        };
-        let ProcessEventPageEvents::Full(events) = page.events else {
-            return Err(PluginError::Session(
-                "a Full process event page returned Lite events".to_string(),
-            ));
-        };
-        for event in events {
-            if event.sequence > high_water {
-                break 'pages;
-            }
-            if summary.fold_event(&event.fact, fleet_format).is_err() {
-                completeness = ProcessDurableCompleteness::Incomplete {
-                    reason: ProcessDurableGapReason::SummaryUndecodable,
-                };
-            }
-            after = event.sequence;
+            });
         }
-        if matches!(page.more, ProcessEventPageMore::Complete) {
-            break;
-        }
-    }
+    };
     Ok(ProcessDurableSnapshot::Retained {
         sequence: high_water,
         status: record.status(),
-        summary,
-        completeness,
+        summary: effects.report,
+        completeness: match effects.coverage {
+            lash_core::ProcessEffectCoverage::Complete => ProcessDurableCompleteness::Complete,
+            lash_core::ProcessEffectCoverage::Incomplete { reason } => {
+                ProcessDurableCompleteness::Incomplete {
+                    reason: match reason {
+                        lash_core::ProcessEffectGapReason::AcquisitionBudgetExhausted => {
+                            ProcessDurableGapReason::AcquisitionBudgetExhausted
+                        }
+                        lash_core::ProcessEffectGapReason::Undecodable => {
+                            ProcessDurableGapReason::SummaryUndecodable
+                        }
+                        lash_core::ProcessEffectGapReason::HistoryReleased => {
+                            ProcessDurableGapReason::HistoryReleased
+                        }
+                    },
+                }
+            }
+        },
     })
 }
 

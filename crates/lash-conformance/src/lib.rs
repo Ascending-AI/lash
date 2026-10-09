@@ -23,6 +23,8 @@ mod backend_assembly_tests;
 pub mod fused_artifact_store;
 #[cfg(test)]
 mod live_replay_store_tests;
+#[cfg(test)]
+mod process_replay_store_tests;
 
 #[cfg(test)]
 mod host_admission_tests;

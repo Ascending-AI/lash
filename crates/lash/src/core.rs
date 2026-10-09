@@ -36,6 +36,10 @@ pub struct LashCore {
     pub(crate) process_registry: Arc<dyn ProcessRegistry>,
     pub(crate) plugin_factories: Arc<Vec<Arc<dyn PluginFactory>>>,
     pub(crate) live_replay_store: Arc<dyn LiveReplayStore>,
+    /// The tail of every process feed, apart from session live replay.
+    pub(crate) process_replay_store: Arc<dyn lash_core::ProcessReplayStore>,
+    /// What one process snapshot may read to fold its effect evidence.
+    pub(crate) process_effect_fold_budget: crate::process_feed::EffectFoldBudget,
     pub(crate) process_observation_hub: Arc<crate::process_observation::ProcessObservationHub>,
     pub(crate) process_lifecycle_feed: Arc<crate::process_lifecycle::ProcessLifecycleFeed>,
     /// The core's process event sinks, its own lifecycle feed first: each
@@ -660,6 +664,7 @@ pub struct LashCoreBuilder {
     recovery_pass: lash_core::engine::RecoveryPassBudget,
     process_tool_visibility_filter: Option<Arc<dyn facade_support::ProcessToolVisibilityFilter>>,
     live_replay_store: Option<Arc<dyn LiveReplayStore>>,
+    process_replay_store: Option<Arc<dyn lash_core::ProcessReplayStore>>,
     process_event_sinks: Vec<Arc<dyn facade_support::ProcessEventSink>>,
     process_observation_work_limits: crate::process_observation::ProcessObservationWorkLimits,
     serves_sessions: bool,
@@ -726,6 +731,7 @@ impl LashCoreBuilder {
             recovery_pass: lash_core::engine::RecoveryPassBudget::default(),
             process_tool_visibility_filter: None,
             live_replay_store: None,
+            process_replay_store: None,
             process_event_sinks: Vec::new(),
             process_observation_work_limits: Default::default(),
             serves_sessions: Self::STANDARD_SERVE_SESSIONS,
@@ -1080,6 +1086,21 @@ impl LashCoreBuilder {
         self
     }
 
+    /// Replace the built-in process replay buffer behind process observation
+    /// ([`Processes::observe`](crate::process::Processes::observe)) with the
+    /// host's own store, which carries the retention the host constructed it
+    /// with; [`DataRetention::process_replay`](crate::DataRetention::process_replay)
+    /// then configures nothing. Cores that share one store share every
+    /// process observation published to it. Durable process state still
+    /// comes from the process registry.
+    pub fn process_replay_store(
+        mut self,
+        process_replay_store: Arc<dyn lash_core::ProcessReplayStore>,
+    ) -> Self {
+        self.process_replay_store = Some(process_replay_store);
+        self
+    }
+
     /// Add a host sink for process events. Every event appended to a
     /// process's durable log, through the registry or by a commit of a
     /// process this core's node runs, reaches it after the commit: once
@@ -1152,6 +1173,19 @@ impl LashCoreBuilder {
                 .with_work_limits(core.observation_work_limits),
             )
         });
+        let process_replay_store = self.process_replay_store.take().unwrap_or_else(|| {
+            Arc::new(
+                lash_core::InMemoryProcessReplayStore::with_clock(
+                    data_retention.process_replay,
+                    Arc::clone(&core.clock),
+                )
+                .with_work_limits(core.observation_work_limits),
+            )
+        });
+        let process_effect_fold_budget = crate::process_feed::EffectFoldBudget {
+            pages: data_retention.process_observation.snapshot_page_budget,
+            page_size: data_retention.process_observation.snapshot_page_size,
+        };
         let process_work = lash_core::ProcessWorkWiring::new(
             lash_core::runtime::watch_process_registry(backend.process_registry()),
             Arc::new(
@@ -1246,6 +1280,8 @@ impl LashCoreBuilder {
             process_registry,
             plugin_factories,
             live_replay_store,
+            process_replay_store,
+            process_effect_fold_budget,
             process_observation_hub,
             process_lifecycle_feed,
             _process_event_registrations: process_event_registrations,

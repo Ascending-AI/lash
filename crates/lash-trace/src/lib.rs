@@ -60,7 +60,8 @@ pub use jsonl_records::{
     JsonlTraceReadError, TraceRead, parse_jsonl_records, parse_trace_jsonl_records,
 };
 pub use language_execution::{
-    TraceLanguageExecutionPayload, TraceNodeAwaited, TraceNodeWaitKind, TraceNodeWaitResolution,
+    LanguageExecutionObservation, TraceLanguageExecutionPayload, TraceNodeAwaited,
+    TraceNodeWaitKind, TraceNodeWaitResolution,
 };
 pub use language_execution_failure::TraceLanguageExecutionFailure;
 pub use lash_sansio::llm::types::GenerationReceipt;

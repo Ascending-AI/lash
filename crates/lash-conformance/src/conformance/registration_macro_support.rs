@@ -21,6 +21,7 @@ pub use super::process_prune_start_staging::*;
 pub use super::process_references::*;
 pub use super::process_registry::status_filters::*;
 pub use super::process_registry::*;
+pub use super::process_replay::*;
 pub use super::queue_observation::*;
 pub use super::retention::*;
 pub use super::revision_pins::*;

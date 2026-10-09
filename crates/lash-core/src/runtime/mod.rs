@@ -261,6 +261,16 @@ pub use observation::{
     SessionObservationSubscription, SessionProcessEventKind, SessionQueueEventKind, SessionResume,
     SessionRevision, WeakRuntimeHandle, load_durable_observation_head,
 };
+pub use observation::{
+    InMemoryProcessReplayStore, InMemoryProcessReplayStoreConfig, LanguageExecutionObservation,
+    ParsedProcessObservationCursor, ProcessEffectCoverage, ProcessEffectEvidence,
+    ProcessEffectGapReason, ProcessObservation, ProcessObservationCursor,
+    ProcessObservationCursorError, ProcessObservationEvent, ProcessObservationEventPayload,
+    ProcessObservationGapCause, ProcessObservationIdentity, ProcessReadView,
+    ProcessReplayEventDraft, ProcessReplayGap, ProcessReplayGapReason, ProcessReplayOutcome,
+    ProcessReplayStore, ProcessReplayStoreError, ProcessReplaySubscribeOutcome,
+    ProcessReplaySubscription, ProcessSequence, RetainedProcessView, commits_bridge,
+};
 pub use observation_publisher::{ObservationSource, work_with_observations};
 pub use process::ProcessChangeSubscription;
 pub use process::registry_transitions;

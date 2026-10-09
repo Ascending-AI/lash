@@ -122,3 +122,131 @@ canonical output. Hosts own graph edits, drafts, layout and versioning.
 Keep the original authored text separately if the editor needs to preserve
 comments or formatting. After an edit, admit the resulting program and use
 its own graph and source identity for subsequent execution records.
+
+## The process feed
+
+Besides the durable facts and the trace records above, a host can follow one
+process live. The feed pairs a durable snapshot with a bounded replay of what
+was published after it. It carries committed lifecycle facts in sequence and
+provisional language execution observations; it does not make node history
+durable, and a host that needs a path beyond the replay window still keeps
+the trace records as described above.
+
+A process is observed the way a session is ([observing turns](observing-turns.md),
+[ADR 0002](adr/0002-session-observation-uses-cursors-and-bounded-live-replay.md)):
+a durable snapshot with a cursor, then a bounded live replay after it, with a
+typed gap wherever the replay cannot continue. The objects are the process's
+own. Process replay shares no store, window or budget with session live
+replay, so a busy process never evicts a session's window.
+
+```rust,ignore
+let observed = core.processes().observe(&process_id);
+let snapshot = observed.snapshot().await?;
+apply_durable(&snapshot.read_view);
+let mut feed = observed.subscribe_and_recover(snapshot.cursor);
+
+while let Some(item) = feed.next().await {
+    match item? {
+        ProcessObservationStreamItem::Event(event) => apply(&event.payload),
+        ProcessObservationStreamItem::Gap { observation, .. } => {
+            replace_durable_and_reset_live(&observation.read_view);
+        }
+    }
+}
+```
+
+### The snapshot
+
+`snapshot()` reads the durable process: a `ProcessReadView` at one durable
+event sequence, which is the revision of this contract (`ProcessSequence`).
+
+- `Retained` carries the process's row and its effect evidence folded through
+  that sequence. The evidence is bounded: retained occurrences and omission
+  counts, with `coverage` saying whether the fold reached the sequence, ran
+  out of its read budget, met an undecodable fact or started after a released
+  prefix. It is never every call the process made.
+- `Retired` is a pruned process's tombstone, and `Unknown` an id no row or
+  tombstone names. Neither is an empty process at sequence zero.
+
+The snapshot's cursor is the earliest position the replay store still retains
+for the process, so a feed from it replays the retained window: an observer
+that attaches late, or after the process ended, still receives the node
+evidence the window holds. Completion does not shorten the window.
+
+### The feed
+
+A feed yields two kinds of event.
+
+- `LanguageExecution` is provisional: what a language execution reported
+  (node starts, waits, branches, completion), with the producer's `event_key`
+  as its identity. It never proves a durable advance. An `ExecutionFinished`
+  in it does not settle the process.
+- `Committed { event }` is one committed lifecycle fact, in sequence. It
+  extends the process at `event.sequence - 1`. The feed delivers it only to a
+  consumer holding that sequence, and skips it for one that already holds it.
+  Only a committed terminal fact, or a terminal read view, settles a process.
+
+Node history is not durable. Starts, branches, loop occurrences, waits and
+timings live only in the replay window; a committed effect occurrence proves
+that effect's outcome and nothing else about the timeline.
+
+### Gaps
+
+A gap replaces the consumer's state. Its `observation` is the durable read
+view read now, and the feed continues from the gap's cursor. On a gap, replace
+the durable projection, discard provisional state, and fold what the feed
+replays next: the retained window, from its start. What the window no longer
+holds stays unknown; do not synthesize it.
+
+`gap.cause` says why:
+
+| Cause | Meaning |
+| --- | --- |
+| `Replay { reason: Trimmed }` | Retention dropped events after the cursor. |
+| `Replay { reason: Unavailable }` | Another store incarnation, a position past the tail, or invalidated continuity. |
+| `CommitUnbridged` | The replay holds no committed fact for some sequence between the consumer's and the process's. One later commit is not a bridge: every sequence is required. |
+| `AheadOfDurableProcess` | The cursor names a sequence the process never reached. |
+| `NotRetained` | No process is retained under the id. The replacement says pruned or unknown, and the feed ends. |
+
+A cursor for another process is refused as an error, never retargeted.
+
+### Delivery and identity
+
+Delivery is at least once. Three identities stay distinct:
+
+- **Delivery:** `ProcessObservationEventId` (process, replay-store incarnation,
+  live position). The stream drops one it already delivered within a bounded
+  window; seed the window with the identities your host applied
+  (`with_applied_event_ids`). A gap clears it.
+- **Committed fact:** the process and its sequence, in every incarnation. A
+  republication after a takeover is the same fact.
+- **Provisional observation:** the process and the producer's `event_key`.
+
+The replay store drops a redelivery whose identity its window holds with the
+same fact. The same identity with a different fact fails that publication and
+invalidates the process's continuity, which observers see as a gap.
+
+To resume after a restart, persist `feed.cursor()`: it carries the sequence
+the consumer holds. An event's own cursor names the sequence the event was
+published at, which for a provisional event may be older.
+
+### The replay store
+
+`LashCoreBuilder::process_replay_store` installs a `ProcessReplayStore`. The
+default is `InMemoryProcessReplayStore`, sized by
+`DataRetention::process_replay`: events, age and bytes per process, and a
+process count and byte total across the store. The standard preset (2,048
+events, 120 seconds and 8 MiB per process; 4,096 processes and 64 MiB) is
+provisional and unmeasured. A window lasts about
+`min(max_age, max_events / events per second, max_bytes / bytes per second)`:
+at 1,000 events a second, 2,048 events are two seconds.
+
+The store holds what was published to it. Cores that share one store share
+every observation. Across OS processes, provisional node history crosses only
+through a store they share; with separate in-memory stores a follower still
+converges on the durable process through its snapshot and gaps, and the other
+process's node events are absent, the same as for sessions.
+
+A store implementation keeps the obligations on the `ProcessReplayStore`
+trait; `lash_conformance::process_replay_tests!` certifies them with the same
+replay laws the session store passes.

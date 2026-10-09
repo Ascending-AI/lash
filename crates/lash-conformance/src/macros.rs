@@ -1197,6 +1197,22 @@ macro_rules! live_replay_tests {
     };
 }
 
+/// Register one independently reported test per process-replay law. The
+/// fixture has the shape [`live_replay_tests!`] takes, over a
+/// `ProcessReplayStore`.
+#[macro_export]
+macro_rules! process_replay_tests {
+    ($fixture:block) => {
+        $crate::live_replay_tests!(@catalogue $fixture; [
+            (process_replay_store, "process-replay", plain),
+            (process_replay_store_burst, "process-replay-burst", plain),
+            (process_replay_store_capacity_trim, "process-replay-capacity", capacity),
+            (process_replay_store_ttl_trim, "process-replay-ttl", ttl),
+            (process_replay_incarnation_change_invalidates_cursor, "process-replay-incarnation", incarnation),
+        ]);
+    };
+}
+
 /// Register checkpoint-component cold-reopen conformance.
 #[macro_export]
 macro_rules! checkpoint_component_reopen_tests {

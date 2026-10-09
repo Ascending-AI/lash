@@ -65,6 +65,9 @@ pub mod checkpoint_observer;
 pub mod conformance_support;
 mod layered_backend;
 mod live_replay;
+pub use live_replay::{
+    process_committed_event, process_language_observation, process_observation_label,
+};
 mod poll;
 mod recording_store;
 pub mod runtime_helpers;

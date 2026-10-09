@@ -70,6 +70,20 @@ impl Processes {
         .await?)
     }
 
+    /// One process, observed: its durable snapshot and the recovering feed
+    /// that continues it from the core's process replay store.
+    pub fn observe(&self, process_id: &ProcessId) -> crate::process_feed::ObservableProcess {
+        crate::process_feed::ObservableProcess {
+            source: crate::process_feed::ProcessFeedSource::new(
+                process_id.clone(),
+                self.registry(),
+                Arc::clone(&self.core.process_replay_store),
+                self.core.process_effect_fold_budget,
+                self.core.env.core.observation_work_limits,
+            ),
+        }
+    }
+
     fn registry(&self) -> Arc<dyn lash_core::ProcessRegistry> {
         self.core.process_registry()
     }

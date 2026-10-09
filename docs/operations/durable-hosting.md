@@ -123,7 +123,7 @@ value:
 | --- | --- | --- |
 | Attachment puts, reads, upload expiry and retained output | `LashCoreBuilder::data_retention`, `DataRetention::attachments` | A put bound or `None` for unbounded; read budgets; an upload expiry; the inline limit and witness size of retained output. |
 | Session revisions | `DataRetention::session_revisions` | `Retention::UntilGc`, `LastTurns(n)` or `HeadOnly`. Recorded with each session the core creates; `LashSession::set_retention` changes one session's. |
-| Live replay and process observation | `DataRetention::live_replay`, `DataRetention::process_observation` | Event, age, session and byte bounds. A host store installed with `live_replay_store` carries its own. |
+| Live replay, process replay and process observation | `DataRetention::live_replay`, `DataRetention::process_replay`, `DataRetention::process_observation` | Event, age, subject and byte bounds, stated apart for sessions and processes. A host store installed with `live_replay_store` or `process_replay_store` carries its own. |
 | Prompt-cache retention | `LlmProfileMetadata::builder(..).cache_retention(..)`, per model | `CacheRetention::None` (off), `Short` (the provider's default lifetime) or `Long` (the extended lifetime). Recorded with each session's model binding. |
 | SQLite durability | `SqliteStoreSet::open(path, synchronous)` | `SqliteSynchronous::Full` or `Normal` ([§3](#3-sqlite-is-one-file)); `Off` only for stores whose loss is acceptable. |
 

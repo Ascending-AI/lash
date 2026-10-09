@@ -89,6 +89,7 @@ mod postgres_host;
 mod postgres_live_replay;
 pub mod preflight;
 pub(crate) mod process_admin;
+mod process_feed;
 mod process_lifecycle;
 mod process_observation;
 /// A session's config and the typed commands that change it (FIG-4379).
@@ -1088,6 +1089,10 @@ pub mod process {
     pub use crate::admin::SessionProcessAdmin;
     pub use crate::artifacts::{HostArtifactPin, HostArtifacts, ProcessDefinitions};
     pub use crate::process_admin::Processes;
+    pub use crate::process_feed::{
+        ObservableProcess, ProcessObservationEventId, ProcessObservationStream,
+        ProcessObservationStreamItem,
+    };
     pub use crate::process_observation::{
         ProcessCursor, ProcessCursorError, ProcessCursorReference, ProcessDurableCompleteness,
         ProcessDurableGapReason, ProcessDurableSnapshot, ProcessEventsFrom, ProcessEventsRead,
@@ -1156,6 +1161,18 @@ pub mod process {
     #[cfg(any(test, feature = "testing"))]
     pub use lash_core::{
         ConformanceProcessRegistry, ProcessEventLogTestSupport, ProcessRegistryTestSupport,
+    };
+    /// Process observation's contract: the snapshot, cursor, stream events,
+    /// typed gaps and the replay store behind a process feed.
+    pub use lash_core::{
+        InMemoryProcessReplayStore, InMemoryProcessReplayStoreConfig, LanguageExecutionObservation,
+        ParsedProcessObservationCursor, ProcessEffectCoverage, ProcessEffectEvidence,
+        ProcessEffectGapReason, ProcessObservation, ProcessObservationCursor,
+        ProcessObservationCursorError, ProcessObservationEvent, ProcessObservationEventPayload,
+        ProcessObservationGapCause, ProcessObservationIdentity, ProcessReadView,
+        ProcessReplayEventDraft, ProcessReplayGap, ProcessReplayGapReason, ProcessReplayOutcome,
+        ProcessReplayStore, ProcessReplayStoreError, ProcessReplaySubscribeOutcome,
+        ProcessReplaySubscription, ProcessSequence, RetainedProcessView,
     };
     #[cfg(feature = "rlm")]
     pub use lash_lashlang_runtime::{

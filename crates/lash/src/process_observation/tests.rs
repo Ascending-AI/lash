@@ -6,6 +6,7 @@
 //! call is a lost or late publication.
 
 use super::*;
+use lash_core::{ProcessEventPageEvents, ProcessEventPageMore};
 use lash_trace::{
     TraceContext, TraceLanguageExecution, TraceLanguageExecutionGeneration,
     TraceLanguageExecutionIdentity, TraceLanguageExecutionMap, TraceLanguageExecutionMapNode,

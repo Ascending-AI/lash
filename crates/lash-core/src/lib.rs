@@ -690,6 +690,18 @@ pub(crate) use runtime::{
     process_event_invocation,
 };
 pub use runtime::{ConsumerHold, SessionTurnOutcome};
+/// Process observation: the snapshot, cursor, stream events and bounded
+/// live replay of one process (D-PROCOBS).
+pub use runtime::{
+    InMemoryProcessReplayStore, InMemoryProcessReplayStoreConfig, LanguageExecutionObservation,
+    ParsedProcessObservationCursor, ProcessEffectCoverage, ProcessEffectEvidence,
+    ProcessEffectGapReason, ProcessObservation, ProcessObservationCursor,
+    ProcessObservationCursorError, ProcessObservationEvent, ProcessObservationEventPayload,
+    ProcessObservationGapCause, ProcessObservationIdentity, ProcessReadView,
+    ProcessReplayEventDraft, ProcessReplayGap, ProcessReplayGapReason, ProcessReplayOutcome,
+    ProcessReplayStore, ProcessReplayStoreError, ProcessReplaySubscribeOutcome,
+    ProcessReplaySubscription, ProcessSequence, RetainedProcessView, commits_bridge,
+};
 pub use runtime::{ProcessLifecycleState, ProcessOutcomeNotRetained, ProcessTerminal};
 pub use runtime::{
     ProcessStartRegistration, ProcessStartTarget, RetiredProcessStatus, TerminalProcessStatus,
