@@ -34,7 +34,7 @@ class PerfReportDispatchTest(unittest.TestCase):
             "dhatFileVersion": 2,
             "cmd": "lash-perf",
             "ftbl": ["dhat::Alloc", "app::work"],
-            "pps": [{"tb": 1, "tbk": 1, "mb": 1, "gb": 1, "fs": [0, 1]}],
+            "pps": [{"tb": 1, "tbk": 1, "mb": 1, "gb": 1, "eb": 0, "fs": [0, 1]}],
         }
 
         kind, summarize, diff = perfreport.dispatch_entry(payload, Path("PROFILE.dhat.json"))
@@ -42,6 +42,18 @@ class PerfReportDispatchTest(unittest.TestCase):
         self.assertEqual(kind, "dhat")
         self.assertIsNone(diff)
         self.assertIn("# dhat heap summary", summarize(payload, 1))
+
+    def test_dhat_global_peak_and_profiler_end_are_distinct(self) -> None:
+        payload = {
+            "cmd": "synthetic-window",
+            "ftbl": ["app::work"],
+            "pps": [{"tb": 100, "tbk": 2, "mb": 80, "gb": 60, "eb": 10, "fs": [0]}],
+        }
+        summary = perfreport.summarize_dhat(payload, 1)
+        print(summary)
+        self.assertIn("peak_live(at_tgmax)=       60B", summary)
+        self.assertIn("end_live=       10B", summary)
+        self.assertIn("max_live(sum-of-pps)", summary)
 
     def test_dead_report_kinds_are_not_dispatchable(self) -> None:
         for kind in ("ui-perf", "runtime-guard", "perf-guard"):

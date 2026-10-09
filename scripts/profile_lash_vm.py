@@ -154,32 +154,27 @@ def process_stack_limits() -> tuple[int | None, int | None, bool]:
 
 
 def current_stack_profile(stack_budget_bytes: int) -> dict[str, Any]:
+    """Record thread-default/process stack capacity, without a usage verdict."""
     rust_min_stack_bytes = parse_env_stack_bytes(os.environ.get("RUST_MIN_STACK"))
     soft_bytes, hard_bytes, hard_unlimited = process_stack_limits()
     if rust_min_stack_bytes is not None:
-        measured_stack_bytes = rust_min_stack_bytes
-        measured_stack_source = "rust_min_stack"
+        configured_stack_capacity_bytes = rust_min_stack_bytes
+        configured_stack_capacity_source = "rust_min_stack"
     elif soft_bytes is not None:
-        measured_stack_bytes = soft_bytes
-        measured_stack_source = "process_stack_soft_limit"
+        configured_stack_capacity_bytes = soft_bytes
+        configured_stack_capacity_source = "process_stack_soft_limit"
     else:
-        measured_stack_bytes = None
-        measured_stack_source = None
-    within_stack_budget = (
-        measured_stack_bytes <= stack_budget_bytes
-        if measured_stack_bytes is not None
-        else None
-    )
+        configured_stack_capacity_bytes = None
+        configured_stack_capacity_source = None
     return {
         "worker_stack_bytes": None,
         "rust_min_stack_bytes": rust_min_stack_bytes,
         "process_stack_soft_limit_bytes": soft_bytes,
         "process_stack_hard_limit_bytes": hard_bytes,
         "process_stack_hard_limit_unlimited": hard_unlimited,
-        "measured_stack_bytes": measured_stack_bytes,
-        "measured_stack_source": measured_stack_source,
+        "configured_stack_capacity_bytes": configured_stack_capacity_bytes,
+        "configured_stack_capacity_source": configured_stack_capacity_source,
         "stack_budget_bytes": stack_budget_bytes,
-        "within_stack_budget": within_stack_budget,
     }
 
 

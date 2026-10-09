@@ -13,6 +13,23 @@ quiet host and the full workload for performance comparisons. The
 committed historical baseline and substrate-comparison documents retain past
 results; their old launchers have been retired.
 
+## Writing a perf instrument
+
+1. Declare every number's quantity, unit, process or window, and statistic.
+   Label configured values, endpoint samples and upper bounds explicitly in
+   both the receipt and its text summary.
+2. Declare diagnostic output as noncertifying. A certifying caller must consume
+   completeness, qualification and every selected verdict before succeeding.
+3. Validate experiment identity before comparing: workload, geometry, build,
+   compiler, allocator, backend, durability, host and sample meaning. Refuse
+   mismatches and missing required metrics.
+4. Capacity and tail claims need scheduled arrivals, finite admission capacity,
+   unfinished/error counts, and offered and achieved rates. Label closed-loop
+   populations as service diagnostics.
+5. Prove reach with an actual producer path, matching authority and features,
+   an observer/consumer and a command receipt. Definitions and synthetic
+   adapter tests establish capability alone.
+
 ## Runtime, stack and allocation profiles
 
 ```sh
@@ -33,6 +50,24 @@ python3 scripts/profile_runtime.py --release --profile quick --dhat \
 The allocation recipe selects the inventory's `dhat-heap` feature target and
 uses the symbolized profiling platform. The default runtime instrument retains
 its stats_alloc counters. Allocation profiles cover the measured window.
+`perfreport` displays each DHAT allocation site's `gb` as
+`peak_live(at_tgmax)`: requested bytes live at the profiled process's global
+heap peak. Its `eb` is `end_live`: requested bytes still live when the profiler
+ends. Site `mb` is that site's own maximum; `max_live(sum-of-pps)` sums those
+independent maxima and is not a simultaneous global peak.
+
+Stack receipts use `configured_stack_capacity_bytes` and
+`configured_stack_capacity_source`. The source identifies the explicit Tokio
+worker reservation, `RUST_MIN_STACK` thread default, or process `RLIMIT_STACK`
+soft limit, in priority order. `stack_budget_bytes` is a configured constraint,
+not observed usage. There is no capacity-versus-budget usage verdict. These
+settings do not bound every thread or child; constrained-execution crash laws
+and the stack sweep establish survival at a configured size, not occupancy.
+
+The scheduler's `runtime.global_queue_depth_endpoint_max_tasks` is the maximum
+queued-task count at the two scenario-window endpoints in the executing Tokio
+runtime. It misses intervening peaks. Process CPU covers every thread in the
+parent process during that window; worker busy/park metrics sum worker deltas.
 
 ## LashVm
 
@@ -44,6 +79,12 @@ python3 scripts/profile_lash_vm.py --scenario baseline --mode one_shot \
 
 The script resolves `perf`, `profile` and `function_perf` independently from
 one build report, rather than guessing `target/release/examples` paths.
+The perf example reports allocation operations and requested-byte increments
+within each counter-reset window (growing reallocations contribute their byte
+increment); it emits no live-heap peak. Pre-window objects can be freed during
+execution, so reset counters cannot establish a new-window live peak without
+tracking allocation membership. Use DHAT for live-at-peak and live-at-end
+quantities rather than deriving them from these counters.
 
 ## Send-to-completion latency
 
@@ -142,3 +183,11 @@ An interval around a caller includes queueing; nested and concurrent intervals
 overlap and must not be summed. Setup and synthetic wait time are not a timing
 baseline. The small laws and service smoke prove function, without timing
 thresholds, repetitions, or claims about a quiet-host distribution.
+
+## Durable transaction telemetry
+
+`lash.durable.commit.lock_statement_elapsed` is a histogram in microseconds
+for lock-bearing statements within one physical PostgreSQL transaction attempt,
+labelled by commit and outcome. It includes execution and network time and is
+an upper bound on lock wait. It does not isolate server lock-wait time; its
+existing producer and name already preserve this distinction.

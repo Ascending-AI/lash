@@ -2,6 +2,10 @@ use serde::Serialize;
 
 pub const DEFAULT_STACK_BUDGET_BYTES: usize = 2 * 1024 * 1024;
 
+/// Stack configuration captured for this process; no occupancy is observed.
+/// Capacity source identifies an explicit Tokio worker reservation, a Rust
+/// thread default, or the process soft limit, in that order. These settings
+/// do not describe every thread or child process executing a scenario.
 #[derive(Debug, Clone, Serialize)]
 pub struct StackProfile {
     pub worker_stack_bytes: Option<usize>,
@@ -9,10 +13,9 @@ pub struct StackProfile {
     pub process_stack_soft_limit_bytes: Option<u64>,
     pub process_stack_hard_limit_bytes: Option<u64>,
     pub process_stack_hard_limit_unlimited: bool,
-    pub measured_stack_bytes: Option<u64>,
-    pub measured_stack_source: Option<&'static str>,
+    pub configured_stack_capacity_bytes: Option<u64>,
+    pub configured_stack_capacity_source: Option<&'static str>,
     pub stack_budget_bytes: Option<usize>,
-    pub within_stack_budget: Option<bool>,
 }
 
 impl StackProfile {
@@ -30,7 +33,7 @@ impl StackProfile {
         let process_stack_hard_limit_unlimited = process_limit
             .as_ref()
             .is_some_and(|limit| limit.hard_limit_unlimited);
-        let (measured_stack_bytes, measured_stack_source) =
+        let (configured_stack_capacity_bytes, configured_stack_capacity_source) =
             if let Some(worker_stack_bytes) = worker_stack_bytes {
                 (Some(worker_stack_bytes as u64), Some("tokio_worker"))
             } else if let Some(rust_min_stack_bytes) = rust_min_stack_bytes {
@@ -43,18 +46,15 @@ impl StackProfile {
             } else {
                 (None, None)
             };
-        let within_stack_budget = stack_budget_bytes
-            .and_then(|budget| measured_stack_bytes.map(|measured| measured <= budget as u64));
         Self {
             worker_stack_bytes,
             rust_min_stack_bytes,
             process_stack_soft_limit_bytes,
             process_stack_hard_limit_bytes,
             process_stack_hard_limit_unlimited,
-            measured_stack_bytes,
-            measured_stack_source,
+            configured_stack_capacity_bytes,
+            configured_stack_capacity_source,
             stack_budget_bytes,
-            within_stack_budget,
         }
     }
 }
@@ -88,4 +88,20 @@ fn parse_limit_bytes(value: &str) -> Option<u64> {
     (value != "unlimited")
         .then(|| value.parse::<u64>().ok())
         .flatten()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn configured_capacity_never_certifies_stack_occupancy() {
+        let profile = serde_json::to_value(StackProfile::capture(Some(4096), Some(2048)))
+            .expect("stack metadata serializes");
+        println!("{profile}");
+        assert_eq!(profile["configured_stack_capacity_bytes"], 4096);
+        assert_eq!(profile["configured_stack_capacity_source"], "tokio_worker");
+        assert!(profile.get("within_stack_budget").is_none());
+        assert!(profile.get("measured_stack_bytes").is_none());
+    }
 }

@@ -73,19 +73,16 @@ def guard_failure_status(result: dict[str, Any]) -> str:
 def fmt_stack_profile(profile: Any) -> str | None:
     if not isinstance(profile, dict):
         return None
-    measured = profile.get("measured_stack_bytes")
+    capacity = profile.get("configured_stack_capacity_bytes")
     budget = profile.get("stack_budget_bytes")
-    source = profile.get("measured_stack_source") or "unknown"
-    within = profile.get("within_stack_budget")
+    source = profile.get("configured_stack_capacity_source") or "unknown"
     parts = []
-    if isinstance(measured, int | float):
-        parts.append(f"stack={fmt_bytes(measured)}")
+    if isinstance(capacity, int | float):
+        parts.append(f"configured_capacity={fmt_bytes(capacity)}")
     if isinstance(budget, int | float):
-        parts.append(f"budget={fmt_bytes(budget)}")
+        parts.append(f"configured_budget={fmt_bytes(budget)}")
     if parts:
         parts.append(f"source={source}")
-    if isinstance(within, bool):
-        parts.append(f"within_budget={'yes' if within else 'no'}")
     return "  " + "  ".join(parts) if parts else None
 
 
@@ -619,7 +616,9 @@ def summarize_dhat(payload: dict[str, Any], top: int) -> str:
         blocks = pretty_stack(p["fs"], depth=8)
         out = [
             f"  total={fmt_bytes(p['tb']):>10s}  blocks={p['tbk']:>7d}  "
-            f"max_live={fmt_bytes(p['mb']):>10s}  end_live={fmt_bytes(p['gb']):>10s}"
+            f"max_live={fmt_bytes(p['mb']):>10s}  "
+            f"peak_live(at_tgmax)={fmt_bytes(p['gb']):>10s}  "
+            f"end_live={fmt_bytes(p['eb']):>10s}"
         ]
         for label in blocks:
             out.append(f"    {label}")
@@ -627,6 +626,7 @@ def summarize_dhat(payload: dict[str, Any], top: int) -> str:
 
     lines = ["# dhat heap summary", ""]
     lines.append(f"command: {cmd}")
+    lines.append("window: profiler lifetime in the profiled process; live quantities are requested heap bytes")
     lines.append(
         f"total alloc={fmt_bytes(total_bytes)}  blocks={total_blocks}  "
         f"max_live(sum-of-pps)={fmt_bytes(total_max_bytes)}  pps={len(pps)}"

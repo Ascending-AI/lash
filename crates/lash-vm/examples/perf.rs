@@ -22,8 +22,6 @@ use std::time::Instant;
 static ALLOCATOR: CountingAllocator = CountingAllocator;
 
 static ALLOCATED_BYTES: AtomicU64 = AtomicU64::new(0);
-static LIVE_BYTES: AtomicU64 = AtomicU64::new(0);
-static PEAK_LIVE_BYTES: AtomicU64 = AtomicU64::new(0);
 static ALLOCATIONS: AtomicU64 = AtomicU64::new(0);
 static DEALLOCATIONS: AtomicU64 = AtomicU64::new(0);
 
@@ -45,7 +43,6 @@ unsafe impl GlobalAlloc for CountingAllocator {
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
         unsafe { System.dealloc(ptr, layout) };
         DEALLOCATIONS.fetch_add(1, Ordering::Relaxed);
-        record_dealloc(layout.size() as u64);
     }
 
     unsafe fn realloc(&self, ptr: *mut u8, old_layout: Layout, new_size: usize) -> *mut u8 {
@@ -57,8 +54,6 @@ unsafe impl GlobalAlloc for CountingAllocator {
         let new_size = new_size as u64;
         if new_size > old_size {
             record_alloc(new_size - old_size);
-        } else {
-            record_dealloc(old_size - new_size);
         }
         ptr
     }
@@ -67,25 +62,6 @@ unsafe impl GlobalAlloc for CountingAllocator {
 fn record_alloc(bytes: u64) {
     ALLOCATIONS.fetch_add(1, Ordering::Relaxed);
     ALLOCATED_BYTES.fetch_add(bytes, Ordering::Relaxed);
-    let live = LIVE_BYTES.fetch_add(bytes, Ordering::Relaxed) + bytes;
-    let mut peak = PEAK_LIVE_BYTES.load(Ordering::Relaxed);
-    while live > peak {
-        match PEAK_LIVE_BYTES.compare_exchange_weak(
-            peak,
-            live,
-            Ordering::Relaxed,
-            Ordering::Relaxed,
-        ) {
-            Ok(_) => break,
-            Err(next) => peak = next,
-        }
-    }
-}
-
-fn record_dealloc(bytes: u64) {
-    let _ = LIVE_BYTES.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |live| {
-        Some(live.saturating_sub(bytes))
-    });
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -288,7 +264,6 @@ fn run_perf(rt: &tokio::runtime::Runtime, mode: Mode, scenario: Scenario, iterat
     println!("allocated_bytes: {:.0}", allocated_bytes);
     println!("allocations_per_iter: {:.3}", allocations_per_iter);
     println!("allocated_bytes_per_iter: {:.1}", allocated_bytes_per_iter);
-    println!("peak_live_bytes: {}", allocs.peak_live_bytes);
     if let Some(stats) = process_cache_stats {
         println!("process_cache_hits: {}", stats.hits);
         println!("process_cache_misses: {}", stats.misses);
@@ -462,8 +437,6 @@ fn parse_mode(value: &str) -> Mode {
 
 fn reset_alloc_counters() {
     ALLOCATED_BYTES.store(0, Ordering::Relaxed);
-    LIVE_BYTES.store(0, Ordering::Relaxed);
-    PEAK_LIVE_BYTES.store(0, Ordering::Relaxed);
     ALLOCATIONS.store(0, Ordering::Relaxed);
     DEALLOCATIONS.store(0, Ordering::Relaxed);
 }
@@ -471,7 +444,6 @@ fn reset_alloc_counters() {
 fn alloc_snapshot() -> AllocSnapshot {
     AllocSnapshot {
         allocated_bytes: ALLOCATED_BYTES.load(Ordering::Relaxed),
-        peak_live_bytes: PEAK_LIVE_BYTES.load(Ordering::Relaxed),
         allocations: ALLOCATIONS.load(Ordering::Relaxed),
         deallocations: DEALLOCATIONS.load(Ordering::Relaxed),
     }
@@ -479,7 +451,6 @@ fn alloc_snapshot() -> AllocSnapshot {
 
 struct AllocSnapshot {
     allocated_bytes: u64,
-    peak_live_bytes: u64,
     allocations: u64,
     deallocations: u64,
 }

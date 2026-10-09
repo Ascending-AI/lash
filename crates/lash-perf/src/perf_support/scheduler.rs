@@ -66,7 +66,7 @@ impl RuntimeSchedulerSample {
                 vec![after.num_workers as f64],
             ),
             (
-                "runtime.global_queue_depth_max".to_string(),
+                "runtime.global_queue_depth_endpoint_max_tasks".to_string(),
                 vec![self.global_queue_depth.max(after.global_queue_depth) as f64],
             ),
         ]);
@@ -192,6 +192,24 @@ fn parse_process_cpu_ticks(stat: &str) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn queue_depth_statistic_names_its_two_endpoint_samples() {
+        let mut before = RuntimeSchedulerSample::capture();
+        let mut after = before.clone();
+        before.global_queue_depth = 5;
+        after.global_queue_depth = 2;
+        let metrics = before.window_metric_samples(&after);
+        println!(
+            "{}",
+            serde_json::to_string(&metrics).expect("metrics serialize")
+        );
+        assert_eq!(
+            metrics["runtime.global_queue_depth_endpoint_max_tasks"],
+            [5.0]
+        );
+        assert!(!metrics.contains_key("runtime.global_queue_depth_max"));
+    }
 
     #[test]
     fn process_stat_parser_handles_spaces_and_closing_parentheses_in_comm() {
