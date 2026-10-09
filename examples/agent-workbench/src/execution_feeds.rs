@@ -72,15 +72,21 @@ struct CachedGraph {
     fed: u64,
 }
 
+/// Metadata lives exactly while a follower or a retained graph needs it.
+#[derive(Default)]
+struct CachedProcess {
+    following: bool,
+    settlement: Option<WorkflowOverlaySettlement>,
+    document: Option<WorkflowDocumentRef>,
+}
+
 #[derive(Default)]
 struct Cache {
     fed: u64,
     graphs: BTreeMap<String, CachedGraph>,
-    /// The committed end of each followed process, applied to its graphs
-    /// whenever they appear.
-    settlements: BTreeMap<ProcessId, WorkflowOverlaySettlement>,
-    /// The document each followed process's snapshot names.
-    process_documents: BTreeMap<ProcessId, WorkflowDocumentRef>,
+    /// Each followed process or process with a retained graph owns its
+    /// committed settlement and the document its snapshot names together.
+    processes: BTreeMap<ProcessId, CachedProcess>,
     /// The documents lash answered, by the reference that names each.
     documents: BTreeMap<WorkflowDocumentRef, Arc<WorkflowExecutionDocument>>,
 }
@@ -92,10 +98,10 @@ impl Cache {
         self.fed += 1;
         let fed = self.fed;
         let (settlement, wants) = match &source {
-            Source::Process(process_id) => (
-                self.settlements.get(process_id).copied(),
-                self.process_documents.get(process_id).cloned(),
-            ),
+            Source::Process(process_id) => {
+                let process = self.processes.entry(process_id.clone()).or_default();
+                (process.settlement, process.document.clone())
+            }
             Source::Session(_) => (None, None),
         };
         let graph = self.graphs.entry(key).or_insert_with(|| {
@@ -128,11 +134,25 @@ impl Cache {
             };
             self.graphs.remove(&oldest);
         }
+        let retained_processes = self
+            .graphs
+            .values()
+            .filter_map(|graph| match &graph.source {
+                Source::Process(id) => Some(id.clone()),
+                Source::Session(_) => None,
+            })
+            .collect::<std::collections::BTreeSet<_>>();
+        self.processes
+            .retain(|id, process| process.following || retained_processes.contains(id));
         let wanted = self
             .graphs
             .values()
             .filter_map(|graph| graph.wants.as_ref())
-            .chain(self.process_documents.values())
+            .chain(
+                self.processes
+                    .values()
+                    .filter_map(|process| process.document.as_ref()),
+            )
             .cloned()
             .collect::<std::collections::BTreeSet<_>>();
         self.documents
@@ -223,6 +243,22 @@ impl Cache {
         self.documents
             .insert(document.reference.clone(), Arc::new(document));
         self.attach_documents();
+        // A read can answer after its graph or follower was released.
+        self.evict();
+    }
+
+    fn follow_process(&mut self, process_id: &ProcessId) {
+        self.processes
+            .entry(process_id.clone())
+            .or_default()
+            .following = true;
+    }
+
+    fn release_process(&mut self, process_id: &ProcessId) {
+        if let Some(process) = self.processes.get_mut(process_id) {
+            process.following = false;
+        }
+        self.evict();
     }
 
     /// The snapshot of `process_id` names the document it runs.
@@ -233,11 +269,17 @@ impl Cache {
                 graph.wants = Some(reference.clone());
             }
         }
-        self.process_documents.insert(process_id.clone(), reference);
+        self.processes
+            .entry(process_id.clone())
+            .or_default()
+            .document = Some(reference);
     }
 
     fn settle(&mut self, process_id: &ProcessId, settlement: WorkflowOverlaySettlement) {
-        self.settlements.insert(process_id.clone(), settlement);
+        self.processes
+            .entry(process_id.clone())
+            .or_default()
+            .settlement = Some(settlement);
         let source = Source::Process(process_id.clone());
         for graph in self.graphs.values_mut() {
             if graph.source == source {
@@ -354,6 +396,7 @@ impl ExecutionGraphs {
         if followers.processes.iter().any(|(id, _)| id == process_id) {
             return;
         }
+        self.inner.cache.lock_recover().follow_process(process_id);
         let follower = tokio::spawn(follow_process(
             self.clone(),
             state.clone(),
@@ -366,9 +409,7 @@ impl ExecutionGraphs {
         while followers.processes.len() > MAX_PROCESSES {
             if let Some((released, oldest)) = followers.processes.pop_front() {
                 oldest.abort();
-                let mut cache = self.inner.cache.lock_recover();
-                cache.settlements.remove(&released);
-                cache.process_documents.remove(&released);
+                self.inner.cache.lock_recover().release_process(&released);
             }
         }
     }
@@ -382,11 +423,9 @@ impl ExecutionGraphs {
     }
 
     fn process_follower_ended(&self, process_id: &ProcessId) {
-        self.inner
-            .followers
-            .lock_recover()
-            .processes
-            .retain(|(id, _)| id != process_id);
+        let mut followers = self.inner.followers.lock_recover();
+        followers.processes.retain(|(id, _)| id != process_id);
+        self.inner.cache.lock_recover().release_process(process_id);
     }
 
     async fn observe(
@@ -432,7 +471,7 @@ async fn follow_session(graphs: ExecutionGraphs, state: AppState, session_id: Se
         let observed = session.observe();
         // The earliest retained cursor: the feed replays what the session's
         // cells published before the workbench attached.
-        let mut feed = observed.subscribe_and_recover(observed.snapshot().await?.cursor);
+        let mut feed = observed.subscribe_and_recover(observed.attach().await?.cursor);
         while let Some(item) = feed.next().await {
             match item? {
                 SessionObservationStreamItem::Event(event) => match &event.payload {
@@ -716,6 +755,134 @@ mod tests {
             "the gapped graph keeps no provisional history: {:?}",
             history(&gapped)
         );
+    }
+
+    /// FIG-5630: completing workflows serially must release their metadata
+    /// and answered documents once neither a follower nor a graph needs them.
+    #[test]
+    fn serial_completions_release_entries_and_documents_with_their_last_graph() {
+        let graphs = ExecutionGraphs::default();
+        let document_graph =
+            lash::typescript::workflow_graph::workflow_graph_from_source_with_facets(
+                "finish(1);",
+                None,
+            )
+            .expect("a workflow document");
+        let mut released_documents = Vec::new();
+        for index in 0..MAX_GRAPHS * 2 {
+            let process_id = ProcessId::fixture(&format!("serial-{index}"));
+            let mut start = started(&process_id);
+            let TraceLanguageExecutionPayload::ExecutionStarted { document } =
+                &mut start.execution.payload
+            else {
+                unreachable!()
+            };
+            document.source_identity = format!("document-{index}");
+            let document = document.clone();
+            {
+                let mut cache = graphs.inner.cache.lock_recover();
+                cache.follow_process(&process_id);
+                cache.names_document(&process_id, document.clone());
+                cache.settle(&process_id, cancelled_at(2_000));
+                cache.observe(Source::Process(process_id.clone()), &start);
+                cache.loaded(WorkflowExecutionDocument {
+                    reference: document.clone(),
+                    graph: document_graph.clone(),
+                    entry: None,
+                });
+                released_documents.push(Arc::downgrade(
+                    cache
+                        .documents
+                        .get(&document)
+                        .expect("the answered document"),
+                ));
+            }
+            graphs.process_follower_ended(&process_id);
+        }
+        let cache = graphs.inner.cache.lock_recover();
+        assert_eq!(cache.graphs.len(), MAX_GRAPHS);
+        assert_eq!(
+            cache.processes.len(),
+            MAX_GRAPHS,
+            "only retained graphs own ended processes"
+        );
+        assert_eq!(cache.documents.len(), MAX_GRAPHS);
+        assert!(
+            released_documents[..MAX_GRAPHS]
+                .iter()
+                .all(|document| document.upgrade().is_none()),
+            "evicted graphs release their answered documents"
+        );
+        assert!(
+            cache.graphs.values().all(|graph| graph
+                .accumulator
+                .snapshot()
+                .is_some_and(|overlay| overlay.settlement.is_some())),
+            "retained graphs keep their committed settlement"
+        );
+    }
+
+    /// FIG-5630: attaching after a cell completed rebuilds its graph from
+    /// retained language evidence, without another turn or new observation.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn late_session_attachment_rebuilds_a_completed_cells_retained_graph() {
+        use crate::tests::{Workbench, run_turn};
+        use lash::observe::LiveReplayStore as _;
+        use lash::tracing::TraceLanguageExecutionStatus;
+        let replay = Arc::new(lash::observe::InMemoryLiveReplayStore::new(
+            lash::observe::InMemoryLiveReplayStoreConfig::standard(),
+        ));
+        let workbench = Workbench::builder(crate::tests::replying_provider(
+            "<typescript>let answer = 42; finish(answer);</typescript>",
+        ))
+        .live_replay(replay.clone())
+        .build()
+        .await;
+        let state = &workbench.state;
+        state.execution_graphs.clear();
+        let session_id = state.current_session_id();
+        run_turn(state, "complete a cell before attachment").await;
+        let session = state
+            .open_session_for_observation(&session_id)
+            .await
+            .expect("the completed session");
+        let snapshot = session
+            .observe()
+            .snapshot()
+            .await
+            .expect("the durable head");
+        let revision = snapshot
+            .cursor
+            .parse_for_session(&session_id)
+            .expect("the session cursor")
+            .revision;
+        let retained = replay
+            .replay_after_cursor(&replay.earliest_cursor(&session_id, revision))
+            .await
+            .expect("retained replay");
+        let lash::persistence::LiveReplayOutcome::Replayed(events) = retained else {
+            panic!("the completed cell's evidence is retained");
+        };
+        assert!(events.iter().any(|event| matches!(&event.payload,
+            SessionObservationEventPayload::LanguageExecution(observation)
+            if matches!(observation.execution.payload, TraceLanguageExecutionPayload::ExecutionFinished { status: TraceLanguageExecutionStatus::Completed, .. }))),
+            "the law attaches while the completed cell is still retained");
+        state.execution_graphs.follow_session(state, &session_id);
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if state.execution_graphs.graphs().iter().any(|graph| {
+                    graph.status == TraceLanguageExecutionStatus::Completed
+                        && !graph.nodes.is_empty()
+                }) {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("late attachment rebuilds the completed cell's graph");
+        state.execution_graphs.clear();
+        workbench.shutdown().await;
     }
 
     /// The cache keeps the most recently fed graphs and no more.

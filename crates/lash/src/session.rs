@@ -1122,6 +1122,18 @@ impl ObservableSession {
         self.feed_source().snapshot().await
     }
 
+    /// Attach to the session's current durable head with a cursor before
+    /// its earliest retained replay evidence.
+    ///
+    /// A feed from this cursor replays retained language observations,
+    /// including cells completed before attachment, while skipping commits
+    /// already included in the returned read view. Replay remains bounded:
+    /// evidence the store has released cannot be rebuilt from this operation.
+    /// Use [`snapshot`](Self::snapshot) for an ordinary transcript snapshot.
+    pub async fn attach(&self) -> Result<SessionObservation> {
+        self.feed_source().attach().await
+    }
+
     /// The live replay after `cursor`, or a gap whose replacement is the
     /// durable head when the cursor is past the head, or behind it without
     /// a replayed `Committed` bridging to it.

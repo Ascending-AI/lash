@@ -139,6 +139,15 @@ impl FeedSource {
         }
     }
 
+    /// Attach to the durable head and replay all retained provisional
+    /// evidence, including language executions that completed before attach.
+    pub(crate) async fn attach(&self) -> Result<SessionObservation> {
+        let mut observation = self.snapshot().await?;
+        let revision = self.requested_revision(&observation.cursor)?;
+        observation.cursor = self.live_replay.earliest_cursor(&self.session_id, revision);
+        Ok(observation)
+    }
+
     fn resident_at(&self, revision: SessionRevision) -> Option<SessionObservation> {
         let observation = self.resident.observe();
         (observation.session_revision() >= revision).then(|| observation.session_observation())
