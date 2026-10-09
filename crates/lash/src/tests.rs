@@ -230,7 +230,7 @@ pub(crate) fn standard_core_over(backend: lash_core::Backend) -> LashCore {
 
 /// The builder of a standard core over `backend`, for a law that names the
 /// core's owner or pacing itself.
-fn standard_core_builder_over(backend: lash_core::Backend) -> crate::LashCoreBuilder {
+pub(crate) fn standard_core_builder_over(backend: lash_core::Backend) -> crate::LashCoreBuilder {
     explicit_ephemeral_facets(LashCore::standard_builder(backend))
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
 }

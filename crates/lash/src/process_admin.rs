@@ -80,6 +80,10 @@ impl Processes {
                 Arc::clone(&self.core.process_replay_store),
                 self.core.process_effect_fold_budget,
                 self.core.env.core.observation_work_limits,
+                crate::process_feed::FeedReconcile {
+                    changes: self.core.process_changes().clone(),
+                    pacing: self.core.observer_pacing.process_reconcile,
+                },
             ),
         }
     }

@@ -25,7 +25,15 @@ fn tick(process_id: &ProcessId, n: u64) -> lash_core::ProcessEventAppendRequest 
     lash_core::ProcessEventAppendRequest::wait_entered(process_id, &wait)
 }
 
+/// A reconcile cadence no law waits out.
+const NO_CADENCE: std::time::Duration = std::time::Duration::from_secs(3600);
+
 struct Fixture {
+    /// What wakes this fixture's feeds to look at the durable process:
+    /// nothing, unless a law says otherwise.
+    reconcile: FeedReconcile,
+    /// The hub the fixture's registry ticks at each commit.
+    commits: ProcessChangeHub,
     registry: Arc<dyn ProcessRegistry>,
     replay: Arc<InMemoryProcessReplayStore>,
     process_id: ProcessId,
@@ -37,9 +45,14 @@ impl Fixture {
     /// A registered, started process: its durable sequence is 1, and
     /// nothing was published.
     async fn new() -> Self {
-        let registry: Arc<dyn ProcessRegistry> = crate::tests::sqlite_memory_store_set()
-            .await
-            .process_registry();
+        // Watched, so a commit ticks `commits`, as a core's registry does.
+        let watched = lash_core::runtime::watch_process_registry(
+            crate::tests::sqlite_memory_store_set()
+                .await
+                .process_registry(),
+        );
+        let registry = Arc::clone(watched.registry());
+        let commits = watched.hub().clone();
         let process_id = registry
             .register_process(
                 lash_core::ProcessRegistration::new(
@@ -70,6 +83,11 @@ impl Fixture {
             .await
             .expect("record the execution start");
         Self {
+            reconcile: FeedReconcile {
+                changes: ProcessChangeHub::new(),
+                pacing: PollPacing::new(NO_CADENCE, NO_CADENCE).expect("pacing"),
+            },
+            commits,
             registry,
             replay: Arc::new(InMemoryProcessReplayStore::new(
                 InMemoryProcessReplayStoreConfig::standard(),
@@ -95,6 +113,7 @@ impl Fixture {
                     page_size: NonZeroUsize::new(256).expect("page size"),
                 },
                 lash_trace::ObservationWorkLimits::standard(),
+                self.reconcile.clone(),
             ),
         }
     }
@@ -411,3 +430,6 @@ async fn a_process_that_is_not_retained_is_typed_absence_and_ends_the_feed() {
     assert!(matches!(replacement.read_view, ProcessReadView::Unknown));
     assert!(feed.next().await.is_none(), "the feed ends");
 }
+
+#[path = "reconcile_tests.rs"]
+mod reconcile;

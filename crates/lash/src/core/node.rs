@@ -227,7 +227,6 @@ impl LashCore {
 
     /// The hub that ticks when a commit grew a process's log, on this
     /// core's node or, through its node wakes, on another.
-    #[cfg(test)]
     pub(crate) fn process_changes(&self) -> &lash_core::runtime::ProcessChangeHub {
         self.substrate_slot.setup.process.watched().hub()
     }

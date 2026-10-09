@@ -16,6 +16,16 @@
 //! language observation never advances the sequence a consumer holds, and
 //! what a gap loses of it is not restored: node history is not durable.
 //!
+//! An open feed converges on the durable process whoever committed to it
+//! and whatever became of the commit's publication. It holds a subscription
+//! of the registry's change hub, which ticks at a commit on this node and,
+//! through node wakes, on another; at a tick, and on the host's reconcile
+//! cadence when a tick was lost, it compares the durable sequence with the
+//! one its consumer holds and publishes the retained facts between to the
+//! replay store, which drops those it already holds. The feed then delivers
+//! them from the store like any other. Facts it cannot read within its
+//! budget, or that were released, are a gap.
+//!
 //! Delivery is at least once. A stream drops an event identity
 //! ([`ProcessObservationEventId`]) it already delivered within a bounded
 //! window, which a host seeds with the identities it applied before a
@@ -30,13 +40,14 @@ use std::task::{Context, Poll};
 
 use futures_util::future::BoxFuture;
 use futures_util::{FutureExt as _, Stream, StreamExt as _};
+use lash_core::runtime::{PollPacing, ProcessChangeHub, ProcessChangeSubscription};
 use lash_core::{
     PluginError, ProcessEffectCoverage, ProcessEffectEvidence, ProcessEffectGapReason,
     ProcessEffectReport, ProcessEventHistoryRetention, ProcessEventPageEvents,
     ProcessEventPageMore, ProcessEventQueryMode, ProcessEventReadOutcome, ProcessObservation,
     ProcessObservationCursor, ProcessObservationEvent, ProcessObservationEventPayload,
-    ProcessObservationGapCause, ProcessReadView, ProcessRegistry, ProcessReplayGap,
-    ProcessReplayStore, ProcessReplayStoreError, ProcessReplaySubscribeOutcome,
+    ProcessObservationGapCause, ProcessReadView, ProcessRegistry, ProcessReplayEventDraft,
+    ProcessReplayGap, ProcessReplayStore, ProcessReplayStoreError, ProcessReplaySubscribeOutcome,
     ProcessReplaySubscription, ProcessSequence, RetainedProcessView, RetiredProcessStatus,
 };
 use lash_sansio::ProcessId;
@@ -137,6 +148,17 @@ pub(crate) async fn fold_effects(
     }))
 }
 
+/// What wakes an open feed to compare the durable process with what its
+/// consumer holds.
+#[derive(Clone)]
+pub(crate) struct FeedReconcile {
+    /// Ticks when a commit grew a process's log, on this node or another.
+    pub(crate) changes: ProcessChangeHub,
+    /// How long a feed waits without a tick before it compares anyway: from
+    /// the initial delay after a tick, backing off to the maximum.
+    pub(crate) pacing: PollPacing,
+}
+
 /// What a process feed reads: the durable process and the replay store.
 #[derive(Clone)]
 pub(crate) struct ProcessFeedSource {
@@ -145,6 +167,7 @@ pub(crate) struct ProcessFeedSource {
     registry: Arc<dyn ProcessRegistry>,
     replay: Arc<dyn ProcessReplayStore>,
     effect_budget: EffectFoldBudget,
+    reconcile: FeedReconcile,
 }
 
 impl ProcessFeedSource {
@@ -154,6 +177,7 @@ impl ProcessFeedSource {
         replay: Arc<dyn ProcessReplayStore>,
         effect_budget: EffectFoldBudget,
         work_limits: lash_trace::ObservationWorkLimits,
+        reconcile: FeedReconcile,
     ) -> Self {
         Self {
             work_limits,
@@ -161,6 +185,7 @@ impl ProcessFeedSource {
             registry,
             replay,
             effect_budget,
+            reconcile,
         }
     }
 
@@ -374,6 +399,10 @@ type FeedStep = BoxFuture<'static, (Box<FeedState>, Option<Result<ProcessObserva
 impl ProcessObservationStream {
     pub(crate) fn new(source: ProcessFeedSource, cursor: ProcessObservationCursor) -> Self {
         let limit = source.work_limits.session_dedup_ids;
+        // Watched before the feed's first read of the durable process, so a
+        // commit after that read ticks.
+        let changes = source.reconcile.changes.subscribe(&source.process_id);
+        let pause = source.reconcile.pacing.initial();
         Self {
             cursor: cursor.clone(),
             state: Some(Box::new(FeedState {
@@ -382,6 +411,8 @@ impl ProcessObservationStream {
                 done: false,
                 held: None,
                 live: None,
+                changes,
+                pause,
             })),
             step: None,
             applied: AppliedEventIds {
@@ -461,6 +492,10 @@ struct FeedState {
     /// gap established it.
     held: Option<ProcessSequence>,
     live: Option<ProcessReplaySubscription>,
+    /// Ticks when a commit grew the process's log.
+    changes: ProcessChangeSubscription,
+    /// How long the feed waits without a tick before its next reconcile.
+    pause: std::time::Duration,
 }
 
 impl FeedState {
@@ -486,7 +521,33 @@ impl FeedState {
                     Err(error) => return Some(Err(error)),
                 }
             };
-            match live.next().await {
+            // Whatever the replay already holds goes first; a tick or the
+            // cadence only makes the feed look at the durable process.
+            let pacing = self.source.reconcile.pacing;
+            let next = tokio::select! {
+                biased;
+                next = live.next() => Some(next),
+                changed = self.changes.changed() => {
+                    if changed.is_err() {
+                        // The registry's hub is gone: only the cadence is left.
+                        tokio::time::sleep(self.pause).await;
+                    }
+                    self.pause = pacing.initial();
+                    None
+                }
+                () = tokio::time::sleep(self.pause) => {
+                    self.pause = self.pause.saturating_mul(2).min(pacing.maximum());
+                    None
+                }
+            };
+            let Some(next) = next else {
+                match self.reconcile().await {
+                    Ok(Some(item)) => return Some(Ok(item)),
+                    Ok(None) => continue,
+                    Err(error) => return Some(Err(error)),
+                }
+            };
+            match next {
                 None => return None,
                 Some(Ok(event)) => match self.deliver(event) {
                     Delivery::Item(item) => return Some(Ok(item)),
@@ -508,15 +569,20 @@ impl FeedState {
 
     /// Subscribe from the feed's cursor, judged against the durable
     /// process: a gap replaces the consumer's state, and the feed continues
-    /// from the gap's cursor.
+    /// from the gap's cursor. A replay that lacks facts between the cursor
+    /// and the durable process is brought up to it once before it is judged
+    /// a gap: their publication was lost, or another node committed them.
     async fn subscribe(&mut self) -> Result<Option<ProcessObservationStreamItem>> {
         let requested = self.source.requested_sequence(&self.cursor)?;
-        let cause = match self.source.durable_sequence().await? {
-            None => ProcessObservationGapCause::NotRetained,
-            Some(durable) if requested > durable => {
-                ProcessObservationGapCause::AheadOfDurableProcess
+        let mut reconciled = false;
+        let cause = loop {
+            let Some(durable) = self.source.durable_sequence().await? else {
+                break ProcessObservationGapCause::NotRetained;
+            };
+            if requested > durable {
+                break ProcessObservationGapCause::AheadOfDurableProcess;
             }
-            Some(durable) => match self
+            match self
                 .source
                 .replay
                 .subscribe_after_cursor(&self.cursor)
@@ -530,15 +596,95 @@ impl FeedState {
                     self.live = Some(subscription);
                     return Ok(None);
                 }
+                ProcessReplaySubscribeOutcome::Subscribed(_) if !reconciled => {
+                    reconciled = true;
+                    self.held = Some(self.held.map_or(requested, |held| held.max(requested)));
+                    if let Some(gap) = self.reconcile().await? {
+                        return Ok(Some(gap));
+                    }
+                }
                 ProcessReplaySubscribeOutcome::Subscribed(_) => {
-                    ProcessObservationGapCause::CommitUnbridged
+                    break ProcessObservationGapCause::CommitUnbridged;
                 }
                 ProcessReplaySubscribeOutcome::Gap(reason) => {
-                    ProcessObservationGapCause::Replay { reason }
+                    break ProcessObservationGapCause::Replay { reason };
                 }
-            },
+            }
         };
         self.rebuild(cause).await.map(Some)
+    }
+
+    /// Bring the replay store up to the durable process: publish the retained
+    /// facts after the sequence the consumer holds, which the store drops
+    /// where it already holds them and the feed then delivers in order. A
+    /// released or pruned history, or more facts than the feed's read budget,
+    /// is a gap instead.
+    async fn reconcile(&mut self) -> Result<Option<ProcessObservationStreamItem>> {
+        let Some(held) = self.held else {
+            return Ok(None);
+        };
+        let Some(durable) = self.source.durable_sequence().await? else {
+            return self
+                .rebuild(ProcessObservationGapCause::NotRetained)
+                .await
+                .map(Some);
+        };
+        let budget = self.source.effect_budget;
+        let mut after = held.as_u64();
+        let mut pages = 0;
+        while after < durable.as_u64() {
+            if pages >= budget.pages {
+                return self.unbridged().await;
+            }
+            pages += 1;
+            let page = match self
+                .source
+                .registry
+                .event_page_after(
+                    &self.source.process_id,
+                    after,
+                    budget.page_size,
+                    ProcessEventQueryMode::Full,
+                )
+                .await?
+            {
+                ProcessEventReadOutcome::Retained(page) => page,
+                ProcessEventReadOutcome::NoLongerRetained(_) => return self.unbridged().await,
+            };
+            let ProcessEventPageEvents::Full(events) = page.events else {
+                return Err(PluginError::Session(
+                    "a Full process event page returned Lite events".to_string(),
+                )
+                .into());
+            };
+            let facts: Vec<_> = events
+                .into_iter()
+                .filter(|event| event.sequence > after && event.sequence <= durable.as_u64())
+                .collect();
+            let Some(last) = facts.last().map(|event| event.sequence) else {
+                break;
+            };
+            self.source
+                .replay
+                .publish(
+                    &self.source.process_id,
+                    facts
+                        .into_iter()
+                        .map(|event| ProcessReplayEventDraft::committed(event.into()))
+                        .collect(),
+                )
+                .await
+                .map_err(process_replay_error)?;
+            after = last;
+        }
+        Ok(None)
+    }
+
+    /// The gap of a consumer whose missing facts the feed cannot publish.
+    async fn unbridged(&mut self) -> Result<Option<ProcessObservationStreamItem>> {
+        self.rebuild(ProcessObservationGapCause::CommitUnbridged)
+            .await
+            .map(Some)
     }
 
     /// Replace the consumer's state with the durable read view: a gap item

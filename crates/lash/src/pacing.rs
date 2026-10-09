@@ -22,12 +22,17 @@ pub struct ObserverPacing {
     pub send_channel: NonZeroUsize,
     /// Record/event-tail pairing attempts for a process snapshot.
     pub snapshot_read_attempts: NonZeroUsize,
+    /// How long an open process feed waits without a change tick before it
+    /// compares the durable process with what its consumer holds: what a
+    /// lost wake or a store without node wakes costs a follower.
+    pub process_reconcile: PollPacing,
 }
 
 impl ObserverPacing {
     /// Standard observer preset: follow/admin/deletion poll from 25ms to 1s,
     /// terminal reads from 20ms to 1s, buffer 4096 activities, queue 64 events,
-    /// and attempt snapshot read repair twice.
+    /// attempt snapshot read repair twice, and reconcile an idle process
+    /// feed from 25ms to 1s.
     /// No workload measurement backs these values.
     pub const fn standard() -> Self {
         Self {
@@ -38,6 +43,7 @@ impl ObserverPacing {
             follow_buffer: NonZeroUsize::MIN.saturating_add(4095),
             send_channel: NonZeroUsize::MIN.saturating_add(63),
             snapshot_read_attempts: NonZeroUsize::MIN.saturating_add(1),
+            process_reconcile: PollPacing::standard(),
         }
     }
 }
