@@ -1,82 +1,7 @@
-#[cfg(feature = "synthetic-next")]
-use crate::testing::ast_builders as b;
 use crate::*;
 use lash_vm_protocol::{
     OpaqueStateRefusal, OpaqueVmState, StateExpectation, VmContractComponent, VmOwner, VmStateKind,
 };
-
-#[cfg(feature = "synthetic-next")]
-struct SleepHost;
-
-#[cfg(feature = "synthetic-next")]
-impl ExecutionHost for SleepHost {
-    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
-        match op {
-            AbilityOp::Sleep(_) => Ok(AbilityOutcome::Value(Value::Null)),
-            AbilityOp::Finish(value) => Ok(AbilityOutcome::Value(value)),
-            _ => Err(ExecutionHostError::new(
-                "the witness only sleeps or finishes",
-            )),
-        }
-    }
-}
-
-#[cfg(feature = "synthetic-next")]
-#[tokio::test]
-async fn n_parked_state_resumes_on_synthetic_next() {
-    assert_eq!(VM_CONTINUATION_FORMAT_VERSION, 2);
-    let program = crate::testing::harness::try_compile_program(&b::program(vec![
-        b::sleep_for(b::num(1.0)),
-        b::finish(b::num(7.0)),
-    ]))
-    .expect("compile the process witness");
-    let mut state = State::new();
-    let environment = ExecutionEnvironment::new(&SleepHost).process();
-    let mut vm = Vm::from_state(&program, &mut state, &environment).expect("install the witness");
-    assert_eq!(
-        vm.run_process_until_effect()
-            .await
-            .expect("run the first effect"),
-        VmRunOutcome::EffectCompleted
-    );
-    let mut wire = serde_json::to_value(vm.suspend().expect("park N's process"))
-        .expect("serialize the continuation");
-    // The synthetic predecessor and successor have the same payload shape;
-    wire["format_version"] = serde_json::json!(1);
-    let mut predecessor = vm_contract_versions();
-    predecessor.continuation = 1;
-    predecessor.snapshot = 1;
-    let owner = VmOwner::new("process:upgrade-witness");
-    let parked = OpaqueVmState::seal(
-        VmStateKind::Continuation,
-        owner.clone(),
-        predecessor,
-        serde_json::to_vec(&wire).expect("encode N's continuation"),
-    );
-    assert_eq!(
-        parked.check(&StateExpectation {
-            kind: VmStateKind::Continuation,
-            owner: &owner,
-            reads: &vm_contract_reads(),
-            max_bytes: 1024 * 1024,
-        }),
-        Ok(()),
-        "N+1 must admit every component N parked within its read range"
-    );
-    let continuation = VmInstance::pristine()
-        .open_continuation(parked.bytes())
-        .expect("the worker lifts N's continuation through its range decoder");
-    assert_eq!(continuation.format_version, VM_CONTINUATION_FORMAT_VERSION);
-    let mut resumed = Vm::resume_from(continuation, &program, &environment)
-        .expect("resume the predecessor's execution");
-    assert_eq!(
-        resumed
-            .run_process_until_effect()
-            .await
-            .expect("finish the successor"),
-        VmRunOutcome::Complete(ExecutionOutcome::Finished(Value::Number(7.0)))
-    );
-}
 
 #[test]
 fn a_component_outside_its_range_is_refused_typed() {
@@ -176,7 +101,6 @@ fn n_snapshot_reaches_the_guarded_decoder_on_synthetic_next() {
         .to_canonical_bytes_stamped(crate::runtime::SnapshotStamps { snapshot: 1 })
         .expect("encode N's snapshot");
     let mut contract = vm_contract_versions();
-    contract.continuation = 1;
     contract.snapshot = 1;
     let owner = VmOwner::new("session:upgrade-witness");
     let parked = OpaqueVmState::seal(VmStateKind::Snapshot, owner.clone(), contract, bytes);

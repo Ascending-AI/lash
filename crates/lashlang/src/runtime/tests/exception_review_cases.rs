@@ -336,9 +336,35 @@ async fn a_v2_shaped_continuation_fails_closed() {
         .expect_err("a v2-shaped continuation must be rejected");
     assert_eq!(error.to_string(), "missing field `handler_stack`");
 
-    let mut versioned = serde_json::to_value(&live).expect("wire");
-    versioned["format_version"] = serde_json::json!(2);
-    let error = serde_json::from_value::<VmContinuation>(versioned)
-        .expect_err("a rolled-back format version must be rejected");
-    assert!(error.to_string().contains("format version 2"), "{error}");
+    let bytes = live.to_bytes().expect("wire");
+    let decoded = VmInstance::pristine()
+        .open_continuation(&bytes)
+        .expect("the current format must decode");
+    assert_eq!(decoded.format_version, VM_CONTINUATION_FORMAT_VERSION);
+
+    for version in [
+        VM_CONTINUATION_FORMAT_VERSION - 1,
+        VM_CONTINUATION_FORMAT_VERSION + 1,
+        u32::MAX,
+    ] {
+        let mut versioned = serde_json::to_value(&live).expect("wire");
+        versioned["format_version"] = serde_json::json!(version);
+        let bytes = serde_json::to_vec(&versioned).expect("wire");
+        assert_eq!(
+            VmInstance::pristine().open_continuation(&bytes),
+            Err(ContinuationError::FormatVersionMismatch {
+                expected: VM_CONTINUATION_FORMAT_VERSION,
+                found: version,
+            }),
+            "a non-current format version must be rejected at decode"
+        );
+        let error = serde_json::from_value::<VmContinuation>(versioned)
+            .expect_err("a non-current format version must be rejected");
+        assert!(
+            error
+                .to_string()
+                .contains(&format!("format version {version}")),
+            "{error}"
+        );
+    }
 }

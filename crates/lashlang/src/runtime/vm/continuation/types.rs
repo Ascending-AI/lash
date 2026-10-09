@@ -77,7 +77,7 @@ impl VmContinuation {
         if let Some(version_val) = raw.get("format_version") {
             if let Some(version) = version_val.as_u64() {
                 if !u32::try_from(version)
-                    .is_ok_and(|version| crate::VM_CONTINUATION_READ_RANGE.contains(version))
+                    .is_ok_and(|version| version == VM_CONTINUATION_FORMAT_VERSION)
                 {
                     return Err(match u32::try_from(version) {
                         Ok(found) => ContinuationError::FormatVersionMismatch {
@@ -99,9 +99,8 @@ impl VmContinuation {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Wire {
-            // Checked above, and lifted to this build's format below.
-            #[serde(rename = "format_version")]
-            _format_version: u32,
+            // Checked against this build's format before decoding guest state.
+            format_version: u32,
             executable: ExecutableIdentity,
             reference_semantics: bool,
             instruction_pointer: usize,
@@ -134,8 +133,7 @@ impl VmContinuation {
 
         let wire = Wire::deserialize(raw).map_err(|error| undecodable(error.to_string()))?;
         let continuation = Self {
-            // A format this build decodes is lifted to its own.
-            format_version: VM_CONTINUATION_FORMAT_VERSION,
+            format_version: wire.format_version,
             executable: wire.executable,
             reference_semantics: wire.reference_semantics,
             instruction_pointer: wire.instruction_pointer,

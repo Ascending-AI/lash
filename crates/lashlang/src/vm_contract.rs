@@ -8,17 +8,9 @@ use crate::{
     LASHLANG_VM_ABI_VERSION, VM_CONTINUATION_FORMAT_VERSION,
 };
 
-/// The range both opaque-state admission and the continuation decoder use.
-/// The synthetic successor lifts N's unchanged continuation shape to its own.
-pub const VM_CONTINUATION_READ_RANGE: VersionRange = VersionRange::between(
-    VM_CONTINUATION_FORMAT_VERSION
-        - if cfg!(feature = "synthetic-next") {
-            1
-        } else {
-            0
-        },
-    VM_CONTINUATION_FORMAT_VERSION,
-);
+/// Opaque-state admission matches the decoder's exact continuation format.
+pub const VM_CONTINUATION_READ_RANGE: VersionRange =
+    VersionRange::exactly(VM_CONTINUATION_FORMAT_VERSION);
 
 /// The component versions this VM writes into an opaque-state envelope.
 #[expect(
