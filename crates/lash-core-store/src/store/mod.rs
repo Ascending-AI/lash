@@ -889,6 +889,16 @@ pub trait TurnInputStore: Send + Sync {
         session_id: &SessionId,
     ) -> Result<Vec<crate::PendingTurnInputRead>, StoreError>;
 
+    /// Read the immutable digest filed under this session's source key,
+    /// including retained terminal inputs. `None` means no submission holds
+    /// the key. A sender consults this before checks for new submissions;
+    /// enqueue still decides equal-content replay or conflict transactionally.
+    async fn turn_input_submission_digest(
+        &self,
+        session_id: &SessionId,
+        source_key: &str,
+    ) -> Result<Option<String>, StoreError>;
+
     /// Read one pending user input by id: the row
     /// [`list_pending_turn_inputs`](Self::list_pending_turn_inputs) lists for
     /// `input_id`, with the status the list gives it, or `None` once it is

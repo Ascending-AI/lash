@@ -269,6 +269,13 @@ impl SessionHistoryStore for Integrator {
 
 #[lash::async_trait]
 impl TurnInputStore for Integrator {
+    async fn turn_input_submission_digest(
+        &self,
+        session_id: &SessionId,
+        source_key: &str,
+    ) -> Result<Option<String>, StoreError> {
+        unreachable!("external signature witness")
+    }
     async fn enqueue_pending_turn_inputs(
         &self,
         batch: PendingTurnInputBatch,

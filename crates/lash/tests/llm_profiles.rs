@@ -1279,6 +1279,71 @@ async fn a_completion_before_a_bind_fault_is_retried_only_while_unrecorded(tier:
     );
 }
 
+/// Retrying a lost acceptance answers the original submission, even when
+/// the host retired its model key after the run settled (FIG-5762).
+async fn a_send_retry_after_its_model_key_left_the_catalog_returns_its_receipt(tier: Tier) {
+    let double = double(tier).await.expect("the store tier is available");
+    let route = Route::new("accepted once");
+    let catalog = LiveCatalog::serving(registry_of(KIMI, "kimi-k3", route.handle()));
+    let core = core_over(&double, &catalog, Vec::new());
+    let session = created_on(&core, "keys-send-retry", KIMI).await;
+    let id = lash::TurnId::parse("keys-send-retry-run").expect("nonblank host identity");
+    let input = TurnInput::text("accept exactly once");
+    let first = session
+        .send(input.clone())
+        .id(id.clone())
+        .model(KIMI)
+        .await
+        .expect("the original send is accepted");
+    let receipt = first.receipt().clone();
+    assert_eq!(answer_of(first).await, "accepted once");
+
+    catalog.serve(LlmProfileRegistry::new());
+    let retry = session
+        .send(input.clone())
+        .id(id.clone())
+        .model(KIMI)
+        .await
+        .expect("the same submission is accepted after its model key was removed");
+    assert_eq!(retry.receipt(), &receipt);
+    assert_eq!(answer_of(retry).await, "accepted once");
+    assert_eq!(catalog.resolver_calls(), (0, 0));
+    assert_eq!(route.calls(), 1);
+
+    let changed = session
+        .send(TurnInput::text("different content"))
+        .id(id.clone())
+        .model(KIMI)
+        .await
+        .err()
+        .expect("the same id cannot accept different content");
+    assert!(matches!(changed, lash::EmbedError::Runtime(error)
+        if error.code == lash::runtime::RuntimeErrorCode::DurableIdentityConflict));
+    let fresh = session
+        .send(TurnInput::text("new submission"))
+        .model(KIMI)
+        .await
+        .err()
+        .expect("a new submission still requires a served model key");
+    assert!(matches!(fresh, lash::EmbedError::Runtime(error)
+        if error.code == lash::runtime::RuntimeErrorCode::LlmProfileUnknown));
+
+    double
+        .stores
+        .session_store_factory()
+        .begin_session_close(&session.session_id(), 1)
+        .await
+        .expect("the session begins closing")
+        .expect("the session has a close intent");
+    let closing_retry = session
+        .send(input)
+        .id(id)
+        .model(KIMI)
+        .await
+        .expect("a closing session still answers its retained submission");
+    assert_eq!(closing_retry.receipt(), &receipt);
+}
+
 // ---- registration -----------------------------------------------------------
 
 #[test]
@@ -1366,3 +1431,5 @@ tiered!(
     a_completion_before_a_bind_fault_is_retried_only_while_unrecorded,
     ignore = "FIG-5368, FIG-5367: the bind fault reaches the tool instead of parking the session, which no host can redrive"
 );
+
+tiered!(a_send_retry_after_its_model_key_left_the_catalog_returns_its_receipt);

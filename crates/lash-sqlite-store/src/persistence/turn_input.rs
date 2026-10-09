@@ -2,6 +2,32 @@ use super::*;
 
 #[async_trait::async_trait]
 impl lash_core_execution::TurnInputStore for SqliteStore {
+    async fn turn_input_submission_digest(
+        &self,
+        session_id: &SessionId,
+        source_key: &str,
+    ) -> Result<Option<String>, StoreError> {
+        let session_id = session_id.clone();
+        let source_key = source_key.to_string();
+        self.conn
+            .call(move |conn| {
+                let outcome = conn
+                    .query_row(
+                        crate::turn_ingress::turn_ingress_sql()
+                            .pending_inputs
+                            .select_id_by_source_key
+                            .sql(),
+                        params![session_id.as_str(), source_key],
+                        |row| row.get(1),
+                    )
+                    .optional()
+                    .map_err(sqlite_error);
+                Ok(outcome)
+            })
+            .await
+            .map_err(sqlite_error)?
+    }
+
     async fn enqueue_pending_turn_inputs(
         &self,
         batch: lash_core_execution::PendingTurnInputBatch,
@@ -414,22 +440,9 @@ pub(crate) fn enqueue_pending_turn_inputs_conn(
     use lash_core_execution::store_backend_support as support;
     let session_id = batch.session_id();
     ensure_session_not_deleted_conn(tx, session_id)?;
-    ensure_session_not_closing_conn(tx, session_id)?;
     for draft in batch.drafts() {
         support::validate_turn_input_source_key(draft)?;
     }
-    let ids = batch
-        .drafts()
-        .iter()
-        .flat_map(|draft| draft.input.stored_attachment_ids())
-        .collect::<std::collections::BTreeSet<_>>()
-        .into_iter()
-        .collect::<Vec<_>>();
-    let claim = lash_core_execution::ReferrerClaim::unguarded(
-        lash_core_execution::ArtifactReferrer::Session(session_id.clone()),
-    )
-    .map_err(|error| error.into_store_error("pending input attachment referrer"))?;
-    crate::attachments::acquire_attachment_refs_conn(tx, &claim, &ids, now)?;
     let sql = crate::turn_ingress::turn_ingress_sql();
     let mut interned = std::collections::BTreeSet::new();
     let mut admitted = Vec::with_capacity(batch.drafts().len());
@@ -465,6 +478,13 @@ pub(crate) fn enqueue_pending_turn_inputs_conn(
         )? {
             support::TurnInputDraftAdmission::Existing { input_id } => input_id,
             support::TurnInputDraftAdmission::New => {
+                ensure_session_not_closing_conn(tx, session_id)?;
+                let ids = draft.input.stored_attachment_ids();
+                let claim = lash_core_execution::ReferrerClaim::unguarded(
+                    lash_core_execution::ArtifactReferrer::Session(session_id.clone()),
+                )
+                .map_err(|error| error.into_store_error("pending input attachment referrer"))?;
+                crate::attachments::acquire_attachment_refs_conn(tx, &claim, &ids, now)?;
                 if let Some(turn_id) = draft.ingress.active_turn_id() {
                     support::require_known_turn_address(
                         session_id,

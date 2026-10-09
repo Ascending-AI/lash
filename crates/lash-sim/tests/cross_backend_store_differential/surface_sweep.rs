@@ -100,6 +100,8 @@ pub(super) enum SurfaceMethod {
     /// [`IngressStore::enqueue_pending_turn_input`] of a keyed next-turn
     /// input under a non-default run spec, which interns the spec (FIG-3838).
     EnqueueRunSpecInput,
+    /// The retained submission digest, independent of input lifecycle state.
+    TurnInputSubmissionDigest,
     /// [`IngressStore::enqueue_pending_turn_inputs`] of a batch under the
     /// sweep's run spec that resends the spec input and adds a new one, or
     /// (`conflicting`) adds a new one beside the spec input with changed
@@ -196,6 +198,7 @@ impl SurfaceMethod {
             Self::RunOfInput => "surface:run_of_input",
             Self::BoundTurnScopes => "surface:bound_turn_scopes",
             Self::EnqueueRunSpecInput => "surface:enqueue_run_spec_input",
+            Self::TurnInputSubmissionDigest => "surface:turn_input_submission_digest",
             Self::EnqueueTurnInputBatch { conflicting: false } => {
                 "surface:enqueue_turn_input_batch"
             }
@@ -374,8 +377,10 @@ pub(super) fn surface_sweep_case() -> GeneratedCase {
             // A spec is unknown until an input naming it is admitted, then
             // reads back exactly; a retry interns nothing new.
             surface(SurfaceMethod::LoadRunSpec { known: true }),
+            surface(SurfaceMethod::TurnInputSubmissionDigest),
             surface(SurfaceMethod::EnqueueRunSpecInput),
             surface(SurfaceMethod::EnqueueRunSpecInput),
+            surface(SurfaceMethod::TurnInputSubmissionDigest),
             // A batch resends the spec input and adds one; resending the
             // batch adds nothing; a conflicting batch is refused whole.
             surface(SurfaceMethod::EnqueueTurnInputBatch { conflicting: false }),
@@ -392,6 +397,7 @@ pub(super) fn surface_sweep_case() -> GeneratedCase {
             surface(SurfaceMethod::CancelUnknownPendingTurnInput),
             surface(SurfaceMethod::CancelPendingTurnInputSuffix),
             surface(SurfaceMethod::CancelPendingTurnInputs),
+            surface(SurfaceMethod::TurnInputSubmissionDigest),
             surface(SurfaceMethod::AbortUnknownAttachmentWrite),
             surface(SurfaceMethod::AcquireUnknownAttachmentRefs),
             surface(SurfaceMethod::ForgetUnknownAttachment),
@@ -922,6 +928,12 @@ impl BackendRunner {
                     "run_spec_is_interned_hash={}",
                     input.run_spec == surface_run_spec_hash()
                 )
+            }
+            SurfaceMethod::TurnInputSubmissionDigest => {
+                let digest = store
+                    .turn_input_submission_digest(&session_id, "surface:run-spec-input")
+                    .await?;
+                format!("submission_digest={digest:?}")
             }
             SurfaceMethod::EnqueueTurnInputBatch { conflicting } => {
                 let draft = |key: &str, text: &str| {

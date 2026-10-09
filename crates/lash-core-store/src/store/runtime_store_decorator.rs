@@ -92,6 +92,7 @@ macro_rules! runtime_store_operations {
                 [carried batch] fn admit_pending_turn_inputs(&self, batch: crate::PendingTurnInputBatch) -> Result<TurnInputAdmission, StoreError>;
                 [session] fn load_run_spec(&self, session_id: &SessionId, hash: &crate::run_spec::RunSpecHash) -> Result<Option<crate::run_spec::RunSpec>, StoreError>;
                 [session] fn list_pending_turn_inputs(&self, session_id: &SessionId) -> Result<Vec<crate::PendingTurnInputRead>, StoreError>;
+                [session] fn turn_input_submission_digest(&self, session_id: &SessionId, source_key: &str) -> Result<Option<String>, StoreError>;
                 [session] fn pending_turn_input(&self, session_id: &SessionId, input_id: &crate::InputId) -> Result<Option<crate::PendingTurnInputRead>, StoreError>;
                 [session] fn list_turn_input_applications(&self, session_id: &SessionId) -> Result<Vec<crate::TurnInputApplication>, StoreError>;
                 [session] fn cancel_pending_turn_inputs(&self, session_id: &SessionId, targets: &[crate::PendingTurnInputCancelTarget]) -> Result<Vec<crate::PendingTurnInputCancelReceipt>, StoreError>;

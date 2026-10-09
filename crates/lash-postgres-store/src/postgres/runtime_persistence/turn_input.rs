@@ -2,6 +2,25 @@ use super::*;
 
 #[async_trait::async_trait]
 impl lash_core_execution::TurnInputStore for PostgresStore {
+    async fn turn_input_submission_digest(
+        &self,
+        session_id: &SessionId,
+        source_key: &str,
+    ) -> Result<Option<String>, StoreError> {
+        let row: Option<(String, String)> = sqlx::query_as(
+            crate::turn_ingress::turn_ingress_sql()
+                .pending_inputs
+                .select_id_by_source_key
+                .sql(),
+        )
+        .bind(session_id.as_str())
+        .bind(source_key)
+        .fetch_optional(crate::observed_sql::executor(&self.pool))
+        .await
+        .map_err(store_sqlx_error)?;
+        Ok(row.map(|(_, digest)| digest))
+    }
+
     async fn enqueue_pending_turn_inputs(
         &self,
         batch: lash_core_execution::PendingTurnInputBatch,
@@ -337,7 +356,6 @@ pub(crate) async fn enqueue_pending_turn_inputs_tx(
     use lash_core_execution::store_backend_support as support;
     let session_id = batch.session_id();
     ensure_session_not_deleted_tx(tx, session_id).await?;
-    ensure_session_not_closing_tx(tx, session_id).await?;
     for draft in batch.drafts() {
         support::validate_turn_input_source_key(draft)?;
     }
@@ -345,21 +363,6 @@ pub(crate) async fn enqueue_pending_turn_inputs_tx(
     // producer takes it before it allocates, so the absences read below
     // hold and the block allocated below is contiguous (FIG-3842).
     super::lock_session_history_mutation_tx(tx, session_id).await?;
-    let ids = batch
-        .drafts()
-        .iter()
-        .flat_map(|draft| draft.input.stored_attachment_ids())
-        .collect::<std::collections::BTreeSet<_>>()
-        .into_iter()
-        .collect::<Vec<_>>();
-    let claim = lash_core_execution::ReferrerClaim::unguarded(
-        lash_core_execution::ArtifactReferrer::Session(session_id.clone()),
-    )
-    .map_err(|error| error.into_store_error("pending input attachment referrer"))?;
-    crate::artifact_store::lock_referrer_tx(tx, &claim.referrer())
-        .await
-        .map_err(store_sqlx_error)?;
-    crate::attachments::acquire_attachment_refs_tx(tx, &claim, &ids, now).await?;
     let sql = crate::turn_ingress::turn_ingress_sql();
     let mut interned = std::collections::BTreeSet::new();
     let mut admitted = Vec::with_capacity(batch.drafts().len());
@@ -393,6 +396,16 @@ pub(crate) async fn enqueue_pending_turn_inputs_tx(
         )? {
             support::TurnInputDraftAdmission::Existing { input_id } => input_id,
             support::TurnInputDraftAdmission::New => {
+                ensure_session_not_closing_tx(tx, session_id).await?;
+                let ids = draft.input.stored_attachment_ids();
+                let claim = lash_core_execution::ReferrerClaim::unguarded(
+                    lash_core_execution::ArtifactReferrer::Session(session_id.clone()),
+                )
+                .map_err(|error| error.into_store_error("pending input attachment referrer"))?;
+                crate::artifact_store::lock_referrer_tx(tx, &claim.referrer())
+                    .await
+                    .map_err(store_sqlx_error)?;
+                crate::attachments::acquire_attachment_refs_tx(tx, &claim, &ids, now).await?;
                 if let Some(turn_id) = draft.ingress.active_turn_id() {
                     let evidence = turn_address_evidence_tx(tx, session_id, turn_id).await?;
                     support::require_known_turn_address(session_id, turn_id, evidence)?;

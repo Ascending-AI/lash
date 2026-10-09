@@ -469,15 +469,27 @@ impl SendBuilder {
         // like any other.
         let host_id = id.or_else(|| input.trace_turn_id.take());
         input.trace_turn_id = None;
-        let id = Some(host_id.unwrap_or_else(crate::turn::fresh_turn_id));
+        let id = host_id.unwrap_or_else(crate::turn::fresh_turn_id);
         let cursor = target.current_cursor();
-        refuse_unservable_selection(&context, &run_spec).await?;
+        // A retained submission is answered by the store's digest verdict,
+        // including a changed-content conflict. Only a new key consults the
+        // host's current model selection (FIG-5762).
+        if (run_spec.overrides.model.is_some() || run_spec.overrides.reasoning.is_some())
+            && context
+                .parts
+                .store
+                .turn_input_submission_digest(id.as_str())
+                .await?
+                .is_none()
+        {
+            refuse_unservable_selection(&context, &run_spec).await?;
+        }
         let enqueued = context
             .parts
             .ops
             .enqueue_turn_inputs(
                 &context.parts.store,
-                vec![(input, id.as_ref().map(ToString::to_string))],
+                vec![(input, Some(id.to_string()))],
                 ingress,
                 run_spec,
                 pin,
@@ -504,7 +516,7 @@ impl SendBuilder {
         Ok(SendHandle {
             target,
             receipt,
-            id,
+            id: Some(id),
             cursor,
             shared: Arc::new(HandleShared::pending()),
         })
