@@ -8,13 +8,33 @@
 //! the [`Host`] the embedder passes to [`Machine::run`]. The machine parks;
 //! the embedder commits.
 //!
-//! This crate fixes the interface. Its rules are the `K-MACH` rules of
+//! [`KernelMachine`] is the machine; [`Machine`] is the interface an embedder
+//! and the conformance harness drive it through. Its rules are the `K-MACH` rules of
 //! `docs/kernel/semantics.md`.
 
+mod compile;
+mod data;
+mod functions;
+mod heap;
 mod interface;
+mod machine;
+
+#[cfg(test)]
+mod laws;
+
+pub use compile::Layout;
+pub use functions::{MachineFunctions, register_machine_functions};
+pub use machine::KernelMachine;
 
 pub use interface::{
     Bindings, Bound, BoundExceeded, Bounds, DeliverError, Delivered, EffectRequest, End,
     ExportError, Finished, Host, ImportError, Machine, MachineError, Meters, Outcome, Park,
     Program, Request, RunError, SleepRequest, Start, StartError, Step, Target, WaitId,
 };
+
+/// The parked state of [`KernelMachine`]: none yet. The machine runs a
+/// document from its start to its end; it writes and reads no parked
+/// state, so this type has no value and [`Machine::import`] cannot be
+/// called.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Unparked {}

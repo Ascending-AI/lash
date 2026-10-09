@@ -990,6 +990,8 @@ PACKAGE_DEPS = {
         "dev": {},
         "normal": {
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
+            "num_bigint": "//third-party/rust:p0210",
+            "num_traits": "//third-party/rust:p0216",
             "thiserror": "//third-party/rust:p0364"
         }
     },

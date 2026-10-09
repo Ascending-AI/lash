@@ -2792,6 +2792,8 @@ name = "lash-kernel-vm"
 version = "0.0.0-dev"
 dependencies = [
  "lash-kernel-doc",
+ "num-bigint",
+ "num-traits",
  "thiserror",
 ]
 

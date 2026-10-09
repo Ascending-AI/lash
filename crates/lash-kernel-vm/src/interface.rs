@@ -270,6 +270,10 @@ pub enum StartError {
 pub enum MachineError {
     #[error("the run has ended")]
     Ended,
+    /// The machine found its own state inconsistent: a defect in the
+    /// machine, never in the document. The run is over.
+    #[error("the machine is in a state it cannot run from: {problem}")]
+    Fault { problem: String },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -277,6 +281,9 @@ pub enum MachineError {
 pub enum ExportError {
     #[error("the run has ended; there is nothing to park")]
     Ended,
+    /// The machine has no parked-state encoding.
+    #[error("this machine cannot write a parked state")]
+    NoEncoding,
 }
 
 /// A parked state the machine refuses to resume.

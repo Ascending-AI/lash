@@ -45053,6 +45053,8 @@
       "declared_features": [],
       "dependencies": [
         "lash-kernel-doc",
+        "num-bigint",
+        "num-traits",
         "thiserror"
       ],
       "doc": "//crates/lash-kernel-vm:lash-kernel-vm__doc",
