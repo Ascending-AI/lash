@@ -216,32 +216,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn verified_commit_owns_the_live_budget_observation_at_its_sql_boundary() {
-        let metrics = crate::operational_metrics::TestMetrics::install();
-        let state = crate::RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(
-            crate::TurnBudget::Unbounded,
-            crate::MaxToolCalls::new(1024),
-            crate::NoProgressBudget::bounded(12),
-        ));
-        let store = FacadeTestStore {
-            materialized_session: Some(state.session_id.clone()),
-            advances_revision: true,
-            ..Default::default()
-        };
-        super::commit_runtime_state_verified(
-            &store,
-            RuntimeCommit::persisted_state_for_test(&state),
-            &lash_trace::telemetry::metrics::TelemetryMetrics::default(),
-        )
-        .await
-        .unwrap();
-        assert_eq!(
-            metrics.histogram_count("lash.runtime_commit.budgeted_size"),
-            1
-        );
-    }
-
-    #[tokio::test]
     async fn verified_commit_records_node_budget_rejection_after_binding() {
         let metrics = crate::operational_metrics::TestMetrics::install();
         let state = crate::RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(

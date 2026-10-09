@@ -245,6 +245,19 @@ async fn an_out_of_range_plugin_write_is_refused_with_zero_publication_on_every_
     state.set_plugin_state(Some(plugin_state(1, 1)));
     state.authority.plugin_config.insert_versioned(
         PLUGIN,
+        version(2),
+        serde_json::json!({"count": 1}),
+    );
+    let before = published(&location);
+    let error = commit(&store, &mut state)
+        .await
+        .expect_err("a first-format state cannot provision a later config in the same publication");
+    outside(&error, FormatNamespace::Config, 2, permitted);
+    assert_eq!(published(&location), before);
+    assert_eq!(recorded_range(&location), None);
+
+    state.authority.plugin_config.insert_versioned(
+        PLUGIN,
         version(1),
         serde_json::json!({"count": 1}),
     );

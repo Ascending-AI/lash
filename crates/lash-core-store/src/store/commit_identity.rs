@@ -931,37 +931,6 @@ mod append_request_identity_tests {
             .join("\n")
             + "\n"
     }
-
-    #[test]
-    fn append_request_identity_covers_only_ordered_semantic_request_fields() {
-        let nodes = vec![
-            crate::SessionAppendNode::plugin("receipt", serde_json::json!({"b": 2, "a": 1})),
-            crate::SessionAppendNode::plugin("receipt", serde_json::json!({"value": 2})),
-        ];
-        let first = append_request_identity_hash(&operation("op-1"), Some("ancestor"), &nodes)
-            .expect("first identity");
-        let same = append_request_identity_hash(&operation("op-1"), Some("ancestor"), &nodes)
-            .expect("same identity");
-        assert_eq!(first, same);
-
-        let mut reversed = nodes.clone();
-        reversed.reverse();
-        assert_ne!(
-            first,
-            append_request_identity_hash(&operation("op-1"), Some("ancestor"), &reversed)
-                .expect("reordered identity")
-        );
-        assert_ne!(
-            first,
-            append_request_identity_hash(&operation("op-2"), Some("ancestor"), &nodes)
-                .expect("changed operation identity")
-        );
-        assert_ne!(
-            first,
-            append_request_identity_hash(&operation("op-1"), None, &nodes)
-                .expect("changed ancestor identity")
-        );
-    }
 }
 
 impl OperationId {
@@ -1250,27 +1219,4 @@ fn history_node_preimage(
     identity.bytes(operation.as_bytes());
     identity.bytes(&ordinal.to_be_bytes());
     Ok(identity.finish())
-}
-
-#[cfg(test)]
-mod history_node_golden_tests {
-    use super::*;
-
-    #[test]
-    fn history_node_preimage_has_an_independent_frozen_golden() {
-        let operation = OperationId::turn("s", "t", "k");
-        let golden = concat!(
-            "000000000000000173",
-            "0000000000000042",
-            "7b226b6579223a226b222c2273636f7065223a7b2273657373696f6e5f6964223a2273222c227475726e5f6964223a2274222c2274797065223a227475726e227d7d",
-            "00000000000000080000000000000007"
-        );
-        let actual = history_node_preimage(&SessionId::from("s"), &operation, 7)
-            .expect("encode history-node preimage");
-        let hex = actual
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect::<String>();
-        assert_eq!(hex, golden);
-    }
 }

@@ -155,4 +155,32 @@ pub async fn release_stamp_conformance(deployment: &dyn ReleaseStampDeployment) 
         after_older.release, build_release,
         "a newer release opening the store takes the stamp over"
     );
+
+    // An unorderable existing stamp is not evidence this build is newer.
+    deployment
+        .force_release("garbage")
+        .await
+        .expect("force a malformed release");
+    let malformed = stamp(
+        &deployment
+            .preflight()
+            .await
+            .expect("preflight reads the malformed release"),
+        "before reopening over a malformed release",
+    );
+    deployment
+        .open()
+        .await
+        .expect("reopen over an unorderable release stamp");
+    let after_malformed = stamp(
+        &deployment
+            .preflight()
+            .await
+            .expect("preflight after the malformed release"),
+        "after reopening over a malformed release",
+    );
+    assert_eq!(
+        after_malformed, malformed,
+        "an unorderable pair must leave the existing stamp untouched"
+    );
 }

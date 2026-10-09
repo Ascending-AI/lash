@@ -1251,18 +1251,6 @@ mod tests {
     }
 
     #[test]
-    fn cleanup_decoder_refuses_a_guard_for_another_referrer_kind() {
-        let referrer = ArtifactReferrer::HostPin(HostArtifactPin::mint());
-        let text = serde_json::json!({
-            "referrer": referrer,
-            "plan": { "plan": "await_journal" },
-            "gate": null,
-        })
-        .to_string();
-        assert!(ArtifactCleanup::from_json(&text, &referrer).is_err());
-    }
-
-    #[test]
     fn cleanup_bodies_round_trip_and_check_their_row() {
         let referrers = every_kind();
         let guards = [

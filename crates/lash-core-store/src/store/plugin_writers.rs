@@ -482,65 +482,6 @@ mod tests {
     }
 
     #[test]
-    fn a_stamp_outside_its_plugin_range_is_refused() {
-        let recorded = ranges(&[("probe", 1, 1)]);
-        assert_eq!(
-            recorded.admit(&publication(&[("probe", FormatNamespace::State, 1)])),
-            Ok(BTreeMap::new())
-        );
-        for namespace in [FormatNamespace::State, FormatNamespace::Config] {
-            assert_eq!(
-                recorded.admit(&publication(&[("probe", namespace, 2)])),
-                Err(CompatRefusal::PluginWriterOutsideRange {
-                    plugin: "probe".into(),
-                    namespace,
-                    writer: 2,
-                    permitted: VersionRange::exactly(1),
-                })
-            );
-        }
-    }
-
-    #[test]
-    fn an_unnamed_plugin_publishes_only_its_first_format() {
-        let recorded = PluginWriterRanges::default();
-        assert_eq!(
-            recorded.admit(&publication(&[
-                ("probe", FormatNamespace::State, 1),
-                ("probe", FormatNamespace::Config, 1),
-            ])),
-            Ok(BTreeMap::from([(
-                "probe".to_owned(),
-                VersionRange::exactly(1)
-            )]))
-        );
-        assert_eq!(
-            recorded.admit(&publication(&[("probe", FormatNamespace::State, 2)])),
-            Err(CompatRefusal::PluginWriterUnprovisioned {
-                plugin: "probe".into()
-            })
-        );
-        assert_eq!(
-            recorded.admit(&publication(&[
-                ("probe", FormatNamespace::State, 1),
-                ("probe", FormatNamespace::Config, 2),
-            ])),
-            Err(CompatRefusal::PluginWriterOutsideRange {
-                plugin: "probe".into(),
-                namespace: FormatNamespace::Config,
-                writer: 2,
-                permitted: VersionRange::exactly(1),
-            })
-        );
-        assert_eq!(
-            recorded.permitted_writer("probe"),
-            Err(CompatRefusal::PluginWriterUnprovisioned {
-                plugin: "probe".into()
-            })
-        );
-    }
-
-    #[test]
     fn a_malformed_range_is_refused() {
         for (min, max) in [(0, 1), (2, 1), (-1, 1), (1, i64::from(u32::MAX) + 1)] {
             assert!(matches!(

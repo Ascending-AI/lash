@@ -783,29 +783,6 @@ mod tests {
     }
 
     #[test]
-    fn a_newer_release_advances_the_stamp_and_nothing_else_does() {
-        assert!(release_stamp_advances("0.1.0", "0.2.0"));
-        assert!(release_stamp_advances("0.1.0-alpha.1", "0.1.0"));
-        assert!(release_stamp_advances("0.0.0-dev", "0.1.0"));
-        assert!(
-            !release_stamp_advances("0.2.0", "0.1.0"),
-            "an older release must never downgrade the stamp"
-        );
-        assert!(
-            !release_stamp_advances("0.1.0", "0.1.0"),
-            "a reopen under the same release leaves the written-at instant alone"
-        );
-        assert!(
-            !release_stamp_advances("0.1.0", "not-a-version"),
-            "an unorderable candidate is not evidence that it is newer"
-        );
-        assert!(
-            !release_stamp_advances("garbage", "0.1.0"),
-            "an unorderable existing stamp is left for an operator to read"
-        );
-    }
-
-    #[test]
     fn prerelease_identifiers_order_the_way_semver_precedence_does() {
         assert_eq!(
             compare_releases("0.1.0-alpha.2", "0.1.0-alpha.10"),

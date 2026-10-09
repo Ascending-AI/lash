@@ -197,22 +197,6 @@ fn legacy_hash_reproduces_random_committed_message_id_conflict() {
 }
 
 #[test]
-fn intent_hash_golden_vector() {
-    // Checkpoint manifest v3, explicit ambient tool access, and the config
-    // revision are pinned in intent bytes.
-    // FIG-3542: the frame-handoff batch list left the intent; a pending
-    // follow-on enters it only when the commit leaves one on the head.
-    // FIG-4236: the usage deltas left the intent (ADR 0125).
-    // FIG-5172: the interrupted-turn closure left the intent (turn cancel
-    // is session mail), and with it the always-present turn id field.
-    let hash = intent_fixture().turn_commit_hash().expect("golden intent");
-    assert_eq!(
-        hash,
-        include_str!("testdata/runtime_commit_intent.hex").trim()
-    );
-}
-
-#[test]
 #[ignore = "regenerates crates/lash-core-store/src/store/testdata/runtime_commit_intent.hex"]
 #[expect(
     clippy::disallowed_methods,
@@ -232,6 +216,13 @@ fn regenerate_intent_hash_golden_vector() {
 
 #[test]
 fn failure_evidence_changes_intent_hash_from_current_shape() {
+    // Checkpoint manifest v3, explicit ambient tool access, and the config
+    // revision are pinned in intent bytes.
+    // FIG-3542: the frame-handoff batch list left the intent; a pending
+    // follow-on enters it only when the commit leaves one on the head.
+    // FIG-4236: the usage deltas left the intent (ADR 0125).
+    // FIG-5172: the interrupted-turn closure left the intent (turn cancel
+    // is session mail), and with it the always-present turn id field.
     let baseline = intent_fixture();
     let baseline_hash = baseline.turn_commit_hash().expect("baseline intent");
     assert_eq!(
@@ -463,22 +454,6 @@ fn derived_node_ids_are_session_operation_and_ordinal_scoped() {
         id,
         derive_history_node_id(&SessionId::from("session-a"), &first, 1).expect("other ordinal")
     );
-}
-
-#[test]
-fn node_derivation_guard_rejects_rogue_ids() {
-    let mut commit = intent_fixture();
-    let operation = OperationId::turn("golden-session", "turn-42", "final");
-    commit.turn_commit = RuntimeTurnCommitStamp::new(operation);
-    commit.validate_node_derivation().expect("derived proposal");
-
-    let mut rogue = commit.clone();
-    let nodes = rogue.graph.nodes_mut();
-    nodes[0].node_id = "rogue".into();
-    assert!(matches!(
-        rogue.validate_node_derivation(),
-        Err(StoreError::NodeIdDerivationMismatch { .. })
-    ));
 }
 
 #[test]

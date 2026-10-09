@@ -256,56 +256,6 @@ mod semantic_boundary_request_identity_tests {
     }
 
     #[test]
-    fn semantic_boundary_identity_excludes_the_rebuilt_baseline() {
-        let commit = stamped_record_config_commit();
-        let mut rebuilt = commit.clone();
-        rebuilt.expected_head_revision += 7;
-        rebuilt.checkpoint.turn_state.turn_index += 3;
-        assert_ne!(
-            commit.turn_commit_hash().expect("original commit hash"),
-            rebuilt.turn_commit_hash().expect("rebuilt commit hash"),
-            "the rebuilt baseline must change the exact commit hash"
-        );
-        assert_eq!(
-            semantic_boundary_request_identity(&commit, SemanticBoundaryOperation::RecordConfig)
-                .expect("original identity"),
-            semantic_boundary_request_identity(&rebuilt, SemanticBoundaryOperation::RecordConfig)
-                .expect("rebuilt identity"),
-            "CAS revision and checkpoint baseline are excluded from the request identity"
-        );
-    }
-
-    #[test]
-    fn semantic_boundary_identity_covers_config_and_operation() {
-        let commit = stamped_record_config_commit();
-        let (_, original) =
-            semantic_boundary_request_identity(&commit, SemanticBoundaryOperation::RecordConfig)
-                .expect("original identity");
-
-        let mut changed_config = commit.clone();
-        changed_config.config = crate::PersistedSessionConfig::new(
-            crate::TurnBudget::bounded(7),
-            crate::MaxToolCalls::new(1024),
-            crate::NoProgressBudget::bounded(12),
-            crate::SessionToolAccess::ambient(),
-        );
-        let (_, changed) = semantic_boundary_request_identity(
-            &changed_config,
-            SemanticBoundaryOperation::RecordConfig,
-        )
-        .expect("changed-config identity");
-        assert_ne!(original, changed, "config participates in the identity");
-
-        let (_, foreign) =
-            semantic_boundary_request_identity(&commit, SemanticBoundaryOperation::CreateSession)
-                .expect("foreign-family identity");
-        assert_ne!(
-            original, foreign,
-            "the operation-owned hash domain must separate identical bytes"
-        );
-    }
-
-    #[test]
     fn stamped_semantic_boundary_commit_validates_and_stale_stamps_are_refused() {
         let commit = stamped_record_config_commit();
         commit

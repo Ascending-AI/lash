@@ -512,6 +512,34 @@ async fn a_wake_crosses_processes_and_a_killed_process_is_reaped_by_its_lock() {
         }
     }
 
+    // One publication spans several envelopes, and every actor must reach
+    // the listener in the other process through SQLite's forwarding path.
+    let actors: BTreeSet<ActorKey> = (0..1_000)
+        .map(|index| actor(&format!("crowded-{index:04}")))
+        .collect();
+    assert!(
+        node_wake_payload::owned(&actors).len() > 1,
+        "the crowd must span multiple wake envelopes"
+    );
+    stores
+        .node_wakes()
+        .expect("file node wakes")
+        .publish(&WakeBatch {
+            owned: BTreeMap::from([(child_boot.node.clone(), actors.clone())]),
+            ..WakeBatch::default()
+        })
+        .await
+        .expect("publish the entire crowd in one batch");
+    let mut expected: BTreeSet<String> =
+        actors.iter().map(|actor| format!("woke {actor}")).collect();
+    while !expected.is_empty() {
+        let line = child.next(WATCHDOG).await;
+        assert!(
+            expected.remove(&line),
+            "unexpected or duplicate wake: {line}"
+        );
+    }
+
     child.kill().await;
     let WakeEvidence::Reaped(reaped) = evidence_until(&mut evidence, |event| {
         matches!(event, WakeEvidence::Reaped(_))
@@ -684,101 +712,5 @@ async fn a_sweep_pass_in_another_process_holds_its_rows_until_it_dies() {
             .collect::<Vec<_>>(),
         vec![swept()],
         "a killed process's pass kept its row"
-    );
-}
-
-/// FIG-5555: wake hints preserve delimiter-bearing identities and the
-/// largest plain key that fits the transport envelope, without oversized payloads.
-#[test]
-fn wake_payloads_round_trip_delimiters_and_a_maximal_fitting_key() {
-    for actors in [
-        std::collections::BTreeSet::from([
-            ActorKey::process("b\ns/a").expect("newlines are valid"),
-            ActorKey::session("quotes\"\\\0雪").expect("escaped text is valid"),
-        ]),
-        std::collections::BTreeSet::from([ActorKey::session(
-            &"x".repeat(node_wake_payload::MAX_BYTES - 6),
-        )
-        .expect("actor ids have no length bound")]),
-        std::collections::BTreeSet::from([ActorKey::session(
-            &"\n".repeat((node_wake_payload::MAX_BYTES - 6) / 2),
-        )
-        .expect("escaping counts toward the bound")]),
-    ] {
-        let batch = WakeBatch {
-            owned: std::collections::BTreeMap::from([(NodeId::new("round-trip"), actors.clone())]),
-            ..WakeBatch::default()
-        };
-        let payloads: Vec<String> = rows(&batch)
-            .into_iter()
-            .map(|(_, payload)| payload)
-            .collect();
-        assert!(
-            payloads
-                .iter()
-                .all(|payload| payload.len() <= node_wake_payload::MAX_BYTES)
-        );
-        let carried: std::collections::BTreeSet<ActorKey> = payloads
-            .iter()
-            .flat_map(|payload| {
-                match node_wake_payload::decode(payload).expect("a valid wake payload") {
-                    NodeWakeEvent::Owned(actors) => actors,
-                    event => panic!("expected owned actors, got {event:?}"),
-                }
-            })
-            .collect();
-        assert_eq!(
-            carried, actors,
-            "wake hints preserve every complete actor identity"
-        );
-    }
-}
-
-/// FIG-5555: both transports split encoded batches at the byte bound and
-/// replace individually oversized keys with one typed store-scan hint.
-#[test]
-fn wake_payloads_split_encoded_batches_and_poll_for_oversized_keys() {
-    let actors: std::collections::BTreeSet<ActorKey> = (0..1_000)
-        .map(|index| {
-            ActorKey::session(&format!("crowded-{index:04}\n\0雪"))
-                .expect("a valid escaped actor key")
-        })
-        .collect();
-    let mut oversized = actors.clone();
-    oversized.extend([
-        ActorKey::session(&"x".repeat(node_wake_payload::MAX_BYTES)).expect("unbounded ids"),
-        ActorKey::process(&"\n".repeat(node_wake_payload::MAX_BYTES / 2)).expect("unbounded ids"),
-    ]);
-    let batch = WakeBatch {
-        ready: std::collections::BTreeSet::from([NodeId::new("ready")]),
-        owned: std::collections::BTreeMap::from([(NodeId::new("owned"), oversized)]),
-        ..WakeBatch::default()
-    };
-    let payloads: Vec<String> = rows(&batch)
-        .into_iter()
-        .map(|(_, payload)| payload)
-        .collect();
-    assert!(payloads.len() > 3, "the encoded crowd must split");
-    let mut carried = std::collections::BTreeSet::new();
-    let mut ready = 0;
-    let mut poll_store = 0;
-    for payload in payloads {
-        assert!(payload.len() <= node_wake_payload::MAX_BYTES);
-        assert!(
-            !payload.contains('\0'),
-            "NOTIFY payloads contain no raw NUL"
-        );
-        match node_wake_payload::decode(&payload).expect("a bounded wake envelope") {
-            NodeWakeEvent::Ready => ready += 1,
-            NodeWakeEvent::Owned(actors) => carried.extend(actors),
-            NodeWakeEvent::PollStore => poll_store += 1,
-            event => panic!("unexpected wake event: {event:?}"),
-        }
-    }
-    assert_eq!(ready, 1);
-    assert_eq!(poll_store, 1, "oversized keys coalesce into one store scan");
-    assert_eq!(
-        carried, actors,
-        "every fitting key rides a complete envelope"
     );
 }

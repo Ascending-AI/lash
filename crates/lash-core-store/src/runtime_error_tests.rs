@@ -164,6 +164,17 @@ fn a_code_is_terminal_exactly_when_it_is_an_outcome() {
                     !code.is_terminal() && !code.is_retryable() && code.parks_turn(),
                     "{code}: a parked code is neither an outcome nor a live fault"
                 );
+                assert!(cause.aborts_invocation());
+                let controller = crate::runtime_error::RuntimeEffectControllerError::new(
+                    code.clone(),
+                    "replay or deployment refusal",
+                );
+                assert_eq!(controller.turn_failure_cause(), cause, "{code}");
+                assert_eq!(
+                    controller.into_runtime_error().turn_failure_cause(),
+                    cause,
+                    "{code}: conversion preserves the parked cause"
+                );
             }
         }
     }
@@ -249,58 +260,6 @@ fn a_journaled_controller_error_is_an_outcome_whatever_its_code() {
         live.into_journaled().turn_failure_cause(),
         TurnFailureCause::Outcome
     );
-}
-
-/// FIG-3586: a lash_vm replay refusal parks its turn. It is neither an
-/// outcome — nothing about the turn failed, and a redeploy of the build that
-/// wrote the journal serves it — nor a live fault a queued run may spend its
-/// retry budget on, since every redrive by this build refuses again. FIG-3587
-/// widens it to any recorded effect's replay hash conflict on the SQL hosts,
-/// and an engine-journal divergence parks the same way.
-#[test]
-fn replay_refusals_park_the_turn() {
-    use crate::runtime_error::TurnFailureCause;
-
-    for code in [
-        RuntimeErrorCode::LashVmCellReplayDivergence,
-        RuntimeErrorCode::RetiredGeneration,
-        RuntimeErrorCode::LashVmCellBindingDrift,
-        RuntimeErrorCode::EffectReplayDivergence,
-    ] {
-        assert_eq!(
-            code.turn_failure_cause(),
-            TurnFailureCause::Parked,
-            "{code}"
-        );
-        assert!(code.parks_turn(), "{code}");
-        assert!(!code.is_terminal(), "{code}: a parked turn is not failed");
-        assert!(
-            !code.is_retryable(),
-            "{code}: a parked turn is not retried live"
-        );
-        assert!(TurnFailureCause::Parked.aborts_invocation());
-        let controller = crate::runtime_error::RuntimeEffectControllerError::new(code.clone(), "x");
-        assert_eq!(controller.turn_failure_cause(), TurnFailureCause::Parked);
-        assert_eq!(
-            controller.into_runtime_error().turn_failure_cause(),
-            TurnFailureCause::Parked
-        );
-    }
-    for code in RuntimeErrorCode::ALL_FIRST_PARTY {
-        assert_eq!(
-            code.parks_turn(),
-            matches!(
-                code,
-                RuntimeErrorCode::LashVmCellReplayDivergence
-                    | RuntimeErrorCode::RetiredGeneration
-                    | RuntimeErrorCode::LashVmCellBindingDrift
-                    | RuntimeErrorCode::PluginRevisionUnavailable
-                    | RuntimeErrorCode::EffectReplayDivergence
-                    | RuntimeErrorCode::VmWorkerUnavailable
-            ),
-            "{code}: only deployment and replay refusals park"
-        );
-    }
 }
 
 /// Generation refusals keep their fields across journaling (FIG-4605): the
