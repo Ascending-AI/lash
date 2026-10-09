@@ -11,7 +11,8 @@
 //! - **NR-1.** An execution whose outcome its body produced (completed or
 //!   known failure) ran its body: exactly once for `Once`.
 //! - **NR-3.** A `Repeatable` started without an outcome re-runs at its own
-//!   ordinal, so it is entered at most once more for the cell's one cut.
+//!   ordinal, so it is entered at most once more per interruption: once more
+//!   for a matrix cell's one cut, once more per plan step for a soak epoch.
 //! - **NR-4.** Resume performs no outcome lookup on behalf of re-running
 //!   code and emits no committed ordinal again, and a turn restores from
 //!   its checkpoint at most once per interruption.
@@ -39,17 +40,30 @@ use lash_sansio::ExecutionPolicy;
 use super::world::World;
 
 /// Every invariant of the cell cut at `cut`, which `nodes` ran over
-/// `world`; `bound_ms` is the virtual time by which the case must be done.
+/// `world`; `bound_ms` is the virtual time by which the case must be done,
+/// `max_restores` how often one turn may restore from its checkpoint and
+/// `repeatable_entries` how often one `Repeatable` body may be entered: once,
+/// and once more for each interruption the run may make.
 pub async fn check(
     world: &World,
     nodes: &SimNodes,
     cut: Option<&Cut>,
     bound_ms: u64,
     max_restores: usize,
+    repeatable_entries: usize,
 ) -> Vec<String> {
     let trace = nodes.script().trace();
     let mut violations = fencing(cut, &trace);
-    violations.extend(once(world, nodes, &trace, stale_pause(cut, &trace)).await);
+    violations.extend(
+        once(
+            world,
+            nodes,
+            &trace,
+            stale_pause(cut, &trace),
+            repeatable_entries,
+        )
+        .await,
+    );
     violations.extend(no_replay(world, cut, max_restores));
     violations.extend(admission_first(world));
     violations.extend(settled(world, nodes).await);
@@ -129,6 +143,7 @@ async fn once(
     nodes: &SimNodes,
     trace: &[Write],
     paused_at: Option<u64>,
+    repeatable_entries: usize,
 ) -> Vec<String> {
     let mut violations = Vec::new();
     let counts = world.tripwire().counts();
@@ -178,9 +193,9 @@ async fn once(
             if once && entered > 1 {
                 violations.push(format!("F2: Once body {id:?} was entered {entered} times"));
             }
-            if !once && entered > 2 {
+            if !once && entered > repeatable_entries {
                 violations.push(format!(
-                    "NR-3: Repeatable body {id:?} was entered {entered} times for one cut"
+                    "NR-3: Repeatable body {id:?} was entered {entered} times, past {repeatable_entries}"
                 ));
             }
             match recovery {

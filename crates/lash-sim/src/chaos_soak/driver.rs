@@ -208,7 +208,19 @@ pub async fn epoch(config: &SoakConfig, seed: u64) -> Epoch {
     epoch.end_ms = clock.logical_ms();
     epoch
         .violations
-        .extend(invariants::check(&world, &nodes, None, u64::MAX, 1 + steps.len()).await);
+        // A turn restores, and a Repeatable re-runs, at most once more per
+        // interruption: per plan step.
+        .extend(
+            invariants::check(
+                &world,
+                &nodes,
+                None,
+                u64::MAX,
+                1 + steps.len(),
+                1 + steps.len(),
+            )
+            .await,
+        );
     epoch.violations.extend(fencing(&fenced, &trace));
     for (case, workload) in &workloads {
         epoch.violations.extend(

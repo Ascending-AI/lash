@@ -507,6 +507,8 @@ impl Scenario for Deployment {
             cut,
             bound_ms,
             self.workload.max_restores(),
+            // Once, and once more for the cell's one cut.
+            2,
         )
         .await;
         violations.extend(self.workload.laws(&self.world, nodes, cut).await);
