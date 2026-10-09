@@ -172,6 +172,55 @@ def check_inventory() -> None:
     )
 
 
+def check_main_test_coverage() -> None:
+    """D-MAINTESTS: main executes every hermetic test, regardless of PR tags."""
+    inventory = load_json("target-inventory.json")
+    main = set(inventory.get("main_test_targets", []))
+    assert main, "missing generated hermetic main test inventory"
+    assert "//crates/lash:facade_completeness" in main
+    assert "//crates/lash:ui_fixtures" in main
+    assert "//crates/lash/tests/builder_contract:builder_plugin_host_is_removed_without_testing" in main
+    replacements = inventory["main_test_replacements"]
+    excluded = inventory["main_test_exclusions"]
+    ordinary = {
+        target["label"]: target
+        for package in inventory["packages"]
+        for target in package["targets"]
+        if target.get("label") in inventory["workspace_test_targets"]
+    }
+    variants = {
+        unit["label"]: ordinary[unit["label"].split("__fv_", 1)[0]]
+        for unit in inventory["feature_lane_units"]
+        if unit["kind"] in {"unit-test", "bin-unit-test", "test"}
+    }
+    for label, target in (ordinary | variants).items():
+        if "cargo-service-gate" in target["tags"]:
+            assert label in excluded and label not in main
+        elif "cargo-trybuild" in target["tags"]:
+            assert replacements[label] in main and label not in main
+        else:
+            assert label in main, f"hermetic test hidden from main: {label}"
+    assert set(excluded) == {
+        label for label, target in (ordinary | variants).items()
+        if "cargo-service-gate" in target["tags"]
+    }
+    batches = inventory["workspace_test_batches"]
+    members = {member for labels in batches.values() for member in labels}
+    assert set(inventory["main_test_suite_labels"]) == main - members | set(batches)
+    assert set(inventory["workspace_test_suite_labels"]) <= set(inventory["main_test_suite_labels"])
+    root = (ROOT / "BUCK").read_text(encoding="utf-8")
+    calls = {
+        ast.literal_eval(node.value.keywords[0].value): {
+            keyword.arg: ast.literal_eval(keyword.value)
+            for keyword in node.value.keywords
+        }
+        for node in ast.parse(root).body
+        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call)
+        and getattr(node.value.func, "id", "") == "test_suite"
+    }
+    assert calls["main_tests"]["tests"] == inventory["main_test_suite_labels"]
+
+
 def check_sizing() -> None:
     text = (HERE / "exec_sizes.bzl").read_text(encoding="utf-8")
     compile_requests = bzl_value(text, "COMPILE_REQUESTS")
@@ -1857,6 +1906,7 @@ def check_vm_worker_runfiles() -> None:
 def main() -> int:
     checks = [
         check_inventory,
+        check_main_test_coverage,
         check_sizing,
         check_queue_priority,
         check_action_categories,

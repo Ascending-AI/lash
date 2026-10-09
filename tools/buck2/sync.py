@@ -942,6 +942,80 @@ def workflow_graph_schema() -> str:
     return found[0]
 
 
+def main_test_inventory(inventory: dict, outputs: dict[pathlib.Path, str]) -> None:
+    """The scheduled suite executes all generated tests except live-service laws.
+
+    Feature check commands also emit executable test binaries. Their manual
+    tag controls PR selection, not main coverage. Cargo's trybuild harnesses
+    use direct-rustc fixture actions at each resolution instead of nesting
+    Cargo inside an action.
+    """
+    test_rules = {
+        "lash_rust_unit_test", "lash_rust_integration_test",
+        "lash_rust_feature_test", "ui_fixtures_test", "facade_completeness_test",
+    }
+    targets = set()
+    exclusions = {}
+    replacements = {}
+    units = {unit["label"]: unit for unit in inventory["feature_lane_units"]}
+    for path, content in list(outputs.items()):
+        if path.name != "BUCK":
+            continue
+        directory = path.parent.relative_to(ROOT).as_posix()
+        additions = []
+        for node in ast.parse(content).body:
+            if not (isinstance(node, ast.Expr) and isinstance(node.value, ast.Call)
+                    and getattr(node.value.func, "id", "") in test_rules):
+                continue
+            args = {
+                keyword.arg: ast.literal_eval(keyword.value)
+                for keyword in node.value.keywords
+                if keyword.arg in {"name", "tags", "crate_features", "package_name"}
+            }
+            label = f"//{directory}:{args['name']}"
+            tags = set(args.get("tags", []))
+            if "cargo-service-gate" in tags:
+                exclusions[label] = "requires an external service or credentials"
+                continue
+            if "cargo-trybuild" not in tags:
+                targets.add(label)
+                continue
+            if label not in units:
+                replacements[label] = f"//{directory}:ui_fixtures"
+                continue
+            # Use precisely the fixtures enabled by this feature graph. Store
+            # seams pin feature-sensitive rustc diagnostics independently.
+            policy = generate_model.PACKAGE_POLICY["ui_fixtures"][args["package_name"]]
+            features = set(args["crate_features"])
+            fixtures = sorted(p.stem for p in (ROOT / directory / "tests/ui").glob("*.stderr"))
+            if "rlm" not in features:
+                fixtures = [f for f in fixtures if f not in policy["rlm_gated"]]
+            if "rlm" not in features or "testing" in features:
+                fixtures = [f for f in fixtures if f not in policy["store_seam"]]
+            name = "ui_fixtures" + args["name"][args["name"].index("__fv_"):]
+            replacement = f"//{directory}:{name}"
+            replacements[label] = replacement
+            targets.add(replacement)
+            additions.append(
+                "ui_fixtures_test(\n"
+                f"    name = {json.dumps(name)},\n"
+                f"    harness = {json.dumps(':' + args['name'])},\n"
+                f"    package = {json.dumps(directory)},\n"
+                f"    fixtures = {generate_model.string_list([f'tests/ui/{f}.rs' for f in fixtures])},\n"
+                f"    expected = {generate_model.string_list([f'tests/ui/{f}.stderr' for f in fixtures])},\n"
+                '    tags = ["manual"],\n'
+                ")\n\n"
+            )
+        if additions:
+            outputs[path] = (outputs[path] + "\n" + "".join(additions)).rstrip() + "\n"
+    batches = inventory["workspace_test_batches"]
+    members = {member for labels in batches.values() for member in labels}
+    inventory["main_test_targets"] = sorted(targets)
+    inventory["main_test_suite_labels"] = sorted(targets - members | set(batches))
+    inventory["main_test_exclusions"] = dict(sorted(exclusions.items()))
+    inventory["main_test_replacements"] = dict(sorted(replacements.items()))
+
+
 def root_buck(inventory: dict) -> str:
     def suite(name: str, labels: list[str]) -> str:
         return (
@@ -961,6 +1035,7 @@ def root_buck(inventory: dict) -> str:
             suite("workspace_check", inventory["workspace_check_targets"]),
             suite("facade_production_check", inventory["facade_production_check_targets"]),
             suite("workspace_tests", inventory["workspace_test_suite_labels"]),
+            suite("main_tests", inventory["main_test_suite_labels"]),
             suite("dev_tests", inventory["workspace_dev_suite_labels"]),
             suite("deferred_tests", inventory["workspace_deferred_test_targets"]),
             suite("workspace_core_tests", inventory["workspace_core_suite_labels"]),
@@ -1160,7 +1235,6 @@ def model_outputs(canonical: dict, third_party: dict[tuple[str, str], str]) -> d
         outputs[BUCK2 / f"{service}_test_labels.txt"] = "".join(label + "\n" for label in labels)
     outputs[BUCK2 / "target-inventory.json"] = json.dumps(inventory, indent=2, sort_keys=True) + "\n"
     outputs[BUCK2 / "clippy_policy.bzl"] = clippy_policy.render(canonical, ROOT)
-    outputs[ROOT / "BUCK"] = root_buck(inventory)
     outputs[ROOT / "examples/BUCK"] = examples_buck()
     lash_buck = ROOT / "crates/lash/BUCK"
     outputs[lash_buck] += '''
@@ -1226,6 +1300,9 @@ ui_fixtures_test(
     tags = ["manual"],
 )
 '''
+    main_test_inventory(inventory, outputs)
+    outputs[BUCK2 / "target-inventory.json"] = json.dumps(inventory, indent=2, sort_keys=True) + "\n"
+    outputs[ROOT / "BUCK"] = root_buck(inventory)
     return outputs
 
 

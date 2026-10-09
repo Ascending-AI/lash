@@ -22,7 +22,16 @@ python3 scripts/dev-test.py
 
 `kiln test` runs `//:dev_tests`, the deterministic developer partition.
 `//:workspace_tests` adds developer-deferred binaries and is the complete PR
-partition. Neither is every correctness gate. The PostgreSQL store package's
+partition. `//:main_tests` is the scheduled full run on main: it adds every
+hermetic manual and PR-deferred test, including feature-check test binaries,
+direct-rustc UI fixtures at each feature resolution and facade completeness.
+Only tests requiring external services or credentials stay outside that suite;
+its generated membership, exclusions and UI harness replacements are recorded
+in `tools/buck2/target-inventory.json`. None is every correctness gate.
+The workflow roundtrip HTTP and durable-engine tests run without frontend
+assets: they never request the frontend file routes. Their manual tag keeps
+that additional coverage on the scheduled path.
+The PostgreSQL store package's
 tests are in both: each starts [its own server](#hermetic-postgresql-tests).
 The other PostgreSQL suites, S3, nested-Cargo tests, release artifacts
 and named recipes retain their contracts.

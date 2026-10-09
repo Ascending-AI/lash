@@ -591,6 +591,8 @@ workflow-graph-roundtrip = [
 [ui_fixtures.lash-runtime]
 harness = "ui"
 rlm_gated = [
+  "linked_module_has_one_carrier",
+  "module_artifact_cannot_be_assembled",
   "rlm_config_builder_requires_channel",
   "rlm_config_builder_requires_every_bound",
   "rlm_memory_limit_cannot_take_an_instruction_budget",
