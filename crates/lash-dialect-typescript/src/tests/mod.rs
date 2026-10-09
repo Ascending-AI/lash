@@ -6,7 +6,7 @@ use lash_kernel_doc::{
     EffectName, Signature, parse_document, print_document, validate_annotations, validate_document,
 };
 
-use crate::{Diagnostic, define_helpers, provisional};
+use crate::Diagnostic;
 
 mod async_fn;
 mod deviations;
@@ -17,15 +17,27 @@ mod package;
 mod printer;
 mod typed;
 
-/// The stand-in kernel library with the dialect's helpers defined in it.
+/// The real library and extension definitions, before the dialect helpers.
+pub(crate) fn kernel_registry() -> lash_kernel_doc::FunctionRegistry {
+    let mut registry = lash_kernel_doc::FunctionRegistry::new();
+    lash_kernel_lib::register_numbers(&mut registry).expect("numeric library registration");
+    lash_kernel_lib::register_text_json(&mut registry).expect("text library registration");
+    lash_kernel_vm::register_machine_functions(&mut registry)
+        .expect("machine library registration");
+    lash_kernel_lib::register_collections(&mut registry).expect("collection library registration");
+    lash_ext_regex_ecma::register(
+        &mut registry,
+        &std::sync::Arc::new(lash_ext_regex_ecma::Engine::new(32)),
+    )
+    .expect("regex extension registration");
+    registry
+}
+
+/// The exact library definitions the unit machine executes.
 pub(crate) fn library() -> &'static NamedLibrary {
     static LIBRARY: OnceLock<NamedLibrary> = OnceLock::new();
     LIBRARY.get_or_init(|| {
-        let mut library = provisional::kernel_library();
-        if let Err(error) = define_helpers(&mut library) {
-            panic!("{error}");
-        }
-        library
+        NamedLibrary::from_registry(machine::registry()).expect("unique library names")
     })
 }
 

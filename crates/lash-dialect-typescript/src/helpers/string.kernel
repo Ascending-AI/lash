@@ -1,0 +1,647 @@
+# String semantics: positions and widths are UTF-16 units. Unicode case/trim data is pinned by the kernel library.
+
+use eq
+use error.new
+use float.to_int
+use int.rem_floor
+use kind
+use list.len
+use num.add
+use num.floor
+use num.is_finite
+use num.is_nan
+use num.le
+use num.lt
+use num.mul
+use num.neg
+use num.sub
+use num.to_float
+use same
+use text.concat
+use text.from_code_points
+use text.from_utf16_units
+use text.lower_u17_0_0
+use text.repeat
+use text.trim_end_u17_0_0
+use text.trim_start_u17_0_0
+use text.trim_u17_0_0
+use text.upper_u17_0_0
+use text.utf16_find
+use text.utf16_get
+use text.utf16_len
+use text.utf16_slice
+use ts.get
+use ts.pad
+use ts.receiver
+use ts.is_nullish
+use ts.require_object_coercible
+use ts.string.at
+use ts.string.charAt
+use ts.string.charCodeAt
+use ts.string.clamp
+use ts.string.codePointAt
+use ts.string.concat
+use ts.string.create
+use ts.string.endsWith
+use ts.string.fromCharCode
+use ts.string.fromCodePoint
+use ts.string.includes
+use ts.string.indexOf
+use ts.string.integer
+use ts.string.lastIndexOf
+use ts.string.length
+use ts.string.length_value
+use ts.string.padEnd
+use ts.string.padStart
+use ts.string.raw
+use ts.string.receiver
+use ts.string.relative
+use ts.string.repeat
+use ts.string.slice
+use ts.string.slice_units
+use ts.string.startsWith
+use ts.string.substring
+use ts.string.toLowerCase
+use ts.string.toString
+use ts.string.toUpperCase
+use ts.string.trim
+use ts.string.trimEnd
+use ts.string.trimStart
+use ts.string.uint32
+use ts.string.valueOf
+use ts.to_number
+use ts.to_string
+
+function ts.string.integer(value: Any) -> Number
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  let number = invoke ts.to_number(value)
+  if num.is_nan(number) { return 0 }
+  if eq(number, 0) { return 0 }
+  if num.is_finite(number) {} else { return number }
+  if num.lt(number, 0) { return num.neg(num.floor(num.neg(number))) }
+  return num.floor(number)
+}
+
+function ts.string.clamp(value: Number, length: Int) -> Int
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  if num.lt(value, 0) { return 0 }
+  if num.lt(value, length) { return float.to_int(num.to_float(value)) }
+  return length
+}
+
+function ts.string.relative(value: Any, length: Int) -> Int
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  let index = invoke ts.string.integer(value)
+  if num.lt(index, 0) { set index = num.add(length, index) }
+  let output_value = invoke ts.string.clamp(index, length)
+  return output_value
+}
+
+function ts.string.length_value(value: Any) -> Int
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  let n = invoke ts.string.integer(value)
+  let output_value = invoke ts.string.clamp(n, 9007199254740991)
+  return output_value
+}
+
+function ts.string.uint32(value: Any) -> Int
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  let n = invoke ts.string.integer(value)
+  if num.is_finite(n) {} else { return 0 }
+  return int.rem_floor(float.to_int(num.to_float(n)), 4294967296)
+}
+
+function ts.string.receiver(this: Any) -> Text
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  do invoke ts.require_object_coercible(this)
+  let text = invoke ts.to_string(this)
+  return text
+}
+
+function ts.string.slice_units(text: Text, start: Int, end: Int) -> Text
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  try { return text.utf16_slice(text, start, end) } catch boundary {
+    if same(boundary.kind, "text_boundary") {
+      throw error.new("TS_LONE_SURROGATE_UNSUPPORTED", "String output_value contains a lone surrogate", null)
+    }
+    throw boundary
+  }
+}
+
+function ts.string.create(this: Any, args: List(Any)) -> Text
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  if eq(list.len(args), 0) { return "" }
+  let arg_1 = args[0]
+  let text = invoke ts.to_string(arg_1)
+  return text
+}
+
+function ts.string.length(this: Any) -> Float
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  let text = invoke ts.string.receiver(this)
+  return num.to_float(text.utf16_len(text))
+}
+
+function ts.string.toString(this: Any, args: List(Any)) -> Text
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  if same(kind(this), "text") { return this }
+  throw error.new("type_error", "String method requires a string receiver", null)
+}
+
+function ts.string.valueOf(this: Any, args: List(Any)) -> Text
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  if same(kind(this), "text") { return this }
+  throw error.new("type_error", "String method requires a string receiver", null)
+}
+
+function ts.string.at(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  let text = invoke ts.string.receiver(this)
+  let padded = invoke ts.pad(args, 1)
+  let arg_2 = padded[0]
+  let n = invoke ts.string.integer(arg_2)
+  let length = text.utf16_len(text)
+  if num.lt(n, 0) { set n = num.add(length, n) }
+  if num.lt(n, 0) { return absent }
+  if num.lt(n, length) {} else { return absent }
+  let index = float.to_int(num.to_float(n))
+  let end = num.add(index, 1)
+  let out = invoke ts.string.slice_units(text, index, end)
+  return out
+}
+
+function ts.string.charAt(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  let text = invoke ts.string.receiver(this)
+  let padded = invoke ts.pad(args, 1)
+  let arg_3 = padded[0]
+  let n = invoke ts.string.integer(arg_3)
+  let length = text.utf16_len(text)
+  if num.lt(n, 0) { return "" }
+  if num.lt(n, length) {} else { return "" }
+  let index = float.to_int(num.to_float(n))
+  let end = num.add(index, 1)
+  let out = invoke ts.string.slice_units(text, index, end)
+  return out
+}
+
+function ts.string.charCodeAt(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  let text = invoke ts.string.receiver(this)
+  let padded = invoke ts.pad(args, 1)
+  let arg_4 = padded[0]
+  let n = invoke ts.string.integer(arg_4)
+  let length = text.utf16_len(text)
+  if num.lt(n, 0) { return nan }
+  if num.lt(n, length) {} else { return nan }
+  let index = float.to_int(num.to_float(n))
+  let unit = text.utf16_get(text, index)
+  return num.to_float(unit)
+}
+
+function ts.string.codePointAt(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  let text = invoke ts.string.receiver(this)
+  let padded = invoke ts.pad(args, 1)
+  let arg_5 = padded[0]
+  let n = invoke ts.string.integer(arg_5)
+  let length = text.utf16_len(text)
+  if num.lt(n, 0) { return absent }
+  if num.lt(n, length) {} else { return absent }
+  let index = float.to_int(num.to_float(n))
+  let unit = text.utf16_get(text, index)
+  if num.le(55296, unit) {
+    if num.le(unit, 56319) {
+      let next = num.add(index, 1)
+      if num.lt(next, length) {
+        let low = text.utf16_get(text, next)
+        if num.le(56320, low) {
+          if num.le(low, 57343) {
+            return num.to_float(num.add(65536, num.add(num.mul(num.sub(unit, 55296), 1024), num.sub(low, 56320))))
+          }
+        }
+      }
+    }
+  }
+  return num.to_float(unit)
+}
+
+function ts.string.slice(this: Any, args: List(Any)) -> Text
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  let text = invoke ts.string.receiver(this)
+  let padded = invoke ts.pad(args, 2)
+  let length = text.utf16_len(text)
+  let arg_6 = padded[0]
+  let start = invoke ts.string.relative(arg_6, length)
+  let end = length
+  if same(padded[1], absent) {} else {
+    let arg_7 = padded[1]
+    set end = invoke ts.string.relative(arg_7, length)
+  }
+  let out = invoke ts.string.slice_units(text, start, end)
+  return out
+}
+
+function ts.string.substring(this: Any, args: List(Any)) -> Text
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  let text = invoke ts.string.receiver(this)
+  let padded = invoke ts.pad(args, 2)
+  let length = text.utf16_len(text)
+  let arg_8 = padded[0]
+  let n = invoke ts.string.integer(arg_8)
+  let start = invoke ts.string.clamp(n, length)
+  let end = length
+  if same(padded[1], absent) {} else {
+    let arg_9 = padded[1]
+    let n = invoke ts.string.integer(arg_9)
+    set end = invoke ts.string.clamp(n, length)
+  }
+  if num.lt(end, start) { let old = start
+    set start = end
+    set end = old
+  }
+  let out = invoke ts.string.slice_units(text, start, end)
+  return out
+}
+
+function ts.string.indexOf(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  let text = invoke ts.string.receiver(this)
+  let padded = invoke ts.pad(args, 2)
+  let arg_10 = padded[0]
+  let needle = invoke ts.to_string(arg_10)
+  let length = text.utf16_len(text)
+  let position = 0
+  let arg_11 = padded[1]
+  let n = invoke ts.string.integer(arg_11)
+  set position = invoke ts.string.clamp(n, length)
+  let found = text.utf16_find(text, needle, position)
+  return num.to_float(found)
+}
+
+function ts.string.lastIndexOf(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  let text = invoke ts.string.receiver(this)
+  let padded = invoke ts.pad(args, 2)
+  let arg_12 = padded[0]
+  let needle = invoke ts.to_string(arg_12)
+  let length = text.utf16_len(text)
+  let position = 0
+  let arg_13 = padded[1]
+  let n = invoke ts.to_number(arg_13)
+  if num.is_nan(n) { set n = inf } else { set n = invoke ts.string.integer(n) }
+  set position = invoke ts.string.clamp(n, length)
+  let found = -1
+  let next = 0
+  while num.le(next, position) {
+    let at = text.utf16_find(text, needle, next)
+    if num.lt(at, 0) { break }
+    if num.lt(position, at) { break }
+    set found = at
+    set next = num.add(at, 1)
+  }
+  return num.to_float(found)
+}
+
+function ts.string.includes(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  let text = invoke ts.string.receiver(this)
+  let padded = invoke ts.pad(args, 2)
+  let arg_14 = padded[0]
+  let receiver = invoke ts.receiver(arg_14)
+  if same(receiver, "brand:regex.ecma") {
+    throw error.new("type_error", "Search string must not be a RegExp", null)
+  }
+  let arg_15 = padded[0]
+  let needle = invoke ts.to_string(arg_15)
+  let length = text.utf16_len(text)
+  let position = 0
+  let arg_16 = padded[1]
+  let n = invoke ts.string.integer(arg_16)
+  set position = invoke ts.string.clamp(n, length)
+  let found = text.utf16_find(text, needle, position)
+  return num.le(0, found)
+}
+
+function ts.string.startsWith(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  let text = invoke ts.string.receiver(this)
+  let padded = invoke ts.pad(args, 2)
+  let arg_17 = padded[0]
+  let receiver = invoke ts.receiver(arg_17)
+  if same(receiver, "brand:regex.ecma") {
+    throw error.new("type_error", "Search string must not be a RegExp", null)
+  }
+  let arg_18 = padded[0]
+  let needle = invoke ts.to_string(arg_18)
+  let length = text.utf16_len(text)
+  let position = 0
+  let arg_19 = padded[1]
+  let n = invoke ts.string.integer(arg_19)
+  set position = invoke ts.string.clamp(n, length)
+  let found = text.utf16_find(text, needle, position)
+  return eq(found, position)
+}
+
+function ts.string.endsWith(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  let text = invoke ts.string.receiver(this)
+  let padded = invoke ts.pad(args, 2)
+  let arg_20 = padded[0]
+  let receiver = invoke ts.receiver(arg_20)
+  if same(receiver, "brand:regex.ecma") {
+    throw error.new("type_error", "Search string must not be a RegExp", null)
+  }
+  let arg_21 = padded[0]
+  let needle = invoke ts.to_string(arg_21)
+  let length = text.utf16_len(text)
+  let position = 0
+  set position = length
+  if same(padded[1], absent) {} else {
+    let arg_22 = padded[1]
+    let n = invoke ts.string.integer(arg_22)
+    set position = invoke ts.string.clamp(n, length)
+  }
+  let start = num.sub(position, text.utf16_len(needle))
+  if num.lt(start, 0) { return false }
+  return eq(text.utf16_find(text, needle, start), start)
+}
+
+function ts.string.concat(this: Any, args: List(Any)) -> Text
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  let text = invoke ts.string.receiver(this)
+  for value in args {
+    let piece = invoke ts.to_string(value)
+    set text = text.concat(text, piece)
+  }
+  return text
+}
+
+function ts.string.toLowerCase(this: Any, args: List(Any)) -> Text
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  let text = invoke ts.string.receiver(this)
+  return text.lower_u17_0_0(text)
+}
+
+function ts.string.toUpperCase(this: Any, args: List(Any)) -> Text
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  let text = invoke ts.string.receiver(this)
+  return text.upper_u17_0_0(text)
+}
+
+function ts.string.trim(this: Any, args: List(Any)) -> Text
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  let text = invoke ts.string.receiver(this)
+  return text.trim_u17_0_0(text)
+}
+
+function ts.string.trimStart(this: Any, args: List(Any)) -> Text
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  let text = invoke ts.string.receiver(this)
+  return text.trim_start_u17_0_0(text)
+}
+
+function ts.string.trimEnd(this: Any, args: List(Any)) -> Text
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  let text = invoke ts.string.receiver(this)
+  return text.trim_end_u17_0_0(text)
+}
+
+function ts.string.repeat(this: Any, args: List(Any)) -> Text
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  let text = invoke ts.string.receiver(this)
+  let padded = invoke ts.pad(args, 1)
+  let arg_23 = padded[0]
+  let n = invoke ts.string.integer(arg_23)
+  if num.lt(n, 0) { throw error.new("RangeError", "Invalid count value", null) }
+  if num.is_finite(n) {} else { throw error.new("RangeError", "Invalid count value", null) }
+  return text.repeat(text, float.to_int(num.to_float(n)))
+}
+
+function ts.string.padStart(this: Any, args: List(Any)) -> Text
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  let text = invoke ts.string.receiver(this)
+  let padded = invoke ts.pad(args, 2)
+  let arg_24 = padded[0]
+  let length = invoke ts.string.length_value(arg_24)
+  let original = text.utf16_len(text)
+  if num.le(length, original) { return text }
+  let fill = " "
+  if same(padded[1], absent) {} else {
+    let arg_25 = padded[1]
+    set fill = invoke ts.to_string(arg_25) }
+  let width = text.utf16_len(fill)
+  if eq(width, 0) { return text }
+  let remaining = num.sub(length, original)
+  let pad = ""
+  while num.le(width, remaining) {
+    set pad = text.concat(pad, fill)
+    set remaining = num.sub(remaining, width)
+  }
+  let tail = invoke ts.string.slice_units(fill, 0, remaining)
+  set pad = text.concat(pad, tail)
+  return text.concat(pad, text)
+}
+
+function ts.string.padEnd(this: Any, args: List(Any)) -> Text
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  let text = invoke ts.string.receiver(this)
+  let padded = invoke ts.pad(args, 2)
+  let arg_26 = padded[0]
+  let length = invoke ts.string.length_value(arg_26)
+  let original = text.utf16_len(text)
+  if num.le(length, original) { return text }
+  let fill = " "
+  if same(padded[1], absent) {} else {
+    let arg_27 = padded[1]
+    set fill = invoke ts.to_string(arg_27) }
+  let width = text.utf16_len(fill)
+  if eq(width, 0) { return text }
+  let remaining = num.sub(length, original)
+  let pad = ""
+  while num.le(width, remaining) {
+    set pad = text.concat(pad, fill)
+    set remaining = num.sub(remaining, width)
+  }
+  let tail = invoke ts.string.slice_units(fill, 0, remaining)
+  set pad = text.concat(pad, tail)
+  return text.concat(text, pad)
+}
+
+function ts.string.fromCharCode(this: Any, args: List(Any)) -> Text
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  let units = []
+  for value in args {
+    let n = invoke ts.string.uint32(value)
+    set units[list.len(units)] = int.rem_floor(n, 65536)
+  }
+  try { return text.from_utf16_units(units) } catch boundary {
+    throw error.new("TS_LONE_SURROGATE_UNSUPPORTED", "String output_value contains a lone surrogate", null)
+  }
+}
+
+function ts.string.fromCodePoint(this: Any, args: List(Any)) -> Text
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  let units = []
+  for value in args {
+    let n = invoke ts.to_number(value)
+    if num.is_finite(n) {} else { throw error.new("RangeError", "Invalid code point", null) }
+    if eq(num.floor(n), n) {} else { throw error.new("RangeError", "Invalid code point", null) }
+    if num.lt(n, 0) { throw error.new("RangeError", "Invalid code point", null) }
+    if num.lt(1114111, n) { throw error.new("RangeError", "Invalid code point", null) }
+    set units[list.len(units)] = float.to_int(n)
+  }
+  try { return text.from_code_points(units) } catch boundary {
+    throw error.new("TS_LONE_SURROGATE_UNSUPPORTED", "String output_value contains a lone surrogate", null)
+  }
+}
+
+function ts.string.raw(this: Any, args: List(Any)) -> Text
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  let padded = invoke ts.pad(args, 1)
+  let arg_28 = padded[0]
+  let raw = invoke ts.get(arg_28, "raw")
+  do invoke ts.require_object_coercible(raw)
+  let count = invoke ts.get(raw, "length")
+  let length = invoke ts.string.length_value(count)
+  let output_value = ""
+  let index = 0
+  while num.lt(index, length) {
+    let value = invoke ts.get(raw, index)
+    let text = invoke ts.to_string(value)
+    set output_value = text.concat(output_value, text)
+    set index = num.add(index, 1)
+    if num.lt(index, length) {
+      if num.lt(index, list.len(args)) {
+        let arg_29 = args[index]
+        let substitution = invoke ts.to_string(arg_29)
+        set output_value = text.concat(output_value, substitution)
+      }
+    }
+  }
+  return output_value
+}
+
+# CreateListFromArrayLike for Function.prototype.apply on a registered built-in.
+function ts.string.apply_arguments(value: Any) -> List(Any)
+kernel 1
+errors "type_error"
+charge sum(8, deep(result))
+body {
+  let nullish = invoke ts.is_nullish(value)
+  if nullish { return [] }
+  if same(kind(value), "list") { return value }
+  if same(kind(value), "record") {} else { throw error.new("type_error", "apply arguments must be an object", null) }
+  let count = invoke ts.get(value, "length")
+  let length = invoke ts.string.length_value(count)
+  let output_value = []
+  let position = 0
+  while num.lt(position, length) {
+    let item = invoke ts.get(value, position)
+    set output_value[list.len(output_value)] = item
+    set position = num.add(position, 1)
+  }
+  return output_value
+}

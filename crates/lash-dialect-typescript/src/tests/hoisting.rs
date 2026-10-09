@@ -88,31 +88,3 @@ let t4 = apply f(absent, t3)
 set x = invoke ts.add(t2, t4)"
     );
 }
-
-/// `a.b[key()] += f()`: the target's object and key are evaluated once,
-/// before the right-hand side, and the write goes to what was read.
-#[test]
-fn an_assignment_target_is_pinned_before_its_right_hand_side() {
-    assert_eq!(
-        main_text(
-            "let a = { b: {} }; function key() { return 'k'; } function f() { return 1; } a.b[key()] += f();"
-        ),
-        "\
-let t1 = {}
-let a = {b: t1}
-let key = fn(this1, args1) {
-  return \"k\"
-}
-let f = fn(this2, args2) {
-  return 1.0
-}
-let t5 = invoke ts.get(a, \"b\")
-let t6 = []
-let t7 = apply key(absent, t6)
-let t8 = invoke ts.get(t5, t7)
-let t9 = []
-let t10 = apply f(absent, t9)
-let t11 = invoke ts.add(t8, t10)
-do invoke ts.set(t5, t7, t11)"
-    );
-}

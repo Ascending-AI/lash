@@ -29,24 +29,24 @@ use num.to_float
 use num.to_text
 use float.to_int
 use int.rem_floor
-use int.bit_and
-use int.bit_or
-use int.bit_xor
-use int.shl
-use int.shr
+use int.div_floor
+use int.pow
+use ts.bitwise32
+use text.utf16_len
+use text.utf16_get
+use text.utf16_slice
 use text.concat
-use text.len
-use text.slice
-use text.trim
+use text.trim_u17_0_0
 use text.ends_with
-use text.to_num
-use text.lt_utf16
-use text.code_points
+use float.parse
+use text.utf16_compare
 use list.len
 use record.get
-use record.has
+use record.contains
 use record.keys
 use json.stringify
+use ts.regexp.escaped_source
+use text.utf16_find
 use ts.exotic.to_primitive
 use ts.exotic.get
 use ts.exotic.set
@@ -229,7 +229,7 @@ body {
   }
   let spelled = num.to_text(value)
   if text.ends_with(spelled, ".0") {
-    return text.slice(spelled, 0, num.sub(text.len(spelled), 2))
+    return text.utf16_slice(spelled, 0, num.sub(text.utf16_len(spelled), 2))
   }
   return spelled
 }
@@ -239,7 +239,7 @@ function ts.number.parse(source: Text) -> Number
 kernel 1
 charge sum(4, size(source))
 body {
-  let trimmed = text.trim(source)
+  let trimmed = text.trim_u17_0_0(source)
   if same(trimmed, "") {
     return 0.0
   }
@@ -253,7 +253,7 @@ body {
     return -inf
   }
   try {
-    return num.to_float(text.to_num(trimmed))
+    return num.to_float(float.parse(trimmed))
   } catch unparsed {
     return nan
   }
@@ -555,7 +555,38 @@ errors "type_error"
 charge sum(14, deep(value))
 body {
   let count = invoke ts.to_int32(value)
-  return int.bit_and(count, 31)
+  return int.rem_floor(count, 32)
+}
+
+# Combine the 32 bits after ECMAScript ToInt32; no unregistered native
+# bit operations are assumed by the dialect.
+function ts.bitwise32(left: Int, right: Int, operation: Text) -> Int
+kernel 1
+charge 1024
+body {
+  let a = int.rem_floor(left, 4294967296)
+  let b = int.rem_floor(right, 4294967296)
+  let weight = 1
+  let result_value = 0
+  let index = 0
+  while num.lt(index, 32) {
+    let x = int.rem_floor(a, 2)
+    let y = int.rem_floor(b, 2)
+    let bit = num.mul(x, y)
+    if same(operation, "or") {
+      set bit = num.sub(num.add(x, y), bit)
+    }
+    if same(operation, "xor") {
+      set bit = int.rem_floor(num.add(x, y), 2)
+    }
+    set result_value = num.add(result_value, num.mul(weight, bit))
+    set a = int.div_floor(a, 2)
+    set b = int.div_floor(b, 2)
+    set weight = num.mul(weight, 2)
+    set index = num.add(index, 1)
+  }
+  let signed = invoke ts.wrap_int32(result_value)
+  return signed
 }
 
 function ts.bit_and(left: Any, right: Any) -> Number
@@ -565,7 +596,8 @@ charge sum(28, deep(left), deep(right))
 body {
   let a = invoke ts.to_int32(left)
   let b = invoke ts.to_int32(right)
-  return num.to_float(int.bit_and(a, b))
+  let combined = invoke ts.bitwise32(a, b, "and")
+  return num.to_float(combined)
 }
 
 function ts.bit_or(left: Any, right: Any) -> Number
@@ -575,7 +607,8 @@ charge sum(28, deep(left), deep(right))
 body {
   let a = invoke ts.to_int32(left)
   let b = invoke ts.to_int32(right)
-  return num.to_float(int.bit_or(a, b))
+  let combined = invoke ts.bitwise32(a, b, "or")
+  return num.to_float(combined)
 }
 
 function ts.bit_xor(left: Any, right: Any) -> Number
@@ -585,7 +618,8 @@ charge sum(28, deep(left), deep(right))
 body {
   let a = invoke ts.to_int32(left)
   let b = invoke ts.to_int32(right)
-  return num.to_float(int.bit_xor(a, b))
+  let combined = invoke ts.bitwise32(a, b, "xor")
+  return num.to_float(combined)
 }
 
 function ts.bit_not(value: Any) -> Number
@@ -604,7 +638,7 @@ charge sum(32, deep(left), deep(right))
 body {
   let a = invoke ts.to_int32(left)
   let count = invoke ts.shift_count(right)
-  let wide = int.shl(a, count)
+  let wide = num.mul(a, int.pow(2, count))
   let shifted = invoke ts.wrap_int32(wide)
   return num.to_float(shifted)
 }
@@ -616,7 +650,7 @@ charge sum(30, deep(left), deep(right))
 body {
   let a = invoke ts.to_int32(left)
   let count = invoke ts.shift_count(right)
-  return num.to_float(int.shr(a, count))
+  return num.to_float(int.div_floor(a, int.pow(2, count)))
 }
 
 function ts.ushr(left: Any, right: Any) -> Number
@@ -626,7 +660,7 @@ charge sum(30, deep(left), deep(right))
 body {
   let a = invoke ts.to_int32(left)
   let count = invoke ts.shift_count(right)
-  return num.to_float(int.shr(int.rem_floor(a, 4294967296), count))
+  return num.to_float(int.div_floor(int.rem_floor(a, 4294967296), int.pow(2, count)))
 }
 
 # `a === b`. Two numbers by value; two objects when they are the same
@@ -757,7 +791,7 @@ charge sum(20, deep(left), deep(right))
 body {
   let operands = invoke ts.relational(left, right)
   if operands[0] {
-    return text.lt_utf16(operands[1], operands[2])
+    return num.lt(text.utf16_compare(operands[1], operands[2]), 0)
   }
   return num.lt(operands[1], operands[2])
 }
@@ -769,7 +803,7 @@ charge sum(20, deep(left), deep(right))
 body {
   let operands = invoke ts.relational(left, right)
   if operands[0] {
-    return text.lt_utf16(operands[2], operands[1])
+    return num.lt(text.utf16_compare(operands[2], operands[1]), 0)
   }
   return num.lt(operands[2], operands[1])
 }
@@ -781,7 +815,7 @@ charge sum(20, deep(left), deep(right))
 body {
   let operands = invoke ts.relational(left, right)
   if operands[0] {
-    return bool.not(text.lt_utf16(operands[2], operands[1]))
+    return bool.not(num.lt(text.utf16_compare(operands[2], operands[1]), 0))
   }
   return num.le(operands[1], operands[2])
 }
@@ -793,7 +827,7 @@ charge sum(20, deep(left), deep(right))
 body {
   let operands = invoke ts.relational(left, right)
   if operands[0] {
-    return bool.not(text.lt_utf16(operands[1], operands[2]))
+    return bool.not(num.lt(text.utf16_compare(operands[1], operands[2]), 0))
   }
   return num.le(operands[2], operands[1])
 }
@@ -855,12 +889,23 @@ kernel 1
 errors "type_error"
 charge sum(4, size(target))
 body {
-  let k = kind(target)
+  let k = invoke ts.receiver(target)
+  if same(k, "brand:regex.match") { return target.items }
   if same(k, "list") {
     return target
   }
   if same(k, "text") {
-    return text.code_points(target)
+    let items = []
+    let position = 0
+    let length = text.utf16_len(target)
+    while num.lt(position, length) {
+      let unit = text.utf16_get(target, position)
+      let end = num.add(position, 1)
+      if num.le(55296, unit) { if num.le(unit, 56319) { set end = num.add(end, 1) } }
+      set items[list.len(items)] = text.utf16_slice(target, position, end)
+      set position = end
+    }
+    return items
   }
   let items = invoke ts.exotic.iterate(target)
   return items
@@ -891,6 +936,10 @@ body {
     return -1.0
   }
   if num.lt(position, length) {
+    if same(kind(key), "text") {
+      let canonical = invoke ts.number.to_string(position)
+      if same(canonical, key) {} else { return -1.0 }
+    }
     return num.to_float(position)
   }
   return -1.0
@@ -903,12 +952,46 @@ errors "type_error"
 charge sum(12, deep(key))
 body {
   let k = invoke ts.receiver(target)
+  if same(k, "text") {
+    let length = text.utf16_len(target)
+    if same(key, "length") { return num.to_float(length) }
+    let position = invoke ts.list_index(key, length)
+    if num.lt(position, 0) { return absent }
+    let index = float.to_int(position)
+    try { return text.utf16_slice(target, index, num.add(index, 1)) } catch boundary {
+      throw error.new("TS_LONE_SURROGATE_UNSUPPORTED", "String index contains a lone surrogate", null)
+    }
+  }
+  if same(k, "brand:regex.ecma") {
+    let name = invoke ts.to_property_key(key)
+    if same(name, "lastIndex") { return target.lastIndex }
+    if same(name, "source") {
+      let pattern = target.pattern
+      let source = invoke ts.regexp.escaped_source(pattern)
+      return source
+    }
+    if same(name, "flags") { return target.flags }
+    for pair in [["global", "g"], ["ignoreCase", "i"], ["multiline", "m"], ["dotAll", "s"], ["unicode", "u"], ["sticky", "y"]] {
+      if same(name, pair[0]) { return num.le(0, text.utf16_find(target.flags, pair[1], 0)) }
+    }
+    return absent
+  }
+  if same(k, "brand:regex.match") {
+    let name = invoke ts.to_property_key(key)
+    if same(name, "length") { return num.to_float(list.len(target.items)) }
+    for field in ["index", "input", "groups"] { if same(name, field) { return target[name] } }
+    let arg_1 = list.len(target.items)
+    let position = invoke ts.list_index(key, arg_1)
+    if num.lt(position, 0) { return absent }
+    return target.items[position]
+  }
   if same(k, "record") {
     let name = invoke ts.to_property_key(key)
     return target[name]
   }
   if same(k, "list") {
     let length = list.len(target)
+    if same(key, "length") { return num.to_float(length) }
     let position = invoke ts.list_index(key, length)
     if num.lt(position, 0) {
       let other = invoke ts.exotic.get(target, key)
@@ -932,6 +1015,12 @@ errors "type_error", "RangeError"
 charge sum(12, deep(key))
 body {
   let k = invoke ts.receiver(target)
+  if same(k, "brand:regex.ecma") {
+    let name = invoke ts.to_property_key(key)
+    if same(name, "lastIndex") { set target.lastIndex = value
+      return value }
+    throw error.new("type_error", "Cannot assign to a read-only RegExp property", null)
+  }
   if same(k, "record") {
     let name = invoke ts.to_property_key(key)
     set target[name] = value
@@ -984,7 +1073,7 @@ body {
   let k = invoke ts.receiver(target)
   if same(k, "record") {
     let name = invoke ts.to_property_key(key)
-    return record.has(target, name)
+    return record.contains(target, name)
   }
   if same(k, "list") {
     let length = list.len(target)

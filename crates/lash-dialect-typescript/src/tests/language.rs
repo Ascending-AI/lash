@@ -93,7 +93,6 @@ fn refusals_keep_their_codes() {
             "var x; x instanceof Foo;",
             DiagnosticCode::InstanceOfUnsupported,
         ),
-        ("/a/;", DiagnosticCode::UnsupportedExpression),
         ("class A {}", DiagnosticCode::ClassUnsupported),
         (
             "out: while (true) { break out; }",

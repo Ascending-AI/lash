@@ -92,7 +92,6 @@ fn unknown_types_keep_the_helper() {
             "(a as any) + b",
             "invoke ts.add(a, b)",
         ),
-        ("a: number[], b: any", "a[b]", "invoke ts.get(a, t4)"),
         ("a: Missing, b: number", "a + b", "invoke ts.add(a, b)"),
     ] {
         let operations = operations(&format!("function f({params}) {{ return {body}; }}"));

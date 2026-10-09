@@ -2,7 +2,7 @@
 //! crate, then run on a kernel machine.
 //!
 //! One test has one observation: it passed, the front end refused it, it
-//! diverged, or it lowered and no machine is installed to run it. The
+//! diverged, or needs an unavailable harness include. The
 //! report counts observations by directory beside the class main's record
 //! holds for the same test, so a lane sees its family's distance to the
 //! record.
@@ -55,8 +55,6 @@ pub(crate) enum Observed {
     Diverged(String),
     /// The test needs a harness include that has no rendering.
     Harness(String),
-    /// The program lowered; no machine is installed to run it.
-    NotRun,
 }
 
 impl Observed {
@@ -66,16 +64,13 @@ impl Observed {
             Self::Refused(_) => "refused",
             Self::Diverged(_) => "fail",
             Self::Harness(_) => "harness",
-            Self::NotRun => "not-run",
         }
     }
 }
 
 /// Runs lowered programs on the production kernel machine.
-pub(crate) fn executor() -> Option<Box<dyn Executor>> {
-    Some(Box::new(OnMachine::<KernelMachine>::new(Arc::clone(
-        registry(),
-    ))))
+pub(crate) fn executor() -> Box<dyn Executor> {
+    Box::new(OnMachine::<KernelMachine>::new(Arc::clone(registry())))
 }
 
 /// All lowering and execution use the same content-addressed definitions.
@@ -84,9 +79,12 @@ fn registry() -> &'static Arc<FunctionRegistry> {
     static REGISTRY: std::sync::OnceLock<Arc<FunctionRegistry>> = std::sync::OnceLock::new();
     REGISTRY.get_or_init(|| {
         let mut registry = FunctionRegistry::new();
+        lash_kernel_lib::register_numbers(&mut registry).expect("numeric library registration");
         lash_kernel_lib::register_text_json(&mut registry).expect("text library registration");
         lash_kernel_vm::register_machine_functions(&mut registry)
             .expect("machine library registration");
+        lash_kernel_lib::register_collections(&mut registry)
+            .expect("collection library registration");
         lash_ext_regex_ecma::register(
             &mut registry,
             &Arc::new(lash_ext_regex_ecma::Engine::new(32)),
@@ -244,7 +242,7 @@ fn lower(source: &str) -> Result<Lowered, lash_dialect_typescript::Diagnostic> {
 }
 
 /// Lowers and runs one vendored test, `test/...`.
-pub(crate) fn run(relative: &str, executor: Option<&dyn Executor>) -> Observed {
+pub(crate) fn run(relative: &str, executor: &dyn Executor) -> Observed {
     let path = data_path(relative);
     let meta = metadata::read_metadata(&path).unwrap_or_else(|error| panic!("{relative}: {error}"));
     if let Some(include) = meta
@@ -281,12 +279,9 @@ pub(crate) fn run(relative: &str, executor: Option<&dyn Executor>) -> Observed {
             negative.error_type.as_str()
         ));
     }
-    match executor {
-        None => Observed::NotRun,
-        Some(executor) => match executor.run(&lowered) {
-            Ok(end) => judge(end, &meta),
-            Err(problem) => Observed::Diverged(problem),
-        },
+    match executor.run(&lowered) {
+        Ok(end) => judge(end, &meta),
+        Err(problem) => Observed::Diverged(problem),
     }
 }
 
@@ -343,8 +338,8 @@ fn directory(path: &str) -> String {
 }
 
 /// One line per directory: how many of its tests the kernel passed,
-/// refused, failed, could not run for a missing harness include or
-/// machine, and how many of them main's record marks `pass`.
+/// refused, failed, could not run for a missing harness include, and how
+/// many of them main's record marks `pass`.
 pub(crate) fn report(
     observations: &[(String, Observed)],
     recorded: &BTreeMap<String, String>,
@@ -367,18 +362,17 @@ pub(crate) fn report(
         }
     }
     let mut out = String::from(
-        "directory\tpass\trefused\tfail\tharness\tnot-run\trecorded-pass\tof-those-not-passing\n",
+        "directory\tpass\trefused\tfail\tharness\trecorded-pass\tof-those-not-passing\n",
     );
     for (directory, row) in &rows {
         let count = |class: &str| row.classes.get(class).copied().unwrap_or(0);
         writeln!(
             out,
-            "{directory}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+            "{directory}\t{}\t{}\t{}\t{}\t{}\t{}",
             count("pass"),
             count("refused"),
             count("fail"),
             count("harness"),
-            count("not-run"),
             row.recorded_pass,
             row.regressed
         )
@@ -452,4 +446,90 @@ pub(crate) fn printing_relowers(relative: &str) -> bool {
         .unwrap_or_else(|error| panic!("{relative}: {error}\n{printed}"));
     assert_eq!(original.document, re_lowered.document, "{relative}");
     true
+}
+
+/// String positions count UTF-16 units, while codePointAt combines a pair.
+#[test]
+fn string_positions_count_utf16_units() {
+    let source = "finish(['😀'.length, '😀'.charCodeAt(0), '😀'.charCodeAt(1), '😀'.codePointAt(0), '😀x'.indexOf('x'), '😀'.slice(0, 2)]);";
+    let result = execute(source);
+    let expected = Datum::List(vec![
+        Datum::Float(lash_kernel_doc::Float::new(2.0)),
+        Datum::Float(lash_kernel_doc::Float::new(55357.0)),
+        Datum::Float(lash_kernel_doc::Float::new(56832.0)),
+        Datum::Float(lash_kernel_doc::Float::new(128512.0)),
+        Datum::Float(lash_kernel_doc::Float::new(2.0)),
+        Datum::Text("😀".into()),
+    ]);
+    assert_finished(result, expected);
+}
+
+/// §2.4: the helper writes lastIndex to the receiver that its aliases share.
+#[test]
+fn regexp_aliases_observe_coerced_last_index_and_failure_reset() {
+    let result = execute(
+        "const r = /x/g; const alias = r; r.lastIndex = '1'; const match = r.exec('xx'); const index = alias.lastIndex; const missed = r.test('x'); finish([index, match.index, match[0], missed, alias.lastIndex]);",
+    );
+    assert_finished(
+        result,
+        Datum::List(vec![
+            Datum::Float(lash_kernel_doc::Float::new(2.0)),
+            Datum::Float(lash_kernel_doc::Float::new(1.0)),
+            Datum::Text("x".into()),
+            Datum::Bool(false),
+            Datum::Float(lash_kernel_doc::Float::new(0.0)),
+        ]),
+    );
+}
+
+/// ECMA URI codecs distinguish reserved URI escapes from component escapes.
+#[test]
+fn uri_codecs_preserve_reserved_escape_spelling() {
+    assert_finished(
+        execute(
+            "finish([encodeURI('é?#'), encodeURIComponent('é?#'), decodeURI('%2f%C3%A9'), decodeURIComponent('%2f%C3%A9')]);",
+        ),
+        Datum::List(vec![
+            Datum::Text("%C3%A9?#".into()),
+            Datum::Text("%C3%A9%3F%23".into()),
+            Datum::Text("%2fé".into()),
+            Datum::Text("/é".into()),
+        ]),
+    );
+}
+
+/// ECMA Decode rejects UTF-8 encodings of surrogates with a typed URIError.
+#[test]
+fn uri_decode_refuses_surrogate_utf8() {
+    let result = execute("finish(decodeURIComponent('%ED%A0%80'));");
+    assert!(
+        matches!(result, End::Error(RunError::Uncaught(error)) if thrown_name(&error).as_deref() == Some("URIError"))
+    );
+}
+
+/// §2.2: each template substitution is converted before the next is read.
+#[test]
+fn template_substitutions_convert_in_source_order() {
+    assert_finished(
+        execute(
+            "let n = 0; const value = {toString() { n = n + 1; return String(n); }}; finish(`${value}${value}`);",
+        ),
+        Datum::Text("12".into()),
+    );
+}
+
+#[cfg(test)]
+fn execute(source: &str) -> End {
+    let lowered = lower(source).expect("a supported dialect witness lowers");
+    executor()
+        .run(&lowered)
+        .expect("the kernel executes the witness")
+}
+
+#[cfg(test)]
+fn assert_finished(end: End, expected: Datum) {
+    match end {
+        End::Finished(finished) => assert_eq!(finished.result, expected),
+        other => panic!("expected {expected:?}, got {other:?}"),
+    }
 }

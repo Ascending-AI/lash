@@ -5,12 +5,23 @@
 # properties are rows in `builtins/`, not branches here.
 
 use error.new
+use kind
+use same
+use ts.regexp.spell
 
 # ToPrimitive of an exotic value. `hint` is "default", "number" or "string".
 function ts.exotic.to_primitive(value: Any, hint: Text) -> Any
 kernel 1
 charge 1
 body {
+  if same(kind(value), "record") {
+    if same(value.brand, "regex.ecma") {
+      let pattern = value.pattern
+      let flags = value.flags
+      let text = invoke ts.regexp.spell(pattern, flags)
+      return text
+    }
+  }
   return "[object Object]"
 }
 

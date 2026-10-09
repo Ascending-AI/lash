@@ -51,6 +51,7 @@ impl Lowerer<'_> {
                 self.span,
             )),
             ast::Expr::RegExp { pattern, flags } => {
+                crate::regex::validate_literal(pattern, flags, self.span)?;
                 let Some(constructor) = self.table.constructors.get("RegExp").copied() else {
                     return Err(Diagnostic::refusal(
                         DiagnosticCode::UnsupportedExpression,

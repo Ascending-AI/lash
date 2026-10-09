@@ -1,0 +1,52 @@
+# Regex source escaping has no coercion or guest callbacks, so the core
+# conversions can use it without a cycle in function identities.
+use same
+use eq
+use num.lt
+use num.le
+use num.add
+use text.utf16_len
+use text.utf16_get
+use text.utf16_slice
+use text.concat
+use ts.regexp.escaped_source
+
+function ts.regexp.escaped_source(pattern: Text) -> Text
+kernel 1
+charge sum(8, size(pattern), size(result))
+body {
+  if same(pattern, "") { return "(?:)" }
+  let output_value = ""
+  # Escaping operates on scalar text, never on a single half-surrogate.
+  let position = 0
+  let escaped = false
+  let inClass = false
+  while num.lt(position, text.utf16_len(pattern)) {
+    let unit = text.utf16_get(pattern, position)
+    let end = num.add(position, 1)
+    if num.le(55296, unit) { if num.le(unit, 56319) { set end = num.add(end, 1) } }
+    let character = text.utf16_slice(pattern, position, end)
+    if eq(unit, 10) { set character = "\\n" }
+    if eq(unit, 13) { set character = "\\r" }
+    if eq(unit, 8232) { set character = "\\u2028" }
+    if eq(unit, 8233) { set character = "\\u2029" }
+    if escaped { set escaped = false } else {
+      if eq(unit, 92) { set escaped = true } else {
+        if eq(unit, 91) { set inClass = true }
+        if eq(unit, 93) { set inClass = false }
+        if eq(unit, 47) { if inClass {} else { set character = "\\/" } }
+      }
+    }
+    set output_value = text.concat(output_value, character)
+    set position = end
+  }
+  return output_value
+}
+
+function ts.regexp.spell(pattern: Text, flags: Text) -> Text
+kernel 1
+charge sum(8, size(pattern), size(flags), size(result))
+body {
+  let source = invoke ts.regexp.escaped_source(pattern)
+  return text.concat("/", text.concat(source, text.concat("/", flags)))
+}

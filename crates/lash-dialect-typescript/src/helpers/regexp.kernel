@@ -1,0 +1,621 @@
+# RegExp is an extension record. Only these helpers update lastIndex; the native matcher never mutates guest data.
+
+use eq
+use error.new
+use kind
+use list.len
+use num.add
+use num.le
+use num.lt
+use num.to_float
+use record.keys
+use regex.ecma.compile_check
+use regex.ecma.exec
+use regex.ecma.match_all
+use regex.ecma.replace
+use regex.ecma.split
+use regex.ecma.test
+use same
+use text.concat
+use text.utf16_find
+use text.utf16_get
+use text.utf16_len
+use text.utf16_slice
+use ts.get
+use ts.is_primitive
+use ts.list_index
+use ts.pad
+use ts.regexp.argument
+use ts.regexp.call
+use ts.regexp.create
+use ts.regexp.dotAll
+use ts.regexp.escaped_source
+use ts.regexp.exec
+use ts.regexp.flags
+use ts.regexp.get
+use ts.regexp.global
+use ts.regexp.ignoreCase
+use ts.regexp.is
+use ts.regexp.match_get
+use ts.regexp.match_record
+use ts.regexp.multiline
+use ts.regexp.native_exec
+use ts.regexp.native_match_all
+use ts.regexp.native_replace
+use ts.regexp.native_split
+use ts.regexp.require
+use ts.regexp.set
+use ts.regexp.snapshot
+use ts.regexp.source
+use ts.regexp.sticky
+use ts.regexp.test
+use ts.regexp.toString
+use ts.regexp.unicode
+use ts.string.length_value
+use ts.string.match
+use ts.string.matchAll
+use ts.string.receiver
+use ts.string.replace
+use ts.string.replaceAll
+use ts.string.replace_value
+use ts.string.search
+use ts.string.slice_units
+use ts.string.split
+use ts.string.substitute
+use ts.string.uint32
+use ts.to_property_key
+use ts.to_string
+
+function ts.regexp.is(value: Any) -> Bool
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  if same(kind(value), "record") { return same(value.brand, "regex.ecma") }
+  return false
+}
+
+function ts.regexp.require(this: Any) -> Any
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  let branded = invoke ts.regexp.is(this)
+  if branded { return this }
+  throw error.new("type_error", "RegExp method requires a RegExp receiver", null)
+}
+
+function ts.regexp.create(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  let padded = invoke ts.pad(args, 2)
+  let source = ""
+  let flags = ""
+  let arg_1 = padded[0]
+  let regex = invoke ts.regexp.is(arg_1)
+  if regex {
+    set source = padded[0].pattern
+    set flags = padded[0].flags
+  } else {
+    if same(padded[0], absent) {} else {
+      let arg_2 = padded[0]
+      set source = invoke ts.to_string(arg_2) }
+  }
+  if same(padded[1], absent) {} else {
+    let arg_3 = padded[1]
+    set flags = invoke ts.to_string(arg_3) }
+  try {
+    let compiled = regex.ecma.compile_check(source, flags)
+    set compiled.lastIndex = 0.0
+    return compiled
+  } catch syntax {
+    if same(syntax.kind, "regex.syntax") { throw error.new("SyntaxError", syntax.message, null) }
+    throw syntax
+  }
+}
+
+function ts.regexp.call(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  let padded = invoke ts.pad(args, 2)
+  let arg_4 = padded[0]
+  let regex = invoke ts.regexp.is(arg_4)
+  if regex { if same(padded[1], absent) { return padded[0] } }
+  let output_value = invoke ts.regexp.create(this, args)
+  return output_value
+}
+
+function ts.regexp.snapshot(this: Any) -> Any
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  do invoke ts.regexp.require(this)
+  let arg_5 = this.lastIndex
+  let index = invoke ts.string.length_value(arg_5)
+  return {brand: "regex.ecma", pattern: this.pattern, flags: this.flags, lastIndex: index}
+}
+
+function ts.regexp.match_record(match: Any, input: Text) -> Any
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  if same(match, null) { return null }
+  let items = []
+  for group in match.groups {
+    if same(group, null) { set items[list.len(items)] = absent } else { set items[list.len(items)] = group }
+  }
+  let named = match.named
+  if same(named, null) { set named = absent } else {
+    for key in record.keys(named) {
+      if same(named[key], null) { set named[key] = absent }
+    }
+  }
+  return {brand: "regex.match", items: items, index: num.to_float(match.index), input: input, groups: named}
+}
+
+function ts.regexp.native_exec(regex: Any, input: Text) -> Any
+kernel 1
+errors "TS_REGEX_LONE_SURROGATE_MATCH_UNSUPPORTED"
+charge sum(4, deep(result))
+body {
+  try { return regex.ecma.exec(regex, input) } catch cause {
+    if same(cause.kind, "regex.lone_surrogate") {
+      throw error.new("TS_REGEX_LONE_SURROGATE_MATCH_UNSUPPORTED", cause.message, cause)
+    }
+    throw cause
+  }
+}
+
+function ts.regexp.native_match_all(regex: Any, input: Text) -> List(Any)
+kernel 1
+errors "TS_REGEX_LONE_SURROGATE_MATCH_UNSUPPORTED"
+charge sum(4, deep(result))
+body {
+  try { return regex.ecma.match_all(regex, input) } catch cause {
+    if same(cause.kind, "regex.lone_surrogate") {
+      throw error.new("TS_REGEX_LONE_SURROGATE_MATCH_UNSUPPORTED", cause.message, cause)
+    }
+    throw cause
+  }
+}
+
+function ts.regexp.native_replace(regex: Any, input: Text, replacement: Text) -> Any
+kernel 1
+errors "TS_REGEX_LONE_SURROGATE_MATCH_UNSUPPORTED"
+charge sum(4, deep(result))
+body {
+  try { return regex.ecma.replace(regex, input, replacement) } catch cause {
+    if same(cause.kind, "regex.lone_surrogate") {
+      throw error.new("TS_REGEX_LONE_SURROGATE_MATCH_UNSUPPORTED", cause.message, cause)
+    }
+    throw cause
+  }
+}
+
+function ts.regexp.native_split(regex: Any, input: Text, limit: Int) -> List(Any)
+kernel 1
+errors "TS_REGEX_LONE_SURROGATE_MATCH_UNSUPPORTED"
+charge sum(4, deep(result))
+body {
+  try { return regex.ecma.split(regex, input, limit) } catch cause {
+    if same(cause.kind, "regex.lone_surrogate") {
+      throw error.new("TS_REGEX_LONE_SURROGATE_MATCH_UNSUPPORTED", cause.message, cause)
+    }
+    throw cause
+  }
+}
+
+function ts.regexp.exec(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  do invoke ts.regexp.require(this)
+  let padded = invoke ts.pad(args, 1)
+  let arg_6 = padded[0]
+  let input = invoke ts.to_string(arg_6)
+  let snapshot = invoke ts.regexp.snapshot(this)
+  let outcome = absent
+  set outcome = invoke ts.regexp.native_exec(snapshot, input)
+  let stateful = num.le(0, text.utf16_find(this.flags, "g", 0))
+  if stateful {} else { set stateful = num.le(0, text.utf16_find(this.flags, "y", 0)) }
+  if stateful { set this.lastIndex = num.to_float(outcome.lastIndex) }
+  let arg_7 = outcome.match
+  let output_value = invoke ts.regexp.match_record(arg_7, input)
+  return output_value
+}
+
+function ts.regexp.test(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  do invoke ts.regexp.require(this)
+  let padded = invoke ts.pad(args, 1)
+  let arg_8 = padded[0]
+  let input = invoke ts.to_string(arg_8)
+  let snapshot = invoke ts.regexp.snapshot(this)
+  let outcome = absent
+  try {
+    set outcome = regex.ecma.test(snapshot, input)
+  } catch error {
+    if same(error.kind, "regex.lone_surrogate") {
+      throw error.new("TS_REGEX_LONE_SURROGATE_MATCH_UNSUPPORTED", error.message, null)
+    }
+    throw error
+  }
+  let stateful = num.le(0, text.utf16_find(this.flags, "g", 0))
+  if stateful {} else { set stateful = num.le(0, text.utf16_find(this.flags, "y", 0)) }
+  if stateful { set this.lastIndex = num.to_float(outcome.lastIndex) }
+  return outcome.matched
+}
+
+function ts.regexp.global(this: Any) -> Bool
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  do invoke ts.regexp.require(this)
+  return num.le(0, text.utf16_find(this.flags, "g", 0))
+}
+
+function ts.regexp.ignoreCase(this: Any) -> Bool
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  do invoke ts.regexp.require(this)
+  return num.le(0, text.utf16_find(this.flags, "i", 0))
+}
+
+function ts.regexp.multiline(this: Any) -> Bool
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  do invoke ts.regexp.require(this)
+  return num.le(0, text.utf16_find(this.flags, "m", 0))
+}
+
+function ts.regexp.dotAll(this: Any) -> Bool
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  do invoke ts.regexp.require(this)
+  return num.le(0, text.utf16_find(this.flags, "s", 0))
+}
+
+function ts.regexp.unicode(this: Any) -> Bool
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  do invoke ts.regexp.require(this)
+  return num.le(0, text.utf16_find(this.flags, "u", 0))
+}
+
+function ts.regexp.sticky(this: Any) -> Bool
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  do invoke ts.regexp.require(this)
+  return num.le(0, text.utf16_find(this.flags, "y", 0))
+}
+
+function ts.regexp.flags(this: Any) -> Text
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  do invoke ts.regexp.require(this)
+  return this.flags
+}
+
+function ts.regexp.source(this: Any) -> Text
+kernel 1
+errors "type_error"
+charge sum(8, deep(result))
+body {
+  do invoke ts.regexp.require(this)
+  let pattern = this.pattern
+  let source = invoke ts.regexp.escaped_source(pattern)
+  return source
+}
+
+function ts.regexp.toString(this: Any, args: List(Any)) -> Text
+kernel 1
+errors "type_error"
+charge sum(8, deep(result))
+body {
+  let primitive = invoke ts.is_primitive(this)
+  if primitive { throw error.new("type_error", "RegExp toString requires an object", null) }
+  let source = invoke ts.get(this, "source")
+  let sourceText = invoke ts.to_string(source)
+  let flags = invoke ts.get(this, "flags")
+  let flagText = invoke ts.to_string(flags)
+  return text.concat("/", text.concat(sourceText, text.concat("/", flagText)))
+}
+
+function ts.regexp.argument(value: Any) -> Any
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  let regex = invoke ts.regexp.is(value)
+  if regex { return value }
+  let args = [value]
+  let output_value = invoke ts.regexp.create(absent, args)
+  return output_value
+}
+
+function ts.string.match(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  let text = invoke ts.string.receiver(this)
+  let padded = invoke ts.pad(args, 1)
+  let arg_1 = padded[0]
+  let regex = invoke ts.regexp.argument(arg_1)
+  let global = invoke ts.regexp.global(regex)
+  if global {
+    set regex.lastIndex = 0.0
+    let snapshot = invoke ts.regexp.snapshot(regex)
+    let matches = invoke ts.regexp.native_match_all(snapshot, text)
+    set regex.lastIndex = 0.0
+    if eq(list.len(matches), 0) { return null }
+    let output_value = []
+    for match in matches { set output_value[list.len(output_value)] = match.groups[0] }
+    return output_value
+  }
+  let passed = [text]
+  let output_value = invoke ts.regexp.exec(regex, passed)
+  return output_value
+}
+
+function ts.string.search(this: Any, args: List(Any)) -> Float
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  let text = invoke ts.string.receiver(this)
+  let padded = invoke ts.pad(args, 1)
+  let arg_2 = padded[0]
+  let regex = invoke ts.regexp.argument(arg_2)
+  let snapshot = {brand: "regex.ecma", pattern: regex.pattern, flags: regex.flags, lastIndex: 0}
+  let outcome = invoke ts.regexp.native_exec(snapshot, text)
+  if same(outcome.match, null) { return -1.0 }
+  return num.to_float(outcome.match.index)
+}
+
+function ts.string.matchAll(this: Any, args: List(Any)) -> List(Any)
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  let text = invoke ts.string.receiver(this)
+  let padded = invoke ts.pad(args, 1)
+  let arg_3 = padded[0]
+  let regex = invoke ts.regexp.is(arg_3)
+  let value = padded[0]
+  if regex {
+    let global = invoke ts.regexp.global(value)
+    if global {} else { throw error.new("type_error", "matchAll requires a global RegExp", null) }
+  } else {
+    let passed = [value, "g"]
+    set value = invoke ts.regexp.create(absent, passed)
+  }
+  let snapshot = invoke ts.regexp.snapshot(value)
+  let matches = invoke ts.regexp.native_match_all(snapshot, text)
+  let output_value = []
+  for match in matches {
+    let item = invoke ts.regexp.match_record(match, text)
+    set output_value[list.len(output_value)] = item
+  }
+  return output_value
+}
+
+function ts.string.split(this: Any, args: List(Any)) -> List(Any)
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  let text = invoke ts.string.receiver(this)
+  let padded = invoke ts.pad(args, 2)
+  let limit = 4294967295
+  if same(padded[1], absent) {} else {
+    let arg_4 = padded[1]
+    set limit = invoke ts.string.uint32(arg_4) }
+  if eq(limit, 0) { return [] }
+  let arg_5 = padded[0]
+  let regex = invoke ts.regexp.is(arg_5)
+  if regex {
+    let value = padded[0]
+    let snapshot = {brand: "regex.ecma", pattern: value.pattern, flags: value.flags, lastIndex: 0}
+    let split = invoke ts.regexp.native_split(snapshot, text, limit)
+    let output_value = []
+    for part in split {
+      if same(part, null) { set output_value[list.len(output_value)] = absent } else { set output_value[list.len(output_value)] = part }
+    }
+    return output_value
+  }
+  if same(padded[0], absent) { return [text] }
+  let arg_6 = padded[0]
+  let separator = invoke ts.to_string(arg_6)
+  let output_value = []
+  let start = 0
+  let width = text.utf16_len(separator)
+  let length = text.utf16_len(text)
+  if eq(width, 0) {
+    while num.lt(start, length) {
+      let end = num.add(start, 1)
+      let part = invoke ts.string.slice_units(text, start, end)
+      set output_value[list.len(output_value)] = part
+      if eq(list.len(output_value), limit) { return output_value }
+      set start = end
+    }
+    return output_value
+  }
+  while true {
+    let position = text.utf16_find(text, separator, start)
+    if num.lt(position, 0) { break }
+    let part = invoke ts.string.slice_units(text, start, position)
+    set output_value[list.len(output_value)] = part
+    if eq(list.len(output_value), limit) { return output_value }
+    set start = num.add(position, width)
+  }
+  let tail = invoke ts.string.slice_units(text, start, length)
+  set output_value[list.len(output_value)] = tail
+  return output_value
+}
+
+function ts.string.substitute(replacement: Text, text: Text, needle: Text, position: Int) -> Text
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  let output_value = ""
+  let index = 0
+  let length = text.utf16_len(replacement)
+  while num.lt(index, length) {
+    let unit = text.utf16_get(replacement, index)
+    let end = num.add(index, 1)
+    if eq(unit, 36) {
+      if num.lt(end, length) {
+        let token = text.utf16_get(replacement, end)
+        let piece = absent
+        if eq(token, 36) { set piece = "$" }
+        if eq(token, 38) { set piece = needle }
+        if eq(token, 96) { set piece = invoke ts.string.slice_units(text, 0, position) }
+        if eq(token, 39) {
+          let after = num.add(position, text.utf16_len(needle))
+          let size = text.utf16_len(text)
+          set piece = invoke ts.string.slice_units(text, after, size)
+        }
+        if same(piece, absent) {} else {
+          set output_value = text.concat(output_value, piece)
+          set index = num.add(end, 1)
+          continue
+        }
+      }
+    }
+    if num.le(55296, unit) { if num.le(unit, 56319) { set end = num.add(end, 1) } }
+    set output_value = text.concat(output_value, text.utf16_slice(replacement, index, end))
+    set index = end
+  }
+  return output_value
+}
+
+function ts.string.replace_value(this: Any, args: List(Any), replace_every: Bool) -> Text
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  let text = invoke ts.string.receiver(this)
+  let padded = invoke ts.pad(args, 2)
+  let search = padded[0]
+  let replacement = padded[1]
+  let callback = same(kind(replacement), "closure")
+  let regex = invoke ts.regexp.is(search)
+  if regex {
+    let global = invoke ts.regexp.global(search)
+    if replace_every { if global {} else { throw error.new("type_error", "replaceAll requires a global RegExp", null) } }
+    if global { set search.lastIndex = 0.0 }
+    let snapshot = invoke ts.regexp.snapshot(search)
+    if callback {} else {
+      let template = invoke ts.to_string(replacement)
+      let outcome = invoke ts.regexp.native_replace(snapshot, text, template)
+      let stateful = global
+      if stateful {} else { set stateful = invoke ts.regexp.sticky(search) }
+      if stateful { set search.lastIndex = num.to_float(outcome.lastIndex) }
+      return outcome.text
+    }
+    # Collect before calling any callback. It may mutate the same regex.
+    let matches = invoke ts.regexp.native_match_all(snapshot, text)
+    if global { set search.lastIndex = 0.0 } else {
+      let sticky = invoke ts.regexp.sticky(search)
+      if sticky {
+        if eq(list.len(matches), 0) { set search.lastIndex = 0.0 } else {
+          let item = matches[0]
+          set search.lastIndex = num.to_float(num.add(item.index, text.utf16_len(item.groups[0])))
+        }
+      }
+    }
+    let output_value = ""
+    let end = 0
+    for match in matches {
+      let passed = []
+      for capture in match.groups {
+        if same(capture, null) { set passed[list.len(passed)] = absent } else { set passed[list.len(passed)] = capture }
+      }
+      set passed[list.len(passed)] = num.to_float(match.index)
+      set passed[list.len(passed)] = text
+      if same(match.named, null) {} else {
+        let named = match.named
+        for key in record.keys(named) { if same(named[key], null) { set named[key] = absent } }
+        set passed[list.len(passed)] = named
+      }
+      let value = apply replacement(absent, passed)
+      let substituted = invoke ts.to_string(value)
+      let arg_7 = match.index
+      let prefix = invoke ts.string.slice_units(text, end, arg_7)
+      set output_value = text.concat(output_value, text.concat(prefix, substituted))
+      set end = num.add(match.index, text.utf16_len(match.groups[0]))
+    }
+    let size = text.utf16_len(text)
+    let tail = invoke ts.string.slice_units(text, end, size)
+    return text.concat(output_value, tail)
+  }
+  let needle = invoke ts.to_string(search)
+  let template = ""
+  if callback {} else { set template = invoke ts.to_string(replacement) }
+  let output_value = ""
+  let end = 0
+  let next = 0
+  let length = text.utf16_len(text)
+  let width = text.utf16_len(needle)
+  while num.le(next, length) {
+    let position = text.utf16_find(text, needle, next)
+    if num.lt(position, 0) { break }
+    let piece = ""
+    if callback {
+      let passed = [needle, num.to_float(position), text]
+      let value = apply replacement(absent, passed)
+      set piece = invoke ts.to_string(value)
+    } else { set piece = invoke ts.string.substitute(template, text, needle, position) }
+    let prefix = invoke ts.string.slice_units(text, end, position)
+    set output_value = text.concat(output_value, text.concat(prefix, piece))
+    set end = num.add(position, width)
+    if replace_every {} else { break }
+    set next = end
+    if eq(width, 0) { set next = num.add(next, 1) }
+  }
+  let tail = invoke ts.string.slice_units(text, end, length)
+  return text.concat(output_value, tail)
+}
+
+function ts.string.replace(this: Any, args: List(Any)) -> Text
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  let output_value = invoke ts.string.replace_value(this, args, false)
+  return output_value
+}
+
+function ts.string.replaceAll(this: Any, args: List(Any)) -> Text
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  let output_value = invoke ts.string.replace_value(this, args, true)
+  return output_value
+}

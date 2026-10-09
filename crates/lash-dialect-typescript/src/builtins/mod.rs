@@ -18,6 +18,9 @@ use std::sync::OnceLock;
 
 mod console;
 mod promise;
+mod regexp;
+mod string;
+mod uri;
 
 /// What a member's receiver is, as `ts.receiver` names it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -101,7 +104,13 @@ pub(crate) struct Object {
 /// Every built-in object, in the order their helpers are defined: an object
 /// may call the helpers of those before it.
 pub(crate) fn objects() -> Vec<Object> {
-    vec![console::object(), promise::object()]
+    vec![
+        console::object(),
+        promise::object(),
+        string::object(),
+        regexp::object(),
+        uri::object(),
+    ]
 }
 
 /// The rows, indexed the ways the lowerer and the package builder ask.

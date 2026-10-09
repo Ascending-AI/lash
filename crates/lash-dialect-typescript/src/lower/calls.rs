@@ -42,7 +42,11 @@ impl Lowerer<'_> {
             ast::MemberProperty::Field(name) => Key::Static(name.clone()),
             ast::MemberProperty::Index(index) => {
                 let index = self.lower_expr(index)?;
-                Key::Computed(self.pin(index))
+                if let Atom::Literal(Literal::Text(name)) = &index.atom {
+                    Key::Static(name.clone())
+                } else {
+                    Key::Computed(self.pin(index))
+                }
             }
         })
     }
@@ -80,7 +84,21 @@ impl Lowerer<'_> {
                 ty,
             );
         }
-        self.invoke("ts.get", &[object.clone(), key.operand()], ty)
+        if let Key::Static(name) = key
+            && self.table.methods.contains_key(name.as_str())
+        {
+            return self.invoke(
+                &format!("ts.member.{name}"),
+                std::slice::from_ref(object),
+                Ty::Unknown,
+            );
+        }
+        let function = if matches!(key, Key::Computed(_)) {
+            "ts.get_computed"
+        } else {
+            "ts.get"
+        };
+        self.invoke(function, &[object.clone(), key.operand()], ty)
     }
 
     /// `object[key] = value`.
@@ -215,7 +233,11 @@ impl Lowerer<'_> {
             return self.invoke(&format!("ts.method.{name}"), &[object, args], Ty::Unknown);
         }
         self.invoke(
-            "ts.call_member",
+            if matches!(key, Key::Computed(_)) {
+                "ts.call_computed"
+            } else {
+                "ts.call_member"
+            },
             &[object, key.operand(), args],
             Ty::Unknown,
         )
@@ -231,9 +253,36 @@ impl Lowerer<'_> {
             return self.lower_wait_call(wait, args, span);
         }
         if let Some(path) = self.global_path(callee) {
+            // The dialect admits reads of the existing built-in prototype
+            // methods. Calling their inherited call/apply needs no prototype
+            // object: preserve the helper's receiver and argument convention.
+            if let Some((base, method)) = path.rsplit_once('.')
+                && matches!(method, "call" | "apply")
+                && let Some(function) = self.table.functions.get(base).copied()
+            {
+                let passed = self.arguments(args)?;
+                let padded = self.invoke(
+                    "ts.pad",
+                    &[passed.clone(), Operand::number(2.0)],
+                    Ty::Unknown,
+                )?;
+                let receiver = self.let_expr(Self::element(&padded, 0), Ty::Unknown);
+                let arguments = if method == "call" {
+                    self.invoke("ts.rest", &[passed, Operand::number(1.0)], Ty::Unknown)?
+                } else {
+                    let arguments = self.let_expr(Self::element(&padded, 1), Ty::Unknown);
+                    self.invoke("ts.string.apply_arguments", &[arguments], Ty::Unknown)?
+                };
+                return self.invoke(function, &[receiver, arguments], Ty::Unknown);
+            }
             if let Some(function) = self.table.functions.get(path.as_str()).copied() {
                 let args = self.arguments(args)?;
-                return self.invoke(function, &[Operand::undefined(), args], Ty::Unknown);
+                let receiver = if path.starts_with("String.prototype.") {
+                    Operand::text("")
+                } else {
+                    Operand::undefined()
+                };
+                return self.invoke(function, &[receiver, args], Ty::Unknown);
             }
             if !path.starts_with("globalThis.") && !self.table.values.contains_key(path.as_str()) {
                 return Err(Diagnostic::refusal(

@@ -1,0 +1,208 @@
+# ECMAScript URI codecs, compiled into kernel code; UTF-8 decoding is strict and preserves reserved escapes verbatim for decodeURI.
+
+use bytes.from_octets
+use bytes.utf8_decode
+use eq
+use error.new
+use int.rem_floor
+use int.div_floor
+use list.len
+use num.add
+use num.le
+use num.lt
+use num.mul
+use num.sub
+use text.concat
+use text.from_utf16_units
+use text.utf16_find
+use text.utf16_get
+use text.utf16_len
+use text.utf16_slice
+use ts.pad
+use ts.to_string
+use ts.uri.decode
+use ts.uri.decodeURI
+use ts.uri.decodeURIComponent
+use ts.uri.encode
+use ts.uri.encodeURI
+use ts.uri.encodeURIComponent
+use ts.uri.escape
+use ts.uri.flush
+use ts.uri.hex
+
+function ts.uri.hex(unit: Int) -> Int
+kernel 1
+errors "URIError"
+charge sum(8, deep(result))
+body {
+  if num.le(48, unit) { if num.le(unit, 57) { return num.sub(unit, 48) } }
+  if num.le(65, unit) { if num.le(unit, 70) { return num.sub(unit, 55) } }
+  if num.le(97, unit) { if num.le(unit, 102) { return num.sub(unit, 87) } }
+  throw error.new("URIError", "URI malformed", null)
+}
+
+function ts.uri.escape(octet: Int) -> Text
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  let high = int.div_floor(octet, 16)
+  let low = int.rem_floor(octet, 16)
+  let a = text.utf16_slice("0123456789ABCDEF", high, num.add(high, 1))
+  let b = text.utf16_slice("0123456789ABCDEF", low, num.add(low, 1))
+  return text.concat("%", text.concat(a, b))
+}
+
+function ts.uri.encode(input: Text, preserve: Bool) -> Text
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  let output_value = ""
+  let index = 0
+  let length = text.utf16_len(input)
+  while num.lt(index, length) {
+    let unit = text.utf16_get(input, index)
+    set index = num.add(index, 1)
+    let scalar = unit
+    if num.le(55296, unit) {
+      if num.le(unit, 56319) {
+        let low = text.utf16_get(input, index)
+        set scalar = num.add(65536, num.add(num.mul(num.sub(unit, 55296), 1024), num.sub(low, 56320)))
+        set index = num.add(index, 1)
+      }
+    }
+    let unescaped = false
+    if num.lt(scalar, 128) {
+      let character = text.from_utf16_units([scalar])
+      set unescaped = num.le(0, text.utf16_find("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.!~*'()", character, 0))
+      if preserve {
+        if num.le(0, text.utf16_find(";/?:@&=+$,#", character, 0)) { set unescaped = true }
+      }
+      if unescaped { set output_value = text.concat(output_value, character) }
+    }
+    if unescaped {} else {
+      let octets = []
+      if num.lt(scalar, 128) { set octets = [scalar] } else {
+        if num.lt(scalar, 2048) {
+          set octets = [num.add(192, int.div_floor(scalar, 64)), num.add(128, int.rem_floor(scalar, 64))]
+        } else {
+          if num.lt(scalar, 65536) {
+            set octets = [num.add(224, int.div_floor(scalar, 4096)), num.add(128, int.rem_floor(int.div_floor(scalar, 64), 64)), num.add(128, int.rem_floor(scalar, 64))]
+          } else {
+            set octets = [num.add(240, int.div_floor(scalar, 262144)), num.add(128, int.rem_floor(int.div_floor(scalar, 4096), 64)), num.add(128, int.rem_floor(int.div_floor(scalar, 64), 64)), num.add(128, int.rem_floor(scalar, 64))]
+          }
+        }
+      }
+      for octet in octets {
+        let escaped = invoke ts.uri.escape(octet)
+        set output_value = text.concat(output_value, escaped)
+      }
+    }
+  }
+  return output_value
+}
+
+function ts.uri.flush(octets: List(Int)) -> Text
+kernel 1
+errors "URIError"
+charge sum(8, deep(result))
+body {
+  try { return bytes.utf8_decode(bytes.from_octets(octets)) } catch malformed {
+    throw error.new("URIError", "URI malformed", null)
+  }
+}
+
+function ts.uri.decode(input: Text, preserve: Bool) -> Text
+kernel 1
+errors "URIError"
+charge sum(8, deep(result))
+body {
+  let output_value = ""
+  let octets = []
+  let index = 0
+  let length = text.utf16_len(input)
+  while num.lt(index, length) {
+    let unit = text.utf16_get(input, index)
+    if eq(unit, 37) {
+      if num.lt(num.add(index, 2), length) {} else { throw error.new("URIError", "URI malformed", null) }
+      let highUnit = text.utf16_get(input, num.add(index, 1))
+      let lowUnit = text.utf16_get(input, num.add(index, 2))
+      let high = invoke ts.uri.hex(highUnit)
+      let low = invoke ts.uri.hex(lowUnit)
+      let octet = num.add(num.mul(high, 16), low)
+      let reserved = false
+      if preserve {
+        if num.lt(octet, 128) {
+          let character = text.from_utf16_units([octet])
+          set reserved = num.le(0, text.utf16_find(";/?:@&=+$,#", character, 0))
+        }
+      }
+      if reserved {
+        let flushed = invoke ts.uri.flush(octets)
+        set output_value = text.concat(output_value, flushed)
+        set octets = []
+        set output_value = text.concat(output_value, text.utf16_slice(input, index, num.add(index, 3)))
+      } else { set octets[list.len(octets)] = octet }
+      set index = num.add(index, 3)
+    } else {
+      let flushed = invoke ts.uri.flush(octets)
+      set output_value = text.concat(output_value, flushed)
+      set octets = []
+      let end = num.add(index, 1)
+      if num.le(55296, unit) { if num.le(unit, 56319) { set end = num.add(end, 1) } }
+      set output_value = text.concat(output_value, text.utf16_slice(input, index, end))
+      set index = end
+    }
+  }
+  let flushed = invoke ts.uri.flush(octets)
+  return text.concat(output_value, flushed)
+}
+
+function ts.uri.encodeURI(this: Any, args: List(Any)) -> Text
+kernel 1
+errors "type_error", "URIError"
+charge sum(8, deep(result))
+body {
+  let padded = invoke ts.pad(args, 1)
+  let arg_1 = padded[0]
+  let input = invoke ts.to_string(arg_1)
+  let output_value = invoke ts.uri.encode(input, true)
+  return output_value
+}
+
+function ts.uri.decodeURI(this: Any, args: List(Any)) -> Text
+kernel 1
+errors "type_error", "URIError"
+charge sum(8, deep(result))
+body {
+  let padded = invoke ts.pad(args, 1)
+  let arg_2 = padded[0]
+  let input = invoke ts.to_string(arg_2)
+  let output_value = invoke ts.uri.decode(input, true)
+  return output_value
+}
+
+function ts.uri.encodeURIComponent(this: Any, args: List(Any)) -> Text
+kernel 1
+errors "type_error", "URIError"
+charge sum(8, deep(result))
+body {
+  let padded = invoke ts.pad(args, 1)
+  let arg_3 = padded[0]
+  let input = invoke ts.to_string(arg_3)
+  let output_value = invoke ts.uri.encode(input, false)
+  return output_value
+}
+
+function ts.uri.decodeURIComponent(this: Any, args: List(Any)) -> Text
+kernel 1
+errors "type_error", "URIError"
+charge sum(8, deep(result))
+body {
+  let padded = invoke ts.pad(args, 1)
+  let arg_4 = padded[0]
+  let input = invoke ts.to_string(arg_4)
+  let output_value = invoke ts.uri.decode(input, false)
+  return output_value
+}

@@ -1,8 +1,53 @@
 use same
 use text.concat
 use json.stringify
+use record.keys
+use ts.console.json
 use ts.receiver
 use ts.to_string
+
+# Console's compact JSON uses the guest number spelling. The kernel JSON
+# codec preserves Int/Float spellings, so only scalar JSON escaping is
+# shared; structured values have already passed its cycle/data checks.
+function ts.console.json(value: Any) -> Text
+kernel 1
+errors "type_error"
+charge sum(8, deep(value), size(result))
+body {
+  let convert = absent
+  set convert = fn(item) {
+    let k = invoke ts.receiver(item)
+    if same(k, "number") {
+      let spelled = invoke ts.to_string(item)
+      return spelled
+    }
+    if same(k, "list") {
+      let result_value = "["
+      let separator = ""
+      for member in item {
+        let spelled = apply convert(member)
+        set result_value = text.concat(result_value, text.concat(separator, spelled))
+        set separator = ","
+      }
+      return text.concat(result_value, "]")
+    }
+    if same(k, "record") {
+      let result_value = "{"
+      let separator = ""
+      for name in record.keys(item) {
+        let member = item[name]
+        let spelled = apply convert(member)
+        let field = text.concat(json.stringify(name), text.concat(":", spelled))
+        set result_value = text.concat(result_value, text.concat(separator, field))
+        set separator = ","
+      }
+      return text.concat(result_value, "}")
+    }
+    return json.stringify(item)
+  }
+  let result_value = apply convert(value)
+  return result_value
+}
 
 # `console.log` and its siblings: one print of the arguments joined by a
 # space, a plain object or an array as compact JSON and anything else as its
@@ -26,7 +71,9 @@ body {
       set structured = same(k, "list")
     }
     if structured {
-      set line = text.concat(line, json.stringify(item))
+      let checked = json.stringify(item)
+      let piece = invoke ts.console.json(item)
+      set line = text.concat(line, piece)
     } else {
       let piece = invoke ts.to_string(item)
       set line = text.concat(line, piece)

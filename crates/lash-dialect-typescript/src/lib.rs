@@ -15,7 +15,7 @@ mod lower;
 mod node_label;
 mod package;
 mod printer;
-pub mod provisional;
+mod regex;
 mod types;
 
 #[cfg(test)]

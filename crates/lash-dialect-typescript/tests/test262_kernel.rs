@@ -61,14 +61,9 @@ fn registered_exclusions() -> BTreeMap<String, String> {
 }
 
 /// Every selected test has one observation, and the report counts them by
-/// directory. With no machine installed a program that lowers is counted
-/// `not-run`; nothing is counted `pass` that did not run to its expected
-/// end.
-///
-/// The register's exclusions are the only skips: each names a test main's
-/// record marks as passing and cites a row of the register, and once a
-/// machine runs the selection, a recorded pass the kernel does not pass
-/// and no row names fails here.
+/// directory. Every recorded pass must run to its expected end or be
+/// explicitly refused in the outcome record and census, or excluded by a
+/// registered dialect deviation.
 #[test]
 fn the_selection_runs_on_the_kernel_and_is_counted_by_directory() {
     let recorded = runner::recorded_classes();
@@ -82,7 +77,7 @@ fn the_selection_runs_on_the_kernel_and_is_counted_by_directory() {
                 recorded.contains_key(path),
                 "{path} has no recorded outcome"
             );
-            (path.clone(), runner::run(path, executor.as_deref()))
+            (path.clone(), runner::run(path, executor.as_ref()))
         })
         .collect();
     let report = runner::report(&observations, &recorded);
@@ -94,7 +89,7 @@ fn the_selection_runs_on_the_kernel_and_is_counted_by_directory() {
         .map(|line| {
             line.split('\t')
                 .skip(1)
-                .take(5)
+                .take(4)
                 .map(|count| count.parse::<usize>().expect("a count"))
                 .sum::<usize>()
         })
@@ -112,31 +107,22 @@ fn the_selection_runs_on_the_kernel_and_is_counted_by_directory() {
             "the register excludes {path} under {code}, which is no row's code"
         );
     }
-    if executor.is_some() {
-        let unregistered: Vec<&str> = observations
-            .iter()
-            .filter(|(path, observed)| {
-                *observed != Observed::Pass
-                    && recorded.get(path).is_some_and(|class| class == "pass")
-                    && !excluded.contains_key(path)
-            })
-            .map(|(path, _)| path.as_str())
-            .collect();
-        assert!(
-            unregistered.is_empty(),
-            "recorded passes the kernel does not pass and the register does not exclude: \
-             {unregistered:#?}"
-        );
+    let regressed: Vec<_> = observations
+        .iter()
+        .filter(|(path, observed)| {
+            recorded.get(path).is_some_and(|class| class == "pass")
+                && *observed != Observed::Pass
+                && !excluded.contains_key(path)
+        })
+        .collect();
+    for (path, observed) in &regressed {
+        println!("regression\t{path}\t{observed:?}");
     }
-    if executor.is_none() {
-        // Only a parse-negative test passes without running.
-        for (path, observed) in &observations {
-            if *observed == Observed::Pass {
-                let meta = metadata::read_metadata(&ingest::data_path(path)).expect("metadata");
-                assert!(meta.negative.is_some(), "{path} passed without running");
-            }
-        }
-    }
+    assert!(
+        regressed.is_empty(),
+        "{} recorded passes did not pass on the kernel; register a real dialect refusal in the census and outcome record, or fix the implementation",
+        regressed.len()
+    );
 }
 
 /// K-DIALECT-001 over every recorded Test262 program, rather than a sample.
