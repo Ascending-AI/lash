@@ -10,14 +10,7 @@ use std::time::Duration;
 
 fn record(subject: TraceRuntimeSubject, occurrence: u64) -> TraceRecord {
     let payload = if occurrence == 0 {
-        TraceLanguageExecutionPayload::ExecutionStarted {
-            document: lash_trace::WorkflowDocumentRef {
-                source_identity: "source".into(),
-                module_ref: "module".into(),
-                entry: lash_trace::WorkflowDocumentEntry::Main,
-                ir_version: 1,
-            },
-        }
+        TraceLanguageExecutionPayload::ExecutionStarted
     } else {
         TraceLanguageExecutionPayload::NodeStarted {
             node_id: "node".into(),
@@ -35,10 +28,14 @@ fn record(subject: TraceRuntimeSubject, occurrence: u64) -> TraceRecord {
                 identity: TraceLanguageExecutionIdentity {
                     scope: TraceRuntimeScope::none(),
                     subject,
-                    source_identity: "source".into(),
-                    module_ref: "module".into(),
-                    entry_kind: "main".into(),
-                    entry_ref: None,
+                    document: lash_trace::WorkflowDocumentRef {
+                        source_identity: "source".into(),
+                        module_ref: lash_sansio::ModuleRef::new(&lash_sansio::ContentHash::new(
+                            "module",
+                        )),
+                        entry: lash_trace::WorkflowDocumentEntry::Main,
+                        ir_version: 1,
+                    },
                     entry_name: "main".into(),
                     engine_execution_id: None,
                     generation: None,

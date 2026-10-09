@@ -743,7 +743,7 @@ async fn execute_code_in_worker_scope(
     if resumed.is_none()
         && let Some(trace) = &lash_vm_execution_trace
     {
-        emit_foreground_execution_started(trace, &linked_module.artifact);
+        emit_foreground_execution_started(trace);
     }
     let identities = match cell.as_ref() {
         Ok(cell) => cell.identities().code().clone(),
@@ -1476,10 +1476,12 @@ fn foreground_lash_vm_execution_trace(
                 address,
                 effect_id: effect_id.to_string(),
             },
-            source_identity: artifact.source_identity(),
-            module_ref: artifact.module_ref().to_string(),
-            entry_kind: "main".to_string(),
-            entry_ref: None,
+            document: lash_trace::WorkflowDocumentRef {
+                source_identity: artifact.source_identity(),
+                module_ref: artifact.module_ref().clone(),
+                entry: lash_trace::WorkflowDocumentEntry::Main,
+                ir_version: artifact.graph.ir_version,
+            },
             entry_name: "main".to_string(),
             engine_execution_id: ctx.engine_execution_id().map(str::to_string),
             generation,
@@ -1487,21 +1489,11 @@ fn foreground_lash_vm_execution_trace(
     ))
 }
 
-fn emit_foreground_execution_started(
-    trace: &LashVmExecutionTrace,
-    artifact: &lash_vm_client::InspectedArtifact,
-) {
+fn emit_foreground_execution_started(trace: &LashVmExecutionTrace) {
     trace.emit(TraceLanguageExecution {
         event_key: trace.event_key("started"),
         identity: trace.identity().clone(),
-        payload: TraceLanguageExecutionPayload::ExecutionStarted {
-            document: lash_trace::WorkflowDocumentRef {
-                source_identity: trace.identity().source_identity.clone(),
-                module_ref: trace.identity().module_ref.clone(),
-                entry: lash_trace::WorkflowDocumentEntry::Main,
-                ir_version: artifact.graph.ir_version,
-            },
-        },
+        payload: TraceLanguageExecutionPayload::ExecutionStarted,
     });
 }
 

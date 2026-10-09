@@ -124,6 +124,7 @@ pub enum WorkflowOverlayEventTransition {
 pub enum WorkflowOverlayFact {
     /// What the language execution reported.
     Language {
+        document: Box<WorkflowDocumentRef>,
         #[serde(flatten)]
         payload: TraceLanguageExecutionPayload,
     },
@@ -441,11 +442,7 @@ pub struct WorkflowOverlayChildLink {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub child_attempt: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub child_module_ref: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub child_entry_ref: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub child_entry_name: Option<String>,
+    pub document: Option<WorkflowDocumentRef>,
 }
 
 /// The actual durable terminal category; abandonment is not a VM failure.

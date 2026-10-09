@@ -683,9 +683,9 @@ async fn attach_observer(State(host): State<Host>, Path(process): Path<String>) 
     accumulator.set_document(document.overlay_document());
     let mut state = Observed {
         document: json!({
-            "reference": serde_json::to_value(&document.reference).map_err(api_error)?,
-            "entry": document.entry,
-            "graph": serde_json::to_value(&document.graph).map_err(api_error)?,
+            "reference": serde_json::to_value(document.reference()).map_err(api_error)?,
+            "entry": document.entry_name(),
+            "graph": serde_json::to_value(document.graph()).map_err(api_error)?,
         }),
         ..Observed::default()
     };

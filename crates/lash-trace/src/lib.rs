@@ -1149,11 +1149,7 @@ impl TraceLanguageExecutionGeneration {
 pub struct TraceLanguageExecutionIdentity {
     pub scope: TraceRuntimeScope,
     pub subject: TraceRuntimeSubject,
-    pub source_identity: String,
-    pub module_ref: String,
-    pub entry_kind: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub entry_ref: Option<String>,
+    pub document: WorkflowDocumentRef,
     pub entry_name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub engine_execution_id: Option<String>,
@@ -1167,10 +1163,7 @@ pub struct TraceLanguageExecutionIdentity {
 struct TraceLanguageExecutionIdentityWire {
     scope: TraceRuntimeScope,
     subject: TraceRuntimeSubject,
-    source_identity: String,
-    module_ref: String,
-    entry_kind: String,
-    entry_ref: Option<String>,
+    document: WorkflowDocumentRef,
     entry_name: String,
     engine_execution_id: Option<String>,
     attempt: Option<u32>,
@@ -1185,10 +1178,7 @@ impl<'de> Deserialize<'de> for TraceLanguageExecutionIdentity {
         Ok(Self {
             scope: wire.scope,
             subject: wire.subject,
-            source_identity: wire.source_identity,
-            module_ref: wire.module_ref,
-            entry_kind: wire.entry_kind,
-            entry_ref: wire.entry_ref,
+            document: wire.document,
             entry_name: wire.entry_name,
             engine_execution_id: wire.engine_execution_id,
             generation: wire.attempt.map(TraceLanguageExecutionGeneration::new),
@@ -1231,11 +1221,7 @@ pub struct TraceLanguageChildExecution {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attempt: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub module_ref: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub entry_ref: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub entry_name: Option<String>,
+    pub document: Option<WorkflowDocumentRef>,
 }
 
 impl TraceLanguageChildExecution {

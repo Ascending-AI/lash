@@ -242,7 +242,7 @@ impl TraceEvent {
                     TraceLanguageExecutionFailure::Effect { message, .. }
                     | TraceLanguageExecutionFailure::Runtime { message, .. } => message.clear(),
                 },
-                TraceLanguageExecutionPayload::ExecutionStarted { .. }
+                TraceLanguageExecutionPayload::ExecutionStarted
                 | TraceLanguageExecutionPayload::NodeStarted { .. }
                 | TraceLanguageExecutionPayload::NodeWaiting { .. }
                 | TraceLanguageExecutionPayload::NodeResumed { .. }

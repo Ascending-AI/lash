@@ -135,6 +135,7 @@ impl WorkflowExecutionOverlayAccumulator {
             observation.observed_at_ms,
             ExecutionRef::of_language(&observation.execution.identity),
             WorkflowOverlayFact::Language {
+                document: Box::new(observation.execution.identity.document.clone()),
                 payload: observation.execution.payload.clone(),
             },
         )

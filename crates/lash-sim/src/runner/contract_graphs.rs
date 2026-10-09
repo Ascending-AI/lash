@@ -136,10 +136,8 @@ impl lash::tracing::TraceSink for ContractGraphs {
         let execution = executions.entry(key).or_default();
         if let lash::tracing::TraceEvent::LanguageExecution { event, .. } = &record.event {
             execution.identity = Some(event.identity.clone());
-            if let lash::tracing::TraceLanguageExecutionPayload::ExecutionStarted { document } =
-                &event.payload
-            {
-                execution.document = Some(document.clone());
+            if let lash::tracing::TraceLanguageExecutionPayload::ExecutionStarted = &event.payload {
+                execution.document = Some(event.identity.document.clone());
             }
         }
         // One execution per accumulator, so the fold cannot refuse the record.
@@ -210,12 +208,13 @@ pub(super) fn agent_contract_graph_facts(
                 _ => {}
             }
         }
-        if identity.entry_kind == "process"
-            && matches!(
-                graph.subject,
-                lash::tracing::TraceRuntimeSubject::Process { .. }
-            )
-            && graph.status == lash::tracing::TraceLanguageExecutionStatus::Completed
+        if matches!(
+            identity.document.entry,
+            lash::workflow::WorkflowDocumentEntry::Process { .. }
+        ) && matches!(
+            graph.subject,
+            lash::tracing::TraceRuntimeSubject::Process { .. }
+        ) && graph.status == lash::tracing::TraceLanguageExecutionStatus::Completed
         {
             completed_process_entries.insert(identity.entry_name.clone());
         }
@@ -223,7 +222,7 @@ pub(super) fn agent_contract_graph_facts(
         // says only what the site was observed to do.
         let body = document
             .as_ref()
-            .and_then(lash::workflow::WorkflowExecutionDocument::body);
+            .map(lash::workflow::WorkflowExecutionDocument::body);
         for site in &graph.sites {
             let Some((node, described)) =
                 body.and_then(|body| contract_document_site(body, &site.site))
@@ -252,7 +251,11 @@ pub(super) fn agent_contract_graph_facts(
             child_links.insert(format!(
                 "{}->{}",
                 identity.entry_name,
-                child.child_entry_name.as_deref().unwrap_or("<unknown>")
+                child
+                    .document
+                    .as_ref()
+                    .map(|document| document.module_ref.as_str())
+                    .unwrap_or("<unknown>")
             ));
         }
     }

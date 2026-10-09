@@ -908,7 +908,7 @@ async fn a_dialect_free_process_never_claims_a_source_language() {
         .collect::<Vec<_>>();
     assert!(language_events.iter().any(|payload| matches!(
         payload,
-        lash_trace::TraceLanguageExecutionPayload::ExecutionStarted { .. }
+        lash_trace::TraceLanguageExecutionPayload::ExecutionStarted
     )));
     assert!(language_events.iter().any(|payload| matches!(
         payload,

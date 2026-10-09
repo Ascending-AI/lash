@@ -230,7 +230,7 @@ pub(crate) fn draw(
         nodes: Vec::new(),
         edges: Vec::new(),
     };
-    match document.and_then(WorkflowExecutionDocument::body) {
+    match document.map(WorkflowExecutionDocument::body) {
         Some(body) => {
             drawing.body(body, None);
             let drawn = drawing
@@ -263,10 +263,19 @@ pub(crate) fn draw(
         scope: overlay.scope.clone(),
         subject: overlay.subject.clone(),
         attempt: overlay.generation.map(|generation| generation.attempt()),
-        source_identity: identity.source_identity.clone(),
-        module_ref: identity.module_ref.clone(),
-        entry_kind: identity.entry_kind.clone(),
-        entry_ref: identity.entry_ref.clone(),
+        source_identity: identity.document.source_identity.clone(),
+        module_ref: identity.document.module_ref.to_string(),
+        entry_kind: match identity.document.entry {
+            lash::workflow::WorkflowDocumentEntry::Main => "main",
+            lash::workflow::WorkflowDocumentEntry::Process { .. } => "process",
+        }
+        .to_string(),
+        entry_ref: match &identity.document.entry {
+            lash::workflow::WorkflowDocumentEntry::Main => None,
+            lash::workflow::WorkflowDocumentEntry::Process { process_ref } => {
+                Some(process_ref.clone())
+            }
+        },
         entry_name: identity.entry_name.clone(),
         status: overlay.status,
         settlement: overlay.settlement,
@@ -282,9 +291,19 @@ pub(crate) fn draw(
                 child_graph_key: child.child_execution_key.clone(),
                 child_process_id: child.child_process_id.clone(),
                 child_attempt: child.child_attempt,
-                child_module_ref: child.child_module_ref.clone(),
-                child_entry_ref: child.child_entry_ref.clone(),
-                child_entry_name: child.child_entry_name.clone(),
+                child_module_ref: child
+                    .document
+                    .as_ref()
+                    .map(|document| document.module_ref.to_string()),
+                child_entry_ref: child.document.as_ref().and_then(|document| {
+                    match &document.entry {
+                        lash::workflow::WorkflowDocumentEntry::Main => None,
+                        lash::workflow::WorkflowDocumentEntry::Process { process_ref } => {
+                            Some(process_ref.clone())
+                        }
+                    }
+                }),
+                child_entry_name: None,
             })
             .collect(),
         mismatches: overlay.mismatches.clone(),

@@ -342,7 +342,7 @@ impl TraceEvent {
                     | TraceLanguageExecutionStatus::Completed
                     | TraceLanguageExecutionStatus::Cancelled => false,
                 },
-                TraceLanguageExecutionPayload::ExecutionStarted { .. }
+                TraceLanguageExecutionPayload::ExecutionStarted
                 | TraceLanguageExecutionPayload::NodeStarted { .. }
                 | TraceLanguageExecutionPayload::NodeWaiting { .. }
                 | TraceLanguageExecutionPayload::NodeResumed { .. }

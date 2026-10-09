@@ -217,7 +217,7 @@ async fn vm_run(
     if input.vm.is_none()
         && let Some(trace) = &trace
     {
-        trace.started(&artifact);
+        trace.started();
     }
     let owner = segment_continuation_owner(&run.process);
     let start = match input.vm {

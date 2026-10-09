@@ -872,6 +872,10 @@
       "minimum": 1,
       "type": "integer"
     },
+    "ModuleRef": {
+      "description": "The content-addressed stored VM module an execution document names.",
+      "type": "string"
+    },
     "NormalizedError": {
       "description": "A journal-safe projection of a provider/transport failure.",
       "properties": {
@@ -2403,22 +2407,14 @@
             "null"
           ]
         },
-        "entry_name": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "entry_ref": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "module_ref": {
-          "type": [
-            "string",
-            "null"
+        "document": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkflowDocumentRef"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "process_id": {
@@ -2437,19 +2433,15 @@
     "TraceLanguageExecution": {
       "oneOf": [
         {
-          "description": "The execution began. It names the workflow document it runs and the\nentry it runs it from; the document itself is read through the\nfacade's workflow inspection, never carried here.",
+          "description": "The execution began. Its identity names the workflow document and\nentry; the document itself is read through facade workflow inspection.",
           "properties": {
-            "document": {
-              "$ref": "#/$defs/WorkflowDocumentRef"
-            },
             "kind": {
               "const": "execution_started",
               "type": "string"
             }
           },
           "required": [
-            "kind",
-            "document"
+            "kind"
           ],
           "type": "object"
         },
@@ -2814,32 +2806,20 @@
           "minimum": 0,
           "type": "integer"
         },
+        "document": {
+          "$ref": "#/$defs/WorkflowDocumentRef"
+        },
         "engine_execution_id": {
           "type": [
             "string",
             "null"
           ]
         },
-        "entry_kind": {
-          "type": "string"
-        },
         "entry_name": {
-          "type": "string"
-        },
-        "entry_ref": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "module_ref": {
           "type": "string"
         },
         "scope": {
           "$ref": "#/$defs/TraceRuntimeScope"
-        },
-        "source_identity": {
-          "type": "string"
         },
         "subject": {
           "$ref": "#/$defs/TraceRuntimeSubject"
@@ -2848,9 +2828,7 @@
       "required": [
         "scope",
         "subject",
-        "source_identity",
-        "module_ref",
-        "entry_kind",
+        "document",
         "entry_name"
       ],
       "type": "object"
@@ -4071,8 +4049,8 @@
           "type": "integer"
         },
         "module_ref": {
-          "description": "The stored module the document is read from.",
-          "type": "string"
+          "$ref": "#/$defs/ModuleRef",
+          "description": "The stored module the document is read from."
         },
         "source_identity": {
           "description": "The definition identity of the admitted module the document\nprojects; the document's own `source_identity`.",

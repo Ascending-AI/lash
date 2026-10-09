@@ -41,7 +41,7 @@ pub struct WorkflowDocumentRef {
     /// projects; the document's own `source_identity`.
     pub source_identity: String,
     /// The stored module the document is read from.
-    pub module_ref: String,
+    pub module_ref: lash_sansio::ModuleRef,
     /// Where the execution enters the document.
     pub entry: WorkflowDocumentEntry,
     /// The interpretation of the IR the document is written under.
@@ -116,10 +116,9 @@ pub struct StepBodyStartedObservation {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TraceLanguageExecutionPayload {
-    /// The execution began. It names the workflow document it runs and the
-    /// entry it runs it from; the document itself is read through the
-    /// facade's workflow inspection, never carried here.
-    ExecutionStarted { document: WorkflowDocumentRef },
+    /// The execution began. Its identity names the workflow document and
+    /// entry; the document itself is read through facade workflow inspection.
+    ExecutionStarted,
     ExecutionFinished {
         status: TraceLanguageExecutionStatus,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -237,7 +236,7 @@ impl TraceLanguageExecutionPayload {
     /// for a fact about the whole execution.
     pub fn context(&self) -> Option<&lash_sansio::WorkflowOccurrenceContext> {
         match self {
-            Self::ExecutionStarted { .. } | Self::ExecutionFinished { .. } => None,
+            Self::ExecutionStarted | Self::ExecutionFinished { .. } => None,
             Self::NodeStarted { context, .. }
             | Self::NodeWaiting { context, .. }
             | Self::NodeResumed { context, .. }
@@ -254,7 +253,7 @@ impl TraceLanguageExecutionPayload {
     /// name one.
     pub fn occurrence_key(&self) -> Option<(lash_sansio::WorkflowSiteRef, u64)> {
         let (node_id, occurrence, context) = match self {
-            Self::ExecutionStarted { .. } | Self::ExecutionFinished { .. } => return None,
+            Self::ExecutionStarted | Self::ExecutionFinished { .. } => return None,
             Self::NodeStarted {
                 node_id,
                 occurrence,

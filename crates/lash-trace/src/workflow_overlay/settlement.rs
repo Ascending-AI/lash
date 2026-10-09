@@ -90,6 +90,7 @@ pub(super) fn observed_execution_status(
     match fact {
         WorkflowOverlayFact::Language {
             payload: TraceLanguageExecutionPayload::ExecutionFinished { status, .. },
+            ..
         } => canonical_execution_status(current, *status),
         _ => current,
     }
@@ -142,9 +143,11 @@ pub(super) fn canonical_execution_status_of(
     let (
         WorkflowOverlayFact::Language {
             payload: TraceLanguageExecutionPayload::ExecutionFinished { status: left, .. },
+            ..
         },
         WorkflowOverlayFact::Language {
             payload: TraceLanguageExecutionPayload::ExecutionFinished { status: right, .. },
+            ..
         },
     ) = (left, right)
     else {

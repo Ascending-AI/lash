@@ -332,14 +332,13 @@ impl Overlay {
         host: Arc<crate::display::HostTools>,
     ) -> Result<Self, RunError> {
         let definition = document
-            .graph
+            .graph()
             .source_identity
             .clone()
             .ok_or_else(|| RunError::Invalid("the run's graph names no artifact".into()))?;
         let root_node = document
-            .entry
-            .as_deref()
-            .and_then(|entry| document.graph.process(entry))
+            .entry_name()
+            .and_then(|entry| document.graph().process(entry))
             .ok_or_else(|| RunError::Invalid("the run's process has no graph".into()))?
             .id
             .to_string();

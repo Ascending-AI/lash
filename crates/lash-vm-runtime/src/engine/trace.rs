@@ -48,10 +48,14 @@ impl ProcessTrace {
                 subject: TraceRuntimeSubject::Process {
                     process_id: process.clone(),
                 },
-                source_identity: artifact.source_identity(),
-                module_ref: input.module_ref.to_string(),
-                entry_kind: "process".to_owned(),
-                entry_ref: Some(lash_vm::process_ref_key(&input.process_ref)),
+                document: lash_trace::WorkflowDocumentRef {
+                    source_identity: artifact.source_identity(),
+                    module_ref: input.module_ref.clone(),
+                    entry: lash_trace::WorkflowDocumentEntry::Process {
+                        process_ref: lash_vm::process_ref_key(&input.process_ref),
+                    },
+                    ir_version: artifact.graph.ir_version,
+                },
                 entry_name: input.process_name.clone(),
                 engine_execution_id: Some(process.to_string()),
                 // The durable actor has no execution-attempt fact. Its
@@ -63,18 +67,8 @@ impl ProcessTrace {
 
     /// The execution began: it names the document it runs and the process
     /// it enters it by.
-    pub(super) fn started(&self, artifact: &lash_vm_client::InspectedArtifact) {
-        let Some(process_ref) = self.identity.entry_ref.clone() else {
-            return;
-        };
-        self.emit_payload(TraceLanguageExecutionPayload::ExecutionStarted {
-            document: lash_trace::WorkflowDocumentRef {
-                source_identity: self.identity.source_identity.clone(),
-                module_ref: self.identity.module_ref.clone(),
-                entry: lash_trace::WorkflowDocumentEntry::Process { process_ref },
-                ir_version: artifact.graph.ir_version,
-            },
-        });
+    pub(super) fn started(&self) {
+        self.emit_payload(TraceLanguageExecutionPayload::ExecutionStarted);
     }
 
     pub(super) fn finished(&self, outcome: &lash_core::ProcessOutcome) {
@@ -184,7 +178,7 @@ impl ProcessTrace {
             .map(|(site, occurrence)| format!("{site}:{occurrence}"))
             .unwrap_or_default();
         let (suffix, node) = match &payload {
-            Payload::ExecutionStarted { .. } => ("started".to_owned(), None),
+            Payload::ExecutionStarted => ("started".to_owned(), None),
             Payload::ExecutionFinished { .. } => ("finished".to_owned(), None),
             Payload::BranchSelected { node_id, .. } => (format!("branch:{at}"), Some(node_id)),
             Payload::ChildStarted {

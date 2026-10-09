@@ -61,7 +61,6 @@ impl<'scope> ProcessOpScope<'scope> {
             return;
         };
         let process_id = record.id.clone();
-        let entry_name = Some(record.identity.kind.as_str().to_owned());
         let observation = move || {
             let identity = &call.identity;
             let context = lash_trace::TraceContext {
@@ -94,9 +93,7 @@ impl<'scope> ProcessOpScope<'scope> {
                         scope: identity.scope.clone(),
                         process_id: process_id.clone(),
                         attempt: None,
-                        module_ref: None,
-                        entry_ref: None,
-                        entry_name: entry_name.clone(),
+                        document: None,
                     },
                     context: call.context.clone(),
                 },

@@ -115,6 +115,7 @@ impl Incoming {
                 timestamp: record.timestamp,
                 execution: ExecutionRef::of_language(&event.identity),
                 fact: WorkflowOverlayFact::Language {
+                    document: Box::new(event.identity.document.clone()),
                     payload: event.payload.clone(),
                 },
             }),
@@ -198,12 +199,14 @@ impl DocumentState {
             return true;
         };
         if let WorkflowOverlayFact::Language {
-            payload: TraceLanguageExecutionPayload::ExecutionStarted { document: claimed },
+            document: claimed,
+            payload: TraceLanguageExecutionPayload::ExecutionStarted,
+            ..
         } = fact
-            && claimed != document.reference()
+            && claimed.as_ref() != document.reference()
         {
             self.report(WorkflowOverlayMismatch::Document {
-                claimed: claimed.clone(),
+                claimed: claimed.as_ref().clone(),
             });
         }
         match &identity.site {
@@ -467,11 +470,13 @@ fn materialize_overlay(
     for item in &history {
         let Some(site) = item.identity.site.clone() else {
             if let WorkflowOverlayFact::Language {
-                payload: TraceLanguageExecutionPayload::ExecutionStarted { document },
+                document,
+                payload: TraceLanguageExecutionPayload::ExecutionStarted,
+                ..
             } = &item.fact
             {
                 start_observed = true;
-                started_document = Some(document.clone());
+                started_document = Some(document.as_ref().clone());
             }
             continue;
         };
@@ -492,8 +497,8 @@ fn materialize_overlay(
                 folded.started(item.timestamp);
                 folded.bind(step.call_id.clone(), Some(step.attempt));
             }
-            WorkflowOverlayFact::Language { payload } => match payload {
-                TraceLanguageExecutionPayload::ExecutionStarted { .. }
+            WorkflowOverlayFact::Language { payload, .. } => match payload {
+                TraceLanguageExecutionPayload::ExecutionStarted
                 | TraceLanguageExecutionPayload::ExecutionFinished { .. } => {}
                 TraceLanguageExecutionPayload::NodeStarted { call_id, .. } => {
                     let folded = folded!();
@@ -767,9 +772,7 @@ fn child_link(
         child_execution_key: child.graph_key(),
         child_process_id: child.process_id.clone(),
         child_attempt: child.attempt,
-        child_module_ref: child.module_ref.clone(),
-        child_entry_ref: child.entry_ref.clone(),
-        child_entry_name: child.entry_name.clone(),
+        document: child.document.clone(),
     }
 }
 
@@ -891,6 +894,7 @@ fn merge_late_retained_event(
         WorkflowOverlayFact::StepBodyStarted { .. }
         | WorkflowOverlayFact::Language {
             payload: TraceLanguageExecutionPayload::NodeStarted { .. },
+            ..
         } => {
             let start = match &retention.state.occurrence {
                 WorkflowOverlayOccurrence::Running {
@@ -986,7 +990,7 @@ fn merge_late_retained_event(
                 }
             }
         }
-        WorkflowOverlayFact::Language { payload } => match payload {
+        WorkflowOverlayFact::Language { payload, .. } => match payload {
             TraceLanguageExecutionPayload::NodeCompleted { occurrence, .. }
             | TraceLanguageExecutionPayload::NodeFailed { occurrence, .. }
             | TraceLanguageExecutionPayload::NodeCancelled { occurrence, .. } => {
@@ -1067,7 +1071,7 @@ fn merge_late_retained_event(
                     retention.children.sort_by_key(child_link_key);
                 }
             }
-            TraceLanguageExecutionPayload::ExecutionStarted { .. }
+            TraceLanguageExecutionPayload::ExecutionStarted
             | TraceLanguageExecutionPayload::ExecutionFinished { .. }
             | TraceLanguageExecutionPayload::NodeStarted { .. }
             | TraceLanguageExecutionPayload::NodeWaiting { .. }
@@ -1104,10 +1108,10 @@ fn event_identity(fact: &WorkflowOverlayFact) -> WorkflowOverlayEventIdentity {
                 step_attempt: Some(step.attempt),
             };
         }
-        WorkflowOverlayFact::Language { payload } => payload,
+        WorkflowOverlayFact::Language { payload, .. } => payload,
     };
     let transition = match payload {
-        TraceLanguageExecutionPayload::ExecutionStarted { .. } => Transition::ExecutionStarted,
+        TraceLanguageExecutionPayload::ExecutionStarted => Transition::ExecutionStarted,
         TraceLanguageExecutionPayload::ExecutionFinished { .. } => Transition::ExecutionFinished,
         TraceLanguageExecutionPayload::NodeStarted { .. } => Transition::NodeStarted,
         TraceLanguageExecutionPayload::NodeWaiting { .. } => Transition::NodeWaiting,

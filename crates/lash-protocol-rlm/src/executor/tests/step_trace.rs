@@ -353,7 +353,7 @@ async fn rlm_uses_runtime_scope_without_suppressing_product_replay() {
     let trace = foreground_lash_vm_execution_trace(&live, &artifact, "typescript")
         .expect("the runtime observes the language");
     assert_eq!(live.trace_scope(), Some(&scope));
-    emit_foreground_execution_started(&trace, &artifact);
+    emit_foreground_execution_started(&trace);
     trace.emit(TraceLanguageExecution {
         event_key: trace.event_key("finished"),
         identity: trace.identity().clone(),
@@ -378,7 +378,7 @@ async fn rlm_uses_runtime_scope_without_suppressing_product_replay() {
     let trace = foreground_lash_vm_execution_trace(&replay, &artifact, "typescript")
         .expect("product observation stays enabled on replay");
     assert_eq!(replay.trace_scope(), Some(&scope));
-    emit_foreground_execution_started(&trace, &artifact);
+    emit_foreground_execution_started(&trace);
     trace.emit(TraceLanguageExecution {
         event_key: trace.event_key("finished"),
         identity: trace.identity().clone(),

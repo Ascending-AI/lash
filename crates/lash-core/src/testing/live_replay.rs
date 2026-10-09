@@ -47,10 +47,16 @@ pub fn process_language_observation(
                 subject: lash_trace::TraceRuntimeSubject::Process {
                     process_id: process_id.clone(),
                 },
-                source_identity: "fixture-source".to_string(),
-                module_ref: "fixture-module".to_string(),
-                entry_kind: "process".to_string(),
-                entry_ref: None,
+                document: lash_trace::WorkflowDocumentRef {
+                    source_identity: "fixture-source".to_string(),
+                    module_ref: lash_sansio::ModuleRef::new(&lash_sansio::ContentHash::new(
+                        "fixture-module",
+                    )),
+                    entry: lash_trace::WorkflowDocumentEntry::Process {
+                        process_ref: "0:0".to_string(),
+                    },
+                    ir_version: 1,
+                },
                 entry_name: "fixture".to_string(),
                 engine_execution_id: None,
                 generation: None,
@@ -144,6 +150,6 @@ pub fn session_language_observation(
         .expect("fixture effect address"),
         effect_id: "cell".into(),
     };
-    observation.execution.identity.entry_kind = "cell".into();
+    observation.execution.identity.document.entry = lash_trace::WorkflowDocumentEntry::Main;
     observation
 }

@@ -245,3 +245,6 @@ pub fn head_tail_truncate(value: &str, max_chars: usize) -> (String, usize) {
         raw_len,
     )
 }
+
+mod module_ref;
+pub use module_ref::{ContentHash, ModuleRef};

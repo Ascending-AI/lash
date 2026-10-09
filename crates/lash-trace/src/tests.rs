@@ -90,10 +90,14 @@ fn event_is_failed_identifies_all_failure_outcomes() {
                     subject: TraceRuntimeSubject::Process {
                         process_id: lash_sansio::ProcessId::fixture("p1"),
                     },
-                    source_identity: "source".to_string(),
-                    module_ref: "m".to_string(),
-                    entry_kind: "p".to_string(),
-                    entry_ref: None,
+                    document: crate::WorkflowDocumentRef {
+                        source_identity: "source".to_string(),
+                        module_ref: lash_sansio::ModuleRef::new(&lash_sansio::ContentHash::new(
+                            "m",
+                        )),
+                        entry: crate::WorkflowDocumentEntry::Main,
+                        ir_version: 1,
+                    },
                     entry_name: "main".to_string(),
                     engine_execution_id: None,
                     generation: None,

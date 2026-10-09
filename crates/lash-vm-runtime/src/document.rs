@@ -41,19 +41,83 @@ pub struct WorkflowDocument {
 /// ([`lash_core::ProcessDocumentProvider::execution_document`]).
 #[derive(Clone, Debug, PartialEq)]
 pub struct WorkflowExecutionDocument {
-    pub reference: lash_trace::WorkflowDocumentRef,
-    pub graph: WorkflowGraph,
-    /// The exported name of the entry process; `None` for the main body.
-    pub entry: Option<String>,
+    reference: lash_trace::WorkflowDocumentRef,
+    graph: WorkflowGraph,
+    entry: ResolvedEntry,
+}
+
+/// Resolved against the verified graph before the provider publishes a document.
+#[derive(Clone, Debug, PartialEq)]
+enum ResolvedEntry {
+    Main,
+    Process { name: String },
 }
 
 impl WorkflowExecutionDocument {
-    /// The body the execution enters: the main body, or the entry process's.
-    pub fn body(&self) -> Option<&lash_vm::WorkflowSubgraph> {
-        match &self.entry {
-            None => Some(&self.graph.main),
-            Some(entry) => self.graph.process(entry).map(|process| &process.body),
+    fn resolved(
+        reference: lash_trace::WorkflowDocumentRef,
+        graph: WorkflowGraph,
+        entry: ResolvedEntry,
+    ) -> Self {
+        Self {
+            reference,
+            graph,
+            entry,
         }
+    }
+
+    pub fn reference(&self) -> &lash_trace::WorkflowDocumentRef {
+        &self.reference
+    }
+
+    pub fn graph(&self) -> &WorkflowGraph {
+        &self.graph
+    }
+
+    pub fn entry_name(&self) -> Option<&str> {
+        match &self.entry {
+            ResolvedEntry::Main => None,
+            ResolvedEntry::Process { name } => Some(name),
+        }
+    }
+
+    /// The provider resolves the entry before constructing the immutable document.
+    #[expect(
+        clippy::expect_used,
+        reason = "the provider verifies the resolved process exists before constructing this immutable document"
+    )]
+    pub fn body(&self) -> &lash_vm::WorkflowSubgraph {
+        match &self.entry {
+            ResolvedEntry::Main => &self.graph.main,
+            ResolvedEntry::Process { name } => {
+                &self
+                    .graph
+                    .process(name)
+                    .expect("the provider resolved the entry in this immutable graph")
+                    .body
+            }
+        }
+    }
+
+    /// A synthetic, resolved document for host and engine laws.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn fixture(
+        reference: lash_trace::WorkflowDocumentRef,
+        graph: WorkflowGraph,
+        entry: Option<String>,
+    ) -> Self {
+        let entry = match (&reference.entry, entry) {
+            (lash_trace::WorkflowDocumentEntry::Main, None) => ResolvedEntry::Main,
+            (lash_trace::WorkflowDocumentEntry::Process { .. }, Some(name)) => {
+                assert!(
+                    graph.process(&name).is_some(),
+                    "fixture entry is in the graph"
+                );
+                ResolvedEntry::Process { name }
+            }
+            _ => panic!("fixture entry agrees with its document reference"),
+        };
+        Self::resolved(reference, graph, entry)
     }
 
     /// What the execution overlay's reducer reads of this document: its
@@ -77,9 +141,7 @@ impl WorkflowExecutionDocument {
             }
         }
         let mut sites = Vec::new();
-        if let Some(body) = self.body() {
-            collect(body, &mut sites);
-        }
+        collect(self.body(), &mut sites);
         lash_trace::WorkflowOverlayDocument::new(self.reference.clone(), sites)
     }
 }
@@ -273,7 +335,7 @@ impl lash_core::ProcessDocumentProvider for LashVmDocumentProvider {
         Ok(lash_core::ProcessDocumentRefRead::Named(
             lash_trace::WorkflowDocumentRef {
                 source_identity: inspected.source_identity(),
-                module_ref: identity.module_ref.to_string(),
+                module_ref: identity.module_ref.clone(),
                 entry: lash_trace::WorkflowDocumentEntry::Process {
                     process_ref: lash_vm::process_ref_key(&identity.process_ref),
                 },
@@ -286,20 +348,17 @@ impl lash_core::ProcessDocumentProvider for LashVmDocumentProvider {
         &self,
         reference: &lash_trace::WorkflowDocumentRef,
     ) -> Result<lash_core::ProcessExecutionDocumentRead, lash_core::PluginError> {
-        let module_ref = serde_json::from_value::<lash_vm::ModuleRef>(serde_json::Value::String(
-            reference.module_ref.clone(),
-        ))
-        .map_err(|error| unresolvable(format!("invalid module reference: {error}")))?;
+        let module_ref = &reference.module_ref;
         let Some(inspected) = self
             .engine
             .workers
-            .inspect_artifact(&self.engine.artifact_store, &module_ref)
+            .inspect_artifact(&self.engine.artifact_store, module_ref)
             .await?
         else {
             return Ok(lash_core::ProcessExecutionDocumentRead::ArtifactMissing {
                 artifact: lash_core::ArtifactName {
                     store: lash_core::ArtifactStoreId::VmModule,
-                    artifact_ref: reference.module_ref.clone(),
+                    artifact_ref: reference.module_ref.to_string(),
                 },
             });
         };
@@ -311,9 +370,9 @@ impl lash_core::ProcessDocumentProvider for LashVmDocumentProvider {
             ));
         }
         let entry = match &reference.entry {
-            lash_trace::WorkflowDocumentEntry::Main => None,
-            lash_trace::WorkflowDocumentEntry::Process { process_ref } => Some(
-                inspected
+            lash_trace::WorkflowDocumentEntry::Main => ResolvedEntry::Main,
+            lash_trace::WorkflowDocumentEntry::Process { process_ref } => ResolvedEntry::Process {
+                name: inspected
                     .exports()
                     .processes
                     .iter()
@@ -323,14 +382,21 @@ impl lash_core::ProcessDocumentProvider for LashVmDocumentProvider {
                     .ok_or_else(|| {
                         unresolvable("the document exports no such entry process".into())
                     })?,
-            ),
+            },
         };
+        if let ResolvedEntry::Process { name } = &entry
+            && inspected.graph.process(name).is_none()
+        {
+            return Err(unresolvable(
+                "the exported entry is absent from the document graph".into(),
+            ));
+        }
         Ok(lash_core::ProcessExecutionDocumentRead::Read(
-            lash_core::ProcessDocument::new(WorkflowExecutionDocument {
-                reference: reference.clone(),
-                graph: inspected.graph,
+            lash_core::ProcessDocument::new(WorkflowExecutionDocument::resolved(
+                reference.clone(),
+                inspected.graph,
                 entry,
-            }),
+            )),
         ))
     }
 

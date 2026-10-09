@@ -234,8 +234,8 @@ fn execution_starts<'r>(
     events
         .iter()
         .filter_map(|event| match &event.payload {
-            TraceLanguageExecutionPayload::ExecutionStarted { document } => {
-                Some((*event, document))
+            TraceLanguageExecutionPayload::ExecutionStarted => {
+                Some((*event, &event.identity.document))
             }
             _ => None,
         })
@@ -268,7 +268,7 @@ async fn read_document(
         .expect("the document read answers")
     {
         WorkflowDocumentRead::Read(document) => {
-            assert_eq!(&document.reference, reference);
+            assert_eq!(document.reference(), reference);
             *document
         }
         other => panic!("the document an execution names is readable: {other:?}"),
@@ -292,7 +292,7 @@ fn document_sites(document: &WorkflowExecutionDocument) -> BTreeSet<Site> {
         }
     }
     let mut sites = BTreeSet::new();
-    collect(document.body().expect("the entry's body"), &mut sites);
+    collect(document.body(), &mut sites);
     sites
 }
 
@@ -342,7 +342,7 @@ fn assert_document_is_the_compiled_inventory(
         lash::workflow::DEFAULT_WORKFLOW_OVERLAY_HISTORY_LIMIT,
     )
     .expect("the records fold");
-    assert_eq!(overlay.document.as_ref(), Some(&document.reference));
+    assert_eq!(overlay.document.as_ref(), Some(document.reference()));
     assert!(
         overlay.mismatches.is_empty(),
         "{context}: {:?}",
@@ -460,7 +460,7 @@ async fn production_rlm_document_is_the_compiled_inventory_for_every_loop_kind(t
     let [(started, reference)] = starts.as_slice() else {
         panic!("one execution_started event, got {}", starts.len());
     };
-    let artifact = stored_artifact(&world, &started.identity.module_ref).await;
+    let artifact = stored_artifact(&world, started.identity.document.module_ref.as_str()).await;
     let compiled =
         lash_vm::compile(&artifact, lash_vm::Entry::Main, None).expect("the cell's main compiles");
     let document = read_document(&world, reference).await;
@@ -568,7 +568,12 @@ async fn process_document_fixture(tier: Tier, workers: lash::vm::WorkerService) 
     let starts = execution_starts(&events);
     let processes = starts
         .iter()
-        .filter(|(started, _)| started.identity.entry_kind == "process")
+        .filter(|(started, _)| {
+            matches!(
+                started.identity.document.entry,
+                lash::workflow::WorkflowDocumentEntry::Process { .. }
+            )
+        })
         .collect::<Vec<_>>();
     let names = processes
         .iter()
@@ -581,7 +586,7 @@ async fn process_document_fixture(tier: Tier, workers: lash::vm::WorkerService) 
     );
     let mut worker_name = None;
     for (started, _) in &processes {
-        let artifact = stored_artifact(&world, &started.identity.module_ref).await;
+        let artifact = stored_artifact(&world, started.identity.document.module_ref.as_str()).await;
         if artifact.ir().declarations.iter().any(|declaration| {
             matches!(declaration, lash_vm::Declaration::Process(process)
                 if process.name == started.identity.entry_name
@@ -595,7 +600,7 @@ async fn process_document_fixture(tier: Tier, workers: lash::vm::WorkerService) 
     // trace arrival order; the nested process has no parameters.
     let worker_name = worker_name.expect("the worker takes the limit parameter");
     for (started, reference) in processes {
-        let artifact = stored_artifact(&world, &started.identity.module_ref).await;
+        let artifact = stored_artifact(&world, started.identity.document.module_ref.as_str()).await;
         let process_ref = artifact
             .process_ref(&started.identity.entry_name)
             .expect("the executed process is exported")
@@ -604,7 +609,7 @@ async fn process_document_fixture(tier: Tier, workers: lash::vm::WorkerService) 
             .expect("the executed process compiles");
         let document = read_document(&world, reference).await;
         assert_eq!(
-            document.entry.as_deref(),
+            document.entry_name(),
             Some(started.identity.entry_name.as_str()),
             "the reference selects the process the execution entered"
         );
@@ -766,7 +771,10 @@ finish(result);
     let mut kinds = BTreeSet::new();
     for (started, reference) in starts {
         assert!(
-            kinds.insert(started.identity.entry_kind.clone()),
+            kinds.insert(matches!(
+                started.identity.document.entry,
+                lash::workflow::WorkflowDocumentEntry::Process { .. }
+            )),
             "each execution starts once"
         );
         let own = events
@@ -800,7 +808,10 @@ finish(result);
             starts.iter().collect::<BTreeSet<_>>().len(),
             "a resumed node never starts twice"
         );
-        if started.identity.entry_kind == "process" {
+        if matches!(
+            started.identity.document.entry,
+            lash::workflow::WorkflowDocumentEntry::Process { .. }
+        ) {
             // FIG-5576: the worker reports each admitted step body as it
             // starts; the VM's own node start carries no call.
             let bound = records
@@ -836,7 +847,8 @@ finish(result);
                 bound[0].2, bound[1].2,
                 "distinct calls retain distinct admitted identities"
             );
-            let artifact = stored_artifact(&world, &started.identity.module_ref).await;
+            let artifact =
+                stored_artifact(&world, started.identity.document.module_ref.as_str()).await;
             let process_ref = artifact
                 .process_ref(&started.identity.entry_name)
                 .expect("the process is exported");
@@ -888,10 +900,7 @@ finish(result);
             );
         }
     }
-    assert_eq!(
-        kinds,
-        BTreeSet::from(["main".to_owned(), "process".to_owned()])
-    );
+    assert_eq!(kinds, BTreeSet::from([false, true]));
     world.shutdown().await;
 }
 
@@ -1040,7 +1049,12 @@ finish("started");
     let events = language_events(&records);
     let (started, reference) = execution_starts(&events)
         .into_iter()
-        .find(|(started, _)| started.identity.entry_kind == "process")
+        .find(|(started, _)| {
+            matches!(
+                started.identity.document.entry,
+                lash::workflow::WorkflowDocumentEntry::Process { .. }
+            )
+        })
         .expect("the worker's start");
     let document = read_document(&world, reference).await;
     let overlay = lash::workflow::fold_workflow_overlay(
@@ -1169,7 +1183,10 @@ finish(fetched.url);
         "every site the cell reported is in its document"
     );
     assert!(
-        document.graph.nodes().any(|node| node.name == "Fetch once"),
+        document
+            .graph()
+            .nodes()
+            .any(|node| node.name == "Fetch once"),
         "the label is the document's to state"
     );
     world.shutdown().await;

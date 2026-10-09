@@ -20,10 +20,12 @@ fn identity() -> LanguageIdentity {
             .expect("valid trace test effect address"),
             effect_id: "exec-1".to_string(),
         },
-        source_identity: "source-1".to_string(),
-        module_ref: "module-1".to_string(),
-        entry_kind: "main".to_string(),
-        entry_ref: None,
+        document: crate::WorkflowDocumentRef {
+            source_identity: "source-1".to_string(),
+            module_ref: lash_sansio::ModuleRef::new(&lash_sansio::ContentHash::new("module-1")),
+            entry: crate::WorkflowDocumentEntry::Main,
+            ir_version: 1,
+        },
         entry_name: "main".to_string(),
         engine_execution_id: None,
         generation: None,
@@ -36,8 +38,6 @@ fn process_identity(process: &ProcessId) -> LanguageIdentity {
         subject: TraceRuntimeSubject::Process {
             process_id: process.clone(),
         },
-        entry_kind: "process".to_string(),
-        entry_ref: Some("0:0".to_string()),
         entry_name: "worker".to_string(),
         ..identity()
     }
@@ -46,7 +46,7 @@ fn process_identity(process: &ProcessId) -> LanguageIdentity {
 fn reference() -> WorkflowDocumentRef {
     WorkflowDocumentRef {
         source_identity: "source-1".to_string(),
-        module_ref: "module-1".to_string(),
+        module_ref: lash_sansio::ModuleRef::new(&lash_sansio::ContentHash::new("module-1")),
         entry: WorkflowDocumentEntry::Main,
         ir_version: 1,
     }
@@ -95,12 +95,7 @@ fn language(event_key: &str, payload: TraceLanguageExecutionPayload) -> TraceLan
 }
 
 fn started_event(event_key: &str) -> TraceLanguageExecution {
-    language(
-        event_key,
-        TraceLanguageExecutionPayload::ExecutionStarted {
-            document: reference(),
-        },
-    )
+    language(event_key, TraceLanguageExecutionPayload::ExecutionStarted)
 }
 
 fn started_at(event_key: &str, site: &WorkflowSiteRef, occurrence: u64) -> TraceLanguageExecution {
@@ -390,11 +385,7 @@ fn a_site_outside_the_document_is_a_typed_mismatch_and_never_a_site() {
     let document = document();
     let stray = site("another-document");
     let mut other_start = started_event("seed");
-    let TraceLanguageExecutionPayload::ExecutionStarted { document: claimed } =
-        &mut other_start.payload
-    else {
-        unreachable!()
-    };
+    let claimed = &mut other_start.identity.document;
     claimed.source_identity = "source-2".to_string();
     let claimed = claimed.clone();
     let records = [
@@ -1073,9 +1064,12 @@ fn a_child_link_names_the_parent_site_and_the_child_execution() {
                         scope: TraceRuntimeScope::none(),
                         process_id: child.clone(),
                         attempt: Some(1),
-                        module_ref: Some("module-2".into()),
-                        entry_ref: Some("0:1".into()),
-                        entry_name: Some("worker".into()),
+                        document: Some(WorkflowDocumentRef {
+                            entry: WorkflowDocumentEntry::Process {
+                                process_ref: "0:1".to_owned(),
+                            },
+                            ..reference()
+                        }),
                     },
                 },
             ),
@@ -1087,6 +1081,12 @@ fn a_child_link_names_the_parent_site_and_the_child_execution() {
     let link = &overlay.children[0];
     assert_eq!(link.parent_execution_key, overlay.execution_key);
     assert_eq!(link.parent_site, site("then"));
+    assert_eq!(
+        link.document.as_ref().map(|document| &document.entry),
+        Some(&WorkflowDocumentEntry::Process {
+            process_ref: "0:1".to_owned()
+        })
+    );
     assert_eq!(
         link.child_execution_key,
         Some(format!("process:{child}:attempt:1"))

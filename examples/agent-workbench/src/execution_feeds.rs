@@ -181,10 +181,8 @@ impl Cache {
         }
         let graph = self.fed_graph(source, key);
         graph.identity = Some(observation.execution.identity.clone());
-        if let TraceLanguageExecutionPayload::ExecutionStarted { document } =
-            &observation.execution.payload
-        {
-            graph.wants = Some(document.clone());
+        if let TraceLanguageExecutionPayload::ExecutionStarted = &observation.execution.payload {
+            graph.wants = Some(observation.execution.identity.document.clone());
         }
         if let Err(error) = graph.accumulator.observe(observation) {
             eprintln!("warning: workbench execution graph refused an observation: {error}");
@@ -241,7 +239,7 @@ impl Cache {
     /// Lash answered the document `reference` names.
     fn loaded(&mut self, document: WorkflowExecutionDocument) {
         self.documents
-            .insert(document.reference.clone(), Arc::new(document));
+            .insert(document.reference().clone(), Arc::new(document));
         self.attach_documents();
         // A read can answer after its graph or follower was released.
         self.evict();
@@ -641,10 +639,14 @@ mod tests {
                     subject: TraceRuntimeSubject::Process {
                         process_id: process_id.clone(),
                     },
-                    source_identity: "source".to_string(),
-                    module_ref: "module".to_string(),
-                    entry_kind: "process".to_string(),
-                    entry_ref: Some("0:0".to_string()),
+                    document: WorkflowDocumentRef {
+                        source_identity: "source".to_string(),
+                        module_ref: lash::vm::ModuleRef::new(&lash::vm::ContentHash::new("module")),
+                        entry: WorkflowDocumentEntry::Process {
+                            process_ref: "0:0".to_string(),
+                        },
+                        ir_version: 1,
+                    },
                     entry_name: "worker".to_string(),
                     engine_execution_id: Some(process_id.to_string()),
                     generation: None,
@@ -660,16 +662,7 @@ mod tests {
             process_id,
             "started",
             1_000,
-            TraceLanguageExecutionPayload::ExecutionStarted {
-                document: WorkflowDocumentRef {
-                    source_identity: "source".to_string(),
-                    module_ref: "module".to_string(),
-                    entry: WorkflowDocumentEntry::Process {
-                        process_ref: "0:0".to_string(),
-                    },
-                    ir_version: 1,
-                },
-            },
+            TraceLanguageExecutionPayload::ExecutionStarted,
         )
     }
 
@@ -773,12 +766,9 @@ mod tests {
         for index in 0..MAX_GRAPHS * 2 {
             let process_id = ProcessId::fixture(&format!("serial-{index}"));
             let mut start = started(&process_id);
-            let TraceLanguageExecutionPayload::ExecutionStarted { document } =
-                &mut start.execution.payload
-            else {
-                unreachable!()
-            };
+            let document = &mut start.execution.identity.document;
             document.source_identity = format!("document-{index}");
+            document.entry = WorkflowDocumentEntry::Main;
             let document = document.clone();
             {
                 let mut cache = graphs.inner.cache.lock_recover();
@@ -786,11 +776,11 @@ mod tests {
                 cache.names_document(&process_id, document.clone());
                 cache.settle(&process_id, cancelled_at(2_000));
                 cache.observe(Source::Process(process_id.clone()), &start);
-                cache.loaded(WorkflowExecutionDocument {
-                    reference: document.clone(),
-                    graph: document_graph.clone(),
-                    entry: None,
-                });
+                cache.loaded(WorkflowExecutionDocument::fixture(
+                    document.clone(),
+                    document_graph.clone(),
+                    None,
+                ));
                 released_documents.push(Arc::downgrade(
                     cache
                         .documents

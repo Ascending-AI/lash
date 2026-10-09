@@ -90,10 +90,12 @@ async fn real_aggregate_child_await_names_both_without_fold_conflict() {
         subject: lash_trace::TraceRuntimeSubject::Process {
             process_id: lash_core::ProcessId::fixture("parent"),
         },
-        source_identity: "source".to_string(),
-        module_ref: "module".to_string(),
-        entry_kind: "main".to_string(),
-        entry_ref: None,
+        document: lash_trace::WorkflowDocumentRef {
+            source_identity: "source".to_string(),
+            module_ref: lash_sansio::ModuleRef::new(&lash_sansio::ContentHash::new("module")),
+            entry: lash_trace::WorkflowDocumentEntry::Main,
+            ir_version: 1,
+        },
         entry_name: "main".to_string(),
         engine_execution_id: None,
         generation: None,
@@ -136,6 +138,7 @@ async fn real_aggregate_child_await_names_both_without_fold_conflict() {
                 awaited: TraceNodeAwaited::ChildProcesses { process_ids },
                 ..
             },
+            ..
         } if process_ids == &vec![
             lash_core::ProcessId::fixture("child-1"),
             lash_core::ProcessId::fixture("child-2"),
@@ -220,10 +223,12 @@ async fn public_trace_host_reports_a_parked_await_cancelled_after_partial_comple
         subject: lash_trace::TraceRuntimeSubject::Process {
             process_id: lash_core::ProcessId::fixture("parent"),
         },
-        source_identity: "source".to_string(),
-        module_ref: "module".to_string(),
-        entry_kind: "main".to_string(),
-        entry_ref: None,
+        document: lash_trace::WorkflowDocumentRef {
+            source_identity: "source".to_string(),
+            module_ref: lash_sansio::ModuleRef::new(&lash_sansio::ContentHash::new("module")),
+            entry: lash_trace::WorkflowDocumentEntry::Main,
+            ir_version: 1,
+        },
         entry_name: "main".to_string(),
         engine_execution_id: None,
         generation: None,
@@ -374,19 +379,19 @@ async fn a_real_loop_branch_names_the_typed_arm_it_takes_in_each_iteration() {
         environment: &environment,
     })
     .expect("loop branch compiles");
-    let document = WorkflowExecutionDocument {
-        reference: lash_trace::WorkflowDocumentRef {
+    let document = WorkflowExecutionDocument::fixture(
+        lash_trace::WorkflowDocumentRef {
             source_identity: output.artifact.source_identity().to_string(),
-            module_ref: output.module_ref.to_string(),
+            module_ref: output.module_ref.clone(),
             entry: lash_trace::WorkflowDocumentEntry::Main,
             ir_version: 1,
         },
-        graph: lash_vm::workflow_graph_from_artifact(&output.artifact),
-        entry: None,
-    };
+        lash_vm::workflow_graph_from_artifact(&output.artifact),
+        None,
+    );
     let node = |title: &str| {
         document
-            .graph
+            .graph()
             .nodes()
             .find(|node| node.name == title)
             .map(|node| node.id.to_string())
@@ -400,10 +405,12 @@ async fn a_real_loop_branch_names_the_typed_arm_it_takes_in_each_iteration() {
         subject: lash_trace::TraceRuntimeSubject::Process {
             process_id: lash_core::ProcessId::fixture("loop-branch"),
         },
-        source_identity: output.artifact.source_identity(),
-        module_ref: output.module_ref.to_string(),
-        entry_kind: "main".to_string(),
-        entry_ref: None,
+        document: lash_trace::WorkflowDocumentRef {
+            source_identity: output.artifact.source_identity(),
+            module_ref: output.module_ref.clone(),
+            entry: lash_trace::WorkflowDocumentEntry::Main,
+            ir_version: 1,
+        },
         entry_name: "main".to_string(),
         engine_execution_id: None,
         generation: None,
@@ -423,9 +430,7 @@ async fn a_real_loop_branch_names_the_typed_arm_it_takes_in_each_iteration() {
         record
     };
     let records = Arc::new(std::sync::Mutex::new(vec![record(
-        TraceLanguageExecutionPayload::ExecutionStarted {
-            document: document.reference.clone(),
-        },
+        TraceLanguageExecutionPayload::ExecutionStarted,
     )]));
     let observed = Arc::clone(&records);
     let observed_record = record;

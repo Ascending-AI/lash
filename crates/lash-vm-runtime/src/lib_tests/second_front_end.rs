@@ -378,10 +378,10 @@ fn execution_document(
     artifact: &lash_vm::ModuleArtifact,
     entry: Option<&str>,
 ) -> WorkflowExecutionDocument {
-    WorkflowExecutionDocument {
-        reference: lash_trace::WorkflowDocumentRef {
+    WorkflowExecutionDocument::fixture(
+        lash_trace::WorkflowDocumentRef {
             source_identity: artifact.source_identity().to_string(),
-            module_ref: "module".to_string(),
+            module_ref: lash_sansio::ModuleRef::new(&lash_sansio::ContentHash::new("module")),
             entry: match entry {
                 None => lash_trace::WorkflowDocumentEntry::Main,
                 Some(name) => lash_trace::WorkflowDocumentEntry::Process {
@@ -390,9 +390,9 @@ fn execution_document(
             },
             ir_version: 1,
         },
-        graph: lash_vm::workflow_graph_from_artifact(artifact),
-        entry: entry.map(str::to_string),
-    }
+        lash_vm::workflow_graph_from_artifact(artifact),
+        entry.map(str::to_string),
+    )
 }
 
 /// The execution sites the document states for the body it enters, with
@@ -413,7 +413,7 @@ fn document_sites(document: &WorkflowExecutionDocument) -> BTreeSet<SiteKey> {
         }
     }
     let mut sites = BTreeSet::new();
-    collect(document.body().expect("the entry's body"), &mut sites);
+    collect(document.body(), &mut sites);
     sites
 }
 
@@ -421,7 +421,7 @@ fn document_sites(document: &WorkflowExecutionDocument) -> BTreeSet<SiteKey> {
 /// an observation at it is never a mismatch.
 fn assert_overlay_index_covers(document: &WorkflowExecutionDocument, sites: &BTreeSet<SiteKey>) {
     let index = document.overlay_document();
-    assert_eq!(index.reference(), &document.reference);
+    assert_eq!(index.reference(), document.reference());
     for (node_id, _, site) in sites {
         let site = lash_sansio::WorkflowSiteRef::new(node_id.clone(), site.site_path.clone());
         assert!(index.contains(&site), "{site} is outside the overlay index");

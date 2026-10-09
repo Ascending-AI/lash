@@ -897,9 +897,14 @@ impl ExecutionHost for HostBridge<'_> {
                         scope: trace.identity().scope.clone(),
                         process_id: child.process_id,
                         attempt: child.attempt,
-                        module_ref: Some(child.module_ref.to_string()),
-                        entry_ref: Some(lash_vm::process_ref_key(&child.process_ref)),
-                        entry_name: Some(child.process_name),
+                        document: (child.module_ref == trace.identity().document.module_ref).then(
+                            || lash_trace::WorkflowDocumentRef {
+                                entry: lash_trace::WorkflowDocumentEntry::Process {
+                                    process_ref: lash_vm::process_ref_key(&child.process_ref),
+                                },
+                                ..trace.identity().document.clone()
+                            },
+                        ),
                     },
                 },
             ),
@@ -922,7 +927,7 @@ fn language_event_node_id(payload: &TraceLanguageExecutionPayload) -> Option<&st
         | TraceLanguageExecutionPayload::NodeFailed { node_id, .. }
         | TraceLanguageExecutionPayload::BranchSelected { node_id, .. } => Some(node_id),
         TraceLanguageExecutionPayload::ChildStarted { parent_node_id, .. } => Some(parent_node_id),
-        TraceLanguageExecutionPayload::ExecutionStarted { .. }
+        TraceLanguageExecutionPayload::ExecutionStarted
         | TraceLanguageExecutionPayload::ExecutionFinished { .. } => None,
     }
 }

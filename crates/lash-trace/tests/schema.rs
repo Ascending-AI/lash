@@ -127,10 +127,14 @@ fn lash_vm_identity() -> TraceLanguageExecutionIdentity {
         subject: TraceRuntimeSubject::Process {
             process_id: lash_sansio::ProcessId::fixture("p1"),
         },
-        source_identity: "source".to_string(),
-        module_ref: "module".to_string(),
-        entry_kind: "process".to_string(),
-        entry_ref: Some("component:0".to_string()),
+        document: lash_trace::WorkflowDocumentRef {
+            source_identity: "source".to_string(),
+            module_ref: lash_sansio::ModuleRef::new(&lash_sansio::ContentHash::new("module")),
+            entry: lash_trace::WorkflowDocumentEntry::Process {
+                process_ref: "component:0".to_string(),
+            },
+            ir_version: 1,
+        },
         entry_name: "main".to_string(),
         engine_execution_id: None,
         generation: None,
@@ -572,16 +576,7 @@ fn assert_schema_accepts(validator: &jsonschema::Validator, value: &serde_json::
 /// reports them: its start, then the observed sites, then its finish.
 fn language_execution_payload_samples() -> Vec<TraceLanguageExecutionPayload> {
     vec![
-        TraceLanguageExecutionPayload::ExecutionStarted {
-            document: lash_trace::WorkflowDocumentRef {
-                source_identity: "source-1".to_string(),
-                module_ref: "module-1".to_string(),
-                entry: lash_trace::WorkflowDocumentEntry::Process {
-                    process_ref: "0:0".to_string(),
-                },
-                ir_version: 1,
-            },
-        },
+        TraceLanguageExecutionPayload::ExecutionStarted,
         TraceLanguageExecutionPayload::NodeStarted {
             node_id: "branch".to_string(),
             occurrence: 1,
@@ -628,9 +623,7 @@ fn language_execution_payload_samples() -> Vec<TraceLanguageExecutionPayload> {
                 scope: TraceRuntimeScope::new("s1"),
                 process_id: lash_sansio::ProcessId::fixture("child-1"),
                 attempt: Some(1),
-                module_ref: Some("child-module".to_string()),
-                entry_ref: None,
-                entry_name: Some("child".to_string()),
+                document: None,
             },
             context: Default::default(),
         },
@@ -786,7 +779,7 @@ fn published_overlay_schema_accepts_a_folded_overlay_and_enforces_its_row() {
     let document = lash_trace::WorkflowOverlayDocument::new(
         lash_trace::WorkflowDocumentRef {
             source_identity: "source-2".to_string(),
-            module_ref: "module-1".to_string(),
+            module_ref: lash_sansio::ModuleRef::new(&lash_sansio::ContentHash::new("module-1")),
             entry: lash_trace::WorkflowDocumentEntry::Main,
             ir_version: 1,
         },
@@ -1184,4 +1177,28 @@ fn omitted_content_policy_empties_every_content_field_and_keeps_identity() {
         "{value}"
     );
     assert_eq!(value["event"]["raw_json_omitted_reason"], "content_policy");
+}
+
+/// A process execution cannot silently lose its start through a missing entry reference.
+#[test]
+fn execution_identity_requires_its_process_document() {
+    let wire = serde_json::to_value(lash_vm_identity()).expect("identity wire");
+    for missing in ["document", "process_ref"] {
+        let mut incomplete = wire.clone();
+        if missing == "document" {
+            incomplete
+                .as_object_mut()
+                .expect("identity object")
+                .remove(missing);
+        } else {
+            incomplete["document"]["entry"]
+                .as_object_mut()
+                .expect("process entry")
+                .remove(missing);
+        }
+        assert!(
+            serde_json::from_value::<TraceLanguageExecutionIdentity>(incomplete).is_err(),
+            "an execution must name its complete typed document before it can emit a start: {missing}"
+        );
+    }
 }

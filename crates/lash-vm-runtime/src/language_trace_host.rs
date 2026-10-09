@@ -306,9 +306,7 @@ fn public_payload(
                 scope: TraceRuntimeScope::none(),
                 process_id: child.process_id,
                 attempt: child.attempt,
-                module_ref: Some(child.module_ref.to_string()),
-                entry_ref: Some(lash_vm::process_ref_key(&child.process_ref)),
-                entry_name: Some(child.process_name),
+                document: None,
             },
         },
     }
