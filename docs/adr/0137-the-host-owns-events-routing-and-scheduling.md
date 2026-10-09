@@ -55,8 +55,9 @@ owner's pending waits, which record their call and tool, useful for
 reconciliation after a restart. A key can settle or be revoked immediately
 after that read. `Completions::pinned_keys(process)` is the same read for the
 keys a process's engine pinned with `PinKey`, by the engine's name for each.
-Lifecycle waiting and resumed facts carry `WaitKind::Call { call_id, tool_id }`
-or `WaitKind::Key { name }` in their wait descriptor, never the key.
+Lifecycle waiting and resumed facts carry `WaitKind::Call { call_id, tool_id }`,
+`WaitKind::Key { name }`, `WaitKind::Sleep { until_ms }` or
+`WaitKind::Process { process_id }` in their wait descriptor, never the key.
 
 `session.send(input).id(TurnId)` admits idempotent turn input. The engine
 owns its drive and continuation; hosts send and observe its handle.

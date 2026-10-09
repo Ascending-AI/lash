@@ -95,6 +95,7 @@ impl Processes {
     fn make_observer(&self) -> Result<lash_core::facade_support::ProcessWorkObserver> {
         Ok(
             lash_core::facade_support::ProcessWorkObserver::new(self.registry())
+                .with_actor_parks(Arc::clone(self.core.backend.durable()))
                 .with_read_attempts(self.core.observer_pacing.snapshot_read_attempts)
                 .with_work_limits(self.core.env.core.observation_work_limits),
         )
@@ -598,7 +599,8 @@ impl Processes {
         self.make_observer()
     }
 
-    /// Cancel every currently-running process. A host-wide lever; for a
+    /// Cancel every live process: running, or waiting on a call, a key, a
+    /// sleep or another process. A host-wide lever; for a
     /// session-scoped stop use [`SessionProcessAdmin::cancel_all`](crate::admin::SessionProcessAdmin::cancel_all).
     pub async fn cancel_all(
         &self,

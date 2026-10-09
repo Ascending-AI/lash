@@ -989,6 +989,7 @@ async fn refolded_process_record_matches_stored_projection(
             call_id: lash_sansio::ToolCallId::fixture("process-wait-law"),
             tool_id: lash_sansio::ToolId::new("process_wait"),
         },
+        site: None,
     };
     writer
         .set_process_wait_with_authority(process_id, wait, Vec::new(), &authority)
@@ -1267,6 +1268,7 @@ pub async fn waiting_processes_remain_in_the_non_terminal_scan(registry: Arc<dyn
                     call_id: lash_sansio::ToolCallId::fixture("process-wait-law"),
                     tool_id: lash_sansio::ToolId::new("process_wait"),
                 },
+                site: None,
             },
             Vec::new(),
             &authority,

@@ -186,9 +186,14 @@ impl ProcessLocalExecution {
                     crate::ProcessListSelection::HostRunning => {
                         registry
                             .list_processes(&crate::ProcessListFilter {
-                                status: crate::ProcessStatusFilter::any_of([
-                                    crate::ProcessStatus::Running,
-                                ]),
+                                // Live, not only `running`: a process that
+                                // sleeps or awaits reads `waiting`.
+                                status: crate::ProcessStatusFilter::any_of(
+                                    crate::ProcessStatus::ALL
+                                        .iter()
+                                        .copied()
+                                        .filter(crate::ProcessStatus::is_live),
+                                ),
                                 ..Default::default()
                             })
                             .await?

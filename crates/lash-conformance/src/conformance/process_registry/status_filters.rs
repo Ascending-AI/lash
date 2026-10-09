@@ -57,6 +57,7 @@ pub async fn list_filters_match_extracted_and_json_fields(registry: Arc<dyn Proc
                     call_id: lash_sansio::ToolCallId::fixture("process-wait-law"),
                     tool_id: lash_sansio::ToolId::new("process_wait"),
                 },
+                site: None,
             },
             Vec::new(),
             &authority,

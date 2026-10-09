@@ -17,10 +17,23 @@ process's engine pinned with `PinKey`: each `PinnedEngineKey` carries its `key`,
 `process`, the engine's `name` for it and `deadline`. It reads the same wait
 rows, so any node answers, before and after a restart or a handover.
 
-A deferred process call records `process.waiting` with
-`WaitKind::Call { call_id, tool_id }`, and a process awaiting a key its engine
-pinned records it with `WaitKind::Key { name }`. Neither carries the bearer
-key; the end of the wait records `process.resumed`.
+A process that releases to wait records one `process.waiting` fact for each
+thing it is blocked on, and its record lists them all
+(`ProcessLifecycleState::Waiting { waits }`, oldest first):
+
+- a deferred call: `WaitKind::Call { call_id, tool_id }`;
+- a key its engine pinned: `WaitKind::Key { name }`;
+- a sleep: `WaitKind::Sleep { until_ms }`;
+- another process's terminal: `WaitKind::Process { process_id }`.
+
+Each wait carries `since_ms` and, when the engine named one, the `site`
+(`node_id`, `occurrence`) of the node that waits. None carries a bearer key or
+a wait id. The end of each wait records `process.resumed`; the process reads
+`running` again once no wait is left.
+
+A park is not a wait. `ObservedProcess::park` carries the actor's
+`ProcessParkReason` beside the lifecycle while the process is parked, and the
+lifecycle keeps what the record says.
 
 `resolve(key, resolution)` settles a wait, first writer wins.
 A second resolution answers `AlreadyResolved` (same

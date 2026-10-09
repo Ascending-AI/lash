@@ -1107,7 +1107,8 @@ pub mod process {
     /// Process-registry and event types that complete the store and engine signature closure.
     pub use lash_core::runtime::{
         ParentEndPlan, ProcessChange, ProcessCompletionOutcome, ProcessExecutionWriteAuthority,
-        ProcessOutcome, ProcessStartOutcome, ProcessTombstone, WaitKind, WaitState,
+        ProcessOutcome, ProcessParkReason, ProcessStartOutcome, ProcessTombstone, WaitKind,
+        WaitState,
     };
     /// The one lifecycle state a process record holds, and the outcome a
     /// terminal one ends in.

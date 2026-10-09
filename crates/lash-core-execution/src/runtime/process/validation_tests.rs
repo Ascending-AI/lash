@@ -160,7 +160,7 @@ fn a_process_record_decodes_one_lifecycle_state() {
         crate::process_id_for_test("one-lifecycle-state"),
     );
     let encoded = serde_json::to_value(&record).expect("encode record");
-    for flat in ["status", "wait", "park", "outcome"] {
+    for flat in ["status", "wait", "waits", "park", "outcome"] {
         assert!(
             encoded.get(flat).is_none(),
             "a record carries no `{flat}` beside its lifecycle"
@@ -179,12 +179,15 @@ fn a_process_record_decodes_one_lifecycle_state() {
         crate::ToolCallOutput::success(serde_json::json!(1)),
     ))
     .expect("encode outcome");
-    let wait = serde_json::to_value(crate::ProcessLifecycleState::fixture(
+    let waits = serde_json::to_value(crate::ProcessLifecycleState::fixture(
         crate::ProcessStatus::Waiting,
     ))
-    .expect("encode a waiting state")["wait"]
+    .expect("encode a waiting state")["waits"]
         .clone();
-    assert!(wait.is_object(), "a waiting state carries its wait");
+    assert!(
+        waits.as_array().is_some_and(|waits| !waits.is_empty()),
+        "a waiting state carries its waits"
+    );
 
     for status in crate::ProcessStatus::ALL {
         let state = crate::ProcessLifecycleState::fixture(*status);
@@ -211,12 +214,16 @@ fn a_process_record_decodes_one_lifecycle_state() {
             serde_json::json!({"state": "running", "outcome": outcome}),
         ),
         (
-            "a terminal state with a wait",
-            serde_json::json!({"state": "terminal", "outcome": outcome, "wait": wait}),
+            "a terminal state with waits",
+            serde_json::json!({"state": "terminal", "outcome": outcome, "waits": waits}),
         ),
         (
-            "a waiting state without a wait",
+            "a waiting state without its waits",
             serde_json::json!({"state": "waiting"}),
+        ),
+        (
+            "a waiting state that waits on nothing",
+            serde_json::json!({"state": "waiting", "waits": []}),
         ),
         (
             "a pruned answer as an outcome",
@@ -239,6 +246,72 @@ fn a_process_record_decodes_one_lifecycle_state() {
     }
 }
 
+/// A process blocked on several things lists each, and the end of one wait
+/// leaves the others: it reads running only once none is left (FIG-5553).
+#[test]
+fn a_resume_ends_only_its_own_wait() {
+    let mut record = crate::ProcessRecord::from_registration(
+        fixture_registration("two-waits"),
+        crate::process_id_for_test("two-waits"),
+    );
+    let process_id = record.id.clone();
+    let sleep = WaitState {
+        since_ms: 1,
+        kind: WaitKind::Sleep { until_ms: 900 },
+        site: Some(crate::StepEffectSite {
+            node_id: "nap".to_owned(),
+            occurrence: 1,
+        }),
+    };
+    let child = WaitState {
+        since_ms: 1,
+        kind: WaitKind::Process {
+            process_id: crate::process_id_for_test("awaited"),
+        },
+        site: None,
+    };
+    let mut sequence = 0;
+    let mut apply = |record: &mut crate::ProcessRecord,
+                     request: crate::ProcessEventAppendRequest| {
+        sequence += 1;
+        let event = crate::ProcessEvent {
+            process_id: process_id.clone(),
+            sequence,
+            fact: request.fact,
+            invocation: crate::runtime::causal::process_event_invocation(
+                &process_id,
+                sequence,
+                "fixture",
+                request.replay,
+            ),
+            trace_cause: request.trace_cause,
+            occurred_at: sequence,
+        };
+        super::apply_process_event_projection(record, &event).expect("fold the wait fact");
+    };
+    apply(
+        &mut record,
+        crate::ProcessEventAppendRequest::wait_entered(&process_id, &sleep),
+    );
+    apply(
+        &mut record,
+        crate::ProcessEventAppendRequest::wait_entered(&process_id, &child),
+    );
+    assert_eq!(record.waits(), [sleep.clone(), child.clone()]);
+    apply(
+        &mut record,
+        crate::ProcessEventAppendRequest::wait_cleared(&process_id, &sleep),
+    );
+    assert_eq!(record.status(), crate::ProcessStatus::Waiting);
+    assert_eq!(record.waits(), std::slice::from_ref(&child));
+    apply(
+        &mut record,
+        crate::ProcessEventAppendRequest::wait_cleared(&process_id, &child),
+    );
+    assert_eq!(record.status(), crate::ProcessStatus::Running);
+    assert!(record.waits().is_empty());
+}
+
 #[test]
 fn a_resume_cannot_return_an_ended_process_to_running() {
     let mut record = crate::ProcessRecord::from_registration(
@@ -251,6 +324,7 @@ fn a_resume_cannot_return_an_ended_process_to_running() {
             call_id: crate::ToolCallId::fixture("resume-call"),
             tool_id: crate::ToolId::from("resume-tool"),
         },
+        site: None,
     };
     let process_id = record.id.clone();
     let event = |sequence, request: crate::ProcessEventAppendRequest| crate::ProcessEvent {
@@ -282,11 +356,14 @@ fn a_resume_cannot_return_an_ended_process_to_running() {
         crate::ProcessEventAppendRequest::wait_cleared(&process_id, &wait),
     );
     super::apply_process_event_projection(&mut record, &waiting).expect("enter the wait");
-    assert_eq!(record.wait(), Some(&wait));
+    assert_eq!(record.waits(), std::slice::from_ref(&wait));
     super::apply_process_event_projection(&mut record, &completed).expect("end the process");
     let ended = record.clone();
     assert_eq!(ended.status(), crate::ProcessStatus::Completed);
-    assert_eq!(ended.wait(), None, "the outcome takes the wait with it");
+    assert!(
+        ended.waits().is_empty(),
+        "the outcome takes the wait with it"
+    );
 
     let error = super::apply_process_event_projection(&mut record, &resumed)
         .expect_err("a resume cannot take an outcome back");
@@ -322,6 +399,7 @@ fn a_persisted_record_accepts_every_runtime_lifecycle_fact() {
             tool_id: crate::ToolId::from("pre-upgrade-tool"),
         },
         since_ms: 2,
+        site: None,
     };
     let requests = [
         ProcessEventAppendRequest::first_started(
@@ -366,7 +444,7 @@ fn a_persisted_record_accepts_every_runtime_lifecycle_fact() {
         record = projected_record;
     }
     assert!(record.first_started.is_some());
-    assert!(record.wait().is_none());
+    assert!(record.waits().is_empty());
     assert!(record.external_ref.is_some());
 }
 

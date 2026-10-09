@@ -450,6 +450,7 @@ impl ProcessEngine for SleepEngine {
         let action = match event {
             EngineEvent::Started { .. } => EngineAction::Sleep {
                 until: DurableInstant(script["until_ms"].as_i64().unwrap_or_default()),
+                site: None,
             },
             EngineEvent::Woke => EngineAction::Terminal(ProcessOutcome::from_tool_output(
                 ToolCallOutput::success(json!({ "slept": true })),

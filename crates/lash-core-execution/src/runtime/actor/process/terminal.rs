@@ -57,6 +57,34 @@ impl ProcessParkReason {
     }
 }
 
+/// Why `process`'s actor is parked, read from its actor row; `None` while
+/// it is not parked, or once it has no actor.
+///
+/// # Errors
+///
+/// The store's refusal, or a stored reason this build does not decode.
+pub async fn park_of(
+    store: &dyn lash_durable::DurableStore,
+    process: &ProcessId,
+) -> Result<Option<ProcessParkReason>, DurableError> {
+    let corrupt = |message: String| {
+        DurableError::Store(StoreFailure {
+            kind: StoreFailureKind::Corrupt,
+            message,
+        })
+    };
+    let actor = lash_durable::ActorKey::process(process.as_str())
+        .map_err(|error| corrupt(error.to_string()))?;
+    let Some(park) = store.actor(&actor).await?.and_then(|actor| actor.park) else {
+        return Ok(None);
+    };
+    serde_json::from_str(&park).map(Some).map_err(|error| {
+        corrupt(format!(
+            "the park of process {process} does not decode: {error}"
+        ))
+    })
+}
+
 /// The terminal of a process cancelled with `origin`: forced when lash
 /// ended it at its grace.
 #[must_use]

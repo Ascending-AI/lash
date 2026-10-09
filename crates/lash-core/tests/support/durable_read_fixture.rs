@@ -804,7 +804,7 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         .expect("durable fixture drift: process read failed")
         .expect("durable fixture drift: process disappeared");
     assert_eq!(process.status(), ProcessStatus::Waiting);
-    assert_eq!(process.wait(), Some(&fixture_wait_state()));
+    assert_eq!(process.waits(), [fixture_wait_state()]);
     assert_eq!(process.env_ref.as_ref(), Some(&expected.process_env_ref));
     assert_eq!(
         process, expected.waiting_process,
@@ -1174,5 +1174,6 @@ fn fixture_wait_state() -> WaitState {
             tool_id: lash_core::ToolId::from("durable-read-wait-tool"),
         },
         since_ms: 123,
+        site: None,
     }
 }

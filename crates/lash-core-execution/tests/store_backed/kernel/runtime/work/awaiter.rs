@@ -389,6 +389,7 @@ mod tests {
                 tool_id: crate::ToolId::from("lifecycle-tool"),
             },
             since_ms: 2,
+            site: None,
         };
         registry
             .set_process_wait(&lifecycle_id, wait)

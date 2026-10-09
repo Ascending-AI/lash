@@ -130,7 +130,9 @@ impl ProcessEngine for WorkerEngine {
                     )),
                 },
             ),
-            EngineEvent::KeyPinned { name, .. } => ("await", EngineAction::AwaitExternal { name }),
+            EngineEvent::KeyPinned { name, .. } => {
+                ("await", EngineAction::AwaitExternal { name, site: None })
+            }
             EngineEvent::ExternalTimedOut { .. } | EngineEvent::ExternalResolved { .. } => (
                 "step-after",
                 EngineAction::Steps {

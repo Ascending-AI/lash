@@ -182,6 +182,7 @@ impl ProcessEngine for ProofEngine {
                         process: ProcessId::parse(script["await"].as_str().unwrap_or_default())
                             .map_err(infra)?,
                         bound: lash_core::ParkBound::Within(Duration::from_millis(WAIT_MS)),
+                        site: None,
                     }
                 } else {
                     EngineAction::Idle

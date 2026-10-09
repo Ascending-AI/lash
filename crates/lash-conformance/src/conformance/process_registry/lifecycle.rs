@@ -44,6 +44,7 @@ pub async fn lifecycle_event_timestamps_follow_the_registry_clock(
                     call_id: lash_sansio::ToolCallId::fixture("process-wait-law"),
                     tool_id: lash_sansio::ToolId::new("process_wait"),
                 },
+                site: None,
             },
             Vec::new(),
             &authority,
@@ -256,6 +257,7 @@ pub(super) async fn a_resume_event_cannot_return_an_ended_process_to_running(
             call_id: lash_sansio::ToolCallId::fixture("process-wait-law"),
             tool_id: lash_sansio::ToolId::new("process_wait"),
         },
+        site: None,
     };
     let error = registry
         .append_event_with_authority(

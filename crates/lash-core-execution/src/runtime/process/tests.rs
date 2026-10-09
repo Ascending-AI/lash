@@ -73,6 +73,7 @@ fn replayed_waiting_non_tail_does_not_repair_terminal_projection() {
             tool_id: crate::ToolId::from("wait-tool"),
         },
         since_ms: 42,
+        site: None,
     };
     let waiting_request = ProcessEventAppendRequest::wait_entered(
         &crate::process_id_for_test("process-repair-waiting"),

@@ -1271,6 +1271,7 @@ impl crate::ProcessEngine for LawEngine {
                 state,
                 crate::EngineAction::Sleep {
                     until: DurableInstant(i64::MAX / 2),
+                    site: None,
                 },
             )),
             (LawEngineMode::RunForever, crate::EngineEvent::Started { .. }) => Ok((

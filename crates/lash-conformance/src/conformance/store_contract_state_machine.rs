@@ -467,6 +467,7 @@ fn wait_state(_process_id: &ProcessId) -> WaitState {
             call_id: lash_sansio::ToolCallId::fixture("store-call"),
             tool_id: lash_sansio::ToolId::new("store_call"),
         },
+        site: None,
     }
 }
 
@@ -552,11 +553,11 @@ async fn apply_operation(
             if result.is_ok()
                 && let Some(expected) = model.process_mut(&id).expected_mut()
             {
-                if expected.wait() != Some(&wait_state(&id)) {
+                if !expected.waits().contains(&wait_state(&id)) {
                     event_sequences.advance(expected);
                 }
                 expected.lifecycle = crate::ProcessLifecycleState::Waiting {
-                    wait: wait_state(&id),
+                    waits: vec![wait_state(&id)],
                 };
             }
         }
@@ -580,7 +581,7 @@ async fn apply_operation(
             .await?;
             if result.is_ok()
                 && let Some(expected) = model.process_mut(&id).expected_mut()
-                && expected.wait().is_some()
+                && !expected.waits().is_empty()
             {
                 event_sequences.advance(expected);
                 expected.lifecycle = crate::ProcessLifecycleState::running();

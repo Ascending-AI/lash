@@ -198,7 +198,7 @@ impl ProcessEngine for SourceEngine {
                 // The receiver waits for its source as long as it lives.
                 bound: lash::tools::ParkBound::UntilScopeEnd,
             },
-            EngineEvent::KeyPinned { name, .. } => EngineAction::AwaitExternal { name },
+            EngineEvent::KeyPinned { name, .. } => EngineAction::AwaitExternal { name, site: None },
             EngineEvent::ExternalResolved { resolution, .. } => match resolution {
                 lash::Resolution::Ok(value) => output(lash::tools::ToolCallOutput::success(value)),
                 other => output(lash::tools::ToolCallOutput::cancelled(
@@ -316,6 +316,7 @@ impl ProcessEngine for SleeperEngine {
                 until: lash::durable::DurableInstant(
                     payload["until_ms"].as_i64().unwrap_or_default(),
                 ),
+                site: None,
             },
             EngineEvent::Woke => output(lash::tools::ToolCallOutput::success(
                 serde_json::json!({"slept": true}),

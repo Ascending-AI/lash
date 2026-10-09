@@ -39,9 +39,9 @@ pub async fn an_awaited_engine_key_records_a_waiting_fact(backend: &Backend) -> 
             name: KeyName(PEER_KEY.to_owned()),
         };
         ensure!(
-            waiting.wait().is_some_and(|wait| wait.kind == key),
-            "a process awaiting its engine key records the wait {:?}",
-            waiting.wait()
+            matches!(waiting.waits(), [wait] if wait.kind == key),
+            "a process awaiting its engine key records the waits {:?}",
+            waiting.waits()
         );
         let pinned = only_key(&backend, &process).await?;
         let answer =
@@ -59,9 +59,9 @@ pub async fn an_awaited_engine_key_records_a_waiting_fact(backend: &Backend) -> 
         .await?;
         let ended = record(&backend, &process).await?;
         ensure!(
-            ended.wait().is_none(),
-            "the ended process still records the wait {:?}",
-            ended.wait()
+            ended.waits().is_empty(),
+            "the ended process still records the waits {:?}",
+            ended.waits()
         );
         Ok(())
     }

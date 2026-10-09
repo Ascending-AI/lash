@@ -126,8 +126,9 @@ pub enum ProcessTransition {
     SetExternalRef(super::model::ProcessExternalRef),
     /// Record a typed process cancellation request.
     RequestCancel(lash_sansio::CancelRequest),
-    /// Enter a durable wait state.
+    /// Enter a durable wait, beside any the process already has.
     EnterWait(WaitState),
+    /// End the oldest wait the record lists.
     ClearWait,
 }
 
@@ -265,7 +266,7 @@ pub fn prepare_process_transition(
             append
         }
         ProcessTransition::EnterWait(wait) => {
-            if record.wait() == Some(&wait) {
+            if record.waits().contains(&wait) {
                 return Ok(ProcessTransitionPlan::Unchanged);
             }
             let mut append = ProcessEventAppendRequest::wait_entered(&record.id, &wait);
@@ -275,7 +276,7 @@ pub fn prepare_process_transition(
             append
         }
         ProcessTransition::ClearWait => {
-            let Some(wait) = record.wait() else {
+            let Some(wait) = record.waits().first() else {
                 return Ok(ProcessTransitionPlan::Unchanged);
             };
             ProcessEventAppendRequest::wait_cleared(&record.id, wait)
@@ -351,10 +352,10 @@ pub fn apply_process_event_projection(
                 )));
             }
             ProcessLifecycleState::Running { .. } | ProcessLifecycleState::Waiting { .. } => {
-                record.lifecycle = ProcessLifecycleState::Waiting { wait: wait.clone() };
+                record.lifecycle = record.lifecycle.entering(wait);
             }
         },
-        ProcessLifecycleFact::Resumed { .. } => match &record.lifecycle {
+        ProcessLifecycleFact::Resumed { wait } => match &record.lifecycle {
             // An ended process stays ended: no later fact takes its outcome
             // back, so a resume cannot return it to running.
             ProcessLifecycleState::Terminal { .. } => {
@@ -364,7 +365,7 @@ pub fn apply_process_event_projection(
                 });
             }
             ProcessLifecycleState::Running { .. } | ProcessLifecycleState::Waiting { .. } => {
-                record.lifecycle = ProcessLifecycleState::running();
+                record.lifecycle = record.lifecycle.leaving(wait);
             }
         },
         ProcessLifecycleFact::ExternalRefSet { external_ref } => {

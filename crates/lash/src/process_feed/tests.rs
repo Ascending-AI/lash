@@ -21,6 +21,7 @@ fn tick(process_id: &ProcessId, n: u64) -> lash_core::ProcessEventAppendRequest 
             call_id: lash_core::ToolCallId::fixture(&format!("feed-call-{n}")),
             tool_id: lash_core::ToolId::from("feed-fixture"),
         },
+        site: None,
     };
     lash_core::ProcessEventAppendRequest::wait_entered(process_id, &wait)
 }

@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use lash_durable::domain::WaitId;
 use serde::{Deserialize, Serialize};
 
-use crate::runtime::process::engine_state::{KeyName, StepName, StepRequest};
+use crate::runtime::process::engine_state::{KeyName, StepEffectSite, StepName, StepRequest};
 use crate::{ProcessId, ToolCallId};
 
 /// The driver's state of one process.
@@ -96,6 +96,9 @@ pub(super) enum Blocked {
         name: KeyName,
         /// Its wait row.
         wait: StoredWaitId,
+        /// The node that waits, when the engine named one.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        site: Option<StepEffectSite>,
     },
     /// Another process's terminal.
     Process {
@@ -103,11 +106,17 @@ pub(super) enum Blocked {
         process: ProcessId,
         /// The `process_terminal` wait row.
         wait: StoredWaitId,
+        /// The node that waits, when the engine named one.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        site: Option<StepEffectSite>,
     },
     /// A durable instant.
     Sleep {
         /// When, in store milliseconds.
         until: i64,
+        /// The node that sleeps, when the engine named one.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        site: Option<StepEffectSite>,
     },
     /// Nothing but its mailbox.
     Idle,

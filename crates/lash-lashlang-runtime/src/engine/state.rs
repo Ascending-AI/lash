@@ -77,7 +77,13 @@ pub(crate) enum Wait {
         settled: Vec<usize>,
     },
     /// A sleep, until its deadline (epoch milliseconds).
-    Sleep { until_ms: i64 },
+    Sleep {
+        until_ms: i64,
+        /// The node that sleeps and which occurrence of it, when the VM
+        /// tracks it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        site: Option<lash_core::StepEffectSite>,
+    },
     /// Another process's terminal.
     Process { process: ProcessId },
 }
@@ -204,7 +210,13 @@ pub(crate) enum IssuedOperation {
         leaves: Vec<IssuedLeaf>,
     },
     /// A sleep until `until_ms`.
-    Sleep { until_ms: i64 },
+    Sleep {
+        until_ms: i64,
+        /// The node that sleeps and which occurrence of it, when the VM
+        /// tracks it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        site: Option<lash_core::StepEffectSite>,
+    },
     /// An await of another process's terminal.
     AwaitProcess { process: ProcessId },
 }

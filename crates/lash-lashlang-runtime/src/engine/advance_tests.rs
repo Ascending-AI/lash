@@ -445,7 +445,10 @@ fn an_aggregates_timer_leaf_sleeps_on_a_durable_wake_until_it_fires() {
     assert_eq!(*armed, Some(wake), "the timer's deadline is the wake");
     assert_eq!(
         driven.on(step("op.0.0", success(serde_json::json!("done")))),
-        EngineAction::Sleep { until: wake },
+        EngineAction::Sleep {
+            until: wake,
+            site: None
+        },
         "a settled step leaves the process asleep until the timer"
     );
     let woke = injected(&driven.on(EngineEvent::Woke));
@@ -473,7 +476,13 @@ fn an_aggregates_timer_leaf_sleeps_on_a_durable_wake_until_it_fires() {
             IssuedLeaf::Timer { until_ms: 900 },
         ],
     ));
-    assert_eq!(action, EngineAction::Sleep { until: wake });
+    assert_eq!(
+        action,
+        EngineAction::Sleep {
+            until: wake,
+            site: None
+        }
+    );
     assert!(matches!(
         injected(&driven.on(EngineEvent::Woke)),
         Injection::Leaves {
@@ -484,12 +493,21 @@ fn an_aggregates_timer_leaf_sleeps_on_a_durable_wake_until_it_fires() {
 }
 
 /// A sleep is the activation's to keep: the engine answers `Sleep` until
-/// `Woke`, and an event it does not wait on re-answers the same deadline.
+/// `Woke`, naming the node the VM slept at, and an event it does not wait
+/// on re-answers the same deadline and node.
 #[test]
 fn a_sleep_stands_until_it_wakes() {
-    let (mut driven, action) = Driven::parked_on(IssuedOperation::Sleep { until_ms: 5_000 });
+    let site = lash_core::StepEffectSite {
+        node_id: "nap".to_owned(),
+        occurrence: 2,
+    };
+    let (mut driven, action) = Driven::parked_on(IssuedOperation::Sleep {
+        until_ms: 5_000,
+        site: Some(site.clone()),
+    });
     let sleep = EngineAction::Sleep {
         until: lash_core::durable_port::DurableInstant(5_000),
+        site: Some(site),
     };
     assert_eq!(action, sleep);
     assert_eq!(
@@ -513,6 +531,7 @@ fn an_await_stands_until_its_process_ends() {
     let standing = EngineAction::AwaitProcess {
         process: awaited.clone(),
         bound: lash_core::ParkBound::UntilScopeEnd,
+        site: None,
     };
     assert_eq!(action, standing);
     let outcome = lash_core::ProcessAwaitOutput::from_tool_output(
@@ -539,7 +558,10 @@ fn an_await_stands_until_its_process_ends() {
 /// `advance` never asks for the same run again.
 #[test]
 fn a_failed_vm_run_ends_the_process_typed() {
-    let (mut driven, _) = Driven::parked_on(IssuedOperation::Sleep { until_ms: 10 });
+    let (mut driven, _) = Driven::parked_on(IssuedOperation::Sleep {
+        until_ms: 10,
+        site: None,
+    });
     driven.on(EngineEvent::Woke);
     let EngineAction::Terminal(outcome) = driven.on(step("vm_run.1", fault())) else {
         panic!("the process ends");
@@ -583,7 +605,10 @@ fn the_vms_end_is_the_processs_terminal() {
 /// corrupt mailbox, not an event to fold.
 #[test]
 fn a_host_key_event_is_refused() {
-    let (driven, _) = Driven::parked_on(IssuedOperation::Sleep { until_ms: 10 });
+    let (driven, _) = Driven::parked_on(IssuedOperation::Sleep {
+        until_ms: 10,
+        site: None,
+    });
     driven.refuses(EngineEvent::ExternalTimedOut {
         name: lash_core::KeyName("key".to_owned()),
     });
@@ -593,7 +618,10 @@ fn a_host_key_event_is_refused() {
 /// before anything is folded.
 #[test]
 fn a_state_of_another_format_is_refused() {
-    let (driven, _) = Driven::parked_on(IssuedOperation::Sleep { until_ms: 10 });
+    let (driven, _) = Driven::parked_on(IssuedOperation::Sleep {
+        until_ms: 10,
+        site: None,
+    });
     let mut foreign = driven.state.clone();
     foreign.format.version += 1;
     assert!(advance(foreign, EngineEvent::Woke).is_err());
@@ -715,8 +743,11 @@ fn parked_sleep(output: VmRunOutput) -> (String, lash_vm_protocol::OpaqueVmState
         VmRunOutput::Parked {
             program_hash,
             vm,
-            issued: IssuedOperation::Sleep { until_ms },
-        } => (program_hash, vm, until_ms),
+            issued: IssuedOperation::Sleep { until_ms, site },
+        } => {
+            assert!(site.is_some(), "the VM names the node it sleeps at");
+            (program_hash, vm, until_ms)
+        }
         other => panic!("a VM parked on a sleep, got {other:?}"),
     }
 }

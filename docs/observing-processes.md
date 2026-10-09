@@ -16,6 +16,25 @@ The terminal outcome records how the process ended and its result or typed
 failure evidence. Reading those facts does not reconstruct every branch,
 loop iteration or node timing.
 
+A process that released to wait reads `waiting`, and its record lists
+everything it is blocked on (`ProcessLifecycleState::Waiting { waits }`,
+oldest first): a deferred call (`WaitKind::Call`), a key its engine pinned
+(`WaitKind::Key`), a sleep (`WaitKind::Sleep { until_ms }`) or another
+process's terminal (`WaitKind::Process { process_id }`). Each `WaitState`
+carries `since_ms` and, when the engine named one, the `site` (`node_id`,
+`occurrence`) of the node that waits; the lashlang engine names the node of a
+sleep. A wait never carries a completion key or a wait id: those resolve the
+wait, and `Completions::parked` and `pinned_keys` hand them only to a host
+that asks for them. The process reads `running` again once its last wait
+ends. A process whose steps are still executing on a node is `running`
+whatever its engine also waits for.
+
+A park is its actor's fact, not a lifecycle state. While a process is parked
+(no engine of its kind, an undecodable state, a refused transition, the
+activation-loop budget), `ObservedProcess::park` carries its typed
+`ProcessParkReason` beside a lifecycle that still says what the record says.
+An operator's redrive or a cancel clears it.
+
 `ProcessEffectOccurrence` records a settled effect's `node_id`, one-based
 `occurrence`, operation, outcome class and failure code when applicable.
 For a tool effect, its typed `call_id` identifies the logical Lash call

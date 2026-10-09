@@ -609,13 +609,7 @@ impl ProcessActivation {
             )
             .await?;
         if let Some(outcome) = applied {
-            if let Some(wait) = record.wait() {
-                append_event(
-                    &mut tx,
-                    process,
-                    crate::ProcessEventAppendRequest::wait_cleared(process, wait),
-                );
-            }
+            super::waiting::end(&mut tx, process, &record);
             record_omitted_effects(&mut tx, process, &driver, self.fleet());
             record_terminal(&mut tx, process, &outcome)?;
             tx.ack_seen();
@@ -928,14 +922,14 @@ impl ProcessActivation {
             .collect::<Vec<_>>();
         match driver.blocked.clone() {
             None | Some(Blocked::Idle) => {}
-            Some(Blocked::Sleep { until }) => {
+            Some(Blocked::Sleep { until, .. }) => {
                 if now.0 >= until {
                     driver.blocked = None;
                     return Ok(Next::Event(EngineEvent::Woke));
                 }
                 due.push(DurableInstant(until));
             }
-            Some(Blocked::External { name, wait }) => {
+            Some(Blocked::External { name, wait, .. }) => {
                 let row = reads
                     .wait(&wait.0)
                     .await?
@@ -965,6 +959,7 @@ impl ProcessActivation {
             Some(Blocked::Process {
                 process: target,
                 wait,
+                ..
             }) => {
                 // The wait row's committed winner is the answer, never the
                 // target's live registry row: a timeout that committed first
@@ -1129,7 +1124,10 @@ impl ProcessActivation {
                 )
                 .map_err(|refusal| corrupt("a process step's admission", refusal))?;
                 fresh.extend(admitted.members().iter().cloned());
-                driver.blocked = wake.map(|until| Blocked::Sleep { until: until.0 });
+                driver.blocked = wake.map(|until| Blocked::Sleep {
+                    until: until.0,
+                    site: None,
+                });
             }
             EngineAction::PinKey { name, bound } => {
                 let (wait, key) = waits::pin(
@@ -1152,18 +1150,20 @@ impl ProcessActivation {
                 );
                 driver.immediate = Some(Immediate::KeyPinned { name });
             }
-            EngineAction::AwaitExternal { name } => {
+            EngineAction::AwaitExternal { name, site } => {
                 let Some(pinned) = driver.keys.get(&name) else {
                     return Ok(Some(refused(format!("key `{}` was never pinned", name.0))));
                 };
                 driver.blocked = Some(Blocked::External {
                     name,
                     wait: pinned.wait,
+                    site,
                 });
             }
             EngineAction::AwaitProcess {
                 process: target,
                 bound,
+                site,
             } => {
                 let (wait, _) = waits::pin(
                     tx,
@@ -1178,34 +1178,19 @@ impl ProcessActivation {
                 driver.blocked = Some(Blocked::Process {
                     process: target,
                     wait: StoredWaitId(wait.id()),
+                    site,
                 });
             }
-            EngineAction::Sleep { until } => {
-                driver.blocked = Some(Blocked::Sleep { until: until.0 });
+            EngineAction::Sleep { until, site } => {
+                driver.blocked = Some(Blocked::Sleep {
+                    until: until.0,
+                    site,
+                });
             }
             EngineAction::Idle => driver.blocked = Some(Blocked::Idle),
             EngineAction::Terminal(outcome) => return Ok(Some(outcome)),
         }
-        // A call stays waiting while its own step remains in flight, and a
-        // key while the engine still awaits it; any other transition ends
-        // the wait the record shows.
-        if let Some(wait) = record.wait()
-            && !match &wait.kind {
-                crate::WaitKind::Call { call_id, .. } => {
-                    driver.steps.values().any(|step| step.call == *call_id)
-                }
-                crate::WaitKind::Key { name } => matches!(
-                    &driver.blocked,
-                    Some(Blocked::External { name: awaited, .. }) if awaited == name
-                ),
-            }
-        {
-            append_event(
-                tx,
-                process,
-                crate::ProcessEventAppendRequest::wait_cleared(process, wait),
-            );
-        }
+        super::waiting::settle(tx, process, record, driver);
         Ok(None)
     }
 }

@@ -108,9 +108,9 @@ pub enum StepRequest {
     },
 }
 
-/// The effect node of an engine's execution map that a step runs for, and
-/// which occurrence of that node it is: what the step's committed outcome
-/// is recorded under (`process.effect_outcome`).
+/// A node of an engine's execution map and which occurrence of it this is:
+/// what a step's committed outcome is recorded under
+/// (`process.effect_outcome`), and where a wait says the process is blocked.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StepEffectSite {
@@ -282,6 +282,8 @@ pub enum EngineAction {
     AwaitExternal {
         /// The wait's name.
         name: KeyName,
+        /// The node that waits, when the engine's execution map names one.
+        site: Option<StepEffectSite>,
     },
     /// Wait for another process's terminal.
     AwaitProcess {
@@ -290,11 +292,15 @@ pub enum EngineAction {
         /// How long the wait may stay open: the engine's own bound, with no
         /// lash default or ceiling.
         bound: crate::ParkBound,
+        /// The node that waits, when the engine's execution map names one.
+        site: Option<StepEffectSite>,
     },
     /// Sleep until a durable instant.
     Sleep {
         /// When the process wakes.
         until: DurableInstant,
+        /// The node that sleeps, when the engine's execution map names one.
+        site: Option<StepEffectSite>,
     },
     /// Nothing to do and no deadline: the process waits until the next
     /// mailbox event (`Cancelled`, a resolved wait or a settled step)

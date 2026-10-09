@@ -569,6 +569,7 @@ pub enum ProcessListSelection {
         session_scope: SessionScope,
         mode: ProcessListMode,
     },
+    /// Every live process of the host: running, or waiting on something.
     HostRunning,
 }
 

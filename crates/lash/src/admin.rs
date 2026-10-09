@@ -346,15 +346,13 @@ impl SessionAdmin {
     /// runtime observes an empty process set rather than erroring, matching the
     /// pre-unification `list_process_handles` behavior.
     fn process_observer_opt(&self) -> Option<lash_core::facade_support::ProcessWorkObserver> {
-        self.runtime
-            .observe()
-            .process_registry
-            .clone()
-            .map(|registry| {
-                lash_core::facade_support::ProcessWorkObserver::new(registry)
-                    .with_read_attempts(self.target.observer_pacing().snapshot_read_attempts)
-                    .with_work_limits(self.observation_work_limits)
-            })
+        let observation = self.runtime.observe();
+        observation.process_registry.clone().map(|registry| {
+            lash_core::facade_support::ProcessWorkObserver::new(registry)
+                .with_actor_parks(Arc::clone(observation.effect_host.backend().durable()))
+                .with_read_attempts(self.target.observer_pacing().snapshot_read_attempts)
+                .with_work_limits(self.observation_work_limits)
+        })
     }
 
     /// Observer edges are session-scoped and deliberately frame-less.

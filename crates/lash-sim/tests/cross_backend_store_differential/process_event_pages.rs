@@ -7,6 +7,7 @@ fn page_wait(id: &lash_sansio::ProcessId, label: &str) -> lash_core::ProcessEven
                 call_id: lash_sansio::ToolCallId::fixture(label),
                 tool_id: lash_sansio::ToolId::new("page_fixture"),
             },
+            site: None,
         },
     )
 }
@@ -434,6 +435,7 @@ pub(super) async fn compare_bounded_process_event_pages(
             call_id: lash_sansio::ToolCallId::fixture("process-wait-law"),
             tool_id: lash_sansio::ToolId::new("process_wait"),
         },
+        site: None,
     };
     let terminal = lash_core::ProcessAwaitOutput::from_tool_output(
         lash_core::ToolCallOutput::success(serde_json::json!({ "summary": "committed" })),

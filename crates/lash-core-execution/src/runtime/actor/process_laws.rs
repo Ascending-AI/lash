@@ -47,8 +47,16 @@ macro_rules! ensure {
     };
 }
 
+mod blockers;
 mod engine_keys;
 mod parked_calls;
+
+pub use blockers::{
+    a_process_awaiting_a_child_reads_waiting_on_that_process,
+    a_process_parked_on_an_unknown_engine_shows_its_park_reason_beside_its_lifecycle,
+    a_process_with_two_parked_calls_lists_both_without_their_keys,
+    a_sleeping_process_reads_waiting_on_its_sleep_and_its_site,
+};
 
 pub use engine_keys::{
     a_pinned_engine_key_is_listed_from_its_wait_after_a_restart_and_a_handover,
@@ -191,7 +199,10 @@ fn origin_name(origin: CancelOrigin) -> String {
 ///   known failure its `Repeatable` contract retries, and ends with how
 ///   the step settled;
 /// - `park`: runs one `law_park` step, which parks on its completion wait
-///   and hands its key out, and ends with how the step settled.
+///   and hands its key out, and ends with how the step settled;
+/// - `park_two`: runs two `law_park` steps at once, each for its own node,
+///   and holds;
+/// - `sleep`: sleeps at a node until the instant its payload names.
 pub struct LawEngine {
     version: u32,
 }
@@ -219,6 +230,7 @@ fn await_action(script: &Value) -> Result<EngineAction, ProcessInfraError> {
             .map_or(crate::ParkBound::UntilScopeEnd, |ms| {
                 crate::ParkBound::Within(Duration::from_millis(ms))
             }),
+        site: None,
     })
 }
 
@@ -240,6 +252,21 @@ fn law_step(step: &str, tool: &str) -> EngineAction {
             site: None,
         }],
         wake: None,
+    }
+}
+
+/// The steps of [`LawEngine`]'s `park_two` act, each named after its node.
+const PARK_TWO: [&str; 2] = ["park-a", "park-b"];
+
+/// The node [`LawEngine`]'s `sleep` act sleeps at.
+const SLEEP_NODE: &str = "sleep-node";
+
+/// The first occurrence of `node`, as the law engine's execution map
+/// would name it.
+fn law_site(node: &str) -> crate::StepEffectSite {
+    crate::StepEffectSite {
+        node_id: node.to_owned(),
+        occurrence: 1,
     }
 }
 
@@ -330,6 +357,27 @@ impl ProcessEngine for LawEngine {
                 "complete" => ended(json!({"real_terminal": true})),
                 "retry" => law_step("flaky", LAW_FLAKY),
                 "park" => law_step("park", LAW_PARK),
+                "park_two" => EngineAction::Steps {
+                    steps: PARK_TWO
+                        .iter()
+                        .map(|step| StepRequest::Tool {
+                            language_execution: None,
+                            step: StepName((*step).to_owned()),
+                            tool: lash_sansio::ToolId::new(LAW_PARK),
+                            input: json!({}),
+                            site: Some(law_site(step)),
+                        })
+                        .collect(),
+                    wake: None,
+                },
+                "sleep" => EngineAction::Sleep {
+                    until: lash_durable::DurableInstant(
+                        script["until_ms"]
+                            .as_i64()
+                            .ok_or_else(|| infra("a sleep names no instant"))?,
+                    ),
+                    site: Some(law_site(SLEEP_NODE)),
+                },
                 _ => EngineAction::Idle,
             },
             EngineEvent::StepSettled { outcome, .. } if act == "retry" || act == "park" => {
@@ -339,7 +387,7 @@ impl ProcessEngine for LawEngine {
                 }))
             }
             EngineEvent::KeyPinned { name, .. } if act == "await_key" || act == "key" => {
-                EngineAction::AwaitExternal { name }
+                EngineAction::AwaitExternal { name, site: None }
             }
             EngineEvent::ExternalResolved {
                 resolution: Resolution::Ok(value),
@@ -583,11 +631,15 @@ fn serve(backend: &Backend) -> Serving {
 
 /// Serve `backend` as node `node`.
 fn serve_as(backend: &Backend, node: &str) -> Serving {
-    let config = RunnerConfig::new(
-        NodeId::new(node),
-        backend.formats().decodes(),
-        backend.config(),
-    );
+    serve_decoding(backend, node, Vec::new())
+}
+
+/// Serve `backend` as node `node`, which also claims actors written in
+/// `claimed`: format sets its build does not decode.
+fn serve_decoding(backend: &Backend, node: &str, claimed: Vec<lash_durable::FormatSet>) -> Serving {
+    let mut decodes = backend.formats().decodes();
+    decodes.extend(claimed);
+    let config = RunnerConfig::new(NodeId::new(node), decodes, backend.config());
     let activation = Arc::new(ProcessActivation::new(
         backend.clone(),
         Arc::new(LawSteps),

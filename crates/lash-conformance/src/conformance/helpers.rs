@@ -351,6 +351,7 @@ pub(crate) fn call_wait_event(
             call_id: lash_core::ToolCallId::fixture(&format!("{label}:{payload}")),
             tool_id: lash_core::ToolId::new(label),
         },
+        site: None,
     };
     crate::ProcessEventAppendRequest::wait_entered(process, &wait)
         .with_replay_key(format!("law:{label}:{replay}"))

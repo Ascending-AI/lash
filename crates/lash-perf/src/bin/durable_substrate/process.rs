@@ -154,7 +154,7 @@ impl ProcessEngine for BenchEngine {
             EngineEvent::Started { .. } => pin(0),
             EngineEvent::KeyPinned { name, key } => {
                 self.board.report(&token, Seen::Pinned(Instant::now(), key));
-                EngineAction::AwaitExternal { name }
+                EngineAction::AwaitExternal { name, site: None }
             }
             EngineEvent::ExternalResolved { .. } => {
                 self.board.report(&token, Seen::Resolved(Instant::now()));

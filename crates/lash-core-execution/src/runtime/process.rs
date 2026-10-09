@@ -30,6 +30,8 @@ mod tests;
 mod validation;
 
 pub use super::actor::round::{Material, NamesMaterial, SettledOutput, SettledOutputRefusal};
+/// Why a process actor is parked: the typed reason its observed state carries.
+pub use crate::runtime::actor::process::ProcessParkReason;
 pub use awaiter::{
     ProcessChangeHub, ProcessChangeSubscription, ProcessEventSink, ProcessEventSinkRegistration,
     WatchedRegistry, watch_process_registry,

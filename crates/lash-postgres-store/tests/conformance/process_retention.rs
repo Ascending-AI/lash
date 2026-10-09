@@ -42,6 +42,7 @@ async fn assert_waiting_process_is_live_not_prunable(registry: &dyn ProcessRegis
                     call_id: lash_core_execution::ToolCallId::fixture("retention-call"),
                     tool_id: lash_core_execution::ToolId::new("retention"),
                 },
+                site: None,
             },
             Vec::new(),
             &authority,

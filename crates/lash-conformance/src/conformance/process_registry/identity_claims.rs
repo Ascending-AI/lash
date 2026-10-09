@@ -231,6 +231,7 @@ pub async fn every_execution_write_refuses_a_superseded_invocation_without_mutat
                 call_id: lash_sansio::ToolCallId::fixture("process-wait-law"),
                 tool_id: lash_sansio::ToolId::new("process_wait"),
             },
+            site: None,
         };
         let terminal =
             crate::terminal_append_request(&id, &settled_success(serde_json::Value::Null), None);

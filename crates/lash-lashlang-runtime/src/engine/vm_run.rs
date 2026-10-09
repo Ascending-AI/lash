@@ -549,7 +549,14 @@ impl QuietPointHost {
                         i64::try_from(deadline_ms).unwrap_or(i64::MAX)
                     }
                 };
-                Issue::Park(IssuedOperation::Sleep { until_ms })
+                let site = sleep
+                    .call_site
+                    .as_ref()
+                    .map(|call_site| lash_core::StepEffectSite {
+                        node_id: call_site.site.node_id.clone(),
+                        occurrence: call_site.occurrence,
+                    });
+                Issue::Park(IssuedOperation::Sleep { until_ms, site })
             }
             AbilityOp::Finish(_) | AbilityOp::Fail(_) | AbilityOp::Print(_) => {
                 return Err(ExecutionHostError::new("answered before issue"));

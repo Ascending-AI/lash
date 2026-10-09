@@ -141,10 +141,11 @@ fn transition(
 fn standing(state: &LashlangEngineState) -> Result<EngineAction, ProcessInfraError> {
     Ok(match &state.phase {
         Phase::Parked {
-            wait: Wait::Sleep { until_ms },
+            wait: Wait::Sleep { until_ms, site },
             ..
         } => EngineAction::Sleep {
             until: lash_core::durable_port::DurableInstant(*until_ms),
+            site: site.clone(),
         },
         Phase::Parked {
             wait: Wait::Process { process },
@@ -154,12 +155,15 @@ fn standing(state: &LashlangEngineState) -> Result<EngineAction, ProcessInfraErr
             // A program's `await` has no deadline of its own: the wait
             // lasts until the awaited process ends or this one's scope does.
             bound: lash_core::ParkBound::UntilScopeEnd,
+            // The VM's `await` names no node to the host.
+            site: None,
         },
         Phase::Parked {
             wait: Wait::Leaves { leaves, .. },
             ..
         } => match next_timer(leaves) {
-            Some(until) => EngineAction::Sleep { until },
+            // An aggregate's timers are leaves of one node, not a sleep at it.
+            Some(until) => EngineAction::Sleep { until, site: None },
             None => EngineAction::Idle,
         },
         Phase::Running { .. } => EngineAction::Idle,
@@ -425,10 +429,10 @@ fn park(
                 }
             }
         }
-        IssuedOperation::Sleep { until_ms } => {
+        IssuedOperation::Sleep { until_ms, site } => {
             state.phase = Phase::Parked {
                 operation,
-                wait: Wait::Sleep { until_ms },
+                wait: Wait::Sleep { until_ms, site },
             };
             standing(state)
         }

@@ -12,7 +12,7 @@ mod waiting;
 
 pub use activation::ProcessActivation;
 pub use session_turn::{SessionTurnCancel, SessionTurnMail, SessionTurns};
-pub use terminal::{ProcessParkReason, cancelled, record_park, record_terminal};
+pub use terminal::{ProcessParkReason, cancelled, park_of, record_park, record_terminal};
 
 use lash_durable::domain::{ProcessWrite, ScopeKey};
 use lash_durable::{ActorTx, DomainWrite, DurableError, DurableReads};

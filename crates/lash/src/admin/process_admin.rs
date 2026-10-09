@@ -41,10 +41,16 @@ impl SessionProcessAdmin {
             .await
     }
 
-    /// Running processes this session may address.
+    /// Live processes this session may address: running, or waiting on a
+    /// call, a key, a sleep or another process.
     pub async fn list(&self) -> Result<Vec<lash_core::facade_support::ObservedProcess>> {
         self.list_observed(&lash_core::ProcessListFilter {
-            status: lash_core::ProcessStatusFilter::any_of([lash_core::ProcessStatus::Running]),
+            status: lash_core::ProcessStatusFilter::any_of(
+                lash_core::ProcessStatus::ALL
+                    .iter()
+                    .copied()
+                    .filter(lash_core::ProcessStatus::is_live),
+            ),
             ..lash_core::ProcessListFilter::default()
         })
         .await

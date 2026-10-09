@@ -11,10 +11,17 @@ use lash_sansio::CancelRequest;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
+/// One thing a process is blocked on: what it is, since when, and the node
+/// of the engine's execution map that blocked on it, when the engine named
+/// one. It names no completion key or wait id: holding one of those resolves
+/// the wait, and a reader of process state is not handed that.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WaitState {
     pub kind: WaitKind,
     pub since_ms: u64,
+    /// The node that blocked, and which occurrence of it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub site: Option<crate::StepEffectSite>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -28,15 +35,21 @@ pub enum WaitKind {
     /// A key the process's engine pinned and awaits, identified by the name
     /// the engine gave it, without its bearer key.
     Key { name: crate::KeyName },
+    /// A durable instant the process sleeps until, in store milliseconds.
+    Sleep { until_ms: i64 },
+    /// Another process's terminal.
+    Process { process_id: ProcessId },
 }
 
 impl WaitState {
-    /// Exposes key to store and durable-substrate implementors while persisting and coordinating
-    /// durable process execution.
-    pub fn key(&self) -> &str {
+    /// The wait's identity within its process: its kind and what that kind
+    /// waits on. Two waits of one process with the same key are one wait.
+    pub fn key(&self) -> String {
         match &self.kind {
-            WaitKind::Call { call_id, .. } => call_id.as_str(),
-            WaitKind::Key { name } => name.0.as_str(),
+            WaitKind::Call { call_id, .. } => format!("call:{call_id}"),
+            WaitKind::Key { name } => format!("key:{}", name.0),
+            WaitKind::Sleep { until_ms } => format!("sleep:{until_ms}"),
+            WaitKind::Process { process_id } => format!("process:{process_id}"),
         }
     }
 }
@@ -94,22 +107,41 @@ pub struct ProcessRecord {
     /// The first accepted cancellation request, retained across retries.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cancel_request: Option<Box<CancelRequest>>,
-    /// The one lifecycle state the process is in. Its status, wait and
-    /// outcome are read from it ([`Self::status`], [`Self::wait`],
+    /// The one lifecycle state the process is in. Its status, waits and
+    /// outcome are read from it ([`Self::status`], [`Self::waits`],
     /// [`Self::terminal`]) and stored nowhere beside it.
     pub lifecycle: ProcessLifecycleState,
 }
 
 /// The lifecycle state of a process record: each state owns the facts that
 /// exist only in it, so a record cannot hold a wait beside an outcome, or a
-/// terminal status without one. A parked process is its actor's state
-/// (ADR 0132 §11), not a record fact.
+/// terminal status without one. A waiting process lists everything it is
+/// blocked on, oldest first, and never an empty list. A parked process is
+/// its actor's state (ADR 0132 §11), not a record fact.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ProcessLifecycleState {
     Running {},
-    Waiting { wait: WaitState },
-    Terminal { outcome: ProcessTerminal },
+    Waiting {
+        #[serde(deserialize_with = "held_waits")]
+        waits: Vec<WaitState>,
+    },
+    Terminal {
+        outcome: ProcessTerminal,
+    },
+}
+
+/// The waits of a stored waiting state: at least one.
+fn held_waits<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<WaitState>, D::Error> {
+    let waits = Vec::<WaitState>::deserialize(deserializer)?;
+    if waits.is_empty() {
+        return Err(serde::de::Error::custom(
+            "a waiting process waits on something",
+        ));
+    }
+    Ok(waits)
 }
 
 impl ProcessLifecycleState {
@@ -128,13 +160,14 @@ impl ProcessLifecycleState {
         match status {
             ProcessStatus::Running => Self::running(),
             ProcessStatus::Waiting => Self::Waiting {
-                wait: WaitState {
+                waits: vec![WaitState {
                     kind: WaitKind::Call {
                         call_id: crate::ToolCallId::fixture("fixture"),
                         tool_id: crate::ToolId::from("fixture"),
                     },
                     since_ms: 0,
-                },
+                    site: None,
+                }],
             },
             ProcessStatus::Completed => {
                 settled(crate::ToolCallOutput::success(serde_json::Value::Null))
@@ -172,11 +205,41 @@ impl ProcessLifecycleState {
         }
     }
 
-    /// The wait the process is in.
-    pub fn wait(&self) -> Option<&WaitState> {
+    /// Everything the process is blocked on; empty unless it waits.
+    pub fn waits(&self) -> &[WaitState] {
         match self {
-            Self::Waiting { wait, .. } => Some(wait),
-            Self::Running { .. } | Self::Terminal { .. } => None,
+            Self::Waiting { waits } => waits,
+            Self::Running { .. } | Self::Terminal { .. } => &[],
+        }
+    }
+
+    /// The state after `wait` is entered: it joins the waits the process
+    /// already has, replacing one of the same identity.
+    pub(crate) fn entering(&self, wait: &WaitState) -> Self {
+        let key = wait.key();
+        let mut waits: Vec<_> = self
+            .waits()
+            .iter()
+            .filter(|held| held.key() != key)
+            .cloned()
+            .collect();
+        waits.push(wait.clone());
+        Self::Waiting { waits }
+    }
+
+    /// The state after `wait` ends: running once no wait is left.
+    pub(crate) fn leaving(&self, wait: &WaitState) -> Self {
+        let key = wait.key();
+        let waits: Vec<_> = self
+            .waits()
+            .iter()
+            .filter(|held| held.key() != key)
+            .cloned()
+            .collect();
+        if waits.is_empty() {
+            Self::running()
+        } else {
+            Self::Waiting { waits }
         }
     }
 
@@ -288,9 +351,9 @@ impl ProcessRecord {
         self.lifecycle.status()
     }
 
-    /// The wait the process is in.
-    pub fn wait(&self) -> Option<&WaitState> {
-        self.lifecycle.wait()
+    /// Everything the process is blocked on; empty unless it waits.
+    pub fn waits(&self) -> &[WaitState] {
+        self.lifecycle.waits()
     }
 
     /// The outcome the process ended in.

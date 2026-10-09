@@ -172,6 +172,7 @@ impl ProcessEngine for SimProcessEngine {
             }
             EngineEvent::KeyPinned { .. } if root => EngineAction::AwaitExternal {
                 name: KeyName(KEY.to_owned()),
+                site: None,
             },
             EngineEvent::ExternalResolved { .. } | EngineEvent::ExternalTimedOut { .. } if root => {
                 script["key"] = json!(matches!(event, EngineEvent::ExternalResolved { .. }));
@@ -179,6 +180,7 @@ impl ProcessEngine for SimProcessEngine {
                     process: ProcessId::parse(script["await"].as_str().unwrap_or_default())
                         .map_err(infra)?,
                     bound: lash_core_execution::ParkBound::Within(Duration::from_millis(AWAIT_MS)),
+                    site: None,
                 }
             }
             EngineEvent::ProcessWaitTimedOut { .. } if root => {

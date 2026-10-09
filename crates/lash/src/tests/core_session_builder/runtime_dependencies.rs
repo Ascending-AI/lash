@@ -103,6 +103,7 @@ async fn the_backend_process_registry_stamps_from_the_backend_clock() {
             call_id: lash_core::ToolCallId::fixture("builder-clock-call"),
             tool_id: lash_core::ToolId::from("builder-clock-tool"),
         },
+        site: None,
     };
     let runner = lash_core::ProcessExecutionWriteAuthority::invocation(
         builder_clock_process_id.clone(),

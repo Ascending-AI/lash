@@ -150,6 +150,7 @@ impl ProcessEngine for LawEngine {
             }
             ("sleep", EngineEvent::Started { .. }) => EngineAction::Sleep {
                 until: DurableInstant(script["until_ms"].as_i64().unwrap_or_default()),
+                site: None,
             },
             ("sleep", EngineEvent::Woke) => success(json!({ "slept": true })),
             ("await", EngineEvent::Started { .. }) => EngineAction::AwaitProcess {
@@ -160,6 +161,7 @@ impl ProcessEngine for LawEngine {
                         .as_u64()
                         .map_or(LONG, Duration::from_millis),
                 ),
+                site: None,
             },
             ("await", EngineEvent::ProcessEnded { outcome, .. }) => success(json!({
                 "ended": serde_json::to_value(&outcome).map_err(infra)?,

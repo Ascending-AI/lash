@@ -88,6 +88,7 @@ fn tick(process_id: &ProcessId, n: u64) -> lash_core::ProcessEventAppendRequest 
             call_id: lash_core::ToolCallId::fixture(&format!("l8-call-{n}")),
             tool_id: lash_core::ToolId::from("l8-fixture"),
         },
+        site: None,
     };
     lash_core::ProcessEventAppendRequest::wait_entered(process_id, &wait)
 }

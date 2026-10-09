@@ -53,13 +53,13 @@ async fn s18(case: &mut Case) -> Result<()> {
                 // The runtime-wide snapshot takes no session admission while its
                 // turn is awaiting; identify our sleeper by its start receipt.
                 let work = case.node("node-a")?.get("/api/work").await?;
-                // A durable timer leaves the sleeper's lifecycle running; waiting
-                // describes a deferred tool call. The session's release below is
-                // the evidence that its process await is suspended.
+                // A sleeper released on its durable timer reads waiting on its
+                // sleep. The session's release below is the evidence that its
+                // process await is suspended.
                 let sleeping = work.as_array().is_some_and(|items| {
                     items.iter().any(|item| {
                         item["process"]["process_id"] == sleeper_id
-                            && item["process"]["lifecycle"] == "running"
+                            && item["process"]["lifecycle"] == "waiting"
                             && item["process"]["terminal"] == false
                     })
                 });

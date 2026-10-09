@@ -98,6 +98,7 @@ fn call_wait(_id: &ProcessId) -> crate::WaitState {
             call_id: lash_sansio::ToolCallId::fixture("process-wait-law"),
             tool_id: lash_sansio::ToolId::new("process_wait"),
         },
+        site: None,
     }
 }
 
@@ -131,7 +132,7 @@ async fn folded(
     id: &ProcessId,
 ) -> (
     Vec<(String, u64, serde_json::Value)>,
-    (crate::ProcessStatus, u64, Option<crate::WaitState>),
+    (crate::ProcessStatus, u64, Vec<crate::WaitState>),
 ) {
     let events = registry
         .full_event_window(id, 0)
@@ -156,14 +157,18 @@ async fn folded(
         (
             record.status(),
             record.last_event_sequence,
-            record.wait().map(|wait| {
-                // The since instant is the writer's clock; the law compares
-                // what the fold derived.
-                crate::WaitState {
-                    since_ms: 0,
-                    ..wait.clone()
-                }
-            }),
+            record
+                .waits()
+                .iter()
+                .map(|wait| {
+                    // The since instant is the writer's clock; the law
+                    // compares what the fold derived.
+                    crate::WaitState {
+                        since_ms: 0,
+                        ..wait.clone()
+                    }
+                })
+                .collect(),
         ),
     )
 }
@@ -312,7 +317,7 @@ pub async fn a_boundary_commits_its_prelude_in_its_own_transaction(
         )
         .await
         .expect("enter the wait with its prelude");
-    assert!(waiting.wait().is_some(), "the process waits");
+    assert!(!waiting.waits().is_empty(), "the process waits");
     assert_eq!(
         change_clock(&registry).await - clock,
         1,
@@ -355,7 +360,7 @@ pub async fn a_boundary_commits_its_prelude_in_its_own_transaction(
         )
         .await
         .expect("clear the wait with its prelude");
-    assert!(resumed.wait().is_none(), "the process resumed");
+    assert!(resumed.waits().is_empty(), "the process resumed");
     assert_eq!(
         change_clock(&registry).await - clock,
         1,

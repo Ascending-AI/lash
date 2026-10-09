@@ -52,6 +52,10 @@ law!(
     an_awaited_engine_key_records_a_waiting_fact,
     a_pinned_engine_key_is_listed_from_its_wait_after_a_restart_and_a_handover,
     a_parked_call_is_reopened_from_its_completion_wait_after_a_restart_and_a_handover,
+    a_sleeping_process_reads_waiting_on_its_sleep_and_its_site,
+    a_process_awaiting_a_child_reads_waiting_on_that_process,
+    a_process_with_two_parked_calls_lists_both_without_their_keys,
+    a_process_parked_on_an_unknown_engine_shows_its_park_reason_beside_its_lifecycle,
 );
 
 /// FIG-5235: a deterministic 40P01 inside the terminal is retried, not refused.

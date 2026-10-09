@@ -19,6 +19,8 @@ pub struct ProcessWorkObserver {
     work_limits: lash_trace::ObservationWorkLimits,
     registry: Arc<dyn ProcessRegistry>,
     read_attempts: std::num::NonZeroUsize,
+    /// The store whose actor rows say why a process is parked.
+    actors: Option<Arc<dyn lash_durable::DurableStore>>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -84,8 +86,17 @@ pub struct ObservedProcess {
     pub caused_by: Option<crate::CausalRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub external_ref: Option<ProcessExternalRef>,
+    /// Everything the process is blocked on while its lifecycle is
+    /// `waiting`, oldest first: each names what it waits for and the node
+    /// that waits, never a key that would resolve it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub waits: Vec<WaitState>,
+    /// Why the process's actor is parked, while it is: it runs no engine
+    /// code until an operator redrives it. A fact of its actor, beside the
+    /// lifecycle and never folded into it; `None` from an observer that was
+    /// given no actor store to read it from.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub wait: Option<WaitState>,
+    pub park: Option<crate::ProcessParkReason>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub child_session_id: Option<SessionId>,
 }
@@ -203,7 +214,38 @@ impl ProcessWorkObserver {
             registry,
             work_limits: lash_trace::ObservationWorkLimits::standard(),
             read_attempts: std::num::NonZeroUsize::MIN.saturating_add(1),
+            actors: None,
         }
+    }
+
+    /// Read each observed process's park from `actors`, the durable store
+    /// its actor row lives in.
+    #[must_use]
+    pub fn with_actor_parks(mut self, actors: Arc<dyn lash_durable::DurableStore>) -> Self {
+        self.actors = Some(actors);
+        self
+    }
+
+    /// `record` as a host observes it, with its actor's park.
+    async fn observed(&self, record: ProcessRecord) -> Result<ObservedProcess, PluginError> {
+        let park = match &self.actors {
+            Some(actors) if !record.is_terminal() => {
+                crate::runtime::actor::process::park_of(actors.as_ref(), &record.id)
+                    .await
+                    .map_err(|error| {
+                        PluginError::RuntimeEffectController(
+                            crate::RuntimeEffectControllerError::new(
+                                crate::RuntimeErrorCode::StoreCommitFailed,
+                                error.to_string(),
+                            ),
+                        )
+                    })?
+            }
+            _ => None,
+        };
+        let mut process = ObservedProcess::from_record(record);
+        process.park = park;
+        Ok(process)
     }
 
     /// Set the bounded record/event-tail pairing retries. The standard preset
@@ -298,7 +340,7 @@ impl ProcessWorkObserver {
                 .into_iter()
                 .map(ObservedProcessEvent::from)
                 .collect();
-            let process = ObservedProcess::from_record(record);
+            let process = self.observed(record).await?;
             let item = ObservedWorkItem { process, events };
             if !item.has_mispaired_event_tail() || attempt + 1 == self.read_attempts.get() {
                 return Ok(item);
@@ -318,7 +360,7 @@ impl ProcessWorkObserver {
         let Some(record) = self.registry.get_process(process_id).await? else {
             return Ok(None);
         };
-        Ok(Some(ObservedProcess::from_record(record)))
+        Ok(Some(self.observed(record).await?))
     }
 
     pub async fn list(
@@ -375,10 +417,11 @@ impl ProcessWorkObserver {
         &self,
         records: Vec<ProcessRecord>,
     ) -> Result<Vec<ObservedProcess>, PluginError> {
-        Ok(records
-            .into_iter()
-            .map(ObservedProcess::from_record)
-            .collect())
+        let mut observed = Vec::with_capacity(records.len());
+        for record in records {
+            observed.push(self.observed(record).await?);
+        }
+        Ok(observed)
     }
 
     /// Read a page of one exact process lifetime strictly after
@@ -448,7 +491,7 @@ impl ObservedProcess {
     fn from_record(record: ProcessRecord) -> Self {
         let lifecycle = record.status();
         let outcome = record.outcome();
-        let wait = record.wait().cloned();
+        let waits = record.waits().to_vec();
         let child_session_id = match record.input.as_ref() {
             ProcessInput::SessionTurn { .. } => record.lineage().session().cloned(),
             ProcessInput::Engine { .. } => None,
@@ -474,7 +517,8 @@ impl ObservedProcess {
             env_ref: record.env_ref,
             caused_by: record.provenance.caused_by,
             external_ref: record.external_ref,
-            wait,
+            waits,
+            park: None,
             child_session_id,
             input,
         }

@@ -610,6 +610,7 @@ mod tests {
                         tool_id: lash::tools::ToolId::new("tool:overlay"),
                     },
                     since_ms: 42,
+                    site: None,
                 },
             },
             occurred_at_ms: 42,

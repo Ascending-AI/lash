@@ -864,7 +864,11 @@ do not park long work. A process also parks when no engine of its kind is
 installed on the claiming node (`UnknownEngine`), when its state is in a format
 the engine does not read (`UndecodableState`), or when its engine refused a
 transition (`AdvanceRefused`). Each park is recorded in the park feed with its
-`ProcessParkReason`.
+`ProcessParkReason`, and a read of the process
+(`Processes::get`, `list`, the work snapshots) carries the same reason in
+`ObservedProcess::park` while the park stands. The lifecycle status does not
+change: a parked process still reads as the `running` or `waiting` its record
+says.
 
 A parked process holds what it holds and runs no engine code until an operator
 acts. `LashCore::parked_work()` lists parked turns.

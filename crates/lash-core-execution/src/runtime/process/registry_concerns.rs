@@ -543,7 +543,7 @@ pub trait ProcessLifecycle: Send + Sync {
         authority: &ProcessExecutionWriteAuthority,
     ) -> Result<ProcessRecord, PluginError>;
 
-    /// Leave the current wait (`process.resumed`) as a run boundary, with the
+    /// Leave the oldest wait the record lists (`process.resumed`) as a run boundary, with the
     /// same `prelude` contract as [`Self::set_process_wait_with_authority`].
     async fn clear_process_wait_with_authority(
         &self,
