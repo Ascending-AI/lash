@@ -31,7 +31,7 @@ const COMPONENT: &str = "postgres";
 /// where the schema gate has already admitted the table itself.
 async fn read_in_tx(tx: &mut Transaction<'_, Postgres>) -> Result<Option<i32>, sqlx::Error> {
     sqlx::query_scalar(session_sql().fleet_format.select_fleet_format.sql())
-        .fetch_optional(&mut **tx)
+        .fetch_optional(crate::observed_sql::executor(&mut **tx))
         .await
 }
 
@@ -90,7 +90,7 @@ pub(crate) async fn seed(
     })?;
     sqlx::query(session_sql().fleet_format.insert_if_absent.sql())
         .bind(version)
-        .execute(&mut **tx)
+        .execute(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(crate::store_sqlx_error)?;
     Ok(())
@@ -109,7 +109,7 @@ where
 {
     let row: Result<Option<i32>, sqlx::Error> =
         sqlx::query_scalar(session_sql().fleet_format.select_fleet_format.sql())
-            .fetch_optional(executor)
+            .fetch_optional(crate::observed_sql::executor(executor))
             .await;
     match row {
         Ok(Some(version)) => match u32::try_from(i64::from(version)) {
@@ -131,9 +131,9 @@ where
 pub(crate) async fn read_state_in_tx(
     tx: &mut Transaction<'_, Postgres>,
 ) -> Result<FleetFormatState, sqlx::Error> {
-    let mut probe = sqlx::Acquire::begin(tx).await?;
+    let mut probe = crate::observed_sql::control("SAVEPOINT", sqlx::Acquire::begin(tx)).await?;
     let state = read(&mut *probe).await;
-    probe.rollback().await?;
+    crate::observed_sql::control("ROLLBACK TO SAVEPOINT", probe.rollback()).await?;
     Ok(state)
 }
 

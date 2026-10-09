@@ -20,7 +20,7 @@ async fn select_prunable<'c>(
     let rows = sqlx::query(sql)
         .bind(cutoff)
         .bind(max_change_seq)
-        .fetch_all(executor)
+        .fetch_all(crate::observed_sql::executor(executor))
         .await
         .map_err(plugin_sqlx_error)?;
     let mut prunable = Vec::new();
@@ -78,7 +78,7 @@ async fn reclaim_settled_parent_end_plans_tx(
 ) -> Result<u64, PluginError> {
     sqlx::query(process_sql().plan_postgres.delete_reclaimable.sql())
         .bind(cutoff)
-        .execute(&mut **tx)
+        .execute(crate::observed_sql::executor(&mut **tx))
         .await
         .map(|done| done.rows_affected())
         .map_err(plugin_sqlx_error)

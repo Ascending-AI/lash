@@ -25,7 +25,7 @@ async fn lock_bundle_tx(
     .bind(format!(
         "lash-artifact:{TOOL_MATERIAL_NAMESPACE}:{artifact_ref}"
     ))
-    .execute(&mut **tx)
+    .execute(crate::observed_sql::executor(&mut **tx))
     .await
     .map_err(store_sqlx_error)?;
     Ok(())
@@ -38,7 +38,7 @@ async fn holder_ended_tx(
     sqlx::query_scalar(artifact_sql().fences.select_is_fenced.sql())
         .bind(referrer.kind().as_str())
         .bind(referrer.canonical_id())
-        .fetch_one(&mut **tx)
+        .fetch_one(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)
 }
@@ -53,7 +53,7 @@ async fn insert_lease_tx(
         .bind(artifact_ref)
         .bind(referrer.kind().as_str())
         .bind(referrer.canonical_id())
-        .execute(&mut **tx)
+        .execute(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?;
     Ok(())
@@ -103,14 +103,14 @@ impl ToolMaterialStore for PostgresLashVmArtifactStore {
             .bind(TOOL_MATERIAL_NAMESPACE)
             .bind(artifact_ref)
             .bind(bundle.bytes())
-            .execute(&mut **tx)
+            .execute(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?;
         let stored: Vec<u8> =
             sqlx::query_scalar(artifact_sql().lash_vm_artifacts.select_bytes.sql())
                 .bind(TOOL_MATERIAL_NAMESPACE)
                 .bind(artifact_ref)
-                .fetch_one(&mut **tx)
+                .fetch_one(crate::observed_sql::executor(&mut **tx))
                 .await
                 .map_err(store_sqlx_error)?;
         if stored != bundle.bytes() {
@@ -159,7 +159,7 @@ impl ToolMaterialStore for PostgresLashVmArtifactStore {
         let exists: bool = sqlx::query_scalar(artifact_sql().lash_vm_artifacts.exists.sql())
             .bind(TOOL_MATERIAL_NAMESPACE)
             .bind(artifact_ref)
-            .fetch_one(&mut **tx)
+            .fetch_one(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?;
         if !exists {
@@ -197,7 +197,9 @@ impl ToolMaterialStore for PostgresLashVmArtifactStore {
             return Err(missing(reference));
         }
         let referrer = holder.referrer();
-        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        let mut tx = crate::observed_sql::control("BEGIN", self.pool.begin())
+            .await
+            .map_err(store_sqlx_error)?;
         if holder_ended_tx(&mut tx, &referrer).await? {
             return Err(MaterialRefusal::Retired {
                 reference: Box::new(reference.clone()),
@@ -209,7 +211,7 @@ impl ToolMaterialStore for PostgresLashVmArtifactStore {
             .bind(&artifact.artifact_ref)
             .bind(referrer.kind().as_str())
             .bind(referrer.canonical_id())
-            .fetch_one(&mut *tx)
+            .fetch_one(crate::observed_sql::executor(&mut *tx))
             .await
             .map_err(store_sqlx_error)?;
         if !leased {
@@ -219,10 +221,12 @@ impl ToolMaterialStore for PostgresLashVmArtifactStore {
             sqlx::query_scalar(artifact_sql().lash_vm_artifacts.select_bytes.sql())
                 .bind(TOOL_MATERIAL_NAMESPACE)
                 .bind(&artifact.artifact_ref)
-                .fetch_one(&mut *tx)
+                .fetch_one(crate::observed_sql::executor(&mut *tx))
                 .await
                 .map_err(store_sqlx_error)?;
-        tx.commit().await.map_err(store_sqlx_error)?;
+        crate::observed_sql::control("COMMIT", tx.commit())
+            .await
+            .map_err(store_sqlx_error)?;
         Ok(MaterialBundle::read(&bytes, reference, owner, available)?)
     }
 }

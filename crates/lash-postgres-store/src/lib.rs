@@ -63,7 +63,7 @@ use lash_core_execution::{
 };
 use sqlx::pool::PoolConnection;
 use sqlx::postgres::{PgPool, PgRow};
-use sqlx::{Acquire, Executor, Postgres, Row};
+use sqlx::{Acquire, Postgres, Row};
 
 const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 
@@ -439,7 +439,9 @@ impl PostgresStorage {
             lash_core_execution::compat::ComponentId::POSTGRES,
         )
         .ok_or_else(|| StoreError::Backend("missing PostgreSQL compatibility descriptor".into()))?;
-        let mut tx = pool.begin().await.map_err(store_sqlx_error)?;
+        let mut tx = crate::observed_sql::control("BEGIN", pool.begin())
+            .await
+            .map_err(store_sqlx_error)?;
         let writing_release = crate::release_stamp::read_release_in_tx(&mut tx).await;
         if let Some(refusal) = lash_core_execution::compat::CompatRefusal::pre_release(
             descriptor.component.as_str(),
@@ -448,7 +450,9 @@ impl PostgresStorage {
         ) {
             return Err(StoreError::Incompatible { refusal });
         }
-        tx.commit().await.map_err(store_sqlx_error)?;
+        crate::observed_sql::control("COMMIT", tx.commit())
+            .await
+            .map_err(store_sqlx_error)?;
         lash_core_execution::compat::admit(
             descriptor,
             crate::schema::read_compat_stamp(&pool, true).await,

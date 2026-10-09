@@ -11,7 +11,7 @@ pub(crate) async fn list_sessions(
             .select_catalog
             .sql(),
     )
-    .fetch_all(pool)
+    .fetch_all(crate::observed_sql::executor(pool))
     .await
     .map_err(store_sqlx_error)?;
     let mut views = Vec::with_capacity(rows.len());

@@ -308,7 +308,7 @@ pub(crate) async fn delay_node_statements_for_testing(
              FOR EACH STATEMENT EXECUTE FUNCTION slow_matrix_statement('{seconds}');",
         seconds = delay.as_secs_f64(),
     ))
-    .execute(pool)
+    .execute(crate::observed_sql::executor(pool))
     .await
     .map(|_| ())
 }
@@ -1263,7 +1263,7 @@ impl DurableStore for PostgresDurableStore {
             let rows: Vec<(String, i64, String)> = sqlx::query_as(SQL.actor.owned_by.sql())
                 .bind(node.owner.node.as_str())
                 .bind(node.owner.boot.as_str())
-                .fetch_all(&self.pools.scheduler)
+                .fetch_all(crate::observed_sql::executor(&self.pools.scheduler))
                 .await
                 .map_err(sqlx_failure)?;
             rows.into_iter()
@@ -1404,7 +1404,7 @@ impl DurableStore for PostgresDurableStore {
         self.within(CommitCapacity::Work, async {
             let Some(row) = sqlx::query(SQL.actor.snapshot.sql())
                 .bind(actor.as_str())
-                .fetch_optional(&self.pools.work)
+                .fetch_optional(crate::observed_sql::executor(&self.pools.work))
                 .await
                 .map_err(sqlx_failure)?
             else {

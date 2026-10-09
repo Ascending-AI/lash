@@ -166,7 +166,7 @@ pub(super) async fn get(
     let row = sqlx::query(process_sql().plan.select_stamps.sql())
         .bind(kind)
         .bind(&id)
-        .fetch_optional(pool)
+        .fetch_optional(crate::observed_sql::executor(pool))
         .await
         .map_err(plugin_sqlx_error)?;
     row.map(|row| {

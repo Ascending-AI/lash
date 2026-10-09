@@ -11,7 +11,7 @@ pub(crate) async fn enumerate_checkpoint_blob_candidates_tx(
         candidates.extend(
             sqlx::query_scalar::<_, String>(session_sql().checkpoint_edges.select_components.sql())
                 .bind(checkpoint_ref_vec)
-                .fetch_all(&mut **tx)
+                .fetch_all(crate::observed_sql::executor(&mut **tx))
                 .await
                 .map_err(store_sqlx_error)?,
         );
@@ -38,7 +38,7 @@ pub(crate) async fn lock_session_blob_candidates_tx(
             .sql(),
     )
     .bind(&candidate_vec)
-    .fetch_all(&mut **tx)
+    .fetch_all(crate::observed_sql::executor(&mut **tx))
     .await
     .map_err(store_sqlx_error)?;
     if locked.len() != candidate_vec.len() {
@@ -66,7 +66,7 @@ pub(crate) async fn reclaim_session_checkpoint_blobs_tx(
                 .sql(),
         )
         .bind(candidate_vec)
-        .execute(&mut **tx)
+        .execute(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?;
     }
@@ -81,7 +81,7 @@ pub(crate) async fn reclaim_session_checkpoint_blobs_tx(
                 .sql(),
         )
         .bind(&blob_ref)
-        .execute(&mut **tx)
+        .execute(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?
         .rows_affected();

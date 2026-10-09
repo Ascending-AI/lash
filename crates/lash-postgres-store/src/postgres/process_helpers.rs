@@ -69,7 +69,7 @@ pub(crate) async fn load_process(
     let json: Option<String> =
         sqlx::query_scalar(process_sql().process.select_record_json_by_id.sql())
             .bind(process_id.as_str())
-            .fetch_optional(pool)
+            .fetch_optional(crate::observed_sql::executor(pool))
             .await
             .map_err(plugin_sqlx_error)?;
     json.map(|json| decode_process_record(&json)).transpose()

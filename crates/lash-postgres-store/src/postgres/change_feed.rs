@@ -147,7 +147,7 @@ pub(crate) async fn sequence_before_read(
         Feed::Processes => process_sql().clock_postgres.has_unsequenced.sql(),
     };
     let pending: bool = sqlx::query_scalar(probe)
-        .fetch_one(pool)
+        .fetch_one(crate::observed_sql::executor(pool))
         .await
         .map_err(store_sqlx_error)?;
     if !pending {

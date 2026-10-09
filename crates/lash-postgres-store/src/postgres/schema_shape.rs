@@ -115,7 +115,7 @@ pub(crate) async fn expanded_findings(
     )
     .bind(schema)
     .bind(&names)
-    .fetch_all(&mut **tx)
+    .fetch_all(crate::observed_sql::executor(&mut **tx))
     .await
     .map_err(crate::store_sqlx_error)?;
     for row in constraints {
@@ -142,7 +142,7 @@ pub(crate) async fn expanded_findings(
     )
     .bind(schema)
     .bind(&names)
-    .fetch_all(&mut **tx)
+    .fetch_all(crate::observed_sql::executor(&mut **tx))
     .await
     .map_err(crate::store_sqlx_error)?;
     for row in triggers {
@@ -218,7 +218,7 @@ pub(crate) async fn synthetic_next_findings(
          )",
     )
     .bind(schema)
-    .fetch_one(&mut **tx)
+    .fetch_one(crate::observed_sql::executor(&mut **tx))
     .await
     .map_err(crate::store_sqlx_error)?;
     if !table_found {

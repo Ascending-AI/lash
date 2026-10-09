@@ -34,7 +34,7 @@ pub(crate) async fn read_search_path(
               AS resolved(schema_name, precedence)
          ORDER BY resolved.precedence",
     )
-    .fetch_all(&mut *connection)
+    .fetch_all(crate::observed_sql::executor(&mut *connection))
     .await
     .map_err(store_sqlx_error)?;
     Ok(SearchPath(schemas))
@@ -97,7 +97,7 @@ pub(crate) async fn resolve_installation(
     )
     .bind(ANCHOR_TABLE)
     .bind(&search_path.0)
-    .fetch_optional(&mut *connection)
+    .fetch_optional(crate::observed_sql::executor(&mut *connection))
     .await
     .map_err(store_sqlx_error)?;
     Ok(row.map(|row| Installation {
@@ -155,7 +155,7 @@ pub(crate) async fn read_component_version(
         installation.quoted_namespace
     ))
     .bind(SCHEMA_COMPONENT)
-    .fetch_optional(&mut *connection)
+    .fetch_optional(crate::observed_sql::executor(&mut *connection))
     .await
     .map_err(store_sqlx_error)?;
     Ok(ComponentVersion::Readable(version))
@@ -197,7 +197,7 @@ async fn probe_columns_match_expected(
     .bind(table_oid)
     .bind(&names)
     .bind(&types)
-    .fetch_one(&mut *connection)
+    .fetch_one(crate::observed_sql::executor(&mut *connection))
     .await
     .map_err(store_sqlx_error)?;
     Ok(matched == names.len() as i64)
@@ -294,7 +294,7 @@ async fn read_shadow_findings(
     )
     .bind(table_names)
     .bind(&search_path.0)
-    .fetch_all(&mut *connection)
+    .fetch_all(crate::observed_sql::executor(&mut *connection))
     .await
     .map_err(store_sqlx_error)?;
     Ok(rows
@@ -327,7 +327,7 @@ pub(crate) async fn resolve_tables(
     )
     .bind(table_names)
     .bind(installation.namespace_oid)
-    .fetch_all(&mut *connection)
+    .fetch_all(crate::observed_sql::executor(&mut *connection))
     .await
     .map_err(store_sqlx_error)?;
     let mut resolved = BTreeMap::new();
@@ -375,7 +375,7 @@ pub(crate) async fn read_live_shape(
            AND NOT attribute.attisdropped",
     )
     .bind(&oids)
-    .fetch_all(&mut *connection)
+    .fetch_all(crate::observed_sql::executor(&mut *connection))
     .await
     .map_err(store_sqlx_error)?;
     for row in column_rows {
@@ -431,7 +431,7 @@ pub(crate) async fn read_live_shape(
            AND index_catalog.indislive",
     )
     .bind(&oids)
-    .fetch_all(&mut *connection)
+    .fetch_all(crate::observed_sql::executor(&mut *connection))
     .await
     .map_err(store_sqlx_error)?;
     for row in index_rows {
@@ -495,7 +495,7 @@ pub(crate) async fn read_live_shape(
            AND constraint_catalog.conrelid::bigint = ANY($1::bigint[])",
     )
     .bind(&oids)
-    .fetch_all(&mut *connection)
+    .fetch_all(crate::observed_sql::executor(&mut *connection))
     .await
     .map_err(store_sqlx_error)?;
     for row in foreign_key_rows {
@@ -597,7 +597,7 @@ async fn read_seed_row_findings(
             "SELECT 1::BIGINT FROM {}.{table} WHERE singleton = {key}",
             installation.quoted_namespace
         ))
-        .fetch_optional(&mut *connection)
+        .fetch_optional(crate::observed_sql::executor(&mut *connection))
         .await
         .map_err(store_sqlx_error)?;
         if present.is_none() {

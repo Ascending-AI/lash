@@ -44,7 +44,7 @@ async-trait = { workspace = true }
 flate2 = "1"
 rmp-serde = "1"
 tokio-rusqlite = { version = "0.7", features = ["bundled"] }
-rusqlite = { version = "0.37", features = ["bundled"] }
+rusqlite = { version = "0.37", features = ["bundled", "trace"] }
 serde = { workspace = true, features = ["derive"] }
 serde_bytes = { workspace = true }
 serde_json = { workspace = true }

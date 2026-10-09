@@ -39,7 +39,7 @@ where
         "SELECT version, min_reader FROM lash_schema_versions WHERE component = $1",
     )
     .bind(SCHEMA_COMPONENT)
-    .fetch_optional(executor)
+    .fetch_optional(crate::observed_sql::executor(executor))
     .await
     {
         Ok(Some((version, min_reader))) => {
@@ -85,7 +85,9 @@ pub(crate) async fn ensure_schema_with_release(
     writable: lash_core_execution::compat::VersionRange,
     build_release: &str,
 ) -> Result<(String, lash_core_execution::FleetFormat), StoreError> {
-    let mut tx = pool.begin().await.map_err(store_sqlx_error)?;
+    let mut tx = crate::observed_sql::control("BEGIN", pool.begin())
+        .await
+        .map_err(store_sqlx_error)?;
     // Serializes lash's own openers with each other and with a `lash migrate`
     // run holding the same key exclusively, so a verifying open cannot read a
     // half-applied migration batch. The lock needs no privileges, so a runtime
@@ -94,7 +96,7 @@ pub(crate) async fn ensure_schema_with_release(
     sqlx::query("SELECT pg_advisory_xact_lock($1, $2)")
         .bind(lock_namespace)
         .bind(lock_key)
-        .execute(&mut *tx)
+        .execute(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(store_sqlx_error)?;
 
@@ -220,7 +222,9 @@ pub(crate) async fn ensure_schema_with_release(
             }
             other => other,
         })?;
-    tx.commit().await.map_err(store_sqlx_error)?;
+    crate::observed_sql::control("COMMIT", tx.commit())
+        .await
+        .map_err(store_sqlx_error)?;
     record_schema_gate_decision(&report, check, admitted_as, None);
     Ok((catalog_id, fleet_format))
 }
@@ -248,7 +252,7 @@ where
     E: sqlx::Executor<'e, Database = sqlx::Postgres>,
 {
     sqlx::query_scalar("SELECT catalog_id FROM lash_catalog_identity WHERE singleton = TRUE")
-        .fetch_optional(executor)
+        .fetch_optional(crate::observed_sql::executor(executor))
         .await
 }
 
@@ -301,7 +305,7 @@ async fn schema_observation_connection(pool: &PgPool) -> Result<sqlx::PgConnecti
     sqlx::query("SELECT pg_advisory_lock_shared($1, $2)")
         .bind(lock_namespace)
         .bind(lock_key)
-        .execute(&mut connection)
+        .execute(crate::observed_sql::executor(&mut connection))
         .await
         .map_err(store_sqlx_error)?;
     Ok(connection)
@@ -333,11 +337,11 @@ async fn observe_within_repeatable_read(
 ) -> Result<SchemaObservation, StoreError> {
     use lash_core_execution::compat::{CompatAdmission, StampRead};
 
-    let mut tx = sqlx::Connection::begin(connection)
+    let mut tx = crate::observed_sql::control("BEGIN", sqlx::Connection::begin(connection))
         .await
         .map_err(store_sqlx_error)?;
     sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
-        .execute(&mut *tx)
+        .execute(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(store_sqlx_error)?;
     let writing_release = crate::release_stamp::read_release_in_tx(&mut tx).await;
@@ -345,11 +349,13 @@ async fn observe_within_repeatable_read(
     let stamp = if report.schema.is_some() {
         // A malformed compatibility relation must yield Unreadable without
         // aborting the snapshot needed by the remaining probes.
-        let mut probe = sqlx::Acquire::begin(&mut tx)
+        let mut probe = crate::observed_sql::control("SAVEPOINT", sqlx::Acquire::begin(&mut tx))
             .await
             .map_err(store_sqlx_error)?;
         let stamp = read_compat_stamp(&mut *probe, true).await;
-        probe.rollback().await.map_err(store_sqlx_error)?;
+        crate::observed_sql::control("ROLLBACK TO SAVEPOINT", probe.rollback())
+            .await
+            .map_err(store_sqlx_error)?;
         stamp
     } else {
         StampRead::Absent { populated: false }
@@ -370,7 +376,9 @@ async fn observe_within_repeatable_read(
     let fleet_format = crate::fleet_format::read_state_in_tx(&mut tx)
         .await
         .map_err(store_sqlx_error)?;
-    tx.commit().await.map_err(store_sqlx_error)?;
+    crate::observed_sql::control("COMMIT", tx.commit())
+        .await
+        .map_err(store_sqlx_error)?;
     Ok(SchemaObservation {
         report,
         stamp,
@@ -385,19 +393,21 @@ async fn observe_within_repeatable_read(
 async fn verify_within_repeatable_read(
     connection: &mut sqlx::PgConnection,
 ) -> Result<SchemaReport, StoreError> {
-    let mut tx = sqlx::Connection::begin(connection)
+    let mut tx = crate::observed_sql::control("BEGIN", sqlx::Connection::begin(connection))
         .await
         .map_err(store_sqlx_error)?;
     // Must precede every other statement in the transaction: PostgreSQL rejects the
     // change once a snapshot has been established.
     sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
-        .execute(&mut *tx)
+        .execute(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(store_sqlx_error)?;
     let report = verify_schema_shape(&mut tx).await?;
     // Read-only, but committing rather than rolling back keeps the transaction's
     // disposition unambiguous in a host's own logs.
-    tx.commit().await.map_err(store_sqlx_error)?;
+    crate::observed_sql::control("COMMIT", tx.commit())
+        .await
+        .map_err(store_sqlx_error)?;
     Ok(report)
 }
 

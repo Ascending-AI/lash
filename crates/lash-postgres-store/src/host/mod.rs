@@ -360,7 +360,7 @@ impl TransactionPrelude {
         &self,
         pool: &PgPool,
     ) -> Result<Transaction<'static, Postgres>, sqlx::Error> {
-        pool.begin_with(self.begin.to_string()).await
+        crate::observed_sql::control(&self.begin, pool.begin_with(self.begin.to_string())).await
     }
 
     /// Begin a guarded transaction on a connection the caller holds.
@@ -372,7 +372,11 @@ impl TransactionPrelude {
         &self,
         connection: &'c mut sqlx::PgConnection,
     ) -> Result<Transaction<'c, Postgres>, sqlx::Error> {
-        sqlx::Connection::begin_with(connection, self.begin.to_string()).await
+        crate::observed_sql::control(
+            &self.begin,
+            sqlx::Connection::begin_with(connection, self.begin.to_string()),
+        )
+        .await
     }
 
     /// Run `operation` within the profile's whole-operation deadline:
@@ -732,7 +736,7 @@ where
                 COALESCE(SUM(setting::bigint) FILTER (WHERE name IN ('superuser_reserved_connections', 'reserved_connections')), 0)::bigint
          FROM pg_settings WHERE name IN ('max_connections', 'superuser_reserved_connections', 'reserved_connections')",
     )
-    .fetch_one(executor)
+    .fetch_one(crate::observed_sql::executor(executor))
     .await
     .map_err(store_sqlx_error)?;
     Ok(PostgresConnectionCapacity {

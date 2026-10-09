@@ -237,7 +237,9 @@ fn retained_revision(
 
 /// A read transaction that sees one snapshot across its statements.
 async fn begin_snapshot(pool: &PgPool) -> Result<Tx<'_>, StoreError> {
-    let mut tx = pool.begin().await.map_err(store_sqlx_error)?;
+    let mut tx = crate::observed_sql::control("BEGIN", pool.begin())
+        .await
+        .map_err(store_sqlx_error)?;
     sqlx::query(
         crate::connection_sql::connection_sql()
             .begin_repeatable_read
@@ -291,7 +293,9 @@ impl PostgresStore {
             &pins,
             fleet,
         )?;
-        tx.commit().await.map_err(store_sqlx_error)?;
+        crate::observed_sql::control("COMMIT", tx.commit())
+            .await
+            .map_err(store_sqlx_error)?;
         Ok(retained)
     }
 
@@ -330,7 +334,9 @@ impl PostgresStore {
                 fleet,
             )?);
         }
-        tx.commit().await.map_err(store_sqlx_error)?;
+        crate::observed_sql::control("COMMIT", tx.commit())
+            .await
+            .map_err(store_sqlx_error)?;
         Ok(revisions)
     }
 
@@ -381,7 +387,9 @@ impl PostgresStore {
         let mut tx = begin_snapshot(&self.pool).await?;
         require_session_tx(&mut tx, session_id).await?;
         let retention = retention_tx(&mut tx, session_id).await?;
-        tx.commit().await.map_err(store_sqlx_error)?;
+        crate::observed_sql::control("COMMIT", tx.commit())
+            .await
+            .map_err(store_sqlx_error)?;
         retention.ok_or_else(|| StoreError::SessionNotFound {
             session_id: session_id.clone(),
         })

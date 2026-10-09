@@ -13,7 +13,7 @@ use std::time::Instant;
 
 use futures_util::future::BoxFuture;
 use futures_util::stream::{BoxStream, StreamExt};
-use lash_core_execution::facade_support::{DurableCommitCost, StoreObserver};
+use lash_core_execution::facade_support::{DurableCommitCost, StoreObserver, sql};
 use lash_durable::{CommitLabel, DurableError};
 use sqlx::postgres::{PgQueryResult, PgRow, PgStatement, PgTypeInfo};
 use sqlx::{Describe, Either, Execute, Executor, Postgres, Row};
@@ -106,7 +106,9 @@ pub(crate) async fn measure<T>(
         label,
         outcome: "cancelled",
     };
-    let result = CURRENT.scope(state, future).await;
+    let result = observer
+        .observe_sql(label.as_str(), "postgres", CURRENT.scope(state, future))
+        .await;
     observation.outcome = if result.is_ok() { "success" } else { "error" };
     result
 }
@@ -134,7 +136,9 @@ pub(crate) fn transaction_started() {
 /// dropped. Writes, explicit row/table locks and advisory locks contribute
 /// their complete elapsed time to the documented lock-wait upper bound.
 struct Statement {
-    state: Shared,
+    state: Option<Shared>,
+    window: Option<sql::Window>,
+    sql: String,
     started: Instant,
     locking: bool,
 }
@@ -143,7 +147,15 @@ impl Statement {
     fn new(sql: &str) -> Option<Self> {
         #[cfg(test)]
         round_trip();
-        let state = CURRENT.try_with(Arc::clone).ok()?;
+        let state = CURRENT.try_with(Arc::clone).ok();
+        let window = sql::Window::current();
+        if state.is_none() && window.is_none() {
+            return None;
+        }
+        if let Some(window) = &window {
+            window.statement(sql);
+        }
+        let text = sql.to_owned();
         let sql = sql.to_ascii_uppercase();
         let locking = [
             "FOR UPDATE",
@@ -159,13 +171,17 @@ impl Statement {
         ]
         .iter()
         .any(|word| sql.contains(word));
-        state
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .cost
-            .sql_statements += 1;
+        if let Some(state) = &state {
+            state
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .cost
+                .sql_statements += 1;
+        }
         Some(Self {
             state,
+            window,
+            sql: text,
             started: Instant::now(),
             locking,
         })
@@ -176,18 +192,25 @@ impl Statement {
             .filter_map(|index| row.try_get_raw(index).ok())
             .filter_map(|value| value.as_bytes().ok().map(|bytes| bytes.len() as u64))
             .sum::<u64>();
-        self.state
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .cost
-            .returned_bytes += bytes;
+        if let Some(window) = &self.window {
+            window.row(&self.sql);
+        }
+        if let Some(state) = &self.state {
+            state
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .cost
+                .returned_bytes += bytes;
+        }
     }
 }
 
 impl Drop for Statement {
     fn drop(&mut self) {
-        if self.locking {
-            self.state
+        if self.locking
+            && let Some(state) = &self.state
+        {
+            state
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
                 .cost
@@ -273,5 +296,112 @@ impl<'c, E: Executor<'c, Database = Postgres>> Executor<'c> for Observed<E> {
         'c: 'e,
     {
         self.0.describe(sql)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    /// SQL-WORK: one known operation has exactly one call and one shape;
+    /// returned rows count stream rows, and server work remains unknown.
+    #[tokio::test]
+    async fn sql_operation_reports_exact_shapes_and_rows() {
+        let database =
+            crate::testing::IsolatedDatabase::create(&crate::testing::required_database_url())
+                .await;
+        let storage = crate::testing::connect(database.url())
+            .await
+            .expect("store");
+        for size in [2_i64, 8] {
+            let (answer, receipt) = sql::collect(
+                format!("known-select/{size}"),
+                "postgres",
+                sqlx::query("SELECT generate_series(1, $1)")
+                    .bind(size)
+                    .fetch_all(executor(storage.pool())),
+            )
+            .await;
+            assert_eq!(answer.expect("query").len(), size as usize);
+            assert_eq!(receipt.statements, 1);
+            assert_eq!(receipt.shapes.len(), 1);
+            assert_eq!(receipt.rows_returned, size as u64);
+            assert_eq!(receipt.shapes["select generate_series(?, ?)"].statements, 1);
+            assert_eq!(receipt.sqlite_work, None);
+            eprintln!(
+                "SQL_WORK {}",
+                serde_json::to_string(&receipt).expect("receipt")
+            );
+        }
+    }
+    /// SQL-WORK: every requested operation is observed at each history size.
+    #[tokio::test]
+    async fn sql_work_receipts_cover_two_history_sizes() {
+        let database =
+            crate::testing::IsolatedDatabase::create(&crate::testing::required_database_url())
+                .await;
+        let storage = crate::testing::connect(database.url())
+            .await
+            .expect("store");
+        let stores = crate::PostgresStoreSet::new(
+            &storage,
+            Arc::new(lash_core_execution::attachments::UnavailableAttachmentStore),
+        );
+        let receipts = lash_core_execution::testing::sql_work::receipts(&stores, "postgres").await;
+        assert_eq!(receipts.len(), 10);
+        for receipt in receipts {
+            assert_eq!(receipt.sqlite_work, None);
+            eprintln!(
+                "SQL_WORK {}",
+                serde_json::to_string(&receipt).expect("receipt")
+            );
+        }
+    }
+    /// SQL-OWNER: production summaries carry the retained actor fence and
+    /// caller operation identity, independent of logical transition metrics.
+    #[tokio::test]
+    async fn physical_summary_joins_the_owner_commit_and_caller_window() {
+        let captured = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = captured.clone();
+        let observer = lash_core_execution::facade_support::StoreObserver::default().with_sql_sink(
+            move |receipt, outcome| {
+                if receipt.operation == "sql-work.owner" {
+                    sink.lock().expect("sink").push((receipt.clone(), outcome));
+                }
+            },
+        );
+        let database =
+            crate::testing::IsolatedDatabase::create(&crate::testing::required_database_url())
+                .await;
+        let storage = crate::PostgresStorage::connect(
+            &crate::PostgresEndpoints::from_url(database.url()).expect("endpoints"),
+            &crate::testing::fixture_config(),
+            observer,
+        )
+        .await
+        .expect("stores");
+        let stores = crate::PostgresStoreSet::new(
+            &storage,
+            Arc::new(lash_core_execution::attachments::UnavailableAttachmentStore),
+        );
+        let (identity, outer) = lash_core_execution::facade_support::sql::collect(
+            "caller/session/turn/record",
+            "postgres",
+            lash_core_execution::testing::sql_work::owner_commit(&stores),
+        )
+        .await;
+        let receipts = captured.lock().expect("receipts");
+        assert_eq!(receipts.len(), 1);
+        let (receipt, outcome) = &receipts[0];
+        assert_eq!(*outcome, "success");
+        assert_eq!(receipt.owner.as_ref(), Some(&identity));
+        assert_eq!(
+            receipt.parent_operation.as_deref(),
+            Some(outer.operation.as_str())
+        );
+        assert!(receipt.statements > 0);
+        eprintln!(
+            "SQL_WORK_OWNER {}",
+            serde_json::to_string(receipt).expect("receipt")
+        );
     }
 }

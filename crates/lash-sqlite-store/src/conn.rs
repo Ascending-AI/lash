@@ -371,30 +371,12 @@ impl SqliteConnectionPolicy {
     }
 }
 
-/// SQLite's `SQLITE_TRACE_PROFILE` callback fires once per completed statement, so this is the
-/// crate's single chokepoint for statement-shape counters: no porter module carries
-/// instrumentation of its own.
-/// Only the statement is recorded, not the duration the callback also carries — that clock is
-/// quantised to whole milliseconds.
-/// The callback and its registration compile out entirely unless `perf-witness` is enabled.
-#[cfg_attr(not(feature = "perf-witness"), expect(unused_variables))]
+/// Count physical SQL in the caller's opt-in operation window. PROFILE's
+/// quantized clock is ignored; work is the difference from STMT to PROFILE.
 fn install_perf_statement_witness(connection: &Connection) {
-    #[cfg(feature = "perf-witness")]
-    connection.trace_v2(
-        rusqlite::trace::TraceEventCodes::SQLITE_TRACE_PROFILE,
-        Some(|event: rusqlite::trace::TraceEvent<'_>| {
-            if let rusqlite::trace::TraceEvent::Profile(statement, _) = event {
-                if lash_core_execution::perf_witness::sql_receipts_enabled() {
-                    lash_core_execution::perf_witness::record_sql_statement_bytes(
-                        &statement.sql(),
-                        statement.expanded_sql().map_or(0, |sql| sql.len()),
-                    );
-                } else {
-                    lash_core_execution::perf_witness::record_sql_statement(&statement.sql());
-                }
-            }
-        }),
-    );
+    if cfg!(feature = "perf-witness") {
+        crate::observed_sql::enable(connection);
+    }
 }
 
 /// Switch a file-backed connection into WAL mode, retrying on lock contention.
@@ -858,6 +840,19 @@ impl SqliteConnection {
         T: Send + 'static,
         F: FnOnce(&mut Connection) -> rusqlite::Result<T> + Send + 'static,
     {
+        let window = lash_core_execution::facade_support::sql::Window::current();
+        let f = move |c: &mut Connection| {
+            let observed = window.is_some() && !cfg!(feature = "perf-witness");
+            if observed {
+                crate::observed_sql::enable(c);
+            }
+            let result =
+                lash_core_execution::facade_support::sql::Window::on_worker(window, || f(c));
+            if observed {
+                c.trace_v2(rusqlite::trace::TraceEventCodes::empty(), None);
+            }
+            result
+        };
         #[cfg(feature = "testing")]
         if self.inline_calls {
             return self.inner.call_inline(f);
@@ -1092,6 +1087,45 @@ fn flatten<T>(result: tokio_rusqlite::Result<rusqlite::Result<T>>) -> rusqlite::
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+    /// SQL-WORK: repeated cached statements count rows and work in each window,
+    /// rather than importing earlier executions of the same prepared statement.
+    #[tokio::test]
+    async fn sql_operation_reports_exact_shapes_rows_and_work() {
+        use lash_core_execution::facade_support::sql;
+        let dir = tempfile::tempdir().expect("tempdir");
+        let target = DatabaseTarget::File(dir.path().join("sql.db"));
+        let conn = installed(
+            &target,
+            SqliteConnectionPolicy::standard(SqliteSynchronous::Normal),
+        )
+        .await;
+        let mut first_work = None;
+        for size in [2, 8, 2] {
+            let (answer, receipt) = sql::collect(format!("known-select/{size}"), "sqlite", conn.call(move |c| {
+                let mut statement = c.prepare_cached("WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x < ?1) SELECT x FROM n")?;
+                statement.query_map([size], |row| row.get::<_, i64>(0))?.collect::<rusqlite::Result<Vec<_>>>()
+            })).await;
+            assert_eq!(answer.expect("query").len(), size as usize);
+            assert_eq!(receipt.statements, 1);
+            assert_eq!(receipt.shapes.len(), 1);
+            assert!(receipt.shapes.contains_key("with recursive n(x) as (values(?) union all select x+? from n where x < ?) select x from n"));
+            assert_eq!(receipt.rows_returned, size as u64);
+            assert_eq!(receipt.shapes.values().next().expect("shape").statements, 1);
+            let work = receipt.sqlite_work.expect("SQLite work");
+            assert!(work.vm_steps > 0);
+            if size == 2 {
+                if let Some(first) = first_work {
+                    assert_eq!(work, first, "cached executions exclude earlier work");
+                }
+                first_work = Some(work);
+            }
+            eprintln!(
+                "SQL_WORK {}",
+                serde_json::to_string(&receipt).expect("receipt")
+            );
+        }
+    }
 
     #[test]
     fn first_open_waits_for_in_process_schema_installation() {

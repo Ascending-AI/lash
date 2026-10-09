@@ -150,7 +150,7 @@ pub(crate) async fn acquire_process_env_tx(
     let exists: bool = sqlx::query_scalar(artifact_sql().lash_vm_artifacts.exists.sql())
         .bind(PROCESS_ENV_NAMESPACE)
         .bind(env.as_str())
-        .fetch_one(&mut ***tx)
+        .fetch_one(crate::observed_sql::executor(&mut ***tx))
         .await
         .map_err(backend)?;
     if !exists {
@@ -164,7 +164,7 @@ pub(crate) async fn acquire_process_env_tx(
         .bind(env.as_str())
         .bind(referrer.kind().as_str())
         .bind(referrer.canonical_id())
-        .execute(&mut ***tx)
+        .execute(crate::observed_sql::executor(&mut ***tx))
         .await
         .map_err(backend)?;
     Ok(())
@@ -182,7 +182,7 @@ async fn lock_artifact_tx(
             .sql(),
     )
     .bind(key)
-    .execute(&mut **tx)
+    .execute(crate::observed_sql::executor(&mut **tx))
     .await
     .map_err(backend)?;
     Ok(())
@@ -195,7 +195,7 @@ async fn is_fenced_tx(
     sqlx::query_scalar(artifact_sql().fences.select_is_fenced.sql())
         .bind(referrer.kind().as_str())
         .bind(referrer.canonical_id())
-        .fetch_one(&mut **tx)
+        .fetch_one(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(backend)
 }
@@ -269,14 +269,14 @@ impl PostgresLashVmArtifactStore {
                 .bind(namespace)
                 .bind(artifact_ref)
                 .bind(bytes)
-                .execute(&mut **tx)
+                .execute(crate::observed_sql::executor(&mut **tx))
                 .await
                 .map_err(backend)?;
             let stored: Vec<u8> =
                 sqlx::query_scalar(artifact_sql().lash_vm_artifacts.select_bytes.sql())
                     .bind(namespace)
                     .bind(artifact_ref)
-                    .fetch_one(&mut **tx)
+                    .fetch_one(crate::observed_sql::executor(&mut **tx))
                     .await
                     .map_err(backend)?;
             if stored != bytes {
@@ -288,7 +288,7 @@ impl PostgresLashVmArtifactStore {
             let exists: bool = sqlx::query_scalar(artifact_sql().lash_vm_artifacts.exists.sql())
                 .bind(namespace)
                 .bind(artifact_ref)
-                .fetch_one(&mut **tx)
+                .fetch_one(crate::observed_sql::executor(&mut **tx))
                 .await
                 .map_err(backend)?;
             if !exists {
@@ -302,7 +302,7 @@ impl PostgresLashVmArtifactStore {
             .bind(artifact_ref)
             .bind(claim.referrer().kind().as_str())
             .bind(claim.referrer().canonical_id())
-            .execute(&mut **tx)
+            .execute(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(backend)?;
         tx.commit().await.map_err(backend)
@@ -352,7 +352,7 @@ impl PostgresLashVmArtifactStore {
             let exists: bool = sqlx::query_scalar(artifact_sql().lash_vm_artifacts.exists.sql())
                 .bind(*namespace)
                 .bind(artifact_ref)
-                .fetch_one(&mut **tx)
+                .fetch_one(crate::observed_sql::executor(&mut **tx))
                 .await
                 .map_err(backend)?;
             if !exists {
@@ -367,14 +367,14 @@ impl PostgresLashVmArtifactStore {
                     .bind(PROCESS_DEFINITION_NAMESPACE)
                     .bind(id)
                     .bind(bytes)
-                    .execute(&mut **tx)
+                    .execute(crate::observed_sql::executor(&mut **tx))
                     .await
                     .map_err(backend)?;
                 let stored: Vec<u8> =
                     sqlx::query_scalar(artifact_sql().lash_vm_artifacts.select_bytes.sql())
                         .bind(PROCESS_DEFINITION_NAMESPACE)
                         .bind(id)
-                        .fetch_one(&mut **tx)
+                        .fetch_one(crate::observed_sql::executor(&mut **tx))
                         .await
                         .map_err(backend)?;
                 if stored != bytes {
@@ -388,7 +388,7 @@ impl PostgresLashVmArtifactStore {
                     sqlx::query_scalar(artifact_sql().lash_vm_artifacts.exists.sql())
                         .bind(PROCESS_DEFINITION_NAMESPACE)
                         .bind(id)
-                        .fetch_one(&mut **tx)
+                        .fetch_one(crate::observed_sql::executor(&mut **tx))
                         .await
                         .map_err(backend)?;
                 if !exists {
@@ -409,7 +409,7 @@ impl PostgresLashVmArtifactStore {
                 .bind(*artifact_ref)
                 .bind(claim.referrer().kind().as_str())
                 .bind(claim.referrer().canonical_id())
-                .execute(&mut **tx)
+                .execute(crate::observed_sql::executor(&mut **tx))
                 .await
                 .map_err(backend)?;
         }
@@ -467,7 +467,7 @@ impl PostgresLashVmArtifactStore {
         .bind(namespace)
         .bind(cleanup.referrer.kind().as_str())
         .bind(cleanup.referrer.canonical_id())
-        .fetch_all(&mut **tx)
+        .fetch_all(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(backend)?;
         let source_refs: BTreeSet<String> = edges
@@ -494,7 +494,7 @@ impl PostgresLashVmArtifactStore {
             .bind(cleanup.referrer.kind().as_str())
             .bind(cleanup.referrer.canonical_id())
             .bind(crate::support::clamp_epoch_ms(now_ms))
-            .execute(&mut **tx)
+            .execute(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(backend)?;
         for carry in &cleanup.carries {
@@ -505,7 +505,7 @@ impl PostgresLashVmArtifactStore {
             let exists: bool = sqlx::query_scalar(artifact_sql().lash_vm_artifacts.exists.sql())
                 .bind(namespace)
                 .bind(artifact_ref)
-                .fetch_one(&mut **tx)
+                .fetch_one(crate::observed_sql::executor(&mut **tx))
                 .await
                 .map_err(backend)?;
             if !exists {
@@ -519,7 +519,7 @@ impl PostgresLashVmArtifactStore {
                 .bind(artifact_ref)
                 .bind(carry.to.kind().as_str())
                 .bind(carry.to.canonical_id())
-                .execute(&mut **tx)
+                .execute(crate::observed_sql::executor(&mut **tx))
                 .await
                 .map_err(backend)?;
         }
@@ -532,7 +532,7 @@ impl PostgresLashVmArtifactStore {
         .bind(namespace)
         .bind(cleanup.referrer.kind().as_str())
         .bind(cleanup.referrer.canonical_id())
-        .execute(&mut **tx)
+        .execute(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(backend)?;
         for artifact_ref in &source_refs {
@@ -540,7 +540,7 @@ impl PostgresLashVmArtifactStore {
             let rows = sqlx::query(artifact_sql().edges.select_artifact_edges.sql())
                 .bind(namespace)
                 .bind(artifact_ref)
-                .fetch_all(&mut **tx)
+                .fetch_all(crate::observed_sql::executor(&mut **tx))
                 .await
                 .map_err(backend)?;
             let referrers = rows
@@ -585,7 +585,7 @@ impl PostgresLashVmArtifactStore {
         sqlx::query(artifact_sql().postgres.delete_unreferenced.sql())
             .bind(namespace)
             .bind(artifact_ref)
-            .execute(&mut **tx)
+            .execute(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(backend)?;
         Ok(())
@@ -599,7 +599,7 @@ impl PostgresLashVmArtifactStore {
         let edges = sqlx::query(artifact_sql().edges.select_artifact_edges.sql())
             .bind(namespace)
             .bind(artifact_ref)
-            .fetch_all(&self.pool)
+            .fetch_all(crate::observed_sql::executor(&self.pool))
             .await
             .map_err(backend)?;
         for row in &edges {
@@ -608,7 +608,7 @@ impl PostgresLashVmArtifactStore {
         sqlx::query_scalar(artifact_sql().lash_vm_artifacts.select_bytes.sql())
             .bind(namespace)
             .bind(artifact_ref)
-            .fetch_optional(&self.pool)
+            .fetch_optional(crate::observed_sql::executor(&self.pool))
             .await
             .map_err(backend)
     }

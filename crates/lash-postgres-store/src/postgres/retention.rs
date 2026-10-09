@@ -21,7 +21,7 @@ pub(super) async fn filter_unregistered_process_ids(
             .map(ProcessId::as_str)
             .collect::<Vec<_>>(),
     )
-    .fetch_all(pool)
+    .fetch_all(crate::observed_sql::executor(pool))
     .await
     .map_err(plugin_sqlx_error)
     .and_then(|ids: Vec<String>| {
@@ -50,7 +50,7 @@ pub(super) async fn filter_tombstoned_process_ids(
             .map(ProcessId::as_str)
             .collect::<Vec<_>>(),
     )
-    .fetch_all(pool)
+    .fetch_all(crate::observed_sql::executor(pool))
     .await
     .map_err(plugin_sqlx_error)
     .and_then(|ids: Vec<String>| {

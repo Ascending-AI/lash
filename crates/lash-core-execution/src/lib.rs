@@ -130,7 +130,7 @@ pub mod trace;
 pub mod facade_support {
     pub use crate::Response;
     pub use crate::runtime::effect::scope_status;
-    pub use lash_core_ids::operational_metrics::{DurableCommitCost, StoreObserver};
+    pub use lash_core_ids::operational_metrics::{DurableCommitCost, StoreObserver, sql};
     /// Apply the canonical runtime invocation projection to an existing trace
     /// context. Durable hosts use this instead of maintaining a second
     /// projection with different parent or attribution precedence.

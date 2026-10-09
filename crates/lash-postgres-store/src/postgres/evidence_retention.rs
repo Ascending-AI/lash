@@ -23,7 +23,7 @@ pub(crate) async fn reclaim(
                 .lock_xact_evidence_retention
                 .sql(),
         )
-        .execute(&mut **tx)
+        .execute(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?;
         let sql = &session_sql().turn_commits;
@@ -33,7 +33,7 @@ pub(crate) async fn reclaim(
             .await
             .map_err(store_sqlx_error)?;
         let (current, _): (i64, i64) = sqlx::query_as(sql.change_clock.sql())
-            .fetch_one(&mut **tx)
+            .fetch_one(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?;
         let current = crate::support::u64_from_sql("TurnChangeClock", "current_seq", current)?;
@@ -42,20 +42,20 @@ pub(crate) async fn reclaim(
         let horizon: Option<i64> = sqlx::query_scalar(sql.removed_horizon.sql())
             .bind(cutoff)
             .bind(watermark)
-            .fetch_one(&mut **tx)
+            .fetch_one(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?;
         if let Some(horizon) = horizon {
             sqlx::query(sql.advance_horizon.sql())
                 .bind(horizon)
-                .execute(&mut **tx)
+                .execute(crate::observed_sql::executor(&mut **tx))
                 .await
                 .map_err(store_sqlx_error)?;
         }
         let removed_session_terminal_count = sqlx::query(sql.delete_session_terminals.sql())
             .bind(cutoff)
             .bind(watermark)
-            .execute(&mut **tx)
+            .execute(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?
             .rows_affected() as usize;
@@ -64,7 +64,7 @@ pub(crate) async fn reclaim(
             sqlx::query(session_sql().turn_commits_postgres.delete_retained.sql())
                 .bind(cutoff)
                 .bind(watermark)
-                .execute(&mut **tx)
+                .execute(crate::observed_sql::executor(&mut **tx))
                 .await
                 .map_err(store_sqlx_error)?
                 .rows_affected() as usize;
@@ -82,13 +82,13 @@ pub(crate) async fn reclaim(
                 .sql(),
         )
         .bind(cutoff)
-        .execute(&mut **tx)
+        .execute(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?;
         let removed_tool_intent_submission_count =
             sqlx::query(tool_intents.tool_intents.reclaim_retired.sql())
                 .bind(cutoff)
-                .execute(&mut **tx)
+                .execute(crate::observed_sql::executor(&mut **tx))
                 .await
                 .map_err(store_sqlx_error)?
                 .rows_affected() as usize;

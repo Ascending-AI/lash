@@ -499,7 +499,7 @@ async fn read_state(
                AND relkind IN ('r', 'p'))",
     )
     .bind(installation.namespace_oid())
-    .fetch_one(&mut **tx)
+    .fetch_one(crate::observed_sql::executor(&mut **tx))
     .await
     .map_err(store_sqlx_error)?;
     let applied = if ledger_present {
@@ -508,7 +508,7 @@ async fn read_state(
                  FROM {}.lash_migrations ORDER BY started_at_ms, migration",
             installation.quoted_namespace()
         ))
-        .fetch_all(&mut **tx)
+        .fetch_all(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?
         .into_iter()
@@ -553,7 +553,7 @@ async fn read_stamp_version(
                AND relkind IN ('r', 'p'))",
     )
     .bind(installation.namespace_oid())
-    .fetch_one(&mut **tx)
+    .fetch_one(crate::observed_sql::executor(&mut **tx))
     .await
     .map_err(store_sqlx_error)?;
     if !stamp_present {
@@ -564,7 +564,7 @@ async fn read_stamp_version(
         installation.quoted_namespace()
     ))
     .bind(SCHEMA_COMPONENT)
-    .fetch_optional(&mut **tx)
+    .fetch_optional(crate::observed_sql::executor(&mut **tx))
     .await
     .map_err(store_sqlx_error)
 }
@@ -635,7 +635,7 @@ fn plan(state: &MigrationState) -> Result<Vec<PlannedStep<'static>>, StoreError>
 /// release stamp follows.
 async fn server_clock_ms(tx: &mut sqlx::Transaction<'_, Postgres>) -> Result<i64, StoreError> {
     sqlx::query_scalar("SELECT CAST(EXTRACT(EPOCH FROM clock_timestamp()) * 1000 AS BIGINT)")
-        .fetch_one(&mut **tx)
+        .fetch_one(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)
 }
@@ -667,7 +667,7 @@ async fn record_step(
     .bind(from_version)
     .bind(to_version)
     .bind(started_at_ms)
-    .fetch_optional(&mut **tx)
+    .fetch_optional(crate::observed_sql::executor(&mut **tx))
     .await
     .map_err(store_sqlx_error)?;
     match recorded {
@@ -678,7 +678,7 @@ async fn record_step(
         ))
         .bind(phase)
         .bind(migration)
-        .fetch_one(&mut **tx)
+        .fetch_one(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error),
     }
@@ -698,7 +698,7 @@ async fn apply_step(
     let (migration, from_version, to_version, ledger) = match step {
         PlannedStep::Bootstrap => {
             sqlx::raw_sql(SCHEMA_DDL)
-                .execute(&mut **tx)
+                .execute(crate::observed_sql::executor(&mut **tx))
                 .await
                 .map_err(store_sqlx_error)?;
             // The bootstrap just created the ledger in the search_path's first
@@ -719,7 +719,7 @@ async fn apply_step(
                 None => name.to_string(),
             };
             sqlx::raw_sql(migration.statements)
-                .execute(&mut **tx)
+                .execute(crate::observed_sql::executor(&mut **tx))
                 .await
                 .map_err(store_sqlx_error)?;
             // Moving the stamp is part of the step: a later open sees either
@@ -732,7 +732,7 @@ async fn apply_step(
             .bind(migration.to_version)
             .bind(SCHEMA_COMPONENT)
             .bind(migration.from_version)
-            .execute(&mut **tx)
+            .execute(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?;
             if moved.rows_affected() != 1 {
@@ -847,12 +847,14 @@ async fn lock_connection(
     let mut connection = pool.acquire().await.map_err(store_sqlx_error)?.detach();
     let locked = async {
         let begin = sqlx::Connection::begin(&mut connection);
-        let mut tx = begin.await.map_err(store_sqlx_error)?;
+        let mut tx = crate::observed_sql::control("BEGIN", begin)
+            .await
+            .map_err(store_sqlx_error)?;
         sqlx::raw_sql(&format!(
             "SET LOCAL lock_timeout = {}; SET LOCAL statement_timeout = 0",
             limits.lock_timeout.as_millis()
         ))
-        .execute(&mut *tx)
+        .execute(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(store_sqlx_error)?;
         sqlx::query(if shared {
@@ -862,17 +864,19 @@ async fn lock_connection(
         })
         .bind(lock_namespace)
         .bind(lock_key)
-        .execute(&mut *tx)
+        .execute(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(store_sqlx_error)?;
-        tx.commit().await.map_err(store_sqlx_error)?;
+        crate::observed_sql::control("COMMIT", tx.commit())
+            .await
+            .map_err(store_sqlx_error)?;
         let statement_timeout = match limits.statement_timeout {
             crate::host::ServerTimeout::Inherit => return Ok(()),
             crate::host::ServerTimeout::Disabled => 0,
             crate::host::ServerTimeout::Limit(limit) => limit.as_millis(),
         };
         sqlx::raw_sql(&format!("SET statement_timeout = {statement_timeout}"))
-            .execute(&mut connection)
+            .execute(crate::observed_sql::executor(&mut connection))
             .await
             .map_err(store_sqlx_error)
             .map(|_| ())
@@ -894,13 +898,17 @@ async fn read_state_under_lock(
     connection: &mut sqlx::PgConnection,
 ) -> Result<MigrationState, StoreError> {
     let begin = sqlx::Connection::begin(&mut *connection);
-    let mut tx = begin.await.map_err(store_sqlx_error)?;
+    let mut tx = crate::observed_sql::control("BEGIN", begin)
+        .await
+        .map_err(store_sqlx_error)?;
     sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
-        .execute(&mut *tx)
+        .execute(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(store_sqlx_error)?;
     let state = read_state(&mut tx).await?;
-    tx.commit().await.map_err(store_sqlx_error)?;
+    crate::observed_sql::control("COMMIT", tx.commit())
+        .await
+        .map_err(store_sqlx_error)?;
     Ok(state)
 }
 
@@ -1140,9 +1148,13 @@ async fn verify_changed_catalog(
     #[cfg(feature = "synthetic-next")]
     let findings = {
         let begin = sqlx::Connection::begin(&mut *connection);
-        let mut tx = begin.await.map_err(store_sqlx_error)?;
+        let mut tx = crate::observed_sql::control("BEGIN", begin)
+            .await
+            .map_err(store_sqlx_error)?;
         let findings = crate::schema_shape::synthetic_next_findings(&mut tx, &verification).await?;
-        tx.rollback().await.map_err(store_sqlx_error)?;
+        crate::observed_sql::control("ROLLBACK", tx.rollback())
+            .await
+            .map_err(store_sqlx_error)?;
         findings
     };
     if !findings.is_empty() {
@@ -1180,7 +1192,7 @@ pub(crate) async fn start_backfill(
         "SELECT state FROM lash_migrations WHERE phase = 'backfill' AND migration = $1",
     )
     .bind(backfill.id)
-    .fetch_optional(pool)
+    .fetch_optional(crate::observed_sql::executor(pool))
     .await
     .map_err(store_sqlx_error)?;
     if started.is_some() {
@@ -1205,7 +1217,7 @@ pub(crate) async fn start_backfill(
              FOR UPDATE",
         )
         .bind(backfill.id)
-        .fetch_optional(&mut **tx)
+        .fetch_optional(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?;
         if started.is_some() {
@@ -1214,7 +1226,7 @@ pub(crate) async fn start_backfill(
         let started_at_ms = server_clock_ms(&mut tx).await?;
         if !backfill.prepare.is_empty() {
             sqlx::raw_sql(backfill.prepare)
-                .execute(&mut **tx)
+                .execute(crate::observed_sql::executor(&mut **tx))
                 .await
                 .map_err(store_sqlx_error)?;
         }
@@ -1228,7 +1240,7 @@ pub(crate) async fn start_backfill(
         .bind(crate::release_stamp::BUILD_RELEASE)
         .bind(written_version()?)
         .bind(started_at_ms)
-        .execute(&mut **tx)
+        .execute(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?;
         tx.commit().await.map_err(store_sqlx_error)?;
@@ -1276,7 +1288,7 @@ pub(crate) async fn backfill_batch_in(
          FOR UPDATE",
     )
     .bind(backfill.id)
-    .fetch_optional(&mut ***tx)
+    .fetch_optional(crate::observed_sql::executor(&mut ***tx))
     .await
     .map_err(store_sqlx_error)?;
     let cursor = match row {
@@ -1293,7 +1305,7 @@ pub(crate) async fn backfill_batch_in(
     let (last_key, scanned, rewritten): (Option<String>, i64, i64) = sqlx::query_as(backfill.batch)
         .bind(cursor.as_deref())
         .bind(batch_rows)
-        .fetch_one(&mut ***tx)
+        .fetch_one(crate::observed_sql::executor(&mut ***tx))
         .await
         .map_err(store_sqlx_error)?;
     let completed = scanned < batch_rows;
@@ -1311,7 +1323,7 @@ pub(crate) async fn backfill_batch_in(
     .bind(last_key)
     .bind(rewritten)
     .bind(completed)
-    .execute(&mut ***tx)
+    .execute(crate::observed_sql::executor(&mut ***tx))
     .await
     .map_err(store_sqlx_error)?;
     Ok(if completed {
@@ -1332,7 +1344,7 @@ async fn ledger_row(
     ))
     .bind(phase.name())
     .bind(migration)
-    .fetch_one(pool)
+    .fetch_one(crate::observed_sql::executor(pool))
     .await
     .map(ledger_step)
     .map_err(store_sqlx_error)
@@ -1353,7 +1365,7 @@ pub(crate) async fn run_backfills(
             "SELECT state FROM lash_migrations WHERE phase = 'backfill' AND migration = $1",
         )
         .bind(backfill.id)
-        .fetch_optional(pool)
+        .fetch_optional(crate::observed_sql::executor(pool))
         .await
         .map_err(store_sqlx_error)?;
         if recorded.as_deref() == Some("applied") {
@@ -1448,7 +1460,7 @@ async fn apply_contract(
             .map(|backfill| (*backfill).to_owned())
             .collect::<Vec<_>>(),
     )
-    .fetch_all(&mut **tx)
+    .fetch_all(crate::observed_sql::executor(&mut **tx))
     .await
     .map_err(store_sqlx_error)?;
     contract_admitted(contract, tx.fleet().version(), |backfill| {
@@ -1457,7 +1469,7 @@ async fn apply_contract(
     let started_at_ms = server_clock_ms(&mut tx).await?;
     let version = written_version()?;
     sqlx::raw_sql(contract.statements)
-        .execute(&mut **tx)
+        .execute(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?;
     sqlx::query(
@@ -1466,7 +1478,7 @@ async fn apply_contract(
     )
     .bind(contract.min_reader)
     .bind(SCHEMA_COMPONENT)
-    .execute(&mut **tx)
+    .execute(crate::observed_sql::executor(&mut **tx))
     .await
     .map_err(store_sqlx_error)?;
     let (release, state, started_at_ms, finished_at_ms) = record_step(

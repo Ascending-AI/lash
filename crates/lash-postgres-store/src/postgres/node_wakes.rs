@@ -126,7 +126,7 @@ impl Session {
                 .await?;
             sqlx::query(SQL.postgres.hold_liveness.sql())
                 .bind(&self.boot)
-                .execute(&mut listener)
+                .execute(crate::observed_sql::executor(&mut listener))
                 .await?;
             Ok(listener)
         };
@@ -244,7 +244,7 @@ impl NodeWakes for PostgresNodeWakes {
                 sqlx::query(SQL.postgres.notify.sql())
                     .bind(&channels)
                     .bind(&payloads)
-                    .execute(&self.store.pools.work)
+                    .execute(crate::observed_sql::executor(&self.store.pools.work))
                     .await
                     .map_err(sqlx_failure)?;
                 Ok(())

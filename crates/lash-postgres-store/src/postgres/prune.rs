@@ -27,7 +27,7 @@ pub(super) async fn prune_process_rows_tx(
         .bind(referrer.kind().as_str())
         .bind(referrer.canonical_id())
         .bind(pruned_at_ms)
-        .execute(&mut **tx)
+        .execute(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(plugin_sqlx_error)?;
         crate::obligation_ledger::arm_cleanup_tx(
@@ -58,7 +58,7 @@ pub(super) async fn prune_process_rows_tx(
             .collect::<Vec<_>>(),
     )
     .bind(pruned_at_ms)
-    .fetch_one(&mut **tx)
+    .fetch_one(crate::observed_sql::executor(&mut **tx))
     .await
     .map_err(plugin_sqlx_error)?;
 

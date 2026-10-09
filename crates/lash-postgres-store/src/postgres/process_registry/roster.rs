@@ -4,7 +4,7 @@ use lash_core_execution::{ProcessChangeBounds, ProcessRosterCursor, ProcessRoste
 
 async fn bounds_tx(tx: &mut sqlx::PgConnection) -> Result<ProcessChangeBounds, PluginError> {
     let row = sqlx::query(process_sql().clock_postgres.select_bounds_for_share.sql())
-        .fetch_one(&mut *tx)
+        .fetch_one(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(plugin_sqlx_error)?;
     Ok(ProcessChangeBounds {
@@ -35,9 +35,13 @@ pub(super) async fn bounds(
     registry: &PostgresProcessRegistry,
 ) -> Result<ProcessChangeBounds, PluginError> {
     sequence(registry).await?;
-    let mut tx = registry.pool.begin().await.map_err(plugin_sqlx_error)?;
+    let mut tx = crate::observed_sql::control("BEGIN", registry.pool.begin())
+        .await
+        .map_err(plugin_sqlx_error)?;
     let bounds = bounds_tx(&mut tx).await?;
-    tx.commit().await.map_err(plugin_sqlx_error)?;
+    crate::observed_sql::control("COMMIT", tx.commit())
+        .await
+        .map_err(plugin_sqlx_error)?;
     Ok(bounds)
 }
 
@@ -52,7 +56,9 @@ pub(super) async fn page(
         .get()
         .min(lash_core_execution::MAX_PROCESS_ROSTER_PAGE_SIZE);
     let store = format!("postgres:{}", registry.catalog_id);
-    let mut tx = registry.pool.begin().await.map_err(plugin_sqlx_error)?;
+    let mut tx = crate::observed_sql::control("BEGIN", registry.pool.begin())
+        .await
+        .map_err(plugin_sqlx_error)?;
     // This share lock keeps compaction and sequencing behind the page. Saves
     // that race it remain unsequenced and therefore belong after the scan fence.
     let bounds = bounds_tx(&mut tx).await?;
@@ -64,7 +70,7 @@ pub(super) async fn page(
         None => sqlx::query_scalar::<_, Option<String>>(
             process_sql().process.select_max_process_id.sql(),
         )
-        .fetch_one(&mut *tx)
+        .fetch_one(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(plugin_sqlx_error)?
         .map(|id| crate::stored_process_id(&id))
@@ -111,7 +117,10 @@ pub(super) async fn page(
             .bind(cursor.as_ref().map(|cursor| cursor.after().as_str()))
             .bind(through.as_str())
             .bind((limit + 1) as i64);
-        let rows = query.fetch_all(&mut *tx).await.map_err(plugin_sqlx_error)?;
+        let rows = query
+            .fetch_all(crate::observed_sql::executor(&mut *tx))
+            .await
+            .map_err(plugin_sqlx_error)?;
         for json in rows {
             #[cfg(test)]
             registry
@@ -120,7 +129,9 @@ pub(super) async fn page(
             candidates.push(serde_json::from_str(&json).map_err(process_decode_error)?);
         }
     }
-    tx.commit().await.map_err(plugin_sqlx_error)?;
+    crate::observed_sql::control("COMMIT", tx.commit())
+        .await
+        .map_err(plugin_sqlx_error)?;
     Ok(ProcessRosterRecords::from_candidates(
         store,
         filter,

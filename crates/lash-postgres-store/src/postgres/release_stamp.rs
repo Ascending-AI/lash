@@ -48,7 +48,7 @@ pub(crate) fn build_schema_versions() -> Vec<StoreComponentVersion> {
 /// privilege is asked for rather than discovered is on the statement.
 async fn stamp_is_writable(tx: &mut Transaction<'_, Postgres>) -> Result<bool, sqlx::Error> {
     sqlx::query_scalar(session_sql().release_stamp.select_is_writable.sql())
-        .fetch_one(&mut **tx)
+        .fetch_one(crate::observed_sql::executor(&mut **tx))
         .await
 }
 
@@ -65,7 +65,7 @@ pub(crate) async fn write(tx: &mut Transaction<'_, Postgres>) -> Result<(), sqlx
     }
     let existing: Option<String> =
         sqlx::query_scalar(session_sql().release_stamp.select_release.sql())
-            .fetch_optional(&mut **tx)
+            .fetch_optional(crate::observed_sql::executor(&mut **tx))
             .await?;
     if let Some(existing) = existing
         && !lash_core_execution::release_stamp_advances(&existing, BUILD_RELEASE)
@@ -77,7 +77,7 @@ pub(crate) async fn write(tx: &mut Transaction<'_, Postgres>) -> Result<(), sqlx
         .bind(StoreReleaseStamp::encode_schema_versions(
             &build_schema_versions(),
         ))
-        .execute(&mut **tx)
+        .execute(crate::observed_sql::executor(&mut **tx))
         .await?;
     Ok(())
 }
@@ -92,7 +92,7 @@ where
 {
     let row: Result<Option<(String, String, i64)>, sqlx::Error> =
         sqlx::query_as(session_sql().release_stamp.select_stamp.sql())
-            .fetch_optional(executor)
+            .fetch_optional(crate::observed_sql::executor(executor))
             .await;
     match row {
         Ok(Some((release, encoded, written_at_epoch_ms))) => {
@@ -123,9 +123,9 @@ where
 pub(crate) async fn read_state_in_tx(
     tx: &mut Transaction<'_, Postgres>,
 ) -> Result<StoreReleaseState, sqlx::Error> {
-    let mut probe = sqlx::Acquire::begin(tx).await?;
+    let mut probe = crate::observed_sql::control("SAVEPOINT", sqlx::Acquire::begin(tx)).await?;
     let state = read(&mut *probe).await;
-    probe.rollback().await?;
+    crate::observed_sql::control("ROLLBACK TO SAVEPOINT", probe.rollback()).await?;
     Ok(state)
 }
 
@@ -138,20 +138,20 @@ pub(crate) async fn read_release_in_tx(tx: &mut Transaction<'_, Postgres>) -> Op
     // A missing or unreadable release table must not poison the open
     // transaction that is about to report a different compatibility refusal.
     sqlx::query("SAVEPOINT lash_release_read")
-        .execute(&mut **tx)
+        .execute(crate::observed_sql::executor(&mut **tx))
         .await
         .ok()?;
     let release = sqlx::query_scalar(session_sql().release_stamp.select_release.sql())
-        .fetch_optional(&mut **tx)
+        .fetch_optional(crate::observed_sql::executor(&mut **tx))
         .await;
     if release.is_err() {
         sqlx::query("ROLLBACK TO SAVEPOINT lash_release_read")
-            .execute(&mut **tx)
+            .execute(crate::observed_sql::executor(&mut **tx))
             .await
             .ok()?;
     }
     sqlx::query("RELEASE SAVEPOINT lash_release_read")
-        .execute(&mut **tx)
+        .execute(crate::observed_sql::executor(&mut **tx))
         .await
         .ok()?;
     release.ok().flatten()

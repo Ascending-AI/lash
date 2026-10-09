@@ -351,7 +351,7 @@ impl ObligationLedger for PostgresObligationLedger {
         let rows = sqlx::query(sql.select_stalled.sql())
             .bind(after.map_or("", ObligationId::as_str))
             .bind(i64::try_from(limit.get()).unwrap_or(i64::MAX))
-            .fetch_all(&self.pool)
+            .fetch_all(crate::observed_sql::executor(&self.pool))
             .await
             .map_err(store_sqlx_error)?;
         rows.iter()
@@ -386,7 +386,7 @@ impl ObligationLedger for PostgresObligationLedger {
     async fn count_stalled(&self) -> Result<u64, StoreError> {
         let sql = self.sql;
         let count: i64 = sqlx::query_scalar(sql.count_stalled.sql())
-            .fetch_one(&self.pool)
+            .fetch_one(crate::observed_sql::executor(&self.pool))
             .await
             .map_err(store_sqlx_error)?;
         u64::try_from(count).map_err(|_| corrupt("a negative count"))
@@ -396,7 +396,7 @@ impl ObligationLedger for PostgresObligationLedger {
         let sql = self.sql;
         let row: Option<(Option<String>, i32)> = sqlx::query_as(sql.select_standing.sql())
             .bind(id.as_str())
-            .fetch_optional(&self.pool)
+            .fetch_optional(crate::observed_sql::executor(&self.pool))
             .await
             .map_err(store_sqlx_error)?;
         let Some((Some(label), attempts)) = row else {
@@ -441,7 +441,7 @@ impl ArtifactCleanupLedger for PostgresObligationLedger {
     async fn load_cleanup(&self, id: &ObligationId) -> Result<Option<ArtifactCleanup>, StoreError> {
         sqlx::query(CLEANUP.select_by_id.sql())
             .bind(id.as_str())
-            .fetch_optional(&self.pool)
+            .fetch_optional(crate::observed_sql::executor(&self.pool))
             .await
             .map_err(store_sqlx_error)?
             .as_ref()

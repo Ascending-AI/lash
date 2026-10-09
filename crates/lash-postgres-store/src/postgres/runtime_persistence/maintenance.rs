@@ -41,7 +41,7 @@ impl PostgresStore {
                 .sql(),
         )
         .bind(session_id.as_str())
-        .execute(&mut **tx)
+        .execute(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?
         .rows_affected() as usize;
@@ -52,7 +52,7 @@ impl PostgresStore {
                 .sql(),
         )
         .bind(session_id.as_str())
-        .execute(&mut **tx)
+        .execute(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?
         .rows_affected();
@@ -64,7 +64,7 @@ impl PostgresStore {
                 .sql(),
         )
         .bind(session_id.as_str())
-        .execute(&mut **tx)
+        .execute(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?
         .rows_affected();
@@ -100,7 +100,8 @@ impl PostgresStore {
         // respect to every committer: a commit racing GC either lands fully
         // before the root read or blocks until GC releases. This is the fenced
         // transactional discipline the store uses on its other write paths.
-        tx.execute("LOCK TABLE lash_blobs IN EXCLUSIVE MODE")
+        sqlx::query("LOCK TABLE lash_blobs IN EXCLUSIVE MODE")
+            .execute(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?;
         // Roots: every live session's checkpoint manifest, across ALL sessions.
@@ -110,7 +111,7 @@ impl PostgresStore {
         // another session's live checkpoint.
         let root_refs =
             sqlx::query_scalar::<_, String>(session_sql().head.select_checkpoint_roots.sql())
-                .fetch_all(&mut **tx)
+                .fetch_all(crate::observed_sql::executor(&mut **tx))
                 .await
                 .map_err(store_sqlx_error)?;
         use lash_core_execution::store::{
@@ -136,7 +137,7 @@ impl PostgresStore {
             let bytes: Option<Vec<u8>> =
                 sqlx::query_scalar(crate::blobs::blob_sql().shared.select_content.sql())
                     .bind(&checkpoint_hash)
-                    .fetch_optional(&mut **tx)
+                    .fetch_optional(crate::observed_sql::executor(&mut **tx))
                     .await
                     .map_err(store_sqlx_error)?;
             let Some(bytes) = bytes else {
@@ -185,7 +186,7 @@ impl PostgresStore {
         // component FK must never be weakened to accommodate stale ownership
         // data.
         sqlx::query(session_sql().checkpoint_edges.delete_unrooted.sql())
-            .execute(&mut **tx)
+            .execute(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?;
         // The sweep is one statement whose bind is the retained set, so the
@@ -197,7 +198,7 @@ impl PostgresStore {
         let deleted_blob_count =
             sqlx::query(crate::blobs::blob_sql().postgres.sweep_unretained.sql())
                 .bind(retained.iter().cloned().collect::<Vec<_>>())
-                .execute(&mut **tx)
+                .execute(crate::observed_sql::executor(&mut **tx))
                 .await
                 .map_err(store_sqlx_error)?
                 .rows_affected();

@@ -283,6 +283,7 @@ impl SqliteStoreSet {
                     process_env_store.conn.clone(),
                     Arc::clone(&clock),
                     process_env_store.options.blob_profile,
+                    options.observer.clone(),
                 );
                 Some(Arc::new(crate::durable::SqliteNodeWakes::new(store, path)))
             }
@@ -350,6 +351,7 @@ impl SqliteStoreSet {
             self.inner.process_env_store.conn.clone(),
             Arc::clone(&self.inner.clock),
             self.inner.process_env_store.options.blob_profile,
+            self.inner.options.observer.clone(),
         )
     }
 

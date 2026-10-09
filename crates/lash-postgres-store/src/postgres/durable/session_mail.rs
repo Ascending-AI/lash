@@ -403,7 +403,7 @@ pub(crate) async fn cut_session_wakes(pool: &sqlx::PgPool, armed: bool) -> sqlx:
         "DROP TRIGGER lash_test_cut_wake ON lash_actors;
          DROP FUNCTION lash_test_cut_wake();"
     })
-    .execute(pool)
+    .execute(crate::observed_sql::executor(pool))
     .await
     .map(|_| ())
 }

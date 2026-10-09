@@ -552,12 +552,16 @@ impl<'c> From<&'c mut PgConnection> for GuardedEntry<'c, 'c> {
 impl<'c> GuardedEntry<'c, '_> {
     /// Begin with `statement`, the prelude's fenced `BEGIN`.
     async fn begin_with(self, statement: String) -> Result<Transaction<'c, Postgres>, sqlx::Error> {
-        match self {
-            Self::Pool(pool) => pool.begin_with(statement).await,
-            Self::Connection(connection) => {
-                sqlx::Connection::begin_with(connection, statement).await
+        let shape = statement.clone();
+        crate::observed_sql::control(&shape, async {
+            match self {
+                Self::Pool(pool) => pool.begin_with(statement).await,
+                Self::Connection(connection) => {
+                    sqlx::Connection::begin_with(connection, statement).await
+                }
             }
-        }
+        })
+        .await
     }
 }
 
@@ -636,7 +640,9 @@ pub(crate) async fn begin_migration<'c>(
     connection: &'c mut PgConnection,
     fence: &WriterFence,
 ) -> Result<GuardedTx<'c>, StoreError> {
-    let mut tx = Acquire::begin(connection).await.map_err(store_sqlx_error)?;
+    let mut tx = crate::observed_sql::control("BEGIN", Acquire::begin(connection))
+        .await
+        .map_err(store_sqlx_error)?;
     let recordable: bool = sqlx::query_scalar(session_sql().fleet_format.select_is_present.sql())
         .fetch_one(crate::observed_sql::executor(&mut *tx))
         .await
@@ -698,7 +704,9 @@ pub(crate) async fn begin_fleet_row(
     pool: &PgPool,
     fence: &WriterFence,
 ) -> Result<FleetRowTx, StoreError> {
-    let mut tx = pool.begin().await.map_err(store_sqlx_error)?;
+    let mut tx = crate::observed_sql::control("BEGIN", pool.begin())
+        .await
+        .map_err(store_sqlx_error)?;
     sqlx::query(
         crate::connection_sql::connection_sql()
             .lock_xact_fleet_fence

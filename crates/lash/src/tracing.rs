@@ -3,6 +3,8 @@
 /// boundary that grants the right to.
 pub use lash_core::facade_support::{JournalFrontier, LiveStep, StepIssue, TraceStanding};
 pub use lash_core::facade_support::{ProviderCompletionSideband, StoreObserver};
+/// Physical SQL windows and the receipt vocabulary their store sinks receive.
+pub use lash_core::operational_metrics::sql;
 pub use lash_sansio::AttachmentMaterializationReason;
 /// The scope, cause, permit and identity vocabulary the trace runtime's
 /// signatures name.

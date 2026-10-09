@@ -39,6 +39,7 @@ pub mod observation_sink;
 #[cfg(feature = "testing")]
 pub mod prompt;
 pub mod sansio_transcript;
+pub mod sql_work;
 pub mod tool_fixtures;
 
 /// A recording or fault layer over any effect host (FIG-3580).

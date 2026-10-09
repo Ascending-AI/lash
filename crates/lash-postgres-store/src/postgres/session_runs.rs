@@ -957,7 +957,7 @@ impl RunStore for PostgresStore {
             sqlx::query_scalar(session_runs_sql().inputs.bound_turn_scopes.sql())
                 .bind(session_id.as_str())
                 .bind(run.as_str())
-                .fetch_all(&self.pool)
+                .fetch_all(crate::observed_sql::executor(&self.pool))
                 .await
                 .map_err(store_sqlx_error)?;
         Ok(scopes

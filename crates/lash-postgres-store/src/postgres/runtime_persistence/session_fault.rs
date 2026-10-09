@@ -11,7 +11,7 @@ async fn session_fault_conn(
 ) -> Result<Option<SessionFault>, StoreError> {
     sqlx::query(session_sql().meta.select_fault.sql())
         .bind(session_id.as_str())
-        .fetch_optional(&mut *connection)
+        .fetch_optional(crate::observed_sql::executor(&mut *connection))
         .await
         .map_err(store_sqlx_error)?
         .map(|row| {
@@ -36,7 +36,7 @@ impl SessionFaultStore for PostgresStore {
             .bind(session_id.as_str())
             .bind(record.to_stored()?)
             .bind(sql_counter_value("fault_at_ms", at_ms)?)
-            .execute(&mut **tx)
+            .execute(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?;
         if changed.rows_affected() == 1 {
@@ -69,7 +69,7 @@ impl SessionFaultStore for PostgresStore {
         let rows = sqlx::query(session_sql().meta.list_faults.sql())
             .bind(after.map_or("", SessionId::as_str))
             .bind(i64::try_from(limit.get()).unwrap_or(i64::MAX))
-            .fetch_all(&self.pool)
+            .fetch_all(crate::observed_sql::executor(&self.pool))
             .await
             .map_err(store_sqlx_error)?;
         rows.iter()
@@ -87,7 +87,7 @@ impl SessionFaultStore for PostgresStore {
         let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
         let changed = sqlx::query(session_sql().meta.clear_fault.sql())
             .bind(session_id.as_str())
-            .execute(&mut **tx)
+            .execute(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?
             .rows_affected();

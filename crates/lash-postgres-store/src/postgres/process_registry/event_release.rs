@@ -14,7 +14,7 @@ pub(crate) async fn released_through_tx(
 ) -> Result<u64, PluginError> {
     sqlx::query_scalar::<_, i64>(process_sql().event_horizon.select_released_through.sql())
         .bind(process_id.as_str())
-        .fetch_optional(&mut **tx)
+        .fetch_optional(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(plugin_sqlx_error)?
         .map(|released| plugin_u64_from_sql("ProcessEventHorizon", "released_through", released))
@@ -51,7 +51,7 @@ pub(super) async fn release_process_events(
             .bind(i64::from(
                 registry.pools.maintenance.process_event_release_page_rows,
             ))
-            .fetch_all(&mut **tx)
+            .fetch_all(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(plugin_sqlx_error)?;
         if rows.is_empty() {
@@ -76,7 +76,7 @@ pub(super) async fn release_process_events(
                     .bind(sequence)
                     .bind(serde_json::to_string(&released).map_err(process_decode_error)?)
                     .bind(digest)
-                    .execute(&mut **tx)
+                    .execute(crate::observed_sql::executor(&mut **tx))
                     .await
                     .map_err(plugin_sqlx_error)?;
             }
@@ -87,7 +87,7 @@ pub(super) async fn release_process_events(
     sqlx::query(process_sql().event_horizon.upsert.sql())
         .bind(process_id.as_str())
         .bind(target_bound)
-        .execute(&mut **tx)
+        .execute(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(plugin_sqlx_error)?;
     tx.commit().await.map_err(plugin_sqlx_error)?;

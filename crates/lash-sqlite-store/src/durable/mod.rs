@@ -198,6 +198,7 @@ pub struct SqliteDurableStore {
     conn: SqliteConnection,
     clock: Arc<dyn Clock>,
     blob_profile: crate::BuiltinBlobProfile,
+    observer: lash_core_execution::facade_support::StoreObserver,
 }
 
 impl std::fmt::Debug for SqliteDurableStore {
@@ -242,11 +243,13 @@ impl SqliteDurableStore {
         conn: SqliteConnection,
         clock: Arc<dyn Clock>,
         blob_profile: crate::BuiltinBlobProfile,
+        observer: lash_core_execution::facade_support::StoreObserver,
     ) -> Self {
         Self {
             conn,
             clock,
             blob_profile,
+            observer,
         }
     }
 
@@ -263,10 +266,14 @@ impl SqliteDurableStore {
     {
         let now = self.instant()?;
         tracing::trace!(label = label.as_str(), "durable sqlite commit");
-        self.conn
-            .write_flow(move |tx| body(tx, now))
+        self.observer
+            .observe_sql(label.as_str(), "sqlite", async {
+                self.conn
+                    .write_flow(move |tx| body(tx, now))
+                    .await
+                    .map_err(store_failure)?
+            })
             .await
-            .map_err(store_failure)?
     }
 
     async fn read<T, F>(&self, body: F) -> Result<T, DurableError>
@@ -1154,9 +1161,14 @@ impl DurableStore for SqliteDurableStore {
             });
         }
         let blob_profile = self.blob_profile;
-        self.write(label, move |connection, now| {
-            apply_owner(connection, tx, now, blob_profile)
-        })
+        lash_core_execution::facade_support::sql::with_owner(
+            tx.actor().as_str().to_owned(),
+            tx.epoch().0,
+            tx.revision().0,
+            self.write(label, move |connection, now| {
+                apply_owner(connection, tx, now, blob_profile)
+            }),
+        )
         .await
     }
 

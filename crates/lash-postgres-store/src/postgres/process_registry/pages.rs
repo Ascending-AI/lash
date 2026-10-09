@@ -11,7 +11,7 @@ pub(super) async fn count_non_terminal_processes(
             .count_non_terminal_processes
             .sql(),
     )
-    .fetch_one(&registry.pool)
+    .fetch_one(crate::observed_sql::executor(&registry.pool))
     .await
     .map_err(plugin_sqlx_error)?;
     usize::try_from(count).map_err(|_| {
@@ -25,7 +25,7 @@ pub(super) async fn collect_non_terminal_records(
     registry: &PostgresProcessRegistry,
 ) -> Result<Vec<ProcessRecord>, PluginError> {
     let rows = sqlx::query(process_sql().process.collect_non_terminal_records.sql())
-        .fetch_all(&registry.pool)
+        .fetch_all(crate::observed_sql::executor(&registry.pool))
         .await
         .map_err(plugin_sqlx_error)?;
     let mut records = Vec::with_capacity(rows.len());
@@ -60,7 +60,7 @@ pub(super) async fn list_non_terminal_processes_page(
                 .select_max_non_terminal_process_id
                 .sql(),
         )
-        .fetch_one(&registry.pool)
+        .fetch_one(crate::observed_sql::executor(&registry.pool))
         .await
         .map_err(plugin_sqlx_error)?
         {
@@ -84,7 +84,7 @@ pub(super) async fn list_non_terminal_processes_page(
         .bind(through_process_id.as_str())
         .bind(cursor.after_process_id().as_str())
         .bind(row_limit)
-        .fetch_all(&registry.pool)
+        .fetch_all(crate::observed_sql::executor(&registry.pool))
         .await
         .map_err(plugin_sqlx_error)?
     } else {
@@ -96,7 +96,7 @@ pub(super) async fn list_non_terminal_processes_page(
         )
         .bind(through_process_id.as_str())
         .bind(row_limit)
-        .fetch_all(&registry.pool)
+        .fetch_all(crate::observed_sql::executor(&registry.pool))
         .await
         .map_err(plugin_sqlx_error)?
     };

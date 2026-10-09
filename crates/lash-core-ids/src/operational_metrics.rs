@@ -3,6 +3,8 @@
 //! transition permit, gauges report current state, and physical resource
 //! observations use a construction-time store observer without a permit.
 
+pub mod sql;
+
 pub use lash_trace::telemetry::metrics::DurableCommitCost;
 use lash_trace::telemetry::metrics::TelemetryMetrics;
 use lash_trace::{EmissionPermit, EmissionSource};
@@ -12,7 +14,10 @@ use std::time::Duration;
 #[derive(Clone, Default)]
 pub struct StoreObserver {
     metrics: Option<TelemetryMetrics>,
+    sql_sink: Option<std::sync::Arc<SqlSink>>,
 }
+
+type SqlSink = dyn Fn(&sql::Receipt, &'static str) + Send + Sync;
 
 impl std::fmt::Debug for StoreObserver {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -27,11 +32,63 @@ impl StoreObserver {
     pub fn new(metrics: TelemetryMetrics) -> Self {
         Self {
             metrics: Some(metrics),
+            sql_sink: None,
         }
     }
 
     pub fn is_observed(&self) -> bool {
-        self.metrics.is_some()
+        self.metrics.is_some() || self.sql_sink.is_some()
+    }
+
+    /// Host-owned physical SQL summaries. Operation identities are carried in
+    /// the receipt, never used as high-cardinality metric attributes.
+    pub fn with_sql_sink(
+        mut self,
+        sink: impl Fn(&sql::Receipt, &'static str) + Send + Sync + 'static,
+    ) -> Self {
+        self.sql_sink = Some(std::sync::Arc::new(sink));
+        self
+    }
+
+    /// Emit on success, error or cancellation. A caller's enclosing window
+    /// remains the parent identity and includes this attempt's physical work.
+    pub async fn observe_sql<T, E>(
+        &self,
+        operation: &str,
+        backend: &'static str,
+        future: impl std::future::Future<Output = Result<T, E>>,
+    ) -> Result<T, E> {
+        if !self.is_observed() {
+            return future.await;
+        }
+        struct Observation<'a> {
+            observer: &'a StoreObserver,
+            window: sql::Window,
+            outcome: &'static str,
+        }
+        impl Drop for Observation<'_> {
+            fn drop(&mut self) {
+                let receipt = self.window.snapshot();
+                tracing::debug!(operation = %receipt.operation, parent_operation = ?receipt.parent_operation,
+                    backend = receipt.backend, outcome = self.outcome,
+                    sql_statements = receipt.statements, sql_rows_returned = receipt.rows_returned,
+                    owner = ?receipt.owner, elapsed_nanos = receipt.elapsed_nanos,
+                    sql_work = ?receipt.sqlite_work, sql_shapes = ?receipt.shapes,
+                    unretained_shape_statements = receipt.unretained_shape_statements,
+                    "physical store SQL operation");
+                if let Some(sink) = &self.observer.sql_sink {
+                    sink(&receipt, self.outcome);
+                }
+            }
+        }
+        let mut observation = Observation {
+            observer: self,
+            window: sql::Window::new(operation, backend),
+            outcome: "cancelled",
+        };
+        let result = observation.window.within(future).await;
+        observation.outcome = if result.is_ok() { "success" } else { "error" };
+        result
     }
 
     pub fn pool_acquire_wait(&self, wait: Duration, outcome: &'static str) {

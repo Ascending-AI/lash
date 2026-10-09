@@ -46,31 +46,45 @@ impl PostgresDurableStore {
         label: CommitLabel,
     ) -> Result<ActorCommit, DurableError> {
         let deadline = self.deadline(label.capacity());
-        self.within(label.capacity(), async {
-            crate::observed_sql::measure(&self.observer, label, group_members(&tx), async {
-                if tx.ack().is_some_and(|through| through > tx.seen()) {
-                    return Err(DurableError::AckBeyondRead {
-                        actor: tx.actor().clone(),
-                    });
-                }
-                let tx = &tx;
-                self.replay(label, deadline, || async move {
-                    let (mut guarded, now, fence) = self.open_replayable(label, Some(tx)).await?;
-                    let outcome = Box::pin(apply_owner(
-                        &mut guarded,
-                        tx,
-                        fence,
-                        now,
-                        self.fence.fleet(),
-                        self.pools.maintenance.checkpoint_ref_chunk as usize,
+        self.within(
+            label.capacity(),
+            lash_core_execution::facade_support::sql::with_owner(
+                tx.actor().as_str().to_owned(),
+                tx.epoch().0,
+                tx.revision().0,
+                async {
+                    Box::pin(crate::observed_sql::measure(
+                        &self.observer,
+                        label,
+                        group_members(&tx),
+                        async {
+                            if tx.ack().is_some_and(|through| through > tx.seen()) {
+                                return Err(DurableError::AckBeyondRead {
+                                    actor: tx.actor().clone(),
+                                });
+                            }
+                            let tx = &tx;
+                            self.replay(label, deadline, || async move {
+                                let (mut guarded, now, fence) =
+                                    self.open_replayable(label, Some(tx)).await?;
+                                let outcome = Box::pin(apply_owner(
+                                    &mut guarded,
+                                    tx,
+                                    fence,
+                                    now,
+                                    self.fence.fleet(),
+                                    self.pools.maintenance.checkpoint_ref_chunk as usize,
+                                ))
+                                .await;
+                                self.settle(label, guarded, outcome, deadline).await
+                            })
+                            .await
+                        },
                     ))
-                    .await;
-                    self.settle(label, guarded, outcome, deadline).await
-                })
-                .await
-            })
-            .await
-        })
+                    .await
+                },
+            ),
+        )
         .await
     }
 

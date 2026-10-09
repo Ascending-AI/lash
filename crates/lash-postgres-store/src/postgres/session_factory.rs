@@ -20,7 +20,7 @@ impl lash_core_execution::DeploymentStore for PostgresStore {
         )
         .bind(frame.session_id().as_str())
         .bind(frame.frame_node_id().as_str())
-        .fetch_one(&self.pool)
+        .fetch_one(crate::observed_sql::executor(&self.pool))
         .await
         .map_err(store_sqlx_error)
     }
@@ -44,7 +44,7 @@ impl lash_core_execution::DeploymentStore for PostgresStore {
                 .count_unsettled_turns
                 .sql(),
         )
-        .fetch_one(&self.pool)
+        .fetch_one(crate::observed_sql::executor(&self.pool))
         .await
         .map_err(store_sqlx_error)?;
         let in_flight: i64 = row.get(0);
@@ -69,7 +69,7 @@ impl lash_core_execution::DeploymentStore for PostgresStore {
         let mut tx = crate::runtime_persistence::read_tx(self).await?;
         let sql = &session_sql().turn_commits;
         let (current, horizon): (i64, i64) = sqlx::query_as(sql.change_clock.sql())
-            .fetch_one(&mut *tx)
+            .fetch_one(crate::observed_sql::executor(&mut *tx))
             .await
             .map_err(store_sqlx_error)?;
         let current = crate::support::u64_from_sql("TurnChangeClock", "current_seq", current)?;
@@ -79,7 +79,7 @@ impl lash_core_execution::DeploymentStore for PostgresStore {
         let rows = sqlx::query(sql.changes_after.sql())
             .bind(after.store_sequence() as i64)
             .bind(i64::try_from(limit.get()).unwrap_or(i64::MAX))
-            .fetch_all(&mut *tx)
+            .fetch_all(crate::observed_sql::executor(&mut *tx))
             .await
             .map_err(store_sqlx_error)?;
         let mut changes = Vec::with_capacity(rows.len());
@@ -98,7 +98,9 @@ impl lash_core_execution::DeploymentStore for PostgresStore {
             lash_core_execution::store::TurnChangeCursor::from_store_sequence(current),
             |change| change.cursor,
         );
-        tx.commit().await.map_err(store_sqlx_error)?;
+        crate::observed_sql::control("COMMIT", tx.commit())
+            .await
+            .map_err(store_sqlx_error)?;
         Ok(lash_core_execution::store::TurnChangePage {
             changes,
             next,
@@ -117,7 +119,7 @@ impl lash_core_execution::DeploymentStore for PostgresStore {
         let rows = sqlx::query(sql.list_after.sql())
             .bind(after.map_or(0, |id| id.sequence()) as i64)
             .bind(limit.get() as i64)
-            .fetch_all(&self.pool)
+            .fetch_all(crate::observed_sql::executor(&self.pool))
             .await
             .map_err(store_sqlx_error)?;
         rows.iter()
@@ -145,7 +147,7 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
                 .await?;
         let deleted: bool = sqlx::query_scalar(session_sql().deleted_postgres.exists.sql())
             .bind(session_id.as_str())
-            .fetch_one(&self.pool)
+            .fetch_one(crate::observed_sql::executor(&self.pool))
             .await
             .map_err(store_sqlx_error)?;
         Ok(if deleted {
@@ -272,7 +274,7 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
                 .sql(),
         )
         .bind(request.session_id.as_str())
-        .fetch_one(&mut **tx)
+        .fetch_one(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?;
         if exists {
@@ -300,7 +302,7 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
         let exists =
             sqlx::query_scalar::<_, bool>(session_sql().meta_postgres.exists_materialized.sql())
                 .bind(request.session_id.as_str())
-                .fetch_one(&mut **tx)
+                .fetch_one(crate::observed_sql::executor(&mut **tx))
                 .await
                 .map_err(store_sqlx_error)?;
         if exists {
@@ -310,7 +312,7 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
         }
         let deleted = sqlx::query_scalar::<_, bool>(session_sql().deleted_postgres.exists.sql())
             .bind(request.session_id.as_str())
-            .fetch_one(&mut **tx)
+            .fetch_one(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?;
         if deleted {
@@ -326,7 +328,7 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
         )
         .bind(source_session_id.as_str())
         .bind(sql_revision)
-        .fetch_optional(&mut **tx)
+        .fetch_optional(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?;
         let Some((leaf_node_id, mut checkpoint_ref, _head_json)) = retained else {
@@ -337,7 +339,7 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
                     .sql(),
             )
             .bind(source_session_id.as_str())
-            .fetch_one(&mut **tx)
+            .fetch_one(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?;
             return Err(if source_deleted {
@@ -370,7 +372,7 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
                     .sql(),
             )
             .bind(leaf_node_id)
-            .fetch_optional(&mut **tx)
+            .fetch_optional(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?;
             let (_owning_session_id, fork_generation) =
@@ -422,7 +424,7 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
             )
             .bind(source_frame.kind().as_str())
             .bind(source_frame.canonical_id())
-            .fetch_one(&mut **tx)
+            .fetch_one(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?;
             if !source_frame_ended {
@@ -441,7 +443,7 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
                     session_sql().graph_postgres.select_edge_for_share.sql(),
                 )
                 .bind(&*current_node_id)
-                .fetch_optional(&mut **tx)
+                .fetch_optional(crate::observed_sql::executor(&mut **tx))
                 .await
                 .map_err(store_sqlx_error)?
                 .ok_or_else(|| StoreError::StoredDataCorrupt {
@@ -563,7 +565,7 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
         .await?;
         sqlx::query(session_sql().head_postgres.insert_fork.sql())
             .bind(request.session_id.as_str())
-            .execute(&mut **tx)
+            .execute(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?;
         if let Some(fork_plan) = &fork_plan {
@@ -577,7 +579,7 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
                             "fork generation does not fit PostgreSQL BIGINT".to_string(),
                         )
                     })?)
-                    .execute(&mut **tx)
+                    .execute(crate::observed_sql::executor(&mut **tx))
                     .await
                     .map_err(store_sqlx_error)?;
             }
@@ -608,7 +610,7 @@ impl lash_core_execution::SessionCatalogStore for PostgresStore {
             .bind(source_frame.canonical_id())
             .bind(fork_frame.kind().as_str())
             .bind(fork_frame.canonical_id())
-            .execute(&mut **tx)
+            .execute(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?;
         }
@@ -649,21 +651,21 @@ impl lash_core_execution::AttachmentRootSet for PostgresStore {
                     .bind(kind.as_str())
                     .bind(after)
                     .bind(limit)
-                    .fetch_all(&self.pool)
+                    .fetch_all(crate::observed_sql::executor(&self.pool))
                     .await
             }
             AttachmentRootSource::OtherReferrers => {
                 sqlx::query_scalar(sql.edges.select_other_root_page.sql())
                     .bind(after)
                     .bind(limit)
-                    .fetch_all(&self.pool)
+                    .fetch_all(crate::observed_sql::executor(&self.pool))
                     .await
             }
             AttachmentRootSource::PendingWrites => {
                 sqlx::query_scalar(sql.pending.select_root_page.sql())
                     .bind(after)
                     .bind(limit)
-                    .fetch_all(&self.pool)
+                    .fetch_all(crate::observed_sql::executor(&self.pool))
                     .await
             }
         }
@@ -694,7 +696,7 @@ impl lash_core_execution::AttachmentRootSet for PostgresStore {
                 .sql(),
         )
         .bind(id.as_str())
-        .fetch_optional(&self.pool)
+        .fetch_optional(crate::observed_sql::executor(&self.pool))
         .await
         .map_err(store_sqlx_error)?
         .is_some())
@@ -744,7 +746,7 @@ impl lash_core_execution::AttachmentRootSet for PostgresStore {
                 .sql(),
         )
         .bind(id.as_str())
-        .fetch_optional(&mut **tx)
+        .fetch_optional(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?
         .is_some();
@@ -760,7 +762,7 @@ impl lash_core_execution::AttachmentRootSet for PostgresStore {
         )
         .bind(id.as_str())
         .bind(generation)
-        .execute(&mut **tx)
+        .execute(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?
         .rows_affected();
@@ -776,7 +778,7 @@ impl lash_core_execution::AttachmentRootSet for PostgresStore {
                     .sql(),
             )
             .bind(id.as_str())
-            .execute(&mut **tx)
+            .execute(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?;
         }
@@ -810,7 +812,7 @@ impl lash_core_execution::AttachmentRootSet for PostgresStore {
         )
         .bind(id.as_str())
         .bind(generation)
-        .execute(&mut **tx)
+        .execute(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?
         .rows_affected();
@@ -897,7 +899,7 @@ async fn fence_deleted_session_frames_tx(
             .bind(referrer.kind().as_str())
             .bind(referrer.canonical_id())
             .bind(crate::support::clamp_epoch_ms(now))
-            .execute(&mut **tx)
+            .execute(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?;
             lash_core_execution::ArtifactCleanup::ended(referrer, Vec::new(), None)
@@ -921,7 +923,7 @@ pub(crate) async fn delete_session_tx(
     let materialized =
         sqlx::query_scalar::<_, bool>(session_sql().meta_postgres.exists_materialized.sql())
             .bind(session_id.as_str())
-            .fetch_one(&mut **tx)
+            .fetch_one(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?;
     if materialized {
@@ -930,12 +932,12 @@ pub(crate) async fn delete_session_tx(
         // Permanent identity evidence for host-facing session ids.
         sqlx::query(session_sql().deleted_postgres.insert_from_meta.sql())
             .bind(session_id.as_str())
-            .execute(&mut **tx)
+            .execute(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?;
         sqlx::query(session_sql().deleted_postgres.insert_root.sql())
             .bind(session_id.as_str())
-            .execute(&mut **tx)
+            .execute(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?;
     }
@@ -947,7 +949,7 @@ pub(crate) async fn delete_session_tx(
         session_sql().head.select_reclaim.sql(),
     )
     .bind(session_id.as_str())
-    .fetch_optional(&mut **tx)
+    .fetch_optional(crate::observed_sql::executor(&mut **tx))
     .await
     .map_err(store_sqlx_error)?;
     let (leaf_node_id, checkpoint_ref) = head.unwrap_or((None, None));
@@ -957,7 +959,7 @@ pub(crate) async fn delete_session_tx(
     let mut checkpoint_refs: std::collections::BTreeSet<String> =
         sqlx::query_scalar(session_sql().revisions.select_session_checkpoints.sql())
             .bind(session_id.as_str())
-            .fetch_all(&mut **tx)
+            .fetch_all(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?
             .into_iter()
@@ -966,7 +968,7 @@ pub(crate) async fn delete_session_tx(
     let mut retained_leaves: std::collections::BTreeSet<String> =
         sqlx::query_scalar(session_sql().revisions.select_session_leaves.sql())
             .bind(session_id.as_str())
-            .fetch_all(&mut **tx)
+            .fetch_all(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?
             .into_iter()
@@ -989,7 +991,7 @@ pub(crate) async fn delete_session_tx(
     ] {
         sqlx::query(statement)
             .bind(session_id.as_str())
-            .execute(&mut **tx)
+            .execute(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?;
     }
@@ -1000,7 +1002,7 @@ pub(crate) async fn delete_session_tx(
         session_sql().graph_postgres.select_unreachable_leaves.sql(),
     )
     .bind(session_id.as_str())
-    .fetch_all(&mut **tx)
+    .fetch_all(crate::observed_sql::executor(&mut **tx))
     .await
     .map_err(store_sqlx_error)?;
     for node_id in unreachable_candidates {
@@ -1020,7 +1022,7 @@ pub(crate) async fn delete_session_tx(
             .sql(),
     )
     .bind(session_id.as_str())
-    .execute(&mut **tx)
+    .execute(crate::observed_sql::executor(&mut **tx))
     .await
     .map_err(store_sqlx_error)?;
     let turn_ingress = crate::turn_ingress::turn_ingress_sql();
@@ -1038,7 +1040,7 @@ pub(crate) async fn delete_session_tx(
     ] {
         sqlx::query(statement)
             .bind(session_id.as_str())
-            .execute(&mut **tx)
+            .execute(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?;
     }
@@ -1050,7 +1052,7 @@ pub(crate) async fn delete_session_tx(
     ] {
         sqlx::query(statement)
             .bind(session_id.as_str())
-            .execute(&mut **tx)
+            .execute(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?;
     }
@@ -1081,7 +1083,7 @@ pub(crate) async fn next_turn_change_sequence(
     conn: &mut sqlx::PgConnection,
 ) -> Result<i64, StoreError> {
     sqlx::query_scalar(session_sql().turn_commits.next_change_seq.sql())
-        .fetch_optional(conn)
+        .fetch_optional(crate::observed_sql::executor(conn))
         .await
         .map_err(store_sqlx_error)?
         .ok_or(StoreError::MonotonicCounterOverflow {

@@ -79,7 +79,9 @@ pub(crate) async fn open_session_command_run_postgres(
     session_id: &SessionId,
 ) -> Result<Vec<QueuedWorkBatch>, StoreError> {
     let mut connection = acquire_runtime_connection(&store.pool, &store.observer).await?;
-    let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
+    let mut tx = crate::observed_sql::control("BEGIN", connection.begin())
+        .await
+        .map_err(store_sqlx_error)?;
     let (mut batches, candidates) = scan_queued_work_candidates_tx(
         &mut tx,
         session_id,
@@ -91,7 +93,9 @@ pub(crate) async fn open_session_command_run_postgres(
     )
     .await?;
     batches.truncate(select_leading_session_command(&candidates));
-    tx.rollback().await.map_err(store_sqlx_error)?;
+    crate::observed_sql::control("ROLLBACK", tx.rollback())
+        .await
+        .map_err(store_sqlx_error)?;
     Ok(batches)
 }
 
@@ -121,7 +125,7 @@ async fn checkpoint_work_pending_postgres(
         .bind(i64::try_from(request.max_inputs).unwrap_or(i64::MAX))
         .bind(request.run.as_str())
         .bind(request.step.as_str())
-        .fetch_one(&mut *connection)
+        .fetch_one(crate::observed_sql::executor(&mut *connection))
         .await
         .map_err(store_sqlx_error)
 }
@@ -140,7 +144,7 @@ async fn read_step_admission_tx(
         .bind(session_id.as_str())
         .bind(run.as_str())
         .bind(step)
-        .fetch_all(&mut **tx)
+        .fetch_all(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?;
     let inputs = input_rows
@@ -179,7 +183,7 @@ async fn compose_active_turn_inputs_tx(
         .bind(session_id.as_str())
         .bind(i64::try_from(max_inputs).unwrap_or(i64::MAX))
         .bind(turn_id.as_str())
-        .fetch_all(&mut **tx)
+        .fetch_all(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?;
     let inputs = rows
@@ -211,7 +215,7 @@ async fn bind_turn_inputs_tx(
             .bind(state)
             .bind(run.as_str())
             .bind(step)
-            .execute(&mut **tx)
+            .execute(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?
             .rows_affected();
@@ -240,7 +244,7 @@ async fn scan_queued_work_candidates_tx(
     let rows = sqlx::query(statement)
         .bind(session_id.as_str())
         .bind(admission_scan_limit(max_rows))
-        .fetch_all(&mut **tx)
+        .fetch_all(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?;
     let mut batches = Vec::with_capacity(rows.len());

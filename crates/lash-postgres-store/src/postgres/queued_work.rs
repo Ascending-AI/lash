@@ -79,7 +79,7 @@ pub(crate) async fn load_queued_batch(
             .sql(),
     )
     .bind(batch_id)
-    .fetch_optional(&mut *tx)
+    .fetch_optional(crate::observed_sql::executor(&mut *tx))
     .await
     .map_err(store_sqlx_error)?;
     let Some(row) = row else {
@@ -130,7 +130,7 @@ pub(crate) async fn complete_admitted_batch_tx(
         sqlx::query_scalar(sql.queued_batches_postgres.settlement_facts.sql())
             .bind(session_id.as_str())
             .bind(batch_id.as_str())
-            .fetch_optional(&mut **tx)
+            .fetch_optional(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?;
     lash_core_execution::store_backend_support::require_admitted_to_run(
@@ -145,7 +145,7 @@ pub(crate) async fn complete_admitted_batch_tx(
         .bind(run.as_str())
         .bind(terminal.cause.as_str())
         .bind(crate::support::clamp_epoch_ms(terminal.at_ms))
-        .execute(&mut **tx)
+        .execute(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?
         .rows_affected();
@@ -188,7 +188,7 @@ pub(crate) async fn settle_open_command_tx(
         sqlx::query_scalar(sql.queued_batches_postgres.settlement_facts.sql())
             .bind(session_id.as_str())
             .bind(batch_id.as_str())
-            .fetch_optional(&mut **tx)
+            .fetch_optional(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?;
     lash_core_execution::store_backend_support::require_open_command(
@@ -202,7 +202,7 @@ pub(crate) async fn settle_open_command_tx(
         .bind(crate::support::clamp_epoch_ms(at_ms))
         .bind(cause.as_str())
         .bind(operation_key)
-        .execute(&mut **tx)
+        .execute(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?
         .rows_affected();

@@ -27,14 +27,14 @@ pub(super) async fn admit(
             .lock_xact_evidence_retention_shared
             .sql(),
     )
-    .execute(&mut **tx)
+    .execute(crate::observed_sql::executor(&mut **tx))
     .await
     .map_err(plugin_sqlx_error)?;
     let sql = crate::turn_ingress::turn_ingress_sql();
     let owner = submission.identity.owner.to_string();
     let retired: bool = sqlx::query_scalar(sql.tool_intents.select_owner_retired.sql())
         .bind(&owner)
-        .fetch_one(&mut **tx)
+        .fetch_one(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(plugin_sqlx_error)?;
     if !retired {
@@ -48,7 +48,7 @@ pub(super) async fn admit(
             .bind(&submission.payload_hash)
             .bind(encoded)
             .bind(crate::support::clamp_epoch_ms(admitted_at_ms))
-            .execute(&mut **tx)
+            .execute(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(plugin_sqlx_error)?;
         if inserted.rows_affected() == 1 {
@@ -58,7 +58,7 @@ pub(super) async fn admit(
     }
     let row = sqlx::query(sql.tool_intents.select_by_replay_key.sql())
         .bind(&submission.identity.replay_key)
-        .fetch_optional(&mut **tx)
+        .fetch_optional(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(plugin_sqlx_error)?;
     let admission = match row {
@@ -87,7 +87,7 @@ pub(super) async fn complete(
             .sql(),
     )
     .bind(replay_key)
-    .fetch_one(&mut **tx)
+    .fetch_one(crate::observed_sql::executor(&mut **tx))
     .await
     .map_err(plugin_sqlx_error)?;
     let mut submission = decode(row.get(0))?;
@@ -102,7 +102,7 @@ pub(super) async fn complete(
         )
         .bind(replay_key)
         .bind(encoded)
-        .execute(&mut **tx)
+        .execute(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(plugin_sqlx_error)?;
     }

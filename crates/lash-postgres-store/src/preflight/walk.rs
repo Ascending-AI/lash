@@ -94,7 +94,7 @@ async fn scan_started_processes(
     )
     .bind(scan.after.clone())
     .bind(row_limit(scan))
-    .fetch_all(pool)
+    .fetch_all(crate::observed_sql::executor(pool))
     .await;
     let rows = match rows {
         Ok(rows) => rows,
@@ -131,7 +131,7 @@ async fn scan_module_artifacts(
     .bind(MODULE_ARTIFACT_NAMESPACE)
     .bind(scan.after.clone())
     .bind(row_limit(scan))
-    .fetch_all(pool)
+    .fetch_all(crate::observed_sql::executor(pool))
     .await;
     let rows = match rows {
         Ok(rows) => rows,
@@ -372,7 +372,9 @@ async fn fetch_sessions(
                 .bind(row_limit(scan))
         }
     };
-    let rows = query.fetch_all(&mut **snapshot).await?;
+    let rows = query
+        .fetch_all(crate::observed_sql::executor(&mut **snapshot))
+        .await?;
     Ok(rows
         .into_iter()
         .filter_map(|(session_id, checkpoint_ref)| {
@@ -405,7 +407,7 @@ async fn fetch_blobs(
             .sql(),
     )
     .bind(hashes)
-    .fetch_all(&mut **snapshot)
+    .fetch_all(crate::observed_sql::executor(&mut **snapshot))
     .await?;
     Ok(rows.into_iter().collect())
 }
@@ -418,8 +420,7 @@ async fn fetch_blobs(
 /// snapshot: under read-committed, a concurrent GC between the two statements
 /// would make a perfectly healthy store report a dangling reference.
 async fn read_only_snapshot(pool: &PgPool) -> Result<Transaction<'_, Postgres>, StoreError> {
-    let mut transaction = pool
-        .begin()
+    let mut transaction = crate::observed_sql::control("BEGIN", pool.begin())
         .await
         .map_err(|error| StoreError::StorageFailure {
             backend: "postgres",
@@ -430,7 +431,7 @@ async fn read_only_snapshot(pool: &PgPool) -> Result<Transaction<'_, Postgres>, 
             .begin_repeatable_read_read_only
             .sql(),
     )
-    .execute(&mut *transaction)
+    .execute(crate::observed_sql::executor(&mut *transaction))
     .await
     .map_err(|error| StoreError::StorageFailure {
         backend: "postgres",
@@ -448,7 +449,7 @@ async fn finish(
     snapshot: Transaction<'_, Postgres>,
     page: Result<DurableScanPage, StoreError>,
 ) -> Result<DurableScanPage, StoreError> {
-    let _ = snapshot.rollback().await;
+    let _ = crate::observed_sql::control("ROLLBACK", snapshot.rollback()).await;
     page
 }
 

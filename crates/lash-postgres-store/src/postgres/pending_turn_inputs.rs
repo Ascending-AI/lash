@@ -99,7 +99,7 @@ pub(crate) async fn load_pending_turn_input(
     )
     .bind(session_id.as_str())
     .bind(input_id)
-    .fetch_optional(&mut **tx)
+    .fetch_optional(crate::observed_sql::executor(&mut **tx))
     .await
     .map_err(store_sqlx_error)?;
     row.map(pending_turn_input_row)
@@ -141,7 +141,7 @@ pub(crate) async fn load_pending_turn_input_row_by_target_tx(
     let row = sqlx::query(statement)
         .bind(session_id.as_str())
         .bind(key)
-        .fetch_optional(&mut **tx)
+        .fetch_optional(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?;
     row.map(pending_turn_input_row).transpose()
@@ -180,7 +180,10 @@ pub(crate) async fn lock_cancel_rows_in_queue_order(
                 .bind(i64::try_from(anchor_seq).unwrap_or(i64::MAX))
         }
     };
-    query.fetch_all(&mut **tx).await.map_err(store_sqlx_error)?;
+    query
+        .fetch_all(crate::observed_sql::executor(&mut **tx))
+        .await
+        .map_err(store_sqlx_error)?;
     Ok(())
 }
 
@@ -223,7 +226,7 @@ pub(crate) async fn cancel_pending_turn_input_row_tx(
             .bind(input.input_id.as_str())
             .bind(lash_core_execution::runtime::TurnInputStateKind::Cancelled.as_str())
             .bind(crate::support::clamp_epoch_ms(now))
-            .execute(&mut **tx)
+            .execute(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?
             .rows_affected();

@@ -38,7 +38,7 @@ async fn db_now(tx: &mut Transaction<'_, Postgres>) -> Result<i64, StoreError> {
             .select_statement_epoch_ms
             .sql(),
     )
-    .fetch_one(&mut **tx)
+    .fetch_one(crate::observed_sql::executor(&mut **tx))
     .await
     .map_err(store_sqlx_error)
 }
@@ -49,7 +49,7 @@ async fn current(
 ) -> Result<Option<LeaseRow>, StoreError> {
     sqlx::query(SQL.select.sql())
         .bind(name)
-        .fetch_optional(&mut **tx)
+        .fetch_optional(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?
         .as_ref()
@@ -87,7 +87,7 @@ impl RecoveryLeaderStore for PostgresRecoveryLeader {
             .bind(now)
             .bind(millis("lease ttl", claim.ttl_ms)?)
             .bind(millis("lease minimum tenure", claim.min_tenure_ms)?)
-            .fetch_optional(&mut **tx)
+            .fetch_optional(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?;
         let row = match taken {
@@ -111,7 +111,7 @@ impl RecoveryLeaderStore for PostgresRecoveryLeader {
             .bind(term)
             .bind(now)
             .bind(millis("lease ttl", claim.ttl_ms)?)
-            .fetch_optional(&mut **tx)
+            .fetch_optional(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?;
         let leader = renewed.is_some();
@@ -140,7 +140,7 @@ impl RecoveryLeaderStore for PostgresRecoveryLeader {
             .bind(holder.as_str())
             .bind(term)
             .bind(now)
-            .execute(&mut **tx)
+            .execute(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?
             .rows_affected();

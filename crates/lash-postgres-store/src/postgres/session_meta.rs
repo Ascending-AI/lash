@@ -174,7 +174,9 @@ pub(crate) async fn load_session_meta(
     observer: &crate::StoreObserver,
 ) -> Result<Option<SessionMeta>, StoreError> {
     let mut connection = acquire_runtime_connection(pool, observer).await?;
-    let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
+    let mut tx = crate::observed_sql::control("BEGIN", connection.begin())
+        .await
+        .map_err(store_sqlx_error)?;
     let row = if let Some(session_id) = selected_session_id {
         sqlx::query(session_sql().meta_postgres.select_relation_for_share.sql())
             .bind(session_id.as_str())
@@ -192,13 +194,17 @@ pub(crate) async fn load_session_meta(
         .await
         .map_err(store_sqlx_error)?;
         if rows.len() != 1 {
-            tx.commit().await.map_err(store_sqlx_error)?;
+            crate::observed_sql::control("COMMIT", tx.commit())
+                .await
+                .map_err(store_sqlx_error)?;
             return Ok(None);
         }
         rows.pop()
     };
     let Some(row) = row else {
-        tx.commit().await.map_err(store_sqlx_error)?;
+        crate::observed_sql::control("COMMIT", tx.commit())
+            .await
+            .map_err(store_sqlx_error)?;
         return Ok(None);
     };
     let mut stored = stored_relation_from_row(&row)?;
@@ -246,6 +252,8 @@ pub(crate) async fn load_session_meta(
                 })
             })
             .transpose()?;
-    tx.commit().await.map_err(store_sqlx_error)?;
+    crate::observed_sql::control("COMMIT", tx.commit())
+        .await
+        .map_err(store_sqlx_error)?;
     Ok(Some(meta))
 }

@@ -22,7 +22,7 @@ impl PostgresStore {
              )",
         )
         .bind(request.session_id.as_str())
-        .fetch_one(&mut **tx)
+        .fetch_one(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?;
         if deleted {
@@ -69,7 +69,7 @@ impl PostgresStore {
             .await?;
             sqlx::query(session_sql().head.insert_created.sql())
                 .bind(request.session_id.as_str())
-                .execute(&mut **tx)
+                .execute(crate::observed_sql::executor(&mut **tx))
                 .await
                 .map_err(store_sqlx_error)?;
         } else {
