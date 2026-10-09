@@ -4,30 +4,20 @@ This standalone lash-perf binary measures the scheduling SQL in the substrate
 DDL sketch. It installs a private schema and drops it on completion. SQL is in
 `sql.rs`; no product store, engine or stored format changes.
 
-Run from a Kiln fork:
+Run from a Kiln fork against a database you own:
 
 ```sh
 . ./env.sh
-mkdir -p .kiln/FIG-5167/bin
-kiln sync
+mkdir -p .kiln/<ticket>/bin
 kiln build --materializations final //crates/lash-perf:postgres-substrate__bin \
-  --out "$PWD/.kiln/FIG-5167/bin"
-kiln gate lash fig-5167 -- python3 scripts/postgres-substrate-bench.py \
-  --binary .kiln/FIG-5167/bin/postgres_substrate \
-  --evidence-dir .kiln/FIG-5167/pg-final -- \
-  --nodes 1,4,16 --seconds 3 --wake-events 128 \
-  > .kiln/FIG-5167/final.jsonl 2> .kiln/FIG-5167/final.log
+  --out "$PWD/.kiln/<ticket>/bin"
+LASH_POSTGRES_DATABASE_URL=<url> .kiln/<ticket>/bin/postgres_substrate \
+  --nodes 1,4,16 --seconds 3 --wake-events 128
 ```
 
-The launcher reuses the repository's pinned PostgreSQL action runner and schema
-setup. It requires `KILN_GATE_ID`, refuses an external database URL, uses an
-unused loopback port and keeps cluster files under the evidence directory.
-It enables fsync, synchronous commit and full-page writes. `--test-settings`
-selects the runner's cheaper durability-off settings for a separate experiment.
-The cluster is stopped and removed on exit; stdout retains settings, binary
-SHA-256, host facts and all raw latency samples. The binary can also run against
-a caller-owned database through `LASH_POSTGRES_DATABASE_URL`; it creates only
-its random schema and requires permission to create/drop schemas.
+The binary creates only its random schema and requires permission to
+create/drop schemas. The FIG-5167 measurements ran on a private cluster with
+fsync, synchronous commit and full-page writes enabled.
 
 ## Method
 

@@ -15,8 +15,6 @@ EXCLUSIONS = {
     "tools/buck2/test_selection.py": "Production libtest selection module, not a self-test.",
     "tools/buck2/test_shard.py": "Production libtest shard wrapper, not a self-test.",
     "tools/buck2/test_timeout.py": "Production test timeout wrapper, not a self-test.",
-    # Live service proofs belong in their named integration gates.
-    "scripts/test-gate-worktree-concurrency.sh": "Needs Docker services and a peer worktree argument.",
 }
 
 

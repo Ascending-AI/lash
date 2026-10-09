@@ -36,7 +36,6 @@ PROBE_ASSIGNMENT = re.compile(r"^LASH_PG_READY_PROBE='(.*)'$", re.MULTILINE)
 CONSUMERS = (
     "scripts/ci/with-service.sh",
     "scripts/push-gate.sh",
-    "scripts/gate-container-smoke.sh",
     "scripts/confidence-gate.sh",
 )
 WORKFLOWS = (

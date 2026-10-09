@@ -976,36 +976,6 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         )
 
 
-    def test_scenario_review_includes_untracked_sources(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = pathlib.Path(directory)
-            subprocess.run(["git", "init", "-q", str(root)], check=True)
-            source = root / "crates/lash-core/tests/runtime/tests/runtime_scenarios/new_case.rs"
-            source.parent.mkdir(parents=True)
-            source.write_text("#[test] fn new_scenario() {}\n")
-            def git(*args: str) -> str:
-                return subprocess.run(["git", "-C", str(root), *args], check=True, text=True, capture_output=True).stdout
-            self.assertEqual(git("diff"), "")
-            script = ROOT / "scripts" / "scenario-review.sh"
-            # The command lives in the checked script; the ADR names it
-            # rather than carrying a second copy for the two to drift.
-            self.assertIn(
-                "scripts/scenario-review.sh",
-                (ROOT / "docs/adr/0007-four-layer-scenario-harnesses.md")
-                .read_text(encoding="utf-8"),
-            )
-            for path in re.findall(r"crates/[a-z0-9_/.-]+", script.read_text()):
-                self.assertTrue((ROOT / path).exists(), path)
-            subprocess.run(
-                ["bash", str(script), str(source.relative_to(root))],
-                cwd=root,
-                check=True,
-            )
-            self.assertIn("+#[test] fn new_scenario() {}", git("diff"))
-            self.assertEqual(git("diff", "--cached"), "")
-            source.write_text("#[test] fn new_scenario() { assert!(true); }\n")
-            self.assertIn("assert!(true)", git("diff"))
-
     def test_deletion_evidence_records_survivor_and_coverage_disposition(self) -> None:
         evidence = json.loads((ROOT / "scripts/fixtures/test-deletion-evidence.json").read_text())
         self.assertEqual(evidence["commit"], "95ece260f58d0d8386147739bab3dc9c4655457d")
@@ -1050,7 +1020,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
                 self.assertTrue(reason.strip(), "every exclusion needs a reason")
         self.assertEqual(
             set(exclusions) - BUCK2_TEST_NAMED_TOOLS,
-            {"scripts/test-gate-worktree-concurrency.sh"},
+            set(),
         )
         self.assertGreater(len(candidates), 5, "discovery found nothing")
 

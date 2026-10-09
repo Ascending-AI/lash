@@ -74,8 +74,8 @@ pub fn percentile_summary(mut values: Vec<f64>) -> PercentileMetricStats {
 /// The percentile rank is the zero-based index `p * (n - 1)`. A fractional
 /// rank is interpolated between its two neighboring samples. Empty input
 /// returns zero, one sample returns that sample, and two samples interpolate
-/// directly between their endpoints. Runtime report p50/p95/p99 fields and
-/// `scripts/runtime_perf_percentiles.py` use this same definition.
+/// directly between their endpoints. Runtime report p50/p95/p99 fields use
+/// this definition.
 pub fn percentile_sorted(values: &[f64], percentile: f64) -> f64 {
     if values.is_empty() {
         return 0.0;

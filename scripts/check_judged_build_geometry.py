@@ -666,32 +666,6 @@ def check_buck2_optimized_config(failures: list[str]) -> None:
         )
 
 
-def check_monty_optimized_config(failures: list[str]) -> None:
-    path = ROOT / "scripts/profile_monty_comparison.sh"
-    if not path.is_file():
-        failures.append("scripts/profile_monty_comparison.sh is missing")
-        return
-    commands = [
-        shlex.split(line.strip())
-        for line in path.read_text(encoding="utf-8").splitlines()
-        if line.strip().startswith("exec kiln run ")
-    ]
-    expected = [
-        "exec",
-        "kiln",
-        "run",
-        "--config=optimized",
-        "//crates/lash-typescript:monty_comparison__example",
-        "--",
-        "$@",
-    ]
-    if commands != [expected]:
-        failures.append(
-            "scripts/profile_monty_comparison.sh: Monty must run through the "
-            "Buck2 optimized configuration"
-        )
-
-
 # A launcher that builds a judged host through Buck2 must name the config on
 # the same command. Without it the label builds under the ordinary
 # configuration, which is the drift this whole gate exists to catch — and it is
@@ -807,7 +781,6 @@ def main() -> int:
     check_profile_overrides_exported(failures)
     check_buck2_judged_config(failures)
     check_buck2_optimized_config(failures)
-    check_monty_optimized_config(failures)
     check_buck2_boot_sites(failures)
     check_build_precedes_launcher_locks(failures)
     if failures:

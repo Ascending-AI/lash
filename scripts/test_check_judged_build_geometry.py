@@ -63,7 +63,6 @@ class JudgedBuildGeometryTests(unittest.TestCase):
         GATE.check_profile_overrides_exported(failures)
         GATE.check_buck2_judged_config(failures)
         GATE.check_buck2_optimized_config(failures)
-        GATE.check_monty_optimized_config(failures)
         GATE.check_buck2_boot_sites(failures)
         GATE.check_build_precedes_launcher_locks(failures)
         return failures
@@ -178,17 +177,6 @@ class JudgedBuildGeometryTests(unittest.TestCase):
         )
         failures = self.run_gate()
         self.assertTrue(any("--config=judged does not select" in f for f in failures), failures)
-
-    def test_monty_uses_the_optimized_configuration(self) -> None:
-        script = self.root / "scripts/profile_monty_comparison.sh"
-        text = script.read_text(encoding="utf-8")
-        self.assertIn("--config=optimized", text)
-        script.write_text(
-            text.replace("--config=optimized", "--config=judged", 1),
-            encoding="utf-8",
-        )
-        failures = self.run_gate()
-        self.assertTrue(any("Buck2 optimized configuration" in f for f in failures), failures)
 
     def test_optimized_profile_flags_match_the_repository_profile(self) -> None:
         rules = self.root / "tools/buck2/lash_rust.bzl"
