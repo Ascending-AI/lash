@@ -7,9 +7,11 @@
 //!   that re-delivers the round's calls, and `round::admit_round` with an
 //!   `x_start` for every member. No body runs before that commit, so a model
 //!   stream that never committed can never launch a tool.
-//! - **Refusal.** A round whose admission the catalog refuses is admitted
-//!   with every member settled on its typed refusal in the same commit: no
-//!   body runs, and a resume answers from those outcomes.
+//! - **Refusal.** A round past the session's tool-call limit is admitted
+//!   with every member settled on that typed refusal in the same commit: no
+//!   body runs, and a resume answers from those outcomes. No round is
+//!   refused for a tool's configuration: a misconfigured tool cannot be
+//!   registered, so the catalog never holds one.
 //! - **Resume.** A round the rows hold is resumed from its fold: the
 //!   re-delivered calls must be the ones it admitted, a started `Once`
 //!   without an outcome is `Interrupted`, a started `Repeatable` reruns at

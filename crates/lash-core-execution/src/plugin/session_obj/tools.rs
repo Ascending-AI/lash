@@ -191,6 +191,7 @@ impl PluginSession {
             tools,
             resolve_contract,
             contributions,
+            isolation_engines: self.host.isolation_engines(),
         })
         .map_err(|err| match err {
             source @ lash_sansio::ToolCatalogBuildError::UnusableSchema { .. } => {

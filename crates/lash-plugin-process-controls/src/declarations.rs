@@ -51,7 +51,8 @@ pub fn process_start_tool_definition() -> ToolDefinition {
         }),
         serde_json::json!({"x-lash": {"kind": "process_unknown"}})).expect("valid declared tool schemas")
         .with_execution(std::time::Duration::from_secs(30))
-        .with_declaration(ToolDeclaration::default().with_intents([ToolIntentKind::StartProcess]))
+        .with_declaration(ToolDeclaration::default().with_intents([ToolIntentKind::StartProcess]), None)
+        .expect("a valid tool declaration")
         .with_tool_binding(ToolBinding::new(["processes"], "start"))
 }
 
@@ -64,7 +65,8 @@ pub fn process_get_tool_definition() -> ToolDefinition {
         serde_json::json!({"type": "object", "properties": {"definition_id": definition_id_schema()}, "required": ["definition_id"], "additionalProperties": false}),
         serde_json::json!({"type": "object", "properties": {"id": definition_id_schema(), "signature": {}}, "required": ["id", "signature"], "additionalProperties": false})).expect("valid declared tool schemas")
         .with_execution(std::time::Duration::from_secs(30))
-        .with_declaration(ToolDeclaration::default().with_intents([ToolIntentKind::GetDefinition]))
+        .with_declaration(ToolDeclaration::default().with_intents([ToolIntentKind::GetDefinition]), None)
+        .expect("a valid tool declaration")
         .with_tool_binding(ToolBinding::new(["processes"], "get"))
 }
 

@@ -988,16 +988,16 @@ mod tool_catalog_cache_tests {
                 serde_json::json!({ "type": "string" }),
             )
             .expect("valid declared tool schemas")
-            .with_execution(std::time::Duration::from_secs(120))
-            .with_declaration(if self.label == "route_a" {
-                crate::ToolDeclaration::deferring()
-            } else {
-                crate::ToolDeclaration::default()
-            });
+            .with_execution(std::time::Duration::from_secs(120));
             if self.label == "route_a" {
-                definition.with_park(crate::ParkBound::Within(std::time::Duration::from_secs(
-                    120,
-                )))
+                definition
+                    .with_declaration(
+                        crate::ToolDeclaration::deferring(),
+                        Some(crate::ParkBound::Within(std::time::Duration::from_secs(
+                            120,
+                        ))),
+                    )
+                    .expect("a deferring tool declares its park bound")
             } else {
                 definition
             }
@@ -1348,7 +1348,7 @@ mod tool_catalog_cache_tests {
         assert_eq!(a_executions.load(Ordering::SeqCst), 1);
         assert_eq!(b_executions.load(Ordering::SeqCst), 0);
         assert!(
-            old_manifest.declaration.may_defer,
+            old_manifest.declaration().may_defer,
             "the old surface admits provider A's declaration"
         );
         assert_eq!(a_attempts.load(Ordering::SeqCst), 1);
@@ -1394,7 +1394,7 @@ mod tool_catalog_cache_tests {
         assert_eq!(a_executions.load(Ordering::SeqCst), 1);
         assert_eq!(b_executions.load(Ordering::SeqCst), 1);
         assert!(
-            !fresh_manifest.declaration.may_defer,
+            !fresh_manifest.declaration().may_defer,
             "the fresh surface admits provider B's declaration"
         );
         assert_eq!(a_attempts.load(Ordering::SeqCst), 1);

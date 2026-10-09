@@ -84,15 +84,21 @@ fn definition(name: &str) -> lash_core::ToolDefinition {
     .with_tool_binding(lash_core::ToolBinding::new(["tools"], name));
     if name == DEFERRED {
         definition
-            .with_declaration(lash_core::ToolDeclaration::deferring())
-            .with_park(lash_core::ParkBound::Within(
-                std::time::Duration::from_secs(120),
-            ))
+            .with_declaration(
+                lash_core::ToolDeclaration::deferring(),
+                Some(lash_core::ParkBound::Within(
+                    std::time::Duration::from_secs(120),
+                )),
+            )
+            .expect("a deferring tool declares its park bound")
     } else {
-        definition.with_declaration(
-            lash_core::ToolDeclaration::default()
-                .with_intents([lash_core::ToolIntentKind::StartProcess]),
-        )
+        definition
+            .with_declaration(
+                lash_core::ToolDeclaration::default()
+                    .with_intents([lash_core::ToolIntentKind::StartProcess]),
+                None,
+            )
+            .expect("a valid tool declaration")
     }
 }
 

@@ -318,8 +318,11 @@ fn write_tool(world: &Arc<World>) -> Arc<dyn lash_core::ToolProvider> {
     )
     .expect("the write tool's schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_declaration(lash_core::ToolDeclaration::deferring())
-    .with_park(lash_core::ParkBound::Within(Duration::from_secs(300)))
+    .with_declaration(
+        lash_core::ToolDeclaration::deferring(),
+        Some(lash_core::ParkBound::Within(Duration::from_secs(300))),
+    )
+    .expect("a deferring tool declares its park bound")
     .with_execution_policy(lash_core::ExecutionPolicy::Once)
     .with_tool_binding(lash_core::ToolBinding::new(["tools"], WRITE_TOOL));
     Arc::new(lash::tools::StaticToolProvider::new(

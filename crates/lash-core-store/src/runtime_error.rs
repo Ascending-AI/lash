@@ -388,6 +388,15 @@ runtime_error_codes! {
         /// revision recovers it. Nothing is recorded, and no other revision is
         /// ever used instead.
         RunDefinitionUnavailable = "run_definition_unavailable" => Retryable,
+        // the tool is isolated in a process engine this worker's deployment does not register.
+        /// Work this worker took up needs an isolated tool whose process
+        /// engine it does not register (FIG-5774): a tool of its own catalog,
+        /// or one a replayed cell's recorded manifest names. It is the
+        /// deployment, not the call: nothing runs and nothing is recorded,
+        /// the work retries, and its retry budget parks it for a worker that
+        /// registers the engine. An isolated call never falls back to an
+        /// inline body.
+        IsolationEngineUnavailable = "isolation_engine_unavailable" => Retryable,
         /// A recorded renderer is absent on this worker. Redeploying it can resume the run.
         RecordedRendererUnavailable = "recorded_renderer_unavailable" => Retryable,
         // the attachment store refused or faulted; a healthy store retains the output.

@@ -527,7 +527,20 @@ async fn run_cell(
         };
     for open in &linked.open_calls {
         match lash_core::tool_dispatch::CellMember::decode(&open.0) {
-            Ok(member) => members.register(member),
+            // An open call this node cannot run is not taken up: the cell
+            // stops unrecorded, and its turn waits for a node that can.
+            Ok(member) => match members.require_capable(&member) {
+                Ok(()) => members.register(member),
+                Err(error) => {
+                    let message = error.to_string();
+                    ctx.record_nested_runtime_effect_error(error);
+                    return exec_setup_failure_or_stop(
+                        state,
+                        &ctx,
+                        lash_core::CellFailure::new(lash_core::CellFailureKind::Host, message),
+                    );
+                }
+            },
             Err(error) => {
                 return exec_setup_failure_or_stop(
                     state,

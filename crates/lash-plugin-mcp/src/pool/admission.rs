@@ -133,17 +133,15 @@ impl McpConnectionPool {
             return pool_shut_down_failure();
         }
         let manifest = call.manifest();
-        if manifest.declaration.isolated {
-            return ToolOutcome::failure(lash_core::tool_dispatch::admission_failure(
-                call.name(),
-                lash_core::ToolAdmissionRefusal::UnsupportedIsolation,
-            ));
-        }
         let binding = match admitted_binding(manifest) {
             Ok(binding) => binding,
             Err(failure) => return failure,
         };
-        if manifest.declaration.may_defer || binding.completion != RemoteCompletion::Inline {
+        let declaration = manifest.declaration();
+        if declaration.may_defer
+            || declaration.isolated
+            || binding.completion != RemoteCompletion::Inline
+        {
             return McpCallFailure::UnsupportedRemoteCompletion {
                 server: binding.server,
                 tool_id: manifest.id.to_string(),

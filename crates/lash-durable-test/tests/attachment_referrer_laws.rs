@@ -133,10 +133,13 @@ fn hold_definition() -> lash_core::ToolDefinition {
 }
 
 fn start_turn_child_definition() -> lash_core::ToolDefinition {
-    tool_definition(START_TURN_CHILD, text_input()).with_declaration(
-        lash_core::ToolDeclaration::default()
-            .with_intents([lash_core::ToolIntentKind::StartProcess]),
-    )
+    tool_definition(START_TURN_CHILD, text_input())
+        .with_declaration(
+            lash_core::ToolDeclaration::default()
+                .with_intents([lash_core::ToolIntentKind::StartProcess]),
+            None,
+        )
+        .expect("a valid tool declaration")
 }
 
 fn text_meta(name: &str) -> lash_core::AttachmentCreateMeta {

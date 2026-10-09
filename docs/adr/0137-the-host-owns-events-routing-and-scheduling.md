@@ -28,9 +28,10 @@ Every tool manifest declares its host-set `execution: Duration` body bound.
 A deferring tool also declares `park: ParkBound`, either `Within(Duration)`
 or `UntilScopeEnd`. A non-deferring tool declares no park bound. Tool
 definitions set these with `with_execution(Duration)` and
-`with_park(ParkBound)`. Registration refuses missing bounds as `MissingBound`
-and a park without deferral as `ParkWithoutDeferral`; admission also checks
-ungated manifests. Body and park bounds are separate,
+`with_declaration(declaration, Some(ParkBound))`. A definition missing a bound
+is refused as `MissingBound`, and a park without deferral as
+`ParkWithoutDeferral`, when it is built or decoded, so no manifest reaches
+admission without its bounds (FIG-5774). Body and park bounds are separate,
 and Lash supplies no default for either. Admission fixes the park deadline
 once; retries and takeover preserve it. `UntilScopeEnd` has no deadline and
 is revoked when its owning turn or process scope ends. Engine `PinKey` and

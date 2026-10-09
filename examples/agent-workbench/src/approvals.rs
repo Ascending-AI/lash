@@ -346,10 +346,10 @@ impl ApprovalToolProvider {
         // The attempt parks on a human decision, so admission records that it
         // may defer and its round pins the completion wait, whose key the
         // host reads from `Completions::parked` when the operator decides.
-        .with_declaration(lash::tools::ToolDeclaration::deferring())
         // A human decides in their own time: the park lasts until the
         // decision or the end of the turn that asked.
-        .with_park(lash::tools::ParkBound::UntilScopeEnd)
+        .with_declaration(lash::tools::ToolDeclaration::deferring(), Some(lash::tools::ParkBound::UntilScopeEnd))
+        .expect("a deferring tool declares its park bound")
     }
 }
 

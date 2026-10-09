@@ -278,7 +278,7 @@ async fn dispatch_prepared_tool_attempt_launch<'run>(
         ));
     };
     let tool_name = authority.manifest().name.clone();
-    let declaration = authority.manifest().declaration.clone();
+    let declaration = authority.manifest().declaration().clone();
     if let Err(failure) = authority.verify_prepared_identity(&prepared) {
         return Ok(attempt_done(
             normalized_outcome(context, &ids, tool_name, args, failure).await,

@@ -112,7 +112,7 @@ async fn build_attempt_context<'run>(
     // capability.
     let completion = match tool_context.completion.load() {
         Some(key) => crate::tool_provider::AttemptCompletionSupport::Available(key),
-        None if !admitted.declaration.may_defer => {
+        None if !admitted.declaration().may_defer => {
             crate::tool_provider::AttemptCompletionSupport::NotDeclared
         }
         None => crate::tool_provider::AttemptCompletionSupport::ControllerUnsupported,

@@ -97,11 +97,15 @@ before any is admitted.
 **Declaration.** The author declares exactly `may_defer`, `intents` and
 `isolated`, as the `ToolDeclaration` on the tool's `ToolManifest`. Admission
 reads it from the manifest the call is admitted under: the catalog's, the
-grant's, or a replayed cell's recorded binding. A round's calls are admitted
-together before any prepares: an invalid declaration, or an isolated
-declaration with no bound process implementation, refuses every member with
-a typed `ToolAdmissionRefusal`. In a turn's round the refused members settle
-at admission, in `model.done`, and no body runs. An outcome the declaration
+grant's, or a replayed cell's recorded binding. A manifest is complete by
+construction: one with an invalid declaration, without a bound its host must
+set, or isolated without naming its process engine cannot be built or
+decoded (`RegistrationRefused`), and an isolated tool enters a catalog only
+where its engine is registered (`UnregisteredIsolationEngine`). So no call
+and no round is refused for a tool's configuration. A node that does not
+register the engine a manifest names takes up none of the work that needs
+it: the work fails `isolation_engine_unavailable`, records nothing, retries,
+and parks for a node that registers the engine. An outcome the declaration
 does not admit (Deferred without `may_defer`, an undeclared intent kind)
 fails the call with `ToolFailureCause::Declaration` before anything it
 declared is realized. An isolated call is a process from its start, with no

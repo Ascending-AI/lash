@@ -313,10 +313,10 @@ pub(crate) fn tool_definitions() -> Vec<lash::tools::ToolDefinition> {
     ).expect("approval schema")
         .with_execution(std::time::Duration::from_secs(120))
         .with_tool_binding(ToolBinding::new(["host"], "approval"))
-        .with_declaration(ToolDeclaration::deferring())
         // The operator decides in their own time: the park lasts until the
         // decision or the end of the run that asked.
-        .with_park(lash::tools::ParkBound::UntilScopeEnd));
+        .with_declaration(ToolDeclaration::deferring(), Some(lash::tools::ParkBound::UntilScopeEnd))
+        .expect("a deferring tool declares its park bound"));
     for operation in crate::sample_tools::OPERATIONS {
         let name = operation.host_operation.replace('.', "_");
         let definition = ToolDefinition::raw(

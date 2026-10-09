@@ -474,14 +474,14 @@ pub use lash_sansio::{
     PluginRuntimeEvent, ProjectionMode, ProviderAttemptLimits, RegistrationRefused, RetainedOutput,
     RunId, SchemaAdmissionError, SchemaContract, SchemaDialect, SchemaProjectionOverride,
     SchemaProjectionPolicy, SessionAppendNode, TOOL_BINDING_KEY, TextProjectionMetadata,
-    TokenUsageOverflow, ToolAdmissionRefusal, ToolArgumentProjectionPolicy, ToolBinding, ToolBound,
-    ToolBounds, ToolCallOutcome, ToolCallOutput, ToolCallRecord, ToolCancellation, ToolCatalog,
+    TokenUsageOverflow, ToolArgumentProjectionPolicy, ToolBinding, ToolBound, ToolBounds,
+    ToolCallOutcome, ToolCallOutput, ToolCallRecord, ToolCancellation, ToolCatalog,
     ToolCatalogBuildError, ToolCatalogEntry, ToolCheckConflict, ToolCheckPhase, ToolCheckReply,
     ToolCheckVerdictKind, ToolContract, ToolControl, ToolDeclaration, ToolDefinition,
-    ToolDefinitionBindingExt, ToolDiscovery, ToolFailure, ToolFailureCause, ToolFailureClass,
-    ToolFailureSource, ToolId, ToolIntentIdentity, ToolIntentKind, ToolManifest, ToolModule,
-    ToolOutputContract, ToolValue, ToolView, ToolViewBlock, ToolViewMeta, TurnId, TurnOutputSource,
-    TurnReply, ValueMismatch,
+    ToolDefinitionBindingExt, ToolDiscovery, ToolDraft, ToolFailure, ToolFailureCause,
+    ToolFailureClass, ToolFailureSource, ToolId, ToolIntentIdentity, ToolIntentKind, ToolManifest,
+    ToolModule, ToolOutputContract, ToolValue, ToolView, ToolViewBlock, ToolViewMeta, TurnId,
+    TurnOutputSource, TurnReply, ValueMismatch,
 };
 pub(crate) use lash_sansio::{
     BaseRenderCache, build_turn, messages_are_prompt_resume_safe, visible_response_parts,
@@ -766,8 +766,8 @@ pub use tool_intent::{
 };
 /// Tool-provider contracts, including child-process execution observation hooks.
 pub use tool_provider::{
-    AttemptContext, AttemptProcessReads, AttemptSessionReads, IsolatedProcessBinding,
-    IsolatedProcessRequest, PreparedToolBatch, PreparedToolBatchCall, PreparedToolCall, ToolCall,
+    AttemptContext, AttemptProcessReads, AttemptSessionReads, IsolatedProcessRequest,
+    PreparedToolBatch, PreparedToolBatchCall, PreparedToolCall, ToolCall,
     ToolChildExecutionTraceHook, ToolChildProcessStarted, ToolExecutionGrant, ToolPrepareCall,
     ToolPrepareContext, ToolProvider,
 };

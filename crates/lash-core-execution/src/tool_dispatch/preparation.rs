@@ -151,7 +151,7 @@ pub async fn prepare_recorded_tool_call_with_context(
     mut pending: crate::sansio::PendingToolCall,
 ) -> ToolPreparationOutcome {
     pending.tool_name = binding.manifest.name.clone();
-    let preparation = if binding.manifest.declaration.may_defer {
+    let preparation = if binding.manifest.declaration().may_defer {
         ProviderPreparation::Live(None)
     } else {
         ProviderPreparation::Recorded
@@ -187,22 +187,6 @@ async fn prepare_authorized_tool_call_with_context(
 ) -> ToolPreparationOutcome {
     let tool_name = manifest.name.clone();
     let ids = ToolCallIds::of_pending(&pending);
-    // Admission precedes every hook and the provider's own preparation: a
-    // refused call runs no callback of any kind. This inline route binds no
-    // process, so an isolated call refuses here.
-    if let Err(refusal) = super::admission::admit_tool(&manifest, false) {
-        let failure = super::admission::admission_failure(&tool_name, refusal);
-        return completed_preparation(
-            normalized_outcome(
-                context,
-                &ids,
-                tool_name,
-                pending.args,
-                crate::ToolOutcome::failure(failure),
-            )
-            .await,
-        );
-    }
     let mut pending = pending;
     let hook_context = super::hooks::hook_context(
         context,

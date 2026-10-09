@@ -762,10 +762,13 @@ fn pending_echo_tool_definition() -> lash_core::ToolDefinition {
     )
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_declaration(lash_core::ToolDeclaration::deferring())
-    .with_park(lash_core::ParkBound::Within(
-        std::time::Duration::from_secs(120),
-    ))
+    .with_declaration(
+        lash_core::ToolDeclaration::deferring(),
+        Some(lash_core::ParkBound::Within(
+            std::time::Duration::from_secs(120),
+        )),
+    )
+    .expect("a deferring tool declares its park bound")
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

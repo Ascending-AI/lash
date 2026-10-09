@@ -1,4 +1,3 @@
-mod admission;
 mod atomic_attempt;
 mod attempt_coordinator;
 mod call_run;
@@ -21,7 +20,6 @@ pub use crate::runtime::process::{
     IsolatedToolStart,
 };
 pub use crate::tool_run::RunCutRefusal;
-pub use admission::{ToolRoundRefusal, admission_failure, admit_tool_round};
 pub use call_run::{AdmittedToolCall, AttemptEnd, CallEnd};
 pub use context::ToolDispatchContext;
 pub use pending_resolver::{LaunchReceipt, model_visible_intent_outcomes};

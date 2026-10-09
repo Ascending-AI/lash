@@ -390,12 +390,14 @@ impl<P: CaseId> SessionPlugin for CasePlugin<P> {
                 .with_execution_policy(plan.policy);
                 // A deferred body parks until the case's host resolves it, or
                 // the turn that called it ends.
-                let definition = if declaration.may_defer {
-                    definition.with_park(lash::tools::ParkBound::UntilScopeEnd)
-                } else {
-                    definition
-                };
-                Ok(definition.with_declaration(declaration))
+                let park = declaration
+                    .may_defer
+                    .then_some(lash::tools::ParkBound::UntilScopeEnd);
+                definition
+                    .with_declaration(declaration, park)
+                    .map_err(|refusal| PluginError::ToolRegistrationRefused {
+                        source: Box::new(refusal),
+                    })
             })
             .collect::<Result<Vec<_>, PluginError>>()?;
         let view = reg.state();

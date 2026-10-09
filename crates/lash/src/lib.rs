@@ -412,16 +412,16 @@ pub mod tools {
     pub use lash_core::sansio::PendingToolCall;
     pub use lash_core::{
         AttemptContext, AttemptProcessReads, AttemptSessionReads, CancelHint, CancelProcessIntent,
-        CompactToolContract, ExecutionOwner, IsolatedProcessBinding, IsolatedProcessRequest,
-        PendingCompletion, PendingResolver, PreparedToolCall, StartProcessIntent,
-        TOOL_INTENT_MAX_CANONICAL_BYTES, TOOL_INTENT_MAX_COUNT, TOOL_INTENT_MAX_PER_KIND,
-        TOOL_INTENT_PROTOCOL_V3, ToolArgumentProjectionPolicy, ToolAttachmentClient,
-        ToolAttemptOutcome, ToolCall, ToolCallOutcome, ToolCallOutput, ToolCallRecord,
-        ToolCatalogEntry, ToolContract, ToolDefinition, ToolDirectCompletionClient, ToolDiscovery,
-        ToolExecutionGrant, ToolFailure, ToolFailureCause, ToolFailureClass, ToolFailureSource,
-        ToolIntent, ToolIntentCommandFailure, ToolIntentExecutionOutcome, ToolIntentIdentity,
-        ToolIntentKind, ToolIntentRealized, ToolIntentRefusalReason, ToolIntentRuntimeFailure,
-        ToolIntents, ToolManifest, ToolModule, ToolOutcome, ToolOutcomeDone, ToolOutputContract,
+        CompactToolContract, ExecutionOwner, IsolatedProcessRequest, PendingCompletion,
+        PendingResolver, PreparedToolCall, StartProcessIntent, TOOL_INTENT_MAX_CANONICAL_BYTES,
+        TOOL_INTENT_MAX_COUNT, TOOL_INTENT_MAX_PER_KIND, TOOL_INTENT_PROTOCOL_V3,
+        ToolArgumentProjectionPolicy, ToolAttachmentClient, ToolAttemptOutcome, ToolCall,
+        ToolCallOutcome, ToolCallOutput, ToolCallRecord, ToolCatalogEntry, ToolContract,
+        ToolDefinition, ToolDirectCompletionClient, ToolDiscovery, ToolDraft, ToolExecutionGrant,
+        ToolFailure, ToolFailureCause, ToolFailureClass, ToolFailureSource, ToolIntent,
+        ToolIntentCommandFailure, ToolIntentExecutionOutcome, ToolIntentIdentity, ToolIntentKind,
+        ToolIntentRealized, ToolIntentRefusalReason, ToolIntentRuntimeFailure, ToolIntents,
+        ToolManifest, ToolModule, ToolOutcome, ToolOutcomeDone, ToolOutputContract,
         ToolPrepareCall, ToolPrepareContext, ToolProvider, ToolRegistry, ToolSessionLlmProfile,
         ToolValue, ToolView, ToolViewBlock, ToolViewMeta, derive_tool_intent_identity,
         facade_support::ReconfigureError, facade_support::ToolSourceHandle,
@@ -430,13 +430,14 @@ pub mod tools {
     /// Per-call execution contract carried by [`ToolDefinition::with_execution_policy`].
     pub use lash_core::{Backoff, BoundedRetry, ExecutionPolicy, LimitCause};
     /// The three capabilities a tool declares with
-    /// [`ToolDefinition::with_declaration`], what refuses a call at admission,
-    /// and what refuses an outcome its declaration does not admit.
-    pub use lash_core::{DeclarationRefusal, OutcomeShape, ToolAdmissionRefusal, ToolDeclaration};
+    /// [`ToolDefinition::with_declaration`], and what refuses a declaration
+    /// or an outcome it does not admit.
+    pub use lash_core::{DeclarationRefusal, OutcomeShape, ToolDeclaration};
     pub use lash_core::{DeclaredStart, DeclaredStartRefused};
     /// A tool's host-set bounds: [`ToolDefinition::with_execution`] bounds
-    /// its body, [`ToolDefinition::with_park`] the park of a tool that may
-    /// defer. Registration refuses a tool missing one, naming the bound.
+    /// its body, [`ToolDefinition::with_declaration`] the park of a tool that
+    /// may defer. A tool missing one cannot be defined: the refusal names
+    /// the bound.
     pub use lash_core::{ParkBound, ToolBound, ToolBounds};
     /// Tool-execution request batches, replies, and child-process observation hooks.
     pub use lash_core::{

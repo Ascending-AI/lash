@@ -668,8 +668,7 @@ impl ProtocolDriverPlugin for StandardProtocolDriver {
         let catalog_specs = catalog.model_tool_specs();
         let tool_specs = match self.config.batch {
             BatchSugar::Enabled { max_members } => {
-                let definition = batch_tool_definition(max_members);
-                let model_tool = definition.contract().model_tool(&definition.manifest());
+                let model_tool = batch_tool_definition(max_members).model_tool();
                 let mut specs = catalog_specs.as_ref().clone();
                 specs.push(lash_core::llm::types::LlmToolSpec {
                     name: model_tool.name,

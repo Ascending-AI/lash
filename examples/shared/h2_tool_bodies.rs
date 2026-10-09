@@ -108,14 +108,12 @@ impl ToolBodies {
                 };
                 // A deferred body parks until the scenario's host resolves
                 // it, or the turn that called it ends.
-                let definition = if declaration.may_defer {
-                    definition.with_park(lash::tools::ParkBound::UntilScopeEnd)
-                } else {
-                    definition
-                };
+                let park = declaration
+                    .may_defer
+                    .then_some(lash::tools::ParkBound::UntilScopeEnd);
                 Ok(definition
                     .with_tool_binding(lash::tools::ToolBinding::new(["tools"], label))
-                    .with_declaration(declaration))
+                    .with_declaration(declaration, park)?)
             })
             .collect::<Result<Vec<_>>>()?;
         Ok(Arc::new(StaticToolProvider::new(definitions, self)))

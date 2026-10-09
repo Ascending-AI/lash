@@ -169,6 +169,7 @@ mod tests {
                 }))
             })),
             contributions: Vec::new(),
+            isolation_engines: std::collections::BTreeSet::new(),
         })
         .expect("first resident definition is pinned");
 
@@ -356,6 +357,7 @@ mod tests {
                 contracts.get(&manifest.id).cloned()
             })),
             contributions: vec![contribution],
+            isolation_engines: std::collections::BTreeSet::new(),
         })
         .expect("complete resident definitions");
 
@@ -505,6 +507,7 @@ mod tests {
                 move |_| Some(Arc::clone(&contract))
             })),
             contributions: vec![ToolCatalogContribution::default()],
+            isolation_engines: std::collections::BTreeSet::new(),
         })
         .expect("complete resident definition");
         let docs = rlm_prompt_tool_docs(

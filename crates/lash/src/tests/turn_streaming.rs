@@ -78,10 +78,13 @@ fn app_tool_definition() -> lash_core::ToolDefinition {
         .with_execution(std::time::Duration::from_secs(120)),
         "app_lookup",
     )
-    .with_declaration(lash_core::ToolDeclaration::deferring())
-    .with_park(lash_core::ParkBound::Within(
-        std::time::Duration::from_secs(120),
-    ))
+    .with_declaration(
+        lash_core::ToolDeclaration::deferring(),
+        Some(lash_core::ParkBound::Within(
+            std::time::Duration::from_secs(120),
+        )),
+    )
+    .expect("a deferring tool declares its park bound")
 }
 
 /// `app_lookup` answering `{ "ok": true }`.

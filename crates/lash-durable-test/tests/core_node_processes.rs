@@ -150,6 +150,22 @@ async fn deploy_configured(
     build: impl FnOnce(&lash::Backend) -> lash::LashCoreBuilder,
 ) -> Deployment {
     let (stores, keep) = stores(tier).await;
+    let (backend, core) = node_over(stores, settings, engines, build);
+    Deployment {
+        backend,
+        core,
+        _keep: keep,
+    }
+}
+
+/// One node over `stores`: a backend with `engines` under `settings`, and
+/// the core `build` builds over it.
+fn node_over(
+    stores: Arc<dyn StoreSet>,
+    settings: lash_core_execution::DurableSettings,
+    engines: Vec<Arc<dyn lash_core::ProcessEngine>>,
+    build: impl FnOnce(&lash::Backend) -> lash::LashCoreBuilder,
+) -> (lash::Backend, lash::LashCore) {
     let backend = engines
         .into_iter()
         .fold(
@@ -170,11 +186,7 @@ async fn deploy_configured(
             lash::persistence::LeaseIncarnationId::new("core-node-boot"),
         ))
         .expect("the core builds");
-    Deployment {
-        backend,
-        core,
-        _keep: keep,
-    }
+    (backend, core)
 }
 
 fn metadata() -> lash_core::LlmProfileMetadata {
@@ -1765,10 +1777,9 @@ fn isolated_engine_advance(
     }
 }
 
-/// A native tool declared isolated, which its provider binds to
-/// [`ISOLATED_ENGINE`] when `bound`; its ordinary body counts its runs.
+/// A native tool declared isolated in [`ISOLATED_ENGINE`]; its ordinary
+/// body counts its runs.
 struct IsolatedTools {
-    bound: bool,
     executions: AtomicUsize,
 }
 
@@ -1789,10 +1800,8 @@ fn isolated_definition() -> lash_core::ToolDefinition {
     .expect("the isolated tool's schemas")
     .with_execution(std::time::Duration::from_secs(120))
     .with_tool_binding(lash_core::ToolBinding::new(["iso"], "run"))
-    .with_declaration(lash_core::ToolDeclaration {
-        isolated: true,
-        ..lash_core::ToolDeclaration::default()
-    })
+    .isolated_in(ISOLATED_ENGINE)
+    .expect("an isolated tool names its engine")
 }
 
 #[async_trait::async_trait]
@@ -1809,66 +1818,29 @@ impl lash_core::ToolProvider for IsolatedTools {
         self.executions.fetch_add(1, Ordering::SeqCst);
         lash_core::ToolOutcome::ok(serde_json::json!({ "ordinary": true })).into()
     }
-
-    fn isolated_process(
-        &self,
-        call: lash_core::IsolatedProcessRequest<'_>,
-    ) -> Option<lash_core::IsolatedProcessBinding> {
-        self.bound.then(|| lash_core::IsolatedProcessBinding {
-            engine: ISOLATED_ENGINE.to_owned(),
-            payload: call.args.clone(),
-        })
-    }
 }
 
-/// An RLM turn whose cell calls the isolated tool: the deployment, its
-/// tools, the turn's output and every request its model saw.
-async fn isolated_turn(
-    tier: Tier,
-    bound: bool,
-) -> (
-    Deployment,
-    Arc<IsolatedTools>,
-    lash::TurnOutput,
-    Vec<String>,
-) {
-    let seen = Arc::new(Mutex::new(Vec::new()));
-    let model = {
-        let seen = Arc::clone(&seen);
-        scripted(move |request, transcript| {
-            let mut seen = seen.lock().unwrap();
-            seen.push(transcript.to_owned());
-            let source = if seen.len() == 1 {
-                "const started = await iso.run({label: \"isolated-law\"});\nfinish(started);"
-            } else {
-                "finish(\"asked again\");"
-            };
-            text(request, &format!("<typescript>\n{source}\n</typescript>"))
-        })
-    };
-    let tools = Arc::new(IsolatedTools {
-        bound,
-        executions: AtomicUsize::new(0),
+/// The engine [`ISOLATED_TOOL`] is isolated in.
+fn isolated_engine() -> Arc<dyn lash_core::ProcessEngine> {
+    Arc::new(ScriptEngine {
+        kind: ISOLATED_ENGINE,
+        advance: isolated_engine_advance,
+    })
+}
+
+/// A core whose RLM cell calls the isolated tool once and finishes with its
+/// answer.
+fn isolated_core(backend: &lash::Backend, tools: &Arc<IsolatedTools>) -> lash::LashCoreBuilder {
+    let model = scripted(|request, _| {
+        text(
+            request,
+            "<typescript>\nconst started = await iso.run({label: \"isolated-law\"});\n\
+             finish(started);\n</typescript>",
+        )
     });
-    let deployment = deploy_with(
-        tier,
-        vec![Arc::new(ScriptEngine {
-            kind: ISOLATED_ENGINE,
-            advance: isolated_engine_advance,
-        })],
-        {
-            let tools = Arc::clone(&tools);
-            move |backend| {
-                rlm_core(backend)
-                    .serve_test_llm_profile(model, metadata())
-                    .tools(tools)
-            }
-        },
-    )
-    .await;
-    let output = settle(&deployment.core, "isolated-call", "call the isolated tool").await;
-    let seen = seen.lock().unwrap().clone();
-    (deployment, tools, output, seen)
+    rlm_core(backend)
+        .serve_test_llm_profile(model, metadata())
+        .tools(Arc::clone(tools) as Arc<dyn lash_core::ToolProvider>)
 }
 
 /// The processes of the isolated engine the registry holds.
@@ -1892,12 +1864,19 @@ async fn isolated_processes(backend: &lash::Backend) -> Vec<lash_core::ProcessRe
     .collect()
 }
 
-/// L08/D04: an RLM cell's call of a tool declared isolated, which its
-/// provider binds to a registered engine, starts exactly one lash process
-/// under an isolated start key, before any body runs: no ordinary body
-/// runs, the engine runs the process, and the call answers its descriptor.
+/// L08/D04: an RLM cell's call of a tool isolated in a registered engine
+/// starts exactly one lash process under an isolated start key, before any
+/// body runs: no ordinary body runs, the engine runs the process, and the
+/// call answers its descriptor.
 async fn an_isolated_rlm_tool_starts_one_process_and_answers_its_descriptor(tier: Tier) {
-    let (deployment, tools, output, _) = isolated_turn(tier, true).await;
+    let tools = Arc::new(IsolatedTools {
+        executions: AtomicUsize::new(0),
+    });
+    let deployment = deploy_with(tier, vec![isolated_engine()], |backend| {
+        isolated_core(backend, &tools)
+    })
+    .await;
+    let output = settle(&deployment.core, "isolated-call", "call the isolated tool").await;
     assert!(output.is_success(), "{output:?}");
     let descriptor: lash_core::tool_dispatch::IsolatedProcessDescriptor = serde_json::from_value(
         output
@@ -1930,34 +1909,146 @@ async fn an_isolated_rlm_tool_starts_one_process_and_answers_its_descriptor(tier
     );
 }
 
-/// L08/D04: an isolated tool its provider binds to no engine is refused at
-/// admission: the cell's call answers the typed refusal, and no body,
-/// process or engine run starts.
-async fn an_unbound_isolated_tool_is_refused_typed_before_any_body(tier: Tier) {
-    let (deployment, tools, output, seen) = isolated_turn(tier, false).await;
-    assert!(output.is_success(), "{output:?}");
-    assert_eq!(seen.len(), 2, "the model saw the refused cell: {seen:#?}");
+/// Redrive `session`'s parked actor as an operator. The facade has no
+/// session redrive verb (FIG-5401), so this writes the substrate's redrive
+/// mail.
+async fn redrive_session(backend: &lash::Backend, session: &SessionId) {
+    use lash_core::durable_port as durable;
+    let mut tx = durable::MailTx::new();
+    tx.write(durable::MailDomainWrite::Redrive(
+        durable::domain::RedriveRequest {
+            actor: durable::ActorKey::session(session.as_str()).expect("a session's actor key"),
+            requester: "operator".to_owned(),
+        },
+    ));
+    backend
+        .durable()
+        .commit_mail(tx, durable::CommitLabel::MAIL_PROCESS)
+        .await
+        .expect("the redrive mail commits");
+}
+
+/// FIG-5774: a node that does not register an isolated tool's process
+/// engine takes up none of a turn that needs it. Its tool does not register
+/// (the typed `isolation_engine_unavailable` fault), so the node runs no
+/// model call, body or process for the turn and records no outcome: the
+/// turn stays open and its session parks. A node that registers the engine
+/// then runs the turn to its end: one process, on the call's arguments.
+#[tokio::test]
+async fn a_node_without_an_isolated_tools_engine_leaves_the_turn_to_one_that_registers_it() {
+    let (stores, _keep) = stores(Tier::SqliteMemory).await;
+    let tools = Arc::new(IsolatedTools {
+        executions: AtomicUsize::new(0),
+    });
+    let settings = lash_core_execution::DurableSettings {
+        activation_loop_budget: 2,
+        ..lash_core_execution::DurableSettings::default()
+    };
+    let session_id = SessionId::try_from("isolated-capability".to_owned()).unwrap();
+
+    let (incapable_backend, incapable) =
+        node_over(Arc::clone(&stores), settings, Vec::new(), |backend| {
+            isolated_core(backend, &tools)
+        });
+    let session = incapable
+        .session(session_id.clone())
+        .create(lash::SessionCreation::root(
+            lash::plugins::SessionToolAccess::ambient(),
+            spec(),
+        ))
+        .await
+        .expect("the session is created");
+    let parked = {
+        let output = session
+            .send(lash::TurnInput::text("call the isolated tool"))
+            .output();
+        tokio::pin!(output);
+        tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                tokio::select! {
+                    output = &mut output => {
+                        panic!("the turn settled on a node without the engine: {output:?}")
+                    }
+                    () = tokio::time::sleep(Duration::from_millis(20)) => {
+                        let park = session.park_reason().await.expect("the park is read");
+                        if let Some(reason) = park {
+                            break reason;
+                        }
+                    }
+                }
+            }
+        })
+        .await
+        .expect("the session parks within a minute")
+    };
+    let lash::SessionParkReason::PassLoop { error, .. } = &parked else {
+        panic!("the session parked for another reason: {parked:?}");
+    };
     assert!(
-        seen[1].contains(
-            "was refused at admission: the tool is declared isolated and no process \
-             implementation is bound to it"
-        ),
-        "the cell's call answered the unsupported-isolation refusal: {}",
-        seen[1]
+        error.contains("isolation_engine_unavailable")
+            && error.contains(ISOLATED_TOOL)
+            && error.contains(ISOLATED_ENGINE),
+        "the park names the tool and the engine its node lacks: {error}"
     );
+    assert!(
+        session
+            .current_turn()
+            .await
+            .expect("the turn is read")
+            .is_some(),
+        "the turn stays open"
+    );
+    assert!(
+        isolated_processes(&incapable_backend).await.is_empty(),
+        "no process"
+    );
+    incapable.shutdown().await.expect("the node stops");
+
+    let (capable_backend, capable) =
+        node_over(stores, settings, vec![isolated_engine()], |backend| {
+            isolated_core(backend, &tools)
+        });
+    redrive_session(&capable_backend, &session_id).await;
+    let process = tokio::time::timeout(Duration::from_secs(60), async {
+        loop {
+            if let [process] = isolated_processes(&capable_backend).await.as_slice() {
+                break process.id.clone();
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("the capable node starts the call's process within a minute");
+    assert_eq!(
+        success(&ended(&capable, &process).await),
+        serde_json::json!({ "isolated": { "label": "isolated-law" } }),
+        "the engine ran the one process on the call's arguments"
+    );
+    tokio::time::timeout(Duration::from_secs(60), async {
+        while session
+            .current_turn()
+            .await
+            .expect("the turn is read")
+            .is_some()
+        {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("the capable node ends the turn within a minute");
     assert_eq!(
         tools.executions.load(Ordering::SeqCst),
         0,
         "no ordinary body"
     );
-    assert!(
-        isolated_processes(&deployment.backend).await.is_empty(),
-        "no process"
+    assert_eq!(
+        isolated_processes(&capable_backend).await.len(),
+        1,
+        "one lash process"
     );
 }
 
 on_every_tier!(an_isolated_rlm_tool_starts_one_process_and_answers_its_descriptor);
-on_every_tier!(an_unbound_isolated_tool_is_refused_typed_before_any_body);
 
 #[path = "support/kernel_process.rs"]
 mod kernel_process;

@@ -3,8 +3,11 @@
 //! A tool declares exactly three capabilities on its [`ToolManifest`]:
 //! whether its body may return Deferred, which Lash intent kinds a Done
 //! result may declare, and whether the call is isolated — a process from its
-//! start, with no inline body. Admission records the declaration with the
-//! admitted manifest, and every later read — the completion key reserved
+//! start, with no inline body. A manifest holds only a valid declaration
+//! ([`ToolManifest::declared`](crate::ToolManifest::declared)): an invalid
+//! one, or an isolated one naming no process engine, is refused when its
+//! tool is registered, so no call is refused for it. Admission records the
+//! declaration with the admitted manifest, and every later read — the completion key reserved
 //! before the body, the check of the body's outcome, a recovered or replayed
 //! call — reads that recorded answer, never a live provider.
 //!
@@ -70,38 +73,6 @@ pub enum DeclarationRefusal {
     UndeclaredIntent { kind: ToolIntentKind },
     #[error("an isolated call produced an inline outcome")]
     InlineOutcomeFromIsolated,
-}
-
-/// Why admission refused a call before any member of its round started.
-///
-/// One refused member admits no member: every call of the round answers
-/// this refusal, the refused member with its own cause and every sibling
-/// naming it.
-#[derive(
-    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, thiserror::Error, schemars::JsonSchema,
-)]
-#[serde(tag = "refusal", rename_all = "snake_case", deny_unknown_fields)]
-pub enum ToolAdmissionRefusal {
-    /// The tool's recorded declaration is itself invalid.
-    #[error("the tool's declaration is refused: {cause}")]
-    Declaration { cause: DeclarationRefusal },
-    /// The call is declared isolated, and no process implementation is
-    /// bound to run it. An isolated call never falls back to an inline body.
-    #[error("the tool is declared isolated and no process implementation is bound to it")]
-    UnsupportedIsolation,
-    /// Another member of the same round was refused, so this one does not
-    /// start either.
-    #[error("member {member} of this call's round was refused at admission")]
-    Sibling { member: u32 },
-    /// The tool's manifest does not declare the bounds its host must set: a
-    /// manifest no registration admitted, such as an execution grant's.
-    #[error("the tool's bounds are refused: {cause}")]
-    Bounds { cause: crate::RegistrationRefused },
-}
-
-impl ToolAdmissionRefusal {
-    /// The failure code a refused call answers with.
-    pub const CODE: &'static str = "tool_admission_refused";
 }
 
 fn intent_position(kind: ToolIntentKind) -> usize {
@@ -187,22 +158,6 @@ impl ToolDeclaration {
                     Err(DeclarationRefusal::UndeclaredIntent { kind: *kind })
                 }),
         }
-    }
-
-    /// Admit a call under this declaration, before it prepares or starts.
-    /// `supports_isolation` answers whether a process implementation is
-    /// bound to run the tool isolated.
-    ///
-    /// # Errors
-    ///
-    /// An invalid declaration, or an isolated one with no implementation.
-    pub fn admit(&self, supports_isolation: bool) -> Result<(), ToolAdmissionRefusal> {
-        self.validate()
-            .map_err(|cause| ToolAdmissionRefusal::Declaration { cause })?;
-        if self.isolated && !supports_isolation {
-            return Err(ToolAdmissionRefusal::UnsupportedIsolation);
-        }
-        Ok(())
     }
 
     pub(crate) fn is_default(&self) -> bool {

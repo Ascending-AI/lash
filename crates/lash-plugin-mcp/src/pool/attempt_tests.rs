@@ -263,10 +263,26 @@ async fn l07_l08_mcp_sockets_refuse_remote_defer_and_isolation_before_send() {
         let mut manifest = original.clone();
         match mode {
             "deferred" => {
-                manifest.declaration.may_defer = true;
-                manifest.park = Some(lash_core::ParkBound::UntilScopeEnd);
+                manifest = manifest
+                    .declared(
+                        lash_core::ToolDeclaration::deferring(),
+                        Some(lash_core::ParkBound::UntilScopeEnd),
+                        None,
+                    )
+                    .expect("a deferring manifest with its park bound");
             }
-            "isolated" => manifest.declaration.isolated = true,
+            "isolated" => {
+                manifest = manifest
+                    .declared(
+                        lash_core::ToolDeclaration {
+                            isolated: true,
+                            ..lash_core::ToolDeclaration::default()
+                        },
+                        None,
+                        Some("sandbox".to_owned()),
+                    )
+                    .expect("an isolated manifest naming its engine");
+            }
             _ => {
                 manifest
                     .bindings
@@ -281,16 +297,7 @@ async fn l07_l08_mcp_sockets_refuse_remote_defer_and_isolation_before_send() {
             panic!("unsupported work never becomes Deferred")
         };
         let result = ToolOutcome::from_output(result.into_output());
-        if mode == "isolated" {
-            assert_eq!(
-                failure(&result).cause.as_deref(),
-                Some(&lash_core::ToolFailureCause::Admission {
-                    refusal: lash_core::ToolAdmissionRefusal::UnsupportedIsolation
-                })
-            );
-        } else {
-            assert_eq!(failure(&result).code, "mcp_unsupported_remote_completion");
-        }
+        assert_eq!(failure(&result).code, "mcp_unsupported_remote_completion");
     }
     let grant = crate::McpDeferredToolProvider::new(Arc::clone(&pool));
     let wrong_server = lash_core::testing::mock_attempt_context_with_execution_binding(

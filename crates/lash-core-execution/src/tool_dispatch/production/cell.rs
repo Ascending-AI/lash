@@ -336,6 +336,43 @@ impl CellMembers {
         self.tools.policies()
     }
 
+    /// Whether this node can run `member` as it is admitted: under its
+    /// recorded binding, its grant or the catalog. An isolated tool's call
+    /// runs only in the process engine its manifest names, and a manifest a
+    /// replayed cell or a grant recorded may name one this node does not
+    /// register. Runs no hook, preparation or body.
+    ///
+    /// # Errors
+    ///
+    /// [`RuntimeErrorCode::IsolationEngineUnavailable`](crate::RuntimeErrorCode::IsolationEngineUnavailable):
+    /// the node takes up none of the cell, which waits for a node that
+    /// registers the engine.
+    pub fn require_capable(
+        &self,
+        member: &CellMember,
+    ) -> Result<(), crate::RuntimeEffectControllerError> {
+        let CellMember::Tool(call) = member;
+        let context = &self.tools.context;
+        let Some(definition) =
+            ProductionToolHandlers::new(context.clone(), None).leaf_definition(&call.invocation())
+        else {
+            return Ok(());
+        };
+        let Some(engine) = definition.manifest.isolation_engine() else {
+            return Ok(());
+        };
+        if context.dispatch().process_engines.require(engine).is_ok() {
+            return Ok(());
+        }
+        Err(crate::PluginError::ToolRegistrationRefused {
+            source: Box::new(crate::RegistrationRefused::UnregisteredIsolationEngine {
+                tool: definition.manifest.name.clone(),
+                engine: engine.to_owned(),
+            }),
+        }
+        .into())
+    }
+
     /// What the cell is answered with for `member`, from its committed
     /// `output` alone.
     #[must_use]

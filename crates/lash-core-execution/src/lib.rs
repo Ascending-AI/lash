@@ -442,14 +442,14 @@ pub use lash_sansio::{
     OutputValue, ParkBound, Part, PartKind, PluginMessage, PluginRuntimeEvent, ProjectionMode,
     ProviderAttemptLimits, RegistrationRefused, RetainedOutput, SchemaAdmissionError,
     SchemaContract, SchemaDialect, SchemaProjectionOverride, SchemaProjectionPolicy,
-    SessionAppendNode, TextProjectionMetadata, TokenUsageOverflow, ToolAdmissionRefusal,
-    ToolArgumentProjectionPolicy, ToolBound, ToolBounds, ToolCallOutcome, ToolCallOutput,
-    ToolCallRecord, ToolCancellation, ToolCatalog, ToolCatalogBuildError, ToolCatalogEntry,
-    ToolCheckConflict, ToolCheckPhase, ToolCheckReply, ToolCheckVerdictKind, ToolContract,
-    ToolControl, ToolDeclaration, ToolDefinition, ToolDiscovery, ToolFailure, ToolFailureCause,
-    ToolFailureClass, ToolFailureSource, ToolId, ToolIntentIdentity, ToolIntentKind, ToolManifest,
-    ToolModule, ToolOutputContract, ToolValue, ToolView, ToolViewBlock, ToolViewMeta, TurnId,
-    TurnOutputSource, ValueMismatch,
+    SessionAppendNode, TextProjectionMetadata, TokenUsageOverflow, ToolArgumentProjectionPolicy,
+    ToolBound, ToolBounds, ToolCallOutcome, ToolCallOutput, ToolCallRecord, ToolCancellation,
+    ToolCatalog, ToolCatalogBuildError, ToolCatalogEntry, ToolCheckConflict, ToolCheckPhase,
+    ToolCheckReply, ToolCheckVerdictKind, ToolContract, ToolControl, ToolDeclaration,
+    ToolDefinition, ToolDiscovery, ToolDraft, ToolFailure, ToolFailureCause, ToolFailureClass,
+    ToolFailureSource, ToolId, ToolIntentIdentity, ToolIntentKind, ToolManifest, ToolModule,
+    ToolOutputContract, ToolValue, ToolView, ToolViewBlock, ToolViewMeta, TurnId, TurnOutputSource,
+    ValueMismatch,
 };
 pub use tool_provider::{ToolAttachmentClient, ToolDirectCompletionClient, ToolSessionLlmProfile};
 /// Project a successful tool control into its terminal turn outcome.
@@ -823,8 +823,8 @@ pub use tool_intent::{
 /// running inside a durable process.
 /// Tool-provider contracts, including child-process execution observation hooks.
 pub use tool_provider::{
-    AttemptContext, AttemptProcessReads, AttemptSessionReads, IsolatedProcessBinding,
-    IsolatedProcessRequest, PreparedToolBatch, PreparedToolBatchCall, PreparedToolCall, ToolCall,
+    AttemptContext, AttemptProcessReads, AttemptSessionReads, IsolatedProcessRequest,
+    PreparedToolBatch, PreparedToolBatchCall, PreparedToolCall, ToolCall,
     ToolChildExecutionTraceHook, ToolChildProcessStarted, ToolExecutionGrant, ToolPrepareCall,
     ToolPrepareContext, ToolProvider,
 };

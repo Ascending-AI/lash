@@ -142,6 +142,20 @@ impl From<PluginError> for RuntimeEffectControllerError {
             | PluginError::MonotonicCounterOverflow { .. }) => {
                 Self::new(RuntimeErrorCode::RuntimeStoreCorrupt, err.to_string())
             }
+            // A node that does not register an isolated tool's engine takes
+            // up none of the work that needs it: the work waits for a node
+            // that does.
+            PluginError::ToolRegistrationRefused { ref source }
+                if matches!(
+                    **source,
+                    crate::RegistrationRefused::UnregisteredIsolationEngine { .. }
+                ) =>
+            {
+                Self::new(
+                    RuntimeErrorCode::IsolationEngineUnavailable,
+                    err_message(source),
+                )
+            }
             err @ (PluginError::Session(_)
             | PluginError::Registration(_)
             | PluginError::ConfigRegistration(_)
@@ -173,6 +187,10 @@ impl From<PluginError> for RuntimeEffectControllerError {
             }
         }
     }
+}
+
+fn err_message(refusal: &crate::RegistrationRefused) -> String {
+    format!("{refusal}; the work waits for a worker that registers that engine")
 }
 
 fn plugin_failure_error(

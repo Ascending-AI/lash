@@ -257,6 +257,14 @@ impl KernelEffects for CellHost<'_> {
                 .insert(invocation.id.clone(), request.identity.clone());
         }
         let member = CellMember::Tool(CellCall::of(&invocation));
+        // A node without the process engine the call's manifest names takes
+        // up none of it: the cell stops unrecorded, and its turn waits for a
+        // node that registers the engine.
+        if let Err(error) = self.members.require_capable(&member) {
+            let fault = ParentFault(error.to_string());
+            self.ctx.record_nested_runtime_effect_error(error);
+            return Err(fault);
+        }
         let pin = self.members.pin(&member, now_ms);
         let payload = EncodedPayload(member.encode().map_err(ParentFault)?);
         let draft = MemberDraft::pinned(member.id().clone(), payload, &self.opener, pin)?;

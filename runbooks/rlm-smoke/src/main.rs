@@ -336,6 +336,8 @@ fn definition<const N: usize>(
         output_schema,
     )
     .expect("valid declared tool schemas")
+    // Each tool reads or writes one local workspace file: a short body.
+    .with_execution(std::time::Duration::from_secs(30))
     .with_tool_binding(ToolBinding::new(module, operation))
 }
 

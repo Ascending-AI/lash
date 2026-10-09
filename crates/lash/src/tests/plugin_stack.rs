@@ -396,7 +396,7 @@ fn facade_compact_and_catalogue_policies_change_the_rendered_view() {
         "display", "display", "display contract",
         serde_json::json!({"type":"object", "properties":{"nested":{"type":"object", "properties":{"deep":{"type":"string"}}}}}),
         serde_json::json!({"type":"string"}),
-    ).expect("schemas").with_examples(vec!["abcdefghijklmnopqrstuvwxyz".into(), "second".into()]);
+    ).expect("schemas").with_execution(std::time::Duration::from_secs(30)).with_examples(vec!["abcdefghijklmnopqrstuvwxyz".into(), "second".into()]);
     let contract = definition.contract();
     let manifest = definition.manifest();
     let base = contract.compact_contract_with_presentation(

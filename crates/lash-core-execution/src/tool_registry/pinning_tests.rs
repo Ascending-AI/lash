@@ -69,7 +69,7 @@ async fn l12_pinned_routes_preserve_the_admitted_binding_and_declaration() {
         async fn execute(&self, call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
             ToolOutcome::ok(json!({
                 "name": call.name(), "binding": call.manifest().bindings["lash.mcp"],
-                "isolated": call.manifest().declaration.isolated,
+                "isolated": call.manifest().declaration().isolated,
             }))
             .into()
         }
@@ -86,7 +86,16 @@ async fn l12_pinned_routes_preserve_the_admitted_binding_and_declaration() {
     admitted
         .bindings
         .insert("lash.mcp".into(), json!({"revision": "admitted"}));
-    admitted.declaration.isolated = true;
+    let admitted = admitted
+        .declared(
+            crate::ToolDeclaration {
+                isolated: true,
+                ..crate::ToolDeclaration::default()
+            },
+            None,
+            Some("sandbox".to_owned()),
+        )
+        .expect("an isolated manifest naming its engine");
     let context = test_attempt_context();
     let crate::ToolAttemptOutcome::Done { result, .. } = pinned
         .execute(ToolCall::new(&admitted, &json!({}), &context))

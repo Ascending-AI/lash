@@ -83,8 +83,8 @@ fn tool_definitions() -> Vec<lash::tools::ToolDefinition> {
         .expect("review schema")
         .with_execution(std::time::Duration::from_secs(120))
         .with_tool_binding(ToolBinding::new(["review"], "request"))
-        .with_declaration(ToolDeclaration::deferring())
-        .with_park(lash::tools::ParkBound::UntilScopeEnd),
+        .with_declaration(ToolDeclaration::deferring(), Some(lash::tools::ParkBound::UntilScopeEnd))
+        .expect("a deferring tool declares its park bound"),
         ToolDefinition::raw(
             "tool:ledger_record",
             "ledger_record",

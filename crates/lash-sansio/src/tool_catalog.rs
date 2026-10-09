@@ -14,6 +14,9 @@ pub struct ToolCatalogBuildInput {
     pub tools: Vec<ToolManifest>,
     pub resolve_contract: Option<ToolContractResolver>,
     pub contributions: Vec<ToolCatalogContribution>,
+    /// The kinds of the process engines registered where the catalog is
+    /// built: an isolated member enters only where its engine is among them.
+    pub isolation_engines: std::collections::BTreeSet<String>,
 }
 
 /// A trusted plugin's contribution to catalog assembly. Membership is the
@@ -184,6 +187,7 @@ impl ToolCatalog {
                 resolver_contracts.get(&manifest.id).cloned()
             })),
             contributions: Vec::new(),
+            isolation_engines: std::collections::BTreeSet::new(),
         })
     }
 
@@ -259,8 +263,7 @@ pub enum ToolCatalogBuildError {
     DuplicateName {
         name: String,
     },
-    /// A member's declared execution is refused against the deployment's
-    /// execution budgets.
+    /// A member is refused against the deployment it registers in.
     RegistrationRefused {
         refusal: crate::RegistrationRefused,
     },
@@ -319,9 +322,16 @@ pub fn build_tool_catalog(
                 name: manifest.name.clone(),
             });
         }
-        manifest
-            .bounds()
-            .map_err(|refusal| ToolCatalogBuildError::RegistrationRefused { refusal })?;
+        if let Some(engine) = manifest.isolation_engine()
+            && !input.isolation_engines.contains(engine)
+        {
+            return Err(ToolCatalogBuildError::RegistrationRefused {
+                refusal: crate::RegistrationRefused::UnregisteredIsolationEngine {
+                    tool: manifest.name.clone(),
+                    engine: engine.to_owned(),
+                },
+            });
+        }
     }
     let entries = tools
         .into_iter()
@@ -382,6 +392,7 @@ mod tests {
                 contracts.get(&manifest.id).cloned()
             })),
             contributions,
+            isolation_engines: std::collections::BTreeSet::new(),
         }
     }
 
@@ -488,6 +499,7 @@ mod tests {
             tools: vec![missing.clone()],
             resolve_contract: None,
             contributions: vec![ToolCatalogContribution::remove_tools(["missing"])],
+            isolation_engines: std::collections::BTreeSet::new(),
         })
         .expect("suppressed manifests are not resident members");
         assert!(hidden.tools.is_empty());
@@ -496,6 +508,7 @@ mod tests {
             tools: vec![missing.clone()],
             resolve_contract: None,
             contributions: Vec::new(),
+            isolation_engines: std::collections::BTreeSet::new(),
         })
         .expect_err("an effective resident member requires a contract");
         assert_eq!(
@@ -521,6 +534,7 @@ mod tests {
                 None
             })),
             contributions: Vec::new(),
+            isolation_engines: std::collections::BTreeSet::new(),
         })
         .expect_err("a duplicate effective ToolId is ambiguous authority");
         assert_eq!(
@@ -563,89 +577,164 @@ mod tests {
         );
     }
 
-    /// FIG-5410 law 4: registration refuses a tool missing a bound its host
-    /// must set, naming the tool and the bound: an `execution` on any tool,
-    /// a `park` on a tool that may defer. A tool that never defers declares
-    /// no park. Lash supplies neither bound.
+    fn refused(
+        result: Result<ToolDefinition, crate::RegistrationRefused>,
+    ) -> crate::RegistrationRefused {
+        result.expect_err("the tool was defined")
+    }
+
+    /// FIG-5410 law 4, FIG-5774: a tool missing a bound its host must set
+    /// cannot be defined. An `execution` is what makes a draft a definition;
+    /// the `park` of a tool that may defer is refused typed when it is
+    /// absent, and when a tool that never defers carries one. A stored
+    /// manifest without its bounds does not decode. Lash supplies neither.
     #[test]
-    fn registration_refuses_a_tool_missing_a_host_set_bound() {
-        let refused = |definition: ToolDefinition| match build_tool_catalog(build_input(
-            vec![definition],
-            Vec::new(),
-        )) {
-            Err(ToolCatalogBuildError::RegistrationRefused { refusal }) => refusal,
-            Err(other) => panic!("refused for another reason: {other}"),
-            Ok(_) => panic!("the tool was registered"),
-        };
-        let mut unbounded = tool("unbounded");
-        unbounded.manifest.execution = None;
+    fn a_tool_missing_a_host_set_bound_cannot_be_defined() {
         assert_eq!(
-            refused(unbounded),
-            crate::RegistrationRefused::MissingBound {
-                tool: "unbounded".into(),
-                bound: crate::ToolBound::Execution,
-            }
-        );
-        let mut parked_unbounded = tool("approve_unbounded")
-            .with_declaration(crate::ToolDeclaration::deferring())
-            .with_park(crate::ParkBound::UntilScopeEnd);
-        parked_unbounded.manifest.execution = None;
-        assert_eq!(
-            refused(parked_unbounded),
-            crate::RegistrationRefused::MissingBound {
-                tool: "approve_unbounded".into(),
-                bound: crate::ToolBound::Execution,
-            }
-        );
-        assert_eq!(
-            refused(tool("approve").with_declaration(crate::ToolDeclaration::deferring())),
+            refused(tool("approve").with_declaration(crate::ToolDeclaration::deferring(), None)),
             crate::RegistrationRefused::MissingBound {
                 tool: "approve".into(),
                 bound: crate::ToolBound::Park,
             }
         );
         assert_eq!(
-            refused(tool("read").with_park(crate::ParkBound::UntilScopeEnd)),
+            refused(tool("read").with_declaration(
+                crate::ToolDeclaration::default(),
+                Some(crate::ParkBound::UntilScopeEnd)
+            )),
             crate::RegistrationRefused::ParkWithoutDeferral {
                 tool: "read".into(),
             }
         );
+        let stored = |edit: fn(&mut serde_json::Value)| {
+            let mut manifest = serde_json::to_value(
+                tool("approve")
+                    .with_declaration(
+                        crate::ToolDeclaration::deferring(),
+                        Some(crate::ParkBound::UntilScopeEnd),
+                    )
+                    .expect("a deferring tool with a park bound")
+                    .manifest(),
+            )
+            .expect("a manifest encodes");
+            edit(&mut manifest);
+            serde_json::from_value::<ToolManifest>(manifest)
+                .expect_err("a manifest without its bounds decoded")
+                .to_string()
+        };
+        assert_eq!(
+            stored(|manifest| drop(manifest["execution"].take())),
+            "tool `approve` declares no execution bound; its host must set one"
+        );
+        assert_eq!(
+            stored(|manifest| drop(manifest["park"].take())),
+            "tool `approve` declares no park bound; its host must set one"
+        );
 
         let hour = std::time::Duration::from_secs(60 * 60);
-        let catalog = build_tool_catalog(build_input(
-            vec![
-                tool("approve")
-                    .with_declaration(crate::ToolDeclaration::deferring())
-                    .with_park(crate::ParkBound::Within(hour)),
-                tool("read"),
-            ],
-            Vec::new(),
-        ))
-        .expect("tools declaring their bounds register");
-        let bounds = catalog
-            .tools
-            .iter()
-            .map(|entry| (entry.manifest.name.as_str(), entry.manifest.bounds()))
-            .collect::<Vec<_>>();
+        let approve = tool("approve")
+            .with_declaration(
+                crate::ToolDeclaration::deferring(),
+                Some(crate::ParkBound::Within(hour)),
+            )
+            .expect("a deferring tool with a park bound");
+        let decoded: ToolManifest = serde_json::from_value(
+            serde_json::to_value(approve.manifest()).expect("a manifest encodes"),
+        )
+        .expect("a complete manifest decodes");
         let execution = std::time::Duration::from_secs(30);
         assert_eq!(
-            bounds,
-            vec![
-                (
-                    "approve",
-                    Ok(crate::ToolBounds {
-                        execution,
-                        park: Some(crate::ParkBound::Within(hour)),
-                    })
-                ),
-                (
-                    "read",
-                    Ok(crate::ToolBounds {
-                        execution,
-                        park: None,
-                    })
-                ),
-            ]
+            decoded.bounds(),
+            crate::ToolBounds {
+                execution,
+                park: Some(crate::ParkBound::Within(hour)),
+            }
         );
+        assert_eq!(
+            tool("read").manifest.bounds(),
+            crate::ToolBounds {
+                execution,
+                park: None,
+            }
+        );
+    }
+
+    /// FIG-5774: a tool with an invalid declaration cannot be defined, and a
+    /// stored manifest holding one does not decode.
+    #[test]
+    fn a_tool_with_an_invalid_declaration_cannot_be_defined() {
+        let unordered = crate::ToolDeclaration {
+            intents: vec![
+                crate::ToolIntentKind::CancelProcess,
+                crate::ToolIntentKind::StartProcess,
+            ],
+            ..crate::ToolDeclaration::default()
+        };
+        assert_eq!(
+            refused(tool("spawn").with_declaration(unordered.clone(), None)),
+            crate::RegistrationRefused::Declaration {
+                tool: "spawn".into(),
+                cause: crate::DeclarationRefusal::IntentOrder,
+            }
+        );
+        let deferring = tool("spawn")
+            .with_declaration(
+                crate::ToolDeclaration::deferring(),
+                Some(crate::ParkBound::UntilScopeEnd),
+            )
+            .expect("a deferring tool with a park bound");
+        assert_eq!(
+            refused(deferring.isolated_in("sandbox")),
+            crate::RegistrationRefused::Declaration {
+                tool: "spawn".into(),
+                cause: crate::DeclarationRefusal::IsolatedInlineCapability,
+            }
+        );
+        let mut stored =
+            serde_json::to_value(tool("spawn").manifest()).expect("a manifest encodes");
+        stored["declaration"] = serde_json::to_value(unordered).expect("a declaration encodes");
+        assert_eq!(
+            serde_json::from_value::<ToolManifest>(stored)
+                .expect_err("a manifest with an invalid declaration decoded")
+                .to_string(),
+            "tool `spawn`'s declaration is refused: declared intents are not in vocabulary order"
+        );
+    }
+
+    /// FIG-5774: an isolated tool names the process engine its calls run in,
+    /// and enters a catalog only where that engine is registered.
+    #[test]
+    fn an_isolated_tool_registers_only_where_its_engine_is_registered() {
+        let isolated = crate::ToolDeclaration {
+            isolated: true,
+            ..crate::ToolDeclaration::default()
+        };
+        assert_eq!(
+            refused(tool("run").with_declaration(isolated, None)),
+            crate::RegistrationRefused::IsolatedWithoutEngine { tool: "run".into() }
+        );
+        let run = tool("run")
+            .isolated_in("sandbox")
+            .expect("an isolated tool naming its engine");
+        assert_eq!(run.manifest.isolation_engine(), Some("sandbox"));
+        let register = |engines: &[&str]| {
+            build_tool_catalog(ToolCatalogBuildInput {
+                isolation_engines: engines.iter().map(|kind| (*kind).to_owned()).collect(),
+                ..build_input(vec![run.clone(), tool("read")], Vec::new())
+            })
+        };
+        for engines in [&[][..], &["other"][..]] {
+            assert_eq!(
+                register(engines).expect_err("the isolated tool was registered"),
+                ToolCatalogBuildError::RegistrationRefused {
+                    refusal: crate::RegistrationRefused::UnregisteredIsolationEngine {
+                        tool: "run".into(),
+                        engine: "sandbox".into(),
+                    },
+                }
+            );
+        }
+        let catalog = register(&["other", "sandbox"]).expect("its engine is registered");
+        assert!(catalog.has_callable_tool("run"));
     }
 }

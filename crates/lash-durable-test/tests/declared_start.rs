@@ -396,11 +396,9 @@ fn probe_tool() -> lash_core::ToolDefinition {
     ))
     // It parks on a declared start, and its failing first attempt declares
     // the start as an ordinary intent that the retry discards.
-    .with_declaration(
-        lash_core::ToolDeclaration::deferring()
-            .with_intents([lash_core::ToolIntentKind::StartProcess]),
-    )
-    .with_park(lash_core::ParkBound::Within(std::time::Duration::from_secs(120)))
+    .with_declaration(lash_core::ToolDeclaration::deferring()
+            .with_intents([lash_core::ToolIntentKind::StartProcess]), Some(lash_core::ParkBound::Within(std::time::Duration::from_secs(120))))
+            .expect("a deferring tool declares its park bound")
 }
 
 /// A tool whose `Pending` declares one held child: the child idles until it

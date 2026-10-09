@@ -68,10 +68,13 @@ fn definition() -> lash_core::ToolDefinition {
     .expect("the tool's schemas")
     .with_execution(std::time::Duration::from_secs(120))
     .with_tool_binding(lash_core::ToolBinding::new(["tools"], DEFERRED))
-    .with_declaration(lash_core::ToolDeclaration::deferring())
-    .with_park(lash_core::ParkBound::Within(
-        std::time::Duration::from_secs(120),
-    ))
+    .with_declaration(
+        lash_core::ToolDeclaration::deferring(),
+        Some(lash_core::ParkBound::Within(
+            std::time::Duration::from_secs(120),
+        )),
+    )
+    .expect("a deferring tool declares its park bound")
 }
 
 /// The law's tool: it parks, and hands the law its completion key.

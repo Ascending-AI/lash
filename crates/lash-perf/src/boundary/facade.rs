@@ -99,8 +99,10 @@ fn definition() -> Result<lash_core::ToolDefinition> {
         serde_json::json!({"type":"object"}),
     )?
     .with_execution(Duration::from_secs(120))
-    .with_declaration(lash_core::ToolDeclaration::deferring())
-    .with_park(lash_core::ParkBound::Within(Duration::from_secs(120))))
+    .with_declaration(
+        lash_core::ToolDeclaration::deferring(),
+        Some(lash_core::ParkBound::Within(Duration::from_secs(120))),
+    )?)
 }
 struct DeferredTools(lash_core::ToolDefinition);
 #[async_trait::async_trait]

@@ -244,16 +244,12 @@ impl ProcessSteps for WorkerSteps {
                         step: step.0.clone(),
                         tool: tool.as_str().to_owned(),
                     })?;
-                let bounds = manifest.bounds().map_err(|refusal| StepRefusal::Refused {
-                    step: step.0.clone(),
-                    reason: refusal.to_string(),
-                })?;
                 // The body's limit and the park's deadline are pinned
                 // separately, as a round member's are.
                 let pin = MemberPin::admitted(
                     manifest.id.clone(),
                     manifest.execution_policy,
-                    bounds,
+                    manifest.bounds(),
                     now_ms,
                 );
                 Ok(StepAdmission {

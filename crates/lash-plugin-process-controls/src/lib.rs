@@ -282,10 +282,10 @@ fn process_await_tool_definition() -> ToolDefinition {
     .with_examples(vec!["await processes.await({ handle: h })?".into()])
     // `await_process` parks, so admission records that it may defer and the
     // runtime pre-derives the completion key its recorded attempt reads.
-    .with_declaration(lash_core::ToolDeclaration::deferring())
     // An await has no deadline of its own: it parks until the awaited
     // process ends or the awaiting scope does.
-    .with_park(lash_core::ParkBound::UntilScopeEnd)
+    .with_declaration(lash_core::ToolDeclaration::deferring(), Some(lash_core::ParkBound::UntilScopeEnd))
+    .expect("a deferring tool declares its park bound")
     .with_tool_binding(ToolBinding::new(["processes"], "await"))
 }
 
@@ -332,10 +332,9 @@ fn process_cancel_tool_definition() -> ToolDefinition {
         r#"await processes.cancel({ process_id: "p_019a432c701070008000000000000001" })?"#.into(),
         r#"await processes.cancel({ process_id: "p_019a432c701070008000000000000002" })?"#.into(),
     ])
-    .with_declaration(
-        lash_core::ToolDeclaration::default()
-            .with_intents([lash_core::ToolIntentKind::CancelProcess]),
-    )
+    .with_declaration(lash_core::ToolDeclaration::default()
+            .with_intents([lash_core::ToolIntentKind::CancelProcess]), None)
+            .expect("a valid tool declaration")
     .with_tool_binding(ToolBinding::new(["processes"], "cancel"))
 }
 
@@ -509,7 +508,7 @@ mod tests {
     fn await_process_declares_a_deferring_attempt_and_a_handle_typed_argument() {
         let definition = process_await_tool_definition();
         assert!(
-            definition.manifest.declaration.may_defer,
+            definition.manifest.declaration().may_defer,
             "the runtime only pre-derives a completion key for a tool that declares it defers"
         );
         // A `{"type":"object"}` parameter would refuse a nominally typed cell

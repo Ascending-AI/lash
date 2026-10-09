@@ -21,6 +21,10 @@ pub struct PluginHost {
         std::sync::OnceLock<Result<Arc<super::ConfigRegistry>, super::ConfigRegistrationError>>,
     >,
     execution_budgets: crate::ExecutionBudgets,
+    /// The kinds of the process engines registered with the runtime this
+    /// host's sessions run in: an isolated tool enters a session's catalog
+    /// only where its engine is among them.
+    isolation_engines: Arc<StdMutex<BTreeSet<String>>>,
 }
 
 /// Inputs shared by new-session creation and reconstruction from durable
@@ -182,6 +186,7 @@ impl PluginHost {
             config_registry,
             trace_runtime,
             execution_budgets,
+            isolation_engines: Arc::default(),
         }
     }
 
@@ -240,7 +245,14 @@ impl PluginHost {
             config_registry: Arc::clone(&self.config_registry),
             trace_runtime: self.trace_runtime.clone(),
             execution_budgets: self.execution_budgets.clone(),
+            isolation_engines: Arc::clone(&self.isolation_engines),
         }
+    }
+
+    /// The kinds of the process engines an isolated tool of this host's
+    /// sessions may name.
+    pub(crate) fn isolation_engines(&self) -> BTreeSet<String> {
+        self.isolation_engines.lock_recover().clone()
     }
 
     pub fn extensions(&self) -> &PluginExtensions {
@@ -369,6 +381,13 @@ impl PluginHost {
                 runtime_host.install_contributed_process_engine(engine)?;
             }
         }
+        // Every engine of the runtime is registered now: these are the
+        // engines an isolated tool of this host's sessions may name.
+        *self.isolation_engines.lock_recover() = runtime_host
+            .process_engines
+            .engines()
+            .map(|engine| engine.kind().to_owned())
+            .collect();
         Ok(runtime_host)
     }
 

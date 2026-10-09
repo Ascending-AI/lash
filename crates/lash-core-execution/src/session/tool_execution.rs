@@ -232,33 +232,6 @@ impl RuntimeExecutionContext<'_> {
         preparation
     }
 
-    /// Settles a call its round's admission refused, without preparing it:
-    /// no hook and no provider callback runs for it.
-    pub async fn refuse_tool_call(
-        &self,
-        pending: crate::sansio::PendingToolCall,
-        refusal: crate::ToolAdmissionRefusal,
-        call_key: &str,
-    ) -> ToolPreparationOutcome {
-        let context = self.with_call_observation_key(self.call_observation_key(call_key));
-        let requested_at_ms = self.dispatch.clock.timestamp_ms();
-        let failure = crate::tool_dispatch::admission_failure(&pending.tool_name, refusal);
-        let outcome = crate::tool_dispatch::normalized_outcome(
-            context.dispatch.as_ref(),
-            &ToolCallIds::of_pending(&pending),
-            pending.tool_name,
-            pending.args,
-            crate::ToolOutcome::failure(failure),
-        )
-        .await;
-        if let Err(error) =
-            context.trace_tool_call_started((&outcome.record).into(), requested_at_ms)
-        {
-            context.record_nested_effect_error(error);
-        }
-        ToolPreparationOutcome::Completed(Box::new(outcome))
-    }
-
     /// Prepares a call on a tool of the turn's recorded surface whose live
     /// definition drifted (FIG-3672 P7b): under `binding`, the recorded
     /// definition, with identity preparation, so the call's envelope is the

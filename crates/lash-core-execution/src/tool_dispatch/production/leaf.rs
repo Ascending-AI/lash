@@ -113,9 +113,9 @@ impl ProductionToolHandlers<'_> {
         Ok(SingletonToolCall {
             owner: owner.clone(),
             call_id: invocation.id.clone(),
+            declaration: definition.manifest.declaration().clone(),
             tool_name: definition.manifest.name,
             arguments: invocation.args.clone(),
-            declaration: definition.manifest.declaration,
             binding,
             available: self.context.dispatch().plugins.tool_run_revisions(),
             cancel: ExternalCancelPolicy::CancelExternalWork,

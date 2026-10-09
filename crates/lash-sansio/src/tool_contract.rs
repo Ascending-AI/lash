@@ -139,8 +139,7 @@ impl std::fmt::Display for ToolBound {
     }
 }
 
-/// A tool's admitted bounds: what its manifest declares, checked once at
-/// registration ([`ToolManifest::bounds`]).
+/// A tool's bounds, as its manifest holds them ([`ToolManifest::bounds`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ToolBounds {
     /// How long one run of the tool's body may take.
@@ -149,7 +148,8 @@ pub struct ToolBounds {
     pub park: Option<ParkBound>,
 }
 
-/// Why registration refused a tool.
+/// Why registration refused a tool: why its manifest cannot be built, or why
+/// a catalog does not take it.
 #[derive(
     Clone,
     Debug,
@@ -170,6 +170,22 @@ pub enum RegistrationRefused {
     /// A tool that never defers declares a `park` bound it can never use.
     #[error("tool `{tool}` declares a park bound, but it does not declare `may_defer`")]
     ParkWithoutDeferral { tool: String },
+    /// The tool's declaration is itself invalid.
+    #[error("tool `{tool}`'s declaration is refused: {cause}")]
+    Declaration {
+        tool: String,
+        cause: crate::DeclarationRefusal,
+    },
+    /// The tool is declared isolated and names no process engine to run in.
+    #[error("tool `{tool}` is declared isolated, but it names no process engine")]
+    IsolatedWithoutEngine { tool: String },
+    /// A tool that is not isolated names a process engine it never runs in.
+    #[error("tool `{tool}` names a process engine, but it does not declare `isolated`")]
+    EngineWithoutIsolation { tool: String },
+    /// The tool is isolated in a process engine its deployment does not
+    /// register: an isolated call never falls back to an inline body.
+    #[error("tool `{tool}` is isolated in process engine `{engine}`, which is not registered")]
+    UnregisteredIsolationEngine { tool: String, engine: String },
 }
 
 fn default_tool_execution_policy() -> ExecutionPolicy {
@@ -382,9 +398,11 @@ pub struct ToolModule {
 /// there is no per-manifest tier. The optional compact contract is the
 /// catalog-facing projection of the resolved contract; full schemas stay in
 /// [`ToolContract`].
-#[derive(
-    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
-)]
+///
+/// A manifest is complete by construction: it holds its host-set bounds and a
+/// valid declaration, and one built or decoded without them is refused
+/// ([`RegistrationRefused`]). Nothing that reads a manifest checks them again.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, schemars::JsonSchema)]
 pub struct ToolManifest {
     #[serde(default = "inline_default", skip_serializing_if = "is_inline")]
     pub inline: bool,
@@ -408,48 +426,175 @@ pub struct ToolManifest {
         skip_serializing_if = "is_default_tool_execution_policy"
     )]
     pub execution_policy: ExecutionPolicy,
-    /// How long one run of the tool's body may take, set by its host. A
-    /// tool without one is refused at registration.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub execution: Option<std::time::Duration>,
+    /// How long one run of the tool's body may take, set by its host.
+    execution: std::time::Duration,
     /// How long a call may stay parked waiting for its completion, set by
-    /// its host. Required exactly on a tool whose declaration may defer.
+    /// its host. Held exactly by a tool whose declaration may defer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub park: Option<ParkBound>,
+    park: Option<ParkBound>,
     /// The author's three-capability declaration. Admission records it with
     /// this manifest; dispatch, recovery and replay read the recorded answer,
     /// never the live provider.
     #[serde(default, skip_serializing_if = "ToolDeclaration::is_default")]
-    pub declaration: ToolDeclaration,
+    declaration: ToolDeclaration,
+    /// [`ProcessEngine::kind`] of the engine an isolated tool's calls run in.
+    /// Held exactly by a tool whose declaration is isolated.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    isolation_engine: Option<String>,
+}
+
+/// A manifest as it is stored, before its bounds and declaration are checked.
+#[derive(serde::Deserialize)]
+struct ManifestRecord {
+    #[serde(default = "inline_default")]
+    inline: bool,
+    id: ToolId,
+    name: String,
+    #[serde(default)]
+    description: String,
+    #[serde(default)]
+    module: Option<Arc<ToolModule>>,
+    #[serde(default)]
+    compact_contract: Option<Arc<CompactToolContract>>,
+    #[serde(default)]
+    bindings: std::collections::BTreeMap<String, serde_json::Value>,
+    #[serde(default)]
+    argument_projection: ToolArgumentProjectionPolicy,
+    #[serde(default = "default_tool_execution_policy")]
+    execution_policy: ExecutionPolicy,
+    #[serde(default)]
+    execution: Option<std::time::Duration>,
+    #[serde(default)]
+    park: Option<ParkBound>,
+    #[serde(default)]
+    declaration: ToolDeclaration,
+    #[serde(default)]
+    isolation_engine: Option<String>,
+}
+
+impl<'de> serde::Deserialize<'de> for ToolManifest {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let record = ManifestRecord::deserialize(deserializer)?;
+        let missing_execution = || RegistrationRefused::MissingBound {
+            tool: record.name.clone(),
+            bound: ToolBound::Execution,
+        };
+        let execution = record
+            .execution
+            .ok_or_else(missing_execution)
+            .map_err(serde::de::Error::custom)?;
+        Self {
+            inline: record.inline,
+            id: record.id,
+            name: record.name,
+            description: record.description,
+            module: record.module,
+            compact_contract: record.compact_contract,
+            bindings: record.bindings,
+            argument_projection: record.argument_projection,
+            execution_policy: record.execution_policy,
+            execution,
+            park: None,
+            declaration: ToolDeclaration::default(),
+            isolation_engine: None,
+        }
+        .declared(record.declaration, record.park, record.isolation_engine)
+        .map_err(serde::de::Error::custom)
+    }
 }
 
 impl ToolManifest {
-    /// The bounds this manifest declares, as registration admits them: an
-    /// `execution` on every tool, and a `park` exactly on a tool that may
-    /// defer.
+    /// How long one run of the tool's body may take.
+    #[must_use]
+    pub fn execution(&self) -> std::time::Duration {
+        self.execution
+    }
+
+    /// How long a call may stay parked; `None` for a tool that never defers.
+    #[must_use]
+    pub fn park(&self) -> Option<ParkBound> {
+        self.park
+    }
+
+    /// The tool's declaration.
+    #[must_use]
+    pub fn declaration(&self) -> &ToolDeclaration {
+        &self.declaration
+    }
+
+    /// The process engine an isolated tool's calls run in; `None` for a tool
+    /// that is not isolated.
+    #[must_use]
+    pub fn isolation_engine(&self) -> Option<&str> {
+        self.isolation_engine.as_deref()
+    }
+
+    /// The bounds this manifest holds.
+    #[must_use]
+    pub fn bounds(&self) -> ToolBounds {
+        ToolBounds {
+            execution: self.execution,
+            park: self.park,
+        }
+    }
+
+    /// This manifest with another execution bound.
+    #[must_use]
+    pub fn with_execution(mut self, execution: std::time::Duration) -> Self {
+        self.execution = execution;
+        self
+    }
+
+    /// This manifest declaring `declaration`, with what its host sets beside
+    /// it: the `park` bound of a tool that may defer, and the process
+    /// `isolation_engine` of an isolated one.
     ///
     /// # Errors
     ///
-    /// [`RegistrationRefused`], naming the tool and the bound.
-    pub fn bounds(&self) -> Result<ToolBounds, RegistrationRefused> {
-        let missing = |bound| RegistrationRefused::MissingBound {
-            tool: self.name.clone(),
-            bound,
-        };
-        let execution = self
-            .execution
-            .ok_or_else(|| missing(ToolBound::Execution))?;
-        let park = match (self.declaration.may_defer, self.park) {
-            (true, Some(park)) => Some(park),
-            (true, None) => return Err(missing(ToolBound::Park)),
-            (false, None) => None,
-            (false, Some(_)) => {
-                return Err(RegistrationRefused::ParkWithoutDeferral {
-                    tool: self.name.clone(),
+    /// An invalid declaration; a deferring tool without a park bound, or a
+    /// park bound on a tool that never defers; an isolated tool without an
+    /// engine, or an engine on a tool that is not isolated.
+    pub fn declared(
+        mut self,
+        declaration: ToolDeclaration,
+        park: Option<ParkBound>,
+        isolation_engine: Option<String>,
+    ) -> Result<Self, RegistrationRefused> {
+        let tool = || self.name.clone();
+        declaration
+            .validate()
+            .map_err(|cause| RegistrationRefused::Declaration {
+                tool: tool(),
+                cause,
+            })?;
+        match (declaration.may_defer, park) {
+            (true, None) => {
+                return Err(RegistrationRefused::MissingBound {
+                    tool: tool(),
+                    bound: ToolBound::Park,
                 });
             }
-        };
-        Ok(ToolBounds { execution, park })
+            (false, Some(_)) => {
+                return Err(RegistrationRefused::ParkWithoutDeferral { tool: tool() });
+            }
+            (true, Some(_)) | (false, None) => {}
+        }
+        match (declaration.isolated, &isolation_engine) {
+            (true, None) => {
+                return Err(RegistrationRefused::IsolatedWithoutEngine { tool: tool() });
+            }
+            (false, Some(_)) => {
+                return Err(RegistrationRefused::EngineWithoutIsolation { tool: tool() });
+            }
+            (true, Some(_)) | (false, None) => {}
+        }
+        self.declaration = declaration;
+        self.park = park;
+        self.isolation_engine = isolation_engine;
+        Ok(self)
     }
 }
 
@@ -772,6 +917,73 @@ pub struct ToolDefinition {
     pub contract: ToolContract,
 }
 
+/// A tool as its author defines it, before its host sets its execution
+/// bound. Lash supplies no bound: [`ToolDraft::with_execution`] makes the
+/// [`ToolDefinition`] a provider registers, and nothing else does.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ToolDraft {
+    id: ToolId,
+    name: String,
+    description: String,
+    bindings: std::collections::BTreeMap<String, serde_json::Value>,
+    contract: ToolContract,
+}
+
+impl ToolDraft {
+    /// Tool identity.
+    pub fn id(&self) -> &ToolId {
+        &self.id
+    }
+
+    /// Tool name.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn with_examples(mut self, examples: Vec<String>) -> Self {
+        self.contract.examples = examples;
+        self
+    }
+
+    /// The tool's contract: its schemas and examples.
+    pub fn contract(&self) -> &ToolContract {
+        &self.contract
+    }
+
+    /// The tool as a model is offered it.
+    pub fn model_tool(&self) -> ModelTool {
+        ModelTool {
+            name: self.name.clone(),
+            description: self.description.clone(),
+            input_schema: self.contract.input_schema.clone(),
+            output_schema: self.contract.output_schema.clone(),
+        }
+    }
+
+    /// Sets how long one run of the tool's body may take: the bound every
+    /// tool's host sets, which makes the draft a definition.
+    pub fn with_execution(self, execution: std::time::Duration) -> ToolDefinition {
+        ToolDefinition {
+            manifest: ToolManifest {
+                inline: true,
+                id: self.id,
+                name: self.name,
+                description: self.description,
+                module: None,
+                compact_contract: None,
+                bindings: self.bindings,
+                argument_projection: ToolArgumentProjectionPolicy::default(),
+                execution_policy: default_tool_execution_policy(),
+                execution,
+                park: None,
+                declaration: ToolDeclaration::default(),
+                isolation_engine: None,
+            },
+            contract: self.contract,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ModelTool {
     pub name: String,
@@ -909,7 +1121,7 @@ impl ToolDefinition {
         description: impl Into<String>,
         input_schema: serde_json::Value,
         output_schema: serde_json::Value,
-    ) -> Result<Self, ToolCatalogBuildError> {
+    ) -> Result<ToolDraft, ToolCatalogBuildError> {
         let id = id.into();
         let name = name.into();
         let admit = |schema, purpose| {
@@ -922,53 +1134,29 @@ impl ToolDefinition {
         };
         let input_schema = admit(input_schema, SchemaPurpose::ToolInput)?;
         let output_schema = admit(output_schema, SchemaPurpose::ToolOutput)?;
-        Ok(Self::new(
-            id,
-            name,
+        let description = description.into();
+        Ok(ToolDraft {
             description,
-            input_schema,
-            output_schema,
-        ))
-    }
-
-    pub fn new(
-        id: impl Into<ToolId>,
-        name: impl Into<String>,
-        description: impl Into<String>,
-        input_schema: SchemaContract,
-        output_schema: SchemaContract,
-    ) -> Self {
-        let id = id.into();
-        let name = name.into();
-        Self {
-            manifest: ToolManifest {
-                inline: true,
-                id: id.clone(),
-                name: name.clone(),
-                description: description.into(),
-                module: None,
-                compact_contract: None,
-                bindings: std::collections::BTreeMap::new(),
-                argument_projection: ToolArgumentProjectionPolicy::default(),
-                execution_policy: default_tool_execution_policy(),
-                execution: None,
-                park: None,
-                declaration: ToolDeclaration::default(),
-            },
+            bindings: std::collections::BTreeMap::new(),
             contract: ToolContract {
-                identity: Some(ToolContractIdentity { id, name }),
+                identity: Some(ToolContractIdentity {
+                    id: id.clone(),
+                    name: name.clone(),
+                }),
                 input_schema,
                 output_schema,
                 ..ToolContract::default()
             },
-        }
+            id,
+            name,
+        })
     }
 
     pub fn typed<Args, Output>(
         id: impl Into<ToolId>,
         name: impl Into<String>,
         description: impl Into<String>,
-    ) -> Result<Self, ToolCatalogBuildError>
+    ) -> Result<ToolDraft, ToolCatalogBuildError>
     where
         Args: schemars::JsonSchema,
         Output: schemars::JsonSchema,
@@ -1000,26 +1188,49 @@ impl ToolDefinition {
         self
     }
 
-    /// Declares how long one run of the tool's body may take. Every tool
-    /// declares it; registration refuses a tool without one.
+    /// Sets another execution bound: how long one run of the tool's body
+    /// may take.
     pub fn with_execution(mut self, execution: std::time::Duration) -> Self {
-        self.manifest.execution = Some(execution);
+        self.manifest = self.manifest.with_execution(execution);
         self
     }
 
-    /// Declares how long a call may stay parked waiting for its completion.
-    /// A tool that may defer declares it; registration refuses one that
-    /// does not, and a tool that never defers that does.
-    pub fn with_park(mut self, park: ParkBound) -> Self {
-        self.manifest.park = Some(park);
-        self
+    /// Declares what the tool's inline body may do beyond a Done result:
+    /// return Deferred, or declare Lash intents. `park` is how long a call
+    /// may stay parked waiting for its completion, which the host of a tool
+    /// that may defer sets, and no other tool has.
+    ///
+    /// # Errors
+    ///
+    /// [`RegistrationRefused`]: an invalid declaration, a deferring tool
+    /// without a park bound, a park bound on a tool that never defers, or an
+    /// isolated declaration, which [`Self::isolated_in`] makes.
+    pub fn with_declaration(
+        mut self,
+        declaration: ToolDeclaration,
+        park: Option<ParkBound>,
+    ) -> Result<Self, RegistrationRefused> {
+        self.manifest = self.manifest.declared(declaration, park, None)?;
+        Ok(self)
     }
 
-    /// Declares what the tool's body may do beyond an inline Done result:
-    /// return Deferred, declare Lash intents, or run isolated as a process.
-    pub fn with_declaration(mut self, declaration: ToolDeclaration) -> Self {
-        self.manifest.declaration = declaration;
-        self
+    /// Declares the tool isolated: every call runs as a process of the
+    /// engine registered as `engine`, with no inline body.
+    ///
+    /// # Errors
+    ///
+    /// [`RegistrationRefused`]: the tool already declares what only an
+    /// inline body does.
+    pub fn isolated_in(mut self, engine: impl Into<String>) -> Result<Self, RegistrationRefused> {
+        let declaration = ToolDeclaration {
+            isolated: true,
+            ..self.manifest.declaration.clone()
+        };
+        let park = self.manifest.park;
+        self.manifest = self
+            .manifest
+            .declared(declaration, park, Some(engine.into()))?;
+        Ok(self)
     }
 
     pub fn with_output_contract(mut self, output_contract: ToolOutputContract) -> Self {
@@ -1189,6 +1400,20 @@ impl ToolBinding {
 /// exposed or implied by calling this setter.
 pub trait ToolDefinitionBindingExt {
     fn with_tool_binding(self, tool_binding: ToolBinding) -> Self;
+}
+
+impl ToolDefinitionBindingExt for ToolDraft {
+    #[expect(
+        clippy::expect_used,
+        reason = "ToolBinding is a module-owned struct of strings and maps, so serialization into the manifest's JSON bindings map can only fail if the type is widened, which the site's message asserts"
+    )]
+    fn with_tool_binding(mut self, tool_binding: ToolBinding) -> Self {
+        self.bindings.insert(
+            TOOL_BINDING_KEY.to_string(),
+            serde_json::to_value(&tool_binding).expect("tool binding must serialize to JSON"),
+        );
+        self
+    }
 }
 
 impl ToolDefinitionBindingExt for ToolDefinition {

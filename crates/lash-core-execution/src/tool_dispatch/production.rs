@@ -148,29 +148,30 @@ impl<'run> ProductionToolHandlers<'run> {
             traced_scope: None,
         }
     }
-    /// Ask an isolated call's executable provider which registered engine
-    /// runs it (D04). This selects data only: no preparation, hook or body
-    /// runs. The start is keyed by the call's Run owner and id.
+    /// The start of an isolated call in `engine`, the process engine its
+    /// manifest names, on the payload its executable provider answers (D04).
+    /// This selects data only: no preparation, hook or body runs. The start
+    /// is keyed by the call's Run owner and id.
     pub(super) fn bind_isolated(
         &self,
         owner: &crate::EffectOpener,
         call_id: &crate::ToolCallId,
         tool_id: &crate::ToolId,
         args: &serde_json::Value,
+        engine: &str,
         executable: &crate::plugin::PluginCallbackIdentity,
-    ) -> Option<IsolatedToolStart> {
+    ) -> Result<IsolatedToolStart, crate::PluginError> {
         let provider = self
             .context
             .dispatch()
             .plugins
-            .resolve_context_tool_bindings(std::slice::from_ref(executable))
-            .ok()?
-            .pop()?;
-        let binding = provider.isolated_process(crate::IsolatedProcessRequest {
+            .resolve_context_tool_bindings(std::slice::from_ref(executable))?
+            .remove(0);
+        let payload = provider.isolated_start_payload(crate::IsolatedProcessRequest {
             tool_id,
             call_id,
             args,
-        })?;
+        });
         let provenance =
             owner
                 .session_id()
@@ -179,8 +180,8 @@ impl<'run> ProductionToolHandlers<'run> {
                 });
         let registration = crate::ProcessStartRegistration::of_target(
             crate::ProcessInput::Engine {
-                kind: binding.engine,
-                payload: binding.payload,
+                kind: engine.to_owned(),
+                payload,
             },
             provenance,
             crate::Lifetime::Detached,
@@ -188,7 +189,7 @@ impl<'run> ProductionToolHandlers<'run> {
         .with_start_key(Some(
             crate::StartKeyDerivation::LASH_START_PATHS.for_isolated_call(owner, call_id),
         ));
-        Some(IsolatedToolStart { registration })
+        Ok(IsolatedToolStart { registration })
     }
     fn cancel_inline_stop(&self, call_id: &crate::ToolCallId, accepted: bool) {
         let mut stops = self.inline_stops.lock_recover();
@@ -670,14 +671,14 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                     .input
                     .definition
                     .manifest
-                    .declaration
+                    .declaration()
                     .admits(OutcomeShape::Deferred)
                     .and_then(|()| {
                         if matches!(
                             pending.resolved_by,
                             Some(crate::PendingResolver::DeclaredStart(_))
                         ) {
-                            prepared.input.definition.manifest.declaration.admits(
+                            prepared.input.definition.manifest.declaration().admits(
                                 OutcomeShape::Done {
                                     intents: &[crate::ToolIntentKind::StartProcess],
                                 },
@@ -808,7 +809,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                         .input
                         .definition
                         .manifest
-                        .declaration
+                        .declaration()
                         .admits(OutcomeShape::Done {
                             intents: &intents
                                 .intents

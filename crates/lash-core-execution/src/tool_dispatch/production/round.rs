@@ -189,8 +189,7 @@ impl ProductionToolHandlers<'_> {
         let Some(definition) = self.leaf_definition(&invocation) else {
             return Ok((MemberEnd::Final(answered(call, unavailable())), Vec::new()));
         };
-        let mut isolation_bound = false;
-        if definition.manifest.declaration.isolated {
+        if let Some(engine) = definition.manifest.isolation_engine() {
             let source = invocation
                 .execution_grant
                 .as_deref()
@@ -201,29 +200,19 @@ impl ProductionToolHandlers<'_> {
                 .plugins
                 .tool_run_binding(&invocation.tool_id, source)
                 .map_err(crate::RuntimeEffectControllerError::from)?;
-            if let Some(start) = self.bind_isolated(
-                owner,
-                &invocation.id,
-                &definition.manifest.id,
-                &invocation.args,
-                &binding.executable,
-            ) {
-                self.isolated
-                    .lock_recover()
-                    .insert(invocation.id.clone(), start);
-                isolation_bound = true;
-            }
-        }
-        if let Err(refusal) =
-            super::super::admit_tool_round([Some((&definition.manifest, isolation_bound))])
-        {
-            return Ok((
-                MemberEnd::Final(answered(
-                    call,
-                    ToolCallOutput::failure(refusal.failure_for(0, &call.tool_name)),
-                )),
-                Vec::new(),
-            ));
+            let start = self
+                .bind_isolated(
+                    owner,
+                    &invocation.id,
+                    &definition.manifest.id,
+                    &invocation.args,
+                    engine,
+                    &binding.executable,
+                )
+                .map_err(crate::RuntimeEffectControllerError::from)?;
+            self.isolated
+                .lock_recover()
+                .insert(invocation.id.clone(), start);
         }
         let mut environment = self.environment.clone();
         let singleton = self
@@ -602,17 +591,16 @@ pub(super) fn completed_answer(
 /// `now_ms`: its policy, its body's limit from its host-set execution bound,
 /// and for a deferring tool the deadline its host-set park bound sets,
 /// written once with the admission ([`MemberPin::admitted`]). A call no tool
-/// answers, or whose tool declares no admissible bounds, is pinned under
-/// `context`'s control-phase bound: its body only answers its refusal.
+/// answers is pinned under `context`'s control-phase bound: its body only
+/// answers that it is unavailable.
 pub(super) fn member_pin(
     context: &RuntimeExecutionContext<'_>,
     manifest: Option<&crate::ToolManifest>,
     tool: crate::ToolId,
     now_ms: u64,
 ) -> MemberPin {
-    let policy = manifest.map_or(ExecutionPolicy::Once, |manifest| manifest.execution_policy);
-    if let Some(bounds) = manifest.and_then(|manifest| manifest.bounds().ok()) {
-        return MemberPin::admitted(tool, policy, bounds, now_ms);
+    if let Some(manifest) = manifest {
+        return MemberPin::admitted(tool, manifest.execution_policy, manifest.bounds(), now_ms);
     }
     let control = context
         .dispatch()
@@ -621,7 +609,7 @@ pub(super) fn member_pin(
         .control_phase();
     MemberPin {
         tool,
-        policy,
+        policy: ExecutionPolicy::Once,
         limit: lash_sansio::ExecutionLimit::starting_at(now_ms, control, control),
         park: None,
     }
@@ -771,67 +759,7 @@ impl RoundTools for ProductionRoundTools {
                     .collect(),
             );
         }
-        let catalog = self.context.tool_catalog();
-        let manifests: Vec<_> = calls
-            .iter()
-            .map(|call| {
-                catalog
-                    .tools
-                    .iter()
-                    .find(|tool| tool.manifest.name == call.tool_name)
-                    .map(|tool| tool.manifest.clone())
-            })
-            .collect();
-        // An isolated member is bound when its provider binds a process; the
-        // binding itself is the member's body's, so only a member no
-        // provider can bind refuses here.
-        let handlers = ProductionToolHandlers::new(self.context.clone(), None);
-        let bound: Vec<bool> = calls
-            .iter()
-            .zip(&manifests)
-            .map(|(call, manifest)| {
-                manifest.as_ref().is_some_and(|manifest| {
-                    manifest.declaration.isolated
-                        && self
-                            .context
-                            .dispatch()
-                            .plugins
-                            .tool_run_binding(&manifest.id, None)
-                            .ok()
-                            .and_then(|binding| {
-                                handlers.bind_isolated(
-                                    &self.owner,
-                                    &call.call_id,
-                                    &manifest.id,
-                                    &call.args,
-                                    &binding.executable,
-                                )
-                            })
-                            .is_some()
-                })
-            })
-            .collect();
-        let refusal = super::super::admit_tool_round(
-            manifests
-                .iter()
-                .zip(&bound)
-                .map(|(manifest, bound)| manifest.as_ref().map(|manifest| (manifest, *bound))),
-        )
-        .err()?;
-        Some(
-            calls
-                .iter()
-                .enumerate()
-                .map(|(member, call)| {
-                    let output = if manifests[member].is_some() {
-                        ToolCallOutput::failure(refusal.failure_for(member, &call.tool_name))
-                    } else {
-                        unavailable()
-                    };
-                    answered(call, output)
-                })
-                .collect(),
-        )
+        None
     }
 
     fn body(

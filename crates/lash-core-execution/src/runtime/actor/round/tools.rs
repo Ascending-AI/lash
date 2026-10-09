@@ -176,10 +176,12 @@ pub trait RoundTools: Send + Sync {
         Ok(())
     }
 
-    /// The round's admission refusal, read from the catalog: when it refuses
-    /// any member of `calls`, what every member answers instead, in declared
-    /// order. A refused round's members settle at its admission and no body
-    /// runs. Runs no hook, preparation or body.
+    /// What every member of `calls` answers, in declared order, when the
+    /// round is past the session's tool-call limit; `None` for a round
+    /// within it. A refused round's members settle at its admission and no
+    /// body runs. A tool's configuration never refuses a round: a
+    /// misconfigured tool is not in the catalog. Runs no hook, preparation
+    /// or body.
     fn refusal(&self, _calls: &[PendingToolCall]) -> Option<Vec<CompletedCall>> {
         None
     }

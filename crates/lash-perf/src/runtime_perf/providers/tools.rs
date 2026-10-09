@@ -433,10 +433,13 @@ fn benchmark_async_tool_definition() -> ToolDefinition {
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120))
     .with_tool_binding(ToolBinding::new(["tools"], "benchmark_async").with_authority_type("Tools"))
-    .with_declaration(lash_core::ToolDeclaration::deferring())
-    .with_park(lash_core::ParkBound::Within(
-        std::time::Duration::from_secs(120),
-    ))
+    .with_declaration(
+        lash_core::ToolDeclaration::deferring(),
+        Some(lash_core::ParkBound::Within(
+            std::time::Duration::from_secs(120),
+        )),
+    )
+    .expect("a deferring tool declares its park bound")
 }
 
 pub(super) fn benchmark_oblique_tool_definitions() -> Vec<ToolDefinition> {

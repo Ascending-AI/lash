@@ -196,6 +196,7 @@ fn json_schema_loaded_contract_merges_nullable_anyof_return_fields() {
             "id": "tool:mcp__appworld__spotify_show_album_library",
             "name": "mcp__appworld__spotify_show_album_library",
             "description": "[MCP appworld] Search or show a list of albums in your album library.",
+            "execution": { "secs": 30, "nanos": 0 },
         },
         "contract": {
             "examples": ["show album library"],

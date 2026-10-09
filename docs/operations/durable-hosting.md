@@ -755,13 +755,18 @@ settles at once.
 
 ### Tool bounds are host declarations
 
-Every tool definition calls `with_execution(Duration)` to supply its required
-body bound. The manifest records `execution`. A tool that can defer also
-calls `with_park(ParkBound)`, either `Within(Duration)` or `UntilScopeEnd`; a
-non-deferring tool supplies none. Registration refuses a missing bound as
-`MissingBound { tool, bound }`, or
-a park on a non-deferring tool as `ParkWithoutDeferral { tool }`. Admission
-of an ungated manifest refuses as `ToolAdmissionRefusal::Bounds`.
+Every tool definition is made by `with_execution(Duration)`, which supplies
+its required body bound: `ToolDefinition::raw` answers a `ToolDraft`, and
+only a draft with its bound is a definition. The manifest records
+`execution`. A tool that can defer declares it with
+`with_declaration(declaration, Some(ParkBound))`, either `Within(Duration)`
+or `UntilScopeEnd`; a non-deferring tool passes `None`. A missing park bound
+is refused as `MissingBound { tool, bound }`, and a park on a non-deferring
+tool as `ParkWithoutDeferral { tool }`, when the definition is built; a
+stored manifest without its bounds does not decode. An isolated tool names
+its process engine with `isolated_in(engine)` and registers only where that
+engine is registered (`UnregisteredIsolationEngine { tool, engine }`). No
+manifest reaches admission without them, so no call is refused for them.
 Lash defaults neither bound and caps neither with a tool or wait ceiling.
 The shipped tools follow the same rule: an MCP tool's body bound is its
 server's `call_max_total_timeout_ms`, and `processes.await` parks

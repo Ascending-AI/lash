@@ -9606,9 +9606,9 @@ lane = "L9e"
 laws = [
   "l08_an_unbound_isolated_tool_refuses_typed_before_any_body",
 ]
-disposition = "replaced-by:crates/lash-durable-test/tests/core_node_processes.rs::an_unbound_isolated_tool_is_refused_typed_before_any_body"
+disposition = "replaced-by:crates/lash-durable-test/tests/core_node_processes.rs::a_node_without_an_isolated_tools_engine_leaves_the_turn_to_one_that_registers_it"
 status = "deleted"
-note = "FIG-5309 re-wrote the law through a host's send() of an RLM turn: the cell's call answers the UnsupportedIsolation admission refusal, and nothing starts"
+note = "FIG-5774: an isolated tool names its engine and registers only where it is registered, so no call answers an admission refusal; a node without the engine runs nothing for the turn, which a node that registers it completes"
 
 [[row]]
 path = "crates/lash/src/tests/isolated_tool_route.rs"

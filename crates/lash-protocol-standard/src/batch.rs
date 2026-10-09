@@ -26,7 +26,7 @@ pub(crate) const BATCH_TOOL_NAME: &str = "batch";
     clippy::expect_used,
     reason = "this module declares the tool or payload schema and admission checks its invariant"
 )]
-pub(crate) fn batch_tool_definition(max_members: NonZeroUsize) -> ToolDefinition {
+pub(crate) fn batch_tool_definition(max_members: NonZeroUsize) -> lash_core::ToolDraft {
     ToolDefinition::raw(
         "tool:batch",
         BATCH_TOOL_NAME,

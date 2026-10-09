@@ -73,6 +73,10 @@ fn tool_definition(
 
 /// `spawn_agent`: run one child session on a task and answer its final
 /// value.
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool, and a deferring declaration with its park bound is valid"
+)]
 pub fn spawn_agent_tool_definition() -> ToolDefinition {
     tool_definition(
         "spawn_agent",
@@ -114,10 +118,10 @@ pub fn spawn_agent_tool_definition() -> ToolDefinition {
     .with_tool_binding(ToolBinding::new(["agents"], "spawn"))
     .with_output_from_input_schema("output", None)
     // The child runs as a declared process start the call parks on.
-    .with_declaration(ToolDeclaration::deferring().with_intents([ToolIntentKind::StartProcess]))
     // The call waits for its child, however long the child's own bounds let
     // it run, or until the delegating turn ends.
-    .with_park(lash::tools::ParkBound::UntilScopeEnd)
+    .with_declaration(ToolDeclaration::deferring().with_intents([ToolIntentKind::StartProcess]), Some(lash::tools::ParkBound::UntilScopeEnd))
+    .expect("a deferring tool declares its park bound")
     // The body's one effect is that start, under a key derived from the
     // call: a rerun after a crash gets the child it registered back, so the
     // call is rerun rather than settled as interrupted.
