@@ -440,6 +440,37 @@ finish([first, second, third, total]);
     }
 }
 
+/// A host's result is a copy, never the guest's own object handed back
+/// (FIG-5612): the echo host answers with the very tree it was passed, and a
+/// write through the result still leaves the argument as it was, in a run
+/// that goes straight through as in one parked on the call.
+#[test]
+fn a_host_result_never_aliases_the_argument_it_was_built_from() {
+    let program = link(
+        r#"
+const a = [1];
+const r = await tools.echo({ value: { a } });
+r.a.push(2);
+finish(a.length * 10 + r.a.length);
+"#,
+        &probe_environment(&[]),
+    );
+    let straight = straight_through(&program, &State::new(), ExecutionMode::Foreground);
+    assert!(
+        straight.end.starts_with("complete") && straight.end.contains("12"),
+        "the argument keeps its one element and the result has two: {}",
+        straight.end
+    );
+    let mut instance = VmInstance::pristine();
+    let parked = stepped(
+        &mut instance,
+        &program,
+        ExecutionMode::Foreground,
+        Boundaries::ParkEveryEffectAndReopen,
+    );
+    assert_eq!(parked, straight, "a parked run matches straight through");
+}
+
 /// The text session A plants everywhere guest state can live.
 const SENTINEL: &str = "SENTINEL-A-4158";
 

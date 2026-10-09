@@ -192,7 +192,7 @@ fn every_corpus_program_round_trips_or_is_an_allowlisted_refusal() {
     let mut open_violations = OPEN_VIOLATIONS.into_iter().collect::<BTreeMap<_, _>>();
     let mut failures = Vec::new();
     let mut agreed = 0usize;
-    for program in corpora::with_workflows() {
+    for program in corpora::all() {
         let listed = allowlist.remove(program.id.as_str());
         if let Some(ticket) = open_violations.remove(program.id.as_str()) {
             match round_trip(&program) {

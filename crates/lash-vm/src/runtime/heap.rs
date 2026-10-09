@@ -689,9 +689,11 @@ impl Heap {
                     .into(),
             ),
             // An Error detaches into the record the guest reads off it, one
-            // way: only a host handing back the identical exported `Arc`
-            // resolves to this object again; a rebuilt record stays a plain
-            // record, since nothing re-brands a record as an error (ADR 0062).
+            // way: only the identical exported `Arc`, which an instruction can
+            // still hold, resolves to this object again. A host's answer is
+            // rebuilt on entry (`AbilityOutcome::into_fresh`), and a rebuilt
+            // record stays a plain record, since nothing re-brands a record
+            // as an error (ADR 0062).
             HeapObject::Error(error) => {
                 javascript_exotics::error_boundary_record(&error, |child| {
                     export_child(self, child, active)

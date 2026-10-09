@@ -42,7 +42,7 @@ impl CorpusProgram {
     }
 }
 
-/// Every program of every corpus the VM-instance laws run.
+/// Every program of every corpus: what every corpus law runs.
 pub(crate) fn all() -> Vec<CorpusProgram> {
     let mut programs = differential();
     programs.extend(test262());
@@ -50,27 +50,12 @@ pub(crate) fn all() -> Vec<CorpusProgram> {
     programs.extend(goldens());
     programs.extend(host_flows());
     programs.extend(teaching());
+    programs.extend(ai_workflows());
     let ids = programs
         .iter()
         .map(|program| program.id.as_str())
         .collect::<BTreeSet<_>>();
     assert_eq!(ids.len(), programs.len(), "corpus ids are unique");
-    programs
-}
-
-/// [`all`] and the AI-style workflows: what the document laws run (the
-/// print round trip, the structural invariants and the document
-/// differential).
-///
-/// The workflows hand compound values to `tools.echo`, and the VM-instance
-/// park law does not hold for a program that does: a straight run gets the
-/// very object it passed back from the echo host, a run parked on the call
-/// gets a copy, and the two leave different heaps (FIG-5578's report has the
-/// three-line program). Until the host boundary settles which of the two a
-/// guest sees, these programs stay out of [`all`].
-pub(crate) fn with_workflows() -> Vec<CorpusProgram> {
-    let mut programs = all();
-    programs.extend(ai_workflows());
     programs
 }
 

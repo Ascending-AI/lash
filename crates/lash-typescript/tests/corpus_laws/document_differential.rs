@@ -52,7 +52,7 @@ struct Tally {
 fn every_corpus_program_published_from_its_document_runs_like_its_source() {
     let mut failures = Vec::new();
     let mut tally = BTreeMap::<String, Tally>::new();
-    for program in corpora::with_workflows() {
+    for program in corpora::all() {
         let corpus = program.id.split(':').next().unwrap_or_default().to_string();
         match runs_like_its_source(&program) {
             Ok(source) => {

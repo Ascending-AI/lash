@@ -52,6 +52,21 @@ that reach functions and records expired names for later diagnostics. Other
 unprojectable bindings remain in the roots while the view omits them. Explicit
 host-boundary uses of functions or unprojectable exotics return typed errors.
 
+### Host results are copies
+
+A value a host returns enters the guest as new heap objects. It never aliases
+a guest object, including when an in-process host answers with the very value
+it received as an argument: the guest then holds two objects, and a write
+through one is invisible through the other. Every ability's answer passes
+through one entry point in the VM, which rebuilds the value before the heap
+imports it. Identity lookup at import is for values the VM's own instructions
+exported, not for a host's.
+
+A host across a wire can only return a copy. So can a run parked on an
+operation and resumed from its bytes, which is answered with an outcome its
+host held. Applying the same rule to a host that answers at once makes a
+parked run and a straight run leave byte-identical state.
+
 ## Alternatives considered
 
 Copying on every durable store changes TypeScript mutation and identity.
@@ -75,4 +90,5 @@ consumers inspect the representation flag and use the matching validator.
 - `crates/lash-vm/src/runtime/heap/validation.rs:163-255` validates shared graphs.
 - `crates/lash-vm/src/runtime/state/expired.rs` removes completed-execution function bindings.
 - `crates/lash-typescript/tests/dialect.rs:310-365,410-416` asserts alias preservation across suspension.
+- `crates/lash-vm/src/runtime/vm/effects.rs` (`Vm::perform`) and `AbilityOutcome::into_fresh` make host results copies; `crates/lash-typescript/tests/corpus_laws/vm_instance.rs` holds the parked-versus-straight law.
 - `crates/lash-vm/src/runtime/state/tests.rs:1697-1714` asserts hidden-binding round trips.

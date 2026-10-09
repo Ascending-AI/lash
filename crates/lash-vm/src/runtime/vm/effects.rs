@@ -57,6 +57,15 @@ struct AwaitCursor {
 }
 
 impl<H: ExecutionHost> Vm<'_, H> {
+    /// The one way this run asks its host for anything, and so the one place
+    /// a host's answer enters the guest: as fresh values, never the guest's
+    /// own objects handed back (see [`AbilityOutcome::into_fresh`]). The
+    /// answer of a host that runs straight on and the held outcome a parked
+    /// and resumed run is answered with both arrive here.
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
+        self.host.perform(op).await.map(AbilityOutcome::into_fresh)
+    }
+
     pub(super) async fn resolve_effect(
         &mut self,
         effect: VmEffect,
@@ -124,7 +133,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 let operation_name = self.chunk.names[operation].text.to_string();
                 let operands = reissue_operands(&receiver, &args);
                 let result = match self
-                    .host
                     .perform(AbilityOp::ResourceOperation(Box::new(ResourceOperation {
                         receiver,
                         operation: operation_name.clone(),
@@ -163,7 +171,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 let operation_name = self.chunk.names[operation].text.to_string();
                 let operands = reissue_operands(&receiver, &args);
                 let result = self
-                    .host
                     .perform(AbilityOp::ResourceOperation(Box::new(ResourceOperation {
                         receiver,
                         operation: operation_name.clone(),
@@ -300,7 +307,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 let value = self.pop_stack()?;
                 let operands = vec![value.clone()];
                 let result = self
-                    .host
                     .perform(AbilityOp::Sleep(Sleep {
                         kind,
                         value,
@@ -335,8 +341,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
             }
             VmEffect::Print => {
                 let value = self.pop_stack()?;
-                self.host
-                    .perform(AbilityOp::Print(value))
+                self.perform(AbilityOp::Print(value))
                     .await
                     .map_err(|source| RuntimeError::PrintFailed { source })?;
                 self.last_value = Some(Value::Null);
@@ -346,7 +351,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 self.ensure_no_pending_tools()?;
                 let value = self.pop_stack()?;
                 let value = self
-                    .host
                     .perform(AbilityOp::Finish(value))
                     .await
                     .and_then(|result| result.into_value("finish"))
@@ -359,7 +363,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
             VmEffect::Fail => {
                 let value = self.pop_stack()?;
                 let value = self
-                    .host
                     .perform(AbilityOp::Fail(value))
                     .await
                     .and_then(|result| result.into_value("fail"))
@@ -810,7 +813,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
     ) -> Result<Awaited<ResourceOperationBatchOutcome>, RuntimeError> {
         let expected = leaves.len();
         let result = self
-            .host
             .perform(AbilityOp::ResourceOperationBatch(ResourceOperationBatch {
                 leaves,
                 consumer,
@@ -1060,7 +1062,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     let value = match cursor.replay.next() {
                         Some(value) => value,
                         None => match self
-                            .host
                             .perform(AbilityOp::Await(Await {
                                 handle: Value::Record(handles),
                                 call_site: cursor.call_site.clone().map(Box::new),
@@ -1137,7 +1138,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     self.observe_child_process_wait(active, &Value::Record(handles.clone()));
                 }
                 let result = self
-                    .host
                     .perform(AbilityOp::Await(Await {
                         handle: Value::Record(handles),
                         call_site: active.map(lash_vm_execution_call_site).map(Box::new),

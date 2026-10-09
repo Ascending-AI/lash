@@ -590,6 +590,44 @@ impl Value {
     pub fn contains_projected(&self) -> bool {
         value_contains_projected(self)
     }
+
+    /// This value with every compound in it rebuilt, so that none of them is
+    /// a tree some heap exported.
+    ///
+    /// A heap resolves an inline compound it exported back to the object it
+    /// came from, by the compound's identity. A value from outside the VM has
+    /// to come in as new objects instead, whatever its host built it from:
+    /// see [`AbilityOutcome::into_fresh`](super::AbilityOutcome).
+    pub(crate) fn into_fresh(self) -> Self {
+        match self {
+            Self::Tuple(values) => Self::Tuple(fresh_list(values)),
+            Self::List(values) => Self::List(fresh_list(values)),
+            Self::Record(record) => {
+                let mut record = Arc::unwrap_or_clone(record);
+                for entry in &mut record.entries {
+                    entry.value = std::mem::replace(&mut entry.value, Self::Null).into_fresh();
+                }
+                Self::Record(Arc::new(record))
+            }
+            scalar @ (Self::Null
+            | Self::Undefined
+            | Self::Bool(_)
+            | Self::Number(_)
+            | Self::String(_)
+            | Self::Image(_)
+            | Self::Resource(_)
+            | Self::Ref(_)
+            | Self::Projected(_)) => scalar,
+        }
+    }
+}
+
+fn fresh_list(values: ListValue) -> ListValue {
+    values
+        .into_vec()
+        .into_iter()
+        .map(Value::into_fresh)
+        .collect()
 }
 
 impl PartialEq for Value {

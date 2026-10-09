@@ -107,8 +107,8 @@ optional cause and optional aggregate errors. Unsupported exotics inside that
 data still fail export. Other exotics such as `Map`, `Set`, `Date`, `RegExp`,
 `URL` and `URLSearchParams` cannot detach as ordinary host data. Inside the VM,
 error enumeration and JSON rendering follow their guest property contract.
-A host returning an identical exported value can reuse the boundary cache;
-a rebuilt JSON record is an ordinary record and does not become a heap error.
+A host's result always enters as a copy (ADR 0076), so an error a host hands
+back is an ordinary record and does not become a heap error again.
 
 ### Promise aggregates settle on recorded order
 

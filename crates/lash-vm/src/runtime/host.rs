@@ -37,6 +37,46 @@ pub enum AbilityOutcome {
 }
 
 impl AbilityOutcome {
+    /// This outcome with every value it carries rebuilt as a fresh one: the
+    /// form in which a host's answer enters the guest.
+    ///
+    /// A host's result is a copy, never an alias. A host in this process can
+    /// answer with the very tree the VM handed it as an argument, and the heap
+    /// would resolve that tree back to the guest object it was exported from,
+    /// so the guest would hold its own object again. A host across a wire, and
+    /// a run parked on the operation and resumed from its bytes, can only ever
+    /// return a copy; rebuilding the value here gives every path that one
+    /// result, the same objects in the same order (FIG-5612).
+    pub(crate) fn into_fresh(self) -> Self {
+        let fresh = |result| match result {
+            ResourceOperationOutcome::Value(value) => {
+                ResourceOperationOutcome::Value(value.into_fresh())
+            }
+            error @ ResourceOperationOutcome::Error(_) => error,
+        };
+        match self {
+            Self::Value(value) => Self::Value(value.into_fresh()),
+            Self::ResourceOperationBatch(ResourceOperationBatchOutcome::AllResults(results)) => {
+                Self::ResourceOperationBatch(ResourceOperationBatchOutcome::AllResults(
+                    results.into_iter().map(fresh).collect(),
+                ))
+            }
+            Self::ResourceOperationBatch(ResourceOperationBatchOutcome::Selected {
+                leaf,
+                result,
+            }) => Self::ResourceOperationBatch(ResourceOperationBatchOutcome::Selected {
+                leaf,
+                result: fresh(result),
+            }),
+            outcome @ (Self::ResourceOperationBatch(
+                ResourceOperationBatchOutcome::SettledValue
+                | ResourceOperationBatchOutcome::ExhaustedRejections(_),
+            )
+            | Self::Unit
+            | Self::HandedOver) => outcome,
+        }
+    }
+
     /// Takes the host's value, refusing one that carries a prototype-chain name
     /// as a data key.
     ///
@@ -444,6 +484,16 @@ impl ExecutionBounds {
 }
 
 pub trait ExecutionHost: Sync {
+    /// Answers one ability the run asks for.
+    ///
+    /// Whatever value the answer carries enters the guest as a copy: the VM
+    /// rebuilds it into new heap objects, so it never aliases a guest object,
+    /// not even when the host answers with the very value it was handed as an
+    /// argument. A guest that passes an object to an operation and gets "it"
+    /// back holds two objects, and a write through one does not show through
+    /// the other. That is all a host across a wire could do, and it is what
+    /// lets a run parked on the operation and answered later from a held
+    /// outcome leave the same state as one that ran straight through.
     fn perform(
         &self,
         op: AbilityOp,

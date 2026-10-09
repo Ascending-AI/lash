@@ -467,7 +467,7 @@ fn every_admitted_artifact_holds_the_structural_invariants() {
     let bound_after = session_bindings();
     let mut failures = Vec::new();
     let mut checked = 0usize;
-    for program in corpora::with_workflows() {
+    for program in corpora::all() {
         // A program the round-trip law records as not admitting is that
         // law's concern; every admitted one is held to the invariants here.
         let problems = check(&program, bound_after.get(&program.id));
