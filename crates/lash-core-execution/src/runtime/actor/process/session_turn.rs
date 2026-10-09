@@ -102,11 +102,8 @@ struct ChildTurnDriver {
 }
 
 impl ChildTurnDriver {
-    fn decode(stored: Option<&str>) -> Result<Option<Self>, DurableError> {
-        stored
-            .map(serde_json::from_str)
-            .transpose()
-            .map_err(|error| corrupt("a session-turn process's driver state", error))
+    fn decode(stored: Option<&str>) -> Result<Option<Self>, serde_json::Error> {
+        stored.map(serde_json::from_str).transpose()
     }
 
     #[expect(
@@ -146,7 +143,27 @@ impl ProcessActivation {
                 .park(owned, tx, &ProcessParkReason::UnservedSessionTurn)
                 .await;
         };
-        let Some(mut driver) = ChildTurnDriver::decode(row.driver_json.as_deref())? else {
+        let driver = match ChildTurnDriver::decode(row.driver_json.as_deref()) {
+            Ok(driver) => driver,
+            // A driver row this node does not decode: a cancel ends the
+            // process unread, and otherwise it parks with its typed reason.
+            Err(error) => {
+                if let Some(origin) = cancel {
+                    return self.end_engine_free(owned, tx, process, live, origin).await;
+                }
+                if live.park.is_some() {
+                    // Woken without a cancel or a redrive: stay parked.
+                    tx.ack_seen().give_up(Release::Parked);
+                    owned.commit(tx, CommitLabel::PROCESS_ADVANCE).await?;
+                    return Ok(Pass::Released);
+                }
+                let reason = ProcessParkReason::UndecodableDriver {
+                    message: error.to_string(),
+                };
+                return self.park(owned, tx, &reason).await;
+            }
+        };
+        let Some(mut driver) = driver else {
             if let Some(origin) = cancel {
                 return self.end_engine_free(owned, tx, process, live, origin).await;
             }

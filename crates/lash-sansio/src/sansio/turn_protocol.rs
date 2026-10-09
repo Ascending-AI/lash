@@ -689,15 +689,11 @@ pub enum DriverAction<M: TurnProtocol = UnitTurnProtocol> {
     ReportToolCalls {
         completed: Vec<CompletedToolCall<M::IntentOutcome>>,
     },
-    /// Refuse the parked state the driver was handed back: this build does
-    /// not decode it. It is the step's only action. The machine neither
-    /// finishes nor continues ([`TurnMachine::state_refusal`]), so the host
-    /// commits nothing of the step and the turn stays where its rows hold it.
-    RefuseState(UndecodableDriverState),
 }
 
-/// A protocol driver's refusal of state it parked while its work ran, handed
-/// back in a format this build does not decode: another build wrote it.
+/// A protocol driver's refusal of state it parked while its work ran, found
+/// in a restored checkpoint in a format this build does not decode: another
+/// build wrote it ([`ProtocolDriverHandle::check_parked_state`]).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UndecodableDriverState {
     /// The driver that refused it.
@@ -881,6 +877,26 @@ pub trait ProtocolDriverHandle<M: TurnProtocol = UnitTurnProtocol>: Send + Sync 
     /// into typed repair feedback.
     fn handles_output_limit_response(&self) -> bool {
         false
+    }
+
+    /// Check the state the driver parked in `work`, the work a restored
+    /// checkpoint waits on: whether this build decodes what
+    /// [`Self::handle_llm_success`] or [`Self::handle_exec_result`] will be
+    /// handed back. [`TurnMachine::restore_from_checkpoint`] asks once,
+    /// before the host re-delivers anything, and refuses the checkpoint with
+    /// the driver's answer; so a handler is only ever handed state this
+    /// build wrote or this check admitted. A driver that parks no state
+    /// keeps the default.
+    ///
+    /// # Errors
+    ///
+    /// [`UndecodableDriverState`] when this build does not decode it.
+    fn check_parked_state(
+        &self,
+        _ctx: DriverContextView<'_, M>,
+        _work: &PendingWork<M>,
+    ) -> Result<(), UndecodableDriverState> {
+        Ok(())
     }
 
     fn prepare_protocol_iteration(&self, ctx: DriverContextView<'_, M>) -> Vec<DriverAction<M>>;

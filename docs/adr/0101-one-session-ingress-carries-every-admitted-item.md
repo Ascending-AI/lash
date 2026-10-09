@@ -437,12 +437,21 @@ program failure nor a fabricated answer. Retry policy is recorded data under
 [ADR 0110](0110-the-engine-owns-process-recovery.md) and ADR 0132 §7.
 
 A turn that resumes from a state the running build does not decode (its
-phase checkpoint, the state its protocol driver parked in it, or a resent
-model call's admission) is such a park, taken at once: nothing of the turn is
-committed or settled for it, its rows keep the state for a build that reads
-it, and the session's park carries the typed refusal
-(`SessionParkReason::UndecodableState`), which a host reads with
-`DurableSession::park_reason`.
+phase checkpoint, the state its protocol driver parked in it, a plugin
+namespace its run committed, the snapshot of the cell it stopped in, or a
+resent model call's admission) is such a park, taken at once. The turn's
+restore decodes all of it before anything is re-delivered: the protocol
+driver answers for its own parked state
+(`ProtocolDriverHandle::check_parked_state`, asked by
+`TurnMachine::restore_from_checkpoint`) and the code executor for its cell's
+snapshot, so no cell runs again and no model call is resent for a turn that
+is then refused. Nothing of the turn is committed or settled for it, its rows
+keep the state for a build that reads it, and the session's park carries the
+typed refusal (`SessionParkReason::UndecodableState`), which a host reads
+with `DurableSession::park_reason`. A cancel of the turn ends it without
+reading the refused state; the calls a stopped cell had completed are then
+not recorded with it. A process whose driver row does not decode parks the
+same way (`ProcessParkReason::UndecodableDriver`), and a cancel ends it.
 
 Implementation: `crates/lash-core/src/runtime/durable/session.rs`
 (`SessionParkReason`) and `crates/lash/src/send.rs` (parked outcomes).

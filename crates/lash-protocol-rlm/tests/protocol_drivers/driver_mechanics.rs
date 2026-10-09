@@ -536,11 +536,11 @@ fn terminal_provider_paths_emit_only_visible_prose() {
     }
 }
 
-/// FIG-5592: parked driver state this build does not decode is refused, typed.
-/// The machine neither runs the cell nor finishes, so no host commits the
-/// turn; it yields nothing further.
+/// FIG-5592, FIG-5601: a checkpoint that parks driver state this build does
+/// not decode is refused when it is restored, with the driver's typed
+/// refusal: no machine exists to re-deliver its model call or run its cell.
 #[test]
-fn rlm_driver_state_this_build_cannot_decode_is_refused_and_never_finishes_the_turn() {
+fn rlm_driver_state_this_build_cannot_decode_refuses_its_checkpoint_at_restore() {
     let config = test_config();
     let msgs = vec![user_message("run some code")];
     let mut machine = TurnMachine::new(config, msgs, Default::default(), 0);
@@ -553,38 +553,17 @@ fn rlm_driver_state_this_build_cannot_decode_is_refused_and_never_finishes_the_t
         "checkpoint should contain RLM driver state"
     );
     let checkpoint = serde_json::from_value(checkpoint).expect("checkpoint deserializes");
-    let mut restored = TurnMachine::restore_from_checkpoint(test_config(), checkpoint, None)
-        .expect("supported checkpoint");
-
-    let effects = drain_effects(&mut restored);
-    let llm_id = *find_llm_call(&effects).expect("restored llm call");
-    restored.handle_response(Response::LlmComplete {
-        id: llm_id,
-        text_streamed: false,
-        result: Ok(LlmResponse {
-            parts: vec![LlmOutputPart::Text {
-                text: typescript_block("print(\"hi\");"),
-                response_meta: None,
-            }],
-            response_metadata: Default::default(),
-            ..LlmResponse::default()
-        }),
-    });
-
-    let effects = drain_effects(&mut restored);
-    assert!(
-        effects.is_empty(),
-        "a refused step yields nothing: no cell, no outcome, no end"
-    );
-    let refusal = restored
-        .state_refusal()
-        .expect("the driver refused its state");
+    let Err(error) = TurnMachine::restore_from_checkpoint(test_config(), checkpoint, None) else {
+        panic!("the machine restored over driver state its driver does not decode");
+    };
+    let lash_sansio::TurnCheckpointRestoreError::UndecodableDriverState(refusal) = error else {
+        panic!("the restore failed with {error}, not the driver's refusal");
+    };
     assert_eq!(refusal.driver, lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID);
     assert!(
         refusal.reason.contains("driver state belongs to plugin"),
         "{refusal:?}"
     );
-    assert!(!restored.is_done(), "a refused turn is not finished");
 }
 
 #[test]

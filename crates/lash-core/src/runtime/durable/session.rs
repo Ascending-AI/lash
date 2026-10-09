@@ -688,8 +688,25 @@ impl SessionActivation {
         // runs: the live owner stopped its work for it, or a crash left it.
         if let Some(request) = row.cancel.clone() {
             // A turn that stopped on a cell records the calls the cell
-            // completed with its cancel: the cell never answers.
-            let stopped = self.services.stopped_cell_calls(cx, &row, heads).await?;
+            // completed with its cancel: the cell never answers. A turn
+            // whose parked state this build does not decode records none of
+            // them: its cancel ends it without reading that state, so the
+            // refusal never holds the session's one way out (FIG-5601).
+            let stopped = match self.services.stopped_cell_calls(cx, &row, heads).await {
+                Ok(stopped) => stopped,
+                Err(error) => match undecodable_state(&error) {
+                    Some(refusal) => {
+                        tracing::warn!(
+                            session_id = %session,
+                            run_id = %row.run,
+                            refusal = %refusal.encode(),
+                            "the cancelled turn ends without its stopped cell's calls"
+                        );
+                        None
+                    }
+                    None => return Err(error),
+                },
+            };
             turn_cancel::finalize(cx, &row, &request, stopped).await?;
             // The stop then waits for the children its cancel marked (G1b,
             // L6b): the rest of its cascade first, then their terminals,
@@ -938,10 +955,12 @@ pub enum SessionParkReason {
         error: String,
     },
     /// Its unfinished turn resumes from a state this build does not decode:
-    /// another build wrote it. Nothing of the turn was committed or settled
-    /// for it, and its rows keep the state: a build that reads it resumes
-    /// the turn on a redrive, and a turn cancel ends it without reading it
-    /// (FIG-5592).
+    /// another build wrote it. The turn's restore refused it before any of
+    /// the turn's work was re-delivered (no cell ran again, no model call
+    /// was resent), so nothing of the turn was committed or settled for it,
+    /// and its rows keep the state: a build that reads it resumes the turn
+    /// on a redrive, and a turn cancel ends it without reading it
+    /// (FIG-5592, FIG-5601).
     UndecodableState {
         /// Which of the turn's states.
         state: ParkedTurnState,
@@ -967,6 +986,11 @@ pub enum ParkedTurnState {
         /// The call's ordinal among the turn's calls.
         call: u32,
     },
+    /// The snapshot the code cell it stopped in resumes from.
+    CellSnapshot,
+    /// A plugin namespace its run committed beside its checkpoint, which a
+    /// resume reinstalls.
+    PluginState,
 }
 
 /// The park of a pass that failed on a state its turn resumes from and this
@@ -975,6 +999,14 @@ fn undecodable_state(error: &TurnError) -> Option<SessionParkReason> {
     use lash_sansio::TurnCheckpointRestoreError as Checkpoint;
     let (state, reason) = match error {
         TurnError::UndecodableState { state, reason } => (state.clone(), reason.clone()),
+        TurnError::Restore(TurnRestoreError::Checkpoint(Checkpoint::UndecodableDriverState(
+            refusal,
+        ))) => (
+            ParkedTurnState::DriverState {
+                driver: refusal.driver.clone(),
+            },
+            refusal.reason.clone(),
+        ),
         TurnError::Restore(
             restore @ (TurnRestoreError::Undecodable { .. }
             | TurnRestoreError::Checkpoint(

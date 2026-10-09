@@ -237,7 +237,7 @@ impl TurnServices for RuntimeTurnServices {
     ) -> Result<OpenTurn, TurnError> {
         let recorded = restore.recorded_preparation()?;
         let (turn, parts) = self.prepare(cx, restore.row(), Some(recorded)).await?;
-        RuntimeDrive::resume(turn, parts, restore).await
+        RuntimeDrive::resume(cx, turn, parts, restore).await
     }
 
     async fn stopped_cell_calls(

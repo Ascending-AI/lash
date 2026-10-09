@@ -185,16 +185,6 @@ pub async fn run_phases(
     // An answered cell's tool calls, recorded with the turn's next commit.
     let mut answered_cell: Option<tool_round::AnsweredCell> = None;
     loop {
-        // The driver refused the parked state its last step was handed back:
-        // nothing the step left is the turn's, and nothing commits.
-        if let Some(refusal) = drive.machine().state_refusal() {
-            return Err(TurnError::UndecodableState {
-                state: ParkedTurnState::DriverState {
-                    driver: refusal.driver.clone(),
-                },
-                reason: refusal.reason.clone(),
-            });
-        }
         let effect = match pending.take() {
             Some(effect) => effect,
             None => match drive.machine().poll_effect() {

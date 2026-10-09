@@ -312,6 +312,44 @@ struct World {
     nodes: SimNodes,
     log: AdvanceLog,
     refuse: Arc<AtomicBool>,
+    /// Set to have the next claim of a process find its driver row as
+    /// another build left it ([`StaleDriverRow`]).
+    stale_driver: Arc<AtomicBool>,
+}
+
+/// The process activation, whose claim first rewrites the process's driver
+/// row as another build left it while `stale` is set.
+struct StaleDriverRow {
+    stale: Arc<AtomicBool>,
+    process: Arc<ProcessActivation>,
+}
+
+#[async_trait::async_trait]
+impl lash_durable::runner::Activation for StaleDriverRow {
+    async fn activate(&self, owned: lash_durable::runner::Owned) -> lash_durable::runner::Exit {
+        if self.stale.swap(false, Ordering::SeqCst) {
+            let process = ProcessId::parse(owned.actor().id()).expect("a process actor");
+            let row = owned
+                .store()
+                .process(&process)
+                .await
+                .expect("the process row reads")
+                .expect("the process has a row");
+            let mut tx = owned.begin().await.expect("the claim reads its actor");
+            tx.write(lash_durable::DomainWrite::Process(
+                lash_durable::domain::ProcessWrite::Advance {
+                    process,
+                    expected_rev: row.state_rev,
+                    driver_json: "another build's driver row".to_owned(),
+                },
+            ));
+            owned
+                .commit(tx, CommitLabel::PROCESS_ADVANCE)
+                .await
+                .expect("the stale driver row commits");
+        }
+        self.process.activate(owned).await
+    }
 }
 
 impl World {
@@ -332,11 +370,15 @@ impl World {
             formats: Vec::new(),
         })
         .expect("the law backend assembles");
-        let activation = Arc::new(ProcessActivation::new(
-            backend.clone(),
-            Arc::new(LawSteps),
-            Arc::new(Tripwire::default()) as _,
-        ));
+        let stale_driver = Arc::new(AtomicBool::new(false));
+        let activation = Arc::new(StaleDriverRow {
+            stale: Arc::clone(&stale_driver),
+            process: Arc::new(ProcessActivation::new(
+                backend.clone(),
+                Arc::new(LawSteps),
+                Arc::new(Tripwire::default()) as _,
+            )),
+        });
         let nodes = SimNodes::new(
             database,
             Arc::clone(&clock),
@@ -354,6 +396,7 @@ impl World {
             nodes,
             log,
             refuse,
+            stale_driver,
         }
     }
 
@@ -827,4 +870,56 @@ async fn an_opaque_advance_failure_parks_the_process_and_a_redrive_runs_it_on() 
         .await;
     let end = world.terminal(&process).await.expect("its end");
     assert_eq!(find(&end, "ran"), Some(&json!(true)), "{end}");
+}
+
+/// D-PARKREFUSE (FIG-5601): a process whose driver row this node does not
+/// decode (another build wrote it) is not ended for it. It parks with the
+/// typed `UndecodableDriver` reason, holds no outcome, and its engine is not
+/// advanced over the row.
+#[tokio::test]
+async fn a_driver_row_this_node_cannot_decode_parks_the_process_instead_of_ending_it() {
+    let world = World::new(Script::new()).await;
+    let process = world
+        .register(registration(json!({
+            "tag": "sleeper",
+            "act": "sleep",
+            "until_ms": SimClock::timestamp_ms_at(2_000),
+        })))
+        .await;
+    world.nodes.start("a");
+    world
+        .until("the process sleeps", || async {
+            world.advances("sleeper") == ["started"]
+                && world.actor_state(&process).await == Some(ActorState::Waiting)
+        })
+        .await;
+    world.stale_driver.store(true, Ordering::SeqCst);
+    world
+        .until("the process parked or ended", || async {
+            world.terminal(&process).await.is_some()
+                || world.actor_state(&process).await == Some(ActorState::Parked)
+        })
+        .await;
+
+    assert_eq!(
+        world.terminal(&process).await,
+        None,
+        "the undecodable driver row is no terminal"
+    );
+    assert_eq!(world.advances("sleeper"), ["started"]);
+    let feed: Vec<_> = world
+        .nodes
+        .database()
+        .park_events(None, 100)
+        .await
+        .expect("read the park feed")
+        .into_iter()
+        .filter(|row| row.actor == actor(&process))
+        .collect();
+    assert!(
+        feed.len() == 1
+            && feed[0].kind == ParkEventKind::Parked
+            && feed[0].reason_json.contains("undecodable_driver"),
+        "one UndecodableDriver park: {feed:?}"
+    );
 }

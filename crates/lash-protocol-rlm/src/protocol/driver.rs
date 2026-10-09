@@ -31,7 +31,7 @@ use crate::dialect::SessionDialect;
 use crate::projection::rlm_protocol_event;
 use crate::rlm_support::decode_rlm_termination_options;
 
-use super::actions::{invalid_turn_options_actions, refuse_driver_state};
+use super::actions::invalid_turn_options_actions;
 use super::cell::{
     CellExtraction, CellExtractionError, extract_cell, malformed_cell_fence,
     project_visible_assistant_prose_with_tags,
@@ -48,8 +48,8 @@ use super::stall::{
     reply_fingerprint, stalled_attempts,
 };
 use crate::driver_state::{
-    RLM_DRIVER_STATE_VERSION, RlmDriverState, RlmReasoningPart, decode_rlm_driver_state,
-    rlm_driver_state,
+    RLM_DRIVER_STATE_VERSION, RlmDriverState, RlmReasoningPart, check_parked_rlm_state,
+    handed_back_rlm_state, rlm_driver_state,
 };
 
 #[derive(Clone)]
@@ -244,6 +244,14 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
 
     fn handles_output_limit_response(&self) -> bool {
         true
+    }
+
+    fn check_parked_state(
+        &self,
+        ctx: DriverContextView<'_>,
+        work: &PendingWork<lash_core::HostTurnProtocol>,
+    ) -> Result<(), lash_sansio::UndecodableDriverState> {
+        check_parked_rlm_state(&ctx, work)
     }
 
     fn prepare_protocol_iteration(&self, ctx: DriverContextView<'_>) -> Vec<DriverAction> {
@@ -456,16 +464,10 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
             lash_core::driver_writer_version!(ctx, crate::RLM_PROTOCOL_EVENT_VERSION),
         )]));
 
-        let Some(raw_state) = driver_state else {
-            return refuse_driver_state("missing RLM driver state".to_string());
-        };
-        let mut state = match decode_rlm_driver_state(
-            raw_state,
+        let mut state = handed_back_rlm_state(
+            driver_state,
             lash_core::driver_writer_version!(ctx, RLM_DRIVER_STATE_VERSION),
-        ) {
-            Ok(state) => state,
-            Err(err) => return refuse_driver_state(err),
-        };
+        );
         state.code = cell.code.clone();
         state.reasoning = reasoning;
         state.assistant_parts = vec![lash_core::Part::text(
@@ -506,13 +508,10 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
         driver_state: lash_core::ProtocolDriverState,
         result: Result<ExecResponse, lash_core::ExecCodeFailure>,
     ) -> Vec<DriverAction> {
-        let state = match decode_rlm_driver_state(
-            driver_state,
+        let state = handed_back_rlm_state(
+            Some(driver_state),
             lash_core::driver_writer_version!(ctx, RLM_DRIVER_STATE_VERSION),
-        ) {
-            Ok(state) => state,
-            Err(err) => return refuse_driver_state(err),
-        };
+        );
         let mut actions = Vec::new();
 
         // Cancellation evidence is recorded at the effect handoff, after the

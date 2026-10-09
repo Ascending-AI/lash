@@ -13,7 +13,7 @@ mod host_bridge;
 mod snapshot;
 mod state;
 
-pub(crate) use cell_segment::snapshot_tool_calls;
+pub(crate) use cell_segment::{check_cell_snapshot, snapshot_tool_calls};
 pub use snapshot::RLM_SNAPSHOT_VERSION;
 pub use state::RlmExecutionState;
 

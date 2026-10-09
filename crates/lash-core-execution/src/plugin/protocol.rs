@@ -258,6 +258,20 @@ pub trait CodeExecutorPlugin: Send + Sync {
         Ok(Vec::new())
     }
 
+    /// Check `snapshot`, the stored snapshot a cell resumes from, as this
+    /// executor wrote it: whether this build decodes it. A turn restored on
+    /// the cell asks before the cell runs again, so a snapshot another build
+    /// wrote is refused before any of the cell's work is re-delivered
+    /// (FIG-5601). An executor whose cells snapshot nothing keeps the
+    /// default.
+    ///
+    /// # Errors
+    ///
+    /// [`crate::SessionError`] when the snapshot does not decode.
+    fn check_cell_snapshot(&self, _snapshot: &str) -> Result<(), crate::SessionError> {
+        Ok(())
+    }
+
     /// The executable generation this executor runs cells under (FIG-3571):
     /// everything that decides how a cell compiles, what its nested effects
     /// are keyed by, and where its cancel checkpoints fall. A turn's admission

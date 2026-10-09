@@ -120,14 +120,28 @@ impl CellSegmentState {
 pub(crate) fn snapshot_tool_calls(
     snapshot: &str,
 ) -> Result<Vec<lash_core::ToolCallRecord>, String> {
+    Ok(stored_envelope(snapshot)?
+        .map(|state| state.host.tool_call_records())
+        .unwrap_or_default())
+}
+
+/// Whether this build decodes `snapshot`, a cell's stored snapshot: the
+/// broker's checkpoint and the envelope a resumed cell runs on with. The VM
+/// bytes are the worker's to read.
+pub(crate) fn check_cell_snapshot(snapshot: &str) -> Result<(), String> {
+    stored_envelope(snapshot).map(drop)
+}
+
+/// The envelope `snapshot`, a cell's stored snapshot, holds, if it holds
+/// one.
+fn stored_envelope(snapshot: &str) -> Result<Option<CellSegmentState>, String> {
     let checkpoint: lash_vm_broker::Checkpoint =
         serde_json::from_str(snapshot).map_err(|error| error.to_string())?;
-    let Some(host) = checkpoint.host.as_ref() else {
-        return Ok(Vec::new());
-    };
-    let state: CellSegmentState =
-        rmp_serde::from_slice(&host.0).map_err(|error| error.to_string())?;
-    Ok(state.host.tool_call_records())
+    checkpoint
+        .host
+        .as_ref()
+        .map(|host| rmp_serde::from_slice(&host.0).map_err(|error| error.to_string()))
+        .transpose()
 }
 
 /// A cell resumed from its latest snapshot: the checkpoint the broker runs

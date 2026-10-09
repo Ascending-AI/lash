@@ -31,10 +31,10 @@ use super::stall::{
     LLM_EXTRACTION_PHASE, NO_PROGRESS_BUDGET_PHASE, native_reply_fingerprint, stalled_attempts,
 };
 use crate::driver_state::{
-    RLM_DRIVER_STATE_VERSION, RlmDriverState, RlmReasoningPart, decode_rlm_driver_state,
-    rlm_driver_state,
+    RLM_DRIVER_STATE_VERSION, RlmDriverState, RlmReasoningPart, check_parked_rlm_state,
+    handed_back_rlm_state, rlm_driver_state,
 };
-use crate::protocol::actions::{invalid_turn_options_actions, refuse_driver_state};
+use crate::protocol::actions::invalid_turn_options_actions;
 use crate::protocol::stall::{ExtractionCounts, ExtractionDiagnostic};
 
 #[derive(Clone)]
@@ -55,6 +55,14 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
 
     fn handles_output_limit_response(&self) -> bool {
         true
+    }
+
+    fn check_parked_state(
+        &self,
+        ctx: DriverContextView<'_>,
+        work: &PendingWork<lash_core::HostTurnProtocol>,
+    ) -> Result<(), lash_sansio::UndecodableDriverState> {
+        check_parked_rlm_state(&ctx, work)
     }
 
     fn prepare_protocol_iteration(&self, ctx: DriverContextView<'_>) -> Vec<DriverAction> {
@@ -323,16 +331,10 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                 }
             }
             super::tool::NativeAction::Execute { code } => {
-                let Some(raw_state) = driver_state else {
-                    return refuse_driver_state("missing native driver state".to_string());
-                };
-                let mut state = match decode_rlm_driver_state(
-                    raw_state,
+                let mut state = handed_back_rlm_state(
+                    driver_state,
                     lash_core::driver_writer_version!(ctx, RLM_DRIVER_STATE_VERSION),
-                ) {
-                    Ok(state) => state,
-                    Err(error) => return refuse_driver_state(error),
-                };
+                );
                 state.code = code.clone();
                 state.reasoning = reasoning;
                 state.assistant_parts = parts;
@@ -367,13 +369,10 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
         driver_state: lash_core::ProtocolDriverState,
         result: Result<ExecResponse, lash_core::ExecCodeFailure>,
     ) -> Vec<DriverAction> {
-        let state = match decode_rlm_driver_state(
-            driver_state,
+        let state = handed_back_rlm_state(
+            Some(driver_state),
             lash_core::driver_writer_version!(ctx, RLM_DRIVER_STATE_VERSION),
-        ) {
-            Ok(state) => state,
-            Err(err) => return refuse_driver_state(err),
-        };
+        );
         let mut actions = Vec::new();
 
         // Cancellation evidence is recorded at the effect handoff, after the

@@ -30,6 +30,14 @@ pub enum ProcessParkReason {
         /// Its version.
         version: u32,
     },
+    /// Its driver row, what the actor records of its steps or of its child
+    /// turn between transitions, does not decode on this node: another
+    /// build wrote it. Nothing of the process ran or committed for it
+    /// (FIG-5601).
+    UndecodableDriver {
+        /// The decoder's account.
+        message: String,
+    },
     /// Its engine refused a transition.
     AdvanceRefused {
         /// The engine's account.

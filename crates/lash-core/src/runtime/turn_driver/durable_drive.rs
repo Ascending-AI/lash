@@ -12,8 +12,8 @@ use super::*;
 use crate::runtime::durable::commit_publication::{CommitBase, PublishedHeads};
 use crate::runtime::durable::head::SessionHead;
 use crate::runtime::durable::session::{
-    CellExit, CellToolCalls, CodeCell, ModelCallAttempt, OpenTurn, PreparedCall, RestoredTurn,
-    TurnCommit, TurnDone, TurnDrive, TurnError, TurnRestore,
+    CellExit, CellToolCalls, CodeCell, ModelCallAttempt, OpenTurn, ParkedTurnState, PreparedCall,
+    RestoredTurn, TurnCommit, TurnDone, TurnDrive, TurnError, TurnRestore,
 };
 use crate::runtime::turn_loop::DurableTurn;
 
@@ -106,7 +106,15 @@ impl RuntimeDrive {
 
     /// A turn taken over from its checkpoint: the machine restored under the
     /// configuration a fresh machine of the prepared turn is built with.
+    ///
+    /// Everything the turn resumes from is decoded here, before any of its
+    /// work is re-delivered: its checkpoint and the driver state parked in
+    /// it (the restore), the plugin namespaces its run committed, and the
+    /// snapshot of the cell it stopped in. A state this build does not
+    /// decode is refused with its typed [`TurnError`], which parks the
+    /// session (FIG-5601).
     pub(in crate::runtime) async fn resume(
+        cx: &ActorContext,
         turn: DurableTurn,
         parts: DriveParts,
         restore: TurnRestore<'_>,
@@ -138,10 +146,14 @@ impl RuntimeDrive {
             .session
             .plugins()
             .restore_run(namespaces)
-            .map_err(|error| {
-                TurnError::Exec(format!(
+            .map_err(|error| match error {
+                crate::PluginError::StoredDataCorrupt { .. } => TurnError::UndecodableState {
+                    state: ParkedTurnState::PluginState,
+                    reason: error.to_string(),
+                },
+                error => TurnError::Exec(format!(
                     "the turn's plugin state did not reinstall: {error}"
-                ))
+                )),
             })?;
         // The protocol records the restored machine already delivered
         // through its progress boundaries reached only the previous owner's
@@ -156,6 +168,9 @@ impl RuntimeDrive {
         // The tool surface a sync before the checkpoint recorded: pinned
         // again from the session's live registry.
         driver.reinstall_tool_surface()?;
+        if let Some(crate::Effect::ExecCode { id, .. }) = &pending {
+            check_cell_snapshot(cx, &driver, &machine, *id).await?;
+        }
         Ok(OpenTurn {
             drive: Box::new(Self::assemble(
                 driver,
@@ -210,6 +225,39 @@ impl RuntimeDrive {
             _attachments: attachments,
         }
     }
+}
+
+/// Check the snapshot the cell of effect `id`, which the restored `machine`
+/// re-delivers, resumes from: the cell's executor decodes it before the cell
+/// runs again. A cell with no snapshot starts over and has nothing to check.
+async fn check_cell_snapshot(
+    cx: &ActorContext,
+    driver: &RuntimeTurnDriver<'static>,
+    machine: &TurnMachine,
+    id: crate::EffectId,
+) -> Result<(), TurnError> {
+    use lash_durable::domain::{CellId, ExecKey};
+
+    let Some(code_executor) = driver.session.plugins().code_executor() else {
+        return Ok(());
+    };
+    let invocation = driver
+        .turn_effect_invocation(machine, id, RuntimeEffectKind::ExecCode)
+        .map_err(|error| TurnError::Exec(error.to_string()))?;
+    let exec = ExecKey::Cell(
+        driver.session_id.clone(),
+        driver.turn_id.clone(),
+        CellId::new(invocation.effect_replay_key()),
+    );
+    let Some(snapshot) = cx.durable_reads()?.snapshot(&exec).await? else {
+        return Ok(());
+    };
+    code_executor
+        .check_cell_snapshot(&snapshot.snapshot_ref)
+        .map_err(|error| TurnError::UndecodableState {
+            state: ParkedTurnState::CellSnapshot,
+            reason: error.to_string(),
+        })
 }
 
 /// The machine a prepared turn starts: ended at once when its recorded model

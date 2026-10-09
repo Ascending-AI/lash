@@ -104,6 +104,49 @@ pub(crate) fn decode_rlm_driver_state(
     Ok(envelope.state)
 }
 
+/// Whether this build decodes the driver state a restored checkpoint parked
+/// in `work`: what both channels' drivers answer
+/// `ProtocolDriverHandle::check_parked_state` with. A model call and a cell
+/// each park one; no other work does.
+pub(crate) fn check_parked_rlm_state(
+    ctx: &lash_core::DriverContextView<'_>,
+    work: &lash_core::sansio::PendingWork<lash_core::HostTurnProtocol>,
+) -> Result<(), lash_sansio::UndecodableDriverState> {
+    let refuse = |reason: String| lash_sansio::UndecodableDriverState {
+        driver: crate::plugin::RLM_PROTOCOL_PLUGIN_ID.to_string(),
+        reason,
+    };
+    let state = match work {
+        lash_core::sansio::PendingWork::Llm { driver_state, .. } => driver_state
+            .as_ref()
+            .ok_or_else(|| refuse("missing RLM driver state".to_string()))?,
+        lash_core::sansio::PendingWork::Exec { driver_state, .. } => driver_state,
+        _ => return Ok(()),
+    };
+    decode_rlm_driver_state(
+        state.clone(),
+        lash_core::driver_writer_version!(ctx, RLM_DRIVER_STATE_VERSION),
+    )
+    .map(drop)
+    .map_err(refuse)
+}
+
+/// The driver state a handler is handed back with its work's answer.
+#[expect(
+    clippy::expect_used,
+    reason = "a handler is handed the state this driver parked in this process, or state `check_parked_rlm_state` admitted when the machine was restored"
+)]
+pub(crate) fn handed_back_rlm_state(
+    state: Option<lash_core::ProtocolDriverState>,
+    fleet_recorded_version: u32,
+) -> RlmDriverState {
+    decode_rlm_driver_state(
+        state.expect("the RLM driver parks its state with every model call and cell"),
+        fleet_recorded_version,
+    )
+    .expect("the RLM driver state was written or checked by this build")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

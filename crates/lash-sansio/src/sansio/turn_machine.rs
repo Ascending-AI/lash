@@ -63,7 +63,6 @@ impl<M: TurnProtocol> TurnMachine<M> {
             observed_cancellation: None,
             resume_work: None,
             run_abort: None,
-            state_refusal: None,
         }
     }
 
@@ -210,14 +209,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
     }
 
     pub fn is_done(&self) -> bool {
-        self.state_refusal.is_none() && matches!(self.state, MachineState::Finished)
-    }
-
-    /// The driver's refusal of the parked state its last step was handed
-    /// back, if it refused it: the machine did not finish and yields no
-    /// further work, and nothing its step queued is the turn's.
-    pub fn state_refusal(&self) -> Option<&UndecodableDriverState> {
-        self.state_refusal.as_ref()
+        matches!(self.state, MachineState::Finished)
     }
 
     pub fn messages(&self) -> crate::AppendVec<Message> {
@@ -385,7 +377,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
         for event in content.sequence(&checkpoint.events)? {
             events.push(event);
         }
-        Ok(Self {
+        let machine = Self {
             config,
             state: checkpoint.state.restore(&content, window.as_ref())?,
             side_effect_outbox,
@@ -404,8 +396,36 @@ impl<M: TurnProtocol> TurnMachine<M> {
             observed_cancellation: None,
             resume_work: None,
             run_abort: None,
-            state_refusal: None,
-        })
+        };
+        machine.check_parked_state()?;
+        Ok(machine)
+    }
+
+    /// Ask the driver whether this build decodes the state it parked in the
+    /// work the restored machine waits on: the one place a parked driver
+    /// state is refused, before the host re-delivers the work.
+    fn check_parked_state(&self) -> Result<(), TurnCheckpointRestoreError> {
+        let (MachineState::Waiting { work, .. }, Some(environment)) =
+            (&self.state, self.environment.as_ref())
+        else {
+            return Ok(());
+        };
+        self.config
+            .protocol_driver
+            .check_parked_state(
+                DriverContextView {
+                    config: &self.config,
+                    messages: &self.messages,
+                    prompt_messages: &self.prompt_messages,
+                    events: self.events.as_slice(),
+                    protocol_iteration: self.protocol_iteration,
+                    protocol_run_offset: self.protocol_run_offset,
+                    observed_cancellation: None,
+                    environment: &environment.sync,
+                },
+                work,
+            )
+            .map_err(TurnCheckpointRestoreError::UndecodableDriverState)
     }
 
     /// Run one driver step over the synced environment and apply the
@@ -532,9 +552,6 @@ impl<M: TurnProtocol> TurnMachine<M> {
     /// Drain the next pending effect. Returns `None` when the host must call
     /// `handle_response()` before more effects become available.
     pub fn poll_effect(&mut self) -> Option<Effect<M>> {
-        if self.state_refusal.is_some() {
-            return None;
-        }
         if let Some(effect) = self.poll_scheduled_effect() {
             return Some(effect);
         }
@@ -702,11 +719,6 @@ impl<M: TurnProtocol> TurnMachine<M> {
                         None => self.finish(outcome),
                     }
                     break;
-                }
-                DriverAction::RefuseState(refusal) => {
-                    self.run_abort = None;
-                    self.state_refusal = Some(refusal);
-                    return;
                 }
             }
         }

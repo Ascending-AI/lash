@@ -173,7 +173,7 @@ pub(super) struct Live {
     /// What the lifecycle's bodies are built from.
     bodies: Arc<StepBodies>,
     /// The actor's park as of the claim.
-    park: Option<String>,
+    pub(super) park: Option<String>,
     /// The claims in a row that committed nothing, as of the claim.
     failed_activations: u32,
     first_pass: bool,
@@ -446,8 +446,12 @@ impl ProcessActivation {
             }
             None => Err(ProcessParkReason::UnknownEngine { kind: kind.clone() }),
         };
+        // The driver row is decoded with the engine state, before anything
+        // of the process runs: one this node does not decode parks the
+        // process with its typed reason, and a cancel ends it unread.
+        let driver = Driver::decode(row.driver_json.as_deref());
         if let Some(origin) = cancel
-            && (live.park.is_some() || loaded.is_err() || row.state_rev == 0)
+            && (live.park.is_some() || loaded.is_err() || driver.is_err() || row.state_rev == 0)
         {
             return self.end_engine_free(owned, tx, process, live, origin).await;
         }
@@ -479,8 +483,15 @@ impl ProcessActivation {
             };
             return self.park(owned, tx, &reason).await;
         };
-        let mut driver = Driver::decode(row.driver_json.as_deref())
-            .map_err(|error| corrupt("a process's driver state", error))?;
+        let mut driver = match driver {
+            Ok(driver) => driver,
+            Err(error) => {
+                let reason = ProcessParkReason::UndecodableDriver {
+                    message: error.to_string(),
+                };
+                return self.park(owned, tx, &reason).await;
+            }
+        };
         let now = owned.store().now().await?;
         if let (Some(origin), Some(until)) = (cancel, driver.grace_until)
             && now.0 >= until

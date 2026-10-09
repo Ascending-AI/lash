@@ -484,6 +484,10 @@ pub enum TurnCheckpointRestoreError {
     CorruptContent { content: String },
     /// The window handed to the restore is not the one the checkpoint names.
     WindowMismatch { message: String },
+    /// The protocol driver does not decode the state it parked in the work
+    /// the checkpoint waits on
+    /// ([`ProtocolDriverHandle::check_parked_state`]).
+    UndecodableDriverState(UndecodableDriverState),
 }
 
 impl std::fmt::Display for TurnCheckpointRestoreError {
@@ -512,6 +516,11 @@ impl std::fmt::Display for TurnCheckpointRestoreError {
             Self::WindowMismatch { message } => {
                 write!(formatter, "turn checkpoint window: {message}")
             }
+            Self::UndecodableDriverState(refusal) => write!(
+                formatter,
+                "turn checkpoint holds `{}` driver state this build does not decode: {}",
+                refusal.driver, refusal.reason
+            ),
         }
     }
 }
@@ -626,10 +635,6 @@ pub struct TurnMachine<M: TurnProtocol = UnitTurnProtocol> {
     /// delivered (ADR 0128). The driver still records those results; the
     /// machine then finishes instead of starting further work.
     pub(super) run_abort: Option<RunAbort>,
-    /// The driver's refusal of the parked state its last step was handed
-    /// ([`DriverAction::RefuseState`]). Runtime-only: a refused machine is
-    /// never checkpointed, and the turn's rows still hold the state.
-    pub(super) state_refusal: Option<UndecodableDriverState>,
 }
 
 /// The Run control a tool result carried: the namespaced code and message
