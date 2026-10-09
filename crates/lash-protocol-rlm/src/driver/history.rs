@@ -446,7 +446,7 @@ fn message_text(
 }
 
 /// The user observation message for a step: printed outputs (with re-fetch handles), images,
-/// executed calls, error, and final value.
+/// executed calls, what the cell did to the session's variables, error, and final value.
 /// Never empty.
 pub(crate) fn step_output_text(
     vocabulary: crate::dialect::DialectPromptVocabulary,
@@ -504,6 +504,29 @@ pub(crate) fn step_output_text(
         }
         for call in &entry.calls {
             let _ = write!(out, "\n- {} → {}", call.operation, call.outcome.as_str());
+        }
+    }
+    if !entry.bindings.is_empty() {
+        if !out.is_empty() {
+            out.push_str("\n\n");
+        }
+        out.push_str("Session variables:");
+        let not_carried = format!(
+            "not kept (a function or a task does not outlive its {})",
+            vocabulary.cell_noun
+        );
+        for (change, names) in [
+            ("added", &entry.bindings.added),
+            ("changed", &entry.bindings.changed),
+            ("removed", &entry.bindings.removed),
+            (not_carried.as_str(), &entry.bindings.not_carried),
+        ] {
+            if !names.is_empty() {
+                let _ = write!(out, "\n- {change}: {}", names.join(", "));
+            }
+        }
+        if entry.bindings.omitted > 0 {
+            let _ = write!(out, "\n- … {} more names omitted", entry.bindings.omitted);
         }
     }
     match &entry.result {

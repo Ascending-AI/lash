@@ -316,6 +316,7 @@ mod rlm_step_serde_tests {
                 call_id: Some(lash_sansio::ToolCallId::fixture("math-add")),
             }],
             calls_omitted: 2,
+            bindings: Default::default(),
             result: CellOutcome::Finished(serde_json::json!({"answer": 42}).into()),
         }
     }

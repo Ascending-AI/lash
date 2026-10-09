@@ -687,6 +687,7 @@ impl ModelStore {
                     },
                     retained_finish_value: None,
                     degraded_bindings: Vec::new(),
+                    bindings: Default::default(),
                     suspended: false,
                 };
                 let outcome = lash_core::RuntimeEffectOutcome::ExecCode {

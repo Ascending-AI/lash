@@ -850,6 +850,7 @@ fn rlm_exec_response(
         },
         retained_finish_value: None,
         degraded_bindings: Vec::new(),
+        bindings: Default::default(),
         suspended: false,
     }
 }
@@ -895,6 +896,7 @@ fn rlm_exec_response_with_tool_calls(
         },
         retained_finish_value: None,
         degraded_bindings: Vec::new(),
+        bindings: Default::default(),
         suspended: false,
     }
 }

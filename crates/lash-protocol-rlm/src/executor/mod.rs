@@ -736,15 +736,18 @@ async fn run_cell(
                 // made of its copy is not the session's.
                 left.variables
                     .retain(|name, _| !projected.contains(name.as_str()));
-                state.settle_cell(document, left, finished.not_carried);
+                let bindings = state.settle_cell(document, left, finished.not_carried);
                 // `main` that ran to its end without a `finish` answered
                 // nothing: the cell completed. A `finish` gave the turn its
                 // answer.
-                respond(if finished.finish {
-                    lash_core::CellOutcome::Finished(datum_json(&result).into())
-                } else {
-                    lash_core::CellOutcome::Completed
-                })
+                ExecResponse {
+                    bindings: Box::new(bindings),
+                    ..respond(if finished.finish {
+                        lash_core::CellOutcome::Finished(datum_json(&result).into())
+                    } else {
+                        lash_core::CellOutcome::Completed
+                    })
+                }
             }
             End::Failed(reason) => failed(
                 lash_core::CellFailureKind::Program,
@@ -886,6 +889,7 @@ fn exec_setup_failure(error: lash_core::CellFailure) -> ExecResponse {
         result: lash_core::CellOutcome::Failed(error),
         retained_finish_value: None,
         degraded_bindings: Vec::new(),
+        bindings: Default::default(),
         suspended: false,
     }
 }
@@ -962,6 +966,7 @@ fn exec_response_from(collected: &CellHostLedgers, result: lash_core::CellOutcom
         result,
         retained_finish_value: None,
         degraded_bindings: Vec::new(),
+        bindings: Default::default(),
         suspended: false,
     }
 }

@@ -423,6 +423,7 @@ mod tests {
             images: Vec::new(),
             calls: Vec::new(),
             calls_omitted: 0,
+            bindings: Default::default(),
             result: lash_core::CellOutcome::Finished(serde_json::json!({ "answer": 42 }).into()),
         };
         let retained = CellRecord {
@@ -435,6 +436,7 @@ mod tests {
             images: Vec::new(),
             calls: Vec::new(),
             calls_omitted: 0,
+            bindings: Default::default(),
             result: lash_core::CellOutcome::Completed,
         };
         let events = [
@@ -515,6 +517,7 @@ mod tests {
             images: Vec::new(),
             calls: Vec::new(),
             calls_omitted: 0,
+            bindings: Default::default(),
             result: lash_core::CellOutcome::Failed(lash_core::CellFailure::new(
                 lash_core::CellFailureKind::Program,
                 "unknown name",
@@ -530,6 +533,7 @@ mod tests {
             images: Vec::new(),
             calls: Vec::new(),
             calls_omitted: 0,
+            bindings: Default::default(),
             result: lash_core::CellOutcome::Finished(serde_json::json!("done").into()),
         };
         let events = [

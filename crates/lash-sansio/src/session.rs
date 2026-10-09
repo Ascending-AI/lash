@@ -343,6 +343,65 @@ mod finish_value {
     }
 }
 
+/// What a cell's committed transition did to its session's bindings, by
+/// name. A cell whose run failed, or whose result was discarded, committed
+/// no transition and reports none; a cell the protocol adjudicated as failed
+/// after its run ended keeps what that run committed.
+///
+/// Each list is in name order and a name is in at most one of them. A record
+/// keeps as many names as its session's recorded bound allows, taken in the
+/// order `added`, `changed`, `removed`, `not_carried`, and counts the rest
+/// in `omitted`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BindingChanges {
+    /// Bound after the cell and not before it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub added: Vec<String>,
+    /// Bound before and after the cell, to different data.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub changed: Vec<String>,
+    /// Bound before the cell and not after it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub removed: Vec<String>,
+    /// Left by the cell holding a value a session does not carry (a function
+    /// or a task): not bound after it, whatever it held before.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub not_carried: Vec<String>,
+    /// Names beyond the recorded bound.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub omitted: usize,
+}
+
+impl BindingChanges {
+    pub fn is_empty(&self) -> bool {
+        self.added.is_empty()
+            && self.changed.is_empty()
+            && self.removed.is_empty()
+            && self.not_carried.is_empty()
+            && self.omitted == 0
+    }
+
+    /// These changes with at most `max_names` names kept and the rest
+    /// counted.
+    #[must_use]
+    pub fn bounded(mut self, max_names: usize) -> Self {
+        let mut room = max_names;
+        for names in [
+            &mut self.added,
+            &mut self.changed,
+            &mut self.removed,
+            &mut self.not_carried,
+        ] {
+            let kept = names.len().min(room);
+            self.omitted += names.len() - kept;
+            names.truncate(kept);
+            room -= kept;
+        }
+        self
+    }
+}
+
 /// One executed code cell, as committed history records it and a transcript
 /// returns it: the protocol that ran the cell appends this record, and a
 /// reader decodes the same record back. Its prints and result are the
@@ -373,6 +432,9 @@ pub struct CellRecord {
     /// Calls the cell made beyond the recorded `calls`.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub calls_omitted: usize,
+    /// What the cell's committed transition did to the session's bindings.
+    #[serde(default, skip_serializing_if = "BindingChanges::is_empty")]
+    pub bindings: BindingChanges,
     pub result: CellOutcome,
 }
 
@@ -408,6 +470,10 @@ pub struct ExecResponse {
     /// the host decides whether to warn, repair, or abort.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub degraded_bindings: Vec<DegradedBinding>,
+    /// What the cell did to the session's bindings, every name: empty unless
+    /// the cell's run ended and the session took what it left.
+    #[serde(default, skip_serializing_if = "BindingChanges::is_empty")]
+    pub bindings: Box<BindingChanges>,
     /// The cell stopped at a segment boundary inside it (FIG-4739): a durable
     /// wait it issued was handed to the Run's successor segment, and the
     /// executor holds the cell's state for the execution that resumes it. A

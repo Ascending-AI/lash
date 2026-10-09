@@ -132,6 +132,7 @@ async fn durable_transcript_projection_fixture() -> Vec<crate::ChatRow> {
             },
         ],
         calls_omitted: 3,
+        bindings: Default::default(),
         images: printed_images,
         ..lash::transcript::CellRecord::default()
     };

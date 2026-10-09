@@ -301,6 +301,7 @@ impl RuntimeBoundaryHarness {
             },
             retained_finish_value: None,
             degraded_bindings: Vec::new(),
+            bindings: Default::default(),
             suspended: false,
         };
         let (outcome, execution_count) = self

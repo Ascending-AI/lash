@@ -260,6 +260,7 @@ fn empty_exec_response() -> crate::ExecResponse {
         result: crate::CellOutcome::Completed,
         retained_finish_value: None,
         degraded_bindings: Vec::new(),
+        bindings: Default::default(),
         suspended: false,
     }
 }

@@ -385,6 +385,7 @@ pub(crate) fn exec_response(
         },
         retained_finish_value: None,
         degraded_bindings: Vec::new(),
+        bindings: Default::default(),
         suspended: false,
     }
 }

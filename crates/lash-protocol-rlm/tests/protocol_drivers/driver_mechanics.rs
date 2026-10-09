@@ -649,6 +649,11 @@ fn rlm_checkpoint_redrives_pending_exec_code_with_driver_state() {
             result: lash_core::CellOutcome::Completed,
             retained_finish_value: None,
             degraded_bindings: Vec::new(),
+            bindings: Box::new(lash_core::BindingChanges {
+                added: vec!["greeting".to_string()],
+                not_carried: vec!["greet".to_string()],
+                ..Default::default()
+            }),
             suspended: false,
         }),
     });
@@ -684,6 +689,16 @@ fn rlm_checkpoint_redrives_pending_exec_code_with_driver_state() {
     assert_eq!(assistant_visible_texts(&restored), vec!["Reason first."]);
     assert_eq!(entry.prints[0].text, "hi\n");
     assert_eq!(entry.prints[0].value, serde_json::json!("hi\n"));
+    // FIG-5766: the record carries what the cell did to the session's
+    // bindings, as the executor reported it.
+    assert_eq!(
+        entry.bindings,
+        lash_core::BindingChanges {
+            added: vec!["greeting".to_string()],
+            not_carried: vec!["greet".to_string()],
+            ..Default::default()
+        }
+    );
     let (_, checkpoint) = find_checkpoint(&effects).expect("after-work checkpoint");
     assert_eq!(checkpoint, CheckpointKind::AfterWork);
 }
@@ -1015,6 +1030,7 @@ fn rlm_checkpoint_after_exec_fanout_tool_outputs_preserves_structured_outcomes()
             result: lash_core::CellOutcome::Completed,
             retained_finish_value: None,
             degraded_bindings: Vec::new(),
+            bindings: Default::default(),
             suspended: false,
         }),
     });

@@ -350,6 +350,7 @@ fn response(finish: Option<serde_json::Value>) -> lash_core::ExecResponse {
         }),
         retained_finish_value: None,
         degraded_bindings: Vec::new(),
+        bindings: Default::default(),
         suspended: false,
     }
 }

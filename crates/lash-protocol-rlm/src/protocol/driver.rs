@@ -575,6 +575,8 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                 }
                 (record.calls, record.calls_omitted) =
                     bounded_executed_calls(response.calls, &self.dialect.presentation());
+                record.bindings = (*response.bindings)
+                    .bounded(self.dialect.presentation().max_binding_change_names);
                 record.images = response.printed_images;
                 record.prints = response.prints;
                 record.prints_retained = response.prints_retained;

@@ -485,6 +485,77 @@ async fn a_deferred_tool_granted_to_a_cell_is_callable_after_a_restart() {
     );
 }
 
+/// FIG-5766: a cell's response says what its committed transition did to
+/// the session's bindings, by name. A binding the cell left alone is in no
+/// list, a closure the session does not carry (`K-SES-003`) is named as not
+/// carried, and a cell that failed committed nothing and reports nothing,
+/// whatever it assigned before it failed.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_cell_reports_the_bindings_its_committed_transition_changed() {
+    let host = open_host().await;
+    let tools = Arc::new(CellTools::default());
+    let services = typescript_services(None);
+    let mut state = typescript_state();
+
+    let first = run_cell(
+        &mut state,
+        cell_context(&host, SESSION, TURN, "exec-code:0", tools.clone()),
+        &services,
+        "const kept = [1, 2];\nlet count = 1;",
+    )
+    .await;
+    assert!(first.error().is_none(), "{:?}", first.error());
+    assert_eq!(
+        *first.bindings,
+        lash_core::BindingChanges {
+            added: vec!["count".to_owned(), "kept".to_owned()],
+            ..Default::default()
+        }
+    );
+
+    let second = run_cell(
+        &mut state,
+        cell_context(&host, SESSION, TURN, "exec-code:1", tools.clone()),
+        &services,
+        "const rows = [kept.length];\ncount = 2;\nconst increment = (value) => value + 1;",
+    )
+    .await;
+    assert!(second.error().is_none(), "{:?}", second.error());
+    assert_eq!(
+        *second.bindings,
+        lash_core::BindingChanges {
+            added: vec!["rows".to_owned()],
+            changed: vec!["count".to_owned()],
+            not_carried: vec!["increment".to_owned()],
+            ..Default::default()
+        }
+    );
+
+    let failed = run_cell(
+        &mut state,
+        cell_context(&host, SESSION, TURN, "exec-code:2", tools.clone()),
+        &services,
+        "count = 3;\nconst late = 1;\nthrow new Error(\"stop\");",
+    )
+    .await;
+    assert!(failed.error().is_some(), "the cell failed");
+    assert_eq!(*failed.bindings, lash_core::BindingChanges::default());
+
+    let after = run_cell(
+        &mut state,
+        cell_context(&host, SESSION, TURN, "exec-code:3", tools),
+        &services,
+        "finish(count);",
+    )
+    .await;
+    assert_eq!(
+        finish_of(&after),
+        serde_json::json!(2),
+        "the failed cell's assignment was not committed"
+    );
+    assert_eq!(*after.bindings, lash_core::BindingChanges::default());
+}
+
 /// `K-TASK-018`, the unjoined-task rule: a cell that ends with work it
 /// started still running gets the kernel's typed error as its observation,
 /// naming the line of the async code that is still running and how to

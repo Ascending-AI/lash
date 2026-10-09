@@ -8,6 +8,9 @@ pub struct RlmPresentationConfig {
     pub max_inline_keys: usize,
     pub max_tool_call_records: usize,
     pub max_inline_scalar_bytes: usize,
+    /// How many binding names a cell's record keeps of what the cell did to
+    /// the session's bindings; it counts the rest.
+    pub max_binding_change_names: usize,
 }
 impl Default for RlmPresentationConfig {
     fn default() -> Self {
@@ -16,7 +19,8 @@ impl Default for RlmPresentationConfig {
 }
 impl RlmPresentationConfig {
     /// Standard preset: standard tool/schema presentation, 12 inline
-    /// catalogue keys, 128 tool-call records and 64 KiB inline scalar bodies.
+    /// catalogue keys, 128 tool-call records, 64 KiB inline scalar bodies and
+    /// 32 binding-change names.
     /// These historical presentation cuts have no universal workload measurement.
     pub const fn standard() -> Self {
         Self {
@@ -24,6 +28,7 @@ impl RlmPresentationConfig {
             max_inline_keys: 12,
             max_tool_call_records: 128,
             max_inline_scalar_bytes: 64 * 1024,
+            max_binding_change_names: 32,
         }
     }
 }

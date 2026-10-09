@@ -1540,7 +1540,7 @@ pub mod transcript {
     /// One executed code cell: the record its protocol committed, which a
     /// [`TranscriptItem::Cell`] returns, a code executor's response reports
     /// the prints and result of, and a completion activity carries.
-    pub use lash_core::{CellOutcome, CellPrint, CellRecord};
+    pub use lash_core::{BindingChanges, CellOutcome, CellPrint, CellRecord};
 }
 
 /// Presentation cuts for runtime value replies and raw transcript errors.

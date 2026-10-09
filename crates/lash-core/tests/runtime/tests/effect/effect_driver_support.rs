@@ -146,6 +146,7 @@ impl lash_core::plugin::CodeExecutorPlugin for EffectControllerTestCodeExecutor 
             result: lash_core::CellOutcome::Completed,
             retained_finish_value: None,
             degraded_bindings: Vec::new(),
+            bindings: Default::default(),
             suspended: false,
         })
     }

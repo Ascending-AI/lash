@@ -84,12 +84,45 @@ impl SessionBindings {
 
     /// Takes what the cell of `document` left: `left` are `main`'s
     /// top-level bindings, `not_carried` the ones the run's end dropped.
-    pub(crate) fn settle(&mut self, document: DocumentId, left: Bindings, not_carried: Vec<Name>) {
+    /// Answers what that did to the bindings, every name.
+    pub(crate) fn settle(
+        &mut self,
+        document: DocumentId,
+        left: Bindings,
+        not_carried: Vec<Name>,
+    ) -> lash_core::BindingChanges {
         self.document = Some(document);
         self.not_carried
             .retain(|name| !left.variables.contains_key(name));
-        self.not_carried.extend(not_carried);
+        let before = Bindings {
+            variables: std::mem::take(&mut self.variables),
+            objects: std::mem::take(&mut self.objects),
+        };
         self.adopt(left);
+        let dropped: BTreeSet<Name> = not_carried.into_iter().collect();
+        let mut changes = lash_core::BindingChanges {
+            not_carried: dropped.iter().map(ToString::to_string).collect(),
+            ..Default::default()
+        };
+        for (name, value) in &self.variables {
+            match before.variables.get(name) {
+                None => changes.added.push(name.to_string()),
+                Some(was)
+                    if binding_data(was, &before.objects) != binding_data(value, &self.objects) =>
+                {
+                    changes.changed.push(name.to_string());
+                }
+                Some(_) => {}
+            }
+        }
+        changes.removed = before
+            .variables
+            .keys()
+            .filter(|name| !self.variables.contains_key(*name) && !dropped.contains(*name))
+            .map(ToString::to_string)
+            .collect();
+        self.not_carried.extend(dropped);
+        changes
     }
 
     /// Replaces the bindings with `left`, renumbering its objects: each is
@@ -199,6 +232,37 @@ impl SessionBindings {
             objects: self.objects.clone(),
         }
     }
+}
+
+/// One binding's value and the objects it reaches, numbered in the order
+/// the value reaches them: equal for two bindings that hold the same data,
+/// wherever a session numbered their objects.
+fn binding_data(value: &Value, objects: &BTreeMap<ObjectId, Object>) -> (Value, Vec<Object>) {
+    let mut renamed: BTreeMap<ObjectId, ObjectId> = BTreeMap::new();
+    let mut reached = Vec::new();
+    let mut pending = Vec::new();
+    value_objects(value, &mut pending);
+    while let Some(id) = pending.pop() {
+        if renamed.contains_key(&id) {
+            continue;
+        }
+        renamed.insert(id, ObjectId(reached.len() as u64));
+        reached.push(id);
+        if let Some(object) = objects.get(&id) {
+            let mut named = Vec::new();
+            object_objects(object, &mut named);
+            pending.extend(named.into_iter().rev());
+        }
+    }
+    let rename = |id: &ObjectId| renamed.get(id).copied().unwrap_or(*id);
+    (
+        rename_value(value, &rename),
+        reached
+            .iter()
+            .filter_map(|id| objects.get(id))
+            .map(|object| rename_object(object, &rename))
+            .collect(),
+    )
 }
 
 fn value_objects(value: &Value, out: &mut Vec<ObjectId>) {
@@ -419,9 +483,9 @@ impl RlmExecutionState {
         document: DocumentId,
         left: Bindings,
         not_carried: Vec<Name>,
-    ) {
-        self.bindings.settle(document, left, not_carried);
+    ) -> lash_core::BindingChanges {
         self.capture_dirty = true;
+        self.bindings.settle(document, left, not_carried)
     }
 
     pub fn execution_state_dirty(&self) -> bool {

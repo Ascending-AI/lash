@@ -62,6 +62,7 @@ fn step_event(code: &str) -> SessionHistoryRecord {
             images: Vec::new(),
             calls: Vec::new(),
             calls_omitted: 0,
+            bindings: Default::default(),
             result: lash_core::CellOutcome::Completed,
         })),
         lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
@@ -95,6 +96,49 @@ fn render(events: &[SessionHistoryRecord]) -> Vec<lash_core::llm::types::LlmMess
     .expect("valid history fixture")
 }
 
+/// FIG-5766: a cell's observation names the session variables its committed
+/// transition changed, apart from what it printed and called. A record keeps
+/// names up to its session's bound, in the order added, changed, removed,
+/// not carried, and counts the rest.
+#[test]
+fn step_output_text_names_the_session_variables_a_cell_changed() {
+    let dialect =
+        crate::dialect::SessionDialect::prompt_only(crate::dialect::CellDialect::typescript());
+    let names = |names: &[&str]| names.iter().map(ToString::to_string).collect::<Vec<_>>();
+    let changes = lash_core::BindingChanges {
+        added: names(&["rows", "total"]),
+        changed: names(&["count"]),
+        removed: names(&["scratch"]),
+        not_carried: names(&["increment"]),
+        omitted: 0,
+    };
+    let entry = |bindings| lash_core::CellRecord {
+        prints: vec!["done".to_string().into()],
+        bindings,
+        ..lash_core::CellRecord::default()
+    };
+
+    assert_eq!(
+        step_output_text(dialect.prompt_vocabulary(), 2, &entry(changes.clone())),
+        "history[2].output[0]:\ndone\n\nSession variables:\n- added: rows, total\n- changed: count\n- removed: scratch\n- not kept (a function or a task does not outlive its cell): increment"
+    );
+
+    let bounded = changes.bounded(3);
+    assert_eq!(
+        bounded,
+        lash_core::BindingChanges {
+            added: names(&["rows", "total"]),
+            changed: names(&["count"]),
+            omitted: 2,
+            ..Default::default()
+        }
+    );
+    assert_eq!(
+        step_output_text(dialect.prompt_vocabulary(), 2, &entry(bounded)),
+        "history[2].output[0]:\ndone\n\nSession variables:\n- added: rows, total\n- changed: count\n- … 2 more names omitted"
+    );
+}
+
 #[test]
 fn step_output_text_derives_image_metadata_from_the_trajectory_entry() {
     let dialect =
@@ -118,6 +162,7 @@ fn step_output_text_derives_image_metadata_from_the_trajectory_entry() {
         }],
         calls: Vec::new(),
         calls_omitted: 0,
+        bindings: lash_core::BindingChanges::default(),
         result: lash_core::CellOutcome::Completed,
     };
 
@@ -222,6 +267,7 @@ fn failed_observation_lists_executed_calls_and_frames_retry() {
                 },
             ],
             calls_omitted: 0,
+            bindings: Default::default(),
             result: lash_core::CellOutcome::Failed(lash_core::CellFailure::new(
                 lash_core::CellFailureKind::Program,
                 "read failed at secret.txt; cache failed at .cache/lash/state",
@@ -268,6 +314,7 @@ fn successful_observation_keeps_calls_and_exact_earlier_omission_marker() {
                 call_id: None,
             }],
             calls_omitted: 3,
+            bindings: Default::default(),
             result: lash_core::CellOutcome::Completed,
         })),
         lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
@@ -304,6 +351,7 @@ fn step_failed_with(id: &str, code: &str, failure: lash_core::CellFailure) -> Se
             images: Vec::new(),
             calls: Vec::new(),
             calls_omitted: 0,
+            bindings: Default::default(),
             result: lash_core::CellOutcome::Failed(failure),
         })),
         lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(

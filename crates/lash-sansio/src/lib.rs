@@ -162,9 +162,9 @@ pub use schema_contract::{
     project_anthropic_bedrock_schema, project_for_dialect, resolve_schema,
 };
 pub use session::{
-    CellDefect, CellFailure, CellFailureKind, CellOutcome, CellPrint, CellRecord, DegradedBinding,
-    ExecCodeFailure, ExecCodeFailureReason, ExecResponse, ExecutedCall, ExecutedCallOutcome,
-    OmittedToolCalls, TextProjectionMetadata,
+    BindingChanges, CellDefect, CellFailure, CellFailureKind, CellOutcome, CellPrint, CellRecord,
+    DegradedBinding, ExecCodeFailure, ExecCodeFailureReason, ExecResponse, ExecutedCall,
+    ExecutedCallOutcome, OmittedToolCalls, TextProjectionMetadata,
 };
 pub use session_model::message::{MessageOrigin, TurnOutputSource, TurnReply, same_message};
 pub use session_model::{

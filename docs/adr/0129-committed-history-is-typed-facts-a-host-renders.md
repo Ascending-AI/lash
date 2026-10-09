@@ -26,7 +26,11 @@ timestamp, its typed turn/input provenance, and a `TranscriptItem`:
   (each an `ExecutedCall`: the operation, its outcome and the `call_id` of
   the host tool call's `ToolCallRecord`, absent only for a dispatch lash
   handled itself; [ADR 0117](0117-lash-names-every-tool-call.md) §7),
-  `calls_omitted` (the calls beyond the recorded bound) and its images. The
+  `calls_omitted` (the calls beyond the recorded bound), its images and
+  `bindings` (a `BindingChanges`: the session bindings its committed
+  transition added, changed, removed or could not carry, by name, with the
+  names beyond the recorded bound counted; empty for a cell whose run
+  failed). The
   executor's `ExecResponse` reports the same `CellPrint` and `CellOutcome`
   values and the `CodeBlockCompleted` activity carries them, so a cell has
   one print shape and one result shape from execution to the transcript. The
