@@ -220,10 +220,16 @@ impl TraceEvent {
                     if let Some(mismatch) = &mut failure.value_mismatch {
                         mismatch.message.clear();
                     }
-                    if let Some(lash_sansio::SchemaAdmissionError::Compilation { message, .. }) =
-                        failure.schema_admission.as_deref_mut()
-                    {
-                        message.clear();
+                    if let Some(admission) = failure.schema_admission.as_deref_mut() {
+                        match admission {
+                            lash_sansio::SchemaAdmissionError::Compilation { message, .. } => {
+                                message.clear();
+                            }
+                            lash_sansio::SchemaAdmissionError::NonLocalReference { reference, .. } => {
+                                reference.clear();
+                            }
+                            lash_sansio::SchemaAdmissionError::InvalidKind { .. } => {}
+                        }
                     }
                 }
                 *terminal_finish = None;

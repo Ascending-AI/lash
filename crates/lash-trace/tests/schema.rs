@@ -1165,3 +1165,71 @@ fn execution_identity_requires_its_process_document() {
         );
     }
 }
+
+/// Schema diagnostics are content under the host's omission policy (FIG-5530).
+#[test]
+fn omitted_schema_admission_diagnostics_keep_classification_without_text() {
+    const COMPILATION: &str = "PRIVATE-COMPILATION-SENTINEL";
+    const REFERENCE: &str = "https://private.example/PRIVATE-REFERENCE-SENTINEL";
+    let cases = [
+        (
+            lash_sansio::SchemaAdmissionError::Compilation {
+                schema_path: "/properties/mode".into(),
+                message: COMPILATION.into(),
+            },
+            "compilation",
+        ),
+        (
+            lash_sansio::SchemaAdmissionError::NonLocalReference {
+                schema_path: "/properties/mode/$ref".into(),
+                reference: REFERENCE.into(),
+            },
+            "non_local_reference",
+        ),
+    ];
+    for (diagnostic, kind) in cases {
+        let path = match &diagnostic {
+            lash_sansio::SchemaAdmissionError::Compilation { schema_path, .. }
+            | lash_sansio::SchemaAdmissionError::NonLocalReference { schema_path, .. } => {
+                schema_path.clone()
+            }
+            lash_sansio::SchemaAdmissionError::InvalidKind { .. } => unreachable!(),
+        };
+        let mut event = exec_code_completed_event();
+        let TraceEvent::ExecCodeCompleted { error, .. } = &mut event else {
+            unreachable!()
+        };
+        *error = Some(
+            lash_trace::CellFailure::new(lash_trace::CellFailureKind::Program, COMPILATION)
+                .with_schema_admission(diagnostic),
+        );
+        let record = fixture_record(TraceContext::default().for_session("s1"), event);
+        let captured = record
+            .clone()
+            .governed(lash_trace::TelemetryContent::Captured);
+        assert_eq!(captured, record);
+        let captured = serde_json::to_value(captured).expect("captured record");
+        assert!(captured.to_string().contains(COMPILATION));
+        if kind == "non_local_reference" {
+            assert!(captured.to_string().contains(REFERENCE));
+        }
+
+        let omitted = serde_json::to_value(record.governed(lash_trace::TelemetryContent::Omitted))
+            .expect("omitted record");
+        assert!(!omitted.to_string().contains(COMPILATION), "{omitted}");
+        assert!(!omitted.to_string().contains(REFERENCE), "{omitted}");
+        assert_eq!(omitted["type"], "exec_code_completed");
+        assert_eq!(omitted["id"], "fixture-record");
+        assert_eq!(omitted["context"]["session_id"], "s1");
+        assert_eq!(omitted["duration_ms"], 12);
+        assert_eq!(omitted["output_chars"], 11);
+        assert_eq!(omitted["observation_count"], 2);
+        assert_eq!(omitted["error"]["kind"], "program");
+        assert_eq!(omitted["error"]["schema_admission"]["kind"], kind);
+        assert_eq!(omitted["error"]["schema_admission"]["schema_path"], path);
+        assert_eq!(
+            omitted["tool_calls"][0]["call_id"],
+            lash_sansio::ToolCallId::fixture("call-1").to_string(),
+        );
+    }
+}

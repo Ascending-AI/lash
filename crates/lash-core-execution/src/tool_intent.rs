@@ -678,6 +678,27 @@ mod tests {
         }
     }
 
+    /// Runtime owners of different kinds cannot alias even when their id bytes match.
+    #[test]
+    fn process_and_session_owners_with_equal_id_bytes_have_distinct_intent_keys() {
+        let process = crate::process_id_for_test("shared-owner");
+        let session = SessionId::fixture(process.as_str());
+        let key = |owner| {
+            derive_tool_intent_identity(
+                &owner,
+                "same-scope",
+                &crate::ToolCallId::fixture("same-call"),
+                0,
+            )
+            .replay_key
+        };
+        assert_ne!(
+            key(RuntimeOwner::Process(process)),
+            key(RuntimeOwner::Session(session)),
+            "the owner kind is part of the intent's idempotency identity",
+        );
+    }
+
     #[test]
     fn intent_identity_has_a_literal_stable_oracle() {
         let identity = derive_tool_intent_identity(

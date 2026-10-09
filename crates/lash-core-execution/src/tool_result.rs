@@ -651,6 +651,38 @@ mod tests {
         );
     }
 
+    /// ADR 0116 §3.1: a replay key cannot attest to different durable identity fields.
+    #[test]
+    fn a_decoded_declared_start_refuses_changed_fields_with_the_declaring_replay_key() {
+        let crate::PendingResolver::DeclaredStart(declared) = declared_start() else {
+            unreachable!()
+        };
+        let declaring = declared.identity().clone();
+        let mut scope = declaring.clone();
+        scope.execution_scope_id = "turn-2".into();
+        let mut call = declaring.clone();
+        call.tool_call_id = crate::ToolCallId::fixture("call-2");
+        let mut emission = declaring.clone();
+        emission.minting_emission_replay_key = Some("tool:call-1:attempt:2".into());
+        let mut ordinal = declaring.clone();
+        ordinal.intent_index = 1;
+
+        for recorded in [scope, call, emission, ordinal] {
+            let mut bytes = serde_json::to_value(&declared).expect("encode declaration");
+            bytes["identity"] = serde_json::to_value(&recorded).expect("encode identity");
+            let decoded: DeclaredStart = serde_json::from_value(bytes).expect("decode declaration");
+            assert_eq!(
+                decoded.bound_to(&declaring),
+                Err(
+                    crate::ToolIntentRefusalReason::DeclaredStartIdentityMismatch {
+                        expected: Box::new(declaring.clone()),
+                        recorded: Box::new(recorded),
+                    }
+                ),
+            );
+        }
+    }
+
     /// A decoded declaration launches only for the call that declared it:
     /// its start names the admitted session and its identity is exactly the
     /// declaring attempt's for index 0, every field of it (ADR 0116 §3.1).

@@ -523,6 +523,34 @@ mod tests {
         );
     }
 
+    /// The published error contract must validate the typed handler's error codec.
+    #[test]
+    fn typed_operation_publishes_its_declared_error_schema() {
+        let host = PluginHost::new(
+            vec![Arc::new(MockPluginFactory)],
+            crate::ExecutionBudgets::recommended(),
+            crate::trace::TraceRuntime::new(Arc::new(crate::SystemClock)),
+        );
+        let session = host
+            .build_session(PluginSessionRequest::creation(
+                "root",
+                crate::plugin::SessionAuthorityContext::ambient_fixture(),
+            ))
+            .expect("session");
+        let def = session
+            .plugin_operations()
+            .into_iter()
+            .find(|def| def.name == "mock.typed_echo")
+            .expect("typed operation declaration");
+        assert_eq!(def.error_type, "mock.typed_echo");
+        assert_eq!(def.error_version, crate::FormatVersion::ONE);
+        let schema = crate::JsonSchema::admit(def.error_schema).expect("admitted error schema");
+        assert_eq!(schema.validate(&json!("declared error")), Ok(()));
+        for invalid in [json!(7), json!({"message": "declared error"})] {
+            assert!(schema.validate(&invalid).is_err(), "{invalid}");
+        }
+    }
+
     #[tokio::test]
     async fn plugin_query_generates_schema_and_invokes_typed_output() {
         let host = PluginHost::new(

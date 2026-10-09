@@ -1450,6 +1450,36 @@ mod tests {
         );
     }
 
+    /// An explicit dialect override takes precedence over automatic canonical repair.
+    #[test]
+    fn resolver_auto_tool_parameters_uses_the_explicit_override() {
+        let wire = json!({
+            "type": "object",
+            "properties": {"mode": {"enum": ["override"]}}
+        });
+        let contract = SchemaContract::admit(json!({
+            "type": "object",
+            "properties": {"mode": {"const": "x"}}
+        }))
+        .expect("canonical schema")
+        .with_override(
+            SchemaDialect::OpenaiToolParameters,
+            JsonSchema::admit(wire.clone()).expect("explicit wire schema"),
+        );
+        let resolved = resolve_schema(
+            &contract,
+            SchemaResolutionRequest {
+                provider: "test",
+                purpose: SchemaPurpose::ToolInput,
+                dialects: &[SchemaDialect::OpenaiToolParameters],
+            },
+        )
+        .expect("resolve explicit override");
+        assert_eq!(resolved.schema, wire);
+        assert_eq!(resolved.dialect, SchemaDialect::OpenaiToolParameters);
+        assert!(resolved.diagnostics.is_empty());
+    }
+
     #[test]
     fn resolver_explicit_only_fails_without_matching_override() {
         let mut contract = SchemaContract::admit(json!({
