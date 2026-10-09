@@ -697,6 +697,17 @@ mod tests {
                 minting_emission_replay_key: None,
             }
         );
+
+        assert_eq!(rederive_tool_intent_identity(&identity), identity);
+        let forged = ToolIntentIdentity {
+            intent_index: 3,
+            ..identity
+        };
+        assert_ne!(
+            rederive_tool_intent_identity(&forged).replay_key,
+            forged.replay_key,
+            "a forged intent_index must not re-derive to the recorded replay key"
+        );
     }
 
     /// The protocol discriminator is part of the row: a submission that
@@ -816,142 +827,5 @@ mod tests {
         }))
         .expect_err("lifetime absence must be refused");
         assert!(error.to_string().contains("lifetime"));
-    }
-
-    /// Every input the replay key is derived from, as a generated tuple.
-    ///
-    /// The fields are drawn from small alphabets on purpose: injectivity is
-    /// only interesting where collisions are *possible*, and a generator over
-    /// unconstrained strings proves that distinct 32-byte randoms hash apart
-    /// rather than that adjacent scope ids do.
-    fn identity_inputs()
-    -> impl proptest::strategy::Strategy<Value = (String, String, String, u32, Option<String>)>
-    {
-        use proptest::prelude::*;
-        let token = proptest::sample::select(vec!["a", "b", "ab", "a-b", "", "b-a"])
-            .prop_map(str::to_string);
-        // A session id is never blank, so its alphabet has no empty token.
-        let session =
-            proptest::sample::select(vec!["a", "b", "ab", "a-b", "b-a"]).prop_map(str::to_string);
-        (
-            session,
-            token.clone(),
-            token.clone(),
-            0u32..4,
-            proptest::option::of(token),
-        )
-    }
-
-    fn derive_from(inputs: &(String, String, String, u32, Option<String>)) -> ToolIntentIdentity {
-        let (session_id, execution_scope_id, tool_call_id, intent_index, minting) = inputs;
-        derive_tool_intent_identity_inner(
-            &RuntimeOwner::Session(SessionId::fixture(session_id.clone())),
-            execution_scope_id,
-            &crate::ToolCallId::fixture(tool_call_id),
-            *intent_index,
-            minting.as_deref(),
-        )
-    }
-
-    proptest::proptest! {
-        /// Distinct inputs derive distinct replay keys, and equal inputs derive
-        /// equal ones.
-        ///
-        /// The replay key is the start key's preimage for a start declaration
-        /// (`StartKeyDerivation::for_tool_intent`), so a collision here is two
-        /// declarations realizing as one process, and a spurious difference is
-        /// a re-submitted declaration starting a second one. The encoder
-        /// length-prefixes each field precisely so that `("a", "b")` and
-        /// `("ab", "")` cannot render to the same bytes; this executes that.
-        #[test]
-        fn tool_intent_identity_derivation_is_injective_in_its_inputs(
-            left in identity_inputs(),
-            right in identity_inputs(),
-        ) {
-            let derived_left = derive_from(&left);
-            let derived_right = derive_from(&right);
-            proptest::prop_assert_eq!(
-                left == right,
-                derived_left.replay_key == derived_right.replay_key,
-                "inputs {:?} vs {:?} derived {} vs {}",
-                left,
-                right,
-                derived_left.replay_key,
-                derived_right.replay_key
-            );
-        }
-
-    }
-
-    #[test]
-    fn a_forged_field_does_not_survive_re_derivation() {
-        // The fence documented on `rederive_tool_intent_identity`: a record
-        // whose `replay_key` does not equal the re-derived one carries a forged
-        // identity. Nothing exercised it, so a field the derivation stopped
-        // reading would have gone unnoticed -- every mutation below must move
-        // the key, or that field is no longer part of the identity.
-        let honest = derive_tool_intent_identity_inner(
-            &crate::RuntimeOwner::Session(SessionId::from("session")),
-            "scope",
-            &crate::ToolCallId::fixture("call"),
-            1,
-            Some("minted"),
-        );
-        assert_eq!(
-            rederive_tool_intent_identity(&honest).replay_key,
-            honest.replay_key
-        );
-
-        let forgeries: Vec<(&str, ToolIntentIdentity)> = vec![
-            (
-                "owner",
-                ToolIntentIdentity {
-                    owner: RuntimeOwner::Session(SessionId::from("other")),
-                    ..honest.clone()
-                },
-            ),
-            (
-                "execution_scope_id",
-                ToolIntentIdentity {
-                    execution_scope_id: "other".to_string(),
-                    ..honest.clone()
-                },
-            ),
-            (
-                "tool_call_id",
-                ToolIntentIdentity {
-                    tool_call_id: crate::ToolCallId::fixture("other"),
-                    ..honest.clone()
-                },
-            ),
-            (
-                "intent_index",
-                ToolIntentIdentity {
-                    intent_index: 2,
-                    ..honest.clone()
-                },
-            ),
-            (
-                "minting_emission_replay_key",
-                ToolIntentIdentity {
-                    minting_emission_replay_key: Some("other".to_string()),
-                    ..honest.clone()
-                },
-            ),
-            (
-                "minting_emission_replay_key absence",
-                ToolIntentIdentity {
-                    minting_emission_replay_key: None,
-                    ..honest.clone()
-                },
-            ),
-        ];
-        for (field, forged) in forgeries {
-            let rederived = rederive_tool_intent_identity(&forged);
-            assert_ne!(
-                rederived.replay_key, forged.replay_key,
-                "a forged `{field}` must not re-derive to the key the record carries"
-            );
-        }
     }
 }

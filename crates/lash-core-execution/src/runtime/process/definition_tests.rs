@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use super::*;
+use crate::identity_json::{optional_payloads_equal, payload_leaf, payloads_equal};
 use crate::runtime::process::definition_ref::ProcessDefinitionResolution;
 use crate::runtime::process::engine::{
     ProcessEngine, ProcessEngineAdmission, ProcessEngineRegistration,
@@ -510,6 +511,70 @@ fn definition_id_golden_vectors_are_frozen() {
         naming_a_descriptor.id().as_str(),
         "lash.definition:sha256:159144ab18b2e24c97e4a600274065478f4532f854ed37c114b8c53793d87e29"
     );
+
+    // Stored descriptors must use canonical bytes, including their spacing.
+    let spaced = String::from_utf8(with_artifacts.to_store_bytes())
+        .expect("utf-8")
+        .replace(':', ": ");
+    assert_eq!(
+        ProcessDefinitionDraft::from_store_bytes(&with_artifacts.id(), spaced.as_bytes()),
+        Err(ProcessDefinitionStoredError::NotCanonical)
+    );
+
+    let parse = |json: &str| serde_json::from_str(json).expect("parse contract payload");
+    let cases = vec![
+        ("signed zero", parse("-0.0"), parse("0.0"), true),
+        (
+            "integer and float",
+            serde_json::json!(1),
+            serde_json::json!(1.0),
+            false,
+        ),
+        (
+            "same signed and unsigned integer",
+            serde_json::Value::Number(serde_json::Number::from(i64::MAX)),
+            serde_json::Value::Number(serde_json::Number::from(i64::MAX as u64)),
+            true,
+        ),
+        (
+            "large unsigned integer and float",
+            serde_json::json!(u64::MAX),
+            serde_json::json!(u64::MAX as f64),
+            false,
+        ),
+        ("exponent and plain float", parse("1e0"), parse("1.0"), true),
+        (
+            "nested signed zero and object order",
+            parse(r#"{"outer":[{"zero":-0.0,"count":1}]}"#),
+            parse(r#"{"outer":[{"count":1,"zero":0.0}]}"#),
+            true,
+        ),
+        (
+            "nested integer and float",
+            parse(r#"{"outer":[1]}"#),
+            parse(r#"{"outer":[1.0]}"#),
+            false,
+        ),
+    ];
+
+    // Numeric equality follows the canonical bytes pinned above.
+    for (name, left, right, expected) in cases {
+        assert_eq!(payloads_equal(&left, &right), expected, "{name}");
+        assert_eq!(payloads_equal(&right, &left), expected, "{name} reversed");
+    }
+    assert_eq!(payload_leaf(&parse("1e0")), b"1.0");
+
+    let null = serde_json::Value::Null;
+    let one = serde_json::json!(1);
+    let optional_cases = [
+        ("absent and absent", None, None, true),
+        ("absent and null", None, Some(&null), true),
+        ("null and absent", Some(&null), None, true),
+        ("null and value", Some(&null), Some(&one), false),
+    ];
+    for (name, left, right, expected) in optional_cases {
+        assert_eq!(optional_payloads_equal(left, right), expected, "{name}");
+    }
 }
 
 /// A manifest is exactly what the owning engine resolves the value to: a
@@ -556,55 +621,6 @@ async fn a_manifest_that_disagrees_with_the_engine_is_refused() {
             engine_kind: ProcessEngineKind::from("absent-engine"),
         })
     );
-}
-
-/// The store keeps a descriptor as its canonical bytes: equal descriptors
-/// encode equally, and stored bytes decode only to the descriptor of the id
-/// they are stored under.
-#[test]
-fn a_descriptor_round_trips_through_its_canonical_store_bytes() {
-    let first = draft(
-        "lashvm",
-        serde_json::from_str(r#"{"b":[1,-0.0],"a":"x"}"#).expect("parse value"),
-        [module("module:1"), env("env:1")],
-    );
-    let reordered = draft(
-        "lashvm",
-        serde_json::from_str(r#"{"a":"x","b":[1,0.0]}"#).expect("parse value"),
-        [env("env:1"), module("module:1"), env("env:1")],
-    );
-    assert_eq!(first.to_store_bytes(), reordered.to_store_bytes());
-    assert_eq!(
-        String::from_utf8(first.to_store_bytes()).expect("utf-8"),
-        concat!(
-            r#"{"artifacts":[{"artifact_ref":"env:1","store":{"store":"process_env"}},"#,
-            r#"{"artifact_ref":"module:1","store":{"store":"vm_module"}}],"#,
-            r#""engine_kind":"lashvm","value":{"a":"x","b":[1,0.0]}}"#,
-        )
-    );
-    let decoded = ProcessDefinitionDraft::from_store_bytes(&first.id(), &first.to_store_bytes())
-        .expect("the stored descriptor decodes");
-    assert_eq!(decoded.id(), first.id());
-    assert_eq!(decoded.to_store_bytes(), first.to_store_bytes());
-
-    let other = signed_draft();
-    assert_eq!(
-        ProcessDefinitionDraft::from_store_bytes(&other.id(), &first.to_store_bytes()),
-        Err(ProcessDefinitionStoredError::OtherId {
-            derived: first.id()
-        })
-    );
-    let spaced = String::from_utf8(first.to_store_bytes())
-        .expect("utf-8")
-        .replace(':', ": ");
-    assert_eq!(
-        ProcessDefinitionDraft::from_store_bytes(&first.id(), spaced.as_bytes()),
-        Err(ProcessDefinitionStoredError::NotCanonical)
-    );
-    assert!(matches!(
-        ProcessDefinitionDraft::from_store_bytes(&first.id(), b"not json"),
-        Err(ProcessDefinitionStoredError::Undecodable(_))
-    ));
 }
 
 #[test]

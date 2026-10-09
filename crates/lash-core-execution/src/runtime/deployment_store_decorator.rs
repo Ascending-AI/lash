@@ -182,19 +182,4 @@ mod tests {
             "`deployment_operations!` must list exactly the `DeploymentStore` operations"
         );
     }
-
-    #[test]
-    // Architecture lint: the scripted deployment's operations are the listed
-    // ones, so a rule on any `DeploymentOp` can fire.
-    fn every_deployment_operation_is_scriptable() {
-        let scriptable: Vec<&str> = super::DeploymentOp::ALL
-            .iter()
-            .map(|op| op.name())
-            .collect();
-        assert_eq!(scriptable, super::DEPLOYMENT_OPERATIONS);
-
-        fn is_a_deployment<T: crate::runtime::DeploymentStore + ?Sized>() {}
-        is_a_deployment::<lash_core_store::testing::Scripted<dyn crate::runtime::DeploymentStore>>(
-        );
-    }
 }

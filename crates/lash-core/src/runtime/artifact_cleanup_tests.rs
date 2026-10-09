@@ -975,6 +975,19 @@ async fn a_start_that_never_registered_ends_when_its_starter_settles() {
 /// store failure is retried; neither is acknowledged.
 #[tokio::test]
 async fn a_missing_carry_is_refused_and_a_store_fault_is_retried() {
+    let engine_harness = harness();
+    *engine_harness
+        .applied
+        .engine_failure
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) =
+        Some(|| ArtifactStoreError::Backend("connection reset".to_owned()));
+    let ended = ArtifactCleanup::ended(host_pin(), Vec::new(), None);
+    assert!(matches!(
+        engine_harness.deliver(ended).await,
+        Err(DeliveryFailure::Retryable(_))
+    ));
+
     let harness = harness();
     let ended = ArtifactCleanup::ended(host_pin(), Vec::new(), None);
     *harness
@@ -1002,22 +1015,6 @@ async fn a_missing_carry_is_refused_and_a_store_fault_is_retried() {
     ));
     let (_, _, engine) = harness.applied();
     assert!(engine.is_empty(), "no store after the failing one is asked");
-}
-
-#[tokio::test]
-async fn an_engine_store_fault_is_retried() {
-    let harness = harness();
-    *harness
-        .applied
-        .engine_failure
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner) =
-        Some(|| ArtifactStoreError::Backend("connection reset".to_owned()));
-    let ended = ArtifactCleanup::ended(host_pin(), Vec::new(), None);
-    assert!(matches!(
-        harness.deliver(ended).await,
-        Err(DeliveryFailure::Retryable(_))
-    ));
 }
 
 #[tokio::test]

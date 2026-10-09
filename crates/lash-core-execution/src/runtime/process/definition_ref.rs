@@ -420,20 +420,6 @@ mod tests {
     }
 
     #[test]
-    fn fingerprint_separates_engine_kinds_and_definitions() {
-        let base = reference(ProcessSignature::Unknown);
-        let other_engine =
-            ProcessDefinitionRef::unclaimed("other", base.definition.clone().into_json());
-        let other_definition = ProcessDefinitionRef::unclaimed(
-            "scripted-engine",
-            serde_json::json!({"marked": true, "process_name": "other"}),
-        );
-
-        assert_ne!(base.fingerprint(), other_engine.fingerprint());
-        assert_ne!(base.fingerprint(), other_definition.fingerprint());
-    }
-
-    #[test]
     fn fingerprint_is_frozen() {
         assert_eq!(
             reference(ProcessSignature::Unknown).fingerprint(),

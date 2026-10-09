@@ -68,42 +68,41 @@ fn stream_accumulator_preserves_reasoning_when_final_response_has_tool_call() {
 }
 
 #[test]
-fn stream_accumulator_preserves_duplicate_provider_calls_until_repair() {
-    let mut accumulator = LlmStreamAccumulator::default();
-    for _ in 0..2 {
-        accumulator.push_tool_call(
-            "call_1".to_string(),
-            "lookup".to_string(),
-            "{\"q\":\"x\"}".to_string(),
-            None,
-        );
-    }
+fn stream_accumulator_repairs_missing_blank_and_duplicate_ids_deterministically() {
+    {
+        let mut accumulator = LlmStreamAccumulator::default();
+        for _ in 0..2 {
+            accumulator.push_tool_call(
+                "call_1".to_string(),
+                "lookup".to_string(),
+                "{\"q\":\"x\"}".to_string(),
+                None,
+            );
+        }
 
-    assert_eq!(
-        accumulator
+        assert_eq!(
+            accumulator
+                .parts
+                .iter()
+                .filter(|part| matches!(part, LlmOutputPart::ToolCall { .. }))
+                .count(),
+            2
+        );
+        let mut response = LlmResponse::default();
+        accumulator.apply_to_response_for_request(&mut response, "request-1");
+        let ids: Vec<&str> = response
             .parts
             .iter()
-            .filter(|part| matches!(part, LlmOutputPart::ToolCall { .. }))
-            .count(),
-        2
-    );
-    let mut response = LlmResponse::default();
-    accumulator.apply_to_response_for_request(&mut response, "request-1");
-    let ids: Vec<&str> = response
-        .parts
-        .iter()
-        .filter_map(|part| match part {
-            LlmOutputPart::ToolCall { call_id, .. } => Some(call_id.as_str()),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(ids[0], "call_1");
-    assert_ne!(ids[1], ids[0]);
-    assert!(ids[1].starts_with("lashcall_"));
-}
+            .filter_map(|part| match part {
+                LlmOutputPart::ToolCall { call_id, .. } => Some(call_id.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(ids[0], "call_1");
+        assert_ne!(ids[1], ids[0]);
+        assert!(ids[1].starts_with("lashcall_"));
+    }
 
-#[test]
-fn stream_accumulator_repairs_missing_blank_and_duplicate_ids_deterministically() {
     let original = || LlmResponse {
         parts: ["", " \t", "provider", "provider"]
             .into_iter()

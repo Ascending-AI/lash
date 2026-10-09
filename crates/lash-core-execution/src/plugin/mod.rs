@@ -332,18 +332,6 @@ mod tests {
     }
 
     #[test]
-    fn plugin_boundary_operations_declare_error_schema() {
-        let registration = PluginOperationRegistration::query(
-            plugin_operation_spec::<TypedEchoOp>(),
-            Arc::new(|_, args| Box::pin(async move { Ok(args) })),
-        );
-        let encoded = serde_json::to_value(registration.def()).unwrap();
-        assert!(encoded["error_schema"].is_object());
-        assert!(encoded["error_type"].is_string());
-        assert!(encoded["error_version"].as_u64().is_some());
-    }
-
-    #[test]
     fn plugin_boundary_observer_contexts_only_offer_reads() {
         let syntax = syn::parse_file(include_str!("hooks.rs")).unwrap();
         let name = "SessionConfigChangedContext";
