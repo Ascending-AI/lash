@@ -1280,7 +1280,7 @@ needs = ["turn", "process"]
 class = "mechanical"
 lane = "L9d"
 laws = ["runtime_scenario_defers_checkpoint_turn_input_and_respects_cancel"]
-disposition = "covered-by:crates/lash-durable-test/tests/steering_crash_laws.rs::a_steer_at_the_terminal_checkpoint_is_withheld_and_runs_next"
+disposition = "covered-by:crates/lash-durable-test/tests/steering_crash_laws.rs::a_withheld_steer_killed_at_every_label_runs_once_next_on_sqlite_memory"
 status = "deleted"
 note = "the cancel half: crates/lash-durable-test/tests/turn_phases.rs::a_cancelled_queued_input_is_withdrawn_and_never_runs"
 
@@ -1754,7 +1754,7 @@ laws = [
 ]
 disposition = "port"
 status = "ported"
-note = "FIG-5308: crates/lash/src/tests/turn_checkpoints.rs has normal_turn_stores_effective_user_text_in_state, retryable_llm_failures_exhaust_and_fail_turn and provider_failure_surfaces_typed_kind_and_retryability_on_turn_issue (read from the call ledger: a durable send's report carries no TurnIssue, D1 \u00a71.5 3b), queued_checkpoint_input_preserves_images, checkpoint_observer_failure_leaves_active_input_pending_without_application_evidence, process_wake_admitted_at_checkpoint_is_completed_when_turn_is_cancelled. Covered: queued_checkpoint_input_commits_before_continuing_standard_turn and queued_checkpoint_input_accepts_and_persists_one_normal_user_message -> steering_crash_laws.rs::a_steer_sent_during_a_round_is_delivered_at_the_next_work_checkpoint; next_turn_input_turn_admits_process_wake_at_active_checkpoint -> steering_crash_laws.rs::a_process_wake_filed_during_a_round_is_delivered_at_the_next_work_checkpoint; wake_admitted_at_a_terminal_checkpoint_executes_a_follow_on_turn -> steering_crash_laws.rs::a_process_wake_after_the_last_work_checkpoint_runs_next; a_follow_on_whose_commit_is_refused_leaves_no_withheld_row_bound -> steering_crash_laws.rs::a_withheld_steer_killed_at_every_label_runs_once_next_on_sqlite_memory. Subject-deleted: checkpoint_hook_can_inject_messages and checkpoint_attachment_failure_leaves_active_input_pending_without_application_evidence (5a7f31f0d0, FIG-5258, deleted plugin message injection); assembled_turn_reports_turn_timing_from_injected_clock (a durable report is rebuilt from the store and carries no execution metrics). FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired."
+note = "FIG-5308: crates/lash/src/tests/turn_checkpoints.rs has normal_turn_stores_effective_user_text_in_state, retryable_llm_failures_exhaust_and_fail_turn and provider_failure_surfaces_typed_kind_and_retryability_on_turn_issue (read from the call ledger: a durable send's report carries no TurnIssue, D1 \u00a71.5 3b), queued_checkpoint_input_preserves_images, checkpoint_observer_failure_leaves_active_input_pending_without_application_evidence, process_wake_admitted_at_checkpoint_is_completed_when_turn_is_cancelled. Covered: queued_checkpoint_input_commits_before_continuing_standard_turn and queued_checkpoint_input_accepts_and_persists_one_normal_user_message -> steering_crash_laws.rs::a_steer_at_a_work_checkpoint_killed_at_every_label_is_delivered_once_on_sqlite_memory; next_turn_input_turn_admits_process_wake_at_active_checkpoint -> steering_crash_laws.rs::a_process_wake_filed_during_a_round_is_delivered_at_the_next_work_checkpoint; wake_admitted_at_a_terminal_checkpoint_executes_a_follow_on_turn -> steering_crash_laws.rs::a_process_wake_after_the_last_work_checkpoint_runs_next; a_follow_on_whose_commit_is_refused_leaves_no_withheld_row_bound -> steering_crash_laws.rs::a_withheld_steer_killed_at_every_label_runs_once_next_on_sqlite_memory. Subject-deleted: checkpoint_hook_can_inject_messages and checkpoint_attachment_failure_leaves_active_input_pending_without_application_evidence (5a7f31f0d0, FIG-5258, deleted plugin message injection); assembled_turn_reports_turn_timing_from_injected_clock (a durable report is rebuilt from the store and carries no execution metrics). FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired."
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/turns/config_transactions.rs"
@@ -16588,7 +16588,7 @@ needs = ["cell"]
 class = "replace"
 lane = "L9e"
 laws = ["rlm_active_input_reaches_the_next_provider_iteration"]
-disposition = "replaced-by:crates/lash-durable-test/tests/steering_crash_laws.rs::a_steer_sent_during_a_round_is_delivered_at_the_next_work_checkpoint"
+disposition = "replaced-by:crates/lash-durable-test/tests/steering_crash_laws.rs::a_steer_at_a_work_checkpoint_killed_at_every_label_is_delivered_once_on_sqlite_memory"
 status = "deleted"
 owed = "active input addressed to a running turn reaches its next provider iteration"
 note = "FIG-5293, FIG-5294: on the production session activation, a steer sent during a round is delivered by the next work checkpoint and the model's next request holds it, on SQLite memory, SQLite file and PostgreSQL, also killed at every label (fail-before, ack-hidden, zombie, abort, commit-then-abort). The checkpoint admission is the turn driver's and does not depend on the protocol; the law runs the standard protocol's tool rounds, not RLM cells."
@@ -16957,7 +16957,7 @@ lane = "L9c"
 laws = [
   "a_stopped_turn_runs_withheld_input_in_a_follow_on",
 ]
-disposition = "replaced-by:crates/lash-durable-test/tests/steering_crash_laws.rs::a_steer_at_the_terminal_checkpoint_is_withheld_and_runs_next"
+disposition = "replaced-by:crates/lash-durable-test/tests/steering_crash_laws.rs::a_withheld_steer_killed_at_every_label_runs_once_next_on_sqlite_memory"
 status = "deleted"
 owed = "a stopped turn runs withheld input in a follow on"
 note = "Superseded by FIG-5293's next-run decision (6b69a8765a, its report's decision (b)): a durable run is one physical turn, so there is no follow-on physical turn inside a run. Input the terminal checkpoint withholds is never bound by the turn and stays session mail; it runs as the session's next run under its own id, however the turn ended. The replacing law proves it, killed at every label on three tiers; a_process_wake_after_the_last_work_checkpoint_runs_next (FIG-5294) proves the same for a process wake. FIG-5419: retained generic property; historical references to process signal, wake, emit or trigger fixtures do not carry those retired subjects forward."

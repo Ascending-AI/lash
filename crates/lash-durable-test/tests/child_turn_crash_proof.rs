@@ -372,20 +372,6 @@ fn uncut_labels() -> Vec<CommitLabel> {
     ]
 }
 
-/// The uncut run: the child turn runs on its session's actor, and the
-/// process ends with its answer.
-#[tokio::test]
-async fn a_child_session_turn_runs_on_its_session_actor() {
-    let report = Matrix::new().faults(&[]).run_test(ChildTurn::new).await;
-    let labels: Vec<CommitLabel> = report
-        .baseline
-        .iter()
-        .filter(|write| write.kind == WriteKind::Actor && write.committed())
-        .map(|write| write.point.label)
-        .collect();
-    assert_eq!(labels, uncut_labels());
-}
-
 /// A child turn killed at every label resumes on another owner, and its
 /// process commits exactly one terminal.
 #[tokio::test]
@@ -412,6 +398,7 @@ async fn a_child_session_turn_killed_at_every_label_resumes_and_ends_its_process
         labels.join(", ")
     );
     report.assert_held();
+    report.assert_baseline_labels(&uncut_labels());
     for label in uncut_labels() {
         assert!(
             report.labels().contains(&label),

@@ -779,6 +779,7 @@ async fn prove(protocol: Protocol, dialect: Dialect, postgres_url: Option<String
             "{fault:?} at round.outcome was not cut"
         );
     }
+    report.assert_baseline_labels(&uncut_labels(protocol));
     for label in uncut_labels(protocol) {
         assert!(
             report.labels().contains(&label),
@@ -823,33 +824,6 @@ fn uncut_labels(protocol: Protocol) -> Vec<CommitLabel> {
             CommitLabel::SESSION_RELEASE,
         ],
     }
-}
-
-async fn uncut(protocol: Protocol) {
-    let report = Matrix::new()
-        .faults(&[])
-        .run_test(|| V0::new(protocol, Dialect::SqliteMemory, None))
-        .await;
-    let labels: Vec<CommitLabel> = report
-        .baseline
-        .iter()
-        .filter(|write| write.kind == WriteKind::Actor && write.committed())
-        .map(|write| write.point.label)
-        .collect();
-    assert_eq!(labels, uncut_labels(protocol));
-}
-
-/// A code turn runs to its commit uncut, through every commit label, on
-/// one owner with one body entry and one fresh program entry.
-#[tokio::test]
-async fn the_uncut_code_turn_commits_through_every_label() {
-    uncut(Protocol::Code).await;
-}
-
-/// A tool turn runs to its commit uncut, through every commit label.
-#[tokio::test]
-async fn the_uncut_tool_turn_commits_through_every_label() {
-    uncut(Protocol::Tools).await;
 }
 
 /// The code turn on SQLite in memory: every cell of the matrix holds P1 to

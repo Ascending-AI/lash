@@ -505,21 +505,6 @@ fn uncut_labels() -> Vec<CommitLabel> {
     ]
 }
 
-/// The uncut run: the tool step runs once and the process ends with its
-/// answer.
-#[tokio::test]
-async fn a_host_engines_tool_step_runs_on_the_production_steps() {
-    let report = Matrix::new().faults(&[]).run_test(StepProof::new).await;
-    report.assert_held();
-    let labels: Vec<CommitLabel> = report
-        .baseline
-        .iter()
-        .filter(|write| write.kind == WriteKind::Actor && write.committed())
-        .map(|write| write.point.label)
-        .collect();
-    assert_eq!(labels, uncut_labels());
-}
-
 /// A host engine's `Once` tool step killed at every process commit label
 /// resumes on another owner, never writes twice, and ends its process once.
 #[tokio::test]
@@ -543,6 +528,7 @@ async fn a_host_engines_once_tool_step_killed_at_every_label_runs_at_most_once()
         labels.join(", ")
     );
     report.assert_held();
+    report.assert_baseline_labels(&uncut_labels());
     for label in uncut_labels() {
         assert!(
             report.labels().contains(&label),

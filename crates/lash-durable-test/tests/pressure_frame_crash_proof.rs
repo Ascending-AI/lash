@@ -812,6 +812,36 @@ async fn uncut(script: Script) {
     );
 }
 
+/// The crash scripts' complete owner sequence, including the RLM cell writes.
+fn uncut_labels(script: Script) -> Vec<CommitLabel> {
+    if script == Script::ContinueAs {
+        vec![
+            CommitLabel::TURN_ADMIT,
+            CommitLabel::MODEL_START,
+            CommitLabel::MODEL_DONE,
+            CommitLabel::TURN_COMMIT,
+            CommitLabel::TURN_ADMIT,
+            CommitLabel::COMPLETION_START,
+            CommitLabel::PRESSURE_FRAME,
+            CommitLabel::MODEL_START,
+            CommitLabel::MODEL_DONE,
+            CommitLabel::CELL_SNAPSHOT_ADMIT,
+            CommitLabel::ROUND_OUTCOME,
+            CommitLabel::CELL_SNAPSHOT,
+            CommitLabel::TURN_COMMIT,
+            CommitLabel::TURN_ADMIT,
+            CommitLabel::MODEL_START,
+            CommitLabel::MODEL_DONE,
+            CommitLabel::TURN_COMMIT,
+            CommitLabel::SESSION_RELEASE,
+        ]
+    } else {
+        let mut labels = ordered_labels(script);
+        labels.push(CommitLabel::SESSION_RELEASE);
+        labels
+    }
+}
+
 /// `script` cut at every label of its uncut run on `dialect`.
 async fn prove(script: Script, dialect: Dialect, postgres_url: Option<String>) {
     let report = Matrix::new()
@@ -833,6 +863,7 @@ async fn prove(script: Script, dialect: Dialect, postgres_url: Option<String>) {
         labels.join(", ")
     );
     report.assert_held();
+    report.assert_baseline_labels(&uncut_labels(script));
     for label in ordered_labels(script) {
         assert!(
             report.labels().contains(&label),
@@ -892,13 +923,6 @@ async fn a_summary_resent_after_completion_start_is_read_as_its_first_attempt_on
         return;
     };
     prove_resend(Dialect::Postgres, Some(url)).await;
-}
-
-/// The uncut run: the overflowing turn commits its pending recovery, and
-/// the next turn's preparation opens the recovery frame it runs in.
-#[tokio::test]
-async fn a_pressure_frame_opens_before_the_turn_that_runs_in_it() {
-    uncut(Script::Overflow).await;
 }
 
 /// On SQLite in memory: a pressure frame killed at every label opens once,

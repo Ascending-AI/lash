@@ -184,6 +184,17 @@ impl MatrixReport {
         );
     }
 
+    /// Require the uncut run's committed owner labels in exactly this order.
+    pub fn assert_baseline_labels(&self, expected: &[CommitLabel]) {
+        let labels: Vec<CommitLabel> = self
+            .baseline
+            .iter()
+            .filter(|write| write.kind == WriteKind::Actor && write.committed())
+            .map(|write| write.point.label)
+            .collect();
+        assert_eq!(labels, expected, "the uncut owner commits changed order");
+    }
+
     /// The distinct labels the matrix cut.
     pub fn labels(&self) -> Vec<CommitLabel> {
         let mut labels: Vec<CommitLabel> = self.cells.iter().map(|cell| cell.point.label).collect();

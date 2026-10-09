@@ -632,21 +632,6 @@ fn uncut_labels(arrival: Arrival) -> Vec<CommitLabel> {
     }
 }
 
-async fn uncut(arrival: Arrival) {
-    let report = Matrix::new()
-        .faults(&[])
-        .run(|| Steering::new(arrival, Dialect::SqliteMemory, None))
-        .await;
-    report.assert_held();
-    let labels: Vec<CommitLabel> = report
-        .baseline
-        .iter()
-        .filter(|write| write.kind == WriteKind::Actor && write.committed())
-        .map(|write| write.point.label)
-        .collect();
-    assert_eq!(labels, uncut_labels(arrival));
-}
-
 async fn prove(arrival: Arrival, dialect: Dialect, postgres_url: Option<String>) {
     let report = Matrix::new()
         .faults(&[
@@ -667,27 +652,13 @@ async fn prove(arrival: Arrival, dialect: Dialect, postgres_url: Option<String>)
         labels.join(", ")
     );
     report.assert_held();
+    report.assert_baseline_labels(&uncut_labels(arrival));
     for label in uncut_labels(arrival) {
         assert!(
             report.labels().contains(&label),
             "the matrix never cut {label}"
         );
     }
-}
-
-/// The uncut run: a steer sent during the first round reaches the model's
-/// next request, is bound to the running run with the phase after the
-/// checkpoint that delivered it, and commits as its own user row.
-#[tokio::test]
-async fn a_steer_sent_during_a_round_is_delivered_at_the_next_work_checkpoint() {
-    uncut(Arrival::SteerAtWork).await;
-}
-
-/// The uncut run: a steer that arrives during the turn's last model call is
-/// withheld from its finish and runs as the session's next run.
-#[tokio::test]
-async fn a_steer_at_the_terminal_checkpoint_is_withheld_and_runs_next() {
-    uncut(Arrival::SteerAtTerminal).await;
 }
 
 /// On SQLite in memory: a steer delivered at a work checkpoint, killed at

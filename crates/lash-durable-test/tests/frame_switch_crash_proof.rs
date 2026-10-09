@@ -433,30 +433,13 @@ async fn prove(dialect: Dialect, postgres_url: Option<String>) {
         labels.join(", ")
     );
     report.assert_held();
+    report.assert_baseline_labels(&uncut_labels());
     for label in uncut_labels() {
         assert!(
             report.labels().contains(&label),
             "the matrix never cut {label}"
         );
     }
-}
-
-/// The uncut run: the switch commits with its follow-on, and the follow-on
-/// runs as the session's next turn.
-#[tokio::test]
-async fn a_frame_switch_commits_with_its_follow_on_which_runs_next() {
-    let report = Matrix::new()
-        .faults(&[])
-        .run_test(|| FrameSwitch::new(Dialect::SqliteMemory, None))
-        .await;
-    report.assert_held();
-    let labels: Vec<CommitLabel> = report
-        .baseline
-        .iter()
-        .filter(|write| write.kind == WriteKind::Actor && write.committed())
-        .map(|write| write.point.label)
-        .collect();
-    assert_eq!(labels, uncut_labels());
 }
 
 /// On SQLite in memory: a frame switch killed at every label gives exactly

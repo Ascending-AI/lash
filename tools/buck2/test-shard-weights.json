@@ -69,7 +69,6 @@
     "sqlite_memory::public_migrated_tools_redrive_to_literal_outcomes": 3913
   },
   "//crates/lash-durable-test:frame_switch_crash_proof__test": {
-    "a_frame_switch_commits_with_its_follow_on_which_runs_next": 297,
     "a_frame_switch_killed_at_every_label_runs_one_follow_on_on_postgres": 16366,
     "a_frame_switch_killed_at_every_label_runs_one_follow_on_on_sqlite_file": 4327,
     "a_frame_switch_killed_at_every_label_runs_one_follow_on_on_sqlite_memory": 4142,
@@ -97,7 +96,6 @@
     "a_pressure_frame_killed_at_every_label_opens_once_on_postgres": 66738,
     "a_pressure_frame_killed_at_every_label_opens_once_on_sqlite_file": 4278,
     "a_pressure_frame_killed_at_every_label_opens_once_on_sqlite_memory": 7431,
-    "a_pressure_frame_opens_before_the_turn_that_runs_in_it": 110,
     "a_summary_resent_after_completion_start_is_read_as_its_first_attempt_on_postgres": 6423,
     "a_summary_resent_after_completion_start_is_read_as_its_first_attempt_on_sqlite_file": 537,
     "a_summary_resent_after_completion_start_is_read_as_its_first_attempt_on_sqlite_memory": 1071,
@@ -239,9 +237,7 @@
     "a_session_decodes_and_resumes_from_its_1_0_image": 94,
     "a_turn_resumed_after_a_progress_boundary_commits_the_uncut_history_on_postgres": 3027,
     "a_turn_resumed_after_a_progress_boundary_commits_the_uncut_history_on_sqlite_file": 2287,
-    "a_turn_resumed_after_a_progress_boundary_commits_the_uncut_history_on_sqlite_memory": 363,
-    "the_uncut_code_turn_commits_through_every_label": 277,
-    "the_uncut_tool_turn_commits_through_every_label": 252
+    "a_turn_resumed_after_a_progress_boundary_commits_the_uncut_history_on_sqlite_memory": 363
   },
   "//crates/lash-postgres-store:conformance__test": {
     "a_boundary_commits_its_prelude_in_its_own_transaction": 695,
@@ -927,7 +923,6 @@
   },
   "//crates/lash-sim:lash-sim__unit_test": {
     "backend_contention::tests::backend_contention_report_runs_sqlite_and_records_artifact": 86,
-    "backend_contention::tests::postgres_variants_never_pass_without_a_database_url": 21,
     "backend_fault::tests::backend_failure_attempts_are_scoped_by_session_and_operation": 45,
     "backend_fault::tests::backend_failure_observation_depends_on_the_armed_script": 82,
     "backend_fault::tests::fig_4679_a_lost_reply_uses_the_returned_store_error_class": 34,

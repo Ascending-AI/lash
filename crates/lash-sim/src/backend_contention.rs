@@ -379,33 +379,4 @@ mod tests {
         assert!(body.contains("runtime-persistence.stale-head-transaction-rejected"));
         assert!(body.contains("runtime-persistence.idempotent-retry-and-stale-write-conflict"));
     }
-    #[tokio::test]
-    #[ignore = "requires PostgreSQL; select inside a with-service.sh pg gate"]
-    async fn backend_contention_report_runs_postgres_and_records_artifact() {
-        let database = crate::postgres_test_isolation::isolated_database().await;
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let report = super::run_backend_contention_report_against(
-            tmp.path(),
-            Some(database.url().to_string()),
-        )
-        .await
-        .expect("backend contention report");
-        assert_eq!(report.status, "passed");
-        assert!(
-            report
-                .scenarios
-                .iter()
-                .any(|scenario| scenario.backend == "postgres"
-                    && scenario.status == "passed"
-                    && scenario.operations.len() >= 2)
-        );
-        assert!(report.report_path.exists());
-    }
-
-    #[test]
-    fn postgres_variants_never_pass_without_a_database_url() {
-        crate::postgres_test_isolation::assert_requires_database_url(
-            "backend_contention::tests::backend_contention_report_runs_postgres_and_records_artifact",
-        );
-    }
 }

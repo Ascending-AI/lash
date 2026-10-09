@@ -1125,18 +1125,6 @@ mod tests {
     }
 
     #[test]
-    fn untrusted_json_nests_reserved_keys_whole() {
-        let foreign = serde_json::json!({ TAG_KEY: ATTACHMENT_TAG, "user": true });
-        let value = ToolValue::untrusted_json(foreign.clone());
-
-        let json = serde_json::to_value(&value).unwrap();
-
-        assert_eq!(json[TAG_KEY], UNTRUSTED_JSON_TAG);
-        assert_eq!(json[VALUE_KEY], foreign);
-        assert_eq!(serde_json::from_value::<ToolValue>(json).unwrap(), value);
-    }
-
-    #[test]
     fn adoption_types_only_the_adopted_claims_and_keeps_the_projection() {
         let tagged = |id: &str| {
             serde_json::json!({

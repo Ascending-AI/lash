@@ -394,7 +394,10 @@ def page_laws(browser, page_file: Path, artifacts: Path | None) -> Laws:
         laws.check(not removed, "no row is removed and re-added during the turn or its settlement", f"removed: {removed}")
         replies = page.locator("#timeline .message.assistant").count()
         laws.check(replies == 1, "exactly one reply after the commit", f"{replies} replies")
-        laws.check(not errors, "the page raises no errors", errors)
+        # An exception at any point invalidates every page law, including
+        # checks recorded before the exception was raised.
+        if errors:
+            laws.results = [(False, f"{rule} — page errors: {errors}") for _, rule in laws.results]
         if artifacts:
             (artifacts / f"page-laws-{page_file.stem}.json").write_text(json.dumps({"live": live, "settled": settled}, indent=2))
         page.close()
