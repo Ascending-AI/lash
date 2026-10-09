@@ -724,3 +724,18 @@ fn borrowed_set_methods_require_set_receivers() {
         Datum::Float(lash_kernel_doc::Float::new(2.0)),
     );
 }
+
+/// Date.toJSON is generic and invokes the receiver's toISOString.
+#[test]
+fn date_to_json_is_generic_and_date_only_methods_check_the_receiver() {
+    assert_finished(
+        execute(
+            "let count = 0; try { Date.prototype.getDate.call({}); } catch (e) { if (e.name === 'TypeError') count++; } try { Date.prototype.setDate.call({}, 1); } catch (e) { if (e.name === 'TypeError') count++; } const obj = {valueOf() {return 0;}, toISOString() {return 'custom';}}; finish([Date.prototype.toJSON.call(obj), Date.prototype.toJSON.call(new Date(NaN)), count]);",
+        ),
+        Datum::List(vec![
+            Datum::Text("custom".into()),
+            Datum::Null,
+            Datum::Float(lash_kernel_doc::Float::new(2.0)),
+        ]),
+    );
+}

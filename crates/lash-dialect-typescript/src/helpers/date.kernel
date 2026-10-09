@@ -67,6 +67,8 @@ use ts.date.toUTCString
 use ts.date.utc
 use ts.date.valueOf
 use ts.pad
+use ts.get
+use ts.require_object_coercible
 use ts.to_number
 use ts.to_primitive
 use ts.to_string
@@ -317,8 +319,16 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
-  if num.is_finite(date.ecma.milliseconds(this)) {} else { return null }
-  return date.ecma.format(this, "iso")
+  do invoke ts.require_object_coercible(this)
+  let primitive = invoke ts.to_primitive(this, "number")
+  if same(kind(primitive), "float") { if num.is_finite(primitive) {} else { return null } }
+  let date = invoke ts.date.is(this)
+  if date { return date.ecma.format(this, "iso") }
+  let method = invoke ts.get(this, "toISOString")
+  if same(kind(method), "closure") {} else { throw error.new("type_error", "toISOString must be callable", null) }
+  let passed = []
+  let output = apply method(this, passed)
+  return output
 }
 
 function ts.date.getFullYear(this: Any, args: List(Any)) -> Any
@@ -326,6 +336,8 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
+  let date = invoke ts.date.is(this)
+  if date {} else { throw error.new("type_error", "Date receiver required", null) }
   throw error.new("TS_DATE_LOCAL_TIME_UNSUPPORTED", "Use a UTC getter", null)
 }
 
@@ -334,6 +346,8 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
+  let date = invoke ts.date.is(this)
+  if date {} else { throw error.new("type_error", "Date receiver required", null) }
   throw error.new("TS_DATE_LOCAL_TIME_UNSUPPORTED", "Use a UTC getter", null)
 }
 
@@ -342,6 +356,8 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
+  let date = invoke ts.date.is(this)
+  if date {} else { throw error.new("type_error", "Date receiver required", null) }
   throw error.new("TS_DATE_LOCAL_TIME_UNSUPPORTED", "Use a UTC getter", null)
 }
 
@@ -350,6 +366,8 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
+  let date = invoke ts.date.is(this)
+  if date {} else { throw error.new("type_error", "Date receiver required", null) }
   throw error.new("TS_DATE_LOCAL_TIME_UNSUPPORTED", "Use a UTC getter", null)
 }
 
@@ -358,6 +376,8 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
+  let date = invoke ts.date.is(this)
+  if date {} else { throw error.new("type_error", "Date receiver required", null) }
   throw error.new("TS_DATE_LOCAL_TIME_UNSUPPORTED", "Use a UTC getter", null)
 }
 
@@ -366,6 +386,8 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
+  let date = invoke ts.date.is(this)
+  if date {} else { throw error.new("type_error", "Date receiver required", null) }
   throw error.new("TS_DATE_LOCAL_TIME_UNSUPPORTED", "Use a UTC getter", null)
 }
 
@@ -374,6 +396,8 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
+  let date = invoke ts.date.is(this)
+  if date {} else { throw error.new("type_error", "Date receiver required", null) }
   throw error.new("TS_DATE_LOCAL_TIME_UNSUPPORTED", "Use a UTC getter", null)
 }
 
@@ -382,6 +406,8 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
+  let date = invoke ts.date.is(this)
+  if date {} else { throw error.new("type_error", "Date receiver required", null) }
   throw error.new("TS_DATE_LOCAL_TIME_UNSUPPORTED", "Use a UTC getter", null)
 }
 
@@ -390,6 +416,8 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
+  let date = invoke ts.date.is(this)
+  if date {} else { throw error.new("type_error", "Date receiver required", null) }
   throw error.new("TS_METHOD_UNSUPPORTED", "Construct a new Date", null)
 }
 
@@ -398,6 +426,8 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
+  let date = invoke ts.date.is(this)
+  if date {} else { throw error.new("type_error", "Date receiver required", null) }
   throw error.new("TS_METHOD_UNSUPPORTED", "Construct a new Date", null)
 }
 
@@ -406,6 +436,8 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
+  let date = invoke ts.date.is(this)
+  if date {} else { throw error.new("type_error", "Date receiver required", null) }
   throw error.new("TS_METHOD_UNSUPPORTED", "Construct a new Date", null)
 }
 
@@ -414,6 +446,8 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
+  let date = invoke ts.date.is(this)
+  if date {} else { throw error.new("type_error", "Date receiver required", null) }
   throw error.new("TS_METHOD_UNSUPPORTED", "Construct a new Date", null)
 }
 
@@ -422,6 +456,8 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
+  let date = invoke ts.date.is(this)
+  if date {} else { throw error.new("type_error", "Date receiver required", null) }
   throw error.new("TS_METHOD_UNSUPPORTED", "Construct a new Date", null)
 }
 
@@ -430,6 +466,8 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
+  let date = invoke ts.date.is(this)
+  if date {} else { throw error.new("type_error", "Date receiver required", null) }
   throw error.new("TS_METHOD_UNSUPPORTED", "Construct a new Date", null)
 }
 
@@ -438,6 +476,8 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
+  let date = invoke ts.date.is(this)
+  if date {} else { throw error.new("type_error", "Date receiver required", null) }
   throw error.new("TS_METHOD_UNSUPPORTED", "Construct a new Date", null)
 }
 
@@ -446,6 +486,8 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
+  let date = invoke ts.date.is(this)
+  if date {} else { throw error.new("type_error", "Date receiver required", null) }
   throw error.new("TS_METHOD_UNSUPPORTED", "Construct a new Date", null)
 }
 
