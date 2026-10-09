@@ -1,12 +1,5 @@
-error[E0574]: expected struct, variant or union type, found enum `Capture`
+error[E0574]: expected struct, variant or union type, found enum `ExecutionStateCapture`
  --> tests/ui/execution_capture_cannot_have_leaves_without_a_root.rs:5:13
   |
-5 |     let _ = Capture {
-  |             ^^^^^^^ not a struct, variant or union type
-  |
-help: consider importing one of these variants instead
-  |
-1 + use lash::dialect::NotSaved::Capture;
-  |
-1 + use lash::dialect::Unusable::Capture;
-  |
+5 |     let _ = ExecutionStateCapture {
+  |             ^^^^^^^^^^^^^^^^^^^^^ not a struct, variant or union type

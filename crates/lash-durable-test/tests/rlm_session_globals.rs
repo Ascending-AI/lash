@@ -12,8 +12,8 @@
 //!
 //! Covers reassignment, block shadowing (including a later cell whose shadow
 //! lowers to the same generated slot), root rebinding, member assignment, a
-//! closure over a shadowed block binding called after its block ends (closures
-//! never cross a cell, so none is called after a restart), a process handle,
+//! saved function with a frozen capture of a shadowed block binding called
+//! after its block ends and after a restart, a process handle,
 //! a projected host binding, a deferred tool binding's result, and a
 //! loop-carried global.
 
@@ -85,8 +85,8 @@ fn bound_names(request: &str) -> BTreeSet<String> {
     section
         .lines()
         .filter_map(|line| line.trim().strip_prefix("- `"))
-        // A name listed as not bound is not a binding: it held a function
-        // or a task, which no later cell reads (`K-SES-003`).
+        // A name listed as not bound is not a binding: its value cannot
+        // be carried as data or saved as a self-contained function.
         .filter(|entry| !entry.contains("not bound:"))
         .filter_map(|entry| entry.split_once('`').map(|(name, _)| name.to_owned()))
         .filter(|name| name != "history")
@@ -136,9 +136,8 @@ fn names(names: &[&str]) -> BTreeSet<String> {
 /// and `armed` (a `const` in an `if` arm) are therefore not session globals;
 /// the top-level `let answer` and `let counter` are.
 const CELL_1_GLOBALS: &[&str] = &["answer", "box", "counter", "fetched", "total"];
-/// `reader` is absent by design: a closure never crosses a program boundary,
-/// so the closure over a shadowed block binding is exercised inside its own
-/// cell.
+/// `reader` is saved with its block-local `answer` frozen at 5. The private
+/// slot itself stays out of the globals, even after a restart.
 const CELL_2_GLOBALS: &[&str] = &[
     "answer",
     "box",
@@ -149,6 +148,7 @@ const CELL_2_GLOBALS: &[&str] = &[
     "worker",
     "handle",
     "later",
+    "reader",
 ];
 
 /// After every cell and every restart the session's globals are exactly the
@@ -254,7 +254,7 @@ const from_host = host_config.label;"#,
   box.n = answer;
 }
 const fetched = "rebound";
-finish({ answer: answer, counter: counter, n: box.n, later: later, fetched: fetched, from_host: from_host, total: total, handle: typeof handle });"#,
+finish({ answer: answer, counter: counter, n: box.n, later: later, saved_reader: reader(), fetched: fetched, from_host: from_host, total: total, handle: typeof handle });"#,
     )
     .await;
     served::assert_answered("cell 3", &third);
@@ -267,6 +267,7 @@ finish({ answer: answer, counter: counter, n: box.n, later: later, fetched: fetc
         "\"counter\":3",
         "\"n\":7",
         "\"later\":47",
+        "\"saved_reader\":5",
         "\"fetched\":\"rebound\"",
         "\"from_host\":\"from-host\"",
         "\"total\":3",

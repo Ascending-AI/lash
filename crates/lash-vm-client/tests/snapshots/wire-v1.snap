@@ -2,7 +2,7 @@ worker protocol 1
 frame header 8 bytes
 testing false
 
-# [serde (rename_all = "snake_case" , deny_unknown_fields)] enum Request { Lower { dialect : String , source : String , effects : BTreeMap < EffectName , Signature > , bindings : BTreeSet < Name > , } , Print { dialect : String , # [serde (with = "serde_bytes")] document : Vec < u8 > , } }
+# [serde (rename_all = "snake_case" , deny_unknown_fields)] enum Request { Lower { dialect : String , source : String , effects : BTreeMap < EffectName , Signature > , bindings : BTreeSet < Name > , functions : BTreeMap < Name , lash_kernel_dialect :: SavedFunction > , } , Print { dialect : String , # [serde (with = "serde_bytes")] document : Vec < u8 > , } }
 
 # [serde (deny_unknown_fields)] struct DialectRefusal { code : String , message : String , span : Option < (usize , usize) > , unsupported : bool , repairs : Vec < String > , }
 

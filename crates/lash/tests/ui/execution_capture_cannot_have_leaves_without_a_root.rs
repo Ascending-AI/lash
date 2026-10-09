@@ -1,8 +1,8 @@
-use lash::plugins::{ExecutionStateCapture as Capture, LeafChange};
+use lash::plugins::{ExecutionStateCapture, LeafChange};
 use std::collections::BTreeMap;
 
 fn main() {
-    let _ = Capture {
+    let _ = ExecutionStateCapture {
         root: None,
         components: BTreeMap::from([("execution_state/orphan".to_owned(), LeafChange::Unchanged)]),
     };
