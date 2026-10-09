@@ -320,7 +320,10 @@ impl ExecutionHost for StackBudgetHost {
                 handle.insert("value".to_string(), Value::String(value));
                 Ok(AbilityOutcome::Value(Value::Record(Arc::new(handle))))
             }
-            AbilityOp::Await(Value::Record(handle)) => {
+            AbilityOp::Await(lash_vm::Await {
+                handle: Value::Record(handle),
+                ..
+            }) => {
                 let Some(Value::String(value)) = handle.get("value").cloned() else {
                     return Err(ExecutionHostError::new("expected handle value"));
                 };

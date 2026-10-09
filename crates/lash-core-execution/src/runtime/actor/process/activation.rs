@@ -1284,9 +1284,14 @@ fn record_effect(
     let Some((class, code)) = effect_class(outcome) else {
         return;
     };
-    if site.occurrence > driver.effect_occurrence_cap
-        || !crate::runtime::process::ProcessEffectOccurrence::is_within_cap(site.occurrence)
-    {
+    // The cap is per node, whichever of the node's sites each occurrence
+    // ran at: a site's own occurrence number says nothing about it.
+    let recorded = driver
+        .recorded_effects
+        .get(&site.node_id)
+        .copied()
+        .unwrap_or_default();
+    if recorded >= driver.effect_occurrence_cap {
         driver
             .omitted_effects
             .entry(site.node_id.clone())
@@ -1294,6 +1299,9 @@ fn record_effect(
             .record(class);
         return;
     }
+    driver
+        .recorded_effects
+        .insert(site.node_id.clone(), recorded + 1);
     let operation = match &step.request {
         StepRequest::Tool { tool, .. } => tool.as_str().to_owned(),
         StepRequest::Engine { kind, .. } => kind.0.clone(),
@@ -1306,7 +1314,8 @@ fn record_effect(
         code,
         format!("process:{process}:effect:{}", step.call),
         fleet,
-    );
+    )
+    .at(site.context.clone());
     occurrence.call_id = match &step.request {
         StepRequest::Tool { .. } => Some(step.call.clone()),
         StepRequest::Engine { .. } => None,

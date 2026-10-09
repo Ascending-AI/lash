@@ -174,6 +174,7 @@ fn event_is_failed_identifies_all_failure_outcomes() {
                     code: "test_failure".to_string(),
                     message: "failed".to_string(),
                 },
+                context: Default::default(),
             }),
         ),
         (
@@ -244,6 +245,7 @@ fn event_is_failed_identifies_all_failure_outcomes() {
                 label: "node".to_string(),
                 occurrence: 1,
                 call_id: None,
+                context: Default::default(),
             }),
         ),
         (

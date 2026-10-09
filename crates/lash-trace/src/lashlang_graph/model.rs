@@ -23,8 +23,9 @@ pub enum TraceLashlangGraphCompleteness {
 
 /// Canonical identity of one fold input.
 ///
-/// Node transitions use `(node_id, node_kind, occurrence, attempt)` plus
-/// the transition kind. The transition kind lets a start and its terminal
+/// Node transitions use `(node_id, site_path, node_kind, occurrence,
+/// attempt)` plus the transition kind: occurrences count per site, so two
+/// sites of one node are never one identity. The transition kind lets a start and its terminal
 /// fact merge monotonically while still making a second, different start or
 /// terminal a typed conflict.
 #[derive(
@@ -35,6 +36,11 @@ pub struct TraceLashlangEventIdentity {
     pub generation: Option<TraceLanguageExecutionGeneration>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub node_id: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "lash_sansio::WorkflowSitePath::is_empty"
+    )]
+    pub site_path: lash_sansio::WorkflowSitePath,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub node_kind: Option<ExecutionNodeKind>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

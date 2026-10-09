@@ -363,7 +363,7 @@ pub fn resolve(
             }
             Ok(ResolvedRequest::Aggregate(calls))
         }
-        OperationRequest::Await(value) => {
+        OperationRequest::Await(lash_vm::Await { handle: value, .. }) => {
             let handle = match value {
                 lash_vm::Value::String(value) => value.to_string(),
                 _ => {

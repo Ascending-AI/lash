@@ -5,7 +5,10 @@ pub(crate) struct LanguageCallAttribution {
     pub language: String,
     pub identity: lash_trace::TraceLanguageExecutionIdentity,
     pub parent_node_id: String,
+    /// Which occurrence of the call's site this is, counted per site.
     pub occurrence: u64,
+    /// The call's exact site inside its node and the loops around it.
+    pub context: lash_sansio::WorkflowOccurrenceContext,
 }
 
 pub(crate) type LanguageCallAttributions = std::sync::Arc<
@@ -77,9 +80,10 @@ impl<'scope> ProcessOpScope<'scope> {
             };
             let event = lash_trace::TraceLanguageExecution {
                 event_key: format!(
-                    "lash_vm_execution:{}:child:{}:{}:process:{process_id}",
+                    "lash_vm_execution:{}:child:{}{}:{}:process:{process_id}",
                     identity.graph_key(),
                     call.parent_node_id,
+                    call.context.site_path,
                     call.occurrence,
                 ),
                 identity: identity.clone(),
@@ -94,6 +98,7 @@ impl<'scope> ProcessOpScope<'scope> {
                         entry_ref: None,
                         entry_name: entry_name.clone(),
                     },
+                    context: call.context.clone(),
                 },
             };
             (

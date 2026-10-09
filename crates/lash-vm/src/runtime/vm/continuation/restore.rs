@@ -69,6 +69,8 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             handlers: Vec::new(),
             finally_stack: Vec::new(),
             lash_vm_execution_occurrences: FxHashMap::default(),
+            loop_stack: Vec::new(),
+            loop_activations: 0,
             profile: None,
             validation_plans: FxHashMap::default(),
             pending_error_span: None,
@@ -249,11 +251,21 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             frame_stack,
             handler_stack,
             finally_stack,
-            occurrence_counters: self
-                .lash_vm_execution_occurrences
+            occurrence_counters: self.occurrence_counters(),
+            loop_stack: self
+                .loop_stack
                 .iter()
-                .map(|(key, value)| (key.clone(), *value))
+                .map(|active| VmLoopContinuation {
+                    site: active.site.clone(),
+                    activation: active.activation,
+                    checks: active.checks,
+                    iterations: active.iterations,
+                    checking: active.checking,
+                    call_depth: active.call_depth,
+                    handler_depth: active.handler_depth,
+                })
                 .collect(),
+            loop_activations: self.loop_activations,
             mode: self.mode.into(),
             profile: self.profile.as_ref().map(|profile| VmProfileContinuation {
                 instruction_counts: profile.instruction_counts.to_vec(),
@@ -494,7 +506,21 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             projected_bindings: host.projected_bindings(),
             handlers,
             finally_stack,
-            lash_vm_execution_occurrences: continuation.occurrence_counters.into_iter().collect(),
+            lash_vm_execution_occurrences: site_occurrences(continuation.occurrence_counters),
+            loop_stack: continuation
+                .loop_stack
+                .into_iter()
+                .map(|active| ActiveLoop {
+                    site: active.site,
+                    activation: active.activation,
+                    checks: active.checks,
+                    iterations: active.iterations,
+                    checking: active.checking,
+                    call_depth: active.call_depth,
+                    handler_depth: active.handler_depth,
+                })
+                .collect(),
+            loop_activations: continuation.loop_activations,
             profile,
             validation_plans: FxHashMap::default(),
             pending_error_span: continuation.pending_error_span,
@@ -529,5 +555,38 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         // reads through its provider (ADR 0132 §9).
         vm.rebind_projected_slots(&host.projected_bindings());
         Ok(vm)
+    }
+}
+
+/// The live per-site counters of a continuation's counter list.
+fn site_occurrences(counters: Vec<VmSiteOccurrenceCounter>) -> SiteOccurrences {
+    let mut occurrences = SiteOccurrences::default();
+    for counter in counters {
+        occurrences
+            .entry(counter.site.node_id)
+            .or_default()
+            .push((counter.site.site_path, counter.count));
+    }
+    occurrences
+}
+
+impl<H: ExecutionHost> Vm<'_, H> {
+    /// Every site's count, in site order: the continuation's encoding does
+    /// not depend on the order the sites first ran in.
+    fn occurrence_counters(&self) -> Vec<VmSiteOccurrenceCounter> {
+        let mut counters: Vec<_> = self
+            .lash_vm_execution_occurrences
+            .iter()
+            .flat_map(|(node_id, sites)| {
+                sites
+                    .iter()
+                    .map(|(site_path, count)| VmSiteOccurrenceCounter {
+                        site: lash_sansio::WorkflowSiteRef::new(node_id.clone(), site_path.clone()),
+                        count: *count,
+                    })
+            })
+            .collect();
+        counters.sort_by(|left, right| left.site.cmp(&right.site));
+        counters
     }
 }

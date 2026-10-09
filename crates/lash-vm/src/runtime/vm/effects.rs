@@ -5,7 +5,7 @@ use crate::span::Span;
 
 use super::super::access::prototype_chain_data_key_error;
 use super::super::host::{
-    AbilityOp, AbilityOutcome, AggregateConsumer, ResourceOperation, ResourceOperationBatch,
+    AbilityOp, AbilityOutcome, AggregateConsumer, Await, ResourceOperation, ResourceOperationBatch,
     ResourceOperationBatchLeaf, ResourceOperationBatchOutcome, ResourceOperationOutcome, Sleep,
     SleepKind,
 };
@@ -52,6 +52,8 @@ pub(super) enum Awaited<T, P = ()> {
 struct AwaitCursor {
     replay: std::vec::IntoIter<Value>,
     settled: Vec<Value>,
+    /// The site every handle of this walk is awaited at.
+    call_site: Option<LashVmExecutionCallSite>,
 }
 
 impl<H: ExecutionHost> Vm<'_, H> {
@@ -127,7 +129,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                         receiver,
                         operation: operation_name.clone(),
                         args,
-                        call_site: active.map(lash_vm_execution_call_site),
+                        call_site: active.map(lash_vm_execution_call_site).map(Box::new),
                     })))
                     .await
                 {
@@ -166,7 +168,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                         receiver,
                         operation: operation_name.clone(),
                         args,
-                        call_site: active.map(lash_vm_execution_call_site),
+                        call_site: active.map(lash_vm_execution_call_site).map(Box::new),
                     })))
                     .await;
                 if matches!(result, Ok(AbilityOutcome::HandedOver)) {
@@ -302,7 +304,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     .perform(AbilityOp::Sleep(Sleep {
                         kind,
                         value,
-                        call_site: active.map(lash_vm_execution_call_site),
+                        call_site: active.map(lash_vm_execution_call_site).map(Box::new),
                     }))
                     .await;
                 if matches!(result, Ok(AbilityOutcome::HandedOver)) {
@@ -552,7 +554,10 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 .get(leaf.receiver_stack_index)
                 .cloned()
                 .ok_or(RuntimeError::ResourceBatchReceiverOutOfRange)?;
-            let call_site = active.as_ref().map(lash_vm_execution_call_site);
+            let call_site = active
+                .as_ref()
+                .map(lash_vm_execution_call_site)
+                .map(Box::new);
             if leaf.timer {
                 operations.push(ResourceOperationBatchLeaf::Timer(Sleep {
                     kind: SleepKind::For,
@@ -994,6 +999,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         let mut cursor = AwaitCursor {
             replay: settled.into_iter(),
             settled: Vec::new(),
+            call_site: active.map(lash_vm_execution_call_site),
         };
         match self
             .await_value_at(handle, String::new(), &mut cursor)
@@ -1055,7 +1061,10 @@ impl<H: ExecutionHost> Vm<'_, H> {
                         Some(value) => value,
                         None => match self
                             .host
-                            .perform(AbilityOp::Await(Value::Record(handles)))
+                            .perform(AbilityOp::Await(Await {
+                                handle: Value::Record(handles),
+                                call_site: cursor.call_site.clone().map(Box::new),
+                            }))
                             .await
                         {
                             Ok(AbilityOutcome::HandedOver) => return Ok(Awaited::Parked(())),
@@ -1129,7 +1138,10 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 }
                 let result = self
                     .host
-                    .perform(AbilityOp::Await(Value::Record(handles)))
+                    .perform(AbilityOp::Await(Await {
+                        handle: Value::Record(handles),
+                        call_site: active.map(lash_vm_execution_call_site).map(Box::new),
+                    }))
                     .await;
                 if matches!(result, Ok(AbilityOutcome::HandedOver)) {
                     return Ok(Awaited::Parked(Vec::new()));
@@ -1176,6 +1188,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         self.observe(|| crate::LashVmExecutionObservation::ChildProcessWaiting {
             site: active.site.clone(),
             occurrence: active.occurrence,
+            loops: active.loops.clone(),
             process_ids,
         });
     }
@@ -1185,6 +1198,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
             self.observe(|| crate::LashVmExecutionObservation::NodeResumed {
                 site: active.site.clone(),
                 occurrence: active.occurrence,
+                loops: active.loops.clone(),
             });
         }
     }
@@ -1339,6 +1353,7 @@ fn lash_vm_execution_call_site(active: &ActiveLashVmExecutionNode) -> LashVmExec
     LashVmExecutionCallSite {
         site: active.site.clone(),
         occurrence: active.occurrence,
+        loops: active.loops.clone(),
     }
 }
 

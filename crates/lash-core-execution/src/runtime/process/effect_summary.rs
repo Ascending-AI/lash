@@ -62,14 +62,16 @@ pub const PROCESS_EFFECT_OUTCOME_EVENT_TYPE: &str =
     super::events::ProcessEventKind::EffectOutcome.as_str();
 
 /// Runtime-owned event counting, per node and outcome class, the occurrences
-/// beyond [`PROCESS_EFFECT_OCCURRENCE_CAP`] that were not recorded one by one.
+/// settled after the node's first [`PROCESS_EFFECT_OCCURRENCE_CAP`], which
+/// were not recorded one by one.
 /// Committed once, as the penultimate event of the run's terminal batch (after
 /// its pending occurrences, before its terminal event), under the same
 /// recovery contract as [`PROCESS_EFFECT_OUTCOME_EVENT_TYPE`].
 pub const PROCESS_EFFECT_OMISSIONS_EVENT_TYPE: &str =
     super::events::ProcessEventKind::EffectOmissions.as_str();
 
-/// Fixed validated wire ceiling for individually recorded effect occurrences.
+/// How many effect occurrences of one node are recorded one by one, across
+/// every site of the node: the fixed validated wire ceiling.
 /// The host may choose a smaller evidence cut through `TraceLimits`; the
 /// driver pins that cut in its first transition and omissions record it.
 pub const PROCESS_EFFECT_OCCURRENCE_CAP: u64 = 8;
@@ -90,7 +92,15 @@ pub enum ProcessEffectOutcomeClass {
 pub struct ProcessEffectOccurrence {
     pub vocabulary_version: u32,
     pub node_id: String,
+    /// Which occurrence of its site this is, from 1, counted per site.
     pub occurrence: u64,
+    /// The exact site inside the node and the loop activations around the
+    /// occurrence: two calls of one node stay apart after the live window.
+    #[serde(
+        default,
+        skip_serializing_if = "lash_sansio::WorkflowOccurrenceContext::is_default"
+    )]
+    pub context: lash_sansio::WorkflowOccurrenceContext,
     pub operation: String,
     pub outcome_class: ProcessEffectOutcomeClass,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -106,6 +116,8 @@ struct ProcessEffectOccurrenceFields {
     vocabulary_version: u32,
     node_id: String,
     occurrence: u64,
+    #[serde(default)]
+    context: lash_sansio::WorkflowOccurrenceContext,
     operation: String,
     outcome_class: ProcessEffectOutcomeClass,
     #[serde(default, deserialize_with = "nonempty_failure_code")]
@@ -116,6 +128,7 @@ struct ProcessEffectOccurrenceFields {
 }
 
 const CODE_ON_A_NON_FAILURE: &str = "only a failed effect occurrence may carry a failure code";
+const OCCURRENCES_COUNT_FROM_ONE: &str = "an effect occurrence counts from 1";
 
 impl TryFrom<ProcessEffectOccurrenceFields> for ProcessEffectOccurrence {
     type Error = ProcessEffectReportError;
@@ -125,6 +138,7 @@ impl TryFrom<ProcessEffectOccurrenceFields> for ProcessEffectOccurrence {
             vocabulary_version: fields.vocabulary_version,
             node_id: fields.node_id,
             occurrence: fields.occurrence,
+            context: fields.context,
             operation: fields.operation,
             outcome_class: fields.outcome_class,
             code: fields.code,
@@ -174,6 +188,7 @@ impl ProcessEffectOccurrence {
             )),
             node_id: node_id.into(),
             occurrence,
+            context: lash_sansio::WorkflowOccurrenceContext::default(),
             operation: operation.into(),
             outcome_class,
             code,
@@ -182,10 +197,11 @@ impl ProcessEffectOccurrence {
         }
     }
 
-    /// Whether the runtime records this occurrence one by one, rather than
-    /// counting it in its node's omission record.
-    pub fn is_within_cap(occurrence: u64) -> bool {
-        (1..=PROCESS_EFFECT_OCCURRENCE_CAP).contains(&occurrence)
+    /// This occurrence at the exact site and loop context `context`.
+    #[must_use]
+    pub fn at(mut self, context: lash_sansio::WorkflowOccurrenceContext) -> Self {
+        self.context = context;
+        self
     }
 
     /// `fleet_format` is the `F` the bound store recorded: the payload admits
@@ -235,10 +251,10 @@ impl ProcessEffectOccurrence {
                 <serde_json::Error as serde::de::Error>::custom(CODE_ON_A_NON_FAILURE),
             ));
         }
-        if !Self::is_within_cap(self.occurrence) {
-            return Err(ProcessEffectReportError::OccurrenceOutsideCap {
-                occurrence: self.occurrence,
-            });
+        if self.occurrence == 0 {
+            return Err(ProcessEffectReportError::InvalidPayload(
+                <serde_json::Error as serde::de::Error>::custom(OCCURRENCES_COUNT_FROM_ONE),
+            ));
         }
         Ok(())
     }
@@ -445,8 +461,9 @@ pub struct ProcessEffectNodeReport {
 /// The per-node effect table a reader rebuilds from a process's event log.
 ///
 /// The bound is the writer's: the log holds at most
-/// [`PROCESS_EFFECT_OCCURRENCE_CAP`] occurrence records per node plus one
-/// omission record, and this fold only folds them. Its input is the log
+/// [`PROCESS_EFFECT_OCCURRENCE_CAP`] occurrence records per node, across all
+/// of the node's sites, plus one omission record, and this fold only folds
+/// them. Its input is the log
 /// itself, whose replay keys are unique; the result does not depend on page
 /// boundaries.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -476,9 +493,14 @@ impl ProcessEffectReport {
             super::ProcessLifecycleFact::EffectOutcome(outcome) => {
                 outcome.admit(fleet_format)?;
                 let node = self.node_entry(&outcome.node_id);
+                // Site order, then occurrence: one order whatever page the
+                // facts arrived in.
+                let key = |occurrence: &ProcessEffectOccurrence| {
+                    (occurrence.context.site_path.clone(), occurrence.occurrence)
+                };
                 let position = node
                     .occurrences
-                    .partition_point(|existing| existing.occurrence < outcome.occurrence);
+                    .partition_point(|existing| key(existing) < key(outcome));
                 node.occurrences.insert(position, outcome.clone());
             }
             super::ProcessLifecycleFact::EffectOmissions(omissions) => {
@@ -513,8 +535,6 @@ pub enum ProcessEffectReportError {
     UnsupportedVocabularyVersion { expected: u32, actual: u64 },
     #[error("invalid effect summary payload: {0}")]
     InvalidPayload(serde_json::Error),
-    #[error("effect occurrence {occurrence} is outside the recorded cap")]
-    OccurrenceOutsideCap { occurrence: u64 },
     #[error("effect omission occurrence cap {actual} exceeds the wire ceiling {expected}")]
     UnsupportedOccurrenceCap { expected: u64, actual: u64 },
     #[error("effect omission record names no omitted occurrence")]
@@ -543,6 +563,31 @@ fn vocabulary_version_schema() -> serde_json::Value {
     }
 }
 
+/// The shape of an occurrence's site context. The typed decode is strict
+/// about its segments; admission only bounds the envelope.
+fn occurrence_context_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "site_path": { "type": "array", "items": { "type": ["object", "string"] } },
+            "loops": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["site", "activation", "position"],
+                    "properties": {
+                        "site": { "type": "object" },
+                        "activation": { "type": "integer", "minimum": 1, "maximum": u64::MAX },
+                        "position": { "type": "object" }
+                    }
+                }
+            }
+        }
+    })
+}
+
 #[expect(
     clippy::expect_used,
     reason = "this module declares the tool or payload schema and admission checks its invariant"
@@ -560,11 +605,8 @@ pub(super) fn effect_outcome_payload_schema() -> crate::JsonSchema {
         "properties": {
             "vocabulary_version": vocabulary_version_schema(),
             "node_id": { "type": "string", "minLength": 1 },
-            "occurrence": {
-                "type": "integer",
-                "minimum": 1,
-                "maximum": PROCESS_EFFECT_OCCURRENCE_CAP
-            },
+            "occurrence": { "type": "integer", "minimum": 1, "maximum": u64::MAX },
+            "context": occurrence_context_schema(),
             "operation": { "type": "string", "minLength": 1 },
             "outcome_class": {
                 "type": "string",

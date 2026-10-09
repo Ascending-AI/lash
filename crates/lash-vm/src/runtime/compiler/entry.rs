@@ -581,27 +581,31 @@ impl Compiler {
         descriptor_expression: &Expr,
     ) -> Option<LashVmExecutionSite> {
         let tracking = self.lash_vm_execution.as_ref()?;
-        let path = tracking.node_paths.path_for_ast(path)?;
+        let (node, slots) = tracking.node_paths.site_for_ast(path)?;
         let (kind, label) = execution_site_descriptor(descriptor_expression)?;
         Some(if kind == BRANCH_EXECUTION_SITE_KIND {
-            tracking.context.builder().branch_site(path)
+            tracking.context.builder().branch_site(node, slots)
         } else {
-            tracking.context.builder().node_site(path, kind, label)
+            tracking
+                .context
+                .builder()
+                .node_site(node, slots, kind, label)
         })
     }
 
+    /// The step `label` declares over the expression at `path`.
     pub(super) fn labeled_step_execution_site(
         &self,
         path: &AstPath,
         label: &str,
     ) -> Option<LashVmExecutionSite> {
         let tracking = self.lash_vm_execution.as_ref()?;
-        let path = tracking.node_paths.path_for_ast(path)?;
+        let (node, slots) = tracking.node_paths.site_for_ast(path)?;
         Some(
             tracking
                 .context
                 .builder()
-                .node_site(path, STEP_EXECUTION_SITE_KIND, label),
+                .labeled_step_site(node, slots, label),
         )
     }
 
@@ -613,19 +617,23 @@ impl Compiler {
         }
     }
 
-    fn emit_loop_execution_step(&mut self, path: &AstPath, label: &'static str) {
+    /// Emits one mark of the loop at `path`, attributed to the loop's own
+    /// site. A loop no workflow node owns still gets its marks, with no site,
+    /// so tracked and untracked code have one layout.
+    fn emit_loop_mark(&mut self, path: &AstPath, mark: LoopMark, label: &'static str) {
         let instruction = self.code.len();
-        self.code.push(Instruction::ObserveStep);
+        self.code.push(Instruction::LoopMark(mark));
         let Some(tracking) = self.lash_vm_execution.as_ref() else {
             return;
         };
-        let Some(path) = tracking.node_paths.path_for_ast(path) else {
+        let Some((node, slots)) = tracking.node_paths.site_for_ast(path) else {
             return;
         };
-        let site = tracking
-            .context
-            .builder()
-            .node_site(path, LOOP_EXECUTION_SITE_KIND, label);
+        let site =
+            tracking
+                .context
+                .builder()
+                .node_site(node, slots, LOOP_EXECUTION_SITE_KIND, label);
         self.mark_lash_vm_execution_site(instruction, site);
     }
 
@@ -750,6 +758,7 @@ impl Compiler {
                 binding,
                 argc: args.len(),
             });
+            self.emit_loop_mark(path, LoopMark::Enter, "for");
             self.compile_for_loop_body(loop_body, path);
             self.push_null_if(leave_value);
             return;
@@ -759,6 +768,7 @@ impl Compiler {
         self.clear_const_slots();
         self.set_const_slot(binding, None);
         self.code.push(Instruction::BeginIter(binding));
+        self.emit_loop_mark(path, LoopMark::Enter, "for");
         self.compile_for_loop_body(loop_body, path);
         self.push_null_if(leave_value);
     }
@@ -773,7 +783,7 @@ impl Compiler {
         self.code.push(Instruction::IterNext {
             jump_to: usize::MAX,
         });
-        self.emit_loop_execution_step(loop_path, "for");
+        self.emit_loop_mark(loop_path, LoopMark::Iteration, "for");
         self.loop_contexts.push(LoopContext {
             continue_target: loop_start,
             break_jumps: SmallVec::new(),
@@ -791,6 +801,7 @@ impl Compiler {
         self.code.push(Instruction::Jump(loop_start));
         let loop_end = self.code.len();
         self.code.push(Instruction::EndIter);
+        self.emit_loop_mark(loop_path, LoopMark::Exit, "for");
         self.patch_jump(iter_next, loop_end);
         for break_jump in loop_context.break_jumps {
             self.patch_jump(break_jump, loop_end);
@@ -810,9 +821,11 @@ impl Compiler {
         path: &AstPath,
     ) {
         self.clear_const_slots();
+        self.emit_loop_mark(path, LoopMark::Enter, "while");
         let loop_start = self.code.len();
+        self.emit_loop_mark(path, LoopMark::Check, "while");
         let jump_to_end = self.compile_condition_jump_if_false(condition, &path.child(0));
-        self.emit_loop_execution_step(path, "while");
+        self.emit_loop_mark(path, LoopMark::Iteration, "while");
         self.clear_const_slots();
         self.loop_contexts.push(LoopContext {
             continue_target: loop_start,
@@ -826,6 +839,7 @@ impl Compiler {
             .expect("loop context should exist while compiling `while`");
         self.code.push(Instruction::Jump(loop_start));
         let loop_end = self.code.len();
+        self.emit_loop_mark(path, LoopMark::Exit, "while");
         self.patch_jump(jump_to_end, loop_end);
         for break_jump in loop_context.break_jumps {
             self.patch_jump(break_jump, loop_end);

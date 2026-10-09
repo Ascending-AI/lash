@@ -115,6 +115,7 @@ impl RuntimeExecutionContext<'_> {
         identity: lash_trace::TraceLanguageExecutionIdentity,
         parent_node_id: impl Into<String>,
         occurrence: u64,
+        context: lash_sansio::WorkflowOccurrenceContext,
     ) {
         self.language_calls.lock_recover().insert(
             call_id,
@@ -123,6 +124,7 @@ impl RuntimeExecutionContext<'_> {
                 identity,
                 parent_node_id: parent_node_id.into(),
                 occurrence,
+                context,
             }),
         );
     }

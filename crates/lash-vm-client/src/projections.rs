@@ -99,7 +99,9 @@ fn operation_values(op: &mut lash_vm::AbilityOp) -> Vec<&mut Value> {
                 }
             }
         }
-        AbilityOp::Await(argument)
+        AbilityOp::Await(lash_vm::Await {
+            handle: argument, ..
+        })
         | AbilityOp::Print(argument)
         | AbilityOp::Finish(argument)
         | AbilityOp::Fail(argument) => values.push(argument),

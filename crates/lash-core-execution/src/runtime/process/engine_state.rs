@@ -108,16 +108,24 @@ pub enum StepRequest {
     },
 }
 
-/// A node of an engine's execution map and which occurrence of it this is:
+/// One occurrence of an execution site of an engine's workflow document:
 /// what a step's committed outcome is recorded under
 /// (`process.effect_outcome`), and where a wait says the process is blocked.
+/// The process's definition scopes the node; core reads none of it.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StepEffectSite {
     /// The node's id in the engine's execution map.
     pub node_id: String,
-    /// Which occurrence of the node this is, from 1.
+    /// Which occurrence of the site this is, from 1, counted per site.
     pub occurrence: u64,
+    /// The exact site inside the node and the loop activations around this
+    /// occurrence.
+    #[serde(
+        default,
+        skip_serializing_if = "lash_sansio::WorkflowOccurrenceContext::is_default"
+    )]
+    pub context: lash_sansio::WorkflowOccurrenceContext,
 }
 
 impl StepRequest {

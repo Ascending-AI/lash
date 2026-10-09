@@ -85,7 +85,13 @@ pub(crate) enum Wait {
         site: Option<lash_core::StepEffectSite>,
     },
     /// Another process's terminal.
-    Process { process: ProcessId },
+    Process {
+        process: ProcessId,
+        /// The site that awaits and which occurrence of it, when the VM
+        /// tracks it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        site: Option<lash_core::StepEffectSite>,
+    },
 }
 
 /// How an aggregate consumes its leaves.
@@ -181,7 +187,8 @@ pub(crate) enum VmRunOutput {
     Parked {
         program_hash: String,
         vm: OpaqueVmState,
-        issued: IssuedOperation,
+        /// Boxed: an issued operation names its site and loop context.
+        issued: Box<IssuedOperation>,
     },
     /// The process ended.
     Ended {
@@ -218,7 +225,13 @@ pub(crate) enum IssuedOperation {
         site: Option<lash_core::StepEffectSite>,
     },
     /// An await of another process's terminal.
-    AwaitProcess { process: ProcessId },
+    AwaitProcess {
+        process: ProcessId,
+        /// The site that awaits and which occurrence of it, when the VM
+        /// tracks it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        site: Option<lash_core::StepEffectSite>,
+    },
 }
 
 /// One leaf of an issued resource operation or aggregate.

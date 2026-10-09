@@ -130,9 +130,9 @@ fn answer(request: EffectRequest) -> EffectResponse {
                 }
                 // The awaited process's terminal: a value that names the
                 // handle, so every leaf of an aggregate is told apart.
-                AbilityOp::Await(handle) => Ok(AbilityOutcome::Value(lash_vm::Value::String(
-                    format!("settled {handle:?}").into(),
-                ))),
+                AbilityOp::Await(lash_vm::Await { handle, .. }) => Ok(AbilityOutcome::Value(
+                    lash_vm::Value::String(format!("settled {handle:?}").into()),
+                )),
                 AbilityOp::Finish(v) | AbilityOp::Fail(v) => Ok(AbilityOutcome::Value(v)),
                 AbilityOp::Print(_) => Ok(AbilityOutcome::Unit),
                 _ => panic!("unexpected effect"),

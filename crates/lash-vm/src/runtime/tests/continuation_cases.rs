@@ -418,6 +418,8 @@ fn resume_rejects_invalid_iterator_binding_and_zero_range_step() {
         heap: VmHeapContinuation::default(),
         resume: VmResumePoint::NextInstruction,
         expired_functions: std::collections::BTreeSet::new(),
+        loop_activations: Default::default(),
+        loop_stack: Default::default(),
     };
     let host = Host;
     let mut invalid_binding = base.clone();

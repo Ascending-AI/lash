@@ -38,6 +38,7 @@ pub mod turn;
 pub mod turn_driver;
 pub mod worker_limit;
 mod workflow;
+mod workflow_site;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Identity version mixed into every Lash VM and TypeScript module-artifact hash.
@@ -215,6 +216,10 @@ pub use turn_driver::{
     reasoning_part, visible_response_parts, visible_response_text_from_parts,
 };
 pub use workflow::WorkflowExecutionSite;
+pub use workflow_site::{
+    ExprSlot, WorkflowLoopFrame, WorkflowLoopPosition, WorkflowOccurrenceContext, WorkflowSitePath,
+    WorkflowSiteRef, WorkflowSiteRole, WorkflowSiteSegment,
+};
 mod execution_node_kind;
 pub use execution_node_kind::ExecutionNodeKind;
 

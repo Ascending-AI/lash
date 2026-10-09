@@ -616,7 +616,8 @@ async fn exception_determinism_dump() -> Vec<u8> {
     assert_eq!(
         caught_continuation
             .occurrence_counters
-            .values()
+            .iter()
+            .map(|counter| counter.count)
             .sum::<u64>(),
         2,
         "the failed call and recovered call both advance the structural node's occurrence"

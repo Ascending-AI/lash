@@ -76,7 +76,7 @@ impl ExecutionHost for EchoHost {
                     batch.answer_in_leaf_order(results),
                 ))
             }
-            AbilityOp::Await(handle) => match handle {
+            AbilityOp::Await(crate::Await { handle, .. }) => match handle {
                 Value::Record(_) => Ok(AbilityOutcome::Value(Value::Null)),
                 _ => Err(ExecutionHostError::new("expected handle record")),
             },
@@ -297,12 +297,7 @@ pub fn compiled_execution_sites(compiled: &CompiledProgram) -> Vec<&LashVmExecut
     ) {
         sites.extend(batch.leaves.iter().filter_map(|leaf| leaf.site.as_ref()));
     }
-    let mut sites = compiled
-        .chunk
-        .lash_vm_execution_sites
-        .iter()
-        .flatten()
-        .collect::<Vec<_>>();
+    let mut sites = compiled.chunk.emitted_execution_sites().collect::<Vec<_>>();
     for batch in &compiled.chunk.resource_operation_batches {
         batch_sites(batch, &mut sites);
     }

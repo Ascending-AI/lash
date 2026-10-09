@@ -119,7 +119,9 @@ impl VmContinuation {
             frame_stack: Vec<VmFrameContinuation>,
             handler_stack: Vec<VmHandlerContinuation>,
             finally_stack: Vec<VmFinallyContinuation>,
-            occurrence_counters: std::collections::BTreeMap<String, u64>,
+            occurrence_counters: Vec<VmSiteOccurrenceCounter>,
+            loop_stack: Vec<VmLoopContinuation>,
+            loop_activations: u64,
             mode: ExecutionMode,
             profile: Option<VmProfileContinuation>,
             pending_error_span: Option<Span>,
@@ -149,6 +151,8 @@ impl VmContinuation {
             handler_stack: wire.handler_stack,
             finally_stack: wire.finally_stack,
             occurrence_counters: wire.occurrence_counters,
+            loop_stack: wire.loop_stack,
+            loop_activations: wire.loop_activations,
             mode: wire.mode,
             profile: wire.profile,
             pending_error_span: wire.pending_error_span,
@@ -249,6 +253,29 @@ pub struct VmLoopPhase {
     pub yield_budget: u64,
     /// The last cancel checkpoint the loop announced.
     pub announced_checkpoint: u64,
+}
+
+/// How many times one execution site ran before the park.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VmSiteOccurrenceCounter {
+    pub site: lash_sansio::WorkflowSiteRef,
+    pub count: u64,
+}
+
+/// One loop a parked run is inside: its site and activation, how far its
+/// checks and body iterations have counted, and the call-frame and handler
+/// depths it was entered under.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VmLoopContinuation {
+    pub site: lash_sansio::WorkflowSiteRef,
+    pub activation: u64,
+    pub checks: u64,
+    pub iterations: u64,
+    pub checking: bool,
+    pub call_depth: usize,
+    pub handler_depth: usize,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -412,6 +439,10 @@ pub enum ContinuationError {
     },
     #[error("continuation with an active function must have a root-owned bottom frame")]
     MissingRootFrame,
+    #[error("continuation loop {index} is not a loop the parked run can be inside: {reason}")]
+    InvalidLoopContext { index: usize, reason: &'static str },
+    #[error("continuation counts execution site {site:?} more than once or at zero")]
+    InvalidOccurrenceCounter { site: lash_sansio::WorkflowSiteRef },
     #[error("continuation has {actual} slots but program requires {expected}")]
     SlotCountMismatch { expected: usize, actual: usize },
     #[error(

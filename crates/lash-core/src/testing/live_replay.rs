@@ -61,6 +61,7 @@ pub fn process_language_observation(
                 label: label.to_string(),
                 occurrence: 0,
                 call_id: None,
+                context: Default::default(),
             },
         },
         observed_at_ms: 0,

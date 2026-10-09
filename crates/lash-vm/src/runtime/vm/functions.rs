@@ -673,6 +673,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         self.iter_stack = frame.iter_stack;
         self.active_function = frame.function;
         self.ip = frame.return_ip;
+        self.unwind_loops();
         self.complete_call(result, frame.return_target)
     }
 

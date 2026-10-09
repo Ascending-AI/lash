@@ -265,12 +265,18 @@ finish(selected);
             .iter()
             .map(|observation| {
                 let (site, occurrence) = match observation {
-                    LashVmExecutionObservation::NodeStarted { site, occurrence }
+                    LashVmExecutionObservation::NodeStarted {
+                        site, occurrence, ..
+                    }
                     | LashVmExecutionObservation::ChildProcessWaiting {
                         site, occurrence, ..
                     }
-                    | LashVmExecutionObservation::NodeResumed { site, occurrence }
-                    | LashVmExecutionObservation::NodeCompleted { site, occurrence }
+                    | LashVmExecutionObservation::NodeResumed {
+                        site, occurrence, ..
+                    }
+                    | LashVmExecutionObservation::NodeCompleted {
+                        site, occurrence, ..
+                    }
                     | LashVmExecutionObservation::NodeFailed {
                         site, occurrence, ..
                     }
@@ -695,4 +701,414 @@ finish(result);
         branch.branch.is_some(),
         "branch descriptor must use branch_site"
     );
+}
+
+// ---- Exact sites, per-site occurrences and loop context (FIG-5575) ----
+
+use lash_sansio::{
+    WorkflowExecutionSite, WorkflowLoopFrame, WorkflowLoopPosition, WorkflowSitePath,
+};
+use lash_vm::{
+    LashVmExecutionCallSite, VmExecutionStart, VmInstance, VmRequest, VmResume, VmRunConfig, VmStep,
+};
+
+/// What one run showed its host.
+#[derive(Debug, PartialEq)]
+struct SiteRun {
+    /// Every observation, in order.
+    observations: Vec<LashVmExecutionObservation>,
+    /// The call site of every tool call the run issued, each once, with the
+    /// `value` it echoed.
+    calls: Vec<(Value, LashVmExecutionCallSite)>,
+    end: String,
+}
+
+/// Runs `compiled` stepwise as an echoing host, parking on the tool calls
+/// `park` names by their position among the calls the run issues and
+/// reopening every parked run from its bytes on a pristine instance.
+fn run_sites(compiled: lash_vm::CompiledProgram, park: impl Fn(usize) -> bool) -> (SiteRun, usize) {
+    let program = std::sync::Arc::new(compiled);
+    let mut config = VmRunConfig::new(
+        lash_vm::ExecutionMode::Foreground,
+        lash_vm::ExecutionBounds::new(
+            lash_vm::ExecutionBound::Unbounded,
+            lash_vm::ExecutionBound::Unbounded,
+        ),
+    );
+    config.observe_execution = true;
+    let mut instance = VmInstance::pristine();
+    let mut observations = Vec::new();
+    let mut calls = Vec::new();
+    let mut parks = 0;
+    let mut held = None::<Value>;
+    let mut step = instance
+        .start(program.clone(), VmExecutionStart::Session, config.clone())
+        .expect("the run starts");
+    let end = loop {
+        step = match step {
+            VmStep::Suspended(suspended) => {
+                observations.extend(suspended.observations);
+                let resume = match suspended.request {
+                    VmRequest::Effect(AbilityOp::ResourceOperation(operation)) => {
+                        let value = operation
+                            .args
+                            .first()
+                            .and_then(Value::as_record)
+                            .and_then(|record| record.get("value"))
+                            .cloned()
+                            .unwrap_or(Value::Null);
+                        match held.take() {
+                            Some(held) => VmResume::Effect(Ok(AbilityOutcome::Value(held))),
+                            None => {
+                                let position = calls.len();
+                                calls.push((
+                                    value.clone(),
+                                    *operation.call_site.expect("a tool call names its site"),
+                                ));
+                                if park(position) {
+                                    held = Some(value);
+                                    VmResume::Park
+                                } else {
+                                    VmResume::Effect(Ok(AbilityOutcome::Value(value)))
+                                }
+                            }
+                        }
+                    }
+                    VmRequest::Effect(AbilityOp::Finish(value)) => {
+                        VmResume::Effect(Ok(AbilityOutcome::Value(value)))
+                    }
+                    VmRequest::Effect(op) => panic!("unexpected effect {op:?}"),
+                    VmRequest::CancelCheckpoint(_) => {
+                        VmResume::CancelCheckpoint { cancelled: false }
+                    }
+                    VmRequest::Boundary => VmResume::Continue,
+                    VmRequest::ParkDeclined(error) => panic!("park declined: {error}"),
+                };
+                instance
+                    .resume(resume)
+                    .expect("the resume answers its request")
+            }
+            VmStep::Parked(parked) => {
+                observations.extend(parked.observations);
+                parks += 1;
+                let bytes = parked
+                    .continuation
+                    .to_bytes()
+                    .expect("a parked continuation encodes");
+                instance = VmInstance::pristine();
+                let continuation = instance
+                    .open_continuation(&bytes)
+                    .expect("a parked continuation reopens on a fresh instance");
+                instance
+                    .start(
+                        program.clone(),
+                        VmExecutionStart::Continuation(Box::new(continuation)),
+                        config.clone(),
+                    )
+                    .expect("the continuation resumes")
+            }
+            VmStep::Complete(complete) => {
+                observations.extend(complete.observations);
+                break format!("{:?}", complete.outcome);
+            }
+            VmStep::GuestError(error) => {
+                observations.extend(error.observations);
+                break format!("guest error {:?}", error.failure.error);
+            }
+        };
+    };
+    (
+        SiteRun {
+            observations,
+            calls,
+            end,
+        },
+        parks,
+    )
+}
+
+fn compile_main(source: &str) -> (lash_vm::WorkflowGraph, lash_vm::CompiledProgram) {
+    let linked = link_labeled(parse_program(source));
+    (
+        workflow_graph_from_program(linked.artifact.ir()),
+        lash_vm::testing::harness::compile_linked_main(&linked),
+    )
+}
+
+/// The loop context of a call as `(activation, position)` per enclosing
+/// loop, outermost first.
+fn loop_positions(call: &LashVmExecutionCallSite) -> Vec<(u64, WorkflowLoopPosition)> {
+    call.loops
+        .iter()
+        .map(|frame| (frame.activation, frame.position))
+        .collect()
+}
+
+/// Every site the compiler emits and every site the document lists carries
+/// the exact expression it stands for, and the two lists are one set.
+fn assert_sites_resolve_in_the_document(
+    graph: &lash_vm::WorkflowGraph,
+    compiled: &lash_vm::CompiledProgram,
+) {
+    let mut graph_sites = Vec::<WorkflowExecutionSite>::new();
+    for node in graph.nodes() {
+        let statement = lash_vm::workflow_node_statement(node).expect("node statement");
+        for site in &node.execution_sites {
+            let slots = lash_vm::WorkflowSlotPath::structural(site.site_path.expr_slots());
+            let expression = lash_vm::workflow_slot_value(&statement, &slots)
+                .unwrap_or_else(|| panic!("site {site:?} resolves in its node's statement"));
+            let labeled_step = matches!(
+                site.site_path.0.last(),
+                Some(lash_sansio::WorkflowSiteSegment::Role(_))
+            );
+            if !labeled_step {
+                let (kind, label) = lash_vm::execution_site_descriptor(expression)
+                    .unwrap_or_else(|| panic!("site {site:?} names an executable expression"));
+                assert_eq!((kind, label.as_ref()), (site.kind, site.label.as_str()));
+            }
+            graph_sites.push(site.clone());
+        }
+    }
+    let unique = graph_sites
+        .iter()
+        .map(|site| (&site.owner, &site.path, &site.site_path))
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        unique.len(),
+        graph_sites.len(),
+        "a site address names one site"
+    );
+    for site in compiled_execution_sites(compiled) {
+        assert!(
+            graph_sites.contains(&site.workflow_site),
+            "compiled site {:?} is a site of the document",
+            site.workflow_site
+        );
+    }
+}
+
+/// FIG-5575: two calls in one statement are two sites, in the document and
+/// in what the run reports, even when the calls are identical. Before, both
+/// named their node's path and collapsed to one site.
+#[test]
+fn two_calls_in_one_statement_are_two_sites_in_the_document_and_in_events() {
+    let (graph, compiled) = compile_main(
+        r#"finish([await tools.echo({ value: "a" }), await tools.echo({ value: "a" })]);
+"#,
+    );
+    assert_sites_resolve_in_the_document(&graph, &compiled);
+    let finish = graph
+        .nodes()
+        .find(|node| matches!(node.kind, WorkflowNodeKind::Terminal { .. }))
+        .expect("finish node");
+    let operations = finish
+        .execution_sites
+        .iter()
+        .filter(|site| site.kind == lash_vm::RESOURCE_OPERATION_EXECUTION_SITE_KIND)
+        .collect::<Vec<_>>();
+    assert_eq!(operations.len(), 2, "{:?}", finish.execution_sites);
+    assert_ne!(operations[0].site_path, operations[1].site_path);
+
+    let (run, _) = run_sites(compiled, |_| false);
+    let [(_, first), (_, second)] = run.calls.as_slice() else {
+        panic!("two calls: {:?}", run.calls);
+    };
+    assert_eq!(first.site.node_id, finish.id.as_str());
+    assert_eq!(second.site.node_id, finish.id.as_str());
+    assert_eq!(
+        [&first.site.workflow_site, &second.site.workflow_site],
+        [operations[0], operations[1]],
+        "each call reports the document's site for it, in evaluation order"
+    );
+    assert_eq!(
+        (first.occurrence, second.occurrence),
+        (1, 1),
+        "occurrences count per site, not per node"
+    );
+    let started = run
+        .observations
+        .iter()
+        .filter_map(|observation| match observation {
+            LashVmExecutionObservation::NodeStarted {
+                site, occurrence, ..
+            } if site.node_kind == lash_vm::RESOURCE_OPERATION_EXECUTION_SITE_KIND => {
+                Some((site.site_path().clone(), *occurrence))
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        started,
+        vec![
+            (operations[0].site_path.clone(), 1),
+            (operations[1].site_path.clone(), 1)
+        ]
+    );
+}
+
+const NESTED_LOOPS: &str = r#"for (const a of [1, 2]) {
+  for (const b of [1, 2]) {
+    await tools.echo({ value: b });
+  }
+}
+finish("done");
+"#;
+
+/// A loop reentered by an outer iteration is a new activation, a call's
+/// occurrence counts across all of them, and each call carries the stack of
+/// loops it ran in.
+#[test]
+fn nested_loops_give_each_occurrence_its_activation_and_iteration() {
+    use WorkflowLoopPosition::Body;
+    let (graph, compiled) = compile_main(NESTED_LOOPS);
+    assert_sites_resolve_in_the_document(&graph, &compiled);
+    let (run, _) = run_sites(compiled, |_| false);
+    assert_eq!(
+        run.calls
+            .iter()
+            .map(|(_, call)| (call.occurrence, loop_positions(call)))
+            .collect::<Vec<_>>(),
+        vec![
+            (1, vec![(1, Body(1)), (2, Body(1))]),
+            (2, vec![(1, Body(1)), (2, Body(2))]),
+            (3, vec![(1, Body(2)), (3, Body(1))]),
+            (4, vec![(1, Body(2)), (3, Body(2))]),
+        ]
+    );
+    let loops = graph
+        .nodes()
+        .filter(|node| {
+            node.execution_sites
+                .iter()
+                .any(|site| site.kind == lash_sansio::ExecutionNodeKind::Loop)
+        })
+        .map(|node| node.id.to_string())
+        .collect::<Vec<_>>();
+    let [outer, inner] = loops.as_slice() else {
+        panic!("two loop nodes: {loops:?}");
+    };
+    for (_, call) in &run.calls {
+        let frames: Vec<&WorkflowLoopFrame> = call.loops.iter().collect();
+        assert_eq!(
+            [&frames[0].site.node_id, &frames[1].site.node_id],
+            [outer, inner],
+            "a frame names its loop's own site"
+        );
+        assert_eq!(frames[0].site.site_path, WorkflowSitePath::default());
+    }
+}
+
+/// A run that parks on a call inside the inner loop and resumes from its
+/// bytes reports exactly what a run that never parked reports: counters and
+/// loop context ride the continuation.
+#[test]
+fn parking_inside_the_inner_loop_keeps_occurrence_activation_and_iteration() {
+    let (_, compiled) = compile_main(NESTED_LOOPS);
+    let (straight, straight_parks) = run_sites(compiled.clone(), |_| false);
+    assert_eq!(straight_parks, 0);
+    assert_eq!(straight.calls.len(), 4);
+    for parked_at in 0..4 {
+        let (parked, parks) = run_sites(compiled.clone(), |position| position == parked_at);
+        assert_eq!(parks, 1, "the run parks on call {parked_at}");
+        assert_eq!(parked, straight, "parked on call {parked_at}");
+    }
+    let (always, parks) = run_sites(compiled, |_| true);
+    assert_eq!(parks, 4);
+    assert_eq!(always, straight);
+}
+
+/// A `while` condition's evaluations are checks, apart from the body
+/// iterations they admit: the last check, which reads false, has no body of
+/// its number.
+#[test]
+fn a_while_condition_check_is_distinct_from_a_body_iteration() {
+    use WorkflowLoopPosition::{Body, Check};
+    let (graph, compiled) = compile_main(
+        r#"let n = 0;
+while (await tools.echo({ value: n < 2 })) {
+  n = n + 1;
+  await tools.echo({ value: "body" });
+}
+finish(n);
+"#,
+    );
+    assert_sites_resolve_in_the_document(&graph, &compiled);
+    let (run, _) = run_sites(compiled.clone(), |_| false);
+    let positions = run
+        .calls
+        .iter()
+        .map(|(value, call)| {
+            (
+                matches!(value, Value::Bool(_)),
+                call.occurrence,
+                loop_positions(call),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        positions,
+        vec![
+            (true, 1, vec![(1, Check(1))]),
+            (false, 1, vec![(1, Body(1))]),
+            (true, 2, vec![(1, Check(2))]),
+            (false, 2, vec![(1, Body(2))]),
+            (true, 3, vec![(1, Check(3))]),
+        ]
+    );
+    let (parked, parks) = run_sites(compiled, |_| true);
+    assert_eq!(parks, 5);
+    assert_eq!(parked, run, "the final false check parks and resumes too");
+}
+
+/// `break`, a caught throw and a return out of a loop each leave the loop:
+/// what runs next is in the loops that still enclose it, and a loop entered
+/// again is a new activation.
+#[test]
+fn leaving_a_loop_abruptly_leaves_its_frame() {
+    use WorkflowLoopPosition::Body;
+    let (_, compiled) = compile_main(
+        r#"const first = (items) => {
+  for (const item of items) {
+    return item;
+  }
+  return null;
+};
+for (const a of [1, 2]) {
+  try {
+    for (const b of [1, 2]) {
+      await tools.echo({ value: "inner" });
+      throw "stop";
+    }
+  } catch (error) {
+    await tools.echo({ value: "caught" });
+  }
+  for (const c of [1, 2]) {
+    break;
+  }
+  await tools.echo({ value: first(["after"]) });
+}
+finish("done");
+"#,
+    );
+    let (run, _) = run_sites(compiled.clone(), |_| false);
+    let seen = run
+        .calls
+        .iter()
+        .map(|(value, call)| (value.to_string(), loop_positions(call)))
+        .collect::<Vec<_>>();
+    // Activations in entry order: outer 1; then per outer iteration the
+    // throwing loop, the breaking loop and the returning loop.
+    assert_eq!(
+        seen,
+        vec![
+            ("inner".to_string(), vec![(1, Body(1)), (2, Body(1))]),
+            ("caught".to_string(), vec![(1, Body(1))]),
+            ("after".to_string(), vec![(1, Body(1))]),
+            ("inner".to_string(), vec![(1, Body(2)), (5, Body(1))]),
+            ("caught".to_string(), vec![(1, Body(2))]),
+            ("after".to_string(), vec![(1, Body(2))]),
+        ]
+    );
+    let (parked, _) = run_sites(compiled, |_| true);
+    assert_eq!(parked, run);
 }

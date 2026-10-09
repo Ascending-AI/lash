@@ -27,7 +27,7 @@ thing it is blocked on, and its record lists them all
 - another process's terminal: `WaitKind::Process { process_id }`.
 
 Each wait carries `since_ms` and, when the engine named one, the `site`
-(`node_id`, `occurrence`) of the node that waits. None carries a bearer key or
+(`node_id`, `occurrence`, `context`) that waits. None carries a bearer key or
 a wait id. The end of each wait records `process.resumed`; the process reads
 `running` again once no wait is left.
 

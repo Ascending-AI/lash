@@ -102,9 +102,61 @@ export type WorkflowSlotPathSegment =
     }
   | {
       index: number;
+    }
+  | {
+      expr: ExprSlot;
     };
 /**
- * An unambiguous address for one input location inside a workflow node.
+ * The role one child expression plays in its parent expression of the
+ * shared workflow IR.
+ */
+export type ExprSlot =
+  | (
+      | 'condition'
+      | 'then'
+      | 'else'
+      | 'iterable'
+      | 'receiver'
+      | 'callee'
+      | 'this'
+      | 'catch'
+      | 'finally'
+      | 'target'
+      | 'index'
+      | 'left'
+      | 'right'
+    )
+  | {
+      item: number;
+    }
+  | {
+      entry: number;
+    }
+  | 'inner'
+  | {
+      assign_index: number;
+    }
+  | 'value'
+  | 'bind'
+  | 'body'
+  | 'input'
+  | {
+      arg: number;
+    }
+  | 'operand'
+  | 'method_key'
+  | 'items'
+  | 'function';
+/**
+ * An unambiguous address for one expression inside a workflow node.
+ *
+ * Two spellings share the type. A *structural* path is made only of
+ * [`WorkflowSlotPathSegment::Expr`] segments and walks the typed child slots
+ * of the node's statement ([`super::workflow_node_statement`]), so it reaches
+ * every expression role of every IR variant; the empty path is the statement
+ * itself. A *call-argument* path starts at a receiver call's argument
+ * (`call`, `arg`, then record fields and list indexes) and is what type
+ * facets name their expected arguments by.
  *
  * The serialized list is authoritative. [`Display`](std::fmt::Display) is a
  * derived spelling for text-only host contracts; field names use JSON string

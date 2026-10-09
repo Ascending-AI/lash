@@ -534,6 +534,7 @@ fn instruction_snapshot(chunk: &Chunk, instruction: Instruction) -> String {
         Instruction::Finish => "finish".to_string(),
         Instruction::ProcessFail => "process_fail".to_string(),
         Instruction::ObserveStep => "observe_step".to_string(),
+        Instruction::LoopMark(mark) => format!("loop_mark {mark:?}"),
         Instruction::Pop => "pop".to_string(),
         Instruction::BeginIter(slot) => format!("begin_iter {slot}:{}", slot_name(chunk, slot)),
         Instruction::BeginRangeIter { binding, argc } => {

@@ -49,7 +49,7 @@ fn parked(tag: &str, issued: IssuedOperation) -> SettledOutput {
     let output = VmRunOutput::Parked {
         program_hash: "program".to_owned(),
         vm: snapshot(tag),
-        issued,
+        issued: Box::new(issued),
     };
     completed(
         &process(),
@@ -500,6 +500,7 @@ fn a_sleep_stands_until_it_wakes() {
     let site = lash_core::StepEffectSite {
         node_id: "nap".to_owned(),
         occurrence: 2,
+        context: Default::default(),
     };
     let (mut driven, action) = Driven::parked_on(IssuedOperation::Sleep {
         until_ms: 5_000,
@@ -520,18 +521,27 @@ fn a_sleep_stands_until_it_wakes() {
     ));
 }
 
-/// An await answers `AwaitProcess` until the awaited process ends; another
-/// process's end changes nothing.
+/// An await answers `AwaitProcess` until the awaited process ends, naming
+/// the site that awaits (FIG-5575); another process's end changes nothing.
 #[test]
 fn an_await_stands_until_its_process_ends() {
     let awaited = ProcessId::fixture("awaited");
+    let site = lash_core::StepEffectSite {
+        node_id: "await.node".to_owned(),
+        occurrence: 2,
+        context: lash_sansio::WorkflowOccurrenceContext {
+            site_path: lash_sansio::WorkflowSitePath::slots([lash_sansio::ExprSlot::Value]),
+            loops: Vec::new(),
+        },
+    };
     let (mut driven, action) = Driven::parked_on(IssuedOperation::AwaitProcess {
         process: awaited.clone(),
+        site: Some(site.clone()),
     });
     let standing = EngineAction::AwaitProcess {
         process: awaited.clone(),
         bound: lash_core::ParkBound::UntilScopeEnd,
-        site: None,
+        site: Some(site),
     };
     assert_eq!(action, standing);
     let outcome = lash_core::ProcessAwaitOutput::from_tool_output(
@@ -749,12 +759,15 @@ fn parked_sleep(output: VmRunOutput) -> (String, lash_vm_protocol::OpaqueVmState
         VmRunOutput::Parked {
             program_hash,
             vm,
-            issued: IssuedOperation::Sleep { until_ms, site },
+            issued,
         } => {
+            let IssuedOperation::Sleep { until_ms, site } = *issued else {
+                panic!("a VM parked on a sleep, got {issued:?}")
+            };
             assert!(site.is_some(), "the VM names the node it sleeps at");
             (program_hash, vm, until_ms)
         }
-        other => panic!("a VM parked on a sleep, got {other:?}"),
+        other @ VmRunOutput::Ended { .. } => panic!("a VM parked on a sleep, got {other:?}"),
     }
 }
 

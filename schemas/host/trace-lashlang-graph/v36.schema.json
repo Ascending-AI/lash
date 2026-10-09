@@ -129,6 +129,134 @@
         }
       ]
     },
+    "ExprSlot": {
+      "description": "The role one child expression plays in its parent expression of the\nshared workflow IR.",
+      "oneOf": [
+        {
+          "enum": [
+            "condition",
+            "then",
+            "else",
+            "iterable",
+            "receiver",
+            "callee",
+            "this",
+            "catch",
+            "finally",
+            "target",
+            "index",
+            "left",
+            "right"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A statement of a block or an element of a list.",
+          "properties": {
+            "item": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "item"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The value of a record entry, by entry position.",
+          "properties": {
+            "entry": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "entry"
+          ],
+          "type": "object"
+        },
+        {
+          "const": "inner",
+          "description": "The expression a label or a structural role wraps.",
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A dynamic index of an assignment target's path, by position.",
+          "properties": {
+            "assign_index": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "assign_index"
+          ],
+          "type": "object"
+        },
+        {
+          "const": "value",
+          "description": "The value an assignment stores.",
+          "type": "string"
+        },
+        {
+          "const": "bind",
+          "description": "The generated statements that bind a loop element to authored names.",
+          "type": "string"
+        },
+        {
+          "const": "body",
+          "description": "The body of a loop, a function, a process literal or a `try`.",
+          "type": "string"
+        },
+        {
+          "const": "input",
+          "description": "The input of a host descriptor constructor.",
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A call argument, by position.",
+          "properties": {
+            "arg": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "arg"
+          ],
+          "type": "object"
+        },
+        {
+          "const": "operand",
+          "description": "The single operand of a unary form.",
+          "type": "string"
+        },
+        {
+          "const": "method_key",
+          "description": "The computed member a method call reads its callee from.",
+          "type": "string"
+        },
+        {
+          "const": "items",
+          "description": "The collection a map intrinsic reads.",
+          "type": "string"
+        },
+        {
+          "const": "function",
+          "description": "The callback a map intrinsic applies.",
+          "type": "string"
+        }
+      ]
+    },
     "RunAggregateWakePolicy": {
       "description": "Aggregate wake rule. Run-owned aggregates preserve these semantics;\nthe rule does not require a durable group dispatcher.\n\n`Promise.all` and `Promise.allSettled` both use [`All`](Self::All): the\ncaller's early exit on rejection is not a host wake rule. The wire shape\nhas no default, so a missing rule cannot be replayed under a guess.",
       "oneOf": [
@@ -301,6 +429,10 @@
                 "null"
               ]
             },
+            "context": {
+              "$ref": "#/$defs/WorkflowOccurrenceContext",
+              "description": "The exact site inside the node and the loop activations around\nthis occurrence. `occurrence` counts per site."
+            },
             "kind": {
               "const": "node_started",
               "type": "string"
@@ -335,6 +467,10 @@
             "awaited": {
               "$ref": "#/$defs/TraceNodeAwaited"
             },
+            "context": {
+              "$ref": "#/$defs/WorkflowOccurrenceContext",
+              "description": "The exact site inside the node and the loop activations around\nthis occurrence. `occurrence` counts per site."
+            },
             "kind": {
               "const": "node_waiting",
               "type": "string"
@@ -367,6 +503,10 @@
         {
           "description": "A parked occurrence resolved, including cancellation. Its node terminal\nremains a separate fact.",
           "properties": {
+            "context": {
+              "$ref": "#/$defs/WorkflowOccurrenceContext",
+              "description": "The exact site inside the node and the loop activations around\nthis occurrence. `occurrence` counts per site."
+            },
             "kind": {
               "const": "node_resumed",
               "type": "string"
@@ -402,6 +542,10 @@
         {
           "description": "Only an occurrence observed in flight may be cancelled.",
           "properties": {
+            "context": {
+              "$ref": "#/$defs/WorkflowOccurrenceContext",
+              "description": "The exact site inside the node and the loop activations around\nthis occurrence. `occurrence` counts per site."
+            },
             "kind": {
               "const": "node_cancelled",
               "type": "string"
@@ -437,6 +581,10 @@
                 "string",
                 "null"
               ]
+            },
+            "context": {
+              "$ref": "#/$defs/WorkflowOccurrenceContext",
+              "description": "The exact site inside the node and the loop activations around\nthis occurrence. `occurrence` counts per site."
             },
             "kind": {
               "const": "node_completed",
@@ -474,6 +622,10 @@
                 "null"
               ]
             },
+            "context": {
+              "$ref": "#/$defs/WorkflowOccurrenceContext",
+              "description": "The exact site inside the node and the loop activations around\nthis occurrence. `occurrence` counts per site."
+            },
             "failure": {
               "$ref": "#/$defs/TraceLanguageExecutionFailure"
             },
@@ -508,6 +660,10 @@
         },
         {
           "properties": {
+            "context": {
+              "$ref": "#/$defs/WorkflowOccurrenceContext",
+              "description": "The exact site inside the node and the loop activations around\nthis occurrence. `occurrence` counts per site."
+            },
             "edge_id": {
               "type": "string"
             },
@@ -540,6 +696,10 @@
           "properties": {
             "child": {
               "$ref": "#/$defs/TraceLanguageChildExecution"
+            },
+            "context": {
+              "$ref": "#/$defs/WorkflowOccurrenceContext",
+              "description": "The exact site inside the node and the loop activations around\nthis occurrence. `occurrence` counts per site."
             },
             "kind": {
               "const": "child_started",
@@ -793,7 +953,7 @@
       "type": "string"
     },
     "TraceLashlangEventIdentity": {
-      "description": "Canonical identity of one fold input.\n\nNode transitions use `(node_id, node_kind, occurrence, attempt)` plus\nthe transition kind. The transition kind lets a start and its terminal\nfact merge monotonically while still making a second, different start or\nterminal a typed conflict.",
+      "description": "Canonical identity of one fold input.\n\nNode transitions use `(node_id, site_path, node_kind, occurrence,\nattempt)` plus the transition kind: occurrences count per site, so two\nsites of one node are never one identity. The transition kind lets a start and its terminal\nfact merge monotonically while still making a second, different start or\nterminal a typed conflict.",
       "properties": {
         "attempt": {
           "format": "uint32",
@@ -829,6 +989,9 @@
             "integer",
             "null"
           ]
+        },
+        "site_path": {
+          "$ref": "#/$defs/WorkflowSitePath"
         },
         "transition": {
           "$ref": "#/$defs/TraceLashlangEventTransition"
@@ -1633,7 +1796,7 @@
       ]
     },
     "WorkflowExecutionSite": {
-      "description": "Stable source-level location of one runtime site under a workflow node.",
+      "description": "One execution site of a workflow node: the node (`owner` and `path`), the\nexact executable subexpression inside its statement (`site_path`), and a\ndescription of what runs there. `kind` and `label` describe the site; they\nare not its identity.",
       "properties": {
         "kind": {
           "$ref": "#/$defs/ExecutionNodeKind"
@@ -1652,6 +1815,9 @@
             "type": "integer"
           },
           "type": "array"
+        },
+        "site_path": {
+          "$ref": "#/$defs/WorkflowSitePath"
         }
       },
       "required": [
@@ -1660,6 +1826,146 @@
         "label"
       ],
       "type": "object"
+    },
+    "WorkflowLoopFrame": {
+      "additionalProperties": false,
+      "description": "One enclosing loop of an occurrence, outermost first in a context.",
+      "properties": {
+        "activation": {
+          "description": "Which entry of that loop this is, unique within the execution: a loop\nreentered by an outer iteration gets a new activation.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "position": {
+          "$ref": "#/$defs/WorkflowLoopPosition"
+        },
+        "site": {
+          "$ref": "#/$defs/WorkflowSiteRef",
+          "description": "The loop's own site."
+        }
+      },
+      "required": [
+        "site",
+        "activation",
+        "position"
+      ],
+      "type": "object"
+    },
+    "WorkflowLoopPosition": {
+      "description": "Where inside one loop activation something ran. Numbers are one-based.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "The `n`-th evaluation of a `while` condition. The check after the last\nbody iteration, which reads false, is a check with no body of its\nnumber.",
+          "properties": {
+            "check": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "check"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The `n`-th run of the loop body.",
+          "properties": {
+            "body": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "body"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "WorkflowOccurrenceContext": {
+      "additionalProperties": false,
+      "description": "Where one occurrence of a site ran, beyond its node: the exact site\ninside the node's statement and the loop activations that enclosed the\noccurrence when it began, outermost first. The default is a node's own\nstatement site outside every loop.",
+      "properties": {
+        "loops": {
+          "items": {
+            "$ref": "#/$defs/WorkflowLoopFrame"
+          },
+          "type": "array"
+        },
+        "site_path": {
+          "$ref": "#/$defs/WorkflowSitePath"
+        }
+      },
+      "type": "object"
+    },
+    "WorkflowSitePath": {
+      "description": "The typed path from a workflow node's statement to one executable\nsubexpression. The empty path is the statement itself.\n\nSlot segments walk the statement's typed child slots; a trailing role\nsegment names a synthetic site of the expression they reach.",
+      "items": {
+        "$ref": "#/$defs/WorkflowSiteSegment"
+      },
+      "type": "array"
+    },
+    "WorkflowSiteRef": {
+      "additionalProperties": false,
+      "description": "The static address of one execution site in a workflow document: the node\nthat owns it and the path to the executable subexpression inside it.",
+      "properties": {
+        "node_id": {
+          "type": "string"
+        },
+        "site_path": {
+          "$ref": "#/$defs/WorkflowSitePath"
+        }
+      },
+      "required": [
+        "node_id"
+      ],
+      "type": "object"
+    },
+    "WorkflowSiteRole": {
+      "description": "What a site that is not an expression of its own stands for.",
+      "oneOf": [
+        {
+          "const": "labeled_step",
+          "description": "The step a label declares over the expression it wraps, when that\nexpression is not itself the labeled operation.",
+          "type": "string"
+        }
+      ]
+    },
+    "WorkflowSiteSegment": {
+      "description": "One step of a [`WorkflowSitePath`].",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "A typed child slot of the expression reached so far.",
+          "properties": {
+            "slot": {
+              "$ref": "#/$defs/ExprSlot"
+            }
+          },
+          "required": [
+            "slot"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A site the expression reached so far owns beside its own.",
+          "properties": {
+            "role": {
+              "$ref": "#/$defs/WorkflowSiteRole"
+            }
+          },
+          "required": [
+            "role"
+          ],
+          "type": "object"
+        }
+      ]
     }
   },
   "$id": "https://lash.dev/schemas/trace-lashlang-graph/v36",

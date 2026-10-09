@@ -37,6 +37,13 @@
 //! variant names its slots exhaustively, in evaluation order, through
 //! `Expr::slots`.
 //!
+//! What runs is named the same way. Each node lists its `execution_sites`,
+//! and a site's `site_path` is that slot path to the expression that runs:
+//! two calls in one statement are two sites of its node. A run reports a
+//! site with its per-site occurrence and the loops around it
+//! ([`crate::vm::WorkflowOccurrenceContext`]), in language traces, durable
+//! effect occurrences and waits alike.
+//!
 //! # Editing
 //!
 //! A [`WorkflowDraft`] opens a document for editing. It names each node by a

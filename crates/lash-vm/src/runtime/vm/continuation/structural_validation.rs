@@ -356,6 +356,46 @@ impl<'a> ContinuationValidator<'a> {
         Ok(())
     }
 
+    /// Site counters are one positive count per site, in site order, and
+    /// the loop stack is one the run could have built: activations it has
+    /// begun, each newer than the loop enclosing it, entered under no more
+    /// call frames or handlers than are parked, and never under fewer than
+    /// its enclosing loop.
+    fn validate_execution_sites(&self) -> Result<(), ContinuationError> {
+        let counters = &self.continuation.occurrence_counters;
+        for (index, counter) in counters.iter().enumerate() {
+            let ordered = index == 0 || counters[index - 1].site < counter.site;
+            if counter.count == 0 || !ordered {
+                return Err(ContinuationError::InvalidOccurrenceCounter {
+                    site: counter.site.clone(),
+                });
+            }
+        }
+        let invalid = |index, reason| ContinuationError::InvalidLoopContext { index, reason };
+        let mut enclosing: Option<&VmLoopContinuation> = None;
+        for (index, active) in self.continuation.loop_stack.iter().enumerate() {
+            if active.activation == 0 || active.activation > self.continuation.loop_activations {
+                return Err(invalid(index, "its activation was never begun"));
+            }
+            if active.call_depth > self.continuation.frame_stack.len()
+                || active.handler_depth > self.continuation.handler_stack.len()
+            {
+                return Err(invalid(index, "it was entered deeper than the parked run"));
+            }
+            if active.checking && active.checks == 0 {
+                return Err(invalid(index, "it is in a check it never counted"));
+            }
+            if let Some(enclosing) = enclosing
+                && (enclosing.activation >= active.activation
+                    || enclosing.call_depth > active.call_depth)
+            {
+                return Err(invalid(index, "it does not nest in the loop enclosing it"));
+            }
+            enclosing = Some(active);
+        }
+        Ok(())
+    }
+
     fn validate_handlers(&self) -> Result<(), ContinuationError> {
         for (index, handler) in self.continuation.handler_stack.iter().enumerate() {
             let Some((owner_function, iterator_count)) =
@@ -531,6 +571,7 @@ pub(super) fn validate_continuation(
     validator.validate_heap_objects()?;
     validator.validate_frames()?;
     validator.validate_handlers()?;
+    validator.validate_execution_sites()?;
     validator.validate_finally()?;
     validator.validate_heap_graph()
 }

@@ -72,6 +72,13 @@ pub enum TraceLanguageExecutionPayload {
         node_kind: lash_sansio::ExecutionNodeKind,
         label: String,
         occurrence: u64,
+        /// The exact site inside the node and the loop activations around
+        /// this occurrence. `occurrence` counts per site.
+        #[serde(
+            default,
+            skip_serializing_if = "lash_sansio::WorkflowOccurrenceContext::is_default"
+        )]
+        context: lash_sansio::WorkflowOccurrenceContext,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         call_id: Option<lash_sansio::ToolCallId>,
     },
@@ -82,6 +89,13 @@ pub enum TraceLanguageExecutionPayload {
         node_kind: lash_sansio::ExecutionNodeKind,
         label: String,
         occurrence: u64,
+        /// The exact site inside the node and the loop activations around
+        /// this occurrence. `occurrence` counts per site.
+        #[serde(
+            default,
+            skip_serializing_if = "lash_sansio::WorkflowOccurrenceContext::is_default"
+        )]
+        context: lash_sansio::WorkflowOccurrenceContext,
         awaited: TraceNodeAwaited,
     },
     /// A parked occurrence resolved, including cancellation. Its node terminal
@@ -91,6 +105,13 @@ pub enum TraceLanguageExecutionPayload {
         node_kind: lash_sansio::ExecutionNodeKind,
         label: String,
         occurrence: u64,
+        /// The exact site inside the node and the loop activations around
+        /// this occurrence. `occurrence` counts per site.
+        #[serde(
+            default,
+            skip_serializing_if = "lash_sansio::WorkflowOccurrenceContext::is_default"
+        )]
+        context: lash_sansio::WorkflowOccurrenceContext,
         resolution: TraceNodeWaitResolution,
     },
     /// Only an occurrence observed in flight may be cancelled.
@@ -99,12 +120,26 @@ pub enum TraceLanguageExecutionPayload {
         node_kind: lash_sansio::ExecutionNodeKind,
         label: String,
         occurrence: u64,
+        /// The exact site inside the node and the loop activations around
+        /// this occurrence. `occurrence` counts per site.
+        #[serde(
+            default,
+            skip_serializing_if = "lash_sansio::WorkflowOccurrenceContext::is_default"
+        )]
+        context: lash_sansio::WorkflowOccurrenceContext,
     },
     NodeCompleted {
         node_id: String,
         node_kind: lash_sansio::ExecutionNodeKind,
         label: String,
         occurrence: u64,
+        /// The exact site inside the node and the loop activations around
+        /// this occurrence. `occurrence` counts per site.
+        #[serde(
+            default,
+            skip_serializing_if = "lash_sansio::WorkflowOccurrenceContext::is_default"
+        )]
+        context: lash_sansio::WorkflowOccurrenceContext,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         call_id: Option<lash_sansio::ToolCallId>,
     },
@@ -113,6 +148,13 @@ pub enum TraceLanguageExecutionPayload {
         node_kind: lash_sansio::ExecutionNodeKind,
         label: String,
         occurrence: u64,
+        /// The exact site inside the node and the loop activations around
+        /// this occurrence. `occurrence` counts per site.
+        #[serde(
+            default,
+            skip_serializing_if = "lash_sansio::WorkflowOccurrenceContext::is_default"
+        )]
+        context: lash_sansio::WorkflowOccurrenceContext,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         call_id: Option<lash_sansio::ToolCallId>,
         failure: TraceLanguageExecutionFailure,
@@ -120,14 +162,115 @@ pub enum TraceLanguageExecutionPayload {
     BranchSelected {
         node_id: String,
         occurrence: u64,
+        /// The exact site inside the node and the loop activations around
+        /// this occurrence. `occurrence` counts per site.
+        #[serde(
+            default,
+            skip_serializing_if = "lash_sansio::WorkflowOccurrenceContext::is_default"
+        )]
+        context: lash_sansio::WorkflowOccurrenceContext,
         edge_id: String,
         selected: TraceBranchSelection,
     },
     ChildStarted {
         parent_node_id: String,
         occurrence: u64,
+        /// The exact site inside the node and the loop activations around
+        /// this occurrence. `occurrence` counts per site.
+        #[serde(
+            default,
+            skip_serializing_if = "lash_sansio::WorkflowOccurrenceContext::is_default"
+        )]
+        context: lash_sansio::WorkflowOccurrenceContext,
         child: TraceLanguageChildExecution,
     },
+}
+
+impl TraceLanguageExecutionPayload {
+    /// Where the occurrence this fact is about ran inside its node; `None`
+    /// for a fact about the whole execution.
+    pub fn context(&self) -> Option<&lash_sansio::WorkflowOccurrenceContext> {
+        match self {
+            Self::ExecutionStarted { .. } | Self::ExecutionFinished { .. } => None,
+            Self::NodeStarted { context, .. }
+            | Self::NodeWaiting { context, .. }
+            | Self::NodeResumed { context, .. }
+            | Self::NodeCancelled { context, .. }
+            | Self::NodeCompleted { context, .. }
+            | Self::NodeFailed { context, .. }
+            | Self::BranchSelected { context, .. }
+            | Self::ChildStarted { context, .. } => Some(context),
+        }
+    }
+
+    /// The occurrence this fact is about: its site and which run of that
+    /// site it is. Occurrences count per site, so the node id alone does not
+    /// name one.
+    pub fn occurrence_key(&self) -> Option<(lash_sansio::WorkflowSiteRef, u64)> {
+        let (node_id, occurrence, context) = match self {
+            Self::ExecutionStarted { .. } | Self::ExecutionFinished { .. } => return None,
+            Self::NodeStarted {
+                node_id,
+                occurrence,
+                context,
+                ..
+            }
+            | Self::NodeWaiting {
+                node_id,
+                occurrence,
+                context,
+                ..
+            }
+            | Self::NodeResumed {
+                node_id,
+                occurrence,
+                context,
+                ..
+            }
+            | Self::NodeCancelled {
+                node_id,
+                occurrence,
+                context,
+                ..
+            }
+            | Self::NodeCompleted {
+                node_id,
+                occurrence,
+                context,
+                ..
+            }
+            | Self::NodeFailed {
+                node_id,
+                occurrence,
+                context,
+                ..
+            }
+            | Self::BranchSelected {
+                node_id,
+                occurrence,
+                context,
+                ..
+            }
+            | Self::ChildStarted {
+                parent_node_id: node_id,
+                occurrence,
+                context,
+                ..
+            } => (node_id, *occurrence, context),
+        };
+        Some((
+            lash_sansio::WorkflowSiteRef::new(node_id.clone(), context.site_path.clone()),
+            occurrence,
+        ))
+    }
+
+    /// The exact site of the fact's occurrence inside its node: the node's
+    /// own statement for a fact about the whole execution.
+    pub fn site_path(&self) -> lash_sansio::WorkflowSitePath {
+        self.context()
+            .map(|context| context.site_path.clone())
+            .unwrap_or_default()
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]

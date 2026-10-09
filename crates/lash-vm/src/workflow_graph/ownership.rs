@@ -8,7 +8,7 @@
 
 use rustc_hash::FxHashMap;
 
-use crate::{AssignPathStep, AstPath, Expr, Program, StructuralRole};
+use crate::{AssignPathStep, AstPath, Expr, ExprSlot, Program, StructuralRole};
 
 use super::child_path;
 
@@ -30,12 +30,29 @@ impl WorkflowNodePath {
 /// workflow node that owns it.
 #[derive(Clone, Debug, Default)]
 pub struct WorkflowOwnership {
-    paths: FxHashMap<AstPath, WorkflowNodePath>,
+    paths: FxHashMap<AstPath, OwnedExpression>,
+}
+
+/// The node that owns one expression and the typed slots that reach the
+/// expression from the node's statement.
+#[derive(Clone, Debug)]
+struct OwnedExpression {
+    node: WorkflowNodePath,
+    slots: Vec<ExprSlot>,
 }
 
 impl WorkflowOwnership {
     pub fn path_for_ast(&self, ast_path: &AstPath) -> Option<&WorkflowNodePath> {
-        self.paths.get(ast_path)
+        self.paths.get(ast_path).map(|owned| &owned.node)
+    }
+
+    /// The owning node of the expression at `ast_path` and the typed slot
+    /// path from that node's statement to the expression: the two halves of
+    /// an execution site's address.
+    pub fn site_for_ast(&self, ast_path: &AstPath) -> Option<(&WorkflowNodePath, &[ExprSlot])> {
+        self.paths
+            .get(ast_path)
+            .map(|owned| (&owned.node, owned.slots.as_slice()))
     }
 }
 
@@ -227,7 +244,7 @@ fn collect_body<'a>(
     ast_path: &AstPath,
     node_base: &[u32],
     slot: Option<WorkflowBodySlot>,
-    paths: &mut FxHashMap<AstPath, WorkflowNodePath>,
+    paths: &mut FxHashMap<AstPath, OwnedExpression>,
 ) -> WorkflowBody<'a> {
     // A body's structural wrappers and completion value are not statements:
     // they stay owned by whatever owns the body expression itself.
@@ -253,9 +270,15 @@ fn collect_statement<'a>(
     expression: &'a Expr,
     ast_path: AstPath,
     node_path: &[u32],
-    paths: &mut FxHashMap<AstPath, WorkflowNodePath>,
+    paths: &mut FxHashMap<AstPath, OwnedExpression>,
 ) -> WorkflowStatement<'a> {
-    map_node_subtree(expression, &ast_path, node_path, paths);
+    map_node_subtree(
+        expression,
+        &ast_path,
+        &WorkflowNodePath::from_indices(node_path),
+        &mut Vec::new(),
+        paths,
+    );
 
     let (value, value_ast, value_path) = statement_value(expression, &ast_path, node_path);
     let mut bodies = Vec::new();
@@ -369,12 +392,21 @@ pub(crate) fn statement_value<'e>(
 fn map_node_subtree(
     expression: &Expr,
     ast_path: &AstPath,
-    node_path: &[u32],
-    paths: &mut FxHashMap<AstPath, WorkflowNodePath>,
+    node: &WorkflowNodePath,
+    slots: &mut Vec<ExprSlot>,
+    paths: &mut FxHashMap<AstPath, OwnedExpression>,
 ) {
-    paths.insert(ast_path.clone(), WorkflowNodePath::from_indices(node_path));
-    for (index, child) in expression.children().enumerate() {
-        map_node_subtree(child, &ast_path.child(index as u32), node_path, paths);
+    paths.insert(
+        ast_path.clone(),
+        OwnedExpression {
+            node: node.clone(),
+            slots: slots.clone(),
+        },
+    );
+    for (index, (slot, child)) in expression.slots().into_iter().enumerate() {
+        slots.push(slot);
+        map_node_subtree(child, &ast_path.child(index as u32), node, slots, paths);
+        slots.pop();
     }
 }
 

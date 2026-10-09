@@ -93,31 +93,32 @@ pub use linker::{
 #[cfg(test)]
 pub(crate) use runtime::compile_ast;
 pub use runtime::{
-    AbilityOp, AbilityOutcome, AggregateConsumer, BINDING_SUMMARY_MAX_CHARS, BindingSummaryConfig,
-    CANCEL_CHECKPOINT_INSTRUCTIONS, CANCEL_CHECKPOINT_INTERVAL_CAP, CompiledLinkedProgram,
-    CompiledProcessCache, CompiledProcessCacheKey, CompiledProgram, CompiledProgramCacheStats,
-    ContinuationError, DurableBaseline, DurableFragment, DurableParts, EcmaErrorClass, Entry,
-    ErrorTaxonomy, ExecutableIdentity, ExecutionBound, ExecutionBounds, ExecutionEnvironment,
-    ExecutionHost, ExecutionHostError, ExecutionMode, ExecutionOutcome, ExecutionScratch,
-    FormatError, GlobalPatch, GlobalPatchOutcome, HeapId, INSTRUCTION_ACCOUNTING_VERSION,
-    ImageValue, LASH_HOST_DESCRIPTOR_TYPE_KEY, LASH_HOST_DESCRIPTOR_VALUE_KEY,
-    LASH_HOST_REQUIREMENTS_REF_KEY, LASH_MODULE_REF_KEY, LASH_PROCESS_NAME_KEY,
-    LASH_PROCESS_REF_KEY, LASH_PROCESS_VALUE_KEY, LASH_TYPE_KEY, LASH_VM_SNAPSHOT_VERSION,
-    LinkedProgramCache, LinkedProgramCacheError, ListValue, PendingOperation, PendingOperationMap,
-    ProcessStart, ProfileReport, ProfileStat, ProjectedBindingError, ProjectedBindings,
-    ProjectedReadRequest, ProjectedReadResponse, ProjectedValue, ProjectionCatalog,
-    ProjectionError, ProjectionProvider, ProjectionReadError, ProjectionReader, ProjectionRefusal,
-    ProjectionType, Record, ResourceHandle, ResourceOperation, ResourceOperationBatch,
-    ResourceOperationBatchLeaf, ResourceOperationBatchOutcome, ResourceOperationOutcome,
-    ResourceRef, RuntimeError, RuntimeFailure, Sleep, SleepKind, Snapshot, SnapshotDecodeError,
-    State, StringValue, UnawaitedToolCall, VM_CONTINUATION_FORMAT_VERSION, Value, Vm, VmComplete,
-    VmContinuation, VmExecutionStart, VmFinallyCompletionContinuation, VmFinallyContinuation,
-    VmGuestError, VmHandlerContinuation, VmHeapContinuation, VmInstance, VmInterrupt,
-    VmIteratorContinuation, VmIteratorCursor, VmLoopPhase, VmPacing, VmParkReason, VmParked,
+    AbilityOp, AbilityOutcome, AggregateConsumer, Await, BINDING_SUMMARY_MAX_CHARS,
+    BindingSummaryConfig, CANCEL_CHECKPOINT_INSTRUCTIONS, CANCEL_CHECKPOINT_INTERVAL_CAP,
+    CompiledLinkedProgram, CompiledProcessCache, CompiledProcessCacheKey, CompiledProgram,
+    CompiledProgramCacheStats, ContinuationError, DurableBaseline, DurableFragment, DurableParts,
+    EcmaErrorClass, Entry, ErrorTaxonomy, ExecutableIdentity, ExecutionBound, ExecutionBounds,
+    ExecutionEnvironment, ExecutionHost, ExecutionHostError, ExecutionMode, ExecutionOutcome,
+    ExecutionScratch, FormatError, GlobalPatch, GlobalPatchOutcome, HeapId,
+    INSTRUCTION_ACCOUNTING_VERSION, ImageValue, LASH_HOST_DESCRIPTOR_TYPE_KEY,
+    LASH_HOST_DESCRIPTOR_VALUE_KEY, LASH_HOST_REQUIREMENTS_REF_KEY, LASH_MODULE_REF_KEY,
+    LASH_PROCESS_NAME_KEY, LASH_PROCESS_REF_KEY, LASH_PROCESS_VALUE_KEY, LASH_TYPE_KEY,
+    LASH_VM_SNAPSHOT_VERSION, LinkedProgramCache, LinkedProgramCacheError, ListValue,
+    PendingOperation, PendingOperationMap, ProcessStart, ProfileReport, ProfileStat,
+    ProjectedBindingError, ProjectedBindings, ProjectedReadRequest, ProjectedReadResponse,
+    ProjectedValue, ProjectionCatalog, ProjectionError, ProjectionProvider, ProjectionReadError,
+    ProjectionReader, ProjectionRefusal, ProjectionType, Record, ResourceHandle, ResourceOperation,
+    ResourceOperationBatch, ResourceOperationBatchLeaf, ResourceOperationBatchOutcome,
+    ResourceOperationOutcome, ResourceRef, RuntimeError, RuntimeFailure, Sleep, SleepKind,
+    Snapshot, SnapshotDecodeError, State, StringValue, UnawaitedToolCall,
+    VM_CONTINUATION_FORMAT_VERSION, Value, Vm, VmComplete, VmContinuation, VmExecutionStart,
+    VmFinallyCompletionContinuation, VmFinallyContinuation, VmGuestError, VmHandlerContinuation,
+    VmHeapContinuation, VmInstance, VmInterrupt, VmIteratorContinuation, VmIteratorCursor,
+    VmLoopContinuation, VmLoopPhase, VmPacing, VmParkReason, VmParked,
     VmPendingErrorOriginContinuation, VmProfileContinuation, VmRequest, VmResume, VmResumePoint,
-    VmRunConfig, VmRunOutcome, VmStep, VmStepError, VmSuspended, VmSuspendedOperation,
-    cancel_checkpoint_reached, compile, execute, from_json, is_javascript_builtin_global,
-    is_process_handle, unwrap_type_value, with_projection_reader,
+    VmRunConfig, VmRunOutcome, VmSiteOccurrenceCounter, VmStep, VmStepError, VmSuspended,
+    VmSuspendedOperation, cancel_checkpoint_reached, compile, execute, from_json,
+    is_javascript_builtin_global, is_process_handle, unwrap_type_value, with_projection_reader,
 };
 pub use runtime::{
     CANONICAL_MESSAGEPACK_DEPTH_LIMIT, CanonicalMapOrder, CanonicalPathSegment,
@@ -210,7 +211,10 @@ pub const LANGUAGE_RUNTIME_RANDOM_OPERATION: &str = "random";
 /// format_manifest = "Bytecode"
 pub const BYTECODE_FORMAT_VERSION: u32 = 30;
 
-pub use lash_sansio::WorkflowExecutionSite;
+pub use lash_sansio::{
+    WorkflowExecutionSite, WorkflowLoopFrame, WorkflowLoopPosition, WorkflowOccurrenceContext,
+    WorkflowSitePath, WorkflowSiteRef, WorkflowSiteRole, WorkflowSiteSegment,
+};
 pub use tracking::{
     LashVmBranchSite, LashVmEffectFailure, LashVmExecutionCallSite, LashVmExecutionChild,
     LashVmExecutionFailure, LashVmExecutionObservation, LashVmExecutionSite,

@@ -882,7 +882,7 @@ async fn recursive_calls_keep_occurrence_counters_stable_across_resume() {
     })
     .await;
     let counters = continuation.occurrence_counters.clone();
-    assert!(counters.values().any(|count| *count > 1));
+    assert!(counters.iter().any(|counter| counter.count > 1));
     let restored: VmContinuation = serde_json::from_slice(
         &serde_json::to_vec(&continuation).expect("serialize occurrence continuation"),
     )
@@ -958,8 +958,9 @@ async fn builtin_callback_continuation_preserves_reentry_and_occurrence_counters
     assert!(
         finished
             .occurrence_counters
-            .values()
-            .any(|count| *count > 1)
+            .iter()
+            .map(|counter| counter.count)
+            .any(|count| count > 1)
     );
 }
 

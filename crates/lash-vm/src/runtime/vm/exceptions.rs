@@ -279,6 +279,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         // above the handler's frame was abandoned by this throw; its answers
         // must not reach the next run of the same instruction.
         self.abandon_guest_coercions(handler.frame_depth);
+        self.unwind_loops();
         if self.active_function != handler.frame_function {
             return Err(RuntimeError::InvalidExceptionState {
                 reason: "handler frame identity does not match the active frame".into(),

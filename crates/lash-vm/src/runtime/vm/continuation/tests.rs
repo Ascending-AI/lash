@@ -27,6 +27,8 @@ fn empty_continuation(heap: Heap) -> VmContinuation {
         heap: VmHeapContinuation::new(heap),
         resume: VmResumePoint::NextInstruction,
         expired_functions: std::collections::BTreeSet::new(),
+        loop_activations: Default::default(),
+        loop_stack: Default::default(),
     }
 }
 

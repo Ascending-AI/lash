@@ -15,6 +15,13 @@ export type WorkflowDeclaration =
       origin?: ProcessOrigin;
       params?: ProcessParam[];
       return_ty?: TypeExpr | null;
+      /**
+       * The failure wrapper around the authored run body, when the process
+       * body has one ([`crate::StructuralRole::ProcessWrapper`]). `body` is
+       * then the run function's body; without a wrapper it is the whole
+       * process body.
+       */
+      wrapper?: WorkflowProcessWrapper | null;
     }
   | (FunctionDecl & {
       kind: 'function';
@@ -34,100 +41,20 @@ export type WorkflowEdgeKind =
       kind: 'sequence';
     };
 /**
- * Closed vocabulary of executable workflow sites.
- *
- * This describes the site, not its current observation. A workflow node may
- * expose more than one site kind. Declaration order is the canonical order:
- * a node's execution sites sort by it, so reordering the variants changes
- * the serialized workflow graph and needs a graph schema bump.
+ * The IR spelling of a body whose statements are a subgraph's nodes.
  */
-export type ExecutionNodeKind =
-  'resource_operation' | 'sleep' | 'wait' | 'terminal' | 'process_event' | 'branch' | 'loop' | 'call' | 'step';
-export type WorkflowNodeKind =
+export type WorkflowBodyForm =
   | {
-      binding?: AssignTarget | null;
-      expression: Expr;
-      kind: 'data';
+      form: 'block';
+      groups?: WorkflowCompletionGroup[];
     }
   | {
-      arguments?: WorkflowArgument[];
-      binding?: AssignTarget | null;
-      kind: 'call';
-      operation: string;
-      receiver: Expr;
-      result_steps?: WorkflowResultStep[];
+      form: 'completion';
+      groups?: WorkflowCompletionGroup[];
+      value: Expr;
     }
   | {
-      arguments?: WorkflowArgument[];
-      binding?: AssignTarget | null;
-      effect: WorkflowEffectKind;
-      kind: 'effect';
-      result_steps?: WorkflowResultStep[];
-    }
-  | {
-      binding?: AssignTarget | null;
-      expression: Expr;
-      kind: 'computation';
-    }
-  | {
-      /**
-       * The assigned value, or with `update`, the operand the update applies
-       * to the target's current value (`target op= expression`).
-       */
-      expression: Expr;
-      kind: 'state_update';
-      target: AssignTarget;
-      update?: UpdateOperator | null;
-    }
-  | {
-      expression: Expr;
-      kind: 'terminal';
-      terminal: WorkflowTerminalKind;
-    }
-  | {
-      binding?: AssignTarget | null;
-      condition: Expr;
-      container_kind: 'if';
-      else_graph: WorkflowSubgraph;
-      /**
-       * Whether the source's else branch is a block rather than a direct value or `else if`.
-       */
-      else_is_block: boolean;
-      kind: 'container';
-      then_graph: WorkflowSubgraph;
-      /**
-       * Whether the source's then branch is a statement block rather than a value expression.
-       */
-      then_is_block: boolean;
-    }
-  | {
-      /**
-       * The element binding's authored name, outside execution identity.
-       */
-      authored_binding?: string | null;
-      bind?: Expr | null;
-      binding: string;
-      body: WorkflowSubgraph;
-      container_kind: 'for';
-      iterable: Expr;
-      kind: 'container';
-    }
-  | {
-      body: WorkflowSubgraph;
-      condition: Expr;
-      container_kind: 'while';
-      kind: 'container';
-    }
-  | {
-      kind: 'opaque';
-      source: string;
-    };
-export type AssignPathStep =
-  | {
-      Field: string;
-    }
-  | {
-      Index: Expr;
+      form: 'statement';
     };
 export type Expr =
   | ('Null' | 'Break' | 'Continue')
@@ -349,6 +276,13 @@ export type IrNumber = number | NonFiniteNumber;
  * A non-finite number literal's stored spelling.
  */
 export type NonFiniteNumber = 'NaN' | 'Infinity' | '-Infinity';
+export type AssignPathStep =
+  | {
+      Field: string;
+    }
+  | {
+      Index: Expr;
+    };
 /**
  * The structural roles a front end marks its generated IR with.
  *
@@ -462,6 +396,180 @@ export type CoercingBinaryOp =
  */
 export type OperandLogicalOp = 'And' | 'Or' | 'NullishCoalesce';
 /**
+ * Closed vocabulary of executable workflow sites.
+ *
+ * This describes the site, not its current observation. A workflow node may
+ * expose more than one site kind. Declaration order is the canonical order:
+ * a node's execution sites sort by it, so reordering the variants changes
+ * the serialized workflow graph and needs a graph schema bump.
+ */
+export type ExecutionNodeKind =
+  'resource_operation' | 'sleep' | 'wait' | 'terminal' | 'process_event' | 'branch' | 'loop' | 'call' | 'step';
+/**
+ * One step of a [`WorkflowSitePath`].
+ */
+export type WorkflowSiteSegment =
+  | {
+      slot: ExprSlot;
+    }
+  | {
+      role: WorkflowSiteRole;
+    };
+/**
+ * The role one child expression plays in its parent expression of the
+ * shared workflow IR.
+ */
+export type ExprSlot =
+  | (
+      | 'condition'
+      | 'then'
+      | 'else'
+      | 'iterable'
+      | 'receiver'
+      | 'callee'
+      | 'this'
+      | 'catch'
+      | 'finally'
+      | 'target'
+      | 'index'
+      | 'left'
+      | 'right'
+    )
+  | {
+      item: number;
+    }
+  | {
+      entry: number;
+    }
+  | 'inner'
+  | {
+      assign_index: number;
+    }
+  | 'value'
+  | 'bind'
+  | 'body'
+  | 'input'
+  | {
+      arg: number;
+    }
+  | 'operand'
+  | 'method_key'
+  | 'items'
+  | 'function';
+/**
+ * What a site that is not an expression of its own stands for.
+ */
+export type WorkflowSiteRole = 'labeled_step';
+/**
+ * The typed path from a workflow node's statement to one executable
+ * subexpression. The empty path is the statement itself.
+ *
+ * Slot segments walk the statement's typed child slots; a trailing role
+ * segment names a synthetic site of the expression they reach.
+ */
+export type WorkflowSitePath = WorkflowSiteSegment[];
+export type WorkflowNodeKind =
+  | {
+      binding?: AssignTarget | null;
+      expression: Expr;
+      kind: 'data';
+    }
+  | {
+      arguments?: WorkflowArgument[];
+      binding?: AssignTarget | null;
+      kind: 'call';
+      operation: string;
+      receiver: Expr;
+      result_steps?: WorkflowResultStep[];
+    }
+  | {
+      arguments?: WorkflowArgument[];
+      binding?: AssignTarget | null;
+      effect: WorkflowEffectKind;
+      kind: 'effect';
+      result_steps?: WorkflowResultStep[];
+    }
+  | {
+      binding?: AssignTarget | null;
+      expression: Expr;
+      kind: 'computation';
+    }
+  | {
+      /**
+       * The assigned value, or with `update`, the operand the update applies
+       * to the target's current value (`target op= expression`).
+       */
+      expression: Expr;
+      kind: 'state_update';
+      /**
+       * Set when the update is a member assignment that pins its
+       * reference base before evaluating the value
+       * ([`crate::StructuralRole::AttributeAssign`]): the slots it pins
+       * them in. `target` is then one member step of a variable.
+       */
+      pinned?: WorkflowPinnedSlots | null;
+      target: AssignTarget;
+      update?: UpdateOperator | null;
+    }
+  | {
+      expression: Expr;
+      kind: 'terminal';
+      terminal: WorkflowTerminalKind;
+    }
+  | {
+      kind: 'throw';
+      value: Expr;
+    }
+  | {
+      binding?: AssignTarget | null;
+      condition: Expr;
+      container_kind: 'if';
+      else_graph: WorkflowSubgraph;
+      kind: 'container';
+      then_graph: WorkflowSubgraph;
+    }
+  | {
+      /**
+       * The element binding's authored name, outside execution identity.
+       */
+      authored_element?: string | null;
+      /**
+       * The generated statements that bind the element into the names the
+       * body reads, when the front end needs any.
+       */
+      bind?: Expr | null;
+      binding?: AssignTarget | null;
+      body: WorkflowSubgraph;
+      container_kind: 'for';
+      /**
+       * The binding each element is assigned to.
+       */
+      element: string;
+      iterable: Expr;
+      kind: 'container';
+    }
+  | {
+      binding?: AssignTarget | null;
+      body: WorkflowSubgraph;
+      condition: Expr;
+      container_kind: 'while';
+      kind: 'container';
+    }
+  | {
+      binding?: AssignTarget | null;
+      body: WorkflowSubgraph;
+      catch?: WorkflowCatch | null;
+      container_kind: 'try';
+      finally?: WorkflowSubgraph | null;
+      kind: 'container';
+    }
+  | {
+      binding?: AssignTarget | null;
+      body: WorkflowSubgraph;
+      container_kind: 'scope';
+      kind: 'container';
+    };
+/**
  * One call or effect argument in graph order.
  *
  * Type facets address these values with a serialized [`WorkflowSlotPath`].
@@ -548,9 +656,20 @@ export type WorkflowSlotPathSegment =
     }
   | {
       index: number;
+    }
+  | {
+      expr: ExprSlot;
     };
 /**
- * An unambiguous address for one input location inside a workflow node.
+ * An unambiguous address for one expression inside a workflow node.
+ *
+ * Two spellings share the type. A *structural* path is made only of
+ * [`WorkflowSlotPathSegment::Expr`] segments and walks the typed child slots
+ * of the node's statement ([`super::workflow_node_statement`]), so it reaches
+ * every expression role of every IR variant; the empty path is the statement
+ * itself. A *call-argument* path starts at a receiver call's argument
+ * (`call`, `arg`, then record fields and list indexes) and is what type
+ * facets name their expected arguments by.
  *
  * The serialized list is authoritative. [`Display`](std::fmt::Display) is a
  * derived spelling for text-only host contracts; field names use JSON string
@@ -591,7 +710,17 @@ export type AstRoot =
 export interface WorkflowGraph {
   declarations?: WorkflowDeclaration[];
   facet_schema_version?: number | null;
+  /**
+   * The interpretation of the semantic IR this document's regions and
+   * expressions are written under ([`WORKFLOW_IR_VERSION`]).
+   */
+  ir_version: number;
   main: WorkflowSubgraph;
+  /**
+   * The main-level bindings that are the front end's own slots rather
+   * than session-visible names ([`crate::Program::private_bindings`]).
+   */
+  private_bindings?: string[];
   schema_version: 21;
   /**
    * The definition identity of the admitted module artifact this graph
@@ -604,7 +733,18 @@ export interface WorkflowGraph {
   source_identity?: string | null;
 }
 export interface WorkflowSubgraph {
+  /**
+   * Derived: sequence follows `nodes` order and data dependencies follow
+   * the bindings the nodes' expressions read.
+   */
   edges?: WorkflowEdge[];
+  /**
+   * How the IR spells this ordered body.
+   */
+  form?: WorkflowBodyForm;
+  /**
+   * The body's statements, in execution order.
+   */
   nodes?: WorkflowNode[];
 }
 export interface WorkflowEdge {
@@ -613,42 +753,27 @@ export interface WorkflowEdge {
   kind: WorkflowEdgeKind;
   to: WorkflowNodeId;
 }
-export interface WorkflowNode {
-  /**
-   * Identifiers visible before this node executes, in stable lexical order.
-   */
-  available_variables?: string[];
-  description?: string | null;
-  execution_sites?: WorkflowExecutionSite[];
-  id: WorkflowNodeId;
-  kind: WorkflowNodeKind;
-  name: string;
-  name_source: WorkflowNodeNameSource;
-  outputs?: VariableVersion[];
-  source_span?: Span | null;
-  /**
-   * Optional host-derived type information. It is never used to render source.
-   */
-  type_facets?: WorkflowNodeTypeFacets | null;
-}
 /**
- * Stable source-level location of one runtime site under a workflow node.
+ * A run of consecutive statements that the IR holds as one nested statement
+ * list closed by its own completion value: the statement a front end gave a
+ * value. It covers the nodes `start .. start + len` of its body; groups are
+ * ordered, never overlap, and nest through `groups`, whose ranges lie inside
+ * this one. A group may cover no statement at all.
  */
-export interface WorkflowExecutionSite {
-  kind: ExecutionNodeKind;
-  label: string;
-  owner: string;
-  path?: number[];
+export interface WorkflowCompletionGroup {
+  groups?: WorkflowCompletionGroup[];
+  len: number;
+  start: number;
+  value: Expr;
+}
+export interface LabelMetadata {
+  description?: string | null;
+  title: string;
   [k: string]: unknown;
 }
 export interface AssignTarget {
   root: string;
   steps?: AssignPathStep[];
-  [k: string]: unknown;
-}
-export interface LabelMetadata {
-  description?: string | null;
-  title: string;
   [k: string]: unknown;
 }
 export interface ResourceRefExpr {
@@ -729,6 +854,55 @@ export interface CatchClause {
   body: Expr;
   [k: string]: unknown;
 }
+export interface WorkflowNode {
+  /**
+   * Identifiers visible before this node executes, in stable lexical order.
+   */
+  available_variables?: string[];
+  description?: string | null;
+  execution_sites?: WorkflowExecutionSite[];
+  id: WorkflowNodeId;
+  kind: WorkflowNodeKind;
+  name: string;
+  name_source: WorkflowNodeNameSource;
+  outputs?: VariableVersion[];
+  source_span?: Span | null;
+  /**
+   * Optional host-derived type information. It is never used to render source.
+   */
+  type_facets?: WorkflowNodeTypeFacets | null;
+}
+/**
+ * One execution site of a workflow node: the node (`owner` and `path`), the
+ * exact executable subexpression inside its statement (`site_path`), and a
+ * description of what runs there. `kind` and `label` describe the site; they
+ * are not its identity.
+ */
+export interface WorkflowExecutionSite {
+  kind: ExecutionNodeKind;
+  label: string;
+  owner: string;
+  path?: number[];
+  site_path?: WorkflowSitePath;
+  [k: string]: unknown;
+}
+/**
+ * The slots a pinned member assignment evaluates through, in evaluation
+ * order: the reference base, a computed index, then the assigned value.
+ */
+export interface WorkflowPinnedSlots {
+  base: string;
+  key?: string | null;
+  result: string;
+}
+/**
+ * The catch clause of a [`WorkflowContainer::Try`]: `binding` names the
+ * thrown value inside `body`.
+ */
+export interface WorkflowCatch {
+  binding: string;
+  body: WorkflowSubgraph;
+}
 export interface VariableVersion {
   variable: string;
   version: number;
@@ -771,6 +945,44 @@ export interface AstPath {
   root: AstRoot;
   steps?: number[];
   [k: string]: unknown;
+}
+/**
+ * The process failure wrapper, without the run body it wraps: the run
+ * function finishes the process with its value, and the catch fails the
+ * process with what the body throws.
+ */
+export interface WorkflowProcessWrapper {
+  /**
+   * The arguments the run call passes.
+   */
+  arguments?: Expr[];
+  captures?: string[];
+  /**
+   * The binding the wrapper's catch fails the process with.
+   */
+  catch_binding: string;
+  /**
+   * The builtin the run call goes through, when it does.
+   */
+  driver?: WorkflowRunDriver | null;
+  js_name?: string | null;
+  /**
+   * The run function's own name, when it has one.
+   */
+  name?: string | null;
+  /**
+   * The run function's parameters, bound to `arguments` in order.
+   */
+  params?: string[];
+  receiver?: string | null;
+}
+/**
+ * A builtin that drives a process's run function: it receives the function
+ * first, then `arguments`.
+ */
+export interface WorkflowRunDriver {
+  arguments?: Expr[];
+  builtin: string;
 }
 /**
  * A user-defined pure synchronous function.

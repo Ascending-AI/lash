@@ -2,12 +2,14 @@ use crate::ast::{AstPath, Expr, LabelMetadata};
 use crate::runtime::{
     STEP_EXECUTION_SITE_KIND, execution_site_descriptor, label_attaches_to_concrete_node,
 };
-use lash_sansio::WorkflowExecutionSite;
+use lash_sansio::{WorkflowExecutionSite, WorkflowSitePath, WorkflowSiteRole};
 
 use super::{WorkflowNodePath, WorkflowOwnership};
 
-/// Every typed execution site a workflow node contributes, keyed by the
-/// node's owner and AST path plus site kind.
+/// Every execution site a workflow node contributes. A site's address is its
+/// node and the typed slot path from the node's statement to the executable
+/// subexpression, read from the same ownership walk the compiler attributes
+/// instructions with: two calls in one statement are two sites.
 ///
 /// Execution sites are a compiler/runtime concept, not a syntax one, so this
 /// walk stays in `lash_vm` while the projector that calls it lives in
@@ -27,7 +29,6 @@ pub fn execution_sites(
         expression, owner, ast_path, node_path, ownership, label, &mut sites,
     );
     sites.sort();
-    sites.dedup();
     sites
 }
 
@@ -50,12 +51,15 @@ fn collect_execution_sites(
     if let Some(label) = label
         && !label_attaches_to_concrete_node(expression)
     {
-        sites.push(WorkflowExecutionSite::new(
-            owner,
-            node_path.indices(),
-            STEP_EXECUTION_SITE_KIND,
-            label.title.as_str(),
-        ));
+        sites.push(
+            WorkflowExecutionSite::new(
+                owner,
+                node_path.indices(),
+                STEP_EXECUTION_SITE_KIND,
+                label.title.as_str(),
+            )
+            .at(site_path(ast_path, ownership).role(WorkflowSiteRole::LabeledStep)),
+        );
         collect_execution_sites(
             expression, owner, ast_path, node_path, ownership, None, sites,
         );
@@ -91,7 +95,13 @@ fn collect_execution_sites(
         }
         _ => {
             if execution_site_descriptor(expression).is_some() {
-                push_execution_site_descriptor(expression, owner, node_path.indices(), sites);
+                push_execution_site_descriptor(
+                    expression,
+                    owner,
+                    node_path.indices(),
+                    site_path(ast_path, ownership),
+                    sites,
+                );
             }
             collect_child_execution_sites(expression, owner, ast_path, node_path, ownership, sites);
         }
@@ -106,11 +116,21 @@ fn push_execution_site_descriptor(
     expression: &Expr,
     owner: &str,
     node_path: &[u32],
+    site_path: WorkflowSitePath,
     sites: &mut Vec<WorkflowExecutionSite>,
 ) {
     let (kind, label) = execution_site_descriptor(expression)
         .expect("execution-site expression must have a compiler descriptor");
-    sites.push(WorkflowExecutionSite::new(owner, node_path, kind, label));
+    sites.push(WorkflowExecutionSite::new(owner, node_path, kind, label).at(site_path));
+}
+
+/// The typed path from the owning node's statement to the expression at
+/// `ast_path`.
+fn site_path(ast_path: &AstPath, ownership: &WorkflowOwnership) -> WorkflowSitePath {
+    ownership
+        .site_for_ast(ast_path)
+        .map(|(_, slots)| WorkflowSitePath::slots(slots.iter().copied()))
+        .unwrap_or_default()
 }
 
 fn collect_child_execution_sites(

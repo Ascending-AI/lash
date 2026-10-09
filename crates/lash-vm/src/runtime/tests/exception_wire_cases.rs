@@ -130,6 +130,8 @@ async fn a_non_monotonic_handler_stack_is_refused() {
         heap: VmHeapContinuation::default(),
         resume: VmResumePoint::NextInstruction,
         expired_functions: std::collections::BTreeSet::new(),
+        loop_activations: Default::default(),
+        loop_stack: Default::default(),
     };
     assert_exception_wire_refused(&program, authored, "not nested inside");
 }

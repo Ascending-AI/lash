@@ -130,21 +130,25 @@ impl ExecutionHost for ProcessAwaitFailureHost {
             AbilityOp::ResourceOperation(_) => {
                 Ok(AbilityOutcome::Value(process_handle("rejected-run")))
             }
-            AbilityOp::Await(handle) if handle == process_handle("rejected-run") => match self {
-                Self::Typed => Err(ExecutionHostError::from_tool_failure(
-                    &lash_sansio::ToolFailure {
-                        cause: None,
-                        class: lash_sansio::ToolFailureClass::PermissionDenied,
-                        code: "approval_denied".to_string(),
-                        message: "approval was denied".to_string(),
-                        source: lash_sansio::ToolFailureSource::Policy,
-                        suggested_delay_ms: None,
-                        raw: None,
-                    },
-                    "await-effect-key",
-                )),
-                Self::MessageOnly => Err(ExecutionHostError::new("plain await failure")),
-            },
+            AbilityOp::Await(lash_vm::Await { handle, .. })
+                if handle == process_handle("rejected-run") =>
+            {
+                match self {
+                    Self::Typed => Err(ExecutionHostError::from_tool_failure(
+                        &lash_sansio::ToolFailure {
+                            cause: None,
+                            class: lash_sansio::ToolFailureClass::PermissionDenied,
+                            code: "approval_denied".to_string(),
+                            message: "approval was denied".to_string(),
+                            source: lash_sansio::ToolFailureSource::Policy,
+                            suggested_delay_ms: None,
+                            raw: None,
+                        },
+                        "await-effect-key",
+                    )),
+                    Self::MessageOnly => Err(ExecutionHostError::new("plain await failure")),
+                }
+            }
             AbilityOp::Finish(value) => Ok(AbilityOutcome::Value(value)),
             _ => Err(ExecutionHostError::new(
                 "unexpected process-await rejection ability",
@@ -786,7 +790,7 @@ impl ExecutionHost for ProcessDurabilityHost {
                     process_handle_json(&name),
                 )))
             }
-            AbilityOp::Await(handle) => {
+            AbilityOp::Await(lash_vm::Await { handle, .. }) => {
                 let id = handle
                     .as_record()
                     .and_then(|record| record.get("process_id"))
@@ -1530,7 +1534,7 @@ impl ExecutionHost for MixedAggregateHost {
                     process_handle_json(&input.to_string()),
                 )))
             }
-            AbilityOp::Await(handle) => {
+            AbilityOp::Await(lash_vm::Await { handle, .. }) => {
                 let id = handle
                     .as_record()
                     .and_then(|record| record.get("process_id"))

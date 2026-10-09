@@ -74,15 +74,15 @@ fn stepped(
                         );
                         VmResume::Effect(outcome)
                     }
-                    VmRequest::Effect(AbilityOp::Await(handle)) => {
-                        let issued = format!("{:?}", AbilityOp::Await(handle.clone()));
+                    VmRequest::Effect(AbilityOp::Await(awaited)) => {
+                        let issued = format!("{:?}", AbilityOp::Await(awaited.clone()));
                         let position = awaits.len();
                         awaits.push(issued.clone());
                         if park(position) {
-                            held = Some((issued, terminal(&handle)));
+                            held = Some((issued, terminal(&awaited.handle)));
                             VmResume::Park
                         } else {
-                            VmResume::Effect(terminal(&handle))
+                            VmResume::Effect(terminal(&awaited.handle))
                         }
                     }
                     VmRequest::Effect(AbilityOp::Finish(value)) => {

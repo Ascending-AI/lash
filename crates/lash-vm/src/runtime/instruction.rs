@@ -17,6 +17,25 @@ use super::record::Symbol;
 use super::schema::ValidationPlan;
 use super::{FormatError, ProfileReport, ProfileStat, Value};
 
+impl Chunk {
+    /// The site of every instruction that emits one, in instruction order. A
+    /// loop's enter, check and exit marks carry the loop's site to keep the
+    /// loop context by; only its iteration mark emits it.
+    #[cfg(any(test, feature = "testing"))]
+    pub(crate) fn emitted_execution_sites(&self) -> impl Iterator<Item = &LashVmExecutionSite> {
+        self.lash_vm_execution_sites
+            .iter()
+            .enumerate()
+            .filter(|(instruction, _)| {
+                !matches!(
+                    self.code.get(*instruction),
+                    Some(Instruction::LoopMark(mark)) if *mark != LoopMark::Iteration
+                )
+            })
+            .filter_map(|(_, site)| site.as_ref())
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct Chunk {
     pub(crate) code: Vec<Instruction>,
@@ -393,6 +412,9 @@ pub(crate) enum Instruction {
     Finish,
     ProcessFail,
     ObserveStep,
+    /// One point of a loop the VM keeps its loop context by; the loop's site
+    /// is the instruction's execution site.
+    LoopMark(LoopMark),
     Pop,
     BeginIter(usize),
     BeginRangeIter {
@@ -404,6 +426,19 @@ pub(crate) enum Instruction {
     },
     EndIter,
     WrapHostDescriptor(usize),
+}
+
+/// Which point of a loop a [`Instruction::LoopMark`] stands at.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum LoopMark {
+    /// The loop is entered: a new activation begins.
+    Enter,
+    /// A `while` condition is about to be evaluated.
+    Check,
+    /// A body iteration begins.
+    Iteration,
+    /// The loop is left, by exhaustion, a false condition or `break`.
+    Exit,
 }
 
 #[derive(Clone, Copy)]
@@ -543,7 +578,9 @@ impl Instruction {
             Instruction::Print => InstructionProfileTag::Print,
             Instruction::Finish => InstructionProfileTag::Finish,
             Instruction::ProcessFail => InstructionProfileTag::SessionProcessAdmin,
-            Instruction::ObserveStep => InstructionProfileTag::ObserveStep,
+            Instruction::ObserveStep | Instruction::LoopMark(_) => {
+                InstructionProfileTag::ObserveStep
+            }
             Instruction::Pop => InstructionProfileTag::Pop,
             Instruction::BeginIter(_) | Instruction::BeginRangeIter { .. } => {
                 InstructionProfileTag::BeginIter

@@ -261,6 +261,7 @@ fn a_resume_ends_only_its_own_wait() {
         site: Some(crate::StepEffectSite {
             node_id: "nap".to_owned(),
             occurrence: 1,
+            context: Default::default(),
         }),
     };
     let child = WaitState {

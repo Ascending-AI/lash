@@ -112,7 +112,7 @@ impl ExecutionHost for AsyncHost {
             AbilityOp::ResourceOperationBatch(batch) => {
                 Host.perform(AbilityOp::ResourceOperationBatch(batch)).await
             }
-            AbilityOp::Await(handle) => {
+            AbilityOp::Await(crate::Await { handle, .. }) => {
                 let record = handle
                     .as_record()
                     .ok_or_else(|| ExecutionHostError::new("expected handle record"))?;
@@ -136,7 +136,7 @@ struct FailingAwaitHost;
 impl ExecutionHost for FailingAwaitHost {
     async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
-            AbilityOp::Await(handle) => {
+            AbilityOp::Await(crate::Await { handle, .. }) => {
                 let record = handle
                     .as_record()
                     .ok_or_else(|| ExecutionHostError::new("expected handle record"))?;
@@ -235,10 +235,19 @@ async fn process_handles_can_be_started_awaited_and_cancelled() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn process_handle_await_reports_the_child_and_its_resolution() {
-    struct ObservingHost(std::sync::Mutex<Vec<LashVmExecutionObservation>>);
+    struct ObservingHost(
+        std::sync::Mutex<Vec<LashVmExecutionObservation>>,
+        std::sync::Mutex<Vec<Option<crate::LashVmExecutionCallSite>>>,
+    );
 
     impl ExecutionHost for ObservingHost {
         async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
+            if let AbilityOp::Await(awaited) = &op {
+                self.1
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .push(awaited.call_site.as_deref().cloned());
+            }
             AsyncHost.perform(op).await
         }
 
@@ -262,11 +271,15 @@ async fn process_handle_await_reports_the_child_and_its_resolution() {
             builders::finish(builders::var("result")),
         ],
     );
-    let host = ObservingHost(std::sync::Mutex::new(Vec::new()));
+    let host = ObservingHost(std::sync::Mutex::default(), std::sync::Mutex::default());
     let mut state = State::new();
     execute_program(&program, &mut state, &host)
         .await
         .expect("process handle await succeeds");
+    let awaits = host
+        .1
+        .into_inner()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let observations = host
         .0
         .into_inner()
@@ -278,16 +291,27 @@ async fn process_handle_await_reports_the_child_and_its_resolution() {
                 site,
                 occurrence,
                 process_ids,
+                ..
             } => Some((site, occurrence, process_ids)),
             _ => None,
         });
     let (site, occurrence, process_ids) = waiting.expect("observed child-process wait");
+    // The await the host is asked to perform names the site that awaits
+    // (FIG-5575): the wait a host records is the one the run observed.
+    let [Some(awaited_at)] = awaits.as_slice() else {
+        panic!("one await, with its site: {awaits:?}");
+    };
+    assert_eq!(
+        (&awaited_at.site, &awaited_at.occurrence),
+        (site, occurrence)
+    );
     assert_eq!(process_ids, &[lash_sansio::ProcessId::fixture("proc-1")]);
     assert!(observations.iter().any(|observation| matches!(
         observation,
         LashVmExecutionObservation::NodeResumed {
             site: resumed_site,
             occurrence: resumed_occurrence,
+            ..
         } if resumed_site.node_id == site.node_id && resumed_occurrence == occurrence
     )));
 }

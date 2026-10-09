@@ -471,6 +471,7 @@ mod tests {
                 label: "sleep".to_string(),
                 occurrence: 1,
                 call_id: None,
+                context: Default::default(),
             },
         )
     }

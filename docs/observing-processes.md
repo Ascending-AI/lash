@@ -22,8 +22,8 @@ oldest first): a deferred call (`WaitKind::Call`), a key its engine pinned
 (`WaitKind::Key`), a sleep (`WaitKind::Sleep { until_ms }`) or another
 process's terminal (`WaitKind::Process { process_id }`). Each `WaitState`
 carries `since_ms` and, when the engine named one, the `site` (`node_id`,
-`occurrence`) of the node that waits; the lash_vm engine names the node of a
-sleep. A wait never carries a completion key or a wait id: those resolve the
+`occurrence` and `context`) that waits; the lash_vm engine names the site of
+a sleep and of an awaited process. A wait never carries a completion key or a wait id: those resolve the
 wait, and `Completions::parked` and `pinned_keys` hand them only to a host
 that asks for them. The process reads `running` again once its last wait
 ends. A process whose steps are still executing on a node is `running`
@@ -60,7 +60,15 @@ registered, a status line, a failure message and a key for a graph view are
 the host's to derive from these facts.
 
 `ProcessEffectOccurrence` records a settled effect's `node_id`, one-based
-`occurrence`, operation, outcome class and failure code when applicable.
+`occurrence`, operation, outcome class and failure code when applicable. Its
+`context` names the exact site inside the node (`site_path`, the typed path
+to the expression that ran, in the statement the node stands for) and the
+loops around the occurrence, outermost first: each loop's site, its
+activation (unique within the run; a loop entered again is a new one) and its
+position, `body` with the one-based iteration or `check` with the one-based
+evaluation of a `while` condition. An occurrence counts per site, so two
+calls in one statement each start at 1. An effect at the node's own
+expression outside every loop omits `context`.
 For a tool effect, its typed `call_id` identifies the logical Lash call
 and joins the effect evidence to its `ToolCallRecord` and language node
 start and terminal traces that carry the same call. It is absent for an
@@ -87,8 +95,10 @@ describes recovery ownership.
 
 Language execution records use `TraceLanguageExecutionPayload`: execution
 start and finish, node start, waiting, resumption, completion, failure or
-cancellation, branch selection and child start. Repeated nodes carry an
-occurrence number. The enclosing `TraceRecord` supplies the timestamp;
+cancellation, branch selection and child start. Each node record carries
+its site's occurrence number and the same `context` a durable effect
+occurrence carries; a continuation keeps both, so a run that parks and
+resumes numbers on. The enclosing `TraceRecord` supplies the timestamp;
 node and wait timings come from the observed records, not a durable path
 log. A child link names related execution; it does not imply that the host
 has received the child's records.
@@ -149,8 +159,9 @@ which language traces also carry in `TraceLanguageExecutionIdentity`.
 
 Join a node trace to the graph using that source identity and `node_id`
 (or `parent_node_id` for a child start). Join a durable effect occurrence's
-`node_id` against the graph of the artifact its process executes, and use
-`occurrence` to distinguish repeated visits to the same static node. Its
+`node_id` and `context.site_path` against the `execution_sites` of that node
+in the graph of the artifact its process executes, and use `occurrence` and
+`context.loops` to distinguish repeated visits to the same site. Its
 call identity links the effect evidence with the tool-call trace. Preserve
 the process-to-artifact association with a recording; the occurrence alone
 does not carry a source identity. A source-only draft graph claims no runtime

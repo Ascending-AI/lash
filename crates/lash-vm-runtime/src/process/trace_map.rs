@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet, btree_map::Entry};
+use std::collections::{BTreeMap, BTreeSet};
 
 use lash_trace::{
     TraceBranchMembership, TraceBranchSelection, TraceLabelMetadata, TraceLanguageExecutionMap,
@@ -22,7 +22,8 @@ pub fn trace_lashlang_main_map(graph: &lash_vm::WorkflowGraph) -> TraceLanguageE
     trace_workflow_subgraph(&graph.main)
 }
 
-type TraceNodeKey = (String, lash_sansio::ExecutionNodeKind);
+/// One map entry per execution site: a node with two calls has two.
+type TraceNodeKey = (String, lash_sansio::WorkflowExecutionSite);
 
 fn trace_workflow_subgraph(graph: &lash_vm::WorkflowSubgraph) -> TraceLanguageExecutionMap {
     let mut nodes = BTreeMap::new();
@@ -62,19 +63,7 @@ fn append_trace_workflow_subgraph(
                 branch_memberships: branch_memberships.to_vec(),
                 label_metadata: label_metadata.clone(),
             };
-            let key = (candidate.id.clone(), candidate.kind);
-            match nodes.entry(key) {
-                Entry::Vacant(entry) => {
-                    entry.insert(candidate);
-                }
-                // Several operations of one kind share one trace node. Retain
-                // the smallest full site descriptor so metadata is independent
-                // of projection traversal order.
-                Entry::Occupied(mut entry) if candidate.site < entry.get().site => {
-                    entry.insert(candidate);
-                }
-                Entry::Occupied(_) => {}
-            }
+            nodes.insert((candidate.id.clone(), candidate.site.clone()), candidate);
         }
         if let lash_vm::WorkflowNodeKind::Container(container) = &node.kind {
             for (slot, child) in container.child_subgraphs() {
@@ -134,28 +123,47 @@ mod tests {
         let keys = map
             .nodes
             .iter()
-            .map(|node| (node.id.as_str(), node.kind.as_str()))
+            .map(|node| (node.id.as_str(), &node.site))
             .collect::<BTreeSet<_>>();
-        assert_eq!(keys.len(), map.nodes.len(), "map keys are (node id, kind)");
+        assert_eq!(keys.len(), map.nodes.len(), "map keys are sites");
+        let graph_sites = graph
+            .nodes
+            .iter()
+            .flat_map(|node| node.execution_sites.iter())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            map.nodes
+                .iter()
+                .map(|node| &node.site)
+                .collect::<BTreeSet<_>>(),
+            graph_sites,
+            "the map lists the document's sites, one entry each"
+        );
 
         let terminal = map
             .nodes
             .iter()
             .find(|node| node.kind == lash_sansio::ExecutionNodeKind::Terminal)
             .expect("terminal site");
-        let operation = map
+        // `finish([echo(), err()])`: the two calls are two sites of the
+        // statement's node, never one entry standing for both (FIG-5575).
+        let operations = map
             .nodes
             .iter()
-            .find(|node| {
+            .filter(|node| {
                 node.id == terminal.id
                     && node.kind == lash_sansio::ExecutionNodeKind::ResourceOperation
             })
-            .expect("the same structural node retains its resource-operation kind");
+            .collect::<Vec<_>>();
         assert_eq!(
-            operation.label, "echo",
-            "the smallest site label is canonical"
+            operations
+                .iter()
+                .map(|node| node.label.as_str())
+                .collect::<Vec<_>>(),
+            ["echo", "err"],
+            "each call keeps its own entry, in evaluation order"
         );
-        assert_eq!(operation.site.label, "echo");
+        assert_ne!(operations[0].site.site_path, operations[1].site.site_path);
 
         let producer = graph
             .nodes
@@ -181,7 +189,7 @@ mod tests {
     }
 
     #[test]
-    fn main_map_is_keyed_by_node_and_kind_and_closed_over_edges() {
+    fn main_map_is_keyed_by_site_and_closed_over_edges() {
         let linked = link_labeled(b::program(match body() {
             lash_vm::Expr::Block(expressions) => expressions,
             _ => unreachable!(),
@@ -192,7 +200,7 @@ mod tests {
     }
 
     #[test]
-    fn process_map_is_keyed_by_node_and_kind_and_closed_over_edges() {
+    fn process_map_is_keyed_by_site_and_closed_over_edges() {
         let linked = link_labeled(b::module(
             vec![b::process("worker", Vec::new(), body())],
             Vec::new(),

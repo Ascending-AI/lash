@@ -36,6 +36,7 @@ fn record(subject: TraceRuntimeSubject, occurrence: u64) -> TraceRecord {
             label: "call()".into(),
             occurrence,
             call_id: None,
+            context: Default::default(),
         }
     };
     fixture_record(
@@ -148,6 +149,7 @@ async fn a_process_cancelled_while_blocked_has_a_committed_cancelled_graph() {
                     label: "call()".into(),
                     occurrence: 1,
                     awaited: lash_trace::TraceNodeAwaited::Sleep { deadline_ms: None },
+                    context: Default::default(),
                 };
             }
             TraceLanguageExecutionPayload::NodeStarted {
@@ -165,6 +167,7 @@ async fn a_process_cancelled_while_blocked_has_a_committed_cancelled_graph() {
                     label: "call()".into(),
                     occurrence: 1,
                     call_id: None,
+                    context: Default::default(),
                 };
             }
             _ => {}

@@ -83,6 +83,7 @@ fn node_failure_requires_typed_provenance() {
             source: lash_sansio::ToolFailureSource::Policy,
             suggested_delay_ms: None,
         },
+        context: Default::default(),
     };
     let wire = serde_json::to_value(&payload).expect("encode typed failure");
     assert_eq!(
@@ -630,12 +631,14 @@ fn language_execution_payload_samples() -> Vec<TraceLanguageExecutionPayload> {
             label: "if ready".to_string(),
             occurrence: 1,
             call_id: None,
+            context: Default::default(),
         },
         TraceLanguageExecutionPayload::BranchSelected {
             node_id: "branch".to_string(),
             occurrence: 1,
             edge_id: "then-edge".to_string(),
             selected: TraceBranchSelection::Then,
+            context: Default::default(),
         },
         TraceLanguageExecutionPayload::NodeCompleted {
             node_id: "branch".to_string(),
@@ -643,6 +646,7 @@ fn language_execution_payload_samples() -> Vec<TraceLanguageExecutionPayload> {
             label: "if ready".to_string(),
             occurrence: 1,
             call_id: None,
+            context: Default::default(),
         },
         TraceLanguageExecutionPayload::NodeStarted {
             node_id: "then".to_string(),
@@ -650,6 +654,7 @@ fn language_execution_payload_samples() -> Vec<TraceLanguageExecutionPayload> {
             label: "notify()".to_string(),
             occurrence: 1,
             call_id: Some(lash_sansio::ToolCallId::fixture("call-1")),
+            context: Default::default(),
         },
         TraceLanguageExecutionPayload::NodeWaiting {
             node_id: "then".to_string(),
@@ -660,6 +665,7 @@ fn language_execution_payload_samples() -> Vec<TraceLanguageExecutionPayload> {
                 name: "approved".to_string(),
                 key: "approved:1".to_string(),
             },
+            context: Default::default(),
         },
         TraceLanguageExecutionPayload::NodeResumed {
             node_id: "then".to_string(),
@@ -667,6 +673,7 @@ fn language_execution_payload_samples() -> Vec<TraceLanguageExecutionPayload> {
             label: "notify()".to_string(),
             occurrence: 1,
             resolution: lash_trace::TraceNodeWaitResolution::Resumed,
+            context: Default::default(),
         },
         TraceLanguageExecutionPayload::ChildStarted {
             parent_node_id: "then".to_string(),
@@ -679,6 +686,7 @@ fn language_execution_payload_samples() -> Vec<TraceLanguageExecutionPayload> {
                 entry_ref: None,
                 entry_name: Some("child".to_string()),
             },
+            context: Default::default(),
         },
         TraceLanguageExecutionPayload::NodeFailed {
             node_id: "then".to_string(),
@@ -690,6 +698,7 @@ fn language_execution_payload_samples() -> Vec<TraceLanguageExecutionPayload> {
                 code: "boom".to_string(),
                 message: "notify failed".to_string(),
             },
+            context: Default::default(),
         },
         TraceLanguageExecutionPayload::NodeStarted {
             node_id: "then".to_string(),
@@ -697,12 +706,14 @@ fn language_execution_payload_samples() -> Vec<TraceLanguageExecutionPayload> {
             label: "notify()".to_string(),
             occurrence: 2,
             call_id: None,
+            context: Default::default(),
         },
         TraceLanguageExecutionPayload::NodeCancelled {
             node_id: "then".to_string(),
             node_kind: lash_sansio::ExecutionNodeKind::Call,
             label: "notify()".to_string(),
             occurrence: 2,
+            context: Default::default(),
         },
         TraceLanguageExecutionPayload::ExecutionFinished {
             status: TraceLanguageExecutionStatus::Failed,
@@ -1114,6 +1125,7 @@ fn content_bearing_events() -> Vec<TraceEvent> {
                 code: "runtime_failed".to_string(),
                 message: CONTENT.to_string(),
             },
+            context: Default::default(),
         }),
     ]
 }

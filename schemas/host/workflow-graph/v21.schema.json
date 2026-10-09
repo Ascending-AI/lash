@@ -1074,7 +1074,7 @@
       ]
     },
     "ExprSlot": {
-      "description": "The role one child expression plays in its parent [`Expr`].",
+      "description": "The role one child expression plays in its parent expression of the\nshared workflow IR.",
       "oneOf": [
         {
           "enum": [
@@ -2230,7 +2230,7 @@
       "type": "string"
     },
     "WorkflowExecutionSite": {
-      "description": "Stable source-level location of one runtime site under a workflow node.",
+      "description": "One execution site of a workflow node: the node (`owner` and `path`), the\nexact executable subexpression inside its statement (`site_path`), and a\ndescription of what runs there. `kind` and `label` describe the site; they\nare not its identity.",
       "properties": {
         "kind": {
           "$ref": "#/$defs/ExecutionNodeKind"
@@ -2249,6 +2249,9 @@
             "type": "integer"
           },
           "type": "array"
+        },
+        "site_path": {
+          "$ref": "#/$defs/WorkflowSitePath"
         }
       },
       "required": [
@@ -2937,6 +2940,54 @@
         "builtin"
       ],
       "type": "object"
+    },
+    "WorkflowSitePath": {
+      "description": "The typed path from a workflow node's statement to one executable\nsubexpression. The empty path is the statement itself.\n\nSlot segments walk the statement's typed child slots; a trailing role\nsegment names a synthetic site of the expression they reach.",
+      "items": {
+        "$ref": "#/$defs/WorkflowSiteSegment"
+      },
+      "type": "array"
+    },
+    "WorkflowSiteRole": {
+      "description": "What a site that is not an expression of its own stands for.",
+      "oneOf": [
+        {
+          "const": "labeled_step",
+          "description": "The step a label declares over the expression it wraps, when that\nexpression is not itself the labeled operation.",
+          "type": "string"
+        }
+      ]
+    },
+    "WorkflowSiteSegment": {
+      "description": "One step of a [`WorkflowSitePath`].",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "A typed child slot of the expression reached so far.",
+          "properties": {
+            "slot": {
+              "$ref": "#/$defs/ExprSlot"
+            }
+          },
+          "required": [
+            "slot"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A site the expression reached so far owns beside its own.",
+          "properties": {
+            "role": {
+              "$ref": "#/$defs/WorkflowSiteRole"
+            }
+          },
+          "required": [
+            "role"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "WorkflowSlotPath": {
       "description": "An unambiguous address for one expression inside a workflow node.\n\nTwo spellings share the type. A *structural* path is made only of\n[`WorkflowSlotPathSegment::Expr`] segments and walks the typed child slots\nof the node's statement ([`super::workflow_node_statement`]), so it reaches\nevery expression role of every IR variant; the empty path is the statement\nitself. A *call-argument* path starts at a receiver call's argument\n(`call`, `arg`, then record fields and list indexes) and is what type\nfacets name their expected arguments by.\n\nThe serialized list is authoritative. [`Display`](std::fmt::Display) is a\nderived spelling for text-only host contracts; field names use JSON string\nquoting so they cannot collide with structural indexes or separators.",

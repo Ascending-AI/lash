@@ -96,7 +96,7 @@ fn only_failed_effects_can_carry_failure_codes() {
 }
 
 #[test]
-fn decode_refuses_other_versions_unknown_fields_and_uncapped_occurrences() {
+fn decode_refuses_other_versions_unknown_fields_and_a_zero_occurrence() {
     let mut payload = occurrence("node", 1).append_request().fact.payload();
     payload["vocabulary_version"] = serde_json::json!(0);
     assert!(matches!(
@@ -111,13 +111,25 @@ fn decode_refuses_other_versions_unknown_fields_and_uncapped_occurrences() {
         Err(ProcessEffectReportError::InvalidPayload(_))
     ));
 
-    let beyond = PROCESS_EFFECT_OCCURRENCE_CAP + 1;
-    assert!(!ProcessEffectOccurrence::is_within_cap(beyond));
-    assert!(!ProcessEffectOccurrence::is_within_cap(0));
+    // A site's occurrences count from 1, with no ceiling of their own: the
+    // per-node cap is the writer's count of what it recorded.
     assert!(matches!(
-        ProcessEffectOccurrence::decode(occurrence("node", beyond).append_request().fact.payload(), crate::FleetFormat::current()),
-        Err(ProcessEffectReportError::OccurrenceOutsideCap { occurrence }) if occurrence == beyond
+        ProcessEffectOccurrence::decode(
+            occurrence("node", 0).append_request().fact.payload(),
+            crate::FleetFormat::current()
+        ),
+        Err(ProcessEffectReportError::InvalidPayload(_))
     ));
+    let beyond = PROCESS_EFFECT_OCCURRENCE_CAP + 1;
+    assert_eq!(
+        ProcessEffectOccurrence::decode(
+            occurrence("node", beyond).append_request().fact.payload(),
+            crate::FleetFormat::current()
+        )
+        .unwrap()
+        .occurrence,
+        beyond
+    );
 }
 
 #[test]

@@ -114,7 +114,9 @@ fn transition(
         EngineEvent::ProcessEnded { process, outcome } => match &state.phase {
             Phase::Parked {
                 operation,
-                wait: Wait::Process { process: awaited },
+                wait: Wait::Process {
+                    process: awaited, ..
+                },
             } if *awaited == process => {
                 let operation = *operation;
                 run_vm(
@@ -148,15 +150,14 @@ fn standing(state: &LashVmEngineState) -> Result<EngineAction, ProcessInfraError
             site: site.clone(),
         },
         Phase::Parked {
-            wait: Wait::Process { process },
+            wait: Wait::Process { process, site },
             ..
         } => EngineAction::AwaitProcess {
             process: process.clone(),
             // A program's `await` has no deadline of its own: the wait
             // lasts until the awaited process ends or this one's scope does.
             bound: lash_core::ParkBound::UntilScopeEnd,
-            // The VM's `await` names no node to the host.
-            site: None,
+            site: site.clone(),
         },
         Phase::Parked {
             wait: Wait::Leaves { leaves, .. },
@@ -342,7 +343,7 @@ fn vm_run_settled(
             state.vm = Some(vm);
             let operation = state.operations;
             state.operations += 1;
-            park(state, operation, issued)
+            park(state, operation, *issued)
         }
     }
 }
@@ -444,10 +445,10 @@ fn park(
             };
             standing(state)
         }
-        IssuedOperation::AwaitProcess { process } => {
+        IssuedOperation::AwaitProcess { process, site } => {
             state.phase = Phase::Parked {
                 operation,
-                wait: Wait::Process { process },
+                wait: Wait::Process { process, site },
             };
             standing(state)
         }

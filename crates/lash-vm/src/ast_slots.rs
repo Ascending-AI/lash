@@ -49,91 +49,9 @@
 //! Leaves (`Null`, `Absent`, `Bool`, `Number`, `String`, `Variable`, `Break`,
 //! `Continue`, `ProcessRef`, `ResourceRef`) have no slots.
 
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+pub use lash_sansio::ExprSlot;
 
 use super::{AssignPathStep, Expr, MethodKey, StructuralRole};
-
-/// The role one child expression plays in its parent [`Expr`].
-#[derive(
-    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum ExprSlot {
-    /// A statement of a block or an element of a list.
-    Item(u32),
-    /// The value of a record entry, by entry position.
-    Entry(u32),
-    /// The expression a label or a structural role wraps.
-    Inner,
-    /// A dynamic index of an assignment target's path, by position.
-    AssignIndex(u32),
-    /// The value an assignment stores.
-    Value,
-    Condition,
-    Then,
-    Else,
-    Iterable,
-    /// The generated statements that bind a loop element to authored names.
-    Bind,
-    /// The body of a loop, a function, a process literal or a `try`.
-    Body,
-    /// The input of a host descriptor constructor.
-    Input,
-    Receiver,
-    /// A call argument, by position.
-    Arg(u32),
-    /// The single operand of a unary form.
-    Operand,
-    Callee,
-    /// The computed member a method call reads its callee from.
-    MethodKey,
-    This,
-    /// The collection a map intrinsic reads.
-    Items,
-    /// The callback a map intrinsic applies.
-    Function,
-    Catch,
-    Finally,
-    Target,
-    Index,
-    Left,
-    Right,
-}
-
-impl std::fmt::Display for ExprSlot {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let name = match self {
-            Self::Item(index) => return write!(formatter, "item[{index}]"),
-            Self::Entry(index) => return write!(formatter, "entry[{index}]"),
-            Self::AssignIndex(index) => return write!(formatter, "assign_index[{index}]"),
-            Self::Arg(index) => return write!(formatter, "arg[{index}]"),
-            Self::Inner => "inner",
-            Self::Value => "value",
-            Self::Condition => "condition",
-            Self::Then => "then",
-            Self::Else => "else",
-            Self::Iterable => "iterable",
-            Self::Bind => "bind",
-            Self::Body => "body",
-            Self::Input => "input",
-            Self::Receiver => "receiver",
-            Self::Operand => "operand",
-            Self::Callee => "callee",
-            Self::MethodKey => "method_key",
-            Self::This => "this",
-            Self::Items => "items",
-            Self::Function => "function",
-            Self::Catch => "catch",
-            Self::Finally => "finally",
-            Self::Target => "target",
-            Self::Index => "index",
-            Self::Left => "left",
-            Self::Right => "right",
-        };
-        formatter.write_str(name)
-    }
-}
 
 fn slot_index(position: usize) -> u32 {
     u32::try_from(position).unwrap_or(u32::MAX)

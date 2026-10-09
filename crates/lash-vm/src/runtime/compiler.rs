@@ -27,11 +27,11 @@ use super::{
     AggregateConsumer, Chunk, ClosureParameterModel, CompiledAggregateAwaitShape,
     CompiledAssignPath, CompiledAssignPathStep, CompiledFormatTemplate, CompiledFunction,
     CompiledResourceOperationBatch, CompiledResourceOperationBatchLeaf, EMPTY_HANDLER_CHAIN_DIGEST,
-    HandlerScopeExtent, Instruction, IntrinsicOp, Name, UriCodec, Value, compile_format_template,
-    eval_javascript_binary, eval_javascript_unary, execute_integer_div_builtin, execute_len_direct,
-    execute_range_builtin, extend_handler_chain_digest, inline_inherited_builtin, is_truthy,
-    javascript_to_string, read_javascript_field_direct, read_javascript_index_direct,
-    transient_name, unwrap_type_value,
+    HandlerScopeExtent, Instruction, IntrinsicOp, LoopMark, Name, UriCodec, Value,
+    compile_format_template, eval_javascript_binary, eval_javascript_unary,
+    execute_integer_div_builtin, execute_len_direct, execute_range_builtin,
+    extend_handler_chain_digest, inline_inherited_builtin, is_truthy, javascript_to_string,
+    read_javascript_field_direct, read_javascript_index_direct, transient_name, unwrap_type_value,
 };
 
 pub(crate) struct Compiler {

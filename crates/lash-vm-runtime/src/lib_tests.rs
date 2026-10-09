@@ -889,6 +889,7 @@ pub(crate) fn test_start_site(node_id: &str, occurrence: u64) -> lash_vm::LashVm
             ),
         },
         occurrence,
+        loops: Default::default(),
     }
 }
 

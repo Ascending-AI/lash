@@ -131,6 +131,7 @@ fn durable_settlement_dominates_provisional_graph_evidence() {
         label: "branch".into(),
         occurrence: 1,
         awaited: crate::TraceNodeAwaited::Sleep { deadline_ms: None },
+        context: Default::default(),
     };
     observe_at(&mut accumulator, at(3), &waiting).unwrap();
     observe_at(&mut accumulator, at(4), &node_started("concurrent", 2)).unwrap();
@@ -140,6 +141,7 @@ fn durable_settlement_dominates_provisional_graph_evidence() {
         label: "else".into(),
         occurrence: 1,
         awaited: crate::TraceNodeAwaited::Sleep { deadline_ms: None },
+        context: Default::default(),
     };
     observe_at(&mut accumulator, at(5), &waiting).unwrap();
     let before = accumulator.snapshot().unwrap();
@@ -432,6 +434,7 @@ fn node_started_for(
             label: node_id.to_string(),
             occurrence,
             call_id: None,
+            context: Default::default(),
         },
     }
 }
@@ -455,6 +458,7 @@ fn node_completed_for(
             label: node_id.to_string(),
             occurrence,
             call_id: None,
+            context: Default::default(),
         },
     }
 }
@@ -473,6 +477,7 @@ fn node_failed(event_key: &str, occurrence: u64, error: &str) -> TraceLanguageEx
                 code: "test_failure".to_string(),
                 message: error.to_string(),
             },
+            context: Default::default(),
         },
     }
 }
@@ -660,6 +665,7 @@ fn graph_store_branch_selection_completes_unstarted_node_with_zero_duration() {
                 occurrence: 1,
                 edge_id: "then-edge".to_string(),
                 selected: TraceBranchSelection::Then,
+                context: Default::default(),
             },
         },
         1_100,
@@ -705,6 +711,7 @@ fn graph_store_records_the_typed_branch_arm_and_marks_the_selected_edge() {
                 occurrence: 1,
                 edge_id: "then-edge".to_string(),
                 selected: TraceBranchSelection::Then,
+                context: Default::default(),
             },
         },
         1_100,
@@ -872,6 +879,7 @@ fn branch_selection_and_terminal_observation_are_distinct_facts() {
             occurrence: 1,
             edge_id: "then-edge".to_string(),
             selected: TraceBranchSelection::Then,
+            context: Default::default(),
         },
     };
     for terminal in [
@@ -1211,6 +1219,7 @@ fn node_waiting(
             label: node_id.to_string(),
             occurrence,
             awaited,
+            context: Default::default(),
         },
     }
 }
@@ -1251,6 +1260,7 @@ fn sleep_wait_uses_record_time_and_completion_dominates_permutations() {
             label: "sleep".to_string(),
             occurrence: 1,
             resolution: crate::TraceNodeWaitResolution::TimedOut,
+            context: Default::default(),
         },
     };
     let mut finished = records.to_vec();
@@ -1343,6 +1353,7 @@ fn signal_wait_resolution_advances_only_its_own_occurrence() {
                 label: "signal".to_string(),
                 occurrence: 1,
                 resolution: crate::TraceNodeWaitResolution::Resumed,
+                context: Default::default(),
             },
         },
         300,
@@ -1377,6 +1388,7 @@ fn cancellation_only_changes_the_observed_in_flight_occurrence() {
             node_kind: Kind::Wait,
             label: "active".to_string(),
             occurrence: 1,
+            context: Default::default(),
         },
     };
     let graph = fold(
@@ -1419,6 +1431,7 @@ fn branch_skip_is_qualified_by_the_observed_branch_iteration() {
             occurrence: branch_occurrence,
             edge_id: edge_id.to_string(),
             selected: arm,
+            context: Default::default(),
         },
     };
     let mut records = vec![
@@ -1471,6 +1484,7 @@ fn missing_transitions_do_not_invent_observed_nodes() {
             label: "orphan".to_string(),
             occurrence: 1,
             resolution: crate::TraceNodeWaitResolution::Resumed,
+            context: Default::default(),
         },
     };
     let cancelled = TraceLanguageExecution {
@@ -1481,6 +1495,7 @@ fn missing_transitions_do_not_invent_observed_nodes() {
             node_kind: lash_sansio::ExecutionNodeKind::Sleep,
             label: "orphan".to_string(),
             occurrence: 1,
+            context: Default::default(),
         },
     };
     let selected = TraceLanguageExecution {
@@ -1491,6 +1506,7 @@ fn missing_transitions_do_not_invent_observed_nodes() {
             occurrence: 1,
             edge_id: "then-edge".to_string(),
             selected: TraceBranchSelection::Then,
+            context: Default::default(),
         },
     };
     let graph = fold(
@@ -1551,6 +1567,7 @@ fn truncation_partition_law_holds_for_late_cancel_and_branch_skip() {
             node_kind: lash_sansio::ExecutionNodeKind::Wait,
             label: "active".to_string(),
             occurrence: 1,
+            context: Default::default(),
         },
     };
     let branch = TraceLanguageExecution {
@@ -1561,6 +1578,7 @@ fn truncation_partition_law_holds_for_late_cancel_and_branch_skip() {
             occurrence: 1,
             edge_id: "then-edge".to_string(),
             selected: TraceBranchSelection::Then,
+            context: Default::default(),
         },
     };
     let p1 = vec![
@@ -1577,6 +1595,7 @@ fn truncation_partition_law_holds_for_late_cancel_and_branch_skip() {
                     occurrence: 2,
                     edge_id: "else-edge".to_string(),
                     selected: TraceBranchSelection::Else,
+                    context: Default::default(),
                 },
             },
             40,
@@ -1594,6 +1613,7 @@ fn truncation_partition_law_holds_for_late_cancel_and_branch_skip() {
                 name: "ready".to_string(),
                 key: "signal-key".to_string(),
             },
+            context: Default::default(),
         },
     };
     let late_resume = TraceLanguageExecution {
@@ -1605,6 +1625,7 @@ fn truncation_partition_law_holds_for_late_cancel_and_branch_skip() {
             label: "active".to_string(),
             occurrence: 1,
             resolution: crate::TraceNodeWaitResolution::Cancelled,
+            context: Default::default(),
         },
     };
     let p2 = vec![

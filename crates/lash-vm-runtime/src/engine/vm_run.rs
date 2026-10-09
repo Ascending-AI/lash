@@ -340,7 +340,7 @@ async fn vm_run(
             Ok(VmRunOutput::Parked {
                 program_hash,
                 vm: checkpoint.vm,
-                issued,
+                issued: Box::new(issued),
             })
         }
         Ok(lash_vm_broker::BrokeredEnd::Cancelled) if stop.is_cancelled() => {
@@ -539,9 +539,12 @@ impl QuietPointHost {
                     leaves,
                 })
             }
-            AbilityOp::Await(handle) => Issue::Park(IssuedOperation::AwaitProcess {
-                process: awaited_process(&handle)?,
-            }),
+            AbilityOp::Await(lash_vm::Await { handle, call_site }) => {
+                Issue::Park(IssuedOperation::AwaitProcess {
+                    process: awaited_process(&handle)?,
+                    site: call_site.as_deref().map(effect_site),
+                })
+            }
             AbilityOp::Sleep(sleep) => {
                 let until_ms = match crate::process_sleep(sleep.kind, &sleep.value)? {
                     lash_core::SleepSpec::For { duration_ms } => self.after(duration_ms),
@@ -549,13 +552,7 @@ impl QuietPointHost {
                         i64::try_from(deadline_ms).unwrap_or(i64::MAX)
                     }
                 };
-                let site = sleep
-                    .call_site
-                    .as_ref()
-                    .map(|call_site| lash_core::StepEffectSite {
-                        node_id: call_site.site.node_id.clone(),
-                        occurrence: call_site.occurrence,
-                    });
+                let site = sleep.call_site.as_deref().map(effect_site);
                 Issue::Park(IssuedOperation::Sleep { until_ms, site })
             }
             AbilityOp::Finish(_) | AbilityOp::Fail(_) | AbilityOp::Print(_) => {
@@ -596,12 +593,7 @@ impl QuietPointHost {
             args,
             call_site,
         } = operation;
-        let site = call_site
-            .as_ref()
-            .map(|call_site| lash_core::StepEffectSite {
-                node_id: call_site.site.node_id.clone(),
-                occurrence: call_site.occurrence,
-            });
+        let site = call_site.as_deref().map(effect_site);
         let Value::Resource(receiver) = &receiver else {
             return Err(LashVmHostError::ModuleAuthorityRequired { operation }.into());
         };
@@ -624,7 +616,7 @@ impl QuietPointHost {
             tool,
             input: resource_payload(&args)?,
             site,
-            language_execution: self.language_execution(call_site.as_ref()),
+            language_execution: self.language_execution(call_site.as_deref()),
         })
     }
 
@@ -647,6 +639,17 @@ impl QuietPointHost {
         let bits = std::collections::hash_map::RandomState::new().hash_one(self.now_ms)
             & ((1_u64 << 53) - 1);
         Value::Number(bits as f64 / (1_u64 << 53) as f64)
+    }
+}
+
+/// The neutral reference core records an effect or a blocker under: the
+/// site's node, which occurrence of the site this is, and where inside the
+/// node and its loops it ran.
+fn effect_site(call_site: &lash_vm::LashVmExecutionCallSite) -> lash_core::StepEffectSite {
+    lash_core::StepEffectSite {
+        node_id: call_site.site.node_id.clone(),
+        occurrence: call_site.occurrence,
+        context: call_site.context(),
     }
 }
 

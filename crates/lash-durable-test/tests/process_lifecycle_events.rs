@@ -341,6 +341,7 @@ fn write(step: &str, x: u64, site: Option<(&str, u64)>) -> lash_core::EngineActi
             site: site.map(|(node_id, occurrence)| lash_core::StepEffectSite {
                 node_id: node_id.to_owned(),
                 occurrence,
+                context: Default::default(),
             }),
         }],
         wake: None,
@@ -439,32 +440,61 @@ fn of_type<'a>(
 
 const NODE: &str = "node.write";
 
-/// Writes as the first occurrence of [`NODE`], then as one past the
-/// per-node cap, then ends.
+/// How many writes [`effects_advance`] issues: one more than a node records.
+const NODE_WRITES: u64 = lash_core::PROCESS_EFFECT_OCCURRENCE_CAP + 1;
+
+/// The site of the `n`-th write of [`NODE`], from 0: the writes alternate
+/// between two call sites of the one node, each counting its own occurrences
+/// from 1.
+fn node_site(n: u64) -> lash_core::StepEffectSite {
+    lash_core::StepEffectSite {
+        node_id: NODE.to_owned(),
+        occurrence: n / 2 + 1,
+        context: lash_sansio::WorkflowOccurrenceContext {
+            site_path: lash_sansio::WorkflowSitePath::slots([lash_sansio::ExprSlot::Item(
+                u32::try_from(n % 2).expect("0 or 1"),
+            )]),
+            loops: Vec::new(),
+        },
+    }
+}
+
+/// Writes [`NODE_WRITES`] times for [`NODE`], one settled before the next,
+/// alternating its two sites, then ends.
 fn effects_advance(
     state: &mut serde_json::Value,
     event: lash_core::EngineEvent,
 ) -> lash_core::EngineAction {
-    match event {
-        lash_core::EngineEvent::Started { .. } => write("first", 1, Some((NODE, 1))),
-        lash_core::EngineEvent::StepSettled { .. } if state.is_null() => {
-            *state = serde_json::json!("first");
-            write(
-                "past-cap",
-                2,
-                Some((NODE, lash_core::PROCESS_EFFECT_OCCURRENCE_CAP + 1)),
-            )
+    let write_at = |n: u64| {
+        let mut action = write(&format!("write-{n}"), n + 1, None);
+        if let lash_core::EngineAction::Steps { steps, .. } = &mut action
+            && let Some(lash_core::StepRequest::Tool { site, .. }) = steps.first_mut()
+        {
+            *site = Some(node_site(n));
         }
-        lash_core::EngineEvent::StepSettled { .. } => answer(serde_json::json!("done")),
+        action
+    };
+    match event {
+        lash_core::EngineEvent::Started { .. } => write_at(0),
+        lash_core::EngineEvent::StepSettled { .. } => {
+            let settled = state.as_u64().unwrap_or(0) + 1;
+            *state = serde_json::json!(settled);
+            if settled < NODE_WRITES {
+                write_at(settled)
+            } else {
+                answer(serde_json::json!("done"))
+            }
+        }
         lash_core::EngineEvent::Cancelled { origin, .. } => cancelled(origin),
         _ => lash_core::EngineAction::Idle,
     }
 }
 
 /// Each committed step outcome that names an effect node is one
-/// `process.effect_outcome` of that node, keyed by its call; an occurrence
-/// past the cap is counted in the omissions record committed just before
-/// the terminal.
+/// `process.effect_outcome` of that node at its exact site, keyed by its
+/// call. A node records `PROCESS_EFFECT_OCCURRENCE_CAP` occurrences across
+/// all of its sites, however each site numbers its own; a later one is
+/// counted in the omissions record committed just before the terminal.
 async fn each_committed_effect_is_one_effect_outcome_event(tier: Tier) {
     let (stores, _keep) = stores(tier).await;
     let world = Arc::new(World::default());
@@ -482,15 +512,27 @@ async fn each_committed_effect_is_one_effect_outcome_event(tier: Tier) {
                     .expect("an effect outcome decodes")
             })
             .collect();
-    assert_eq!(outcomes.len(), 1, "one outcome within the cap: {events:#?}");
-    assert_eq!(outcomes[0].node_id, NODE);
-    assert_eq!(outcomes[0].occurrence, 1);
-    assert_eq!(outcomes[0].operation, WRITE_TOOL);
+    let recorded: Vec<(lash_sansio::WorkflowOccurrenceContext, u64)> = outcomes
+        .iter()
+        .map(|outcome| (outcome.context.clone(), outcome.occurrence))
+        .collect();
+    let first_cap: Vec<_> = (0..lash_core::PROCESS_EFFECT_OCCURRENCE_CAP)
+        .map(node_site)
+        .map(|site| (site.context, site.occurrence))
+        .collect();
     assert_eq!(
-        outcomes[0].outcome_class,
-        lash_core::ProcessEffectOutcomeClass::Success
+        recorded, first_cap,
+        "the node's first cap occurrences, each at its own site: {events:#?}"
     );
-    assert!(outcomes[0].code.is_none());
+    for outcome in &outcomes {
+        assert_eq!(outcome.node_id, NODE);
+        assert_eq!(outcome.operation, WRITE_TOOL);
+        assert_eq!(
+            outcome.outcome_class,
+            lash_core::ProcessEffectOutcomeClass::Success
+        );
+        assert!(outcome.code.is_none());
+    }
 
     let omissions = of_type(&events, lash_core::PROCESS_EFFECT_OMISSIONS_EVENT_TYPE);
     assert_eq!(omissions.len(), 1, "one omissions record: {events:#?}");
@@ -505,7 +547,10 @@ async fn each_committed_effect_is_one_effect_outcome_event(tier: Tier) {
         terminal.sequence,
         "the omissions record commits just before the terminal"
     );
-    assert_eq!(world.writes.lock().unwrap().len(), 2);
+    assert_eq!(
+        world.writes.lock().unwrap().len(),
+        usize::try_from(NODE_WRITES).expect("a small count")
+    );
 }
 
 on_every_tier!(each_committed_effect_is_one_effect_outcome_event);

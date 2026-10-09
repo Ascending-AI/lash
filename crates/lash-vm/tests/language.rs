@@ -88,7 +88,7 @@ impl ExecutionHost for TestHost {
                     batch.answer_in_leaf_order(results),
                 ))
             }
-            AbilityOp::Await(handle) => handle
+            AbilityOp::Await(lash_vm::Await { handle, .. }) => handle
                 .as_record()
                 .filter(|record| record.get("__handle__").is_some())
                 .and_then(|record| record.get("value").cloned())

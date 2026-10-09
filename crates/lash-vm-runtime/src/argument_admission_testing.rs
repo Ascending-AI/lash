@@ -126,6 +126,7 @@ pub async fn nested_process_arguments_reject_forged_aliases_and_try_later_union_
                     ),
                 },
                 occurrence: 1,
+                loops: Default::default(),
             },
             process_name: "install".into(),
             args,

@@ -136,6 +136,7 @@ pub(super) fn instruction_heap_plan(
         | I::IterNext { .. }
         | I::EndIter
         | I::ObserveStep
+        | I::LoopMark(_)
         | I::PushHandler { .. }
         | I::PopHandler
         | I::EnterFinally { .. }
@@ -249,6 +250,7 @@ pub(super) fn instruction_keeps_vm_state_heapified(
         | I::ToBool
         | I::IsNullish
         | I::ObserveStep
+        | I::LoopMark(_)
         | I::CoercingUnary(_)
         | I::CoercingBinary(_)
         | I::CoercingAddAssign(_) => true,

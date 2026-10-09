@@ -35,7 +35,7 @@ impl ExecutionHost for BenchHost {
                     batch.answer_in_leaf_order(results),
                 ))
             }
-            AbilityOp::Await(handle) => {
+            AbilityOp::Await(lash_vm::Await { handle, .. }) => {
                 let record = handle
                     .as_record()
                     .ok_or_else(|| ExecutionHostError::new("expected handle record"))?;

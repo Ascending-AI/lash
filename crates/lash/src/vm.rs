@@ -3,36 +3,36 @@
 //! Structured authoring IR is available in [`ir`]. VM workers and runtime
 //! integration are independent of the optional TypeScript frontend.
 
-pub use lash_vm::WorkflowExecutionSite;
 pub use lash_vm::effect_value;
 pub use lash_vm::is_resolved_type_assignable;
 pub use lash_vm::referenced_definition_ids;
 pub use lash_vm::{
-    AbilityOp, AbilityOutcome, AggregateConsumer, BINDING_SUMMARY_MAX_CHARS, BindingSummaryConfig,
-    CANCEL_CHECKPOINT_INSTRUCTIONS, CANCEL_CHECKPOINT_INTERVAL_CAP, CompiledLinkedProgram,
-    CompiledProcessCache, CompiledProcessCacheKey, CompiledProgram, CompiledProgramCacheStats,
-    ContinuationError, DurableBaseline, DurableFragment, DurableParts, EcmaErrorClass, Entry,
-    ErrorTaxonomy, ExecutableIdentity, ExecutionBound, ExecutionBounds as VmExecutionBounds,
-    ExecutionEnvironment, ExecutionHost, ExecutionHostError, ExecutionMode, ExecutionOutcome,
-    ExecutionScratch, FormatError, GlobalPatch, GlobalPatchOutcome, HeapId,
-    INSTRUCTION_ACCOUNTING_VERSION, ImageValue, LASH_HOST_DESCRIPTOR_TYPE_KEY,
-    LASH_HOST_DESCRIPTOR_VALUE_KEY, LASH_HOST_REQUIREMENTS_REF_KEY, LASH_MODULE_REF_KEY,
-    LASH_PROCESS_NAME_KEY, LASH_PROCESS_REF_KEY, LASH_PROCESS_VALUE_KEY, LASH_TYPE_KEY,
-    LinkedProgramCache, LinkedProgramCacheError, ListValue, PendingOperation, PendingOperationMap,
-    ProcessStart, ProfileReport, ProfileStat, ProjectedBindingError, ProjectedBindings,
-    ProjectedReadRequest, ProjectedReadResponse, ProjectedValue, ProjectionCatalog,
-    ProjectionError, ProjectionProvider, ProjectionReadError, ProjectionReader, ProjectionRefusal,
-    ProjectionType, Record, ResourceHandle, ResourceOperation, ResourceOperationBatch,
-    ResourceOperationBatchLeaf, ResourceOperationBatchOutcome, ResourceOperationOutcome,
-    ResourceRef, RuntimeError as VmRuntimeError, RuntimeFailure, Sleep, SleepKind, Snapshot,
-    SnapshotDecodeError, State, StringValue, UnawaitedToolCall, Value, Vm, VmComplete,
-    VmContinuation, VmExecutionStart, VmFinallyCompletionContinuation, VmFinallyContinuation,
-    VmGuestError, VmHandlerContinuation, VmHeapContinuation, VmInstance, VmInterrupt,
-    VmIteratorContinuation, VmIteratorCursor, VmLoopPhase, VmPacing, VmParkReason, VmParked,
-    VmPendingErrorOriginContinuation, VmProfileContinuation, VmRequest, VmResume, VmResumePoint,
-    VmRunConfig, VmRunOutcome, VmStep, VmStepError, VmSuspended, VmSuspendedOperation,
-    cancel_checkpoint_reached, compile, execute, from_json, is_javascript_builtin_global,
-    is_process_handle, unwrap_type_value, with_projection_reader,
+    AbilityOp, AbilityOutcome, AggregateConsumer, Await, BINDING_SUMMARY_MAX_CHARS,
+    BindingSummaryConfig, CANCEL_CHECKPOINT_INSTRUCTIONS, CANCEL_CHECKPOINT_INTERVAL_CAP,
+    CompiledLinkedProgram, CompiledProcessCache, CompiledProcessCacheKey, CompiledProgram,
+    CompiledProgramCacheStats, ContinuationError, DurableBaseline, DurableFragment, DurableParts,
+    EcmaErrorClass, Entry, ErrorTaxonomy, ExecutableIdentity, ExecutionBound,
+    ExecutionBounds as VmExecutionBounds, ExecutionEnvironment, ExecutionHost, ExecutionHostError,
+    ExecutionMode, ExecutionOutcome, ExecutionScratch, FormatError, GlobalPatch,
+    GlobalPatchOutcome, HeapId, INSTRUCTION_ACCOUNTING_VERSION, ImageValue,
+    LASH_HOST_DESCRIPTOR_TYPE_KEY, LASH_HOST_DESCRIPTOR_VALUE_KEY, LASH_HOST_REQUIREMENTS_REF_KEY,
+    LASH_MODULE_REF_KEY, LASH_PROCESS_NAME_KEY, LASH_PROCESS_REF_KEY, LASH_PROCESS_VALUE_KEY,
+    LASH_TYPE_KEY, LinkedProgramCache, LinkedProgramCacheError, ListValue, PendingOperation,
+    PendingOperationMap, ProcessStart, ProfileReport, ProfileStat, ProjectedBindingError,
+    ProjectedBindings, ProjectedReadRequest, ProjectedReadResponse, ProjectedValue,
+    ProjectionCatalog, ProjectionError, ProjectionProvider, ProjectionReadError, ProjectionReader,
+    ProjectionRefusal, ProjectionType, Record, ResourceHandle, ResourceOperation,
+    ResourceOperationBatch, ResourceOperationBatchLeaf, ResourceOperationBatchOutcome,
+    ResourceOperationOutcome, ResourceRef, RuntimeError as VmRuntimeError, RuntimeFailure, Sleep,
+    SleepKind, Snapshot, SnapshotDecodeError, State, StringValue, UnawaitedToolCall, Value, Vm,
+    VmComplete, VmContinuation, VmExecutionStart, VmFinallyCompletionContinuation,
+    VmFinallyContinuation, VmGuestError, VmHandlerContinuation, VmHeapContinuation, VmInstance,
+    VmInterrupt, VmIteratorContinuation, VmIteratorCursor, VmLoopContinuation, VmLoopPhase,
+    VmPacing, VmParkReason, VmParked, VmPendingErrorOriginContinuation, VmProfileContinuation,
+    VmRequest, VmResume, VmResumePoint, VmRunConfig, VmRunOutcome, VmSiteOccurrenceCounter, VmStep,
+    VmStepError, VmSuspended, VmSuspendedOperation, cancel_checkpoint_reached, compile, execute,
+    from_json, is_javascript_builtin_global, is_process_handle, unwrap_type_value,
+    with_projection_reader,
 };
 pub use lash_vm::{
     CANONICAL_MESSAGEPACK_DEPTH_LIMIT, CanonicalMapOrder, CanonicalPathSegment,
@@ -89,6 +89,10 @@ pub use lash_vm::{
     RESOURCE_OPERATION_EXECUTION_SITE_KIND, execution_site_descriptor, is_pure_expr,
 };
 pub use lash_vm::{VM_CONTINUATION_READ_RANGE, vm_contract_reads, vm_contract_versions};
+pub use lash_vm::{
+    WorkflowExecutionSite, WorkflowLoopFrame, WorkflowLoopPosition, WorkflowOccurrenceContext,
+    WorkflowSitePath, WorkflowSiteRef, WorkflowSiteRole, WorkflowSiteSegment,
+};
 pub use lash_vm::{WorkflowLinkAnalysis, analyze_workflow_program};
 
 #[cfg(feature = "testing")]

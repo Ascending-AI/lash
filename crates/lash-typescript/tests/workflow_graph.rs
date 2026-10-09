@@ -1478,7 +1478,7 @@ fn while_collects_condition_sites_without_duplicating_body_sites() {
             .iter()
             .map(|site| (site.kind.as_str(), site.label.as_str()))
             .collect::<Vec<_>>(),
-        vec![("resource_operation", "ready"), ("loop", "while")]
+        vec![("loop", "while"), ("resource_operation", "ready")]
     );
     assert_eq!(body.nodes[0].execution_sites[0].label, "tick");
     assert_lens_laws(source);

@@ -376,7 +376,7 @@ impl Compiler {
             Expr::ResultUnwrap(inner) => inner.as_ref(),
             _ => site_expr,
         };
-        let site = self.lash_vm_execution_site_for_descriptor(site_path, descriptor_expr);
+        let site = self.lash_vm_execution_site_for_descriptor(&call_path, descriptor_expr);
         let source_span = self.expression_source_span(site_path);
         let leaf_index = leaves.len();
         leaves.push(CompiledResourceOperationBatchLeaf {

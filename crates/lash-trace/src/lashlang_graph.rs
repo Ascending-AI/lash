@@ -317,15 +317,19 @@ fn materialize_graph(
     let mut edges = BTreeMap::new();
     if let Some(map) = &execution_map {
         for node in &map.nodes {
-            nodes.insert(
-                (node.id.clone(), node.kind),
-                TraceLashlangGraphNode::unobserved(
-                    node.id.clone(),
-                    node.kind,
-                    node.label.clone(),
-                    node.label_metadata.clone(),
-                ),
-            );
+            // The map lists one entry per execution site, in site order;
+            // this view draws one node per (node, kind) and labels it from
+            // the first.
+            nodes
+                .entry((node.id.clone(), node.kind))
+                .or_insert_with(|| {
+                    TraceLashlangGraphNode::unobserved(
+                        node.id.clone(),
+                        node.kind,
+                        node.label.clone(),
+                        node.label_metadata.clone(),
+                    )
+                });
         }
         for retention in &mut node_retention {
             if let Some(static_node) = map.nodes.iter().find(|node| node.id == retention.node_id) {
@@ -379,6 +383,7 @@ fn materialize_graph(
                     occurrence,
                     edge_id,
                     selected,
+                    ..
                 } = &retained.event.payload
                 {
                     if !retention.selected_edge_ids.contains(edge_id) {
@@ -422,6 +427,7 @@ fn materialize_graph(
                         *node_kind,
                         *occurrence,
                         item.event.identity.attempt(),
+                        item.event.payload.site_path(),
                     ))
                     .or_default()
                     .start = Some(item.timestamp);
@@ -432,6 +438,7 @@ fn materialize_graph(
                 label,
                 occurrence,
                 awaited,
+                ..
             } => {
                 nodes
                     .entry((node_id.clone(), *node_kind))
@@ -444,6 +451,7 @@ fn materialize_graph(
                         *node_kind,
                         *occurrence,
                         item.event.identity.attempt(),
+                        item.event.payload.site_path(),
                     ))
                     .or_default()
                     .waiting = Some((item.timestamp, awaited.clone()));
@@ -466,6 +474,7 @@ fn materialize_graph(
                         *node_kind,
                         *occurrence,
                         item.event.identity.attempt(),
+                        item.event.payload.site_path(),
                     ))
                     .or_default()
                     .resumed = Some(item.timestamp);
@@ -488,6 +497,7 @@ fn materialize_graph(
                         *node_kind,
                         *occurrence,
                         item.event.identity.attempt(),
+                        item.event.payload.site_path(),
                     ))
                     .or_default()
                     .explicit_terminal = Some(OccurrenceTerminal::Completed(item.timestamp));
@@ -511,6 +521,7 @@ fn materialize_graph(
                         *node_kind,
                         *occurrence,
                         item.event.identity.attempt(),
+                        item.event.payload.site_path(),
                     ))
                     .or_default()
                     .explicit_terminal =
@@ -521,6 +532,7 @@ fn materialize_graph(
                 node_kind,
                 label,
                 occurrence,
+                ..
             } => {
                 nodes
                     .entry((node_id.clone(), *node_kind))
@@ -533,6 +545,7 @@ fn materialize_graph(
                         *node_kind,
                         *occurrence,
                         item.event.identity.attempt(),
+                        item.event.payload.site_path(),
                     ))
                     .or_default()
                     .explicit_terminal = Some(OccurrenceTerminal::Cancelled(item.timestamp));
@@ -542,6 +555,7 @@ fn materialize_graph(
                 occurrence,
                 edge_id,
                 selected,
+                ..
             } => {
                 let node = nodes
                     .entry((node_id.clone(), ExecutionNodeKind::Branch))
@@ -560,6 +574,7 @@ fn materialize_graph(
                         ExecutionNodeKind::Branch,
                         *occurrence,
                         item.event.identity.attempt(),
+                        item.event.payload.site_path(),
                     ))
                     .or_default()
                     .provisional_terminal = Some(OccurrenceTerminal::Completed(item.timestamp));
@@ -688,7 +703,15 @@ struct OccurrenceFold {
     provisional_terminal: Option<OccurrenceTerminal>,
 }
 
-type OccurrenceKey = (String, ExecutionNodeKind, u64, Option<u32>);
+/// Node, kind, occurrence, attempt and the site inside the node: the site
+/// is last so a node's occurrences still sort by number first.
+type OccurrenceKey = (
+    String,
+    ExecutionNodeKind,
+    u64,
+    Option<u32>,
+    lash_sansio::WorkflowSitePath,
+);
 
 enum OccurrenceTerminal {
     Completed(DateTime<Utc>),
@@ -713,7 +736,7 @@ fn apply_occurrences(
             .count() as u64;
         let terminals = matching
             .iter()
-            .filter_map(|((_, _, occurrence, _), folded)| {
+            .filter_map(|((_, _, occurrence, _, _), folded)| {
                 folded_terminal(folded).map(|terminal| {
                     let (status, end) = match terminal {
                         OccurrenceTerminal::Completed(end) => {
@@ -749,7 +772,7 @@ fn apply_occurrences(
         .into_iter()
         .flatten()
         .max_by_key(|terminal| terminal.occurrence);
-        if let Some(((_, _, occurrence, _), folded)) = matching.last() {
+        if let Some(((_, _, occurrence, _, _), folded)) = matching.last() {
             node.observation = match folded_terminal(folded) {
                 Some(OccurrenceTerminal::Completed(end)) => {
                     TraceLashlangNodeObservation::Completed {
@@ -1304,6 +1327,7 @@ fn event_identity(event: &TraceLanguageExecution) -> TraceLashlangEventIdentity 
     TraceLashlangEventIdentity {
         generation: event.identity.generation,
         node_id,
+        site_path: event.payload.site_path(),
         node_kind: match &event.payload {
             TraceLanguageExecutionPayload::NodeStarted { node_kind, .. }
             | TraceLanguageExecutionPayload::NodeWaiting { node_kind, .. }

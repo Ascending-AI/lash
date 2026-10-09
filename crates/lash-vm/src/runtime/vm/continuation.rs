@@ -12,8 +12,8 @@ pub(crate) use types::VM_PARKED_AWAIT_SETTLED_LIMIT;
 pub use types::{
     ContinuationError, PendingOperation, PendingOperationMap, VmFinallyCompletionContinuation,
     VmFinallyContinuation, VmHandlerContinuation, VmIteratorContinuation, VmIteratorCursor,
-    VmLoopPhase, VmPendingErrorOriginContinuation, VmProfileContinuation, VmResumePoint,
-    VmSuspendedOperation,
+    VmLoopContinuation, VmLoopPhase, VmPendingErrorOriginContinuation, VmProfileContinuation,
+    VmResumePoint, VmSiteOccurrenceCounter, VmSuspendedOperation,
 };
 
 use super::exceptions::PendingErrorOrigin;
@@ -255,7 +255,13 @@ pub struct VmContinuation {
     pub(crate) frame_stack: Vec<VmFrameContinuation>,
     pub handler_stack: Vec<VmHandlerContinuation>,
     pub finally_stack: Vec<VmFinallyContinuation>,
-    pub occurrence_counters: std::collections::BTreeMap<String, u64>,
+    /// How many times each execution site has run, in site order.
+    pub occurrence_counters: Vec<VmSiteOccurrenceCounter>,
+    /// The loops the run parked inside, outermost first.
+    pub loop_stack: Vec<VmLoopContinuation>,
+    /// How many loop activations the execution has begun: a loop entered
+    /// after the resume takes the next one.
+    pub loop_activations: u64,
     pub mode: ExecutionMode,
     pub profile: Option<VmProfileContinuation>,
     pub pending_error_span: Option<Span>,

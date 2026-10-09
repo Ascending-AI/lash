@@ -38,7 +38,7 @@ pub fn trace_failure(
 pub struct LanguageTraceHost<H, O> {
     host: H,
     observer: O,
-    active_nodes: Mutex<BTreeSet<(String, ExecutionNodeKind, u64)>>,
+    active_nodes: Mutex<BTreeSet<(lash_sansio::WorkflowSiteRef, ExecutionNodeKind, u64)>>,
     waiting_nodes: TraceWaitBookkeeping,
 }
 
@@ -123,61 +123,62 @@ where
 
     fn observe_lash_vm_execution(&self, observation: lash_vm::LashVmExecutionObservation) {
         use lash_vm::LashVmExecutionObservation as Observation;
+        let active = |site: &lash_vm::LashVmExecutionSite, occurrence: u64| {
+            (site.site_ref(), site.node_kind, occurrence)
+        };
         match &observation {
-            Observation::NodeStarted { site, occurrence } => {
-                self.active_nodes.lock_recover().insert((
-                    site.node_id.clone(),
-                    site.node_kind,
-                    *occurrence,
-                ));
+            Observation::NodeStarted {
+                site, occurrence, ..
+            } => {
+                self.active_nodes
+                    .lock_recover()
+                    .insert(active(site, *occurrence));
             }
             Observation::ChildProcessWaiting {
                 site, occurrence, ..
             } => {
-                self.waiting_nodes
-                    .mark_waiting(&site.node_id, site.node_kind, *occurrence);
+                self.waiting_nodes.mark_waiting(site, *occurrence);
             }
-            Observation::NodeResumed { site, occurrence } => {
-                self.waiting_nodes
-                    .finish(&site.node_id, site.node_kind, *occurrence);
+            Observation::NodeResumed {
+                site, occurrence, ..
+            } => {
+                self.waiting_nodes.finish(site, *occurrence);
             }
             Observation::NodeFailed {
-                site, occurrence, ..
+                site,
+                occurrence,
+                loops,
+                ..
             } if self.host.is_cancelled() => {
-                if self.active_nodes.lock_recover().remove(&(
-                    site.node_id.clone(),
-                    site.node_kind,
-                    *occurrence,
-                )) {
-                    self.emit_cancelled(site, *occurrence);
+                if self
+                    .active_nodes
+                    .lock_recover()
+                    .remove(&active(site, *occurrence))
+                {
+                    self.emit_cancelled(site, *occurrence, loops);
                     return;
                 }
             }
-            Observation::NodeCompleted { site, occurrence }
-                if self.host.is_cancelled()
-                    && self.waiting_nodes.is_waiting(
-                        &site.node_id,
-                        site.node_kind,
-                        *occurrence,
-                    ) =>
-            {
-                self.active_nodes.lock_recover().remove(&(
-                    site.node_id.clone(),
-                    site.node_kind,
-                    *occurrence,
-                ));
-                self.emit_cancelled(site, *occurrence);
+            Observation::NodeCompleted {
+                site,
+                occurrence,
+                loops,
+            } if self.host.is_cancelled() && self.waiting_nodes.is_waiting(site, *occurrence) => {
+                self.active_nodes
+                    .lock_recover()
+                    .remove(&active(site, *occurrence));
+                self.emit_cancelled(site, *occurrence, loops);
                 return;
             }
-            Observation::NodeCompleted { site, occurrence }
+            Observation::NodeCompleted {
+                site, occurrence, ..
+            }
             | Observation::NodeFailed {
                 site, occurrence, ..
             } => {
-                self.active_nodes.lock_recover().remove(&(
-                    site.node_id.clone(),
-                    site.node_kind,
-                    *occurrence,
-                ));
+                self.active_nodes
+                    .lock_recover()
+                    .remove(&active(site, *occurrence));
             }
             Observation::BranchSelected { .. } | Observation::ChildStarted { .. } => {}
         }
@@ -189,11 +190,13 @@ impl<H, O> LanguageTraceHost<H, O>
 where
     O: Fn(&H, TraceLanguageExecutionPayload),
 {
-    fn emit_cancelled(&self, site: &lash_vm::LashVmExecutionSite, occurrence: u64) {
-        if self
-            .waiting_nodes
-            .finish(&site.node_id, site.node_kind, occurrence)
-        {
+    fn emit_cancelled(
+        &self,
+        site: &lash_vm::LashVmExecutionSite,
+        occurrence: u64,
+        loops: &[lash_sansio::WorkflowLoopFrame],
+    ) {
+        if self.waiting_nodes.finish(site, occurrence) {
             (self.observer)(
                 &self.host,
                 TraceLanguageExecutionPayload::NodeResumed {
@@ -201,6 +204,7 @@ where
                     node_kind: site.node_kind,
                     label: site.label.clone(),
                     occurrence,
+                    context: site.occurrence_context(loops),
                     resolution: lash_trace::TraceNodeWaitResolution::Cancelled,
                 },
             );
@@ -212,6 +216,7 @@ where
                 node_kind: site.node_kind,
                 label: site.label.clone(),
                 occurrence,
+                context: site.occurrence_context(loops),
             },
         );
     }
@@ -225,45 +230,58 @@ fn public_payload(
             site,
             occurrence,
             process_ids,
+            loops,
         } => TraceLanguageExecutionPayload::NodeWaiting {
+            context: site.occurrence_context(&loops),
             node_id: site.node_id,
             node_kind: site.node_kind,
             label: site.label,
             occurrence,
             awaited: lash_trace::TraceNodeAwaited::ChildProcesses { process_ids },
         },
-        lash_vm::LashVmExecutionObservation::NodeResumed { site, occurrence } => {
-            TraceLanguageExecutionPayload::NodeResumed {
-                node_id: site.node_id,
-                node_kind: site.node_kind,
-                label: site.label,
-                occurrence,
-                resolution: lash_trace::TraceNodeWaitResolution::Resumed,
-            }
-        }
-        lash_vm::LashVmExecutionObservation::NodeStarted { site, occurrence } => {
-            TraceLanguageExecutionPayload::NodeStarted {
-                node_id: site.node_id,
-                node_kind: site.node_kind,
-                label: site.label,
-                occurrence,
-                call_id: None,
-            }
-        }
-        lash_vm::LashVmExecutionObservation::NodeCompleted { site, occurrence } => {
-            TraceLanguageExecutionPayload::NodeCompleted {
-                node_id: site.node_id,
-                node_kind: site.node_kind,
-                label: site.label,
-                occurrence,
-                call_id: None,
-            }
-        }
+        lash_vm::LashVmExecutionObservation::NodeResumed {
+            site,
+            occurrence,
+            loops,
+        } => TraceLanguageExecutionPayload::NodeResumed {
+            context: site.occurrence_context(&loops),
+            node_id: site.node_id,
+            node_kind: site.node_kind,
+            label: site.label,
+            occurrence,
+            resolution: lash_trace::TraceNodeWaitResolution::Resumed,
+        },
+        lash_vm::LashVmExecutionObservation::NodeStarted {
+            site,
+            occurrence,
+            loops,
+        } => TraceLanguageExecutionPayload::NodeStarted {
+            context: site.occurrence_context(&loops),
+            node_id: site.node_id,
+            node_kind: site.node_kind,
+            label: site.label,
+            occurrence,
+            call_id: None,
+        },
+        lash_vm::LashVmExecutionObservation::NodeCompleted {
+            site,
+            occurrence,
+            loops,
+        } => TraceLanguageExecutionPayload::NodeCompleted {
+            context: site.occurrence_context(&loops),
+            node_id: site.node_id,
+            node_kind: site.node_kind,
+            label: site.label,
+            occurrence,
+            call_id: None,
+        },
         lash_vm::LashVmExecutionObservation::NodeFailed {
             site,
             occurrence,
             failure,
+            loops,
         } => TraceLanguageExecutionPayload::NodeFailed {
+            context: site.occurrence_context(&loops),
             node_id: site.node_id,
             node_kind: site.node_kind,
             label: site.label,
@@ -276,7 +294,9 @@ fn public_payload(
             occurrence,
             edge_id,
             selected,
+            loops,
         } => TraceLanguageExecutionPayload::BranchSelected {
+            context: site.occurrence_context(&loops),
             node_id: site.node_id,
             occurrence,
             edge_id,
@@ -289,7 +309,9 @@ fn public_payload(
             site,
             occurrence,
             child,
+            loops,
         } => TraceLanguageExecutionPayload::ChildStarted {
+            context: site.occurrence_context(&loops),
             parent_node_id: site.node_id,
             occurrence,
             child: lash_trace::TraceLanguageChildExecution {

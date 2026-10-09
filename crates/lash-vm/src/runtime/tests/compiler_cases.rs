@@ -1113,9 +1113,7 @@ fn aggregate_resource_sites_share_their_structural_node() {
 fn execution_site_ids(compiled: &CompiledProgram) -> Vec<&str> {
     compiled
         .chunk
-        .lash_vm_execution_sites
-        .iter()
-        .flatten()
+        .emitted_execution_sites()
         .map(|site| site.node_id.as_str())
         .collect()
 }
@@ -1123,9 +1121,7 @@ fn execution_site_ids(compiled: &CompiledProgram) -> Vec<&str> {
 fn compiled_site_descriptors(compiled: &CompiledProgram) -> Vec<(String, String, Vec<u32>)> {
     let mut sites = compiled
         .chunk
-        .lash_vm_execution_sites
-        .iter()
-        .flatten()
+        .emitted_execution_sites()
         .map(|site| {
             (
                 site.node_kind.to_string(),

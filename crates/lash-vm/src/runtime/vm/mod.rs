@@ -40,9 +40,9 @@ pub(crate) use continuation::VM_PARKED_AWAIT_SETTLED_LIMIT;
 pub use continuation::{
     ContinuationError, PendingOperation, PendingOperationMap, VmContinuation,
     VmFinallyCompletionContinuation, VmFinallyContinuation, VmHandlerContinuation,
-    VmHeapContinuation, VmIteratorContinuation, VmIteratorCursor, VmLoopPhase,
+    VmHeapContinuation, VmIteratorContinuation, VmIteratorCursor, VmLoopContinuation, VmLoopPhase,
     VmPendingErrorOriginContinuation, VmProfileContinuation, VmResumePoint, VmRunOutcome,
-    VmSuspendedOperation,
+    VmSiteOccurrenceCounter, VmSuspendedOperation,
 };
 pub(crate) use continuation::{VmFrameContinuation, VmFrameReturnContinuation};
 pub(crate) use control::VmParkableRun;
@@ -65,16 +65,17 @@ use super::{
     BuiltinFunction, Chunk, ClosureParameterModel, CompiledProgram,
     DEFAULT_HEAP_LOGICAL_BYTE_LIMIT, ExecutionHost, ExecutionOutcome, ExecutionScratch, Heap,
     HeapId, HeapObject, ImageValue, Instruction, InstructionProfileTag, IntrinsicOp,
-    LASH_HOST_DESCRIPTOR_TYPE_KEY, LASH_HOST_DESCRIPTOR_VALUE_KEY, ListValue, Name, PersistedRoots,
-    ProfileAccumulator, ProfileReport, ProjectedBindings, RegExpMatchObject, ResourceHandle,
-    RuntimeError, State, Value, assign_path, charge_collection_work, deep_proportional_units,
-    eval_javascript_binary, eval_javascript_unary, execute_compiled_format,
-    execute_compiled_format_direct, execute_compiled_format_one_number_compact_direct,
-    execute_intrinsic, execute_push_builtin, heap_inherited_builtin, inline_inherited_builtin,
-    is_truthy, iterable_values, javascript_join, javascript_split, materialize_value,
-    proportional_units, range_bounds, range_bounds_projected, read_javascript_field_direct,
-    read_javascript_heap_field, read_javascript_heap_index, read_javascript_index_direct_with_key,
-    regexp_string, sorting_work, unwrap_tool_result, unwrap_type_value,
+    LASH_HOST_DESCRIPTOR_TYPE_KEY, LASH_HOST_DESCRIPTOR_VALUE_KEY, ListValue, LoopMark, Name,
+    PersistedRoots, ProfileAccumulator, ProfileReport, ProjectedBindings, RegExpMatchObject,
+    ResourceHandle, RuntimeError, State, Value, assign_path, charge_collection_work,
+    deep_proportional_units, eval_javascript_binary, eval_javascript_unary,
+    execute_compiled_format, execute_compiled_format_direct,
+    execute_compiled_format_one_number_compact_direct, execute_intrinsic, execute_push_builtin,
+    heap_inherited_builtin, inline_inherited_builtin, is_truthy, iterable_values, javascript_join,
+    javascript_split, materialize_value, proportional_units, range_bounds, range_bounds_projected,
+    read_javascript_field_direct, read_javascript_heap_field, read_javascript_heap_index,
+    read_javascript_index_direct_with_key, regexp_string, sorting_work, unwrap_tool_result,
+    unwrap_type_value,
 };
 
 #[derive(Clone)]
@@ -251,7 +252,11 @@ pub struct Vm<'a, H> {
     projected_bindings: ProjectedBindings,
     handlers: Vec<ExceptionHandler>,
     finally_stack: Vec<FinallyState>,
-    lash_vm_execution_occurrences: FxHashMap<String, u64>,
+    lash_vm_execution_occurrences: SiteOccurrences,
+    /// The loops the run is inside, outermost first, across call frames.
+    loop_stack: Vec<ActiveLoop>,
+    /// How many loop activations this execution has begun.
+    loop_activations: u64,
     profile: Option<ProfileAccumulator>,
     validation_plans: FxHashMap<usize, (Arc<Record>, ValidationPlan)>,
     pending_error_span: Option<Span>,
@@ -282,6 +287,29 @@ pub struct Vm<'a, H> {
 pub(super) struct ActiveLashVmExecutionNode {
     pub(super) site: LashVmExecutionSite,
     pub(super) occurrence: u64,
+    /// The loop context the occurrence began in. Every transition of the
+    /// occurrence reports it, however far its loops have advanced since.
+    pub(super) loops: Vec<lash_sansio::WorkflowLoopFrame>,
+}
+
+/// How many times each execution site has run, by node then site path. A
+/// node has few sites, so its counters are a short list.
+pub(super) type SiteOccurrences = FxHashMap<String, Vec<(lash_sansio::WorkflowSitePath, u64)>>;
+
+/// One loop the run is inside.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct ActiveLoop {
+    pub(super) site: lash_sansio::WorkflowSiteRef,
+    pub(super) activation: u64,
+    pub(super) checks: u64,
+    pub(super) iterations: u64,
+    /// Whether the run is evaluating the loop's condition, not its body.
+    pub(super) checking: bool,
+    /// How many call frames and exception handlers were live when the loop
+    /// was entered: a return or a caught throw that leaves fewer of either
+    /// has left the loop.
+    pub(super) call_depth: usize,
+    pub(super) handler_depth: usize,
 }
 
 impl<'a, H: ExecutionHost> Vm<'a, H> {
@@ -659,6 +687,9 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             Instruction::ObserveStep => {
                 self.observe_lash_vm_execution_step(self.current_instruction_ip());
             }
+            Instruction::LoopMark(mark) => {
+                self.mark_loop(self.current_instruction_ip(), mark);
+            }
             Instruction::Pop => {
                 self.last_value = Some(self.pop_stack()?);
             }
@@ -997,6 +1028,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             | Instruction::SleepFor
             | Instruction::ProcessFail
             | Instruction::ObserveStep
+            | Instruction::LoopMark(_)
             | Instruction::Pop
             | Instruction::Jump(_)
             | Instruction::IterNext { .. }

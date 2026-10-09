@@ -417,7 +417,7 @@ pub(super) async fn compare_bounded_process_event_pages(
         } else {
             lash_core::ProcessEffectOutcomeClass::Success
         };
-        if !lash_core::ProcessEffectOccurrence::is_within_cap(occurrence) {
+        if occurrence > lash_core::PROCESS_EFFECT_OCCURRENCE_CAP {
             omitted.record(class);
             continue;
         }

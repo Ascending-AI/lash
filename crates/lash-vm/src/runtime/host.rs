@@ -19,7 +19,7 @@ pub enum AbilityOp {
     /// Inlining it would make every `AbilityOp` that large.
     ResourceOperation(Box<ResourceOperation>),
     ResourceOperationBatch(ResourceOperationBatch),
-    Await(#[serde(with = "super::effect_value")] Value),
+    Await(Await),
     Print(#[serde(with = "super::effect_value")] Value),
     Finish(#[serde(with = "super::effect_value")] Value),
     Fail(#[serde(with = "super::effect_value")] Value),
@@ -81,7 +81,7 @@ pub struct ResourceOperation {
     pub operation: String,
     #[serde(with = "super::effect_value::list")]
     pub args: Vec<Value>,
-    pub call_site: Option<crate::LashVmExecutionCallSite>,
+    pub call_site: Option<Box<crate::LashVmExecutionCallSite>>,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -267,6 +267,16 @@ impl ResourceOperationOutcome {
     }
 }
 
+/// An await of one process handle, with the site that awaits it.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct Await {
+    #[serde(with = "super::effect_value")]
+    pub handle: Value,
+    /// Boxed, like a sleep's: a call site names its site and the loops around
+    /// it, and inline it would size every `AbilityOp`.
+    pub call_site: Option<Box<LashVmExecutionCallSite>>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum SleepKind {
     For,
@@ -278,7 +288,7 @@ pub struct Sleep {
     pub kind: SleepKind,
     #[serde(with = "super::effect_value")]
     pub value: Value,
-    pub call_site: Option<LashVmExecutionCallSite>,
+    pub call_site: Option<Box<LashVmExecutionCallSite>>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

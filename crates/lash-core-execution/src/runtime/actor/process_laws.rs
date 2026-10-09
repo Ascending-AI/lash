@@ -267,6 +267,7 @@ fn law_site(node: &str) -> crate::StepEffectSite {
     crate::StepEffectSite {
         node_id: node.to_owned(),
         occurrence: 1,
+        context: Default::default(),
     }
 }
 

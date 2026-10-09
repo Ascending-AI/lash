@@ -97,7 +97,7 @@ impl HostBridge<'_> {
         let source_operation = format!("{}.{}", receiver.alias, operation);
         let payload = operation_payload(&args).await?;
         let call_site =
-            Self::require_call_site(&operation, &host_operation, call_site.as_ref())?.clone();
+            Self::require_call_site(&operation, &host_operation, call_site.as_deref())?.clone();
         let logical_call_id = self.resource_tool_call_id(ordinal, operand_index)?;
         let call = LeafCall {
             source_operation,
@@ -233,6 +233,7 @@ impl HostBridge<'_> {
                 trace.identity().clone(),
                 call.call_site.site.node_id.clone(),
                 call.call_site.occurrence,
+                call.call_site.context(),
             );
         }
         DispatchedCall {
@@ -315,7 +316,7 @@ impl HostBridge<'_> {
         operation: String,
         receiver: FlowValue,
         args: Vec<FlowValue>,
-        call_site: Option<lash_vm::LashVmExecutionCallSite>,
+        call_site: Option<Box<lash_vm::LashVmExecutionCallSite>>,
     ) -> Result<AbilityOutcome, ExecutionHostError> {
         let commands = self.commands()?;
         let performing = self.performing()?;

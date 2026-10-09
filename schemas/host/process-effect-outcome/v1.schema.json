@@ -28,12 +28,52 @@
       "minLength": 1,
       "type": "string"
     },
+    "context": {
+      "additionalProperties": false,
+      "properties": {
+        "loops": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "activation": {
+                "maximum": 18446744073709551615,
+                "minimum": 1,
+                "type": "integer"
+              },
+              "position": {
+                "type": "object"
+              },
+              "site": {
+                "type": "object"
+              }
+            },
+            "required": [
+              "site",
+              "activation",
+              "position"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "site_path": {
+          "items": {
+            "type": [
+              "object",
+              "string"
+            ]
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
     "node_id": {
       "minLength": 1,
       "type": "string"
     },
     "occurrence": {
-      "maximum": 8,
+      "maximum": 18446744073709551615,
       "minimum": 1,
       "type": "integer"
     },

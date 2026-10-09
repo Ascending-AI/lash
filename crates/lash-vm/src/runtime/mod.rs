@@ -65,7 +65,7 @@ pub use heap::{
     is_javascript_builtin_global,
 };
 pub use host::{
-    AbilityOp, AbilityOutcome, AggregateConsumer, DEFAULT_HOST_MEMORY_LIMIT_BYTES,
+    AbilityOp, AbilityOutcome, AggregateConsumer, Await, DEFAULT_HOST_MEMORY_LIMIT_BYTES,
     DEFAULT_MAX_VM_FRAME_DEPTH, ExecutionBound, ExecutionBounds, ExecutionEnvironment,
     ExecutionHost, ExecutionHostError, ExecutionMode, ProcessStart, ResourceOperation,
     ResourceOperationBatch, ResourceOperationBatchLeaf, ResourceOperationBatchOutcome,
@@ -93,9 +93,9 @@ pub use vm::{
     REGEXP_FUEL_PER_INSTRUCTION, REGEXP_MAX_NESTING, REGEXP_MAX_PATTERN_CODE_UNITS,
     RegExpValidationError, VM_CONTINUATION_FORMAT_VERSION, Vm, VmContinuation,
     VmFinallyCompletionContinuation, VmFinallyContinuation, VmHandlerContinuation,
-    VmHeapContinuation, VmIteratorContinuation, VmIteratorCursor, VmLoopPhase,
+    VmHeapContinuation, VmIteratorContinuation, VmIteratorCursor, VmLoopContinuation, VmLoopPhase,
     VmPendingErrorOriginContinuation, VmProfileContinuation, VmResumePoint, VmRunOutcome,
-    VmSuspendedOperation, validate_regexp, validate_regexp_shape,
+    VmSiteOccurrenceCounter, VmSuspendedOperation, validate_regexp, validate_regexp_shape,
 };
 // Re-exports of helpers that live in the focused submodules but need to be
 // reachable via `use super::*` from sibling submodules + via `super::name`

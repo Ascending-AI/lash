@@ -401,7 +401,11 @@ impl FakeWorker {
                         .to_string();
                     return self.request(
                         EffectKind::Await,
-                        OperationRequest::Await(lash_vm::Value::String(handle.into())).encode(),
+                        OperationRequest::Await(lash_vm::Await {
+                            handle: lash_vm::Value::String(handle.into()),
+                            call_site: None,
+                        })
+                        .encode(),
                     );
                 }
                 Step::Sleep(millis) => {

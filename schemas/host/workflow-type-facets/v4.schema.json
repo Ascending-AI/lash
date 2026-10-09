@@ -1,7 +1,7 @@
 {
   "$defs": {
     "ExprSlot": {
-      "description": "The role one child expression plays in its parent [`Expr`].",
+      "description": "The role one child expression plays in its parent expression of the\nshared workflow IR.",
       "oneOf": [
         {
           "enum": [
