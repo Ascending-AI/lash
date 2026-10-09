@@ -222,3 +222,45 @@ pub(crate) fn url_attachment() -> LlmContentBlock {
         }),
     }
 }
+
+// FIG-5743: attachment feedback falls back to user content with its authority tag.
+#[test]
+fn attachment_feedback_preserves_its_tag_and_attachment() {
+    let feedback = LlmMessage::new(
+        LlmRole::System,
+        vec![
+            LlmContentBlock::Text {
+                text: "read failed".into(),
+                response_meta: None,
+                cache_breakpoint: false,
+            },
+            url_attachment(),
+            LlmContentBlock::Text {
+                text: "; retry".into(),
+                response_meta: None,
+                cache_breakpoint: false,
+            },
+        ],
+    );
+    let fallback = crate::responses_shared::attachment_feedback(&feedback).unwrap();
+    assert_eq!(fallback.role, LlmRole::User);
+    assert_eq!(
+        fallback.blocks.as_ref(),
+        &vec![
+            LlmContentBlock::Text {
+                text: "<runtime_feedback>read failed; retry</runtime_feedback>".into(),
+                response_meta: None,
+                cache_breakpoint: false
+            },
+            url_attachment(),
+        ]
+    );
+    let body = OpenAiProvider::new("key")
+        .build_responses_request_body(&request(vec![feedback]), true)
+        .unwrap();
+    assert_eq!(body["input"][0]["role"], "user");
+    assert_eq!(
+        body["input"][0]["content"][0],
+        json!({"type":"input_text","text":"<runtime_feedback>read failed; retry</runtime_feedback>"})
+    );
+}

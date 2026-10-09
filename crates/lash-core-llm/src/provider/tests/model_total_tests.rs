@@ -11,18 +11,18 @@ const SECOND: Duration = Duration::from_secs(1);
 
 /// lash's clock on tokio's paused time: every sleep advances it.
 #[derive(Debug)]
-struct PausedClock {
+pub(super) struct PausedClock {
     epoch: tokio::time::Instant,
 }
 
 impl PausedClock {
-    fn new() -> Arc<Self> {
+    pub(super) fn new() -> Arc<Self> {
         Arc::new(Self {
             epoch: tokio::time::Instant::now(),
         })
     }
 
-    fn elapsed(&self) -> Duration {
+    pub(super) fn elapsed(&self) -> Duration {
         tokio::time::Instant::now() - self.epoch
     }
 }

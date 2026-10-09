@@ -41,7 +41,7 @@ impl LlmHttpTransport for Scripted {
                 200,
                 vec![(
                     "x-goog-upload-url".into(),
-                    "https://upload.example.invalid/session".into(),
+                    "https://generativelanguage.googleapis.com/upload/session".into(),
                 )],
                 String::new(),
             ),
@@ -195,4 +195,151 @@ async fn an_unrelated_refusal_of_a_byte_delivery_is_not_retried() {
     assert_eq!(wires.len(), 1, "a byte delivery has nothing to invalidate");
     assert!(wires[0].contains("inlineData"), "{}", wires[0]);
     assert_eq!(uploads, 0);
+}
+
+// FIG-5743: a resumable-upload reply cannot send bytes or bearer credentials
+// outside the origin that accepted the upload start.
+#[tokio::test]
+async fn file_upload_refuses_a_foreign_origin_before_sending_and_finalizes_same_origin() {
+    use lash_core_store::attachments::provider_files::ProviderFileUploader;
+    use lash_core_store::attachments::{AttachmentStoreError, AttachmentStoreFailureClass};
+    use std::io::{Read, Write};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let foreign = format!("http://{}/session", listener.local_addr().unwrap());
+    let requests = Arc::new(AtomicUsize::new(0));
+    let stop = Arc::new(AtomicBool::new(false));
+    let server = std::thread::spawn({
+        let (requests, stop) = (requests.clone(), stop.clone());
+        move || {
+            while !stop.load(Ordering::SeqCst) {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        requests.fetch_add(1, Ordering::SeqCst);
+                        stream
+                            .set_read_timeout(Some(std::time::Duration::from_secs(1)))
+                            .unwrap();
+                        let mut buffer = [0; 4096];
+                        let _ = stream.read(&mut buffer);
+                        let body = r#"{"file":{"uri":"files/leaked"}}"#;
+                        write!(stream, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(std::time::Duration::from_millis(1))
+                    }
+                    Err(error) => panic!("listener failed: {error}"),
+                }
+            }
+        }
+    });
+    #[derive(Debug)]
+    struct UploadTransport {
+        url: String,
+        finalized: AtomicUsize,
+    }
+    #[async_trait]
+    impl LlmHttpTransport for UploadTransport {
+        async fn send(
+            &self,
+            request: LlmHttpRequest,
+            timeout: Option<std::time::Duration>,
+        ) -> Result<LlmHttpResponse, LlmTransportError> {
+            if request
+                .headers
+                .iter()
+                .any(|(name, value)| name == "X-Goog-Upload-Command" && value.as_str() == "start")
+            {
+                assert_eq!(
+                    request.url,
+                    "https://generativelanguage.googleapis.com/upload/v1beta/files"
+                );
+                return Ok(LlmHttpResponse {
+                    status: 200,
+                    headers: vec![("x-goog-upload-url".into(), self.url.clone())],
+                    body: LlmHttpBody::buffered(""),
+                });
+            }
+            self.finalized.fetch_add(1, Ordering::SeqCst);
+            if request.url.starts_with("http://127.0.0.1:") {
+                return lash_llm_transport::ReqwestLlmHttpTransport::new()
+                    .send(request, timeout)
+                    .await;
+            }
+            assert_eq!(
+                request.url,
+                "https://generativelanguage.googleapis.com/upload/session"
+            );
+            assert_eq!(request.body.as_ref(), &[1, 2, 3]);
+            assert!(
+                request
+                    .headers
+                    .iter()
+                    .any(|(name, value)| name == "Authorization"
+                        && value.as_str() == "Bearer private-key")
+            );
+            Ok(LlmHttpResponse {
+                status: 200,
+                headers: vec![("x-goog-upload-status".into(), "final".into())],
+                body: LlmHttpBody::buffered(r#"{"file":{"uri":"files/control"}}"#),
+            })
+        }
+    }
+    let reference = lash_sansio::AttachmentRef {
+        id: lash_sansio::AttachmentId::parse("ab".repeat(32)).unwrap(),
+        media_type: MediaType::parse("image/png").unwrap(),
+        byte_len: 3,
+        type_metadata: None,
+        label: None,
+    };
+    let transport = Arc::new(UploadTransport {
+        url: foreign,
+        finalized: AtomicUsize::new(0),
+    });
+    let provider = crate::GoogleOAuthProvider::new(Arc::new(ProviderToken::new("private-key")))
+        .with_project_id(Some("project".into()))
+        .with_attachment_credential_scope("account")
+        .with_transport(transport.clone());
+    let result = provider
+        .file_uploader()
+        .unwrap()
+        .upload(&reference, &[1, 2, 3])
+        .await;
+    stop.store(true, Ordering::SeqCst);
+    server.join().unwrap();
+    let error = result.unwrap_err();
+    let AttachmentStoreError::Backend { class, source, .. } = error else {
+        panic!("typed upload refusal required");
+    };
+    assert_eq!(class, AttachmentStoreFailureClass::Terminal);
+    let cause = source
+        .downcast_ref::<LlmTransportError>()
+        .expect("transport cause is retained");
+    assert_eq!(cause.kind, lash_core::ProviderFailureKind::Validation);
+    assert_eq!(
+        cause.code.as_ref().unwrap().spelling(),
+        "invalid_provider_endpoint"
+    );
+    assert_eq!(
+        requests.load(Ordering::SeqCst),
+        0,
+        "no body or credential reaches the foreign listener"
+    );
+    assert_eq!(transport.finalized.load(Ordering::SeqCst), 0);
+    let transport = Arc::new(UploadTransport {
+        url: "https://generativelanguage.googleapis.com/upload/session".into(),
+        finalized: AtomicUsize::new(0),
+    });
+    let provider = crate::GoogleOAuthProvider::new(Arc::new(ProviderToken::new("private-key")))
+        .with_project_id(Some("project".into()))
+        .with_attachment_credential_scope("account")
+        .with_transport(transport.clone());
+    let file = provider
+        .file_uploader()
+        .unwrap()
+        .upload(&reference, &[1, 2, 3])
+        .await
+        .unwrap();
+    assert_eq!(file.id.expose(), "files/control");
+    assert_eq!(transport.finalized.load(Ordering::SeqCst), 1);
 }

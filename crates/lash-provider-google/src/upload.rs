@@ -94,6 +94,25 @@ impl GoogleOAuthProvider {
             })?
             .to_string();
 
+        // The resumable URL is untrusted response data. It cannot authorize
+        // an upload of the original bytes and bearer to a different origin.
+        let same_origin = reqwest::Url::parse(&upload_url)
+            .ok()
+            .zip(reqwest::Url::parse(GEMINI_FILES_UPLOAD_URL).ok())
+            .is_some_and(|(upload, start)| {
+                upload.scheme() == start.scheme()
+                    && upload.host_str() == start.host_str()
+                    && upload.port_or_known_default() == start.port_or_known_default()
+                    && upload.username().is_empty()
+                    && upload.password().is_none()
+            });
+        if !same_origin {
+            return Err(LlmTransportError::new("Gemini Files upload URL refused")
+                .with_kind(ProviderFailureKind::Validation)
+                .with_lash_code(TurnFailureCode::InvalidProviderEndpoint)
+                .with_retry_verdict(TransportRetryVerdict::Forbidden));
+        }
+
         let mut finalize = LlmHttpRequest::post(upload_url, bytes.to_vec())
             .with_header(
                 "Authorization",
@@ -191,10 +210,21 @@ fn safe_upload_error(error: LlmTransportError) -> AttachmentStoreError {
     } else {
         AttachmentStoreFailureClass::Terminal
     };
+    // Keep the actionable typed cause without exposing upload credentials,
+    // file locators or a provider's echoed body in store diagnostics.
+    let mut cause = LlmTransportError::new("Google Files upload failed")
+        .with_kind(error.kind)
+        .with_retry_verdict(error.retry_verdict);
+    if let Some(code) = error.code {
+        cause = cause.with_code(code);
+    }
+    if let Some(status) = error.http_status {
+        cause = cause.with_http_status(status);
+    }
     AttachmentStoreError::Backend {
         operation: "provider file upload",
         class,
-        source: Box::new(std::io::Error::other("Google Files upload failed")),
+        source: Box::new(cause),
     }
 }
 #[async_trait]

@@ -1125,3 +1125,107 @@ fn summary_recognition_requires_standard_compaction_origin() {
     });
     assert!(!is_compaction_summary_message(&summary));
 }
+
+// FIG-5743: retaining a physical turn keeps its input and the entire tool pair.
+#[tokio::test]
+async fn pressure_retains_the_latest_physical_turn_with_its_tool_pair() {
+    let mut old = text_message("old-u", MessageRole::User, "old request");
+    old.origin = Some(MessageOrigin::TurnInput {
+        turn_id: TurnId::parse("old-turn").unwrap(),
+        input_id: None,
+    });
+    let mut user = text_message("new-u", MessageRole::User, "new request");
+    user.origin = Some(MessageOrigin::TurnInput {
+        turn_id: TurnId::parse("new-turn").unwrap(),
+        input_id: None,
+    });
+    let call_id = lash_core::ToolCallId::fixture("retained-call");
+    let mut call = text_message("new-c", MessageRole::Assistant, "");
+    call.parts = vec![Part::tool_call(
+        "c.p0".into(),
+        "{}".into(),
+        call_id.clone(),
+        "wire-call".into(),
+        "read_file".into(),
+        None,
+    )]
+    .into();
+    let mut result = text_message("new-r", MessageRole::User, "");
+    result.parts = vec![Part::tool_result(
+        "r.p0".into(),
+        vec![lash_sansio::ModelToolReturnPart::text("tool result")],
+        call_id,
+        "read_file".into(),
+    )]
+    .into();
+    let assistant = text_message("new-a", MessageRole::Assistant, "new answer");
+    let retained = vec![user, call, result, assistant];
+    let mut history = vec![
+        old,
+        text_message("old-a", MessageRole::Assistant, "old answer"),
+    ];
+    history.extend(retained.clone());
+    let direct = Arc::new(RecordingLlmCompletions {
+        summary: "summary".into(),
+        ..Default::default()
+    });
+    let traces = Arc::new(RecordingTraces::default());
+    let ctx = build_pressure_ctx(
+        compactable_state(history),
+        Some(prompt_usage(30_000)),
+        Some(40_000),
+        &traces,
+        RecordingLlmCompletions::client(&direct),
+    );
+    let config = StandardCompactionConfig {
+        retained_user_turns: 1,
+        keep_recent_tokens: 0,
+        ..StandardCompactionConfig::standard()
+    };
+    let decision = StandardCompactionPressureHook::new(config)
+        .decide(&ctx)
+        .await
+        .unwrap();
+    let ContextPressureDecision::OpenFrame { seed, .. } = decision else {
+        panic!("expected compaction");
+    };
+    let copied: Vec<_> = seed
+        .iter()
+        .skip(1)
+        .map(|node| {
+            let lash_core::SessionAppendNode::Message { message } = node else {
+                panic!("expected message");
+            };
+            (message.role, message.origin.clone(), message.parts.clone())
+        })
+        .collect();
+    assert_eq!(
+        copied,
+        retained
+            .iter()
+            .map(|m| (m.role, m.origin.clone(), m.parts.to_vec()))
+            .collect::<Vec<_>>()
+    );
+    let requests = direct.requests();
+    assert_eq!(requests.len(), 1);
+    assert!(
+        requests[0]
+            .messages
+            .iter()
+            .flat_map(|message| message.blocks.iter())
+            .all(|block| !matches!(
+                block,
+                lash_sansio::llm::types::LlmContentBlock::ToolCall { .. }
+                    | lash_sansio::llm::types::LlmContentBlock::ToolResult { .. }
+            )),
+        "no half-pair in the summarized prefix"
+    );
+    let prefix = RecordingLlmCompletions::request_text(&requests[0]);
+    assert!(prefix.contains("old request") && prefix.contains("old answer"));
+    assert!(
+        !prefix.contains("new request")
+            && !prefix.contains("tool result")
+            && !prefix.contains("wire-call"),
+        "{prefix}"
+    );
+}

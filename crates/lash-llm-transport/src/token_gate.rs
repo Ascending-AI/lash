@@ -63,8 +63,8 @@ pub struct TokenGate {
 /// What the gate knows per route. In memory only.
 #[derive(Default)]
 struct Bindings {
-    /// The newest epoch any route opened. Routes holding one secret share its
-    /// epoch, so one credential valid for several routes is one epoch.
+    /// The newest epoch any route opened. Current answers may share a secret's
+    /// epoch across routes; each replacement opens a fresh epoch.
     newest_epoch: u64,
     by_route: HashMap<ProviderRouteIdentity, Binding>,
 }
@@ -208,8 +208,8 @@ impl TokenGate {
             .map_err(|error| error.into_transport_error())
     }
 
-    /// Numbers `token` and makes it `route`'s newest lease: a secret no route
-    /// holds opens a new epoch. `None` when a `Current` answer was overtaken
+    /// Numbers `token` and makes it `route`'s newest lease: a replacement or a
+    /// secret no route holds opens a new epoch. `None` when a `Current` answer was overtaken
     /// by a replacement and is not the token that replacement published.
     fn publish(
         &self,
@@ -238,8 +238,12 @@ impl TokenGate {
         let epoch = by_route
             .values()
             .filter_map(|binding| binding.lease.as_ref())
-            .find(|lease| lease.token.same_secret(&token))
+            .filter(|lease| {
+                matches!(publication, Publication::Current { .. })
+                    && lease.token.same_secret(&token)
+            })
             .map(|lease| lease.epoch)
+            .max()
             .unwrap_or_else(|| {
                 *newest_epoch = newest_epoch.saturating_add(1);
                 *newest_epoch

@@ -274,7 +274,14 @@ impl AnthropicProvider {
                 timeouts.request_timeout,
                 "Anthropic response body timed out",
             )
-            .await?;
+            .await
+            .map_err(|error| {
+                let mut error = error.with_http_status(status).with_headers(headers.clone());
+                if let Some(body) = &request_body {
+                    error = error.with_request_body(body.clone());
+                }
+                error
+            })?;
             return Err(http_error_envelope(
                 format!("Anthropic request failed with {}", status),
                 status,

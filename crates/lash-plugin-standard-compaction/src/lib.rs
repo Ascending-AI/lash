@@ -75,7 +75,7 @@ pub struct StandardCompactionConfig {
     pub compaction_buffer_tokens: usize,
     /// Eligibility bound for explicit compaction; the cut lands on a user turn.
     pub keep_recent_tokens: usize,
-    /// Recent user turns copied into the fresh frame alongside the summary.
+    /// Recent physical turns copied into the fresh frame alongside the summary.
     pub retained_user_turns: usize,
     pub prune_recent_user_turns: usize,
     pub prune_context_percent: u8,
@@ -692,7 +692,7 @@ fn retained_history_start(messages: &[Message], config: &StandardCompactionConfi
         .iter()
         .enumerate()
         .rev()
-        .filter(|(_, message)| message.role == MessageRole::User)
+        .filter(|(_, message)| matches!(message.origin, Some(MessageOrigin::TurnInput { .. })))
         .nth(config.retained_user_turns - 1)
         .map_or(leading_system_prefix_len(messages), |(index, _)| index)
 }

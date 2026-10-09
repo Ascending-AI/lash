@@ -476,8 +476,37 @@ impl ProviderHandle {
             if let Err(failure) = &mut result
                 && !failure.rejected_slots().is_empty()
             {
-                invalidate_rejected(template, deliveries, &delivered, failure.rejected_slots())
-                    .await;
+                // Forgetting a delivery is host I/O under the same total as
+                // sending it. Preserve the received rejection if that I/O stalls.
+                let invalidated = {
+                    let invalidation = invalidate_rejected(
+                        template,
+                        deliveries,
+                        &delivered,
+                        failure.rejected_slots(),
+                    );
+                    let expiry = clock.sleep_until(deadline);
+                    futures_util::pin_mut!(invalidation, expiry);
+                    matches!(
+                        futures_util::future::select(invalidation, expiry).await,
+                        futures_util::future::Either::Left(_)
+                    )
+                };
+                if !invalidated {
+                    sideband.seal_attempt(failure_attempt_record(
+                        attempt_ordinal,
+                        failure,
+                        true,
+                        failure_protocol_position(failure),
+                        Some(RetryDecision::Declined(RetryDeclineCause::TimedOut {
+                            limit: lash_sansio::LimitCause::ExecutionTotal,
+                        })),
+                    ));
+                    return Err(ProviderCompletionError {
+                        error: model_total_error(limit, Some(failure)),
+                        call_record: Box::new(sideband.call_record(call_id)),
+                    });
+                }
                 if failure.kind != ProviderFailureKind::Auth {
                     failure.retry_verdict = TransportRetryVerdict::RetryableTransient;
                 }

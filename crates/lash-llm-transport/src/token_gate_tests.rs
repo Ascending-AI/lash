@@ -374,3 +374,53 @@ async fn a_current_answer_older_than_an_expiry_replacement_is_not_republished() 
     a_current_answer_older_than_a_replacement_is_not_republished(TokenRequestReason::Expiring)
         .await;
 }
+
+// FIG-5743: a replacement reusing another route's secret must still advance
+// this route's epoch, so every queued rejection joins the same replacement.
+#[tokio::test]
+async fn replacement_with_another_routes_secret_is_single_flight() {
+    #[derive(Debug, Default)]
+    struct SharedSecretSource {
+        replacements: AtomicUsize,
+        entered: tokio::sync::Notify,
+        release: tokio::sync::Notify,
+    }
+    #[async_trait::async_trait]
+    impl TokenSource for SharedSecretSource {
+        async fn token(&self, request: TokenRequest<'_>) -> Result<ProviderToken, TokenError> {
+            if request.reason == TokenRequestReason::Current {
+                return Ok(ProviderToken::new(if request.route.model.as_ref() == "a" {
+                    "S"
+                } else {
+                    "T"
+                }));
+            }
+            let first = self.replacements.fetch_add(1, Ordering::SeqCst) == 0;
+            if first {
+                self.entered.notify_one();
+                self.release.notified().await;
+            }
+            Ok(ProviderToken::new("S"))
+        }
+    }
+    let source = Arc::new(SharedSecretSource::default());
+    let gate = Arc::new(TokenGate::new(source.clone(), "test"));
+    let a = gate.current(&route_for("a")).await.unwrap();
+    let route_b = route_for("b");
+    let b = gate.current(&route_b).await.unwrap();
+    assert_eq!((secret(&a), secret(&b)), ("S", "T"));
+    let mut callers = Vec::new();
+    for _ in 0..8 {
+        let (gate, route, rejected) = (gate.clone(), route_b.clone(), b.clone());
+        callers.push(tokio::spawn(async move {
+            gate.replace(&route, &rejected, TokenRequestReason::Rejected)
+                .await
+        }));
+    }
+    source.entered.notified().await;
+    source.release.notify_one();
+    for caller in callers {
+        assert_eq!(secret(&caller.await.unwrap().unwrap().unwrap()), "S");
+    }
+    assert_eq!(source.replacements.load(Ordering::SeqCst), 1);
+}

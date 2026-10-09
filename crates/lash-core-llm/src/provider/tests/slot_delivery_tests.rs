@@ -215,3 +215,99 @@ async fn every_attempt_delivers_afresh_and_unsent_or_rejected_deliveries_are_ret
         "the rejected delivery is forgotten before the next attempt"
     );
 }
+
+// FIG-5743 / L-C2: forgetting a rejected delivery is inside the model total,
+// and timing it out must preserve the rejection already received.
+#[tokio::test(start_paused = true)]
+async fn pending_invalidation_is_cut_at_model_total_and_seals_the_rejection() {
+    struct PendingInvalidator {
+        entered: tokio::sync::Notify,
+    }
+    #[async_trait::async_trait]
+    impl SlotDeliveries for PendingInvalidator {
+        async fn deliver(
+            &self,
+            slots: &[&AttachmentSlot],
+            ctx: &DeliveryContext,
+        ) -> Result<Vec<Arc<Delivery>>, AttachmentDeliveryError> {
+            Ok(slots
+                .iter()
+                .map(|_| {
+                    Arc::new(Delivery::Url {
+                        url: DeliverySecret::new("https://store.example/rejected".into()),
+                        valid_until_ms: Some(ctx.valid_through_ms),
+                    })
+                })
+                .collect())
+        }
+        async fn invalidate(
+            &self,
+            _: &lash_sansio::AttachmentRef,
+            _: &Delivery,
+        ) -> Result<(), AttachmentDeliveryError> {
+            self.entered.notify_one();
+            std::future::pending().await
+        }
+    }
+    let clock = super::model_total_tests::PausedClock::new();
+    let wires = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let provider = RejectOnceProvider {
+        options: ProviderOptions::default(),
+        wires: wires.clone(),
+    };
+    let mut handle =
+        ProviderHandle::new(ProviderComponents::new(Box::new(provider))).with_clock(clock.clone());
+    let mut request = empty_request();
+    let sideband = handle.prepare_completion(&mut request);
+    let signer = PendingInvalidator {
+        entered: tokio::sync::Notify::new(),
+    };
+    let budgets = lash_sansio::ExecutionBudgets::recommended();
+    let cap = Duration::from_secs(1);
+    let enclosing = lash_sansio::ExecutionLimit::starting_at(clock.timestamp_ms(), cap, cap);
+    let template = Arc::new(slot_template());
+    let metrics = lash_trace::telemetry::metrics::TelemetryMetrics::default();
+    let completion = handle.complete_prepared(
+        ResponseContext::of_request(&request),
+        &template,
+        &signer,
+        sideband,
+        crate::ChargeSafetyPolicy::default(),
+        &metrics,
+        None,
+        ModelCallBounds {
+            budgets,
+            enclosing: Some(enclosing),
+        },
+    );
+    tokio::pin!(completion);
+    tokio::select! {
+        _ = signer.entered.notified() => {},
+        result = &mut completion => panic!("settled before invalidation: {result:?}"),
+    }
+    tokio::time::advance(cap).await;
+    let error = tokio::time::timeout(Duration::from_millis(1), &mut completion)
+        .await
+        .expect("model cap settles a pending invalidation")
+        .unwrap_err();
+    assert_eq!(clock.elapsed(), cap);
+    assert_eq!(wires.lock_recover().len(), 1, "no resend after the cap");
+    assert_eq!(
+        error.error.code,
+        Some(FailureCode::lash(TurnFailureCode::ModelTotalExceeded))
+    );
+    let [attempt] = error.call_record.attempts.as_slice() else {
+        panic!("one sealed attempt");
+    };
+    assert_eq!(attempt.error.as_ref().unwrap().http_status, Some(400));
+    assert_eq!(
+        attempt.error.as_ref().unwrap().class,
+        ProviderFailureKind::Validation
+    );
+    assert_eq!(
+        attempt.retry_decision,
+        Some(RetryDecision::Declined(RetryDeclineCause::TimedOut {
+            limit: lash_sansio::LimitCause::ExecutionTotal
+        }))
+    );
+}
