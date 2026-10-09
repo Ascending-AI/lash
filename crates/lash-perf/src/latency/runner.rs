@@ -12,7 +12,7 @@
 //! keep tick-fine precision while a quiet wait stays cheap:
 //!
 //! * `admission` — the input's pending row first reports `Admitted` (a run took
-//!   it), or leaves the open set.
+//!   it), leaves the observed open set, or its retained run binding is readable.
 //! * `applied` — the input's durable binding names the run that took it.
 //! * `settled` — the run's terminal evidence is readable.
 //!
@@ -789,6 +789,10 @@ pub(crate) async fn poll_marks(
         if run.is_none()
             && let Ok(Some(bound)) = store.run_of_input(&session_id, &input_id).await
         {
+            // The binding proves admission even if the pending read missed
+            // Admitted: a fast run can settle before that read or between
+            // these two reads. Keep any earlier admission observation.
+            marks.admission_ms.get_or_insert(now);
             marks.applied_ms = Some(now);
             run = Some(bound);
             changed = true;
@@ -1340,5 +1344,29 @@ mod tests {
         assert_eq!(probe.pending_input_calls.load(Ordering::SeqCst), 2);
         assert_eq!(probe.run_of_input_calls.load(Ordering::SeqCst), 3);
         assert_eq!(probe.run_terminal_calls.load(Ordering::SeqCst), 2);
+    }
+
+    /// LATENCY-REMOTE: admission and settlement can commit between the pending
+    /// row read and the binding read, so missing the Admitted state must not
+    /// discard the admission-to-settled sample.
+    #[tokio::test]
+    async fn the_store_poller_retains_admission_when_settlement_races_the_pending_read() {
+        let session_id = SessionId::from("latency-race");
+        let input_id = lash_core::InputId::from("latency-race-input");
+        let run = lash_core::TurnId::from("latency-race-run");
+        let stores = lash_sqlite_store::SqliteStoreSet::memory().await.unwrap();
+        let probe =
+            PollProbeStore::over(stores.session_store_factory(), &session_id, &input_id, &run);
+        // The first pending read sees Open; admission and settlement become
+        // visible to the binding and terminal reads in that same tick.
+        probe.run_of_input_calls.store(2, Ordering::SeqCst);
+        probe.run_terminal_calls.store(1, Ordering::SeqCst);
+        let marks = poll_marks(Arc::new(probe), session_id, input_id, Instant::now()).await;
+
+        assert!(!marks.timed_out);
+        let admission = marks.admission_ms.expect("the binding proves admission");
+        let applied = marks.applied_ms.expect("the input's retained binding");
+        let settled = marks.settled_ms.expect("the run's terminal");
+        assert!(admission <= applied && applied <= settled);
     }
 }
