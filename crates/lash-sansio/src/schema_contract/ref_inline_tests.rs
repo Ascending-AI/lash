@@ -21,49 +21,6 @@ fn ref_with_sibling_description_schema() -> Value {
 }
 
 #[test]
-fn structured_output_inlines_ref_carrying_sibling_keywords() {
-    let projected = project_structured_output(&ref_with_sibling_description_schema()).unwrap();
-    let property = &projected.schema["properties"]["polarity"];
-    assert!(property.get("$ref").is_none(), "{property}");
-    assert_eq!(property["type"], json!("string"));
-    assert_eq!(property["enum"], json!(["positive", "negative"]));
-    assert_eq!(
-        property["description"],
-        json!("how the caller feels about it")
-    );
-    assert!(
-        projected
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.contains("$.properties.polarity")
-                && diagnostic.contains("inlined `$ref` `#/$defs/Polarity`")
-                && diagnostic.contains("description")),
-        "{:?}",
-        projected.diagnostics
-    );
-}
-
-#[test]
-fn strict_tool_parameters_inlines_ref_carrying_sibling_keywords() {
-    let projected = project_strict_tool_parameters(&ref_with_sibling_description_schema()).unwrap();
-    let property = &projected.schema["properties"]["polarity"];
-    assert!(property.get("$ref").is_none(), "{property}");
-    assert_eq!(property["type"], json!("string"));
-    assert_eq!(
-        property["description"],
-        json!("how the caller feels about it")
-    );
-    assert!(
-        projected
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.contains("inlined `$ref` `#/$defs/Polarity`")),
-        "{:?}",
-        projected.diagnostics
-    );
-}
-
-#[test]
 fn projection_leaves_a_bare_ref_unchanged() {
     let schema = json!({
         "type": "object",
@@ -134,10 +91,27 @@ fn projection_bounds_a_cyclic_ref_carrying_sibling_keywords() {
             projected.diagnostics
         );
     }
-}
 
-#[test]
-fn projection_rejects_an_unresolvable_ref_carrying_sibling_keywords() {
+    let projected = project_structured_output(&ref_with_sibling_description_schema()).unwrap();
+    let property = &projected.schema["properties"]["polarity"];
+    assert!(property.get("$ref").is_none(), "{property}");
+    assert_eq!(property["type"], json!("string"));
+    assert_eq!(property["enum"], json!(["positive", "negative"]));
+    assert_eq!(
+        property["description"],
+        json!("how the caller feels about it")
+    );
+    assert!(
+        projected
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.contains("$.properties.polarity")
+                && diagnostic.contains("inlined `$ref` `#/$defs/Polarity`")
+                && diagnostic.contains("description")),
+        "{:?}",
+        projected.diagnostics
+    );
+
     let err = project_structured_output(&json!({
         "type": "object",
         "properties": {

@@ -486,6 +486,19 @@ mod tests {
             8
         );
         assert!(!ids.contains(&ToolCallId::derive(NAMESPACE, turn("tags"), &[]).child(0)));
+
+        let process = ProcessId::fixture("p");
+        let roots = [
+            ToolCallId::derive(NAMESPACE, turn(process.as_str()), &[]),
+            ToolCallId::derive(
+                NAMESPACE,
+                ToolCallRoot::host_submission(process.as_str()).expect("nonblank"),
+                &[],
+            ),
+            ToolCallId::derive(NAMESPACE, ToolCallRoot::process(&process), &[]),
+        ];
+        let distinct = roots.iter().collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(distinct.len(), roots.len());
     }
 
     #[test]
@@ -506,6 +519,21 @@ mod tests {
                 &[ToolCallPosition::ContentIndex(3)]
             )
         );
+
+        let wrapper = model_call(turn("op-1"), 0);
+        let member = wrapper.child(2);
+        assert_eq!(member, model_call(turn("op-1"), 0).child(2));
+        assert_eq!(
+            member.as_str(),
+            "tc_ac39d0f5b2fd4b79b19ea69bd6d20de11236a3db6f1b185cc91254a8d0e8f389"
+        );
+        assert_ne!(member, wrapper.child(3));
+        assert_ne!(member, wrapper);
+        assert_ne!(member, model_call(turn("op-1"), 1).child(2));
+        assert_ne!(member.child(0), wrapper.child(0));
+
+        let reparsed = ToolCallId::parse(wrapper.as_str()).expect("derived spelling");
+        assert_eq!(reparsed.child(2), member);
     }
 
     #[test]
@@ -551,73 +579,6 @@ mod tests {
                 ],
             )
         );
-    }
-
-    #[test]
-    fn the_same_number_under_different_tags_names_different_calls() {
-        let under = |position| ToolCallId::derive(NAMESPACE, turn("op"), &[position]);
-        let ids = [
-            under(ToolCallPosition::Continuation(7)),
-            under(ToolCallPosition::Iteration(7)),
-            under(ToolCallPosition::EffectOrdinal(7)),
-            under(ToolCallPosition::ContentIndex(7)),
-            under(ToolCallPosition::CodeCommand(7)),
-            under(ToolCallPosition::CodeAggregate(7)),
-            under(ToolCallPosition::CodeOpener("7")),
-            under(ToolCallPosition::CodeCell("7")),
-        ];
-        let distinct = ids.iter().collect::<std::collections::BTreeSet<_>>();
-        assert_eq!(distinct.len(), ids.len());
-
-        let process = ProcessId::fixture("p");
-        let roots = [
-            ToolCallId::derive(NAMESPACE, turn(process.as_str()), &[]),
-            ToolCallId::derive(
-                NAMESPACE,
-                ToolCallRoot::host_submission(process.as_str()).expect("nonblank"),
-                &[],
-            ),
-            ToolCallId::derive(NAMESPACE, ToolCallRoot::process(&process), &[]),
-        ];
-        let distinct = roots.iter().collect::<std::collections::BTreeSet<_>>();
-        assert_eq!(distinct.len(), roots.len());
-
-        assert_ne!(
-            ToolCallId::derive(
-                NAMESPACE,
-                turn("op"),
-                &[
-                    ToolCallPosition::Iteration(1),
-                    ToolCallPosition::ContentIndex(2)
-                ],
-            ),
-            ToolCallId::derive(
-                NAMESPACE,
-                turn("op"),
-                &[
-                    ToolCallPosition::Iteration(2),
-                    ToolCallPosition::ContentIndex(1)
-                ],
-            )
-        );
-    }
-
-    #[test]
-    fn child_extension_is_stable_and_member_specific() {
-        let wrapper = model_call(turn("op-1"), 0);
-        let member = wrapper.child(2);
-        assert_eq!(member, model_call(turn("op-1"), 0).child(2));
-        assert_eq!(
-            member.as_str(),
-            "tc_ac39d0f5b2fd4b79b19ea69bd6d20de11236a3db6f1b185cc91254a8d0e8f389"
-        );
-        assert_ne!(member, wrapper.child(3));
-        assert_ne!(member, wrapper);
-        assert_ne!(member, model_call(turn("op-1"), 1).child(2));
-        assert_ne!(member.child(0), wrapper.child(0));
-
-        let reparsed = ToolCallId::parse(wrapper.as_str()).expect("derived spelling");
-        assert_eq!(reparsed.child(2), member);
     }
 
     #[test]

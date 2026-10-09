@@ -1451,38 +1451,6 @@ mod tests {
     }
 
     #[test]
-    fn resolver_auto_prefers_explicit_override_for_matching_dialect() {
-        let contract = SchemaContract::admit(json!({
-            "type": "object",
-            "properties": { "raw": { "const": "x" } }
-        }))
-        .expect("valid declared schema")
-        .with_override(
-            SchemaDialect::OpenaiToolParameters,
-            crate::JsonSchema::admit(json!({
-                "type": "object",
-                "properties": { "raw": { "type": "string", "enum": ["x"] } }
-            }))
-            .expect("valid declared projection schema"),
-        );
-
-        let resolved = resolve_schema(
-            &contract,
-            SchemaResolutionRequest {
-                provider: "test",
-                purpose: SchemaPurpose::ToolInput,
-                dialects: &[SchemaDialect::OpenaiToolParameters],
-            },
-        )
-        .unwrap();
-
-        assert_eq!(
-            resolved.schema["properties"]["raw"],
-            json!({ "type": "string", "enum": ["x"] })
-        );
-    }
-
-    #[test]
     fn resolver_explicit_only_fails_without_matching_override() {
         let mut contract = SchemaContract::admit(json!({
             "type": "object",

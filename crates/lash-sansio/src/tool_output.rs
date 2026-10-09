@@ -1061,42 +1061,6 @@ mod tests {
     use proptest::collection::{btree_map, vec};
     use proptest::prelude::*;
 
-    /// REF-ONLY-BOUNDARY: a guest's nested ref remains a claim until adopted.
-    #[test]
-    fn nested_ref_claims_require_adoption_and_preserve_projection() {
-        let reference = AttachmentRef::new(
-            AttachmentId::parse("a".repeat(64)).unwrap(),
-            MediaType::parse("image/png").unwrap(),
-            3,
-            Some(AttachmentTypeMetadata::image(Some(1), Some(1))),
-            Some("tiny".to_string()),
-        );
-        let json = serde_json::json!({ "images": [{
-            "$lash_tool_value": "attachment", "reference": reference
-        }] });
-        let value = ToolValue::untrusted_json(json.clone());
-        assert!(value.attachments().is_empty());
-        let claims = value.untrusted_attachment_claims();
-        assert_eq!(
-            claims.len(),
-            1,
-            "a tagged ref must be recognized as a claim"
-        );
-        let adopted = value.adopt_attachments(&claims);
-        assert_eq!(adopted.attachments(), claims);
-        assert_eq!(adopted.to_json_value(), json);
-        let decoded: ToolValue =
-            serde_json::from_value(serde_json::to_value(&adopted).unwrap()).unwrap();
-        assert_eq!(decoded, adopted);
-        let output = ToolCallOutput::success_tool_value(ToolValue::Null).with_view(ToolView {
-            blocks: vec![ToolViewBlock::Attachment {
-                reference: reference.clone(),
-                meta: ToolViewMeta::default(),
-            }],
-        });
-        assert_eq!(output.attachments(), vec![reference]);
-    }
-
     fn attachment_source(id: &str) -> AttachmentRef {
         AttachmentRef::new(
             AttachmentId::parse(
@@ -1211,10 +1175,7 @@ mod tests {
             serde_json::from_value::<ToolValue>(encoded).unwrap(),
             adopted
         );
-    }
 
-    #[test]
-    fn adopting_nothing_keeps_the_value_untrusted() {
         let forged = serde_json::json!({
             TAG_KEY: ATTACHMENT_TAG,
             REFERENCE_KEY: serde_json::to_value(attachment_source("forged")).unwrap(),
@@ -1228,6 +1189,15 @@ mod tests {
             value
         );
         assert!(value.attachments().is_empty());
+
+        let reference = attachment_source("view");
+        let output = ToolCallOutput::success_tool_value(ToolValue::Null).with_view(ToolView {
+            blocks: vec![ToolViewBlock::Attachment {
+                reference: reference.clone(),
+                meta: ToolViewMeta::default(),
+            }],
+        });
+        assert_eq!(output.attachments(), vec![reference]);
     }
 
     #[test]
