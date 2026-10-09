@@ -130,16 +130,20 @@ pub async fn send(core: &lash::LashCore, session: &SessionId, run: &TurnId) -> R
         .map_err(|error| format!("send the cell turn: {error}"))
 }
 
-/// The default worker service with its run deadlines off the clock: a
-/// held body keeps its cell waiting for as long as the host holds it. A
-/// worker runs off the runtime, so each worker call holds `clock` while it
-/// is in flight.
+/// The default worker service with its deadlines off the clock: a held
+/// body keeps its cell waiting for as long as the host holds it. A worker
+/// runs off the runtime, so each worker call holds `clock` while it is in
+/// flight. The checkout deadline and the no-response watchdog are wall
+/// time too: on a loaded host they fail a cell's setup retryably, and the
+/// retried attempt enters the program again with no cut to account for it.
 fn untimed_workers(clock: &Arc<SimClock>) -> lash::vm::WorkerService {
     const OFF_THE_CLOCK: Duration = Duration::from_secs(365 * 24 * 60 * 60);
     let mut config = lash::vm::WorkerService::default().config().clone();
     config.deadlines.compute = OFF_THE_CLOCK;
     config.deadlines.serialization = OFF_THE_CLOCK;
     config.deadlines.cumulative_cpu = OFF_THE_CLOCK;
+    config.deadlines.checkout = OFF_THE_CLOCK;
+    config.protocol.no_response_watchdog = OFF_THE_CLOCK;
     let clock = Arc::clone(clock);
     lash::vm::WorkerService::new(config).with_call_hold(Arc::new(move || Box::new(clock.hold())))
 }

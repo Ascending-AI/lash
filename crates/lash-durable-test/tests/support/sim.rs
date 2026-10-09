@@ -56,14 +56,19 @@ pub fn backend(stores: Arc<dyn StoreSet>) -> Backend {
     .expect("a simulated backend assembles")
 }
 
-/// The dialect's worker service with its run deadlines off the clock: a
-/// cell's guest is bounded by its instruction and memory budgets.
+/// The dialect's worker service with its deadlines off the clock: a cell's
+/// guest is bounded by its instruction and memory budgets. The checkout
+/// deadline and the no-response watchdog measure the host: on a loaded one
+/// they fail a cell's setup retryably, which a crash law reads as a replay
+/// no cut accounts for and every law pays for in retried attempts.
 pub fn untimed_workers() -> lash::vm::WorkerService {
     const OFF_THE_CLOCK: Duration = Duration::from_secs(365 * 24 * 60 * 60);
     let mut config = lash::vm::WorkerService::default().config().clone();
     config.deadlines.compute = OFF_THE_CLOCK;
     config.deadlines.serialization = OFF_THE_CLOCK;
     config.deadlines.cumulative_cpu = OFF_THE_CLOCK;
+    config.deadlines.checkout = OFF_THE_CLOCK;
+    config.protocol.no_response_watchdog = OFF_THE_CLOCK;
     lash::vm::WorkerService::new(config)
 }
 

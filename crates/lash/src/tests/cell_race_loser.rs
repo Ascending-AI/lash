@@ -12,10 +12,11 @@ const SLEEP_MS: u64 = 3_000;
 const FAST: &str = "fast";
 const SLOW: &str = "slow";
 
-/// `fast` answers at once; `slow` opens `entered`, waits for `gate`, then
-/// opens `midpoint` and answers.
+/// `fast` answers at once, noting when in `won`; `slow` opens `entered`,
+/// waits for `gate`, then opens `midpoint` and answers.
 #[derive(Clone, Default)]
 struct RaceTools {
+    won: Arc<std::sync::OnceLock<Instant>>,
     entered: Arc<tokio::sync::Notify>,
     gate: Arc<tokio::sync::Notify>,
     midpoint: Arc<tokio::sync::Notify>,
@@ -54,6 +55,8 @@ impl ToolProvider for RaceTools {
             self.entered.notify_one();
             self.gate.notified().await;
             self.midpoint.notify_one();
+        } else {
+            let _ = self.won.set(Instant::now());
         }
         lash_core::ToolOutcome::ok(serde_json::json!(call.name())).into()
     }
@@ -87,7 +90,9 @@ fn race_core(
 /// A race loser's body progresses while the program sleeps: the cell races
 /// `slow` against `fast`, `fast` wins, and the cell sleeps. Released while
 /// the cell sleeps, the losing `slow` reaches its midpoint long before the
-/// sleep is due, and the turn answers only after the sleep.
+/// sleep is due, and the turn answers only after the sleep. The sleep starts
+/// after `fast` answers, so both are timed from that answer: the time the
+/// session takes to reach the race is no part of the law.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn l06_race_loser_body_progresses_while_the_program_sleeps() -> Result<()> {
     let tools = RaceTools::default();
@@ -107,7 +112,6 @@ async fn l06_race_loser_body_progresses_while_the_program_sleeps() -> Result<()>
             mock_session_spec(),
         ))
         .await?;
-    let sent = Instant::now();
     let handle = session.send(TurnInput::text("race then sleep")).await?;
     tokio::time::timeout(Duration::from_secs(30), tools.entered.notified())
         .await
@@ -121,17 +125,20 @@ async fn l06_race_loser_body_progresses_while_the_program_sleeps() -> Result<()>
     )
     .await
     .expect("the loser reaches its midpoint while the program sleeps");
-    let progressed_at = sent.elapsed();
+    let progressed = Instant::now();
     let output = tokio::time::timeout(Duration::from_secs(30), handle.output())
         .await
         .expect("the turn answers")?;
-    let answered_at = sent.elapsed();
+    let answered = Instant::now();
     assert!(output.is_success(), "{:?}", output.result.outcome);
+    let won = *tools.won.get().expect("the winning call answered");
+    let (progressed_at, answered_at) =
+        (progressed.duration_since(won), answered.duration_since(won));
     assert!(
         progressed_at < Duration::from_millis(SLEEP_MS)
             && answered_at >= Duration::from_millis(SLEEP_MS),
-        "the loser progressed at {progressed_at:?}, inside the sleep the turn answered after at \
-         {answered_at:?}"
+        "the loser progressed {progressed_at:?} after the race was won, inside the sleep the turn \
+         answered after at {answered_at:?}"
     );
     drop(session);
     core.shutdown().await?;
