@@ -617,3 +617,17 @@ fn trim_and_number_parsing_use_ecma_whitespace() {
         ]),
     );
 }
+
+/// MakeTime and MakeDate use the specified left-to-right floating-point evaluation.
+#[test]
+fn date_utc_preserves_floating_point_evaluation_order() {
+    assert_finished(
+        execute(
+            "finish([Date.UTC(1970, 0, 1, 80063993375, 29, 1, -288230376151711740), Date.UTC(1970, 0, 213503982336, 0, 0, 0, -18446744073709552000)]);",
+        ),
+        Datum::List(vec![
+            Datum::Float(lash_kernel_doc::Float::new(29312.0)),
+            Datum::Float(lash_kernel_doc::Float::new(34447360.0)),
+        ]),
+    );
+}

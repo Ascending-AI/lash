@@ -107,7 +107,7 @@ body {
 let first = invoke ts.date.day_from_year(builtin_arg_0)
   set first = num.add(num.sub(first, num.mul(365.0, after_february)), before[month])
   let day = num.add(first, num.sub(components[2], 1.0))
-  let time = num.add(num.add(num.mul(components[3], 3600000.0), num.mul(components[4], 60000.0)), num.add(num.mul(components[5], 1000.0), components[6]))
+  let time = num.add(num.add(num.add(num.mul(components[3], 3600000.0), num.mul(components[4], 60000.0)), num.mul(components[5], 1000.0)), components[6])
   let output = num.add(num.mul(day, 86400000.0), time)
   if num.le(num.abs(output), 8640000000000000.0) { return num.add(num.trunc(output), 0.0) }
   return nan
