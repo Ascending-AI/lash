@@ -319,12 +319,6 @@ class AnonymousMemoryTest(unittest.TestCase):
         row = sizes.compile_row(sizes.collect([line] * 20, {("lash-internal-core", "lash_core")})[KEY], (1, 4 * 1024 * 1024))
         self.assertEqual(row["memory_kb"], 4864 * 1024)
 
-    def test_legacy_records_keep_the_previous_formula(self):
-        for anon in ("-", "invalid"):
-            measured = self.measured(anon, peak=3 * GIB)
-            self.assertEqual(sizes.table(measured)[KEY]["memory_kb"], 3840 * 1024)
-        self.assertEqual(sizes.compile_row(self.measured(0)[KEY], (1, 4 * 1024 * 1024))["memory_kb"], sizes.DEFAULT_MEMORY_KB)
-
     def test_legacy_contract_keeps_peak_floor_without_inventing_anonymous_data(self):
         sample = self.measured("-", peak=3 * GIB)[KEY]
         evidence = sizes.compile_evidence({KEY: sample})[KEY]

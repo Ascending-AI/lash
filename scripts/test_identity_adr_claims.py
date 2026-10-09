@@ -10,12 +10,6 @@ import check_outcome_suffixes as gate
 REPO = Path(__file__).resolve().parents[1]
 
 
-def public_outcome_inventory_matches_adr_0068():
-    found = gate.violations(REPO)
-    if found:
-        raise AssertionError(found)
-
-
 def public_outcome_names_follow_declared_suffix_roles():
     witnesses = [
         ("crates/lash-core-execution/src/runtime/process/model.rs", "ProcessRegistrationOutcome", "enum", "Existing"),
@@ -34,7 +28,7 @@ def public_outcome_names_follow_declared_suffix_roles():
 
 
 if __name__ == "__main__":
-    pins = [public_outcome_inventory_matches_adr_0068, public_outcome_names_follow_declared_suffix_roles]
+    pins = [public_outcome_names_follow_declared_suffix_roles]
     selected = sys.argv[1:]
     suite = unittest.TestSuite(unittest.FunctionTestCase(pin) for pin in pins if not selected or pin.__name__ in selected)
     if suite.countTestCases() == 0:

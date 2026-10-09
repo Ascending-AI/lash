@@ -85,16 +85,11 @@ test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
         self.assertEqual((suite.get("tests"), suite.get("errors")), ("2", "1"))
         error = cases(suite)["crates/x/x__test"].find("error")
         self.assertEqual(error.get("message"), "exited with error code 134")
-
-    def test_non_libtest_output_is_one_case_per_binary(self):
-        passed, missing = self.write(("ui", "0", b"all fixtures match\n"), ("gone", "?", b""))
-        self.assertEqual(list(cases(passed)), ["ui"])
-        self.assertEqual((passed.get("failures"), passed.get("errors")), ("0", "0"))
+        (missing,) = self.write(("gone", "?", b""))
         self.assertEqual(
             cases(missing)["gone"].find("error").get("message"),
             "exited without recording an exit code",
         )
-
 
 class RunnerTests(unittest.TestCase):
     def run_under(self, script, *, env=(), stdin="", terminate_after=None):

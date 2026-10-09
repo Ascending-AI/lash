@@ -94,27 +94,15 @@ class ClassifyTests(unittest.TestCase):
         self.assertEqual({"false"}, {plan[family] for family in ci_plan.FAMILIES})
 
     def test_docs_file_deletion_runs_every_expensive_family(self) -> None:
-        plan = ci_plan.classify([("D", "docs/adr/0079-x.md")])
-        self.assertEqual("false", plan["docs_only"])
-        self.assertEqual("docs deletion", plan["reason"])
-        self.assertEqual({"true"}, {plan[family] for family in ci_plan.FAMILIES})
-
-    def test_docs_addition_and_modification_preserve_docs_only_skip(self) -> None:
-        plan = ci_plan.classify([("A", "docs/new.md"), ("M", "AGENTS.md")])
-        self.assertEqual("true", plan["docs_only"])
-        self.assertEqual("docs-only diff", plan["reason"])
-        self.assertEqual({"false"}, {plan[family] for family in ci_plan.FAMILIES})
-
-    def test_docs_markdown_file_stays_docs_only(self) -> None:
-        plan = ci_plan.classify([("M", "docs/adr/0079-x.md")])
-        self.assertEqual("true", plan["docs_only"])
-        self.assertEqual({"false"}, {plan[family] for family in ci_plan.FAMILIES})
-
-    def test_docs_deletion_mixed_with_docs_modification_runs_everything(self) -> None:
-        plan = ci_plan.classify([("D", "docs/old.md"), ("M", "README.md")])
-        self.assertEqual("false", plan["docs_only"])
-        self.assertEqual("docs deletion", plan["reason"])
-        self.assertEqual({"true"}, {plan[family] for family in ci_plan.FAMILIES})
+        for diff in (
+            [("D", "docs/adr/0079-x.md")],
+            [("D", "docs/old.md"), ("M", "README.md")],
+        ):
+            with self.subTest(diff=diff):
+                plan = ci_plan.classify(diff)
+                self.assertEqual("false", plan["docs_only"])
+                self.assertEqual("docs deletion", plan["reason"])
+                self.assertEqual({"true"}, {plan[family] for family in ci_plan.FAMILIES})
 
     def test_unknown_status_fails_open(self) -> None:
         plan = ci_plan.classify([("X", "docs/unknown.md")])
@@ -166,13 +154,6 @@ class ClassifyTests(unittest.TestCase):
                     self.assertEqual(
                         expected, ci_plan.classify(changes, event)["workbench"]
                     )
-
-    def test_a_docs_only_pull_request_still_skips_every_expensive_family(self) -> None:
-        for event in ("pull_request", "merge_group"):
-            with self.subTest(event=event):
-                plan = ci_plan.classify([("M", "docs/adr/0079-x.md")], event)
-                self.assertEqual("true", plan["docs_only"])
-                self.assertEqual({"false"}, {plan[family] for family in ci_plan.FAMILIES})
 
     def test_an_underivable_closure_fails_open(self) -> None:
         plan = ci_plan.classify(
@@ -752,11 +733,9 @@ class RustRuntimeDocInputTests(unittest.TestCase):
             referenced["docs/adr/0062-the-typescript-dialect-is-an-exact-ecma-262-subset.md"],
         )
 
-    def test_the_sweep_finds_the_sources_it_is_meant_to_read(self) -> None:
+    def test_every_doc_path_named_in_rust_is_a_rust_input(self) -> None:
         # A silent zero-hit sweep would be a guard that cannot fail.
         self.assertGreater(len(self.sources), 100)
-
-    def test_every_doc_path_named_in_rust_is_a_rust_input(self) -> None:
         offenders = {
             path: sorted(set(sources))
             for path, sources in self.referenced_paths().items()

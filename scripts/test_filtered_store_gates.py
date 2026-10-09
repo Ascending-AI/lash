@@ -220,15 +220,14 @@ class FilteredRunnerTests(Fixture):
 
     def test_each_explicit_selector_must_exist(self):
         self.assert_failed(self.single("law", "law_typo"))
+        Path(self.env["XML_OUTPUT_FILE"]).unlink()
+        self.assert_failed(self.single("law_typo", "--list"))
 
     def test_skip_excluding_the_selection_fails(self):
         self.assert_failed(self.single("law", "--skip", "law"))
 
     def test_listing_a_valid_selection_preserves_the_requested_format(self):
         self.assert_passed(self.single("law", "--list", "--format", "terse"))
-
-    def test_listing_a_typo_fails(self):
-        self.assert_failed(self.single("law_typo", "--list"))
 
     def test_unfiltered_empty_binary_with_output_flags_passes(self):
         self.env["FIXTURE_CASES"] = "[]"
@@ -272,9 +271,6 @@ class FilteredRunnerTests(Fixture):
     def test_batch_ignored_only_selection_fails(self):
         self.env["FIXTURE_CASES"] = '[["law", true]]'
         self.assert_failed(self.batch("law"))
-
-    def test_batch_each_explicit_selector_must_exist(self):
-        self.assert_failed(self.batch("law", "law_typo"))
 
     def test_batch_one_empty_member_does_not_fail_the_union(self):
         self.env["FIXTURE_BATCH_EMPTY_MEMBER"] = "1"

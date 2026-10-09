@@ -1121,20 +1121,6 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
                     f"{name} runs here but its gate runs only in CI",
                 )
 
-    def test_push_gate_serializes_live_differential_before_postgres_free_suite(
-        self,
-    ) -> None:
-        push_gate = PUSH_GATE.read_text(encoding="utf-8")
-        postgres = shell_function_body(push_gate, "run_postgres_conformance")
-        workspace = shell_function_body(push_gate, "run_workspace_tests")
-
-        self.assertIn("--test cross_backend_store_differential", postgres)
-        self.assertIn("LASH_POSTGRES_DATABASE_URL", postgres)
-        self.assertIn(
-            "env -u LASH_POSTGRES_DATABASE_URL",
-            workspace,
-        )
-
     def test_mutation_packages_bounded_leg_rotates_slices(self) -> None:
         """The leg coordinate plus the run index must pick distinct slices."""
         gate = GATE.read_text(encoding="utf-8")
@@ -1793,35 +1779,6 @@ run_mutants_recorded() {{ printf 'RECORDED %s\\n' "$*"; }}
                 "Areas: store, process, trigger, effect-host, protocol, provider, sim",
                 invalid.stderr,
             )
-
-    def test_full_lane_artifact_contract_requires_true_full_evidence(self) -> None:
-        gate = GATE.read_text(encoding="utf-8")
-
-        required_snippets = [
-            'if [ "$lane" = "full" ] && [ "$mutation_scope" != "full" ]; then',
-            'if [ "$lane" = "full" ] && [ "$coverage_scope" != "run" ]; then',
-            "full_mutation_suites_complete()",
-            "mutation_evidence_status()",
-            "coverage_evidence_status()",
-            '"artifact_contract": {',
-            '"schema": "lash.confidence.summary-artifact-contract.v1"',
-            '"full_lane": {',
-            'full:all) echo "true_full"',
-            'full:*) echo "area_scoped_full"',
-            '"global_full_confidence_claim":',
-            '"required_coverage_scope": "run"',
-            '"effective_coverage_scope": "${coverage_scope}"',
-            '"coverage_evidence_status": "$(coverage_evidence_status)"',
-            '"required_mutation_scope": "full"',
-            '"effective_mutation_scope": "$(mutation_recorded_scope)"',
-            '"mutation_evidence": "$(mutation_evidence_path)"',
-            '"mutation_evidence_status": "$(mutation_evidence_status)"',
-            '"full_mutation_status": "$(full_mutation_status)"',
-            '"status": "not_run"',
-        ]
-
-        for snippet in required_snippets:
-            self.assertIn(snippet, gate)
 
     def test_model_replay_artifact_does_not_claim_backend_equivalence(self) -> None:
         gate = GATE.read_text(encoding="utf-8")

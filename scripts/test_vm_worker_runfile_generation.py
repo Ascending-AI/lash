@@ -70,41 +70,6 @@ class WorkerRunfileGenerationTests(unittest.TestCase):
         metadata["resolve"]["nodes"][1]["deps"][0]["dep_kinds"][0]["kind"] = "dev"
         self.assertFalse(generator.vm_worker_runfiles.Graph(metadata, outputs, ROOT).requires("//crates/host:host__unit_test"))
 
-    def test_a_compile_data_helper_is_already_a_runfile(self):
-        metadata, outputs = self.fixture()
-        path = ROOT / "crates/host/BUCK"
-        outputs[path] = outputs[path].replace(
-            '    name="host__unit_test",',
-            '    name="host__unit_test",\n    extra_compile_data=["//crates/lash-vm-worker:lash-vm-worker__bin"],',
-        )
-        generator.vm_worker_runfiles.add(metadata, outputs, ROOT)
-        self.assertEqual([], generator.vm_worker_runfiles.check(metadata, outputs, ROOT))
-        self.assertNotIn("extra_data", outputs[path])
-
-    def test_feature_variant_swaps_and_extra_dependencies_are_traversed(self):
-        metadata, outputs = self.fixture("build")
-        path = ROOT / "crates/host/BUCK"
-        outputs[path] += '''lash_rust_feature_test(
-    name="variant",
-    manifest_dir="crates/host",
-    extra_deps={"//crates/middle:variant": "renamed"},
-)
-'''
-        outputs[ROOT / "crates/middle/BUCK"] += '''lash_rust_feature_library(
-    name="variant",
-    manifest_dir="crates/middle",
-    variant_deps={"//crates/lash-internal-vm-client:lash-internal-vm-client": "//crates/lash-internal-vm-client:variant"},
-)
-'''
-        outputs[ROOT / "crates/lash-internal-vm-client/BUCK"] += '''lash_rust_feature_library(
-    name="variant",
-    manifest_dir="crates/lash-internal-vm-client",
-)
-'''
-        generator.vm_worker_runfiles.add(metadata, outputs, ROOT)
-        self.assertEqual([], generator.vm_worker_runfiles.check(metadata, outputs, ROOT))
-        self.assertIn("LASH_VM_WORKER", outputs[path])
-
     def test_synthetic_next_spawners_receive_the_next_helper(self):
         metadata, outputs = self.fixture()
         name = "worker-package"

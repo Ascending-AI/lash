@@ -464,6 +464,27 @@ class PublishWorkspaceTest(unittest.TestCase):
         self.assertEqual(facade_dev_dependency["req"], "*")
 
     def test_uploaded_crate_digest_mismatch_fails_the_release(self) -> None:
+        publish_workspace = load_publish_workspace_module()
+        args = argparse.Namespace(upload_digest_attempts=1, retry_delay_seconds=0)
+        payload = b"identical bytes"
+        checksum = hashlib.sha256(payload).hexdigest()
+        with tempfile.TemporaryDirectory() as directory:
+            target = pathlib.Path(directory)
+            (target / "package").mkdir()
+            (target / "package" / "lash-internal-sansio-1.2.3.crate").write_bytes(payload)
+
+            with (
+                mock.patch.object(publish_workspace, "target_directory", return_value=target),
+                mock.patch.object(
+                    publish_workspace, "download_uploaded_crate", return_value=payload
+                ),
+                mock.patch.object(
+                    publish_workspace, "registry_crate_checksum", return_value=checksum
+                ),
+            ):
+                with contextlib.redirect_stdout(io.StringIO()):
+                    publish_workspace.verify_uploaded_crate("lash-internal-sansio", "1.2.3", args)
+
         # The point of the post-publish check: if crates.io serves anything
         # other than the bytes this job packaged, the release stops.
         publish_workspace = load_publish_workspace_module()
@@ -487,28 +508,6 @@ class PublishWorkspaceTest(unittest.TestCase):
                         )
 
         self.assertIn("UPLOADED CRATE DIGEST MISMATCH", str(raised.exception))
-
-    def test_uploaded_crate_digest_match_passes(self) -> None:
-        publish_workspace = load_publish_workspace_module()
-        args = argparse.Namespace(upload_digest_attempts=1, retry_delay_seconds=0)
-        payload = b"identical bytes"
-        checksum = hashlib.sha256(payload).hexdigest()
-        with tempfile.TemporaryDirectory() as directory:
-            target = pathlib.Path(directory)
-            (target / "package").mkdir()
-            (target / "package" / "lash-internal-sansio-1.2.3.crate").write_bytes(payload)
-
-            with (
-                mock.patch.object(publish_workspace, "target_directory", return_value=target),
-                mock.patch.object(
-                    publish_workspace, "download_uploaded_crate", return_value=payload
-                ),
-                mock.patch.object(
-                    publish_workspace, "registry_crate_checksum", return_value=checksum
-                ),
-            ):
-                with contextlib.redirect_stdout(io.StringIO()):
-                    publish_workspace.verify_uploaded_crate("lash-internal-sansio", "1.2.3", args)
 
     def test_registry_recorded_checksum_mismatch_fails_the_release(self) -> None:
         publish_workspace = load_publish_workspace_module()

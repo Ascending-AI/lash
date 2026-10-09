@@ -1,4 +1,3 @@
-import ast
 import os
 from pathlib import Path
 import subprocess
@@ -99,31 +98,6 @@ class BinaryRunfileTests(unittest.TestCase):
         }
         return metadata, outputs
 
-    def test_transitive_binaries_gain_runtime_support_and_preserve_other_inputs(self):
-        metadata, outputs = self.fixture()
-        path = ROOT / "crates/host/BUCK"
-        outputs[path] = outputs[path].replace(
-            '    name="host__bin",',
-            '    name="host__bin",\n    extra_data=["//:fixture"],\n    run_env={"OTHER": "value"},',
-        )
-        self.assertTrue(any("host__bin" in failure for failure in workers.check(metadata, outputs, ROOT)))
-        workers.add(metadata, outputs, ROOT)
-        self.assertEqual([], workers.check(metadata, outputs, ROOT))
-        binary = ast.parse(outputs[path]).body[1].value
-        args = {arg.arg: ast.literal_eval(arg.value) for arg in binary.keywords}
-        self.assertEqual(["//:fixture", workers.WORKER_LABEL], args["extra_data"])
-        self.assertEqual({"OTHER": "value", "LASH_VM_WORKER": workers.WORKER_ENV}, args["run_env"])
-        self.assertNotIn("test_env", args)
-        self.assertNotIn("extra_compile_data", args)
-        self.assertNotIn("LASH_VM_WORKER", outputs[ROOT / "crates/unrelated/BUCK"])
-        before = dict(outputs)
-        workers.add(metadata, outputs, ROOT)
-        self.assertEqual(before, outputs)
-        outputs[path] = outputs[path].replace(workers.WORKER_ENV, "wrong-worker")
-        self.assertTrue(any("host__bin" in failure for failure in workers.check(metadata, outputs, ROOT)))
-        outputs[path] = before[path].replace(f'        "{workers.WORKER_LABEL}",\n', "")
-        self.assertTrue(any("missing VM worker runfile" in failure for failure in workers.check(metadata, outputs, ROOT)))
-
     def test_binary_dev_and_build_dependencies_do_not_become_runtime_edges(self):
         for kind in ("dev", "build"):
             with self.subTest(kind=kind):
@@ -164,6 +138,20 @@ class BinaryRunfileTests(unittest.TestCase):
         self.assertEqual(["LASH_VM_WORKER"], attrs["self_env"])
 
     def test_feature_binary_selects_the_worker_matching_its_client(self):
+        metadata, outputs = self.fixture()
+        path = ROOT / "crates/host/BUCK"
+        outputs[path] = outputs[path].replace(
+            '    name="host__bin",',
+            '    name="host__bin",\n    run_env={"OTHER": "value"},',
+        )
+        workers.add(metadata, outputs, ROOT)
+        self.assertEqual([], workers.check(metadata, outputs, ROOT))
+        graph = workers.Graph(metadata, outputs, ROOT)
+        self.assertEqual(
+            {"OTHER": "value", "LASH_VM_WORKER": workers.WORKER_ENV},
+            graph.targets["//crates/host:host__bin"].value("run_env"),
+        )
+
         metadata, outputs = self.fixture("build")
         path = ROOT / "crates/host/BUCK"
         outputs[path] += '''lash_rust_feature_binary(

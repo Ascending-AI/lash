@@ -133,6 +133,13 @@ class TableTest(unittest.TestCase):
         self.assertEqual(entry["p99_peak_bytes"], 3 * GIB)
         # 3 GiB x 1.25 = 3.75 GiB, already a multiple of 256 MiB.
         self.assertEqual(entry["memory_kb"], 3932160)
+        for anon in ("-", "invalid"):
+            with self.subTest(anon=anon):
+                legacy = [record(peak_bytes=3 * GIB) + f"\tanon_peak_bytes={anon}"] * 20
+                self.assertEqual(
+                    table(legacy)["lash-internal-core/lash_core"]["memory_kb"],
+                    3840 * 1024,
+                )
 
     def test_a_run_inside_its_request_needs_no_more_than_that_request(self) -> None:
         # 3.5 GiB under a 4 GiB request: the request was enough, so the row

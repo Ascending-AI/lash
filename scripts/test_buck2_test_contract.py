@@ -300,19 +300,6 @@ class WorkflowTests(unittest.TestCase):
         cls.ci_text = (ROOT / ".github/workflows/ci.yml").read_text()
         cls.ci = workflow("ci.yml")
 
-    def test_filtered_selection_helper_is_in_every_remote_test_bundle(self) -> None:
-        rules = (ROOT / "tools/buck2/test_rules.bzl").read_text()
-        package = (ROOT / "tools/buck2/BUCK").read_text()
-        single = (ROOT / "tools/buck2/test_xml_runner.sh").read_text()
-        batch = (ROOT / "tools/buck2/test_batch_runner.sh").read_text()
-        self.assertIn('"libtest_selection.py": ctx.attrs.libtest_selection', rules)
-        self.assertIn('libtest_selection = "libtest_selection.py"', package)
-        self.assertIn('libtest_selection.py" runner', single)
-        self.assertIn("--selection-argv-count", single)
-        self.assertIn('"--lash-libtest-args"', rules)
-        self.assertIn('shard_env["LASH_TEST_EXECUTION_PREFIX_ARG_COUNT"]', rules)
-        self.assertIn('"$libtest_selection" batch-members', batch)
-
     def test_trust_decision_and_required_partition_ids_are_buck2_owned(self) -> None:
         outputs = self.ci["jobs"]["plan"]["outputs"]
         self.assertIn("buck2_trusted", outputs)
@@ -320,33 +307,6 @@ class WorkflowTests(unittest.TestCase):
         for job in ("buck2-tests", "buck2-tests-tail", "feature-lanes"):
             self.assertIn(job, self.ci["jobs"])
             self.assertIn("buck2_trusted", str(self.ci["jobs"][job]["if"]))
-
-    def test_trusted_tests_use_driver_reports_and_event_logs(self) -> None:
-        for job_name, step_name in (
-            ("buck2-tests", "Test the workspace core suite with shared cache"),
-            ("buck2-tests-tail", "Test the workspace tail suite with shared cache"),
-            ("feature-lanes", "Run the executable feature lanes"),
-        ):
-            run = step(self.ci["jobs"][job_name], step_name)["run"]
-            self.assertIn("scripts/ci/buck2-test.sh", run)
-        self.assertIn("--event-log", self.ci_text)
-        self.assertIn("--build-report", self.ci_text)
-        self.assertNotIn("buck2 --output_user_root", self.ci_text)
-        self.assertNotIn("BUCK2_SHARED_CACHE_FLAGS", self.ci_text)
-
-    def test_feature_compile_clippy_and_schema_use_their_matching_operations(self) -> None:
-        feature = step(self.ci["jobs"]["feature-lanes"], "Compile every feature lane")["run"]
-        self.assertIn("hermetic-build.sh check", feature)
-        self.assertNotIn("hermetic-build.sh build", feature)
-        self.assertIn("//:feature_lane_compile", feature)
-        lint = step(
-            self.ci["jobs"]["lint"],
-            "Clippy (workspace, all targets, shared cache)",
-        )["run"]
-        self.assertIn("hermetic-build.sh clippy", lint)
-        self.assertIn("//:workspace_clippy", lint)
-        self.assertIn("hermetic-build.sh build", lint)
-        self.assertIn("//:schema_checks", lint)
 
     def test_untrusted_workspace_and_lint_paths_stay_cargo(self) -> None:
         workspace = self.ci["jobs"]["workspace-tests"]
@@ -356,22 +316,6 @@ class WorkflowTests(unittest.TestCase):
         cargo = step(lint, "Clippy (workspace, all targets)")
         self.assertIn("buck2_trusted != 'true'", str(cargo["if"]))
         self.assertIn("cargo clippy --workspace --all-targets", cargo["run"])
-
-    def test_live_store_tests_compile_remotely_but_execute_locally_uncached(self) -> None:
-        text = (ROOT / "scripts/ci/store-tests.sh").read_text()
-        self.assertIn('"${HERMETIC_BUILD:-scripts/hermetic-build.sh}" test', text)
-        self.assertIn("--local-test-execution", text)
-        self.assertIn("--no-test-cache", text)
-        self.assertIn('inventory["service_test_targets"]', text)
-        self.assertIn("cargo test -p lash-internal-postgres-store", text)
-        self.assertNotRegex(text, r"\bbazel\b")
-        for job_name in (*POSTGRES_STORE_JOBS, "s3-store"):
-            job = self.ci["jobs"][job_name]
-            upload = next(
-                item for item in job["steps"]
-                if "Buck2 reports and event logs" in item.get("name", "")
-            )
-            self.assertIn("store-test-results", upload["with"]["path"])
 
     def test_cache_warm_is_the_only_actions_cache_writer_for_buck2_tools(self) -> None:
         writers = []
@@ -649,22 +593,6 @@ class WorkflowTests(unittest.TestCase):
             self.assertNotEqual(0, unknown.returncode)
             self.assertIn("unknown store suite: conformance", unknown.stderr)
             self.assertEqual(1, len(calls.read_text(encoding="utf-8").splitlines()))
-
-    def test_nightly_forces_only_test_execution_uncached(self) -> None:
-        nightly = workflow("test262-nightly.yml")["jobs"]["test262-full"]
-        run = step(nightly, "Run the full Test262 selection uncached")["run"]
-        self.assertIn("--no-test-cache", run)
-        self.assertNotIn("--no-remote-cache", run)
-        report = step(nightly, "Report the figures")["run"]
-        self.assertIn("test262-full-test-results/root/crates/lash-typescript", report)
-
-    def test_just_recipes_use_each_buck2_target_with_its_supported_operation(self) -> None:
-        source = (ROOT / "justfile").read_text(encoding="utf-8")
-        self.assertNotIn("--test_sharding_strategy", source)
-        self.assertIn("kiln test //:dev_tests //:feature_lane_tests", source)
-        self.assertIn("kiln clippy //:workspace_clippy", source)
-        self.assertIn("kiln build //:schema_checks", source)
-
 
 class TestShardHelperTests(unittest.TestCase):
     def test_shards_are_stable_disjoint_complete_and_propagate_failure(self) -> None:

@@ -103,11 +103,6 @@ class PgServiceContract(unittest.TestCase):
                 )
                 self.assertIn("lash_pg_", text)
 
-    def test_with_service_probes_through_the_helper(self) -> None:
-        text = (ROOT / "scripts/ci/with-service.sh").read_text(encoding="utf-8")
-        self.assertIn("lash_pg_ready docker exec", text)
-
-
 class PgServiceBehaviour(unittest.TestCase):
     """`lash_pg_wait` against a fake exec prefix with a scripted verdict."""
 

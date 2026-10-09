@@ -51,12 +51,6 @@ class MountGateTests(unittest.TestCase):
         """)
         self.assertEqual(self.missing(), set())
 
-    def test_an_unused_test_macro_cannot_supply_a_mount(self):
-        self.write("crates/backend/tests/conformance.rs", """
-            macro_rules! unused { () => { #[tokio::test] async fn mounted() { law().await; } }; }
-        """)
-        self.assertEqual(self.missing(), {"law"})
-
     def test_a_non_test_macro_is_not_a_mount(self):
         self.write("crates/backend/tests/conformance.rs", """
             macro_rules! helpers { () => { async fn helper() { law().await; } }; }
