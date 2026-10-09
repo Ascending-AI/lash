@@ -8,7 +8,7 @@
 mod embedding;
 #[cfg(feature = "dhat-heap")]
 mod heap_profile;
-pub use embedding::{EmbedError, Embedder, Embedding, standard, typescript};
+pub use embedding::{EmbedError, Embedder, Embedding, standard, standard_functions, typescript};
 
 #[cfg(unix)]
 mod entry;

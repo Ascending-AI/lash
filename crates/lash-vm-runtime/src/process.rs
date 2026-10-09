@@ -251,7 +251,7 @@ impl KernelProcessEngine {
         workers: lash_vm_client::service::Service,
         bounds: lash_kernel_vm::Bounds,
     ) -> Result<Self, lash_vm_worker::EmbedError> {
-        let functions = Arc::clone(lash_vm_worker::standard(&workers.config().tuning)?.registry());
+        let functions = lash_vm_worker::standard_functions()?;
         Ok(Self::with_functions(documents, functions, workers, bounds))
     }
 

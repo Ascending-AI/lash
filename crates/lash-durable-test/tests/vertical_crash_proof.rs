@@ -89,7 +89,7 @@ const MODEL: &str = "v0-model";
 
 /// The cell the model writes: one `Once` host operation, then a printout of
 /// what it answered.
-const CELL: &str = "<typescript>\nconst written = await tools.ext_write({ x: 7 });\nprint(written);\n</typescript>";
+const CELL: &str = "<typescript>\nconst written = await tools.ext_write({ x: 7 });\nconsole.log(written);\n</typescript>";
 /// What marks the operation's answer in the transcript.
 const WROTE: &str = "wrote";
 /// What the final answer starts with.

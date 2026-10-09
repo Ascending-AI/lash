@@ -8,16 +8,24 @@ use crate::{TurnCancelMode, TurnInput};
 use lash_core::facade_support::TurnCancelOutcome;
 use std::time::{Duration, Instant};
 
-/// How long the cell sleeps: long enough for a cancel to land inside it.
+/// How long the cell sleeps when its timer is let finish: long enough for
+/// a cancel to land inside it.
 const SLEEP_MS: u64 = 2_000;
+/// How long the cell sleeps when a stop cuts its timer: far past everything
+/// the turn does around the sleep (lowering the cell in a worker, restoring
+/// the turn to end it), so a turn that ends before it was cut, on any host.
+const CUT_SLEEP_MS: u64 = 20_000;
+/// When, after the cell was sent, a stop is requested: inside the sleep.
+const STOP_AFTER: Duration = Duration::from_millis(500);
 /// How long a cancelled turn may take to end.
 const ENDS_WITHIN: Duration = Duration::from_secs(30);
 
 /// An RLM core whose model answers the first call with a cell that sleeps
-/// [`SLEEP_MS`] and then prints, and every later call with text; `started`
+/// `sleep_ms` and then prints, and every later call with text; `started`
 /// opens at the first call, and `calls` counts them.
 async fn sleeping_cell_session(
     id: &str,
+    sleep_ms: u64,
     calls: &Arc<AtomicUsize>,
     started: &Arc<tokio::sync::Notify>,
 ) -> Result<(LashCore, crate::DurableSession)> {
@@ -41,7 +49,7 @@ async fn sleeping_cell_session(
             }
             async move {
                 Ok(text_response(&if call == 0 {
-                    typescript_block(&format!("await sleep({SLEEP_MS});\nconsole.log(\"woke\");"))
+                    typescript_block(&format!("await sleep({sleep_ms});\nconsole.log(\"woke\");"))
                 } else {
                     "after the sleep".to_string()
                 }))
@@ -92,11 +100,12 @@ async fn ended(
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn after_step_during_a_cell_sleep_lets_the_timer_finish() -> Result<()> {
     let (calls, started) = (Arc::default(), Arc::default());
-    let (core, session) = sleeping_cell_session("after-step-sleep", &calls, &started).await?;
+    let (core, session) =
+        sleeping_cell_session("after-step-sleep", SLEEP_MS, &calls, &started).await?;
     let sent = Instant::now();
     let handle = session.send(TurnInput::text("sleep")).await?;
     started.notified().await;
-    tokio::time::sleep(Duration::from_millis(SLEEP_MS / 4)).await;
+    tokio::time::sleep(STOP_AFTER).await;
     let requested = outcome(
         handle
             .cancel()
@@ -131,11 +140,12 @@ async fn after_step_during_a_cell_sleep_lets_the_timer_finish() -> Result<()> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn immediate_during_a_cell_sleep_aborts_it() -> Result<()> {
     let (calls, started) = (Arc::default(), Arc::default());
-    let (core, session) = sleeping_cell_session("immediate-sleep", &calls, &started).await?;
+    let (core, session) =
+        sleeping_cell_session("immediate-sleep", CUT_SLEEP_MS, &calls, &started).await?;
     let sent = Instant::now();
     let handle = session.send(TurnInput::text("sleep")).await?;
     started.notified().await;
-    tokio::time::sleep(Duration::from_millis(SLEEP_MS / 4)).await;
+    tokio::time::sleep(STOP_AFTER).await;
     let requested = outcome(
         handle
             .cancel()
@@ -151,7 +161,7 @@ async fn immediate_during_a_cell_sleep_aborts_it() -> Result<()> {
     assert_eq!(evidence.request_id, "abort-in-sleep");
     assert_eq!(evidence.mode, TurnCancelMode::Immediate);
     assert!(
-        at.duration_since(sent) < Duration::from_millis(SLEEP_MS),
+        at.duration_since(sent) < Duration::from_millis(CUT_SLEEP_MS),
         "an immediate stop cuts the sleep: ended after {:?}",
         at.duration_since(sent)
     );
@@ -167,12 +177,13 @@ async fn immediate_during_a_cell_sleep_aborts_it() -> Result<()> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn escalating_a_deferred_stop_aborts_the_cell_sleep() -> Result<()> {
     let (calls, started) = (Arc::default(), Arc::default());
-    let (core, session) = sleeping_cell_session("escalated-sleep", &calls, &started).await?;
+    let (core, session) =
+        sleeping_cell_session("escalated-sleep", CUT_SLEEP_MS, &calls, &started).await?;
     let sent = Instant::now();
     let handle = session.send(TurnInput::text("sleep")).await?;
     let run = handle.id().cloned().expect("the send names its run");
     started.notified().await;
-    tokio::time::sleep(Duration::from_millis(SLEEP_MS / 4)).await;
+    tokio::time::sleep(STOP_AFTER).await;
     let first = outcome(
         handle
             .cancel()
@@ -184,7 +195,7 @@ async fn escalating_a_deferred_stop_aborts_the_cell_sleep() -> Result<()> {
         matches!(first, TurnCancelOutcome::Requested(_)),
         "{first:?}"
     );
-    tokio::time::sleep(Duration::from_millis(SLEEP_MS / 4)).await;
+    tokio::time::sleep(STOP_AFTER).await;
     let escalated = outcome(
         session
             .cancel(crate::CancelTarget::Run(run))
@@ -201,7 +212,7 @@ async fn escalating_a_deferred_stop_aborts_the_cell_sleep() -> Result<()> {
     assert_eq!(evidence.request_id, "abort-second");
     assert_eq!(evidence.mode, TurnCancelMode::Immediate);
     assert!(
-        at.duration_since(sent) < Duration::from_millis(SLEEP_MS),
+        at.duration_since(sent) < Duration::from_millis(CUT_SLEEP_MS),
         "the escalation cuts the sleep: ended after {:?}",
         at.duration_since(sent)
     );

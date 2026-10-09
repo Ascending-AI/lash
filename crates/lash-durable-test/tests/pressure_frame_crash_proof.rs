@@ -105,7 +105,8 @@ const FINAL: &str = "a brief answer";
 const SUMMARIZER: &str = "Provide a detailed summary of the conversation above";
 /// A prompt usage over the 200 000-token window's compaction threshold.
 const OVER_THRESHOLD: i64 = 190_000;
-/// The session global the RLM globals leg sets.
+/// The session binding the RLM globals leg sets: a cell's top-level
+/// binding is the session's, carried to its later cells.
 const GLOBAL: &str = "pressureLawGlobal";
 /// The task the RLM `continue_as` leg switches frames to.
 const TASK: &str = "finish the briefing in a fresh frame";
@@ -169,16 +170,13 @@ impl Script {
         };
         match self {
             Self::Overflow if rendered.contains(NEXT) => text(request, FINAL),
-            Self::Globals { .. } if rendered.contains(NEXT) => text(
-                request,
-                &cell(&format!("finish(typeof globalThis.{GLOBAL});")),
-            ),
+            Self::Globals { .. } if rendered.contains(NEXT) => {
+                text(request, &cell(&format!("finish(typeof {GLOBAL});")))
+            }
             Self::Globals { pressure } => {
                 let set = text(
                     request,
-                    &cell(&format!(
-                        "globalThis.{GLOBAL} = \"kept\";\nfinish(\"set\");"
-                    )),
+                    &cell(&format!("let {GLOBAL} = \"kept\";\nfinish(\"set\");")),
                 );
                 if pressure { over(set) } else { set }
             }
@@ -571,7 +569,7 @@ impl Scenario for PressureFrame {
         };
         let mut violations = match self.script {
             Script::Overflow => self.recovered(database, &seen).await,
-            Script::Globals { pressure } => self.globals(database, pressure).await,
+            Script::Globals { pressure } => self.globals(database, pressure, &seen).await,
             Script::ContinueAs => self.continued(database, &seen).await,
         };
 
@@ -661,7 +659,12 @@ impl PressureFrame {
 
     /// The globals script's laws: the second turn's cell found the global
     /// gone behind a compaction frame, and kept with none.
-    async fn globals(&self, database: &Arc<dyn DurableStore>, pressure: bool) -> Vec<String> {
+    async fn globals(
+        &self,
+        database: &Arc<dyn DurableStore>,
+        pressure: bool,
+        seen: &[String],
+    ) -> Vec<String> {
         let mut violations = Vec::new();
         let expected = if pressure { "undefined" } else { "string" };
         match database.turn_end(&session(), &turn(SECOND_RUN)).await {
@@ -676,7 +679,9 @@ impl PressureFrame {
                     } if value.as_str() == Some(expected)
                 ) => {}
             other => violations.push(format!(
-                "the second turn's cell did not find the global's type {expected}: {other:?}"
+                "the second turn's cell did not find the global's type {expected}: {other:?}; \
+                 the model last saw: {:?}",
+                seen.last()
             )),
         }
         let frames = usize::from(pressure) + 1;

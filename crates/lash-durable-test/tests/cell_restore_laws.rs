@@ -137,22 +137,24 @@ impl Cell {
         let body = match self {
             Self::Identity => "const a = await tools.ext_write({ x: 1 });\n\
                  const b = await tools.ext_write({ x: 2 });\n\
-                 print([a, b]);"
+                 console.log([a, b]);"
                 .to_owned(),
-            Self::Sleep => format!("await sleep({SLEEP_MS});\nprint(\"woke\");"),
-            Self::Repeatable => "const a = await tools.ext_retry({ x: 1 });\nprint(a);".to_owned(),
+            Self::Sleep => format!("await sleep({SLEEP_MS});\nconsole.log(\"woke\");"),
+            Self::Repeatable => {
+                "const a = await tools.ext_retry({ x: 1 });\nconsole.log(a);".to_owned()
+            }
             Self::Race => "const w = await Promise.race([tools.ext_fast({ x: 1 }), \
-                 tools.ext_slow({ x: 2 })]);\nprint(w);"
+                 tools.ext_slow({ x: 2 })]);\nconsole.log(w);"
                 .to_owned(),
             Self::AwaitProcess => "const h = await tools.ext_handle({});\n\
                  const r = await processes.await({ handle: h });\n\
-                 print(r);"
+                 console.log(r);"
                 .to_owned(),
             Self::Deferred => format!(
                 "const a = await tools.{GRANTED}({{ x: 1 }});\n\
                  await sleep({SLEEP_MS});\n\
                  const b = await tools.{GRANTED}({{ x: 2 }});\n\
-                 print([a, b]);"
+                 console.log([a, b]);"
             ),
         };
         format!("<typescript>\n{body}\n</typescript>")
@@ -166,7 +168,9 @@ struct ExternalWorld {
     entries: Mutex<BTreeMap<ToolCallId, Vec<(String, Value)>>>,
     /// The process `ext_handle` hands out.
     process: Mutex<Option<ProcessId>>,
-    /// How many paths the deferred resolver was asked to resolve.
+    /// How many times the deferred resolver was asked. One ask carries
+    /// every dotted call path of a cell that no catalog tool answers, the
+    /// dialect's own `console.log` among them.
     resolved: std::sync::atomic::AtomicUsize,
     /// Whether the deployment was redeployed: its resolver grants nothing
     /// and its catalog binds [`AMBIENT`] at the granted tool's path.
@@ -177,6 +181,13 @@ impl ExternalWorld {
     fn entries(&self) -> BTreeMap<ToolCallId, Vec<(String, Value)>> {
         self.entries.lock_recover().clone()
     }
+}
+
+/// The `x` a call was made with. A cell's numbers are its dialect's: a
+/// TypeScript `1` reaches the tool as the number it is, written `1.0`.
+fn written_x(args: &Value) -> Option<i64> {
+    let x = args["x"].as_f64()?;
+    (x.fract() == 0.0).then_some(x as i64)
 }
 
 struct ExtTools {
@@ -290,7 +301,7 @@ impl lash_core::ToolProvider for DeferredTools {
 }
 
 /// Grants `tools.ext_granted` until the deployment is redeployed, and
-/// counts every path it is asked.
+/// counts every ask.
 struct GrantingResolver {
     world: Arc<ExternalWorld>,
 }
@@ -304,7 +315,7 @@ impl lash::tools::DeferredToolResolver for GrantingResolver {
     ) -> BTreeMap<String, lash::tools::DeferredToolResolution> {
         self.world
             .resolved
-            .fetch_add(paths.len(), std::sync::atomic::Ordering::SeqCst);
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let redeployed = self
             .world
             .redeployed
@@ -701,7 +712,7 @@ impl CellTurn {
                 ));
             }
             for (_, args) in entries {
-                let x = args["x"].as_i64().expect("a write names its x");
+                let x = written_x(args).expect("a write names its x");
                 ids.entry(x).or_default().push(call);
             }
         }
@@ -1175,7 +1186,7 @@ async fn deferred_grant_across_a_crash(dialect: Dialect, postgres_url: Option<St
         .entries()
         .into_values()
         .flatten()
-        .map(|(name, args)| (name, args["x"].as_i64().unwrap_or_default()))
+        .map(|(name, args)| (name, written_x(&args).unwrap_or_default()))
         .collect::<std::collections::BTreeSet<_>>();
     let expected = [(GRANTED.to_owned(), 1), (GRANTED.to_owned(), 2)]
         .into_iter()
@@ -1188,7 +1199,7 @@ async fn deferred_grant_across_a_crash(dialect: Dialect, postgres_url: Option<St
     let resolved = turn.world.resolved.load(Ordering::SeqCst);
     if resolved != 1 {
         violations.push(format!(
-            "the resolver was asked {resolved} paths, not the one the cell resolved once"
+            "the resolver was asked {resolved} times, not the once the cell resolved its paths"
         ));
     }
     let last = turn.last_request();

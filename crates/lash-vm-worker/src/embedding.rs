@@ -7,7 +7,7 @@
 //! each extension crate's, and each dialect's helpers.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use lash_kernel_dialect::{
     Diagnostic, Environment, FrontEnd, Library, Lowered, NamedLibrary, Package, Printer,
@@ -173,6 +173,23 @@ pub fn standard(tuning: &WorkerTuning) -> Result<Embedding, EmbedError> {
     embedder.finish()
 }
 
+/// The function registry of [`standard`], assembled once in this process:
+/// what a parent links and admits documents against for workers assembled
+/// as lash ships them. The registry is the same under every tuning, which
+/// sizes only the parser's stack.
+///
+/// # Errors
+///
+/// [`EmbedError`].
+pub fn standard_functions() -> Result<Arc<FunctionRegistry>, EmbedError> {
+    static FUNCTIONS: OnceLock<Arc<FunctionRegistry>> = OnceLock::new();
+    if let Some(functions) = FUNCTIONS.get() {
+        return Ok(Arc::clone(functions));
+    }
+    let functions = Arc::clone(standard(&WorkerTuning::standard())?.registry());
+    Ok(Arc::clone(FUNCTIONS.get_or_init(|| functions)))
+}
+
 /// The TypeScript dialect, its helpers defined against `library`.
 ///
 /// # Errors
@@ -264,5 +281,20 @@ mod tests {
             "every registered function has one name"
         );
         assert!(embedding.dialects.contains_key("typescript"));
+    }
+
+    /// A parent assembles the shipped registry once: every session it
+    /// opens links against the same one, however many it opens (FIG-5759).
+    #[test]
+    fn the_standard_functions_are_assembled_once_in_a_process() {
+        let first = standard_functions().expect("the standard functions");
+        let again = standard_functions().expect("the standard functions");
+        assert!(Arc::ptr_eq(&first, &again));
+        let embedding = standard(&WorkerTuning::standard()).expect("the standard embedding");
+        assert_eq!(
+            first.iter().count(),
+            embedding.registry().iter().count(),
+            "the registry a worker assembles"
+        );
     }
 }

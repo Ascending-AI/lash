@@ -36,7 +36,7 @@ const MODEL: &str = "lash-sim-cell-model";
 /// The cell the model writes for `session`: one `Once` tool call naming it.
 fn cell(session: &str) -> String {
     format!(
-        "<typescript>\nconst written = await tools.{EXT_WRITE}({{ x: 7, session: \"{session}\" }});\nprint(written);\n</typescript>"
+        "<typescript>\nconst written = await tools.{EXT_WRITE}({{ x: 7, session: \"{session}\" }});\nconsole.log(written);\n</typescript>"
     )
 }
 

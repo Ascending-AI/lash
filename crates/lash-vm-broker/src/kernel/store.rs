@@ -7,8 +7,9 @@
 //! snapshot revision, the [`EffectLedger`] that matches it, the admission
 //! and `x_start` of every effect requested since the last park (one
 //! admitted execution each, under its own declared policy, limit and
-//! completion wait), the deadline of every sleep, and the prune of the run
-//! records no saved state can reach again. No effect's body starts before
+//! completion wait), the timer wait of every sleep, due at the deadline the
+//! sleep was admitted with (ADR 0132 §6), and the prune of the run records
+//! no saved state can reach again. No effect's body starts before
 //! that commit; each runs through the admitted-execution lifecycle (ADR
 //! 0132 §5) and its outcome commits as `round.outcome`.
 //!
@@ -325,6 +326,7 @@ impl DurableSnapshotStore {
         let mut drafts = Vec::new();
         let mut executions = Vec::new();
         let mut standings = Vec::with_capacity(admit.len());
+        let mut timers = Vec::new();
         for admission in admit {
             let EffectAdmission {
                 identity,
@@ -339,13 +341,31 @@ impl DurableSnapshotStore {
                     drafts.push(draft);
                     None
                 }
-                AdmitAs::Sleep { until } => Some(Standing::Sleeping { until_ms: until.0 }),
+                AdmitAs::Sleep { until } => {
+                    timers.push(until);
+                    Some(Standing::Sleeping { until_ms: until.0 })
+                }
                 AdmitAs::Refused(error) => Some(Standing::Refused(error)),
             };
             standings.push((identity, wait, effect, standing));
         }
         let expected = self.revision().await?;
         let mut tx = self.cx.begin().await.map_err(refused)?;
+        // A sleep is a timer wait of the run's scope, pinned with the park
+        // that admits it: the owner that holds only sleeps releases until
+        // the earliest, and the scope's end revokes them.
+        if !timers.is_empty() {
+            let scope = waits::wait_scope(&self.cx).map_err(refused)?;
+            for deadline in timers {
+                waits::pin(
+                    &mut tx,
+                    waits::WaitSpec {
+                        scope: scope.clone(),
+                        purpose: waits::WaitPurpose::Timer { deadline },
+                    },
+                );
+            }
+        }
         let mut admitted: Vec<AdmittedExecution> = Vec::new();
         if !drafts.is_empty() {
             let park = checkpoint.ledger.take_park();
@@ -489,9 +509,10 @@ impl DurableSnapshotStore {
 
     /// Run the run's open executions until at least one wait `ledger`
     /// stands on is settled, and answer every one that is; `cancel` cancels
-    /// every open execution. Answers [`Driven::Suspended`] once nothing
-    /// runs and only rows or sleeps are left to wait on: the run stays
-    /// parked beyond this activation.
+    /// every open execution and cuts every sleep: a cancelled run that
+    /// awaits no execution is answered with nothing, at once. Answers
+    /// [`Driven::Suspended`] once nothing runs and only rows or sleeps are
+    /// left to wait on: the run stays parked beyond this activation.
     ///
     /// # Errors
     ///
@@ -522,20 +543,31 @@ impl DurableSnapshotStore {
         quiet: Option<&tokio::sync::Notify>,
     ) -> Result<Driven<Vec<Settled>>, QuietPointRefusal> {
         let exec = &self.exec;
-        self.members
+        let driven = self
+            .members
             .lock()
             .await
             .drive_by(cancel, quiet, &mut |_, folded, now| {
                 let settled = settled_in(ledger, exec, folded, now, outcome);
-                if settled.is_empty() {
+                if !settled.is_empty() || (cancel.is_cancelled() && !ledger.awaits_execution()) {
+                    Decide::Answer(settled)
+                } else {
                     Decide::Wait {
                         until: ledger.next_wake(),
                     }
-                } else {
-                    Decide::Answer(settled)
                 }
             })
             .await
-            .map_err(refused)
+            .map_err(refused)?;
+        // A sleep that is over settles its timer row, so the owner's next
+        // release is not due at a deadline already answered.
+        if let Driven::Answered(settled) = &driven
+            && settled
+                .iter()
+                .any(|settled| settled.outcome == Outcome::Elapsed)
+        {
+            waits::settle_due(&self.cx).await.map_err(refused)?;
+        }
+        Ok(driven)
     }
 }

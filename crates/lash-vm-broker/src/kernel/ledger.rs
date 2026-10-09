@@ -207,6 +207,14 @@ impl EffectLedger {
             .chain(&self.released)
     }
 
+    /// Whether the state waits on an admitted execution: what a cancel
+    /// settles. Without one, a cancelled run stands on sleeps alone.
+    pub fn awaits_execution(&self) -> bool {
+        self.pending
+            .values()
+            .any(|entry| matches!(entry.standing, Standing::Admitted(_)))
+    }
+
     /// The earliest instant a sleep the state stands on is over.
     pub fn next_wake(&self) -> Option<DurableInstant> {
         self.pending

@@ -250,11 +250,11 @@ impl Turn {
                 served::call("call-b", STATE_OBSERVE, serde_json::json!({ "label": "B" })),
             ])],
             Self::StateCell => vec![served::cell(&format!(
-                "const c = await tools.{STATE_SET}({{ label: \"C\" }});\nprint(c);"
+                "const c = await tools.{STATE_SET}({{ label: \"C\" }});\nconsole.log(c);"
             ))],
             Self::StatePairCell => vec![served::cell(&format!(
                 "const both = await Promise.all([tools.{STATE_SET}({{ label: \"A\" }}), \
-                 tools.{STATE_OBSERVE}({{ label: \"B\" }})]);\nprint(both);"
+                 tools.{STATE_OBSERVE}({{ label: \"B\" }})]);\nconsole.log(both);"
             ))],
             Self::CellIdentity => vec![
                 served::cell(&format!("await {};", call("cell-one"))),
