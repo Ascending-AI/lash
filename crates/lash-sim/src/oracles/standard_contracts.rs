@@ -357,12 +357,33 @@ pub(super) fn contract_execution_payload_matches_observed<'a>(
     Ok(observed)
 }
 
+/// A fixed contract's source and inputs are immutable for this executable.
+/// Execute that reference independently of candidate evidence once, then keep
+/// comparing each candidate's complete source and result against it. Facts and
+/// verdicts remain local to their trace; failed replays are never retained.
+fn fixed_contract_replay(contract: &str) -> Result<std::sync::Arc<Value>, String> {
+    type Replays = BTreeMap<String, std::sync::Arc<Value>>;
+    static REPLAYS: std::sync::LazyLock<std::sync::Mutex<Replays>> =
+        std::sync::LazyLock::new(|| std::sync::Mutex::new(BTreeMap::new()));
+    let mut replays = REPLAYS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(replayed) = replays.get(contract) {
+        return Ok(replayed.clone());
+    }
+    let replayed = std::sync::Arc::new(
+        crate::runner::replay_contract_execution(contract)
+            .map_err(|err| format!("could not re-execute `{contract}`: {err}"))?,
+    );
+    replays.insert(contract.to_owned(), replayed.clone());
+    Ok(replayed)
+}
+
 pub(super) fn contract_execution_replay_matches(
     observed: &Value,
     contract: &str,
 ) -> Result<(), String> {
-    let replayed = crate::runner::replay_contract_execution(contract)
-        .map_err(|err| format!("could not re-execute `{contract}`: {err}"))?;
+    let replayed = fixed_contract_replay(contract)?;
     if replayed.get("source") != observed.get("source") {
         return Err(format!(
             "`{contract}` source identity/hash diverged from re-execution"

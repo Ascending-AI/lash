@@ -44,8 +44,10 @@ pub(super) async fn agent_nested_process_start_await_execution()
         vec![
             r#"<typescript>
 const parent = async () => {
-  const child = async () => { return { child: 'done' }; };
-  const inner = await (await processes.start({ definition: child }));
+  const handle = await processes.start({
+    definition: async () => { return { child: 'done' }; }
+  });
+  const inner = await handle;
   return { parent: inner.child };
 };
 const handle = await processes.start({ definition: parent });

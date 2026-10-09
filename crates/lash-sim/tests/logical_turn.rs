@@ -931,11 +931,11 @@ await control.continue_as({
     let refusals = requests
         .lock_recover()
         .iter()
-        .filter(|request| request.contains("shadows module"))
+        .filter(|request| request.contains("uncaught type_error: continue_as is not a function"))
         .count();
     assert!(
         refusals > 0,
-        "expected the refusal to name the shadowed module authority"
+        "the persisted local binding must fail as a non-callable value"
     );
     assert_eq!(
         call_index.load(Ordering::SeqCst) - calls_after_binding,

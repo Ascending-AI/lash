@@ -123,8 +123,8 @@ async fn captured_rlm_iterations() -> Vec<LlmRequest> {
 
     let captures = Arc::new(std::sync::Mutex::new(Vec::new()));
     let responses = Arc::new(tokio::sync::Mutex::new(VecDeque::from([
-        "<typescript>\nlet value = 1;\nprint(value);\n</typescript>".to_string(),
-        "<typescript>\nvalue = value + 1;\nprint(value);\n</typescript>".to_string(),
+        "<typescript>\nlet value = 1;\nconsole.log(value);\n</typescript>".to_string(),
+        "<typescript>\nvalue = value + 1;\nconsole.log(value);\n</typescript>".to_string(),
         "<typescript>\nfinish(value);\n</typescript>".to_string(),
     ])));
     let provider = lash_core::testing::TestProvider::builder()

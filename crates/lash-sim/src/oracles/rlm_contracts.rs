@@ -404,13 +404,13 @@ fn check_rlm_cell_diagnostic_counts(
 ) -> Result<Value, String> {
     let diagnostic = require_rlm_diagnostic(result, "execute_typescript", "natural", contract)?;
     require_rlm_count(diagnostic, "typescript_cell_count", 1, contract)?;
-    require_rlm_count(diagnostic, "code_chars", 12, contract)?;
-    require_rlm_exec_code(result, "print(\"hi\");", contract)?;
+    require_rlm_count(diagnostic, "code_chars", 18, contract)?;
+    require_rlm_exec_code(result, "console.log(\"hi\");", contract)?;
     require_rlm_trajectory_error(result, None, contract)?;
     Ok(json!({
         "decision": "execute_typescript",
         "counts": diagnostic.get("counts").cloned().unwrap_or(Value::Null),
-        "exec_code": "print(\"hi\");",
+        "exec_code": "console.log(\"hi\");",
         "trajectory_last": rlm_trajectory_last(result).cloned().unwrap_or(Value::Null),
     }))
 }
@@ -419,7 +419,7 @@ fn check_rlm_retired_marker_plain_lash_vm_text(
     result: &Value,
     contract: &'static str,
 ) -> Result<Value, String> {
-    let code = "const text = \"%%lash_vm is just source here\";\nprint(text);";
+    let code = "const text = \"%%lash_vm is just source here\";\nconsole.log(text);";
     let diagnostic = require_rlm_diagnostic(result, "execute_typescript", "natural", contract)?;
     require_rlm_count(diagnostic, "typescript_cell_count", 1, contract)?;
     require_rlm_exec_code(result, code, contract)?;
@@ -438,14 +438,14 @@ fn check_rlm_lash_vm_cell_exec_continues(
 ) -> Result<Value, String> {
     require_bool(result, "/done", false, contract)?;
     require_u64(result, "/llm_call_count", 2, contract)?;
-    require_rlm_exec_code(result, "print(\"hi\");", contract)?;
+    require_rlm_exec_code(result, "console.log(\"hi\");", contract)?;
     require_checkpoint(result, "after_work", contract)?;
     require_rlm_trajectory_error(result, None, contract)?;
     require_rlm_trajectory_output_contains(result, "hi\n", contract)?;
     Ok(json!({
         "done": false,
         "llm_call_count": 2,
-        "exec_code": "print(\"hi\");",
+        "exec_code": "console.log(\"hi\");",
         "checkpoint": "after_work",
         "trajectory_output": "hi\n",
     }))
@@ -458,7 +458,7 @@ fn check_rlm_streamed_lash_vm_cell_exec_persists_trajectory(
     require_bool(result, "/done", false, contract)?;
     require_u64(result, "/llm_call_count", 2, contract)?;
     require_rlm_response_text_streamed(result, 0, true, contract)?;
-    require_rlm_exec_code(result, "print(\"streamed\");", contract)?;
+    require_rlm_exec_code(result, "console.log(\"streamed\");", contract)?;
     require_checkpoint(result, "after_work", contract)?;
     require_rlm_trajectory_error(result, None, contract)?;
     require_rlm_trajectory_output_contains(result, "streamed\n", contract)?;
@@ -466,7 +466,7 @@ fn check_rlm_streamed_lash_vm_cell_exec_persists_trajectory(
         "done": false,
         "llm_call_count": 2,
         "text_streamed": true,
-        "exec_code": "print(\"streamed\");",
+        "exec_code": "console.log(\"streamed\");",
         "checkpoint": "after_work",
         "trajectory_output": "streamed\n",
     }))

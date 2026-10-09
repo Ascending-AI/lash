@@ -256,7 +256,10 @@ fn rlm_cell_diagnostic_counts_execution() -> Result<Value, FixedScriptRunnerErro
         vec![
             RlmContractStep::Llm(vec![
                 rlm_reasoning_part("Checking state."),
-                rlm_text_part(&rlm_typescript_block_with_prose("Ready.", "print(\"hi\");")),
+                rlm_text_part(&rlm_typescript_block_with_prose(
+                    "Ready.",
+                    "console.log(\"hi\");",
+                )),
             ]),
             RlmContractStep::Exec(Box::new(rlm_exec_response(&["hi\n"], None, None))),
         ],
@@ -265,7 +268,7 @@ fn rlm_cell_diagnostic_counts_execution() -> Result<Value, FixedScriptRunnerErro
 
 fn rlm_retired_marker_plain_lash_vm_text_execution() -> Result<Value, FixedScriptRunnerError> {
     let assistant_prose = "First.";
-    let code = "const text = \"%%lash_vm is just source here\";\nprint(text);";
+    let code = "const text = \"%%lash_vm is just source here\";\nconsole.log(text);";
     run_rlm_protocol_contract(
         "rlm retired marker plain Lash VM text",
         "run some code",
@@ -288,7 +291,7 @@ fn rlm_lash_vm_cell_exec_continues_execution() -> Result<Value, FixedScriptRunne
         vec![
             RlmContractStep::Llm(vec![rlm_text_part(&rlm_typescript_block_with_prose(
                 "Quick check.\n",
-                "print(\"hi\");",
+                "console.log(\"hi\");",
             ))]),
             RlmContractStep::Exec(Box::new(rlm_exec_response(&["hi\n"], None, None))),
             RlmContractStep::Checkpoint,
@@ -307,7 +310,7 @@ fn rlm_streamed_lash_vm_cell_exec_persists_trajectory_execution()
         vec![
             RlmContractStep::StreamedLlm(vec![rlm_text_part(&rlm_typescript_block_with_prose(
                 "Streaming check.\n",
-                "print(\"streamed\");",
+                "console.log(\"streamed\");",
             ))]),
             RlmContractStep::Exec(Box::new(rlm_exec_response(&["streamed\n"], None, None))),
             RlmContractStep::Checkpoint,

@@ -476,6 +476,12 @@ mod tests {
                 .build(),
             lash_protocol_rlm::CellDialect::typescript(),
         );
+        // This law bounds stop handling on a ready host. Kernel worker startup
+        // belongs to host setup, before the turn's two-second bound begins.
+        factory
+            .worker_service()
+            .pool()
+            .expect("prewarm the host's kernel worker");
         let core = lash::LashCore::rlm_builder(backend, factory)
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .data_retention(lash::DataRetention::standard())
