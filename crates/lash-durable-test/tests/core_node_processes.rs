@@ -133,11 +133,27 @@ async fn deploy_with(
     engines: Vec<Arc<dyn lash_core::ProcessEngine>>,
     build: impl FnOnce(&lash::Backend) -> lash::LashCoreBuilder,
 ) -> Deployment {
+    deploy_configured(
+        tier,
+        lash_core_execution::DurableSettings::default(),
+        engines,
+        build,
+    )
+    .await
+}
+
+/// [`deploy_with`], the backend's substrate under `settings`.
+async fn deploy_configured(
+    tier: Tier,
+    settings: lash_core_execution::DurableSettings,
+    engines: Vec<Arc<dyn lash_core::ProcessEngine>>,
+    build: impl FnOnce(&lash::Backend) -> lash::LashCoreBuilder,
+) -> Deployment {
     let (stores, keep) = stores(tier).await;
     let backend = engines
         .into_iter()
         .fold(
-            lash::durable::DurableBackendBuilder::new(stores),
+            lash::durable::DurableBackendBuilder::new(stores).config(settings),
             lash::durable::DurableBackendBuilder::process_engine,
         )
         .build()

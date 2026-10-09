@@ -127,3 +127,115 @@ async fn a_detached_process_outlives_its_deleted_session_and_accepts_host_cancel
 }
 
 on_every_tier!(a_detached_process_outlives_its_deleted_session_and_accepts_host_cancellation);
+
+/// How long the owner of a sleeping process has had to release it before
+/// the host cancels it.
+#[derive(Clone, Copy, Debug)]
+enum SleepState {
+    /// Cancelled as soon as its sleep is its committed wait, inside the
+    /// owner's `idle_evict`.
+    Hot,
+    /// Cancelled once `idle_evict` has passed over its sleep.
+    Suspended,
+}
+
+/// A lashlang process cancelled while its VM is parked on a sleep ends
+/// cancelled with the host's origin: the cancel is answered from the
+/// committed snapshot, never by a VM run that fails to resume.
+async fn a_sleeping_lashlang_process_ends_cancelled(tier: Tier, state: SleepState) {
+    use lashlang::testing::ast_builders as b;
+    const IDLE_EVICT: Duration = Duration::from_millis(50);
+    let settings = match state {
+        SleepState::Hot => lash_core_execution::DurableSettings::default(),
+        SleepState::Suspended => lash_core_execution::DurableSettings {
+            idle_evict: IDLE_EVICT,
+            ..lash_core_execution::DurableSettings::default()
+        },
+    };
+    let deployment = deploy_configured(tier, settings, Vec::new(), rlm_core).await;
+    let payload = lashlang_payload(
+        &deployment.backend,
+        "process sleeper() -> str { sleep(3600000); finish \"woke\" }",
+        b::process_returning(
+            "sleeper",
+            Vec::new(),
+            lashlang::TypeExpr::Str,
+            b::block(vec![
+                b::sleep_for(b::num(3_600_000.0)),
+                b::finish(b::string("woke")),
+            ]),
+        ),
+    )
+    .await;
+    let process = start(
+        &deployment.core,
+        lash_lashlang_runtime::LASHLANG_ENGINE_KIND,
+        payload,
+    )
+    .await;
+    let registry = deployment.backend.process_registry();
+    tokio::time::timeout(Duration::from_secs(60), async {
+        loop {
+            let record = registry
+                .get_process(&process)
+                .await
+                .expect("the process is read")
+                .expect("the process exists");
+            assert!(
+                !record.is_terminal(),
+                "the process ended before its sleep: {record:?}"
+            );
+            if record
+                .waits()
+                .iter()
+                .any(|wait| matches!(wait.kind, lash_core::WaitKind::Sleep { .. }))
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("the process parks on its sleep within a minute");
+    if matches!(state, SleepState::Suspended) {
+        tokio::time::sleep(IDLE_EVICT * 10).await;
+    }
+    registry
+        .request_process_cancel(
+            &process,
+            lash_core::CancelOrigin::OperatorRequested,
+            "sleeper-host".to_owned(),
+            None,
+        )
+        .await
+        .expect("the cancel is accepted");
+    let output = ended(&deployment.core, &process).await;
+    assert!(
+        matches!(&output.outcome, lash_core::ToolCallOutcome::Cancelled(cancellation)
+            if cancellation.origin == Some(lash_core::CancelOrigin::OperatorRequested)),
+        "the sleeping process ends cancelled by the host: {output:?}"
+    );
+    let record = registry
+        .get_process(&process)
+        .await
+        .expect("the process is read")
+        .expect("the process exists");
+    assert!(
+        matches!(
+            &record.lifecycle,
+            lash_core::ProcessLifecycleState::Terminal { .. }
+        ) && record.waits().is_empty(),
+        "the cancelled process holds its terminal and no wait: {record:?}"
+    );
+}
+
+async fn a_lashlang_process_cancelled_while_its_sleep_is_hot_ends_cancelled(tier: Tier) {
+    a_sleeping_lashlang_process_ends_cancelled(tier, SleepState::Hot).await;
+}
+
+async fn a_lashlang_process_cancelled_after_idle_eviction_of_its_sleep_ends_cancelled(tier: Tier) {
+    a_sleeping_lashlang_process_ends_cancelled(tier, SleepState::Suspended).await;
+}
+
+on_every_tier!(a_lashlang_process_cancelled_while_its_sleep_is_hot_ends_cancelled);
+on_every_tier!(a_lashlang_process_cancelled_after_idle_eviction_of_its_sleep_ends_cancelled);
