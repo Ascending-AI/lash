@@ -1,4 +1,11 @@
-#[cfg(feature = "e2e-tools")]
+#[cfg(any(feature = "e2e-tools", test))]
+#[cfg_attr(
+    not(feature = "e2e-tools"),
+    expect(
+        dead_code,
+        reason = "the laws read the ledger and use neither its environment nor its cuts"
+    )
+)]
 #[path = "../../shared/e2e_commit_ledger.rs"]
 mod e2e_commit_ledger;
 #[cfg(feature = "e2e-tools")]

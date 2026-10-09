@@ -140,11 +140,12 @@ async fn an_approval_resolved_after_its_body_bound_across_a_restart_completes_on
         .await
         .expect("open a SQLite memory store set on the frozen clock"),
     );
+    let commits = RecordedCommits::over(Arc::clone(&stores));
     let approvals = approvals::WorkbenchApprovals::in_memory().expect("open the approval ledger");
     let first = Workbench::builder(cells_then_noted(vec![
         "<typescript>\nconst applied = await ops.apply_change({ target: \"db\", change: \"migrate\" });\nfinish(applied.status);\n</typescript>".to_string(),
     ]))
-    .stores(Arc::clone(&stores))
+    .stores(Arc::clone(&commits.stores))
     .approvals(approvals.clone())
     .build()
     .await;
@@ -154,22 +155,7 @@ async fn an_approval_resolved_after_its_body_bound_across_a_restart_completes_on
             .await
             .expect("the send is admitted"),
     );
-    let pending = tokio::time::timeout(Duration::from_secs(30), async {
-        loop {
-            let pending = pending_approvals(&first.state)
-                .await
-                .expect("list the parked approvals");
-            if !pending.is_empty() {
-                return pending;
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-    })
-    .await
-    .expect("the approval call parks");
-    let [approval] = pending.as_slice() else {
-        panic!("one call parks: {pending:?}");
-    };
+    let approval = the_parked_approval(&first.state, &commits).await;
     assert_eq!(approval.requesting_session, session_id.as_str());
 
     // The body's 30 s bound passes while the call is parked.
@@ -964,14 +950,65 @@ async fn a_cron_tick_is_recorded_once_across_a_restart_after_its_occurrence_was_
     second.shutdown().await;
 }
 
-/// The approval call `state` parks.
-async fn the_parked_approval(state: &AppState) -> approvals::PendingApproval {
+/// A store set whose durable commits a law reads back: the binary's commit
+/// ledger over a law's stores, appending to a file of its own.
+struct RecordedCommits {
+    stores: Arc<dyn lash::StoreSet>,
+    ledger: tempfile::NamedTempFile,
+}
+
+impl RecordedCommits {
+    fn over(stores: Arc<dyn lash::StoreSet>) -> Self {
+        let file = tempfile::NamedTempFile::new().expect("create the commit ledger");
+        let ledger = crate::e2e_commit_ledger::CommitLedger::open(file.path(), "law", Vec::new())
+            .expect("open the commit ledger");
+        Self {
+            stores: crate::e2e_commit_ledger::ledger_stores(stores, ledger),
+            ledger: file,
+        }
+    }
+
+    /// Whether the store applied a commit of `session`'s actor under `label`.
+    fn applied(&self, session: &SessionId, label: lash::durable::CommitLabel) -> bool {
+        let actor = lash::durable::ActorKey::session(session.as_str())
+            .expect("a session actor")
+            .to_string();
+        std::fs::read_to_string(self.ledger.path())
+            .expect("read the commit ledger")
+            .lines()
+            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+            .any(|commit| {
+                commit["label"] == label.as_str()
+                    && commit["actor"] == actor.as_str()
+                    && commit["applied"] == true
+            })
+    }
+}
+
+/// The approval call the current session of `state` parked, once its park is
+/// durable in the stores `commits` records.
+///
+/// `Completions::parked` lists a call from its admission, which pins the
+/// completion wait before the body runs, and the body records the ledger row
+/// before it parks. The call is parked only once its `Waiting` outcome
+/// commits, under `round.outcome`: a workbench stopped before that leaves a
+/// started `Once` call, which the next owner records `Interrupted`
+/// (ADR 0132 §5) whatever resolved its wait. Nothing a host reads says the
+/// park committed, so the law reads the commit itself; it is the turn's
+/// first `round.outcome`, the cell's one call.
+async fn the_parked_approval(
+    state: &AppState,
+    commits: &RecordedCommits,
+) -> approvals::PendingApproval {
+    let session_id = state.current_session_id();
     let pending = tokio::time::timeout(Duration::from_secs(30), async {
         loop {
             let pending = pending_approvals(state)
                 .await
                 .expect("list the parked approvals");
-            if !pending.is_empty() {
+            if !pending.is_empty()
+                && commits.applied(&session_id, lash::durable::CommitLabel::ROUND_OUTCOME)
+            {
                 return pending;
             }
             tokio::time::sleep(Duration::from_millis(50)).await;
@@ -990,10 +1027,17 @@ async fn the_parked_approval(state: &AppState) -> approvals::PendingApproval {
 /// the call, and its ledger row is deleted once the resolve answered.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_decision_that_crashed_before_its_resolve_is_resolved_at_boot_by_the_parked_key() {
+    let stores: Arc<dyn lash::StoreSet> = Arc::new(
+        lash::sqlite::SqliteStoreSet::memory()
+            .await
+            .expect("open a SQLite memory store set"),
+    );
+    let commits = RecordedCommits::over(Arc::clone(&stores));
     let approvals = approvals::WorkbenchApprovals::in_memory().expect("open the approval ledger");
     let first = Workbench::builder(cells_then_noted(vec![
         "<typescript>\nconst applied = await ops.apply_change({ target: \"db\", change: \"migrate\" });\nfinish(applied.status);\n</typescript>".to_string(),
     ]))
+    .stores(Arc::clone(&commits.stores))
     .approvals(approvals.clone())
     .build()
     .await;
@@ -1003,14 +1047,13 @@ async fn a_decision_that_crashed_before_its_resolve_is_resolved_at_boot_by_the_p
             .await
             .expect("the send is admitted"),
     );
-    let approval = the_parked_approval(&first.state).await;
+    let approval = the_parked_approval(&first.state, &commits).await;
     assert_eq!(
         approvals
             .decide(&approval.key, approvals::ApprovalDecision::Approved)
             .expect("record the decision"),
         approvals::ApprovalDecision::Approved
     );
-    let stores = Arc::clone(&first.stores);
     first.shutdown().await;
 
     let second = Workbench::builder(cells_then_noted(Vec::new()))
