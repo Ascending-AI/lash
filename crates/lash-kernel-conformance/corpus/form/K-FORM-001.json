@@ -1,0 +1,14 @@
+{
+  "rule": "K-FORM-001",
+  "cases": [
+    {
+      "name": "unknown forms are refused",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\nteleport 1\n}\n",
+      "expected": {
+        "prints": [],
+        "end": "refused",
+        "trace": []
+      }
+    }
+  ]
+}

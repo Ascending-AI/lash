@@ -1,0 +1,31 @@
+{
+  "rule": "K-FORM-009",
+  "cases": [
+    {
+      "name": "missing fields yield absent",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\nfinish {}.missing\n}\n",
+      "expected": {
+        "prints": [],
+        "end": {
+          "finished": "absent"
+        },
+        "trace": []
+      }
+    },
+    {
+      "name": "field reads require record or error",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\ntry { print [1].x } catch e { print e.kind }\n}\n",
+      "expected": {
+        "prints": [
+          {
+            "text": "type_error"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": []
+      }
+    }
+  ]
+}

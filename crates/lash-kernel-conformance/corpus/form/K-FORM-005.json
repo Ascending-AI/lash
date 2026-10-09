@@ -1,0 +1,46 @@
+{
+  "rule": "K-FORM-005",
+  "cases": [
+    {
+      "name": "fields replace in place and append at end",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\nlet r = {a: 1} set r.b = 2 set r.a = 3 finish r\n}\n",
+      "expected": {
+        "prints": [],
+        "end": {
+          "finished": {
+            "record": [
+              [
+                "a",
+                {
+                  "int": "3"
+                }
+              ],
+              [
+                "b",
+                {
+                  "int": "2"
+                }
+              ]
+            ]
+          }
+        },
+        "trace": []
+      }
+    },
+    {
+      "name": "field assignment requires record",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\ntry { let xs = [1] set xs.a = 2 } catch e { print e.kind }\n}\n",
+      "expected": {
+        "prints": [
+          {
+            "text": "type_error"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": []
+      }
+    }
+  ]
+}

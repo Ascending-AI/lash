@@ -1,0 +1,72 @@
+{
+  "rule": "K-VAL-013",
+  "cases": [
+    {
+      "name": "errors retain kind message and arbitrary data",
+      "document": "kernel 1\nnumbers by_spelling\neffect echo(value: Int) -> Int\n\nmain {\ntry { do perform echo(1) as Int } catch e { finish (e.kind, e.message, e.data) }\n}\n",
+      "expected": {
+        "prints": [],
+        "end": {
+          "finished": {
+            "tuple": [
+              {
+                "text": "test"
+              },
+              {
+                "text": "message"
+              },
+              {
+                "record": [
+                  [
+                    "n",
+                    {
+                      "int": "4"
+                    }
+                  ]
+                ]
+              }
+            ]
+          }
+        },
+        "trace": [
+          {
+            "effect": {
+              "effect": "echo",
+              "args": [
+                {
+                  "int": "1"
+                }
+              ],
+              "result": "int"
+            }
+          }
+        ]
+      },
+      "environment": {
+        "deliveries": [
+          [
+            {
+              "request": 0,
+              "outcome": {
+                "failed": {
+                  "kind": "test",
+                  "message": "message",
+                  "data": {
+                    "record": [
+                      [
+                        "n",
+                        {
+                          "int": "4"
+                        }
+                      ]
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        ]
+      }
+    }
+  ]
+}

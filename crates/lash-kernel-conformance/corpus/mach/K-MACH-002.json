@@ -1,0 +1,28 @@
+{
+  "rule": "K-MACH-002",
+  "cases": [
+    {
+      "name": "fuel slices leave execution unchanged",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\nprint 1 print 2 finish 3\n}\n",
+      "expected": {
+        "prints": [
+          {
+            "int": "1"
+          },
+          {
+            "int": "2"
+          }
+        ],
+        "end": {
+          "finished": {
+            "int": "3"
+          }
+        },
+        "trace": []
+      },
+      "environment": {
+        "slice": 1
+      }
+    }
+  ]
+}

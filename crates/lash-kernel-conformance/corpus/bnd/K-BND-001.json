@@ -1,0 +1,24 @@
+{
+  "rule": "K-BND-001",
+  "cases": [
+    {
+      "name": "run bounds cannot be caught",
+      "document": "kernel 1\nnumbers by_spelling\nfn value() {}\nmain {\ntry { let h = spawn call value() } catch e { print 1 } finally { print 2 }\n}\n",
+      "expected": {
+        "prints": [],
+        "end": {
+          "bound": {
+            "name": "live_tasks",
+            "limit": 1
+          }
+        },
+        "trace": []
+      },
+      "environment": {
+        "bounds": {
+          "live_tasks": 1
+        }
+      }
+    }
+  ]
+}

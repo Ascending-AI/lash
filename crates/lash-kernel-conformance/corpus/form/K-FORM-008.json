@@ -1,0 +1,52 @@
+{
+  "rule": "K-FORM-008",
+  "cases": [
+    {
+      "name": "construction is fresh and duplicates keep first key",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\nlet a = [1] let c = [1] set a[0] = 2 finish (a, c, map{1: \"a\", 1.0: \"b\"}, set{1, 1.0})\n}\n",
+      "expected": {
+        "prints": [],
+        "end": {
+          "finished": {
+            "tuple": [
+              {
+                "list": [
+                  {
+                    "int": "2"
+                  }
+                ]
+              },
+              {
+                "list": [
+                  {
+                    "int": "1"
+                  }
+                ]
+              },
+              {
+                "map": [
+                  [
+                    {
+                      "int": "1"
+                    },
+                    {
+                      "text": "b"
+                    }
+                  ]
+                ]
+              },
+              {
+                "set": [
+                  {
+                    "int": "1"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "trace": []
+      }
+    }
+  ]
+}

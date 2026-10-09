@@ -1,0 +1,22 @@
+{
+  "rule": "K-TASK-009",
+  "cases": [
+    {
+      "name": "joining twice returns the same object",
+      "document": "kernel 1\nnumbers by_spelling\nfn value() { return [1] }\nmain {\nlet h = spawn call value() let a = join h let b = join h set a[0] = 2 finish b\n}\n",
+      "expected": {
+        "prints": [],
+        "end": {
+          "finished": {
+            "list": [
+              {
+                "int": "2"
+              }
+            ]
+          }
+        },
+        "trace": []
+      }
+    }
+  ]
+}

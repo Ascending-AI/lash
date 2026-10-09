@@ -1,0 +1,12 @@
+{
+  "rule": "K-DOC-006",
+  "cases": [
+    {
+      "name": "kernel text refuses forms nested beyond the version bound",
+      "document": "kernel 1\nnumbers by_spelling\nmain {if true {if true {if true {if true {if true {if true {if true {if true {if true {if true {if true {if true {if true {if true {if true {if true {if true {if true {if true {if true {if true {if true {if true {if true {if true {if true {if true {if true {if true {if true {if true {if true {if true {if true {if true {if true {if true {if true {if true {if true {finish null}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}",
+      "expected": {
+        "end": "refused"
+      }
+    }
+  ]
+}

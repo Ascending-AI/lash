@@ -1,0 +1,25 @@
+{
+  "rule": "K-VAL-032",
+  "cases": [
+    {
+      "name": "integer literals use canonical decimal text",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\nfinish (-12345678901234567890, 0)\n}\n",
+      "expected": {
+        "prints": [],
+        "end": {
+          "finished": {
+            "tuple": [
+              {
+                "int": "-12345678901234567890"
+              },
+              {
+                "int": "0"
+              }
+            ]
+          }
+        },
+        "trace": []
+      }
+    }
+  ]
+}

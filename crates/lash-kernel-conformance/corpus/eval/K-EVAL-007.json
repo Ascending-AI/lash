@@ -1,0 +1,26 @@
+{
+  "rule": "K-EVAL-007",
+  "cases": [
+    {
+      "name": "failed write leaves original object untouched",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\nlet xs = [1] try { set xs[3] = 2 } catch e { print e.kind } finish xs\n}\n",
+      "expected": {
+        "prints": [
+          {
+            "text": "index_out_of_range"
+          }
+        ],
+        "end": {
+          "finished": {
+            "list": [
+              {
+                "int": "1"
+              }
+            ]
+          }
+        },
+        "trace": []
+      }
+    }
+  ]
+}

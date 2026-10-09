@@ -1,0 +1,35 @@
+{
+  "rule": "K-VAL-034",
+  "cases": [
+    {
+      "name": "runtime tuple nesting is bounded independently of document nesting",
+      "document": "kernel 1\nnumbers by_spelling\nmain { let value = null try { for ignored in [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null] { set value = (value,) } } catch e { print e.kind } }",
+      "expected": {
+        "prints": [
+          {
+            "text": "too_deep"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": []
+      }
+    },
+    {
+      "name": "heap nesting is allowed until a copy crosses the boundary",
+      "document": "kernel 1\nnumbers by_spelling\nmain { let value = null for ignored in [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null] { set value = [value] } try { print value } catch e { print e.kind } }",
+      "expected": {
+        "prints": [
+          {
+            "text": "too_deep"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": []
+      }
+    }
+  ]
+}

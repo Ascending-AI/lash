@@ -1,0 +1,20 @@
+{
+  "rule": "K-HOST-004",
+  "cases": [
+    {
+      "name": "read requires a projection handle",
+      "document": "kernel 1\nnumbers by_spelling\nmain { try { print read(null, null) } catch e { print e.kind } }",
+      "expected": {
+        "prints": [
+          {
+            "text": "type_error"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": []
+      }
+    }
+  ]
+}

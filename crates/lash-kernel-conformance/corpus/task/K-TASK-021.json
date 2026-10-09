@@ -1,0 +1,50 @@
+{
+  "rule": "K-TASK-021",
+  "cases": [
+    {
+      "name": "unfinished excludes caller and ended tasks and preserves spawn order",
+      "document": "kernel 1\nnumbers by_spelling\nuse tasks.unfinished = @2e4b1fc9067053510f2bdef6bf6bde3c31aa69bb3a8156f8f4ece8e38e914ff1\nfn child(value) { do sleep 0 return value }\nfn ended() { return 3 }\nmain { let first = spawn call child(1) let ended = spawn call ended() let second = spawn call child(2) let pending = tasks.unfinished() let results = join all pending finish results }",
+      "expected": {
+        "prints": [],
+        "end": {
+          "finished": {
+            "list": [
+              {
+                "int": "1"
+              },
+              {
+                "int": "2"
+              }
+            ]
+          }
+        },
+        "trace": [
+          {
+            "sleep": {
+              "nanoseconds": 0
+            }
+          },
+          {
+            "sleep": {
+              "nanoseconds": 0
+            }
+          }
+        ]
+      },
+      "environment": {
+        "deliveries": [
+          [
+            {
+              "request": 1,
+              "outcome": "elapsed"
+            },
+            {
+              "request": 0,
+              "outcome": "elapsed"
+            }
+          ]
+        ]
+      }
+    }
+  ]
+}

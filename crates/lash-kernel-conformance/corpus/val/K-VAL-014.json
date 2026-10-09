@@ -1,0 +1,25 @@
+{
+  "rule": "K-VAL-014",
+  "cases": [
+    {
+      "name": "task handles retain ended results",
+      "document": "kernel 1\nnumbers by_spelling\nfn value() { return 7 }\nmain {\nlet h = spawn call value() let a = join h let b = join h finish (a, b)\n}\n",
+      "expected": {
+        "prints": [],
+        "end": {
+          "finished": {
+            "tuple": [
+              {
+                "int": "7"
+              },
+              {
+                "int": "7"
+              }
+            ]
+          }
+        },
+        "trace": []
+      }
+    }
+  ]
+}

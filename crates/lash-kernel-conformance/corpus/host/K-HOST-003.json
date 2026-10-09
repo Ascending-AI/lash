@@ -1,0 +1,35 @@
+{
+  "rule": "K-HOST-003",
+  "cases": [
+    {
+      "name": "random uses top 53 bits and stays below one",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\nfinish (random, random)\n}\n",
+      "expected": {
+        "prints": [],
+        "end": {
+          "finished": {
+            "tuple": [
+              {
+                "float": "0.0"
+              },
+              {
+                "float": "0.5"
+              }
+            ]
+          }
+        },
+        "trace": []
+      },
+      "environment": {
+        "host": [
+          {
+            "random": 0
+          },
+          {
+            "random": 9223372036854775808
+          }
+        ]
+      }
+    }
+  ]
+}

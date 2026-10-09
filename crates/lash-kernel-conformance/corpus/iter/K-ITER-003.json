@@ -1,0 +1,47 @@
+{
+  "rule": "K-ITER-003",
+  "cases": [
+    {
+      "name": "map iteration sees additions skips removal and preserves replaced position",
+      "document": "kernel 1\nnumbers by_spelling\nmain { let xs = map{1: \"a\", 2: \"b\", 3: \"c\"} let first = true for x in xs { print x if first { remove xs[2] set xs[4] = \"d\" set xs[1] = \"new\" set first = false } } }",
+      "expected": {
+        "prints": [
+          {
+            "int": "1"
+          },
+          {
+            "int": "3"
+          },
+          {
+            "int": "4"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": []
+      }
+    },
+    {
+      "name": "set reinsertion moves a member to the end",
+      "document": "kernel 1\nnumbers by_spelling\nmain { let xs = set{1, 2} let first = true for x in xs { print x if first { remove xs[1] set xs[1] = true set first = false } } }",
+      "expected": {
+        "prints": [
+          {
+            "int": "1"
+          },
+          {
+            "int": "2"
+          },
+          {
+            "int": "1"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": []
+      }
+    }
+  ]
+}

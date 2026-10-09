@@ -1,0 +1,18 @@
+{
+  "rule": "K-ERR-001",
+  "cases": [
+    {
+      "name": "throw keeps arbitrary raised value",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\ntry { throw \"value\" } catch e { finish e }\n}\n",
+      "expected": {
+        "prints": [],
+        "end": {
+          "finished": {
+            "text": "value"
+          }
+        },
+        "trace": []
+      }
+    }
+  ]
+}

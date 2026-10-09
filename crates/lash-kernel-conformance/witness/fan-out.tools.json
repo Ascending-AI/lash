@@ -1,0 +1,7 @@
+{
+  "tools": [
+    {"name": "echo", "args": [1], "value": 10},
+    {"name": "echo", "args": [2], "value": 20}
+  ],
+  "deliveries": [[1, 0]]
+}

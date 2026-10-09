@@ -1,0 +1,25 @@
+{
+  "rule": "K-FN-003",
+  "cases": [
+    {
+      "name": "arguments bind in order on each activation",
+      "document": "kernel 1\nnumbers by_spelling\nfn pair(a, b) { return (a, b) }\nmain {\nlet answer = call pair(1, 2) finish answer\n}\n",
+      "expected": {
+        "prints": [],
+        "end": {
+          "finished": {
+            "tuple": [
+              {
+                "int": "1"
+              },
+              {
+                "int": "2"
+              }
+            ]
+          }
+        },
+        "trace": []
+      }
+    }
+  ]
+}

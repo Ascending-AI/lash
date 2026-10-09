@@ -1,0 +1,38 @@
+{
+  "rule": "K-FORM-019",
+  "cases": [
+    {
+      "name": "finish ends through finally without cleanup",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\ntry { finish 7 } finally { print \"never\" }\n}\n",
+      "expected": {
+        "prints": [],
+        "end": {
+          "finished": {
+            "int": "7"
+          }
+        },
+        "trace": []
+      }
+    },
+    {
+      "name": "fail terminates with copied reason",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\ntry { fail {reason: \"stop\"} } finally { print \"never\" }\n}\n",
+      "expected": {
+        "prints": [],
+        "end": {
+          "failed": {
+            "record": [
+              [
+                "reason",
+                {
+                  "text": "stop"
+                }
+              ]
+            ]
+          }
+        },
+        "trace": []
+      }
+    }
+  ]
+}

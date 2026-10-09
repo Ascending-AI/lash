@@ -1,0 +1,58 @@
+{
+  "end": {
+    "returned": {
+      "list": [
+        {
+          "float": "10.0"
+        },
+        {
+          "float": "20.0"
+        }
+      ]
+    }
+  },
+  "prints": [
+    {
+      "float": "1.0"
+    },
+    {
+      "float": "2.0"
+    },
+    {
+      "float": "20.0"
+    },
+    {
+      "float": "10.0"
+    }
+  ],
+  "trace": [
+    {
+      "phase": "requested",
+      "id": 0,
+      "tool": "echo",
+      "args": [
+        {
+          "float": "1.0"
+        }
+      ]
+    },
+    {
+      "phase": "requested",
+      "id": 1,
+      "tool": "echo",
+      "args": [
+        {
+          "float": "2.0"
+        }
+      ]
+    },
+    {
+      "phase": "delivered",
+      "id": 1
+    },
+    {
+      "phase": "delivered",
+      "id": 0
+    }
+  ]
+}

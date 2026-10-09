@@ -1,0 +1,25 @@
+{
+  "rule": "K-VAL-009",
+  "cases": [
+    {
+      "name": "clock exposes timestamp nanoseconds",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\nfinish clock\n}\n",
+      "expected": {
+        "prints": [],
+        "end": {
+          "finished": {
+            "timestamp": "123456789012345678901234567890"
+          }
+        },
+        "trace": []
+      },
+      "environment": {
+        "host": [
+          {
+            "clock": "123456789012345678901234567890"
+          }
+        ]
+      }
+    }
+  ]
+}

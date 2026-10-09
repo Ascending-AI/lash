@@ -1,0 +1,26 @@
+{
+  "rule": "K-TASK-016",
+  "cases": [
+    {
+      "name": "task error is data until each join observes it",
+      "document": "kernel 1\nnumbers by_spelling\nfn bad() { throw 7 }\nmain {\nlet h = spawn call bad() print \"alive\" try { do join h } catch e { print e } try { do join h } catch e { print e }\n}\n",
+      "expected": {
+        "prints": [
+          {
+            "text": "alive"
+          },
+          {
+            "int": "7"
+          },
+          {
+            "int": "7"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": []
+      }
+    }
+  ]
+}

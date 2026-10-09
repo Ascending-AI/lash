@@ -1,0 +1,32 @@
+{
+  "rule": "K-EVAL-003",
+  "cases": [
+    {
+      "name": "assignment reads rhs before target index",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\nlet xs = [1] set xs[random] = random finish xs\n}\n",
+      "expected": {
+        "prints": [],
+        "end": {
+          "finished": {
+            "list": [
+              {
+                "float": "0.5"
+              }
+            ]
+          }
+        },
+        "trace": []
+      },
+      "environment": {
+        "host": [
+          {
+            "random": 9223372036854775808
+          },
+          {
+            "random": 0
+          }
+        ]
+      }
+    }
+  ]
+}

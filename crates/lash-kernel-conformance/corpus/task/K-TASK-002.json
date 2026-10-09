@@ -1,0 +1,23 @@
+{
+  "rule": "K-TASK-002",
+  "cases": [
+    {
+      "name": "spawn runs child before parent continuation",
+      "document": "kernel 1\nnumbers by_spelling\nfn value() { print \"child\" return 1 }\nmain {\nlet h = spawn call value() print \"parent\" do join h\n}\n",
+      "expected": {
+        "prints": [
+          {
+            "text": "child"
+          },
+          {
+            "text": "parent"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": []
+      }
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "rule": "K-ERR-003",
+  "cases": [
+    {
+      "name": "uncaught non-error throw ends main in its original value",
+      "document": "kernel 1\nnumbers by_spelling\nmain { throw 7 }",
+      "expected": {
+        "end": {
+          "uncaught": {
+            "int": "7"
+          }
+        }
+      }
+    }
+  ]
+}

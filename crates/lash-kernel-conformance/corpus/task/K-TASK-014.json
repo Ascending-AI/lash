@@ -1,0 +1,33 @@
+{
+  "rule": "K-TASK-014",
+  "cases": [
+    {
+      "name": "any skips failures and selects first succeeded member",
+      "document": "kernel 1\nnumbers by_spelling\nfn bad() { throw 1 } fn good() { return 2 }\nmain {\nlet a = spawn call bad() let b = spawn call good() let tasks = [a, b] let answer = join any tasks finish answer\n}\n",
+      "expected": {
+        "prints": [],
+        "end": {
+          "finished": {
+            "int": "2"
+          }
+        },
+        "trace": []
+      }
+    },
+    {
+      "name": "empty any raises empty_join",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\ntry { let tasks = [] do join any tasks } catch e { print e.kind }\n}\n",
+      "expected": {
+        "prints": [
+          {
+            "text": "empty_join"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": []
+      }
+    }
+  ]
+}

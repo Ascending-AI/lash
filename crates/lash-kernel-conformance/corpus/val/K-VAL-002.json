@@ -1,0 +1,27 @@
+{
+  "rule": "K-VAL-002",
+  "cases": [
+    {
+      "name": "absent remains ordinary data distinct from null",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\nlet r = {}\nfinish (r.missing, absent, null, [absent])\n}\n",
+      "expected": {
+        "prints": [],
+        "end": {
+          "finished": {
+            "tuple": [
+              "absent",
+              "absent",
+              "null",
+              {
+                "list": [
+                  "absent"
+                ]
+              }
+            ]
+          }
+        },
+        "trace": []
+      }
+    }
+  ]
+}

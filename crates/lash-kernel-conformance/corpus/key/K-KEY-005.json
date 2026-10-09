@@ -1,0 +1,23 @@
+{
+  "rule": "K-KEY-005",
+  "cases": [
+    {
+      "name": "removal and reinsertion take a new position",
+      "document": "kernel 1\nnumbers by_spelling\nmain { let m = map{1: \"a\", 2: \"b\"} remove m[1] set m[1] = \"new\" for key in m { print key } }",
+      "expected": {
+        "prints": [
+          {
+            "int": "2"
+          },
+          {
+            "int": "1"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": []
+      }
+    }
+  ]
+}

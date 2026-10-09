@@ -1,0 +1,18 @@
+{
+  "rule": "K-FORM-011",
+  "cases": [
+    {
+      "name": "creating closure executes no body",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\nlet fnc = fn() { print \"late\" } finish \"now\"\n}\n",
+      "expected": {
+        "prints": [],
+        "end": {
+          "finished": {
+            "text": "now"
+          }
+        },
+        "trace": []
+      }
+    }
+  ]
+}

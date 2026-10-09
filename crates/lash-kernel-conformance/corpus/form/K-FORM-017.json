@@ -1,0 +1,43 @@
+{
+  "rule": "K-FORM-017",
+  "cases": [
+    {
+      "name": "finally runs for return and can replace it",
+      "document": "kernel 1\nnumbers by_spelling\nfn value() { try { return 1 } finally { print \"finally\" return 2 } }\nmain {\nlet n = call value() finish n\n}\n",
+      "expected": {
+        "prints": [
+          {
+            "text": "finally"
+          }
+        ],
+        "end": {
+          "finished": {
+            "int": "2"
+          }
+        },
+        "trace": []
+      }
+    },
+    {
+      "name": "finally also runs for continue and break",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\nfor n in [1, 2] { try { continue } finally { print n } } for n in [3, 4] { try { break } finally { print n } }\n}\n",
+      "expected": {
+        "prints": [
+          {
+            "int": "1"
+          },
+          {
+            "int": "2"
+          },
+          {
+            "int": "3"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": []
+      }
+    }
+  ]
+}

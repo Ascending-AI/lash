@@ -1,0 +1,27 @@
+{
+  "rule": "K-ADM-002",
+  "cases": [
+    {
+      "name": "provided result type must serve the expected result",
+      "document": "kernel 1\nnumbers by_spelling\neffect echo(value: Int) -> Int\nmain { let answer = perform echo(1) as Int finish answer }",
+      "expected": {
+        "prints": [],
+        "end": "refused",
+        "trace": []
+      },
+      "environment": {
+        "effects": {
+          "echo": {
+            "params": [
+              {
+                "name": "value",
+                "ty": "int"
+              }
+            ],
+            "result": "text"
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,85 @@
+{
+  "rule": "K-TASK-003",
+  "cases": [
+    {
+      "name": "ready tasks run FIFO until wait",
+      "document": "kernel 1\nnumbers by_spelling\neffect echo(value: Int) -> Int\nfn child(value) { print value let answer = perform echo(value) as Int print answer return answer }\n\nmain {\nlet a = spawn call child(1)\nlet b = spawn call child(2)\nlet tasks = [a, b]\nlet answer = join all tasks\nfinish answer\n}\n",
+      "expected": {
+        "prints": [
+          {
+            "int": "1"
+          },
+          {
+            "int": "2"
+          },
+          {
+            "int": "20"
+          },
+          {
+            "int": "10"
+          }
+        ],
+        "end": {
+          "finished": {
+            "list": [
+              {
+                "int": "10"
+              },
+              {
+                "int": "20"
+              }
+            ]
+          }
+        },
+        "trace": [
+          {
+            "effect": {
+              "effect": "echo",
+              "args": [
+                {
+                  "int": "1"
+                }
+              ],
+              "result": "int"
+            }
+          },
+          {
+            "effect": {
+              "effect": "echo",
+              "args": [
+                {
+                  "int": "2"
+                }
+              ],
+              "result": "int"
+            }
+          }
+        ],
+        "parks": 1
+      },
+      "environment": {
+        "deliveries": [
+          [
+            {
+              "request": 1,
+              "outcome": {
+                "completed": {
+                  "int": "20"
+                }
+              }
+            },
+            {
+              "request": 0,
+              "outcome": {
+                "completed": {
+                  "int": "10"
+                }
+              }
+            }
+          ]
+        ],
+        "resume": false
+      }
+    }
+  ]
+}

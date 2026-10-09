@@ -1,0 +1,45 @@
+{
+  "rule": "K-MACH-007",
+  "cases": [
+    {
+      "name": "export at park records safe statement boundary",
+      "document": "kernel 1\nnumbers by_spelling\neffect echo(value: Int) -> Int\n\nmain {\nlet answer = perform echo(1) as Int finish answer\n}\n",
+      "expected": {
+        "prints": [],
+        "end": {
+          "finished": {
+            "int": "10"
+          }
+        },
+        "trace": [
+          {
+            "effect": {
+              "effect": "echo",
+              "args": [
+                {
+                  "int": "1"
+                }
+              ],
+              "result": "int"
+            }
+          }
+        ]
+      },
+      "environment": {
+        "deliveries": [
+          [
+            {
+              "request": 0,
+              "outcome": {
+                "completed": {
+                  "int": "10"
+                }
+              }
+            }
+          ]
+        ],
+        "resume": true
+      }
+    }
+  ]
+}

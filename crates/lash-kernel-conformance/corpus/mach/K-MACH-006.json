@@ -1,0 +1,21 @@
+{
+  "rule": "K-MACH-006",
+  "cases": [
+    {
+      "name": "pending host cancellation ends at safe point without cleanup",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\ntry { do sleep 0 } finally { print 1 }\n}\n",
+      "expected": {
+        "prints": [],
+        "end": "cancelled",
+        "trace": []
+      },
+      "environment": {
+        "host": [
+          {
+            "cancel": true
+          }
+        ]
+      }
+    }
+  ]
+}

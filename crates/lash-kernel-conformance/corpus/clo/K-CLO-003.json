@@ -1,0 +1,31 @@
+{
+  "rule": "K-CLO-003",
+  "cases": [
+    {
+      "name": "closure return ends only its call",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\nlet fnc = fn() { return 7 } let a = apply fnc() print a finish 8\n}\n",
+      "expected": {
+        "prints": [
+          {
+            "int": "7"
+          }
+        ],
+        "end": {
+          "finished": {
+            "int": "8"
+          }
+        },
+        "trace": []
+      }
+    },
+    {
+      "name": "closure cannot break surrounding loop",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\nfor n in [1] { let fnc = fn() { break } }\n}\n",
+      "expected": {
+        "prints": [],
+        "end": "refused",
+        "trace": []
+      }
+    }
+  ]
+}

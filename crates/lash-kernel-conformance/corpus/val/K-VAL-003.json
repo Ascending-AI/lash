@@ -1,0 +1,20 @@
+{
+  "rule": "K-VAL-003",
+  "cases": [
+    {
+      "name": "conditions refuse integer truthiness",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\ntry { if 1 { finish true } } catch e { print e.kind }\n}\n",
+      "expected": {
+        "prints": [
+          {
+            "text": "type_error"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": []
+      }
+    }
+  ]
+}

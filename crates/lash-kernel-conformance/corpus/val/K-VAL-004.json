@@ -1,0 +1,25 @@
+{
+  "rule": "K-VAL-004",
+  "cases": [
+    {
+      "name": "integers exceed binary64 and have no negative zero",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\nfinish (1234567890123456789012345678901234567890, -0)\n}\n",
+      "expected": {
+        "prints": [],
+        "end": {
+          "finished": {
+            "tuple": [
+              {
+                "int": "1234567890123456789012345678901234567890"
+              },
+              {
+                "int": "0"
+              }
+            ]
+          }
+        },
+        "trace": []
+      }
+    }
+  ]
+}

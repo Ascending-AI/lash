@@ -1,0 +1,62 @@
+{
+  "rule": "K-VAL-011",
+  "cases": [
+    {
+      "name": "mutable aliases expose changes and insertion order",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\nlet xs = [1] let alias = xs set alias[0] = 2 let m = map{\"a\": 1, \"b\": 2} set m[\"a\"] = 3 let r = {a: 1} set r.b = 2\nfinish (xs, m, r)\n}\n",
+      "expected": {
+        "prints": [],
+        "end": {
+          "finished": {
+            "tuple": [
+              {
+                "list": [
+                  {
+                    "int": "2"
+                  }
+                ]
+              },
+              {
+                "map": [
+                  [
+                    {
+                      "text": "a"
+                    },
+                    {
+                      "int": "3"
+                    }
+                  ],
+                  [
+                    {
+                      "text": "b"
+                    },
+                    {
+                      "int": "2"
+                    }
+                  ]
+                ]
+              },
+              {
+                "record": [
+                  [
+                    "a",
+                    {
+                      "int": "1"
+                    }
+                  ],
+                  [
+                    "b",
+                    {
+                      "int": "2"
+                    }
+                  ]
+                ]
+              }
+            ]
+          }
+        },
+        "trace": []
+      }
+    }
+  ]
+}

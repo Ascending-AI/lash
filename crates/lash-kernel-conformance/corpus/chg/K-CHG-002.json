@@ -1,0 +1,17 @@
+{
+  "rule": "K-CHG-002",
+  "cases": [
+    {
+      "name": "statement expression and copy charges are pinned",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\nfinish null\n}\n",
+      "expected": {
+        "prints": [],
+        "end": {
+          "finished": "null"
+        },
+        "trace": [],
+        "charged": 3
+      }
+    }
+  ]
+}

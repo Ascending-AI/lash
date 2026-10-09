@@ -1,0 +1,64 @@
+{
+  "rule": "K-FORM-010",
+  "cases": [
+    {
+      "name": "index reads preserve collection rules",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\nfinish ([1][0.0], (2,)[0], map{3: 4}[3], set{5}[5], set{5}[6])\n}\n",
+      "expected": {
+        "prints": [],
+        "end": {
+          "finished": {
+            "tuple": [
+              {
+                "int": "1"
+              },
+              {
+                "int": "2"
+              },
+              {
+                "int": "4"
+              },
+              {
+                "bool": true
+              },
+              {
+                "bool": false
+              }
+            ]
+          }
+        },
+        "trace": []
+      }
+    },
+    {
+      "name": "negative form indices are refused at runtime",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\ntry { print [1][-1] } catch e { print e.kind }\n}\n",
+      "expected": {
+        "prints": [
+          {
+            "text": "index_out_of_range"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": []
+      }
+    },
+    {
+      "name": "missing map key raises",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\ntry { print map{}[1] } catch e { print e.kind }\n}\n",
+      "expected": {
+        "prints": [
+          {
+            "text": "key_missing"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": []
+      }
+    }
+  ]
+}

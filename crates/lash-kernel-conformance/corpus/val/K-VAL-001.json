@@ -1,0 +1,79 @@
+{
+  "rule": "K-VAL-001",
+  "cases": [
+    {
+      "name": "kinds are distinct without coercion",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\nfinish (null, absent, true, 1, 1.0, \"1\", b\"31\", (1,), [1], map{1: \"one\"}, set{1}, {n: 1})\n}\n",
+      "expected": {
+        "prints": [],
+        "end": {
+          "finished": {
+            "tuple": [
+              "null",
+              "absent",
+              {
+                "bool": true
+              },
+              {
+                "int": "1"
+              },
+              {
+                "float": "1.0"
+              },
+              {
+                "text": "1"
+              },
+              {
+                "bytes": "31"
+              },
+              {
+                "tuple": [
+                  {
+                    "int": "1"
+                  }
+                ]
+              },
+              {
+                "list": [
+                  {
+                    "int": "1"
+                  }
+                ]
+              },
+              {
+                "map": [
+                  [
+                    {
+                      "int": "1"
+                    },
+                    {
+                      "text": "one"
+                    }
+                  ]
+                ]
+              },
+              {
+                "set": [
+                  {
+                    "int": "1"
+                  }
+                ]
+              },
+              {
+                "record": [
+                  [
+                    "n",
+                    {
+                      "int": "1"
+                    }
+                  ]
+                ]
+              }
+            ]
+          }
+        },
+        "trace": []
+      }
+    }
+  ]
+}

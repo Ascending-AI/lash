@@ -1,0 +1,81 @@
+{
+  "rule": "K-EFF-002",
+  "cases": [
+    {
+      "name": "printed aliases are copied independently",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\nlet xs = [1] let aliases = [xs, xs] print aliases set xs[0] = 2 finish aliases\n}\n",
+      "expected": {
+        "prints": [
+          {
+            "list": [
+              {
+                "list": [
+                  {
+                    "int": "1"
+                  }
+                ]
+              },
+              {
+                "list": [
+                  {
+                    "int": "1"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "end": {
+          "finished": {
+            "list": [
+              {
+                "list": [
+                  {
+                    "int": "2"
+                  }
+                ]
+              },
+              {
+                "list": [
+                  {
+                    "int": "2"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "trace": []
+      }
+    },
+    {
+      "name": "cycle is rejected before print leaves guest",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\ntry { let xs = [null] set xs[0] = xs print xs } catch e { print e.kind }\n}\n",
+      "expected": {
+        "prints": [
+          {
+            "text": "cycle"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": []
+      }
+    },
+    {
+      "name": "cycle detection crosses an immutable tuple before a heap object",
+      "document": "kernel 1\nnumbers by_spelling\nmain { let xs = [null] let wrapped = (xs,) set xs[0] = wrapped try { print wrapped } catch e { print e.kind } }",
+      "expected": {
+        "prints": [
+          {
+            "text": "cycle"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+[package]
+name = "kernel-embedder"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+rust-version.workspace = true
+description = "A minimal standalone embedder of the kernel machine."
+publish = false
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+lash-kernel-check.workspace = true
+lash-kernel-doc.workspace = true
+lash-kernel-vm.workspace = true

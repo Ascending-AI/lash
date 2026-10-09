@@ -1,0 +1,14 @@
+{
+  "rule": "K-STMT-001",
+  "cases": [
+    {
+      "name": "nested action has no text representation",
+      "document": "kernel 1\nnumbers by_spelling\neffect echo(value: Int) -> Int\n\nmain {\nfinish [perform echo(1) as Int]\n}\n",
+      "expected": {
+        "prints": [],
+        "end": "refused",
+        "trace": []
+      }
+    }
+  ]
+}

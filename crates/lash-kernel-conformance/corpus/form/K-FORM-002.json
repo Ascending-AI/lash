@@ -1,0 +1,36 @@
+{
+  "rule": "K-FORM-002",
+  "cases": [
+    {
+      "name": "literal kinds retain their data",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\nfinish (null, absent, true, 123456789012345678901234567890, -0.0, \"hello\", b\"00ff\")\n}\n",
+      "expected": {
+        "prints": [],
+        "end": {
+          "finished": {
+            "tuple": [
+              "null",
+              "absent",
+              {
+                "bool": true
+              },
+              {
+                "int": "123456789012345678901234567890"
+              },
+              {
+                "float": "-0.0"
+              },
+              {
+                "text": "hello"
+              },
+              {
+                "bytes": "00ff"
+              }
+            ]
+          }
+        },
+        "trace": []
+      }
+    }
+  ]
+}

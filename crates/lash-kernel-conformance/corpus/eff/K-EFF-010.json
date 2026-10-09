@@ -1,0 +1,49 @@
+{
+  "rule": "K-EFF-010",
+  "cases": [
+    {
+      "name": "zero sleep requests elapsed outcome",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\ndo sleep 0 finish 1\n}\n",
+      "expected": {
+        "prints": [],
+        "end": {
+          "finished": {
+            "int": "1"
+          }
+        },
+        "trace": [
+          {
+            "sleep": {
+              "nanoseconds": 0
+            }
+          }
+        ]
+      },
+      "environment": {
+        "deliveries": [
+          [
+            {
+              "request": 0,
+              "outcome": "elapsed"
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "negative sleep duration raises number_range",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\ntry { do sleep -1 } catch e { print e.kind }\n}\n",
+      "expected": {
+        "prints": [
+          {
+            "text": "number_range"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": []
+      }
+    }
+  ]
+}

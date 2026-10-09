@@ -1,0 +1,38 @@
+{
+  "rule": "K-FORM-013",
+  "cases": [
+    {
+      "name": "if chooses one block and while checks before each iteration",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\nlet again = true if false { print 0 } else { print 1 } while again { print 2 set again = false }\n}\n",
+      "expected": {
+        "prints": [
+          {
+            "int": "1"
+          },
+          {
+            "int": "2"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": []
+      }
+    },
+    {
+      "name": "if is strict about bool",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\ntry { if [] { print 1 } } catch e { print e.kind }\n}\n",
+      "expected": {
+        "prints": [
+          {
+            "text": "type_error"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": []
+      }
+    }
+  ]
+}

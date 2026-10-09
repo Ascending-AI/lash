@@ -1,0 +1,24 @@
+{
+  "rule": "K-BND-002",
+  "cases": [
+    {
+      "name": "recursive calls pass per task depth bound",
+      "document": "kernel 1\nnumbers by_spelling\nfn recurse() { do call recurse() }\nmain {\ndo call recurse()\n}\n",
+      "expected": {
+        "prints": [],
+        "end": {
+          "bound": {
+            "name": "call_depth",
+            "limit": 2
+          }
+        },
+        "trace": []
+      },
+      "environment": {
+        "bounds": {
+          "call_depth": 2
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,55 @@
+{
+  "rule": "K-KEY-003",
+  "cases": [
+    {
+      "name": "equal numeric keys retain first key and insertion position",
+      "document": "kernel 1\nnumbers by_spelling\nmain { let m = map{1: \"a\", 2: \"c\"} set m[1.0] = \"b\" finish m }",
+      "expected": {
+        "prints": [],
+        "end": {
+          "finished": {
+            "map": [
+              [
+                {
+                  "int": "1"
+                },
+                {
+                  "text": "b"
+                }
+              ],
+              [
+                {
+                  "int": "2"
+                },
+                {
+                  "text": "c"
+                }
+              ]
+            ]
+          }
+        },
+        "trace": []
+      }
+    },
+    {
+      "name": "adding an existing set member changes nothing",
+      "document": "kernel 1\nnumbers by_spelling\nmain { let s = set{1, 2} set s[1.0] = true finish s }",
+      "expected": {
+        "prints": [],
+        "end": {
+          "finished": {
+            "set": [
+              {
+                "int": "1"
+              },
+              {
+                "int": "2"
+              }
+            ]
+          }
+        },
+        "trace": []
+      }
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "rule": "K-FN-004",
+  "cases": [
+    {
+      "name": "omitted declared arguments bind absent",
+      "document": "kernel 1\nnumbers by_spelling\nfn pair(a, b) { return (a, b) }\nmain {\nlet answer = call pair(1) finish answer\n}\n",
+      "expected": {
+        "prints": [],
+        "end": {
+          "finished": {
+            "tuple": [
+              {
+                "int": "1"
+              },
+              "absent"
+            ]
+          }
+        },
+        "trace": []
+      }
+    },
+    {
+      "name": "too many declared arguments are refused",
+      "document": "kernel 1\nnumbers by_spelling\nfn value(a) {}\nmain {\ndo call value(1, 2)\n}\n",
+      "expected": {
+        "prints": [],
+        "end": "refused",
+        "trace": []
+      }
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "rule": "K-MACH-005",
+  "cases": [
+    {
+      "name": "slices change no values or charge",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\nprint null finish null\n}\n",
+      "expected": {
+        "prints": [
+          "null"
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": [],
+        "charged": 6
+      },
+      "environment": {
+        "slice": 1
+      }
+    }
+  ]
+}

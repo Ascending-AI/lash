@@ -1,0 +1,24 @@
+{
+  "rule": "K-CHG-008",
+  "cases": [
+    {
+      "name": "charge failure ends before catch cleanup",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\ntry { print null } catch e { print 1 } finally { print 2 }\n}\n",
+      "expected": {
+        "prints": [],
+        "end": {
+          "bound": {
+            "name": "charge",
+            "limit": 0
+          }
+        },
+        "trace": []
+      },
+      "environment": {
+        "bounds": {
+          "charge": 0
+        }
+      }
+    }
+  ]
+}

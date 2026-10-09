@@ -1,0 +1,31 @@
+{
+  "rule": "K-FORM-018",
+  "cases": [
+    {
+      "name": "print copies graph before later mutation",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\nlet xs = [1] print xs set xs[0] = 2 print xs\n}\n",
+      "expected": {
+        "prints": [
+          {
+            "list": [
+              {
+                "int": "1"
+              }
+            ]
+          },
+          {
+            "list": [
+              {
+                "int": "2"
+              }
+            ]
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": []
+      }
+    }
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "rule": "K-TASK-004",
+  "cases": [
+    {
+      "name": "sleep zero is still a wait",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\nprint \"before\" do sleep 0 print \"after\"\n}\n",
+      "expected": {
+        "prints": [
+          {
+            "text": "before"
+          },
+          {
+            "text": "after"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": [
+          {
+            "sleep": {
+              "nanoseconds": 0
+            }
+          }
+        ],
+        "parks": 1
+      },
+      "environment": {
+        "deliveries": [
+          [
+            {
+              "request": 0,
+              "outcome": "elapsed"
+            }
+          ]
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "rule": "K-ITER-004",
+  "cases": [
+    {
+      "name": "a dialect can iterate a snapshot with kernel forms",
+      "document": "kernel 1\nnumbers by_spelling\nmain { let xs = [1, 2] let snapshot = [xs[0], xs[1]] for x in snapshot { print x remove xs[0] } finish xs }",
+      "expected": {
+        "prints": [
+          {
+            "int": "1"
+          },
+          {
+            "int": "2"
+          }
+        ],
+        "end": {
+          "finished": {
+            "list": []
+          }
+        },
+        "trace": []
+      }
+    }
+  ]
+}

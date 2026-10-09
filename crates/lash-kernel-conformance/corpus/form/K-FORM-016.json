@@ -1,0 +1,25 @@
+{
+  "rule": "K-FORM-016",
+  "cases": [
+    {
+      "name": "throw accepts arbitrary data and catch binds it",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\ntry { throw [1, 2] } catch value { finish value }\n}\n",
+      "expected": {
+        "prints": [],
+        "end": {
+          "finished": {
+            "list": [
+              {
+                "int": "1"
+              },
+              {
+                "int": "2"
+              }
+            ]
+          }
+        },
+        "trace": []
+      }
+    }
+  ]
+}

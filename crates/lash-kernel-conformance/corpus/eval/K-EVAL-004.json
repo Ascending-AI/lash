@@ -1,0 +1,52 @@
+{
+  "rule": "K-EVAL-004",
+  "cases": [
+    {
+      "name": "action snapshots its atoms before waiting",
+      "document": "kernel 1\nnumbers by_spelling\neffect echo(value: Int) -> Int\nfn child(value) { print value let answer = perform echo(value) as Int print answer return answer }\n\nmain {\nlet x = 1 let h = spawn call child(x) set x = 2 let answer = join h finish answer\n}\n",
+      "expected": {
+        "prints": [
+          {
+            "int": "1"
+          },
+          {
+            "int": "10"
+          }
+        ],
+        "end": {
+          "finished": {
+            "int": "10"
+          }
+        },
+        "trace": [
+          {
+            "effect": {
+              "effect": "echo",
+              "args": [
+                {
+                  "int": "1"
+                }
+              ],
+              "result": "int"
+            }
+          }
+        ]
+      },
+      "environment": {
+        "deliveries": [
+          [
+            {
+              "request": 0,
+              "outcome": {
+                "completed": {
+                  "int": "10"
+                }
+              }
+            }
+          ]
+        ],
+        "resume": false
+      }
+    }
+  ]
+}

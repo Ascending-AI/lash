@@ -1,0 +1,18 @@
+{
+  "rule": "K-FN-006",
+  "cases": [
+    {
+      "name": "callee raise is caught at caller statement",
+      "document": "kernel 1\nnumbers by_spelling\nfn raises() { throw 7 }\nmain {\ntry { do call raises() } catch e { finish e }\n}\n",
+      "expected": {
+        "prints": [],
+        "end": {
+          "finished": {
+            "int": "7"
+          }
+        },
+        "trace": []
+      }
+    }
+  ]
+}

@@ -1976,6 +1976,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "kernel-embedder"
+version = "0.0.0-dev"
+dependencies = [
+ "lash-kernel-check",
+ "lash-kernel-doc",
+ "lash-kernel-vm",
+]
+
+[[package]]
 name = "lash-dialect-typescript"
 version = "0.0.0-dev"
 dependencies = [
@@ -2794,6 +2803,20 @@ name = "lash-kernel-check"
 version = "0.0.0-dev"
 dependencies = [
  "lash-kernel-doc",
+ "thiserror",
+]
+
+[[package]]
+name = "lash-kernel-conformance"
+version = "0.0.0-dev"
+dependencies = [
+ "kernel-embedder",
+ "lash-kernel-check",
+ "lash-kernel-doc",
+ "lash-kernel-lib",
+ "lash-kernel-vm",
+ "serde",
+ "serde_json",
  "thiserror",
 ]
 

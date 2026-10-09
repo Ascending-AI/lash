@@ -1,0 +1,54 @@
+{
+  "rule": "K-ID-004",
+  "cases": [
+    {
+      "name": "derived action address follows statement child indexes",
+      "document": "kernel 1\nnumbers by_spelling\neffect echo(value: Int) -> Int\n\nmain {\ndo perform echo(1) as Int\n}\n",
+      "expected": {
+        "prints": [],
+        "end": {
+          "finished": "null"
+        },
+        "trace": [
+          {
+            "effect": {
+              "effect": "echo",
+              "args": [
+                {
+                  "int": "1"
+                }
+              ],
+              "result": "int",
+              "identity": {
+                "task": "main",
+                "site": {
+                  "unit": "main",
+                  "path": [
+                    0,
+                    0
+                  ]
+                },
+                "occurrence": 0
+              }
+            }
+          }
+        ]
+      },
+      "environment": {
+        "deliveries": [
+          [
+            {
+              "request": 0,
+              "outcome": {
+                "completed": {
+                  "int": "10"
+                }
+              }
+            }
+          ]
+        ],
+        "resume": false
+      }
+    }
+  ]
+}

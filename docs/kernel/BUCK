@@ -1,0 +1,7 @@
+# Kernel rule source consumed by the independent conformance corpus.
+filegroup(
+    name = "package_files",
+    srcs = ["semantics.md", "design.md", "library-text-json.md"],
+    copy = False,
+    visibility = ["PUBLIC"],
+)

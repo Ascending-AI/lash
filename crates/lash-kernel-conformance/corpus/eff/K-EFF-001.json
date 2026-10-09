@@ -1,0 +1,46 @@
+{
+  "rule": "K-EFF-001",
+  "cases": [
+    {
+      "name": "perform requests typed manifest effect and waits",
+      "document": "kernel 1\nnumbers by_spelling\neffect echo(value: Int) -> Int\n\nmain {\nlet answer = perform echo(1) as Int finish answer\n}\n",
+      "expected": {
+        "prints": [],
+        "end": {
+          "finished": {
+            "int": "10"
+          }
+        },
+        "trace": [
+          {
+            "effect": {
+              "effect": "echo",
+              "args": [
+                {
+                  "int": "1"
+                }
+              ],
+              "result": "int"
+            }
+          }
+        ],
+        "parks": 1
+      },
+      "environment": {
+        "deliveries": [
+          [
+            {
+              "request": 0,
+              "outcome": {
+                "completed": {
+                  "int": "10"
+                }
+              }
+            }
+          ]
+        ],
+        "resume": false
+      }
+    }
+  ]
+}

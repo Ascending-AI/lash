@@ -1,0 +1,35 @@
+{
+  "rule": "K-TASK-010",
+  "cases": [
+    {
+      "name": "single join requires task handle",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\ntry { do join 1 } catch e { print e.kind }\n}\n",
+      "expected": {
+        "prints": [
+          {
+            "text": "type_error"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": []
+      }
+    },
+    {
+      "name": "list join requires only task handles",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\ntry { let xs = [1] do join all xs } catch e { print e.kind }\n}\n",
+      "expected": {
+        "prints": [
+          {
+            "text": "type_error"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": []
+      }
+    }
+  ]
+}

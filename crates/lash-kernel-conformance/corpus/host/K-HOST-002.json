@@ -1,0 +1,25 @@
+{
+  "rule": "K-HOST-002",
+  "cases": [
+    {
+      "name": "clock retains timestamp kind",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\nfinish clock\n}\n",
+      "expected": {
+        "prints": [],
+        "end": {
+          "finished": {
+            "timestamp": "100"
+          }
+        },
+        "trace": []
+      },
+      "environment": {
+        "host": [
+          {
+            "clock": "100"
+          }
+        ]
+      }
+    }
+  ]
+}

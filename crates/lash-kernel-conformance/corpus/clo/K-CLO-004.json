@@ -1,0 +1,20 @@
+{
+  "rule": "K-CLO-004",
+  "cases": [
+    {
+      "name": "closure cannot leave through print",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\ntry { let fnc = fn() {} print fnc } catch e { print e.kind }\n}\n",
+      "expected": {
+        "prints": [
+          {
+            "text": "not_data"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": []
+      }
+    }
+  ]
+}

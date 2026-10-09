@@ -1,0 +1,58 @@
+{
+  "end": {
+    "returned": {
+      "list": [
+        {
+          "int": "10"
+        },
+        {
+          "int": "20"
+        }
+      ]
+    }
+  },
+  "prints": [
+    {
+      "int": "1"
+    },
+    {
+      "int": "2"
+    },
+    {
+      "int": "20"
+    },
+    {
+      "int": "10"
+    }
+  ],
+  "trace": [
+    {
+      "phase": "requested",
+      "id": 0,
+      "tool": "echo",
+      "args": [
+        {
+          "int": "1"
+        }
+      ]
+    },
+    {
+      "phase": "requested",
+      "id": 1,
+      "tool": "echo",
+      "args": [
+        {
+          "int": "2"
+        }
+      ]
+    },
+    {
+      "phase": "delivered",
+      "id": 1
+    },
+    {
+      "phase": "delivered",
+      "id": 0
+    }
+  ]
+}

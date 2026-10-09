@@ -1,0 +1,33 @@
+{
+  "rule": "K-TASK-013",
+  "cases": [
+    {
+      "name": "already ended race chooses first in member order",
+      "document": "kernel 1\nnumbers by_spelling\nfn value(n) { return n }\nmain {\nlet a = spawn call value(1) let b = spawn call value(2) let tasks = [b, a] let answer = join race tasks finish answer\n}\n",
+      "expected": {
+        "prints": [],
+        "end": {
+          "finished": {
+            "int": "2"
+          }
+        },
+        "trace": []
+      }
+    },
+    {
+      "name": "empty race raises empty_join",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\ntry { let tasks = [] do join race tasks } catch e { print e.kind }\n}\n",
+      "expected": {
+        "prints": [
+          {
+            "text": "empty_join"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": []
+      }
+    }
+  ]
+}

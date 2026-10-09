@@ -1,0 +1,41 @@
+{
+  "rule": "K-ITER-002",
+  "cases": [
+    {
+      "name": "appended list elements are visited",
+      "document": "kernel 1\nnumbers by_spelling\nmain { let xs = [1] let first = true for x in xs { print x if first { set xs[1] = 2 set first = false } } }",
+      "expected": {
+        "prints": [
+          {
+            "int": "1"
+          },
+          {
+            "int": "2"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": []
+      }
+    },
+    {
+      "name": "removal before live position skips an element",
+      "document": "kernel 1\nnumbers by_spelling\nmain { let xs = [1, 2, 3] for x in xs { print x remove xs[0] } }",
+      "expected": {
+        "prints": [
+          {
+            "int": "1"
+          },
+          {
+            "int": "3"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": []
+      }
+    }
+  ]
+}

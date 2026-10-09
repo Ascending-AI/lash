@@ -1,0 +1,30 @@
+[package]
+name = "lash-kernel-conformance"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+rust-version.workspace = true
+description = "Dialect-independent kernel rule corpus and reader, machine and native conformance harnesses."
+publish = false
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+lash-kernel-check.workspace = true
+lash-kernel-doc.workspace = true
+lash-kernel-vm.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+kernel-embedder = { path = "../../examples/kernel-embedder" }
+lash-kernel-lib = { path = "../lash-kernel-lib" }

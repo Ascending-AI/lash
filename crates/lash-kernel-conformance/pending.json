@@ -1,0 +1,358 @@
+[
+  {
+    "rule": "K-ADM-003",
+    "owner": "KCHECK (FIG-5697)"
+  },
+  {
+    "rule": "K-ADM-005",
+    "owner": "KCHECK (FIG-5697)"
+  },
+  {
+    "rule": "K-ADM-006",
+    "owner": "KCHECK (FIG-5697)"
+  },
+  {
+    "rule": "K-ADM-007",
+    "owner": "KCHECK (FIG-5697)"
+  },
+  {
+    "rule": "K-ADM-008",
+    "owner": "KCHECK (FIG-5697)"
+  },
+  {
+    "rule": "K-ADM-009",
+    "owner": "KCHECK (FIG-5697)"
+  },
+  {
+    "rule": "K-BND-003",
+    "owner": "KVM (FIG-5695)"
+  },
+  {
+    "rule": "K-CHG-001",
+    "owner": "KCONF (FIG-5702)"
+  },
+  {
+    "rule": "K-CHG-003",
+    "owner": "KVM (FIG-5695)"
+  },
+  {
+    "rule": "K-CHG-004",
+    "owner": "KVM (FIG-5695)"
+  },
+  {
+    "rule": "K-CHG-005",
+    "owner": "KVM (FIG-5695)"
+  },
+  {
+    "rule": "K-CHG-006",
+    "owner": "KVM (FIG-5695)"
+  },
+  {
+    "rule": "K-CHG-007",
+    "owner": "KLIBC (FIG-5701)"
+  },
+  {
+    "rule": "K-DOC-001",
+    "owner": "KCONF (FIG-5702)"
+  },
+  {
+    "rule": "K-DOC-002",
+    "owner": "KCONF (FIG-5702)"
+  },
+  {
+    "rule": "K-DOC-003",
+    "owner": "KCONF (FIG-5702)"
+  },
+  {
+    "rule": "K-DOC-004",
+    "owner": "KCONF (FIG-5702)"
+  },
+  {
+    "rule": "K-DOC-005",
+    "owner": "KCONF (FIG-5702)"
+  },
+  {
+    "rule": "K-DOC-007",
+    "owner": "KCONF (FIG-5702)"
+  },
+  {
+    "rule": "K-EDIT-001",
+    "owner": "KEDIT (FIG-5698)"
+  },
+  {
+    "rule": "K-EDIT-002",
+    "owner": "KEDIT (FIG-5698)"
+  },
+  {
+    "rule": "K-EDIT-003",
+    "owner": "KEDIT (FIG-5698)"
+  },
+  {
+    "rule": "K-EDIT-004",
+    "owner": "KEDIT (FIG-5698)"
+  },
+  {
+    "rule": "K-EDIT-005",
+    "owner": "KEDIT (FIG-5698)"
+  },
+  {
+    "rule": "K-EDIT-006",
+    "owner": "KEDIT (FIG-5698)"
+  },
+  {
+    "rule": "K-EDIT-007",
+    "owner": "KEDIT (FIG-5698)"
+  },
+  {
+    "rule": "K-EDIT-008",
+    "owner": "KEDIT (FIG-5698)"
+  },
+  {
+    "rule": "K-EDIT-009",
+    "owner": "KEDIT (FIG-5698)"
+  },
+  {
+    "rule": "K-EDIT-010",
+    "owner": "KEDIT (FIG-5698)"
+  },
+  {
+    "rule": "K-EFF-005",
+    "owner": "KLIBT (FIG-5700)"
+  },
+  {
+    "rule": "K-EFF-006",
+    "owner": "KLIBT (FIG-5700)"
+  },
+  {
+    "rule": "K-EFF-007",
+    "owner": "KLIBT (FIG-5700)"
+  },
+  {
+    "rule": "K-EFF-011",
+    "owner": "KBROKER (FIG-5712)"
+  },
+  {
+    "rule": "K-FN-007",
+    "owner": "KLIBN (FIG-5699)"
+  },
+  {
+    "rule": "K-ID-001",
+    "owner": "KCONF (FIG-5702)"
+  },
+  {
+    "rule": "K-ID-002",
+    "owner": "KCONF (FIG-5702)"
+  },
+  {
+    "rule": "K-ID-003",
+    "owner": "KCONF (FIG-5702)"
+  },
+  {
+    "rule": "K-KEY-001",
+    "owner": "KLIBN (FIG-5699)"
+  },
+  {
+    "rule": "K-LIB-001",
+    "owner": "KCONF (FIG-5702)"
+  },
+  {
+    "rule": "K-LIB-002",
+    "owner": "KCONF (FIG-5702)"
+  },
+  {
+    "rule": "K-LIB-003",
+    "owner": "KCONF (FIG-5702)"
+  },
+  {
+    "rule": "K-LIB-004",
+    "owner": "KCONF (FIG-5702)"
+  },
+  {
+    "rule": "K-LIB-005",
+    "owner": "KCONF (FIG-5702)"
+  },
+  {
+    "rule": "K-LIB-006",
+    "owner": "KCONF (FIG-5702)"
+  },
+  {
+    "rule": "K-LIB-007",
+    "owner": "KLIBC (FIG-5701)"
+  },
+  {
+    "rule": "K-LIB-008",
+    "owner": "KREGEX (FIG-5703)"
+  },
+  {
+    "rule": "K-LIB-009",
+    "owner": "KCONF (FIG-5702)"
+  },
+  {
+    "rule": "K-LIB-010",
+    "owner": "KVM (FIG-5695)"
+  },
+  {
+    "rule": "K-MACH-001",
+    "owner": "KCONF (FIG-5702)"
+  },
+  {
+    "rule": "K-MACH-004",
+    "owner": "KCONF (FIG-5702)"
+  },
+  {
+    "rule": "K-NUM-001",
+    "owner": "KLIBN (FIG-5699)"
+  },
+  {
+    "rule": "K-NUM-002",
+    "owner": "KLIBN (FIG-5699)"
+  },
+  {
+    "rule": "K-NUM-003",
+    "owner": "KLIBN (FIG-5699)"
+  },
+  {
+    "rule": "K-NUM-004",
+    "owner": "KLIBN (FIG-5699)"
+  },
+  {
+    "rule": "K-NUM-005",
+    "owner": "KLIBN (FIG-5699)"
+  },
+  {
+    "rule": "K-NUM-006",
+    "owner": "KLIBN (FIG-5699)"
+  },
+  {
+    "rule": "K-NUM-007",
+    "owner": "KLIBN (FIG-5699)"
+  },
+  {
+    "rule": "K-NUM-008",
+    "owner": "KLIBN (FIG-5699)"
+  },
+  {
+    "rule": "K-SES-001",
+    "owner": "KRLM (FIG-5714)"
+  },
+  {
+    "rule": "K-SES-002",
+    "owner": "KRLM (FIG-5714)"
+  },
+  {
+    "rule": "K-SES-003",
+    "owner": "KRLM (FIG-5714)"
+  },
+  {
+    "rule": "K-SITE-001",
+    "owner": "KPARK (FIG-5696)"
+  },
+  {
+    "rule": "K-SITE-002",
+    "owner": "KPARK (FIG-5696)"
+  },
+  {
+    "rule": "K-SITE-003",
+    "owner": "KPARK (FIG-5696)"
+  },
+  {
+    "rule": "K-SITE-004",
+    "owner": "KCHECK (FIG-5697)"
+  },
+  {
+    "rule": "K-SITE-005",
+    "owner": "KCHECK (FIG-5697)"
+  },
+  {
+    "rule": "K-STMT-002",
+    "owner": "KCHECK (FIG-5697)"
+  },
+  {
+    "rule": "K-STMT-003",
+    "owner": "KCHECK (FIG-5697)"
+  },
+  {
+    "rule": "K-TEXT-001",
+    "owner": "KCONF (FIG-5702)"
+  },
+  {
+    "rule": "K-TEXT-002",
+    "owner": "KCONF (FIG-5702)"
+  },
+  {
+    "rule": "K-TEXT-003",
+    "owner": "KCONF (FIG-5702)"
+  },
+  {
+    "rule": "K-VAL-006",
+    "owner": "KLIBT (FIG-5700)"
+  },
+  {
+    "rule": "K-VAL-007",
+    "owner": "KLIBT (FIG-5700)"
+  },
+  {
+    "rule": "K-VAL-008",
+    "owner": "KLIBT (FIG-5700)"
+  },
+  {
+    "rule": "K-VAL-017",
+    "owner": "KLIBN (FIG-5699)"
+  },
+  {
+    "rule": "K-VAL-020",
+    "owner": "KLIBN (FIG-5699)"
+  },
+  {
+    "rule": "K-VAL-021",
+    "owner": "KLIBN (FIG-5699)"
+  },
+  {
+    "rule": "K-VAL-022",
+    "owner": "KLIBN (FIG-5699)"
+  },
+  {
+    "rule": "K-VAL-023",
+    "owner": "KLIBN (FIG-5699)"
+  },
+  {
+    "rule": "K-VAL-024",
+    "owner": "KLIBN (FIG-5699)"
+  },
+  {
+    "rule": "K-VAL-025",
+    "owner": "KLIBN (FIG-5699)"
+  },
+  {
+    "rule": "K-VAL-027",
+    "owner": "KLIBN (FIG-5699)"
+  },
+  {
+    "rule": "K-VAL-028",
+    "owner": "KLIBN (FIG-5699)"
+  },
+  {
+    "rule": "K-VAL-029",
+    "owner": "KLIBN (FIG-5699)"
+  },
+  {
+    "rule": "K-VAL-030",
+    "owner": "KLIBT (FIG-5700)"
+  },
+  {
+    "rule": "K-VAL-031",
+    "owner": "KLIBN (FIG-5699)"
+  },
+  {
+    "rule": "K-VAL-033",
+    "owner": "KLIBN (FIG-5699)"
+  },
+  {
+    "rule": "K-VER-001",
+    "owner": "KCONF (FIG-5702)"
+  },
+  {
+    "rule": "K-VER-002",
+    "owner": "KCONF (FIG-5702)"
+  }
+]

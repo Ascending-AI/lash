@@ -1,0 +1,30 @@
+{
+  "rule": "K-TASK-001",
+  "cases": [
+    {
+      "name": "tasks share heap and run serially",
+      "document": "kernel 1\nnumbers by_spelling\nfn change(xs) { set xs[0] = 2 }\nmain {\nlet xs = [1] let h = spawn call change(xs) print xs let answer = join h finish xs\n}\n",
+      "expected": {
+        "prints": [
+          {
+            "list": [
+              {
+                "int": "2"
+              }
+            ]
+          }
+        ],
+        "end": {
+          "finished": {
+            "list": [
+              {
+                "int": "2"
+              }
+            ]
+          }
+        },
+        "trace": []
+      }
+    }
+  ]
+}

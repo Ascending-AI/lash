@@ -1,0 +1,14 @@
+{
+  "rule": "K-ADM-004",
+  "cases": [
+    {
+      "name": "main cannot read a missing session binding",
+      "document": "kernel 1\nnumbers by_spelling\nmain { finish missing }",
+      "expected": {
+        "prints": [],
+        "end": "refused",
+        "trace": []
+      }
+    }
+  ]
+}

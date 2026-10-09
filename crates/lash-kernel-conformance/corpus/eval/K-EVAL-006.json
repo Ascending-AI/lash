@@ -1,0 +1,20 @@
+{
+  "rule": "K-EVAL-006",
+  "cases": [
+    {
+      "name": "strict operations never coerce a condition",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\ntry { while \"yes\" { print 1 } } catch e { print e.kind }\n}\n",
+      "expected": {
+        "prints": [
+          {
+            "text": "type_error"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": []
+      }
+    }
+  ]
+}

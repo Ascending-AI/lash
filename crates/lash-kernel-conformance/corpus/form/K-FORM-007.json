@@ -1,0 +1,35 @@
+{
+  "rule": "K-FORM-007",
+  "cases": [
+    {
+      "name": "removal shifts lists and missing fields are harmless",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\nlet xs = [1, 2, 3] remove xs[1] let r = {a: 1} remove r.missing remove r.a let m = map{1: 2} remove m[3] remove m[1] finish (xs, r, m)\n}\n",
+      "expected": {
+        "prints": [],
+        "end": {
+          "finished": {
+            "tuple": [
+              {
+                "list": [
+                  {
+                    "int": "1"
+                  },
+                  {
+                    "int": "3"
+                  }
+                ]
+              },
+              {
+                "record": []
+              },
+              {
+                "map": []
+              }
+            ]
+          }
+        },
+        "trace": []
+      }
+    }
+  ]
+}

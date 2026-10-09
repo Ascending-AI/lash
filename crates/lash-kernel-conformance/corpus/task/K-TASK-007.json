@@ -1,0 +1,24 @@
+{
+  "rule": "K-TASK-007",
+  "cases": [
+    {
+      "name": "joining ended task continues before queued ready task",
+      "document": "kernel 1\nnumbers by_spelling\nfn queued() { do yield print \"queued\" } fn value() { return 1 }\nmain {\nlet waiting = spawn call queued() let done = spawn call value() do join done print \"parent\" do join waiting\n}\n",
+      "expected": {
+        "prints": [
+          {
+            "text": "parent"
+          },
+          {
+            "text": "queued"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": [],
+        "parks": 0
+      }
+    }
+  ]
+}

@@ -1,0 +1,51 @@
+{
+  "rule": "K-EVAL-005",
+  "cases": [
+    {
+      "name": "map reads key before value and before next entry",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\nfinish map{clock: clock, clock: clock}\n}\n",
+      "expected": {
+        "prints": [],
+        "end": {
+          "finished": {
+            "map": [
+              [
+                {
+                  "timestamp": "1"
+                },
+                {
+                  "timestamp": "2"
+                }
+              ],
+              [
+                {
+                  "timestamp": "3"
+                },
+                {
+                  "timestamp": "4"
+                }
+              ]
+            ]
+          }
+        },
+        "trace": []
+      },
+      "environment": {
+        "host": [
+          {
+            "clock": "1"
+          },
+          {
+            "clock": "2"
+          },
+          {
+            "clock": "3"
+          },
+          {
+            "clock": "4"
+          }
+        ]
+      }
+    }
+  ]
+}

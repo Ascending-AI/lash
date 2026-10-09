@@ -1,0 +1,44 @@
+{
+  "rule": "K-TASK-023",
+  "cases": [
+    {
+      "name": "mutual joins without effects end as deadlock",
+      "document": "kernel 1\nnumbers by_spelling\nfn left(xs) { do yield let h = xs[1] do join h }\nfn right(xs) { do yield let h = xs[0] do join h }\nmain { let xs = [null, null] let a = spawn call left(xs) let b = spawn call right(xs) set xs[0] = a set xs[1] = b let tasks = [a, b] do join all tasks }",
+      "expected": {
+        "end": {
+          "deadlock": {
+            "waiting": [
+              "main",
+              {
+                "spawned": {
+                  "parent": "main",
+                  "site": {
+                    "unit": "main",
+                    "path": [
+                      1,
+                      0
+                    ]
+                  },
+                  "occurrence": 0
+                }
+              },
+              {
+                "spawned": {
+                  "parent": "main",
+                  "site": {
+                    "unit": "main",
+                    "path": [
+                      2,
+                      0
+                    ]
+                  },
+                  "occurrence": 0
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

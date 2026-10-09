@@ -1,0 +1,17 @@
+kernel 1
+numbers by_spelling
+effect echo(value: Int) -> Int
+
+fn child(value) {
+  let answer = perform echo(value) as Int
+  print answer
+  return answer
+}
+
+main {
+  let a = spawn call child(1)
+  let b = spawn call child(2)
+  let tasks = [a, b]
+  let answers = join all tasks
+  finish answers
+}

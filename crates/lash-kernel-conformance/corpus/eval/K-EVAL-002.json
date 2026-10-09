@@ -1,0 +1,22 @@
+{
+  "rule": "K-EVAL-002",
+  "cases": [
+    {
+      "name": "let rhs sees enclosing binding before shadowing",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\nlet x = 1 if true { let x = x print x } finish x\n}\n",
+      "expected": {
+        "prints": [
+          {
+            "int": "1"
+          }
+        ],
+        "end": {
+          "finished": {
+            "int": "1"
+          }
+        },
+        "trace": []
+      }
+    }
+  ]
+}

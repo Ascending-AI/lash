@@ -1,0 +1,35 @@
+{
+  "rule": "K-FORM-014",
+  "cases": [
+    {
+      "name": "continue skips remainder and break ends innermost loop",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\nfor n in [1, 2] { print n continue print 3 } for n in [4, 5] { print n break print 6 }\n}\n",
+      "expected": {
+        "prints": [
+          {
+            "int": "1"
+          },
+          {
+            "int": "2"
+          },
+          {
+            "int": "4"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": []
+      }
+    },
+    {
+      "name": "break outside loop is refused",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\nbreak\n}\n",
+      "expected": {
+        "prints": [],
+        "end": "refused",
+        "trace": []
+      }
+    }
+  ]
+}

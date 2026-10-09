@@ -1,0 +1,69 @@
+{
+  "rule": "K-EFF-009",
+  "cases": [
+    {
+      "name": "effect failure is raised at perform",
+      "document": "kernel 1\nnumbers by_spelling\neffect echo(value: Int) -> Int\n\nmain {\ntry { do perform echo(1) as Int } catch e { finish (e.kind, e.data) }\n}\n",
+      "expected": {
+        "prints": [],
+        "end": {
+          "finished": {
+            "tuple": [
+              {
+                "text": "test"
+              },
+              {
+                "record": [
+                  [
+                    "n",
+                    {
+                      "int": "4"
+                    }
+                  ]
+                ]
+              }
+            ]
+          }
+        },
+        "trace": [
+          {
+            "effect": {
+              "effect": "echo",
+              "args": [
+                {
+                  "int": "1"
+                }
+              ],
+              "result": "int"
+            }
+          }
+        ]
+      },
+      "environment": {
+        "deliveries": [
+          [
+            {
+              "request": 0,
+              "outcome": {
+                "failed": {
+                  "kind": "test",
+                  "message": "message",
+                  "data": {
+                    "record": [
+                      [
+                        "n",
+                        {
+                          "int": "4"
+                        }
+                      ]
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        ]
+      }
+    }
+  ]
+}

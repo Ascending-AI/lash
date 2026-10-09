@@ -1,0 +1,40 @@
+{
+  "rule": "K-VAL-010",
+  "cases": [
+    {
+      "name": "tuple length and data remain fixed",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\nlet xs = (1, 2)\nfinish xs\n}\n",
+      "expected": {
+        "prints": [],
+        "end": {
+          "finished": {
+            "tuple": [
+              {
+                "int": "1"
+              },
+              {
+                "int": "2"
+              }
+            ]
+          }
+        },
+        "trace": []
+      }
+    },
+    {
+      "name": "tuple members cannot be assigned",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\ntry { let xs = (1, 2) set xs[0] = 3 } catch e { print e.kind }\n}\n",
+      "expected": {
+        "prints": [
+          {
+            "text": "type_error"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": []
+      }
+    }
+  ]
+}

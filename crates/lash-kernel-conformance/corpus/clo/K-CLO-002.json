@@ -1,0 +1,25 @@
+{
+  "rule": "K-CLO-002",
+  "cases": [
+    {
+      "name": "for closures capture separate iteration bindings",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\nlet fs = [null, null] for n in [0, 1] { let fnc = fn() { return n } set fs[n] = fnc } let f = fs[0] let g = fs[1] let a = apply f() let b = apply g() finish (a, b)\n}\n",
+      "expected": {
+        "prints": [],
+        "end": {
+          "finished": {
+            "tuple": [
+              {
+                "int": "0"
+              },
+              {
+                "int": "1"
+              }
+            ]
+          }
+        },
+        "trace": []
+      }
+    }
+  ]
+}

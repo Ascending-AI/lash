@@ -1,0 +1,37 @@
+{
+  "rule": "K-TASK-017",
+  "cases": [
+    {
+      "name": "cancel injects typed error and runs waiting cleanup",
+      "document": "kernel 1\nnumbers by_spelling\nfn slow() { try { do sleep 0 } catch e { print e.kind } finally { print \"cleanup\" } }\nmain {\nlet h = spawn call slow() do cancel h do join h\n}\n",
+      "expected": {
+        "prints": [
+          {
+            "text": "cancelled"
+          },
+          {
+            "text": "cleanup"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": [],
+        "parks": 0
+      }
+    },
+    {
+      "name": "cancelling ended task is harmless",
+      "document": "kernel 1\nnumbers by_spelling\nfn done() { return 7 }\nmain {\nlet h = spawn call done() do cancel h let answer = join h finish answer\n}\n",
+      "expected": {
+        "prints": [],
+        "end": {
+          "finished": {
+            "int": "7"
+          }
+        },
+        "trace": []
+      }
+    }
+  ]
+}

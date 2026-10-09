@@ -1,0 +1,51 @@
+{
+  "rule": "K-FORM-006",
+  "cases": [
+    {
+      "name": "integral indices replace append and set membership",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\nlet xs = [1] set xs[0.0] = 2 set xs[1] = 3 let s = set{1} set s[2] = true set s[1] = false finish (xs, s)\n}\n",
+      "expected": {
+        "prints": [],
+        "end": {
+          "finished": {
+            "tuple": [
+              {
+                "list": [
+                  {
+                    "int": "2"
+                  },
+                  {
+                    "int": "3"
+                  }
+                ]
+              },
+              {
+                "set": [
+                  {
+                    "int": "2"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "trace": []
+      }
+    },
+    {
+      "name": "append cannot skip list positions",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\ntry { let xs = [1] set xs[2] = 2 } catch e { print e.kind }\n}\n",
+      "expected": {
+        "prints": [
+          {
+            "text": "index_out_of_range"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": []
+      }
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "rule": "K-FORM-003",
+  "cases": [
+    {
+      "name": "inner declarations shadow without replacing outer bindings",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\nlet x = 1 if true { let x = 2 print x } finish x\n}\n",
+      "expected": {
+        "prints": [
+          {
+            "int": "2"
+          }
+        ],
+        "end": {
+          "finished": {
+            "int": "1"
+          }
+        },
+        "trace": []
+      }
+    }
+  ]
+}

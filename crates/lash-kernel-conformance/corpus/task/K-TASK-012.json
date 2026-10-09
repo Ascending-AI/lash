@@ -1,0 +1,51 @@
+{
+  "rule": "K-TASK-012",
+  "cases": [
+    {
+      "name": "settled joins record success and arbitrary failure data",
+      "document": "kernel 1\nnumbers by_spelling\nfn good() { return 1 } fn bad() { throw 7 }\nmain {\nlet a = spawn call good() let b = spawn call bad() let tasks = [a, b] let answer = join settled tasks finish answer\n}\n",
+      "expected": {
+        "prints": [],
+        "end": {
+          "finished": {
+            "list": [
+              {
+                "record": [
+                  [
+                    "status",
+                    {
+                      "text": "ok"
+                    }
+                  ],
+                  [
+                    "value",
+                    {
+                      "int": "1"
+                    }
+                  ]
+                ]
+              },
+              {
+                "record": [
+                  [
+                    "status",
+                    {
+                      "text": "error"
+                    }
+                  ],
+                  [
+                    "error",
+                    {
+                      "int": "7"
+                    }
+                  ]
+                ]
+              }
+            ]
+          }
+        },
+        "trace": []
+      }
+    }
+  ]
+}

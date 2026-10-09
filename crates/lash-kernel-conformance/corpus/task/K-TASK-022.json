@@ -1,0 +1,24 @@
+{
+  "rule": "K-TASK-022",
+  "cases": [
+    {
+      "name": "live task bound includes main and spawn",
+      "document": "kernel 1\nnumbers by_spelling\nfn pending() { do sleep 0 }\nmain {\nlet h = spawn call pending() finish 1\n}\n",
+      "expected": {
+        "prints": [],
+        "end": {
+          "bound": {
+            "name": "live_tasks",
+            "limit": 1
+          }
+        },
+        "trace": []
+      },
+      "environment": {
+        "bounds": {
+          "live_tasks": 1
+        }
+      }
+    }
+  ]
+}

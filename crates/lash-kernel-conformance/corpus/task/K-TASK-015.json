@@ -1,0 +1,53 @@
+{
+  "rule": "K-TASK-015",
+  "cases": [
+    {
+      "name": "race leaves losing members running until explicit join",
+      "document": "kernel 1\nnumbers by_spelling\neffect echo(value: Int) -> Int\nfn slow() { try { do perform echo(1) as Int print \"slow\" } finally { print \"cleanup\" } } fn fast() { return 2 }\n\nmain {\nlet a = spawn call slow() let b = spawn call fast() let tasks = [a, b] let answer = join race tasks print answer do join a\n}\n",
+      "expected": {
+        "prints": [
+          {
+            "int": "2"
+          },
+          {
+            "text": "slow"
+          },
+          {
+            "text": "cleanup"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": [
+          {
+            "effect": {
+              "effect": "echo",
+              "args": [
+                {
+                  "int": "1"
+                }
+              ],
+              "result": "int"
+            }
+          }
+        ]
+      },
+      "environment": {
+        "deliveries": [
+          [
+            {
+              "request": 0,
+              "outcome": {
+                "completed": {
+                  "int": "10"
+                }
+              }
+            }
+          ]
+        ],
+        "resume": false
+      }
+    }
+  ]
+}

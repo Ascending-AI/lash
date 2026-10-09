@@ -1,0 +1,14 @@
+{
+  "rule": "K-FN-002",
+  "cases": [
+    {
+      "name": "declared function cannot read main variables",
+      "document": "kernel 1\nnumbers by_spelling\nfn closed() { return x }\nmain {\nlet x = 1 let answer = call closed() finish answer\n}\n",
+      "expected": {
+        "prints": [],
+        "end": "refused",
+        "trace": []
+      }
+    }
+  ]
+}

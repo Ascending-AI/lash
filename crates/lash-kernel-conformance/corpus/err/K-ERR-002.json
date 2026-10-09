@@ -1,0 +1,20 @@
+{
+  "rule": "K-ERR-002",
+  "cases": [
+    {
+      "name": "kernel failures retain typed kind",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\ntry { print [1][2] } catch e { print e.kind }\n}\n",
+      "expected": {
+        "prints": [
+          {
+            "text": "index_out_of_range"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": []
+      }
+    }
+  ]
+}

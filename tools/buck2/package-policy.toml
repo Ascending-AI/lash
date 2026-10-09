@@ -658,3 +658,14 @@ compile_data = ["//crates/lash-core-execution:rust_sources"]
 packages = ["lash-internal-core-execution"]
 kinds = ["unit-test"]
 data = ["//:workspace_rust_sources"]
+
+# Kernel conformance reads independently owned rule shards and the specification.
+[[rule]]
+packages = ["lash-kernel-conformance"]
+kinds = ["unit-test"]
+compile_data = ["//docs/kernel:package_files", "//crates/lash-kernel-conformance:package_files", "//crates/lash-kernel-lib:package_files"]
+
+[[rule]]
+packages = ["kernel-embedder"]
+kinds = ["lib"]
+compile_data = ["//examples/kernel-embedder:package_files"]

@@ -1,0 +1,68 @@
+{
+  "rule": "K-ITER-001",
+  "cases": [
+    {
+      "name": "iterable is evaluated once despite reassignment",
+      "document": "kernel 1\nnumbers by_spelling\nmain { let xs = [1, 2] for x in xs { print x set xs = [9] } }",
+      "expected": {
+        "prints": [
+          {
+            "int": "1"
+          },
+          {
+            "int": "2"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": []
+      }
+    },
+    {
+      "name": "tuples yield elements and maps and sets yield keys",
+      "document": "kernel 1\nnumbers by_spelling\nmain { for x in (1, 2) { print x } for x in map{3: 99, 4: 98} { print x } for x in set{5, 6} { print x } }",
+      "expected": {
+        "prints": [
+          {
+            "int": "1"
+          },
+          {
+            "int": "2"
+          },
+          {
+            "int": "3"
+          },
+          {
+            "int": "4"
+          },
+          {
+            "int": "5"
+          },
+          {
+            "int": "6"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": []
+      }
+    },
+    {
+      "name": "a non iterable raises type error",
+      "document": "kernel 1\nnumbers by_spelling\nmain { try { for x in null { print x } } catch e { print e.kind } }",
+      "expected": {
+        "prints": [
+          {
+            "text": "type_error"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": []
+      }
+    }
+  ]
+}

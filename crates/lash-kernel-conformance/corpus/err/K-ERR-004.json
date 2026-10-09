@@ -1,0 +1,24 @@
+{
+  "rule": "K-ERR-004",
+  "cases": [
+    {
+      "name": "bounds bypass catch and finally",
+      "document": "kernel 1\nnumbers by_spelling\nfn value() {}\nmain {\ntry { let h = spawn call value() } catch e { print \"caught\" } finally { print \"cleanup\" }\n}\n",
+      "expected": {
+        "prints": [],
+        "end": {
+          "bound": {
+            "name": "live_tasks",
+            "limit": 1
+          }
+        },
+        "trace": []
+      },
+      "environment": {
+        "bounds": {
+          "live_tasks": 1
+        }
+      }
+    }
+  ]
+}

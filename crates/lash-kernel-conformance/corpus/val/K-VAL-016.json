@@ -1,0 +1,48 @@
+{
+  "rule": "K-VAL-016",
+  "cases": [
+    {
+      "name": "handle kind and id are host data",
+      "document": "kernel 1\nnumbers by_spelling\neffect resource() -> Handle(\"table\")\nmain {\nlet h = perform resource() as Handle(\"table\") finish h\n}\n",
+      "expected": {
+        "prints": [],
+        "end": {
+          "finished": {
+            "handle": {
+              "kind": "table",
+              "id": "row"
+            }
+          }
+        },
+        "trace": [
+          {
+            "effect": {
+              "effect": "resource",
+              "args": [],
+              "result": {
+                "handle": "table"
+              }
+            }
+          }
+        ]
+      },
+      "environment": {
+        "deliveries": [
+          [
+            {
+              "request": 0,
+              "outcome": {
+                "completed": {
+                  "handle": {
+                    "kind": "table",
+                    "id": "row"
+                  }
+                }
+              }
+            }
+          ]
+        ]
+      }
+    }
+  ]
+}

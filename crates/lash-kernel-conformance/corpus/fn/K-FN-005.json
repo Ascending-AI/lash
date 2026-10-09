@@ -1,0 +1,20 @@
+{
+  "rule": "K-FN-005",
+  "cases": [
+    {
+      "name": "variable call requires closure or function reference",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\ntry { let fnc = 1 do apply fnc() } catch e { print e.kind }\n}\n",
+      "expected": {
+        "prints": [
+          {
+            "text": "type_error"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": []
+      }
+    }
+  ]
+}

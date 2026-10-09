@@ -1,0 +1,33 @@
+{
+  "rule": "K-FORM-004",
+  "cases": [
+    {
+      "name": "variable assignment changes binding and leaves object aliases",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\nlet xs = [1] let alias = xs set xs = [2] finish (xs, alias)\n}\n",
+      "expected": {
+        "prints": [],
+        "end": {
+          "finished": {
+            "tuple": [
+              {
+                "list": [
+                  {
+                    "int": "2"
+                  }
+                ]
+              },
+              {
+                "list": [
+                  {
+                    "int": "1"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "trace": []
+      }
+    }
+  ]
+}

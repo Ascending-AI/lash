@@ -1,0 +1,23 @@
+{
+  "rule": "K-FORM-015",
+  "cases": [
+    {
+      "name": "return ends function and fallthrough returns null",
+      "document": "kernel 1\nnumbers by_spelling\nfn value() { return 7 print 8 } fn empty() {}\nmain {\nlet n = call value() let empty = call empty() finish (n, empty)\n}\n",
+      "expected": {
+        "prints": [],
+        "end": {
+          "finished": {
+            "tuple": [
+              {
+                "int": "7"
+              },
+              "null"
+            ]
+          }
+        },
+        "trace": []
+      }
+    }
+  ]
+}

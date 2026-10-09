@@ -1,0 +1,22 @@
+{
+  "rule": "K-VAL-012",
+  "cases": [
+    {
+      "name": "closure construction delays its body",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\nlet n = 1 let fnc = fn() { set n = 2 } print n do apply fnc() finish n\n}\n",
+      "expected": {
+        "prints": [
+          {
+            "int": "1"
+          }
+        ],
+        "end": {
+          "finished": {
+            "int": "2"
+          }
+        },
+        "trace": []
+      }
+    }
+  ]
+}

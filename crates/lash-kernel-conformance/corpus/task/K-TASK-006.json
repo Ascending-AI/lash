@@ -1,0 +1,33 @@
+{
+  "rule": "K-TASK-006",
+  "cases": [
+    {
+      "name": "yield schedules ready children FIFO",
+      "document": "kernel 1\nnumbers by_spelling\nfn child(n) { print n do yield print n }\nmain {\nlet a = spawn call child(1) let b = spawn call child(2) print 0 do yield let tasks = [a, b] do join all tasks\n}\n",
+      "expected": {
+        "prints": [
+          {
+            "int": "1"
+          },
+          {
+            "int": "2"
+          },
+          {
+            "int": "0"
+          },
+          {
+            "int": "1"
+          },
+          {
+            "int": "2"
+          }
+        ],
+        "end": {
+          "finished": "null"
+        },
+        "trace": [],
+        "parks": 0
+      }
+    }
+  ]
+}

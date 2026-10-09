@@ -1,0 +1,31 @@
+{
+  "rule": "K-VAL-005",
+  "cases": [
+    {
+      "name": "binary64 preserves signed zero and canonical nan",
+      "document": "kernel 1\nnumbers by_spelling\n\nmain {\nfinish (nan, inf, -inf, -0.0)\n}\n",
+      "expected": {
+        "prints": [],
+        "end": {
+          "finished": {
+            "tuple": [
+              {
+                "float": "nan"
+              },
+              {
+                "float": "inf"
+              },
+              {
+                "float": "-inf"
+              },
+              {
+                "float": "-0.0"
+              }
+            ]
+          }
+        },
+        "trace": []
+      }
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "rule": "K-TASK-019",
+  "cases": [
+    {
+      "name": "end cancels race loser without running cleanup",
+      "document": "kernel 1\nnumbers by_spelling\neffect echo(value: Int) -> Int\nfn slow() { try { do perform echo(1) as Int print \"slow\" } finally { print \"cleanup\" } } fn fast() { return 2 }\n\nmain {\nlet a = spawn call slow() let b = spawn call fast() let tasks = [a, b] let answer = join race tasks finish answer\n}\n",
+      "expected": {
+        "prints": [],
+        "end": {
+          "finished": {
+            "int": "2"
+          }
+        },
+        "trace": [],
+        "parks": 0
+      }
+    }
+  ]
+}

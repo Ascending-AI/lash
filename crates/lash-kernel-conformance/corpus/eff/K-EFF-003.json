@@ -1,0 +1,73 @@
+{
+  "rule": "K-EFF-003",
+  "cases": [
+    {
+      "name": "separate effect results never share identity",
+      "document": "kernel 1\nnumbers by_spelling\neffect items() -> List(Int)\nmain {\nlet a = perform items() as List(Int) let b = perform items() as List(Int) set a[0] = 2 finish b\n}\n",
+      "expected": {
+        "prints": [],
+        "end": {
+          "finished": {
+            "list": [
+              {
+                "int": "1"
+              }
+            ]
+          }
+        },
+        "trace": [
+          {
+            "effect": {
+              "effect": "items",
+              "args": [],
+              "result": {
+                "list": "int"
+              }
+            }
+          },
+          {
+            "effect": {
+              "effect": "items",
+              "args": [],
+              "result": {
+                "list": "int"
+              }
+            }
+          }
+        ]
+      },
+      "environment": {
+        "deliveries": [
+          [
+            {
+              "request": 0,
+              "outcome": {
+                "completed": {
+                  "list": [
+                    {
+                      "int": "1"
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          [
+            {
+              "request": 1,
+              "outcome": {
+                "completed": {
+                  "list": [
+                    {
+                      "int": "1"
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        ]
+      }
+    }
+  ]
+}
