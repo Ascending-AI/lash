@@ -1,7 +1,8 @@
 //! The crash matrix (ADR 0132 §14, design-opus §7.2): every case of
 //! `lash_sim::crash_matrix` cut at every commit label of its uncut run,
 //! under every mode, at every seed (`LASH_CRASH_MATRIX_SEEDS`, default 2),
-//! on the production durable runtime over SQLite memory. Each cell recovers
+//! on the production durable runtime over SQLite memory, and, selected by
+//! the release gate, over a SQLite file and PostgreSQL. Each cell recovers
 //! on the other node and keeps the invariants F1, F2, NR-1 to NR-4, the
 //! fold, terminal-or-durable-wait and the deadline bound, and its case's
 //! own laws. The catalog audit holds the cases to every label the runtime
@@ -216,4 +217,42 @@ crash_matrix_on_postgres! {
     the_crash_matrix_holds_on_postgres_for_a_prompt_composition => Prompt;
     the_crash_matrix_holds_on_postgres_for_a_compaction_s_summary => Compaction;
     the_crash_matrix_holds_on_postgres_for_a_pressure_frame => Pressure;
+}
+
+/// Each case's matrix over a SQLite database file, one law per case: the
+/// tier a single-host deployment runs on, whose WAL and file locks SQLite
+/// memory does not exercise. The release gate selects it.
+macro_rules! crash_matrix_on_a_sqlite_file {
+    ($($name:ident => $case:ident;)*) => {
+        $(
+            #[tokio::test]
+            #[ignore = "the SQLite-file tier; the release gate selects it with --include-ignored"]
+            async fn $name() {
+                let cells = assert_case_on(Case::$case, &Dialect::SqliteFile).await;
+                eprintln!("{} on a SQLite file: cells per seed {cells:?}", Case::$case.name());
+            }
+        )*
+
+        #[allow(dead_code)]
+        fn every_case_has_a_sqlite_file_law(case: Case) {
+            match case {
+                $(Case::$case)|* => {}
+            }
+        }
+    };
+}
+
+crash_matrix_on_a_sqlite_file! {
+    the_crash_matrix_holds_on_a_sqlite_file_for_a_turn => Turn;
+    the_crash_matrix_holds_on_a_sqlite_file_for_a_tool_round => Round;
+    the_crash_matrix_holds_on_a_sqlite_file_for_a_tool_s_effects => Effects;
+    the_crash_matrix_holds_on_a_sqlite_file_for_a_turn_cancel => Cancel;
+    the_crash_matrix_holds_on_a_sqlite_file_for_a_code_cell => Cell;
+    the_crash_matrix_holds_on_a_sqlite_file_for_a_killed_code_cell => CellKilled;
+    the_crash_matrix_holds_on_a_sqlite_file_for_a_process => Process;
+    the_crash_matrix_holds_on_a_sqlite_file_for_a_session_close => Close;
+    the_crash_matrix_holds_on_a_sqlite_file_for_a_session_command => Command;
+    the_crash_matrix_holds_on_a_sqlite_file_for_a_drained_node => Drain;
+    the_crash_matrix_holds_on_a_sqlite_file_for_a_prompt_composition => Prompt;
+    the_crash_matrix_holds_on_a_sqlite_file_for_a_compaction_s_summary => Compaction;
 }

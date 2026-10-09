@@ -1,7 +1,7 @@
 //! One deployment of the production durable runtime under the matrix: the
 //! session and process activations behind one [`ActorDispatch`], on
-//! [`SimNodes`] `a` and `b` over one SQLite memory database, with the
-//! host's writes through its own producer store.
+//! [`SimNodes`] `a` and `b` over one database (SQLite memory by default),
+//! with the host's writes through its own producer store.
 //!
 //! One node serves and the other stands by: a supervisor starts the standby
 //! the moment the primary stops serving or pauses, and the standby then
@@ -98,6 +98,9 @@ pub fn failover(lease: LeaseConfig) -> Duration {
 pub enum Dialect {
     /// SQLite in memory: the cheapest tier.
     SqliteMemory,
+    /// A fresh SQLite database file in a temporary directory: the tier a
+    /// single-host deployment runs on.
+    SqliteFile,
     /// A fresh isolated database on the PostgreSQL server at this URL.
     Postgres(String),
 }
@@ -115,7 +118,7 @@ impl Dialect {
 }
 
 /// What must outlive a deployment's database: an isolated PostgreSQL
-/// database, dropped with the run.
+/// database or a SQLite file's directory, dropped with the run.
 pub type Keep = Vec<Box<dyn std::any::Any + Send + Sync>>;
 
 /// The backend of a deployment over a fresh database of `dialect` on
@@ -132,6 +135,7 @@ pub async fn open(
 ) -> Result<(Backend, Arc<dyn DurableStore>), String> {
     match dialect {
         Dialect::SqliteMemory => sqlite(clock).await,
+        Dialect::SqliteFile => sqlite_file(clock, keep).await,
         Dialect::Postgres(url) => postgres(url, clock, keep).await,
     }
 }
@@ -280,6 +284,37 @@ pub async fn sqlite(clock: Arc<SimClock>) -> Result<(Backend, Arc<dyn DurableSto
     .await;
     let database: Arc<dyn DurableStore> = Arc::new(stores.durable_store());
     let backend = assemble(Arc::new(stores))?;
+    Ok((backend, database))
+}
+
+/// The backend of a deployment over a fresh SQLite database file on
+/// `clock`, and its durable store. Its calls run inline as
+/// [`sqlite`]'s do; the file's directory is pushed onto `keep`.
+///
+/// # Errors
+///
+/// The directory or the store set does not open, or the backend does not
+/// assemble.
+pub async fn sqlite_file(
+    clock: Arc<SimClock>,
+    keep: &mut Keep,
+) -> Result<(Backend, Arc<dyn DurableStore>), String> {
+    wait_out_renders(&clock);
+    let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
+    let options = lash_sqlite_store::SqliteStoreSetOptions {
+        inline_calls: true,
+        ..lash_sqlite_store::SqliteStoreSetOptions::default()
+    };
+    let stores = lash_sqlite_store::SqliteStoreSet::open_with_options_and_clock(
+        directory.path().join("lash.db"),
+        options,
+        clock,
+    )
+    .await
+    .map_err(|error| error.to_string())?;
+    let database: Arc<dyn DurableStore> = Arc::new(stores.durable_store());
+    let backend = assemble(Arc::new(stores))?;
+    keep.push(Box::new(directory));
     Ok((backend, database))
 }
 
