@@ -577,15 +577,7 @@ mod tests {
             .next()
             .expect("the default workflow exports a process")
             .clone();
-        let view = RunView::of(
-            &WorkflowDocument {
-                graph,
-                source: String::new(),
-                entry,
-            },
-            1,
-        )
-        .expect("the run view");
+        let view = RunView::of(&WorkflowDocument { graph, entry }, 1).expect("the run view");
         let mut overlay = Overlay {
             view,
             process: lash::ProcessId::fixture("call-wait-overlay"),

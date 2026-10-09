@@ -110,10 +110,13 @@ async fn a_started_process_reads_as_its_graph_and_canonical_source() {
     );
     assert_eq!(
         of_process.document.graph,
-        lash_typescript::workflow_graph::workflow_graph_from_artifact(&artifact)
+        lash_vm::workflow_graph_from_artifact(&artifact)
     );
     assert_eq!(
-        of_process.document.source,
+        of_process
+            .source_view()
+            .expect("the greeter has a TypeScript spelling")
+            .source,
         lash_typescript::workflow_graph::typescript_program_source(artifact.ir())
             .expect("the greeter prints")
     );

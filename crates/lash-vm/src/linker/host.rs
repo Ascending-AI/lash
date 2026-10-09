@@ -351,6 +351,16 @@ impl LinkedModule {
         program: Program,
         surface: impl Borrow<LashVmHostEnvironment>,
     ) -> Result<Self, LinkError> {
+        Self::link_then(program, surface, |_| {})
+    }
+
+    /// [`Self::link`], with `settle` applied to the linked program, span
+    /// table included, before it becomes the artifact.
+    pub(crate) fn link_then(
+        program: Program,
+        surface: impl Borrow<LashVmHostEnvironment>,
+        settle: impl FnOnce(&mut Program),
+    ) -> Result<Self, LinkError> {
         crate::ast::validate_ast(&program)?;
         // The linker derives every lifted declaration; a program handed to it
         // declares its processes and cannot claim one was lifted.
@@ -372,6 +382,7 @@ impl LinkedModule {
         let surface = surface.borrow();
         let mut linker = Linker::new(&program, surface);
         let mut program = linker.link_program()?;
+        settle(&mut program);
         let spans = std::mem::take(&mut program.spans);
         let requirements = host_requirements_for_program_with_catalog(&program, &surface.resources);
         let artifact =

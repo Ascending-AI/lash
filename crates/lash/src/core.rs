@@ -419,15 +419,32 @@ impl LashCore {
     /// The core's artifact stores, as a host publishes into them under a
     /// pin it minted (ADR 0113 §2.6).
     pub fn host_artifacts(&self) -> crate::artifacts::HostArtifacts {
-        crate::artifacts::HostArtifacts::new(
-            self.backend().module_artifacts(),
-            Arc::clone(&self.env.core.durability.process_env_store),
-            self.backend().definition_store(),
-            self.backend().attachment_referrers(),
-            self.backend().artifact_cleanup(),
-            Arc::clone(&self.env.core.clock),
-            self.host_process_engines.clone(),
-        )
+        crate::artifacts::HostArtifacts::new(self)
+    }
+
+    /// The tool catalogue a process created under `environment` resolves:
+    /// its own plugin session's tools, built as its runtime builds them.
+    #[cfg(feature = "rlm")]
+    pub(crate) fn process_tool_catalog(
+        &self,
+        environment: &lash_core::ProcessExecutionEnvSpec,
+    ) -> Result<Arc<lash_core::ToolCatalog>> {
+        let plugin_host = build_plugin_host(
+            self.protocol_factory.as_ref(),
+            self.plugin_factories.as_ref(),
+            &self.env.core,
+        )?;
+        let plugins = plugin_host.defer_session(
+            lash_core::plugin::PluginSessionRequest::process_creation(
+                lash_core::mint_process_id(),
+                lash_core::plugin::SessionAuthorityContext {
+                    tool_access: environment.tool_access.clone(),
+                    plugin_config: environment.plugin_config.clone(),
+                },
+            ),
+        )?;
+        plugins.materialize()?;
+        Ok(plugins.resolved_tool_catalog()?)
     }
 
     /// Check start arguments against a retained definition's authoritative signature.

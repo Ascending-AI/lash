@@ -23,10 +23,11 @@ pub enum Request {
         #[serde(with = "serde_bytes")]
         bytes: Vec<u8>,
     },
-    InspectDocument {
-        module_ref: lash_vm::ModuleRef,
-        #[serde(with = "serde_bytes")]
-        bytes: Vec<u8>,
+    /// Admit a workflow document: reconstruct its IR and link it against
+    /// `environment`. No dialect front-end runs.
+    AdmitDocument {
+        graph: Box<lash_vm::WorkflowGraph>,
+        environment: LashVmHostEnvironment,
     },
     CompileAst {
         source: String,
@@ -130,7 +131,8 @@ pub enum Response {
     Module(Box<CompiledModule>),
     Definition(CreatedDefinition),
     Artifact(crate::InspectedArtifact),
-    Document(Box<crate::InspectedDocument>),
+    Admitted(Box<crate::AdmittedDocument>),
+    AdmissionRefused(lash_vm::WorkflowAdmissionRefusal),
     ArtifactRefused(lash_vm::ModuleArtifactRefusal),
     CompileRefused {
         error: lash_vm::ModuleCompileError,
@@ -364,6 +366,7 @@ pub enum WorkerPath {
     References,
     Compile,
     CreateDefinition,
+    Admit,
     Artifact,
     State,
     Cell,
@@ -411,16 +414,16 @@ pub mod runtime_ops {
             >,
         > + Send;
 
-        /// The stored artifact read as a document, or `None` when nothing
-        /// retains it.
-        fn inspect_document(
+        /// `graph` admitted against `environment`, or the typed reason it
+        /// is not.
+        fn admit_document(
             &self,
-            store: &lash_vm::LashVmArtifacts,
-            module_ref: &lash_vm::ModuleRef,
+            graph: lash_vm::WorkflowGraph,
+            environment: LashVmHostEnvironment,
         ) -> impl Future<
             Output = Result<
-                Option<crate::InspectedDocument>,
-                lash_core_execution::ArtifactStoreError,
+                Result<crate::AdmittedDocument, lash_vm::WorkflowAdmissionRefusal>,
+                PoolError,
             >,
         > + Send;
 
@@ -496,31 +499,23 @@ pub mod runtime_ops {
             }
         }
 
-        async fn inspect_document(
+        async fn admit_document(
             &self,
-            store: &lash_vm::LashVmArtifacts,
-            module_ref: &lash_vm::ModuleRef,
-        ) -> Result<Option<crate::InspectedDocument>, lash_core_execution::ArtifactStoreError>
+            graph: lash_vm::WorkflowGraph,
+            environment: LashVmHostEnvironment,
+        ) -> Result<Result<crate::AdmittedDocument, lash_vm::WorkflowAdmissionRefusal>, PoolError>
         {
-            let Some(bytes) = store
-                .store()
-                .get_module_artifact(module_ref.as_str())
-                .await?
-            else {
-                return Ok(None);
-            };
             match self
-                .request_accounted(Request::InspectDocument {
-                    module_ref: module_ref.clone(),
-                    bytes,
+                .request_accounted(Request::AdmitDocument {
+                    graph: Box::new(graph),
+                    environment,
                 })
-                .await
-                .map_err(inspection_error)?
+                .await?
             {
-                Response::Document(document) => Ok(Some(*document)),
-                Response::ArtifactRefused(refusal) => Err(refusal.into()),
-                _ => Err(lash_core_execution::ArtifactStoreError::Backend(
-                    "unexpected worker document inspection response".into(),
+                Response::Admitted(admitted) => Ok(Ok(*admitted)),
+                Response::AdmissionRefused(refusal) => Ok(Err(refusal)),
+                _ => Err(PoolError::breach(
+                    lash_vm_protocol::SequenceFault::UnexpectedServiceResponse,
                 )),
             }
         }
@@ -575,6 +570,7 @@ pub mod runtime_ops {
                     | Request::CompileAst { .. }
                     | Request::LinkAst { .. } => WorkerPath::Compile,
                     Request::CreateDefinition { .. } => WorkerPath::CreateDefinition,
+                    Request::AdmitDocument { .. } => WorkerPath::Admit,
                     Request::InspectArtifact { .. } | Request::VerifyArtifact { .. } => {
                         WorkerPath::Artifact
                     }

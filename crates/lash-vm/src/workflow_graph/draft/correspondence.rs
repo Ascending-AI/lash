@@ -95,6 +95,86 @@ impl WorkflowCorrespondence {
             _ => None,
         })
     }
+
+    /// This correspondence carried through an admission of the document it
+    /// ends at: `admitted` names the admitted id of each node of that
+    /// document, and every outcome ends at the admitted node instead. A
+    /// surviving node admission does not name is [`Unmatched`]; an inserted
+    /// one it does not name has no entry.
+    ///
+    /// [`Unmatched`]: WorkflowCorrespondenceEntry::Unmatched
+    #[must_use]
+    pub fn through(&self, admitted: &BTreeMap<WorkflowNodeId, WorkflowNodeId>) -> Self {
+        use WorkflowCorrespondenceEntry as Entry;
+        let mut entries = Vec::with_capacity(self.entries.len());
+        for entry in &self.entries {
+            match entry.clone() {
+                Entry::Retained { handle, from, to } => entries.push(match admitted.get(&to) {
+                    Some(to) => Entry::Retained {
+                        handle,
+                        from,
+                        to: to.clone(),
+                    },
+                    None => Entry::Unmatched { handle, from },
+                }),
+                Entry::Moved { handle, from, to } => entries.push(match admitted.get(&to) {
+                    Some(to) => Entry::Moved {
+                        handle,
+                        from,
+                        to: to.clone(),
+                    },
+                    None => Entry::Unmatched { handle, from },
+                }),
+                Entry::Inserted { handle, to, source } => {
+                    if let Some(to) = admitted.get(&to) {
+                        entries.push(Entry::Inserted {
+                            handle,
+                            to: to.clone(),
+                            source,
+                        });
+                    }
+                }
+                Entry::Split { handle, from, into } => {
+                    let into = into
+                        .into_iter()
+                        .filter_map(|(piece, id)| Some((piece, admitted.get(&id)?.clone())))
+                        .collect::<Vec<_>>();
+                    entries.push(if into.is_empty() {
+                        Entry::Unmatched { handle, from }
+                    } else {
+                        Entry::Split { handle, from, into }
+                    });
+                }
+                Entry::Merged {
+                    handles,
+                    from,
+                    handle,
+                    to,
+                } => match admitted.get(&to) {
+                    Some(to) => entries.push(Entry::Merged {
+                        handles,
+                        from,
+                        handle,
+                        to: to.clone(),
+                    }),
+                    None => entries.extend(
+                        handles
+                            .into_iter()
+                            .zip(from)
+                            .map(|(handle, from)| Entry::Unmatched { handle, from }),
+                    ),
+                },
+                unchanged @ (Entry::Deleted { .. } | Entry::Unmatched { .. }) => {
+                    entries.push(unchanged);
+                }
+            }
+        }
+        Self {
+            base: self.base,
+            revision: self.revision,
+            entries,
+        }
+    }
 }
 
 /// What edits and normalizations did to handles.

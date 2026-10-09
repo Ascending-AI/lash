@@ -79,15 +79,15 @@ impl InspectedArtifact {
             .ok_or_else(|| "process export has no complete signature".into())
     }
 }
-/// A worker-verified artifact read as a document: its metadata, the graph of
-/// the program it executes with spans into its canonical TypeScript, and that
-/// text.
+/// A workflow document a worker admitted against a host environment: the
+/// artifact the linker derived from it, whose `graph` is the admitted
+/// document, and the admitted id of each node and process container of the
+/// submitted one.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct InspectedDocument {
+pub struct AdmittedDocument {
     pub artifact: InspectedArtifact,
-    pub graph: lash_vm::WorkflowGraph,
-    pub source: String,
+    pub nodes: BTreeMap<lash_vm::WorkflowNodeId, lash_vm::WorkflowNodeId>,
 }
 impl lash_vm::ModuleArtifactBytes for InspectedArtifact {
     fn artifact_ref(&self) -> &lash_vm::ModuleRef {

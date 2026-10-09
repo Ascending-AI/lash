@@ -1,4 +1,5 @@
-//! Reading a process or a definition as its workflow (FIG-5563).
+//! Reading a process or a definition as its workflow (FIG-5563), editing
+//! it, and publishing the result as a new definition (FIG-5574).
 //!
 //! [`Processes::graph`](crate::process::Processes::graph) and
 //! [`HostArtifacts::definition_graph`](crate::process::HostArtifacts::definition_graph)
@@ -57,6 +58,33 @@
 //! host maps an edge drag to a move or to a use of a binding
 //! ([`WorkflowDraft::edit_for_edge_drag`]).
 //!
+//! # Publishing
+//!
+//! [`HostArtifacts::publish_workflow`](crate::process::HostArtifacts::publish_workflow)
+//! admits a draft as a definition. Lash reconstructs the IR in its VM
+//! workers, links it against the environment a process of the definition
+//! would run under, and publishes the module and the descriptor of the
+//! selected [`WorkflowEntry`] under the host's pin. A [`WorkflowPublication`]
+//! names the definition, the admitted document and the correspondence from
+//! the opened document to the admitted one. A document the linker refuses
+//! is a [`WorkflowAdmissionRefusal`] at node and expression paths, and
+//! publishes nothing.
+//!
+//! Nothing a document states about itself is trusted: ids, types,
+//! signatures, lifted processes and host requirements are derived again.
+//! A lifted process keeps its name only when the declaration the linker
+//! derives equals the document's in everything else, so an unchanged
+//! admitted document publishes to the definition it was read from.
+//!
+//! # Source
+//!
+//! No part of reading, editing or publishing prints or parses a dialect.
+//! TypeScript is a lens: `lash::typescript::workflow_graph` lowers source to
+//! a document a draft opens, and [`WorkflowInspection::source_view`] answers
+//! a document's canonical TypeScript with a span per node, or the lens's
+//! typed refusal for a program it cannot spell. A refusal there leaves the
+//! document readable, editable and publishable.
+//!
 //! The IR the document carries (`Expr`, its slots, declarations and types)
 //! is `lash::vm::ir`; this module is the document itself.
 
@@ -69,12 +97,16 @@ pub use lash_vm::{
     WorkflowRunDriver, workflow_node_statement, workflow_program_from_graph,
 };
 pub use lash_vm::{
+    WorkflowAdmissionDiagnostic, WorkflowAdmissionDiagnosticKind, WorkflowAdmissionLocation,
+    WorkflowAdmissionRefusal,
+};
+pub use lash_vm::{
     WorkflowBindingRef, WorkflowBodyRef, WorkflowCorrespondence, WorkflowCorrespondenceEntry,
     WorkflowDraft, WorkflowDraftHandle, WorkflowDraftOpenError, WorkflowDraftRevision,
     WorkflowEdgeDrag, WorkflowEdit, WorkflowEditDiagnostic, WorkflowEditDiagnosticKind,
     WorkflowEditLocation, WorkflowEditRefusal, WorkflowEditTransaction, WorkflowNodeSource,
 };
-pub use lash_vm_runtime::WorkflowDocument;
+pub use lash_vm_runtime::{WorkflowDocument, WorkflowEntry};
 
 use crate::persistence::ArtifactName;
 use crate::process::{ProcessDefinition, ProcessDefinitionId, ProcessEngineKind};
@@ -90,6 +122,45 @@ pub struct WorkflowInspection {
     /// The definition in its language. `document.graph.source_identity`
     /// names the artifact the definition executes.
     pub document: WorkflowDocument,
+}
+
+#[cfg(feature = "typescript")]
+impl WorkflowInspection {
+    /// The document's canonical TypeScript and where each node sits in it,
+    /// or the typed reason the TypeScript lens has none. The lens runs here,
+    /// when asked: the read that answered this inspection printed nothing.
+    pub fn source_view(
+        &self,
+    ) -> std::result::Result<
+        lash_typescript::workflow_graph::SourceView,
+        lash_typescript::workflow_graph::GraphRenderError,
+    > {
+        lash_typescript::workflow_graph::source_view(&self.document.graph)
+    }
+}
+
+/// A workflow published as a definition.
+#[derive(Clone, Debug, PartialEq)]
+pub struct WorkflowPublication {
+    /// The content-derived id and the signature the stored artifact states.
+    pub definition: ProcessDefinition,
+    /// The admitted document and the process the definition starts.
+    pub document: WorkflowDocument,
+    /// What became of every node since the draft was opened, ending at the
+    /// ids of the admitted document.
+    pub correspondence: WorkflowCorrespondence,
+}
+
+/// The answer to publishing a workflow.
+#[derive(Clone, Debug, PartialEq)]
+pub enum WorkflowPublish {
+    Published(Box<WorkflowPublication>),
+    /// The document was refused admission. Nothing was published.
+    Refused(WorkflowAdmissionRefusal),
+    /// No engine of this core admits workflow documents.
+    Unsupported {
+        engine_kind: ProcessEngineKind,
+    },
 }
 
 /// A workflow inspection, or why there is none.

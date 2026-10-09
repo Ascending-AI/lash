@@ -929,6 +929,21 @@ impl LashVmProcessEngine {
     pub fn artifact_store(&self) -> LashVmArtifacts {
         self.artifact_store.clone()
     }
+
+    /// The settings a process created under `env_spec` records: the surface
+    /// its runs link against and their bounds.
+    pub(crate) fn recorded_settings(
+        &self,
+        env_spec: &lash_core::ProcessExecutionEnvSpec,
+    ) -> Result<LashVmRecordedSettings, lash_core::PluginError> {
+        match &self.run_settings_recorder {
+            Some(recorder) => recorder.record(env_spec),
+            None => Ok(LashVmRecordedSettings::new(
+                self.surface.clone(),
+                self.execution_bounds,
+            )),
+        }
+    }
 }
 
 #[async_trait::async_trait]
@@ -950,11 +965,7 @@ impl lash_core::ProcessEngine for LashVmProcessEngine {
         &self,
         env_spec: &lash_core::ProcessExecutionEnvSpec,
     ) -> Result<Option<serde_json::Value>, lash_core::PluginError> {
-        let recorded = match &self.run_settings_recorder {
-            Some(recorder) => recorder.record(env_spec)?,
-            None => LashVmRecordedSettings::new(self.surface.clone(), self.execution_bounds),
-        };
-        serde_json::to_value(recorded)
+        serde_json::to_value(self.recorded_settings(env_spec)?)
             .map(Some)
             .map_err(|error| lash_core::PluginError::Registration(error.to_string()))
     }
@@ -1102,8 +1113,7 @@ pub fn lash_vm_process_engine_registration(
     )
     .expect("lash_vm engine and admission share a fixed kind")
     .with_document_provider(Arc::new(document::LashVmDocumentProvider {
-        artifact_store: engine.artifact_store.clone(),
-        workers: engine.workers.clone(),
+        engine: Arc::clone(&engine),
     }))
     .with_engine_steps(Arc::new(LashVmEngineSteps::new(Arc::clone(&engine))))
 }
@@ -1135,7 +1145,10 @@ pub use deferred::{
     resolve_and_build_deferred_environment, resolve_and_build_deferred_environment_from_references,
     resolve_and_fold_deferred,
 };
-pub use document::WorkflowDocument;
+pub use document::{
+    AdmittedWorkflow, WorkflowAdmissionOutcome, WorkflowAdmissionRequest, WorkflowDocument,
+    WorkflowEntry,
+};
 pub use engine::LASH_VM_SEGMENT_STATE_VERSION;
 pub use process::{
     lash_vm_program_hash, lash_vm_type_expr_schema, trace_lashlang_main_map,

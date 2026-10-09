@@ -236,6 +236,10 @@ pub use workflow_graph::{
     execution_sites,
 };
 pub use workflow_graph::{
+    WorkflowAdmission, WorkflowAdmissionDiagnostic, WorkflowAdmissionDiagnosticKind,
+    WorkflowAdmissionLocation, WorkflowAdmissionRefusal, admit_workflow_graph,
+};
+pub use workflow_graph::{
     WorkflowBindingRef, WorkflowBodyRef, WorkflowCorrespondence, WorkflowCorrespondenceEntry,
     WorkflowDraft, WorkflowDraftHandle, WorkflowDraftOpenError, WorkflowDraftRevision,
     WorkflowEdgeDrag, WorkflowEdit, WorkflowEditDiagnostic, WorkflowEditDiagnosticKind,

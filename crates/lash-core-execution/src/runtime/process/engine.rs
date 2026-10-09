@@ -240,8 +240,10 @@ pub enum ProcessDocumentRefRead {
 }
 
 /// An engine's optional reading of its definitions as a language document
-/// (FIG-5563). An engine registered without one has no document: a host's
-/// inspection of its processes and definitions answers `Unsupported`.
+/// (FIG-5563), and its admission of such a document as a definition
+/// (FIG-5574). An engine registered without one has no document: a host's
+/// inspection of its processes and definitions, and its publication of a
+/// document, answer `Unsupported`.
 #[async_trait::async_trait]
 pub trait ProcessDocumentProvider: Send + Sync {
     /// The document of the definition `payload` names: a start payload or a
@@ -257,6 +259,20 @@ pub trait ProcessDocumentProvider: Send + Sync {
         &self,
         payload: &serde_json::Value,
     ) -> Result<ProcessDocumentRefRead, crate::PluginError>;
+
+    /// Admit a language document as a definition. The engine validates the
+    /// document itself, derives everything a definition states from it, and
+    /// only then holds what the definition executes under `claim` in its own
+    /// stores. A document it refuses holds nothing.
+    ///
+    /// Core names no language here either: `request` and the answer are the
+    /// provider's own types, which the caller that knows them builds and
+    /// takes back with [`ProcessDocument::downcast`].
+    async fn admit(
+        &self,
+        claim: &crate::ReferrerClaim,
+        request: ProcessDocument,
+    ) -> Result<ProcessDocument, crate::PluginError>;
 }
 
 /// A process identity the engine registry produced.

@@ -56,6 +56,7 @@ use crate::ast::{
 };
 use crate::span::Span;
 
+mod admission;
 mod body;
 mod draft;
 mod execution_sites;
@@ -66,6 +67,10 @@ mod reconstruction;
 #[cfg(test)]
 mod totality_tests;
 
+pub use admission::{
+    WorkflowAdmission, WorkflowAdmissionDiagnostic, WorkflowAdmissionDiagnosticKind,
+    WorkflowAdmissionLocation, WorkflowAdmissionRefusal, admit_workflow_graph,
+};
 pub use body::{WorkflowBodyForm, WorkflowCompletionGroup};
 pub use draft::{
     WorkflowBindingRef, WorkflowBodyRef, WorkflowCorrespondence, WorkflowCorrespondenceEntry,

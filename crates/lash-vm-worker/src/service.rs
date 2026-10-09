@@ -26,15 +26,15 @@ pub(crate) fn perform(
             Ok(artifact) => Response::Artifact(inspect(&artifact)?),
             Err(refusal) => Response::ArtifactRefused(refusal),
         },
-        Request::InspectDocument { module_ref, bytes } => match verified(&module_ref, &bytes) {
-            Ok(artifact) => Response::Document(Box::new(lash_vm_client::InspectedDocument {
-                source: lash_typescript::workflow_graph::typescript_program_source(artifact.ir())
-                    .map_err(inconsistent_artifact)?,
-                graph: lash_typescript::workflow_graph::workflow_graph_from_artifact(&artifact),
-                artifact: inspect(&artifact)?,
-            })),
-            Err(refusal) => Response::ArtifactRefused(refusal),
-        },
+        Request::AdmitDocument { graph, environment } => {
+            match lash_vm::admit_workflow_graph(&graph, &environment) {
+                Ok(admission) => Response::Admitted(Box::new(lash_vm_client::AdmittedDocument {
+                    artifact: inspect(&admission.linked.artifact)?,
+                    nodes: admission.nodes,
+                })),
+                Err(refusal) => Response::AdmissionRefused(refusal),
+            }
+        }
 
         Request::CreateDefinition {
             source,
