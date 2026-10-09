@@ -98,7 +98,7 @@ async fn the_backend_process_registry_stamps_from_the_backend_clock() {
         .expect("register clock-wiring process")
         .id;
     let wait = lash_core::WaitState {
-        since_ms: NOW_MS,
+        since_ms: i64::try_from(NOW_MS).expect("fixture time"),
         kind: lash_core::WaitKind::Call {
             call_id: lash_core::ToolCallId::fixture("builder-clock-call"),
             tool_id: lash_core::ToolId::from("builder-clock-tool"),

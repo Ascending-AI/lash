@@ -833,8 +833,6 @@ fn drain_area_witnesses() {
     type_witness::<lash::process::WaitKind>();
     // W0301: lash::process::WaitState [struct]
     type_witness::<lash::process::WaitState>();
-    // W0302: lash::process::WaitState::key [function]
-    let _ = lash::process::WaitState::key;
     // W0303: lash::process::WaitState::kind [field]
     field_witness(|value: &lash::process::WaitState| {
         let _ = &value.kind;

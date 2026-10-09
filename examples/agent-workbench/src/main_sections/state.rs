@@ -954,7 +954,7 @@ impl WorkLifecycle {
         match &process.lifecycle {
             lash::process::ProcessLifecycleState::Running {} => Self::Running,
             lash::process::ProcessLifecycleState::Waiting { waits } => Self::Waiting {
-                blockers: waits.clone(),
+                blockers: waits.as_slice().to_vec(),
             },
             lash::process::ProcessLifecycleState::Terminal { occurred_at_ms, .. } => {
                 Self::Terminal {

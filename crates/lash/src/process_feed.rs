@@ -56,10 +56,11 @@ use lash_core::{
     PluginError, ProcessEffectCoverage, ProcessEffectEvidence, ProcessEffectGapReason,
     ProcessEffectReport, ProcessEventHistoryRetention, ProcessEventPageEvents,
     ProcessEventPageMore, ProcessEventQueryMode, ProcessEventReadOutcome, ProcessObservation,
-    ProcessObservationCursor, ProcessObservationEvent, ProcessObservationEventPayload,
-    ProcessObservationGapCause, ProcessReadView, ProcessRegistry, ProcessReplayGap,
-    ProcessReplayStore, ProcessReplayStoreError, ProcessReplaySubscribeOutcome,
-    ProcessReplaySubscription, ProcessSequence, RetainedProcessView, RetiredProcessStatus,
+    ProcessObservationCursor, ProcessObservationEnd, ProcessObservationEvent,
+    ProcessObservationEventPayload, ProcessObservationGapCause, ProcessObservationReplacement,
+    ProcessReadView, ProcessRegistry, ProcessReplayStore, ProcessReplayStoreError,
+    ProcessReplaySubscribeOutcome, ProcessReplaySubscription, ProcessSequence, RetainedProcessView,
+    RetiredProcessStatus,
 };
 use lash_sansio::ProcessId;
 
@@ -311,20 +312,18 @@ impl ProcessFeedSource {
     /// by being read.
     pub(crate) async fn snapshot(&self) -> Result<ProcessObservation> {
         let read_view = self.read_view().await?;
-        let cursor = match read_view {
-            ProcessReadView::Retained(_) => self
+        let cursor = match read_view.sequence() {
+            Some(sequence) => self
                 .replay
-                .earliest_cursor(&self.process_id, read_view.sequence())
+                .earliest_cursor(&self.process_id, sequence)
                 .await
                 .map_err(process_replay_error)?,
-            ProcessReadView::Retired { .. } | ProcessReadView::Unknown => {
-                ProcessObservationCursor::new(
-                    UNRETAINED_INCARNATION,
-                    &self.process_id,
-                    read_view.sequence(),
-                    0,
-                )
-            }
+            None => ProcessObservationCursor::new(
+                UNRETAINED_INCARNATION,
+                &self.process_id,
+                ProcessSequence::new(0),
+                0,
+            ),
         };
         Ok(ProcessObservation { read_view, cursor })
     }
@@ -349,28 +348,30 @@ impl ProcessFeedSource {
             .sequence)
     }
 
-    /// A gap from `requested`: the durable read view and the cursor a
-    /// reader continues from.
+    /// The authoritative replacement at a gap: retained state and its
+    /// continuation, or typed absence that ends observation.
     async fn gap(
         &self,
-        requested: &ProcessObservationCursor,
         cause: ProcessObservationGapCause,
-    ) -> Result<(ProcessObservation, ProcessReplayGap)> {
+    ) -> Result<ProcessObservationReplacement> {
         let observation = self.snapshot().await?;
-        let cause = match observation.read_view {
-            ProcessReadView::Retained(_) => cause,
-            ProcessReadView::Retired { .. } | ProcessReadView::Unknown => {
-                ProcessObservationGapCause::NotRetained
+        Ok(match observation.read_view {
+            ProcessReadView::Retained(view) => ProcessObservationReplacement::Replaced {
+                view,
+                cursor: observation.cursor,
+                cause,
+            },
+            ProcessReadView::Retired {
+                terminal_label,
+                pruned_at_ms,
+            } => ProcessObservationReplacement::Ended(ProcessObservationEnd::Retired {
+                terminal_label,
+                pruned_at_ms,
+            }),
+            ProcessReadView::Unknown => {
+                ProcessObservationReplacement::Ended(ProcessObservationEnd::Unknown)
             }
-        };
-        let gap = ProcessReplayGap {
-            process_id: self.process_id.clone(),
-            requested_cursor: requested.clone(),
-            latest_cursor: observation.cursor.clone(),
-            latest_sequence: observation.read_view.sequence(),
-            cause,
-        };
-        Ok((observation, gap))
+        })
     }
 }
 
@@ -383,12 +384,12 @@ const UNRETAINED_INCARNATION: &str = "unretained";
 #[derive(Clone, Debug)]
 pub enum ProcessObservationStreamItem {
     Event(Arc<ProcessObservationEvent>),
-    /// The feed could not continue from its cursor. `observation` replaces
+    /// The feed could not continue from its cursor. `replacement` replaces
     /// the consumer's durable state; the consumer discards its provisional
     /// state and folds what the feed replays next.
     Gap {
-        observation: ProcessObservation,
-        gap: ProcessReplayGap,
+        requested: ProcessObservationCursor,
+        replacement: ProcessObservationReplacement,
     },
 }
 
@@ -665,7 +666,7 @@ impl FeedState {
         let mut reconciled = None;
         let cause = loop {
             let Some(durable) = self.source.durable_sequence().await? else {
-                break ProcessObservationGapCause::NotRetained;
+                break ProcessObservationGapCause::CommitUnbridged;
             };
             if requested > durable {
                 break ProcessObservationGapCause::AheadOfDurableProcess;
@@ -718,7 +719,7 @@ impl FeedState {
         };
         let Some(durable) = self.source.durable_sequence().await? else {
             return self
-                .rebuild(ProcessObservationGapCause::NotRetained)
+                .rebuild(ProcessObservationGapCause::CommitUnbridged)
                 .await
                 .map(Some);
         };
@@ -813,12 +814,23 @@ impl FeedState {
         &mut self,
         cause: ProcessObservationGapCause,
     ) -> Result<ProcessObservationStreamItem> {
-        let (observation, gap) = self.source.gap(&self.cursor, cause).await?;
-        self.held = Some(gap.latest_sequence);
-        self.cursor = gap.latest_cursor.clone();
+        let requested = self.cursor.clone();
+        let replacement = self.source.gap(cause).await?;
+        match &replacement {
+            ProcessObservationReplacement::Replaced { view, cursor, .. } => {
+                self.held = Some(ProcessSequence::new(view.process.last_event_sequence));
+                self.cursor = cursor.clone();
+            }
+            ProcessObservationReplacement::Ended(_) => {
+                self.held = None;
+                self.done = true;
+            }
+        }
         self.live = None;
-        self.done = !matches!(observation.read_view, ProcessReadView::Retained(_));
-        Ok(ProcessObservationStreamItem::Gap { observation, gap })
+        Ok(ProcessObservationStreamItem::Gap {
+            requested,
+            replacement,
+        })
     }
 
     /// Deliver one event. A committed fact at or below the sequence the

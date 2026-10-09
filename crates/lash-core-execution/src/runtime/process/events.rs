@@ -1222,21 +1222,25 @@ impl ProcessEventAppendRequest {
     /// Builds a wait-entry event for process-store implementors keyed by wait identity and start
     /// time so replay cannot duplicate the transition.
     pub fn wait_entered(process_id: &ProcessId, wait: &WaitState) -> Self {
-        Self::new(ProcessLifecycleFact::Waiting { wait: wait.clone() }).with_replay_key(format!(
-            "process:{process_id}:wait:{}:since:{}:entered",
-            wait.key(),
-            wait.since_ms
-        ))
+        Self::new(ProcessLifecycleFact::Waiting { wait: wait.clone() })
+            .with_replay_key(Self::wait_transition_key(process_id, wait, "entered"))
     }
 
     /// Builds a wait-clear event for process-store implementors keyed to the exact wait identity
     /// and start time being resumed.
     pub fn wait_cleared(process_id: &ProcessId, wait: &WaitState) -> Self {
-        Self::new(ProcessLifecycleFact::Resumed { wait: wait.clone() }).with_replay_key(format!(
-            "process:{process_id}:wait:{}:since:{}:cleared",
-            wait.key(),
+        Self::new(ProcessLifecycleFact::Resumed { wait: wait.clone() })
+            .with_replay_key(Self::wait_transition_key(process_id, wait, "cleared"))
+    }
+
+    fn wait_transition_key(process_id: &ProcessId, wait: &WaitState, transition: &str) -> String {
+        let kind = crate::stable_hash::sha256_hex(&crate::identity_json::payload_leaf(
+            &serde_json::json!(wait.kind),
+        ));
+        format!(
+            "process:{process_id}:wait:{kind}:since:{}:{transition}",
             wait.since_ms
-        ))
+        )
     }
 
     /// Builds the single replay-stable external-reference event for process-store implementors

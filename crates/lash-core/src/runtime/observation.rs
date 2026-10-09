@@ -16,12 +16,12 @@ pub use process_replay::{
     InMemoryProcessReplayStore, InMemoryProcessReplayStoreConfig, LanguageExecutionObservation,
     ParsedProcessObservationCursor, ProcessDocumentIdentity, ProcessEffectCoverage,
     ProcessEffectEvidence, ProcessEffectGapReason, ProcessObservation, ProcessObservationCursor,
-    ProcessObservationCursorError, ProcessObservationEvent, ProcessObservationEventPayload,
-    ProcessObservationGapCause, ProcessObservationIdentity, ProcessReadView,
-    ProcessReplayEventDraft, ProcessReplayGap, ProcessReplayGapReason, ProcessReplayOutcome,
-    ProcessReplayPublishLimits, ProcessReplayStore, ProcessReplayStoreError,
-    ProcessReplaySubscribeOutcome, ProcessReplaySubscription, ProcessSequence, RetainedProcessView,
-    StepBodyStartedObservation, commits_bridge,
+    ProcessObservationCursorError, ProcessObservationEnd, ProcessObservationEvent,
+    ProcessObservationEventPayload, ProcessObservationGapCause, ProcessObservationIdentity,
+    ProcessObservationReplacement, ProcessReadView, ProcessReplayEventDraft,
+    ProcessReplayGapReason, ProcessReplayOutcome, ProcessReplayPublishLimits, ProcessReplayStore,
+    ProcessReplayStoreError, ProcessReplaySubscribeOutcome, ProcessReplaySubscription,
+    ProcessSequence, RetainedProcessView, StepBodyStartedObservation, commits_bridge,
 };
 pub(in crate::runtime) use replay::observation_revision;
 pub use replay::{

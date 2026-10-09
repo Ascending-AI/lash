@@ -984,7 +984,7 @@ async fn refolded_process_record_matches_stored_projection(
         .expect("record refold first start");
     assert_refold_matches_stored_projection(&reader, &base, process_id, "first start").await;
     let wait = WaitState {
-        since_ms: base.created_at_ms,
+        since_ms: i64::try_from(base.created_at_ms).unwrap_or(i64::MAX),
         kind: crate::WaitKind::Call {
             call_id: lash_sansio::ToolCallId::fixture("process-wait-law"),
             tool_id: lash_sansio::ToolId::new("process_wait"),
@@ -1263,7 +1263,7 @@ pub async fn waiting_processes_remain_in_the_non_terminal_scan(registry: Arc<dyn
         .set_process_wait_with_authority(
             &process_id,
             WaitState {
-                since_ms: record.created_at_ms,
+                since_ms: i64::try_from(record.created_at_ms).unwrap_or(i64::MAX),
                 kind: crate::WaitKind::Call {
                     call_id: lash_sansio::ToolCallId::fixture("process-wait-law"),
                     tool_id: lash_sansio::ToolId::new("process_wait"),

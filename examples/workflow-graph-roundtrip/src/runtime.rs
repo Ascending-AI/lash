@@ -250,12 +250,13 @@ pub(crate) async fn observe(
                     matches!(event.fact, ProcessLifecycleFact::Terminal { .. }),
                 ),
             },
-            ProcessObservationStreamItem::Gap { observation, .. } => {
+            ProcessObservationStreamItem::Gap { replacement, .. } => {
+                let read_view = replacement.into_read_view();
                 // A gap retires provisional history. Applied display operations
                 // remain host state; retained effect evidence rebuilds bindings.
                 overlay.accumulator.reset_live();
                 overlay.completed_calls.clear();
-                overlay.snapshot(observation.read_view)?
+                overlay.snapshot(read_view)?
             }
         };
     }

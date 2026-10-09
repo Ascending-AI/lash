@@ -206,8 +206,12 @@ mod tests {
     /// wait, in the one read (FIG-5564).
     #[tokio::test]
     async fn an_observed_process_carries_its_typed_outcome_or_its_wait_in_one_read() {
-        let registry = memory_registry().await;
+        let stores = crate::support::sqlite_memory_process_store_set().await;
+        let registry: Arc<dyn ProcessRegistry> = stores.process_registry();
         let observer = observer(Arc::clone(&registry));
+        let actor_observer = observer
+            .clone()
+            .with_actor_parks(Arc::new(stores.durable_store()));
         let failure =
             crate::ToolFailure::runtime(ToolFailureClass::External, "boom", "failed loudly");
         let evidence = crate::AbandonEvidence {
@@ -244,6 +248,16 @@ mod tests {
                 .await
                 .expect("read the ended process")
                 .expect("the ended process is retained");
+            assert_eq!(seen.park, crate::ProcessParkState::NotRead);
+            assert_eq!(
+                actor_observer
+                    .process(&id)
+                    .await
+                    .expect("read actor park")
+                    .expect("retained process")
+                    .park,
+                crate::ProcessParkState::NotParked
+            );
             let expected =
                 crate::ProcessTerminal::try_from(outcome).expect("the outcome is terminal");
             assert_eq!(
@@ -286,9 +300,21 @@ mod tests {
             .await
             .expect("read the waiting process")
             .expect("the waiting process is retained");
+        assert_eq!(seen.park, crate::ProcessParkState::NotRead);
+        assert_eq!(
+            actor_observer
+                .process(&id)
+                .await
+                .expect("read actor park")
+                .expect("retained process")
+                .park,
+            crate::ProcessParkState::NotParked
+        );
         assert_eq!(
             seen.lifecycle,
-            crate::ProcessLifecycleState::Waiting { waits: vec![wait] },
+            crate::ProcessLifecycleState::Waiting {
+                waits: crate::ProcessWaits::new(wait)
+            },
             "a waiting process is observed with what it waits on"
         );
     }

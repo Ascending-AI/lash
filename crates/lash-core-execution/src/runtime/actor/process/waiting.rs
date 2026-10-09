@@ -36,7 +36,7 @@ pub(super) fn project(
     record: &ProcessRecord,
     driver: &Driver,
     fold: &RunFold,
-    since_ms: u64,
+    since_ms: i64,
 ) {
     let mut blockers: Vec<(WaitKind, Option<StepEffectSite>)> = fold
         .rounds()

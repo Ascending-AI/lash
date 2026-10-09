@@ -477,3 +477,46 @@ fn every_registration_refusal_rule_has_a_fixture_that_trips_exactly_it() {
         }
     }
 }
+
+/// FIG-5644: one typed blocker has one entry even on stored decode.
+#[test]
+fn a_waiting_state_refuses_duplicate_blockers() {
+    let wait = WaitState {
+        kind: WaitKind::Sleep { until_ms: 900 },
+        since_ms: 1,
+        site: None,
+    };
+    let encoded = serde_json::json!({
+        "state": "waiting",
+        "waits": [wait.clone(), WaitState { since_ms: 2, ..wait }],
+    });
+    assert!(serde_json::from_value::<crate::ProcessLifecycleState>(encoded).is_err());
+}
+
+/// FIG-5644: construction and folding keep one entry per typed wait kind.
+#[test]
+fn waiting_construction_and_fold_keep_one_entry_per_kind() {
+    let first = WaitState {
+        kind: WaitKind::Sleep { until_ms: -1 },
+        since_ms: -2,
+        site: None,
+    };
+    let replacement = WaitState {
+        since_ms: -1,
+        ..first.clone()
+    };
+    assert!(crate::ProcessWaits::try_from(Vec::new()).is_err());
+    let waiting = crate::ProcessLifecycleState::Waiting {
+        waits: crate::ProcessWaits::new(first),
+    }
+    .entering(&replacement);
+    assert_eq!(waiting.waits(), std::slice::from_ref(&replacement));
+    let decoded: crate::ProcessLifecycleState =
+        serde_json::from_value(serde_json::to_value(&waiting).expect("encode waiting state"))
+            .expect("signed store milliseconds decode for both since and until");
+    assert_eq!(decoded, waiting);
+    assert_eq!(
+        waiting.leaving(&replacement),
+        crate::ProcessLifecycleState::running()
+    );
+}

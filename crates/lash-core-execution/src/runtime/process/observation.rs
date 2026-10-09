@@ -89,14 +89,21 @@ pub struct ObservedProcess {
     pub caused_by: Option<crate::CausalRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub external_ref: Option<ProcessExternalRef>,
-    /// Why the process's actor is parked, while it is: it runs no engine
-    /// code until an operator redrives it. A fact of its actor, beside the
-    /// lifecycle and never folded into it; `None` from an observer that was
-    /// given no actor store to read it from.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub park: Option<crate::ProcessParkReason>,
+    /// Whether the actor park was read, and why it is parked when it is.
+    pub park: ProcessParkState,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub child_session_id: Option<SessionId>,
+}
+
+/// The result of reading a process actor's park, separate from lifecycle.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "state", content = "reason", rename_all = "snake_case")]
+pub enum ProcessParkState {
+    /// This observer has no actor store.
+    NotRead,
+    /// The actor is not parked, or its process is terminal.
+    NotParked,
+    Parked(crate::ProcessParkReason),
 }
 
 /// A bounded canonical roster and the fence from before its scan began.
@@ -252,8 +259,10 @@ impl ProcessWorkObserver {
                             ),
                         )
                     })?
+                    .map_or(ProcessParkState::NotParked, ProcessParkState::Parked)
             }
-            _ => None,
+            Some(_) => ProcessParkState::NotParked,
+            None => ProcessParkState::NotRead,
         };
         let mut process = ObservedProcess::from_record(record);
         process.park = park;
@@ -588,7 +597,7 @@ impl ObservedProcess {
             env_ref: record.env_ref,
             caused_by: record.provenance.caused_by,
             external_ref: record.external_ref,
-            park: None,
+            park: ProcessParkState::NotRead,
             child_session_id,
             input,
         }

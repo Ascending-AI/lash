@@ -559,7 +559,7 @@ async fn apply_operation(
                     event_sequences.advance(expected);
                 }
                 expected.lifecycle = crate::ProcessLifecycleState::Waiting {
-                    waits: vec![wait_state(&id)],
+                    waits: lash_core::ProcessWaits::new(wait_state(&id)),
                 };
             }
         }

@@ -16,7 +16,7 @@ use lash_core::{
 /// every tick is a new event at the next sequence.
 fn tick(process_id: &ProcessId, n: u64) -> lash_core::ProcessEventAppendRequest {
     let wait = lash_core::WaitState {
-        since_ms: n,
+        since_ms: i64::try_from(n).expect("fixture time"),
         kind: lash_core::WaitKind::Call {
             call_id: lash_core::ToolCallId::fixture(&format!("feed-call-{n}")),
             tool_id: lash_core::ToolId::from("feed-fixture"),
@@ -206,20 +206,35 @@ fn expect_event(item: ProcessObservationStreamItem, expected: &str) {
     }
 }
 
-/// The gap's cause, replacement sequence and cursor; the replacement and the
-/// gap agree on where the consumer now stands.
+/// A retained replacement has one cursor and one durable view.
 #[track_caller]
 fn expect_gap(
     item: ProcessObservationStreamItem,
     cause: ProcessObservationGapCause,
-) -> (ProcessObservation, ProcessReplayGap) {
-    let ProcessObservationStreamItem::Gap { observation, gap } = item else {
+) -> (ProcessObservation, ProcessObservationCursor) {
+    let ProcessObservationStreamItem::Gap {
+        requested,
+        replacement,
+    } = item
+    else {
         panic!("expected a {cause:?} gap, got {item:?}");
     };
-    assert_eq!(gap.cause, cause);
-    assert_eq!(gap.latest_sequence, observation.read_view.sequence());
-    assert_eq!(gap.latest_cursor, observation.cursor);
-    (observation, gap)
+    let ProcessObservationReplacement::Replaced {
+        view,
+        cursor,
+        cause: actual,
+    } = replacement
+    else {
+        panic!("expected retained replacement");
+    };
+    assert_eq!(actual, cause);
+    (
+        ProcessObservation {
+            read_view: ProcessReadView::Retained(view),
+            cursor,
+        },
+        requested,
+    )
 }
 
 fn held(feed: &ProcessObservationStream) -> u64 {
@@ -302,7 +317,7 @@ async fn an_unknown_engine_park_is_shared_by_get_list_snapshot_and_gap() {
         .await
         .expect("get")
         .expect("retained process");
-    assert_eq!(get.park, Some(reason));
+    assert_eq!(get.park, lash_core::ProcessParkState::Parked(reason));
     let list = processes
         .list(
             &lash_core::ProcessListFilter::default(),
@@ -410,15 +425,18 @@ async fn a_commit_without_its_bridge_is_one_gap_with_the_durable_process() {
     let _lost = fixture.commit().await;
     let unbridged = fixture.commit_published().await;
 
-    let (replacement, gap) = expect_gap(
+    let (replacement, requested) = expect_gap(
         next(&mut feed).await,
         ProcessObservationGapCause::CommitUnbridged,
     );
     assert_eq!(
         replacement.read_view.sequence(),
-        ProcessSequence::new(unbridged.sequence)
+        Some(ProcessSequence::new(unbridged.sequence))
     );
-    assert_eq!(gap.process_id, fixture.process_id);
+    assert_eq!(
+        requested.parse().expect("cursor").process_id,
+        fixture.process_id
+    );
     // After a gap the consumer refolds the retained provisional window; the
     // commits the replacement reflects are not delivered again.
     expect_event(next(&mut feed).await, "node kept");
@@ -462,7 +480,7 @@ async fn a_stale_cursor_continues_only_across_every_commit_it_missed() {
     );
     assert_eq!(
         replacement.read_view.sequence(),
-        ProcessSequence::new(last.sequence)
+        Some(ProcessSequence::new(last.sequence))
     );
     quiet(&mut unbridged).await;
 
@@ -508,7 +526,7 @@ async fn a_replay_that_loses_continuity_is_one_gap_and_the_feed_resumes() {
     );
     assert_eq!(
         replacement.read_view.sequence(),
-        ProcessSequence::new(committed.sequence),
+        Some(ProcessSequence::new(committed.sequence)),
         "the replacement holds the commit whose publication the replay lost"
     );
     quiet(&mut feed).await;
@@ -546,13 +564,16 @@ async fn a_process_that_is_not_retained_is_typed_absence_and_ends_the_feed() {
     let unknown = fixture.observe_process(&ProcessId::fixture("never-registered"));
     let snapshot = unknown.snapshot().await.expect("snapshot");
     assert!(matches!(snapshot.read_view, ProcessReadView::Unknown));
+    assert_eq!(snapshot.read_view.sequence(), None);
 
     let mut feed = unknown.subscribe_and_recover(snapshot.cursor);
-    let (replacement, _) = expect_gap(
-        next(&mut feed).await,
-        ProcessObservationGapCause::NotRetained,
-    );
-    assert!(matches!(replacement.read_view, ProcessReadView::Unknown));
+    let ProcessObservationStreamItem::Gap { replacement, .. } = next(&mut feed).await else {
+        panic!("expected ended gap");
+    };
+    assert!(matches!(
+        replacement,
+        ProcessObservationReplacement::Ended(ProcessObservationEnd::Unknown)
+    ));
     assert!(feed.next().await.is_none(), "the feed ends");
 }
 

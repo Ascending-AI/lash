@@ -602,9 +602,10 @@ async fn follow_process(graphs: ExecutionGraphs, state: AppState, process_id: Pr
                         }
                     }
                 },
-                ProcessObservationStreamItem::Gap { observation, .. } => {
+                ProcessObservationStreamItem::Gap { replacement, .. } => {
+                    let read_view = replacement.into_read_view();
                     graphs.inner.cache.lock_recover().reset(&source);
-                    match apply(&observation.read_view) {
+                    match apply(&read_view) {
                         Some(now_ended) => ended = now_ended,
                         None => break,
                     }

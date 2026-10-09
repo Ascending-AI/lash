@@ -1153,7 +1153,8 @@ pub mod process {
     pub use lash_core::runtime::StoreRealization;
     /// Process-registry and event types that complete the store and engine signature closure.
     pub use lash_core::runtime::{
-        ParentEndPlan, ProcessOutcome, ProcessParkReason, ProcessTombstone, WaitKind, WaitState,
+        ParentEndPlan, ProcessOutcome, ProcessParkReason, ProcessParkState, ProcessTombstone,
+        ProcessWaits, WaitKind, WaitState,
     };
     /// The one lifecycle state a process record holds, and the outcome a
     /// terminal one ends in.
@@ -1204,12 +1205,13 @@ pub mod process {
         InMemoryProcessReplayStore, InMemoryProcessReplayStoreConfig, LanguageExecutionObservation,
         ParsedProcessObservationCursor, ProcessDocumentIdentity, ProcessEffectCoverage,
         ProcessEffectEvidence, ProcessEffectGapReason, ProcessObservation,
-        ProcessObservationCursor, ProcessObservationCursorError, ProcessObservationEvent,
-        ProcessObservationEventPayload, ProcessObservationGapCause, ProcessObservationIdentity,
-        ProcessReadView, ProcessReplayEventDraft, ProcessReplayGap, ProcessReplayGapReason,
-        ProcessReplayOutcome, ProcessReplayPublishLimits, ProcessReplayStore,
-        ProcessReplayStoreError, ProcessReplaySubscribeOutcome, ProcessReplaySubscription,
-        ProcessSequence, RetainedProcessView, StepBodyStartedObservation,
+        ProcessObservationCursor, ProcessObservationCursorError, ProcessObservationEnd,
+        ProcessObservationEvent, ProcessObservationEventPayload, ProcessObservationGapCause,
+        ProcessObservationIdentity, ProcessObservationReplacement, ProcessReadView,
+        ProcessReplayEventDraft, ProcessReplayGapReason, ProcessReplayOutcome,
+        ProcessReplayPublishLimits, ProcessReplayStore, ProcessReplayStoreError,
+        ProcessReplaySubscribeOutcome, ProcessReplaySubscription, ProcessSequence,
+        RetainedProcessView, StepBodyStartedObservation,
     };
     #[cfg(feature = "rlm")]
     pub use lash_vm_runtime::{LASH_VM_ENGINE_KIND, LashVmProcessInput};

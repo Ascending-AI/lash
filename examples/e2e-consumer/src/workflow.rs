@@ -603,7 +603,7 @@ async fn read_run(State(host): State<Host>, Path(process): Path<String>) -> ApiR
     let workflow = workflow_read_json(processes.graph(&process).await.map_err(api_error)?)?;
     Ok(Json(json!({
         "status": format!("{:?}", view.process.status()),
-        "waits": view.process.waits().iter().map(|wait| wait.key()).collect::<Vec<_>>(),
+        "waits": view.process.waits().iter().map(|wait| &wait.kind).collect::<Vec<_>>(),
         "process": serde_json::to_value(&view.process).map_err(api_error)?,
         "document": match &view.document {
             lash::process::ProcessDocumentIdentity::Available(reference) => {
@@ -753,11 +753,13 @@ async fn attach_observer(State(host): State<Host>, Path(process): Path<String>) 
                             )
                         }
                     },
-                    ProcessObservationStreamItem::Gap { observation, gap } => {
+                    ProcessObservationStreamItem::Gap { replacement, .. } => {
+                        let cause = format!("{replacement:?}");
+                        let read_view = replacement.into_read_view();
                         // A gap retires the provisional history; the durable
                         // view it carries may already be terminal.
                         accumulator.reset_live();
-                        let terminal = match &observation.read_view {
+                        let terminal = match &read_view {
                             lash::process::ProcessReadView::Retained(view) => settlement(
                                 view.process.status(),
                                 view.process.lifecycle.terminal_at_ms(),
@@ -768,7 +770,7 @@ async fn attach_observer(State(host): State<Host>, Path(process): Path<String>) 
                             accumulator.settle(settled);
                         }
                         (
-                            json!({"item": "gap", "cause": format!("{:?}", gap.cause)}),
+                            json!({"item": "gap", "cause": cause}),
                             terminal.map(|settled| format!("{:?}", settled.terminal)),
                         )
                     }

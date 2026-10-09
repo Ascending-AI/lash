@@ -533,7 +533,7 @@ async fn process_feed_across_two_publication_windows() -> Result<(Vec<Shown>, us
     .bind_attempt(1);
     let observed = core.processes().observe(&process_id);
     let snapshot = observed.snapshot().await?;
-    let base = snapshot.read_view.sequence().as_u64();
+    let base = snapshot.read_view.sequence().expect("retained").as_u64();
     let published_before = replay.facts.load(Ordering::SeqCst);
     let mut feed = observed.subscribe_and_recover(snapshot.cursor);
 

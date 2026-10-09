@@ -337,9 +337,9 @@ async fn parked(case: &Case, node: &str, process: &str, nth: usize) -> Result<Va
                 return Ok(None);
             };
             let run = host.get(&format!("/workflow/runs/{process}")).await?;
-            let wait = format!("call:{}", delivery["call_id"].as_str().unwrap_or_default());
+            let wait = json!({"kind": "call", "call_id": delivery["call_id"], "tool_id": "review_request"});
             let waits = run["waits"].as_array().cloned().unwrap_or_default();
-            Ok((run["status"] == "Waiting" && waits == [Value::String(wait)]).then_some(delivery))
+            Ok((run["status"] == "Waiting" && waits == [wait]).then_some(delivery))
         })
         .await?;
     case.record_barrier(json!({"barrier": "parked", "node": node, "process": process, "review": nth, "delivery": delivery}));

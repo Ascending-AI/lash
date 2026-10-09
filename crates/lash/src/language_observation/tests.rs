@@ -539,7 +539,10 @@ fn gap_cause(
     item: crate::process::ProcessObservationStreamItem,
 ) -> lash_core::ProcessObservationGapCause {
     match item {
-        crate::process::ProcessObservationStreamItem::Gap { gap, .. } => gap.cause,
+        crate::process::ProcessObservationStreamItem::Gap {
+            replacement: lash_core::ProcessObservationReplacement::Replaced { cause, .. },
+            ..
+        } => cause,
         other => panic!("expected a gap, got {other:?}"),
     }
 }

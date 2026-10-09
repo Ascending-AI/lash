@@ -208,12 +208,11 @@ pub enum ProcessReadView {
 }
 
 impl ProcessReadView {
-    /// The durable sequence this view stands at; zero when no process is
-    /// retained.
-    pub fn sequence(&self) -> ProcessSequence {
+    /// The durable sequence this view stands at, only while retained.
+    pub fn sequence(&self) -> Option<ProcessSequence> {
         match self {
-            Self::Retained(view) => ProcessSequence(view.process.last_event_sequence),
-            Self::Retired { .. } | Self::Unknown => ProcessSequence(0),
+            Self::Retained(view) => Some(ProcessSequence(view.process.last_event_sequence)),
+            Self::Retired { .. } | Self::Unknown => None,
         }
     }
 }
@@ -421,22 +420,45 @@ pub enum ProcessObservationGapCause {
     /// The replay holds no committed fact for some sequence between the one
     /// the consumer holds and the durable process's.
     CommitUnbridged,
-    /// No process is retained under this id: the replacement says whether it
-    /// was pruned or is unknown, and the feed ends.
-    NotRetained,
 }
 
-/// A break in a process feed. The replacement snapshot that travels with it
-/// is authoritative: the consumer replaces its durable state, discards its
-/// provisional state and folds what the feed replays from `latest_cursor`.
-/// Node events the replay no longer holds are not restored.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct ProcessReplayGap {
-    pub process_id: ProcessId,
-    pub requested_cursor: ProcessObservationCursor,
-    pub latest_cursor: ProcessObservationCursor,
-    pub latest_sequence: ProcessSequence,
-    pub cause: ProcessObservationGapCause,
+/// A gap replaces retained state at one cursor, or ends observation with
+/// typed absence. Neither a cursor nor a replay cause exists for an ended feed.
+#[derive(Clone, Debug)]
+pub enum ProcessObservationReplacement {
+    Replaced {
+        view: Box<RetainedProcessView>,
+        cursor: ProcessObservationCursor,
+        cause: ProcessObservationGapCause,
+    },
+    Ended(ProcessObservationEnd),
+}
+
+/// Why observation ended without a retained process.
+#[derive(Clone, Debug)]
+pub enum ProcessObservationEnd {
+    Retired {
+        terminal_label: RetiredProcessStatus,
+        pruned_at_ms: u64,
+    },
+    Unknown,
+}
+
+impl ProcessObservationReplacement {
+    /// Consume the replacement as the durable state a host folds.
+    pub fn into_read_view(self) -> ProcessReadView {
+        match self {
+            Self::Replaced { view, .. } => ProcessReadView::Retained(view),
+            Self::Ended(ProcessObservationEnd::Retired {
+                terminal_label,
+                pruned_at_ms,
+            }) => ProcessReadView::Retired {
+                terminal_label,
+                pruned_at_ms,
+            },
+            Self::Ended(ProcessObservationEnd::Unknown) => ProcessReadView::Unknown,
+        }
+    }
 }
 
 #[derive(Clone, Debug, thiserror::Error)]

@@ -64,7 +64,7 @@ pub async fn a_sleeping_process_reads_waiting_on_its_sleep_and_its_site(
         ensure!(
             seen.status() == ProcessStatus::Waiting
                 && blockers(seen.waits()) == expected
-                && seen.park.is_none(),
+                && seen.park == crate::ProcessParkState::NotParked,
             "a sleeping process is observed {:?} on {:?}, parked {:?}",
             seen.lifecycle,
             seen.waits(),
@@ -232,7 +232,7 @@ pub async fn a_process_parked_on_an_unknown_engine_shows_its_park_reason_beside_
         let seen = observed(&backend, &process).await?;
         ensure!(
             seen.park
-                == Some(ProcessParkReason::UnknownEngine {
+                == crate::ProcessParkState::Parked(ProcessParkReason::UnknownEngine {
                     kind: ABSENT_ENGINE_KIND.to_owned(),
                 })
                 && seen.status() == ProcessStatus::Running

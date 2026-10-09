@@ -13,7 +13,9 @@ fn committed_sequence(item: ProcessObservationStreamItem) -> u64 {
             ProcessObservationEventPayload::Committed { event } => event.sequence,
             other => panic!("expected a committed fact, got {other:?}"),
         },
-        ProcessObservationStreamItem::Gap { gap, .. } => panic!("unexpected gap {gap:?}"),
+        ProcessObservationStreamItem::Gap { replacement, .. } => {
+            panic!("unexpected gap {replacement:?}")
+        }
     }
 }
 
@@ -65,15 +67,14 @@ async fn a_follower_whose_missed_facts_were_released_gets_one_gap() {
     .expect("release the missed events");
     wake.notify(&fixture.process_id);
 
-    let ProcessObservationStreamItem::Gap { observation, gap } = next(&mut feed).await else {
-        panic!("released facts are a gap");
-    };
-    assert!(matches!(
-        gap.cause,
-        ProcessObservationGapCause::CommitUnbridged
-    ));
-    assert_eq!(gap.latest_sequence.as_u64(), last.sequence);
-    assert_eq!(observation.read_view.sequence().as_u64(), last.sequence);
+    let (observation, _) = expect_gap(
+        next(&mut feed).await,
+        ProcessObservationGapCause::CommitUnbridged,
+    );
+    assert_eq!(
+        observation.read_view.sequence().expect("retained").as_u64(),
+        last.sequence
+    );
     assert_eq!(held(&feed), last.sequence);
 }
 
@@ -102,7 +103,10 @@ async fn a_follower_behind_the_bridge_bound_gaps_and_republishes_nothing() {
         next(&mut feed).await,
         ProcessObservationGapCause::CommitUnbridged,
     );
-    assert_eq!(replacement.read_view.sequence().as_u64(), last.sequence);
+    assert_eq!(
+        replacement.read_view.sequence().expect("retained").as_u64(),
+        last.sequence
+    );
     let lash_core::ProcessReplayOutcome::Replayed(retained) = fixture
         .replay
         .replay_after_cursor(&window)
@@ -185,7 +189,7 @@ async fn a_follower_on_one_core_observes_the_terminal_another_core_commits() {
 
     let observed = core_a.processes().observe(&process_id);
     let snapshot = observed.snapshot().await.expect("snapshot on core A");
-    let mut sequence = snapshot.read_view.sequence().as_u64();
+    let mut sequence = snapshot.read_view.sequence().expect("retained").as_u64();
     let mut feed = observed.subscribe_and_recover(snapshot.cursor);
     quiet(&mut feed).await;
 
@@ -348,6 +352,7 @@ async fn a_local_commit_is_published_once_however_many_feeds_are_open() {
         .expect("snapshot")
         .read_view
         .sequence()
+        .expect("retained process")
         .as_u64();
     let before = replay.drafts.load(std::sync::atomic::Ordering::SeqCst);
     replay.open.send_replace(false);

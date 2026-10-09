@@ -90,9 +90,9 @@ pub use model::{
     ProcessSessionDeleteReport, ProcessSpawnProvenance, ProcessStartDeclaration,
     ProcessStartOptions, ProcessStartOutcome, ProcessStartReceipt, ProcessStartRegistration,
     ProcessStartRequest, ProcessStartTarget, ProcessStarted, ProcessStatus, ProcessStatusFilter,
-    ProcessTombstone, RetiredProcessStatus, SCOPE_STORAGE_PAYLOAD_VERSION, ScopeGrant, ScopeId,
-    ScopeRef, ScopeStorageError, SessionId, SessionScope, SessionScopeId, StartCx, StartCxError,
-    StartKey, StoreRealization, TerminalProcessStatus, WaitKind, WaitState,
+    ProcessTombstone, ProcessWaits, RetiredProcessStatus, SCOPE_STORAGE_PAYLOAD_VERSION,
+    ScopeGrant, ScopeId, ScopeRef, ScopeStorageError, SessionId, SessionScope, SessionScopeId,
+    StartCx, StartCxError, StartKey, StoreRealization, TerminalProcessStatus, WaitKind, WaitState,
     artifact_referrer_ended, artifact_store_plugin_error, lifetime, load_process_execution_env,
     mint_process_id, process_child_session_id, process_session_turn_id,
     publish_process_execution_env,
@@ -101,7 +101,8 @@ pub use model::{ConsumerHold, SessionTurnOutcome};
 pub use observation::{
     ObservedProcess, ObservedProcessChange, ObservedProcessEvent, ObservedProcessEventLite,
     ObservedProcessEventPage, ObservedProcessEventReadOutcome, ObservedWorkItem,
-    ObservedWorkItemState, ProcessRosterPage, ProcessWorkObserver, ProcessWorkSnapshot,
+    ObservedWorkItemState, ProcessParkState, ProcessRosterPage, ProcessWorkObserver,
+    ProcessWorkSnapshot,
 };
 pub use observer_intent::{
     SessionObserverIntentSource, reconcile_session_process_observer_intents,

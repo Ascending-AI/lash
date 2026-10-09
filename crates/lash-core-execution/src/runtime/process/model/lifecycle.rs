@@ -18,13 +18,13 @@ use std::sync::Arc;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WaitState {
     pub kind: WaitKind,
-    pub since_ms: u64,
+    pub since_ms: i64,
     /// The node that blocked, and which occurrence of it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub site: Option<crate::StepEffectSite>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum WaitKind {
     /// A deferring tool call, identified without its bearer completion key.
@@ -41,16 +41,51 @@ pub enum WaitKind {
     Process { process_id: ProcessId },
 }
 
-impl WaitState {
-    /// The wait's identity within its process: its kind and what that kind
-    /// waits on. Two waits of one process with the same key are one wait.
-    pub fn key(&self) -> String {
-        match &self.kind {
-            WaitKind::Call { call_id, .. } => format!("call:{call_id}"),
-            WaitKind::Key { name } => format!("key:{}", name.0),
-            WaitKind::Sleep { until_ms } => format!("sleep:{until_ms}"),
-            WaitKind::Process { process_id } => format!("process:{process_id}"),
+/// A non-empty collection indexed by the typed blocker. Entries are sorted
+/// by `WaitKind`, and there is exactly one entry per kind. The private storage
+/// lets readers borrow a slice without allowing them to empty the collection
+/// or introduce duplicate keys.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "Vec<WaitState>", into = "Vec<WaitState>")]
+pub struct ProcessWaits(Vec<WaitState>);
+
+impl ProcessWaits {
+    /// Start a waiting state with its first blocker.
+    pub fn new(wait: WaitState) -> Self {
+        Self(vec![wait])
+    }
+
+    /// Read all blockers in typed key order.
+    pub fn as_slice(&self) -> &[WaitState] {
+        &self.0
+    }
+
+    fn insert(&mut self, wait: WaitState) {
+        match self.0.binary_search_by(|held| held.kind.cmp(&wait.kind)) {
+            Ok(index) => self.0[index] = wait,
+            Err(index) => self.0.insert(index, wait),
         }
+    }
+}
+
+impl TryFrom<Vec<WaitState>> for ProcessWaits {
+    type Error = &'static str;
+
+    fn try_from(mut waits: Vec<WaitState>) -> Result<Self, Self::Error> {
+        if waits.is_empty() {
+            return Err("a waiting process waits on something");
+        }
+        waits.sort_by(|a, b| a.kind.cmp(&b.kind));
+        if waits.windows(2).any(|pair| pair[0].kind == pair[1].kind) {
+            return Err("a waiting process has one entry per blocker");
+        }
+        Ok(Self(waits))
+    }
+}
+
+impl From<ProcessWaits> for Vec<WaitState> {
+    fn from(waits: ProcessWaits) -> Self {
+        waits.0
     }
 }
 
@@ -117,7 +152,7 @@ pub struct ProcessRecord {
 /// The lifecycle state of a process record: each state owns the facts that
 /// exist only in it, so a record cannot hold a wait beside an outcome, or a
 /// terminal status without one. A waiting process lists everything it is
-/// blocked on, oldest first, and never an empty list. A parked process is
+/// blocked on, keyed by `WaitKind`, and never an empty list. A parked process is
 /// its actor's state (ADR 0132 §11), not a record fact. An ended process
 /// holds its outcome and the time of the committed fact that ended it: no
 /// later fact changes either.
@@ -126,8 +161,7 @@ pub struct ProcessRecord {
 pub enum ProcessLifecycleState {
     Running {},
     Waiting {
-        #[serde(deserialize_with = "held_waits")]
-        waits: Vec<WaitState>,
+        waits: ProcessWaits,
     },
     Terminal {
         outcome: ProcessTerminal,
@@ -136,19 +170,6 @@ pub enum ProcessLifecycleState {
         /// overwrites.
         occurred_at_ms: u64,
     },
-}
-
-/// The waits of a stored waiting state: at least one.
-fn held_waits<'de, D: serde::Deserializer<'de>>(
-    deserializer: D,
-) -> Result<Vec<WaitState>, D::Error> {
-    let waits = Vec::<WaitState>::deserialize(deserializer)?;
-    if waits.is_empty() {
-        return Err(serde::de::Error::custom(
-            "a waiting process waits on something",
-        ));
-    }
-    Ok(waits)
 }
 
 impl ProcessLifecycleState {
@@ -168,14 +189,14 @@ impl ProcessLifecycleState {
         match status {
             ProcessStatus::Running => Self::running(),
             ProcessStatus::Waiting => Self::Waiting {
-                waits: vec![WaitState {
+                waits: ProcessWaits::new(WaitState {
                     kind: WaitKind::Call {
                         call_id: crate::ToolCallId::fixture("fixture"),
                         tool_id: crate::ToolId::from("fixture"),
                     },
                     since_ms: 0,
                     site: None,
-                }],
+                }),
             },
             ProcessStatus::Completed => {
                 settled(crate::ToolCallOutput::success(serde_json::Value::Null))
@@ -217,7 +238,7 @@ impl ProcessLifecycleState {
     /// Everything the process is blocked on; empty unless it waits.
     pub fn waits(&self) -> &[WaitState] {
         match self {
-            Self::Waiting { waits } => waits,
+            Self::Waiting { waits } => waits.as_slice(),
             Self::Running { .. } | Self::Terminal { .. } => &[],
         }
     }
@@ -225,30 +246,29 @@ impl ProcessLifecycleState {
     /// The state after `wait` is entered: it joins the waits the process
     /// already has, replacing one of the same identity.
     pub(crate) fn entering(&self, wait: &WaitState) -> Self {
-        let key = wait.key();
-        let mut waits: Vec<_> = self
-            .waits()
-            .iter()
-            .filter(|held| held.key() != key)
-            .cloned()
-            .collect();
-        waits.push(wait.clone());
+        let mut waits = match self {
+            Self::Waiting { waits } => waits.clone(),
+            _ => {
+                return Self::Waiting {
+                    waits: ProcessWaits::new(wait.clone()),
+                };
+            }
+        };
+        waits.insert(wait.clone());
         Self::Waiting { waits }
     }
 
     /// The state after `wait` ends: running once no wait is left.
     pub(crate) fn leaving(&self, wait: &WaitState) -> Self {
-        let key = wait.key();
         let waits: Vec<_> = self
             .waits()
             .iter()
-            .filter(|held| held.key() != key)
+            .filter(|held| held.kind != wait.kind)
             .cloned()
             .collect();
-        if waits.is_empty() {
-            Self::running()
-        } else {
-            Self::Waiting { waits }
+        match ProcessWaits::try_from(waits) {
+            Ok(waits) => Self::Waiting { waits },
+            Err(_) => Self::running(),
         }
     }
 

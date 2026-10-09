@@ -18,11 +18,13 @@ loop iteration or node timing.
 
 A process that released to wait reads `waiting`, and its record lists
 everything it is blocked on (`ProcessLifecycleState::Waiting { waits }`,
-oldest first): a deferred call (`WaitKind::Call`), a key its engine pinned
+keyed by `WaitKind` in a non-empty `ProcessWaits` collection): a deferred call
+(`WaitKind::Call`), a key its engine pinned
 (`WaitKind::Key`), a sleep (`WaitKind::Sleep { until_ms }`) or another
 process's terminal (`WaitKind::Process { process_id }`). Each `WaitState`
-carries `since_ms` and, when the engine named one, the `site` (`node_id`,
-`occurrence` and `context`) that waits; the lash_vm engine names the site of
+carries `since_ms` in signed store milliseconds, as is the sleep's `until_ms`,
+and, when the engine named one, the `site` (`node_id`, `occurrence` and
+`context`) that waits; the lash_vm engine names the site of
 a sleep and of an awaited process. A wait never carries a completion key or a wait id: those resolve the
 wait, and `Completions::parked` and `pinned_keys` hand them only to a host
 that asks for them. The process reads `running` again once its last wait
@@ -31,9 +33,10 @@ whatever its engine also waits for.
 
 A park is its actor's fact, not a lifecycle state. While a process is parked
 (no engine of its kind, an undecodable state, a refused transition, the
-activation-loop budget), `ObservedProcess::park` carries its typed
-`ProcessParkReason` beside a lifecycle that still says what the record says.
-An operator's redrive or a cancel clears it.
+activation-loop budget), `ObservedProcess::park` is `ProcessParkState::Parked`
+with its typed `ProcessParkReason` beside the lifecycle. `NotParked` says the
+actor store was available and the process is not parked; `NotRead` says the
+observer had no actor store. An operator's redrive or a cancel clears a park.
 
 ## One read shape
 
@@ -351,7 +354,11 @@ holds stays unknown; do not synthesize it.
 | `Replay { reason: Unavailable }` | Another store incarnation, a position past the tail, or invalidated continuity. |
 | `CommitUnbridged` | The replay holds no committed fact for some sequence between the consumer's and the process's. One later commit is not a bridge: every sequence is required. |
 | `AheadOfDurableProcess` | The cursor names a sequence the process never reached. |
-| `NotRetained` | No process is retained under the id. The replacement says pruned or unknown, and the feed ends. |
+
+A gap carries its requested cursor once. Its replacement is either `Replaced`
+with the retained view, one continuation cursor and a cause above, or `Ended`
+with a retired tombstone or unknown id. An ended replacement has no replay
+cause or continuation cursor; its read view has no durable sequence.
 
 A cursor for another process is refused as an error, never retargeted.
 

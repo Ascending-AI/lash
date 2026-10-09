@@ -12,7 +12,7 @@ use super::op_scope::ProcessOpScope;
 
 mod lifecycle;
 use lifecycle::recorded_lineage;
-pub use lifecycle::{ProcessLifecycleState, ProcessRecord, WaitKind, WaitState};
+pub use lifecycle::{ProcessLifecycleState, ProcessRecord, ProcessWaits, WaitKind, WaitState};
 
 mod execution;
 pub use execution::*;

@@ -54,7 +54,7 @@ pub async fn process_roster_pages_match_status_sets_and_definition(
         .set_process_wait_with_authority(
             &process_id,
             WaitState {
-                since_ms: record.created_at_ms,
+                since_ms: i64::try_from(record.created_at_ms).unwrap_or(i64::MAX),
                 kind: crate::WaitKind::Call {
                     call_id: lash_sansio::ToolCallId::fixture("process-wait-law"),
                     tool_id: lash_sansio::ToolId::new("process_wait"),

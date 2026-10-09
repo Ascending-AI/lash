@@ -569,7 +569,7 @@ impl ProcessActivation {
                 // the earliest of them, holding nothing.
                 let steps_due = live.lifecycle.due(&idle).await.map_err(steps_failure)?;
                 let next_due = due.into_iter().chain(steps_due).min();
-                super::waiting::project(&mut tx, process, &record, &driver, &fold, millis(now));
+                super::waiting::project(&mut tx, process, &record, &driver, &fold, now.0);
                 tx.ack_seen().give_up(Release::Waiting { next_due });
                 owned.commit(tx, CommitLabel::PROCESS_ADVANCE).await?;
                 return Ok(Pass::Released);

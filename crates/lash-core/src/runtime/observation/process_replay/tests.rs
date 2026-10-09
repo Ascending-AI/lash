@@ -308,3 +308,17 @@ async fn a_followed_window_idle_past_max_age_is_kept() {
         Err(ProcessReplayGapReason::Unavailable)
     );
 }
+
+/// FIG-5644: absence has no durable sequence, even while a tombstone remains.
+#[test]
+fn an_unretained_read_view_has_no_sequence() {
+    assert_eq!(ProcessReadView::Unknown.sequence(), None);
+    assert_eq!(
+        ProcessReadView::Retired {
+            terminal_label: RetiredProcessStatus::Completed,
+            pruned_at_ms: 42,
+        }
+        .sequence(),
+        None
+    );
+}
