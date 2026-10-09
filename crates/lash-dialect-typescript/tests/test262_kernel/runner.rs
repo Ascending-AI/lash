@@ -713,3 +713,14 @@ fn borrowed_map_methods_require_map_receivers() {
         Datum::Float(lash_kernel_doc::Float::new(2.0)),
     );
 }
+
+/// Set prototype methods require the Set internal slot, even for other containers.
+#[test]
+fn borrowed_set_methods_require_set_receivers() {
+    assert_finished(
+        execute(
+            "let count = 0; const map = new Map(); try { Set.prototype.add.call(map, 1); } catch (e) { if (e.name === 'TypeError') count++; } try { Set.prototype.entries.call([]); } catch (e) { if (e.name === 'TypeError') count++; } finish(count);",
+        ),
+        Datum::Float(lash_kernel_doc::Float::new(2.0)),
+    );
+}

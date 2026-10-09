@@ -81,6 +81,7 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
+  if same(kind(this), "set") {} else { throw error.new("type_error", "Set receiver required", null) }
   return num.to_float(set.len(this))
 }
 
@@ -89,6 +90,7 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
+  if same(kind(this), "set") {} else { throw error.new("type_error", "Set receiver required", null) }
   let args = invoke ts.pad(args, 1)
   let builtin_arg_0 = args[0]
 let key = invoke ts.map.key(builtin_arg_0)
@@ -101,6 +103,7 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
+  if same(kind(this), "set") {} else { throw error.new("type_error", "Set receiver required", null) }
   let args = invoke ts.pad(args, 1)
   let builtin_arg_1 = args[0]
 let key = invoke ts.map.key(builtin_arg_1)
@@ -112,6 +115,7 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
+  if same(kind(this), "set") {} else { throw error.new("type_error", "Set receiver required", null) }
   let args = invoke ts.pad(args, 1)
   let builtin_arg_2 = args[0]
 let key = invoke ts.map.key(builtin_arg_2)
@@ -125,6 +129,7 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
+  if same(kind(this), "set") {} else { throw error.new("type_error", "Set receiver required", null) }
   for key in set.values(this) { set this[key] = false }
   return absent
 }
@@ -134,6 +139,7 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
+  if same(kind(this), "set") {} else { throw error.new("type_error", "Set receiver required", null) }
   let output = []
   for key in this {
     let value = invoke ts.map.value(key)
@@ -147,6 +153,7 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
+  if same(kind(this), "set") {} else { throw error.new("type_error", "Set receiver required", null) }
   let output = []
   for key in this {
     let value = invoke ts.map.value(key)
@@ -160,6 +167,7 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
+  if same(kind(this), "set") {} else { throw error.new("type_error", "Set receiver required", null) }
   let output = []
   for key in this {
     let value = invoke ts.map.value(key)
@@ -173,6 +181,7 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
+  if same(kind(this), "set") {} else { throw error.new("type_error", "Set receiver required", null) }
   let args = invoke ts.pad(args, 2)
   let callback = args[0]
   let receiver = args[1]
@@ -223,6 +232,7 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
+  if same(kind(this), "set") {} else { throw error.new("type_error", "Set receiver required", null) }
   let args = invoke ts.pad(args, 1)
   let other = args[0]
   let other = invoke ts.set.other(other)
@@ -241,6 +251,7 @@ kernel 1
 errors "type_error", "TS_METHOD_UNSUPPORTED"
 charge sum(8, deep(result))
 body {
+  if same(kind(this), "set") {} else { throw error.new("type_error", "Set receiver required", null) }
   let args = invoke ts.pad(args, 1)
   let other = args[0]
   let other = invoke ts.set.other(other)
@@ -264,6 +275,7 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
+  if same(kind(this), "set") {} else { throw error.new("type_error", "Set receiver required", null) }
   let args = invoke ts.pad(args, 1)
   let other = args[0]
   let other = invoke ts.set.other(other)
@@ -280,6 +292,7 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
+  if same(kind(this), "set") {} else { throw error.new("type_error", "Set receiver required", null) }
   let args = invoke ts.pad(args, 1)
   let other = args[0]
   let other = invoke ts.set.other(other)
@@ -299,6 +312,7 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
+  if same(kind(this), "set") {} else { throw error.new("type_error", "Set receiver required", null) }
   let args = invoke ts.pad(args, 1)
   let other = args[0]
   let other = invoke ts.set.other(other)
@@ -315,6 +329,7 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
+  if same(kind(this), "set") {} else { throw error.new("type_error", "Set receiver required", null) }
   let args = invoke ts.pad(args, 1)
   let other = args[0]
   let other = invoke ts.set.other(other)
@@ -330,6 +345,7 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
+  if same(kind(this), "set") {} else { throw error.new("type_error", "Set receiver required", null) }
   let args = invoke ts.pad(args, 1)
   let other = args[0]
   let other = invoke ts.set.other(other)
