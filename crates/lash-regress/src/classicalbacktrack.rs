@@ -75,6 +75,7 @@ pub(crate) struct MatchAttempter<'a, Input: InputIndexer> {
     bts: Vec<BacktrackInsn<Input>>,
     s: State<Input::Position>,
     fuel: Option<u64>,
+    consumed: u64,
     exhausted: bool,
 }
 
@@ -88,6 +89,7 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                 groups: vec![GroupData::new(); re.groups as usize],
             },
             fuel: None,
+            consumed: 0,
             exhausted: false,
         }
     }
@@ -108,6 +110,7 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
             false
         } else {
             *remaining -= 1;
+            self.consumed += 1;
             true
         }
     }
@@ -1211,6 +1214,10 @@ impl<Input: InputIndexer> exec::FallibleMatchProducer for BacktrackExecutor<'_, 
         } else {
             Ok(found)
         }
+    }
+
+    fn consumed_fuel(&self) -> u64 {
+        self.matcher.consumed
     }
 }
 

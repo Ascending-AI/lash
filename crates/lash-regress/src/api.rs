@@ -20,7 +20,7 @@ use crate::util::to_char_sat;
 use alloc::{boxed::Box, string::String, string::ToString, vec::Vec};
 use core::{fmt, iter::FusedIterator, str::FromStr};
 
-pub use exec::MatchError;
+pub use exec::{MatchError, MeteredMatches};
 pub use parse::Error;
 
 /// Flags used to control regex parsing.
@@ -878,7 +878,26 @@ pub fn escape(text: &str) -> String {
 
 #[cfg(test)]
 mod deterministic_fuel_tests {
-    use super::{MatchError, Regex};
+    use super::{MatchError, MeteredMatches, Regex};
+
+    #[test]
+    fn consumed_fuel_is_the_smallest_allowance_that_finishes() {
+        let regex = Regex::new("(a+)+b").expect("compile");
+        let input = "aaaaaaaaaaaa";
+
+        let mut unbounded = regex.try_find_from(input, 0, u64::MAX);
+        assert!(unbounded.next().is_none());
+        let needed = unbounded.consumed_fuel();
+        assert!(needed > input.len() as u64);
+
+        let mut exact = regex.try_find_from(input, 0, needed);
+        assert!(exact.next().is_none());
+        assert_eq!(exact.consumed_fuel(), needed);
+
+        let mut short = regex.try_find_from(input, 0, needed - 1);
+        assert!(matches!(short.next(), Some(Err(MatchError::Exhausted))));
+        assert_eq!(short.consumed_fuel(), needed - 1);
+    }
 
     #[test]
     fn utf8_utf16_and_ucs2_report_the_same_typed_exhaustion() {

@@ -5,8 +5,9 @@
 - Upstream repository: <https://github.com/ridiculousfish/regress>
 - Upstream commit: `7e64ad5e6807b5503e5cc97a79e0f129b23c556b`
 - Upstream author: ridiculous_fish (Cory Doras)
-- Local purpose: deterministic fuel/step-budget instrumentation and the
-  anchored-matching API used by Lash VM
+- Local purpose: deterministic fuel/step-budget instrumentation, with the
+  steps a search consumed reported back, and the anchored-matching API used
+  by Lash VM and by `lash-ext-regex-ecma`
 
 The upstream `LICENSE-MIT` and `LICENSE-APACHE` files are preserved verbatim.
 Upstream copyright and modification notices remain in the carried source and

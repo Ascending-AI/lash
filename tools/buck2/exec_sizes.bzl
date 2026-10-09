@@ -374,6 +374,7 @@ TEST_RUN_REQUESTS = {
     "//crates/lash-durable:lash-durable__unit_test": {"cpu_count": 2, "memory_kb": 524288},
     "//crates/lash-e2e:e2e__test": {"cpu_count": 2, "memory_kb": 524288},
     "//crates/lash-e2e:lash-e2e__unit_test": {"cpu_count": 2, "memory_kb": 524288},
+    "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma__unit_test": {"cpu_count": 2, "memory_kb": 524288},
     "//crates/lash-http-transport:lash-http-transport__unit_test": {"cpu_count": 1, "memory_kb": 262144},
     "//crates/lash-kernel-check:lash-kernel-check__unit_test": {"cpu_count": 2, "memory_kb": 524288},
     "//crates/lash-kernel-doc:kernel_schema_generator__bin__unit_test": {"cpu_count": 2, "memory_kb": 524288},

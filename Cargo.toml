@@ -49,6 +49,7 @@ members = [
     "crates/lash-kernel-check",
     "crates/lash-kernel-doc",
     "crates/lash-kernel-vm",
+    "crates/lash-ext-regex-ecma",
     "examples/agent-workbench",
     "examples/toolbench",
     "examples/workflow-graph-roundtrip",
@@ -314,6 +315,7 @@ lash-typescript = { package = "lash-internal-typescript", path = "crates/lash-ty
 lash-kernel-check = { path = "crates/lash-kernel-check", version = "=0.0.0-dev" }
 lash-kernel-doc = { path = "crates/lash-kernel-doc", version = "=0.0.0-dev" }
 lash-kernel-vm = { path = "crates/lash-kernel-vm", version = "=0.0.0-dev" }
+lash-ext-regex-ecma = { path = "crates/lash-ext-regex-ecma", version = "=0.0.0-dev" }
 swc_common = "=25.0.0"
 swc_ecma_ast = "=28.0.0"
 swc_ecma_parser = { version = "=44.0.0", default-features = false, features = ["typescript"] }

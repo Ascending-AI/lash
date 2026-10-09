@@ -59,6 +59,27 @@ pub trait FallibleMatchProducer: MatchProducer {
         pos: Self::Position,
         next_start: &mut Option<Self::Position>,
     ) -> Result<Option<Match>, MatchError>;
+
+    /// The steps charged against the allowance so far: zero for a producer
+    /// that was given none.
+    fn consumed_fuel(&self) -> u64;
+}
+
+/// A fuel-limited match iterator that reports what it has consumed.
+///
+/// One unit is one matcher step: an instruction dispatched or a backtrack
+/// entry popped. The count is a function of the compiled program, the input
+/// and the start offset; an allowance of exactly the count a search needs
+/// lets it finish, and one less exhausts it.
+pub trait MeteredMatches: Iterator<Item = Result<Match, MatchError>> {
+    /// The steps charged against the allowance so far, exhausted or not.
+    fn consumed_fuel(&self) -> u64;
+}
+
+impl<Producer: FallibleMatchProducer> MeteredMatches for TryMatches<Producer> {
+    fn consumed_fuel(&self) -> u64 {
+        self.mp.consumed_fuel()
+    }
 }
 
 /// A trait for executing a regex.

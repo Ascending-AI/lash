@@ -11,11 +11,12 @@ SCRIPT = ROOT / "scripts/check-kernel-boundary.py"
 
 WORKSPACE = """\
 [workspace]
-members = ["crates/lash-kernel-doc", "crates/lash-kernel-vm", "crates/lash-ext-regex", "crates/lash-core"]
+members = ["crates/lash-kernel-doc", "crates/lash-kernel-vm", "crates/lash-ext-regex", "crates/lash-regress", "crates/lash-core"]
 
 [workspace.dependencies]
 serde = "1"
 lash-kernel-doc = { path = "crates/lash-kernel-doc" }
+lash-regress = { path = "crates/lash-regress" }
 lash-core = { package = "lash-internal-core", path = "crates/lash-core" }
 """
 
@@ -31,7 +32,11 @@ CLEAN = {
         "[dependencies]\nlash-kernel-doc = { workspace = true }\n"
         '[dev-dependencies]\nlash-ext-regex = { path = "../lash-ext-regex" }\n',
     ),
-    "crates/lash-ext-regex": manifest("lash-ext-regex", '[dependencies]\nregex = "1"\n'),
+    "crates/lash-ext-regex": manifest(
+        "lash-ext-regex", '[dependencies]\nregex = "1"\nlash-regress = { workspace = true }\n'
+    ),
+    # A forked engine is in the set under its own name.
+    "crates/lash-regress": manifest("lash-regress", '[dependencies]\nmemchr = "2"\n'),
     # Lash may depend on the kernel; only the reverse is refused.
     "crates/lash-core": manifest("lash-internal-core", "[dependencies]\nlash-kernel-doc = { workspace = true }\n"),
 }
@@ -61,7 +66,7 @@ class KernelBoundary(unittest.TestCase):
             "build": "[build-dependencies]\nlash-core = { workspace = true }\n",
             "target": "[target.'cfg(unix)'.dependencies]\nlash-core = { workspace = true }\n",
         }
-        for crate in ("lash-kernel-vm", "lash-ext-regex"):
+        for crate in ("lash-kernel-vm", "lash-ext-regex", "lash-regress"):
             for label, body in cases.items():
                 with self.subTest(crate=crate, case=label):
                     result = self.run_check({f"crates/{crate}": manifest(crate, body)})

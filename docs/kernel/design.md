@@ -217,7 +217,7 @@ The kernel is a set of small crates that depend on nothing else in lash, so the 
 Dialect packages sit beside them: `lash-dialect-typescript`, `lash-ext-regex-ecma`, `lash-ext-url-whatwg`.
 
 **Rules.**
-1. **One direction.** `lash-kernel-*`, `lash-dialect-*` and `lash-ext-*` crates depend only on each other and on third-party crates. A CI check enforces it.
+1. **One direction.** `lash-kernel-*`, `lash-dialect-*` and `lash-ext-*` crates depend only on each other and on third-party crates. A forked engine an extension is built on is in the set under its own name: `lash-regress`, the matcher under `lash-ext-regex-ecma`. A CI check enforces it.
 2. **No I/O in the kernel.** No async runtime, store, network, threads or process management. The machine is a plain library. `run` executes until no task is ready, or a fuel slice ends, and returns the effects and sleeps requested since the last park; `deliver` takes one outcome. The embedder passes `run` a synchronous interface that answers host reads (clock, random, projection reads), takes `print` output and reports a pending cancel.
 3. **No global state.** Everything guest-derived lives in an instance the embedder owns (ADR 0123).
 4. **The machine parks; the embedder commits.** `lash-kernel-vm` produces and consumes parked state. Durable admission, transactions, ownership, leases, retries and processes stay in `lash-vm-broker` and the durable engine.

@@ -1993,6 +1993,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "lash-ext-regex-ecma"
+version = "0.0.0-dev"
+dependencies = [
+ "lash-kernel-doc",
+ "lash-regress",
+ "num-traits",
+ "thiserror",
+]
+
+[[package]]
 name = "lash-facade-failover"
 version = "0.0.0-dev"
 dependencies = [

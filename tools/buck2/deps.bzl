@@ -108,6 +108,16 @@ PACKAGE_DEPS = {
             "tokio": "//third-party/rust:p0371"
         }
     },
+    "lash-ext-regex-ecma": {
+        "build": {},
+        "dev": {},
+        "normal": {
+            "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
+            "lash_regress": "//crates/lash-regress:lash-regress",
+            "num_traits": "//third-party/rust:p0216",
+            "thiserror": "//third-party/rust:p0364"
+        }
+    },
     "lash-facade-failover": {
         "build": {},
         "dev": {

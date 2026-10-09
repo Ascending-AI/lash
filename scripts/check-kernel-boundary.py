@@ -3,9 +3,11 @@
 
 `lash-kernel-*`, `lash-dialect-*` and `lash-ext-*` crates depend only on each
 other and on third-party crates, so the set can move to its own repository.
-This check reads every workspace member's manifest and fails when one of
-those crates names, in any dependency table (normal, dev, build or
-target-specific), a crate of this repository outside the set.
+The forked engines an extension is built on (`lash-regress`) are in the set
+under their own names and held to the same rule. This check reads every
+workspace member's manifest and fails when one of those crates names, in any
+dependency table (normal, dev, build or target-specific), a crate of this
+repository outside the set.
 
 A dependency is a crate of this repository when it is given by `path`, in the
 member's manifest or in the `[workspace.dependencies]` entry it inherits.
@@ -19,11 +21,16 @@ import tomllib
 from pathlib import Path
 
 KERNEL_SET = re.compile(r"^lash-(kernel|dialect|ext)-")
+# Forked third-party engines that move with the set: `lash-regress` is the
+# ECMAScript matcher under `lash-ext-regex-ecma`.
+KERNEL_SET_FORKS = frozenset({"lash-regress"})
 DEPENDENCY_TABLES = ("dependencies", "dev-dependencies", "build-dependencies")
 
 
 def in_kernel_set(package: str, directory: str) -> bool:
-    return bool(KERNEL_SET.match(package) or KERNEL_SET.match(directory))
+    return bool(
+        KERNEL_SET.match(package) or KERNEL_SET.match(directory) or package in KERNEL_SET_FORKS
+    )
 
 
 def dependency_tables(manifest: dict) -> list[tuple[str, dict]]:
