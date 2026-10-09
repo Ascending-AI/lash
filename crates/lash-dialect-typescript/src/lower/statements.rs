@@ -126,6 +126,13 @@ impl Lowerer<'_> {
             }
             ast::Stmt::Empty | ast::Stmt::Function { .. } => Ok(()),
             ast::Stmt::Expr(expr) => {
+                if self.discards_effect(expr) {
+                    return Err(Diagnostic::new(
+                        DiagnosticCode::UnawaitedTool,
+                        "a discarded tool call's promise can never be awaited",
+                        self.span,
+                    ));
+                }
                 let value = self.lower_expr(expr)?;
                 self.discard(value);
                 Ok(())

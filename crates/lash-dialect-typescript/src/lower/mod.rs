@@ -18,8 +18,9 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use lash_kernel_dialect::{Environment, Library, Lowered};
 use lash_kernel_doc::{
-    Action, Atom, Block, Callee, Catch, Closure, Document, Expr, Float, FunctionCatalog,
-    FunctionId, FunctionName, Literal, Member, Name, NumberPolicy, Place, Rhs, Stmt, TryStmt,
+    Action, Atom, Block, Callee, Catch, Closure, Document, EffectName, Expr, Float,
+    FunctionCatalog, FunctionId, FunctionName, Literal, Member, Name, NumberPolicy, Place, Rhs,
+    Signature, Stmt, TryStmt,
 };
 
 use crate::adapter as ast;
@@ -44,6 +45,7 @@ pub(crate) type Lowering<T> = Result<T, Diagnostic>;
 pub(crate) const CORE_OPERATIONS: &[&str] = &[
     "same",
     "ts.add",
+    "ts.await",
     "ts.assign",
     "ts.bit_and",
     "ts.bit_not",
@@ -70,6 +72,8 @@ pub(crate) const CORE_OPERATIONS: &[&str] = &[
     "ts.object_rest",
     "ts.pad",
     "ts.pow",
+    "ts.promise.pending",
+    "ts.promise.run",
     "ts.rem",
     "ts.require_object_coercible",
     "ts.rest",
@@ -234,6 +238,10 @@ struct FunctionFrame {
 
 pub(crate) struct Lowerer<'a> {
     library: &'a dyn Library,
+    /// The effects the host supplies: a call of one is a tool call.
+    effects: &'a BTreeMap<EffectName, Signature>,
+    /// The effects the document performs, for its manifest (`K-DOC-002`).
+    performed: BTreeMap<EffectName, Signature>,
     session: &'a BTreeSet<Name>,
     table: &'static Table,
     /// Every word of the source, every session binding and every name
@@ -268,6 +276,8 @@ pub(crate) fn lower(
     );
     let mut lowerer = Lowerer {
         library: environment.library,
+        effects: environment.effects,
+        performed: BTreeMap::new(),
         session: environment.bindings,
         table: builtins::table(),
         taken,
@@ -294,6 +304,7 @@ pub(crate) fn lower(
     let mut document = Document::new(NumberPolicy::Float, main.stmts);
     document.private_bindings = lowerer.private;
     document.manifest.functions = reachable(lowerer.used, environment.library);
+    document.manifest.effects = lowerer.performed;
     let annotations = annotate::annotations(&document, &main.notes, source)?;
     Ok(Lowered {
         document,

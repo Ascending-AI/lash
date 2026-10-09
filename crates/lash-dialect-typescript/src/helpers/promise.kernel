@@ -1,0 +1,423 @@
+# Promises over kernel tasks.
+#
+# A promise is a record `{brand: "Promise", state, task}`: `task` is the
+# handle of the one task whose end settles the promise, and `state` is
+# "pending", "fulfilled" or "rejected". The task itself writes `state` in
+# the stretch it ends in (`ts.promise.run`), so a reader learns whether the
+# task has ended without waiting on it. The task's result is the promise's
+# value and the task's error is its reason, so awaiting a promise twice
+# joins one handle twice and gives the same answer (`K-TASK-009`).
+#
+# JavaScript runs every continuation as a job at the back of one queue. The
+# kernel's ready queue is that queue: a task woken by a `join` goes to its
+# back as a reaction job does. The two differ where JavaScript queues a job
+# and the kernel goes straight on, and each such place is one `yield` here:
+# awaiting what is not a promise, awaiting a promise that has settled
+# (`K-TASK-007`), resolving a promise with a promise, and an aggregate that
+# is decided when it is called.
+
+use same
+use eq
+use error.new
+use list.len
+use ts.receiver
+use ts.pad
+use ts.iterate
+use ts.promise.is
+use ts.promise.pending
+use ts.await
+use ts.promise.run
+use ts.promise.start
+use ts.promise.settled
+use ts.promise.callable
+use ts.promise.then
+use ts.promise.members
+use ts.promise.decided
+
+# Whether a value is a promise. `instanceof Promise` asks this too.
+function ts.promise.is(value: Any) -> Bool
+kernel 1
+charge 4
+body {
+  let k = invoke ts.receiver(value)
+  return same(k, "brand:Promise")
+}
+
+# A promise no task settles yet. The statement that follows spawns its task
+# and writes the handle to `task`.
+function ts.promise.pending() -> Any
+kernel 1
+charge 4
+body {
+  return {brand: "Promise", state: "pending", task: absent}
+}
+
+# `await value`: the value a promise fulfils with, or a raise of what it
+# rejects with. JavaScript continues one job later than the settlement, so
+# a promise that has settled, and a value that is no promise, cost one
+# `yield`; a pending promise costs none, because the `join` wakes this task
+# at the back of the queue.
+function ts.await(value: Any) -> Any
+kernel 1
+charge 6
+body {
+  let promise = invoke ts.promise.is(value)
+  if promise {
+    if same(value.state, "pending") {} else {
+      do yield
+    }
+    let task = value.task
+    let outcome = join task
+    return outcome
+  }
+  do yield
+  return value
+}
+
+# What a promise's task runs: `work(this, args)`, then the settlement.
+# A body that returns a promise resolves this one with it, which JavaScript
+# does in a job of its own before it waits on that promise.
+function ts.promise.run(promise: Any, work: Any, this: Any, args: Any) -> Any
+kernel 1
+charge 8
+body {
+  let value = absent
+  try {
+    set value = apply work(this, args)
+    let adopts = invoke ts.promise.is(value)
+    if adopts {
+      do yield
+      set value = invoke ts.await(value)
+    }
+  } catch reason {
+    set promise.state = "rejected"
+    throw reason
+  }
+  set promise.state = "fulfilled"
+  return value
+}
+
+# A promise settled by a new task that runs `work(this, args)`. The task
+# runs at once, up to its first wait (`K-TASK-002`).
+function ts.promise.start(work: Any, this: Any, args: Any) -> Any
+kernel 1
+charge 12
+body {
+  let promise = invoke ts.promise.pending()
+  set promise.task = spawn invoke ts.promise.run(promise, work, this, args)
+  return promise
+}
+
+# A promise already fulfilled with `value`, or already rejected with it.
+function ts.promise.settled(value: Any, rejected: Bool) -> Any
+kernel 1
+charge 16
+body {
+  let work = fn(this, args) {
+    if rejected {
+      throw value
+    }
+    return value
+  }
+  let promise = invoke ts.promise.pending()
+  set promise.task = spawn invoke ts.promise.run(promise, work, absent, absent)
+  return promise
+}
+
+# `Promise.resolve(value)`: a promise is itself.
+function ts.promise.resolve(this: Any, args: List(Any)) -> Any
+kernel 1
+charge 24
+body {
+  let padded = invoke ts.pad(args, 1.0)
+  let value = padded[0]
+  let promise = invoke ts.promise.is(value)
+  if promise {
+    return value
+  }
+  let made = invoke ts.promise.settled(value, false)
+  return made
+}
+
+# `Promise.reject(reason)`.
+function ts.promise.reject(this: Any, args: List(Any)) -> Any
+kernel 1
+charge 24
+body {
+  let padded = invoke ts.pad(args, 1.0)
+  let reason = padded[0]
+  let made = invoke ts.promise.settled(reason, true)
+  return made
+}
+
+function ts.promise.callable(value: Any) -> Bool
+kernel 1
+charge 4
+body {
+  let k = invoke ts.receiver(value)
+  return same(k, "closure")
+}
+
+# `promise.then(onFulfilled, onRejected)`: a task that awaits the promise
+# and then runs the handler that applies. With no handler the outcome
+# passes through.
+function ts.promise.then(this: Any, args: List(Any)) -> Any
+kernel 1
+charge 32
+body {
+  let handlers = invoke ts.pad(args, 2.0)
+  let on_fulfilled = handlers[0]
+  let on_rejected = handlers[1]
+  let source = this
+  let react = fn(this, args) {
+    let fulfilled = true
+    let outcome = absent
+    try {
+      set outcome = invoke ts.await(source)
+    } catch reason {
+      set fulfilled = false
+      set outcome = reason
+    }
+    let handler = on_rejected
+    if fulfilled {
+      set handler = on_fulfilled
+    }
+    let handled = invoke ts.promise.callable(handler)
+    if handled {
+      let values = [outcome]
+      let handled_to = apply handler(absent, values)
+      return handled_to
+    }
+    if fulfilled {
+      return outcome
+    }
+    throw outcome
+  }
+  let derived = invoke ts.promise.start(react, absent, absent)
+  return derived
+}
+
+# `promise.catch(onRejected)`.
+function ts.promise.catch(this: Any, args: List(Any)) -> Any
+kernel 1
+charge 40
+body {
+  let handlers = invoke ts.pad(args, 1.0)
+  let pair = [absent, handlers[0]]
+  let derived = invoke ts.promise.then(this, pair)
+  return derived
+}
+
+# `promise.finally(onFinally)`: the handler runs whichever way the promise
+# settled, what it returns is awaited, and then the first outcome stands
+# unless the handler raised. JavaScript spends one more job handing the
+# outcome on.
+function ts.promise.finally(this: Any, args: List(Any)) -> Any
+kernel 1
+charge 40
+body {
+  let handlers = invoke ts.pad(args, 1.0)
+  let on_finally = handlers[0]
+  let source = this
+  let react = fn(this, args) {
+    let fulfilled = true
+    let outcome = absent
+    try {
+      set outcome = invoke ts.await(source)
+    } catch reason {
+      set fulfilled = false
+      set outcome = reason
+    }
+    let handled = invoke ts.promise.callable(on_finally)
+    if handled {
+      let none = []
+      let waited = apply on_finally(absent, none)
+      do invoke ts.await(waited)
+      do yield
+    }
+    if fulfilled {
+      return outcome
+    }
+    throw outcome
+  }
+  let derived = invoke ts.promise.start(react, absent, absent)
+  return derived
+}
+
+# The members of an aggregate: the task of each, and the state each was in
+# when the aggregate was called. A member that is no promise is a promise
+# already fulfilled with it.
+function ts.promise.members(items: Any) -> Any
+kernel 1
+charge sum(8, size(items))
+body {
+  let elements = invoke ts.iterate(items)
+  let tasks = []
+  let states = []
+  for element in elements {
+    let member = element
+    let promise = invoke ts.promise.is(element)
+    if promise {} else {
+      set member = invoke ts.promise.settled(element, false)
+    }
+    set tasks[list.len(tasks)] = member.task
+    set states[list.len(states)] = member.state
+  }
+  return {tasks: tasks, states: states}
+}
+
+# Whether an aggregate over members in these states is decided as it is
+# called. JavaScript still decides it in a job, so the aggregate's task
+# yields once before its `join`, which then continues at once.
+function ts.promise.decided(states: List(Text), mode: Text) -> Bool
+kernel 1
+charge sum(4, size(states))
+body {
+  let pending = false
+  let fulfilled = false
+  let rejected = false
+  for state in states {
+    if same(state, "pending") {
+      set pending = true
+    }
+    if same(state, "fulfilled") {
+      set fulfilled = true
+    }
+    if same(state, "rejected") {
+      set rejected = true
+    }
+  }
+  if eq(list.len(states), 0) {
+    return false
+  }
+  if pending {} else {
+    return true
+  }
+  if same(mode, "all") {
+    return rejected
+  }
+  if same(mode, "race") {
+    if fulfilled {
+      return true
+    }
+    return rejected
+  }
+  if same(mode, "any") {
+    return fulfilled
+  }
+  return false
+}
+
+# `Promise.all(items)`: `join all` (`K-TASK-011`).
+function ts.promise.all(this: Any, args: List(Any)) -> Any
+kernel 1
+charge 48
+body {
+  let padded = invoke ts.pad(args, 1.0)
+  let items = padded[0]
+  let members = invoke ts.promise.members(items)
+  let tasks = members.tasks
+  let states = members.states
+  let decided = invoke ts.promise.decided(states, "all")
+  let wait = fn(this, args) {
+    if decided {
+      do yield
+    }
+    let values = join all tasks
+    return values
+  }
+  let promise = invoke ts.promise.start(wait, absent, absent)
+  return promise
+}
+
+# `Promise.allSettled(items)`: `join settled` (`K-TASK-012`), each outcome
+# under the names JavaScript gives it.
+function ts.promise.all_settled(this: Any, args: List(Any)) -> Any
+kernel 1
+charge 48
+body {
+  let padded = invoke ts.pad(args, 1.0)
+  let items = padded[0]
+  let members = invoke ts.promise.members(items)
+  let tasks = members.tasks
+  let states = members.states
+  let decided = invoke ts.promise.decided(states, "settled")
+  let wait = fn(this, args) {
+    if decided {
+      do yield
+    }
+    let outcomes = join settled tasks
+    let results = []
+    for outcome in outcomes {
+      if same(outcome.status, "ok") {
+        set results[list.len(results)] = {status: "fulfilled", value: outcome.value}
+      } else {
+        set results[list.len(results)] = {status: "rejected", reason: outcome.error}
+      }
+    }
+    return results
+  }
+  let promise = invoke ts.promise.start(wait, absent, absent)
+  return promise
+}
+
+# `Promise.race(items)`: `join race` (`K-TASK-013`).
+function ts.promise.race(this: Any, args: List(Any)) -> Any
+kernel 1
+charge 48
+body {
+  let padded = invoke ts.pad(args, 1.0)
+  let items = padded[0]
+  let members = invoke ts.promise.members(items)
+  let tasks = members.tasks
+  let states = members.states
+  let decided = invoke ts.promise.decided(states, "race")
+  let wait = fn(this, args) {
+    if decided {
+      do yield
+    }
+    let value = join race tasks
+    return value
+  }
+  let promise = invoke ts.promise.start(wait, absent, absent)
+  return promise
+}
+
+# `Promise.any(items)`: `join any` (`K-TASK-014`). When every member
+# rejects, and for no members at all, the reason is an `AggregateError`
+# whose data holds the members' reasons under `errors`.
+function ts.promise.any(this: Any, args: List(Any)) -> Any
+kernel 1
+charge 48
+body {
+  let padded = invoke ts.pad(args, 1.0)
+  let items = padded[0]
+  let members = invoke ts.promise.members(items)
+  let tasks = members.tasks
+  let states = members.states
+  let decided = invoke ts.promise.decided(states, "any")
+  let wait = fn(this, args) {
+    if eq(list.len(tasks), 0) {
+      let none = {errors: []}
+      throw error.new("AggregateError", "All promises were rejected", none)
+    }
+    if decided {
+      do yield
+    }
+    try {
+      let value = join any tasks
+      return value
+    } catch reason {
+      let k = invoke ts.receiver(reason)
+      if same(k, "error") {
+        if same(reason.kind, "all_failed") {
+          let reasons = {errors: reason.data}
+          throw error.new("AggregateError", "All promises were rejected", reasons)
+        }
+      }
+      throw reason
+    }
+  }
+  let promise = invoke ts.promise.start(wait, absent, absent)
+  return promise
+}

@@ -17,6 +17,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::OnceLock;
 
 mod console;
+mod promise;
 
 /// What a member's receiver is, as `ts.receiver` names it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -100,7 +101,7 @@ pub(crate) struct Object {
 /// Every built-in object, in the order their helpers are defined: an object
 /// may call the helpers of those before it.
 pub(crate) fn objects() -> Vec<Object> {
-    vec![console::object()]
+    vec![console::object(), promise::object()]
 }
 
 /// The rows, indexed the ways the lowerer and the package builder ask.

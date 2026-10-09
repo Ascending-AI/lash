@@ -43,7 +43,8 @@ impl Lowerer<'_> {
         result
     }
 
-    fn closure(&mut self, function: &ast::Function) -> Lowering<Operand> {
+    /// A function's parameters and body as a closure, whatever runs it.
+    pub(super) fn closure(&mut self, function: &ast::Function) -> Lowering<Operand> {
         let this = self.fresh("this");
         let args = self.fresh("args");
         self.functions.push(FunctionFrame {

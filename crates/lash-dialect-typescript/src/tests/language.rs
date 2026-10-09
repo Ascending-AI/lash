@@ -84,9 +84,6 @@ fn refusals_keep_their_codes() {
     for (source, code) in [
         ("const c = 1; c = 2;", DiagnosticCode::AssignConst),
         ("missing + 1;", DiagnosticCode::UnknownBinding),
-        ("async function f() {}", DiagnosticCode::AsyncUnsupported),
-        ("const f = async () => 1;", DiagnosticCode::AsyncUnsupported),
-        ("var x; await x;", DiagnosticCode::AwaitUnsupported),
         ("new Foo();", DiagnosticCode::NewUnsupported),
         ("this.x;", DiagnosticCode::ThisUnsupported),
         ("arguments;", DiagnosticCode::ArgumentsUnsupported),

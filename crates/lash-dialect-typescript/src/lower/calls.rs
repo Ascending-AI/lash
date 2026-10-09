@@ -207,6 +207,9 @@ impl Lowerer<'_> {
         args: &[ast::CallArg],
         span: SourceSpan,
     ) -> Lowering<Operand> {
+        if let Some(wait) = self.wait_of(callee) {
+            return self.lower_wait_call(wait, args, span);
+        }
         if let Some(path) = self.global_path(callee) {
             if let Some(function) = self.table.functions.get(path.as_str()).copied() {
                 let args = self.arguments(args)?;

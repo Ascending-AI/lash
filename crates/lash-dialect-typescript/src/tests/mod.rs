@@ -2,12 +2,16 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::OnceLock;
 
 use lash_kernel_dialect::{Environment, Lowered, NamedLibrary};
-use lash_kernel_doc::{parse_document, print_document, validate_annotations, validate_document};
+use lash_kernel_doc::{
+    EffectName, Signature, parse_document, print_document, validate_annotations, validate_document,
+};
 
 use crate::{Diagnostic, define_helpers, provisional};
 
+mod async_fn;
 mod hoisting;
 mod language;
+mod machine;
 mod package;
 
 /// The stand-in kernel library with the dialect's helpers defined in it.
@@ -30,11 +34,24 @@ pub(crate) fn lower(source: &str) -> Result<Lowered, Diagnostic> {
 }
 
 pub(crate) fn lower_in_session(source: &str, bindings: &[&str]) -> Result<Lowered, Diagnostic> {
-    let effects = BTreeMap::new();
+    lower_against(source, bindings, &BTreeMap::new())
+}
+
+/// Lowers a first cell whose host supplies the laws' tools, `echo` and
+/// `boom`.
+pub(crate) fn lower_with_effects(source: &str) -> Result<Lowered, Diagnostic> {
+    lower_against(source, &[], &machine::effects())
+}
+
+fn lower_against(
+    source: &str,
+    bindings: &[&str],
+    effects: &BTreeMap<EffectName, Signature>,
+) -> Result<Lowered, Diagnostic> {
     let bindings: BTreeSet<_> = bindings.iter().map(|name| (*name).into()).collect();
     let environment = Environment {
         library: library(),
-        effects: &effects,
+        effects,
         bindings: &bindings,
     };
     let lowered = crate::lower(source, &environment)?;
@@ -56,7 +73,16 @@ pub(crate) fn lower_in_session(source: &str, bindings: &[&str]) -> Result<Lowere
 /// The body of `main` in kernel text, one statement per line, without the
 /// header that lists library functions.
 pub(crate) fn main_text(source: &str) -> String {
-    let lowered = match lower(source) {
+    main_of(lower(source))
+}
+
+/// [`main_text`] of a cell that may call the laws' tools.
+pub(crate) fn main_text_with_effects(source: &str) -> String {
+    main_of(lower_with_effects(source))
+}
+
+fn main_of(lowered: Result<Lowered, Diagnostic>) -> String {
+    let lowered = match lowered {
         Ok(lowered) => lowered,
         Err(diagnostic) => panic!("{diagnostic}"),
     };

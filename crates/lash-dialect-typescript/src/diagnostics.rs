@@ -9,7 +9,6 @@ pub enum DiagnosticCode {
     SyntaxError,
     ClassUnsupported,
     GeneratorUnsupported,
-    AsyncUnsupported,
     WithUnsupported,
     EvalUnsupported,
     FunctionConstructorUnsupported,
@@ -34,7 +33,6 @@ pub enum DiagnosticCode {
     NewUnsupported,
     ForUnsupported,
     ForOfUnsupported,
-    AwaitUnsupported,
     AwaitRequired,
     UnawaitedTool,
     YieldUnsupported,
@@ -89,7 +87,6 @@ impl DiagnosticCode {
         Self::SyntaxError,
         Self::ClassUnsupported,
         Self::GeneratorUnsupported,
-        Self::AsyncUnsupported,
         Self::WithUnsupported,
         Self::EvalUnsupported,
         Self::FunctionConstructorUnsupported,
@@ -114,7 +111,6 @@ impl DiagnosticCode {
         Self::NewUnsupported,
         Self::ForUnsupported,
         Self::ForOfUnsupported,
-        Self::AwaitUnsupported,
         Self::AwaitRequired,
         Self::UnawaitedTool,
         Self::YieldUnsupported,
@@ -181,9 +177,6 @@ impl DiagnosticCode {
             Self::GeneratorUnsupported => {
                 "build the whole list and return it, or drive the work with `for...of`"
             }
-            Self::AsyncUnsupported => {
-                "declare the function `async` where the dialect allows it, or move the awaited work to the caller"
-            }
             Self::WithUnsupported => "name the object and read its properties explicitly",
             Self::EvalUnsupported => "write the code in the cell; there is no dynamic evaluation",
             Self::FunctionConstructorUnsupported => {
@@ -228,9 +221,6 @@ impl DiagnosticCode {
                 "run the update in the body before a `continue` that leaves a `try` with a `finally`, and drop it from the loop head"
             }
             Self::ForOfUnsupported => "iterate a materialized array with plain `for...of`",
-            Self::AwaitUnsupported => {
-                "await tool calls, process handles, `sleep`, or `Promise.all`/`allSettled`/`race`/`any` — nothing else is awaitable"
-            }
             Self::AwaitRequired => "add `await` — the call returns a promise",
             Self::UnawaitedTool => {
                 "await the tool call, or collect its handle into `Promise.all` or `Promise.allSettled` and await the aggregate"
@@ -323,7 +313,6 @@ impl DiagnosticCode {
             // form is refused again; the fix is the other construct.
             Self::ClassUnsupported
             | Self::GeneratorUnsupported
-            | Self::AsyncUnsupported
             | Self::WithUnsupported
             | Self::EvalUnsupported
             | Self::FunctionConstructorUnsupported
@@ -344,7 +333,6 @@ impl DiagnosticCode {
             | Self::NewUnsupported
             | Self::ForUnsupported
             | Self::ForOfUnsupported
-            | Self::AwaitUnsupported
             | Self::UnawaitedTool
             | Self::YieldUnsupported
             | Self::TaggedTemplateUnsupported
@@ -408,7 +396,6 @@ impl DiagnosticCode {
             Self::SyntaxError => "TS_SYNTAX_ERROR",
             Self::ClassUnsupported => "TS_CLASS_UNSUPPORTED",
             Self::GeneratorUnsupported => "TS_GENERATOR_UNSUPPORTED",
-            Self::AsyncUnsupported => "TS_ASYNC_UNSUPPORTED",
             Self::WithUnsupported => "TS_WITH_UNSUPPORTED",
             Self::EvalUnsupported => "TS_EVAL_UNSUPPORTED",
             Self::FunctionConstructorUnsupported => "TS_FUNCTION_CONSTRUCTOR_UNSUPPORTED",
@@ -433,7 +420,6 @@ impl DiagnosticCode {
             Self::NewUnsupported => "TS_NEW_UNSUPPORTED",
             Self::ForUnsupported => "TS_FOR_UNSUPPORTED",
             Self::ForOfUnsupported => "TS_FOR_OF_UNSUPPORTED",
-            Self::AwaitUnsupported => "TS_AWAIT_UNSUPPORTED",
             Self::AwaitRequired => "TS_AWAIT_REQUIRED",
             Self::UnawaitedTool => "TS_UNAWAITED_TOOL",
             Self::YieldUnsupported => "TS_YIELD_UNSUPPORTED",
