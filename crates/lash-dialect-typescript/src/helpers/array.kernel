@@ -139,6 +139,7 @@ charge 8
 body {
   let number = invoke ts.to_number(value)
   if num.is_nan(number) { return 0.0 }
+  if eq(number, 0) { return 0.0 }
   return num.trunc(number)
 }
 
@@ -957,6 +958,10 @@ errors "type_error", "RangeError"
 charge 8
 body {
   let length = invoke ts.array.length(this)
+  if eq(length, 0) {
+    do invoke ts.array.set(this, "length", 0.0)
+    return absent
+  }
   let value = invoke ts.get(this, 0.0)
   let array_arg_8 = [0.0, 1.0]
   do invoke ts.array.splice(this, array_arg_8)

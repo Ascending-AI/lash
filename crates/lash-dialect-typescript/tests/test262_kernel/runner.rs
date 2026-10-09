@@ -663,3 +663,20 @@ fn logical_assignment_returns_the_stored_closure() {
         ),
     );
 }
+
+/// ToIntegerOrInfinity normalizes negative zero before returning an array index.
+#[test]
+fn array_search_returns_positive_zero_and_empty_shift_skips_index_zero() {
+    assert_finished(
+        execute(
+            "const obj = {length: -1, 0: 99}; const shifted = Array.prototype.shift.call(obj); finish([1 / [true].indexOf(true, -0), 1 / [true].lastIndexOf(true, -0), shifted === undefined, obj.length, obj[0]]);",
+        ),
+        Datum::List(vec![
+            Datum::Float(lash_kernel_doc::Float::new(f64::INFINITY)),
+            Datum::Float(lash_kernel_doc::Float::new(f64::INFINITY)),
+            Datum::Bool(true),
+            Datum::Float(lash_kernel_doc::Float::new(0.0)),
+            Datum::Float(lash_kernel_doc::Float::new(99.0)),
+        ]),
+    );
+}
