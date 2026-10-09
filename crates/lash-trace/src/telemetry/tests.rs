@@ -208,7 +208,7 @@ fn links_keep_the_first_sixty_four_distinct_spans_in_admission_order() {
 
 #[test]
 fn a_retained_scope_yields_no_permit_and_an_inserted_one_does() {
-    let candidate = UntracedScopes.propose(&run_scope(), &TraceCause::Root);
+    let candidate = UntracedScopes.propose(&run_scope(), &TraceCause::Root, 1_700_000_000_000);
     let scope = DurableTraceScope {
         scope: run_scope(),
         cause: TraceCause::linked_to(Some(carrier(3))),

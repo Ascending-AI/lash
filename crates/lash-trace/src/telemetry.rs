@@ -936,9 +936,15 @@ pub trait TraceScopeFactory: Send + Sync {
         None
     }
 
-    /// Starts an admission candidate for `scope` under `cause`.
-    fn propose(&self, scope: &TraceScopeId, cause: &TraceCause)
-    -> Box<dyn TraceAdmissionCandidate>;
+    /// Starts an admission candidate for `scope` under `cause` at the
+    /// same `started_at_ms` the durable scope retains. The adapter uses
+    /// this instant instead of reading its own clock.
+    fn propose(
+        &self,
+        scope: &TraceScopeId,
+        cause: &TraceCause,
+        started_at_ms: u64,
+    ) -> Box<dyn TraceAdmissionCandidate>;
 
     /// Exports the admission of `scope`, retained by a durable admission
     /// whose owner may not have exported it (it lost its life or the
@@ -973,6 +979,7 @@ impl TraceScopeFactory for UntracedScopes {
         &self,
         _scope: &TraceScopeId,
         _cause: &TraceCause,
+        _started_at_ms: u64,
     ) -> Box<dyn TraceAdmissionCandidate> {
         Box::new(UntracedCandidate)
     }

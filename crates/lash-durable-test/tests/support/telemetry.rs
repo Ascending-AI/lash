@@ -105,6 +105,7 @@ impl TraceScopeFactory for Telemetry {
         &self,
         scope: &TraceScopeId,
         cause: &TraceCause,
+        _started_at_ms: u64,
     ) -> Box<dyn TraceAdmissionCandidate> {
         let proposed = {
             let mut recorded = self.recorded.lock_recover();

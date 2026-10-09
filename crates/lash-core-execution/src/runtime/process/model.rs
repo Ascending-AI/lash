@@ -1036,6 +1036,10 @@ impl PreparedProcessRegistration {
     pub fn trace(&self) -> &lash_trace::TraceScopeOffer {
         &self.registration.trace
     }
+    /// The retained preparation time used by the process trace scope.
+    pub fn prepared_at_ms(&self) -> u64 {
+        self.prepared_at_ms
+    }
     pub fn into_commit(
         mut self,
         anchor: lash_trace::TraceAnchor,

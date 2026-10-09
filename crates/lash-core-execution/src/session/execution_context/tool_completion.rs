@@ -72,7 +72,11 @@ impl RuntimeExecutionContext<'_> {
             call_id,
             requested_at_ms,
         );
-        let candidate = tracing.runtime.scopes().propose(&scope.scope, &scope.cause);
+        let candidate =
+            tracing
+                .runtime
+                .scopes()
+                .propose(&scope.scope, &scope.cause, scope.started_at_ms);
         scope.anchor = candidate.anchor();
         Ok(Some(crate::runtime::actor::round::TraceProposal {
             scope,

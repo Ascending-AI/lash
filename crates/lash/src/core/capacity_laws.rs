@@ -211,7 +211,7 @@ fn facade_otel_admission_capacities_control_defer_and_dedup() {
         session_id: "capacity".into(),
         turn_id: "turn".into(),
     });
-    let candidate = adapter.propose(&scope, &TraceCause::Root);
+    let candidate = adapter.propose(&scope, &TraceCause::Root, 1);
     let anchor = candidate.anchor();
     candidate.defer();
     assert_eq!(

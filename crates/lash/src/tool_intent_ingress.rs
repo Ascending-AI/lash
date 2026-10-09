@@ -626,13 +626,11 @@ impl ToolIntentIngress {
             .map_err(|error| RealizationFailure::Command(kind, error))?;
         // The submission's admission proposes the anchor its scope retains,
         // so the committed settlement has a parent to export under.
-        let candidate = self
-            .core
-            .env
-            .core
-            .tracing
-            .scopes()
-            .propose(&record.trace_scope_id(), trace.offer.cause());
+        let candidate = self.core.env.core.tracing.scopes().propose(
+            &record.trace_scope_id(),
+            trace.offer.cause(),
+            trace.submitted_at_ms,
+        );
         let submitted = record.with_trace_offer(
             lash_core::TraceScopeOffer::new(trace.offer.cause().clone(), candidate.anchor()),
             trace.submitted_at_ms,

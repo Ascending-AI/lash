@@ -340,13 +340,14 @@ impl TurnServices for RuntimeTurnServices {
         });
         // A session's turn is its own root: nothing parents its admission.
         let cause = lash_trace::TraceCause::Root;
-        let candidate = tracing.scopes().propose(&scope, &cause);
+        let started_at_ms = tracing.clock().timestamp_ms();
+        let candidate = tracing.scopes().propose(&scope, &cause, started_at_ms);
         Some(lash_core_execution::runtime::actor::round::TraceProposal {
             scope: lash_trace::DurableTraceScope {
                 scope,
                 cause,
                 anchor: candidate.anchor(),
-                started_at_ms: tracing.clock().timestamp_ms(),
+                started_at_ms,
             },
             candidate,
         })

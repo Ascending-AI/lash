@@ -797,6 +797,7 @@ async fn stage<'a>(
                 process_id: prepared.process_id().clone(),
             }),
             prepared.trace().cause(),
+            prepared.prepared_at_ms(),
         )
     });
     let anchor = candidate.as_ref().map_or_else(

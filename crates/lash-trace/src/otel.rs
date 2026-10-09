@@ -344,12 +344,13 @@ impl TraceScopeFactory for OtelTelemetry {
         &self,
         scope: &TraceScopeId,
         cause: &TraceCause,
+        started_at_ms: u64,
     ) -> Box<dyn TraceAdmissionCandidate> {
         let definition = DomainSpan::AdmissionAttempt.definition();
         let parent = match cause {
             TraceCause::Parent(context) => {
                 let Some(context) = span_context(context) else {
-                    return UntracedScopes.propose(scope, cause);
+                    return UntracedScopes.propose(scope, cause, started_at_ms);
                 };
                 Context::new().with_remote_span_context(context)
             }
@@ -359,7 +360,7 @@ impl TraceScopeFactory for OtelTelemetry {
         if let TraceCause::Linked(causes) = cause {
             for context in causes.contexts() {
                 let Some(context) = span_context(context) else {
-                    return UntracedScopes.propose(scope, cause);
+                    return UntracedScopes.propose(scope, cause, started_at_ms);
                 };
                 links.push(Link::new(context, Vec::new(), 0));
             }
@@ -375,6 +376,7 @@ impl TraceScopeFactory for OtelTelemetry {
             .with_kind(definition.kind)
             .with_attributes(attributes)
             .with_links(links)
+            .with_start_time(epoch_ms(started_at_ms))
             .start_with_context(self.tracer.as_ref(), &parent);
         let anchor = carrier(span.span_context())
             .map(TraceAnchor::Context)

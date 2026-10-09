@@ -36,7 +36,7 @@ fn scope_id() -> TraceScopeId {
 }
 fn admit(adapter: &OtelTelemetry, cause: TraceCause) -> DurableTraceScope {
     let scope = scope_id();
-    let candidate = adapter.propose(&scope, &cause);
+    let candidate = adapter.propose(&scope, &cause, 1000);
     let anchor = candidate.anchor();
     candidate.settle(TraceCandidateOutcome::Selected);
     DurableTraceScope {
@@ -105,7 +105,7 @@ fn reconciled_admissions_are_exported_once_by_identity() {
         started_at_ms: 1000,
     };
 
-    let deferred = adapter.propose(&scope_id(), &TraceCause::Root);
+    let deferred = adapter.propose(&scope_id(), &TraceCause::Root, 1000);
     let anchor = deferred.anchor();
     deferred.defer();
     assert!(exporter.get_finished_spans().unwrap().is_empty());
@@ -114,6 +114,7 @@ fn reconciled_admissions_are_exported_once_by_identity() {
     let spans = exporter.get_finished_spans().unwrap();
     assert_eq!(spans.len(), 1);
     assert_eq!(spans[0].name, "lash.turn.admitted");
+    assert_eq!(spans[0].start_time, epoch_ms(1000));
     assert_eq!(
         spans[0].span_context.span_id().to_bytes(),
         anchor.context().unwrap().span_id().to_bytes()
@@ -125,6 +126,7 @@ fn reconciled_admissions_are_exported_once_by_identity() {
     let spans = exporter.get_finished_spans().unwrap();
     assert_eq!(spans.len(), 2);
     assert_eq!(spans[1].name, "lash.turn.admitted");
+    assert_eq!(spans[1].start_time, epoch_ms(1000));
     assert_eq!(
         spans[1].parent_span_id.to_bytes(),
         elsewhere.span_id().to_bytes()
@@ -134,7 +136,9 @@ fn reconciled_admissions_are_exported_once_by_identity() {
         elsewhere.trace_id().to_bytes()
     );
 
-    adapter.propose(&scope_id(), &TraceCause::Root).defer();
+    adapter
+        .propose(&scope_id(), &TraceCause::Root, 1000)
+        .defer();
     let selected = admit(&adapter, TraceCause::Root);
     adapter.export_admitted(&selected);
     let spans = exporter.get_finished_spans().unwrap();
@@ -146,6 +150,7 @@ fn reconciled_admissions_are_exported_once_by_identity() {
             .contains(&A::AdmissionOutcome.value("refused"))
     );
     assert_eq!(spans[3].name, "lash.turn.admitted");
+    assert_eq!(spans[3].start_time, epoch_ms(1000));
 }
 
 #[test]
@@ -208,11 +213,14 @@ fn admission_selection_parent_links_and_dropped_candidates_are_explicit() {
     assert_eq!(anchor.trace_id(), cause.trace_id());
     admit(&adapter, TraceCause::linked_to(Some(cause.clone())));
     adapter
-        .propose(&scope_id(), &TraceCause::Root)
+        .propose(&scope_id(), &TraceCause::Root, 1000)
         .settle(TraceCandidateOutcome::Reused);
-    drop(adapter.propose(&scope_id(), &TraceCause::Root));
+    drop(adapter.propose(&scope_id(), &TraceCause::Root, 1000));
     let spans = exporter.get_finished_spans().unwrap();
     assert_eq!(spans.len(), 4);
+    for span in &spans {
+        assert_eq!(span.start_time, epoch_ms(1000));
+    }
     assert_eq!(
         spans[0].parent_span_id.to_bytes(),
         cause.span_id().to_bytes()
@@ -1067,7 +1075,7 @@ fn correlation_ids_are_attributes_with_payload_export_off() {
     ];
     for (owner, run, process) in owners {
         let id = TraceScopeId::admission(owner);
-        let candidate = adapter.propose(&id, &TraceCause::Root);
+        let candidate = adapter.propose(&id, &TraceCause::Root, 1000);
         let anchor = candidate.anchor();
         candidate.settle(TraceCandidateOutcome::Selected);
         let scope = DurableTraceScope {
