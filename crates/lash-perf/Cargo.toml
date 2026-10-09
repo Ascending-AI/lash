@@ -61,6 +61,7 @@ lash-durable = { workspace = true }
 lash-lashlang-runtime = { workspace = true }
 lash-postgres-store = { workspace = true, features = ["perf-witness", "testing"] }
 lash = { workspace = true, features = ["rlm", "sqlite", "testing"] }
+lash-llm-transport = { workspace = true }
 lash-llm-tools = { workspace = true }
 lash-protocol-rlm = { workspace = true, features = ["testing"] }
 lash-provider-openai = { workspace = true, features = ["testing"] }
@@ -85,7 +86,7 @@ serde_json = { workspace = true }
 sqlx = { workspace = true, features = ["runtime-tokio-rustls", "postgres"] }
 stats_alloc = "0.1"
 dhat = { version = "0.3", optional = true }
-tokio = { workspace = true, features = ["io-util", "macros", "net", "process", "rt-multi-thread", "sync", "time"] }
+tokio = { workspace = true, features = ["io-std", "io-util", "macros", "net", "process", "rt-multi-thread", "sync", "time"] }
 tokio-util = { workspace = true, features = ["rt"] }
 uuid = { workspace = true, features = ["v4"] }
 

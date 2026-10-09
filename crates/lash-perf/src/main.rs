@@ -131,6 +131,10 @@ struct Args {
 
 #[derive(Debug, clap::Subcommand)]
 enum Command {
+    /// Run one synthetic 1.0 boundary population and write its functional receipt.
+    Boundary(lash_perf::boundary::Args),
+    #[command(hide = true)]
+    BoundaryWorker(lash_perf::boundary::WorkerArgs),
     /// Regenerate the strict synthetic workload v1 JSON Schema.
     WorkloadSchema {
         #[arg(long, value_name = "SCHEMA.json")]
@@ -221,6 +225,19 @@ fn tokio_thread_stack_bytes(args: &Args) -> usize {
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     match &args.command {
+        Some(Command::Boundary(options)) => {
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()?;
+            runtime.block_on(lash_perf::boundary::run(options))?;
+            return Ok(());
+        }
+        Some(Command::BoundaryWorker(options)) => {
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()?;
+            return runtime.block_on(lash_perf::boundary::run_worker(options));
+        }
         Some(Command::WorkloadSchema { out }) => {
             let schema = serde_json::to_string_pretty(&lash_perf::workload::schema())?;
             std::fs::write(out, format!("{schema}\n"))?;

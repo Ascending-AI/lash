@@ -43383,6 +43383,7 @@
         "lash-internal-lashlang",
         "lash-internal-lashlang-runtime",
         "lash-internal-llm-tools",
+        "lash-internal-llm-transport",
         "lash-internal-plugin-process-controls",
         "lash-internal-plugin-standard-compaction",
         "lash-internal-postgres-store",

@@ -955,6 +955,7 @@ PACKAGE_DEPS = {
             "lash_durable": "//crates/lash-durable:lash-durable",
             "lash_lashlang_runtime": "//crates/lash-lashlang-runtime:lash-lashlang-runtime",
             "lash_llm_tools": "//crates/lash-llm-tools:lash-llm-tools",
+            "lash_llm_transport": "//crates/lash-llm-transport:lash-llm-transport",
             "lash_plugin_process_controls": "//crates/lash-plugin-process-controls:lash-plugin-process-controls",
             "lash_plugin_standard_compaction": "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction",
             "lash_postgres_store": "//crates/lash-postgres-store:lash-postgres-store",
