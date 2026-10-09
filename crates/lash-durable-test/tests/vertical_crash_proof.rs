@@ -39,6 +39,10 @@
 //! killed after the second model call's `model.start`, whose checkpoint has
 //! consumed the cell's protocol records through a progress boundary, leaves
 //! a turn whose resumed commit holds every one of them (FIG-5229).
+//!
+//! A protocol record appended while a tool call is unanswered is committed
+//! with the turn, uncut and resumed alike (FIG-5588): the **Noted** protocol
+//! is a tool round whose driver appends one beside the model's call.
 
 // Test code: the PostgreSQL leg reads its database URL from the environment.
 #![allow(clippy::disallowed_methods, clippy::expect_used, clippy::unwrap_used)]
@@ -47,6 +51,8 @@
 mod dialect;
 #[path = "support/images.rs"]
 mod images;
+#[path = "support/noted.rs"]
+mod noted;
 #[path = "support/sim.rs"]
 mod sim;
 
@@ -110,6 +116,9 @@ enum Protocol {
     Code,
     /// The standard protocol: the operation runs in a tool round.
     Tools,
+    /// A tool round whose protocol appends a record of its own while the
+    /// model's call is unanswered ([`noted`]).
+    Noted,
 }
 
 /// The outside world: what `ext_write` wrote, per call. It survives every
@@ -205,7 +214,7 @@ fn model(protocol: Protocol, seen: Arc<Mutex<Seen>>) -> ProviderHandle {
                         text(&request, &format!("{FINAL}{told}"))
                     }
                     (false, Protocol::Code) => text(&request, CELL),
-                    (false, Protocol::Tools) => LlmResponse {
+                    (false, Protocol::Tools | Protocol::Noted) => LlmResponse {
                         parts: vec![LlmOutputPart::ToolCall {
                             call_id: "v0-call".to_owned(),
                             tool_name: TOOL.to_owned(),
@@ -272,6 +281,8 @@ fn core(
             .with_worker_service(sim::workers(clock)),
         ),
         Protocol::Tools => lash::LashCore::standard_builder(backend.clone()),
+        Protocol::Noted => lash::LashCore::builder(backend.clone())
+            .protocol_plugin(Arc::new(noted::NotedProtocolFactory)),
     };
     builder
         .serve_sessions(false)
@@ -773,7 +784,7 @@ fn uncut_labels(protocol: Protocol) -> Vec<CommitLabel> {
             CommitLabel::TURN_COMMIT,
             CommitLabel::SESSION_RELEASE,
         ],
-        Protocol::Tools => vec![
+        Protocol::Tools | Protocol::Noted => vec![
             CommitLabel::TURN_ADMIT,
             CommitLabel::MODEL_START,
             CommitLabel::MODEL_DONE,
@@ -978,7 +989,25 @@ async fn a_cold_restart_restores_from_state_and_reruns_no_code_on_postgres() {
 /// turn's draft only through the progress boundary on A; the cold owner that
 /// resumes it must commit them as the uncut owner did.
 async fn resumed_history(dialect: Dialect, postgres_url: Option<String>) {
-    let uncut = V0::new(Protocol::Code, dialect, postgres_url.clone());
+    resumed_as_uncut(
+        Protocol::Code,
+        (CommitLabel::MODEL_START, 2),
+        dialect,
+        postgres_url,
+    )
+    .await;
+}
+
+/// The protocol records `protocol`'s turn commits uncut, which the turn
+/// commits too when node A is killed right after its `cut` write committed
+/// and a cold owner resumes it.
+async fn resumed_as_uncut(
+    protocol: Protocol,
+    (label, nth): (CommitLabel, usize),
+    dialect: Dialect,
+    postgres_url: Option<String>,
+) -> Vec<serde_json::Value> {
+    let uncut = V0::new(protocol, dialect, postgres_url.clone());
     let clock = SimClock::new();
     let database = uncut.database(Arc::clone(&clock)).await;
     let nodes = SimNodes::new(
@@ -994,14 +1023,14 @@ async fn resumed_history(dialect: Dialect, postgres_url: Option<String>) {
     let expected = uncut.committed_protocol_records().await;
     assert!(
         !expected.is_empty(),
-        "the uncut code turn committed no protocol record"
+        "the uncut {protocol:?} turn committed no protocol record"
     );
 
-    let first = V0::new(Protocol::Code, dialect, postgres_url.clone());
+    let first = V0::new(protocol, dialect, postgres_url.clone());
     let clock = SimClock::new();
     let database = first.database(Arc::clone(&clock)).await;
     let script = Script::new();
-    script.cut_on("a", CommitLabel::MODEL_START, 2, Fault::CommitThenAbort);
+    script.cut_on("a", label, nth, Fault::CommitThenAbort);
     let before = SimNodes::new(
         Arc::clone(&database),
         Arc::clone(&clock),
@@ -1018,7 +1047,7 @@ async fn resumed_history(dialect: Dialect, postgres_url: Option<String>) {
         let stepped = before.step().await;
         assert!(
             stepped.is_some() || !before.script().cuts().is_empty(),
-            "the turn stalled before its second model call started:\n{}",
+            "the turn stalled before its {label} write {nth}:\n{}",
             before.script().rendered_trace()
         );
     }
@@ -1038,8 +1067,9 @@ async fn resumed_history(dialect: Dialect, postgres_url: Option<String>) {
     assert_eq!(
         cold.committed_protocol_records().await,
         expected,
-        "the resumed turn on {dialect:?} committed other protocol history than the uncut one"
+        "the {protocol:?} turn resumed after {label} on {dialect:?} committed other protocol history than the uncut one"
     );
+    expected
 }
 
 /// A resumed turn commits the uncut turn's protocol history, on SQLite in
@@ -1063,6 +1093,31 @@ async fn a_turn_resumed_after_a_progress_boundary_commits_the_uncut_history_on_p
         return;
     };
     resumed_history(Dialect::Postgres, Some(url)).await;
+}
+
+/// FIG-5588: the Noted turn's driver appends a protocol record beside the
+/// model's call, before the call's result. The turn's commit holds it once,
+/// uncut; and so does the commit of a turn whose owner died while the call
+/// was unanswered (`model.done`, the round's checkpoint) or after the
+/// round's results made the transcript resume-safe again
+/// (`round.present_model_start`).
+#[tokio::test]
+async fn a_protocol_record_appended_while_a_call_is_unanswered_is_committed_uncut_and_resumed() {
+    let note = serde_json::to_value(lash_core::SessionHistoryRecord::Protocol(
+        noted::mid_call_note(),
+    ))
+    .expect("a record encodes");
+    for cut in [
+        (CommitLabel::MODEL_DONE, 1),
+        (CommitLabel::ROUND_PRESENT_MODEL_START, 1),
+    ] {
+        let committed = resumed_as_uncut(Protocol::Noted, cut, Dialect::SqliteMemory, None).await;
+        assert_eq!(
+            committed,
+            vec![note.clone()],
+            "the turn's commit holds the record appended mid-call once"
+        );
+    }
 }
 
 /// Re-record the session image (`support/images.rs`): node A runs the turn

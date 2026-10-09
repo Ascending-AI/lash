@@ -54,9 +54,6 @@ impl RuntimeTurnDriver<'_> {
         event_delta: Vec<crate::SessionHistoryRecord>,
         protocol_iteration: usize,
     ) -> Result<(), RuntimeError> {
-        if !crate::messages_are_prompt_resume_safe(messages.iter()) {
-            return Ok(());
-        }
         let boundary = self
             .turn_pipeline
             .progress_boundary(

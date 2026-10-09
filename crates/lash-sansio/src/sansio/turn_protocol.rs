@@ -195,6 +195,10 @@ pub enum Effect<M: TurnProtocol = UnitTurnProtocol> {
     /// This is separate from [`SessionStreamEvent`]: UI stream events can be partial,
     /// duplicated, or display-only, while `Progress` is emitted only after the
     /// state machine has applied semantic message or protocol-step changes.
+    ///
+    /// `messages` are prompt-resume-safe: no boundary is emitted while a tool
+    /// call is unanswered. `event_delta` is every record appended since the
+    /// previous boundary, the ones appended mid-call among them.
     Progress {
         messages: MessageSequence,
         event_delta: Vec<SessionHistoryRecord<M::Event>>,

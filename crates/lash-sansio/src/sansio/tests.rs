@@ -9,6 +9,7 @@ use super::*;
 
 mod bounded_checkpoint;
 mod fold;
+mod held_progress;
 use crate::TurnFinish;
 use crate::llm::types::{LlmOutputPart, LlmRequest, LlmResponse, LlmTerminalReason};
 use crate::session_model::message::PartAttachment;

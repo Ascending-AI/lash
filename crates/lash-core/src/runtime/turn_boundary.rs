@@ -329,12 +329,6 @@ impl TurnBoundary {
         messages: MessageSequence,
         event_delta: Vec<SessionHistoryRecord>,
     ) -> Result<ProgressBoundaryResult, RuntimeError> {
-        if !crate::messages_are_prompt_resume_safe(messages.iter()) {
-            return Ok(ProgressBoundaryResult {
-                protocol_events: Vec::new(),
-            });
-        }
-
         probe_execution_state_capture(session)
             .await
             .map_err(|err| {
@@ -365,11 +359,13 @@ impl TurnBoundary {
             execution_state_update,
             plugins,
         } = snapshot;
-        if !crate::messages_are_prompt_resume_safe(messages.iter()) {
-            return Ok(ProgressBoundaryResult {
-                protocol_events: Vec::new(),
-            });
-        }
+        // The machine emits no boundary while a tool call is unanswered
+        // (`Effect::Progress`): it holds the records appended meanwhile for
+        // this one.
+        debug_assert!(
+            crate::messages_are_prompt_resume_safe(messages.iter()),
+            "a progress boundary's messages are prompt-resume-safe"
+        );
 
         {
             let draft = self.draft_mut();

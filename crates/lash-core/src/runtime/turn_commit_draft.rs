@@ -78,7 +78,8 @@ struct TurnGraphAppendDraftInner {
 /// boundary it applies (`prepared_checkpoint`, `progress_boundary`, or the
 /// final commit), after the messages that boundary carries, so an append is
 /// ordered behind the history that existed when the boundary ran and later
-/// messages parent after it. A boundary skipped because its messages are not
+/// messages parent after it. No progress boundary runs while a tool call is
+/// unanswered, and a prepared checkpoint skipped because its messages are not
 /// prompt-resume-safe leaves the queue untouched. Draft ids are remapped to
 /// durable ids by the turn's commit like every other draft node.
 #[derive(Clone, Debug)]

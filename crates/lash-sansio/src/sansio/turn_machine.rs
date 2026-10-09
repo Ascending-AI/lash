@@ -222,7 +222,9 @@ impl<M: TurnProtocol> TurnMachine<M> {
     /// The history records the machine has delivered through its progress
     /// boundaries: its history up to its progress cursor, the history it
     /// started from leading it. A restored machine's cursor is its
-    /// checkpoint's, so these are the records an earlier owner consumed.
+    /// checkpoint's, so these are the records an earlier owner consumed;
+    /// the ones appended since, while a tool call was unanswered, are still
+    /// to be delivered.
     pub fn progressed_events(&self) -> &[SessionHistoryRecord<M::Event>] {
         let events = self.events.as_slice();
         events.get(..self.progress_event_cursor).unwrap_or(events)
@@ -428,7 +430,15 @@ impl<M: TurnProtocol> TurnMachine<M> {
         self.side_effect_outbox.push_back(Effect::Emit(event));
     }
 
+    /// A progress boundary is one a host may persist and resume from, so
+    /// none is emitted while a tool call is unanswered: the progress cursor
+    /// stays where it is, and the records appended meanwhile ride the next
+    /// boundary's delta, or the turn's `Done`, in the order they were
+    /// appended.
     fn emit_progress(&mut self) {
+        if !crate::session_model::messages_are_prompt_resume_safe(self.messages.iter()) {
+            return;
+        }
         let event_delta = self.next_event_delta();
         self.side_effect_outbox.push_back(Effect::Progress {
             messages: self.messages.clone(),
