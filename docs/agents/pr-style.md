@@ -41,6 +41,7 @@ Blast radius, anything deliberately out of scope, follow-ups filed as tickets.
 - **Link the ticket, don't repeat it.** One or two orienting sentences, then the link. The PR carries the *how*; the ticket carries the *what/why*. Don't copy the ticket body in.
 - **Prove it, per the Definition of Done.** Run focused regressions for behavior changes and cheap relevant checks for mechanical changes. Add a targeted live check only for a named durability or behavior risk absent from current CI coverage ([way-of-working.md](way-of-working.md)). Say what actually ran, including its scope and intentional omissions.
 - **Match the diff.** The PR body describes what the diff does. No aspirational claims for code that isn't there, no stale description after a force-push.
+- **Name the co-change.** Which support statement and which existing law changed with this behaviour, or why neither? A behaviour diff that updates neither owes the reviewer the reason.
 - **Follow-ups are tickets, not TODOs.** Work discovered but out of scope gets a FIG issue and a link, not a buried comment.
 - **The ticket's prose bar applies here too:** lede first, cut filler, concrete over abstract ([ticket-style.md](ticket-style.md)). A reviewer skims, and a rambling PR body costs review time.
 
