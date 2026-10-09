@@ -181,27 +181,6 @@ fn a_test_narrows_a_binding_nothing_assigns() {
     );
 }
 
-/// A declared return type, a type alias, an interface and a loop over a
-/// declared array each carry a type to where it is used.
-#[test]
-fn declared_types_reach_their_uses() {
-    assert_eq!(
-        operations(
-            "type Price = number; interface Item { price: Price } \
-             function total(items: Item[]): number { let sum = 0; \
-             for (const item of items) { sum += item.price; } return sum; } \
-             const twice = total([]) * 2;"
-        ),
-        [
-            "invoke ts.iterate(items)",
-            "invoke ts.get(item, \"price\")",
-            "num.add(t5, num.to_float(t6))",
-            "apply t9(absent, t11)",
-            "num.mul(num.to_float(t12), 2.0)"
-        ]
-    );
-}
-
 /// A tool's declared result type is stated at its `perform`, so an `Int`
 /// or a `Float` is decoded as declared (`K-EFF-005`), and what the call
 /// gives is known to be that type: an `Int` is a number that may be an

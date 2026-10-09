@@ -1,3 +1,4 @@
+use ts.boundary
 use same
 use text.concat
 use json.stringify
@@ -71,8 +72,9 @@ body {
       set structured = same(k, "list")
     }
     if structured {
-      let checked = json.stringify(item)
-      let piece = invoke ts.console.json(item)
+      let copied = invoke ts.boundary(item)
+      let checked = json.stringify(copied)
+      let piece = invoke ts.console.json(copied)
       set line = text.concat(line, piece)
     } else {
       let piece = invoke ts.to_string(item)

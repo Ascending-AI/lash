@@ -202,10 +202,19 @@ impl Lowerer<'_> {
                 let result = signature.result.clone();
                 let ty = Ty::decoded(&result);
                 self.performed.insert(effect.clone(), signature);
+                let mut copied = Vec::with_capacity(args.len());
+                for atom in args {
+                    let value = Operand {
+                        atom,
+                        ty: Ty::Unknown,
+                    };
+                    let value = self.invoke("ts.boundary", &[value], Ty::Unknown)?;
+                    copied.push(value.atom);
+                }
                 Ok(self.emit_action(
                     Action::Perform {
                         effect,
-                        args,
+                        args: copied,
                         result,
                     },
                     ty,

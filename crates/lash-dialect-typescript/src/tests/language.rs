@@ -88,7 +88,6 @@ fn refusals_keep_their_codes() {
         ("new Foo();", DiagnosticCode::NewUnsupported),
         ("this.x;", DiagnosticCode::ThisUnsupported),
         ("arguments;", DiagnosticCode::ArgumentsUnsupported),
-        ("[1, , 2];", DiagnosticCode::SparseArrayUnsupported),
         (
             "var x; x instanceof Foo;",
             DiagnosticCode::InstanceOfUnsupported,

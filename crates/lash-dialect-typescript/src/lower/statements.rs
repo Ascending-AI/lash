@@ -466,17 +466,51 @@ impl Lowerer<'_> {
         body: &ast::Stmt,
     ) -> Lowering<()> {
         let subject = self.lower_expr(subject)?;
-        let items = self.invoke(helper, &[subject], Ty::Unknown)?;
+        if helper == "ts.iterate" {
+            let iterator = self.invoke("ts.array.iterator", &[subject], Ty::Unknown)?;
+            let body = self.loop_block(Vec::new(), |this| {
+                let empty = this.let_expr(Expr::List(Vec::new()), Ty::Unknown);
+                let step = this.invoke(
+                    "ts.call_member",
+                    &[iterator.clone(), Operand::text("next"), empty],
+                    Ty::Unknown,
+                )?;
+                let done = this.invoke(
+                    "ts.get",
+                    &[step.clone(), Operand::text("done")],
+                    Ty::Unknown,
+                )?;
+                let onward = this.invoke("ts.not", &[done], Ty::Bool)?;
+                this.exit_unless(onward.expr());
+                let element =
+                    this.invoke("ts.get", &[step, Operand::text("value")], Ty::Unknown)?;
+                let mode = match kind {
+                    None => Mode::Assign,
+                    Some(VarKind::Var) => Mode::Declared,
+                    Some(_) => Mode::Local,
+                };
+                this.destructure(pattern, element, mode)?;
+                this.lower_statement(body)
+            })?;
+            self.emit_while(truth(), body);
+            return Ok(());
+        }
+        let items = self.invoke(helper, std::slice::from_ref(&subject), Ty::Unknown)?;
         let item = self.temp();
         let element = Operand::variable(item.clone(), Ty::Unknown);
         let body = self.loop_block(Vec::new(), |this| {
-            let mode = match kind {
-                None => Mode::Assign,
-                Some(VarKind::Var) => Mode::Declared,
-                Some(_) => Mode::Local,
-            };
-            this.destructure(pattern, element, mode)?;
-            this.lower_statement(body)
+            let present = this.invoke("ts.has", &[subject, element.clone()], Ty::Bool)?;
+            let visits = this.block(|this| {
+                let mode = match kind {
+                    None => Mode::Assign,
+                    Some(VarKind::Var) => Mode::Declared,
+                    Some(_) => Mode::Local,
+                };
+                this.destructure(pattern, element, mode)?;
+                this.lower_statement(body)
+            })?;
+            this.emit_if(present.expr(), visits, Buf::default());
+            Ok(())
         })?;
         self.emit_for(item, items.expr(), body);
         Ok(())

@@ -62,7 +62,8 @@ impl Lowerer<'_> {
             match key {
                 Key::Computed(index) if index.ty.is_number() => {
                     let read = self.native("list.get", vec![object.expr(), index.expr()])?;
-                    return Ok(self.let_expr(read, (**element).clone()));
+                    let read = self.let_expr(read, (**element).clone());
+                    return self.invoke("ts.hole_value", &[read], (**element).clone());
                 }
                 Key::Static(name) if name == "length" => {
                     let length = self.native("list.len", vec![object.expr()])?;
@@ -249,6 +250,18 @@ impl Lowerer<'_> {
         args: &[ast::CallArg],
         span: SourceSpan,
     ) -> Lowering<Operand> {
+        if let ast::Expr::Member {
+            property: ast::MemberProperty::Field(name),
+            ..
+        } = callee
+            && name == "toLocaleString"
+        {
+            return Err(Diagnostic::refusal(
+                DiagnosticCode::MethodUnsupported,
+                "Unsupported: toLocaleString/Intl formatting is locale-dependent. Build the deterministic string explicitly.",
+                Some(span),
+            ));
+        }
         if let Some(wait) = self.wait_of(callee) {
             return self.lower_wait_call(wait, args, span);
         }
@@ -305,6 +318,7 @@ impl Lowerer<'_> {
                         ));
                     }
                 };
+                let value = self.invoke("ts.boundary", &[value], Ty::Unknown)?;
                 self.emit(Stmt::Finish {
                     value: value.expr(),
                 });

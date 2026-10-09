@@ -190,50 +190,58 @@ impl Lowerer<'_> {
     fn lower_array(&mut self, elements: &[ast::ArrayElement]) -> Lowering<Operand> {
         if elements
             .iter()
-            .any(|element| matches!(element, ast::ArrayElement::Hole))
+            .all(|element| !matches!(element, ast::ArrayElement::Hole))
         {
-            return Err(Diagnostic::new(
-                DiagnosticCode::SparseArrayUnsupported,
-                "an array literal with a hole is not in the TypeScript dialect",
-                self.span,
-            ));
+            let items: Vec<_> = elements
+                .iter()
+                .map(|element| match element {
+                    ast::ArrayElement::Spread(value) => (true, value),
+                    ast::ArrayElement::Value(value) => (false, value),
+                    ast::ArrayElement::Hole => unreachable!("handled below"),
+                })
+                .collect();
+            return self.list(&items);
         }
-        let items: Vec<(bool, &ast::Expr)> = elements
-            .iter()
-            .map(|element| match element {
-                ast::ArrayElement::Spread(value) => (true, value),
-                ast::ArrayElement::Value(value) => (false, value),
-                ast::ArrayElement::Hole => unreachable!("holes are refused above"),
-            })
-            .collect();
-        self.list(&items)
+        let mut parts = Vec::new();
+        for element in elements {
+            let part = match element {
+                ast::ArrayElement::Hole => {
+                    self.let_expr(Expr::List(vec![Expr::Tuple(Vec::new())]), Ty::Unknown)
+                }
+                ast::ArrayElement::Value(value) => {
+                    let value = self.lower_expr(value)?;
+                    self.let_expr(Expr::List(vec![value.expr()]), Ty::Unknown)
+                }
+                ast::ArrayElement::Spread(value) => {
+                    let value = self.lower_expr(value)?;
+                    self.invoke("ts.array.spread", &[value], Ty::Unknown)?
+                }
+            };
+            parts.push(part.expr());
+        }
+        let parts = self.let_expr(Expr::List(parts), Ty::Unknown);
+        self.invoke("ts.spread", &[parts], Ty::Unknown)
     }
 
     /// A new list of values, some of them spread.
     pub(super) fn list(&mut self, items: &[(bool, &ast::Expr)]) -> Lowering<Operand> {
-        let exprs: Vec<&ast::Expr> = items.iter().map(|(_, expr)| *expr).collect();
-        let mut operands = self.operands(&exprs)?;
         if items.iter().all(|(spread, _)| !spread) {
-            let values = operands.iter().map(Operand::expr).collect();
-            return Ok(self.let_expr(Expr::List(values), Ty::Unknown));
+            let exprs: Vec<_> = items.iter().map(|(_, expr)| *expr).collect();
+            let operands = self.operands(&exprs)?;
+            return Ok(self.let_expr(
+                Expr::List(operands.iter().map(Operand::expr).collect()),
+                Ty::Unknown,
+            ));
         }
-        // Each spread value is iterated where the source evaluates it; the
-        // values between spreads are lists of their own.
-        let mut parts: Vec<Expr> = Vec::new();
-        let mut run: Vec<Expr> = Vec::new();
-        for ((spread, _), operand) in items.iter().zip(operands.drain(..)) {
-            if *spread {
-                if !run.is_empty() {
-                    parts.push(Expr::List(std::mem::take(&mut run)));
-                }
-                let items = self.invoke("ts.iterate", &[operand], Ty::Unknown)?;
-                parts.push(items.expr());
+        let mut parts = Vec::new();
+        for (spread, expr) in items {
+            let value = self.lower_expr(expr)?;
+            let part = if *spread {
+                self.invoke("ts.array.spread", &[value], Ty::Unknown)?
             } else {
-                run.push(operand.expr());
-            }
-        }
-        if !run.is_empty() {
-            parts.push(Expr::List(run));
+                self.let_expr(Expr::List(vec![value.expr()]), Ty::Unknown)
+            };
+            parts.push(part.expr());
         }
         let parts = self.let_expr(Expr::List(parts), Ty::Unknown);
         self.invoke("ts.spread", &[parts], Ty::Unknown)

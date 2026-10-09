@@ -1,0 +1,1270 @@
+# JavaScript Array semantics on kernel collections.
+# Empty tuple slots are holes; JS values never use tuples.
+
+use kind
+use same
+use eq
+use bool.not
+use error.new
+use num.add
+use num.sub
+use num.mul
+use num.div
+use num.lt
+use num.le
+use num.floor
+use num.trunc
+use num.min
+use num.max
+use num.is_nan
+use num.to_float
+use text.concat
+use text.utf16_compare
+use list.len
+use list.copy
+use list.sort
+use ts.require_object_coercible
+use ts.get
+use ts.set
+use ts.delete
+use ts.has
+use ts.to_number
+use ts.to_string
+use ts.to_boolean
+use ts.strict_equals
+use ts.is_nullish
+use ts.receiver
+use ts.iterate
+use ts.array.set
+use ts.array.remove
+use ts.array.argument
+use ts.array.integer
+use ts.array.length
+use ts.array.length_property
+use ts.array.is
+use ts.array.is_array
+use ts.array.callback
+use ts.array.bound
+use ts.array.dense
+use ts.array.spread
+use ts.array.construct
+use ts.array.of
+use ts.array.valueOf
+use ts.array.at
+use ts.array.push
+use ts.array.pop
+use ts.array.slice
+use ts.array.concat
+use ts.array.fill
+use ts.array.copyWithin
+use ts.array.indexOf
+use ts.array.lastIndexOf
+use ts.array.includes
+use ts.array.map
+use ts.array.filter
+use ts.array.forEach
+use ts.array.every
+use ts.array.some
+use ts.array.find
+use ts.array.findIndex
+use ts.array.findLast
+use ts.array.findLastIndex
+use ts.array.reduce
+use ts.array.reduceRight
+use ts.array.join
+use ts.array.toString
+use ts.array.toLocaleString
+use ts.array.reverse
+use ts.array.toReversed
+use ts.array.splice
+use ts.array.shift
+use ts.array.unshift
+use ts.array.toSpliced
+use ts.array.with
+use ts.array.sort
+use ts.array.toSorted
+use ts.array.flatten
+use ts.array.flat
+use ts.array.flatMap
+use ts.array.keys
+use ts.array.values
+use ts.array.entries
+use ts.array.iterator
+use ts.array.from
+
+function ts.array.match_length(this: Any) -> Number
+kernel 1
+charge 1
+body { return num.to_float(list.len(this.items)) }
+
+function ts.array.set(target: Any, key: Any, value: Any) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge 4
+body {
+  let receiver = invoke ts.receiver(target)
+  if same(receiver, "brand:regex.match") {
+    throw error.new("TS_ARRAY_LIKE_MATCH_UNSUPPORTED", "match arrays do not take writes", null)
+  }
+  let outcome = invoke ts.set(target, key, value)
+  return outcome
+}
+
+function ts.array.remove(target: Any, key: Any) -> Bool
+kernel 1
+errors "type_error"
+charge 4
+body {
+  let receiver = invoke ts.receiver(target)
+  if same(receiver, "brand:regex.match") {
+    throw error.new("TS_ARRAY_LIKE_MATCH_UNSUPPORTED", "match arrays do not take writes", null)
+  }
+  let outcome = invoke ts.delete(target, key)
+  return outcome
+}
+
+function ts.array.argument(args: List(Any), index: Number) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  if num.lt(index, list.len(args)) { return args[index] }
+  return absent
+}
+
+function ts.array.integer(value: Any) -> Number
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  let number = invoke ts.to_number(value)
+  if num.is_nan(number) { return 0.0 }
+  return num.trunc(number)
+}
+
+function ts.array.length(this: Any) -> Number
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  do invoke ts.require_object_coercible(this)
+  let value = invoke ts.get(this, "length")
+  let length = invoke ts.array.integer(value)
+  if num.le(length, 0) { return 0.0 }
+  return num.min(length, 9007199254740991.0)
+}
+
+function ts.array.length_property(this: Any) -> Number
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  return num.to_float(list.len(this))
+}
+
+function ts.array.is(value: Any) -> Bool
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  if same(kind(value), "list") { return true }
+  if same(kind(value), "record") { return same(value.brand, "regex.match") }
+  return false
+}
+
+function ts.array.is_array(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  let value = invoke ts.array.argument(args, 0)
+  let output = invoke ts.array.is(value)
+  return output
+}
+
+function ts.array.callback(callback: Any) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  let receiver = invoke ts.receiver(callback)
+  if same(receiver, "closure") { return callback }
+  throw error.new("type_error", "callback is not a function", null)
+}
+
+function ts.array.bound(value: Any, length: Number, fallback: Number) -> Number
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  if same(value, absent) { return fallback }
+  let position = invoke ts.array.integer(value)
+  if num.lt(position, 0) { return num.max(num.add(length, position), 0) }
+  return num.min(position, length)
+}
+
+function ts.array.dense(this: Any) -> List(Any)
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  let length = invoke ts.array.length(this)
+  let output = []
+  let index = 0.0
+  while num.lt(index, length) {
+    let value = invoke ts.get(this, index)
+    set output[list.len(output)] = value
+    set index = num.add(index, 1)
+  }
+  return output
+}
+
+function ts.array.spread(this: Any) -> List(Any)
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  let items = invoke ts.iterate(this)
+  let output = invoke ts.array.dense(items)
+  return output
+}
+
+function ts.array.construct(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  if same(list.len(args), 1) {
+    let value = args[0]
+    let k = kind(value)
+    let numeric = same(k, "float")
+    if same(k, "integer") { set numeric = true }
+    if numeric {
+      let output = []
+      do invoke ts.set(output, "length", value)
+      return output
+    }
+  }
+  return list.copy(args)
+}
+
+function ts.array.of(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  return list.copy(args)
+}
+
+function ts.array.valueOf(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  do invoke ts.require_object_coercible(this)
+  return this
+}
+
+function ts.array.at(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  let length = invoke ts.array.length(this)
+  let input = invoke ts.array.argument(args, 0)
+  let index = invoke ts.array.integer(input)
+  if num.lt(index, 0) { set index = num.add(length, index) }
+  if num.lt(index, 0) { return absent }
+  if num.le(length, index) { return absent }
+  let value = invoke ts.get(this, index)
+  return value
+}
+
+function ts.array.push(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  let length = invoke ts.array.length(this)
+  if num.lt(9007199254740991.0, num.add(length, list.len(args))) {
+    throw error.new("type_error", "array-like length exceeds the safe integer limit", null)
+  }
+  for value in args {
+    do invoke ts.array.set(this, length, value)
+    set length = num.add(length, 1)
+  }
+  do invoke ts.array.set(this, "length", length)
+  return num.to_float(length)
+}
+
+function ts.array.pop(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  let length = invoke ts.array.length(this)
+  if same(length, 0.0) {
+    do invoke ts.array.set(this, "length", 0.0)
+    return absent
+  }
+  let index = num.sub(length, 1)
+  let value = invoke ts.get(this, index)
+  do invoke ts.array.remove(this, index)
+  do invoke ts.array.set(this, "length", index)
+  return value
+}
+
+function ts.array.slice(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  let length = invoke ts.array.length(this)
+  let input = invoke ts.array.argument(args, 0)
+  let start = invoke ts.array.bound(input, length, 0.0)
+  let stop = invoke ts.array.argument(args, 1)
+  let end = invoke ts.array.bound(stop, length, length)
+  let output = []
+  while num.lt(start, end) {
+    let present = invoke ts.has(this, start)
+    let value = ()
+    if present { set value = invoke ts.get(this, start) }
+    set output[list.len(output)] = value
+    set start = num.add(start, 1)
+  }
+  return output
+}
+
+function ts.array.concat(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  do invoke ts.require_object_coercible(this)
+  let sources = [this]
+  for source in args { set sources[list.len(sources)] = source }
+  let output = []
+  for source in sources {
+    let array = invoke ts.array.is(source)
+    if array {
+      let length = invoke ts.array.length(source)
+      let index = 0.0
+      while num.lt(index, length) {
+        let present = invoke ts.has(source, index)
+        let value = ()
+        if present { set value = invoke ts.get(source, index) }
+        set output[list.len(output)] = value
+        set index = num.add(index, 1)
+      }
+    } else { set output[list.len(output)] = source }
+  }
+  return output
+}
+
+function ts.array.fill(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  let length = invoke ts.array.length(this)
+  let value = invoke ts.array.argument(args, 0)
+  let input = invoke ts.array.argument(args, 1)
+  let start = invoke ts.array.bound(input, length, 0.0)
+  let stop = invoke ts.array.argument(args, 2)
+  let end = invoke ts.array.bound(stop, length, length)
+  while num.lt(start, end) {
+    do invoke ts.array.set(this, start, value)
+    set start = num.add(start, 1)
+  }
+  return this
+}
+
+function ts.array.copyWithin(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  let length = invoke ts.array.length(this)
+  let target_arg = invoke ts.array.argument(args, 0)
+  let target = invoke ts.array.bound(target_arg, length, 0.0)
+  let start_arg = invoke ts.array.argument(args, 1)
+  let start = invoke ts.array.bound(start_arg, length, 0.0)
+  let end_arg = invoke ts.array.argument(args, 2)
+  let end = invoke ts.array.bound(end_arg, length, length)
+  let count = num.min(num.sub(end, start), num.sub(length, target))
+  let direction = 1.0
+  if num.lt(start, target) {
+    if num.lt(target, num.add(start, count)) {
+      set direction = -1.0
+      set start = num.sub(num.add(start, count), 1)
+      set target = num.sub(num.add(target, count), 1)
+    }
+  }
+  while num.lt(0, count) {
+    let present = invoke ts.has(this, start)
+    if present {
+      let value = invoke ts.get(this, start)
+      do invoke ts.array.set(this, target, value)
+    } else { do invoke ts.array.remove(this, target) }
+    set start = num.add(start, direction)
+    set target = num.add(target, direction)
+    set count = num.sub(count, 1)
+  }
+  return this
+}
+
+function ts.array.indexOf(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  let length = invoke ts.array.length(this)
+  let search = invoke ts.array.argument(args, 0)
+  let input = invoke ts.array.argument(args, 1)
+  let from = invoke ts.array.integer(input)
+  let index = num.max(from, 0)
+  if num.lt(from, 0) { set index = num.max(num.add(length, from), 0) }
+  while num.lt(index, length) {
+    if num.lt(index, 0) { break }
+    let present = invoke ts.has(this, index)
+    if present {
+      let value = invoke ts.get(this, index)
+      let equal = invoke ts.strict_equals(value, search)
+      if equal { return num.to_float(index) }
+    }
+    set index = num.add(index, 1.0)
+  }
+  return -1.0
+}
+
+function ts.array.lastIndexOf(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  let length = invoke ts.array.length(this)
+  let search = invoke ts.array.argument(args, 0)
+  let from = num.sub(length, 1)
+  if num.lt(1, list.len(args)) { let array_arg_1 = args[1]
+  set from = invoke ts.array.integer(array_arg_1) }
+  let index = num.min(from, num.sub(length, 1))
+  if num.lt(from, 0) { set index = num.add(length, from) }
+  while num.lt(index, length) {
+    if num.lt(index, 0) { break }
+    let present = invoke ts.has(this, index)
+    if present {
+      let value = invoke ts.get(this, index)
+      let equal = invoke ts.strict_equals(value, search)
+      if equal { return num.to_float(index) }
+    }
+    set index = num.add(index, -1.0)
+  }
+  return -1.0
+}
+
+function ts.array.includes(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  let length = invoke ts.array.length(this)
+  let search = invoke ts.array.argument(args, 0)
+  let input = invoke ts.array.argument(args, 1)
+  let from = invoke ts.array.integer(input)
+  let index = num.max(from, 0)
+  if num.lt(from, 0) { set index = num.max(num.add(length, from), 0) }
+  while num.lt(index, length) {
+    if num.lt(index, 0) { break }
+    let present = invoke ts.has(this, index)
+    set present = true
+    if present {
+      let value = invoke ts.get(this, index)
+      let equal = invoke ts.strict_equals(value, search)
+      if equal {} else {
+        if same(kind(value), "float") {
+          if same(kind(search), "float") {
+            if num.is_nan(value) { set equal = num.is_nan(search) }
+          }
+        }
+      }
+      if equal { return true }
+    }
+    set index = num.add(index, 1.0)
+  }
+  return false
+}
+
+function ts.array.map(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  let length = invoke ts.array.length(this)
+  let input = invoke ts.array.argument(args, 0)
+  let callback = invoke ts.array.callback(input)
+  let context = invoke ts.array.argument(args, 1)
+  let output = []
+  do invoke ts.set(output, "length", length)
+  let index = 0.0
+  while num.lt(index, length) {
+    if num.lt(index, 0) { break }
+    let present = invoke ts.has(this, index)
+    if present {
+      let value = invoke ts.get(this, index)
+      let passed = [value, num.to_float(index), this]
+      let answer = apply callback(context, passed)
+      do invoke ts.set(output, index, answer)
+    }
+    set index = num.add(index, 1.0)
+  }
+  return output
+}
+
+function ts.array.filter(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  let length = invoke ts.array.length(this)
+  let input = invoke ts.array.argument(args, 0)
+  let callback = invoke ts.array.callback(input)
+  let context = invoke ts.array.argument(args, 1)
+  let output = []
+  let index = 0.0
+  while num.lt(index, length) {
+    if num.lt(index, 0) { break }
+    let present = invoke ts.has(this, index)
+    if present {
+      let value = invoke ts.get(this, index)
+      let passed = [value, num.to_float(index), this]
+      let answer = apply callback(context, passed)
+      let truth = invoke ts.to_boolean(answer)
+      if truth { set output[list.len(output)] = value }
+    }
+    set index = num.add(index, 1.0)
+  }
+  return output
+}
+
+function ts.array.forEach(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  let length = invoke ts.array.length(this)
+  let input = invoke ts.array.argument(args, 0)
+  let callback = invoke ts.array.callback(input)
+  let context = invoke ts.array.argument(args, 1)
+  let output = []
+  let index = 0.0
+  while num.lt(index, length) {
+    if num.lt(index, 0) { break }
+    let present = invoke ts.has(this, index)
+    if present {
+      let value = invoke ts.get(this, index)
+      let passed = [value, num.to_float(index), this]
+      let answer = apply callback(context, passed)
+    }
+    set index = num.add(index, 1.0)
+  }
+  return absent
+}
+
+function ts.array.every(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  let length = invoke ts.array.length(this)
+  let input = invoke ts.array.argument(args, 0)
+  let callback = invoke ts.array.callback(input)
+  let context = invoke ts.array.argument(args, 1)
+  let output = []
+  let index = 0.0
+  while num.lt(index, length) {
+    if num.lt(index, 0) { break }
+    let present = invoke ts.has(this, index)
+    if present {
+      let value = invoke ts.get(this, index)
+      let passed = [value, num.to_float(index), this]
+      let answer = apply callback(context, passed)
+      let truth = invoke ts.to_boolean(answer)
+      if truth {} else { return false }
+    }
+    set index = num.add(index, 1.0)
+  }
+  return true
+}
+
+function ts.array.some(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  let length = invoke ts.array.length(this)
+  let input = invoke ts.array.argument(args, 0)
+  let callback = invoke ts.array.callback(input)
+  let context = invoke ts.array.argument(args, 1)
+  let output = []
+  let index = 0.0
+  while num.lt(index, length) {
+    if num.lt(index, 0) { break }
+    let present = invoke ts.has(this, index)
+    if present {
+      let value = invoke ts.get(this, index)
+      let passed = [value, num.to_float(index), this]
+      let answer = apply callback(context, passed)
+      let truth = invoke ts.to_boolean(answer)
+      if truth { return true }
+    }
+    set index = num.add(index, 1.0)
+  }
+  return false
+}
+
+function ts.array.find(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  let length = invoke ts.array.length(this)
+  let input = invoke ts.array.argument(args, 0)
+  let callback = invoke ts.array.callback(input)
+  let context = invoke ts.array.argument(args, 1)
+  let output = []
+  let index = 0.0
+  while num.lt(index, length) {
+    if num.lt(index, 0) { break }
+    let present = invoke ts.has(this, index)
+    set present = true
+    if present {
+      let value = invoke ts.get(this, index)
+      let passed = [value, num.to_float(index), this]
+      let answer = apply callback(context, passed)
+      let truth = invoke ts.to_boolean(answer)
+      if truth { return value }
+    }
+    set index = num.add(index, 1.0)
+  }
+  return absent
+}
+
+function ts.array.findIndex(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  let length = invoke ts.array.length(this)
+  let input = invoke ts.array.argument(args, 0)
+  let callback = invoke ts.array.callback(input)
+  let context = invoke ts.array.argument(args, 1)
+  let output = []
+  let index = 0.0
+  while num.lt(index, length) {
+    if num.lt(index, 0) { break }
+    let present = invoke ts.has(this, index)
+    set present = true
+    if present {
+      let value = invoke ts.get(this, index)
+      let passed = [value, num.to_float(index), this]
+      let answer = apply callback(context, passed)
+      let truth = invoke ts.to_boolean(answer)
+      if truth { return num.to_float(index) }
+    }
+    set index = num.add(index, 1.0)
+  }
+  return -1.0
+}
+
+function ts.array.findLast(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  let length = invoke ts.array.length(this)
+  let input = invoke ts.array.argument(args, 0)
+  let callback = invoke ts.array.callback(input)
+  let context = invoke ts.array.argument(args, 1)
+  let output = []
+  let index = num.sub(length, 1)
+  while num.lt(index, length) {
+    if num.lt(index, 0) { break }
+    let present = invoke ts.has(this, index)
+    set present = true
+    if present {
+      let value = invoke ts.get(this, index)
+      let passed = [value, num.to_float(index), this]
+      let answer = apply callback(context, passed)
+      let truth = invoke ts.to_boolean(answer)
+      if truth { return value }
+    }
+    set index = num.add(index, -1.0)
+  }
+  return absent
+}
+
+function ts.array.findLastIndex(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  let length = invoke ts.array.length(this)
+  let input = invoke ts.array.argument(args, 0)
+  let callback = invoke ts.array.callback(input)
+  let context = invoke ts.array.argument(args, 1)
+  let output = []
+  let index = num.sub(length, 1)
+  while num.lt(index, length) {
+    if num.lt(index, 0) { break }
+    let present = invoke ts.has(this, index)
+    set present = true
+    if present {
+      let value = invoke ts.get(this, index)
+      let passed = [value, num.to_float(index), this]
+      let answer = apply callback(context, passed)
+      let truth = invoke ts.to_boolean(answer)
+      if truth { return num.to_float(index) }
+    }
+    set index = num.add(index, -1.0)
+  }
+  return -1.0
+}
+
+function ts.array.reduce(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  let length = invoke ts.array.length(this)
+  let input = invoke ts.array.argument(args, 0)
+  let callback = invoke ts.array.callback(input)
+  let accumulator = invoke ts.array.argument(args, 1)
+  let initialised = num.lt(1, list.len(args))
+  let index = 0.0
+  while num.lt(index, length) {
+    if num.lt(index, 0) { break }
+    let present = invoke ts.has(this, index)
+    if present {
+      let value = invoke ts.get(this, index)
+      if initialised {
+        let passed = [accumulator, value, num.to_float(index), this]
+        set accumulator = apply callback(absent, passed)
+      } else {
+        set accumulator = value
+        set initialised = true
+      }
+    }
+    set index = num.add(index, 1.0)
+  }
+  if initialised { return accumulator }
+  throw error.new("type_error", "Reduce of empty array with no initial value", null)
+}
+
+function ts.array.reduceRight(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  let length = invoke ts.array.length(this)
+  let input = invoke ts.array.argument(args, 0)
+  let callback = invoke ts.array.callback(input)
+  let accumulator = invoke ts.array.argument(args, 1)
+  let initialised = num.lt(1, list.len(args))
+  let index = num.sub(length, 1)
+  while num.lt(index, length) {
+    if num.lt(index, 0) { break }
+    let present = invoke ts.has(this, index)
+    if present {
+      let value = invoke ts.get(this, index)
+      if initialised {
+        let passed = [accumulator, value, num.to_float(index), this]
+        set accumulator = apply callback(absent, passed)
+      } else {
+        set accumulator = value
+        set initialised = true
+      }
+    }
+    set index = num.add(index, -1.0)
+  }
+  if initialised { return accumulator }
+  throw error.new("type_error", "Reduce of empty array with no initial value", null)
+}
+
+function ts.array.join(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  let length = invoke ts.array.length(this)
+  let input = invoke ts.array.argument(args, 0)
+  let separator = ","
+  if same(input, absent) {} else { set separator = invoke ts.to_string(input) }
+  let output = ""
+  let index = 0.0
+  while num.lt(index, length) {
+    if num.lt(0, index) { set output = text.concat(output, separator) }
+    let value = invoke ts.get(this, index)
+    let nullish = invoke ts.is_nullish(value)
+    if nullish {} else {
+      let piece = invoke ts.to_string(value)
+      set output = text.concat(output, piece)
+    }
+    set index = num.add(index, 1)
+  }
+  return output
+}
+
+function ts.array.toString(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error"
+charge 8
+body {
+  do invoke ts.require_object_coercible(this)
+  let receiver = invoke ts.receiver(this)
+  let array = same(receiver, "list")
+  if same(receiver, "brand:regex.match") { set array = true }
+  let arguments = []
+  if array {
+    let output = invoke ts.array.join(this, arguments)
+    return output
+  }
+  let method = invoke ts.get(this, "join")
+  if same(kind(method), "closure") {
+    let output = apply method(this, arguments)
+    return output
+  }
+  if same(receiver, "text") { return "[object String]" }
+  if same(receiver, "number") { return "[object Number]" }
+  if same(receiver, "bool") { return "[object Boolean]" }
+  if same(receiver, "closure") { return "[object Function]" }
+  if same(receiver, "error") { return "[object Error]" }
+  if same(receiver, "map") { return "[object Map]" }
+  if same(receiver, "set") { return "[object Set]" }
+  if same(receiver, "timestamp") { return "[object Date]" }
+  if same(receiver, "brand:regex.ecma") { return "[object RegExp]" }
+  return "[object Object]"
+}
+
+function ts.array.toLocaleString(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "TS_METHOD_UNSUPPORTED"
+charge 1
+body {
+  throw error.new("TS_METHOD_UNSUPPORTED", "toLocaleString/Intl formatting is locale-dependent", null)
+}
+
+function ts.array.reverse(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  let length = invoke ts.array.length(this)
+  let lower = 0.0
+  while num.lt(lower, num.floor(num.div(length, 2))) {
+    let upper = num.sub(num.sub(length, lower), 1)
+    let a_present = invoke ts.has(this, lower)
+    let b_present = invoke ts.has(this, upper)
+    let a = invoke ts.get(this, lower)
+    let b = invoke ts.get(this, upper)
+    if b_present { do invoke ts.array.set(this, lower, b) } else { do invoke ts.array.remove(this, lower) }
+    if a_present { do invoke ts.array.set(this, upper, a) } else { do invoke ts.array.remove(this, upper) }
+    set lower = num.add(lower, 1)
+  }
+  return this
+}
+
+function ts.array.toReversed(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  let output = invoke ts.array.dense(this)
+  let array_arg_4 = []
+  let reversed = invoke ts.array.reverse(output, array_arg_4)
+  return reversed
+}
+
+function ts.array.splice(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  let length = invoke ts.array.length(this)
+  let input = invoke ts.array.argument(args, 0)
+  let start = invoke ts.array.bound(input, length, 0.0)
+  let removed_count = 0.0
+  let inserted_count = 0.0
+  if num.lt(0, list.len(args)) { set removed_count = num.sub(length, start) }
+  if num.lt(1, list.len(args)) {
+    let array_arg_5 = args[1]
+    let count = invoke ts.array.integer(array_arg_5)
+    set removed_count = num.min(num.max(count, 0), num.sub(length, start))
+    set inserted_count = num.sub(list.len(args), 2)
+  }
+  let new_length = num.add(num.sub(length, removed_count), inserted_count)
+  if num.lt(9007199254740991.0, new_length) { throw error.new("type_error", "Invalid array-like length", null) }
+  let array_arg_6 = [start, num.add(start, removed_count)]
+  let deleted = invoke ts.array.slice(this, array_arg_6)
+  if num.lt(inserted_count, removed_count) {
+    let index = start
+    while num.lt(index, num.sub(length, removed_count)) {
+      let from = num.add(index, removed_count)
+      let to = num.add(index, inserted_count)
+      let present = invoke ts.has(this, from)
+      if present {
+        let value = invoke ts.get(this, from)
+        do invoke ts.array.set(this, to, value)
+      } else { do invoke ts.array.remove(this, to) }
+      set index = num.add(index, 1)
+    }
+    let tail = length
+    while num.lt(new_length, tail) {
+      set tail = num.sub(tail, 1)
+      do invoke ts.array.remove(this, tail)
+    }
+  } else {
+    let index = num.sub(length, removed_count)
+    while num.lt(start, index) {
+      set index = num.sub(index, 1)
+      let from = num.add(index, removed_count)
+      let to = num.add(index, inserted_count)
+      let present = invoke ts.has(this, from)
+      if present {
+        let value = invoke ts.get(this, from)
+        do invoke ts.array.set(this, to, value)
+      } else { do invoke ts.array.remove(this, to) }
+    }
+  }
+  let index = 0.0
+  while num.lt(index, inserted_count) {
+    let value = args[num.add(index, 2)]
+    let array_arg_7 = num.add(start, index)
+    do invoke ts.array.set(this, array_arg_7, value)
+    set index = num.add(index, 1)
+  }
+  do invoke ts.array.set(this, "length", new_length)
+  return deleted
+}
+
+function ts.array.shift(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  let length = invoke ts.array.length(this)
+  let value = invoke ts.get(this, 0.0)
+  let array_arg_8 = [0.0, 1.0]
+  do invoke ts.array.splice(this, array_arg_8)
+  return value
+}
+
+function ts.array.unshift(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  let passed = [0.0, 0.0]
+  for value in args { set passed[list.len(passed)] = value }
+  do invoke ts.array.splice(this, passed)
+  let length = invoke ts.array.length(this)
+  return length
+}
+
+function ts.array.toSpliced(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  let output = invoke ts.array.dense(this)
+  do invoke ts.array.splice(output, args)
+  return output
+}
+
+function ts.array.with(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  let length = invoke ts.array.length(this)
+  let input = invoke ts.array.argument(args, 0)
+  let index = invoke ts.array.integer(input)
+  if num.lt(index, 0) { set index = num.add(length, index) }
+  if num.lt(index, 0) { throw error.new("RangeError", "Invalid index", null) }
+  if num.le(length, index) { throw error.new("RangeError", "Invalid index", null) }
+  let value = invoke ts.array.argument(args, 1)
+  let output = []
+  let position = 0.0
+  while num.lt(position, length) {
+    let item = value
+    if eq(position, index) {} else { set item = invoke ts.get(this, position) }
+    set output[list.len(output)] = item
+    set position = num.add(position, 1)
+  }
+  return output
+}
+
+function ts.array.sort(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  let length = invoke ts.array.length(this)
+  let callback = invoke ts.array.argument(args, 0)
+  if same(callback, absent) {} else { do invoke ts.array.callback(callback) }
+  let values = []
+  let undefined_count = 0
+  let index = 0.0
+  while num.lt(index, length) {
+    let present = invoke ts.has(this, index)
+    if present {
+      let value = invoke ts.get(this, index)
+      if same(value, absent) { set undefined_count = num.add(undefined_count, 1) }
+      else { set values[list.len(values)] = value }
+    }
+    set index = num.add(index, 1)
+  }
+  let compare = fn(a, b) {
+    if same(callback, absent) {
+      let left = invoke ts.to_string(a)
+      let right = invoke ts.to_string(b)
+      return text.utf16_compare(left, right)
+    }
+    let passed = [a, b]
+    let output = apply callback(absent, passed)
+    let number = invoke ts.to_number(output)
+    if num.is_nan(number) { return 0.0 }
+    return number
+  }
+  do invoke list.sort(values, compare)
+  set index = 0.0
+  for value in values {
+    do invoke ts.array.set(this, index, value)
+    set index = num.add(index, 1)
+  }
+  while num.lt(0, undefined_count) {
+    do invoke ts.array.set(this, index, absent)
+    set index = num.add(index, 1)
+    set undefined_count = num.sub(undefined_count, 1)
+  }
+  while num.lt(index, length) {
+    do invoke ts.array.remove(this, index)
+    set index = num.add(index, 1)
+  }
+  return this
+}
+
+function ts.array.toSorted(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  let output = invoke ts.array.dense(this)
+  do invoke ts.array.sort(output, args)
+  return output
+}
+
+function ts.array.flatten(source: Any, depth: Number, output: List(Any)) -> List(Any)
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  let flatten = absent
+  set flatten = fn(source, depth) {
+    let length = invoke ts.array.length(source)
+    let index = 0.0
+    while num.lt(index, length) {
+      let present = invoke ts.has(source, index)
+      if present {
+        let value = invoke ts.get(source, index)
+        let array = invoke ts.array.is(value)
+        if num.lt(0, depth) {} else { set array = false }
+        if array { let array_arg_9 = num.sub(depth, 1)
+        do apply flatten(value, array_arg_9) }
+        else { set output[list.len(output)] = value }
+      }
+      set index = num.add(index, 1)
+    }
+    return absent
+  }
+  do apply flatten(source, depth)
+  return output
+}
+
+function ts.array.flat(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  do invoke ts.require_object_coercible(this)
+  let input = invoke ts.array.argument(args, 0)
+  let depth = 1.0
+  if same(input, absent) {} else { set depth = invoke ts.array.integer(input) }
+  let array_arg_10 = []
+  let output = invoke ts.array.flatten(this, depth, array_arg_10)
+  return output
+}
+
+function ts.array.flatMap(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  let length = invoke ts.array.length(this)
+  let input = invoke ts.array.argument(args, 0)
+  let callback = invoke ts.array.callback(input)
+  let context = invoke ts.array.argument(args, 1)
+  let output = []
+  let index = 0.0
+  while num.lt(index, length) {
+    let present = invoke ts.has(this, index)
+    if present {
+      let value = invoke ts.get(this, index)
+      let passed = [value, num.to_float(index), this]
+      let mapped = apply callback(context, passed)
+      let array = invoke ts.array.is(mapped)
+      if array { do invoke ts.array.flatten(mapped, 0.0, output) }
+      else { set output[list.len(output)] = mapped }
+    }
+    set index = num.add(index, 1)
+  }
+  return output
+}
+
+function ts.array.keys(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  do invoke ts.require_object_coercible(this)
+  let index = 0.0
+  let exhausted = false
+  let next = fn(context, passed) {
+    let length = invoke ts.array.length(this)
+    if exhausted { return {value: absent, done: true} }
+    if num.le(length, index) {
+      set exhausted = true
+      return {value: absent, done: true}
+    }
+    let position = index
+    set index = num.add(index, 1)
+    let value = num.to_float(position)
+    return {value: value, done: false}
+  }
+  return {brand: "ts.iterator", next: next}
+}
+
+function ts.array.values(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  do invoke ts.require_object_coercible(this)
+  let index = 0.0
+  let exhausted = false
+  let next = fn(context, passed) {
+    let length = invoke ts.array.length(this)
+    if exhausted { return {value: absent, done: true} }
+    if num.le(length, index) {
+      set exhausted = true
+      return {value: absent, done: true}
+    }
+    let position = index
+    set index = num.add(index, 1)
+    let value = invoke ts.get(this, position)
+    return {value: value, done: false}
+  }
+  return {brand: "ts.iterator", next: next}
+}
+
+function ts.array.entries(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  do invoke ts.require_object_coercible(this)
+  let index = 0.0
+  let exhausted = false
+  let next = fn(context, passed) {
+    let length = invoke ts.array.length(this)
+    if exhausted { return {value: absent, done: true} }
+    if num.le(length, index) {
+      set exhausted = true
+      return {value: absent, done: true}
+    }
+    let position = index
+    set index = num.add(index, 1)
+    let value = invoke ts.get(this, position)
+    set value = [num.to_float(position), value]
+    return {value: value, done: false}
+  }
+  return {brand: "ts.iterator", next: next}
+}
+
+# Array iteration retains its receiver and reads length anew on each step.
+# Existing iterator objects retain their next closure; exotics provide their
+# dialect-supported values through ts.iterate.
+function ts.array.iterator(this: Any) -> Any
+kernel 1
+errors "type_error"
+charge 8
+body {
+  if same(kind(this), "record") {
+    if same(this.brand, "ts.iterator") { return this }
+  }
+  let k = invoke ts.receiver(this)
+  let array = invoke ts.array.is(this)
+  if array { let array_arg_11 = []
+  let iterator = invoke ts.array.values(this, array_arg_11) return iterator }
+  let items = invoke ts.iterate(this)
+  let array_arg_12 = []
+  let iterator = invoke ts.array.values(items, array_arg_12)
+  return iterator
+}
+
+function ts.array.from(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  let source = invoke ts.array.argument(args, 0)
+  do invoke ts.require_object_coercible(source)
+  let mapping = invoke ts.array.argument(args, 1)
+  let mapped = bool.not(same(mapping, absent))
+  if mapped { do invoke ts.array.callback(mapping) }
+  let context = invoke ts.array.argument(args, 2)
+  let output = []
+  let k = invoke ts.receiver(source)
+  let iterable = same(k, "list")
+  for other in ["text", "map", "set", "brand:regex.match", "brand:ts.iterator"] {
+    if same(k, other) { set iterable = true }
+  }
+  let index = 0.0
+  if iterable {
+    let iterator = invoke ts.array.iterator(source)
+    let next = iterator.next
+    let none = []
+    while true {
+      let step = apply next(iterator, none)
+      if step.done { break }
+      let value = step.value
+      if mapped {
+        let passed = [value, num.to_float(index)]
+        set value = apply mapping(context, passed)
+      }
+      set output[list.len(output)] = value
+      set index = num.add(index, 1)
+    }
+  } else {
+    let length = invoke ts.array.length(source)
+    while num.lt(index, length) {
+      let value = invoke ts.get(source, index)
+      if mapped {
+        let passed = [value, num.to_float(index)]
+        set value = apply mapping(context, passed)
+      }
+      set output[list.len(output)] = value
+      set index = num.add(index, 1)
+    }
+  }
+  return output
+}

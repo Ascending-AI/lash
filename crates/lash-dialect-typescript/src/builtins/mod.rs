@@ -17,6 +17,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::OnceLock;
 
+mod array;
 mod console;
 mod promise;
 mod regexp;
@@ -107,6 +108,7 @@ pub(crate) struct Object {
 pub(crate) fn objects() -> Vec<Object> {
     vec![
         console::object(),
+        array::object(),
         promise::object(),
         string::object(),
         regexp::object(),

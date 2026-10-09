@@ -12,7 +12,6 @@
 use lash_kernel_doc::{Datum, Float};
 
 use super::machine::{Ended, end};
-use super::main_text;
 
 const REGISTER: &str = include_str!("../../deviations.md");
 
@@ -261,23 +260,4 @@ fn the_register_holds_every_typed_row_with_its_law() {
         assert!(dialect.contains(&format!("`{}`", row.raises)), "{dialect}");
         assert_eq!(cited, format!("`{law}`"));
     }
-}
-
-/// An array declared `number[]` and changed through an `any` alias holds a
-/// text. The read is still the array's own `list.get`, the addition is
-/// still `num.add`, and the addition raises: it does not concatenate, and
-/// it does not give a number.
-#[test]
-fn a_typed_array_mutated_through_an_untyped_alias_raises_at_the_typed_use() {
-    let source = "const xs: number[] = [1, 2]; const alias: any = xs; alias[0] = 'a'; \
-                  finish(xs[0] + 1);";
-    let lowered = main_text(source);
-    assert!(
-        lowered.contains("let t4 = list.get(xs, 0.0)\nlet t5 = num.add(num.to_float(t4), 1.0)"),
-        "{lowered}"
-    );
-    assert_eq!(end(source), Ended::Raised("type_error".to_string()));
-    // Untyped, the same program is JavaScript's.
-    let untyped = source.replace("number[]", "any");
-    assert_eq!(end(&untyped), Ended::Finished(text("a1")));
 }

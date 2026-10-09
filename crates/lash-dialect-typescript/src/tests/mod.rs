@@ -8,6 +8,7 @@ use lash_kernel_doc::{
 
 use crate::Diagnostic;
 
+mod array;
 mod async_fn;
 mod deviations;
 mod hoisting;

@@ -36,10 +36,19 @@ use text.utf16_len
 use text.utf16_get
 use text.utf16_slice
 use text.concat
+use text.len
+use text.slice
 use text.trim_u17_0_0
 use text.ends_with
 use float.parse
 use text.utf16_compare
+use text.to_code_points
+use list.copy_deep
+use record.copy_deep
+use map.copy_deep
+use set.copy_deep
+use map.entries
+use ts.boundary
 use list.len
 use record.get
 use record.contains
@@ -72,6 +81,11 @@ use ts.relational
 use ts.list_index
 use ts.get
 use ts.require_object_coercible
+use ts.iterate
+use ts.keys
+use ts.set
+use ts.delete
+use ts.hole_value
 
 # What a value is to a dispatcher: "absent", "null", "bool", "number",
 # "text", "list", "record", "closure", "error", "map", "set", "timestamp",
@@ -81,7 +95,7 @@ kernel 1
 charge 3
 body {
   let k = kind(value)
-  if same(k, "int") {
+  if same(k, "integer") {
     return "number"
   }
   if same(k, "float") {
@@ -165,7 +179,7 @@ body {
   if same(k, "text") {
     return bool.not(same(value, ""))
   }
-  if same(k, "int") {
+  if same(k, "integer") {
     return bool.not(eq(value, 0))
   }
   if same(k, "float") {
@@ -343,7 +357,8 @@ body {
         } else {
           set joined = text.concat(joined, ",")
         }
-        let nullish = invoke ts.is_nullish(item)
+        let nullish = same(item, ())
+        if nullish {} else { set nullish = invoke ts.is_nullish(item) }
         if nullish {} else {
           let primitive = apply convert(item, "string")
           let piece = invoke ts.primitive_to_string(primitive)
@@ -907,6 +922,17 @@ body {
     }
     return items
   }
+  if same(k, "brand:ts.iterator") {
+      let iterator_items = []
+      let next = target.next
+      while true {
+        let array_arg_1 = []
+        let step = apply next(target, array_arg_1)
+        if step.done { break }
+        set iterator_items[list.len(iterator_items)] = step.value
+      }
+      return iterator_items
+  }
   let items = invoke ts.exotic.iterate(target)
   return items
 }
@@ -917,32 +943,24 @@ function ts.list_index(key: Any, length: Number) -> Number
 kernel 1
 charge sum(6, size(key))
 body {
-  let position = key
-  if same(kind(key), "text") {
-    set position = invoke ts.number.parse(key)
-  }
-  let k = kind(position)
-  let number = same(k, "float")
-  if number {} else {
-    set number = same(k, "int")
-  }
-  if number {} else {
-    return -1.0
-  }
-  if eq(num.floor(position), position) {} else {
-    return -1.0
-  }
-  if num.lt(position, 0) {
-    return -1.0
-  }
-  if num.lt(position, length) {
-    if same(kind(key), "text") {
-      let canonical = invoke ts.number.to_string(position)
-      if same(canonical, key) {} else { return -1.0 }
-    }
-    return num.to_float(position)
-  }
+  let name = invoke ts.to_property_key(key)
+  let position = invoke ts.number.parse(name)
+  if num.is_finite(position) {} else { return -1.0 }
+  if eq(num.floor(position), position) {} else { return -1.0 }
+  if num.lt(position, 0) { return -1.0 }
+  let canonical = invoke ts.number.to_string(position)
+  if same(canonical, name) {} else { return -1.0 }
+  if num.lt(position, length) { return num.to_float(position) }
   return -1.0
+}
+
+# A hole is not a JavaScript value. Reading one gives undefined.
+function ts.hole_value(value: Any) -> Any
+kernel 1
+charge 1
+body {
+  if same(value, ()) { return absent }
+  return value
 }
 
 # `target[key]` and `target.key` where no built-in row answers.
@@ -983,7 +1001,13 @@ body {
     let arg_1 = list.len(target.items)
     let position = invoke ts.list_index(key, arg_1)
     if num.lt(position, 0) { return absent }
-    return target.items[position]
+    let element = target.items[position]
+    let outcome = invoke ts.hole_value(element)
+    return outcome
+  }
+  if same(k, "brand:ts.iterator") {
+    let name = invoke ts.to_property_key(key)
+    return target[name]
   }
   if same(k, "record") {
     let name = invoke ts.to_property_key(key)
@@ -991,13 +1015,16 @@ body {
   }
   if same(k, "list") {
     let length = list.len(target)
-    if same(key, "length") { return num.to_float(length) }
-    let position = invoke ts.list_index(key, length)
+    let name = invoke ts.to_property_key(key)
+    if same(name, "length") { return num.to_float(length) }
+    let position = invoke ts.list_index(name, length)
     if num.lt(position, 0) {
       let other = invoke ts.exotic.get(target, key)
       return other
     }
-    return target[position]
+    let value = target[position]
+    let element_value = invoke ts.hole_value(value)
+    return element_value
   }
   let nullish = invoke ts.is_nullish(target)
   if nullish {
@@ -1027,12 +1054,22 @@ body {
     return value
   }
   if same(k, "list") {
-    let bound = num.add(list.len(target), 1)
-    let position = invoke ts.list_index(key, bound)
-    if num.lt(position, 0) {
-      let written = invoke ts.exotic.set(target, key, value)
-      return written
+    let name = invoke ts.to_property_key(key)
+    if same(name, "length") {
+      let length = invoke ts.to_number(value)
+      if num.is_finite(length) {} else { throw error.new("RangeError", "Invalid array length", null) }
+      if eq(num.floor(length), length) {} else { throw error.new("RangeError", "Invalid array length", null) }
+      if num.lt(length, 0) { throw error.new("RangeError", "Invalid array length", null) }
+      if num.lt(4294967295.0, length) { throw error.new("RangeError", "Invalid array length", null) }
+      while num.lt(length, list.len(target)) { remove target[num.sub(list.len(target), 1)] }
+      while num.lt(list.len(target), length) { set target[list.len(target)] = () }
+      return value
     }
+    let position = invoke ts.list_index(name, 4294967295.0)
+    if num.lt(position, 0) {
+      throw error.new("TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED", "arrays do not carry named properties", null)
+    }
+    while num.lt(list.len(target), position) { set target[list.len(target)] = () }
     set target[position] = value
     return value
   }
@@ -1057,6 +1094,14 @@ body {
     remove target[name]
     return true
   }
+  if same(k, "list") {
+    let name = invoke ts.to_property_key(key)
+    if same(name, "length") { throw error.new("type_error", "Cannot delete array length", null) }
+    let array_arg_2 = list.len(target)
+    let position = invoke ts.list_index(name, array_arg_2)
+    if num.le(0, position) { set target[position] = () }
+    return true
+  }
   let nullish = invoke ts.is_nullish(target)
   if nullish {
     throw error.new("type_error", "Cannot convert undefined or null to object", null)
@@ -1071,14 +1116,25 @@ errors "type_error"
 charge sum(12, deep(key))
 body {
   let k = invoke ts.receiver(target)
+  if same(k, "brand:regex.match") {
+    let name = invoke ts.to_property_key(key)
+    for field in ["length", "index", "input", "groups"] { if same(name, field) { return true } }
+    let length = list.len(target.items)
+    let position = invoke ts.list_index(name, length)
+    if num.lt(position, 0) { return false }
+    return bool.not(same(target.items[position], ()))
+  }
   if same(k, "record") {
     let name = invoke ts.to_property_key(key)
     return record.contains(target, name)
   }
   if same(k, "list") {
-    let length = list.len(target)
-    let position = invoke ts.list_index(key, length)
-    return num.le(0, position)
+    let name = invoke ts.to_property_key(key)
+    if same(name, "length") { return true }
+    let array_arg_3 = list.len(target)
+    let position = invoke ts.list_index(name, array_arg_3)
+    if num.lt(position, 0) { return false }
+    return bool.not(same(target[position], ()))
   }
   throw error.new("type_error", "Cannot use 'in' to search in a value that is not an object", null)
 }
@@ -1106,15 +1162,38 @@ kernel 1
 charge sum(4, size(target))
 body {
   let k = kind(target)
-  if same(k, "record") {
-    return record.keys(target)
-  }
   let keys = []
+  if same(k, "record") {
+    let numeric = []
+    let other = []
+    for key in record.keys(target) {
+      let index = invoke ts.list_index(key, 4294967295.0)
+      if num.le(0, index) {
+        let position = list.len(numeric)
+        set numeric[position] = index
+        while num.lt(0, position) {
+          let previous = num.sub(position, 1)
+          if num.le(numeric[previous], index) { break }
+          set numeric[position] = numeric[previous]
+          set position = previous
+        }
+        set numeric[position] = index
+      } else { set other[list.len(other)] = key }
+    }
+    for index in numeric {
+      let key = invoke ts.number.to_string(index)
+      set keys[list.len(keys)] = key
+    }
+    for key in other { set keys[list.len(keys)] = key }
+    return keys
+  }
   if same(k, "list") {
     let position = 0.0
     while num.lt(position, list.len(target)) {
-      let key = invoke ts.number.to_string(position)
-      set keys[list.len(keys)] = key
+      if same(target[position], ()) {} else {
+        let key = invoke ts.number.to_string(position)
+        set keys[list.len(keys)] = key
+      }
       set position = num.add(position, 1)
     }
   }
@@ -1126,19 +1205,10 @@ function ts.assign(target: Any, source: Any) -> Any
 kernel 1
 charge sum(4, size(source))
 body {
-  let k = kind(source)
-  if same(k, "record") {
-    for name in record.keys(source) {
-      set target[name] = source[name]
-    }
-  }
-  if same(k, "list") {
-    let position = 0.0
-    for item in source {
-      let key = invoke ts.number.to_string(position)
-      set target[key] = item
-      set position = num.add(position, 1)
-    }
+  let keys = invoke ts.keys(source)
+  for key in keys {
+    let value = invoke ts.get(source, key)
+    set target[key] = value
   }
   return target
 }
@@ -1164,4 +1234,52 @@ body {
     }
   }
   return rest
+}
+
+# Guest arrays cross a host boundary as plain data. Copy first: replacing
+# absent slots must never fill the guest's holes or change any guest alias.
+function ts.boundary(value: Any) -> Any
+kernel 1
+errors "cyclic_value", "too_deep", "type_error"
+charge sum(4, deep(value))
+body {
+  let k = kind(value)
+  let copied = value
+  if same(k, "list") { set copied = list.copy_deep(value) }
+  if same(k, "record") { set copied = record.copy_deep(value) }
+  if same(k, "map") { set copied = map.copy_deep(value) }
+  if same(k, "set") { set copied = set.copy_deep(value) }
+  let visit = absent
+  set visit = fn(item) {
+    let k = kind(item)
+    if same(k, "list") {
+      let index = 0
+      while num.lt(index, list.len(item)) {
+        let child = item[index]
+        if same(child, ()) { set child = null }
+        if same(child, absent) { set child = null }
+        set child = apply visit(child)
+        set item[index] = child
+        set index = num.add(index, 1)
+      }
+    }
+    if same(k, "record") {
+      for key in record.keys(item) {
+        let child = item[key]
+        set child = apply visit(child)
+        set item[key] = child
+      }
+    }
+    if same(k, "map") {
+      for pair in map.entries(item) {
+        let key = pair[0]
+        let child = pair[1]
+        set child = apply visit(child)
+        set item[key] = child
+      }
+    }
+    return item
+  }
+  let outcome = apply visit(copied)
+  return outcome
 }
