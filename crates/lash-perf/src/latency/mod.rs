@@ -11,19 +11,51 @@
 //! acceptance, acceptance to shift admission, shift admission to first visible
 //! delta, shift admission to run settlement, and run settlement to
 //! host-visible completion. Failures land in the same ledger. The
-//! `poll` and `grace` cases isolate the send follower's two tail
-//! behaviours — the 25 ms..1 s polling backoff and the 5 s live-report
-//! grace, which binds only while a run in the host may still deposit a
-//! report — by fixing the shift-attach wake the follower waits on.
+//! `poll` and `grace` cases isolate the current follower's normal poll and
+//! remote terminal wait. The historical `grace` name remains a CLI case;
+//! the retired live-report grace is no longer part of the measured engine.
 
 mod provider;
 mod runner;
-mod work_engine;
 
 use crate::perf_support::dhat;
 pub(crate) use provider::LatencyProviderKind;
 use runner::{CaseSpec, Topology};
-use work_engine::AwaitShiftMode;
+/// Which of the current follower's two polling paths observes settlement.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum FollowerMode {
+    Standard,
+    Poll,
+    RemoteTerminal,
+}
+
+impl FollowerMode {
+    fn pacing(self) -> anyhow::Result<lash::ObserverPacing> {
+        let mut pacing = lash::ObserverPacing::standard();
+        let delayed = lash::PollPacing::new(
+            std::time::Duration::from_secs(120),
+            std::time::Duration::from_secs(120),
+        )?;
+        match self {
+            Self::Standard => {}
+            Self::Poll => pacing.terminal = delayed,
+            Self::RemoteTerminal => {
+                // Binding discovery uses this floor too: retain its short probe.
+                pacing.follow = lash::PollPacing::new(
+                    pacing.follow.initial(),
+                    std::time::Duration::from_secs(120),
+                )?;
+            }
+        }
+        Ok(pacing)
+    }
+}
+
+/// Serve a durable node in the latency instrument's child process until stdin closes.
+pub async fn run_worker(store_dir: &std::path::Path) -> anyhow::Result<()> {
+    runner::run_worker(store_dir).await
+}
 
 /// The gate's budget, fixed before measurement (FIG-3843): same-process,
 /// no-tool, deterministic fast-provider fixture.
@@ -45,7 +77,7 @@ pub(crate) fn default_cases(fast_samples: usize, lanes: usize) -> Vec<CaseSpec> 
             name: GATE_CASE,
             topology: Topology::SameProcess,
             provider: LatencyProviderKind::Text,
-            await_shift: AwaitShiftMode::Real,
+            follower: FollowerMode::Standard,
             samples: fast_samples,
             // The gated fixture is the *idle* path: pinned at 16 lanes so the
             // measured latency is the send path itself, not server-side
@@ -58,7 +90,7 @@ pub(crate) fn default_cases(fast_samples: usize, lanes: usize) -> Vec<CaseSpec> 
             name: "stream",
             topology: Topology::SameProcess,
             provider: LatencyProviderKind::Stream,
-            await_shift: AwaitShiftMode::Real,
+            follower: FollowerMode::Standard,
             samples: 500,
             lanes,
             busy: false,
@@ -67,7 +99,7 @@ pub(crate) fn default_cases(fast_samples: usize, lanes: usize) -> Vec<CaseSpec> 
             name: "tool",
             topology: Topology::SameProcess,
             provider: LatencyProviderKind::Tool,
-            await_shift: AwaitShiftMode::Real,
+            follower: FollowerMode::Standard,
             samples: 500,
             lanes,
             busy: false,
@@ -76,7 +108,7 @@ pub(crate) fn default_cases(fast_samples: usize, lanes: usize) -> Vec<CaseSpec> 
             name: "failure",
             topology: Topology::SameProcess,
             provider: LatencyProviderKind::Fail,
-            await_shift: AwaitShiftMode::Real,
+            follower: FollowerMode::Standard,
             samples: 200,
             lanes,
             busy: false,
@@ -85,7 +117,7 @@ pub(crate) fn default_cases(fast_samples: usize, lanes: usize) -> Vec<CaseSpec> 
             name: "busy",
             topology: Topology::SameProcess,
             provider: LatencyProviderKind::Text,
-            await_shift: AwaitShiftMode::Real,
+            follower: FollowerMode::Standard,
             samples: 300,
             lanes,
             busy: true,
@@ -94,7 +126,7 @@ pub(crate) fn default_cases(fast_samples: usize, lanes: usize) -> Vec<CaseSpec> 
             name: "provider-http",
             topology: Topology::SameProcess,
             provider: LatencyProviderKind::OpenAiCompat,
-            await_shift: AwaitShiftMode::Real,
+            follower: FollowerMode::Standard,
             samples: 200,
             lanes,
             busy: false,
@@ -103,34 +135,28 @@ pub(crate) fn default_cases(fast_samples: usize, lanes: usize) -> Vec<CaseSpec> 
             name: "cross-worker",
             topology: Topology::CrossWorker,
             provider: LatencyProviderKind::Text,
-            await_shift: AwaitShiftMode::Real,
+            follower: FollowerMode::Standard,
             samples: 500,
             lanes,
             busy: false,
         },
-        // The follower's polling regime isolated: the shift-attach wake is
-        // answered immediately, so the store poll alone carries settlement
-        // detection and the 25 ms..1 s backoff bounds the settle→complete
-        // tail. Runs cross-worker so no live replay or mailbox shortcuts it.
+        // Delay the terminal wait so the normal follow poll observes settlement.
         CaseSpec {
             name: "poll",
             topology: Topology::CrossWorker,
             provider: LatencyProviderKind::Text,
-            await_shift: AwaitShiftMode::Answered,
+            follower: FollowerMode::Poll,
             samples: 300,
             lanes,
             busy: false,
         },
-        // The 5 s live-report grace's reach: the shift-attach wake never
-        // resolves, as for a shift that outlives the run. The run ran in
-        // the worker, so no run in this process can deposit its report and
-        // the handle answers from the store without waiting the grace.
-        // Runs cross-worker for the same reason.
+        // Historical grace case: extend follow backoff while retaining binding
+        // probes. The current follower has no live-report grace.
         CaseSpec {
             name: "grace",
             topology: Topology::CrossWorker,
             provider: LatencyProviderKind::Text,
-            await_shift: AwaitShiftMode::Pending,
+            follower: FollowerMode::RemoteTerminal,
             samples: 16,
             lanes: 16,
             busy: false,
@@ -195,9 +221,8 @@ pub async fn run(run: LatencyRun) -> anyhow::Result<i32> {
     );
     dhat::ensure_dhat_parent(run.dhat_out.as_ref())?;
     let env = runner::LatencyEnv::open(&run.store_dir).await?;
-    // The profile covers the measured cases only, and ends while the server
-    // and stores are still open, so its end-of-run heap is what the cases left
-    // retained, not teardown.
+    // The parent-process profile covers the selected cases, including their
+    // teardown. Child-node allocations are outside this process's allocator.
     let profiler =
         dhat::start_dhat_profiler(run.dhat_out.clone(), run.dhat_frames, DHAT_FEATURE_ERROR)?;
     let mut reports = Vec::new();

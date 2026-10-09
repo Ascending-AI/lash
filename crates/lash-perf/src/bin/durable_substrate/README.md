@@ -53,15 +53,15 @@ PostgreSQL 18 cluster with L12a's durable settings:
 python3 tools/buck2/bootstrap_native_tools.py   # the pinned PostgreSQL tree
 kiln build //crates/lash-perf:durable-substrate__bin --materializations final \
   --build-report .kiln/FIG-5188/build-report.json
-cp "$(python3 tools/buck2/outputs.py --report .kiln/FIG-5188/build-report.json \
-  --label //crates/lash-perf:durable-substrate__bin --single)" .kiln/FIG-5188/bin/durable_substrate
+B="$(python3 tools/buck2/outputs.py --report .kiln/FIG-5188/build-report.json \
+  --label //crates/lash-perf:durable-substrate__bin --single)"
 
 kiln run //crates/lash-perf:durable-substrate__bin -- --store sqlite \
   --sqlite-dir "$PWD/.kiln/FIG-5188/final/sqlite/db-a" --case rounds-1 --samples 10 \
   --out "$PWD/.kiln/FIG-5188/final/sqlite/sqlite.jsonl"
 
 kiln gate lash <fork> -- python3 crates/lash-perf/src/bin/durable_substrate/bench.py \
-  --binary .kiln/FIG-5188/bin/durable_substrate --evidence-dir .kiln/FIG-5188/final/pg \
+  --binary "$B" --evidence-dir .kiln/FIG-5188/final/pg \
   --nodes 1 --case rounds-1 -- --samples 10
 
 python3 crates/lash-perf/src/bin/durable_substrate/report.py \

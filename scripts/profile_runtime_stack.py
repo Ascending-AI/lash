@@ -17,6 +17,7 @@ import os
 import re
 import subprocess
 import sys
+from perf_artifacts import add_build_report_arg, artifacts, runtime_label
 from pathlib import Path
 
 
@@ -99,7 +100,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--binary",
         type=Path,
-        help="Path to lash-perf. Defaults to target/release/lash-perf or target/debug/lash-perf.",
+        help="Explicit prebuilt lash-perf executable; otherwise resolve the Kiln build report.",
     )
     parser.add_argument(
         "--build",
@@ -117,7 +118,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--release",
         action="store_true",
-        help="Use target/release/lash-perf instead of target/debug/lash-perf.",
+        help="Use the optimized Kiln configuration.",
     )
     parser.add_argument(
         "--scenario",
@@ -179,6 +180,7 @@ def parse_args() -> argparse.Namespace:
         default=[],
         help="Additional Cargo feature to enable when building lash-perf.",
     )
+    add_build_report_arg(parser)
     return parser.parse_args()
 
 
@@ -193,30 +195,10 @@ def default_out(root: Path) -> Path:
 
 def resolve_binary(args: argparse.Namespace, root: Path) -> Path:
     if args.binary:
-        return args.binary
-    profile = "release" if args.release else "debug"
-    return cargo_target_dir(root) / profile / "lash-perf"
-
-
-def cargo_target_dir(root: Path) -> Path:
-    value = os.environ.get("CARGO_TARGET_DIR")
-    if value:
-        path = Path(value)
-        return path if path.is_absolute() else root / path
-    return root / "target"
-
-
-def maybe_build(args: argparse.Namespace, root: Path) -> None:
-    if not args.build:
-        return
-    cmd = ["cargo", "build", "-q", "-p", "lash-perf"]
-    features = list(args.cargo_feature)
-    if features:
-        cmd.extend(["--features", ",".join(features)])
-    if args.release:
-        cmd.append("--release")
-    print(f"Building lash-perf binary: {' '.join(cmd)}", file=sys.stderr)
-    subprocess.run(cmd, cwd=root, check=True)
+        return args.binary.resolve()
+    label = runtime_label(args.cargo_feature)
+    return artifacts(root, [label], build=args.build, report=args.build_report,
+                     optimized=args.release, symbolized=args.cpu_profile or label != runtime_label([]))[label]
 
 
 def file_sha256(path: Path) -> str | None:
@@ -517,7 +499,6 @@ def main() -> int:
     else:
         stacks = sorted(set(args.stack_bytes or DEFAULT_STACKS) | set(stack_budgets.values()))
 
-    maybe_build(args, root)
     if not binary.exists():
         raise SystemExit(f"error: binary not found: {binary}")
 

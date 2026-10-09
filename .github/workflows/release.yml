@@ -153,10 +153,9 @@ jobs:
 
   validate-release-ref:
     name: Validate release ref
+    environment: build-cache
     runs-on: ubuntu-24.04
-    # Cold-cache mode: a release cut after a Cargo.lock bump misses the
-    # linux-release cache and rebuilds the workspace in release profile
-    # (~11m on this runner class) before profiling.
+    # Build optimized profiling instruments on the existing Kiln pool.
     timeout-minutes: 60
     needs: prepare-release
 
@@ -226,22 +225,53 @@ jobs:
       - name: Validate locked workspace metadata
         run: cargo metadata --format-version 1 --locked >/dev/null
 
+      - name: Configure shared build cache
+        uses: ./.github/actions/buck2-shared-cache
+        env:
+          CACHE_ENDPOINT: ${{ secrets.CACHE_ENDPOINT }}
+          CACHE_INSTANCE: ${{ secrets.CACHE_INSTANCE }}
+          KILN_EXECUTOR_RUNTIME: ${{ secrets.KILN_EXECUTOR_RUNTIME }}
+          CACHE_CA: ${{ secrets.CACHE_CA }}
+          CACHE_CERT: ${{ secrets.CACHE_CERT }}
+          CACHE_KEY: ${{ secrets.CACHE_KEY }}
+
+      - name: Build performance instruments through Kiln
+        run: |
+          set -euo pipefail
+          kiln() { scripts/hermetic-build.sh "$@"; }
+          kiln sync
+          mkdir -p .benchmarks/perf-guard
+          kiln build --config=optimized --materializations=final \
+            --build-report .benchmarks/perf-guard/build-report.json \
+            //crates/lash-perf:lash-perf__bin \
+            //crates/lashlang:perf__example //crates/lashlang:profile__example \
+            //crates/lashlang:function_perf__example \
+            //crates/lash-vm-worker:lash-vm-worker__bin
+          worker="$(python3 tools/buck2/outputs.py \
+            --report .benchmarks/perf-guard/build-report.json \
+            --label //crates/lash-vm-worker:lash-vm-worker__bin --single)"
+          echo "LASH_VM_WORKER=${worker}" >> "$GITHUB_ENV"
+
       # Two steps, not two commands in one step: a failure in the runtime
       # profile would otherwise abort before the lashlang profile ran at all,
       # so a red release could only ever report one of the two guards. Kept in
       # step with .github/workflows/perf.yml, which runs the same pair.
       - name: Run full runtime performance checks
         run: |
-          python3 scripts/profile_runtime.py --profile full --release --scenario all --enforce-budgets --out .benchmarks/perf-guard/runtime.json
+          python3 scripts/profile_runtime.py --profile full --release --scenario all --enforce-budgets --out .benchmarks/perf-guard/runtime.json --no-build --build-report .benchmarks/perf-guard/build-report.json
 
       - name: Run full lashlang performance checks
         if: '!cancelled()'
         run: |
-          python3 scripts/profile_lashlang.py --iterations 2500 --profile-iterations 2500 --enforce-budgets --out .benchmarks/perf-guard/lashlang.json
+          python3 scripts/profile_lashlang.py --iterations 2500 --profile-iterations 2500 --enforce-budgets --out .benchmarks/perf-guard/lashlang.json --no-build --build-report .benchmarks/perf-guard/build-report.json
 
       - name: Check TypeScript string loop scaling
         if: '!cancelled()'
-        run: target/release/lash-perf string-scaling --out .benchmarks/perf-guard/string-scaling.json
+        run: |
+          binary="$(python3 tools/buck2/outputs.py \
+            --report .benchmarks/perf-guard/build-report.json \
+            --label //crates/lash-perf:lash-perf__bin --single)"
+          "$binary" string-scaling --out .benchmarks/perf-guard/string-scaling.json
 
       - name: Publish performance summaries
         if: '!cancelled()'
@@ -263,17 +293,21 @@ jobs:
           path: .benchmarks/perf-guard/*
           if-no-files-found: warn
 
+      - name: Remove shared build credentials
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/build-cache"
+
   # The send-to-completion latency gate (FIG-3843): `send()` → `outcome()`
   # measured end to end; the same-process fast
   # fixture fails the release when added overhead reaches p50 >= 50 ms or
   # p99 >= 250 ms. Every other case is measured and reported in the uploaded
   # JSON. `just latency-gate` reproduces the run locally.
+
   latency-gate:
     name: Send-to-completion latency gate
+    environment: build-cache
     runs-on: ubuntu-24.04
-    # The gate builds the harness in the release profile (restore-only against
-    # the linux-release cache, as the perf guard does) and then runs every
-    # latency case.
+    # Build the harness on the existing Kiln pool, then run every latency case.
     timeout-minutes: 120
     needs: prepare-release
 
@@ -322,10 +356,25 @@ jobs:
         with:
           tool: just
 
+      - name: Configure shared build cache
+        uses: ./.github/actions/buck2-shared-cache
+        env:
+          CACHE_ENDPOINT: ${{ secrets.CACHE_ENDPOINT }}
+          CACHE_INSTANCE: ${{ secrets.CACHE_INSTANCE }}
+          KILN_EXECUTOR_RUNTIME: ${{ secrets.KILN_EXECUTOR_RUNTIME }}
+          CACHE_CA: ${{ secrets.CACHE_CA }}
+          CACHE_CERT: ${{ secrets.CACHE_CERT }}
+          CACHE_KEY: ${{ secrets.CACHE_KEY }}
+
       - name: Run the send-to-completion latency gate
         env:
           LASH_LATENCY_ARTIFACT_DIR: target/functional-e2e-artifacts/latency-gate
-        run: just latency-gate
+        run: |
+          set -euo pipefail
+          kiln() { scripts/hermetic-build.sh "$@"; }
+          export -f kiln
+          kiln sync
+          just latency-gate
 
       - name: Upload latency-gate artifacts
         if: always()
@@ -334,6 +383,10 @@ jobs:
           name: release-latency-gate-${{ needs.prepare-release.outputs.release_tag }}-attempt-${{ github.run_attempt }}
           path: target/functional-e2e-artifacts/latency-gate
           if-no-files-found: warn
+
+      - name: Remove shared build credentials
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/build-cache"
 
   # Lash 1.0 supports PostgreSQL 17 and 18 (FIG-5209). CI runs 18 alone, so
   # the release runs the PostgreSQL legs on both majors: the store's unit,

@@ -13,6 +13,7 @@ declare_clippy_configurations()
 constraint_setting(name = "profile")
 constraint_value(name = "profile_judged", constraint_setting = ":profile")
 constraint_value(name = "profile_optimized", constraint_setting = ":profile")
+constraint_value(name = "profile_profiling", constraint_setting = ":profile")
 constraint_value(name = "profile_host", constraint_setting = ":profile")
 
 platform(
@@ -30,6 +31,16 @@ platform(
         "prelude//os/constraints:linux",
         "prelude//cpu/constraints:x86_64",
         ":profile_optimized",
+    ],
+)
+
+# CPU sampling: optimized code, symbolized stacks, unchanged pool requests.
+platform(
+    name = "profiling",
+    constraint_values = [
+        "prelude//os/constraints:linux",
+        "prelude//cpu/constraints:x86_64",
+        ":profile_profiling",
     ],
 )
 

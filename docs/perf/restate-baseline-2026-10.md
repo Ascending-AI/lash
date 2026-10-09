@@ -23,7 +23,8 @@ These are observations; the prospect's performance hypotheses remain hypotheses.
   `stats_alloc` allocator. Use this same profile for the substrate comparison.
   An optimized release comparison needs a separate optimized baseline.
 - Restate: pinned `restate-server 1.7.12`, commit `577e032`, from the existing
-  `scripts/ci/restate_suite.py serve --leg live` launcher used by `just latency-gate`.
+  then-current Restate launcher. That launcher is retired; `just latency-gate`
+  now measures lash's own durable engine.
   One node/partition, loopback TCP, 256 MB RocksDB budget, ordinary live-leg
   invocation timing. No forced-replay leg.
 - PostgreSQL: Docker `postgres:16-alpine`, **16.15**, immutable image digest
@@ -129,52 +130,17 @@ Concurrent sessions, each with five rounds of three parallel tools:
 
 ## Commands and retained evidence
 
-Build and materialize the two binaries through Kiln:
+This is a historical Restate measurement, not a recipe for the current
+engine. Its runtime launcher and report scripts were retired with Restate.
+The committed [ledger](restate-baseline-2026-10.json) retains commands,
+machine versions and completed samples; those commands require the historical
+source revision. Use [current instruments](current-instruments.md) for new
+receipts over lash's own durable engine, and label comparisons by engine,
+source revision and build profile.
 
-```sh
-cd /workspace/kiln/lash/forks/fig-5168
-. ./env.sh
-kiln sync
-kiln build //crates/lash-perf:lash-perf__bin \
-  //crates/lash-vm-worker:lash-vm-worker__bin --materializations final \
-  --build-report .kiln/FIG-5168/build-report.json
-baseline_binary="$(python3 tools/buck2/outputs.py \
-  --report .kiln/FIG-5168/build-report.json \
-  --label //crates/lash-perf:lash-perf__bin --single)"
-baseline_worker="$(python3 tools/buck2/outputs.py \
-  --report .kiln/FIG-5168/build-report.json \
-  --label //crates/lash-vm-worker:lash-vm-worker__bin --single)"
-```
-
-The actual measurement invocations, in order, were:
-
-```sh
-# A: 53 completed batches: 1/5/20 rounds and resumes; concurrency 1/10.
-# At execution this launcher's PostgreSQL default was 100 connections.
-# Retained directory renamed from live to turns-and-resume afterward.
-kiln gate lash fig-5168 -- python3 scripts/restate-baseline.py \
-  --binary "$baseline_binary" --out-dir .kiln/FIG-5168/live \
-  --samples 10 --wait-seconds 30
-
-# B: six completed 100-session batches; larger runtime/server pools.
-# Retained directory renamed to concurrent-100-first-six afterward.
-kiln gate lash fig-5168 -- python3 scripts/restate-baseline.py \
-  --binary "$baseline_binary" --out-dir .kiln/FIG-5168/remaining \
-  --samples 10 --wait-seconds 30 --cases concurrent-100,parked-process-0
-
-# C: four remaining 100-session batches, with paginated admin queries.
-# Retained directory renamed to concurrent-100-last-four afterward.
-kiln gate lash fig-5168 -- env LASH_VM_WORKER="$baseline_worker" \
-  python3 scripts/restate-baseline.py --binary "$baseline_binary" \
-  --out-dir .kiln/FIG-5168/remaining --samples 4 --wait-seconds 30 \
-  --cases concurrent-100,parked-process-0
-
-# D: process-only measurement with the RLM fixture's proper XML channel fence.
-kiln gate lash fig-5168 -- env LASH_VM_WORKER="$baseline_worker" \
-  python3 scripts/restate-baseline.py --binary "$baseline_binary" \
-  --out-dir .kiln/FIG-5168/parked-process --samples 1 --wait-seconds 30 \
-  --cases parked-process-0
-```
+The retained run sequence was A (53 batches of rounds/resumes and concurrency
+1/10), B (six 100-session batches), C (four more 100-session batches), and
+D (the process-only case with the corrected XML channel fence).
 
 A ended while opening 100 live sessions because the original 32-connection
 fixture pool timed out. B retained six answered batches before an unpaginated
@@ -187,37 +153,10 @@ Earlier setup attempts and their logs remain under `.kiln/FIG-5168/attempt-*`;
 their numbers are excluded. Counters, outcome checks and percentile definitions
 were identical for the retained successful batches.
 
-To repeat the completed shapes with the final harness and the same PostgreSQL
-connection settings:
-
-```sh
-kiln gate lash fig-5168 -- env LASH_VM_WORKER="$baseline_worker" \
-  python3 scripts/restate-baseline.py --binary "$baseline_binary" \
-  --out-dir .kiln/FIG-5168/repeat-a --samples 10 --wait-seconds 30 \
-  --postgres-max-connections 100 \
-  --cases rounds-1,resume-1,rounds-5,resume-5,rounds-20,resume-20,concurrent-1,concurrent-10
-kiln gate lash fig-5168 -- env LASH_VM_WORKER="$baseline_worker" \
-  python3 scripts/restate-baseline.py --binary "$baseline_binary" \
-  --out-dir .kiln/FIG-5168/repeat-b --samples 10 --wait-seconds 30 \
-  --cases concurrent-100,parked-process-0
-```
-
-The launcher pins the same PostgreSQL image and existing Restate version. It
-creates private services under `KILN_GATE_ID`, retains machine/command records,
-server logs and all completed samples, then stops the services. Database URLs
-and credentials are absent from the committed ledger.
-
-Archive and reproduce the tables:
-
-```sh
-python3 scripts/restate-baseline-report.py --inputs \
-  .kiln/FIG-5168/turns-and-resume .kiln/FIG-5168/concurrent-100-first-six \
-  .kiln/FIG-5168/concurrent-100-last-four .kiln/FIG-5168/parked-process \
-  --out docs/perf/restate-baseline-2026-10.json
-python3 scripts/restate-baseline-report.py \
-  --ledger docs/perf/restate-baseline-2026-10.json
-kiln clippy
-```
+The historical launcher used private PostgreSQL and Restate services, and
+stopped them after retaining the completed samples. Database URLs and
+credentials are absent from the committed ledger. There is no current Restate
+reproduction entrypoint.
 
 The committed ledger preserves every completed turn's timings, each batch's
 write counts, journal bounds, suspension observations, commands and machine

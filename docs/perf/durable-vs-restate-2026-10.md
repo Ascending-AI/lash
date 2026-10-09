@@ -411,15 +411,18 @@ settings).
 
 Everything ran from `/workspace/kiln/lash/forks/fig-5188` after `. ./env.sh`.
 The evidence lives in that fork's `.kiln/FIG-5188/`. `F` is `$PWD/.kiln/FIG-5188/final/sqlite`
-and `B` is `.kiln/FIG-5188/bin/durable_substrate`.
+and `B` is the materialized executable resolved from the build report.
+Run build outputs in place; keep receipts and logs, rather than binary copies,
+in the evidence directory. These measurements remain historical; see
+[current instruments](current-instruments.md) for functional smoke recipes.
 
 ```sh
 kiln sync
 python3 tools/buck2/bootstrap_native_tools.py
 kiln build //crates/lash-perf:durable-substrate__bin --materializations final \
   --build-report .kiln/FIG-5188/build-report.json
-cp "$(python3 tools/buck2/outputs.py --report .kiln/FIG-5188/build-report.json \
-  --label //crates/lash-perf:durable-substrate__bin --single)" "$B"
+B="$(python3 tools/buck2/outputs.py --report .kiln/FIG-5188/build-report.json \
+  --label //crates/lash-perf:durable-substrate__bin --single)"
 
 # SQLite file, one node (kiln run builds the same binary)
 kiln run //crates/lash-perf:durable-substrate__bin -- --store sqlite --sqlite-dir "$F/db-a" \
@@ -481,11 +484,10 @@ this run's; every other record is L12b's. Evidence, the per-phase timing
 probe included, is in that fork's `.kiln/FIG-5206/`.
 
 ```sh
-B=.kiln/FIG-5206/bin/durable_substrate
 kiln build //crates/lash-perf:durable-substrate__bin --materializations final \
   --build-report .kiln/FIG-5206/build-report.json
-cp "$(python3 tools/buck2/outputs.py --report .kiln/FIG-5206/build-report.json \
-  --label //crates/lash-perf:durable-substrate__bin --single)" "$B"
+B="$(python3 tools/buck2/outputs.py --report .kiln/FIG-5206/build-report.json \
+  --label //crates/lash-perf:durable-substrate__bin --single)"
 $B --store sqlite --sqlite-dir "$PWD/.kiln/FIG-5206/h2/sqlite/db-c" --case prior-0 --case prior-10 \
   --case prior-100 --case prior-300 --samples 5 --out "$PWD/.kiln/FIG-5206/h2/sqlite/sqlite.jsonl"
 kiln gate lash fig-5206 -- python3 crates/lash-perf/src/bin/durable_substrate/bench.py --binary "$B" \
@@ -508,8 +510,8 @@ included, is in that fork's `.kiln/FIG-5207/h2/`.
 ```sh
 kiln build //crates/lash-perf:durable-substrate__bin --materializations final \
   --build-report .kiln/FIG-5207/build-report.json
-cp "$(python3 tools/buck2/outputs.py --report .kiln/FIG-5207/build-report.json \
-  --label //crates/lash-perf:durable-substrate__bin --single)" "$B"
+B="$(python3 tools/buck2/outputs.py --report .kiln/FIG-5207/build-report.json \
+  --label //crates/lash-perf:durable-substrate__bin --single)"
 # B0 is the same build on a checkout of a6cbd94a65; D=$PWD/.kiln/FIG-5207/h2
 "$B0" --store sqlite --sqlite-dir "$D/sqlite-base/db-c" --case prior-0 --case prior-10 \
   --case prior-100 --case prior-300 --samples 5 --out "$D/sqlite-base/sqlite.jsonl"

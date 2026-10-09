@@ -46,6 +46,7 @@ run_stack_budget() {
 )
 
 python3 scripts/profile_runtime_stack.py \
+  --binary "$target_dir/debug/lash-perf" \
   --no-build \
   --enforce-budgets \
   --budget-only \

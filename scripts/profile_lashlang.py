@@ -9,6 +9,7 @@ import os
 import subprocess
 import sys
 from datetime import datetime, timezone
+from perf_artifacts import add_build_report_arg, artifacts
 from pathlib import Path
 from typing import Any
 
@@ -86,6 +87,7 @@ def parse_args() -> argparse.Namespace:
             "LASH_STACK_BUDGET_KB, or 2 MiB."
         ),
     )
+    add_build_report_arg(parser)
     return parser.parse_args()
 
 
@@ -208,40 +210,6 @@ def resolve_profile_scenarios(values: list[str], known: list[str]) -> list[str]:
         if value not in resolved:
             resolved.append(value)
     return resolved
-
-
-def maybe_build(root: Path, debug: bool, build: bool) -> None:
-    if not build:
-        return
-    cmd = [
-        "cargo",
-        "build",
-        "-q",
-        "-p",
-        "lash-internal-lashlang",
-        "--example",
-        "perf",
-        "--example",
-        "profile",
-        "--example",
-        "function_perf",
-    ]
-    if not debug:
-        cmd.append("--release")
-    print(f"Building Lashlang profiling examples: {' '.join(cmd)}", file=sys.stderr)
-    subprocess.run(cmd, cwd=root, check=True)
-
-
-def example_path(root: Path, debug: bool, name: str) -> Path:
-    return cargo_target_dir(root) / ("debug" if debug else "release") / "examples" / name
-
-
-def cargo_target_dir(root: Path) -> Path:
-    value = os.environ.get("CARGO_TARGET_DIR")
-    if value:
-        path = Path(value)
-        return path if path.is_absolute() else root / path
-    return root / "target"
 
 
 def run_command(root: Path, cmd: list[str]) -> str:
@@ -554,11 +522,14 @@ def main() -> int:
         else default_stack_budget_bytes()
     )
 
-    maybe_build(root, args.debug, args.build)
+    names = ["perf", "profile", "function_perf"]
+    labels = [f"//crates/lashlang:{name}__example" for name in names]
+    binaries = artifacts(root, labels, build=args.build, report=args.build_report,
+                         optimized=not args.debug, symbolized=args.cpu_profile)
     apply_stack_budget(stack_budget_bytes)
-    perf_bin = example_path(root, args.debug, "perf")
-    profile_bin = example_path(root, args.debug, "profile")
-    function_perf_bin = example_path(root, args.debug, "function_perf")
+    perf_bin = binaries[labels[0]]
+    profile_bin = binaries[labels[1]]
+    function_perf_bin = binaries[labels[2]]
 
     scenario_binary = perf_bin if perf_bin.exists() else profile_bin
     if not scenario_binary.exists():

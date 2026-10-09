@@ -24,6 +24,14 @@ _OPTIMIZED_FLAGS = [
     "-Cembed-bitcode=no",
 ]
 
+_PROFILING_FLAGS = [
+    "-Copt-level=3",
+    "-Cdebuginfo=line-tables-only",
+    "-Cstrip=none",
+    "-Cforce-frame-pointers=yes",
+    "-Cembed-bitcode=no",
+]
+
 def _cargo_env(package_name, crate_name, manifest_dir, version, extra = {}):
     result = {
         "CARGO_CRATE_NAME": crate_name,
@@ -42,11 +50,13 @@ def _rustc_flags(package_name, declared_features, extra = []):
     profile = select({
         "//tools/buck2:profile_host": _OPTIMIZED_FLAGS,
         "//tools/buck2:profile_optimized": _OPTIMIZED_FLAGS,
+        "//tools/buck2:profile_profiling": _PROFILING_FLAGS,
         "DEFAULT": [],
     })
     if package_name in FIRST_PARTY_OPT_LEVELS:
         profile += select({
             "//tools/buck2:profile_host": [],
+            "//tools/buck2:profile_profiling": [],
             "DEFAULT": ["-Copt-level={}".format(FIRST_PARTY_OPT_LEVELS[package_name])],
         })
     judged = select({
@@ -99,6 +109,7 @@ def _resource_attrs(exec_properties):
         key: select({
             "//tools/buck2:profile_host": optimized[key],
             "//tools/buck2:profile_optimized": optimized[key],
+            "//tools/buck2:profile_profiling": optimized[key],
             "DEFAULT": value,
         })
         for key, value in dev.items()

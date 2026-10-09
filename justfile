@@ -94,7 +94,7 @@ workbench-continue-as-budget-gate:
 # samples, every other case (stream, tool, failure, busy, controlled
 # real-provider, cross-worker, poll, grace) measured and reported. The report
 # and the raw sample ledger land under the artifact directory. The harness
-# builds in the release profile — the same build the release's perf guard
+# builds in the optimized Kiln configuration — the same build the release's perf guard
 # measures — so the budget binds optimized code, not a debug binary.
 #
 # Arguments are forwarded to `lash-perf latency`, so one case can be run
@@ -123,8 +123,10 @@ latency-gate *args:
   mkdir -p "$artifacts"
   log="$artifacts/latency-gate.log"
 
-  cargo build --release --locked --package lash-perf --bin lash-perf
-  binary="${CARGO_TARGET_DIR:-{{repo}}/target}/release/lash-perf"
+  kiln build --config=optimized //crates/lash-perf:lash-perf__bin \
+    --materializations final --build-report "$artifacts/build-report.json"
+  binary="$(python3 "{{repo}}/tools/buck2/outputs.py" \
+    --report "$artifacts/build-report.json" --label //crates/lash-perf:lash-perf__bin --single)"
 
   set +e
   timeout --kill-after=30 5400 \

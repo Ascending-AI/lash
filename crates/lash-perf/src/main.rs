@@ -159,6 +159,13 @@ enum Command {
         profile: Option<String>,
     },
 
+    /// Serve the child node used by the remote latency cases.
+    #[command(hide = true)]
+    LatencyWorker {
+        #[arg(long)]
+        store_dir: std::path::PathBuf,
+    },
+
     /// Run the send-to-completion latency gate (FIG-3843) on lash's durable
     /// engine over SQLite store sets under `--store-dir`.
     Latency {
@@ -237,6 +244,13 @@ fn main() -> anyhow::Result<()> {
         Some(Command::DurationTrend { history, profile }) => {
             // Pure history reading: no runtime, no measurement, no exit code.
             return lash_perf::runtime_perf::run_duration_trend_cli(history, profile.as_deref());
+        }
+        Some(Command::LatencyWorker { store_dir }) => {
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .thread_stack_size(tokio_thread_stack_bytes(&args))
+                .build()?;
+            return runtime.block_on(lash_perf::latency::run_worker(store_dir));
         }
         Some(Command::Latency {
             out,

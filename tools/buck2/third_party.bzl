@@ -18,6 +18,14 @@ _OPTIMIZED_FLAGS = [
     "-Cembed-bitcode=no",
 ]
 
+_PROFILING_FLAGS = [
+    "-Copt-level=3",
+    "-Cdebuginfo=line-tables-only",
+    "-Cstrip=none",
+    "-Cforce-frame-pointers=yes",
+    "-Cembed-bitcode=no",
+]
+
 def _resource_kwargs(kwargs):
     result = dict(kwargs)
     result["kiln_action_cpu_count"] = result.get("kiln_action_cpu_count", _DEFAULT_CPU)
@@ -31,6 +39,7 @@ def _profile_kwargs(kwargs):
     flags = select({
         "//tools/buck2:profile_host": _OPTIMIZED_FLAGS,
         "//tools/buck2:profile_optimized": _OPTIMIZED_FLAGS,
+        "//tools/buck2:profile_profiling": _PROFILING_FLAGS,
         "DEFAULT": [],
     }) + list(result.get("rustc_flags", []))
     opt_level = THIRD_PARTY_OPT_LEVELS.get(package_name, THIRD_PARTY_OPT_LEVELS.get("*"))
@@ -38,6 +47,7 @@ def _profile_kwargs(kwargs):
         flags += select({
             "//tools/buck2:profile_host": [],
             "//tools/buck2:profile_optimized": [],
+            "//tools/buck2:profile_profiling": [],
             "DEFAULT": ["-Copt-level={}".format(opt_level)],
         })
     flags += select({

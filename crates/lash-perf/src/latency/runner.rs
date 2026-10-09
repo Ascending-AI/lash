@@ -16,9 +16,9 @@
 //! * `applied` — the input's durable binding names the run that took it.
 //! * `settled` — the run's terminal evidence is readable.
 //!
-//! The follower tail (`settled→complete`) is what live replay, the settled
-//! mailbox, the shift-attach wake and the 25 ms→1 s poll each contribute
-//! to; the `poll`/`grace` cases isolate those contributions.
+//! The follower tail (`settled→complete`) includes live observation, the
+//! persisted terminal wait and the 25 ms→1 s follow poll; `poll`/`grace`
+//! isolate the current remote polling paths.
 
 use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 use std::collections::BTreeMap;
@@ -32,10 +32,10 @@ use serde::Serialize;
 use lash_sansio::SessionId;
 use lash_sansio::sync::MutexExt;
 
+use super::FollowerMode;
 use super::provider::{
     HoldRegistry, LaneHold, LatencyProviderKind, ProviderTiming, latency_provider,
 };
-use super::work_engine::AwaitShiftMode;
 use crate::perf_support::memory::process_memory_sample;
 use crate::perf_support::metrics::percentile_sorted;
 use crate::perf_support::scheduler::process_cpu_ms;
@@ -76,7 +76,7 @@ pub(crate) struct CaseSpec {
     pub(crate) name: &'static str,
     pub(crate) topology: Topology,
     pub(crate) provider: LatencyProviderKind,
-    pub(crate) await_shift: AwaitShiftMode,
+    pub(crate) follower: FollowerMode,
     pub(crate) samples: usize,
     pub(crate) lanes: usize,
     /// Queue each measured input behind a held sibling run.
@@ -254,6 +254,7 @@ impl LaneSession {
 struct CaseTopology {
     core: lash::LashCore,
     observer: lash::LashCore,
+    worker: Option<tokio::process::Child>,
 }
 
 /// Run one case to completion and collect every sample.
@@ -290,14 +291,23 @@ pub(crate) async fn run_case(
                 &compat_server,
             )?;
             let observer = build_observer(&stores_dir).await?;
-            CaseTopology { core, observer }
+            CaseTopology {
+                core,
+                observer,
+                worker: None,
+            }
         }
-        // A cross-worker case's child serves the node the host only sends
-        // to; no host serves a node until L3's facade wiring (FIG-5172).
-        Topology::CrossWorker => anyhow::bail!(
-            "latency case `{}` runs cross-worker, and no worker serves a durable node until L3's facade wiring (FIG-5172)",
-            spec.name
-        ),
+        Topology::CrossWorker => {
+            let stores_dir = case_dir.join("worker");
+            let worker = start_worker(&stores_dir).await?;
+            let core = build_observer_with_mode(&stores_dir, spec.follower).await?;
+            let observer = build_observer(&stores_dir).await?;
+            CaseTopology {
+                core,
+                observer,
+                worker: Some(worker),
+            }
+        }
     };
 
     let started = Instant::now();
@@ -326,6 +336,19 @@ pub(crate) async fn run_case(
     samples.sort_by_key(|sample| (sample.lane, sample.index));
     let wall = started.elapsed();
     let report = CaseReport::assemble(spec, &samples, errors, wall);
+    topology.core.shutdown().await?;
+    topology.observer.shutdown().await?;
+    if let Some(mut worker) = topology.worker {
+        // EOF requests a clean node shutdown; the timeout still kills and reaps
+        // a child that cannot stop. kill_on_drop covers earlier error exits.
+        drop(worker.stdin.take());
+        match tokio::time::timeout(Duration::from_secs(10), worker.wait()).await {
+            Ok(status) => anyhow::ensure!(status?.success(), "latency worker failed"),
+            Err(_) => {
+                worker.kill().await?;
+            }
+        }
+    }
     Ok((report, samples))
 }
 
@@ -362,6 +385,8 @@ fn build_core(
         )),
     )));
     lash::LashCore::standard_builder(backend)
+        .serve_sessions(spec.topology == Topology::SameProcess && spec.name != "observer")
+        .observer_pacing(spec.follower.pacing()?)
         .serve_test_llm_profile(provider, latency_llm_profile_spec()?)
         .plugins(plugins)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
@@ -378,6 +403,13 @@ fn build_core(
 /// durable pollers read through its connections (WAL readers beside the
 /// writer) so their cadence never serializes on the shift's own connections.
 async fn build_observer(stores_dir: &Path) -> Result<lash::LashCore> {
+    build_observer_with_mode(stores_dir, FollowerMode::Standard).await
+}
+
+async fn build_observer_with_mode(
+    stores_dir: &Path,
+    follower: FollowerMode,
+) -> Result<lash::LashCore> {
     let stores = lash::sqlite::SqliteStoreSet::open(
         stores_dir.join("lash.db"),
         lash::sqlite::SqliteSynchronous::Normal,
@@ -389,7 +421,7 @@ async fn build_observer(stores_dir: &Path) -> Result<lash::LashCore> {
         name: "observer",
         topology: Topology::SameProcess,
         provider: LatencyProviderKind::Text,
-        await_shift: AwaitShiftMode::Real,
+        follower,
         samples: 0,
         lanes: 0,
         busy: false,
@@ -815,7 +847,7 @@ pub(crate) struct CaseReport {
     pub(crate) name: &'static str,
     pub(crate) topology: Topology,
     pub(crate) provider: LatencyProviderKind,
-    pub(crate) await_shift: AwaitShiftMode,
+    pub(crate) follower: FollowerMode,
     pub(crate) busy: bool,
     pub(crate) samples: usize,
     pub(crate) lanes: usize,
@@ -845,7 +877,7 @@ impl CaseReport {
             name: spec.name,
             topology: spec.topology,
             provider: spec.provider,
-            await_shift: spec.await_shift,
+            follower: spec.follower,
             busy: spec.busy,
             samples: samples.len(),
             lanes: spec.lanes,
@@ -943,6 +975,65 @@ pub(crate) fn build_report(
             violations,
         },
     }
+}
+
+async fn start_worker(stores_dir: &Path) -> Result<tokio::process::Child> {
+    use tokio::io::{AsyncBufReadExt, BufReader};
+    let mut child = tokio::process::Command::new(std::env::current_exe()?)
+        .arg("latency-worker")
+        .arg("--store-dir")
+        .arg(stores_dir)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::inherit())
+        .kill_on_drop(true)
+        .spawn()
+        .context("launch latency worker")?;
+    let stdout = child.stdout.take().context("worker stdout")?;
+    let mut lines = BufReader::new(stdout).lines();
+    let ready = tokio::time::timeout(Duration::from_secs(30), lines.next_line())
+        .await
+        .context("latency worker startup timed out")??;
+    anyhow::ensure!(
+        ready.as_deref() == Some("latency worker ready"),
+        "latency worker did not become ready: {ready:?}"
+    );
+    Ok(child)
+}
+
+pub(super) async fn run_worker(stores_dir: &Path) -> Result<()> {
+    use std::io::Write;
+    std::fs::create_dir_all(stores_dir)?;
+    let stores = lash::sqlite::SqliteStoreSet::open(
+        stores_dir.join("lash.db"),
+        lash::sqlite::SqliteSynchronous::Normal,
+    )
+    .await?;
+    let spec = CaseSpec {
+        name: "worker",
+        topology: Topology::SameProcess,
+        provider: LatencyProviderKind::Text,
+        follower: FollowerMode::Standard,
+        samples: 0,
+        lanes: 0,
+        busy: false,
+    };
+    let core = build_core(
+        durable_backend(stores)?,
+        &spec,
+        Arc::new(ProviderTiming::default()),
+        None,
+        &None,
+    )?;
+    println!("latency worker ready");
+    std::io::stdout().flush()?;
+    tokio::task::spawn_blocking(|| {
+        let mut line = String::new();
+        std::io::stdin().read_line(&mut line)
+    })
+    .await??;
+    core.shutdown().await?;
+    Ok(())
 }
 
 #[cfg(test)]
