@@ -35,6 +35,29 @@ members have separate profile directories named by scenario, stack size or VM
 population beside the aggregate receipt; capture receipts name the workload
 receipt. VM scenario enumeration is not sampled.
 
+## Direct `perf record`
+
+The opt-in `//tools/buck2:profiling` target platform compiles first-party and
+third-party runtime code at opt-level 3 with line tables, retained symbols and
+frame pointers. It uses the existing optimized compile budgets and all existing
+pool properties; normal and optimized configurations retain their behavior.
+
+```sh
+kiln build //crates/lash-perf:lash-perf__bin \
+  --target-platforms //tools/buck2:profiling -c kiln.rust_profile=optimized \
+  --materializations final --build-report .kiln/profiles/cpu-build.json
+B="$(python3 tools/buck2/outputs.py --report .kiln/profiles/cpu-build.json \
+  --label //crates/lash-perf:lash-perf__bin --single)"
+perf record -g --call-graph fp -o .kiln/profiles/perf.data -- "$B" \
+  --runtime-perf-scenario standard --runtime-perf-runs 1 \
+  --runtime-perf-warmups 0 --runtime-perf-turns 1 --runtime-perf-smoke
+perf report --stdio -i .kiln/profiles/perf.data
+```
+
+Sampling requires host perf permissions and belongs on a quiet host. Building
+and running a symbolized executable is functional proof; no CPU optimization
+claim follows from a smoke receipt.
+
 ## Off-CPU capture
 
 ```sh

@@ -134,7 +134,7 @@ This is a historical Restate measurement, not a recipe for the current
 engine. Its runtime launcher and report scripts were retired with Restate.
 The committed [ledger](restate-baseline-2026-10.json) retains commands,
 machine versions and completed samples; those commands require the historical
-source revision. Use [current instruments](current-instruments.md) for new
+source revision. Use [current instruments](README.md) for new
 receipts over lash's own durable engine, and label comparisons by engine,
 source revision and build profile.
 

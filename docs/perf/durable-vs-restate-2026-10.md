@@ -414,7 +414,7 @@ The evidence lives in that fork's `.kiln/FIG-5188/`. `F` is `$PWD/.kiln/FIG-5188
 and `B` is the materialized executable resolved from the build report.
 Run build outputs in place; keep receipts and logs, rather than binary copies,
 in the evidence directory. These measurements remain historical; see
-[current instruments](current-instruments.md) for functional smoke recipes.
+[current instruments](README.md) for functional smoke recipes.
 
 ```sh
 kiln sync
