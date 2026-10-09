@@ -5,7 +5,7 @@
 use super::*;
 
 use crate::support::TurnInput;
-use lash_core::llm::types::LlmOutputPart;
+use lash_core::llm::types::{LlmOutputPart, LlmTerminalReason};
 use lash_core::testing::runtime_helpers::{EchoTool, MockCall, mock_provider};
 use lash_trace::{TelemetryContent, TraceRecord, TraceSink, TraceSinkError};
 use std::sync::Mutex as StdMutex;
@@ -92,6 +92,8 @@ async fn tool_calling_turn(
     let path = dir.path().join("trace.jsonl");
     let lines = Arc::new(Lines::default());
     let projected = Arc::new(Projected::default());
+    // Report the terminals the provider observed: an Unknown terminal seals
+    // an interrupted attempt even when the response carries output.
     let provider = mock_provider(vec![
         MockCall {
             stream_events: Vec::new(),
@@ -102,12 +104,16 @@ async fn tool_calling_turn(
                     input_json: format!(r#"{{"value":"{ARGUMENT}"}}"#),
                     replay: None,
                 }],
+                terminal_reason: LlmTerminalReason::ToolUse,
                 ..LlmResponse::default()
             }),
         },
         MockCall {
             stream_events: Vec::new(),
-            response: Ok(text_response(RESPONSE)),
+            response: Ok(LlmResponse {
+                terminal_reason: LlmTerminalReason::Stop,
+                ..text_response(RESPONSE)
+            }),
         },
     ])
     .into_handle();
@@ -126,6 +132,7 @@ async fn tool_calling_turn(
             .trace_level(lash_trace::TraceLevel::Extended),
     )
     .build(crate::testing::runtime_lease_owner())?;
+    // output() waits for the durable settled outcome before trace shutdown.
     let turn = core
         .session(crate::SessionId::parse(session).expect("nonblank host identity"))
         .created()
@@ -239,14 +246,6 @@ async fn telemetry_content_policy_governs_every_built_in_telemetry_path() -> Res
         assert!(record["event"]["raw_sha256"].is_string(), "{record}");
         assert!(record["event"].get("raw_json").is_none(), "{record}");
     }
-    let attempts = of_type(&entries, "llm_attempt_completed");
-    assert_eq!(attempts.len(), 2, "{entries:?}");
-    for record in attempts {
-        assert_eq!(record["attempt"]["ordinal"], 1);
-        assert!(record["attempt"]["outcome"].is_string(), "{record}");
-        assert_eq!(record["observation"]["provider"], "mock");
-    }
-
     let captured = tool_calling_turn("content-captured", |builder| {
         builder.telemetry_content(TelemetryContent::Captured)
     })
@@ -280,5 +279,15 @@ async fn telemetry_content_policy_governs_every_built_in_telemetry_path() -> Res
             .collect::<Vec<_>>(),
         "the policy changes what records carry, not which records exist"
     );
+    for telemetry in [&omitted, &captured] {
+        let entries = telemetry.records();
+        let attempts = of_type(&entries, "llm_attempt_completed");
+        assert_eq!(attempts.len(), 2, "{entries:?}");
+        for record in attempts {
+            assert_eq!(record["attempt"]["ordinal"], 1);
+            assert_eq!(record["attempt"]["outcome"], "completed", "{record}");
+            assert_eq!(record["observation"]["provider"], "mock");
+        }
+    }
     Ok(())
 }
