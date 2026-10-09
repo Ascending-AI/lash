@@ -1,5 +1,6 @@
 use super::*;
 use crate::session_sql::session_sql;
+use sqlx::Executor;
 
 #[async_trait::async_trait]
 impl StoreMaintenance for PostgresStore {
@@ -100,8 +101,11 @@ impl PostgresStore {
         // respect to every committer: a commit racing GC either lands fully
         // before the root read or blocks until GC releases. This is the fenced
         // transactional discipline the store uses on its other write paths.
-        sqlx::query("LOCK TABLE lash_blobs IN EXCLUSIVE MODE")
-            .execute(crate::observed_sql::executor(&mut **tx))
+        // Preserve simple-query execution through observation. Preparing this
+        // utility statement caches the query ID that pg_stat_statements clears
+        // on its first execution, hiding subsequent locks from the GC law.
+        crate::observed_sql::executor(&mut **tx)
+            .execute("LOCK TABLE lash_blobs IN EXCLUSIVE MODE")
             .await
             .map_err(store_sqlx_error)?;
         // Roots: every live session's checkpoint manifest, across ALL sessions.

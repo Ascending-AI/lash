@@ -1193,12 +1193,22 @@ async fn postgres_gc_sweep_statement_count_is_dead_set_invariant_when_configured
         .expect("seed dead blobs");
         reset_gc_statement_stats(&storage).await;
 
-        let report = store.gc_unreachable().await.expect("gc sweep");
+        let (report, receipt) = lash_core_execution::facade_support::sql::collect(
+            "gc-sweep-pin",
+            "postgres",
+            store.gc_unreachable(),
+        )
+        .await;
+        let report = report.expect("gc sweep");
         let statements = postgres_statement_calls_by_name(storage.pool()).await;
         assert_eq!(
             statements,
             expected_gc_statements(true),
             "leg {leg}: gc round trips changed with {dead_count} dead blobs",
+        );
+        assert_eq!(
+            receipt.shapes["lock table lash_blobs in exclusive mode"].statements, 1,
+            "leg {leg}: observation records the unprepared lock without changing its execution",
         );
         assert_eq!(
             report.root_count, 1,
