@@ -233,9 +233,13 @@ fn retry_once_provider() -> ProviderHandle {
             let attempts = Arc::clone(&attempts);
             async move {
                 if attempts.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
-                    return Err(LlmTransportError::new("retry me").with_retry_verdict(
-                        lash_core::llm::transport::TransportRetryVerdict::RetryableTransient,
-                    ));
+                    return Err(LlmTransportError::new("retry me")
+                        .with_kind(lash_core::ProviderFailureKind::Http)
+                        .with_code(lash_core::FailureCode::provider("server_overloaded"))
+                        .with_raw("provider overload detail")
+                        .with_retry_verdict(
+                            lash_core::llm::transport::TransportRetryVerdict::RetryableTransient,
+                        ));
                 }
                 Ok(LlmResponse {
                     parts: vec![LlmOutputPart::Text {

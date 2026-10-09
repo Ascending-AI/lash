@@ -5,7 +5,6 @@
 //! delivery lag without changing transcript content. Pending deltas therefore
 //! coalesce losslessly by correlation; they are never committed state.
 
-use crate::RetryProgress;
 use crate::llm::types::{StreamBlockEvent, StreamBlockKind};
 use std::sync::Arc;
 
@@ -1218,21 +1217,8 @@ impl RuntimeTurnDriver<'_> {
                     }
                 })?;
             }
-            LlmStreamEvent::RetryStatus {
-                wait_seconds,
-                attempt,
-                max_attempts,
-                reason,
-            } => {
-                forwarder.send_semantic_session_event(SessionStreamEvent::RetryStatus(
-                    RetryProgress {
-                        wait_seconds,
-                        attempt,
-                        max_attempts,
-                        reason,
-                        envelope: None,
-                    },
-                ));
+            LlmStreamEvent::RetryStatus(progress) => {
+                forwarder.send_semantic_session_event(SessionStreamEvent::RetryStatus(progress));
             }
         }
         Ok(())

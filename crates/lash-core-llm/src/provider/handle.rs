@@ -1,6 +1,7 @@
 use super::support::*;
 use futures_util::FutureExt as _;
 use lash_sansio::llm::attachment_delivery::Delivery;
+use lash_sansio::{ErrorEnvelope, RetryProgress};
 use lash_trace::EmissionPermit;
 use lash_trace::telemetry::metrics::TelemetryMetrics;
 
@@ -963,12 +964,24 @@ fn announce_retry(
         if resets_stream(class) {
             events.send(crate::llm::types::LlmStreamEvent::AttemptReset);
         }
-        events.send(crate::llm::types::LlmStreamEvent::RetryStatus {
-            wait_seconds: delay.as_secs(),
-            attempt: (attempt + 1) as usize,
-            max_attempts: attempts as usize,
-            reason: failure.message.clone(),
-        });
+        events.send(crate::llm::types::LlmStreamEvent::RetryStatus(
+            RetryProgress {
+                wait_seconds: delay.as_secs(),
+                attempt: (attempt + 1) as usize,
+                max_attempts: attempts as usize,
+                reason: failure.message.clone(),
+                envelope: Some(ErrorEnvelope {
+                    kind: crate::TurnFailureKind::LlmProvider,
+                    code: failure.code.clone(),
+                    terminal_reason: Some(failure.terminal_reason),
+                    user_message: failure.message.clone(),
+                    raw: failure.raw.as_deref().cloned(),
+                    retryable: Some(failure.is_retryable()),
+                    provider_failure_kind: (failure.kind != ProviderFailureKind::Unknown)
+                        .then_some(failure.kind),
+                }),
+            },
+        ));
     }
 }
 

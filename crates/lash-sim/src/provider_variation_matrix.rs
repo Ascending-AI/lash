@@ -1362,7 +1362,7 @@ fn assert_retry_stream_reduction(
             })
             | LlmStreamEvent::Part(_)
             | LlmStreamEvent::Usage(_)
-            | LlmStreamEvent::RetryStatus { .. } => {}
+            | LlmStreamEvent::RetryStatus(_) => {}
         }
     }
     assert_eq!(accumulated_text, completion.full_text());

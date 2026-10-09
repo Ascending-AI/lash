@@ -1390,12 +1390,8 @@ pub enum LlmStreamEvent {
     /// is live. The runtime retains the latest fields so a protocol abort can
     /// journal what was known before preemption.
     Evidence(LlmStreamEvidence),
-    RetryStatus {
-        wait_seconds: u64,
-        attempt: usize,
-        max_attempts: usize,
-        reason: String,
-    },
+    /// The retry progress and failure reported unchanged to both host lanes.
+    RetryStatus(crate::session_model::RetryProgress),
 }
 
 #[derive(Clone, Debug, Default)]

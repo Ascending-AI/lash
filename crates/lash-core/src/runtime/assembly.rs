@@ -685,7 +685,7 @@ pub(super) fn fold_llm_stream_event(
         }
         LlmStreamEvent::Usage(streamed) => *usage = streamed.clone(),
         LlmStreamEvent::Evidence(_) => {}
-        LlmStreamEvent::RetryStatus { .. } => {}
+        LlmStreamEvent::RetryStatus(_) => {}
     }
 }
 

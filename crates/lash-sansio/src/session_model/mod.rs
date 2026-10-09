@@ -433,9 +433,9 @@ pub struct ReportedFailure {
     pub envelope: Option<ErrorEnvelope>,
 }
 
-/// A retry that is about to wait: the single payload both host lanes carry
-/// for it (`SessionStreamEvent::RetryStatus` and the turn activity's
-/// `RetryStatus`).
+/// A retry that is about to wait: the single payload the provider stream and
+/// both host lanes carry for it (`LlmStreamEvent::RetryStatus`,
+/// `SessionStreamEvent::RetryStatus` and the turn activity's `RetryStatus`).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RetryProgress {
     pub wait_seconds: u64,

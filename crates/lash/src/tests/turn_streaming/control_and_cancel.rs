@@ -68,7 +68,7 @@ async fn retry_status_streams_as_semantic_turn_event() -> Result<()> {
         attempt,
         max_attempts,
         reason,
-        ..
+        envelope,
     }) = retry.event
     else {
         unreachable!();
@@ -77,6 +77,25 @@ async fn retry_status_streams_as_semantic_turn_event() -> Result<()> {
     assert_eq!(attempt, 1);
     assert_eq!(max_attempts, 2);
     assert!(reason.contains("retry me"));
+    // FIG-5581: provider retry progress retains the failure being retried
+    // across the provider, session-stream and turn-activity boundary.
+    let failure = envelope.expect("provider retry carries its typed failure");
+    assert_eq!(failure.kind, lash_core::TurnFailureKind::LlmProvider);
+    assert_eq!(
+        failure.code,
+        Some(lash_core::FailureCode::provider("server_overloaded"))
+    );
+    assert_eq!(
+        failure.terminal_reason,
+        Some(lash_core::LlmTerminalReason::ProviderError)
+    );
+    assert_eq!(failure.user_message, reason);
+    assert_eq!(failure.raw.as_deref(), Some("provider overload detail"));
+    assert_eq!(failure.retryable, Some(true));
+    assert_eq!(
+        failure.provider_failure_kind,
+        Some(lash_core::ProviderFailureKind::Http)
+    );
     Ok(())
 }
 
