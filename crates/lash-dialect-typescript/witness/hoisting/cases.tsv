@@ -1,0 +1,31 @@
+# family	source
+call_arguments	m.f(m.a(1), m.b(2));
+callee_before_arguments	m.callee(() => 0)(m.a(1), m.b(2));
+receiver_key_arguments	m.obj(o)[m.key('id')](m.a(1));
+binary_operands	m.a(1) + m.b(2) * m.c(3);
+comparison_operands	m.a(1) < m.b(2) === m.c(true);
+in_operands	m.a('k') in m.b(o);
+unary_operand	-m.a(1) + +m.b(2);
+member_assignment	m.obj(o)[m.key('k')] = m.val(1);
+compound_member_assignment	m.obj(o)[m.key('n')] += m.val(1);
+logical_member_assignment	m.obj(o)[m.key('missing')] ??= m.val(1);
+member_update	m.obj(o)[m.key('n')]++;
+variable_assignment_reads_before_call	let x = 1; x = x + m.a(1);
+array_literal_with_spread	[m.a(1), ...m.b([2]), m.c(3)];
+object_literal	({ [m.k1('x')]: m.v1(1), y: m.v2(2), ...m.s({}) });
+template_literal	`${m.a(1)}-${m.b(2)}`;
+conditional	m.t(true) ? m.a(1) : m.b(2);
+logical_and_or	m.a(0) || m.b(1) && m.c(2);
+nullish	m.a(null) ?? m.b(1);
+optional_chain	m.obj(o)?.[m.key('id')]?.(m.arg(1));
+optional_chain_short_circuit	m.obj(null)?.[m.key('id')](m.arg(1));
+call_with_spread	m.f(...m.a([1]), m.b(2));
+object_pattern_defaults	const { x = m.a(1), y = m.b(2) } = m.src({});
+array_pattern_defaults	const [p = m.a(1), q = m.b(2)] = m.src([]);
+assignment_pattern_targets	[m.t1(o).a, m.t2(o).b] = m.src([1, 2]);
+default_parameters	function g(p = m.a(1), q = m.b(2)) { return m.body(p + q); } g();
+switch_cases	switch (m.d(2)) { case m.a(1): break; case m.b(2): break; case m.c(3): break; }
+delete_operands	delete m.obj(o)[m.key('gone')];
+declaration_list	const u = m.a(1), v = m.b(2), w = m.c(u + v);
+return_operands	function h() { return m.f(m.a(1), m.b(2)); } h();
+throw_operand	try { throw m.f(m.a(1)); } catch (e) { m.caught(e); }

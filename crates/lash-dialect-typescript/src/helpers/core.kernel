@@ -1,0 +1,1078 @@
+# The TypeScript dialect's own operations (tier 2): what JavaScript means by
+# an operator, a coercion, a member access and a call, written in kernel
+# code. The lowerer emits a call to one of these wherever it does not know
+# an operand's type.
+#
+# Conventions: `undefined` is absent; every JavaScript number is a float,
+# and a function here that takes "a number" accepts an integer too; a
+# JavaScript function is a closure `fn(this, args)`; the empty tuple marks a
+# `let` or `const` that has not been initialised.
+
+use kind
+use same
+use eq
+use bool.not
+use error.new
+use num.add
+use num.sub
+use num.mul
+use num.div
+use num.rem_trunc
+use num.pow
+use num.neg
+use num.lt
+use num.le
+use num.floor
+use num.is_nan
+use num.is_finite
+use num.to_float
+use num.to_text
+use float.to_int
+use int.rem_floor
+use int.bit_and
+use int.bit_or
+use int.bit_xor
+use int.shl
+use int.shr
+use text.concat
+use text.len
+use text.slice
+use text.trim
+use text.ends_with
+use text.to_num
+use text.lt_utf16
+use text.code_points
+use list.len
+use record.get
+use record.has
+use record.keys
+use json.stringify
+use ts.exotic.to_primitive
+use ts.exotic.get
+use ts.exotic.set
+use ts.exotic.iterate
+use ts.receiver
+use ts.is_primitive
+use ts.is_nullish
+use ts.to_boolean
+use ts.number.to_string
+use ts.number.parse
+use ts.primitive_to_string
+use ts.primitive_to_number
+use ts.to_primitive
+use ts.to_string
+use ts.to_number
+use ts.to_property_key
+use ts.to_int32
+use ts.wrap_int32
+use ts.shift_count
+use ts.strict_equals
+use ts.loose_equals
+use ts.relational
+use ts.list_index
+use ts.get
+use ts.require_object_coercible
+
+# What a value is to a dispatcher: "absent", "null", "bool", "number",
+# "text", "list", "record", "closure", "error", "map", "set", "timestamp",
+# or "brand:<b>" for a record whose `brand` field is the text <b>.
+function ts.receiver(value: Any) -> Text
+kernel 1
+charge 3
+body {
+  let k = kind(value)
+  if same(k, "int") {
+    return "number"
+  }
+  if same(k, "float") {
+    return "number"
+  }
+  if same(k, "function") {
+    return "closure"
+  }
+  if same(k, "record") {
+    let brand = value.brand
+    if same(kind(brand), "text") {
+      return text.concat("brand:", brand)
+    }
+  }
+  return k
+}
+
+function ts.is_primitive(value: Any) -> Bool
+kernel 1
+charge 4
+body {
+  let k = invoke ts.receiver(value)
+  for primitive in ["absent", "null", "bool", "number", "text"] {
+    if same(k, primitive) {
+      return true
+    }
+  }
+  return false
+}
+
+function ts.is_nullish(value: Any) -> Bool
+kernel 1
+charge 2
+body {
+  if same(value, null) {
+    return true
+  }
+  return same(value, absent)
+}
+
+# Raises the ReferenceError of a `let` or `const` read before its
+# declaration ran.
+function ts.tdz(value: Any, name: Text) -> Any
+kernel 1
+errors "ReferenceError"
+charge 2
+body {
+  if same(value, ()) {
+    throw error.new("ReferenceError", text.concat("Cannot access '", text.concat(name, "' before initialization")), null)
+  }
+  return value
+}
+
+function ts.require_object_coercible(value: Any) -> Any
+kernel 1
+errors "type_error"
+charge 3
+body {
+  let nullish = invoke ts.is_nullish(value)
+  if nullish {
+    throw error.new("type_error", "Cannot destructure a value that is undefined or null", null)
+  }
+  return value
+}
+
+# ToBoolean.
+function ts.to_boolean(value: Any) -> Bool
+kernel 1
+charge 3
+body {
+  let k = kind(value)
+  if same(k, "bool") {
+    return value
+  }
+  if same(k, "absent") {
+    return false
+  }
+  if same(k, "null") {
+    return false
+  }
+  if same(k, "text") {
+    return bool.not(same(value, ""))
+  }
+  if same(k, "int") {
+    return bool.not(eq(value, 0))
+  }
+  if same(k, "float") {
+    if num.is_nan(value) {
+      return false
+    }
+    return bool.not(eq(value, 0))
+  }
+  return true
+}
+
+# `!value`.
+function ts.not(value: Any) -> Bool
+kernel 1
+charge 4
+body {
+  let truthy = invoke ts.to_boolean(value)
+  return bool.not(truthy)
+}
+
+function ts.typeof(value: Any) -> Text
+kernel 1
+charge 4
+body {
+  let k = invoke ts.receiver(value)
+  if same(k, "absent") {
+    return "undefined"
+  }
+  if same(k, "bool") {
+    return "boolean"
+  }
+  if same(k, "number") {
+    return "number"
+  }
+  if same(k, "text") {
+    return "string"
+  }
+  if same(k, "closure") {
+    return "function"
+  }
+  return "object"
+}
+
+# Number::toString for radix 10. The spellings between 1e16 and 1e21 and
+# below 1e-4 are the kernel's until the Number built-in replaces this.
+function ts.number.to_string(value: Number) -> Text
+kernel 1
+charge sum(4, size(result))
+body {
+  if num.is_nan(value) {
+    return "NaN"
+  }
+  if eq(value, inf) {
+    return "Infinity"
+  }
+  if eq(value, -inf) {
+    return "-Infinity"
+  }
+  if eq(value, 0) {
+    return "0"
+  }
+  let spelled = num.to_text(value)
+  if text.ends_with(spelled, ".0") {
+    return text.slice(spelled, 0, num.sub(text.len(spelled), 2))
+  }
+  return spelled
+}
+
+# StringToNumber, as far as the kernel's own number syntax reaches.
+function ts.number.parse(source: Text) -> Number
+kernel 1
+charge sum(4, size(source))
+body {
+  let trimmed = text.trim(source)
+  if same(trimmed, "") {
+    return 0.0
+  }
+  if same(trimmed, "Infinity") {
+    return inf
+  }
+  if same(trimmed, "+Infinity") {
+    return inf
+  }
+  if same(trimmed, "-Infinity") {
+    return -inf
+  }
+  try {
+    return num.to_float(text.to_num(trimmed))
+  } catch unparsed {
+    return nan
+  }
+}
+
+# ToString of a primitive.
+function ts.primitive_to_string(value: Any) -> Text
+kernel 1
+errors "type_error"
+charge sum(4, size(result))
+body {
+  let k = invoke ts.receiver(value)
+  if same(k, "text") {
+    return value
+  }
+  if same(k, "absent") {
+    return "undefined"
+  }
+  if same(k, "null") {
+    return "null"
+  }
+  if same(k, "bool") {
+    if value {
+      return "true"
+    }
+    return "false"
+  }
+  if same(k, "number") {
+    let spelled = invoke ts.number.to_string(value)
+    return spelled
+  }
+  throw error.new("type_error", "Cannot convert object to primitive value", null)
+}
+
+# ToNumber of a primitive.
+function ts.primitive_to_number(value: Any) -> Number
+kernel 1
+errors "type_error"
+charge sum(4, size(value))
+body {
+  let k = invoke ts.receiver(value)
+  if same(k, "number") {
+    return num.to_float(value)
+  }
+  if same(k, "absent") {
+    return nan
+  }
+  if same(k, "null") {
+    return 0.0
+  }
+  if same(k, "bool") {
+    if value {
+      return 1.0
+    }
+    return 0.0
+  }
+  if same(k, "text") {
+    let parsed = invoke ts.number.parse(value)
+    return parsed
+  }
+  throw error.new("type_error", "Cannot convert object to primitive value", null)
+}
+
+# ToPrimitive. `hint` is "default", "number" or "string". An array is its
+# elements joined by commas; a plain object runs its own `valueOf` and
+# `toString` in the hint's order and is "[object Object]" when it has
+# neither.
+function ts.to_primitive(value: Any, hint: Text) -> Any
+kernel 1
+errors "type_error"
+charge sum(4, deep(value))
+body {
+  let convert = absent
+  set convert = fn(value, hint) {
+    let k = invoke ts.receiver(value)
+    for primitive in ["absent", "null", "bool", "number", "text"] {
+      if same(k, primitive) {
+        return value
+      }
+    }
+    if same(k, "list") {
+      let joined = ""
+      let first = true
+      for item in value {
+        if first {
+          set first = false
+        } else {
+          set joined = text.concat(joined, ",")
+        }
+        let nullish = invoke ts.is_nullish(item)
+        if nullish {} else {
+          let primitive = apply convert(item, "string")
+          let piece = invoke ts.primitive_to_string(primitive)
+          set joined = text.concat(joined, piece)
+        }
+      }
+      return joined
+    }
+    if same(k, "record") {
+      let order = ["valueOf", "toString"]
+      if same(hint, "string") {
+        set order = ["toString", "valueOf"]
+      }
+      let own = false
+      for name in order {
+        let method = record.get(value, name)
+        if same(kind(method), "closure") {
+          set own = true
+          let none = []
+          let outcome = apply method(value, none)
+          let primitive = invoke ts.is_primitive(outcome)
+          if primitive {
+            return outcome
+          }
+        }
+      }
+      if own {
+        throw error.new("type_error", "Cannot convert object to primitive value", null)
+      }
+      return "[object Object]"
+    }
+    if same(k, "error") {
+      return text.concat(value.kind, text.concat(": ", value.message))
+    }
+    if same(k, "closure") {
+      throw error.new("type_error", "A function has no string or number form", null)
+    }
+    let exotic = invoke ts.exotic.to_primitive(value, hint)
+    return exotic
+  }
+  let outcome = apply convert(value, hint)
+  return outcome
+}
+
+# ToString.
+function ts.to_string(value: Any) -> Text
+kernel 1
+errors "type_error"
+charge sum(8, deep(value))
+body {
+  let primitive = invoke ts.to_primitive(value, "string")
+  let spelled = invoke ts.primitive_to_string(primitive)
+  return spelled
+}
+
+# ToNumber.
+function ts.to_number(value: Any) -> Number
+kernel 1
+errors "type_error"
+charge sum(8, deep(value))
+body {
+  let primitive = invoke ts.to_primitive(value, "number")
+  let number = invoke ts.primitive_to_number(primitive)
+  return number
+}
+
+# ToPropertyKey.
+function ts.to_property_key(key: Any) -> Text
+kernel 1
+errors "type_error"
+charge sum(8, deep(key))
+body {
+  if same(kind(key), "text") {
+    return key
+  }
+  let spelled = invoke ts.to_string(key)
+  return spelled
+}
+
+# The parts of a template literal or of any concatenation, already texts.
+function ts.join(parts: List(Text)) -> Text
+kernel 1
+charge sum(2, deep(parts))
+body {
+  let joined = ""
+  for part in parts {
+    set joined = text.concat(joined, part)
+  }
+  return joined
+}
+
+# `a + b`.
+function ts.add(left: Any, right: Any) -> Any
+kernel 1
+errors "type_error"
+charge sum(12, deep(left), deep(right))
+body {
+  let a = invoke ts.to_primitive(left, "default")
+  let b = invoke ts.to_primitive(right, "default")
+  let textual = same(kind(a), "text")
+  if textual {} else {
+    set textual = same(kind(b), "text")
+  }
+  if textual {
+    let sa = invoke ts.primitive_to_string(a)
+    let sb = invoke ts.primitive_to_string(b)
+    return text.concat(sa, sb)
+  }
+  let na = invoke ts.primitive_to_number(a)
+  let nb = invoke ts.primitive_to_number(b)
+  return num.add(na, nb)
+}
+
+function ts.sub(left: Any, right: Any) -> Number
+kernel 1
+errors "type_error"
+charge sum(12, deep(left), deep(right))
+body {
+  let a = invoke ts.to_number(left)
+  let b = invoke ts.to_number(right)
+  return num.sub(a, b)
+}
+
+function ts.mul(left: Any, right: Any) -> Number
+kernel 1
+errors "type_error"
+charge sum(12, deep(left), deep(right))
+body {
+  let a = invoke ts.to_number(left)
+  let b = invoke ts.to_number(right)
+  return num.mul(a, b)
+}
+
+function ts.div(left: Any, right: Any) -> Number
+kernel 1
+errors "type_error"
+charge sum(12, deep(left), deep(right))
+body {
+  let a = invoke ts.to_number(left)
+  let b = invoke ts.to_number(right)
+  return num.div(a, b)
+}
+
+function ts.rem(left: Any, right: Any) -> Number
+kernel 1
+errors "type_error"
+charge sum(12, deep(left), deep(right))
+body {
+  let a = invoke ts.to_number(left)
+  let b = invoke ts.to_number(right)
+  return num.rem_trunc(a, b)
+}
+
+function ts.pow(left: Any, right: Any) -> Number
+kernel 1
+errors "type_error"
+charge sum(12, deep(left), deep(right))
+body {
+  let a = invoke ts.to_number(left)
+  let b = invoke ts.to_number(right)
+  if num.is_nan(b) {
+    return nan
+  }
+  return num.pow(a, b)
+}
+
+function ts.neg(value: Any) -> Number
+kernel 1
+errors "type_error"
+charge sum(10, deep(value))
+body {
+  let number = invoke ts.to_number(value)
+  return num.neg(number)
+}
+
+# ToInt32, as an integer.
+function ts.to_int32(value: Any) -> Int
+kernel 1
+errors "type_error"
+charge sum(12, deep(value))
+body {
+  let number = invoke ts.to_number(value)
+  if num.is_finite(number) {} else {
+    return 0
+  }
+  let wrapped = int.rem_floor(float.to_int(number), 4294967296)
+  if num.le(2147483648, wrapped) {
+    return num.sub(wrapped, 4294967296)
+  }
+  return wrapped
+}
+
+# An integer reduced to the signed 32-bit range.
+function ts.wrap_int32(value: Int) -> Int
+kernel 1
+charge 3
+body {
+  let wrapped = int.rem_floor(value, 4294967296)
+  if num.le(2147483648, wrapped) {
+    return num.sub(wrapped, 4294967296)
+  }
+  return wrapped
+}
+
+# The low five bits of a shift's right operand.
+function ts.shift_count(value: Any) -> Int
+kernel 1
+errors "type_error"
+charge sum(14, deep(value))
+body {
+  let count = invoke ts.to_int32(value)
+  return int.bit_and(count, 31)
+}
+
+function ts.bit_and(left: Any, right: Any) -> Number
+kernel 1
+errors "type_error"
+charge sum(28, deep(left), deep(right))
+body {
+  let a = invoke ts.to_int32(left)
+  let b = invoke ts.to_int32(right)
+  return num.to_float(int.bit_and(a, b))
+}
+
+function ts.bit_or(left: Any, right: Any) -> Number
+kernel 1
+errors "type_error"
+charge sum(28, deep(left), deep(right))
+body {
+  let a = invoke ts.to_int32(left)
+  let b = invoke ts.to_int32(right)
+  return num.to_float(int.bit_or(a, b))
+}
+
+function ts.bit_xor(left: Any, right: Any) -> Number
+kernel 1
+errors "type_error"
+charge sum(28, deep(left), deep(right))
+body {
+  let a = invoke ts.to_int32(left)
+  let b = invoke ts.to_int32(right)
+  return num.to_float(int.bit_xor(a, b))
+}
+
+function ts.bit_not(value: Any) -> Number
+kernel 1
+errors "type_error"
+charge sum(14, deep(value))
+body {
+  let a = invoke ts.to_int32(value)
+  return num.to_float(num.sub(num.neg(a), 1))
+}
+
+function ts.shl(left: Any, right: Any) -> Number
+kernel 1
+errors "type_error"
+charge sum(32, deep(left), deep(right))
+body {
+  let a = invoke ts.to_int32(left)
+  let count = invoke ts.shift_count(right)
+  let wide = int.shl(a, count)
+  let shifted = invoke ts.wrap_int32(wide)
+  return num.to_float(shifted)
+}
+
+function ts.shr(left: Any, right: Any) -> Number
+kernel 1
+errors "type_error"
+charge sum(30, deep(left), deep(right))
+body {
+  let a = invoke ts.to_int32(left)
+  let count = invoke ts.shift_count(right)
+  return num.to_float(int.shr(a, count))
+}
+
+function ts.ushr(left: Any, right: Any) -> Number
+kernel 1
+errors "type_error"
+charge sum(30, deep(left), deep(right))
+body {
+  let a = invoke ts.to_int32(left)
+  let count = invoke ts.shift_count(right)
+  return num.to_float(int.shr(int.rem_floor(a, 4294967296), count))
+}
+
+# `a === b`. Two numbers by value; two objects when they are the same
+# object.
+function ts.strict_equals(left: Any, right: Any) -> Bool
+kernel 1
+charge 8
+body {
+  let a = invoke ts.receiver(left)
+  let b = invoke ts.receiver(right)
+  if same(a, b) {} else {
+    return false
+  }
+  if same(a, "number") {
+    return eq(left, right)
+  }
+  if same(a, "error") {
+    return eq(left, right)
+  }
+  return same(left, right)
+}
+
+function ts.strict_not_equals(left: Any, right: Any) -> Bool
+kernel 1
+charge 10
+body {
+  let equal = invoke ts.strict_equals(left, right)
+  return bool.not(equal)
+}
+
+# `a == b`.
+function ts.loose_equals(left: Any, right: Any) -> Bool
+kernel 1
+errors "type_error"
+charge sum(24, deep(left), deep(right))
+body {
+  let loose = absent
+  set loose = fn(left, right) {
+    let a = invoke ts.receiver(left)
+    let b = invoke ts.receiver(right)
+    if same(a, b) {
+      let equal = invoke ts.strict_equals(left, right)
+      return equal
+    }
+    let left_nullish = invoke ts.is_nullish(left)
+    let right_nullish = invoke ts.is_nullish(right)
+    if left_nullish {
+      return right_nullish
+    }
+    if right_nullish {
+      return false
+    }
+    if same(a, "bool") {
+      let number = invoke ts.primitive_to_number(left)
+      let equal = apply loose(number, right)
+      return equal
+    }
+    if same(b, "bool") {
+      let number = invoke ts.primitive_to_number(right)
+      let equal = apply loose(left, number)
+      return equal
+    }
+    if same(a, "number") {
+      if same(b, "text") {
+        let number = invoke ts.number.parse(right)
+        return eq(left, number)
+      }
+    }
+    if same(a, "text") {
+      if same(b, "number") {
+        let number = invoke ts.number.parse(left)
+        return eq(number, right)
+      }
+    }
+    let left_primitive = invoke ts.is_primitive(left)
+    let right_primitive = invoke ts.is_primitive(right)
+    if left_primitive {
+      if right_primitive {
+        return false
+      }
+      let primitive = invoke ts.to_primitive(right, "default")
+      let equal = apply loose(left, primitive)
+      return equal
+    }
+    if right_primitive {
+      let primitive = invoke ts.to_primitive(left, "default")
+      let equal = apply loose(primitive, right)
+      return equal
+    }
+    return false
+  }
+  let equal = apply loose(left, right)
+  return equal
+}
+
+function ts.loose_not_equals(left: Any, right: Any) -> Bool
+kernel 1
+errors "type_error"
+charge sum(26, deep(left), deep(right))
+body {
+  let equal = invoke ts.loose_equals(left, right)
+  return bool.not(equal)
+}
+
+# The operands of a relational operator, converted left first: a tuple of
+# whether both are texts and the two operands, as texts or as numbers.
+function ts.relational(left: Any, right: Any) -> Tuple(Bool, Any, Any)
+kernel 1
+errors "type_error"
+charge sum(16, deep(left), deep(right))
+body {
+  let a = invoke ts.to_primitive(left, "number")
+  let b = invoke ts.to_primitive(right, "number")
+  if same(kind(a), "text") {
+    if same(kind(b), "text") {
+      return (true, a, b)
+    }
+  }
+  let na = invoke ts.primitive_to_number(a)
+  let nb = invoke ts.primitive_to_number(b)
+  return (false, na, nb)
+}
+
+function ts.lt(left: Any, right: Any) -> Bool
+kernel 1
+errors "type_error"
+charge sum(20, deep(left), deep(right))
+body {
+  let operands = invoke ts.relational(left, right)
+  if operands[0] {
+    return text.lt_utf16(operands[1], operands[2])
+  }
+  return num.lt(operands[1], operands[2])
+}
+
+function ts.gt(left: Any, right: Any) -> Bool
+kernel 1
+errors "type_error"
+charge sum(20, deep(left), deep(right))
+body {
+  let operands = invoke ts.relational(left, right)
+  if operands[0] {
+    return text.lt_utf16(operands[2], operands[1])
+  }
+  return num.lt(operands[2], operands[1])
+}
+
+function ts.le(left: Any, right: Any) -> Bool
+kernel 1
+errors "type_error"
+charge sum(20, deep(left), deep(right))
+body {
+  let operands = invoke ts.relational(left, right)
+  if operands[0] {
+    return bool.not(text.lt_utf16(operands[2], operands[1]))
+  }
+  return num.le(operands[1], operands[2])
+}
+
+function ts.ge(left: Any, right: Any) -> Bool
+kernel 1
+errors "type_error"
+charge sum(20, deep(left), deep(right))
+body {
+  let operands = invoke ts.relational(left, right)
+  if operands[0] {
+    return bool.not(text.lt_utf16(operands[1], operands[2]))
+  }
+  return num.le(operands[2], operands[1])
+}
+
+# A list with at least `count` elements: `items` itself when it is long
+# enough, else a copy filled out with absent. A parameter list and an array
+# pattern read their positions from it.
+function ts.pad(items: List(Any), count: Number) -> List(Any)
+kernel 1
+charge sum(2, size(items), magnitude(count))
+body {
+  if num.le(count, list.len(items)) {
+    return items
+  }
+  let padded = []
+  for item in items {
+    set padded[list.len(padded)] = item
+  }
+  while num.lt(list.len(padded), count) {
+    set padded[list.len(padded)] = absent
+  }
+  return padded
+}
+
+# The elements of `items` from `start` on, as a new list: a rest parameter
+# or a rest element.
+function ts.rest(items: List(Any), start: Number) -> List(Any)
+kernel 1
+charge sum(2, size(items))
+body {
+  let rest = []
+  let position = start
+  while num.lt(position, list.len(items)) {
+    set rest[list.len(rest)] = items[position]
+    set position = num.add(position, 1)
+  }
+  return rest
+}
+
+# The lists of `parts` end to end, as a new list: an array literal or an
+# argument list with a spread in it.
+function ts.spread(parts: List(List(Any))) -> List(Any)
+kernel 1
+charge sum(2, deep(parts))
+body {
+  let flat = []
+  for part in parts {
+    for item in part {
+      set flat[list.len(flat)] = item
+    }
+  }
+  return flat
+}
+
+# What `for...of`, a spread and an array pattern take from a value, as a
+# list. An array is itself, so a loop over it reads it live.
+function ts.iterate(target: Any) -> List(Any)
+kernel 1
+errors "type_error"
+charge sum(4, size(target))
+body {
+  let k = kind(target)
+  if same(k, "list") {
+    return target
+  }
+  if same(k, "text") {
+    return text.code_points(target)
+  }
+  let items = invoke ts.exotic.iterate(target)
+  return items
+}
+
+# The position a property key names in a list of `length` elements, or -1
+# when it names none.
+function ts.list_index(key: Any, length: Number) -> Number
+kernel 1
+charge sum(6, size(key))
+body {
+  let position = key
+  if same(kind(key), "text") {
+    set position = invoke ts.number.parse(key)
+  }
+  let k = kind(position)
+  let number = same(k, "float")
+  if number {} else {
+    set number = same(k, "int")
+  }
+  if number {} else {
+    return -1.0
+  }
+  if eq(num.floor(position), position) {} else {
+    return -1.0
+  }
+  if num.lt(position, 0) {
+    return -1.0
+  }
+  if num.lt(position, length) {
+    return num.to_float(position)
+  }
+  return -1.0
+}
+
+# `target[key]` and `target.key` where no built-in row answers.
+function ts.get(target: Any, key: Any) -> Any
+kernel 1
+errors "type_error"
+charge sum(12, deep(key))
+body {
+  let k = invoke ts.receiver(target)
+  if same(k, "record") {
+    let name = invoke ts.to_property_key(key)
+    return target[name]
+  }
+  if same(k, "list") {
+    let length = list.len(target)
+    let position = invoke ts.list_index(key, length)
+    if num.lt(position, 0) {
+      let other = invoke ts.exotic.get(target, key)
+      return other
+    }
+    return target[position]
+  }
+  let nullish = invoke ts.is_nullish(target)
+  if nullish {
+    let name = invoke ts.to_property_key(key)
+    throw error.new("type_error", text.concat("Cannot read properties of undefined or null (reading '", text.concat(name, "')")), null)
+  }
+  let other = invoke ts.exotic.get(target, key)
+  return other
+}
+
+# `target[key] = value`.
+function ts.set(target: Any, key: Any, value: Any) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(12, deep(key))
+body {
+  let k = invoke ts.receiver(target)
+  if same(k, "record") {
+    let name = invoke ts.to_property_key(key)
+    set target[name] = value
+    return value
+  }
+  if same(k, "list") {
+    let bound = num.add(list.len(target), 1)
+    let position = invoke ts.list_index(key, bound)
+    if num.lt(position, 0) {
+      let written = invoke ts.exotic.set(target, key, value)
+      return written
+    }
+    set target[position] = value
+    return value
+  }
+  let nullish = invoke ts.is_nullish(target)
+  if nullish {
+    let name = invoke ts.to_property_key(key)
+    throw error.new("type_error", text.concat("Cannot set properties of undefined or null (setting '", text.concat(name, "')")), null)
+  }
+  let written = invoke ts.exotic.set(target, key, value)
+  return written
+}
+
+# `delete target[key]`.
+function ts.delete(target: Any, key: Any) -> Bool
+kernel 1
+errors "type_error"
+charge sum(12, deep(key))
+body {
+  let k = invoke ts.receiver(target)
+  if same(k, "record") {
+    let name = invoke ts.to_property_key(key)
+    remove target[name]
+    return true
+  }
+  let nullish = invoke ts.is_nullish(target)
+  if nullish {
+    throw error.new("type_error", "Cannot convert undefined or null to object", null)
+  }
+  throw error.new("type_error", "Only a property of a plain object can be deleted", null)
+}
+
+# `key in target`: an own-property test.
+function ts.has(target: Any, key: Any) -> Bool
+kernel 1
+errors "type_error"
+charge sum(12, deep(key))
+body {
+  let k = invoke ts.receiver(target)
+  if same(k, "record") {
+    let name = invoke ts.to_property_key(key)
+    return record.has(target, name)
+  }
+  if same(k, "list") {
+    let length = list.len(target)
+    let position = invoke ts.list_index(key, length)
+    return num.le(0, position)
+  }
+  throw error.new("type_error", "Cannot use 'in' to search in a value that is not an object", null)
+}
+
+# `target.key(args)` where no built-in row answers: the object's own
+# function, called with the object as `this`.
+function ts.call_member(target: Any, key: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error"
+charge sum(16, deep(key))
+body {
+  let method = invoke ts.get(target, key)
+  let k = invoke ts.receiver(method)
+  if same(k, "closure") {
+    let outcome = apply method(target, args)
+    return outcome
+  }
+  let name = invoke ts.to_property_key(key)
+  throw error.new("type_error", text.concat(name, " is not a function"), null)
+}
+
+# The keys `for...in` visits, as a new list.
+function ts.keys(target: Any) -> List(Text)
+kernel 1
+charge sum(4, size(target))
+body {
+  let k = kind(target)
+  if same(k, "record") {
+    return record.keys(target)
+  }
+  let keys = []
+  if same(k, "list") {
+    let position = 0.0
+    while num.lt(position, list.len(target)) {
+      let key = invoke ts.number.to_string(position)
+      set keys[list.len(keys)] = key
+      set position = num.add(position, 1)
+    }
+  }
+  return keys
+}
+
+# Copies the own properties of `source` onto `target`: an object spread.
+function ts.assign(target: Any, source: Any) -> Any
+kernel 1
+charge sum(4, size(source))
+body {
+  let k = kind(source)
+  if same(k, "record") {
+    for name in record.keys(source) {
+      set target[name] = source[name]
+    }
+  }
+  if same(k, "list") {
+    let position = 0.0
+    for item in source {
+      let key = invoke ts.number.to_string(position)
+      set target[key] = item
+      set position = num.add(position, 1)
+    }
+  }
+  return target
+}
+
+# The own properties of `source` whose names are not in `taken`, as a new
+# object: an object pattern's rest.
+function ts.object_rest(source: Any, taken: List(Text)) -> Any
+kernel 1
+errors "type_error"
+charge sum(4, size(source), size(taken))
+body {
+  do invoke ts.require_object_coercible(source)
+  let skip = set{}
+  for name in taken {
+    set skip[name] = true
+  }
+  let rest = {}
+  if same(kind(source), "record") {
+    for name in record.keys(source) {
+      if skip[name] {} else {
+        set rest[name] = source[name]
+      }
+    }
+  }
+  return rest
+}

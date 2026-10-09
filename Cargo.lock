@@ -1976,6 +1976,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "lash-dialect-typescript"
+version = "0.0.0-dev"
+dependencies = [
+ "lash-kernel-dialect",
+ "lash-kernel-doc",
+ "lash-kernel-vm",
+ "ryu-js",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "swc_common",
+ "swc_ecma_ast",
+ "swc_ecma_parser",
+ "thiserror",
+]
+
+[[package]]
 name = "lash-e2e"
 version = "0.0.0-dev"
 dependencies = [
@@ -2770,6 +2787,14 @@ dependencies = [
 
 [[package]]
 name = "lash-kernel-check"
+version = "0.0.0-dev"
+dependencies = [
+ "lash-kernel-doc",
+ "thiserror",
+]
+
+[[package]]
+name = "lash-kernel-dialect"
 version = "0.0.0-dev"
 dependencies = [
  "lash-kernel-doc",

@@ -1,0 +1,31 @@
+# family	order Node evaluates the marked operands in
+call_arguments	a b f
+callee_before_arguments	callee a b
+receiver_key_arguments	obj key a
+binary_operands	a b c
+comparison_operands	a b c
+in_operands	a b
+unary_operand	a b
+member_assignment	obj key val
+compound_member_assignment	obj key val
+logical_member_assignment	obj key val
+member_update	obj key
+variable_assignment_reads_before_call	a
+array_literal_with_spread	a b c
+object_literal	k1 v1 v2 s
+template_literal	a b
+conditional	t a
+logical_and_or	a b c
+nullish	a b
+optional_chain	obj key arg
+optional_chain_short_circuit	obj
+call_with_spread	a b f
+object_pattern_defaults	src a b
+array_pattern_defaults	src a b
+assignment_pattern_targets	src t1 t2
+default_parameters	a b body
+switch_cases	d a b
+delete_operands	obj key
+declaration_list	a b c
+return_operands	a b f
+throw_operand	a f caught

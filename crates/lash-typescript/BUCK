@@ -348,6 +348,18 @@ filegroup(
     visibility = ["PUBLIC"],
 )
 
+filegroup(
+    name = "test262_corpus",
+    srcs = glob([
+        "tests/test262/harness-shim/**",
+        "tests/test262/outcomes/**",
+        "tests/test262/sample.tsv",
+        "tests/test262/test/**",
+    ]),
+    copy = False,
+    visibility = ["PUBLIC"],
+)
+
 load("//tools/buck2:test_batch.bzl", "lash_batch_test")
 
 lash_batch_test(

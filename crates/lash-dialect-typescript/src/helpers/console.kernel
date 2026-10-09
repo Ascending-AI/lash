@@ -1,0 +1,37 @@
+use same
+use text.concat
+use json.stringify
+use ts.receiver
+use ts.to_string
+
+# `console.log` and its siblings: one print of the arguments joined by a
+# space, a plain object or an array as compact JSON and anything else as its
+# ToString.
+function ts.console.log(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error"
+charge sum(4, deep(args))
+body {
+  let line = ""
+  let first = true
+  for item in args {
+    if first {
+      set first = false
+    } else {
+      set line = text.concat(line, " ")
+    }
+    let k = invoke ts.receiver(item)
+    let structured = same(k, "record")
+    if structured {} else {
+      set structured = same(k, "list")
+    }
+    if structured {
+      set line = text.concat(line, json.stringify(item))
+    } else {
+      let piece = invoke ts.to_string(item)
+      set line = text.concat(line, piece)
+    }
+  }
+  print line
+  return absent
+}

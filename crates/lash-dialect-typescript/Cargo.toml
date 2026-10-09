@@ -1,0 +1,42 @@
+[package]
+name = "lash-dialect-typescript"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+rust-version.workspace = true
+description = "The TypeScript dialect of the lash kernel: a front end that lowers TypeScript to kernel documents, and the helper functions it emits calls to."
+keywords = ["lash", "kernel", "typescript", "dialect"]
+categories = ["compilers", "parser-implementations"]
+publish = false
+
+[lib]
+name = "lash_dialect_typescript"
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+lash-kernel-dialect = { workspace = true }
+lash-kernel-doc = { workspace = true }
+ryu-js = { workspace = true }
+serde_json = { workspace = true }
+swc_common = { workspace = true }
+swc_ecma_ast = { workspace = true }
+swc_ecma_parser = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+lash-kernel-vm = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_yaml = "=0.9.34"
+
+# Test262 on the kernel: the vendored selection lowered by this crate and run
+# on a kernel machine, counted by directory against main's record.
+[[test]]
+name = "test262_kernel"
+path = "tests/test262_kernel.rs"

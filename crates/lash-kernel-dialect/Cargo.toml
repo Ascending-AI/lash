@@ -1,0 +1,25 @@
+[package]
+name = "lash-kernel-dialect"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+rust-version.workspace = true
+description = "What a lash kernel dialect is: a front end, a printer, typed diagnostics and the library functions the dialect ships."
+keywords = ["lash", "kernel", "workflow", "dialect"]
+categories = ["compilers"]
+publish = false
+
+[lib]
+name = "lash_kernel_dialect"
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+lash-kernel-doc = { workspace = true }
+thiserror = { workspace = true }

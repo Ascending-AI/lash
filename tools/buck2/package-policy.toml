@@ -330,6 +330,13 @@ kinds = ["bin", "test", "example", "bench"]
 targets = ["integration_boundary"]
 data = ["//tools/buck2:target_inventory"]
 
+# Test262 on the kernel reads the corpus where it is vendored.
+[[rule]]
+packages = ["lash-dialect-typescript"]
+kinds = ["bin", "test", "example", "bench"]
+targets = ["test262_kernel"]
+data = ["//crates/lash-typescript:test262_corpus"]
+
 # These carry the relocated suites that assert over captured `tracing` events.
 # Capture installs a scoped default subscriber, so other cases in the same
 # libtest process must not emit concurrently.
@@ -575,6 +582,14 @@ session_oracle_corpus = { glob = [
     "tests/differential/sessions/expectations/**",
     "tests/differential/sessions/generated/**",
     "tests/test262/census/**",
+] }
+# The vendored Test262 selection, its harness renderings and main's outcome
+# record, which the kernel dialect's runner reads until the corpus moves.
+test262_corpus = { glob = [
+    "tests/test262/harness-shim/**",
+    "tests/test262/outcomes/**",
+    "tests/test262/sample.tsv",
+    "tests/test262/test/**",
 ] }
 
 # --- Exported files ------------------------------------------------------------

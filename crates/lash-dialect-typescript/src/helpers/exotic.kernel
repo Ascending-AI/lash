@@ -1,0 +1,41 @@
+# Where the built-in lanes say how a value that is neither a primitive, a
+# list, a plain record, an error nor a closure behaves under the language's
+# own operations: a map, a set, a timestamp, a branded record. The core
+# coercions and member operations call these; a built-in's own methods and
+# properties are rows in `builtins/`, not branches here.
+
+use error.new
+
+# ToPrimitive of an exotic value. `hint` is "default", "number" or "string".
+function ts.exotic.to_primitive(value: Any, hint: Text) -> Any
+kernel 1
+charge 1
+body {
+  return "[object Object]"
+}
+
+# A property read no row answers.
+function ts.exotic.get(target: Any, key: Any) -> Any
+kernel 1
+charge 1
+body {
+  return absent
+}
+
+# A property write.
+function ts.exotic.set(target: Any, key: Any, value: Any) -> Any
+kernel 1
+errors "type_error"
+charge 1
+body {
+  throw error.new("type_error", "Cannot assign to a property of this value", null)
+}
+
+# The elements `for...of`, spread and array destructuring take, as a list.
+function ts.exotic.iterate(target: Any) -> List(Any)
+kernel 1
+errors "type_error"
+charge 1
+body {
+  throw error.new("type_error", "value is not iterable", null)
+}
