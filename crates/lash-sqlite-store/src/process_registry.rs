@@ -1,3 +1,4 @@
+mod roster;
 use super::*;
 use lash_core_execution::ProcessQuery as _;
 use lash_sansio::ProcessId;
@@ -125,6 +126,21 @@ impl lash_core_execution::ProcessQuery for SqliteProcessRegistry {
             })
             .await
             .map_err(process_sqlite_error)?
+    }
+
+    async fn list_processes_page(
+        &self,
+        filter: &lash_core_execution::ProcessListFilter,
+        limit: std::num::NonZeroUsize,
+        continuation: Option<lash_core_execution::ProcessRosterCursor>,
+    ) -> Result<lash_core_execution::ProcessRosterRecords, lash_core_execution::PluginError> {
+        roster::page(self, filter, limit, continuation).await
+    }
+
+    async fn process_change_bounds(
+        &self,
+    ) -> Result<lash_core_execution::ProcessChangeBounds, lash_core_execution::PluginError> {
+        roster::bounds(self).await
     }
 
     async fn processes_changed_since(

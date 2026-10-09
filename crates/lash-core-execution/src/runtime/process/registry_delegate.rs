@@ -32,6 +32,23 @@ macro_rules! delegate_process_query {
                 self.$inner.list_processes(filter).await
             }
 
+            async fn list_processes_page(
+                &self,
+                filter: &$crate::ProcessListFilter,
+                limit: std::num::NonZeroUsize,
+                continuation: Option<$crate::ProcessRosterCursor>,
+            ) -> Result<$crate::ProcessRosterRecords, $crate::PluginError> {
+                self.$inner
+                    .list_processes_page(filter, limit, continuation)
+                    .await
+            }
+
+            async fn process_change_bounds(
+                &self,
+            ) -> Result<$crate::ProcessChangeBounds, $crate::PluginError> {
+                self.$inner.process_change_bounds().await
+            }
+
             async fn processes_changed_since(
                 &self,
                 cursor: $crate::ProcessChangeCursor,

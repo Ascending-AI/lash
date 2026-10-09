@@ -419,6 +419,19 @@ impl ProcessQuery for Integrator {
     ) -> Result<Vec<ProcessRecord>, PluginError> {
         unreachable!("external signature witness")
     }
+    async fn list_processes_page(
+        &self,
+        filter: &ProcessListFilter,
+        limit: NonZeroUsize,
+        continuation: Option<lash::process::ProcessRosterCursor>,
+    ) -> Result<lash::process::ProcessRosterRecords, PluginError> {
+        unreachable!("external signature witness")
+    }
+    async fn process_change_bounds(
+        &self,
+    ) -> Result<lash::process::ProcessChangeBounds, PluginError> {
+        unreachable!("external signature witness")
+    }
     async fn processes_changed_since(
         &self,
         cursor: ProcessChangeCursor,

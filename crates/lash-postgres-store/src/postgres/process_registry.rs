@@ -3,6 +3,9 @@
 //! their events. Database-clock admission and delivery decisions
 //! retain their separate clock contract.
 
+#[path = "process_registry/roster.rs"]
+mod roster;
+
 use crate::*;
 use lash_core_execution::ProcessQuery as _;
 use lash_core_execution::facade_support;
@@ -116,6 +119,21 @@ impl lash_core_execution::ProcessQuery for PostgresProcessRegistry {
             }
         }
         Ok(records)
+    }
+
+    async fn list_processes_page(
+        &self,
+        filter: &lash_core_execution::ProcessListFilter,
+        limit: std::num::NonZeroUsize,
+        continuation: Option<lash_core_execution::ProcessRosterCursor>,
+    ) -> Result<lash_core_execution::ProcessRosterRecords, PluginError> {
+        roster::page(self, filter, limit, continuation).await
+    }
+
+    async fn process_change_bounds(
+        &self,
+    ) -> Result<lash_core_execution::ProcessChangeBounds, PluginError> {
+        roster::bounds(self).await
     }
 
     async fn processes_changed_since(

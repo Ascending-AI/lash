@@ -35,6 +35,17 @@ pub const CHANGE_FEED_UPSERT_COLUMNS: &str = "change_seq, 'upsert' AS kind, reco
 crate::statements! {
     /// `processes` statements both backends issue verbatim.
     pub struct ProcessStatements @ "process" {
+        /// Inclusive bound for a fleet scan; process ids are not time ordered.
+        select_max_process_id = "SELECT MAX(process_id) FROM processes";
+
+        /// A bounded keyset of candidates. Stores apply the exact typed filter
+        /// and continue after the last candidate examined, even on empty pages.
+        list_first_roster_candidates = "SELECT record_json FROM processes
+             WHERE process_id <= ?1 ORDER BY process_id LIMIT ?2";
+        list_next_roster_candidates = "SELECT record_json FROM processes
+             WHERE process_id <= ?1 AND process_id > ?2
+             ORDER BY process_id LIMIT ?3";
+
         /// The stored record for `?1`.
         select_record_json_by_id = "SELECT record_json FROM processes WHERE process_id = ?1";
 

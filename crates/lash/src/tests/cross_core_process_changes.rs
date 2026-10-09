@@ -58,7 +58,7 @@ async fn a_commit_on_one_core_ticks_the_process_change_hub_of_another() {
     .await
     .expect("both nodes listen");
 
-    let committer = core_b.process_registry();
+    let committer = core_b.process_registry.clone();
     let process_id = committer
         .register_process(
             lash_core::ProcessRegistration::new(
@@ -88,7 +88,8 @@ async fn a_commit_on_one_core_ticks_the_process_change_hub_of_another() {
         .expect("core A hears core B's commit")
         .expect("core A's hub lives");
     let seen = core_a
-        .process_registry()
+        .process_registry
+        .clone()
         .get_process(&process_id)
         .await
         .expect("read on core A")

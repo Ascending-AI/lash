@@ -179,6 +179,7 @@ plugin_error_samples! {
         digest: crate::AttachmentId::parse("a1".repeat(32)).expect("a well-formed id"),
     },
     ProcessUnknown { .. } => PluginError::ProcessUnknown { process_id: process() },
+    ProcessRosterFilterMismatch {} => PluginError::ProcessRosterFilterMismatch {},
     ProcessChangeCursorPruned { .. } => PluginError::ProcessChangeCursorPruned {
         requested_cursor: crate::ProcessChangeCursor::initial(),
         tombstone_compaction_horizon: crate::ProcessChangeCursor::from_store_sequence(2),

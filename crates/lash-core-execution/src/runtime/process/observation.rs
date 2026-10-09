@@ -99,6 +99,17 @@ pub struct ObservedProcess {
     pub child_session_id: Option<SessionId>,
 }
 
+/// A bounded canonical roster and the fence from before its scan began.
+/// Follow every continuation, then apply global changes after `change_cursor`.
+/// If that cursor is pruned, discard the roster and start another scan.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProcessRosterPage {
+    pub processes: Vec<ObservedProcess>,
+    pub continuation: Option<super::ProcessRosterCursor>,
+    pub change_cursor: ProcessChangeCursor,
+    pub verified_through: ProcessChangeCursor,
+}
+
 /// One change of the process roster, as a host reads it: the process as it
 /// now stands, or the tombstone of one that was pruned. A page of changes
 /// converges on the latest row of each process; it is not every transition.
@@ -364,9 +375,19 @@ impl ProcessWorkObserver {
     pub async fn list(
         &self,
         filter: &ProcessListFilter,
-    ) -> Result<Vec<ObservedProcess>, PluginError> {
-        let records = self.registry.list_processes(filter).await?;
-        self.observe_records(records).await
+        limit: std::num::NonZeroUsize,
+        continuation: Option<super::ProcessRosterCursor>,
+    ) -> Result<ProcessRosterPage, PluginError> {
+        let page = self
+            .registry
+            .list_processes_page(filter, limit, continuation)
+            .await?;
+        Ok(ProcessRosterPage {
+            processes: self.observe_records(page.records).await?,
+            continuation: page.continuation,
+            change_cursor: page.change_cursor,
+            verified_through: page.verified_through,
+        })
     }
 
     /// List processes a session may address — the observer filter. A process is

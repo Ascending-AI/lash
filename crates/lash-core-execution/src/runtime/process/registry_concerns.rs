@@ -71,6 +71,22 @@ pub trait ProcessQuery: Send + Sync {
         filter: &ProcessListFilter,
     ) -> Result<Vec<ProcessRecord>, PluginError>;
 
+    /// Read at most `limit` candidates plus one lookahead (page size capped at MAX_PROCESS_ROSTER_PAGE_SIZE)
+    /// in process-id order, filtering inside the store. Capture a change fence
+    /// before the first page and keep it in every continuation. Drain global
+    /// changes after that fence to reconcile inserts, deletion and filter exit.
+    /// This is a trusted fleet query, never session authorization.
+    async fn list_processes_page(
+        &self,
+        filter: &ProcessListFilter,
+        limit: NonZeroUsize,
+        continuation: Option<super::ProcessRosterCursor>,
+    ) -> Result<super::ProcessRosterRecords, PluginError>;
+
+    /// Read the committed change fence and compaction horizon. PostgreSQL
+    /// must sequence pending committed changes before answering this read.
+    async fn process_change_bounds(&self) -> Result<super::ProcessChangeBounds, PluginError>;
+
     /// Return process records whose persisted row changed strictly after
     /// `cursor`, ordered by the backend's per-store change sequence.
     ///

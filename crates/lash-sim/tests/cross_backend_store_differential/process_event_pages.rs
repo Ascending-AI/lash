@@ -51,6 +51,20 @@ where
 async fn release_observations(
     registry: &dyn lash_core::ProcessRegistry,
 ) -> (lash_sansio::ProcessId, Vec<lash_core::ProcessEventRelease>) {
+    let bounds = registry
+        .process_change_bounds()
+        .await
+        .expect("roster change bounds");
+    let page = registry
+        .list_processes_page(
+            &lash_core::ProcessListFilter::default(),
+            std::num::NonZeroUsize::MIN,
+            None,
+        )
+        .await
+        .expect("bounded roster sweep");
+    assert!(page.records.len() <= 1);
+    assert!(page.change_cursor.store_sequence() >= bounds.current.store_sequence());
     let process_id = registry
         .register_process(lash_core::testing::held_engine_registration(
             serde_json::Value::Null,

@@ -511,7 +511,7 @@ and built from lash's primitives, each shown once:
   deliveries are all bound or failed is pruned with them once it is an hour
   old, longer than either source can fire the same occurrence again.
 - **Lifecycle cursor plus `send().id`.** The notice pass follows
-  `processes_changed_since`. When a delivered process reaches a terminal, it
+  `core.processes().changed_since`. When a delivered process reaches a terminal, it
   sends the subscribing session one short input with id
   `process-end:{process_id}`, then commits its cursor. A retried send after a
   lost acknowledgement is the same input. A send that fails is counted and

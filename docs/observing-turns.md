@@ -166,3 +166,32 @@ Workspace measurement and fault-injection tools use the hidden turn-phase
 probe. Its vocabulary is explicitly unstable. See the
 [turn-phase instrumentation contract](architecture/turn-phase-probe.md) for
 callback, registration and naming rules.
+
+## Discovering a process fleet
+
+`core.processes().list(&filter, limit, continuation)` reads a bounded page
+of canonical process states. A page carries `processes`, `continuation`,
+`change_cursor` and `verified_through`. Start with no continuation and follow
+every continuation, including when a filtered page is empty. Pages examine
+at most 256 candidates plus one lookahead, without loading the whole roster.
+The continuation belongs to its issuing store and original filter.
+
+The first page captures `change_cursor` before scanning, and every later
+page retains that fence. This is a convergent scan, rather than a snapshot
+across pages: concurrent inserts and updates can appear during enumeration.
+After scanning, drain `changed_since(change_cursor, limit)` and apply each
+whole page before retaining its `next` cursor. Even an empty change page
+reports a verified high water. `verified_through` is the page's verified
+change high water; it does not replace the pre-scan fence.
+
+Changes are global latest-row upserts or deletion tombstones. Reapply the
+roster's selection to each upsert: a row leaving the filter must be removed,
+and a deletion removes its id. These trusted fleet reads require host
+authorization; they do not grant session observer or provenance access.
+
+`ChangePage::retained_after` reports the tombstone-compaction horizon. A
+`ProcessChangeCursorPruned` refusal from changes or a scan continuation means
+discarding the roster and starting a fresh scan. Its new fence lets scanning
+restart even when deletion history before that fence is gone. Process facts
+and provisional node observations continue through each process's recovering
+observation feed; the fleet cursor is separate from its observation cursor.

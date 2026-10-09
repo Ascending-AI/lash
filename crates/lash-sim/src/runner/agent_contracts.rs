@@ -898,12 +898,17 @@ async fn wait_for_contract_durable_input_park(
 ) -> Result<(), FixedScriptRunnerError> {
     let processes = core
         .processes()
-        .list(&lash_core::ProcessListFilter {
-            status: lash_core::ProcessStatusFilter::Any,
-            ..lash_core::ProcessListFilter::default()
-        })
+        .list(
+            &lash_core::ProcessListFilter {
+                status: lash_core::ProcessStatusFilter::Any,
+                ..lash_core::ProcessListFilter::default()
+            },
+            std::num::NonZeroUsize::new(2).unwrap_or(std::num::NonZeroUsize::MIN),
+            None,
+        )
         .await
-        .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
+        .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?
+        .processes;
     let [process] = processes.as_slice() else {
         return Err(FixedScriptRunnerError::Assertion(format!(
             "the durable input contract runs one process, found {}",
@@ -1026,34 +1031,45 @@ async fn agent_contract_process_observations(
     core: &lash::LashCore,
 ) -> Result<Vec<AgentContractProcessObservation>, FixedScriptRunnerError> {
     let artifacts = lash::persistence::LashVmArtifacts::of_backend(core.backend());
-    let processes = core
-        .processes()
-        .list(&lash_core::ProcessListFilter {
-            definition_id: None,
-            status: lash_core::ProcessStatusFilter::Any,
-            ..lash_core::ProcessListFilter::default()
-        })
-        .await
-        .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-    let mut observed = Vec::with_capacity(processes.len());
-    for process in processes {
-        let process_ref = agent_contract_process_ref(&process);
-        let process_origin =
-            agent_contract_process_origin(core.backend(), &artifacts, &process).await?;
-        observed.push(AgentContractProcessObservation {
-            raw_process_id: process.process_id.clone(),
-            process_ref: process_ref.clone(),
-            observed: json!({
-                "process_ref": process_ref,
-                "kind": process.identity.kind.as_str(),
-                "label": process.identity.label,
-                "status": process.status().label(),
-                "terminal": process.terminal().is_some(),
-                "definition_present": process.identity.definition_id.is_some(),
-                "process_origin": process_origin.map(Value::from).unwrap_or(Value::Null),
-                "child_session_present": process.child_session_id.is_some(),
-            }),
-        });
+    let processes = core.processes();
+    let filter = lash_core::ProcessListFilter {
+        status: lash_core::ProcessStatusFilter::Any,
+        ..lash_core::ProcessListFilter::default()
+    };
+    let mut observed = Vec::new();
+    let mut continuation = None;
+    loop {
+        let page = processes
+            .list(
+                &filter,
+                std::num::NonZeroUsize::new(256).unwrap_or(std::num::NonZeroUsize::MIN),
+                continuation,
+            )
+            .await
+            .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
+        for process in page.processes {
+            let process_ref = agent_contract_process_ref(&process);
+            let process_origin =
+                agent_contract_process_origin(core.backend(), &artifacts, &process).await?;
+            observed.push(AgentContractProcessObservation {
+                raw_process_id: process.process_id.clone(),
+                process_ref: process_ref.clone(),
+                observed: json!({
+                    "process_ref": process_ref,
+                    "kind": process.identity.kind.as_str(),
+                    "label": process.identity.label,
+                    "status": process.status().label(),
+                    "terminal": process.terminal().is_some(),
+                    "definition_present": process.identity.definition_id.is_some(),
+                    "process_origin": process_origin.map(Value::from).unwrap_or(Value::Null),
+                    "child_session_present": process.child_session_id.is_some(),
+                }),
+            });
+        }
+        continuation = page.continuation;
+        if continuation.is_none() {
+            break;
+        }
     }
     observed.sort_by(|left, right| left.process_ref.cmp(&right.process_ref));
     Ok(observed)

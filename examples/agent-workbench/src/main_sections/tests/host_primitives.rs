@@ -217,21 +217,28 @@ async fn an_approval_resolved_after_its_body_bound_across_a_restart_completes_on
 
 /// The processes deliveries started for `session_id`'s registrations.
 async fn delivered_processes(state: &AppState, session_id: &SessionId) -> Vec<lash::ProcessId> {
-    state
-        .core
-        .processes()
-        .list(&lash::process::ProcessListFilter {
-            status: lash::process::ProcessStatusFilter::Any,
-            originator: Some(lash::process::ProcessOriginatorFilter::Host {
-                scope: Some(format!("workbench-trigger:{session_id}")),
-            }),
-            ..lash::process::ProcessListFilter::default()
-        })
-        .await
-        .expect("list the delivered processes")
-        .into_iter()
-        .map(|process| process.process_id)
-        .collect()
+    let filter = lash::process::ProcessListFilter {
+        status: lash::process::ProcessStatusFilter::Any,
+        originator: Some(lash::process::ProcessOriginatorFilter::Host {
+            scope: Some(format!("workbench-trigger:{session_id}")),
+        }),
+        ..lash::process::ProcessListFilter::default()
+    };
+    let mut continuation = None;
+    let mut processes = Vec::new();
+    loop {
+        let page = state
+            .core
+            .processes()
+            .list(&filter, std::num::NonZeroUsize::MIN, continuation)
+            .await
+            .expect("list the delivered processes");
+        processes.extend(page.processes.into_iter().map(|process| process.process_id));
+        continuation = page.continuation;
+        if continuation.is_none() {
+            return processes;
+        }
+    }
 }
 
 /// A delivery whose process started but whose bind was lost to a crash

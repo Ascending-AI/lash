@@ -613,6 +613,15 @@ define_plugin_errors! {
         => Self::ProcessUnknown { .. }
         => "process_unknown"
         => crate::ToolFailureClass::InvalidRequest;
+    /// A roster continuation was reused with a different selection.
+    #[error("process roster continuation requires its original filter")]
+    ProcessRosterFilterMismatch {}
+        => PluginError::ProcessRosterFilterMismatch {}
+        => {}
+        => Self::ProcessRosterFilterMismatch {}
+        => Self::ProcessRosterFilterMismatch {}
+        => "process_roster_filter_mismatch"
+        => crate::ToolFailureClass::InvalidRequest;
 /// A Process Change Feed cursor predates deletion history removed by
     /// Tombstone Compaction. The consumer must perform a full relist before
     /// resuming from the reported horizon.
@@ -967,6 +976,7 @@ impl PluginError {
             | Self::NotASessionRuntime { .. }
             | Self::ProcessOutputAttachmentUnavailable { .. }
             | Self::ProcessUnknown { .. }
+            | Self::ProcessRosterFilterMismatch {}
             | Self::ProcessChangeCursorPruned { .. }
             | Self::ProcessEventsReleased { .. }
             | Self::MonotonicCounterOverflow { .. }

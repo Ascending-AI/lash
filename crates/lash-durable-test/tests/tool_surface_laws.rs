@@ -1141,9 +1141,14 @@ async fn a_lost_host_start_acknowledgement_recovers_the_retained_process(tier: T
         let retained = world
             .core
             .processes()
-            .list(&filter)
+            .list(
+                &filter,
+                std::num::NonZeroUsize::new(2).expect("two detects a duplicate start"),
+                None,
+            )
             .await
-            .expect("read the committed process");
+            .expect("read the committed process")
+            .processes;
         assert_eq!(retained.len(), 1);
         let original_id = retained[0].process_id.clone();
 
@@ -1187,9 +1192,14 @@ async fn a_lost_host_start_acknowledgement_recovers_the_retained_process(tier: T
             let processes = world
                 .core
                 .processes()
-                .list(&filter)
+                .list(
+                    &filter,
+                    std::num::NonZeroUsize::new(2).expect("two detects a duplicate start"),
+                    None,
+                )
                 .await
-                .expect("read processes after both retries");
+                .expect("read processes after both retries")
+                .processes;
             assert_eq!(processes.len(), 1, "no retry creates a second process");
             assert_eq!(processes[0].process_id, original_id);
         }

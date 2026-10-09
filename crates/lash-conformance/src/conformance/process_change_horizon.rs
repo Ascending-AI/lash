@@ -71,3 +71,68 @@ pub async fn process_change_cursor_below_tombstone_compaction_horizon_is_refused
         .await
         .expect("the horizon cursor itself remains resumable");
 }
+
+/// FIG-5569: a filter can make a page empty without finishing enumeration.
+/// Keyset work stays bounded and every page retains the pre-scan change fence.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance fixture and its named contract assertions"
+)]
+pub async fn process_roster_pages_preserve_the_fence_through_empty_filtered_pages(
+    registry: Arc<dyn ProcessRegistry>,
+) {
+    for index in 0..3 {
+        registry
+            .register_process(registration(&format!("roster-{index}")))
+            .await
+            .expect("register roster");
+    }
+    let bound = std::num::NonZeroUsize::MIN;
+    let filter = crate::ProcessListFilter {
+        identity_label: Some("no-row-has-this-label".to_owned()),
+        status: crate::ProcessStatusFilter::Any,
+        ..crate::ProcessListFilter::default()
+    };
+    let first = registry
+        .list_processes_page(&filter, bound, None)
+        .await
+        .expect("filtered page");
+    let fence = first.change_cursor;
+    assert!(first.records.is_empty());
+    let cursor = first
+        .continuation
+        .expect("empty page still has candidates after it");
+    assert!(matches!(
+        registry
+            .list_processes_page(
+                &crate::ProcessListFilter::default(),
+                bound,
+                Some(cursor.clone())
+            )
+            .await,
+        Err(crate::PluginError::ProcessRosterFilterMismatch {})
+    ));
+    let mut continuation = Some(cursor);
+    let mut pages = 1;
+    while let Some(cursor) = continuation {
+        let page = registry
+            .list_processes_page(&filter, bound, Some(cursor))
+            .await
+            .expect("continue filtered page");
+        assert!(page.records.is_empty());
+        assert_eq!(page.change_cursor, fence);
+        continuation = page.continuation;
+        pages += 1;
+        assert!(
+            pages <= 3,
+            "a continuation advances past examined candidates"
+        );
+    }
+    assert_eq!(pages, 3);
+    let bounds = registry
+        .process_change_bounds()
+        .await
+        .expect("verified high water");
+    assert_eq!(bounds.current, fence);
+    assert_eq!(bounds.retained_after, crate::ProcessChangeCursor::initial());
+}

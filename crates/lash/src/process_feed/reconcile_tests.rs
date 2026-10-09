@@ -149,7 +149,7 @@ async fn a_follower_on_one_core_observes_the_terminal_another_core_commits() {
     .await
     .expect("both nodes listen");
 
-    let committer = core_b.process_registry();
+    let committer = core_b.process_registry.clone();
     let process_id = committer
         .register_process(
             lash_core::ProcessRegistration::new(

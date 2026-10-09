@@ -73,7 +73,7 @@ impl Processes {
     }
 
     fn registry(&self) -> Arc<dyn lash_core::ProcessRegistry> {
-        self.core.process_registry()
+        self.core.process_registry.clone()
     }
 
     fn make_observer(&self) -> Result<lash_core::facade_support::ProcessWorkObserver> {
@@ -415,12 +415,21 @@ impl Processes {
         Ok(lash_core::ProcessStartReceipt::of(&record, disposition))
     }
 
-    /// Lists processes matching the supplied filter.
+    /// Reads one bounded fleet page. Follow every continuation, including on
+    /// empty filtered pages, then drain global changes after `change_cursor`.
+    /// A pruned cursor requires discarding the roster and starting a new scan.
+    /// The scan is convergent, rather than a point-in-time snapshot. The host
+    /// authorizes this unscoped read and reapplies its selection to changes.
     pub async fn list(
         &self,
         filter: &lash_core::ProcessListFilter,
-    ) -> Result<Vec<lash_core::facade_support::ObservedProcess>> {
-        self.make_observer()?.list(filter).await.map_err(Into::into)
+        limit: std::num::NonZeroUsize,
+        continuation: Option<lash_core::ProcessRosterCursor>,
+    ) -> Result<lash_core::facade_support::ProcessRosterPage> {
+        self.make_observer()?
+            .list(filter, limit, continuation)
+            .await
+            .map_err(Into::into)
     }
 
     /// List processes a session may address — the **observer** filter.
@@ -472,14 +481,21 @@ impl Processes {
             lash_core::ProcessChangeCursor,
         >,
     > {
-        let (changes, next) = self
+        let bounds = self.registry().process_change_bounds().await?;
+        let (changes, mut next) = self
             .make_observer()?
-            .changed_since(after, limit.get())
+            .changed_since(
+                after,
+                limit.get().min(lash_core::MAX_PROCESS_ROSTER_PAGE_SIZE),
+            )
             .await?;
+        if changes.is_empty() && next.store_sequence() < bounds.current.store_sequence() {
+            next = bounds.current;
+        }
         Ok(crate::ChangePage {
             changes,
             next,
-            retained_after: None,
+            retained_after: Some(bounds.retained_after),
         })
     }
 
@@ -547,7 +563,8 @@ impl Processes {
     ) -> Result<lash_core::ProcessAwaitOutput> {
         let process_id = self
             .core
-            .process_registry()
+            .process_registry
+            .clone()
             .require_process_id(process_id)
             .await?;
         let process_work = Arc::clone(self.core.substrate_slot.ports().await.process.port());

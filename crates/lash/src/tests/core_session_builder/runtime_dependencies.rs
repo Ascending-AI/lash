@@ -87,7 +87,7 @@ async fn the_backend_process_registry_stamps_from_the_backend_clock() {
         .delta_coalescing(crate::DeltaCoalescing::recommended())
         .build(crate::testing::runtime_lease_owner())
         .expect("build core over a clocked memory backend");
-    let registry = core.process_registry();
+    let registry = core.process_registry.clone();
     let builder_clock_process_id = registry
         .register_process(lash_core::testing::held_engine_registration(
             serde_json::Value::Null,

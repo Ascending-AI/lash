@@ -166,6 +166,7 @@ pub struct PostgresStore {
 
 #[derive(Clone)]
 pub struct PostgresProcessRegistry {
+    catalog_id: Arc<str>,
     pool: PgPool,
     pools: Arc<host::RolePools>,
     clock: Arc<dyn lash_core_execution::Clock>,
@@ -711,6 +712,7 @@ impl PostgresStorage {
 
     pub fn process_registry(&self) -> PostgresProcessRegistry {
         PostgresProcessRegistry {
+            catalog_id: Arc::clone(&self.catalog_id),
             pool: self.pool.clone(),
             pools: Arc::clone(&self.pools),
             clock: Arc::new(lash_core_execution::facade_support::SystemClock),

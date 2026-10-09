@@ -416,6 +416,9 @@ lash_store_sql::statements! {
 
         /// How far tombstone compaction has run, under a share lock: a reader
         /// must not see the horizon move past its own cursor mid-read.
+        select_bounds_for_share = "SELECT current_seq, tombstone_compaction_horizon
+         FROM process_change_clock WHERE singleton = TRUE FOR SHARE";
+
         select_compaction_horizon_for_share = "SELECT tombstone_compaction_horizon
          FROM process_change_clock
          WHERE singleton = TRUE

@@ -100,7 +100,7 @@ pub use model::{ConsumerHold, SessionTurnOutcome};
 pub use observation::{
     ObservedProcess, ObservedProcessChange, ObservedProcessEvent, ObservedProcessEventLite,
     ObservedProcessEventPage, ObservedProcessEventReadOutcome, ObservedWorkItem,
-    ObservedWorkItemState, ProcessWorkObserver, ProcessWorkSnapshot,
+    ObservedWorkItemState, ProcessRosterPage, ProcessWorkObserver, ProcessWorkSnapshot,
 };
 pub use observer_intent::{
     SessionObserverIntentSource, reconcile_session_process_observer_intents,
@@ -108,6 +108,11 @@ pub use observer_intent::{
 pub use op_scope::ProcessOpScope;
 pub(crate) use op_scope::{LanguageCallAttribution, LanguageCallAttributions};
 pub use references::ProcessLiveReferenceView;
+mod roster;
+pub use roster::{
+    MAX_PROCESS_ROSTER_PAGE_SIZE, ProcessChangeBounds, ProcessRosterCursor, ProcessRosterRecords,
+};
+
 #[cfg(any(test, feature = "testing"))]
 pub use registry::{
     ConformanceProcessRegistry, ProcessEventLogTestSupport, ProcessRegistryTestSupport,

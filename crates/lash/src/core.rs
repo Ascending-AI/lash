@@ -605,11 +605,6 @@ impl LashCore {
         Ok(lash_core::session_delete::delete_session(&context).await?)
     }
 
-    /// The process registry of this core's backend.
-    pub fn process_registry(&self) -> Arc<dyn ProcessRegistry> {
-        Arc::clone(&self.process_registry)
-    }
-
     /// Builds the durable process-worker configuration for this core: the
     /// core's own plugin set, the one every worker of its engine binding
     /// installs. A process runs under the environment its start captured, so

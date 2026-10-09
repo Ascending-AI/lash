@@ -95,7 +95,8 @@ async fn reopened_rlm_session_and_process_runtime_run_under_recorded_budgets_and
     .await
     .expect("published environment");
     let process_id = core
-        .process_registry()
+        .process_registry
+        .clone()
         .register_process(
             lash_core::ProcessRegistration::new(
                 lash_core::testing::held_engine_input(serde_json::Value::Null),
@@ -133,7 +134,8 @@ async fn reopened_rlm_session_and_process_runtime_run_under_recorded_budgets_and
     // budget: it runs under its host config's, and under the plugin
     // configuration its environment recorded.
     let process = core
-        .process_registry()
+        .process_registry
+        .clone()
         .get_process(&process_id)
         .await
         .expect("process read")

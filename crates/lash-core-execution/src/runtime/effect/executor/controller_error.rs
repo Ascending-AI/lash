@@ -162,6 +162,7 @@ impl From<PluginError> for RuntimeEffectControllerError {
             | PluginError::ClockBeforeUnixEpoch { .. }
             | PluginError::ProcessOutputAttachmentUnavailable { .. }
             | PluginError::ProcessUnknown { .. }
+            | PluginError::ProcessRosterFilterMismatch {}
             | PluginError::ProcessChangeCursorPruned { .. }
             | PluginError::ProcessEventsReleased { .. }
             | PluginError::ProcessHandedOver { .. }

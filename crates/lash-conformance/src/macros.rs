@@ -539,6 +539,7 @@ macro_rules! process_change_horizon_tests {
     ($fixture:block) => {
         $crate::process_change_horizon_tests!(@catalogue $fixture; [
             (process_change_cursor_below_tombstone_compaction_horizon_is_refused, "process-change-horizon"),
+            (process_roster_pages_preserve_the_fence_through_empty_filtered_pages, "process-roster-fence"),
         ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
