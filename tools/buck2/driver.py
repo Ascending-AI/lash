@@ -33,6 +33,7 @@ FORK_RECOVERY = (
     '(`kiln fork lash <name>`), or pass --local'
 )
 CONFIGS = ('judged', 'optimized')
+SELF_PROFILE_CONFIG = 'rust-self-profile'
 BAZEL_CONFIGS = {'local': 'use --local', 'shared': 'use --shared (the default)'}
 # Bazel spellings lanes still use, with the control that replaces each here.
 # Buck2 and driver flags are kebab-case; any other underscore flag is Bazel's.
@@ -110,7 +111,7 @@ def arguments(argv):
     parser.add_argument('--jobs', type=int, default=32)
     parser.add_argument('--isolation-dir', default='kiln')
     parser.add_argument('--materializations', choices=['final', 'none'])
-    parser.add_argument('--config')
+    parser.add_argument('--config', help='judged, optimized, or rust-self-profile (build only)')
     parser.add_argument('--test-report', type=Path)
     parser.add_argument('--test-output-dir', type=Path)
     parser.add_argument('--test_env', action='append', default=[])
@@ -128,9 +129,11 @@ def arguments(argv):
     test_options = options.test_report or options.test_output_dir or options.test_env or options.test_arg or options.test_timeout or options.no_test_cache or options.local_test_execution or options.runs_per_test or options.test_filter or options.test_sharding_strategy
     if options.operation != 'test' and test_options:
         parser.error('Test controls require the test operation')
-    if options.config is not None and options.config not in CONFIGS:
+    if options.config is not None and options.config not in (*CONFIGS, SELF_PROFILE_CONFIG):
         hint = BAZEL_CONFIGS.get(options.config)
         raise ValueError(f'Unknown --config={options.config}; Buck2 configurations are judged and optimized' + (f'; for the Bazel config, {hint}' if hint else ''))
+    if options.config == SELF_PROFILE_CONFIG and options.operation != 'build':
+        raise ValueError('--config=rust-self-profile requires build with explicit first-party library or binary labels')
     if options.runs_per_test is not None:
         if not re.fullmatch(r'[1-9][0-9]*', options.runs_per_test):
             raise ValueError(f'--runs_per_test takes a positive run count, not {options.runs_per_test!r}; select the tests to repeat with labels and --test_arg')
@@ -269,6 +272,36 @@ def expand_labels(tokens, inventory, operation, skipped=None):
     return expanded
 
 
+def self_profile_labels(tokens, inventory):
+    """Select the prelude's declared profile output, leaving dependencies alone."""
+    crates = {target['label'] for package in inventory['packages']
+              for target in package['targets'] if target.get('kind') in ('lib', 'bin')
+              and target.get('label')}
+    result = []
+    selected = False
+    skip_value = False
+    for token in tokens:
+        if skip_value:
+            result.append(token)
+            skip_value = False
+            continue
+        if token in ('--target-platforms', '--build-report', '--event-log', '--write-build-id', '--command-report-path', '--modifier'):
+            result.append(token)
+            skip_value = True
+            continue
+        label = token.removeprefix('root') if token.startswith('root//') else token
+        if label.startswith('//'):
+            if label not in crates:
+                raise ValueError(f'self-profile requires an explicit first-party library or binary label: {token}')
+            result.append(label + '[profile][rustc_stages][raw]')
+            selected = True
+        else:
+            result.append(token)
+    if not selected:
+        raise ValueError('self-profile requires at least one explicit first-party library or binary label')
+    return result
+
+
 def command(options, remaining, executable, root, inventory=None, skipped=None):
     operation = options.operation
     actual = 'build' if operation in ('check', 'clippy', 'doc') else 'cquery' if operation == 'analyze' else operation
@@ -284,7 +317,7 @@ def command(options, remaining, executable, root, inventory=None, skipped=None):
     result += ['-c', f'kiln.re_priority={re_priority(os.environ)}']
     if options.local and operation != 'analyze':
         result.append('--local-only')
-    if options.config:
+    if options.config in CONFIGS:
         result += ['--target-platforms', '//tools/buck2:' + options.config]
     if options.config == 'optimized':
         result += ['-c', 'kiln.rust_profile=optimized']
@@ -294,6 +327,10 @@ def command(options, remaining, executable, root, inventory=None, skipped=None):
     elif operation == 'test' and materializations != 'none':
         raise ValueError('test materializes declared reports automatically; use build --materializations final for executable artifacts')
     args = list(remaining)
+    if options.config == SELF_PROFILE_CONFIG:
+        if inventory is None:
+            raise ValueError('Missing generated target inventory; run sync')
+        args = self_profile_labels(args, inventory)
     labels = [arg for arg in args if arg.startswith('//') or arg.startswith('root//')]
     if operation == 'test':
         from test_selection import target_positions
