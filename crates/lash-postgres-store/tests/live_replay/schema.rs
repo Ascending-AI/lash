@@ -146,10 +146,13 @@ async fn a_host_provisioned_schema_serves_verify_only_under_a_role_without_ddl_p
     let schema = fresh_schema();
     host_provision(database.url(), &schema).await;
     let role = format!("live_replay_runtime_{}", uuid::Uuid::new_v4().simple());
+    // A server that authenticates by password (the release gate's) refuses
+    // a login role without one.
+    let password = uuid::Uuid::new_v4().simple().to_string();
     execute(
         database.url(),
         &format!(
-            "CREATE ROLE \"{role}\" LOGIN; \
+            "CREATE ROLE \"{role}\" LOGIN PASSWORD '{password}'; \
              GRANT USAGE ON SCHEMA \"{schema}\" TO \"{role}\"; \
              GRANT SELECT, INSERT, UPDATE, DELETE, TRUNCATE ON ALL TABLES IN SCHEMA \"{schema}\" \
                TO \"{role}\";"
@@ -159,6 +162,7 @@ async fn a_host_provisioned_schema_serves_verify_only_under_a_role_without_ddl_p
     let runtime_url = PgConnectOptions::from_str(database.url())
         .expect("parse the database URL")
         .username(&role)
+        .password(&password)
         .to_url_lossy()
         .to_string();
     let mut runtime = PgConnection::connect(&runtime_url)

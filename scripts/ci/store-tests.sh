@@ -313,11 +313,14 @@ run_uniform_store_suite() {
 # target's `native//:postgres` (18), or the tree `with-service.sh pg17` hands
 # over as LASH_WORKERS_POSTGRES (the Cargo half always needs that variable).
 # The store row covers the schema apply, the committed shape artifact and the
-# version stamp. The SQLite-file crash matrix needs no server; it rides here
+# version stamp. It skips the one law that reads the whole cluster's
+# checkpoint counter: on a shared server every other action's DROP DATABASE
+# requests a checkpoint, so the law needs a server of its own, which
+# `pg-store` gives each action. The SQLite-file crash matrix needs no server; it rides here
 # because this is the release gate. The cross-backend differential runs as its own uniform suite
 # after these.
 release_legs() {
-  echo "store|shared||$(labels postgres default)|-p lash-internal-postgres-store"
+  echo "store|shared|--skip isolated_cells_do_not_checkpoint_or_share_state|$(labels postgres default)|-p lash-internal-postgres-store"
   echo "durable-crash-proof|shared|on_postgres|//crates/lash-durable-test:vertical_crash_proof__test //crates/lash-durable-test:turn_phases__test|-p lash-internal-durable-test --test vertical_crash_proof --test turn_phases"
   echo "crash-matrix|shared|the_crash_matrix_holds_on_postgres --include-ignored|//crates/lash-sim:crash_matrix__test|-p lash-sim --test crash_matrix"
   echo "crash-matrix-sqlite-file|shared|the_crash_matrix_holds_on_a_sqlite_file --include-ignored|//crates/lash-sim:crash_matrix__test|-p lash-sim --test crash_matrix"
