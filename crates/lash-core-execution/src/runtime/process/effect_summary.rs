@@ -106,6 +106,7 @@ struct ProcessEffectOccurrenceFields {
     occurrence: u64,
     operation: String,
     outcome_class: ProcessEffectOutcomeClass,
+    #[serde(default, deserialize_with = "nonempty_failure_code")]
     code: Option<lash_sansio::FailureCode>,
     replay_key: String,
 }
@@ -113,13 +114,10 @@ struct ProcessEffectOccurrenceFields {
 const CODE_ON_A_NON_FAILURE: &str = "only a failed effect occurrence may carry a failure code";
 
 impl TryFrom<ProcessEffectOccurrenceFields> for ProcessEffectOccurrence {
-    type Error = &'static str;
+    type Error = ProcessEffectReportError;
 
     fn try_from(fields: ProcessEffectOccurrenceFields) -> Result<Self, Self::Error> {
-        if fields.outcome_class != ProcessEffectOutcomeClass::Failure && fields.code.is_some() {
-            return Err(CODE_ON_A_NON_FAILURE);
-        }
-        Ok(Self {
+        let outcome = Self {
             vocabulary_version: fields.vocabulary_version,
             node_id: fields.node_id,
             occurrence: fields.occurrence,
@@ -127,8 +125,32 @@ impl TryFrom<ProcessEffectOccurrenceFields> for ProcessEffectOccurrence {
             outcome_class: fields.outcome_class,
             code: fields.code,
             replay_key: fields.replay_key,
-        })
+        };
+        outcome.check()?;
+        Ok(outcome)
     }
+}
+
+fn nonempty_failure_code<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<lash_sansio::FailureCode>, D::Error> {
+    let code = String::deserialize(deserializer)?;
+    if code.is_empty() {
+        return Err(serde::de::Error::custom(
+            "an effect failure code must be nonempty",
+        ));
+    }
+    Ok(Some(lash_sansio::FailureCode::from_wire(&code)))
+}
+
+fn nonempty_identifier(
+    identifier: &str,
+    field: &'static str,
+) -> Result<(), ProcessEffectReportError> {
+    if identifier.is_empty() {
+        return Err(ProcessEffectReportError::EmptyIdentifier { field });
+    }
+    Ok(())
 }
 
 impl ProcessEffectOccurrence {
@@ -185,10 +207,9 @@ impl ProcessEffectOccurrence {
                 actual: u64::from(version),
             })?;
         }
-        let outcome: Self =
-            serde_json::from_value(payload).map_err(ProcessEffectReportError::InvalidPayload)?;
-        outcome.check()?;
-        Ok(outcome)
+        let fields = serde_json::from_value::<ProcessEffectOccurrenceFields>(payload)
+            .map_err(ProcessEffectReportError::InvalidPayload)?;
+        Self::try_from(fields)
     }
 
     /// Admit an occurrence this build holds typed, as [`Self::decode`]
@@ -200,6 +221,9 @@ impl ProcessEffectOccurrence {
     }
 
     fn check(&self) -> Result<(), ProcessEffectReportError> {
+        nonempty_identifier(&self.node_id, "node_id")?;
+        nonempty_identifier(&self.operation, "operation")?;
+        nonempty_identifier(&self.replay_key, "replay_key")?;
         if self.outcome_class != ProcessEffectOutcomeClass::Failure && self.code.is_some() {
             return Err(ProcessEffectReportError::InvalidPayload(
                 <serde_json::Error as serde::de::Error>::custom(CODE_ON_A_NON_FAILURE),
@@ -248,11 +272,33 @@ impl ProcessEffectOmittedCounts {
 
 /// Strict durable payload counting every node's omitted occurrences.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(try_from = "ProcessEffectOmissionsFields")]
 pub struct ProcessEffectOmissions {
     pub vocabulary_version: u32,
     pub occurrence_cap: u64,
     pub nodes: BTreeMap<String, ProcessEffectOmittedCounts>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProcessEffectOmissionsFields {
+    vocabulary_version: u32,
+    occurrence_cap: u64,
+    nodes: BTreeMap<String, ProcessEffectOmittedCounts>,
+}
+
+impl TryFrom<ProcessEffectOmissionsFields> for ProcessEffectOmissions {
+    type Error = ProcessEffectReportError;
+
+    fn try_from(fields: ProcessEffectOmissionsFields) -> Result<Self, Self::Error> {
+        let omissions = Self {
+            vocabulary_version: fields.vocabulary_version,
+            occurrence_cap: fields.occurrence_cap,
+            nodes: fields.nodes,
+        };
+        omissions.check()?;
+        Ok(omissions)
+    }
 }
 
 impl ProcessEffectOmissions {
@@ -292,10 +338,9 @@ impl ProcessEffectOmissions {
                 actual: u64::from(version),
             })?;
         }
-        let omissions: Self =
-            serde_json::from_value(payload).map_err(ProcessEffectReportError::InvalidPayload)?;
-        omissions.check()?;
-        Ok(omissions)
+        let fields = serde_json::from_value::<ProcessEffectOmissionsFields>(payload)
+            .map_err(ProcessEffectReportError::InvalidPayload)?;
+        Self::try_from(fields)
     }
 
     /// The counterpart of [`ProcessEffectOccurrence::admit`].
@@ -310,6 +355,9 @@ impl ProcessEffectOmissions {
                 expected: PROCESS_EFFECT_OCCURRENCE_CAP,
                 actual: self.occurrence_cap,
             });
+        }
+        for node in self.nodes.keys() {
+            nonempty_identifier(node, "node_id")?;
         }
         if self.nodes.is_empty() || self.nodes.values().any(|counts| counts.total() == 0) {
             return Err(ProcessEffectReportError::EmptyOmissions);
@@ -451,6 +499,8 @@ impl ProcessEffectReport {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProcessEffectReportError {
+    #[error("effect summary {field} must be nonempty")]
+    EmptyIdentifier { field: &'static str },
     #[error("effect summary payload is missing its vocabulary_version")]
     MissingVocabularyVersion,
     #[error("effect summary vocabulary version {actual} is unsupported; expected {expected}")]
@@ -526,7 +576,7 @@ pub(super) fn effect_outcome_payload_schema() -> crate::JsonSchema {
     reason = "this module declares the tool or payload schema and admission checks its invariant"
 )]
 pub(super) fn effect_omissions_payload_schema() -> crate::JsonSchema {
-    let count = serde_json::json!({ "type": "integer", "minimum": 0 });
+    let count = serde_json::json!({ "type": "integer", "minimum": 0, "maximum": u64::MAX });
     crate::JsonSchema::admit(serde_json::json!({
         "type": "object",
         "additionalProperties": false,
@@ -537,10 +587,16 @@ pub(super) fn effect_omissions_payload_schema() -> crate::JsonSchema {
             "nodes": {
                 "type": "object",
                 "minProperties": 1,
+                "propertyNames": { "minLength": 1 },
                 "additionalProperties": {
                     "type": "object",
                     "additionalProperties": false,
                     "required": ["success", "failure", "cancelled"],
+                    "anyOf": [
+                        { "properties": { "success": { "minimum": 1 } } },
+                        { "properties": { "failure": { "minimum": 1 } } },
+                        { "properties": { "cancelled": { "minimum": 1 } } }
+                    ],
                     "properties": {
                         "success": count,
                         "failure": count,

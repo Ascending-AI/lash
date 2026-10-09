@@ -124,7 +124,8 @@ impl LashRuntime {
     ) -> Result<(), crate::FormatRefusal> {
         self.install_resolved_run(resolved)?;
         debug_assert_eq!(
-            self.state.config_revision, resolved.base.config_revision,
+            self.state.config_revision,
+            resolved.base().config_revision,
             "a run's resident config revision moved inside the run"
         );
         Ok(())
@@ -305,20 +306,18 @@ impl RuntimeEffectLocalRunner for ResolveTurnConfigRunner {
         };
         // Native execution config is part of this recorded resolution. Cold
         // adoption never calls a decoder.
-        resolved.base.plugin_config = self
-            .plugin_host
-            .decode_config(&resolved.base.plugin_config)?;
-        if let Some(config) = resolved.resolved.as_mut() {
+        resolved = resolved.map_configs(|mut config| {
             config.plugin_config = self.plugin_host.decode_config(&config.plugin_config)?;
-        }
+            Ok::<_, RuntimeEffectControllerError>(config)
+        })?;
         // An override is judged by the owner of every namespace it changed,
         // as a config command's candidate is: an overlay cannot set what the
         // owner does not admit. The refusal is the run's recorded shape.
-        if resolved.resolved.is_some()
+        if resolved.has_override()
             && let Some(registry) = self.config_registry.as_ref()
         {
             registry
-                .validate_derived(&resolved.base, resolved.config())
+                .validate_derived(resolved.base(), resolved.config())
                 .map_err(config_fault)?;
         }
         if let Some(driver) = self.protocol_driver {

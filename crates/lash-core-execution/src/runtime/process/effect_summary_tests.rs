@@ -204,3 +204,75 @@ fn the_fold_reads_the_written_bound_in_any_page_order() {
     assert_eq!(node.omitted.total(), 3);
     assert_eq!(forward.node("node-b").unwrap().omitted.total(), 0);
 }
+
+#[test]
+fn effect_identifiers_and_positive_omissions_match_the_host_schemas() {
+    let fleet = crate::FleetFormat::current();
+    let schema = effect_outcome_payload_schema();
+    for field in ["node_id", "operation", "replay_key"] {
+        let mut payload = occurrence("node", 1).append_request().fact.payload();
+        payload[field] = serde_json::json!("");
+        assert!(schema.validate(&payload).is_err());
+        assert!(
+            ProcessEffectOccurrence::decode(payload.clone(), fleet).is_err(),
+            "{field}"
+        );
+        assert!(serde_json::from_value::<ProcessEffectOccurrence>(payload).is_err());
+        let mut typed = occurrence("node", 1);
+        match field {
+            "node_id" => typed.node_id.clear(),
+            "operation" => typed.operation.clear(),
+            _ => typed.replay_key.clear(),
+        }
+        assert!(typed.admit(fleet).is_err());
+    }
+    for code in [serde_json::Value::Null, serde_json::json!("")] {
+        let mut payload = occurrence("node", 1).append_request().fact.payload();
+        payload["outcome_class"] = serde_json::json!("failure");
+        payload["code"] = code;
+        assert!(schema.validate(&payload).is_err());
+        assert!(ProcessEffectOccurrence::decode(payload.clone(), fleet).is_err());
+        assert!(serde_json::from_value::<ProcessEffectOccurrence>(payload).is_err());
+    }
+    let schema = effect_omissions_payload_schema();
+    for node in ["", "node"] {
+        for counts in [
+            ProcessEffectOmittedCounts::default(),
+            ProcessEffectOmittedCounts {
+                success: 1,
+                failure: 0,
+                cancelled: 0,
+            },
+            ProcessEffectOmittedCounts {
+                success: 0,
+                failure: 1,
+                cancelled: 0,
+            },
+            ProcessEffectOmittedCounts {
+                success: 0,
+                failure: 0,
+                cancelled: 1,
+            },
+            ProcessEffectOmittedCounts {
+                success: u64::MAX,
+                failure: u64::MAX,
+                cancelled: u64::MAX,
+            },
+        ] {
+            let allowed = !node.is_empty() && counts.total() > 0;
+            let typed =
+                ProcessEffectOmissions::new(BTreeMap::from([(node.to_owned(), counts)]), fleet);
+            let payload = serde_json::to_value(&typed).unwrap();
+            assert_eq!(schema.validate(&payload).is_ok(), allowed, "{payload}");
+            assert_eq!(typed.admit(fleet).is_ok(), allowed);
+            assert_eq!(
+                ProcessEffectOmissions::decode(payload.clone(), fleet).is_ok(),
+                allowed
+            );
+            assert_eq!(
+                serde_json::from_value::<ProcessEffectOmissions>(payload).is_ok(),
+                allowed
+            );
+        }
+    }
+}

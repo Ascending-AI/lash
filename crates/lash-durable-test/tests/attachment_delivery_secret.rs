@@ -174,7 +174,7 @@ impl Provider for WireRecorder {
         }
         RecordedRequestTemplate::from_segments(
             template.route.clone(),
-            template.stream,
+            template.stream(),
             template.generation,
             segments,
         )

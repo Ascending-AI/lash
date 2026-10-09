@@ -290,7 +290,7 @@ sends.
 The law the attempts keep is WIRE-SLOTS:
 
 > Every attempt of an admitted call, on any owner, sends the template its
-> admission recorded. Its literal text, route, stream flag, generation
+> admission recorded. Its literal text, route, response mode, generation
 > receipt and its ordered slots (reference, position, acceptance, codec) are
 > read back from the admission and are byte-for-byte the admitted ones, so a
 > resend on an owner whose renderer or provider builder would produce other
@@ -304,6 +304,12 @@ The law the attempts keep is WIRE-SLOTS:
 > replayed with zero deliveries and zero uploads, and no delivered value is
 > journaled or recorded in an admission record. Request-body evidence uses
 > the template; provider text may echo delivered values (ADR 0135 §4).
+
+Response mode is recorded once. A body's top-level `stream` boolean is
+its mode; construction and reopen derive an immutable cache from that literal.
+A route whose JSON carries no mode (Google's URL method or a canonical
+in-process request) records `transport_stream` instead. A record carrying both
+statements is refused, and no literal is rewritten to obtain its mode.
 
 No renderer, projector or provider builder runs for a resend, so a builder
 or renderer changed since sends nothing different outside the slots.

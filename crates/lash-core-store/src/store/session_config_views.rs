@@ -21,7 +21,7 @@ pub fn root_snapshot_config_from_state(
     state: &crate::RuntimeSessionState,
 ) -> crate::PersistedSessionConfig {
     match state.authority.run_view() {
-        Some(view) => view.run.base.clone(),
+        Some(view) => view.run.base().clone(),
         None => execution_session_config_from_state(state),
     }
 }

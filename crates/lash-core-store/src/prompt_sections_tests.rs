@@ -98,3 +98,36 @@ fn a_prompt_snapshot_decodes_only_at_version_one() {
     encoded["version"] = serde_json::json!(2);
     assert!(serde_json::from_value::<PromptSnapshot>(encoded).is_err());
 }
+
+#[test]
+fn chunked_response_mode_is_recorded_only_outside_the_body() {
+    use lash_sansio::llm::types::{
+        LiveRequestBody, ProviderRouteIdentity, RecordedRequestTemplate,
+    };
+    let route = ProviderRouteIdentity {
+        provider: "fixture".into(),
+        endpoint: "https://fixture.test".into(),
+        model: "model".into(),
+    };
+    for (body, outside) in [(" { \"stream\" : true } ", None), ("{}", Some(true))] {
+        let template = RecordedRequestTemplate::literal(route.clone(), true, None, body).unwrap();
+        let (chunked, texts) = ChunkedRequestTemplate::chunk(&template);
+        assert_eq!(chunked.transport_stream, outside);
+        let encoded = serde_json::to_value(&chunked).unwrap();
+        assert!(encoded.get("stream").is_none());
+        let mut decoded: ChunkedRequestTemplate = serde_json::from_value(encoded).unwrap();
+        let read = |reference: &BlobRef| {
+            texts
+                .iter()
+                .find(|(blob, _)| blob == reference)
+                .map(|(_, text)| text.as_str())
+        };
+        let assembled = decoded.assemble(read).unwrap();
+        assert_eq!(assembled, template);
+        let live = LiveRequestBody::fill(std::sync::Arc::new(assembled), vec![]).unwrap();
+        assert_eq!(live.wire(), body);
+        assert!(live.stream());
+        decoded.transport_stream = if outside.is_none() { Some(false) } else { None };
+        assert!(decoded.assemble(read).is_err());
+    }
+}

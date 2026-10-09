@@ -146,7 +146,7 @@ fn the_default_spec_is_no_spec_and_resolves_to_the_snapshot() {
         .resolve(&snapshot(), None, &catalog(), &MapOwner)
         .expect("resolve");
     assert_eq!(resolved, ResolvedRun::snapshot(snapshot()));
-    assert_eq!(resolved.base.config_revision, 7);
+    assert_eq!(resolved.base().config_revision, 7);
 }
 
 #[test]
@@ -307,7 +307,7 @@ fn a_model_only_override_mints_the_key_once_and_keeps_the_snapshot_reasoning() {
         "a key alone keeps the snapshot's reasoning"
     );
     assert_eq!(resolved.spec, spec.hash().expect("hash"));
-    assert_eq!(resolved.base.config_revision, 7);
+    assert_eq!(resolved.base().config_revision, 7);
 }
 
 #[test]
@@ -444,4 +444,32 @@ fn explicit_overrides_win_over_the_definition_which_wins_over_the_snapshot() {
             .payload,
         serde_json::json!({ "keep": 1, "replace": "explicit", "added": true })
     );
+}
+
+#[test]
+fn a_redundant_resolved_override_normalizes_to_the_snapshot() {
+    let run = ResolvedRun::snapshot(snapshot());
+    let mut payload = serde_json::to_value(&run).unwrap();
+    payload["resolved"] = payload["base"].clone();
+    let decoded: ResolvedRun = serde_json::from_value(payload).unwrap();
+    assert_eq!(decoded, run);
+    assert!(
+        serde_json::to_value(decoded)
+            .unwrap()
+            .get("resolved")
+            .is_none()
+    );
+    assert_eq!(run.clone().with_config(snapshot()), run);
+    let mut changed = snapshot();
+    changed.config_revision += 1;
+    let overridden = run.clone().with_config(changed.clone());
+    assert!(overridden.has_override());
+    assert_eq!(overridden.config(), &changed);
+    let normalized = overridden
+        .map_configs(|mut config| {
+            config.config_revision = run.base().config_revision;
+            Ok::<_, std::convert::Infallible>(config)
+        })
+        .unwrap();
+    assert_eq!(normalized, run);
 }

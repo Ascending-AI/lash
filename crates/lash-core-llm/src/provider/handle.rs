@@ -335,7 +335,7 @@ impl ProviderHandle {
         }
         // The template decides whether the response streams: a streamed
         // body is read through a sender even when the caller asked for none.
-        match (template.stream, context.stream_events.is_some()) {
+        match (template.stream(), context.stream_events.is_some()) {
             (true, false) => {
                 context.stream_events = Some(crate::llm::types::LlmEventSender::new(|_| {}));
             }

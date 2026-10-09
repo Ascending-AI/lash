@@ -1061,7 +1061,7 @@ impl RuntimeSessionState {
         let revision = self
             .authority
             .run_view()
-            .map_or(self.config_revision, |view| view.run.base.config_revision);
+            .map_or(self.config_revision, |view| view.run.base().config_revision);
         crate::AdmittedPluginConfig::new(self.authority.plugin_config.clone(), revision)
     }
 

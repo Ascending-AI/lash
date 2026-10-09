@@ -44,7 +44,7 @@ pub struct RecordedRequestTemplate {
     /// Recorded fetch slack; omission on reopen is refused, never filled from the host.
     pub fetch_horizon: super::attachment_delivery::DeliveryFetchHorizon,
     pub route: ProviderRouteIdentity,
-    pub stream: bool,
+    response_mode: ResponseMode,
     pub generation: Option<GenerationReceipt>,
     /// What the lowering route read from the body it built and needs again
     /// at every send (Anthropic: the beta headers the body requires), so no
@@ -53,13 +53,21 @@ pub struct RecordedRequestTemplate {
     segments: Vec<RequestSegment>,
 }
 
+// Body is a derived cache; only Transport is serialized as mode metadata.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ResponseMode {
+    Body(bool),
+    Transport(bool),
+}
+
 /// The serialized shape of a [`RecordedRequestTemplate`], unvalidated.
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct TemplateParts {
     fetch_horizon: super::attachment_delivery::DeliveryFetchHorizon,
     route: ProviderRouteIdentity,
-    stream: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    transport_stream: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     generation: Option<GenerationReceipt>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -70,8 +78,12 @@ struct TemplateParts {
 impl TryFrom<TemplateParts> for RecordedRequestTemplate {
     type Error = TemplateError;
     fn try_from(parts: TemplateParts) -> Result<Self, TemplateError> {
-        let mut template =
-            Self::from_segments(parts.route, parts.stream, parts.generation, parts.segments)?;
+        let mut template = Self::from_recorded_segments(
+            parts.route,
+            parts.transport_stream,
+            parts.generation,
+            parts.segments,
+        )?;
         template.fetch_horizon = parts.fetch_horizon;
         template.wire_features = parts.wire_features;
         Ok(template)
@@ -80,10 +92,11 @@ impl TryFrom<TemplateParts> for RecordedRequestTemplate {
 
 impl From<RecordedRequestTemplate> for TemplateParts {
     fn from(template: RecordedRequestTemplate) -> Self {
+        let transport_stream = template.transport_stream();
         Self {
             fetch_horizon: template.fetch_horizon,
             route: template.route,
-            stream: template.stream,
+            transport_stream,
             generation: template.generation,
             wire_features: template.wire_features,
             segments: template.segments,
@@ -296,11 +309,51 @@ impl RecordedRequestTemplate {
         generation: Option<GenerationReceipt>,
         segments: Vec<RequestSegment>,
     ) -> Result<Self, TemplateError> {
-        validate(&segments)?;
+        let body_stream = validate(&segments)?;
+        if body_stream.is_some_and(|body_stream| body_stream != stream) {
+            return Err(TemplateError::ResponseMode);
+        }
+        Self::from_validated_segments(
+            route,
+            body_stream,
+            body_stream.is_none().then_some(stream),
+            generation,
+            segments,
+        )
+    }
+
+    /// Reopen a record with mode metadata only when the body carries no mode.
+    /// A second statement of the body's mode is refused, even when equal.
+    ///
+    /// # Errors
+    ///
+    /// [`TemplateError`] when the segments or mode are not canonical.
+    pub fn from_recorded_segments(
+        route: ProviderRouteIdentity,
+        transport_stream: Option<bool>,
+        generation: Option<GenerationReceipt>,
+        segments: Vec<RequestSegment>,
+    ) -> Result<Self, TemplateError> {
+        let body_stream = validate(&segments)?;
+        Self::from_validated_segments(route, body_stream, transport_stream, generation, segments)
+    }
+
+    fn from_validated_segments(
+        route: ProviderRouteIdentity,
+        body_stream: Option<bool>,
+        transport_stream: Option<bool>,
+        generation: Option<GenerationReceipt>,
+        segments: Vec<RequestSegment>,
+    ) -> Result<Self, TemplateError> {
+        let response_mode = match (body_stream, transport_stream) {
+            (Some(stream), None) => ResponseMode::Body(stream),
+            (None, Some(stream)) => ResponseMode::Transport(stream),
+            _ => return Err(TemplateError::ResponseMode),
+        };
         Ok(Self {
             fetch_horizon: super::attachment_delivery::DeliveryFetchHorizon::standard(),
             route,
-            stream,
+            response_mode,
             generation,
             wire_features: Vec::new(),
             segments,
@@ -318,6 +371,22 @@ impl RecordedRequestTemplate {
             generation,
             segments: Vec::new(),
             literal: String::new(),
+        }
+    }
+
+    /// The immutable mode, derived from the body when it names `stream`.
+    pub fn stream(&self) -> bool {
+        match self.response_mode {
+            ResponseMode::Body(stream) | ResponseMode::Transport(stream) => stream,
+        }
+    }
+
+    /// Mode recorded outside JSON (for example Google's URL method or a
+    /// canonical in-process request). Absent when the body owns the mode.
+    pub fn transport_stream(&self) -> Option<bool> {
+        match self.response_mode {
+            ResponseMode::Body(_) => None,
+            ResponseMode::Transport(stream) => Some(stream),
         }
     }
 
@@ -467,7 +536,7 @@ fn block_node(tree: &mut TemplateJson, mi: usize, bi: usize) -> Option<&mut Temp
 }
 
 /// Check `segments` are a template (see [`RecordedRequestTemplate`]).
-fn validate(segments: &[RequestSegment]) -> Result<(), TemplateError> {
+fn validate(segments: &[RequestSegment]) -> Result<Option<bool>, TemplateError> {
     let mut text = String::new();
     let mut literal = false;
     let mut in_string = false;
@@ -505,8 +574,29 @@ fn validate(segments: &[RequestSegment]) -> Result<(), TemplateError> {
             }
         }
     }
-    serde_json::from_str::<serde::de::IgnoredAny>(&text).map_err(|_| TemplateError::InvalidJson)?;
-    Ok(())
+    if text.trim_start().starts_with('{') {
+        serde_json::from_str::<BodyResponseMode>(&text)
+            .map(|body| body.stream)
+            .map_err(|_| TemplateError::InvalidJson)
+    } else {
+        serde_json::from_str::<serde::de::IgnoredAny>(&text)
+            .map(|_| None)
+            .map_err(|_| TemplateError::InvalidJson)
+    }
+}
+
+// Read only the top-level mode; serde skips other fields without allocating
+// a JSON tree and refuses duplicate `stream` fields. Slots cannot supply mode.
+#[derive(Deserialize)]
+struct BodyResponseMode {
+    #[serde(default, deserialize_with = "body_stream")]
+    stream: Option<bool>,
+}
+
+fn body_stream<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<bool>, D::Error> {
+    bool::deserialize(deserializer).map(Some)
 }
 
 pub struct RequestTemplateBuilder {
@@ -645,7 +735,7 @@ impl LiveRequestBody {
         &self.template.route
     }
     pub fn stream(&self) -> bool {
-        self.template.stream
+        self.template.stream()
     }
     pub fn generation(&self) -> Option<GenerationReceipt> {
         self.template.generation
@@ -691,6 +781,8 @@ impl std::fmt::Debug for LiveRequestBody {
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum TemplateError {
+    #[error("a request template must name one response mode, agreeing with its body")]
+    ResponseMode,
     #[error("a request template contains an empty literal")]
     EmptyLiteral,
     #[error("a request template contains adjacent literals")]
@@ -703,4 +795,61 @@ pub enum TemplateError {
     EmptyAcceptance,
     #[error("the body is not a canonical request: {reason}")]
     NotCanonical { reason: String },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn response_mode_has_one_authority_and_preserves_literal_bytes() {
+        let route = ProviderRouteIdentity {
+            provider: "fixture".into(),
+            endpoint: "https://fixture.test".into(),
+            model: "model".into(),
+        };
+        let body = " { \"stream\" : true, \"input\" : \"literal\" } ";
+        assert!(RecordedRequestTemplate::literal(route.clone(), false, None, body).is_err());
+        let template = RecordedRequestTemplate::literal(route.clone(), true, None, body).unwrap();
+        let encoded = serde_json::to_value(&template).unwrap();
+        assert!(encoded.get("stream").is_none());
+        assert!(encoded.get("transport_stream").is_none());
+        let decoded: RecordedRequestTemplate = serde_json::from_value(encoded.clone()).unwrap();
+        let live = LiveRequestBody::fill(Arc::new(decoded), vec![]).unwrap();
+        assert!(live.stream());
+        assert_eq!(live.wire(), body);
+        for stream in [false, true] {
+            let mut duplicate = encoded.clone();
+            duplicate["transport_stream"] = serde_json::json!(stream);
+            assert!(serde_json::from_value::<RecordedRequestTemplate>(duplicate).is_err());
+        }
+        let mut builder = RecordedRequestTemplate::builder(route.clone(), false, None);
+        builder.literal(body);
+        assert!(builder.finish().is_err());
+        for invalid in [
+            "{\"stream\":null}",
+            "{\"stream\":1}",
+            "{\"stream\":\"true\"}",
+            "{\"stream\":true,\"stream\":false}",
+        ] {
+            assert!(RecordedRequestTemplate::literal(route.clone(), true, None, invalid).is_err());
+        }
+        let mut conflicting = encoded;
+        conflicting["stream"] = serde_json::json!(false);
+        assert!(serde_json::from_value::<RecordedRequestTemplate>(conflicting).is_err());
+        for stream in [false, true] {
+            let template =
+                RecordedRequestTemplate::literal(route.clone(), stream, None, "{}").unwrap();
+            let mut encoded = serde_json::to_value(template).unwrap();
+            let decoded: RecordedRequestTemplate = serde_json::from_value(encoded.clone()).unwrap();
+            encoded.as_object_mut().unwrap().remove("transport_stream");
+            assert!(serde_json::from_value::<RecordedRequestTemplate>(encoded).is_err());
+            assert_eq!(
+                LiveRequestBody::fill(Arc::new(decoded), vec![])
+                    .unwrap()
+                    .stream(),
+                stream
+            );
+        }
+    }
 }

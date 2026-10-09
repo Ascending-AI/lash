@@ -590,13 +590,10 @@ impl RunSpec {
         {
             apply_protocol_options(&mut config, options, owner)?;
         }
-        Ok(ResolvedRun {
-            spec: self.hash()?,
-            resolved: (config != *snapshot).then(|| Box::new(config)),
-            capabilities: self.capabilities.clone(),
-            base: snapshot.clone(),
-            render: None,
-        })
+        let mut run = ResolvedRun::snapshot(snapshot.clone()).with_config(config);
+        run.spec = self.hash()?;
+        run.capabilities = self.capabilities.clone();
+        Ok(run)
     }
 }
 
@@ -653,24 +650,52 @@ impl RecordedRender {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(from = "ResolvedRunFields")]
 pub struct ResolvedRun {
     /// The run's snapshot: the session config after the boundary's command
     /// drain, which the spec resolved against. Its revision is the config
     /// revision the run was admitted under.
-    pub base: PersistedSessionConfig,
+    base: PersistedSessionConfig,
     /// The spec the run resolved; `None` for the default spec.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub spec: Option<RunSpecHash>,
     /// The config the run executes under when its spec changed the snapshot;
     /// `None` when it runs under the snapshot itself.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub resolved: Option<Box<PersistedSessionConfig>>,
+    resolved: Option<Box<PersistedSessionConfig>>,
     /// The capability refs the spec's slots named, recorded with the shape so
     /// a replay binds the same refs (FIG-3877).
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub capabilities: std::collections::BTreeMap<SlotId, CapabilityRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub render: Option<RecordedRender>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ResolvedRunFields {
+    base: PersistedSessionConfig,
+    #[serde(default)]
+    spec: Option<RunSpecHash>,
+    #[serde(default)]
+    resolved: Option<Box<PersistedSessionConfig>>,
+    #[serde(default)]
+    capabilities: std::collections::BTreeMap<SlotId, CapabilityRef>,
+    #[serde(default)]
+    render: Option<RecordedRender>,
+}
+
+impl From<ResolvedRunFields> for ResolvedRun {
+    fn from(fields: ResolvedRunFields) -> Self {
+        let mut run = Self::snapshot(fields.base);
+        if let Some(config) = fields.resolved {
+            run = run.with_config(*config);
+        }
+        run.spec = fields.spec;
+        run.capabilities = fields.capabilities;
+        run.render = fields.render;
+        run
+    }
 }
 
 impl ResolvedRun {
@@ -683,6 +708,43 @@ impl ResolvedRun {
             capabilities: std::collections::BTreeMap::new(),
             render: None,
         }
+    }
+
+    /// Set the execution config, retaining an override only when it differs.
+    pub fn with_config(mut self, config: PersistedSessionConfig) -> Self {
+        self.resolved = (config != self.base).then(|| Box::new(config));
+        self
+    }
+
+    /// The immutable snapshot the run resolved against.
+    pub fn base(&self) -> &PersistedSessionConfig {
+        &self.base
+    }
+
+    pub fn has_override(&self) -> bool {
+        self.resolved.is_some()
+    }
+
+    /// Transform both configs and normalize again: decoding can make a
+    /// previously distinct override equal to the snapshot.
+    ///
+    /// # Errors
+    ///
+    /// The transformation's error, with no partially transformed run returned.
+    pub fn map_configs<E>(
+        self,
+        mut map: impl FnMut(PersistedSessionConfig) -> Result<PersistedSessionConfig, E>,
+    ) -> Result<Self, E> {
+        let base = map(self.base)?;
+        let config = self.resolved.map(|config| map(*config)).transpose()?;
+        let mut run = Self::snapshot(base);
+        if let Some(config) = config {
+            run = run.with_config(config);
+        }
+        run.spec = self.spec;
+        run.capabilities = self.capabilities;
+        run.render = self.render;
+        Ok(run)
     }
 
     /// The config the run executes under.

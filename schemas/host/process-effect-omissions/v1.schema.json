@@ -6,16 +6,42 @@
     "nodes": {
       "additionalProperties": {
         "additionalProperties": false,
+        "anyOf": [
+          {
+            "properties": {
+              "success": {
+                "minimum": 1
+              }
+            }
+          },
+          {
+            "properties": {
+              "failure": {
+                "minimum": 1
+              }
+            }
+          },
+          {
+            "properties": {
+              "cancelled": {
+                "minimum": 1
+              }
+            }
+          }
+        ],
         "properties": {
           "cancelled": {
+            "maximum": 18446744073709551615,
             "minimum": 0,
             "type": "integer"
           },
           "failure": {
+            "maximum": 18446744073709551615,
             "minimum": 0,
             "type": "integer"
           },
           "success": {
+            "maximum": 18446744073709551615,
             "minimum": 0,
             "type": "integer"
           }
@@ -28,6 +54,9 @@
         "type": "object"
       },
       "minProperties": 1,
+      "propertyNames": {
+        "minLength": 1
+      },
       "type": "object"
     },
     "occurrence_cap": {

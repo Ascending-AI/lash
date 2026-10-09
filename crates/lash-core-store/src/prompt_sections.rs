@@ -511,8 +511,8 @@ pub const PROVIDER_BODY_CHUNK_BYTES: usize = 32 * 1024;
 
 /// The request template an admitted call sends, as its record stores it
 /// (ADR 0133 §6, ADR 0135 §6): the route that lowered it, whether it
-/// streams, the generation receipt its provider built, and its segments in
-/// wire order. A literal is stored as content-addressed chunks of its own,
+/// streams outside its JSON, the generation receipt its provider built, and
+/// its segments in wire order. A literal is stored as content-addressed chunks of its own,
 /// so a template that shares a literal prefix with an earlier call's shares
 /// that prefix's chunks. A slot is recorded inline: its ref, position,
 /// acceptance and codec, never a delivered value.
@@ -521,7 +521,9 @@ pub const PROVIDER_BODY_CHUNK_BYTES: usize = 32 * 1024;
 pub struct ChunkedRequestTemplate {
     pub fetch_horizon: lash_sansio::llm::attachment_delivery::DeliveryFetchHorizon,
     pub route: lash_sansio::llm::types::ProviderRouteIdentity,
-    pub stream: bool,
+    /// Only routes whose JSON carries no response mode record it here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transport_stream: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub generation: Option<lash_sansio::llm::types::GenerationReceipt>,
     /// See [`RecordedRequestTemplate::wire_features`](lash_sansio::llm::types::RecordedRequestTemplate).
@@ -607,7 +609,7 @@ impl ChunkedRequestTemplate {
             Self {
                 fetch_horizon: template.fetch_horizon,
                 route: template.route.clone(),
-                stream: template.stream,
+                transport_stream: template.transport_stream(),
                 generation: template.generation,
                 wire_features: template.wire_features.clone(),
                 segments,
@@ -657,12 +659,13 @@ impl ChunkedRequestTemplate {
                 },
             });
         }
-        let mut template = lash_sansio::llm::types::RecordedRequestTemplate::from_segments(
-            self.route.clone(),
-            self.stream,
-            self.generation,
-            segments,
-        )?;
+        let mut template =
+            lash_sansio::llm::types::RecordedRequestTemplate::from_recorded_segments(
+                self.route.clone(),
+                self.transport_stream,
+                self.generation,
+                segments,
+            )?;
         template.fetch_horizon = self.fetch_horizon;
         template.wire_features = self.wire_features.clone();
         Ok(template)

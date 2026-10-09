@@ -564,10 +564,10 @@ fn a_persisted_initial_frame_keeps_the_config_it_opened_under() {
 /// Install a run view that runs under `config`, resolved against the
 /// state's sticky config.
 fn install_view(state: &mut RuntimeSessionState, config: &crate::PersistedSessionConfig) {
-    let mut run = crate::run_spec::ResolvedRun::snapshot(
+    let run = crate::run_spec::ResolvedRun::snapshot(
         crate::store::persisted_session_config_from_state(state),
-    );
-    run.resolved = (*config != run.base).then(|| Box::new(config.clone()));
+    )
+    .with_config(config.clone());
     state.install_run_view(&run);
 }
 
