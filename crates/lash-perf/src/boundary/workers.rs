@@ -168,7 +168,7 @@ pub(super) async fn run(args: &Args) -> Result<Receipt> {
             // Preserve the child-measured intervals rather than timing a parent
             // read and calling it a send.
             meter
-                .0
+                .phases
                 .lock()
                 .map_err(|_| anyhow::anyhow!("meter poisoned"))?
                 .push(super::Phase {

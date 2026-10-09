@@ -36,6 +36,9 @@ fn args(case: Case, dir: &std::path::Path) -> Args {
         callers: 2,
         postgres_url: None,
         workload: "smoke-v1".into(),
+        dhat_out: None,
+        dhat_frames: None,
+        worker_stack_bytes: None,
     }
 }
 #[tokio::test]

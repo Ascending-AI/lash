@@ -271,10 +271,22 @@ fn main() -> anyhow::Result<()> {
             return lash_perf::receipt_tail::run(receipt, samples.as_deref(), *slowest);
         }
         Some(Command::Boundary(options)) => {
-            let runtime = tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .build()?;
-            runtime.block_on(lash_perf::boundary::run(options))?;
+            let mut runtime = tokio::runtime::Builder::new_multi_thread();
+            runtime.enable_all();
+            if let Some(stack_bytes) = options.worker_stack_bytes {
+                runtime.thread_stack_size(stack_bytes);
+            }
+            let runtime = runtime.build()?;
+            lash_perf::perf_support::dhat::ensure_dhat_parent(options.dhat_out.as_ref())?;
+            let profiler = lash_perf::perf_support::dhat::start_dhat_profiler(
+                options.dhat_out.clone(),
+                options.dhat_frames,
+                "boundary --dhat-out requires a build with `--features dhat-heap`",
+            )?;
+            let result = runtime.block_on(lash_perf::boundary::run(options));
+            // The profile is written when the profiler drops, on either outcome.
+            lash_perf::perf_support::dhat::finish_dhat_profiler(profiler);
+            result?;
             return Ok(());
         }
         Some(Command::BoundaryWorker(options)) => {

@@ -5,11 +5,20 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
-from perf_artifacts import add_build_report_arg, artifacts, runtime_label
+from perf_artifacts import (
+    add_boundary_args,
+    add_build_report_arg,
+    artifacts,
+    boundary_artifacts,
+    boundary_command,
+    runtime_label,
+)
 from profile_runtime_stack import KNOWN_RUNTIME_SCENARIOS
 
 PROFILE_DEFAULTS = {
@@ -140,6 +149,7 @@ def parse_args() -> argparse.Namespace:
         default=[],
         help="Enable one or more Cargo features when building lash-perf.",
     )
+    add_boundary_args(parser)
     add_build_report_arg(parser)
     return parser.parse_args()
 
@@ -156,9 +166,43 @@ def default_dhat_out(out: Path) -> Path:
     return out.with_name(f"{out.stem}.dhat.json")
 
 
+def run_boundary(args: argparse.Namespace, repo_root: Path) -> int:
+    """One boundary case, with a dhat heap profile of it under --dhat."""
+    if args.binary:
+        binary, worker = args.binary.resolve(), None
+    else:
+        binary, worker = boundary_artifacts(
+            repo_root, runtime_label(args.cargo_feature, args.dhat), build=args.build,
+            report=args.build_report, optimized=args.release,
+            symbolized=args.cpu_profile or args.dhat)
+    out = args.out or repo_root / ".benchmarks" / "boundary" / f"{args.boundary}.json"
+    out = out if out.is_absolute() else repo_root / out
+    out.parent.mkdir(parents=True, exist_ok=True)
+    extra = list(args.boundary_arg)
+    dhat_out = None
+    if args.dhat:
+        dhat_out = args.dhat_out or default_dhat_out(out)
+        extra += [f"--dhat-out={dhat_out}", f"--dhat-frames={max(args.dhat_frames, 1)}"]
+    env = dict(os.environ)
+    if worker:
+        env["LASH_VM_WORKER"] = str(worker)
+    with tempfile.TemporaryDirectory(prefix="boundary-", dir=out.parent) as scratch:
+        # The case refuses an existing store directory.
+        cmd = boundary_command(binary, args.boundary, out, Path(scratch) / "store", extra)
+        proc = subprocess.run(cmd, cwd=repo_root, env=env)
+    if proc.returncode != 0:
+        raise SystemExit(proc.returncode)
+    print(f"Boundary receipt: {out}", file=sys.stderr)
+    if dhat_out:
+        print(f"dhat heap profile: {dhat_out}", file=sys.stderr)
+    return 0
+
+
 def main() -> int:
     args = parse_args()
     repo_root = Path(__file__).resolve().parents[1]
+    if args.boundary:
+        return run_boundary(args, repo_root)
     binary = resolve_binary(args, repo_root)
     profile_defaults = PROFILE_DEFAULTS[args.profile]
     runs = args.runs if args.runs is not None else profile_defaults["runs"]

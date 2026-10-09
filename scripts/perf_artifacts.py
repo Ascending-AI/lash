@@ -12,6 +12,37 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from tools.buck2.outputs import resolve
 
 
+# Workflow and cell workloads start VM workers from this executable.
+VM_WORKER_LABEL = "//crates/lash-vm-worker:lash-vm-worker__bin"
+
+
+def add_boundary_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--boundary", metavar="CASE",
+        help="Run one `lash-perf boundary` case (for example process-dispatcher) "
+             "instead of the runtime scenarios.",
+    )
+    parser.add_argument(
+        "--boundary-arg", action="append", default=[], metavar="ARG",
+        help="Forward one argument to the boundary case, e.g. --boundary-arg=--operations=64 "
+             "or --boundary-arg=--postgres-url=<url>. May be repeated.",
+    )
+
+
+def boundary_artifacts(root: Path, label: str, *, build: bool, report: Path | None,
+                       optimized: bool, symbolized: bool = False) -> tuple[Path, Path]:
+    """The boundary executable and the VM worker it starts, from one build."""
+    resolved = artifacts(root, [label, VM_WORKER_LABEL], build=build, report=report,
+                         optimized=optimized, symbolized=symbolized)
+    return resolved[label], resolved[VM_WORKER_LABEL]
+
+
+def boundary_command(binary: Path, case: str, out: Path, store_dir: Path,
+                     extra: list[str]) -> list[str]:
+    return [str(binary), "boundary", "--case", case, "--out", str(out),
+            "--store-dir", str(store_dir), *extra]
+
+
 def add_build_report_arg(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--build-report", type=Path,

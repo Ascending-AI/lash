@@ -974,6 +974,7 @@ PACKAGE_DEPS = {
             "lash_vm_runtime": "//crates/lash-vm-runtime:lash-vm-runtime",
             "lash_vm_worker": "//crates/lash-vm-worker:lash-vm-worker",
             "libc": "//third-party/rust:p0188",
+            "opentelemetry_sdk": "//third-party/rust:p0223",
             "rand_chacha": "//third-party/rust:p0261",
             "rmp_serde": "//third-party/rust:p0282",
             "schemars": "//third-party/rust:p0299",

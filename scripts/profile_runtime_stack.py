@@ -17,7 +17,15 @@ import os
 import re
 import subprocess
 import sys
-from perf_artifacts import add_build_report_arg, artifacts, runtime_label
+import tempfile
+from perf_artifacts import (
+    add_boundary_args,
+    add_build_report_arg,
+    artifacts,
+    boundary_artifacts,
+    boundary_command,
+    runtime_label,
+)
 from pathlib import Path
 
 
@@ -180,6 +188,7 @@ def parse_args() -> argparse.Namespace:
         default=[],
         help="Additional Cargo feature to enable when building lash-perf.",
     )
+    add_boundary_args(parser)
     add_build_report_arg(parser)
     return parser.parse_args()
 
@@ -434,6 +443,76 @@ def run_sample(
     return sample
 
 
+def run_boundary_sample(
+    *,
+    root: Path,
+    binary: Path,
+    worker: Path | None,
+    case: str,
+    extra: list[str],
+    stack_bytes: int,
+    out: Path,
+    timeout_seconds: int,
+) -> dict[str, object]:
+    """One boundary case on Tokio workers of `stack_bytes`."""
+    sample_out = out.with_name(f"{out.stem}-{case}-{stack_bytes}.boundary.json")
+    env = dict(os.environ)
+    if worker:
+        env["LASH_VM_WORKER"] = str(worker)
+    started = dt.datetime.now(dt.timezone.utc)
+    sample: dict[str, object] = {
+        "scenario": case,
+        "stack_bytes": stack_bytes,
+        "started_at": started.isoformat(),
+        "runtime_perf_out": str(sample_out),
+        "summary_scenarios": [],
+        "stack_accounted": False,
+    }
+    with tempfile.TemporaryDirectory(prefix="boundary-", dir=out.parent) as scratch:
+        cmd = boundary_command(binary, case, sample_out, Path(scratch) / "store",
+                               [*extra, f"--worker-stack-bytes={stack_bytes}"])
+        try:
+            proc = subprocess.run(cmd, cwd=root, env=env, capture_output=True, text=True,
+                                  timeout=timeout_seconds)
+        except subprocess.TimeoutExpired as exc:
+            return sample | {
+                "status": "timeout", "returncode": None,
+                "duration_ms": timeout_seconds * 1000,
+                "stdout_tail": (exc.stdout or "")[-4000:],
+                "stderr_tail": (exc.stderr or "")[-4000:],
+            }
+    finished = dt.datetime.now(dt.timezone.utc)
+    reasons = []
+    if proc.returncode != 0:
+        reasons.append("boundary_case_failed")
+    else:
+        try:
+            profile = json.loads(sample_out.read_text()).get("stack_profile") or {}
+        except (OSError, json.JSONDecodeError):
+            profile = {}
+            reasons.append("missing_boundary_receipt")
+        sample["reported_stack_profile"] = profile
+        if profile.get("worker_stack_bytes") == stack_bytes:
+            sample["stack_accounted"] = True
+            sample["summary_scenarios"] = [case]
+        else:
+            reasons.append("stack_size_not_accounted")
+    if contains_stack_overflow(proc.stdout or "", proc.stderr or ""):
+        reasons.append("stack_overflow")
+    failed = bool(reasons)
+    sample |= {
+        "status": "failed" if failed else "ok",
+        "returncode": proc.returncode,
+        "duration_ms": round((finished - started).total_seconds() * 1000, 3),
+        "stdout_tail": proc.stdout[-4000:] if failed else "",
+        "stderr_tail": proc.stderr[-4000:] if failed else "",
+    }
+    if failed:
+        sample["failure_reasons"] = reasons
+        sample["failure_reason"] = ",".join(reasons)
+    return sample
+
+
 def first_success(samples: list[dict[str, object]], scenario: str) -> int | None:
     for sample in sorted(
         (sample for sample in samples if sample["scenario"] == scenario),
@@ -487,8 +566,22 @@ def main() -> int:
     root = repo_root()
     out = args.out or default_out(root)
     out.parent.mkdir(parents=True, exist_ok=True)
-    binary = resolve_binary(args, root)
-    scenarios = args.scenario or DEFAULT_SCENARIOS
+    worker = None
+    if args.boundary:
+        if args.scenario or args.enforce_budgets:
+            raise SystemExit("error: --boundary takes no --scenario and has no stack budget")
+        if args.binary:
+            binary = args.binary.resolve()
+        else:
+            label = runtime_label(args.cargo_feature)
+            binary, worker = boundary_artifacts(
+                root, label, build=args.build, report=args.build_report,
+                optimized=args.release,
+                symbolized=args.cpu_profile or label != runtime_label([]))
+        scenarios = [args.boundary]
+    else:
+        binary = resolve_binary(args, root)
+        scenarios = args.scenario or DEFAULT_SCENARIOS
     if args.budget_only and not args.enforce_budgets:
         raise SystemExit("error: --budget-only requires --enforce-budgets")
     stack_budgets = (
@@ -506,7 +599,16 @@ def main() -> int:
     for scenario in scenarios:
         for stack_bytes in stacks:
             print(f"stack={stack_bytes} scenario={scenario}", file=sys.stderr)
-            sample = run_sample(
+            sample = run_boundary_sample(
+                root=root,
+                binary=binary,
+                worker=worker,
+                case=scenario,
+                extra=list(args.boundary_arg),
+                stack_bytes=stack_bytes,
+                out=out,
+                timeout_seconds=args.timeout_seconds,
+            ) if args.boundary else run_sample(
                 root=root,
                 binary=binary,
                 scenario=scenario,
@@ -533,7 +635,9 @@ def main() -> int:
         "turns": max(args.turns, 1),
         "scenarios": scenarios,
         "known_scenarios": KNOWN_RUNTIME_SCENARIOS,
-        "missing_known_scenarios": sorted(set(KNOWN_RUNTIME_SCENARIOS) - set(scenarios)),
+        "missing_known_scenarios": (
+            [] if args.boundary else sorted(set(KNOWN_RUNTIME_SCENARIOS) - set(scenarios))
+        ),
         "stack_bytes": stacks,
         "stack_budgets": stack_budgets,
         "first_success_stack_bytes": {

@@ -306,7 +306,7 @@ pub(super) async fn run(operations: usize) -> Result<Receipt> {
                 "attachment turn failed: {:?}; calls={:?}; phases={:?}",
                 output.result.outcome,
                 output.result.llm_calls,
-                meter.0.lock_recover()
+                meter.phases.lock_recover()
             );
         }
         ensure!(
