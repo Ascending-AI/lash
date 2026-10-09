@@ -403,8 +403,14 @@ impl crate::ProcessEngine for Engine {
 
     fn start_artifacts(
         &self,
-        _payload: &serde_json::Value,
+        payload: &serde_json::Value,
     ) -> Result<Vec<ArtifactName>, PluginError> {
+        if payload.get("program") == Some(&serde_json::json!("p")) {
+            return Ok(vec![
+                name(ArtifactStoreId::module(), "mod-definition"),
+                name(ArtifactStoreId::ProcessEnv, "env-definition"),
+            ]);
+        }
         Ok(vec![
             name(ArtifactStoreId::module(), "mod-start"),
             name(ArtifactStoreId::Engine(ENGINE_KIND.to_owned()), "own-start"),
@@ -806,6 +812,50 @@ async fn a_start_by_id_carries_its_descriptor_and_manifest_onto_its_record() {
             ]
         )]
     );
+}
+
+/// FIG-5638, ADR 0109 §1.4: an immutable definition manifest disagreement
+/// refuses cleanup with a typed cause, without severing the start's edges.
+#[tokio::test]
+async fn a_definition_manifest_disagreement_refuses_cleanup_without_retrying() {
+    let harness = harness();
+    let draft = crate::ProcessDefinitionDraft::new(
+        ENGINE_KIND,
+        serde_json::json!({}),
+        [name(ArtifactStoreId::module(), "wrong-module")],
+    )
+    .expect("a well-formed but inconsistent draft");
+    let id = draft.id();
+    harness
+        .applied
+        .descriptors
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert(id.as_str().to_owned(), draft.to_store_bytes());
+    harness.retain(&ProcessId::fixture("inconsistent-definition"));
+    harness
+        .authorities
+        .retained
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .as_mut()
+        .expect("a retained record")
+        .definition_id = Some(id);
+    let result = harness
+        .deliver(ArtifactCleanup::Await(ReferrerGuard::Start {
+            start_key: start_key(),
+            starter: journal("starter"),
+        }))
+        .await;
+    assert!(
+        matches!(
+            result,
+            Err(DeliveryFailure::Refused(ref error))
+                if error.code == RuntimeErrorCode::DefinitionRefused
+        ),
+        "an invalid definition must refuse cleanup, got {result:?}"
+    );
+    assert!(harness.nothing_applied());
 }
 
 impl Harness {
