@@ -51,7 +51,10 @@ mod scope;
 mod tests;
 
 pub use correspondence::{WorkflowCorrespondence, WorkflowCorrespondenceEntry, WorkflowNodeSource};
-pub use edit::{WorkflowBindingRef, WorkflowEdgeDrag, WorkflowEdit, WorkflowExpressionRef};
+pub use edit::{
+    WorkflowBindingRef, WorkflowBodyLayout, WorkflowBodyLayoutItem, WorkflowEdgeDrag, WorkflowEdit,
+    WorkflowExpressionRef,
+};
 
 use correspondence::Journal;
 use scope::{FrameRoot, Lexical, Role};
@@ -384,8 +387,8 @@ impl WorkflowDraft {
     pub fn body(&self, body: &WorkflowBodyRef) -> Option<Vec<WorkflowDraftHandle>> {
         let body = edit::body(&self.state.working, body)?;
         Some(
-            body.nodes
-                .iter()
+            body.nodes()
+                .into_iter()
                 .filter_map(|node| WorkflowDraftHandle::of(&node.id))
                 .collect(),
         )
@@ -618,7 +621,7 @@ impl State {
                 if let Some(handle) = WorkflowDraftHandle::of(&process.id) {
                     self.journal.deleted.insert(handle);
                 }
-                for node in &process.body.nodes {
+                for node in process.body.nodes() {
                     self.forget(node, false);
                 }
             }
@@ -673,21 +676,21 @@ impl State {
         assigned: &mut BTreeMap<WorkflowNodeId, WorkflowDraftHandle>,
     ) {
         let single = !edited.is_statement_list();
+        let edited = edited.nodes();
+        let produced = canonical.nodes();
         let counts = edited
-            .nodes
             .iter()
             .map(|node| listed_statements(node, single))
-            .collect::<Option<Vec<_>>>()
-            .filter(|counts| counts.iter().sum::<usize>() == canonical.nodes.len());
-        let Some(counts) = counts else {
-            for node in &edited.nodes {
+            .collect::<Vec<_>>();
+        if counts.iter().sum::<usize>() != produced.len() {
+            for node in edited {
                 self.forget(node, true);
             }
             self.adopt(canonical, WorkflowNodeSource::Authored, assigned);
             return;
-        };
-        let mut produced = canonical.nodes.iter();
-        for (node, count) in edited.nodes.iter().zip(counts) {
+        }
+        let mut produced = produced.into_iter();
+        for (node, count) in edited.into_iter().zip(counts) {
             let pieces = produced.by_ref().take(count).collect::<Vec<_>>();
             let Some(handle) = WorkflowDraftHandle::of(&node.id) else {
                 for piece in pieces {
@@ -703,7 +706,7 @@ impl State {
                 }
                 pieces => {
                     for (_, child) in children(node) {
-                        for node in &child.nodes {
+                        for node in child.nodes() {
                             self.forget(node, false);
                         }
                     }
@@ -738,7 +741,7 @@ impl State {
         }
         for (slot, body) in &edited {
             if !canonical.iter().any(|(canonical, _)| canonical == slot) {
-                for node in &body.nodes {
+                for node in body.nodes() {
                     self.forget(node, false);
                 }
             }
@@ -760,7 +763,7 @@ impl State {
         source: WorkflowNodeSource,
         assigned: &mut BTreeMap<WorkflowNodeId, WorkflowDraftHandle>,
     ) {
-        for node in &body.nodes {
+        for node in body.nodes() {
             self.adopt_node(node, source, assigned);
         }
     }
@@ -790,7 +793,7 @@ impl State {
             }
         }
         for (_, child) in children(node) {
-            for node in &child.nodes {
+            for node in child.nodes() {
                 self.forget(node, unmatched);
             }
         }
@@ -993,8 +996,8 @@ fn holder<'a>(
 
 /// How many statements a body lists an edited node's statement as. `single`
 /// is whether the body is that one statement with no list around it.
-fn listed_statements(node: &WorkflowNode, single: bool) -> Option<usize> {
-    let statement = workflow_node_statement(node).ok()?;
+fn listed_statements(node: &WorkflowNode, single: bool) -> usize {
+    let statement = workflow_node_statement(node);
     let list = single
         || matches!(
             statement,
@@ -1003,11 +1006,11 @@ fn listed_statements(node: &WorkflowNode, single: bool) -> Option<usize> {
                 ..
             }
         );
-    Some(if list {
+    if list {
         statement_list(&statement).len()
     } else {
         1
-    })
+    }
 }
 
 fn children(node: &WorkflowNode) -> Vec<(&'static str, &WorkflowSubgraph)> {
@@ -1030,7 +1033,7 @@ fn processes(graph: &WorkflowGraph) -> impl Iterator<Item = &WorkflowProcess> {
 /// Every node id and process container id of `graph`, in document order.
 fn node_ids_mut(graph: &mut WorkflowGraph) -> Vec<&mut WorkflowNodeId> {
     fn body<'g>(graph: &'g mut WorkflowSubgraph, ids: &mut Vec<&'g mut WorkflowNodeId>) {
-        for node in &mut graph.nodes {
+        for node in graph.nodes_mut() {
             ids.push(&mut node.id);
             if let WorkflowNodeKind::Container(container) = &mut node.kind {
                 for (_, child) in container.child_subgraphs_mut() {

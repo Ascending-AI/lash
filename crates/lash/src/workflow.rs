@@ -121,20 +121,20 @@ pub use lash_trace::{
 pub use lash_trace::{WorkflowDocumentEntry, WorkflowDocumentRef};
 
 pub use lash_vm::{
-    WORKFLOW_IR_VERSION, WorkflowBodyForm, WorkflowCatch, WorkflowCompletionGroup, WorkflowGraph,
-    WorkflowGraphError, WorkflowIrVersionRefusal, WorkflowPinnedSlots, WorkflowProcessWrapper,
-    WorkflowRunDriver, workflow_node_statement, workflow_program_from_graph,
+    WORKFLOW_IR_VERSION, WorkflowBodyItem, WorkflowBodyShape, WorkflowCatch, WorkflowGraph,
+    WorkflowGraphError, WorkflowIrVersionRefusal, WorkflowMemberStep, WorkflowProcessWrapper,
+    WorkflowRunDriver, WorkflowStateWrite, workflow_node_statement, workflow_program_from_graph,
 };
 pub use lash_vm::{
     WorkflowAdmission, WorkflowAdmissionDiagnostic, WorkflowAdmissionDiagnosticKind,
     WorkflowAdmissionLocation, WorkflowAdmissionRefusal,
 };
 pub use lash_vm::{
-    WorkflowBindingRef, WorkflowBodyRef, WorkflowCorrespondence, WorkflowCorrespondenceEntry,
-    WorkflowDraft, WorkflowDraftHandle, WorkflowDraftOpenError, WorkflowDraftRevision,
-    WorkflowEdgeDrag, WorkflowEdit, WorkflowEditDiagnostic, WorkflowEditDiagnosticKind,
-    WorkflowEditLocation, WorkflowEditRefusal, WorkflowEditTransaction, WorkflowExpressionRef,
-    WorkflowNodeSource,
+    WorkflowBindingRef, WorkflowBodyLayout, WorkflowBodyLayoutItem, WorkflowBodyRef,
+    WorkflowCorrespondence, WorkflowCorrespondenceEntry, WorkflowDraft, WorkflowDraftHandle,
+    WorkflowDraftOpenError, WorkflowDraftRevision, WorkflowEdgeDrag, WorkflowEdit,
+    WorkflowEditDiagnostic, WorkflowEditDiagnosticKind, WorkflowEditLocation, WorkflowEditRefusal,
+    WorkflowEditTransaction, WorkflowExpressionRef, WorkflowNodeSource,
 };
 pub use lash_vm_runtime::{WorkflowDocument, WorkflowEntry, WorkflowExecutionDocument};
 

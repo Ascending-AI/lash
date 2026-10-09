@@ -12,10 +12,10 @@ use crate::{
 };
 
 use super::{
-    WorkflowBindingRef, WorkflowBodyRef, WorkflowCorrespondence,
-    WorkflowCorrespondenceEntry as Entry, WorkflowDraft, WorkflowDraftHandle, WorkflowEdgeDrag,
-    WorkflowEdit, WorkflowEditDiagnosticKind as Kind, WorkflowEditLocation, WorkflowEditRefusal,
-    WorkflowEditTransaction, WorkflowNodeSource,
+    WorkflowBindingRef, WorkflowBodyLayout, WorkflowBodyLayoutItem, WorkflowBodyRef,
+    WorkflowCorrespondence, WorkflowCorrespondenceEntry as Entry, WorkflowDraft,
+    WorkflowDraftHandle, WorkflowEdgeDrag, WorkflowEdit, WorkflowEditDiagnosticKind as Kind,
+    WorkflowEditLocation, WorkflowEditRefusal, WorkflowEditTransaction, WorkflowNodeSource,
 };
 
 fn echo(value: Expr) -> Expr {
@@ -224,8 +224,7 @@ fn removing_a_producer_with_live_uses_is_refused_unless_the_transaction_reconnec
         },
         "the diagnostic points at the read"
     );
-    let statement =
-        workflow_node_statement(draft.node(consumer).expect("still there")).expect("a statement");
+    let statement = workflow_node_statement(draft.node(consumer).expect("still there"));
     assert_eq!(
         statement.at_slots(&echoed().expr_slots().expect("structural")),
         Some(&b::var("value"))
@@ -717,9 +716,9 @@ fn correspondence_follows_a_node_through_normalization() {
 }
 
 #[test]
-fn an_edit_shifts_the_completion_groups_around_it() {
+fn an_edit_leaves_the_completion_groups_around_it() {
     // The second statement is a list closed by its own completion value: a
-    // group the body's form names by position.
+    // group of the body.
     let valued = |statements: Vec<Expr>| {
         let mut items = statements;
         items.push(b::string("value"));
@@ -765,6 +764,67 @@ fn an_edit_shifts_the_completion_groups_around_it() {
             b::print(b::string("last")),
         ])
     );
+}
+
+#[test]
+fn a_layout_groups_the_statements_it_names_and_no_others() {
+    let mut draft = open(&b::program(vec![
+        b::print(b::string("first")),
+        b::print(b::string("second")),
+        b::print(b::string("last")),
+    ]));
+    let [first, second, last] = main(&draft)[..] else {
+        panic!("three statements");
+    };
+    let grouped = |items: Vec<WorkflowBodyLayoutItem>| WorkflowEdit::SetBodyLayout {
+        body: WorkflowBodyRef::Main,
+        layout: WorkflowBodyLayout::List {
+            items: vec![
+                WorkflowBodyLayoutItem::Node(first),
+                WorkflowBodyLayoutItem::Group {
+                    items,
+                    value: b::string("value"),
+                },
+                WorkflowBodyLayoutItem::Node(last),
+            ],
+            completion: Some(Expr::Absent),
+        },
+    };
+
+    // A layout arranges the body's statements: it cannot drop one, and
+    // reordering is a move.
+    for items in [
+        Vec::new(),
+        vec![
+            WorkflowBodyLayoutItem::Node(last),
+            WorkflowBodyLayoutItem::Node(second),
+        ],
+    ] {
+        let (_, location, kind) = refused(&mut draft, vec![grouped(items)]);
+        assert_eq!(location, WorkflowEditLocation::Document);
+        assert!(matches!(kind, Kind::EditDoesNotApply { .. }), "{kind:?}");
+    }
+
+    apply(
+        &mut draft,
+        vec![grouped(vec![WorkflowBodyLayoutItem::Node(second)])],
+    )
+    .expect("the layout names the body's statements in order");
+    assert_eq!(
+        spelled(&draft),
+        Program {
+            main: completion(vec![
+                b::print(b::string("first")),
+                b::role(
+                    StructuralRole::Completion,
+                    b::block(vec![b::print(b::string("second")), b::string("value")]),
+                ),
+                b::print(b::string("last")),
+            ]),
+            ..b::program(Vec::new())
+        }
+    );
+    assert_eq!(main(&draft), [first, second, last], "every handle survives");
 }
 
 #[test]

@@ -2064,6 +2064,7 @@
       "type": "string"
     },
     "WorkflowEffectKind": {
+      "description": "Which effect a [`WorkflowEffect`] is, without its operands.",
       "enum": [
         "await_join",
         "sleep_for",
@@ -2074,6 +2075,7 @@
       "type": "string"
     },
     "WorkflowTerminalKind": {
+      "description": "Whether a [`WorkflowTerminal`] finishes or fails, without its value.",
       "enum": [
         "finish",
         "fail"

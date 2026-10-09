@@ -107,7 +107,7 @@ path, with a stable `code()`.
 | A label | `SetLabel` |
 | Processes | `InsertProcess`, `RemoveProcess`, `RenameProcess`, `SetProcessSignature`, `SetProcessWrapper` |
 | Declared functions and private bindings | `InsertFunction`, `ReplaceFunction`, `RemoveFunction`, `SetPrivateBindings` |
-| How a body is spelled around its statements | `SetBodyForm` |
+| How a body arranges its statements: its completion value and groups | `SetBodyLayout` |
 
 A lifted process (an inline process, shown as a container named by a
 digest) is derived from its content. `RenameProcess` and `RemoveProcess`

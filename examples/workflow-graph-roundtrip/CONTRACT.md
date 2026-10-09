@@ -290,7 +290,7 @@ Invalid graph edits return HTTP `422`:
 
 Typed render codes are `unsupported_schema_version`, `unsupported_ir_version`,
 `duplicate_node_id`, `missing_required_child`, `invalid_node_payload`,
-`invalid_body_form`, `invalid_expression`, `invalid_assignment_target`,
+`invalid_expression`, `invalid_assignment_target`,
 `duplicate_process_name`, `process_origin_mismatch`, `invalid_program`, and
 `canonical_source`. A transaction the draft refuses returns the draft's own
 code: `unresolved_binding`, `binding_captured`, `binding_name_taken`,
@@ -367,7 +367,7 @@ The response has the shape of a save's. There is one `op` for each
 | `setLoopBinding` | `node`, `element`, `authored_element?`, `bind?` |
 | `setCatch` | `node`, `binding?` |
 | `setFinally` | `node`, `present` |
-| `setBodyForm` | `body`, `form` |
+| `setBodyLayout` | `body`, `layout`: `{ form: "list", items, completion? }` with each item `{ node }` or `{ group: { items, value } }`, or `{ form: "statement", node }`; it names exactly the body's statements, in order |
 | `insertProcess` | `name`, `params`, `return_ty?` |
 | `removeProcess`, `renameProcess` | `process`, and `name` to rename |
 | `setProcessSignature` | `process`, `params`, `return_ty?` |

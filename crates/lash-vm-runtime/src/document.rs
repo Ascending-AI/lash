@@ -129,7 +129,7 @@ impl WorkflowExecutionDocument {
             body: &lash_vm::WorkflowSubgraph,
             sites: &mut Vec<lash_sansio::WorkflowSiteRef>,
         ) {
-            for node in &body.nodes {
+            for node in body.nodes() {
                 sites.extend(node.execution_sites.iter().map(|site| {
                     lash_sansio::WorkflowSiteRef::new(node.id.to_string(), site.site_path.clone())
                 }));

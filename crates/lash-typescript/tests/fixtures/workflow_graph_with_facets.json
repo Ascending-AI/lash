@@ -5,136 +5,139 @@
   "facet_schema_version": 4,
   "declarations": [],
   "main": {
-    "nodes": [
-      {
-        "id": "node:1de6eca7fbb5c02fa3b32d47",
-        "name": "lookup",
-        "name_source": "derived",
-        "kind": {
-          "kind": "call",
-          "binding": {
-            "root": "answer"
-          },
-          "receiver": {
-            "ResourceRef": {
-              "path": [
-                "tools"
-              ],
-              "resource_type": "Tools",
-              "alias": "tools"
-            }
-          },
-          "operation": "lookup",
-          "arguments": [
-            {
-              "kind": "named",
-              "fields": [
-                [
-                  "query",
-                  {
-                    "String": "x"
-                  }
-                ]
-              ]
-            }
-          ],
-          "result_steps": [
-            "unwrap_result",
-            "await"
-          ]
-        },
-        "type_facets": {
-          "expected_arguments": [
-            {
-              "slot": [
+    "body": {
+      "form": "list",
+      "items": [
+        {
+          "node": {
+            "id": "node:1de6eca7fbb5c02fa3b32d47",
+            "name": "lookup",
+            "kind": {
+              "kind": "call",
+              "binding": {
+                "root": "answer"
+              },
+              "receiver": {
+                "ResourceRef": {
+                  "path": [
+                    "tools"
+                  ],
+                  "resource_type": "Tools",
+                  "alias": "tools"
+                }
+              },
+              "operation": "lookup",
+              "arguments": [
                 {
-                  "arg": 0
+                  "kind": "named",
+                  "fields": [
+                    [
+                      "query",
+                      {
+                        "String": "x"
+                      }
+                    ]
+                  ]
                 }
               ],
-              "ty": {
-                "Object": [
-                  {
-                    "name": "query",
-                    "ty": "Str",
-                    "optional": false
-                  }
-                ]
-              }
+              "result_steps": [
+                "unwrap_result",
+                "await"
+              ]
             },
-            {
-              "slot": [
+            "type_facets": {
+              "expected_arguments": [
                 {
-                  "arg": 0
+                  "slot": [
+                    {
+                      "arg": 0
+                    }
+                  ],
+                  "ty": {
+                    "Object": [
+                      {
+                        "name": "query",
+                        "ty": "Str",
+                        "optional": false
+                      }
+                    ]
+                  }
                 },
                 {
-                  "field": "query"
+                  "slot": [
+                    {
+                      "arg": 0
+                    },
+                    {
+                      "field": "query"
+                    }
+                  ],
+                  "ty": "Str"
                 }
-              ],
-              "ty": "Str"
-            }
-          ]
-        },
-        "outputs": [
-          {
-            "variable": "answer",
-            "version": 1
-          }
-        ],
-        "execution_sites": [
-          {
-            "owner": "main",
-            "path": [
-              0
-            ],
-            "kind": "resource_operation",
-            "label": "lookup"
-          }
-        ]
-      },
-      {
-        "id": "node:e5da609e1296a1d8e31ae439",
-        "name": "finish",
-        "name_source": "derived",
-        "kind": {
-          "kind": "terminal",
-          "terminal": "finish",
-          "expression": {
-            "Finish": {
-              "Variable": "answer"
-            }
-          }
-        },
-        "available_variables": [
-          "answer"
-        ],
-        "type_facets": {
-          "available_variables": [
-            {
-              "name": "answer",
-              "ty": {
-                "Object": [
-                  {
-                    "name": "answer",
-                    "ty": "Str",
-                    "optional": false
-                  }
-                ]
+              ]
+            },
+            "outputs": [
+              {
+                "variable": "answer",
+                "version": 1
               }
-            }
-          ]
-        },
-        "execution_sites": [
-          {
-            "owner": "main",
-            "path": [
-              1
             ],
-            "kind": "terminal",
-            "label": "result"
+            "execution_sites": [
+              {
+                "owner": "main",
+                "path": [
+                  0
+                ],
+                "kind": "resource_operation",
+                "label": "lookup"
+              }
+            ]
           }
-        ]
-      }
-    ],
+        },
+        {
+          "node": {
+            "id": "node:e5da609e1296a1d8e31ae439",
+            "name": "finish",
+            "kind": {
+              "kind": "terminal",
+              "terminal": "finish",
+              "value": {
+                "Variable": "answer"
+              }
+            },
+            "available_variables": [
+              "answer"
+            ],
+            "type_facets": {
+              "available_variables": [
+                {
+                  "name": "answer",
+                  "ty": {
+                    "Object": [
+                      {
+                        "name": "answer",
+                        "ty": "Str",
+                        "optional": false
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "execution_sites": [
+              {
+                "owner": "main",
+                "path": [
+                  1
+                ],
+                "kind": "terminal",
+                "label": "result"
+              }
+            ]
+          }
+        }
+      ]
+    },
     "edges": [
       {
         "id": "edge:40198ae72035692a1480797f",

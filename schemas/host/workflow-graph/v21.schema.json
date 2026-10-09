@@ -1837,7 +1837,7 @@
       "type": "object"
     },
     "WorkflowArgument": {
-      "description": "One call or effect argument in graph order.\n\nType facets address these values with a serialized [`WorkflowSlotPath`].\nIts typed call, argument, field, and index segments cannot collide when a\nfield contains punctuation. Nodes with several nested receiver calls add a\ncall segment in depth-first IR walk order.",
+      "description": "One call argument in graph order.\n\nType facets address these values with a serialized [`WorkflowSlotPath`].\nIts typed call, argument, field, and index segments cannot collide when a\nfield contains punctuation. Nodes with several nested receiver calls add a\ncall segment in depth-first IR walk order.",
       "oneOf": [
         {
           "additionalProperties": false,
@@ -1888,50 +1888,83 @@
         }
       ]
     },
-    "WorkflowBodyForm": {
-      "description": "The IR spelling of a body whose statements are a subgraph's nodes.",
+    "WorkflowBodyItem": {
+      "description": "One entry of a statement list.",
       "oneOf": [
         {
           "additionalProperties": false,
-          "description": "A block of the statements.",
           "properties": {
+            "node": {
+              "$ref": "#/$defs/WorkflowNode"
+            }
+          },
+          "required": [
+            "node"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A run of statements the IR holds as one nested statement list closed\nby its own completion value: the statement a front end gave a value.\nIt may hold no statement at all.",
+          "properties": {
+            "group": {
+              "additionalProperties": false,
+              "properties": {
+                "items": {
+                  "default": [],
+                  "items": {
+                    "$ref": "#/$defs/WorkflowBodyItem"
+                  },
+                  "type": "array"
+                },
+                "value": {
+                  "$ref": "#/$defs/Expr"
+                }
+              },
+              "required": [
+                "value"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "group"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "WorkflowBodyShape": {
+      "description": "The statements of a body, in execution order, as the IR spells them.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "A list of statements. With `completion` the list is closed by that\nvalue ([`StructuralRole::Completion`]): the statements run in order\nand the list evaluates to it, a pure expression that is no statement.\nWithout one it is a block.",
+          "properties": {
+            "completion": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Expr"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "form": {
-              "const": "block",
+              "const": "list",
               "type": "string"
             },
-            "groups": {
+            "items": {
+              "default": [],
               "items": {
-                "$ref": "#/$defs/WorkflowCompletionGroup"
+                "$ref": "#/$defs/WorkflowBodyItem"
               },
               "type": "array"
             }
           },
           "required": [
             "form"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "A statement list closed by a completion value\n([`StructuralRole::Completion`]): the statements run in order and the\nlist evaluates to `value`, a pure expression that is no statement.",
-          "properties": {
-            "form": {
-              "const": "completion",
-              "type": "string"
-            },
-            "groups": {
-              "items": {
-                "$ref": "#/$defs/WorkflowCompletionGroup"
-              },
-              "type": "array"
-            },
-            "value": {
-              "$ref": "#/$defs/Expr"
-            }
-          },
-          "required": [
-            "form",
-            "value"
           ],
           "type": "object"
         },
@@ -1942,10 +1975,14 @@
             "form": {
               "const": "statement",
               "type": "string"
+            },
+            "node": {
+              "$ref": "#/$defs/WorkflowNode"
             }
           },
           "required": [
-            "form"
+            "form",
+            "node"
           ],
           "type": "object"
         }
@@ -1968,37 +2005,6 @@
       ],
       "type": "object"
     },
-    "WorkflowCompletionGroup": {
-      "additionalProperties": false,
-      "description": "A run of consecutive statements that the IR holds as one nested statement\nlist closed by its own completion value: the statement a front end gave a\nvalue. It covers the nodes `start .. start + len` of its body; groups are\nordered, never overlap, and nest through `groups`, whose ranges lie inside\nthis one. A group may cover no statement at all.",
-      "properties": {
-        "groups": {
-          "items": {
-            "$ref": "#/$defs/WorkflowCompletionGroup"
-          },
-          "type": "array"
-        },
-        "len": {
-          "format": "uint32",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "start": {
-          "format": "uint32",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "value": {
-          "$ref": "#/$defs/Expr"
-        }
-      },
-      "required": [
-        "start",
-        "len",
-        "value"
-      ],
-      "type": "object"
-    },
     "WorkflowDeclaration": {
       "oneOf": [
         {
@@ -2008,15 +2014,6 @@
             "body": {
               "$ref": "#/$defs/WorkflowSubgraph"
             },
-            "description": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "display_name": {
-              "type": "string"
-            },
             "id": {
               "$ref": "#/$defs/WorkflowNodeId"
             },
@@ -2024,11 +2021,19 @@
               "const": "process",
               "type": "string"
             },
+            "label": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/LabelMetadata"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The authored label, when the process has one."
+            },
             "name": {
               "type": "string"
-            },
-            "name_source": {
-              "$ref": "#/$defs/WorkflowNodeNameSource"
             },
             "origin": {
               "$ref": "#/$defs/ProcessOrigin",
@@ -2067,8 +2072,6 @@
             "kind",
             "id",
             "name",
-            "display_name",
-            "name_source",
             "body"
           ],
           "type": "object"
@@ -2200,16 +2203,6 @@
         }
       ]
     },
-    "WorkflowEffectKind": {
-      "enum": [
-        "await_join",
-        "sleep_for",
-        "print",
-        "break",
-        "continue"
-      ],
-      "type": "string"
-    },
     "WorkflowExecutionSite": {
       "description": "One execution site of a workflow node: the node (`owner` and `path`), the\nexact executable subexpression inside its statement (`site_path`), and a\ndescription of what runs there. `kind` and `label` describe the site; they\nare not its identity.",
       "properties": {
@@ -2257,6 +2250,50 @@
       ],
       "type": "object"
     },
+    "WorkflowMemberStep": {
+      "description": "The member a pinned assignment writes.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "field": {
+              "type": "string"
+            },
+            "step": {
+              "const": "field",
+              "type": "string"
+            }
+          },
+          "required": [
+            "step",
+            "field"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A computed index, pinned in `key_slot` before the value is evaluated.",
+          "properties": {
+            "index": {
+              "$ref": "#/$defs/Expr"
+            },
+            "key_slot": {
+              "type": "string"
+            },
+            "step": {
+              "const": "index",
+              "type": "string"
+            }
+          },
+          "required": [
+            "step",
+            "index",
+            "key_slot"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "WorkflowNode": {
       "additionalProperties": false,
       "properties": {
@@ -2266,12 +2303,6 @@
             "type": "string"
           },
           "type": "array"
-        },
-        "description": {
-          "type": [
-            "string",
-            "null"
-          ]
         },
         "execution_sites": {
           "items": {
@@ -2285,11 +2316,20 @@
         "kind": {
           "$ref": "#/$defs/WorkflowNodeKind"
         },
-        "name": {
-          "type": "string"
+        "label": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LabelMetadata"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The authored label, when the statement has one."
         },
-        "name_source": {
-          "$ref": "#/$defs/WorkflowNodeNameSource"
+        "name": {
+          "description": "Derived: what the statement is, read off its IR.",
+          "type": "string"
         },
         "outputs": {
           "items": {
@@ -2312,7 +2352,6 @@
       "required": [
         "id",
         "name",
-        "name_source",
         "kind"
       ],
       "type": "object"
@@ -2396,14 +2435,8 @@
         },
         {
           "additionalProperties": false,
+          "description": "Waits for `value` to settle, then applies `result_steps` to what it\nsettled with.",
           "properties": {
-            "arguments": {
-              "default": [],
-              "items": {
-                "$ref": "#/$defs/WorkflowArgument"
-              },
-              "type": "array"
-            },
             "binding": {
               "anyOf": [
                 {
@@ -2415,7 +2448,8 @@
               ]
             },
             "effect": {
-              "$ref": "#/$defs/WorkflowEffectKind"
+              "const": "await_join",
+              "type": "string"
             },
             "kind": {
               "const": "effect",
@@ -2426,11 +2460,117 @@
                 "$ref": "#/$defs/WorkflowResultStep"
               },
               "type": "array"
+            },
+            "value": {
+              "$ref": "#/$defs/Expr"
             }
           },
           "required": [
+            "effect",
             "kind",
-            "effect"
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "binding": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/AssignTarget"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "duration": {
+              "$ref": "#/$defs/Expr"
+            },
+            "effect": {
+              "const": "sleep_for",
+              "type": "string"
+            },
+            "kind": {
+              "const": "effect",
+              "type": "string"
+            }
+          },
+          "required": [
+            "duration",
+            "effect",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "binding": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/AssignTarget"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "effect": {
+              "const": "print",
+              "type": "string"
+            },
+            "kind": {
+              "const": "effect",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/Expr"
+            }
+          },
+          "required": [
+            "effect",
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Leaves the nearest enclosing loop. It has no value to bind.",
+          "properties": {
+            "effect": {
+              "const": "break",
+              "type": "string"
+            },
+            "kind": {
+              "const": "effect",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Starts the next iteration of the nearest enclosing loop. It has no\nvalue to bind.",
+          "properties": {
+            "effect": {
+              "const": "continue",
+              "type": "string"
+            },
+            "kind": {
+              "const": "effect",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect",
+            "kind"
           ],
           "type": "object"
         },
@@ -2463,28 +2603,56 @@
         },
         {
           "additionalProperties": false,
+          "description": "Assigns `value` to `target`.",
           "properties": {
-            "expression": {
-              "$ref": "#/$defs/Expr",
-              "description": "The assigned value, or with `update`, the operand the update applies\nto the target's current value (`target op= expression`)."
+            "kind": {
+              "const": "state_update",
+              "type": "string"
+            },
+            "target": {
+              "$ref": "#/$defs/AssignTarget"
+            },
+            "value": {
+              "$ref": "#/$defs/Expr"
+            },
+            "write": {
+              "const": "plain",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "target",
+            "value",
+            "write"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A member assignment that pins its reference base before it evaluates\nthe value ([`crate::StructuralRole::AttributeAssign`]): writes the\nmember `step` of the variable `root`.",
+          "properties": {
+            "base_slot": {
+              "description": "The slot the reference base is pinned in.",
+              "type": "string"
             },
             "kind": {
               "const": "state_update",
               "type": "string"
             },
-            "pinned": {
-              "anyOf": [
-                {
-                  "$ref": "#/$defs/WorkflowPinnedSlots"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Set when the update is a member assignment that pins its\nreference base before evaluating the value\n([`crate::StructuralRole::AttributeAssign`]): the slots it pins\nthem in. `target` is then one member step of a variable."
+            "operand": {
+              "$ref": "#/$defs/Expr",
+              "description": "The assigned value, or with `update` its right operand."
             },
-            "target": {
-              "$ref": "#/$defs/AssignTarget"
+            "result_slot": {
+              "description": "The slot the assigned value is held in.",
+              "type": "string"
+            },
+            "root": {
+              "type": "string"
+            },
+            "step": {
+              "$ref": "#/$defs/WorkflowMemberStep"
             },
             "update": {
               "anyOf": [
@@ -2494,34 +2662,91 @@
                 {
                   "type": "null"
                 }
-              ]
+              ],
+              "description": "The operator a compound update applies to the member's current\nvalue (`root.step op= operand`); a plain write has none."
+            },
+            "write": {
+              "const": "member",
+              "type": "string"
             }
           },
           "required": [
+            "base_slot",
             "kind",
-            "target",
-            "expression"
+            "operand",
+            "result_slot",
+            "root",
+            "step",
+            "write"
           ],
           "type": "object"
         },
         {
           "additionalProperties": false,
+          "description": "Finishes the process with `value`.",
           "properties": {
-            "expression": {
-              "$ref": "#/$defs/Expr"
-            },
             "kind": {
               "const": "terminal",
               "type": "string"
             },
             "terminal": {
-              "$ref": "#/$defs/WorkflowTerminalKind"
+              "const": "finish",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/Expr"
             }
           },
           "required": [
             "kind",
             "terminal",
-            "expression"
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Returns `value` from the enclosing function body, which in a process\nbody is the process's finish.",
+          "properties": {
+            "kind": {
+              "const": "terminal",
+              "type": "string"
+            },
+            "terminal": {
+              "const": "return",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/Expr"
+            }
+          },
+          "required": [
+            "kind",
+            "terminal",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Fails the process with `value`.",
+          "properties": {
+            "kind": {
+              "const": "terminal",
+              "type": "string"
+            },
+            "terminal": {
+              "const": "fail",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/Expr"
+            }
+          },
+          "required": [
+            "kind",
+            "terminal",
+            "value"
           ],
           "type": "object"
         },
@@ -2768,13 +2993,6 @@
         }
       ]
     },
-    "WorkflowNodeNameSource": {
-      "enum": [
-        "label",
-        "derived"
-      ],
-      "type": "string"
-    },
     "WorkflowNodeTypeFacets": {
       "properties": {
         "available_variables": {
@@ -2796,29 +3014,6 @@
           "type": "array"
         }
       },
-      "type": "object"
-    },
-    "WorkflowPinnedSlots": {
-      "additionalProperties": false,
-      "description": "The slots a pinned member assignment evaluates through, in evaluation\norder: the reference base, a computed index, then the assigned value.",
-      "properties": {
-        "base": {
-          "type": "string"
-        },
-        "key": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "result": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "base",
-        "result"
-      ],
       "type": "object"
     },
     "WorkflowProcessWrapper": {
@@ -2886,7 +3081,7 @@
       "type": "object"
     },
     "WorkflowResultStep": {
-      "description": "Ordered wrappers around a call or effect, from the operation outwards.",
+      "description": "Ordered wrappers around a call or an await, from the operation outwards.",
       "enum": [
         "await",
         "unwrap_result"
@@ -3042,38 +3237,24 @@
     "WorkflowSubgraph": {
       "additionalProperties": false,
       "properties": {
+        "body": {
+          "$ref": "#/$defs/WorkflowBodyShape",
+          "default": {
+            "form": "list",
+            "items": []
+          },
+          "description": "The body's statements, in execution order, as the IR holds them."
+        },
         "edges": {
           "default": [],
-          "description": "Derived: sequence follows `nodes` order and data dependencies follow\nthe bindings the nodes' expressions read.",
+          "description": "Derived: sequence follows statement order and data dependencies\nfollow the bindings the nodes' expressions read.",
           "items": {
             "$ref": "#/$defs/WorkflowEdge"
-          },
-          "type": "array"
-        },
-        "form": {
-          "$ref": "#/$defs/WorkflowBodyForm",
-          "default": {
-            "form": "block"
-          },
-          "description": "How the IR spells this ordered body."
-        },
-        "nodes": {
-          "default": [],
-          "description": "The body's statements, in execution order.",
-          "items": {
-            "$ref": "#/$defs/WorkflowNode"
           },
           "type": "array"
         }
       },
       "type": "object"
-    },
-    "WorkflowTerminalKind": {
-      "enum": [
-        "finish",
-        "fail"
-      ],
-      "type": "string"
     },
     "WorkflowTypeDiagnostic": {
       "description": "A semantic diagnostic at a node and optional argument slot. A source view\nsupplies text coordinates when a host shows the diagnostic in source.",

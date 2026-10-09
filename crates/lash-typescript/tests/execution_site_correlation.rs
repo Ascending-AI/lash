@@ -18,7 +18,7 @@ use lash_vm::testing::ast_builders as b;
 use lash_vm::testing::harness::{EchoHost, compiled_execution_sites, link_labeled};
 use lash_vm::{
     AbilityOp, AbilityOutcome, AstRoot, Declaration, ExecutionHost, ExecutionHostError,
-    ExecutionOutcome, LashVmExecutionObservation, Program, State, Value, WorkflowEffectKind,
+    ExecutionOutcome, LashVmExecutionObservation, Program, State, Value, WorkflowEffect,
     WorkflowNodeKind,
 };
 
@@ -310,7 +310,7 @@ finish(selected);
                     .nodes()
                     .find(|node| node.id == *node_id)
                     .expect("correlated graph node");
-                (node.name.clone(), *occurrence)
+                (node.display_name().to_string(), *occurrence)
             })
             .collect::<Vec<_>>();
         assert_eq!(
@@ -425,10 +425,7 @@ fn execution_site_wrapped_effect_uses_the_compiler_descriptor_for_its_graph_name
     let node = graph.nodes().next().expect("wrapped sleep graph node");
     assert!(matches!(
         &node.kind,
-        WorkflowNodeKind::Effect {
-            effect: WorkflowEffectKind::SleepFor,
-            ..
-        }
+        WorkflowNodeKind::Effect(WorkflowEffect::SleepFor { .. })
     ));
     assert_eq!(node.name, "sleep for");
     assert_eq!(
@@ -597,11 +594,8 @@ finish(1);
             )
         });
 
-    assert_eq!(graph_node.name, "Lookup app state");
-    assert_eq!(
-        graph_node.name_source,
-        lash_vm::WorkflowNodeNameSource::Label
-    );
+    assert_eq!(graph_node.display_name(), "Lookup app state");
+    assert!(graph_node.label.is_some());
     assert!(
         matches!(
             &graph_node.kind,
@@ -903,7 +897,7 @@ fn assert_sites_resolve_in_the_document(
 ) {
     let mut graph_sites = Vec::<WorkflowExecutionSite>::new();
     for node in graph.nodes() {
-        let statement = lash_vm::workflow_node_statement(node).expect("node statement");
+        let statement = lash_vm::workflow_node_statement(node);
         for site in &node.execution_sites {
             let slots = lash_vm::WorkflowSlotPath::structural(site.site_path.expr_slots());
             let expression = lash_vm::workflow_slot_value(&statement, &slots)

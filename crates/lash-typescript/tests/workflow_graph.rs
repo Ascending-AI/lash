@@ -20,8 +20,8 @@ use lash_vm::{
     WORKFLOW_GRAPH_SCHEMA_VERSION, WORKFLOW_TYPE_FACET_SCHEMA_VERSION, WorkflowArgument,
     WorkflowContainer, WorkflowDeclaration, WorkflowDiagnosticKind, WorkflowEdgeKind,
     WorkflowGraph, WorkflowGraphDecodeError, WorkflowNode, WorkflowNodeId, WorkflowNodeKind,
-    WorkflowNodeNameSource, WorkflowSlotPath, WorkflowSlotPathSegment, WorkflowSubgraph,
-    workflow_call_to_ir, workflow_slot_value,
+    WorkflowSlotPath, WorkflowSlotPathSegment, WorkflowSubgraph, workflow_call_to_ir,
+    workflow_slot_value,
 };
 
 /// The one process a fixture lifts.
@@ -115,14 +115,19 @@ fn source_coordinates_live_only_in_the_source_view() {
             if source.contains("sleep") {
                 let process = only_process(&graph);
                 assert_eq!(
-                    process.body.nodes.iter().map(text).collect::<Vec<_>>(),
+                    process
+                        .body
+                        .nodes()
+                        .into_iter()
+                        .map(text)
+                        .collect::<Vec<_>>(),
                     ["sleep(1)", "return 1;"]
                 );
             } else {
                 for label in ["Inner", "Outer"] {
                     let node = graph
                         .nodes()
-                        .find(|node| node.name == label)
+                        .find(|node| node.display_name() == label)
                         .expect("labeled read");
                     assert!(
                         text(node).contains("console.log(item)"),
@@ -139,7 +144,7 @@ fn source_coordinates_live_only_in_the_source_view() {
         Some(&slot_path_environment()),
     )
     .expect("diagnostic draft");
-    let node = &graph.main.nodes[0];
+    let node = graph.main.nodes()[0];
     let facets = node.type_facets.as_ref().expect("facets");
     assert!(!facets.diagnostics.is_empty());
     for diagnostic in &facets.diagnostics {
@@ -193,8 +198,8 @@ fn a_source_view_locates_nested_lifted_declaration_bodies() {
         };
         let slices = process
             .body
-            .nodes
-            .iter()
+            .nodes()
+            .into_iter()
             .map(|node| {
                 let span = view.spans[&node.id];
                 &view.source[span.start..span.end]
@@ -235,19 +240,22 @@ finish(items);
         .expect("serialized workflow graph decodes from a JSON value");
     assert_eq!(from_value, graph);
 
-    let conditional = &value["main"]["nodes"][1]["kind"];
+    let conditional = &value["main"]["body"]["items"][1]["node"]["kind"];
     assert_eq!(conditional["kind"], "container");
     assert_eq!(conditional["container_kind"], "if");
-    assert_eq!(conditional["else_graph"]["nodes"], serde_json::json!([]));
+    assert_eq!(
+        conditional["else_graph"]["body"]["items"],
+        serde_json::json!([])
+    );
 
-    let for_loop = &conditional["then_graph"]["nodes"][0]["kind"];
+    let for_loop = &conditional["then_graph"]["body"]["items"][0]["node"]["kind"];
     assert_eq!(for_loop["kind"], "container");
     assert_eq!(for_loop["container_kind"], "for");
 
-    let while_loop = &for_loop["body"]["nodes"][0]["kind"];
+    let while_loop = &for_loop["body"]["body"]["items"][0]["node"]["kind"];
     assert_eq!(while_loop["kind"], "container");
     assert_eq!(while_loop["container_kind"], "while");
-    assert_eq!(while_loop["body"]["nodes"], serde_json::json!([]));
+    assert_eq!(while_loop["body"]["body"]["items"], serde_json::json!([]));
 
     let rendered = workflow_graph_to_source(&from_string).expect("decoded graph renders");
     assert_eq!(rendered, canonical);
@@ -282,7 +290,8 @@ fn workflow_graph_decode_checks_version_before_shape() {
     let graph = workflow_graph_from_source("finish(1);\n").expect("fixture projects");
     let mut value = serde_json::to_value(graph).expect("graph serializes");
     value["schema_version"] = serde_json::json!(WORKFLOW_GRAPH_SCHEMA_VERSION - 1);
-    value["main"]["nodes"][0]["kind"] = serde_json::json!({ "kind": "future_node" });
+    value["main"]["body"]["items"][0]["node"]["kind"] =
+        serde_json::json!({ "kind": "future_node" });
 
     let encoded = serde_json::to_string(&value).expect("fixture JSON encodes");
     assert!(matches!(
@@ -299,7 +308,8 @@ fn workflow_graph_decode_checks_version_before_shape() {
 fn workflow_graph_refuses_unknown_variant() {
     let graph = workflow_graph_from_source("finish(1);\n").expect("fixture projects");
     let mut unknown_variant = serde_json::to_value(graph).expect("graph serializes");
-    unknown_variant["main"]["nodes"][0]["kind"] = serde_json::json!({ "kind": "future_node" });
+    unknown_variant["main"]["body"]["items"][0]["node"]["kind"] =
+        serde_json::json!({ "kind": "future_node" });
     let error = WorkflowGraph::decode_json(
         &serde_json::to_string(&unknown_variant).expect("fixture JSON encodes"),
     )
@@ -336,12 +346,12 @@ fn facet_reader_requires_exact_version() {
         serde_json::json!(WORKFLOW_TYPE_FACET_SCHEMA_VERSION)
     );
     assert!(
-        value["main"]["nodes"][0]["type_facets"]
+        value["main"]["body"]["items"][0]["node"]["type_facets"]
             .as_object()
             .is_some_and(|facets| !facets.is_empty())
     );
     value["facet_schema_version"] = serde_json::json!(WORKFLOW_TYPE_FACET_SCHEMA_VERSION - 1);
-    value["main"]["nodes"][0]["type_facets"]["diagnostics"] = serde_json::json!([{
+    value["main"]["body"]["items"][0]["node"]["type_facets"]["diagnostics"] = serde_json::json!([{
         "kind": "future_diagnostic"
     }]);
 
@@ -354,12 +364,12 @@ fn facet_reader_requires_exact_version() {
 #[test]
 fn facet_reader_tolerates_unknown_field() {
     let graph = populated_facet_graph();
-    let expected = graph.main.nodes[0]
+    let expected = graph.main.nodes()[0]
         .type_facets
         .clone()
         .expect("fixture has facets");
     let mut value = serde_json::to_value(&graph).expect("graph serializes");
-    value["main"]["nodes"][0]["type_facets"]["future"] = serde_json::json!(true);
+    value["main"]["body"]["items"][0]["node"]["type_facets"]["future"] = serde_json::json!(true);
 
     let decoded = WorkflowGraph::decode_json_value(value)
         .expect("known facet objects tolerate additive unknown fields");
@@ -367,15 +377,15 @@ fn facet_reader_tolerates_unknown_field() {
         decoded.facet_schema_version,
         Some(WORKFLOW_TYPE_FACET_SCHEMA_VERSION)
     );
-    assert_eq!(decoded.main.nodes[0].type_facets, Some(expected));
+    assert_eq!(decoded.main.nodes()[0].type_facets, Some(expected));
 }
 
 #[test]
 fn facet_reader_refuses_unknown_variant() {
     let graph = populated_facet_graph();
     let mut value = serde_json::to_value(graph).expect("graph serializes");
-    value["main"]["nodes"][0]["type_facets"]["diagnostics"] = serde_json::json!([{
-        "node_id": value["main"]["nodes"][0]["id"].clone(),
+    value["main"]["body"]["items"][0]["node"]["type_facets"]["diagnostics"] = serde_json::json!([{
+        "node_id": value["main"]["body"]["items"][0]["node"]["id"].clone(),
         "kind": "future_diagnostic",
         "slot": null,
         "message": "fixture",
@@ -409,11 +419,13 @@ fn workflow_graph_decode_refuses_unknown_fields_in_nested_non_facet_payloads() {
     ));
 
     let mut execution_site = golden_value.clone();
-    execution_site["main"]["nodes"][0]["execution_sites"][0]["future"] = serde_json::json!(true);
+    execution_site["main"]["body"]["items"][0]["node"]["execution_sites"][0]["future"] =
+        serde_json::json!(true);
     cases.push(("execution site", "future", execution_site));
 
     let mut ast_payload = golden_value.clone();
-    ast_payload["main"]["nodes"][0]["kind"]["binding"]["future"] = serde_json::json!(true);
+    ast_payload["main"]["body"]["items"][0]["node"]["kind"]["binding"]["future"] =
+        serde_json::json!(true);
     cases.push(("AssignTarget", "future", ast_payload));
 
     let function_graph = WorkflowGraph {
@@ -454,7 +466,8 @@ fn workflow_graph_decode_refuses_unknown_fields_in_nested_non_facet_payloads() {
     }
 
     let mut extended_facet = golden_value;
-    extended_facet["main"]["nodes"][0]["type_facets"]["future"] = serde_json::json!(true);
+    extended_facet["main"]["body"]["items"][0]["node"]["type_facets"]["future"] =
+        serde_json::json!(true);
     WorkflowGraph::decode_json(
         &serde_json::to_string(&extended_facet).expect("the facet extension encodes"),
     )
@@ -514,7 +527,7 @@ fn workflow_graph_ir_json_golden_is_exact() {
     let kinds = serde_json::Value::Array(
         graph
             .main
-            .nodes
+            .nodes()
             .iter()
             .map(|node| serde_json::to_value(&node.kind).expect("node kind serializes"))
             .collect(),
@@ -541,10 +554,7 @@ fn workflow_graph_ir_json_golden_is_exact() {
             {
                 "kind": "effect",
                 "effect": "sleep_for",
-                "arguments": [{
-                    "kind": "positional",
-                    "value": { "String": "1s" }
-                }]
+                "duration": { "String": "1s" }
             }
         ])
     );
@@ -622,7 +632,7 @@ finish(choice);
         then_graph,
         else_graph,
         ..
-    }) = &graph.main.nodes[0].kind
+    }) = &graph.main.nodes()[0].kind
     else {
         panic!("expected expression-if container")
     };
@@ -633,13 +643,13 @@ finish(choice);
         then_graph,
         else_graph,
         ..
-    }) = &graph.main.nodes[1].kind
+    }) = &graph.main.nodes()[1].kind
     else {
         panic!("expected statement-if container")
     };
     assert!(then_graph.is_statement_list());
     assert!(matches!(
-        else_graph.nodes.as_slice(),
+        else_graph.nodes()[..],
         [WorkflowNode {
             kind: WorkflowNodeKind::Container(WorkflowContainer::If { .. }),
             ..
@@ -677,22 +687,8 @@ fn validate_and_render_agree_on_every_document_failure_class() {
     unsupported_ir.ir_version += 1;
 
     let mut duplicate_node_id = fixture();
-    duplicate_node_id.main.nodes[1].id = duplicate_node_id.main.nodes[0].id.clone();
-
-    let mut invalid_node_payload = fixture();
-    let terminal = invalid_node_payload
-        .main
-        .nodes
-        .iter_mut()
-        .find_map(|node| match &mut node.kind {
-            WorkflowNodeKind::Terminal { terminal, .. } => Some(terminal),
-            _ => None,
-        })
-        .expect("fixture contains a terminal node");
-    *terminal = lash_vm::WorkflowTerminalKind::Fail;
-
-    let mut invalid_body_form = fixture();
-    invalid_body_form.main.form = lash_vm::WorkflowBodyForm::Statement;
+    let first = duplicate_node_id.main.nodes()[0].id.clone();
+    duplicate_node_id.main.nodes_mut()[1].id = first;
 
     let mut duplicate_process_name = fixture();
     let process = duplicate_process_name
@@ -708,21 +704,21 @@ fn validate_and_render_agree_on_every_document_failure_class() {
         workflow_graph_from_source("finish(1);\n").expect("terminal fixture projects");
     let terminal = invalid_program
         .main
-        .nodes
-        .iter_mut()
+        .nodes_mut()
+        .into_iter()
         .find_map(|node| match &mut node.kind {
-            WorkflowNodeKind::Terminal { expression, .. } => Some(expression),
+            WorkflowNodeKind::Terminal(terminal) => Some(terminal),
             _ => None,
         })
         .expect("fixture contains a terminal node");
-    *terminal = lash_vm::Expr::FunctionReturn(Box::new(lash_vm::Expr::Number(1.0)));
+    *terminal = lash_vm::WorkflowTerminal::Return {
+        value: lash_vm::Expr::Number(1.0),
+    };
 
     let cases = [
         ("unsupported_schema_version", unsupported_schema),
         ("unsupported_ir_version", unsupported_ir),
         ("duplicate_node_id", duplicate_node_id),
-        ("invalid_node_payload", invalid_node_payload),
-        ("invalid_body_form", invalid_body_form),
         ("duplicate_process_name", duplicate_process_name),
         ("invalid_program", invalid_program),
     ];
@@ -743,8 +739,10 @@ fn validate_and_render_agree_on_every_document_failure_class() {
 fn a_document_the_lens_cannot_spell_validates_and_is_refused_by_the_lens_alone() {
     let mut graph =
         workflow_graph_from_source("const value = 1;\nfinish(value);\n").expect("fixture projects");
-    graph.main.nodes[0].name_source = WorkflowNodeNameSource::Label;
-    graph.main.nodes[0].name = "Close */ me".into();
+    graph.main.nodes_mut()[0].label = Some(lash_vm::LabelMetadata {
+        title: "Close */ me".into(),
+        description: None,
+    });
 
     validate(&graph).expect("the document is a valid program");
     lash_vm::workflow_program_from_graph(&graph).expect("the document reconstructs");
@@ -766,7 +764,7 @@ fn a_source_view_addresses_the_documents_own_nodes() {
     let source = "const value = 1;\ntry {\n  console.log(value);\n} catch (error) {\n  console.log(error);\n}\nfinish(value);\n";
     let canonical = canonical(source);
     let mut graph = workflow_graph_from_source(&canonical).expect("fixture projects");
-    for (index, node) in graph.main.nodes.iter_mut().enumerate() {
+    for (index, node) in graph.main.nodes_mut().into_iter().enumerate() {
         node.id = WorkflowNodeId::new(format!("node:host-{index}"));
     }
     let view = lash_typescript::workflow_graph::source_view(&graph).expect("the lens has a view");
@@ -875,28 +873,28 @@ finish(state);
 "#;
     let graph = workflow_graph_from_source(source).expect("fixture projects");
     assert!(matches!(
-        graph.main.nodes[1].kind,
+        graph.main.nodes()[1].kind,
         WorkflowNodeKind::StateUpdate { .. }
     ));
     let WorkflowNodeKind::Container(WorkflowContainer::While { body, .. }) =
-        &graph.main.nodes[2].kind
+        &graph.main.nodes()[2].kind
     else {
         panic!("expected while container")
     };
     assert!(matches!(
-        body.nodes[0].kind,
+        body.nodes()[0].kind,
         WorkflowNodeKind::StateUpdate { .. }
     ));
     assert_eq!(
-        graph.main.nodes[2].outputs,
+        graph.main.nodes()[2].outputs,
         vec![VariableVersion {
             variable: "state".to_string(),
             version: 3,
         }]
     );
     assert!(graph.main.edges.iter().any(|edge| {
-        edge.from == graph.main.nodes[2].id
-            && edge.to == graph.main.nodes[3].id
+        edge.from == graph.main.nodes()[2].id
+            && edge.to == graph.main.nodes()[3].id
             && matches!(
                 edge.kind,
                 WorkflowEdgeKind::DataDependency {
@@ -920,18 +918,18 @@ fn iteration_carried_reassignment_is_structured_state_update() {
     let source = "let total = 0;\nfor (const value of [1, 2]) {\n  total = total + value;\n}\nfinish(total);\n";
     let graph = workflow_graph_from_source(source).expect("fixture projects");
     let WorkflowNodeKind::Container(WorkflowContainer::For { body, .. }) =
-        &graph.main.nodes[1].kind
+        &graph.main.nodes()[1].kind
     else {
         panic!("expected for container")
     };
     assert!(matches!(
-        body.nodes[0].kind,
+        body.nodes()[0].kind,
         WorkflowNodeKind::StateUpdate { .. }
     ));
-    assert_eq!(graph.main.nodes[1].outputs[0].version, 2);
+    assert_eq!(graph.main.nodes()[1].outputs[0].version, 2);
     assert!(graph.main.edges.iter().any(|edge| {
-        edge.from == graph.main.nodes[1].id
-            && edge.to == graph.main.nodes[2].id
+        edge.from == graph.main.nodes()[1].id
+            && edge.to == graph.main.nodes()[2].id
             && matches!(
                 edge.kind,
                 WorkflowEdgeKind::DataDependency { version: 2, .. }
@@ -952,7 +950,7 @@ for (let item of [1, 2]) {
 finish([state, introduced]);
 "#;
     let graph = workflow_graph_from_source(source).expect("fixture projects");
-    let loop_node = &graph.main.nodes[2];
+    let loop_node = &graph.main.nodes()[2];
     assert_eq!(
         loop_node.outputs,
         vec![
@@ -976,7 +974,7 @@ finish([state, introduced]);
         panic!("expected for container")
     };
     assert!(matches!(
-        body.nodes[0].kind,
+        body.nodes()[0].kind,
         WorkflowNodeKind::StateUpdate { .. }
     ));
     assert_lens_laws(source);
@@ -992,13 +990,13 @@ for (const entry of items) {
 finish(item);
 "#;
     let graph = workflow_graph_from_source(source).expect("fixture projects");
-    let outer_item = &graph.main.nodes[0];
+    let outer_item = &graph.main.nodes()[0];
     let WorkflowNodeKind::Container(WorkflowContainer::For { body, .. }) =
-        &graph.main.nodes[2].kind
+        &graph.main.nodes()[2].kind
     else {
         panic!("expected for container")
     };
-    let body_node = &body.nodes[0];
+    let body_node = &body.nodes()[0];
     assert!(!body.edges.iter().any(|edge| {
         edge.from == outer_item.id
             && edge.to == body_node.id
@@ -1009,7 +1007,7 @@ finish(item);
     }));
     assert!(!graph.main.edges.iter().any(|edge| {
         edge.from == outer_item.id
-            && edge.to == graph.main.nodes[2].id
+            && edge.to == graph.main.nodes()[2].id
             && matches!(
                 edge.kind,
                 WorkflowEdgeKind::DataDependency { ref variable, .. } if variable == "item"
@@ -1017,7 +1015,7 @@ finish(item);
     }));
     assert!(graph.main.edges.iter().any(|edge| {
         edge.from == outer_item.id
-            && edge.to == graph.main.nodes[3].id
+            && edge.to == graph.main.nodes()[3].id
             && matches!(
                 edge.kind,
                 WorkflowEdgeKind::DataDependency { ref variable, version: 1 }
@@ -1043,26 +1041,26 @@ finish(1);
     )
     .expect("fixture projects");
     let process = only_process(&graph);
-    assert_eq!(process.body.nodes[0].available_variables, ["record"]);
+    assert_eq!(process.body.nodes()[0].available_variables, ["record"]);
     assert_eq!(
-        process.body.nodes[1].available_variables,
+        process.body.nodes()[1].available_variables,
         ["record", "state"]
     );
     assert_eq!(
-        process.body.nodes[2].available_variables,
+        process.body.nodes()[2].available_variables,
         ["first", "record", "state"]
     );
     let WorkflowNodeKind::Container(WorkflowContainer::For { body, .. }) =
-        &process.body.nodes[2].kind
+        &process.body.nodes()[2].kind
     else {
         panic!("expected for container")
     };
     assert_eq!(
-        body.nodes[0].available_variables,
+        body.nodes()[0].available_variables,
         ["first", "item", "record", "state"]
     );
     assert_eq!(
-        process.body.nodes[3].available_variables,
+        process.body.nodes()[3].available_variables,
         ["first", "nested", "record", "state"]
     );
 }
@@ -1246,7 +1244,7 @@ fn facet_slot_paths_are_injective_for_hostile_record_keys() {
 "#;
     let graph = workflow_graph_from_source_with_facets(source, Some(&slot_path_environment()))
         .expect("hostile record keys project with facets");
-    let arguments = &graph.main.nodes[0]
+    let arguments = &graph.main.nodes()[0]
         .type_facets
         .as_ref()
         .expect("call has facets")
@@ -1293,7 +1291,7 @@ fn facet_slot_paths_are_injective_for_hostile_record_keys() {
         arguments: call_arguments,
         result_steps,
         ..
-    } = &graph.main.nodes[0].kind
+    } = &graph.main.nodes()[0].kind
     else {
         panic!("fixture projects as a call node");
     };
@@ -1326,7 +1324,7 @@ finish(second);
     let graph = workflow_graph_from_source_with_facets(source, Some(&slot_path_environment()))
         .expect("fixture projects with facets");
 
-    let first = graph.main.nodes[0]
+    let first = graph.main.nodes()[0]
         .type_facets
         .as_ref()
         .expect("echo has facets");
@@ -1337,7 +1335,7 @@ finish(second);
             .any(|slot| slot.slot.to_string() == "arg[0]")
     );
 
-    let second = graph.main.nodes[1]
+    let second = graph.main.nodes()[1]
         .type_facets
         .as_ref()
         .expect("compose has facets");
@@ -1358,7 +1356,7 @@ finish(second);
         );
     }
 
-    let nested = graph.main.nodes[2]
+    let nested = graph.main.nodes()[2]
         .type_facets
         .as_ref()
         .expect("nested call has facets");
@@ -1386,7 +1384,7 @@ fn type_diagnostic_carries_slot_and_kind() {
         Some(&slot_path_environment()),
     )
     .expect("a type mismatch remains projectable");
-    let diagnostic = graph.main.nodes[0]
+    let diagnostic = graph.main.nodes()[0]
         .type_facets
         .as_ref()
         .expect("call has facets")
@@ -1415,7 +1413,7 @@ fn multi_call_diagnostic_identifies_only_the_later_failing_call() {
         Some(&slot_path_environment()),
     )
     .expect("a later nested mismatch remains projectable");
-    let diagnostics = &graph.main.nodes[0]
+    let diagnostics = &graph.main.nodes()[0]
         .type_facets
         .as_ref()
         .expect("call has facets")
@@ -1453,7 +1451,7 @@ finish(1);
     );
     let process = only_process(&graph);
 
-    let call_facets = process.body.nodes[1]
+    let call_facets = process.body.nodes()[1]
         .type_facets
         .as_ref()
         .expect("the call node has type facets");
@@ -1473,7 +1471,7 @@ finish(1);
         argument.slot.to_string() == "arg[0][\"query\"]" && argument.ty == TypeExpr::Str
     }));
 
-    let loop_facets = process.body.nodes[2]
+    let loop_facets = process.body.nodes()[2]
         .type_facets
         .as_ref()
         .expect("the loop node has type facets");
@@ -1504,11 +1502,11 @@ finish(indexed);
 "#;
     let graph = workflow_graph_from_source(source).expect("fixture projects");
     assert!(
-        graph.main.nodes[2..=7]
+        graph.main.nodes()[2..=7]
             .iter()
             .all(|node| matches!(node.kind, WorkflowNodeKind::Computation { .. })),
         "unexpected kinds: {:?}",
-        graph.main.nodes[2..=7]
+        graph.main.nodes()[2..=7]
             .iter()
             .map(|node| &node.kind)
             .collect::<Vec<_>>()
@@ -1523,7 +1521,7 @@ fn while_collects_condition_sites_without_duplicating_body_sites() {
 }
 "#;
     let graph = workflow_graph_from_source(source).expect("fixture projects");
-    let node = &graph.main.nodes[0];
+    let node = &graph.main.nodes()[0];
     let WorkflowNodeKind::Container(WorkflowContainer::While { body, .. }) = &node.kind else {
         panic!("expected while container")
     };
@@ -1534,7 +1532,7 @@ fn while_collects_condition_sites_without_duplicating_body_sites() {
             .collect::<Vec<_>>(),
         vec![("loop", "while"), ("resource_operation", "ready")]
     );
-    assert_eq!(body.nodes[0].execution_sites[0].label, "tick");
+    assert_eq!(body.nodes()[0].execution_sites[0].label, "tick");
     assert_lens_laws(source);
 }
 
@@ -1564,13 +1562,16 @@ fn label_doc_comments_name_nodes_through_every_lens_law() {
     let graph = workflow_graph_from_source(&canonical(LABELED)).expect("labeled source projects");
     let node = graph
         .main
-        .nodes
-        .iter()
-        .find(|node| node.name_source == WorkflowNodeNameSource::Label)
+        .nodes()
+        .into_iter()
+        .find(|node| node.label.is_some())
         .expect("a labeled node in the module body");
-    assert_eq!(node.name.as_str(), "Lookup");
+    assert_eq!(node.display_name(), "Lookup");
     assert_eq!(
-        node.description.as_deref(),
+        node.label
+            .as_ref()
+            .and_then(|label| label.description.as_ref())
+            .map(|description| description.as_str()),
         Some("Read the app's current state")
     );
 
@@ -1579,10 +1580,10 @@ fn label_doc_comments_name_nodes_through_every_lens_law() {
     // name the linker will lift to.
     let labeled = graph
         .main
-        .nodes
+        .nodes()
         .iter()
-        .filter(|node| node.name_source == WorkflowNodeNameSource::Label)
-        .map(|node| node.name.to_string())
+        .filter(|node| node.label.is_some())
+        .map(|node| node.display_name().to_string())
         .collect::<Vec<_>>();
     assert_eq!(
         labeled,
@@ -1595,14 +1596,14 @@ fn label_doc_comments_name_nodes_through_every_lens_law() {
             .as_str()
             .starts_with(lash_vm::LIFTED_PROCESS_NAME_PREFIX)
     );
-    assert_eq!(process.name_source, WorkflowNodeNameSource::Derived);
+    assert!(process.label.is_none());
     assert_eq!(
         process
             .body
-            .nodes
+            .nodes()
             .iter()
-            .filter(|node| node.name_source == WorkflowNodeNameSource::Label)
-            .map(|node| node.name.to_string())
+            .filter(|node| node.label.is_some())
+            .map(|node| node.display_name().to_string())
             .collect::<Vec<_>>(),
         vec!["Go".to_string()],
     );
@@ -1631,11 +1632,7 @@ fn comments_that_are_not_the_label_form_stay_trivia() {
     ] {
         let graph = workflow_graph_from_source(source).expect("a commented module projects");
         assert!(
-            graph
-                .main
-                .nodes
-                .iter()
-                .all(|node| node.name_source == WorkflowNodeNameSource::Derived),
+            graph.main.nodes().iter().all(|node| node.label.is_none()),
             "source named a node:\n{source}"
         );
         let rendered = workflow_graph_to_source(&graph).expect("graph renders");
@@ -1668,7 +1665,8 @@ fn an_edit_inside_a_process_container_survives_the_round_trip() {
     let WorkflowDeclaration::Process(process) = &mut graph.declarations[0] else {
         panic!("the fixture lifts one process");
     };
-    let WorkflowNodeKind::Call { arguments, .. } = &mut process.body.nodes[0].kind else {
+    let mut nodes = process.body.nodes_mut();
+    let WorkflowNodeKind::Call { arguments, .. } = &mut nodes[0].kind else {
         panic!("the container's first node is the display call");
     };
     let [WorkflowArgument::Named { fields }] = arguments.as_mut_slice() else {
@@ -1690,7 +1688,7 @@ fn an_edit_inside_a_process_container_survives_the_round_trip() {
     let WorkflowDeclaration::Process(reprojected_process) = &reprojected.declarations[0] else {
         panic!("the saved source lifts one process");
     };
-    let WorkflowNodeKind::Call { arguments, .. } = &reprojected_process.body.nodes[0].kind else {
+    let WorkflowNodeKind::Call { arguments, .. } = &reprojected_process.body.nodes()[0].kind else {
         panic!("the reprojected container's first node is the display call");
     };
     let [WorkflowArgument::Named { fields }] = arguments.as_slice() else {
@@ -1715,20 +1713,20 @@ mod adr_claims;
 #[test]
 fn workflow_diagnostic_classification_is_required_and_closed_on_the_wire() {
     let mut value = serde_json::to_value(populated_facet_graph()).expect("graph encodes");
-    value["main"]["nodes"][0]["type_facets"]["diagnostics"] = serde_json::json!([{
-        "node_id": value["main"]["nodes"][0]["id"].clone(),
+    value["main"]["body"]["items"][0]["node"]["type_facets"]["diagnostics"] = serde_json::json!([{
+        "node_id": value["main"]["body"]["items"][0]["node"]["id"].clone(),
         "kind": "unknown_name",
         "classification": "definite",
         "message": "fixture"
     }]);
     for classification in ["definite", "advisory"] {
-        value["main"]["nodes"][0]["type_facets"]["diagnostics"][0]["classification"] =
+        value["main"]["body"]["items"][0]["node"]["type_facets"]["diagnostics"][0]["classification"] =
             serde_json::json!(classification);
         let decoded =
             WorkflowGraph::decode_json_value(value.clone()).expect("closed classification decodes");
         let encoded = serde_json::to_value(decoded).expect("graph encodes");
         assert_eq!(
-            encoded["main"]["nodes"][0]["type_facets"]["diagnostics"][0]["classification"],
+            encoded["main"]["body"]["items"][0]["node"]["type_facets"]["diagnostics"][0]["classification"],
             classification
         );
     }
@@ -1737,14 +1735,14 @@ fn workflow_diagnostic_classification_is_required_and_closed_on_the_wire() {
         serde_json::json!("future"),
         serde_json::json!(0),
     ] {
-        value["main"]["nodes"][0]["type_facets"]["diagnostics"][0]["classification"] =
+        value["main"]["body"]["items"][0]["node"]["type_facets"]["diagnostics"][0]["classification"] =
             classification;
         assert!(
             WorkflowGraph::decode_json_value(value.clone()).is_err(),
             "invalid classification must be refused"
         );
     }
-    value["main"]["nodes"][0]["type_facets"]["diagnostics"][0]
+    value["main"]["body"]["items"][0]["node"]["type_facets"]["diagnostics"][0]
         .as_object_mut()
         .expect("diagnostic object")
         .remove("classification");

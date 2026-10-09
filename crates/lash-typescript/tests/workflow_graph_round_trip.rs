@@ -432,7 +432,7 @@ fn a_throw_reading_a_session_global_renders_without_the_session() {
         .expect("source parses against the session");
     let graph = workflow_graph_from_program(&program);
     assert!(matches!(
-        graph.main.nodes[0].kind,
+        graph.main.nodes()[0].kind,
         WorkflowNodeKind::Throw { .. }
     ));
     assert_eq!(

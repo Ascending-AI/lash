@@ -4,11 +4,11 @@ use lash::typescript::workflow_graph::{
     typescript_assign_target_source, typescript_expression_source, typescript_for_of_source,
 };
 use lash::vm::ir::{
-    Expr, VariableVersion, WorkflowContainer, WorkflowDeclaration, WorkflowEdge, WorkflowNode,
-    WorkflowNodeId, WorkflowNodeKind, WorkflowSubgraph, format_type_expr, workflow_call_from_ir,
-    workflow_call_to_ir, workflow_effect_from_ir, workflow_effect_to_ir,
+    Expr, VariableVersion, WorkflowContainer, WorkflowDeclaration, WorkflowEdge, WorkflowEffect,
+    WorkflowNode, WorkflowNodeId, WorkflowNodeKind, WorkflowSubgraph, WorkflowTerminal,
+    format_type_expr, workflow_call_from_ir, workflow_call_to_ir,
 };
-use lash::workflow::{WorkflowCatch, WorkflowGraph};
+use lash::workflow::{WorkflowCatch, WorkflowGraph, WorkflowStateWrite};
 use serde_json::json;
 
 use crate::{
@@ -91,11 +91,7 @@ pub(crate) fn document_from_graph(
             node_type: "process".to_string(),
             parent_id: None,
             data: NodeData {
-                name: NodeName::projected(
-                    process.name_source,
-                    process.display_name.clone(),
-                    process.description.clone(),
-                ),
+                name: NodeName::projected(process.label.as_ref(), &process.name),
                 body: NodeBody::Process {
                     process_name: Some(process.name.clone()),
                     params: process.params.iter().map(editable_process_param).collect(),
@@ -158,7 +154,7 @@ fn flatten_subgraph(
     for edge in &graph.edges {
         edges.push(flow_edge(edge, scope));
     }
-    for node in &graph.nodes {
+    for node in graph.nodes() {
         let id = node.id.to_string();
         let child_groups = child_groups(node);
         let data = node_data(node, child_groups.clone(), graph_scope);
@@ -187,10 +183,13 @@ fn flatten_subgraph(
 fn node_data(node: &WorkflowNode, children: Vec<ChildGroup>, graph_scope: &GraphScope) -> NodeData {
     let expression = match &node.kind {
         WorkflowNodeKind::Data { expression, .. }
-        | WorkflowNodeKind::Computation { expression, .. }
-        | WorkflowNodeKind::StateUpdate { expression, .. } => {
+        | WorkflowNodeKind::Computation { expression, .. } => {
             typescript_expression_source(expression).ok()
         }
+        WorkflowNodeKind::StateUpdate(
+            WorkflowStateWrite::Plain { value, .. }
+            | WorkflowStateWrite::Member { operand: value, .. },
+        ) => typescript_expression_source(value).ok(),
         WorkflowNodeKind::Call {
             receiver,
             operation,
@@ -204,16 +203,10 @@ fn node_data(node: &WorkflowNode, children: Vec<ChildGroup>, graph_scope: &Graph
             result_steps,
         ))
         .ok(),
-        WorkflowNodeKind::Effect {
-            effect,
-            arguments,
-            result_steps,
-            ..
-        } => workflow_effect_to_ir(*effect, arguments, result_steps)
-            .and_then(|expression| typescript_expression_source(&expression).ok()),
-        WorkflowNodeKind::Terminal { expression, .. } => {
-            terminal_value(expression, &FragmentScope::of_node(node, graph_scope))
+        WorkflowNodeKind::Effect(effect) => {
+            typescript_expression_source(&effect_expression(effect)).ok()
         }
+        WorkflowNodeKind::Terminal(terminal) => typescript_expression_source(terminal.value()).ok(),
         WorkflowNodeKind::Throw { value } => typescript_expression_source(value).ok(),
         WorkflowNodeKind::Container(_) => None,
     };
@@ -242,13 +235,11 @@ fn node_data(node: &WorkflowNode, children: Vec<ChildGroup>, graph_scope: &Graph
             expression,
             fields,
         },
-        WorkflowNodeKind::Effect {
-            binding: target,
-            effect,
-            ..
-        } => NodeBody::Effect {
-            binding: binding(target),
-            effect: *effect,
+        WorkflowNodeKind::Effect(effect) => NodeBody::Effect {
+            binding: effect
+                .binding()
+                .and_then(|target| typescript_assign_target_source(target).ok()),
+            effect: effect.kind(),
             expression,
             fields,
         },
@@ -259,13 +250,13 @@ fn node_data(node: &WorkflowNode, children: Vec<ChildGroup>, graph_scope: &Graph
             expression,
             fields,
         },
-        WorkflowNodeKind::StateUpdate { target, .. } => NodeBody::StateUpdate {
-            target: typescript_assign_target_source(target).ok(),
+        WorkflowNodeKind::StateUpdate(write) => NodeBody::StateUpdate {
+            target: typescript_assign_target_source(&write.target()).ok(),
             expression,
             fields,
         },
-        WorkflowNodeKind::Terminal { terminal, .. } => NodeBody::Terminal {
-            terminal_kind: terminal.clone(),
+        WorkflowNodeKind::Terminal(terminal) => NodeBody::Terminal {
+            terminal_kind: terminal.kind(),
             expression,
         },
         WorkflowNodeKind::Throw { .. } => NodeBody::Throw { expression },
@@ -308,11 +299,7 @@ fn node_data(node: &WorkflowNode, children: Vec<ChildGroup>, graph_scope: &Graph
         }),
     };
     NodeData {
-        name: NodeName::projected(
-            node.name_source,
-            node.name.clone(),
-            node.description.clone(),
-        ),
+        name: NodeName::projected(node.label.as_ref(), &node.name),
         body,
         available_vars: node
             .type_facets
@@ -363,17 +350,12 @@ fn node_data(node: &WorkflowNode, children: Vec<ChildGroup>, graph_scope: &Graph
     }
 }
 
-/// The value text a terminal node exposes for editing.
-///
-/// A cell terminal is `finish(value)` or `fail(value)`; a process terminal is
-/// the `return value;` that ends the run body, which the language will not
-/// parse in expression position, so it is read through the process door.
-fn terminal_value(expression: &Expr, _scope: &FragmentScope) -> Option<String> {
-    let value = match expression {
-        Expr::Finish(value) | Expr::Fail(value) | Expr::FunctionReturn(value) => value,
-        _ => return None,
-    };
-    typescript_expression_source(value).ok()
+/// An effect's own expression, without the binding its statement assigns.
+fn effect_expression(effect: &WorkflowEffect) -> Expr {
+    match effect.to_ir() {
+        Expr::Assign { expr, .. } if effect.binding().is_some() => *expr,
+        expression => expression,
+    }
 }
 
 fn flow_edge(edge: &WorkflowEdge, scope: &str) -> FlowEdge {
@@ -441,30 +423,25 @@ fn node_from_flow_data(
         }
         NodeBody::Effect { effect, .. } => {
             let (_, parsed) = editable_effect_expression(id, data, graph_scope)?;
-            let (parsed_effect, arguments, result_steps) = workflow_effect_from_ir(&parsed)
-                .ok_or_else(|| {
+            let binding = editable_binding(
+                id,
+                data.binding().as_ref(),
+                &FragmentScope::of_data(data, graph_scope),
+            )?;
+            let parsed_effect =
+                WorkflowEffect::from_ir(binding.as_ref(), &parsed).ok_or_else(|| {
                     RenderErrorResponse::invalid_node_payload(
                         id,
                         "an effect node needs a recognized effect expression",
                     )
                 })?;
-            let effect = *effect;
-            if effect != parsed_effect {
+            if *effect != parsed_effect.kind() {
                 return Err(RenderErrorResponse::invalid_node_payload(
                     id,
                     "effect kind does not match its expression",
                 ));
             }
-            WorkflowNodeKind::Effect {
-                binding: editable_binding(
-                    id,
-                    data.binding().as_ref(),
-                    &FragmentScope::of_data(data, graph_scope),
-                )?,
-                effect,
-                arguments,
-                result_steps,
-            }
+            WorkflowNodeKind::Effect(parsed_effect)
         }
         NodeBody::StateUpdate { .. } => {
             let target = required_text(id, data.target().as_ref(), "target")?;
@@ -474,12 +451,10 @@ fn node_from_flow_data(
                 variable: target.root.to_string(),
                 version: 0,
             });
-            WorkflowNodeKind::StateUpdate {
+            WorkflowNodeKind::StateUpdate(WorkflowStateWrite::Plain {
                 target,
-                expression: editable_expression(id, data, graph_scope)?,
-                update: None,
-                pinned: None,
-            }
+                value: editable_expression(id, data, graph_scope)?,
+            })
         }
         NodeBody::Computation { .. } => WorkflowNodeKind::Computation {
             binding: editable_binding(
@@ -491,16 +466,12 @@ fn node_from_flow_data(
         },
         NodeBody::Terminal { .. } => {
             let terminal = required_terminal_kind(id, data.terminal_kind())?;
-            let expression = terminal_expression(
+            WorkflowNodeKind::Terminal(editable_terminal(
                 id,
-                &terminal,
+                terminal,
                 data.expression().as_ref(),
                 &FragmentScope::of_data(data, graph_scope),
-            )?;
-            WorkflowNodeKind::Terminal {
-                terminal,
-                expression,
-            }
+            )?)
         }
         NodeBody::Throw { .. } => WorkflowNodeKind::Throw {
             value: editable_expression(id, data, graph_scope)?,
@@ -580,8 +551,7 @@ fn node_from_flow_data(
     Ok(WorkflowNode {
         id: workflow_node_id(id),
         name: data.name.title().to_string(),
-        description: data.name.description().map(str::to_string),
-        name_source: data.name.name_source(),
+        label: data.name.label(),
         kind,
         // The lens re-parses a node's editable text inside a wrapper that
         // declares the names the node can read, so a rebuilt node carries the
@@ -624,9 +594,7 @@ fn apply_editable_data(
     let shown = node_data(node, Vec::new(), graph_scope);
     let rebound = data.binding() != shown.binding();
     let reworded = data.expression() != shown.expression();
-    node.name = data.name.title().to_string();
-    node.description = data.name.description().map(str::to_string);
-    node.name_source = data.name.name_source();
+    node.label = data.name.label();
     match &mut node.kind {
         WorkflowNodeKind::Data {
             binding,
@@ -680,29 +648,26 @@ fn apply_editable_data(
             *arguments = new_arguments;
             *result_steps = new_result_steps;
         }
-        WorkflowNodeKind::Effect {
-            binding,
-            effect,
-            arguments,
-            result_steps,
-        } => {
-            if rebound {
-                *binding = editable_binding(&node_id, data.binding().as_ref(), &scope)?;
-            }
-            if !reworded && data.effect() == shown.effect() && data.fields() == shown.fields() {
-                return Ok(());
-            }
-            let (_, parsed) = editable_effect_expression(&node_id, data, graph_scope)?;
-            let (new_effect, new_arguments, new_result_steps) = workflow_effect_from_ir(&parsed)
-                .ok_or_else(|| {
-                    RenderErrorResponse::invalid_node_payload(
-                        &node_id,
-                        "edited expression is not a recognized effect",
-                    )
-                })?;
-            *effect = new_effect;
-            *arguments = new_arguments;
-            *result_steps = new_result_steps;
+        WorkflowNodeKind::Effect(effect) => {
+            let binding = if rebound {
+                editable_binding(&node_id, data.binding().as_ref(), &scope)?
+            } else {
+                effect.binding().cloned()
+            };
+            let parsed = if !reworded
+                && data.effect() == shown.effect()
+                && data.fields() == shown.fields()
+            {
+                effect_expression(effect)
+            } else {
+                editable_effect_expression(&node_id, data, graph_scope)?.1
+            };
+            *effect = WorkflowEffect::from_ir(binding.as_ref(), &parsed).ok_or_else(|| {
+                RenderErrorResponse::invalid_node_payload(
+                    &node_id,
+                    "edited expression is not a recognized effect",
+                )
+            })?;
         }
         WorkflowNodeKind::Computation {
             binding,
@@ -720,18 +685,38 @@ fn apply_editable_data(
                 )?;
             }
         }
-        WorkflowNodeKind::StateUpdate {
-            target, expression, ..
-        } => {
+        WorkflowNodeKind::StateUpdate(write) => {
             if data.target() != shown.target() {
-                *target = parse_assignment_target(
+                // A retargeted update is a plain assignment to the new
+                // target; a compound member update cannot be retargeted
+                // through its text.
+                let target = parse_assignment_target(
                     &node_id,
                     &required_text(&node_id, data.target().as_ref(), "target")?,
                     &scope,
                 )?;
+                let value = match &*write {
+                    WorkflowStateWrite::Plain { value, .. }
+                    | WorkflowStateWrite::Member {
+                        update: None,
+                        operand: value,
+                        ..
+                    } => value.clone(),
+                    WorkflowStateWrite::Member {
+                        update: Some(_), ..
+                    } => {
+                        return Err(RenderErrorResponse::invalid_node_payload(
+                            &node_id,
+                            "a compound update keeps the member it updates",
+                        ));
+                    }
+                };
+                *write = WorkflowStateWrite::Plain { target, value };
             }
             if reworded {
-                *expression = required_expression(
+                let (WorkflowStateWrite::Plain { value, .. }
+                | WorkflowStateWrite::Member { operand: value, .. }) = write;
+                *value = required_expression(
                     &node_id,
                     data.expression().as_ref(),
                     "expression",
@@ -739,18 +724,13 @@ fn apply_editable_data(
                 )?;
             }
         }
-        WorkflowNodeKind::Terminal {
-            terminal,
-            expression,
-        } => {
+        WorkflowNodeKind::Terminal(terminal) => {
             if reworded || data.terminal_kind() != shown.terminal_kind() {
-                let returns = matches!(expression, Expr::FunctionReturn(_));
-                *terminal = required_terminal_kind(&node_id, data.terminal_kind())?;
                 let mut terminal_scope = scope.clone();
-                terminal_scope.in_process = returns;
-                *expression = terminal_expression(
+                terminal_scope.in_process = matches!(terminal, WorkflowTerminal::Return { .. });
+                *terminal = editable_terminal(
                     &node_id,
-                    terminal,
+                    required_terminal_kind(&node_id, data.terminal_kind())?,
                     data.expression().as_ref(),
                     &terminal_scope,
                 )?;
@@ -897,7 +877,11 @@ fn diagnostic_kind_text(kind: lash::vm::ir::WorkflowDiagnosticKind) -> String {
 }
 
 fn node_ids(graph: &WorkflowSubgraph) -> Vec<String> {
-    graph.nodes.iter().map(|node| node.id.to_string()).collect()
+    graph
+        .nodes()
+        .into_iter()
+        .map(|node| node.id.to_string())
+        .collect()
 }
 
 /// Lower just the form being edited. Child bodies and process wrappers stay in

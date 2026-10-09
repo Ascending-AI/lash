@@ -144,16 +144,18 @@ impl Drawing<'_> {
     /// Draw `body`. `skipped_by` names the branch whose other arm ran, when
     /// this body is an arm that did not.
     fn body(&mut self, body: &WorkflowSubgraph, skipped_by: Option<&str>) {
-        for document_node in &body.nodes {
+        for document_node in body.nodes() {
             let id = document_node.id.to_string();
             let sites = self.observed.get(id.as_str()).cloned().unwrap_or_default();
             if let Some(first) = document_node.execution_sites.first() {
-                let label_metadata = (document_node.name_source
-                    == lash::vm::ir::WorkflowNodeNameSource::Label)
-                    .then(|| ExecutionGraphLabel {
-                        title: document_node.name.clone(),
-                        description: document_node.description.clone(),
-                    });
+                let label_metadata =
+                    document_node
+                        .label
+                        .as_ref()
+                        .map(|label| ExecutionGraphLabel {
+                            title: label.title.to_string(),
+                            description: label.description.as_ref().map(ToString::to_string),
+                        });
                 let mut drawn = node(
                     id.clone(),
                     first.kind,

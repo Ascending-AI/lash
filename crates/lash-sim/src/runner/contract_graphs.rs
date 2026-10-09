@@ -154,7 +154,7 @@ fn contract_document_site<'a>(
     &'a lash::vm::ir::WorkflowNode,
     &'a lash::vm::WorkflowExecutionSite,
 )> {
-    body.nodes.iter().find_map(|node| {
+    body.nodes().into_iter().find_map(|node| {
         if node.id.as_str() == site.node_id {
             return node
                 .execution_sites
@@ -229,10 +229,10 @@ pub(super) fn agent_contract_graph_facts(
             else {
                 continue;
             };
-            if node.name_source != lash::vm::ir::WorkflowNodeNameSource::Label {
+            let Some(label) = &node.label else {
                 continue;
-            }
-            let title = node.name.as_str();
+            };
+            let title = label.title.as_str();
             let resource = described.kind == lash::tracing::ExecutionNodeKind::ResourceOperation;
             match &site.occurrence {
                 lash::workflow::WorkflowOverlayOccurrence::Completed { .. } => {

@@ -314,7 +314,7 @@ fn compiled_sites(compiled: &lash_vm::CompiledProgram, graph: &WorkflowSubgraph)
 /// The ids of a subgraph's `if` containers: the only nodes whose children
 /// sit in branch arms.
 fn if_container_ids(graph: &WorkflowSubgraph, out: &mut BTreeSet<String>) {
-    for node in &graph.nodes {
+    for node in graph.nodes() {
         if let WorkflowNodeKind::Container(container) = &node.kind {
             if matches!(container, WorkflowContainer::If { .. }) {
                 out.insert(node.id.to_string());
@@ -330,7 +330,7 @@ fn if_container_ids(graph: &WorkflowSubgraph, out: &mut BTreeSet<String>) {
 /// node's execution sites, with the arms of the `if` containers above it.
 fn mapped_sites(graph: &WorkflowSubgraph) -> BTreeSet<Site> {
     fn walk(graph: &WorkflowSubgraph, arms: &BTreeSet<(String, bool)>, out: &mut BTreeSet<Site>) {
-        for node in &graph.nodes {
+        for node in graph.nodes() {
             for site in &node.execution_sites {
                 out.insert((node.id.to_string(), site.kind, site.clone(), arms.clone()));
             }

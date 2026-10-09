@@ -6,12 +6,12 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use lash::vm::ir::{
     AssignTarget, AstString, Expr, ExprSlot, FunctionDecl, LabelMetadata, ProcessParam, TypeExpr,
-    WorkflowBodySlot, WorkflowContainer, WorkflowNode, WorkflowNodeKind, WorkflowNodeNameSource,
-    WorkflowSlotPath, WorkflowSubgraph,
+    WorkflowBodySlot, WorkflowContainer, WorkflowNode, WorkflowNodeKind, WorkflowSlotPath,
+    WorkflowSubgraph,
 };
 use lash::workflow::{
-    WorkflowBindingRef, WorkflowBodyForm, WorkflowBodyRef, WorkflowDraft, WorkflowDraftHandle,
-    WorkflowEdit, WorkflowEditRefusal, WorkflowEditTransaction, WorkflowGraphError,
+    WorkflowBindingRef, WorkflowBodyLayout, WorkflowBodyLayoutItem, WorkflowBodyRef, WorkflowDraft,
+    WorkflowDraftHandle, WorkflowEdit, WorkflowEditRefusal, WorkflowEditTransaction,
     WorkflowProcessWrapper, workflow_node_statement,
 };
 use serde::Deserialize;
@@ -23,11 +23,6 @@ pub(crate) enum EditError {
     Refused(#[from] WorkflowEditRefusal),
     #[error("form fields were refused")]
     Form(Box<crate::RenderErrorResponse>),
-    #[error("node `{node}` does not spell a statement: {error}")]
-    Statement {
-        node: String,
-        error: WorkflowGraphError,
-    },
     #[error("`{id}` names no node or process of the workflow")]
     UnknownNode { id: String },
     #[error("`{slot}` is not a child body of node `{node}`")]
@@ -50,33 +45,15 @@ pub(crate) fn body_slot(container: &WorkflowContainer, name: &str) -> Option<Wor
     })
 }
 
-fn statement(node: &WorkflowNode) -> Result<Expr, EditError> {
-    workflow_node_statement(node).map_err(|error| EditError::Statement {
-        node: node.id.to_string(),
-        error,
-    })
-}
-
 /// A node's own statement: what it spells with its child bodies emptied.
-fn own_statement(node: &WorkflowNode) -> Result<Expr, EditError> {
+fn own_statement(node: &WorkflowNode) -> Expr {
     let mut own = node.clone();
     if let WorkflowNodeKind::Container(container) = &mut own.kind {
         for (_, child) in container.child_subgraphs_mut() {
             *child = WorkflowSubgraph::default();
         }
     }
-    statement(&own)
-}
-
-fn label(
-    source: WorkflowNodeNameSource,
-    title: &str,
-    description: Option<&String>,
-) -> Option<LabelMetadata> {
-    matches!(source, WorkflowNodeNameSource::Label).then(|| LabelMetadata {
-        title: title.into(),
-        description: description.map(|description| description.as_str().into()),
-    })
+    workflow_node_statement(&own)
 }
 
 /// The path from a container node's statement to the container expression
@@ -118,6 +95,30 @@ pub enum BodyRef {
     Main,
     Process { process: String },
     Child { node: String, slot: String },
+}
+
+/// How a body arranges its statements, each named by its node id.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(tag = "form", rename_all = "camelCase", deny_unknown_fields)]
+pub enum BodyLayout {
+    List {
+        items: Vec<BodyLayoutItem>,
+        #[serde(default)]
+        completion: Option<Expr>,
+    },
+    Statement {
+        node: String,
+    },
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub enum BodyLayoutItem {
+    Node(String),
+    Group {
+        items: Vec<BodyLayoutItem>,
+        value: Expr,
+    },
 }
 
 /// A variable of the workflow, named where the document binds it.
@@ -227,9 +228,9 @@ pub enum EditOperation {
         node: String,
         present: bool,
     },
-    SetBodyForm {
+    SetBodyLayout {
         body: BodyRef,
-        form: WorkflowBodyForm,
+        layout: BodyLayout,
     },
     InsertProcess {
         name: AstString,
@@ -310,6 +311,43 @@ fn body_ref(
                 })?,
             }
         }
+    })
+}
+
+fn body_layout(named: &Named, layout: BodyLayout) -> Result<WorkflowBodyLayout, EditError> {
+    fn items(
+        named: &Named,
+        listed: Vec<BodyLayoutItem>,
+    ) -> Result<Vec<WorkflowBodyLayoutItem>, EditError> {
+        listed
+            .into_iter()
+            .map(|item| {
+                Ok(match item {
+                    BodyLayoutItem::Node(node) => {
+                        WorkflowBodyLayoutItem::Node(handle(named, &node)?)
+                    }
+                    BodyLayoutItem::Group {
+                        items: grouped,
+                        value,
+                    } => WorkflowBodyLayoutItem::Group {
+                        items: items(named, grouped)?,
+                        value,
+                    },
+                })
+            })
+            .collect()
+    }
+    Ok(match layout {
+        BodyLayout::List {
+            items: listed,
+            completion,
+        } => WorkflowBodyLayout::List {
+            items: items(named, listed)?,
+            completion,
+        },
+        BodyLayout::Statement { node } => WorkflowBodyLayout::Statement {
+            node: handle(named, &node)?,
+        },
     })
 }
 
@@ -412,9 +450,9 @@ fn typed_edit(
             node: handle(named, &node)?,
             present,
         },
-        Op::SetBodyForm { body, form } => WorkflowEdit::SetBodyForm {
+        Op::SetBodyLayout { body, layout } => WorkflowEdit::SetBodyLayout {
             body: body_ref(draft, named, &body)?,
-            form,
+            layout: body_layout(named, layout)?,
         },
         Op::InsertProcess {
             name,
@@ -506,17 +544,11 @@ pub(crate) fn apply_operations(
                 .map_err(|e| EditError::Form(Box::new(e)))?;
                 transaction(
                     &mut draft,
-                    vec![
-                        WorkflowEdit::SetBodyForm {
-                            body: body.clone(),
-                            form: WorkflowBodyForm::default(),
-                        },
-                        WorkflowEdit::InsertNode {
-                            body: body.clone(),
-                            before,
-                            statement: statement(&node)?,
-                        },
-                    ],
+                    vec![WorkflowEdit::InsertNode {
+                        body: body.clone(),
+                        before,
+                        statement: workflow_node_statement(&node),
+                    }],
                 )?;
                 let inserted = draft
                     .body(&body)
@@ -611,11 +643,7 @@ fn form_edits(
         }
         edits.push(WorkflowEdit::SetLabel {
             target: handle,
-            label: label(
-                process.name_source,
-                &process.display_name,
-                process.description.as_ref(),
-            ),
+            label: process.label,
         });
         return Ok(edits);
     }
@@ -660,7 +688,7 @@ fn form_edits(
                         authored_element: authored_element.as_ref().map(|v| v.as_str().into()),
                         bind: bind.clone(),
                     });
-                    let mut slot = container_path(&own_statement(base)?);
+                    let mut slot = container_path(&own_statement(base));
                     slot.push(ExprSlot::Iterable);
                     edits.push(WorkflowEdit::ReplaceExpression {
                         target: lash::workflow::WorkflowExpressionRef::Node(handle),
@@ -682,17 +710,17 @@ fn form_edits(
             }
         }
         _ => {
-            if own_statement(base)? != own_statement(&node)? {
+            if own_statement(base) != own_statement(&node) {
                 edits.push(WorkflowEdit::ReplaceNode {
                     node: handle,
-                    statement: statement(&node)?,
+                    statement: workflow_node_statement(&node),
                 });
             }
         }
     }
     edits.push(WorkflowEdit::SetLabel {
         target: handle,
-        label: label(node.name_source, &node.name, node.description.as_ref()),
+        label: node.label,
     });
     Ok(edits)
 }
@@ -726,8 +754,8 @@ fn variant(expression: &Expr) -> String {
     }
 }
 
-pub(crate) fn node_ir(node: &WorkflowNode) -> Result<NodeIr, EditError> {
-    let statement = statement(node)?;
+pub(crate) fn node_ir(node: &WorkflowNode) -> NodeIr {
+    let statement = workflow_node_statement(node);
     // The statements of a container's child bodies are nodes of their own.
     let bodies = match &node.kind {
         WorkflowNodeKind::Container(container) => {
@@ -741,7 +769,7 @@ pub(crate) fn node_ir(node: &WorkflowNode) -> Result<NodeIr, EditError> {
                 }
                 WorkflowContainer::Scope { .. } => &[],
             };
-            Some((container_path(&own_statement(node)?), slots))
+            Some((container_path(&own_statement(node)), slots))
         }
         _ => None,
     };
@@ -772,5 +800,5 @@ pub(crate) fn node_ir(node: &WorkflowNode) -> Result<NodeIr, EditError> {
     }
     let mut slots = Vec::new();
     walk(&statement, &mut Vec::new(), bodies.as_ref(), &mut slots);
-    Ok(NodeIr { statement, slots })
+    NodeIr { statement, slots }
 }

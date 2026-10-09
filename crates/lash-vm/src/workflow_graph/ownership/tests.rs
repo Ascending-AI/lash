@@ -86,12 +86,9 @@ fn a_completion_wrapped_statement_is_the_statement_it_wraps() {
     ]);
     let graph = workflow_graph_from_program(&program);
     assert!(
-        matches!(
-            graph.main.nodes[1].kind,
-            WorkflowNodeKind::StateUpdate { .. }
-        ),
+        matches!(graph.main.nodes()[1].kind, WorkflowNodeKind::StateUpdate(_)),
         "the wrapped assignment projects as the state update it is: {:?}",
-        graph.main.nodes[1].kind
+        graph.main.nodes()[1].kind
     );
 }
 
@@ -111,10 +108,10 @@ fn an_attribute_assignment_projects_its_authored_target() {
     ]);
     validate_ast(&program).expect("the attribute assignment has its role's shape");
     let graph = workflow_graph_from_program(&program);
-    let WorkflowNodeKind::StateUpdate { target, .. } = &graph.main.nodes[1].kind else {
-        panic!("expected a state update: {:?}", graph.main.nodes[1].kind);
+    let WorkflowNodeKind::StateUpdate(write) = &graph.main.nodes()[1].kind else {
+        panic!("expected a state update: {:?}", graph.main.nodes()[1].kind);
     };
-    assert_eq!(target.root.as_str(), "state");
+    assert_eq!(write.root().as_str(), "state");
 }
 
 #[test]

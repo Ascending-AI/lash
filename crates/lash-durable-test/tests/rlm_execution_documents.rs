@@ -278,7 +278,7 @@ async fn read_document(
 /// The execution sites of the body `document` enters, with their kinds.
 fn document_sites(document: &WorkflowExecutionDocument) -> BTreeSet<Site> {
     fn collect(body: &lash_vm::WorkflowSubgraph, sites: &mut BTreeSet<Site>) {
-        for node in &body.nodes {
+        for node in body.nodes() {
             sites.extend(
                 node.execution_sites
                     .iter()
@@ -1186,7 +1186,7 @@ finish(fetched.url);
         document
             .graph()
             .nodes()
-            .any(|node| node.name == "Fetch once"),
+            .any(|node| node.display_name() == "Fetch once"),
         "the label is the document's to state"
     );
     world.shutdown().await;

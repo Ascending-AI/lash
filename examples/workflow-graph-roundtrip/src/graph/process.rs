@@ -15,9 +15,7 @@ pub(super) fn process_from_data(
             .process_name()
             .clone()
             .unwrap_or_else(|| data.name.title().to_string()),
-        display_name: data.name.title().to_string(),
-        description: data.name.description().map(str::to_string),
-        name_source: data.name.name_source(),
+        label: data.name.label(),
         params: Vec::new(),
         return_ty: None,
         origin: Default::default(),
@@ -31,9 +29,7 @@ pub(super) fn process_from_data(
     if !derived {
         let name = data.process_name().as_deref().unwrap_or(data.name.title());
         process.name = editable_identifier(&process_id, "name", name)?;
-        process.display_name = data.name.title().to_string();
-        process.description = data.name.description().map(str::to_string);
-        process.name_source = data.name.name_source();
+        process.label = data.name.label();
     }
     process.params = data
         .params()

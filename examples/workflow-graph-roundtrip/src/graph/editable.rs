@@ -11,8 +11,8 @@ use lash::typescript::workflow_graph::{
     typescript_expression_source,
 };
 use lash::vm::ir::{
-    AstString, Expr, WorkflowDeclaration, WorkflowEffectKind, WorkflowNode, WorkflowNodeId,
-    WorkflowNodeKind, WorkflowTerminalKind, workflow_call_to_ir, workflow_effect_to_ir,
+    AstString, Expr, WorkflowDeclaration, WorkflowEffect, WorkflowEffectKind, WorkflowNode,
+    WorkflowNodeId, WorkflowNodeKind, WorkflowTerminal, WorkflowTerminalKind, workflow_call_to_ir,
 };
 use lash::workflow::WorkflowGraph;
 
@@ -121,8 +121,8 @@ pub(super) fn editable_effect_expression(
         )?,
     };
     if let Some(requested_effect) = requested_effect {
-        let current_effect = lash::vm::ir::workflow_effect_from_ir(&expression)
-            .map(|(effect, _, _)| effect)
+        let current_effect = WorkflowEffect::from_ir(None, &expression)
+            .map(|effect| effect.kind())
             .ok_or_else(|| {
                 RenderErrorResponse::invalid_node_payload(
                     id,
@@ -173,8 +173,8 @@ pub(super) fn editable_fields(
     _graph_scope: &GraphScope,
 ) -> BTreeMap<String, EditableValue> {
     let expression = match &node.kind {
-        WorkflowNodeKind::Data { expression, .. }
-        | WorkflowNodeKind::Terminal { expression, .. } => expression.clone(),
+        WorkflowNodeKind::Data { expression, .. } => expression.clone(),
+        WorkflowNodeKind::Terminal(terminal) => terminal.to_ir(),
         WorkflowNodeKind::Call {
             receiver,
             operation,
@@ -182,17 +182,7 @@ pub(super) fn editable_fields(
             result_steps,
             ..
         } => workflow_call_to_ir(receiver, operation, arguments, result_steps),
-        WorkflowNodeKind::Effect {
-            effect,
-            arguments,
-            result_steps,
-            ..
-        } => {
-            let Some(expression) = workflow_effect_to_ir(*effect, arguments, result_steps) else {
-                return BTreeMap::new();
-            };
-            expression
-        }
+        WorkflowNodeKind::Effect(effect) => super::effect_expression(effect),
         _ => return BTreeMap::new(),
     };
     if let Some(fields) = receiver_fields(&expression) {
@@ -328,26 +318,23 @@ pub(super) fn required_terminal_kind(
     })
 }
 
-pub(super) fn terminal_expression(
+pub(super) fn editable_terminal(
     id: &str,
-    terminal: &WorkflowTerminalKind,
+    terminal: WorkflowTerminalKind,
     value: Option<&String>,
     scope: &FragmentScope,
-) -> Result<Expr, RenderErrorResponse> {
+) -> Result<WorkflowTerminal, RenderErrorResponse> {
     let value = required_text(id, value, "expression")?;
     let value = parse_fragment(&value, scope).map_err(|error| {
         RenderErrorResponse::invalid_expression(id, "expression", error.to_string())
     })?;
     // Inside a process the terminal is the `return` that ends the run body;
     // `finish` is cell-only. Both render through the lens's own printer.
-    if scope.in_process && matches!(terminal, WorkflowTerminalKind::Finish) {
-        return Ok(Expr::FunctionReturn(Box::new(value)));
-    }
-    let expression = match terminal {
-        WorkflowTerminalKind::Finish => Expr::Finish(Box::new(value)),
-        WorkflowTerminalKind::Fail => Expr::Fail(Box::new(value)),
-    };
-    Ok(expression)
+    Ok(match terminal {
+        WorkflowTerminalKind::Finish if scope.in_process => WorkflowTerminal::Return { value },
+        WorkflowTerminalKind::Finish => WorkflowTerminal::Finish { value },
+        WorkflowTerminalKind::Fail => WorkflowTerminal::Fail { value },
+    })
 }
 
 pub(super) fn parse_assignment_target(

@@ -391,7 +391,13 @@ export type EditableValue =
         [k: string]: EditableValue;
       };
     };
+/**
+ * Which effect a [`WorkflowEffect`] is, without its operands.
+ */
 export type WorkflowEffectKind = 'await_join' | 'sleep_for' | 'print' | 'break' | 'continue';
+/**
+ * Whether a [`WorkflowTerminal`] finishes or fails, without its value.
+ */
 export type WorkflowTerminalKind = 'finish' | 'fail';
 
 export interface WorkflowDocument {

@@ -105,8 +105,8 @@ fn is_string(expr: &Expr, text: &str) -> bool {
     matches!(expr, Expr::String(value) if value.as_str() == text)
 }
 
-fn statement(node: &WorkflowNode) -> Result<Expr> {
-    workflow_node_statement(node).with_context(|| format!("node {} spells a statement", node.id))
+fn statement(node: &WorkflowNode) -> Expr {
+    workflow_node_statement(node)
 }
 
 /// `statement` with the expression at `path` replaced.
@@ -127,7 +127,7 @@ fn calls(node: &WorkflowNode, operation: &str) -> bool {
 
 /// Every node of `body` and of the bodies under it, in document order.
 fn all_nodes<'g>(body: &'g WorkflowSubgraph, nodes: &mut Vec<&'g WorkflowNode>) {
-    for node in &body.nodes {
+    for node in body.nodes() {
         nodes.push(node);
         if let WorkflowNodeKind::Container(container) = &node.kind {
             for (_, child) in container.child_subgraphs() {
@@ -167,7 +167,7 @@ struct Shape<'g> {
 /// it by where its literal sits: the workflow's is the outermost.
 fn workflow_process(graph: &WorkflowGraph) -> Result<(String, String)> {
     ensure!(
-        graph.main.nodes.iter().any(|node| matches!(
+        graph.main.nodes().into_iter().any(|node| matches!(
             &node.kind,
             WorkflowNodeKind::Data {
                 binding: Some(binding),
@@ -193,7 +193,7 @@ fn workflow_process(graph: &WorkflowGraph) -> Result<(String, String)> {
 
 /// The first `for` of `body`, with its own body.
 fn loop_in(body: &WorkflowSubgraph) -> Option<(&WorkflowNode, &WorkflowSubgraph)> {
-    body.nodes.iter().find_map(|node| match &node.kind {
+    body.nodes().into_iter().find_map(|node| match &node.kind {
         WorkflowNodeKind::Container(WorkflowContainer::For { body, .. }) => {
             Some((node, body.as_ref()))
         }
@@ -203,12 +203,10 @@ fn loop_in(body: &WorkflowSubgraph) -> Option<(&WorkflowNode, &WorkflowSubgraph)
 
 fn shape<'g>(graph: &'g WorkflowGraph, entry: &str) -> Result<Shape<'g>> {
     let process = graph.process(entry).context("the document has the entry")?;
-    let top = &process.body.nodes;
+    let top = process.body.nodes();
     top.iter()
         .find(|node| {
-            statement(node).is_ok_and(|statement| {
-                slot_where(&statement, |expr| matches!(expr, Expr::Function(_))).is_some()
-            })
+            slot_where(&statement(node), |expr| matches!(expr, Expr::Function(_))).is_some()
         })
         .context("the closure is a typed function value in a statement")?;
     let region = top
@@ -230,15 +228,15 @@ fn shape<'g>(graph: &'g WorkflowGraph, entry: &str) -> Result<Shape<'g>> {
     };
     let catch_record = catch
         .body
-        .nodes
-        .iter()
+        .nodes()
+        .into_iter()
         .find(|node| calls(node, "record"))
         .context("the catch body records")?;
     let (outer, outer_body) = loop_in(try_body).context("the outer loop is in the try body")?;
     let (inner, inner_body) = loop_in(outer_body).context("the inner loop is in the outer")?;
     let (threshold, then_graph) = inner_body
-        .nodes
-        .iter()
+        .nodes()
+        .into_iter()
         .find_map(|node| match &node.kind {
             WorkflowNodeKind::Container(WorkflowContainer::If { then_graph, .. }) => {
                 Some((node, then_graph.as_ref()))
@@ -247,13 +245,13 @@ fn shape<'g>(graph: &'g WorkflowGraph, entry: &str) -> Result<Shape<'g>> {
         })
         .context("the inner loop branches")?;
     let review = then_graph
-        .nodes
-        .iter()
+        .nodes()
+        .into_iter()
         .find(|node| calls(node, "request"))
         .context("the branch asks for a review")?;
     let decision = then_graph
-        .nodes
-        .iter()
+        .nodes()
+        .into_iter()
         .find(|node| {
             matches!(
                 node.kind,
@@ -262,21 +260,22 @@ fn shape<'g>(graph: &'g WorkflowGraph, entry: &str) -> Result<Shape<'g>> {
         })
         .context("the branch reads the decision")?;
     let record = inner_body
-        .nodes
-        .iter()
+        .nodes()
+        .into_iter()
         .find(|node| calls(node, "record"))
         .context("the inner loop records")?;
     let status = try_body
-        .nodes
-        .iter()
-        .find(|node| matches!(node.kind, WorkflowNodeKind::StateUpdate { .. }))
+        .nodes()
+        .into_iter()
+        .find(|node| matches!(node.kind, WorkflowNodeKind::StateUpdate(_)))
         .context("the try body ends by setting the status")?;
     let inline = top
         .iter()
         .find(|node| {
-            statement(node).is_ok_and(|statement| {
-                slot_where(&statement, |expr| matches!(expr, Expr::ProcessRef { .. })).is_some()
+            slot_where(&statement(node), |expr| {
+                matches!(expr, Expr::ProcessRef { .. })
             })
+            .is_some()
         })
         .context("a statement holds the inline process")?;
     let start = top
@@ -957,7 +956,7 @@ async fn s38(case: &mut Case) -> Result<()> {
             && !lifted[0].origin.is_declared()
             && lifted[0]
                 .body
-                .nodes
+                .nodes()
                 .iter()
                 .any(|node| calls(node, "record")),
         "the inline process is lifted into a declaration with a typed body"
@@ -972,12 +971,12 @@ async fn s38(case: &mut Case) -> Result<()> {
         bail!("a statement binds the inline process");
     };
     ensure!(
-        slot_where(&statement(old_shape.inline)?, |expr| matches!(
+        slot_where(&statement(old_shape.inline), |expr| matches!(
             expr,
             Expr::ProcessRef { process } if process.as_str() == lifted[0].name
         ))
         .is_some()
-            && slot_where(&statement(old_shape.start)?, |expr| matches!(
+            && slot_where(&statement(old_shape.start), |expr| matches!(
                 expr,
                 Expr::Variable(name) if name.as_str() == audit.root.as_str()
             ))
@@ -1003,16 +1002,16 @@ async fn s38(case: &mut Case) -> Result<()> {
     let draft_graph = graph(&opened["graph"])?;
     let (draft_entry, draft_entry_id) = workflow_process(&draft_graph)?;
     let draft = shape(&draft_graph, &draft_entry)?;
-    let status = statement(draft.status)?;
+    let status = statement(draft.status);
     let status_slot =
         slot_where(&status, |expr| is_string(expr, "reviewed")).context("the status literal")?;
-    let threshold = statement(draft.threshold)?;
+    let threshold = statement(draft.threshold);
     let threshold_slot = slot_where(
         &threshold,
         |expr| matches!(expr, Expr::Number(two) if *two == 2.0),
     )
     .context("the threshold literal")?;
-    let rejected = statement(draft.catch_record)?;
+    let rejected = statement(draft.catch_record);
     let rejected_slot = slot_where(&rejected, |expr| is_string(expr, "rejected"))
         .context("the recorded literal")?;
     let signed_off = Expr::String("signed-off".into());
@@ -1108,12 +1107,12 @@ async fn s38(case: &mut Case) -> Result<()> {
         );
     }
     ensure!(
-        slot_where(&statement(new_shape.status)?, |expr| is_string(
+        slot_where(&statement(new_shape.status), |expr| is_string(
             expr,
             "signed-off"
         ))
         .is_some()
-            && slot_where(&statement(new_shape.threshold)?, |expr| {
+            && slot_where(&statement(new_shape.threshold), |expr| {
                 matches!(expr, Expr::Number(three) if *three == 3.0)
             })
             .is_some(),
@@ -1121,16 +1120,18 @@ async fn s38(case: &mut Case) -> Result<()> {
     );
     let authored = new_shape
         .try_body
-        .nodes
+        .nodes()
         .last()
+        .copied()
         .context("the edited try body")?;
     let cloned = new_shape
         .inner_body
-        .nodes
+        .nodes()
         .last()
+        .copied()
         .context("the edited inner loop body")?;
     ensure!(
-        slot_where(&statement(authored)?, |expr| is_string(expr, "signed-off")).is_some()
+        slot_where(&statement(authored), |expr| is_string(expr, "signed-off")).is_some()
             && calls(authored, "record")
             && calls(cloned, "record")
             && cloned.id != new_shape.record.id,

@@ -58,8 +58,8 @@ pub use ast::{
     walk_expr, walk_expr_slots,
 };
 pub use ast::{
-    AttributeAssignParts, AttributeStep, AttributeUpdate, CollectionTransformParts, ExprChildren,
-    ExprChildrenMut, ProcessWrapperParts, UpdateOperator,
+    AttributeAssignParts, AttributeStep, AttributeUpdate, AttributeWrite, CollectionTransformParts,
+    ExprChildren, ExprChildrenMut, ProcessWrapperParts, UpdateOperator,
 };
 
 /// Names of every source Lash VM builtin, in registry order.
@@ -222,38 +222,37 @@ pub use tracking::{
 };
 
 pub use workflow_graph::{
-    ListedStatement, WORKFLOW_IR_VERSION, WorkflowBody, WorkflowBodyForm, WorkflowBodySlot,
-    WorkflowCatch, WorkflowCompletionGroup, WorkflowGraphError, WorkflowGraphProjector,
-    WorkflowIrVersionRefusal, WorkflowPinnedSlots, WorkflowProcessWrapper, WorkflowRunDriver,
-    WorkflowStatement, else_if_chain, statement_list, workflow_graph_from_artifact,
-    workflow_graph_from_program, workflow_node_statement, workflow_program_from_graph,
+    ListedStatement, WORKFLOW_IR_VERSION, WorkflowBody, WorkflowBodyItem, WorkflowBodyShape,
+    WorkflowBodySlot, WorkflowCatch, WorkflowGraphError, WorkflowGraphProjector,
+    WorkflowIrVersionRefusal, WorkflowMemberStep, WorkflowProcessWrapper, WorkflowRunDriver,
+    WorkflowStateWrite, WorkflowStatement, else_if_chain, statement_list,
+    workflow_graph_from_artifact, workflow_graph_from_program, workflow_node_statement,
+    workflow_program_from_graph,
 };
 pub use workflow_graph::{
     VariableVersion, WORKFLOW_GRAPH_SCHEMA_VERSION, WORKFLOW_TYPE_FACET_SCHEMA_VERSION,
     WorkflowArgument, WorkflowContainer, WorkflowDeclaration, WorkflowDiagnosticClassification,
-    WorkflowDiagnosticKind, WorkflowEdge, WorkflowEdgeKind, WorkflowEffectKind,
+    WorkflowDiagnosticKind, WorkflowEdge, WorkflowEdgeKind, WorkflowEffect, WorkflowEffectKind,
     WorkflowExpectedArgument, WorkflowGraph, WorkflowGraphDecodeError, WorkflowGraphVersionRefusal,
-    WorkflowNode, WorkflowNodeId, WorkflowNodeKind, WorkflowNodeNameSource, WorkflowNodePath,
-    WorkflowNodeTypeFacets, WorkflowOwnership, WorkflowProcess, WorkflowProjection,
-    WorkflowResultStep, WorkflowSlotPath, WorkflowSlotPathSegment, WorkflowSubgraph,
-    WorkflowTerminalKind, WorkflowTypeDiagnostic, WorkflowTypedVariable, child_path,
-    execution_sites,
+    WorkflowNode, WorkflowNodeId, WorkflowNodeKind, WorkflowNodePath, WorkflowNodeTypeFacets,
+    WorkflowOwnership, WorkflowProcess, WorkflowProjection, WorkflowResultStep, WorkflowSlotPath,
+    WorkflowSlotPathSegment, WorkflowSubgraph, WorkflowTerminal, WorkflowTerminalKind,
+    WorkflowTypeDiagnostic, WorkflowTypedVariable, child_path, execution_sites,
 };
 pub use workflow_graph::{
     WorkflowAdmission, WorkflowAdmissionDiagnostic, WorkflowAdmissionDiagnosticKind,
     WorkflowAdmissionLocation, WorkflowAdmissionRefusal, admit_workflow_graph,
 };
 pub use workflow_graph::{
-    WorkflowBindingRef, WorkflowBodyRef, WorkflowCorrespondence, WorkflowCorrespondenceEntry,
-    WorkflowDraft, WorkflowDraftHandle, WorkflowDraftOpenError, WorkflowDraftRevision,
-    WorkflowEdgeDrag, WorkflowEdit, WorkflowEditDiagnostic, WorkflowEditDiagnosticKind,
-    WorkflowEditLocation, WorkflowEditRefusal, WorkflowEditTransaction, WorkflowExpressionRef,
-    WorkflowNodeSource,
+    WorkflowBindingRef, WorkflowBodyLayout, WorkflowBodyLayoutItem, WorkflowBodyRef,
+    WorkflowCorrespondence, WorkflowCorrespondenceEntry, WorkflowDraft, WorkflowDraftHandle,
+    WorkflowDraftOpenError, WorkflowDraftRevision, WorkflowEdgeDrag, WorkflowEdit,
+    WorkflowEditDiagnostic, WorkflowEditDiagnosticKind, WorkflowEditLocation, WorkflowEditRefusal,
+    WorkflowEditTransaction, WorkflowExpressionRef, WorkflowNodeSource,
 };
 pub use workflow_graph::{
-    projected_node_type_facets, workflow_call_from_ir, workflow_call_to_ir,
-    workflow_effect_from_ir, workflow_effect_to_ir, workflow_node_id, workflow_slot_accepts_value,
-    workflow_slot_value,
+    projected_node_type_facets, workflow_call_from_ir, workflow_call_to_ir, workflow_node_id,
+    workflow_slot_accepts_value, workflow_slot_value,
 };
 
 /// Internals the workflow-graph projector needs.

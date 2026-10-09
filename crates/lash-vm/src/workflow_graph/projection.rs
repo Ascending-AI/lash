@@ -12,20 +12,20 @@ const LASH_WORKFLOW_EDGE_DOMAIN_VERSION: &str = "lash-workflow-edge/v2";
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::ast::{
-    AssignTarget, AstPath, AttributeAssignParts, AttributeStep, Declaration, Expr, LabelMetadata,
-    ProcessDecl, ProcessLiteralExpr, ProcessOrigin, ProcessWrapperParts, Program, StructuralRole,
+    AssignTarget, AstPath, Declaration, Expr, LabelMetadata, ProcessDecl, ProcessLiteralExpr,
+    ProcessOrigin, ProcessWrapperParts, Program, StructuralRole,
 };
 use crate::linker::WorkflowLinkAnalysis;
 
 use super::{
     VariableVersion, WORKFLOW_GRAPH_SCHEMA_VERSION, WORKFLOW_IR_VERSION,
-    WORKFLOW_TYPE_FACET_SCHEMA_VERSION, WorkflowBody, WorkflowBodyForm, WorkflowBodySlot,
+    WORKFLOW_TYPE_FACET_SCHEMA_VERSION, WorkflowBody, WorkflowBodyShape, WorkflowBodySlot,
     WorkflowCatch, WorkflowContainer, WorkflowDeclaration, WorkflowEdge, WorkflowEdgeKind,
-    WorkflowEffectKind, WorkflowGraph, WorkflowNode, WorkflowNodeId, WorkflowNodeKind,
-    WorkflowNodeNameSource, WorkflowOwnership, WorkflowPinnedSlots, WorkflowProcess,
-    WorkflowProcessWrapper, WorkflowProjection, WorkflowRunDriver, WorkflowStatement,
-    WorkflowSubgraph, WorkflowTerminalKind, execution_sites, projected_node_type_facets,
-    statement_list, workflow_call_from_ir, workflow_effect_from_ir, workflow_node_id,
+    WorkflowEffect, WorkflowGraph, WorkflowNode, WorkflowNodeId, WorkflowNodeKind,
+    WorkflowOwnership, WorkflowProcess, WorkflowProcessWrapper, WorkflowProjection,
+    WorkflowRunDriver, WorkflowStateWrite, WorkflowStatement, WorkflowSubgraph, WorkflowTerminal,
+    execution_sites, projected_node_type_facets, statement_list, workflow_call_from_ir,
+    workflow_node_id,
 };
 
 /// Projects `program` as a draft graph, before any admission: it claims no
@@ -157,18 +157,6 @@ impl Session<'_, '_> {
 
     fn project_process(&self, process: &ProcessDecl, declaration_index: u32) -> WorkflowProcess {
         let owner = format!("process:{}", process.name);
-        let (display_name, description, name_source) = match &process.label {
-            Some(label) => (
-                label.title.to_string(),
-                label.description.as_ref().map(ToString::to_string),
-                WorkflowNodeNameSource::Label,
-            ),
-            None => (
-                process.name.to_string(),
-                None,
-                WorkflowNodeNameSource::Derived,
-            ),
-        };
         let mut versions = VersionState::default();
         for param in &process.params {
             versions.seed(param.name.as_str());
@@ -180,9 +168,7 @@ impl Session<'_, '_> {
         WorkflowProcess {
             id: workflow_node_id(&owner, &[]),
             name: process.name.to_string(),
-            display_name,
-            description,
-            name_source,
+            label: process.label.clone(),
             params: process.params.clone(),
             return_ty: process.return_ty.clone(),
             origin: process.origin.clone(),
@@ -225,10 +211,8 @@ impl Session<'_, '_> {
         let projection = WorkflowProjection::for_process(&literal.body, site.child(0));
         WorkflowProcess {
             id: workflow_node_id(&owner, &[]),
-            name: name.clone(),
-            display_name: name,
-            description: None,
-            name_source: WorkflowNodeNameSource::Derived,
+            name,
+            label: None,
             params,
             return_ty: literal.return_ty.clone(),
             origin: ProcessOrigin::Lifted {
@@ -253,17 +237,15 @@ impl Session<'_, '_> {
         ownership: &WorkflowOwnership,
         versions: &mut VersionState,
     ) -> WorkflowSubgraph {
-        let mut subgraph = WorkflowSubgraph {
-            form: WorkflowBodyForm::of(body.expr),
-            ..WorkflowSubgraph::default()
-        };
+        let mut edges = Vec::new();
+        let mut nodes = Vec::with_capacity(body.statements.len());
         let mut previous_effect: Option<WorkflowNodeId> = None;
         for statement in &body.statements {
             let node = self.project_node(statement, owner, ownership, versions);
-            add_dependency_edges(&mut subgraph.edges, &node, statement.expr, versions);
+            add_dependency_edges(&mut edges, &node, statement.expr, versions);
             if node_is_sequenced(&node) {
                 if let Some(previous) = &previous_effect {
-                    subgraph.edges.push(edge(
+                    edges.push(edge(
                         previous.clone(),
                         node.id.clone(),
                         WorkflowEdgeKind::Sequence,
@@ -272,9 +254,12 @@ impl Session<'_, '_> {
                 previous_effect = Some(node.id.clone());
             }
             versions.record_outputs(&node.outputs, &node.id);
-            subgraph.nodes.push(node);
+            nodes.push(node);
         }
-        subgraph
+        WorkflowSubgraph {
+            body: WorkflowBodyShape::of(body.expr, &mut nodes.into_iter()),
+            edges,
+        }
     }
 
     fn project_node(
@@ -292,17 +277,9 @@ impl Session<'_, '_> {
         };
         let path = statement.node_path.indices();
         let available_variables: Vec<String> = versions.known.iter().cloned().collect();
-        let (kind, derived_name, outputs) =
+        let (kind, name, outputs) =
             self.project_kind(statement, expression, owner, ownership, versions);
         let id = workflow_node_id(owner, path);
-        let (name, description, name_source) = match label {
-            Some(label) => (
-                label.title.to_string(),
-                label.description.as_ref().map(ToString::to_string),
-                WorkflowNodeNameSource::Label,
-            ),
-            None => (derived_name, None, WorkflowNodeNameSource::Derived),
-        };
         let execution_sites = execution_sites(expression, owner, &facts_path, ownership, label);
         let mut type_facets = projected_node_type_facets(
             self.projector.analysis,
@@ -330,8 +307,7 @@ impl Session<'_, '_> {
         WorkflowNode {
             id,
             name,
-            description,
-            name_source,
+            label: label.cloned(),
             kind,
             available_variables,
             type_facets,
@@ -348,19 +324,10 @@ impl Session<'_, '_> {
         ownership: &WorkflowOwnership,
         versions: &mut VersionState,
     ) -> (WorkflowNodeKind, String, Vec<VariableVersion>) {
-        if let Some((target, value, update, pinned)) = attribute_assignment(expression) {
-            let name = format!("update {}", target.root);
-            let outputs = vec![versions.allocate(target.root.as_str())];
-            return (
-                WorkflowNodeKind::StateUpdate {
-                    target,
-                    expression: value.clone(),
-                    update,
-                    pinned: Some(pinned),
-                },
-                name,
-                outputs,
-            );
+        if let Some(write) = WorkflowStateWrite::member_from_ir(expression) {
+            let name = format!("update {}", write.root());
+            let outputs = vec![versions.allocate(write.root().as_str())];
+            return (WorkflowNodeKind::StateUpdate(write), name, outputs);
         }
         let (binding, value) = assignment_parts(expression);
         if let Expr::Assign { target, expr } = expression
@@ -368,12 +335,10 @@ impl Session<'_, '_> {
             && !owns_bodies(expr)
         {
             return (
-                WorkflowNodeKind::StateUpdate {
+                WorkflowNodeKind::StateUpdate(WorkflowStateWrite::Plain {
                     target: target.clone(),
-                    expression: expr.as_ref().clone(),
-                    update: None,
-                    pinned: None,
-                },
+                    value: expr.as_ref().clone(),
+                }),
                 format!("update {}", target.root),
                 vec![versions.allocate(target.root.as_str())],
             );
@@ -538,29 +503,26 @@ impl Session<'_, '_> {
                     outputs,
                 )
             }
-            Expr::Finish(_) if binding.is_none() => (
-                WorkflowNodeKind::Terminal {
-                    terminal: WorkflowTerminalKind::Finish,
-                    expression: value.clone(),
-                },
+            Expr::Finish(finished) if binding.is_none() => (
+                WorkflowNodeKind::Terminal(WorkflowTerminal::Finish {
+                    value: finished.as_ref().clone(),
+                }),
                 "finish".to_string(),
                 Vec::new(),
             ),
-            Expr::Fail(_) if binding.is_none() => (
-                WorkflowNodeKind::Terminal {
-                    terminal: WorkflowTerminalKind::Fail,
-                    expression: value.clone(),
-                },
+            Expr::Fail(failure) if binding.is_none() => (
+                WorkflowNodeKind::Terminal(WorkflowTerminal::Fail {
+                    value: failure.as_ref().clone(),
+                }),
                 "fail".to_string(),
                 Vec::new(),
             ),
             // A function body ends by returning, and in a process body that
             // return is the process's finish.
-            Expr::FunctionReturn(_) if binding.is_none() => (
-                WorkflowNodeKind::Terminal {
-                    terminal: WorkflowTerminalKind::Finish,
-                    expression: value.clone(),
-                },
+            Expr::FunctionReturn(returned) if binding.is_none() => (
+                WorkflowNodeKind::Terminal(WorkflowTerminal::Return {
+                    value: returned.as_ref().clone(),
+                }),
                 "return".to_string(),
                 Vec::new(),
             ),
@@ -598,20 +560,9 @@ impl Session<'_, '_> {
                         operation,
                         outputs,
                     )
-                } else if let Some((effect, arguments, result_steps)) =
-                    workflow_effect_from_ir(value)
-                {
+                } else if let Some(effect) = WorkflowEffect::from_ir(binding.as_ref(), value) {
                     let name = effect_name(value, &effect);
-                    (
-                        WorkflowNodeKind::Effect {
-                            binding: binding.clone(),
-                            effect,
-                            arguments,
-                            result_steps,
-                        },
-                        name,
-                        outputs,
-                    )
+                    (WorkflowNodeKind::Effect(effect), name, outputs)
                 } else {
                     (
                         WorkflowNodeKind::Computation {
@@ -691,52 +642,6 @@ pub(super) fn statement_addresses(program: &Program) -> Vec<(WorkflowNodeId, Ast
         collect(projection.body(), &owner, &mut out);
     }
     out
-}
-
-/// The authored target and value of an attribute assignment whose object is a
-/// plain variable: the only shape a graph state update can name.
-/// A member assignment role as a state update: its target, then either its
-/// value or, for a compound update, the operand and operator.
-fn attribute_assignment(
-    expression: &Expr,
-) -> Option<(
-    AssignTarget,
-    &Expr,
-    Option<crate::UpdateOperator>,
-    WorkflowPinnedSlots,
-)> {
-    let Expr::Role {
-        role: StructuralRole::AttributeAssign,
-        expr,
-    } = expression
-    else {
-        return None;
-    };
-    let parts = AttributeAssignParts::of(expr)?;
-    let Expr::Variable(root) = parts.object else {
-        return None;
-    };
-    let step = match parts.step {
-        AttributeStep::Field(field) => crate::AssignPathStep::Field(field.clone()),
-        AttributeStep::Index(index) => crate::AssignPathStep::Index(index.clone()),
-    };
-    let (value, update) = match parts.update {
-        Some(update) => (update.operand, Some(update.operator)),
-        None => (parts.value, None),
-    };
-    Some((
-        AssignTarget {
-            root: root.clone(),
-            steps: vec![step],
-        },
-        value,
-        update,
-        WorkflowPinnedSlots {
-            base: parts.base.clone(),
-            key: parts.key.cloned(),
-            result: parts.result.clone(),
-        },
-    ))
 }
 
 /// Whether a statement's value is a region that owns child bodies, as the
@@ -1018,8 +923,8 @@ fn assignment_output(
 fn collect_statement_roots(body: &WorkflowBody<'_>, assigned: &mut BTreeSet<String>) {
     for statement in &body.statements {
         let (_, expression) = peel_label(statement.expr);
-        if let Some((target, _, _, _)) = attribute_assignment(expression) {
-            assigned.insert(target.root.to_string());
+        if let Some(write) = WorkflowStateWrite::member_from_ir(expression) {
+            assigned.insert(write.root().to_string());
         } else if let Expr::Assign { target, .. } = expression {
             assigned.insert(target.root.to_string());
         }
@@ -1062,7 +967,7 @@ pub(super) fn collect_process_literals<'a>(
     }
 }
 
-fn effect_name(expression: &Expr, effect: &WorkflowEffectKind) -> String {
+fn effect_name(expression: &Expr, effect: &WorkflowEffect) -> String {
     let descriptor_expression = match expression {
         Expr::ResultUnwrap(inner) => inner.as_ref(),
         _ => expression,
@@ -1071,12 +976,12 @@ fn effect_name(expression: &Expr, effect: &WorkflowEffectKind) -> String {
         return label.into_owned();
     }
     match effect {
-        WorkflowEffectKind::AwaitJoin => "await",
-        WorkflowEffectKind::Print => "print",
-        WorkflowEffectKind::Break => "break",
-        WorkflowEffectKind::Continue => "continue",
-        // The remaining effects all carry a compiler execution-site descriptor.
-        WorkflowEffectKind::SleepFor => {
+        WorkflowEffect::AwaitJoin { .. } => "await",
+        WorkflowEffect::Print { .. } => "print",
+        WorkflowEffect::Break => "break",
+        WorkflowEffect::Continue => "continue",
+        // A sleep always carries a compiler execution-site descriptor.
+        WorkflowEffect::SleepFor { .. } => {
             unreachable!("execution-site effects must have a compiler descriptor")
         }
     }

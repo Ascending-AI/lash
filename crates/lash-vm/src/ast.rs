@@ -18,7 +18,7 @@ pub use slots::{ExprSlot, ExprSlotVisitor, walk_expr_slots};
 mod roles;
 pub(crate) use roles::check_unique_declarations;
 pub use roles::{
-    AttributeAssignParts, AttributeStep, AttributeUpdate, BindingVisibility,
+    AttributeAssignParts, AttributeStep, AttributeUpdate, AttributeWrite, BindingVisibility,
     CollectionTransformParts, LIFTED_PROCESS_NAME_PREFIX, ProcessOrigin, ProcessWrapperParts,
     StructuralRole, UpdateOperator, lifted_process_identity, lifted_process_name,
     process_wrapper_run_path,

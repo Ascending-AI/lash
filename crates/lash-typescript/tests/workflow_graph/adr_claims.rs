@@ -66,19 +66,19 @@ fn editable_ir_fields_survive_every_lens_direction() {
             0,
             "arguments",
         ),
-        ("console.log('a');", "console.log('b');", 0, "arguments"),
-        ("finish(1);", "finish(2);", 0, "expression"),
+        ("console.log('a');", "console.log('b');", 0, "value"),
+        ("finish(1);", "finish(2);", 0, "value"),
         (
             "let state = { x: 1, y: 2 }; state.x = 3;",
             "let state = { x: 1, y: 2 }; state.y = 3;",
             1,
-            "target",
+            "step",
         ),
         (
             "let state = { x: 1 }; state.x = 3;",
             "let state = { x: 1 }; state.x = 4;",
             1,
-            "expression",
+            "operand",
         ),
         (
             "let state = { x: 1 }; state.x += 3;",
@@ -139,15 +139,15 @@ fn editable_ir_fields_survive_every_lens_direction() {
         if field == "result_steps" {
             // Removing await changes a call node into a pending computation
             // after projection. Its canonical graph is the authored target.
-            edited["main"]["nodes"][index]["kind"][field] = serde_json::json!([]);
+            edited["main"]["body"]["items"][index]["node"]["kind"][field] = serde_json::json!([]);
         }
         assert_ne!(
-            document["main"]["nodes"][index]["kind"][field],
-            edited["main"]["nodes"][index]["kind"][field],
+            document["main"]["body"]["items"][index]["node"]["kind"][field],
+            edited["main"]["body"]["items"][index]["node"]["kind"][field],
             "{field}: fixture edits a real field"
         );
-        document["main"]["nodes"][index]["kind"][field] =
-            edited["main"]["nodes"][index]["kind"][field].clone();
+        document["main"]["body"]["items"][index]["node"]["kind"][field] =
+            edited["main"]["body"]["items"][index]["node"]["kind"][field].clone();
         let mutated = WorkflowGraph::decode_json_value(document).expect("edited IR decodes");
         let rendered = workflow_graph_to_source(&mutated)
             .unwrap_or_else(|error| panic!("{field}/{source}: {error}"));

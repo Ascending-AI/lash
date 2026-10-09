@@ -355,7 +355,7 @@ fn l3_a_rename_inside_a_lifted_literal_remints_one_owner_everywhere() {
         workflow_graph_from_source(source)
             .expect("the variant projects")
             .main
-            .nodes
+            .nodes()
             .iter()
             .map(|node| node.id.to_string())
             .collect::<Vec<_>>()

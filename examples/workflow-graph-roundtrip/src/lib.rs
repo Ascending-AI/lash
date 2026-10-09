@@ -366,9 +366,7 @@ async fn get_workflow(State(state): State<AppState>) -> Json<WorkflowDocument> {
 
 /// The saved workflow as the typed document it is, with each node's
 /// statement and the expressions of it a generic editor can replace.
-async fn get_workflow_ir(
-    State(state): State<AppState>,
-) -> Result<Json<WorkflowIrResponse>, RenderErrorResponse> {
+async fn get_workflow_ir(State(state): State<AppState>) -> Json<WorkflowIrResponse> {
     let saved = state.current();
     // The draft's own document is what an edit addresses: a slot path read
     // here is the path a `replaceExpression` takes.
@@ -376,14 +374,13 @@ async fn get_workflow_ir(
         .ids
         .iter()
         .filter_map(|(handle, id)| Some((id, saved.draft.node(*handle)?)))
-        .map(|(id, node)| Ok((id.to_string(), edits::node_ir(node)?)))
-        .collect::<Result<_, edits::EditError>>()
-        .map_err(RenderErrorResponse::edit)?;
-    Ok(Json(WorkflowIrResponse {
+        .map(|(id, node)| (id.to_string(), edits::node_ir(node)))
+        .collect();
+    Json(WorkflowIrResponse {
         version: saved.version,
         graph: saved.draft.document().clone(),
         nodes,
-    }))
+    })
 }
 
 /// Opens a workflow given as its typed document: no source is involved.

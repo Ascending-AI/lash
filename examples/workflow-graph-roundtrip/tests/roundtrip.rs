@@ -483,8 +483,8 @@ async fn lists_selects_projects_and_runs_built_in_workflows() {
             assert!(projected.nodes().any(|node| {
                 matches!(
                     &node.kind,
-                    lash::vm::ir::WorkflowNodeKind::StateUpdate { target, .. }
-                        if !target.steps.is_empty()
+                    lash::vm::ir::WorkflowNodeKind::StateUpdate(write)
+                        if !write.target().steps.is_empty()
                 )
             }));
         }

@@ -14,15 +14,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 use crate::ast::{
-    AssignPathStep, AssignTarget, AttributeAssignParts, CatchClause, Declaration, Expr,
-    FunctionExpr, LabelMetadata, ProcessDecl, ProcessLiteralExpr, ProcessOrigin,
-    ProcessWrapperParts, Program, StructuralRole, TryExpr,
+    AssignTarget, CatchClause, Declaration, Expr, FunctionExpr, ProcessDecl, ProcessLiteralExpr,
+    ProcessOrigin, ProcessWrapperParts, Program, StructuralRole, TryExpr,
 };
 
 use super::{
     WorkflowContainer, WorkflowDeclaration, WorkflowGraph, WorkflowIrVersionRefusal, WorkflowNode,
-    WorkflowNodeId, WorkflowNodeKind, WorkflowNodeNameSource, WorkflowProcess, WorkflowSubgraph,
-    WorkflowTerminalKind, workflow_call_to_ir, workflow_effect_to_ir,
+    WorkflowNodeId, WorkflowNodeKind, WorkflowProcess, WorkflowSubgraph, workflow_call_to_ir,
 };
 
 /// Why a workflow document does not spell a program.
@@ -35,10 +33,6 @@ pub enum WorkflowGraphError {
     DuplicateNodeId { id: String },
     #[error("duplicate process name `{name}`")]
     DuplicateProcessName { name: String },
-    #[error("node `{node_id}` has a payload incompatible with its kind: {message}")]
-    InvalidNodePayload { node_id: String, message: String },
-    #[error("a body's form does not fit its nodes: {message}")]
-    InvalidBodyForm { message: String },
     /// A process's origin is derived at admission, never authored: a declared
     /// process cannot take a lifted name, and a lifted one must still be
     /// carried by the literal it was lifted from or by a reference to it.
@@ -53,8 +47,6 @@ impl WorkflowGraphError {
             Self::UnsupportedIrVersion(_) => "unsupported_ir_version",
             Self::DuplicateNodeId { .. } => "duplicate_node_id",
             Self::DuplicateProcessName { .. } => "duplicate_process_name",
-            Self::InvalidNodePayload { .. } => "invalid_node_payload",
-            Self::InvalidBodyForm { .. } => "invalid_body_form",
             Self::ProcessOriginMismatch { .. } => "process_origin_mismatch",
         }
     }
@@ -63,10 +55,8 @@ impl WorkflowGraphError {
     pub fn node_id(&self) -> Option<&str> {
         match self {
             Self::DuplicateNodeId { id } => Some(id),
-            Self::InvalidNodePayload { node_id, .. } => Some(node_id),
             Self::UnsupportedIrVersion(_)
             | Self::DuplicateProcessName { .. }
-            | Self::InvalidBodyForm { .. }
             | Self::ProcessOriginMismatch { .. } => None,
         }
     }
@@ -125,13 +115,13 @@ pub(super) fn reconstruct(graph: &WorkflowGraph) -> Result<Reconstruction, Workf
             _ => None,
         })
         .collect::<BTreeSet<_>>();
-    let mut main = body_expression(&graph.main)?;
+    let mut main = body_expression(&graph.main);
     resolve_lifted_references(&mut main, &lifted);
     let mut bodies = Vec::new();
     for declaration in &graph.declarations {
         if let WorkflowDeclaration::Process(process) = declaration {
             check_origin(process)?;
-            let mut body = process_body(process)?;
+            let mut body = process_body(process);
             resolve_lifted_references(&mut body, &lifted);
             bodies.push(Some(body));
         } else {
@@ -159,16 +149,11 @@ pub(super) fn reconstruct(graph: &WorkflowGraph) -> Result<Reconstruction, Workf
                 carried.by_name.insert(process.name.clone(), process);
             }
             (WorkflowDeclaration::Process(process), Some(body)) => {
-                let label =
-                    (process.name_source == WorkflowNodeNameSource::Label).then(|| LabelMetadata {
-                        title: process.display_name.clone().into(),
-                        description: process.description.clone().map(Into::into),
-                    });
                 declarations.push(Declaration::Process(ProcessDecl {
                     name: process.name.clone().into(),
                     params: process.params.clone(),
                     return_ty: process.return_ty.clone(),
-                    label,
+                    label: process.label.clone(),
                     origin: process.origin.clone(),
                     body,
                 }));
@@ -191,11 +176,10 @@ pub(super) fn reconstruct(graph: &WorkflowGraph) -> Result<Reconstruction, Workf
 
 /// The statement a node spells, label included: the root every
 /// [`super::WorkflowSlotPath`] of [`crate::ExprSlot`] segments is read from.
-pub fn workflow_node_statement(node: &WorkflowNode) -> Result<Expr, WorkflowGraphError> {
-    let invalid = |message: &str| WorkflowGraphError::InvalidNodePayload {
-        node_id: node.id.to_string(),
-        message: message.to_string(),
-    };
+///
+/// Every node spells one: a payload holds exactly the operands its kind
+/// takes, so there is nothing here to refuse.
+pub fn workflow_node_statement(node: &WorkflowNode) -> Expr {
     let expression = match &node.kind {
         WorkflowNodeKind::Data {
             binding,
@@ -215,103 +199,22 @@ pub fn workflow_node_statement(node: &WorkflowNode) -> Result<Expr, WorkflowGrap
             binding,
             workflow_call_to_ir(receiver, operation, arguments, result_steps),
         ),
-        WorkflowNodeKind::Effect {
-            binding,
-            effect,
-            arguments,
-            result_steps,
-        } => assigned(
-            binding,
-            workflow_effect_to_ir(*effect, arguments, result_steps)
-                .ok_or_else(|| invalid("effect arguments do not match its kind"))?,
-        ),
-        WorkflowNodeKind::StateUpdate {
-            target,
-            expression,
-            update,
-            pinned: None,
-        } => {
-            if update.is_some() {
-                return Err(invalid(
-                    "a compound update pins the member it updates and names its slots",
-                ));
-            }
-            Expr::Assign {
-                target: target.clone(),
-                expr: Box::new(expression.clone()),
-            }
-        }
-        WorkflowNodeKind::StateUpdate {
-            target,
-            expression,
-            update,
-            pinned: Some(pinned),
-        } => {
-            let member = || invalid("a pinned update's target is one member step of a variable");
-            let [step] = target.steps.as_slice() else {
-                return Err(member());
-            };
-            let (field, key) = match (step, &pinned.key) {
-                (AssignPathStep::Field(field), None) => (Some(field.clone()), None),
-                (AssignPathStep::Index(index), Some(key)) => {
-                    (None, Some((key.clone(), index.clone())))
-                }
-                _ => return Err(member()),
-            };
-            let value = match update {
-                None => expression.clone(),
-                Some(operator) => AttributeAssignParts::update_value(
-                    &pinned.base,
-                    pinned.key.as_ref(),
-                    field.as_ref(),
-                    *operator,
-                    expression.clone(),
-                )
-                .ok_or_else(member)?,
-            };
-            AttributeAssignParts::build(
-                pinned.base.clone(),
-                key,
-                pinned.result.clone(),
-                Expr::Variable(target.root.clone()),
-                field,
-                value,
-            )
-            .ok_or_else(member)?
-        }
-        WorkflowNodeKind::Terminal {
-            terminal,
-            expression,
-        } => {
-            let fits = matches!(
-                (terminal, expression),
-                (
-                    WorkflowTerminalKind::Finish,
-                    Expr::Finish(_) | Expr::FunctionReturn(_)
-                ) | (WorkflowTerminalKind::Fail, Expr::Fail(_))
-            );
-            if !fits {
-                return Err(invalid("terminal kind does not match its expression"));
-            }
-            expression.clone()
-        }
+        WorkflowNodeKind::Effect(effect) => effect.to_ir(),
+        WorkflowNodeKind::StateUpdate(write) => write.to_ir(),
+        WorkflowNodeKind::Terminal(terminal) => terminal.to_ir(),
         WorkflowNodeKind::Throw { value } => Expr::Throw(Box::new(value.clone())),
-        WorkflowNodeKind::Container(container) => container_expression(container)?,
+        WorkflowNodeKind::Container(container) => container_expression(container),
     };
-    Ok(if node.name_source == WorkflowNodeNameSource::Label {
-        Expr::LabelAnnotated {
-            label: LabelMetadata {
-                title: node.name.clone().into(),
-                description: node.description.clone().map(Into::into),
-            },
+    match &node.label {
+        Some(label) => Expr::LabelAnnotated {
+            label: label.clone(),
             expr: Box::new(expression),
-        }
-    } else {
-        expression
-    })
+        },
+        None => expression,
+    }
 }
 
-fn container_expression(container: &WorkflowContainer) -> Result<Expr, WorkflowGraphError> {
+fn container_expression(container: &WorkflowContainer) -> Expr {
     let value = match container {
         WorkflowContainer::If {
             condition,
@@ -320,8 +223,8 @@ fn container_expression(container: &WorkflowContainer) -> Result<Expr, WorkflowG
             ..
         } => Expr::If {
             condition: Box::new(condition.clone()),
-            then_block: Box::new(body_expression(then_graph)?),
-            else_block: Box::new(body_expression(else_graph)?),
+            then_block: Box::new(body_expression(then_graph)),
+            else_block: Box::new(body_expression(else_graph)),
         },
         WorkflowContainer::For {
             element,
@@ -335,13 +238,13 @@ fn container_expression(container: &WorkflowContainer) -> Result<Expr, WorkflowG
             authored_binding: authored_element.clone().map(Into::into),
             iterable: Box::new(iterable.clone()),
             bind: bind.clone().map(Box::new),
-            body: Box::new(body_expression(body)?),
+            body: Box::new(body_expression(body)),
         },
         WorkflowContainer::While {
             condition, body, ..
         } => Expr::While {
             condition: Box::new(condition.clone()),
-            body: Box::new(body_expression(body)?),
+            body: Box::new(body_expression(body)),
         },
         WorkflowContainer::Try {
             body,
@@ -349,33 +252,27 @@ fn container_expression(container: &WorkflowContainer) -> Result<Expr, WorkflowG
             finally,
             ..
         } => Expr::Try(Box::new(TryExpr {
-            body: Box::new(body_expression(body)?),
-            catch: catch
-                .as_ref()
-                .map(|catch| {
-                    Ok::<_, WorkflowGraphError>(CatchClause {
-                        binding: catch.binding.clone().into(),
-                        body: Box::new(body_expression(&catch.body)?),
-                    })
-                })
-                .transpose()?,
+            body: Box::new(body_expression(body)),
+            catch: catch.as_ref().map(|catch| CatchClause {
+                binding: catch.binding.clone().into(),
+                body: Box::new(body_expression(&catch.body)),
+            }),
             finally: finally
                 .as_ref()
-                .map(|finally| body_expression(finally).map(Box::new))
-                .transpose()?,
+                .map(|finally| Box::new(body_expression(finally))),
         })),
         WorkflowContainer::Scope { body, .. } => Expr::Role {
             role: StructuralRole::Scope,
-            expr: Box::new(body_expression(body)?),
+            expr: Box::new(body_expression(body)),
         },
     };
-    Ok(match container.binding() {
+    match container.binding() {
         Some(target) => Expr::Assign {
             target: target.clone(),
             expr: Box::new(value),
         },
         None => value,
-    })
+    }
 }
 
 fn assigned(binding: &Option<AssignTarget>, expression: Expr) -> Expr {
@@ -388,20 +285,15 @@ fn assigned(binding: &Option<AssignTarget>, expression: Expr) -> Expr {
     }
 }
 
-fn body_expression(graph: &WorkflowSubgraph) -> Result<Expr, WorkflowGraphError> {
-    let statements = graph
-        .nodes
-        .iter()
-        .map(workflow_node_statement)
-        .collect::<Result<Vec<_>, _>>()?;
-    graph.form.body(statements)
+fn body_expression(graph: &WorkflowSubgraph) -> Expr {
+    graph.body.expression()
 }
 
 /// A process's whole body: its run body inside the failure wrapper, when it
 /// has one.
-fn process_body(process: &WorkflowProcess) -> Result<Expr, WorkflowGraphError> {
-    let body = body_expression(&process.body)?;
-    Ok(match &process.wrapper {
+fn process_body(process: &WorkflowProcess) -> Expr {
+    let body = body_expression(&process.body);
+    match &process.wrapper {
         None => body,
         Some(wrapper) => ProcessWrapperParts::build(
             FunctionExpr {
@@ -419,7 +311,7 @@ fn process_body(process: &WorkflowProcess) -> Result<Expr, WorkflowGraphError> {
             wrapper.arguments.clone(),
             wrapper.catch_binding.clone(),
         ),
-    })
+    }
 }
 
 fn check_identities(graph: &WorkflowGraph) -> Result<(), WorkflowGraphError> {
@@ -427,7 +319,7 @@ fn check_identities(graph: &WorkflowGraph) -> Result<(), WorkflowGraphError> {
         graph: &WorkflowSubgraph,
         ids: &mut BTreeSet<WorkflowNodeId>,
     ) -> Result<(), WorkflowGraphError> {
-        for node in &graph.nodes {
+        for node in graph.nodes() {
             if !ids.insert(node.id.clone()) {
                 return Err(WorkflowGraphError::DuplicateNodeId {
                     id: node.id.to_string(),
@@ -603,7 +495,7 @@ fn splice_carried(
         literal.params = params.to_vec();
         literal.hidden_args = hidden_args.to_vec();
         literal.return_ty = return_ty;
-        *literal.body = process_body(process)?;
+        *literal.body = process_body(process);
     }
     let label = matches!(expression, Expr::LabelAnnotated { .. });
     for (index, child) in (0u32..).zip(expression.children_mut()) {

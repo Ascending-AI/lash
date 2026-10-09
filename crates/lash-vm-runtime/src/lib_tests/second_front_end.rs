@@ -399,7 +399,7 @@ fn execution_document(
 /// their kinds.
 fn document_sites(document: &WorkflowExecutionDocument) -> BTreeSet<SiteKey> {
     fn collect(body: &lash_vm::WorkflowSubgraph, sites: &mut BTreeSet<SiteKey>) {
-        for node in &body.nodes {
+        for node in body.nodes() {
             sites.extend(
                 node.execution_sites
                     .iter()
@@ -498,10 +498,10 @@ fn a_second_front_end_gets_complete_documents_for_main_and_its_lifted_process() 
     assert!(
         graph.nodes().any(|node| matches!(
             node.kind,
-            lash_vm::WorkflowNodeKind::StateUpdate {
+            lash_vm::WorkflowNodeKind::StateUpdate(lash_vm::WorkflowStateWrite::Member {
                 update: Some(lash_vm::UpdateOperator::Add),
                 ..
-            }
+            })
         )),
         "the attribute update projects as an update of its target"
     );

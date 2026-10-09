@@ -67,8 +67,10 @@ fn graph_submission_cannot_edit_a_process_origin() {
     );
 
     let mut relabelled = graph.clone();
-    relabelled.main.nodes[0].name_source = WorkflowNodeNameSource::Label;
-    relabelled.main.nodes[0].name = "Child worker".into();
+    relabelled.main.nodes_mut()[0].label = Some(lash_vm::LabelMetadata {
+        title: "Child worker".into(),
+        description: None,
+    });
     let rendered = workflow_graph_to_source(&relabelled).expect("a label is not an origin edit");
     assert!(rendered.contains("return 1"), "{rendered}");
     assert_eq!(
@@ -104,7 +106,7 @@ fn a_lifted_process_body_renders_after_host_text_round_trips_and_moves() {
             })
             .collect::<BTreeSet<_>>();
         // A host spells every main expression as text and reads it back.
-        for node in &mut edited.main.nodes {
+        for node in edited.main.nodes_mut() {
             if let WorkflowNodeKind::Data { expression, .. } = &mut node.kind {
                 let text = typescript_expression_source(expression).expect("print");
                 *expression = parse_typescript_expression(&text, &BTreeSet::new(), &processes)
@@ -125,24 +127,26 @@ fn a_lifted_process_body_renders_after_host_text_round_trips_and_moves() {
             .expect("the literal lifts");
         let terminal = process
             .body
-            .nodes
-            .iter_mut()
-            .find(|node| matches!(node.kind, WorkflowNodeKind::Terminal { .. }))
+            .nodes_mut()
+            .into_iter()
+            .find(|node| matches!(node.kind, WorkflowNodeKind::Terminal(_)))
             .expect("the body returns");
-        if let WorkflowNodeKind::Terminal {
-            expression: lash_vm::Expr::FunctionReturn(value),
-            ..
-        } = &mut terminal.kind
+        if let WorkflowNodeKind::Terminal(lash_vm::WorkflowTerminal::Return { value }) =
+            &mut terminal.kind
         {
-            **value = lash_vm::Expr::Number(7.0);
+            *value = lash_vm::Expr::Number(7.0);
         }
-        let mut inserted = edited.main.nodes[0].clone();
+        let mut inserted = edited.main.nodes()[0].clone();
         inserted.id = WorkflowNodeId::new("node:0123456789abcdef01234567".to_string());
         inserted.kind = WorkflowNodeKind::Data {
             binding: Some(lash_vm::AssignTarget::variable("greeting".into())),
             expression: lash_vm::Expr::String("hello".into()),
         };
-        edited.main.nodes.insert(0, inserted);
+        edited
+            .main
+            .body
+            .items_mut()
+            .insert(0, lash_vm::WorkflowBodyItem::Node(Box::new(inserted)));
 
         let rendered = workflow_graph_to_source(&edited)
             .unwrap_or_else(|error| panic!("{what}: a moved literal still renders: {error}"));

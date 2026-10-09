@@ -463,15 +463,13 @@ fn an_admitted_document_reconstructs_its_source_identity() {
 fn derived_views_are_recomputed_and_never_read() {
     fn scramble(graph: &mut crate::WorkflowSubgraph, counter: &mut u32) {
         graph.edges.clear();
-        for node in &mut graph.nodes {
+        for node in graph.nodes_mut() {
             *counter += 1;
             node.id = WorkflowNodeId::new(format!("node:host-{counter}"));
             node.available_variables = vec!["stale".to_string()];
             node.outputs.clear();
             node.execution_sites.clear();
-            if node.name_source == crate::WorkflowNodeNameSource::Derived {
-                node.name = "renamed by a host".to_string();
-            }
+            node.name = "renamed by a host".to_string();
             if let WorkflowNodeKind::Container(container) = &mut node.kind {
                 for (_, child) in container.child_subgraphs_mut() {
                     scramble(child, counter);
@@ -544,7 +542,7 @@ fn every_expression_of_a_node_has_a_typed_slot_address() {
         }
         let graph = workflow_graph_from_program(&program);
         for node in graph.nodes() {
-            let statement = workflow_node_statement(node).expect("a projected node is a statement");
+            let statement = workflow_node_statement(node);
             let mut paths = Paths(vec![Vec::new()]);
             walk_expr_slots(&mut paths, &statement);
             for path in paths.0 {
@@ -568,6 +566,61 @@ fn a_document_survives_its_wire_encoding() {
             WorkflowGraph::decode_json(&json).expect("the document decodes"),
             graph,
             "{name}"
+        );
+    }
+}
+
+/// FIG-5643: a payload holds exactly the operands its kind takes, so the
+/// states reconstruction used to refuse, and the description it used to drop,
+/// do not decode.
+#[test]
+fn a_payload_cannot_hold_an_operand_its_kind_does_not_take() {
+    let graph = workflow_graph_from_program(&b::program(vec![
+        b::assign("total", b::num(0.0)),
+        b::assign("total", b::num(1.0)),
+        b::print(b::var("total")),
+    ]));
+    let document = serde_json::to_value(&graph).expect("the document serializes");
+    WorkflowGraph::decode_json_value(document.clone()).expect("the document decodes");
+    let node = |index: usize| format!("/main/body/items/{index}/node");
+    let cases = [
+        // A description without a label.
+        (node(0), "description", serde_json::json!("dropped")),
+        // A plain write with a compound operator.
+        (
+            format!("{}/kind", node(1)),
+            "update",
+            serde_json::json!("add"),
+        ),
+        // An effect with no result, unwrapped.
+        (
+            format!("{}/kind", node(2)),
+            "result_steps",
+            serde_json::json!(["unwrap_result"]),
+        ),
+        // A statement list that is also one bare statement.
+        (
+            "/main/body".to_string(),
+            "node",
+            document
+                .pointer(&node(0))
+                .expect("the first statement")
+                .clone(),
+        ),
+    ];
+    for (at, field, value) in cases {
+        let mut edited = document.clone();
+        edited
+            .pointer_mut(&at)
+            .and_then(serde_json::Value::as_object_mut)
+            .unwrap_or_else(|| panic!("{at} is an object"))
+            .insert(field.to_string(), value);
+        assert!(
+            matches!(
+                WorkflowGraph::decode_json_value(edited),
+                Err(WorkflowGraphDecodeError::Document(_))
+            ),
+            "{at} takes no `{field}`"
         );
     }
 }
@@ -618,10 +671,11 @@ fn an_edit_inside_a_lifted_container_reaches_its_literal() {
             _ => None,
         })
         .expect("the outer literal projects as a process container");
-    let removed = outer.body.nodes.remove(1);
+    let removed = outer.body.body.items_mut().remove(1);
     assert!(matches!(
-        removed.kind,
-        WorkflowNodeKind::Container(crate::WorkflowContainer::Try { .. })
+        removed,
+        crate::WorkflowBodyItem::Node(node)
+            if matches!(node.kind, WorkflowNodeKind::Container(crate::WorkflowContainer::Try { .. }))
     ));
     let rebuilt = workflow_program_from_graph(&graph).expect("the edited draft reconstructs");
     let mut expected = program;
@@ -658,7 +712,7 @@ fn an_edit_inside_a_lifted_container_reaches_its_literal() {
     };
     statements.pop();
     let mut orphaned = graph;
-    orphaned.main.nodes.pop();
+    orphaned.main.body.items_mut().pop();
     assert!(matches!(
         workflow_program_from_graph(&orphaned),
         Err(WorkflowGraphError::ProcessOriginMismatch { .. })

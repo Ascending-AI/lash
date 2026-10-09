@@ -18,9 +18,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use lash_vm::testing::ast_builders as b;
 use lash_vm::{
-    AstString, AttributeAssignParts, CoercingBinaryOp, CoercingUnaryOp, Declaration, Expr,
-    FunctionExpr, MethodKey, OperandLogicalOp, ProcessLiteralExpr, ProcessWrapperParts, Program,
-    StructuralRole, TypeExpr, TypeField, UpdateOperator,
+    AstString, AttributeAssignParts, AttributeWrite, CoercingBinaryOp, CoercingUnaryOp,
+    Declaration, Expr, FunctionExpr, MethodKey, OperandLogicalOp, ProcessLiteralExpr,
+    ProcessWrapperParts, Program, StructuralRole, TypeExpr, TypeField, UpdateOperator,
 };
 
 /// The host environment generated programs link against: the test catalogue
@@ -929,18 +929,19 @@ impl<'t> Generator<'t> {
 
     /// `record.count = value`, `record.count += value` and their computed
     /// forms, as the role that pins the base before it evaluates the value.
-    #[expect(
-        clippy::expect_used,
-        reason = "the generator passes exactly one of a field and a key, which is what the role builds from, per each message"
-    )]
     fn member_assignment(&mut self, ctx: &mut Ctx) -> Vec<Expr> {
         let mut statements = Vec::new();
         let record = self.need(ctx, Ty::Rec, &mut statements);
         let base = self.slot("base");
         let result = self.slot("result");
-        let computed = self.tape.pick(2) == 1;
-        let key = computed.then(|| self.slot("key"));
-        let field = (!computed).then(|| AstString::from("count"));
+        let step = if self.tape.pick(2) == 1 {
+            AttributeWrite::Index {
+                key: self.slot("key"),
+                index: b::string("count"),
+            }
+        } else {
+            AttributeWrite::Field(AstString::from("count"))
+        };
         let operand = self.num(ctx, 1);
         let value = if self.tape.pick(2) == 0 {
             operand
@@ -950,26 +951,15 @@ impl<'t> Generator<'t> {
                 UpdateOperator::Subtract,
                 UpdateOperator::Multiply,
             ][self.tape.pick(3)];
-            AttributeAssignParts::update_value(
-                &base,
-                key.as_ref(),
-                field.as_ref(),
-                operator,
-                operand,
-            )
-            .expect("an update names one member")
+            AttributeAssignParts::update_value(&base, &step, operator, operand)
         };
-        statements.push(
-            AttributeAssignParts::build(
-                base,
-                key.map(|key| (key, b::string("count"))),
-                result,
-                b::var(&record),
-                field,
-                value,
-            )
-            .expect("a member assignment names one member"),
-        );
+        statements.push(AttributeAssignParts::build(
+            base,
+            step,
+            result,
+            b::var(&record),
+            value,
+        ));
         statements
     }
 

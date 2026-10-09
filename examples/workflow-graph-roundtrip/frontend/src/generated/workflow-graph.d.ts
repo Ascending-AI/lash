@@ -3,12 +3,13 @@
 export type WorkflowDeclaration =
   | {
       body: WorkflowSubgraph;
-      description?: string | null;
-      display_name: string;
       id: WorkflowNodeId;
       kind: 'process';
+      /**
+       * The authored label, when the process has one.
+       */
+      label?: LabelMetadata | null;
       name: string;
-      name_source: WorkflowNodeNameSource;
       /**
        * Whether the process was declared or lifted from an inline literal.
        */
@@ -28,33 +29,17 @@ export type WorkflowDeclaration =
       [k: string]: unknown;
     });
 /**
- * A deterministic node identifier minted from structural owner and AST path.
+ * The statements of a body, in execution order, as the IR spells them.
  */
-export type WorkflowNodeId = string;
-export type WorkflowEdgeKind =
+export type WorkflowBodyShape =
   | {
-      kind: 'data_dependency';
-      variable: string;
-      version: number;
-    }
-  | {
-      kind: 'sequence';
-    };
-/**
- * The IR spelling of a body whose statements are a subgraph's nodes.
- */
-export type WorkflowBodyForm =
-  | {
-      form: 'block';
-      groups?: WorkflowCompletionGroup[];
-    }
-  | {
-      form: 'completion';
-      groups?: WorkflowCompletionGroup[];
-      value: Expr;
+      completion?: Expr | null;
+      form: 'list';
+      items?: WorkflowBodyItem[];
     }
   | {
       form: 'statement';
+      node: WorkflowNode;
     };
 export type Expr =
   | ('Null' | 'Break' | 'Continue')
@@ -396,6 +381,19 @@ export type CoercingBinaryOp =
  */
 export type OperandLogicalOp = 'And' | 'Or' | 'NullishCoalesce';
 /**
+ * One entry of a statement list.
+ */
+export type WorkflowBodyItem =
+  | {
+      node: WorkflowNode;
+    }
+  | {
+      group: {
+        items?: WorkflowBodyItem[];
+        value: Expr;
+      };
+    };
+/**
  * Closed vocabulary of executable workflow sites.
  *
  * This describes the site, not its current observation. A workflow node may
@@ -468,6 +466,10 @@ export type WorkflowSiteRole = 'labeled_step';
  * segment names a synthetic site of the expression they reach.
  */
 export type WorkflowSitePath = WorkflowSiteSegment[];
+/**
+ * A deterministic node identifier minted from structural owner and AST path.
+ */
+export type WorkflowNodeId = string;
 export type WorkflowNodeKind =
   | {
       binding?: AssignTarget | null;
@@ -483,11 +485,31 @@ export type WorkflowNodeKind =
       result_steps?: WorkflowResultStep[];
     }
   | {
-      arguments?: WorkflowArgument[];
       binding?: AssignTarget | null;
-      effect: WorkflowEffectKind;
+      effect: 'await_join';
       kind: 'effect';
       result_steps?: WorkflowResultStep[];
+      value: Expr;
+    }
+  | {
+      binding?: AssignTarget | null;
+      duration: Expr;
+      effect: 'sleep_for';
+      kind: 'effect';
+    }
+  | {
+      binding?: AssignTarget | null;
+      effect: 'print';
+      kind: 'effect';
+      value: Expr;
+    }
+  | {
+      effect: 'break';
+      kind: 'effect';
+    }
+  | {
+      effect: 'continue';
+      kind: 'effect';
     }
   | {
       binding?: AssignTarget | null;
@@ -495,26 +517,48 @@ export type WorkflowNodeKind =
       kind: 'computation';
     }
   | {
-      /**
-       * The assigned value, or with `update`, the operand the update applies
-       * to the target's current value (`target op= expression`).
-       */
-      expression: Expr;
       kind: 'state_update';
-      /**
-       * Set when the update is a member assignment that pins its
-       * reference base before evaluating the value
-       * ([`crate::StructuralRole::AttributeAssign`]): the slots it pins
-       * them in. `target` is then one member step of a variable.
-       */
-      pinned?: WorkflowPinnedSlots | null;
       target: AssignTarget;
-      update?: UpdateOperator | null;
+      value: Expr;
+      write: 'plain';
     }
   | {
-      expression: Expr;
+      /**
+       * The slot the reference base is pinned in.
+       */
+      base_slot: string;
+      kind: 'state_update';
+      /**
+       * The assigned value, or with `update` its right operand.
+       */
+      operand: Expr;
+      /**
+       * The slot the assigned value is held in.
+       */
+      result_slot: string;
+      root: string;
+      step: WorkflowMemberStep;
+      /**
+       * The operator a compound update applies to the member's current
+       * value (`root.step op= operand`); a plain write has none.
+       */
+      update?: UpdateOperator | null;
+      write: 'member';
+    }
+  | {
       kind: 'terminal';
-      terminal: WorkflowTerminalKind;
+      terminal: 'finish';
+      value: Expr;
+    }
+  | {
+      kind: 'terminal';
+      terminal: 'return';
+      value: Expr;
+    }
+  | {
+      kind: 'terminal';
+      terminal: 'fail';
+      value: Expr;
     }
   | {
       kind: 'throw';
@@ -570,7 +614,7 @@ export type WorkflowNodeKind =
       kind: 'container';
     };
 /**
- * One call or effect argument in graph order.
+ * One call argument in graph order.
  *
  * Type facets address these values with a serialized [`WorkflowSlotPath`].
  * Its typed call, argument, field, and index segments cannot collide when a
@@ -587,18 +631,28 @@ export type WorkflowArgument =
       kind: 'named';
     };
 /**
- * Ordered wrappers around a call or effect, from the operation outwards.
+ * Ordered wrappers around a call or an await, from the operation outwards.
  */
 export type WorkflowResultStep = 'await' | 'unwrap_result';
-export type WorkflowEffectKind = 'await_join' | 'sleep_for' | 'print' | 'break' | 'continue';
+/**
+ * The member a pinned assignment writes.
+ */
+export type WorkflowMemberStep =
+  | {
+      field: string;
+      step: 'field';
+    }
+  | {
+      index: Expr;
+      key_slot: string;
+      step: 'index';
+    };
 /**
  * An arithmetic operator a compound attribute assignment applies to the
  * attribute's current value. Named neutrally: a front end's IR decides
  * whether the operation is LashVm's or ECMA-262's.
  */
 export type UpdateOperator = 'add' | 'subtract' | 'multiply' | 'divide' | 'remainder';
-export type WorkflowTerminalKind = 'finish' | 'fail';
-export type WorkflowNodeNameSource = 'label' | 'derived';
 /**
  * Whether a diagnostic establishes an admission failure for the analyzed
  * program and host environment or gives advice without establishing a failure.
@@ -676,6 +730,15 @@ export type WorkflowSlotPathSegment =
  * quoting so they cannot collide with structural indexes or separators.
  */
 export type WorkflowSlotPath = WorkflowSlotPathSegment[];
+export type WorkflowEdgeKind =
+  | {
+      kind: 'data_dependency';
+      variable: string;
+      version: number;
+    }
+  | {
+      kind: 'sequence';
+    };
 /**
  * The origin of a [`super::ProcessDecl`].
  */
@@ -734,37 +797,14 @@ export interface WorkflowGraph {
 }
 export interface WorkflowSubgraph {
   /**
-   * Derived: sequence follows `nodes` order and data dependencies follow
-   * the bindings the nodes' expressions read.
+   * The body's statements, in execution order, as the IR holds them.
+   */
+  body?: WorkflowBodyShape;
+  /**
+   * Derived: sequence follows statement order and data dependencies
+   * follow the bindings the nodes' expressions read.
    */
   edges?: WorkflowEdge[];
-  /**
-   * How the IR spells this ordered body.
-   */
-  form?: WorkflowBodyForm;
-  /**
-   * The body's statements, in execution order.
-   */
-  nodes?: WorkflowNode[];
-}
-export interface WorkflowEdge {
-  from: WorkflowNodeId;
-  id: string;
-  kind: WorkflowEdgeKind;
-  to: WorkflowNodeId;
-}
-/**
- * A run of consecutive statements that the IR holds as one nested statement
- * list closed by its own completion value: the statement a front end gave a
- * value. It covers the nodes `start .. start + len` of its body; groups are
- * ordered, never overlap, and nest through `groups`, whose ranges lie inside
- * this one. A group may cover no statement at all.
- */
-export interface WorkflowCompletionGroup {
-  groups?: WorkflowCompletionGroup[];
-  len: number;
-  start: number;
-  value: Expr;
 }
 export interface LabelMetadata {
   description?: string | null;
@@ -859,12 +899,17 @@ export interface WorkflowNode {
    * Identifiers visible before this node executes, in stable lexical order.
    */
   available_variables?: string[];
-  description?: string | null;
   execution_sites?: WorkflowExecutionSite[];
   id: WorkflowNodeId;
   kind: WorkflowNodeKind;
+  /**
+   * The authored label, when the statement has one.
+   */
+  label?: LabelMetadata | null;
+  /**
+   * Derived: what the statement is, read off its IR.
+   */
   name: string;
-  name_source: WorkflowNodeNameSource;
   outputs?: VariableVersion[];
   /**
    * Optional host-derived type information. It is never used to render source.
@@ -884,15 +929,6 @@ export interface WorkflowExecutionSite {
   path?: number[];
   site_path?: WorkflowSitePath;
   [k: string]: unknown;
-}
-/**
- * The slots a pinned member assignment evaluates through, in evaluation
- * order: the reference base, a computed index, then the assigned value.
- */
-export interface WorkflowPinnedSlots {
-  base: string;
-  key?: string | null;
-  result: string;
 }
 /**
  * The catch clause of a [`WorkflowContainer::Try`]: `binding` names the
@@ -933,6 +969,12 @@ export interface WorkflowExpectedArgument {
   slot: WorkflowSlotPath;
   ty: TypeExpr;
   [k: string]: unknown;
+}
+export interface WorkflowEdge {
+  from: WorkflowNodeId;
+  id: string;
+  kind: WorkflowEdgeKind;
+  to: WorkflowNodeId;
 }
 /**
  * A node's address in a `Program`: the root it hangs from plus the

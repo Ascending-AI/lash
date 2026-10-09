@@ -250,6 +250,14 @@ pub enum AttributeStep<'a> {
     Index(&'a Expr),
 }
 
+/// The attribute [`AttributeAssignParts::build`] writes: a field, or a
+/// computed `index` pinned in the slot `key`.
+#[derive(Clone, Debug, PartialEq)]
+pub enum AttributeWrite {
+    Field(AstString),
+    Index { key: AstString, index: Expr },
+}
+
 impl<'a> AttributeAssignParts<'a> {
     /// Reads the parts of an attribute-assignment block, or `None` when the
     /// block does not have the role's shape.
@@ -344,29 +352,26 @@ impl<'a> AttributeAssignParts<'a> {
 
     /// Builds the role block [`Self::of`] reads these parts from.
     ///
-    /// `index` is the computed index of an indexed step, pinned in `key`; a
-    /// field step has neither. `value` is the whole assigned value, which for
-    /// an update reads the pinned attribute (see [`Self::update_value`]).
+    /// `value` is the whole assigned value, which for an update reads the
+    /// pinned attribute (see [`Self::update_value`]).
     pub fn build(
         base: AstString,
-        key: Option<(AstString, Expr)>,
+        step: AttributeWrite,
         result: AstString,
         object: Expr,
-        field: Option<AstString>,
         value: Expr,
-    ) -> Option<Expr> {
+    ) -> Expr {
         let assign = |root: &AstString, expr: Expr| Expr::Assign {
             target: AssignTarget::variable(root.clone()),
             expr: Box::new(expr),
         };
         let mut items = vec![assign(&base, object)];
-        let step = match (field, key) {
-            (Some(field), None) => AssignPathStep::Field(field),
-            (None, Some((key, index))) => {
+        let step = match step {
+            AttributeWrite::Field(field) => AssignPathStep::Field(field),
+            AttributeWrite::Index { key, index } => {
                 items.push(assign(&key, index));
                 AssignPathStep::Index(Expr::Variable(key))
             }
-            _ => return None,
         };
         items.push(assign(&result, value));
         items.push(Expr::Assign {
@@ -377,38 +382,36 @@ impl<'a> AttributeAssignParts<'a> {
             expr: Box::new(Expr::Variable(result.clone())),
         });
         items.push(Expr::Variable(result));
-        Some(Expr::Role {
+        Expr::Role {
             role: StructuralRole::AttributeAssign,
             expr: Box::new(Expr::Block(items)),
-        })
+        }
     }
 
     /// The value of a compound update: the pinned attribute's current value
     /// combined with `operand` by `operator`.
     pub fn update_value(
         base: &AstString,
-        key: Option<&AstString>,
-        field: Option<&AstString>,
+        step: &AttributeWrite,
         operator: UpdateOperator,
         operand: Expr,
-    ) -> Option<Expr> {
+    ) -> Expr {
         let pinned = Box::new(Expr::Variable(base.clone()));
-        let current = match (field, key) {
-            (Some(field), None) => Expr::Field {
+        let current = match step {
+            AttributeWrite::Field(field) => Expr::Field {
                 target: pinned,
                 field: field.clone(),
             },
-            (None, Some(key)) => Expr::Index {
+            AttributeWrite::Index { key, .. } => Expr::Index {
                 target: pinned,
                 index: Box::new(Expr::Variable(key.clone())),
             },
-            _ => return None,
         };
-        Some(Expr::CoercingBinary {
+        Expr::CoercingBinary {
             left: Box::new(current),
             op: operator.coercing_op(),
             right: Box::new(operand),
-        })
+        }
     }
 }
 

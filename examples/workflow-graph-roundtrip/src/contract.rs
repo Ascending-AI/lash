@@ -3,8 +3,8 @@ use std::collections::BTreeMap;
 use axum::http::StatusCode;
 use lash::typescript::workflow_graph::{GraphRenderError, WorkflowGraphBuildError};
 use lash::vm::ir::{
-    Span, WorkflowDiagnosticClassification, WorkflowEdgeKind, WorkflowEffectKind,
-    WorkflowNodeNameSource, WorkflowTerminalKind,
+    LabelMetadata, Span, WorkflowDiagnosticClassification, WorkflowEdgeKind, WorkflowEffectKind,
+    WorkflowTerminalKind,
 };
 use lash::workflow::WorkflowGraphError;
 use schemars::JsonSchema;
@@ -708,8 +708,8 @@ pub struct EditableProcessField {
 /// rename waiting to evaporate. The tag is therefore mandatory and carries the
 /// title inside the variant: "title present, tag absent" is unrepresentable,
 /// and an unknown tag is a decode error rather than a silent `derived`. The
-/// wire values (`label`, `derived`) mirror `WorkflowNodeNameSource`, which the
-/// browser client already writes on every node.
+/// wire values (`label`, `derived`) are the ones the browser client already
+/// writes on every node.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "nameSource", rename_all = "camelCase", deny_unknown_fields)]
 pub enum NodeName {
@@ -743,22 +743,28 @@ impl NodeName {
         }
     }
 
-    /// The core tag this name projects to.
-    pub fn name_source(&self) -> WorkflowNodeNameSource {
+    /// The label an authored name is in the document; a derived name is none.
+    pub fn label(&self) -> Option<LabelMetadata> {
         match self {
-            Self::Authored { .. } => WorkflowNodeNameSource::Label,
-            Self::Derived { .. } => WorkflowNodeNameSource::Derived,
+            Self::Authored { title, description } => Some(LabelMetadata {
+                title: title.as_str().into(),
+                description: description.as_deref().map(Into::into),
+            }),
+            Self::Derived { .. } => None,
         }
     }
 
-    pub fn projected(
-        name_source: WorkflowNodeNameSource,
-        title: String,
-        description: Option<String>,
-    ) -> Self {
-        match name_source {
-            WorkflowNodeNameSource::Label => Self::Authored { title, description },
-            WorkflowNodeNameSource::Derived => Self::Derived { title },
+    /// The name of a node or process the document labels with `label`, or
+    /// else names `derived`.
+    pub fn projected(label: Option<&LabelMetadata>, derived: &str) -> Self {
+        match label {
+            Some(label) => Self::Authored {
+                title: label.title.to_string(),
+                description: label.description.as_ref().map(ToString::to_string),
+            },
+            None => Self::Derived {
+                title: derived.to_string(),
+            },
         }
     }
 }
@@ -1176,11 +1182,7 @@ impl RenderErrorResponse {
             GraphRenderError::Document(WorkflowGraphError::DuplicateNodeId { id }) => {
                 json!({ "id": id })
             }
-            GraphRenderError::Document(WorkflowGraphError::InvalidNodePayload {
-                message, ..
-            })
-            | GraphRenderError::Document(WorkflowGraphError::InvalidBodyForm { message })
-            | GraphRenderError::InvalidExpression { message, .. }
+            GraphRenderError::InvalidExpression { message, .. }
             | GraphRenderError::InvalidAssignmentTarget { message, .. } => {
                 json!({ "reason": message })
             }
@@ -1250,15 +1252,12 @@ impl RenderErrorResponse {
 
     pub(crate) fn invalid_node_payload(node_id: &str, message: impl Into<String>) -> Self {
         let message = message.into();
-        let host_message = format!("node `{node_id}` has an invalid payload: {message}");
-        let mut response = Self::render(GraphRenderError::Document(
-            WorkflowGraphError::InvalidNodePayload {
-                node_id: node_id.to_string(),
-                message,
-            },
-        ));
-        response.body.error.message = host_message;
-        response
+        Self::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_node_payload",
+            format!("node `{node_id}` has an invalid payload: {message}"),
+            json!({ "reason": message, "nodeId": node_id }),
+        )
     }
 
     /// A typed document this build does not read.
@@ -1285,11 +1284,6 @@ impl RenderErrorResponse {
         use lash::workflow::WorkflowEditDiagnosticKind as Kind;
         let refusal = match error {
             EditError::Form(response) => return *response,
-            EditError::Statement { node, error } => {
-                let mut response = Self::render(GraphRenderError::Document(error));
-                response.body.error.details["nodeId"] = json!(node);
-                return response;
-            }
             EditError::Refused(refusal) => refusal,
             unknown @ (EditError::UnknownNode { .. } | EditError::UnknownSlot { .. }) => {
                 return Self::document(unknown.to_string(), json!({}));

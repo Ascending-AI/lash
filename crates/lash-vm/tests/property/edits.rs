@@ -13,11 +13,11 @@ use lash_vm::testing::ast_builders as b;
 use lash_vm::testing::workflow_edits::workflow_edit_kind;
 use lash_vm::{
     AssignTarget, AstString, CoercingBinaryOp, Declaration, Expr, ExprSlot, ExprSlotVisitor,
-    Program, TypeExpr, WorkflowBindingRef, WorkflowBodyForm, WorkflowBodyRef, WorkflowBodySlot,
-    WorkflowContainer, WorkflowCorrespondence, WorkflowCorrespondenceEntry as Entry,
-    WorkflowDeclaration, WorkflowDraft, WorkflowDraftHandle, WorkflowDraftRevision,
-    WorkflowEdgeDrag, WorkflowEdit, WorkflowEditTransaction, WorkflowGraph, WorkflowNodeId,
-    WorkflowNodeKind, WorkflowProcessWrapper, WorkflowSlotPath, walk_expr_slots,
+    Program, TypeExpr, WorkflowBindingRef, WorkflowBodyLayout, WorkflowBodyLayoutItem,
+    WorkflowBodyRef, WorkflowBodySlot, WorkflowContainer, WorkflowCorrespondence,
+    WorkflowCorrespondenceEntry as Entry, WorkflowDeclaration, WorkflowDraft, WorkflowDraftHandle,
+    WorkflowDraftRevision, WorkflowEdgeDrag, WorkflowEdit, WorkflowEditTransaction, WorkflowGraph,
+    WorkflowNodeId, WorkflowNodeKind, WorkflowProcessWrapper, WorkflowSlotPath, walk_expr_slots,
     workflow_graph_from_program, workflow_node_statement, workflow_program_from_graph,
 };
 use proptest::prelude::*;
@@ -186,10 +186,7 @@ fn names_of(draft: &WorkflowDraft, handle: WorkflowDraftHandle) -> Vec<AstString
         }
     }
     let mut names = BTreeSet::new();
-    if let Some(statement) = draft
-        .node(handle)
-        .and_then(|node| workflow_node_statement(node).ok())
-    {
+    if let Some(statement) = draft.node(handle).map(workflow_node_statement) {
         collect(&statement, &mut names);
     }
     names.into_iter().collect()
@@ -204,10 +201,7 @@ fn slots_of(draft: &WorkflowDraft, handle: WorkflowDraftHandle) -> Vec<Vec<ExprS
         }
     }
     let mut paths = Paths(Vec::new());
-    if let Some(statement) = draft
-        .node(handle)
-        .and_then(|node| workflow_node_statement(node).ok())
-    {
+    if let Some(statement) = draft.node(handle).map(workflow_node_statement) {
         walk_expr_slots(&mut paths, &statement);
     }
     paths.0
@@ -468,17 +462,44 @@ impl Script<'_> {
                 node: self.prefer(&view.tries, node),
                 present: self.pick(2) == 1,
             },
-            (17, _, _) => WorkflowEdit::SetBodyForm {
-                body: self.body(view),
-                form: match self.pick(3) {
-                    0 => WorkflowBodyForm::default(),
-                    1 => WorkflowBodyForm::Completion {
-                        value: Box::new(Expr::Absent),
-                        groups: Vec::new(),
+            (17, node, _) => {
+                let body = self.body(view);
+                let held = draft.body(&body).unwrap_or_default();
+                let listed = |handles: &[WorkflowDraftHandle]| {
+                    handles
+                        .iter()
+                        .copied()
+                        .map(WorkflowBodyLayoutItem::Node)
+                        .collect::<Vec<_>>()
+                };
+                let layout = match (self.pick(4), held.as_slice(), node) {
+                    (0, _, _) => WorkflowBodyLayout::List {
+                        items: listed(&held),
+                        completion: None,
                     },
-                    _ => WorkflowBodyForm::Statement,
-                },
-            },
+                    (1, _, _) => WorkflowBodyLayout::List {
+                        items: listed(&held),
+                        completion: Some(Expr::Absent),
+                    },
+                    (2, [only], _) => WorkflowBodyLayout::Statement { node: *only },
+                    // A layout that names another body's statement is refused.
+                    (2, _, Some(node)) => WorkflowBodyLayout::Statement { node },
+                    // A leading run of the statements, closed as a group.
+                    _ => {
+                        let (grouped, rest) = held.split_at(self.pick(held.len() + 1));
+                        let mut items = vec![WorkflowBodyLayoutItem::Group {
+                            items: listed(grouped),
+                            value: Expr::Absent,
+                        }];
+                        items.extend(listed(rest));
+                        WorkflowBodyLayout::List {
+                            items,
+                            completion: None,
+                        }
+                    }
+                };
+                WorkflowEdit::SetBodyLayout { body, layout }
+            }
             (18, _, _) => {
                 let taken = view
                     .process_names

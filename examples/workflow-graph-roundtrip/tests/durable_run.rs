@@ -188,7 +188,7 @@ async fn a_saved_workflow_runs_as_a_durable_process() {
         body: &'g lash::vm::ir::WorkflowSubgraph,
         ids: &mut std::collections::BTreeSet<&'g str>,
     ) {
-        for node in &body.nodes {
+        for node in body.nodes() {
             if !node.execution_sites.is_empty() {
                 ids.insert(node.id.as_str());
             }

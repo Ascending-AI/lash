@@ -1,194 +1,269 @@
-//! How the IR spells an ordered body of statements.
+//! How a body holds its statements.
 //!
 //! The ownership walk ([`super::statement_list`]) reads a body's statements
 //! through the structure around them: a plain block, a statement list closed
 //! by a completion value, a statement that is itself such a list, or one bare
-//! statement. A [`WorkflowBodyForm`] records that structure, so the body
-//! expression is rebuilt from its nodes exactly, with no front end to
-//! normalize it.
+//! statement. A [`WorkflowBodyShape`] holds the statements in that structure,
+//! so the body expression is rebuilt from it exactly, with no front end to
+//! normalize it, and no shape it can take fails to spell a body.
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::ast::{Expr, StructuralRole};
 
-use super::{WorkflowGraphError, deserialize_strict};
+use super::{WorkflowNode, deserialize_strict, workflow_node_statement};
 
-/// The IR spelling of a body whose statements are a subgraph's nodes.
+/// The statements of a body, in execution order, as the IR spells them.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "form", rename_all = "snake_case", deny_unknown_fields)]
-pub enum WorkflowBodyForm {
-    /// A block of the statements.
-    Block {
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        groups: Vec<WorkflowCompletionGroup>,
-    },
-    /// A statement list closed by a completion value
-    /// ([`StructuralRole::Completion`]): the statements run in order and the
-    /// list evaluates to `value`, a pure expression that is no statement.
-    Completion {
+pub enum WorkflowBodyShape {
+    /// A list of statements. With `completion` the list is closed by that
+    /// value ([`StructuralRole::Completion`]): the statements run in order
+    /// and the list evaluates to it, a pure expression that is no statement.
+    /// Without one it is a block.
+    List {
+        #[serde(default)]
+        items: Vec<WorkflowBodyItem>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         #[serde(deserialize_with = "deserialize_strict")]
-        value: Box<Expr>,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        groups: Vec<WorkflowCompletionGroup>,
+        completion: Option<Box<Expr>>,
     },
     /// The body is its one statement, with no list around it.
-    Statement,
+    Statement { node: Box<WorkflowNode> },
 }
 
-impl Default for WorkflowBodyForm {
+impl Default for WorkflowBodyShape {
     fn default() -> Self {
-        Self::Block { groups: Vec::new() }
+        Self::List {
+            items: Vec::new(),
+            completion: None,
+        }
     }
 }
 
-/// A run of consecutive statements that the IR holds as one nested statement
-/// list closed by its own completion value: the statement a front end gave a
-/// value. It covers the nodes `start .. start + len` of its body; groups are
-/// ordered, never overlap, and nest through `groups`, whose ranges lie inside
-/// this one. A group may cover no statement at all.
+/// One entry of a statement list.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct WorkflowCompletionGroup {
-    pub start: u32,
-    pub len: u32,
-    #[serde(deserialize_with = "deserialize_strict")]
-    pub value: Expr,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub groups: Vec<WorkflowCompletionGroup>,
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum WorkflowBodyItem {
+    Node(Box<WorkflowNode>),
+    /// A run of statements the IR holds as one nested statement list closed
+    /// by its own completion value: the statement a front end gave a value.
+    /// It may hold no statement at all.
+    Group {
+        #[serde(default)]
+        items: Vec<WorkflowBodyItem>,
+        #[serde(deserialize_with = "deserialize_strict")]
+        value: Expr,
+    },
 }
 
-impl WorkflowBodyForm {
-    /// The same form with every statement directly in the list.
-    ///
-    /// Groups name their statements by position, so a host that adds, removes
-    /// or reorders a body's nodes without restating them uses this: each
-    /// formerly grouped statement stays a statement and loses only the value
-    /// its front end closed it with.
-    pub fn ungrouped(&self) -> Self {
-        match self {
-            Self::Block { .. } => Self::Block { groups: Vec::new() },
-            Self::Completion { value, .. } => Self::Completion {
-                value: value.clone(),
-                groups: Vec::new(),
-            },
-            Self::Statement => Self::Statement,
+impl WorkflowBodyShape {
+    /// A block of `nodes`, none of them grouped.
+    pub fn block(nodes: impl IntoIterator<Item = WorkflowNode>) -> Self {
+        Self::List {
+            items: nodes
+                .into_iter()
+                .map(|node| WorkflowBodyItem::Node(Box::new(node)))
+                .collect(),
+            completion: None,
         }
     }
 
-    /// The form after a statement is inserted at `index` of the body's nodes.
+    /// The statements in execution order, through every group.
+    pub fn nodes(&self) -> Vec<&WorkflowNode> {
+        fn collect<'a>(items: &'a [WorkflowBodyItem], out: &mut Vec<&'a WorkflowNode>) {
+            for item in items {
+                match item {
+                    WorkflowBodyItem::Node(node) => out.push(node),
+                    WorkflowBodyItem::Group { items, .. } => collect(items, out),
+                }
+            }
+        }
+        let mut out = Vec::new();
+        match self {
+            Self::List { items, .. } => collect(items, &mut out),
+            Self::Statement { node } => out.push(node.as_ref()),
+        }
+        out
+    }
+
+    /// [`Self::nodes`], for changing them in place.
+    pub fn nodes_mut(&mut self) -> Vec<&mut WorkflowNode> {
+        fn collect<'a>(items: &'a mut [WorkflowBodyItem], out: &mut Vec<&'a mut WorkflowNode>) {
+            for item in items {
+                match item {
+                    WorkflowBodyItem::Node(node) => out.push(node),
+                    WorkflowBodyItem::Group { items, .. } => collect(items, out),
+                }
+            }
+        }
+        let mut out = Vec::new();
+        match self {
+            Self::List { items, .. } => collect(items, &mut out),
+            Self::Statement { node } => out.push(node.as_mut()),
+        }
+        out
+    }
+
+    /// This shape holding `nodes` instead of its own statements, for a host
+    /// that gives a body's statements again without giving its arrangement.
     ///
-    /// Groups name their statements by position, so they are shifted around
-    /// the new one: a group after it moves down, a group it lands strictly
-    /// inside grows, and at a group's edge the statement stays outside. A
-    /// single-statement body becomes a block, which runs the same way.
-    pub fn with_inserted(&self, index: u32) -> Self {
-        self.shifted(|group| {
-            if index <= group.start {
-                group.start += 1;
-            } else if index < group.start + group.len {
-                group.len += 1;
+    /// When `nodes` are the same statements in the same order, by id, each
+    /// takes the place of the one with its id and every group is kept. When
+    /// they are not, every statement goes directly in the list, which keeps
+    /// only its own completion value: a formerly grouped statement stays a
+    /// statement and loses the value its front end closed it with. A
+    /// single-statement body stays one while it holds one statement.
+    pub fn with_nodes(&self, nodes: Vec<WorkflowNode>) -> Self {
+        fn refill(
+            items: &[WorkflowBodyItem],
+            nodes: &mut impl Iterator<Item = WorkflowNode>,
+        ) -> Vec<WorkflowBodyItem> {
+            let mut out = Vec::with_capacity(items.len());
+            for item in items {
+                match item {
+                    WorkflowBodyItem::Node(_) => {
+                        out.extend(
+                            nodes
+                                .next()
+                                .map(|node| WorkflowBodyItem::Node(Box::new(node))),
+                        );
+                    }
+                    WorkflowBodyItem::Group { items, value } => out.push(WorkflowBodyItem::Group {
+                        items: refill(items, nodes),
+                        value: value.clone(),
+                    }),
+                }
             }
-        })
-    }
-
-    /// The form after the statement at `index` of the body's nodes is
-    /// removed: a group after it moves up and the group that held it shrinks,
-    /// keeping its completion value.
-    pub fn with_removed(&self, index: u32) -> Self {
-        self.shifted(|group| {
-            if index < group.start {
-                group.start -= 1;
-            } else if index < group.start + group.len {
-                group.len -= 1;
-            }
-        })
-    }
-
-    fn shifted(&self, shift: impl Fn(&mut WorkflowCompletionGroup) + Copy) -> Self {
-        fn shift_all(
-            groups: &[WorkflowCompletionGroup],
-            shift: impl Fn(&mut WorkflowCompletionGroup) + Copy,
-        ) -> Vec<WorkflowCompletionGroup> {
-            groups
+            out
+        }
+        let held = self.nodes();
+        let same = held.len() == nodes.len()
+            && held
                 .iter()
-                .map(|group| {
-                    let mut group = WorkflowCompletionGroup {
-                        start: group.start,
-                        len: group.len,
-                        value: group.value.clone(),
-                        groups: shift_all(&group.groups, shift),
-                    };
-                    shift(&mut group);
-                    group
-                })
-                .collect()
-        }
-        match self {
-            Self::Block { groups } => Self::Block {
-                groups: shift_all(groups, shift),
+                .zip(&nodes)
+                .all(|(held, node)| held.id == node.id);
+        let mut nodes = nodes.into_iter();
+        match (self, nodes.len()) {
+            (Self::Statement { .. }, 1) => match nodes.next() {
+                Some(node) => Self::Statement {
+                    node: Box::new(node),
+                },
+                None => Self::default(),
             },
-            Self::Completion { value, groups } => Self::Completion {
-                value: value.clone(),
-                groups: shift_all(groups, shift),
+            (Self::Statement { .. }, _) => Self::block(nodes),
+            (Self::List { items, completion }, _) if same => Self::List {
+                items: refill(items, &mut nodes),
+                completion: completion.clone(),
             },
-            Self::Statement => Self::Block { groups: Vec::new() },
+            (Self::List { completion, .. }, _) => Self::List {
+                items: nodes
+                    .map(|node| WorkflowBodyItem::Node(Box::new(node)))
+                    .collect(),
+                completion: completion.clone(),
+            },
         }
     }
 
-    /// The form of `body`, read the way [`super::statement_list`] reads its
-    /// statements.
-    pub(super) fn of(body: &Expr) -> Self {
+    /// The statements in execution order, taken out of the shape.
+    pub fn into_nodes(self) -> Vec<WorkflowNode> {
+        fn collect(items: Vec<WorkflowBodyItem>, out: &mut Vec<WorkflowNode>) {
+            for item in items {
+                match item {
+                    WorkflowBodyItem::Node(node) => out.push(*node),
+                    WorkflowBodyItem::Group { items, .. } => collect(items, out),
+                }
+            }
+        }
+        let mut out = Vec::new();
+        match self {
+            Self::List { items, .. } => collect(items, &mut out),
+            Self::Statement { node } => out.push(*node),
+        }
+        out
+    }
+
+    /// The items of the body as a list, turning a single-statement body into
+    /// the block of that statement, which runs the same way.
+    pub fn items_mut(&mut self) -> &mut Vec<WorkflowBodyItem> {
+        if let Self::Statement { node } = self {
+            let node = node.clone();
+            *self = Self::List {
+                items: vec![WorkflowBodyItem::Node(node)],
+                completion: None,
+            };
+        }
+        match self {
+            Self::List { items, .. } => items,
+            Self::Statement { .. } => unreachable!("a single-statement body was made a list above"),
+        }
+    }
+
+    /// Reads `body` the way [`super::statement_list`] reads its statements,
+    /// taking each statement's node from `nodes` in that order.
+    pub(super) fn of(body: &Expr, nodes: &mut impl Iterator<Item = WorkflowNode>) -> Self {
         match body {
             Expr::Role {
                 role: StructuralRole::Completion,
                 expr,
             } => match expr.as_ref() {
                 Expr::Block(items) => match items.split_last() {
-                    Some((value, statements)) => Self::Completion {
-                        value: Box::new(value.clone()),
-                        groups: groups_of(statements, &mut 0),
+                    Some((value, statements)) => Self::List {
+                        items: items_of(statements, nodes),
+                        completion: Some(Box::new(value.clone())),
                     },
-                    None => Self::Statement,
+                    // A completion list with no value is no statement at
+                    // all; the ownership walk skips it and `validate_ast`
+                    // refuses it.
+                    None => Self::default(),
                 },
-                _ => Self::Statement,
+                _ => Self::default(),
             },
-            Expr::Block(items) => Self::Block {
-                groups: groups_of(items, &mut 0),
+            Expr::Block(items) => Self::List {
+                items: items_of(items, nodes),
+                completion: None,
             },
-            _ => Self::Statement,
+            _ => match nodes.next() {
+                Some(node) => Self::Statement {
+                    node: Box::new(node),
+                },
+                None => Self::default(),
+            },
         }
     }
 
-    /// The body expression this form spells around `statements`, one per
-    /// node in order.
-    pub(super) fn body(&self, statements: Vec<Expr>) -> Result<Expr, WorkflowGraphError> {
-        let count = statements.len();
-        let mut statements = statements.into_iter();
+    /// The body expression this shape spells.
+    pub(super) fn expression(&self) -> Expr {
         match self {
-            Self::Statement => match (statements.next(), statements.next()) {
-                (Some(statement), None) => Ok(statement),
-                _ => Err(WorkflowGraphError::InvalidBodyForm {
-                    message: format!("a single-statement body holds one node, found {count}"),
-                }),
-            },
-            Self::Block { groups } => Ok(Expr::Block(grouped(&mut statements, groups, 0, count)?)),
-            Self::Completion { value, groups } => {
-                let mut items = grouped(&mut statements, groups, 0, count)?;
-                items.push(value.as_ref().clone());
-                Ok(Expr::Role {
-                    role: StructuralRole::Completion,
-                    expr: Box::new(Expr::Block(items)),
-                })
+            Self::Statement { node } => workflow_node_statement(node),
+            Self::List { items, completion } => {
+                let mut list = item_expressions(items);
+                match completion {
+                    None => Expr::Block(list),
+                    Some(value) => {
+                        list.push(value.as_ref().clone());
+                        completion_list(list)
+                    }
+                }
             }
         }
     }
 }
 
-/// The completion groups among `items`, with `next` the index of the next
-/// visible statement.
-fn groups_of(items: &[Expr], next: &mut u32) -> Vec<WorkflowCompletionGroup> {
-    let mut groups = Vec::new();
+fn completion_list(items: Vec<Expr>) -> Expr {
+    Expr::Role {
+        role: StructuralRole::Completion,
+        expr: Box::new(Expr::Block(items)),
+    }
+}
+
+/// The entries of the statement list `items`, one node per visible statement.
+fn items_of(
+    items: &[Expr],
+    nodes: &mut impl Iterator<Item = WorkflowNode>,
+) -> Vec<WorkflowBodyItem> {
+    let mut out = Vec::new();
     for item in items {
         let nested = match item {
             Expr::Role {
@@ -199,57 +274,36 @@ fn groups_of(items: &[Expr], next: &mut u32) -> Vec<WorkflowCompletionGroup> {
                 _ => None,
             },
             _ => {
-                *next += 1;
+                out.extend(
+                    nodes
+                        .next()
+                        .map(|node| WorkflowBodyItem::Node(Box::new(node))),
+                );
                 continue;
             }
         };
-        // A completion list with no value is no statement at all; the
-        // ownership walk skips it and `validate_ast` refuses it.
+        // A completion list with no value is no statement at all, as above.
         let Some((value, statements)) = nested else {
             continue;
         };
-        let start = *next;
-        let inner = groups_of(statements, next);
-        groups.push(WorkflowCompletionGroup {
-            start,
-            len: *next - start,
+        out.push(WorkflowBodyItem::Group {
+            items: items_of(statements, nodes),
             value: value.clone(),
-            groups: inner,
         });
     }
-    groups
+    out
 }
 
-/// The items of the list covering statements `start .. end`: each ungrouped
-/// statement as itself and each group as its nested completion list.
-fn grouped(
-    statements: &mut std::vec::IntoIter<Expr>,
-    groups: &[WorkflowCompletionGroup],
-    start: usize,
-    end: usize,
-) -> Result<Vec<Expr>, WorkflowGraphError> {
-    let malformed = || WorkflowGraphError::InvalidBodyForm {
-        message: "completion groups are ordered ranges inside their body".to_string(),
-    };
-    let mut items = Vec::new();
-    let mut cursor = start;
-    for group in groups {
-        let group_start = group.start as usize;
-        let group_end = group_start
-            .checked_add(group.len as usize)
-            .ok_or_else(malformed)?;
-        if group_start < cursor || group_end > end {
-            return Err(malformed());
-        }
-        items.extend(statements.by_ref().take(group_start - cursor));
-        let mut nested = grouped(statements, &group.groups, group_start, group_end)?;
-        nested.push(group.value.clone());
-        items.push(Expr::Role {
-            role: StructuralRole::Completion,
-            expr: Box::new(Expr::Block(nested)),
-        });
-        cursor = group_end;
-    }
-    items.extend(statements.by_ref().take(end - cursor));
-    Ok(items)
+fn item_expressions(items: &[WorkflowBodyItem]) -> Vec<Expr> {
+    items
+        .iter()
+        .map(|item| match item {
+            WorkflowBodyItem::Node(node) => workflow_node_statement(node),
+            WorkflowBodyItem::Group { items, value } => {
+                let mut nested = item_expressions(items);
+                nested.push(value.clone());
+                completion_list(nested)
+            }
+        })
+        .collect()
 }

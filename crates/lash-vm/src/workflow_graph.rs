@@ -12,15 +12,16 @@
 //!
 //! A document has two kinds of field.
 //!
-//! *Authoritative* fields are the program: the ordered `nodes` of each body
-//! and its [`WorkflowBodyForm`], each node's `kind` payload (bindings,
-//! targets, expressions, arguments, child bodies), a labelled node's `name`
-//! and `description` with `name_source`, the declarations with their
-//! parameters, types, origins and wrappers, and `private_bindings`.
+//! *Authoritative* fields are the program: each body's [`WorkflowBodyShape`]
+//! (its statements in order, how they are grouped and the value that closes
+//! them), each node's `kind` payload (bindings, targets, expressions,
+//! arguments, child bodies), a node's or a process's `label`, the
+//! declarations with their parameters, types, origins and wrappers, and
+//! `private_bindings`.
 //!
 //! *Derived* fields are read views a projection computes from those: node and
 //! process ids, edges, `available_variables`, `outputs`, `type_facets`,
-//! `execution_sites`, a derived node's `name`, and
+//! `execution_sites`, a node's `name`, and
 //! `source_identity`. Reconstruction never reads them, so editing one changes
 //! nothing; [`WorkflowGraph::rederive`] recomputes them all from the
 //! authoritative fields. An edited document is a draft: it names no admitted
@@ -52,7 +53,8 @@ use lash_sansio::WorkflowExecutionSite;
 use lash_sansio::core_support::Blake3DomainHasher;
 
 use crate::ast::{
-    AssignTarget, AstString, Expr, FunctionDecl, ProcessOrigin, ProcessParam, TypeExpr,
+    AssignPathStep, AssignTarget, AstString, AttributeAssignParts, Expr, FunctionDecl,
+    LabelMetadata, ProcessOrigin, ProcessParam, TypeExpr, UpdateOperator,
 };
 
 mod admission;
@@ -70,13 +72,13 @@ pub use admission::{
     WorkflowAdmission, WorkflowAdmissionDiagnostic, WorkflowAdmissionDiagnosticKind,
     WorkflowAdmissionLocation, WorkflowAdmissionRefusal, admit_workflow_graph,
 };
-pub use body::{WorkflowBodyForm, WorkflowCompletionGroup};
+pub use body::{WorkflowBodyItem, WorkflowBodyShape};
 pub use draft::{
-    WorkflowBindingRef, WorkflowBodyRef, WorkflowCorrespondence, WorkflowCorrespondenceEntry,
-    WorkflowDraft, WorkflowDraftHandle, WorkflowDraftOpenError, WorkflowDraftRevision,
-    WorkflowEdgeDrag, WorkflowEdit, WorkflowEditDiagnostic, WorkflowEditDiagnosticKind,
-    WorkflowEditLocation, WorkflowEditRefusal, WorkflowEditTransaction, WorkflowExpressionRef,
-    WorkflowNodeSource,
+    WorkflowBindingRef, WorkflowBodyLayout, WorkflowBodyLayoutItem, WorkflowBodyRef,
+    WorkflowCorrespondence, WorkflowCorrespondenceEntry, WorkflowDraft, WorkflowDraftHandle,
+    WorkflowDraftOpenError, WorkflowDraftRevision, WorkflowEdgeDrag, WorkflowEdit,
+    WorkflowEditDiagnostic, WorkflowEditDiagnosticKind, WorkflowEditLocation, WorkflowEditRefusal,
+    WorkflowEditTransaction, WorkflowExpressionRef, WorkflowNodeSource,
 };
 pub use execution_sites::execution_sites;
 pub use facets::*;
@@ -364,33 +366,50 @@ impl WorkflowGraph {
     }
 }
 
-fn strip_type_facets(value: &mut serde_json::Value) {
-    match value {
-        serde_json::Value::Array(values) => {
-            for value in values {
-                strip_type_facets(value);
-            }
+/// Removes every node's `type_facets` from an undecoded document, walking
+/// exactly the places a document holds nodes.
+fn strip_type_facets(document: &mut serde_json::Value) {
+    fn subgraph(graph: Option<&mut serde_json::Value>) {
+        let Some(body) = graph.and_then(|graph| graph.get_mut("body")) else {
+            return;
+        };
+        node(body.get_mut("node"));
+        items(body.get_mut("items"));
+    }
+    fn items(list: Option<&mut serde_json::Value>) {
+        let Some(list) = list.and_then(serde_json::Value::as_array_mut) else {
+            return;
+        };
+        for item in list {
+            node(item.get_mut("node"));
+            items(
+                item.get_mut("group")
+                    .and_then(|group| group.get_mut("items")),
+            );
         }
-        serde_json::Value::Object(object) => {
-            if object.contains_key("nodes") && object.contains_key("edges") {
-                if let Some(nodes) = object
-                    .get_mut("nodes")
-                    .and_then(serde_json::Value::as_array_mut)
-                {
-                    for node in nodes {
-                        if let Some(node) = node.as_object_mut() {
-                            node.remove("type_facets");
-                        }
-                        strip_type_facets(node);
-                    }
-                }
-            } else {
-                for value in object.values_mut() {
-                    strip_type_facets(value);
-                }
-            }
+    }
+    fn node(node: Option<&mut serde_json::Value>) {
+        let Some(node) = node.and_then(serde_json::Value::as_object_mut) else {
+            return;
+        };
+        node.remove("type_facets");
+        let Some(kind) = node.get_mut("kind") else {
+            return;
+        };
+        for child in ["then_graph", "else_graph", "body", "finally"] {
+            subgraph(kind.get_mut(child));
         }
-        _ => {}
+        subgraph(
+            kind.get_mut("catch")
+                .and_then(|catch| catch.get_mut("body")),
+        );
+    }
+    subgraph(document.get_mut("main"));
+    let declarations = document
+        .get_mut("declarations")
+        .and_then(serde_json::Value::as_array_mut);
+    for declaration in declarations.into_iter().flatten() {
+        subgraph(declaration.get_mut("body"));
     }
 }
 
@@ -508,16 +527,26 @@ pub enum WorkflowDeclaration {
     Function(#[serde(deserialize_with = "deserialize_strict")] FunctionDecl),
 }
 
+impl WorkflowProcess {
+    /// The name a person reads the process by: its label's title, or its
+    /// name when it has no label.
+    pub fn display_name(&self) -> &str {
+        self.label
+            .as_ref()
+            .map_or(self.name.as_str(), |label| label.title.as_str())
+    }
+}
+
 /// A named process is a container with its own child subgraph.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WorkflowProcess {
     pub id: WorkflowNodeId,
     pub name: String,
-    pub display_name: String,
+    /// The authored label, when the process has one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-    pub name_source: WorkflowNodeNameSource,
+    #[serde(deserialize_with = "deserialize_strict")]
+    pub label: Option<LabelMetadata>,
     #[serde(default)]
     #[serde(deserialize_with = "deserialize_strict")]
     pub params: Vec<ProcessParam>,
@@ -577,32 +606,33 @@ pub struct WorkflowRunDriver {
     pub arguments: Vec<Expr>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum WorkflowNodeNameSource {
-    Label,
-    Derived,
-}
-
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WorkflowSubgraph {
-    /// How the IR spells this ordered body.
+    /// The body's statements, in execution order, as the IR holds them.
     #[serde(default)]
-    pub form: WorkflowBodyForm,
-    /// The body's statements, in execution order.
-    #[serde(default)]
-    pub nodes: Vec<WorkflowNode>,
-    /// Derived: sequence follows `nodes` order and data dependencies follow
-    /// the bindings the nodes' expressions read.
+    pub body: WorkflowBodyShape,
+    /// Derived: sequence follows statement order and data dependencies
+    /// follow the bindings the nodes' expressions read.
     #[serde(default)]
     pub edges: Vec<WorkflowEdge>,
 }
 
 impl WorkflowSubgraph {
+    /// The body's statements in execution order, through every group and not
+    /// into any child body.
+    pub fn nodes(&self) -> Vec<&WorkflowNode> {
+        self.body.nodes()
+    }
+
+    /// [`Self::nodes`], for changing them in place.
+    pub fn nodes_mut(&mut self) -> Vec<&mut WorkflowNode> {
+        self.body.nodes_mut()
+    }
+
     /// Whether the body is a statement list rather than one bare statement.
     pub fn is_statement_list(&self) -> bool {
-        !matches!(self.form, WorkflowBodyForm::Statement)
+        matches!(self.body, WorkflowBodyShape::List { .. })
     }
 }
 
@@ -610,10 +640,12 @@ impl WorkflowSubgraph {
 #[serde(deny_unknown_fields)]
 pub struct WorkflowNode {
     pub id: WorkflowNodeId,
+    /// Derived: what the statement is, read off its IR.
     pub name: String,
+    /// The authored label, when the statement has one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-    pub name_source: WorkflowNodeNameSource,
+    #[serde(deserialize_with = "deserialize_strict")]
+    pub label: Option<LabelMetadata>,
     pub kind: WorkflowNodeKind,
     /// Identifiers visible before this node executes, in stable lexical order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -627,6 +659,16 @@ pub struct WorkflowNode {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[serde(deserialize_with = "deserialize_strict")]
     pub execution_sites: Vec<WorkflowExecutionSite>,
+}
+
+impl WorkflowNode {
+    /// The name a person reads the node by: its label's title, or its
+    /// derived name when it has no label.
+    pub fn display_name(&self) -> &str {
+        self.label
+            .as_ref()
+            .map_or(self.name.as_str(), |label| label.title.as_str())
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -651,16 +693,7 @@ pub enum WorkflowNodeKind {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         result_steps: Vec<WorkflowResultStep>,
     },
-    Effect {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        #[serde(deserialize_with = "deserialize_strict")]
-        binding: Option<AssignTarget>,
-        effect: WorkflowEffectKind,
-        #[serde(default)]
-        arguments: Vec<WorkflowArgument>,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        result_steps: Vec<WorkflowResultStep>,
-    },
+    Effect(WorkflowEffect),
     Computation {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[serde(deserialize_with = "deserialize_strict")]
@@ -668,27 +701,8 @@ pub enum WorkflowNodeKind {
         #[serde(deserialize_with = "deserialize_strict")]
         expression: Expr,
     },
-    StateUpdate {
-        #[serde(deserialize_with = "deserialize_strict")]
-        target: AssignTarget,
-        /// The assigned value, or with `update`, the operand the update applies
-        /// to the target's current value (`target op= expression`).
-        #[serde(deserialize_with = "deserialize_strict")]
-        expression: Expr,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        update: Option<crate::UpdateOperator>,
-        /// Set when the update is a member assignment that pins its
-        /// reference base before evaluating the value
-        /// ([`crate::StructuralRole::AttributeAssign`]): the slots it pins
-        /// them in. `target` is then one member step of a variable.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pinned: Option<WorkflowPinnedSlots>,
-    },
-    Terminal {
-        terminal: WorkflowTerminalKind,
-        #[serde(deserialize_with = "deserialize_strict")]
-        expression: Expr,
-    },
+    StateUpdate(WorkflowStateWrite),
+    Terminal(WorkflowTerminal),
     /// Throws `value`: control transfers to the nearest enclosing catch, or
     /// fails the process when there is none.
     Throw {
@@ -698,18 +712,349 @@ pub enum WorkflowNodeKind {
     Container(WorkflowContainer),
 }
 
-/// The slots a pinned member assignment evaluates through, in evaluation
-/// order: the reference base, a computed index, then the assigned value.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct WorkflowPinnedSlots {
-    pub base: AstString,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub key: Option<AstString>,
-    pub result: AstString,
+/// An effect a statement performs, with exactly the operands its kind takes.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "effect", rename_all = "snake_case", deny_unknown_fields)]
+pub enum WorkflowEffect {
+    /// Waits for `value` to settle, then applies `result_steps` to what it
+    /// settled with.
+    AwaitJoin {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(deserialize_with = "deserialize_strict")]
+        binding: Option<AssignTarget>,
+        #[serde(deserialize_with = "deserialize_strict")]
+        value: Expr,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        result_steps: Vec<WorkflowResultStep>,
+    },
+    SleepFor {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(deserialize_with = "deserialize_strict")]
+        binding: Option<AssignTarget>,
+        #[serde(deserialize_with = "deserialize_strict")]
+        duration: Expr,
+    },
+    Print {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(deserialize_with = "deserialize_strict")]
+        binding: Option<AssignTarget>,
+        #[serde(deserialize_with = "deserialize_strict")]
+        value: Expr,
+    },
+    /// Leaves the nearest enclosing loop. It has no value to bind.
+    Break,
+    /// Starts the next iteration of the nearest enclosing loop. It has no
+    /// value to bind.
+    Continue,
 }
 
-/// One call or effect argument in graph order.
+impl WorkflowEffect {
+    /// Reads `expression` as an effect, with `binding` the target its value
+    /// is assigned to. `None` when the expression is no effect, or is one
+    /// this kind of effect cannot spell: a bound `break`, or an unwrapped
+    /// `sleep`.
+    pub fn from_ir(binding: Option<&AssignTarget>, expression: &Expr) -> Option<Self> {
+        let binding = binding.cloned();
+        match expression {
+            Expr::SleepFor(duration) => Some(Self::SleepFor {
+                binding,
+                duration: duration.as_ref().clone(),
+            }),
+            Expr::Print(value) => Some(Self::Print {
+                binding,
+                value: value.as_ref().clone(),
+            }),
+            Expr::Break if binding.is_none() => Some(Self::Break),
+            Expr::Continue if binding.is_none() => Some(Self::Continue),
+            _ => {
+                let (effect, result_steps) = peel_result_steps(expression);
+                let Expr::Await(value) = effect else {
+                    return None;
+                };
+                Some(Self::AwaitJoin {
+                    binding,
+                    value: value.as_ref().clone(),
+                    result_steps,
+                })
+            }
+        }
+    }
+
+    /// The statement the effect spells.
+    pub fn to_ir(&self) -> Expr {
+        let (binding, expression) = match self {
+            Self::AwaitJoin {
+                binding,
+                value,
+                result_steps,
+            } => (
+                binding,
+                apply_result_steps(Expr::Await(Box::new(value.clone())), result_steps),
+            ),
+            Self::SleepFor { binding, duration } => {
+                (binding, Expr::SleepFor(Box::new(duration.clone())))
+            }
+            Self::Print { binding, value } => (binding, Expr::Print(Box::new(value.clone()))),
+            Self::Break => return Expr::Break,
+            Self::Continue => return Expr::Continue,
+        };
+        match binding {
+            Some(target) => Expr::Assign {
+                target: target.clone(),
+                expr: Box::new(expression),
+            },
+            None => expression,
+        }
+    }
+
+    pub fn kind(&self) -> WorkflowEffectKind {
+        match self {
+            Self::AwaitJoin { .. } => WorkflowEffectKind::AwaitJoin,
+            Self::SleepFor { .. } => WorkflowEffectKind::SleepFor,
+            Self::Print { .. } => WorkflowEffectKind::Print,
+            Self::Break => WorkflowEffectKind::Break,
+            Self::Continue => WorkflowEffectKind::Continue,
+        }
+    }
+
+    /// The target the effect's value is assigned to, if it has one.
+    pub fn binding(&self) -> Option<&AssignTarget> {
+        match self {
+            Self::AwaitJoin { binding, .. }
+            | Self::SleepFor { binding, .. }
+            | Self::Print { binding, .. } => binding.as_ref(),
+            Self::Break | Self::Continue => None,
+        }
+    }
+
+    /// The binding field of an effect that can bind its value.
+    pub fn binding_mut(&mut self) -> Option<&mut Option<AssignTarget>> {
+        match self {
+            Self::AwaitJoin { binding, .. }
+            | Self::SleepFor { binding, .. }
+            | Self::Print { binding, .. } => Some(binding),
+            Self::Break | Self::Continue => None,
+        }
+    }
+}
+
+/// What a state update writes.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "write", rename_all = "snake_case", deny_unknown_fields)]
+pub enum WorkflowStateWrite {
+    /// Assigns `value` to `target`.
+    Plain {
+        #[serde(deserialize_with = "deserialize_strict")]
+        target: AssignTarget,
+        #[serde(deserialize_with = "deserialize_strict")]
+        value: Expr,
+    },
+    /// A member assignment that pins its reference base before it evaluates
+    /// the value ([`crate::StructuralRole::AttributeAssign`]): writes the
+    /// member `step` of the variable `root`.
+    Member {
+        root: AstString,
+        step: WorkflowMemberStep,
+        /// The slot the reference base is pinned in.
+        base_slot: AstString,
+        /// The slot the assigned value is held in.
+        result_slot: AstString,
+        /// The operator a compound update applies to the member's current
+        /// value (`root.step op= operand`); a plain write has none.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        update: Option<UpdateOperator>,
+        /// The assigned value, or with `update` its right operand.
+        #[serde(deserialize_with = "deserialize_strict")]
+        operand: Expr,
+    },
+}
+
+/// The member a pinned assignment writes.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "step", rename_all = "snake_case", deny_unknown_fields)]
+pub enum WorkflowMemberStep {
+    Field {
+        field: AstString,
+    },
+    /// A computed index, pinned in `key_slot` before the value is evaluated.
+    Index {
+        #[serde(deserialize_with = "deserialize_strict")]
+        index: Expr,
+        key_slot: AstString,
+    },
+}
+
+impl WorkflowStateWrite {
+    /// Reads a member assignment role whose object is a plain variable: the
+    /// only member write a state update names.
+    pub fn member_from_ir(expression: &Expr) -> Option<Self> {
+        let Expr::Role {
+            role: crate::StructuralRole::AttributeAssign,
+            expr,
+        } = expression
+        else {
+            return None;
+        };
+        let parts = AttributeAssignParts::of(expr)?;
+        let Expr::Variable(root) = parts.object else {
+            return None;
+        };
+        let step = match (parts.step, parts.key) {
+            (crate::AttributeStep::Field(field), None) => WorkflowMemberStep::Field {
+                field: field.clone(),
+            },
+            (crate::AttributeStep::Index(index), Some(key)) => WorkflowMemberStep::Index {
+                index: index.clone(),
+                key_slot: key.clone(),
+            },
+            _ => return None,
+        };
+        let (update, operand) = match parts.update {
+            Some(update) => (Some(update.operator), update.operand),
+            None => (None, parts.value),
+        };
+        Some(Self::Member {
+            root: root.clone(),
+            step,
+            base_slot: parts.base.clone(),
+            result_slot: parts.result.clone(),
+            update,
+            operand: operand.clone(),
+        })
+    }
+
+    /// The statement the write spells.
+    pub fn to_ir(&self) -> Expr {
+        match self {
+            Self::Plain { target, value } => Expr::Assign {
+                target: target.clone(),
+                expr: Box::new(value.clone()),
+            },
+            Self::Member {
+                root,
+                step,
+                base_slot,
+                result_slot,
+                update,
+                operand,
+            } => {
+                let step = match step {
+                    WorkflowMemberStep::Field { field } => {
+                        crate::AttributeWrite::Field(field.clone())
+                    }
+                    WorkflowMemberStep::Index { index, key_slot } => crate::AttributeWrite::Index {
+                        key: key_slot.clone(),
+                        index: index.clone(),
+                    },
+                };
+                let value = match update {
+                    None => operand.clone(),
+                    Some(operator) => AttributeAssignParts::update_value(
+                        base_slot,
+                        &step,
+                        *operator,
+                        operand.clone(),
+                    ),
+                };
+                AttributeAssignParts::build(
+                    base_slot.clone(),
+                    step,
+                    result_slot.clone(),
+                    Expr::Variable(root.clone()),
+                    value,
+                )
+            }
+        }
+    }
+
+    /// The variable the write updates.
+    pub fn root(&self) -> &AstString {
+        match self {
+            Self::Plain { target, .. } => &target.root,
+            Self::Member { root, .. } => root,
+        }
+    }
+
+    /// The place the write assigns: for a member write, the one member step
+    /// of its root.
+    pub fn target(&self) -> AssignTarget {
+        match self {
+            Self::Plain { target, .. } => target.clone(),
+            Self::Member { root, step, .. } => AssignTarget {
+                root: root.clone(),
+                steps: vec![match step {
+                    WorkflowMemberStep::Field { field } => AssignPathStep::Field(field.clone()),
+                    WorkflowMemberStep::Index { index, .. } => AssignPathStep::Index(index.clone()),
+                }],
+            },
+        }
+    }
+}
+
+/// How a statement ends its process or function.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "terminal", rename_all = "snake_case", deny_unknown_fields)]
+pub enum WorkflowTerminal {
+    /// Finishes the process with `value`.
+    Finish {
+        #[serde(deserialize_with = "deserialize_strict")]
+        value: Expr,
+    },
+    /// Returns `value` from the enclosing function body, which in a process
+    /// body is the process's finish.
+    Return {
+        #[serde(deserialize_with = "deserialize_strict")]
+        value: Expr,
+    },
+    /// Fails the process with `value`.
+    Fail {
+        #[serde(deserialize_with = "deserialize_strict")]
+        value: Expr,
+    },
+}
+
+impl WorkflowTerminal {
+    /// Reads `expression` as a terminal, or `None` when it is not one.
+    pub fn from_ir(expression: &Expr) -> Option<Self> {
+        Some(match expression {
+            Expr::Finish(value) => Self::Finish {
+                value: value.as_ref().clone(),
+            },
+            Expr::FunctionReturn(value) => Self::Return {
+                value: value.as_ref().clone(),
+            },
+            Expr::Fail(value) => Self::Fail {
+                value: value.as_ref().clone(),
+            },
+            _ => return None,
+        })
+    }
+
+    /// The statement the terminal spells.
+    pub fn to_ir(&self) -> Expr {
+        match self {
+            Self::Finish { value } => Expr::Finish(Box::new(value.clone())),
+            Self::Return { value } => Expr::FunctionReturn(Box::new(value.clone())),
+            Self::Fail { value } => Expr::Fail(Box::new(value.clone())),
+        }
+    }
+
+    /// Whether the terminal finishes or fails.
+    pub fn kind(&self) -> WorkflowTerminalKind {
+        match self {
+            Self::Finish { .. } | Self::Return { .. } => WorkflowTerminalKind::Finish,
+            Self::Fail { .. } => WorkflowTerminalKind::Fail,
+        }
+    }
+
+    pub fn value(&self) -> &Expr {
+        match self {
+            Self::Finish { value } | Self::Return { value } | Self::Fail { value } => value,
+        }
+    }
+}
+
+/// One call argument in graph order.
 ///
 /// Type facets address these values with a serialized [`WorkflowSlotPath`].
 /// Its typed call, argument, field, and index segments cannot collide when a
@@ -728,7 +1073,7 @@ pub enum WorkflowArgument {
     },
 }
 
-/// Ordered wrappers around a call or effect, from the operation outwards.
+/// Ordered wrappers around a call or an await, from the operation outwards.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkflowResultStep {
@@ -772,51 +1117,6 @@ pub fn workflow_call_to_ir(
         },
         result_steps,
     )
-}
-
-/// Decomposes one effect into its exact kind, arguments, and outer result steps.
-pub fn workflow_effect_from_ir(
-    expression: &Expr,
-) -> Option<(
-    WorkflowEffectKind,
-    Vec<WorkflowArgument>,
-    Vec<WorkflowResultStep>,
-)> {
-    let (effect, result_steps) = peel_result_steps(expression);
-    let (kind, args) = match effect {
-        Expr::Await(value) => (WorkflowEffectKind::AwaitJoin, vec![value.as_ref().clone()]),
-        Expr::SleepFor(value) => (WorkflowEffectKind::SleepFor, vec![value.as_ref().clone()]),
-        Expr::Print(value) => (WorkflowEffectKind::Print, vec![value.as_ref().clone()]),
-        Expr::Break => (WorkflowEffectKind::Break, Vec::new()),
-        Expr::Continue => (WorkflowEffectKind::Continue, Vec::new()),
-        _ => return None,
-    };
-    Some((
-        kind,
-        args.iter().map(workflow_argument_from_ir).collect(),
-        result_steps,
-    ))
-}
-
-/// Reconstructs the authoritative IR represented by an effect node.
-pub fn workflow_effect_to_ir(
-    effect: WorkflowEffectKind,
-    arguments: &[WorkflowArgument],
-    result_steps: &[WorkflowResultStep],
-) -> Option<Expr> {
-    let values = arguments
-        .iter()
-        .map(workflow_argument_to_ir)
-        .collect::<Vec<_>>();
-    let expression = match (effect, values.as_slice()) {
-        (WorkflowEffectKind::AwaitJoin, [value]) => Expr::Await(Box::new(value.clone())),
-        (WorkflowEffectKind::SleepFor, [value]) => Expr::SleepFor(Box::new(value.clone())),
-        (WorkflowEffectKind::Print, [value]) => Expr::Print(Box::new(value.clone())),
-        (WorkflowEffectKind::Break, []) => Expr::Break,
-        (WorkflowEffectKind::Continue, []) => Expr::Continue,
-        _ => return None,
-    };
-    Some(apply_result_steps(expression, result_steps))
 }
 
 fn workflow_argument_from_ir(value: &Expr) -> WorkflowArgument {
@@ -885,6 +1185,7 @@ fn apply_result_steps(mut expression: Expr, result_steps: &[WorkflowResultStep])
     expression
 }
 
+/// Which effect a [`WorkflowEffect`] is, without its operands.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkflowEffectKind {
@@ -895,7 +1196,8 @@ pub enum WorkflowEffectKind {
     Continue,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+/// Whether a [`WorkflowTerminal`] finishes or fails, without its value.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkflowTerminalKind {
     Finish,
@@ -1094,7 +1396,7 @@ impl WorkflowNodeId {
 }
 
 fn collect_subgraph_nodes<'a>(graph: &'a WorkflowSubgraph, nodes: &mut Vec<&'a WorkflowNode>) {
-    for node in &graph.nodes {
+    for node in graph.nodes() {
         nodes.push(node);
         if let WorkflowNodeKind::Container(container) = &node.kind {
             for (_, child) in container.child_subgraphs() {

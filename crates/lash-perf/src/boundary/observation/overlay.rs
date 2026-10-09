@@ -31,7 +31,7 @@ pub(super) async fn run(args: &Args) -> Result<Receipt> {
 }
 
 fn sites(body: &lash::vm::ir::WorkflowSubgraph, nodes: &mut usize, count: &mut usize) {
-    for node in &body.nodes {
+    for node in body.nodes() {
         *nodes += 1;
         *count += node.execution_sites.len();
         if let lash::vm::ir::WorkflowNodeKind::Container(container) = &node.kind {
