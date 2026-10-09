@@ -12,7 +12,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use lash_core_execution::StoreSet as _;
@@ -126,10 +126,12 @@ fn child_role() -> Option<(String, PathBuf)> {
     Some((role.to_owned(), PathBuf::from(path)))
 }
 
-/// One child node process, and the report lines it prints.
+/// One child node process, the report lines it prints, and what it wrote
+/// to stderr for a failure's panic.
 struct Child {
     process: tokio::process::Child,
     reports: mpsc::UnboundedReceiver<String>,
+    stderr: Arc<Mutex<String>>,
 }
 
 impl Child {
@@ -142,11 +144,12 @@ impl Child {
                 .env(CHILD, format!("{role}\n{}", database.display()))
                 .stdin(Stdio::null())
                 .stdout(Stdio::piped())
-                .stderr(Stdio::inherit())
+                .stderr(Stdio::piped())
                 .kill_on_drop(true)
                 .spawn()
                 .expect("the child node starts");
         let stdout = process.stdout.take().expect("piped stdout");
+        let stderr_pipe = process.stderr.take().expect("piped stderr");
         let (send, reports) = mpsc::unbounded_channel();
         tokio::spawn(async move {
             let mut lines = tokio::io::BufReader::new(stdout).lines();
@@ -157,24 +160,50 @@ impl Child {
                 }
             }
         });
-        Self { process, reports }
+        let stderr = Arc::new(Mutex::new(String::new()));
+        tokio::spawn({
+            let stderr = Arc::clone(&stderr);
+            async move {
+                let mut lines = tokio::io::BufReader::new(stderr_pipe).lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    let mut captured = stderr.lock().expect("the child's stderr buffer");
+                    captured.push_str(&line);
+                    captured.push('\n');
+                }
+            }
+        });
+        Self {
+            process,
+            reports,
+            stderr,
+        }
+    }
+
+    /// What the child wrote to stderr so far.
+    fn stderr(&self) -> String {
+        self.stderr
+            .lock()
+            .expect("the child's stderr buffer")
+            .clone()
     }
 
     /// The next report line, within `within`.
     async fn next(&mut self, within: Duration) -> String {
-        tokio::time::timeout(within, self.reports.recv())
-            .await
-            .expect("the child reports in time")
-            .expect("the child is running")
+        match tokio::time::timeout(within, self.reports.recv()).await {
+            Ok(Some(line)) => line,
+            Ok(None) => panic!("the child is running; its stderr:\n{}", self.stderr()),
+            Err(_) => panic!("the child reports in time; its stderr:\n{}", self.stderr()),
+        }
     }
 
     /// Kill the child with SIGKILL and wait for it to be gone.
     async fn kill(&mut self) {
-        self.process.start_kill().expect("the child is killed");
         self.process
-            .wait()
-            .await
-            .expect("the killed child is reaped");
+            .start_kill()
+            .unwrap_or_else(|error| panic!("the child is killed: {error}\n{}", self.stderr()));
+        self.process.wait().await.unwrap_or_else(|error| {
+            panic!("the killed child is reaped: {error}\n{}", self.stderr())
+        });
     }
 }
 
