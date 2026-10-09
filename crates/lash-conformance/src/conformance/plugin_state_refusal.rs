@@ -12,8 +12,16 @@ use pretty_assertions::assert_eq;
 )]
 pub(super) async fn plugin_state_corrupt_boundary(store: Arc<dyn RuntimeStore>, session_id: &str) {
     let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    // Fleet ranges are deployment-wide: this payload law must not inherit
+    // the migration law's rollback range when both share one database.
+    let plugin_id = "corrupt-state";
+    let plugin = FormatPlugin {
+        id: plugin_id,
+        calls: calls.clone(),
+    };
+    let native = crate::plugin::PluginMetadata::plugin_declaration(&plugin).format_version;
     let mut factories = crate::testing::test_standard_protocol_factories();
-    factories.push(Arc::new(FormatPlugin(calls.clone())));
+    factories.push(Arc::new(plugin));
     let host = crate::PluginHost::new(
         factories,
         lash_core::ExecutionBudgets::recommended(),
@@ -39,9 +47,9 @@ pub(super) async fn plugin_state_corrupt_boundary(store: Arc<dyn RuntimeStore>, 
     // `bad key` fails `validate_key` at any stamp; recorded at the native
     // format so no migration runs and the payload itself is what refuses.
     snapshot.plugins.insert(
-        "format-state".into(),
+        plugin_id.into(),
         lash_core::PluginNamespaceState {
-            format_version: lash_core::FormatVersion::new(2).unwrap(),
+            format_version: native,
             generation: 3,
             publication: Default::default(),
             fork: Default::default(),
@@ -52,15 +60,14 @@ pub(super) async fn plugin_state_corrupt_boundary(store: Arc<dyn RuntimeStore>, 
         },
     );
     state.set_plugin_state(Some(snapshot));
-    // The fleet record permits the stamp the corrupted namespace carries: the
-    // refusal must come from the payload, not the range.
+    // Seed from the writer that produced this native-format fixture, whose
+    // only writable format is native. Its floor permits the stamp even in a
+    // rollback window: the refusal must come from the payload, not the range.
     store
         .provision_plugin_writers(&[crate::store::plugin_writers::PluginWriterRegistration {
-            plugin: "format-state".into(),
-            native: lash_core::FormatVersion::new(2).unwrap(),
-            writable: (1..=2)
-                .map(|format| lash_core::FormatVersion::new(format).unwrap())
-                .collect(),
+            plugin: plugin_id.into(),
+            native,
+            writable: vec![native],
         }])
         .await
         .unwrap();

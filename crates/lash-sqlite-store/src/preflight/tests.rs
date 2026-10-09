@@ -690,19 +690,25 @@ async fn release_build_refuses_pre_release_store_before_counters_without_mutatio
     }
 }
 
-/// FIG-5270: the baseline release opens its own version-1 store.
+/// FIG-5270: a release build opens its own declared store version.
 #[tokio::test]
 async fn release_build_admits_release_store() {
-    assert_release_admission("1.0.0", "1.0.0", 1, false).await;
+    assert_release_admission("1.0.0", "1.0.0", crate::schema::expected_version(), false).await;
 }
 
 /// FIG-5270: the release cut rule does not change development admission.
 #[tokio::test]
 async fn pre_release_build_admits_pre_release_store() {
-    assert_release_admission("0.0.0-dev", "0.0.0-dev", 1, false).await;
+    assert_release_admission(
+        "0.0.0-dev",
+        "0.0.0-dev",
+        crate::schema::expected_version(),
+        false,
+    )
+    .await;
 }
 
-async fn assert_release_admission(writing: &str, build: &str, counter: u32, refuses: bool) {
+async fn assert_release_admission(writing: &str, build: &str, counter: i64, refuses: bool) {
     let root = temp_root();
     let path = root.path().join("lash.db");
     drop(

@@ -2,7 +2,10 @@ use super::*;
 use pretty_assertions::assert_eq;
 
 #[derive(Clone)]
-pub(super) struct FormatPlugin(pub(super) Arc<std::sync::atomic::AtomicUsize>);
+pub(super) struct FormatPlugin {
+    pub(super) id: &'static str,
+    pub(super) calls: Arc<std::sync::atomic::AtomicUsize>,
+}
 
 #[expect(
     clippy::unwrap_used,
@@ -10,7 +13,7 @@ pub(super) struct FormatPlugin(pub(super) Arc<std::sync::atomic::AtomicUsize>);
 )]
 impl PluginFactory for FormatPlugin {
     fn id(&self) -> &'static str {
-        "format-state"
+        self.id
     }
 
     fn migrate_format(
@@ -21,13 +24,13 @@ impl PluginFactory for FormatPlugin {
     ) -> Result<serde_json::Value, lash_core::FormatRefusal> {
         if from != lash_core::FormatVersion::ONE {
             return Err(lash_core::FormatRefusal {
-                plugin: "format-state".into(),
+                plugin: self.id.into(),
                 namespace,
                 stored: from,
                 readable: crate::plugin::PluginMetadata::plugin_declaration(self).format_version,
             });
         }
-        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let map = value.as_object_mut().unwrap();
         let old = map.remove("count").unwrap();
         map.insert("total".into(), old);
@@ -46,7 +49,7 @@ impl PluginFactory for FormatPlugin {
             map.insert("count".into(), total);
         } else if to != crate::plugin::PluginMetadata::plugin_declaration(self).format_version {
             return Err(lash_core::FormatRefusal {
-                plugin: "format-state".into(),
+                plugin: self.id.into(),
                 namespace,
                 stored: to,
                 readable: crate::plugin::PluginMetadata::plugin_declaration(self).format_version,
@@ -55,7 +58,7 @@ impl PluginFactory for FormatPlugin {
         Ok(value)
     }
     fn build(&self, _: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
-        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         Ok(Arc::new(self.clone()))
     }
 }
@@ -64,9 +67,9 @@ impl PluginFactory for FormatPlugin {
     clippy::unwrap_used,
     reason = "format law uses known versions and exact object fixtures"
 )]
-impl crate::plugin::PluginDefinition for FormatPlugin {
-    fn declaration() -> lash_core::plugin::PluginDeclaration {
-        let mut declaration = lash_core::plugin::PluginDeclaration::initial("format-state");
+impl crate::plugin::PluginMetadata for FormatPlugin {
+    fn plugin_declaration(&self) -> lash_core::plugin::PluginDeclaration {
+        let mut declaration = lash_core::plugin::PluginDeclaration::initial(self.id);
         declaration.format_version = lash_core::FormatVersion::new(2).unwrap();
         declaration.writable_formats =
             vec![lash_core::FormatVersion::ONE, declaration.format_version];
@@ -75,14 +78,14 @@ impl crate::plugin::PluginDefinition for FormatPlugin {
 }
 impl SessionPlugin for FormatPlugin {
     fn id(&self) -> &'static str {
-        "format-state"
+        self.id
     }
     fn register(&self, _: &mut PluginRegistrar) -> Result<(), PluginError> {
-        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         Ok(())
     }
     fn session_ready(&self, _: SessionReadyContext) -> Result<(), PluginError> {
-        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         Ok(())
     }
 }
@@ -137,7 +140,10 @@ pub(super) async fn plugin_format_boundary(
 ) {
     let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let mut factories = crate::testing::test_standard_protocol_factories();
-    factories.push(Arc::new(FormatPlugin(calls.clone())));
+    factories.push(Arc::new(FormatPlugin {
+        id: "format-state",
+        calls: calls.clone(),
+    }));
     let host = crate::PluginHost::new(
         factories,
         lash_core::ExecutionBudgets::recommended(),
