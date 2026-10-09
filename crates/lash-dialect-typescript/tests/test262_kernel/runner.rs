@@ -739,3 +739,45 @@ fn date_to_json_is_generic_and_date_only_methods_check_the_receiver() {
         ]),
     );
 }
+
+/// ECMAScript exponentiation returns NaN for either unit magnitude raised to infinity.
+#[test]
+fn exponentiation_of_unit_magnitude_by_infinity_is_nan() {
+    assert_finished(
+        execute(
+            "finish([Number.isNaN((-1) ** Infinity), Number.isNaN((-1) ** -Infinity), Number.isNaN(1 ** Infinity), (-1) ** 0]);",
+        ),
+        Datum::List(vec![
+            Datum::Bool(true),
+            Datum::Bool(true),
+            Datum::Bool(true),
+            Datum::Float(lash_kernel_doc::Float::new(1.0)),
+        ]),
+    );
+}
+
+/// convert each key before evaluating its value.
+#[test]
+fn computed_property_keys_convert_once_and_before_object_values() {
+    assert_finished(
+        execute(
+            "let count = 0; const key = {toString() { count++; return 'x'; }}; const obj = {x: 1}; obj[key] += 2; const value = {[key]: count}; finish([count, obj.x, value.x]);",
+        ),
+        Datum::List(vec![
+            Datum::Float(lash_kernel_doc::Float::new(2.0)),
+            Datum::Float(lash_kernel_doc::Float::new(3.0)),
+            Datum::Float(lash_kernel_doc::Float::new(2.0)),
+        ]),
+    );
+}
+
+/// Computed member reads reject a nullish base before coercing the key.
+#[test]
+fn computed_member_reads_check_the_base_before_key_conversion() {
+    assert_finished(
+        execute(
+            "const key = {toString() { throw new Error('key'); }}; let count = 0; for (const base of [null, undefined]) { try { base[key]; } catch (e) { if (e.name === 'TypeError') count++; } } finish(count);",
+        ),
+        Datum::Float(lash_kernel_doc::Float::new(2.0)),
+    );
+}

@@ -51,6 +51,23 @@ impl Lowerer<'_> {
         })
     }
 
+    /// A read-modify-write reference converts a guest key only once.
+    pub(super) fn reference_key(&mut self, object: &Operand, key: Key) -> Lowering<Key> {
+        match key {
+            Key::Computed(value) if !value.ty.is_number() && value.ty != Ty::Text => {
+                let checked = self.invoke(
+                    "ts.require_object_coercible",
+                    std::slice::from_ref(object),
+                    Ty::Unknown,
+                )?;
+                self.discard(checked);
+                let key = self.invoke("ts.to_property_key", &[value], Ty::Text)?;
+                Ok(Key::Computed(key))
+            }
+            key => Ok(key),
+        }
+    }
+
     /// `object.key` or `object[key]`.
     ///
     /// An element of an array read by a number, and an array's length, are

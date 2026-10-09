@@ -286,7 +286,7 @@ impl Lowerer<'_> {
                         ast::PropertyKey::Static(name) => Key::Static(name.clone()),
                         ast::PropertyKey::Computed(key) => {
                             let key = self.lower_expr(key)?;
-                            Key::Computed(self.pin(key))
+                            Key::Computed(self.invoke("ts.to_property_key", &[key], Ty::Text)?)
                         }
                     };
                     let value = self.lower_expr(value)?;
@@ -519,6 +519,7 @@ impl Lowerer<'_> {
                         Ok(value)
                     }
                     AssignOp::Binary(op) => {
+                        let key = self.reference_key(&object, key)?;
                         let current = self.get_member(&object, &key)?;
                         let value = self.lower_expr(value)?;
                         let result = self.binary(op, current, value)?;
@@ -526,6 +527,7 @@ impl Lowerer<'_> {
                         Ok(result)
                     }
                     AssignOp::Logical(op) => {
+                        let key = self.reference_key(&object, key)?;
                         let current = self.get_member(&object, &key)?;
                         self.short_circuit(op, current, |this| {
                             let value = this.lower_expr(value)?;
@@ -611,6 +613,7 @@ impl Lowerer<'_> {
                 let object = self.lower_expr(object)?;
                 let object = self.pin(object);
                 let key = self.lower_key(property)?;
+                let key = self.reference_key(&object, key)?;
                 let current = self.get_member(&object, &key)?;
                 let (old, new) = self.stepped(current, delta)?;
                 self.set_member(&object, &key, new.clone())?;

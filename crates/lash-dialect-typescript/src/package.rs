@@ -161,7 +161,9 @@ fn computed_dispatcher(table: &builtins::Table, call: bool) -> String {
         "get_computed"
     };
     let fallback = if call { "ts.call_member" } else { "ts.get" };
-    let mut source = format!("use same\nuse ts.to_property_key\nuse {fallback}\n");
+    let mut source = format!(
+        "use same\nuse ts.to_property_key\nuse ts.require_object_coercible\nuse {fallback}\n"
+    );
     let mut rows = Vec::new();
     if !call {
         rows.extend(
@@ -190,7 +192,7 @@ fn computed_dispatcher(table: &builtins::Table, call: bool) -> String {
         "this: Any, key: Any"
     };
     let args = if call { "this, args" } else { "this" };
-    source.push_str(&format!("function ts.{family}({params}) -> Any\nkernel 1\ncharge {}\nbody {{\n  let name = invoke ts.to_property_key(key)\n", 4 + rows.len()));
+    source.push_str(&format!("function ts.{family}({params}) -> Any\nkernel 1\ncharge {}\nbody {{\n  do invoke ts.require_object_coercible(this)\n  let name = invoke ts.to_property_key(key)\n", 4 + rows.len()));
     for (name, function) in &rows {
         source.push_str(&format!("  if same(name, \"{name}\") {{\n    let outcome = invoke {function}({args})\n    return outcome\n  }}\n"));
     }

@@ -13,6 +13,7 @@ use same
 use eq
 use bool.not
 use error.new
+use num.abs
 use num.add
 use num.sub
 use num.mul
@@ -471,6 +472,9 @@ body {
   let b = invoke ts.to_number(right)
   if num.is_nan(b) {
     return nan
+  }
+  if eq(num.abs(a), 1) {
+    if num.is_finite(b) {} else { return nan }
   }
   return num.pow(a, b)
 }
