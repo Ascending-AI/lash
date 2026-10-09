@@ -58,7 +58,7 @@ impl SessionGraph {
             renamed.push((draft.clone(), derived.clone(), index));
         }
         for (draft, derived, index) in &renamed {
-            for child_index in self.cache().children_of(*index).iter().copied() {
+            for child_index in self.cache().children_of(*index) {
                 let node = &self.nodes[child_index];
                 debug_assert_eq!(node.parent_node_id.as_ref(), Some(draft));
                 edits

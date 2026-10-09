@@ -51,6 +51,20 @@ fn a_held_snapshot_shares_the_buffer_and_never_sees_later_appends() {
 }
 
 #[test]
+fn the_append_after_a_batch_that_grew_the_buffer_writes_in_place() {
+    let mut writer = AppendVec::new();
+    writer.extend(0..100);
+    let held = writer.clone();
+    writer.push(100);
+
+    assert_eq!(values(&held), (0..100).collect::<Vec<_>>());
+    assert!(
+        std::ptr::eq(held.as_ptr(), writer.as_ptr()),
+        "a batch leaves room, so the next append does not copy it"
+    );
+}
+
+#[test]
 fn a_handle_behind_the_tip_forks_on_a_different_value() {
     let mut writer = AppendVec::with_capacity(8);
     writer.extend([1, 2]);

@@ -13,9 +13,10 @@
 //! `Arc` bump. An append from the handle whose length is the buffer's
 //! initialized length writes the next slot in place, so a snapshot and every
 //! later append share one allocation; a slot other handles cannot see is
-//! never observed by them. The buffer is replaced only when it is full
-//! (doubling, amortized O(1)), or when the appending handle is behind the
-//! buffer's tip and its value is not the one already there (a fork).
+//! never observed by them. The buffer is replaced only when it is full (by
+//! one at least twice as long as its contents, amortized O(1)), or when the
+//! appending handle is behind the buffer's tip and its value is not the one
+//! already there (a fork).
 //!
 //! Every initialized slot a live handle other than the editing one can see is
 //! immutable. The buffer counts its live handles by length, so an edit knows
@@ -319,10 +320,20 @@ impl<T: Clone> AppendVec<T> {
 
     /// Moves this handle to a buffer of its own with room for `additional`
     /// more slots, copying its view. Other handles keep the old buffer.
+    ///
+    /// The new buffer is at most half full, so a copy of `len` slots is
+    /// followed by at least `len` appends in place. A batch larger than the
+    /// view doubles what it needs: sized exactly, the buffer would be full
+    /// again and the very next append would copy the whole batch (FIG-5673).
     fn grow(&mut self, additional: usize) {
-        let capacity = (self.len + additional)
-            .max(self.len.saturating_mul(2))
-            .max(MIN_GROWN_CAPACITY);
+        let doubled = self.len.saturating_mul(2);
+        let required = self.len.saturating_add(additional);
+        let capacity = if required > doubled {
+            required.saturating_mul(2)
+        } else {
+            doubled
+        }
+        .max(MIN_GROWN_CAPACITY);
         let mut values = Vec::with_capacity(capacity);
         values.extend_from_slice(self.as_slice());
         *self = Self::from(values);

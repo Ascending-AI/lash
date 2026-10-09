@@ -719,9 +719,19 @@ allocated bytes per resident node for snapshot append. A rejection emits
 shape, then exits nonzero. Its phase entries count allocations and allocated
 bytes in the named operation window, with `samples` as the divisor; the slope
 subtracts the zero-resident mean before dividing by resident nodes. This makes
-product regressions reviewable without changing their verdict. FIG-5659
-attributes the snapshot-append cap crossing to the versioned indexes introduced
-by `ac19148e6f` (FIG-4060); it remains a product-owned regression.
+product regressions reviewable without changing their verdict.
+
+The curve samples resident sizes 0, 32, 128 and 512, and a slope counts every
+byte a buffer allocates when an append finds it full. The node-pointer and
+active-path sequences double there, 16 bytes per resident node each, which is
+what the 48 and 64 byte caps leave room for. The id and child-edge indexes
+allocate a fixed amount per write at every size (FIG-5673), and the
+`lash-perf` unit law
+`a_held_snapshot_append_stays_within_its_cap_at_every_resident_size` holds the
+snapshot-append cap at each size from 32 to 1,024, not only the three samples.
+The event-read phase measures an append that fits the event sequence. When
+that sequence is full it is copied to one twice as long, record by record;
+that cost is amortized over the appends that follow and no phase caps it.
 
 ## Direct durable-substrate process waits
 

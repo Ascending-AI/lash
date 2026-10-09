@@ -1,153 +1,13 @@
-use std::borrow::Borrow;
-use std::collections::{BTreeMap, HashMap};
-use std::hash::Hash;
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex as StdMutex};
 
 use crate::session_graph::facade_ops::SessionNodeProjection;
 use crate::session_graph::{SessionGraph, SessionNodePayload, SessionNodeRecord, SessionReadModel};
 use crate::session_graph_integrity::{ancestry_indices, graph_node_indices};
 use crate::session_model::SessionHistoryRecord;
+use crate::snapshot_index::SnapshotIndex;
 use crate::{BaseRenderCache, Message, NodeId};
 use lash_sansio::{AppendVec, same_history_record, same_message};
-
-/// An index snapshot sees the writes preceding its length. Appends at the
-/// shared tip add one write without copying entries held by older readers.
-/// A writer branching from an older snapshot gets a private index of that
-/// prefix; ordinary commits always advance the tip.
-#[derive(Debug)]
-struct SnapshotIndex<K, V> {
-    data: Arc<StdMutex<IndexWrites<K, V>>>,
-    len: usize,
-}
-
-#[derive(Debug)]
-struct IndexWrites<K, V> {
-    writes: Vec<(K, V)>,
-    by_key: HashMap<K, Vec<usize>>,
-    holders: BTreeMap<usize, usize>,
-}
-
-impl<K: Eq + Hash + Clone, V: Clone> SnapshotIndex<K, V> {
-    fn from_entries(entries: impl IntoIterator<Item = (K, V)>) -> Self {
-        let mut data = IndexWrites {
-            writes: Vec::new(),
-            by_key: HashMap::new(),
-            holders: BTreeMap::new(),
-        };
-        for (key, value) in entries {
-            data.push(key, value);
-        }
-        let len = data.writes.len();
-        data.holders.insert(len, 1);
-        Self {
-            len,
-            data: Arc::new(StdMutex::new(data)),
-        }
-    }
-
-    fn get<Q: Eq + Hash + ?Sized>(&self, key: &Q) -> Option<V>
-    where
-        K: Borrow<Q>,
-    {
-        let data = self
-            .data
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let versions = data.by_key.get(key)?;
-        let ordinal = versions
-            .partition_point(|position| *position < self.len)
-            .checked_sub(1)?;
-        Some(data.writes[versions[ordinal]].1.clone())
-    }
-
-    fn insert(&mut self, key: K, value: V) {
-        let mut data = self
-            .data
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let visible_tip = data.holders.last_key_value().map_or(0, |(len, _)| *len);
-        data.truncate(visible_tip);
-        if self.len < data.writes.len() {
-            let private = Self::from_entries(data.writes[..self.len].iter().cloned());
-            drop(data);
-            *self = private;
-            self.insert(key, value);
-            return;
-        }
-        data.push(key, value);
-        data.unregister(self.len);
-        self.len += 1;
-        *data.holders.entry(self.len).or_default() += 1;
-    }
-
-    fn reserve(&mut self, additional: usize) {
-        let mut data = self
-            .data
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        data.writes.reserve(additional);
-        data.by_key.reserve(additional);
-    }
-}
-
-impl<K, V> Clone for SnapshotIndex<K, V> {
-    fn clone(&self) -> Self {
-        let mut data = self
-            .data
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        *data.holders.entry(self.len).or_default() += 1;
-        Self {
-            data: Arc::clone(&self.data),
-            len: self.len,
-        }
-    }
-}
-
-impl<K, V> Drop for SnapshotIndex<K, V> {
-    fn drop(&mut self) {
-        self.data
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .unregister(self.len);
-    }
-}
-
-impl<K, V> IndexWrites<K, V> {
-    fn unregister(&mut self, len: usize) {
-        if let Some(count) = self.holders.get_mut(&len) {
-            *count -= 1;
-            if *count == 0 {
-                self.holders.remove(&len);
-            }
-        }
-    }
-}
-
-impl<K: Eq + Hash + Clone, V> IndexWrites<K, V> {
-    // A discarded speculative writer must not force the next writer to copy
-    // the resident prefix. Only writes no remaining snapshot can see retire.
-    fn truncate(&mut self, len: usize) {
-        while self.writes.len() > len {
-            if let Some((key, _)) = self.writes.pop()
-                && let Some(versions) = self.by_key.get_mut(&key)
-            {
-                versions.pop();
-                if versions.is_empty() {
-                    self.by_key.remove(&key);
-                }
-            }
-        }
-    }
-
-    fn push(&mut self, key: K, value: V) {
-        self.by_key
-            .entry(key.clone())
-            .or_default()
-            .push(self.writes.len());
-        self.writes.push((key, value));
-    }
-}
 
 #[derive(Clone, Debug)]
 pub(crate) struct NodeIdIndex(SnapshotIndex<NodeId, Option<usize>>);
@@ -170,10 +30,6 @@ impl NodeIdIndex {
     pub(crate) fn rename(&mut self, from: &NodeId, to: NodeId, index: usize) {
         self.0.insert(from.clone(), None);
         self.0.insert(to, Some(index));
-    }
-
-    fn reserve(&mut self, additional: usize) {
-        self.0.reserve(additional);
     }
 }
 
@@ -201,7 +57,9 @@ pub(crate) struct SessionGraphCache {
     pub(crate) by_id: NodeIdIndex,
     pub(crate) active_path_indices: AppendVec<usize>,
     pub(crate) active_frame_indices: AppendVec<usize>,
-    children: SnapshotIndex<usize, AppendVec<usize>>,
+    /// Every child edge, as one write of the child's position under its
+    /// parent's.
+    children: SnapshotIndex<usize, usize>,
     /// The one memoized projection, of the active path from its last
     /// `FrameOpen` (ADR 0112 §9).
     ///
@@ -250,21 +108,16 @@ impl SessionGraphCache {
                 )
             })
             .collect::<Vec<_>>();
-        let mut children = HashMap::<usize, Vec<usize>>::new();
-        for (index, node) in graph.nodes.iter().enumerate() {
-            if let Some(parent) = node.parent_node_id.as_ref().and_then(|id| by_id.get(id)) {
-                children.entry(*parent).or_default().push(index);
-            }
-        }
+        let children = graph.nodes.iter().enumerate().filter_map(|(index, node)| {
+            let parent = node.parent_node_id.as_ref().and_then(|id| by_id.get(id))?;
+            Some((*parent, index))
+        });
+        let children = SnapshotIndex::from_entries(children);
         let mut cache = Self {
             by_id: NodeIdIndex::from_resident(by_id),
             active_path_indices: AppendVec::from(active_path_indices),
             active_frame_indices: AppendVec::from(active_frame_indices),
-            children: SnapshotIndex::from_entries(
-                children
-                    .into_iter()
-                    .map(|(index, children)| (index, AppendVec::from(children))),
-            ),
+            children,
             active_read: StdMutex::new(ActiveReadModel {
                 active_events: AppendVec::new(),
                 active_messages: AppendVec::new(),
@@ -387,20 +240,17 @@ impl SessionGraphCache {
         &mut self,
         node_index: usize,
         node: &SessionNodeRecord,
-        previous_leaf_node_id: Option<&str>,
+        extends_leaf: bool,
     ) {
         if let Some(parent_index) = node
             .parent_node_id
             .as_deref()
             .and_then(|id| self.by_id.get(id))
         {
-            let mut children = self.children.get(&parent_index).unwrap_or_default();
-            children.push(node_index);
-            self.children.insert(parent_index, children);
+            self.children.insert(parent_index, node_index);
         }
         self.by_id.insert(node.node_id.clone(), node_index);
-        let parent_matches_leaf = node.parent_node_id.as_deref() == previous_leaf_node_id;
-        if !parent_matches_leaf {
+        if !extends_leaf {
             return;
         }
         self.active_path_indices.push(node_index);
@@ -432,8 +282,8 @@ impl SessionGraphCache {
         }
     }
 
-    pub(crate) fn children_of(&self, node_index: usize) -> AppendVec<usize> {
-        self.children.get(&node_index).unwrap_or_default()
+    pub(crate) fn children_of(&self, node_index: usize) -> Vec<usize> {
+        self.children.all(&node_index)
     }
 
     pub(crate) fn reserve_append_capacity(
@@ -441,7 +291,6 @@ impl SessionGraphCache {
         additional_nodes: usize,
         additional_messages: usize,
     ) {
-        self.by_id.reserve(additional_nodes);
         self.active_path_indices.reserve(additional_nodes);
         if additional_messages > 0 {
             self.active_read
@@ -474,7 +323,7 @@ mod tests {
             assert_eq!(before_rename.get(&format!("derived-{ordinal}")), None);
         }
         assert!(
-            Arc::ptr_eq(&initial.0.data, &index.0.data),
+            initial.0.shares_writes_with(&index.0),
             "advancing commits never copy the base"
         );
         assert_eq!(initial.get("root"), Some(0));

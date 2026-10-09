@@ -128,7 +128,8 @@ pub mod facade_ops {
 }
 
 pub fn draft_node_id(namespace: &str, ordinal: u64) -> NodeId {
-    let preimage = format!("{}:{namespace}:{ordinal}", namespace.len());
+    let (length, ordinal) = (namespace.len().to_string(), ordinal.to_string());
+    let preimage = [&length, ":", namespace, ":", &ordinal].concat();
     NodeId::prefixed(
         DRAFT_NODE_PREFIX_VERSION,
         crate::stable_hash::blake3_hex(LASH_DRAFT_NODE_DOMAIN_VERSION, preimage.as_bytes()),
@@ -623,7 +624,7 @@ impl SessionGraphAppendBuilder {
     {
         let mut nodes = Vec::new();
         for draft in drafts {
-            let parent_node_id = self.leaf_node_id.clone();
+            let parent_node_id = self.leaf_node_id.take();
             let (node_id, payload) = match draft.payload {
                 SessionNodeDraftPayload::Message(message) => {
                     let node_id = self.next_draft_node_id();
@@ -1052,7 +1053,7 @@ impl SessionGraph {
         {
             let data = Arc::make_mut(&mut self.inner);
             for node in nodes {
-                let previous_leaf = data.leaf_node_id.clone();
+                let extends_leaf = node.parent_node_id == data.leaf_node_id;
                 let node_id = node.node_id.clone();
                 data.nodes.push(Arc::new(node));
                 cache.append_node(
@@ -1061,7 +1062,7 @@ impl SessionGraph {
                         .last()
                         .expect("just appended graph node")
                         .as_ref(),
-                    previous_leaf.as_deref(),
+                    extends_leaf,
                 );
                 data.leaf_node_id = Some(node_id);
             }

@@ -358,6 +358,60 @@ fn assert_allocations_flat_in_resident_size(
     Ok(())
 }
 
+#[cfg(test)]
+mod append_allocation_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn the_resident_graph_curve_meets_its_counted_allocation_contract() -> anyhow::Result<()>
+    {
+        run_once_resident_graph_append_curve(1).await?;
+        Ok(())
+    }
+
+    /// The curve samples three resident sizes. An index that grows by
+    /// reallocating its entries passes any sample its growth misses, so
+    /// this law appends behind a held snapshot at every size between.
+    #[test]
+    fn a_held_snapshot_append_stays_within_its_cap_at_every_resident_size() {
+        let cap = MAX_SLOPE_BYTES_PER_RESIDENT_NODE
+            .iter()
+            .find_map(|(operation, cap)| (*operation == "snapshot_append").then_some(*cap))
+            .expect("the curve caps the held-snapshot append");
+        let message = |index: usize| {
+            checkpoint_message(
+                format!("growth-msg-{index}"),
+                MessageRole::Assistant,
+                "One resident message.".to_string(),
+            )
+        };
+        let mut graph = lash_core::SessionGraph::default();
+        graph.read_model();
+        let mut baseline = 0.0;
+        for resident_nodes in 0..=2 * RESIDENT_GRAPH_SIZES[3] {
+            let appended = message(resident_nodes);
+            let before = allocator_stats();
+            {
+                let mut adopted = graph.clone();
+                adopted.append_message(appended.clone());
+            }
+            let bytes = alloc_delta(before, allocator_stats()).bytes_allocated as f64;
+            if resident_nodes == 0 {
+                baseline = bytes;
+            } else if resident_nodes >= RESIDENT_GRAPH_SIZES[1] {
+                let slope = (bytes - baseline) / resident_nodes as f64;
+                assert!(
+                    slope <= cap,
+                    "a held-snapshot append allocated {slope:.1} bytes per resident node at size \
+                     {resident_nodes} (cap {cap})"
+                );
+            }
+            graph.append_message(appended);
+            let _ = graph.read_model();
+        }
+    }
+}
+
 #[cfg(all(test, target_os = "linux"))]
 mod commit_scaling_tests {
     use super::*;
