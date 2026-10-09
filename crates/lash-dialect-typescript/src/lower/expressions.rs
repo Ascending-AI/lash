@@ -578,9 +578,9 @@ impl Lowerer<'_> {
                 let kernel = self.resolve_for_write(name, self.span)?;
                 self.short_circuit(op, current, |this| {
                     let value = this.lower_expr(value)?;
-                    let value = this.pin(value);
-                    this.store(Place::Variable(kernel), value.clone());
-                    Ok(value)
+                    let ty = value.ty.clone();
+                    this.store(Place::Variable(kernel.clone()), value);
+                    Ok(Operand::variable(kernel, ty))
                 })
             }
         }

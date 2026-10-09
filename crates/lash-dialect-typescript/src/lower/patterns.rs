@@ -62,6 +62,7 @@ impl Lowerer<'_> {
                     for (index, element) in elements.iter().enumerate() {
                         let Some(element) = element else { continue };
                         let item = self.let_expr(Self::element(&padded, index), Ty::Unknown);
+                        let item = self.invoke("ts.hole_value", &[item], Ty::Unknown)?;
                         self.destructure(element, item, mode)?;
                     }
                 }

@@ -39,7 +39,6 @@ use text.utf16_slice
 use text.concat
 use text.len
 use text.slice
-use text.trim_u17_0_0
 use text.ends_with
 use float.parse
 use text.utf16_compare
@@ -818,6 +817,15 @@ body {
   return padded
 }
 
+# A hole is not a JavaScript value. Reading one gives undefined.
+function ts.hole_value(value: Any) -> Any
+kernel 1
+charge 1
+body {
+  if same(value, ()) { return absent }
+  return value
+}
+
 # The elements of `items` from `start` on, as a new list: a rest parameter
 # or a rest element.
 function ts.rest(items: List(Any), start: Number) -> List(Any)
@@ -827,7 +835,9 @@ body {
   let rest = []
   let position = start
   while num.lt(position, list.len(items)) {
-    set rest[list.len(rest)] = items[position]
+    let item = items[position]
+    let value = invoke ts.hole_value(item)
+    set rest[list.len(rest)] = value
     set position = num.add(position, 1)
   }
   return rest
@@ -903,15 +913,6 @@ body {
   if same(canonical, name) {} else { return -1.0 }
   if num.lt(position, length) { return num.to_float(position) }
   return -1.0
-}
-
-# A hole is not a JavaScript value. Reading one gives undefined.
-function ts.hole_value(value: Any) -> Any
-kernel 1
-charge 1
-body {
-  if same(value, ()) { return absent }
-  return value
 }
 
 # `target[key]` and `target.key` where no built-in row answers.

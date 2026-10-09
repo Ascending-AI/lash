@@ -631,3 +631,35 @@ fn date_utc_preserves_floating_point_evaluation_order() {
         ]),
     );
 }
+
+/// Array-pattern iteration yields undefined for holes and creates dense rest elements.
+#[test]
+fn destructuring_holes_apply_defaults_and_make_dense_rest() {
+    assert_finished(
+        execute(
+            "const [x = 23, ...tail] = [, , 4]; finish([x, Object.hasOwn(tail, '0'), tail[0] === undefined, tail[1]]);",
+        ),
+        Datum::List(vec![
+            Datum::Float(lash_kernel_doc::Float::new(23.0)),
+            Datum::Bool(true),
+            Datum::Bool(true),
+            Datum::Float(lash_kernel_doc::Float::new(4.0)),
+        ]),
+    );
+}
+
+/// A logical assignment returns its stored value even when storing consumes a temporary.
+#[test]
+fn logical_assignment_returns_the_stored_closure() {
+    assert_finished(
+        execute(
+            "let a; let b = false; let c = true; const x = (a ??= function() { return 7; }); const y = (b ||= function() { return 8; }); const z = (c &&= function() { return 9; }); finish([x(), y(), z(), a(), b(), c()]);",
+        ),
+        Datum::List(
+            (7..=9)
+                .chain(7..=9)
+                .map(|n| Datum::Float(lash_kernel_doc::Float::new(f64::from(n))))
+                .collect(),
+        ),
+    );
+}
