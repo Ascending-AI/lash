@@ -2,6 +2,11 @@
 //! process replay store keeps is certified in `lash-conformance`
 //! (`process_replay_tests!`).
 
+use std::sync::Mutex as StdMutex;
+use std::time::{Duration, Instant};
+
+use lash_sansio::sync::MutexExt as _;
+
 use super::*;
 use crate::testing::{
     process_committed_event, process_language_observation, process_observation_label,
@@ -220,5 +225,86 @@ async fn the_aggregate_bound_evicts_the_idlest_other_process() {
     assert_eq!(
         replay(&store, &busy_start).await.map(|events| events.len()),
         Ok(3)
+    );
+}
+
+/// A clock the law advances by hand.
+#[derive(Debug)]
+struct HandClock(StdMutex<Instant>);
+
+#[async_trait::async_trait]
+impl crate::Clock for HandClock {
+    fn now(&self) -> Instant {
+        *self.0.lock_recover()
+    }
+
+    fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
+        crate::SystemClock.timestamp_datetime()
+    }
+
+    async fn sleep(&self, _: Duration) {
+        panic!("replay expiry laws do not sleep");
+    }
+
+    async fn sleep_until(&self, _: Instant) {
+        panic!("replay expiry laws do not sleep");
+    }
+}
+
+/// Idle expiry releases only windows nobody follows (FIG-5627): a process
+/// that publishes nothing for longer than `max_age` keeps its window while
+/// a subscriber holds it, so its follower's tail stays open and the next
+/// event arrives without a gap; an unfollowed process idle as long is
+/// released, and so is the followed one once its follower has left.
+#[tokio::test]
+async fn a_followed_window_idle_past_max_age_is_kept() {
+    let clock = Arc::new(HandClock(StdMutex::new(Instant::now())));
+    let config = InMemoryProcessReplayStoreConfig::standard();
+    let past_max_age = config.max_age + Duration::from_secs(1);
+    let store = InMemoryProcessReplayStore::with_clock(config, clock.clone());
+    let (followed, unfollowed) = (ProcessId::fixture("followed"), ProcessId::fixture("alone"));
+    let first = store
+        .publish(&followed, vec![node(&followed, "event-0")])
+        .await
+        .expect("publish");
+    let alone = store
+        .publish(&unfollowed, vec![node(&unfollowed, "event-0")])
+        .await
+        .expect("publish");
+    let ProcessReplaySubscribeOutcome::Subscribed(mut subscription) = store
+        .subscribe_after_cursor(&first[0].cursor)
+        .await
+        .expect("subscribe")
+    else {
+        panic!("the tail subscribes");
+    };
+
+    *clock.0.lock_recover() += past_max_age;
+    assert_eq!(
+        store.expire_idle_processes(),
+        1,
+        "only the unfollowed window is released"
+    );
+    assert_eq!(
+        replay(&store, &alone[0].cursor).await,
+        Err(ProcessReplayGapReason::Unavailable)
+    );
+    assert_eq!(replay(&store, &first[0].cursor).await, Ok(Vec::new()));
+    let second = store
+        .publish(&followed, vec![node(&followed, "event-1")])
+        .await
+        .expect("publish");
+    let next = futures_util::StreamExt::next(&mut subscription)
+        .await
+        .expect("the tail is open")
+        .expect("the follower sees no gap");
+    assert_eq!(next.cursor, second[0].cursor);
+
+    drop(subscription);
+    *clock.0.lock_recover() += past_max_age;
+    assert_eq!(store.expire_idle_processes(), 1);
+    assert_eq!(
+        replay(&store, &second[0].cursor).await,
+        Err(ProcessReplayGapReason::Unavailable)
     );
 }

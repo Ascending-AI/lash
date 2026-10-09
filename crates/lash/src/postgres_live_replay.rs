@@ -21,7 +21,7 @@
 //!   sentinel row rotates the incarnation, and every older cursor gaps.
 //! - **Retention.** Count, age and bytes per session, judged by database
 //!   time; a periodic jittered pass reclaims expired rows and forgets idle
-//!   sessions.
+//!   sessions; a session a replica's subscriber follows is not idle.
 //! - **Schema.** The tables come from the published
 //!   `postgres-live-replay-schema.sql`, which the store executes in its
 //!   `install` schema mode and a host applies itself for the `verify_only`
@@ -175,6 +175,15 @@ impl Shared {
         for doorbell in doorbells {
             mirror.ring(doorbell);
         }
+    }
+
+    /// The sessions this replica's subscribers follow.
+    fn followed(&self) -> Vec<String> {
+        self.bells
+            .lock_recover()
+            .keys()
+            .map(ToString::to_string)
+            .collect()
     }
 
     /// Wake this replica's subscribers of every session `doorbells` name;
@@ -420,6 +429,9 @@ impl LiveReplayStore for PostgresLiveReplayStore {
     ) -> Result<LiveReplaySubscribeOutcome, LiveReplayStoreError> {
         let parsed = cursor.parse()?;
         let bell = self.shared.bell(&parsed.session_id).await?;
+        // From here the replica's cleanup passes keep the head; this covers
+        // the time until the first of them.
+        cleanup::keep(&self.shared, &[parsed.session_id.to_string()]).await?;
         let events = match subscription::read(&self.shared, &parsed).await? {
             Read::Gap(reason) => return Ok(LiveReplaySubscribeOutcome::Gap(reason)),
             Read::Events(events) => events,

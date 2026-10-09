@@ -76,6 +76,7 @@ pub(super) struct Statements {
     pub(super) read: String,
     pub(super) positions: String,
     pub(super) expired_heads: String,
+    pub(super) touch_heads: String,
     pub(super) forget_heads: String,
     pub(super) shrink_reservations: String,
     pub(super) invalidate_head: String,
@@ -283,6 +284,13 @@ impl Statements {
                  WHERE l.published_at < {age} \
                  ORDER BY h.process_id LIMIT $2",
                 age = age(1),
+            ),
+            // A head another writer holds is skipped, never waited for:
+            // that writer touches it or takes it away.
+            touch_heads: format!(
+                "UPDATE {head} SET touched_at = clock_timestamp() WHERE process_id IN ( \
+                   SELECT process_id FROM {head} WHERE process_id = ANY($1) \
+                   ORDER BY process_id FOR UPDATE SKIP LOCKED)"
             ),
             forget_heads: format!(
                 "DELETE FROM {head} WHERE process_id IN ( \

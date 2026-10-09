@@ -32,7 +32,8 @@ pub struct InMemoryProcessReplayStoreConfig {
     /// The most recent events one process's window keeps.
     pub max_events_per_process: usize,
     /// How long an event stays replayable, whether or not the process has
-    /// ended and whether or not anyone is subscribed.
+    /// ended and whether or not anyone is subscribed; also how long a
+    /// window nobody follows may sit idle before it is released.
     pub max_age: Duration,
     /// Maximum charged bytes of one process's retained events.
     pub max_bytes_per_process: usize,
@@ -92,9 +93,9 @@ impl InMemoryProcessReplayStore {
         self
     }
 
-    /// Release every window idle beyond `max_age`. Hosts call this in
-    /// traffic-free periods; ordinary store calls also do a bounded amount
-    /// of this work.
+    /// Release every window idle beyond `max_age` that has no live
+    /// subscriber, and answer how many. Hosts call this in traffic-free
+    /// periods; ordinary store calls also do a bounded amount of this work.
     pub fn expire_idle_processes(&self) -> usize {
         self.windows
             .lock_recover()
@@ -409,6 +410,10 @@ impl Windows {
         }
     }
 
+    /// Release the windows idle beyond `max_age` that nobody follows, doing
+    /// at most `budget` units of work. A window with a live subscriber
+    /// counts as accessed instead: its follower is at the tail of a process
+    /// that is only waiting, and releasing it would gap them over nothing.
     fn expire(
         &mut self,
         config: &InMemoryProcessReplayStoreConfig,
@@ -416,7 +421,7 @@ impl Windows {
         budget: usize,
     ) -> usize {
         let mut removed = 0;
-        while removed < budget {
+        for _ in 0..budget {
             let Some((last_access, process_id)) = self.idle.first() else {
                 break;
             };
@@ -424,8 +429,16 @@ impl Windows {
                 break;
             }
             let process_id = process_id.clone();
-            self.remove(&process_id);
-            removed += 1;
+            if self
+                .windows
+                .get(&process_id)
+                .is_some_and(Window::is_followed)
+            {
+                self.touch(&process_id, now);
+            } else {
+                self.remove(&process_id);
+                removed += 1;
+            }
         }
         removed
     }
@@ -568,6 +581,13 @@ struct Stored {
 }
 
 impl Window {
+    /// Whether a live subscription holds this window's channel.
+    fn is_followed(&self) -> bool {
+        self.sender
+            .as_ref()
+            .is_some_and(|sender| sender.receiver_count() > 0)
+    }
+
     fn drop_front(&mut self) {
         if let Some(stored) = self.events.pop_front() {
             self.event_bytes -= stored.bytes;

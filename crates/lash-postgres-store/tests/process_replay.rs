@@ -526,3 +526,52 @@ async fn the_idlest_window_is_evicted_to_keep_the_aggregate_bounds() {
     assert_eq!((resident, reserved), (1, STEP as i64));
     assert!(over <= 0, "no window holds more than it reserved");
 }
+
+/// Idle expiry forgets only processes nobody follows (FIG-5627): a process
+/// that publishes nothing for longer than `max_age` keeps its head while a
+/// replica has a subscriber on it, so the follower's tail stays open and
+/// the next event, published on another replica, arrives without a gap. An
+/// unfollowed process idle as long is forgotten by the same passes.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_followed_process_idle_past_max_age_keeps_its_window() {
+    let Replicas {
+        database: _database,
+        a,
+        b,
+        ..
+    } = replicas(|policy| {
+        policy.data.max_age = Duration::from_millis(500);
+        policy.data.cleanup_interval = Duration::from_millis(100);
+        policy.data.cleanup_jitter = Duration::ZERO;
+    })
+    .await;
+    let (followed, unfollowed) = (ProcessId::fixture("followed"), ProcessId::fixture("alone"));
+    let first = publish(&a, &followed, "event-0", "first").await;
+    let alone = publish(&a, &unfollowed, "event-0", "alone").await;
+    let mut on_b = subscribed(&b, &first.cursor).await;
+
+    // The unfollowed head going is the evidence that both processes sat
+    // idle past `max_age` under running cleanup passes.
+    tokio::time::timeout(Duration::from_secs(30), async {
+        while !matches!(
+            replay(&a, &alone.cursor).await,
+            Err(ProcessReplayGapReason::Unavailable)
+        ) {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("the unfollowed process is forgotten");
+
+    assert_eq!(
+        replay(&a, &first.cursor).await.map(|events| events.len()),
+        Ok(0),
+        "the followed process's cursor still continues"
+    );
+    let second = publish(&a, &followed, "event-1", "second").await;
+    assert_eq!(
+        next(&mut on_b).await.cursor,
+        second.cursor,
+        "the follower sees no gap"
+    );
+}

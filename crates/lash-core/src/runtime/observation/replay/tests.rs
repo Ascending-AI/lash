@@ -526,6 +526,64 @@ async fn expiry_tick_releases_one_hundred_thousand_idle_sessions() {
     );
 }
 
+/// Idle expiry releases only entries nobody follows (FIG-5627): a session
+/// that publishes nothing for longer than `max_age` keeps its window while
+/// a subscriber holds it, so its follower's tail stays open and the next
+/// event arrives without a gap; an unfollowed session idle as long is
+/// released, and so is the followed one once its follower has left.
+#[tokio::test]
+async fn a_followed_session_idle_past_max_age_keeps_its_window() {
+    let clock = Arc::new(ReplayClock(StdMutex::new(Instant::now())));
+    let store = InMemoryLiveReplayStore::with_clock(
+        InMemoryLiveReplayStoreConfig::standard(),
+        clock.clone(),
+    );
+    let (followed, unfollowed) = (SessionId::fixture("followed"), SessionId::fixture("alone"));
+    let first = store
+        .publish_test_event(&followed, SessionRevision(1), None, activity("first"))
+        .await
+        .expect("publish");
+    store
+        .publish_test_event(&unfollowed, SessionRevision(1), None, activity("alone"))
+        .await
+        .expect("publish");
+    let LiveReplaySubscribeOutcome::Subscribed(mut subscription) = store
+        .subscribe_after_cursor(&first.cursor)
+        .await
+        .expect("subscribe")
+    else {
+        panic!("the tail subscribes");
+    };
+
+    clock.advance(STANDARD_LIVE_REPLAY_TTL + Duration::from_secs(1));
+    assert_eq!(
+        store.expire_idle_sessions(),
+        1,
+        "only the unfollowed entry is released"
+    );
+    assert!(
+        !store
+            .sessions
+            .lock_recover()
+            .buffers
+            .contains_key(&unfollowed)
+    );
+    let second = store
+        .publish_test_event(&followed, SessionRevision(1), None, activity("second"))
+        .await
+        .expect("publish");
+    let next = futures_util::StreamExt::next(&mut subscription)
+        .await
+        .expect("the tail is open")
+        .expect("the follower sees no gap");
+    assert_eq!(next.cursor, second.cursor);
+
+    drop(subscription);
+    clock.advance(STANDARD_LIVE_REPLAY_TTL + Duration::from_secs(1));
+    assert_eq!(store.expire_idle_sessions(), 1);
+    assert!(store.sessions.lock_recover().buffers.is_empty());
+}
+
 #[tokio::test]
 async fn deployment_session_capacity_evicts_with_a_gap() {
     let store = InMemoryLiveReplayStore::new(InMemoryLiveReplayStoreConfig::standard());

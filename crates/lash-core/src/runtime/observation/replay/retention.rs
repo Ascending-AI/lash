@@ -48,6 +48,10 @@ impl ReplayRetention {
         }
     }
 
+    /// Release the entries idle beyond `max_age` that nobody follows, doing
+    /// at most `budget` units of work. An entry with a live subscriber
+    /// counts as accessed instead: its follower is at the tail of a session
+    /// that is only quiet, and releasing it would gap them over nothing.
     pub(super) fn expire(
         &mut self,
         config: &InMemoryLiveReplayStoreConfig,
@@ -55,7 +59,7 @@ impl ReplayRetention {
         budget: usize,
     ) -> usize {
         let mut removed = 0;
-        while removed < budget {
+        for _ in 0..budget {
             let Some((last_access, session_id)) = self.idle.first_key_value().map(|(key, ())| key)
             else {
                 break;
@@ -64,8 +68,16 @@ impl ReplayRetention {
                 break;
             }
             let session_id = session_id.clone();
-            self.remove(&session_id);
-            removed += 1;
+            if self
+                .buffers
+                .get(&session_id)
+                .is_some_and(LiveReplaySessionBuffer::is_followed)
+            {
+                self.touch(&session_id, now);
+            } else {
+                self.remove(&session_id);
+                removed += 1;
+            }
         }
         removed
     }

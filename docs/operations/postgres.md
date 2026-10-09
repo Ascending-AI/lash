@@ -255,7 +255,13 @@ The retention values are a provisional preset; no measurement backs them. A
 process's window is cut by whichever bound it reaches first, so it lasts about
 `min(max_age, max_events / events per second, max_bytes / bytes per second)`:
 at 1,000 events a second, 2,048 events are two seconds. Completion does not
-shorten a window, and a subscriber does not lengthen it.
+shorten a window, and a subscriber does not lengthen it. A subscriber does
+keep the window's cursors valid: a process that publishes nothing for longer
+than `max_age` (it sleeps, or waits on an approval) is forgotten only when no
+replica has a follower on it, so a connected follower sees no gap when it
+resumes. Each replica renews that on its cleanup cadence; keep
+`cleanup_interval_ms + cleanup_jitter_ms` below `max_age_ms`. `live_replay`
+keeps a followed session the same way.
 
 - **Per process.** Events, age (by database time) and encoded bytes. A single
   publication larger than `max_bytes_per_process` is refused and ends the
@@ -264,7 +270,7 @@ shorten a window, and a subscriber does not lengthen it.
   reserved for them. A window reserves its bytes in `reservation_bytes` steps
   and is trimmed to what it reserved, so an event append takes no store-wide
   lock; only a new window or a new step does. When either bound is spent the
-  idlest window (the one published to longest ago) is evicted to admit
+  idlest window (the one published to or followed longest ago) is evicted to admit
   another, and its observers get a gap. Cleanup hands unused steps back.
 - **Ingress.** A replica holds at most `max_pending_events` events and
   `max_pending_bytes` bytes between `publish` and their transaction; a

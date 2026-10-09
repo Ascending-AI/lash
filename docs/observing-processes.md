@@ -422,7 +422,10 @@ process count and byte total across the store. The standard preset (2,048
 events, 120 seconds and 8 MiB per process; 4,096 processes and 64 MiB) is
 provisional and unmeasured. A window lasts about
 `min(max_age, max_events / events per second, max_bytes / bytes per second)`:
-at 1,000 events a second, 2,048 events are two seconds.
+at 1,000 events a second, 2,048 events are two seconds. A window nobody
+follows is released once it has been idle for `max_age`; a window with a
+live subscriber is not, so a process that waits longer than that does not
+gap its connected followers.
 
 The store holds what was published to it. Cores that share one store share
 every observation. Across OS processes, provisional node history crosses only

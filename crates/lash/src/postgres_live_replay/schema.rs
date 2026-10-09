@@ -62,6 +62,7 @@ pub(super) struct Statements {
     pub(super) load_heads: String,
     pub(super) load_runs: String,
     pub(super) expired_heads: String,
+    pub(super) touch_heads: String,
     pub(super) forget_heads: String,
     pub(super) raise_watermark: String,
     pub(super) invalidate_head: String,
@@ -225,6 +226,13 @@ impl Statements {
                    ON l.session_id = h.session_id AND l.position = h.first_retained \
                  WHERE l.published_at < statement_timestamp() - $1 * interval '1 microsecond' \
                  ORDER BY h.session_id LIMIT $2"
+            ),
+            // A head another writer holds is skipped, never waited for:
+            // that writer touches it or takes it away.
+            touch_heads: format!(
+                "UPDATE {head} SET touched_at = clock_timestamp() WHERE session_id IN ( \
+                   SELECT session_id FROM {head} WHERE session_id = ANY($1) \
+                   ORDER BY session_id FOR UPDATE SKIP LOCKED)"
             ),
             forget_heads: format!(
                 "DELETE FROM {head} WHERE session_id IN ( \

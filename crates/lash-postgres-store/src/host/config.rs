@@ -555,8 +555,10 @@ pub struct ReplayDataPolicy {
     /// Encoded bytes retained per session; a larger single publication is
     /// refused. Default 8 MiB, 1 KiB to 1 GiB.
     pub max_bytes_per_session: usize,
-    /// How often a replica reclaims expired events. Default 30 s, 100 ms to
-    /// 1 h.
+    /// How often a replica reclaims expired events and idle sessions, and
+    /// counts the sessions its subscribers follow as accessed: a followed
+    /// session keeps its window while this plus `cleanup_jitter` is below
+    /// `max_age`. Default 30 s, 100 ms to 1 h.
     #[serde(rename = "cleanup_interval_ms", with = "serde_ms")]
     pub cleanup_interval: Duration,
     /// The most a cleanup run is delayed past its interval, drawn at random.
@@ -671,7 +673,9 @@ pub struct ProcessReplayDataPolicy {
     /// Default 64 KiB; 1 KiB to `max_bytes_per_process`.
     pub reservation_bytes: usize,
     /// How often a replica reclaims expired events, idle windows and unused
-    /// reservations. Default 30 s, 100 ms to 1 h.
+    /// reservations, and counts the processes its subscribers follow as
+    /// accessed: a followed process keeps its window while this plus
+    /// `cleanup_jitter` is below `max_age`. Default 30 s, 100 ms to 1 h.
     #[serde(rename = "cleanup_interval_ms", with = "serde_ms")]
     pub cleanup_interval: Duration,
     /// The most a cleanup run is delayed past its interval, drawn at random.

@@ -482,3 +482,55 @@ async fn a_takeover_replica_reads_back_a_dead_replicas_stream_and_continues_it()
         "A's subscriber follows B's events and A's in one order"
     );
 }
+
+/// Idle expiry forgets only sessions nobody follows (FIG-5627): a session
+/// that publishes nothing for longer than `max_age` keeps its head while a
+/// replica has a subscriber on it, so the follower's tail stays open and
+/// the next event, published on another replica, arrives without a gap. An
+/// unfollowed session idle as long is forgotten by the same passes.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_followed_session_idle_past_max_age_keeps_its_window() {
+    let database = IsolatedDatabase::create(&required_database_url()).await;
+    let schema = fresh_schema();
+    let [a, b] = [(), ()].map(|()| {
+        connect(
+            database.url(),
+            with_data(&schema, |data| {
+                data.max_age = Duration::from_millis(500);
+                data.cleanup_interval = Duration::from_millis(100);
+                data.cleanup_jitter = Duration::ZERO;
+            }),
+        )
+    });
+    let (followed, unfollowed) = (SessionId::from("followed"), SessionId::from("alone"));
+    let first = publish(&a, &followed, "k#0", "first").await;
+    let alone = publish(&a, &unfollowed, "k#0", "alone").await;
+    let mut on_b = subscribed(b.subscribe_after_cursor(&first.cursor).await);
+
+    // The unfollowed head going is the evidence that both sessions sat idle
+    // past `max_age` under running cleanup passes.
+    tokio::time::timeout(Duration::from_secs(30), async {
+        while !matches!(
+            a.replay_after_cursor(&alone.cursor).await.expect("replay"),
+            LiveReplayOutcome::Gap(LiveReplayGapReason::Unavailable)
+        ) {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("the unfollowed session is forgotten");
+
+    assert!(
+        matches!(
+            a.replay_after_cursor(&first.cursor).await.expect("replay"),
+            LiveReplayOutcome::Replayed(events) if events.is_empty()
+        ),
+        "the followed session's cursor still continues"
+    );
+    let second = publish(&a, &followed, "k#1", "second").await;
+    assert_eq!(
+        next(&mut on_b).await.cursor,
+        second.cursor,
+        "the follower sees no gap"
+    );
+}

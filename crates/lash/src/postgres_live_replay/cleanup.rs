@@ -3,6 +3,11 @@
 //!
 //! Reads already cut the window by database time, so cleanup only reclaims
 //! space and identities; any replica's pass serves every replica.
+//!
+//! A session is idle only while nobody follows it: each replica touches the
+//! heads its subscribers follow when they subscribe and at the start of
+//! every pass, so a quiet session keeps its window, and its followers
+//! their cursors, for as long as one of them is connected.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -42,8 +47,22 @@ fn jitter(bound: Duration) -> Duration {
     Duration::from_micros(draw % (micros + 1))
 }
 
+/// Count `sessions` as accessed now: a head with a subscriber is not idle.
+pub(super) async fn keep(shared: &Shared, sessions: &[String]) -> Result<(), LiveReplayStoreError> {
+    if sessions.is_empty() {
+        return Ok(());
+    }
+    sqlx::query(&shared.sql.touch_heads)
+        .bind(sessions)
+        .execute(&shared.pool)
+        .await
+        .map_err(db_error("keep followed sessions"))?;
+    Ok(())
+}
+
 /// One cleanup pass.
 async fn clean(shared: &Shared) -> Result<(), LiveReplayStoreError> {
+    keep(shared, &shared.followed()).await?;
     loop {
         let sessions = sqlx::query(&shared.sql.expired_heads)
             .bind(micros(shared.config.max_age))
@@ -113,7 +132,8 @@ async fn expire_once(shared: &Shared, sessions: &[String]) -> Result<Vec<Doorbel
     Ok(doorbells)
 }
 
-/// Forget sessions idle past the window's age with nothing retained, and
+/// Forget sessions nobody touched for the window's age, with nothing
+/// retained, and
 /// raise the watermark past their tails so a session that returns starts
 /// above every position it ever had (P6).
 async fn forget(shared: &Shared) -> Result<(), LiveReplayStoreError> {

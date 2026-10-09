@@ -4,6 +4,11 @@
 //!
 //! Reads already cut the window by database time, so cleanup only reclaims
 //! space, identities and budget; any replica's pass serves every replica.
+//!
+//! A process is idle only while nobody follows it: each replica touches the
+//! heads its subscribers follow when they subscribe and at the start of
+//! every pass, so a process that only waits keeps its window, and its
+//! followers their cursors, for as long as one of them is connected.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -42,8 +47,25 @@ fn jitter(bound: Duration) -> Duration {
     Duration::from_micros(draw % (micros + 1))
 }
 
+/// Count `processes` as accessed now: a head with a subscriber is not idle.
+pub(super) async fn keep(
+    shared: &Shared,
+    processes: &[String],
+) -> Result<(), ProcessReplayStoreError> {
+    if processes.is_empty() {
+        return Ok(());
+    }
+    sqlx::query(&shared.sql.touch_heads)
+        .bind(processes)
+        .execute(&shared.pool)
+        .await
+        .map_err(db_error("keep followed processes"))?;
+    Ok(())
+}
+
 /// One cleanup pass.
 async fn clean(shared: &Shared) -> Result<(), ProcessReplayStoreError> {
+    keep(shared, &shared.followed()).await?;
     loop {
         let processes = sqlx::query(&shared.sql.expired_heads)
             .bind(micros(shared.config.max_age))
@@ -113,8 +135,8 @@ async fn expire_once(shared: &Shared, processes: &[String]) -> Result<(), Attemp
 /// What a reclaim pass hands back to the aggregate budget.
 #[derive(Clone, Copy)]
 enum Reclaim {
-    /// Processes idle past the window's age with nothing retained: their
-    /// heads go, and the watermark rises past their tails so a process that
+    /// Processes nobody touched for the window's age, with nothing
+    /// retained: their heads go, and the watermark rises past their tails so a process that
     /// returns starts above every position it ever had.
     Forget,
     /// The whole steps a head reserves beyond what it retains.

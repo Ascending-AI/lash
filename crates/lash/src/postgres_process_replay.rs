@@ -30,7 +30,8 @@
 //! - **Retention.** Count, age and bytes per process, judged by database
 //!   time, and two aggregate bounds across every replica: resident
 //!   processes, and the bytes their windows reserve. A periodic jittered
-//!   pass reclaims expired rows, idle processes and unused reservations.
+//!   pass reclaims expired rows, idle processes and unused reservations; a
+//!   process a replica's subscriber follows is not idle.
 //! - **Schema.** The tables come from the published
 //!   `postgres-process-replay-schema.sql`, which the store executes in its
 //!   `install` schema mode and a host applies itself for the `verify_only`
@@ -170,6 +171,11 @@ impl Shared {
                 bell.sender.send_modify(|rings| *rings += 1);
             }
         }
+    }
+
+    /// The processes this replica's subscribers follow.
+    fn followed(&self) -> Vec<String> {
+        self.bells.lock_recover().keys().cloned().collect()
     }
 
     /// Register a subscriber's doorbell, once the listener's LISTEN is
@@ -395,6 +401,9 @@ impl ProcessReplayStore for PostgresProcessReplayStore {
     ) -> Result<ProcessReplaySubscribeOutcome, ProcessReplayStoreError> {
         let parsed = cursor.parse()?;
         let bell = self.shared.bell(&parsed.process_id).await?;
+        // From here the replica's cleanup passes keep the head; this covers
+        // the time until the first of them.
+        cleanup::keep(&self.shared, std::slice::from_ref(&bell.process)).await?;
         let events = match subscription::read(&self.shared, &parsed).await? {
             Read::Gap(reason) => return Ok(ProcessReplaySubscribeOutcome::Gap(reason)),
             Read::Events(events) => events,

@@ -728,7 +728,8 @@ pub trait LiveReplayStore: Send + Sync {
 pub struct InMemoryLiveReplayStoreConfig {
     /// The most recent events one session's window keeps.
     pub max_events_per_session: usize,
-    /// How long an event stays replayable.
+    /// How long an event stays replayable; also how long an entry nobody
+    /// follows may sit idle before it is released.
     pub max_age: Duration,
     /// Maximum resident session entries across this store.
     pub max_sessions: usize,
@@ -799,9 +800,10 @@ impl InMemoryLiveReplayStore {
         self
     }
 
-    /// Release all entries idle beyond `max_age`, including their live
-    /// channels. Hosts call this tick during traffic-free periods; normal
-    /// store calls also perform a bounded amount of global expiry work.
+    /// Release all entries idle beyond `max_age` that have no live
+    /// subscriber, and answer how many. Hosts call this tick during
+    /// traffic-free periods; normal store calls also perform a bounded
+    /// amount of global expiry work.
     pub fn expire_idle_sessions(&self) -> usize {
         self.sessions
             .lock_recover()
@@ -878,6 +880,13 @@ impl LiveReplaySessionBuffer {
             delivered_activities: DeliveredActivities::default(),
             sender: None,
         }
+    }
+
+    /// Whether a live subscription holds this entry's channel.
+    fn is_followed(&self) -> bool {
+        self.sender
+            .as_ref()
+            .is_some_and(|sender| sender.receiver_count() > 0)
     }
 
     /// Drop the oldest stored event and release the activity identity it
