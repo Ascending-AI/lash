@@ -415,8 +415,8 @@ async fn main() -> Result<()> {
         None => builder,
     };
     let core = builder.build(lash::persistence::LeaseOwnerIdentity::opaque(
-        node.clone(),
-        std::process::id().to_string(),
+        lash::persistence::LeaseOwnerId::new(node.clone()),
+        lash::persistence::LeaseIncarnationId::new(std::process::id().to_string()),
     ))?;
     let operation = async {
         let app = Router::new()

@@ -374,8 +374,8 @@ impl Crash {
                         world: Arc::clone(&self.world),
                     }))
                     .build(lash::persistence::LeaseOwnerIdentity::opaque(
-                        "turn-callback-deployment",
-                        "turn-callback-boot",
+                        lash::persistence::LeaseOwnerId::new("turn-callback-deployment"),
+                        lash::persistence::LeaseIncarnationId::new("turn-callback-boot"),
                     ))
                     .expect("the core builds")
             })

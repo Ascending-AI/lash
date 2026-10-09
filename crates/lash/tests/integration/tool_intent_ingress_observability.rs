@@ -55,8 +55,8 @@ async fn test_core() -> lash::Result<(lash::LashCore, ProcessId, ProcessId)> {
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "intent-ingress-observability-worker",
-            "intent-ingress-observability-boot",
+            lash::persistence::LeaseOwnerId::new("intent-ingress-observability-worker"),
+            lash::persistence::LeaseIncarnationId::new("intent-ingress-observability-boot"),
         ))?;
     let _session = crate::created_session(&core, "intent-ingress-observability-model", SESSION)
         .await

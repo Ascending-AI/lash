@@ -522,10 +522,7 @@ async fn main() -> Result<()> {
         .trace_level(lash::tracing::TraceLevel::Extended)
         .telemetry_content(lash::tracing::TelemetryContent::Captured)
         .trace_context(trace_context)
-        .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "rlm-smoke",
-            args.session_id.clone(),
-        ))
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(lash::persistence::LeaseOwnerId::new("rlm-smoke"), lash::persistence::LeaseIncarnationId::new(args.session_id.clone())))
         .context("build RLM smoke core")?;
     // A smoke run may name a session an earlier run created: create-or-use,
     // written out, since only `create` creates (FIG-4112).

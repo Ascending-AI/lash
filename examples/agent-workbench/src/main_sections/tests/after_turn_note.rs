@@ -62,8 +62,8 @@ async fn the_after_turn_note_commits_with_the_turn_after_the_one_it_summarizes()
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "workbench-after-turn",
-            "workbench-after-turn-boot",
+            lash::persistence::LeaseOwnerId::new("workbench-after-turn"),
+            lash::persistence::LeaseIncarnationId::new("workbench-after-turn-boot"),
         ))
         .expect("the core builds");
     let spec = lash::SessionSpec::new(

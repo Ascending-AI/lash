@@ -139,8 +139,8 @@ async fn core_on(
     let core =
         crate::tests::standard_core_builder_over(lash_conformance::backend_over(stores.clone()))
             .build(lash_core::LeaseOwnerIdentity::opaque(
-                node,
-                format!("{node}-boot"),
+                lash_core::LeaseOwnerId::new(node),
+                lash_core::LeaseIncarnationId::new(format!("{node}-boot")),
             ))
             .expect("standard core");
     (stores, core)

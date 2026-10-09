@@ -86,7 +86,10 @@ async fn embedded_runtime_builder_loads_state_from_store() {
                 lash_core::runtime::DeltaCoalescing::recommended(),
                 lash_core::facade_support::DataRetentionConfig::standard(),
             ),
-            lash_core::LeaseOwnerIdentity::opaque("protocol-test-worker", "protocol-test-boot"),
+            lash_core::LeaseOwnerIdentity::opaque(
+                lash_core::LeaseOwnerId::new("protocol-test-worker"),
+                lash_core::LeaseIncarnationId::new("protocol-test-boot"),
+            ),
         )
         .with_store(store.clone())
         .with_plugin_factories(vec![Arc::new(
@@ -154,7 +157,10 @@ async fn embedded_runtime_builder_rejects_store_bound_to_different_session_id() 
                 lash_core::runtime::DeltaCoalescing::recommended(),
                 lash_core::facade_support::DataRetentionConfig::standard(),
             ),
-            lash_core::LeaseOwnerIdentity::opaque("protocol-test-worker", "protocol-test-boot"),
+            lash_core::LeaseOwnerIdentity::opaque(
+                lash_core::LeaseOwnerId::new("protocol-test-worker"),
+                lash_core::LeaseIncarnationId::new("protocol-test-boot"),
+            ),
         )
         .with_store(store)
         .with_session_id("beta")

@@ -237,8 +237,8 @@ async fn section_text_never_enters_history_or_a_compaction_seed() {
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "section-leak-worker",
-            "section-leak-boot",
+            lash::persistence::LeaseOwnerId::new("section-leak-worker"),
+            lash::persistence::LeaseIncarnationId::new("section-leak-boot"),
         ))
         .expect("core");
     let session = crate::created_session(&core, MODEL, "section-leak-session")

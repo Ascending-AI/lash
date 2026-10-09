@@ -50,19 +50,21 @@ mod transcript;
 fn sim_process_owner() -> lash_core::LeaseOwnerIdentity {
     static INCARNATION: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     lash_core::LeaseOwnerIdentity::opaque(
-        "lash-sim",
-        INCARNATION
-            .get_or_init(|| {
-                format!(
-                    "{}-{}",
-                    std::process::id(),
-                    std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_nanos()
-                )
-            })
-            .clone(),
+        lash_core::LeaseOwnerId::new("lash-sim"),
+        lash_core::LeaseIncarnationId::new(
+            INCARNATION
+                .get_or_init(|| {
+                    format!(
+                        "{}-{}",
+                        std::process::id(),
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_nanos()
+                    )
+                })
+                .clone(),
+        ),
     )
 }
 

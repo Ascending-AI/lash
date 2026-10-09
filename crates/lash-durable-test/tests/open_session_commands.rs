@@ -294,8 +294,8 @@ async fn a_terminally_refused_command_commit_settles_with_its_cause_and_the_lane
         .data_retention(lash::DataRetention::standard())
         .serve_test_llm_profile(served::model(Arc::default()), served::metadata())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "command-refusal",
-            "boot",
+            lash::persistence::LeaseOwnerId::new("command-refusal"),
+            lash::persistence::LeaseIncarnationId::new("boot"),
         ))
         .unwrap();
     let id = lash::SessionId::try_from("command-refusal".to_owned()).unwrap();

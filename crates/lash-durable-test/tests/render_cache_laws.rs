@@ -133,7 +133,10 @@ async fn retained(backend: &lash::Backend) -> usize {
 }
 
 fn owner(build: &'static str) -> lash::persistence::LeaseOwnerIdentity {
-    lash::persistence::LeaseOwnerIdentity::opaque("render-cache-deployment", build)
+    lash::persistence::LeaseOwnerIdentity::opaque(
+        lash::persistence::LeaseOwnerId::new("render-cache-deployment"),
+        lash::persistence::LeaseIncarnationId::new(build),
+    )
 }
 
 fn session_id(name: &str) -> lash::SessionId {

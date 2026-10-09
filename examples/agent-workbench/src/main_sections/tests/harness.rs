@@ -205,8 +205,8 @@ impl WorkbenchBuilder {
             },
             self.provider,
             lash::persistence::LeaseOwnerIdentity::opaque(
-                "agent-workbench-test",
-                uuid::Uuid::new_v4().to_string(),
+                lash::persistence::LeaseOwnerId::new("agent-workbench-test"),
+                lash::persistence::LeaseIncarnationId::new(uuid::Uuid::new_v4().to_string()),
             ),
         )
         .await

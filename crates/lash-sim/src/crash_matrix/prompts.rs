@@ -106,8 +106,8 @@ pub fn prompt_core(world: &Arc<World>) -> Result<lash::LashCore, String> {
             world: Arc::downgrade(world),
         }))
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "lash-sim-deployment",
-            "lash-sim-boot",
+            lash::persistence::LeaseOwnerId::new("lash-sim-deployment"),
+            lash::persistence::LeaseIncarnationId::new("lash-sim-boot"),
         ))
         .map_err(|error| format!("build the prompt core: {error}"))?;
     Ok(world.prompt_core().get_or_init(|| built).clone())

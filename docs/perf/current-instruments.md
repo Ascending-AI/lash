@@ -331,6 +331,11 @@ kiln run //crates/lash-perf:lash-perf__bin -- boundary \
   --store-dir "$E/wire-slots-store" --out "$E/wire-slots.json"
 ```
 
+Every perf core constructs its stable node name with `LeaseOwnerId` and its
+boot identity with `LeaseIncarnationId`. Concurrent boundary writers retain
+distinct node names (`writer-<lane>`), so a later writer cannot fence an
+earlier writer by swapping those constructor arguments.
+
 The store directory must be fresh. Select each case independently; there is no
 aggregate population that folds unlike boundary costs into one number.
 

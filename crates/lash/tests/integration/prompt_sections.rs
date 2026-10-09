@@ -190,8 +190,8 @@ async fn witness_core_over(
     };
     builder
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "prompt-witness-worker",
-            "prompt-witness-boot",
+            lash::persistence::LeaseOwnerId::new("prompt-witness-worker"),
+            lash::persistence::LeaseIncarnationId::new("prompt-witness-boot"),
         ))
         .expect("core")
 }

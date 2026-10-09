@@ -408,8 +408,8 @@ impl PressureFrame {
                         lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
                     ))
                     .build(lash::persistence::LeaseOwnerIdentity::opaque(
-                        "pressure-frame-deployment",
-                        "pressure-frame-boot",
+                        lash::persistence::LeaseOwnerId::new("pressure-frame-deployment"),
+                        lash::persistence::LeaseIncarnationId::new("pressure-frame-boot"),
                     ))
                     .expect("the core builds")
             })
@@ -1024,8 +1024,8 @@ impl PromptUsage {
                 .delta_coalescing(lash::DeltaCoalescing::recommended())
                 .serve_test_llm_profile(model, metadata())
                 .build(lash::persistence::LeaseOwnerIdentity::opaque(
-                    "prompt-usage-deployment",
-                    "prompt-usage-boot",
+                    lash::persistence::LeaseOwnerId::new("prompt-usage-deployment"),
+                    lash::persistence::LeaseIncarnationId::new("prompt-usage-boot"),
                 ))
                 .expect("the core builds")
             })

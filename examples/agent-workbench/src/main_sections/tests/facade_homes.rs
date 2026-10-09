@@ -132,8 +132,8 @@ async fn workbench_plugin_observes_session_config_policy_transition() {
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "agent-workbench-test",
-            uuid::Uuid::new_v4().to_string(),
+            lash::persistence::LeaseOwnerId::new("agent-workbench-test"),
+            lash::persistence::LeaseIncarnationId::new(uuid::Uuid::new_v4().to_string()),
         ))
         .expect("build the config-change core");
     let session_id = lash::SessionId::from("workbench-config-change-session");

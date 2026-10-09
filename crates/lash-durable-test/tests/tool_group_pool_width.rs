@@ -235,8 +235,8 @@ fn core(
         .serve_test_llm_profile(model(protocol, Arc::clone(seen)), metadata())
         .tools(touch(Arc::clone(touched)))
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "pool-width-deployment",
-            "pool-width-boot",
+            lash::persistence::LeaseOwnerId::new("pool-width-deployment"),
+            lash::persistence::LeaseIncarnationId::new("pool-width-boot"),
         ))
         .expect("the core builds")
 }

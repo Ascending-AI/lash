@@ -286,8 +286,8 @@ fn core(
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "facade-host-wrappers-worker",
-            "facade-host-wrappers-boot",
+            lash::persistence::LeaseOwnerId::new("facade-host-wrappers-worker"),
+            lash::persistence::LeaseIncarnationId::new("facade-host-wrappers-boot"),
         ))
         .expect("RLM core behind the host's wrapper")
 }
@@ -434,8 +434,8 @@ async fn eviction_law(backend: lash::Backend, tag: &str) -> LashCore {
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "replay-bounds",
-            tag,
+            lash::persistence::LeaseOwnerId::new("replay-bounds"),
+            lash::persistence::LeaseIncarnationId::new(tag),
         ))
         .expect("core");
     let id = format!("replay-bounds-{tag}");

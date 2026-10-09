@@ -1319,7 +1319,10 @@ async fn golden_tree_survives_a_kill_and_resume_on_another_node() -> Result<()> 
     let (keys, mut published) = tokio::sync::mpsc::unbounded_channel();
     let node_a = Traced::over(
         lash_conformance::backend_over(Arc::clone(&stores) as Arc<dyn lash_core::StoreSet>),
-        crate::persistence::LeaseOwnerIdentity::opaque("golden-tree", "node-a"),
+        crate::persistence::LeaseOwnerIdentity::opaque(
+            crate::persistence::LeaseOwnerId::new("golden-tree"),
+            crate::persistence::LeaseIncarnationId::new("node-a"),
+        ),
         tree_provider(),
         |builder| builder.tools(Arc::new(PendingEchoTool(keys))),
     )?;
@@ -1333,7 +1336,10 @@ async fn golden_tree_survives_a_kill_and_resume_on_another_node() -> Result<()> 
     let (keys, _) = tokio::sync::mpsc::unbounded_channel();
     let node_b = Traced::over(
         lash_conformance::backend_over(Arc::clone(&stores) as Arc<dyn lash_core::StoreSet>),
-        crate::persistence::LeaseOwnerIdentity::opaque("golden-tree", "node-b"),
+        crate::persistence::LeaseOwnerIdentity::opaque(
+            crate::persistence::LeaseOwnerId::new("golden-tree"),
+            crate::persistence::LeaseIncarnationId::new("node-b"),
+        ),
         mock_provider(vec![text_call("done")]).into_handle(),
         |builder| builder.tools(Arc::new(PendingEchoTool(keys))),
     )?;

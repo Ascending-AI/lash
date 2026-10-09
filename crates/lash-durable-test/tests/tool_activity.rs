@@ -624,8 +624,8 @@ async fn a_durable_turn_streams_provider_deltas_before_its_committed_rows(tier: 
                     .expect("the model's metadata"),
             )
             .build(lash::persistence::LeaseOwnerIdentity::opaque(
-                "provider-activity-deployment",
-                "provider-activity-boot",
+                lash::persistence::LeaseOwnerId::new("provider-activity-deployment"),
+                lash::persistence::LeaseIncarnationId::new("provider-activity-boot"),
             ))
             .expect("the core builds");
         let session_id = lash::SessionId::try_from("provider-activity".to_owned()).unwrap();
@@ -971,8 +971,8 @@ async fn a_commit_on_one_node_reaches_a_subscriber_attached_through_another(tier
             backend: world.backend.clone(),
         }))
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "activity-attached-deployment",
-            "activity-attached-boot",
+            lash::persistence::LeaseOwnerId::new("activity-attached-deployment"),
+            lash::persistence::LeaseIncarnationId::new("activity-attached-boot"),
         ))
         .expect("the attached core builds");
     let session_id = lash::SessionId::try_from(SESSION.to_owned()).expect("a session id");

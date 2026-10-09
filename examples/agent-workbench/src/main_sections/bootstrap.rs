@@ -706,7 +706,10 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
             lash_vm_execution_sink: Some(lash_vm_execution_sink),
         },
         provider.clone(),
-        lash::persistence::LeaseOwnerIdentity::opaque(node, process_incarnation_id()),
+        lash::persistence::LeaseOwnerIdentity::opaque(
+            lash::persistence::LeaseOwnerId::new(node),
+            lash::persistence::LeaseIncarnationId::new(process_incarnation_id()),
+        ),
     )
     .await?;
     let shutdown_core = core.clone();

@@ -97,7 +97,10 @@ fn processes_area_witnesses() {
         )
     });
     // W0094: lash::persistence::LeaseOwnerIdentity::engine_process_execution [function]
-    let _ = lash::persistence::LeaseOwnerIdentity::engine_process_execution(todo!(), "exec");
+    let _ = lash::persistence::LeaseOwnerIdentity::engine_process_execution(
+        todo!(),
+        lash::persistence::LeaseIncarnationId::new("exec"),
+    );
     // W0095: lash::persistence::LeaseOwnerIdentity::engine_process_execution_id [function]
     let _ = lash::persistence::LeaseOwnerIdentity::engine_process_execution_id;
     // W0096: lash::persistence::ProcessExecutionEnvStore [trait]

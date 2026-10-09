@@ -54,8 +54,8 @@ pub(super) async fn durable_core(
     };
     builder
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            format!("{model}-facade-turns"),
-            format!("{model}-facade-turns-boot"),
+            lash::persistence::LeaseOwnerId::new(format!("{model}-facade-turns")),
+            lash::persistence::LeaseIncarnationId::new(format!("{model}-facade-turns-boot")),
         ))
         .expect("the core builds")
 }

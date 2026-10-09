@@ -402,8 +402,8 @@ fn rlm_core_with_plugins(
             ),
         ))
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "artifact-referrers-worker",
-            "artifact-referrers-boot",
+            lash::persistence::LeaseOwnerId::new("artifact-referrers-worker"),
+            lash::persistence::LeaseIncarnationId::new("artifact-referrers-boot"),
         ))
         .expect("RLM core")
 }

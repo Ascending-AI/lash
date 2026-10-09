@@ -46,8 +46,8 @@ async fn durable_core_without_advanced(
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "durable-builder-test-worker",
-            "durable-builder-test-boot",
+            lash::persistence::LeaseOwnerId::new("durable-builder-test-worker"),
+            lash::persistence::LeaseIncarnationId::new("durable-builder-test-boot"),
         ))
 }
 

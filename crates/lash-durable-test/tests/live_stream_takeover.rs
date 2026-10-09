@@ -211,8 +211,8 @@ impl Takeover {
         }
         let core = builder
             .build(lash::persistence::LeaseOwnerIdentity::opaque(
-                "live-stream-takeover",
-                "live-stream-takeover-boot",
+                lash::persistence::LeaseOwnerId::new("live-stream-takeover"),
+                lash::persistence::LeaseIncarnationId::new("live-stream-takeover-boot"),
             ))
             .expect("the core builds");
         let script = Script::new();

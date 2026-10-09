@@ -230,10 +230,7 @@ impl Holding {
                     .tools(Arc::new(Probe {
                         world: Arc::clone(&self.world),
                     }))
-                    .build(lash::persistence::LeaseOwnerIdentity::opaque(
-                        "process-holding-deployment",
-                        "process-holding-boot",
-                    ))
+                    .build(lash::persistence::LeaseOwnerIdentity::opaque(lash::persistence::LeaseOwnerId::new("process-holding-deployment"), lash::persistence::LeaseIncarnationId::new("process-holding-boot")))
                     .expect("the core builds")
             })
             .clone()

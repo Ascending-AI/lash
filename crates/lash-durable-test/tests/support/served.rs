@@ -434,8 +434,8 @@ impl World {
             .delta_coalescing(lash::DeltaCoalescing::recommended())
             .serve_test_llm_profile(model, metadata())
             .build(lash::persistence::LeaseOwnerIdentity::opaque(
-                "tool-semantics-deployment",
-                "tool-semantics-boot",
+                lash::persistence::LeaseOwnerId::new("tool-semantics-deployment"),
+                lash::persistence::LeaseIncarnationId::new("tool-semantics-boot"),
             ))
             .expect("the core builds");
         Some(Self {
@@ -509,8 +509,8 @@ impl World {
             .delta_coalescing(lash::DeltaCoalescing::recommended())
             .serve_test_llm_profile(model(Arc::clone(&self.scripts)), metadata())
             .build(lash::persistence::LeaseOwnerIdentity::opaque(
-                "tool-semantics-deployment",
-                boot,
+                lash::persistence::LeaseOwnerId::new("tool-semantics-deployment"),
+                lash::persistence::LeaseIncarnationId::new(boot),
             ))
             .expect("the restarted core builds");
     }

@@ -93,8 +93,8 @@ async fn one_lifecycle(run: usize) -> std::sync::Weak<lash_sqlite_store::SqliteS
                 .expect("the model's metadata"),
         )
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "resource-capacity",
-            format!("lifecycle-{run}"),
+            lash::persistence::LeaseOwnerId::new("resource-capacity"),
+            lash::persistence::LeaseIncarnationId::new(format!("lifecycle-{run}")),
         ))
         .expect("the core builds");
 

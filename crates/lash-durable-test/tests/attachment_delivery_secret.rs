@@ -286,8 +286,8 @@ async fn delivered_values_stay_out_of_records_across_crash_and_resend() {
                 served::metadata(),
             )
             .build(lash::persistence::LeaseOwnerIdentity::opaque(
-                "delivery-secret-deployment",
-                "delivery-secret-boot",
+                lash::persistence::LeaseOwnerId::new("delivery-secret-deployment"),
+                lash::persistence::LeaseIncarnationId::new("delivery-secret-boot"),
             ))
             .expect("the core builds");
         let nodes = SimNodes::new(

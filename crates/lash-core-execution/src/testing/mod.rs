@@ -470,8 +470,8 @@ pub use lash_core_store::testing::{
 /// matrices cannot accidentally reenter a predecessor's lease.
 pub fn runtime_lease_owner() -> crate::LeaseOwnerIdentity {
     crate::LeaseOwnerIdentity::opaque(
-        "lash-core-test-worker",
-        format!("lash-core-test-boot:{}", uuid::Uuid::new_v4()),
+        crate::LeaseOwnerId::new("lash-core-test-worker"),
+        crate::LeaseIncarnationId::new(format!("lash-core-test-boot:{}", uuid::Uuid::new_v4())),
     )
 }
 

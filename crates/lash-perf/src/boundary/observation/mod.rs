@@ -82,8 +82,8 @@ type Wiring = (
 /// already in use fences that name's earlier boot. The run is the boot.
 fn node_identity(index: usize, run: &str) -> lash::persistence::LeaseOwnerIdentity {
     lash::persistence::LeaseOwnerIdentity::opaque(
-        format!("observation-node-{index}"),
-        format!("run-{run}"),
+        lash::persistence::LeaseOwnerId::new(format!("observation-node-{index}")),
+        lash::persistence::LeaseIncarnationId::new(format!("run-{run}")),
     )
 }
 

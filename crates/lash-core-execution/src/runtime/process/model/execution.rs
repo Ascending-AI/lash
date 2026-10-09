@@ -119,7 +119,7 @@ impl ProcessExecutionWriteAuthority {
     pub fn owner_identity(&self) -> crate::LeaseOwnerIdentity {
         crate::LeaseOwnerIdentity::engine_process_execution(
             &self.process_id,
-            self.execution_id.clone(),
+            crate::LeaseIncarnationId::new(self.execution_id.clone()),
         )
     }
 

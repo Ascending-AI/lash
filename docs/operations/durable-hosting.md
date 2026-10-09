@@ -84,7 +84,10 @@ let core = lash::LashCore::builder(backend)
         ..lash::DataRetention::standard()
     })
     // providers, plugins, models, tracing ...
-    .build(lash::persistence::LeaseOwnerIdentity::opaque(node_name, boot_id))?;
+    .build(lash::persistence::LeaseOwnerIdentity::opaque(
+        lash::persistence::LeaseOwnerId::new(node_name),
+        lash::persistence::LeaseIncarnationId::new(boot_id),
+    ))?;
 ```
 
 ### Required choices before serving

@@ -649,8 +649,8 @@ impl CellTurn {
                         ),
                     ))
                     .build(lash::persistence::LeaseOwnerIdentity::opaque(
-                        "cell-restore-deployment",
-                        "cell-restore-boot",
+                        lash::persistence::LeaseOwnerId::new("cell-restore-deployment"),
+                        lash::persistence::LeaseIncarnationId::new("cell-restore-boot"),
                     ))
                     .expect("the core builds")
             })

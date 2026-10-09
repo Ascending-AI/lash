@@ -136,7 +136,7 @@ pub use history::{
     HistoryNode, HistoryPage, HistoryStop, LineageStamp, SessionHistoryStore, SessionWindowRead,
     WindowSelector,
 };
-pub use lease_owner::LeaseOwnerIdentity;
+pub use lease_owner::{LeaseIncarnationId, LeaseOwnerId, LeaseOwnerIdentity};
 pub use maintenance::{
     GcReport, MaintenanceFailure, MaintenanceRefusal, MaintenanceReport, MaintenanceResult,
     MaintenanceStop, MaintenanceSweep, SessionBlobReclaimReport, VacuumReport,

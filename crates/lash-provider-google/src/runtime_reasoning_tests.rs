@@ -141,8 +141,8 @@ async fn google_streaming_runtime_preserves_tool_interleaved_reasoning_boundarie
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "google-reasoning-boundaries-test",
-            "google-reasoning-boundaries-test-boot",
+            lash::persistence::LeaseOwnerId::new("google-reasoning-boundaries-test"),
+            lash::persistence::LeaseIncarnationId::new("google-reasoning-boundaries-test-boot"),
         ))
         .expect("core");
     let session = created_session(&core, "google-reasoning-boundaries").await;
@@ -232,8 +232,8 @@ async fn google_streaming_runtime_does_not_republish_reasoning_after_signature_o
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "google-signature-only-reasoning-test",
-            "google-signature-only-reasoning-test-boot",
+            lash::persistence::LeaseOwnerId::new("google-signature-only-reasoning-test"),
+            lash::persistence::LeaseIncarnationId::new("google-signature-only-reasoning-test-boot"),
         ))
         .expect("core");
     let session = created_session(&core, "google-signature-only-reasoning").await;

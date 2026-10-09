@@ -129,8 +129,8 @@ fn core(
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "lifecycle-events-deployment",
-            boot,
+            lash::persistence::LeaseOwnerId::new("lifecycle-events-deployment"),
+            lash::persistence::LeaseIncarnationId::new(boot),
         ))
         .expect("the core builds");
     (backend, core)

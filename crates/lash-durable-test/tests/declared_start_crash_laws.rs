@@ -341,8 +341,8 @@ impl Spawn {
                 };
                 builder
                     .build(lash::persistence::LeaseOwnerIdentity::opaque(
-                        "declared-start-deployment",
-                        "declared-start-boot",
+                        lash::persistence::LeaseOwnerId::new("declared-start-deployment"),
+                        lash::persistence::LeaseIncarnationId::new("declared-start-boot"),
                     ))
                     .expect("the core builds")
             })

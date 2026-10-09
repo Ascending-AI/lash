@@ -210,8 +210,8 @@ impl Deployment {
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
             .serve_test_llm_profile(model(&self.offered), served::metadata())
             .build(lash::persistence::LeaseOwnerIdentity::opaque(
-                "tool-surface-deployment",
-                "tool-surface-boot",
+                lash::persistence::LeaseOwnerId::new("tool-surface-deployment"),
+                lash::persistence::LeaseIncarnationId::new("tool-surface-boot"),
             ))
             .expect("the core builds")
     }

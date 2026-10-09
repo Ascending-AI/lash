@@ -147,8 +147,8 @@ impl ChildTurn {
                     .delta_coalescing(lash::DeltaCoalescing::recommended())
                     .serve_test_llm_profile(model(), metadata())
                     .build(lash::persistence::LeaseOwnerIdentity::opaque(
-                        "child-turn-deployment",
-                        "child-turn-boot",
+                        lash::persistence::LeaseOwnerId::new("child-turn-deployment"),
+                        lash::persistence::LeaseIncarnationId::new("child-turn-boot"),
                     ))
                     .expect("the core builds")
             })

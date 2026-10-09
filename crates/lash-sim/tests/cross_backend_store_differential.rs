@@ -925,8 +925,8 @@ impl BackendRunner {
             .delta_coalescing(lash::DeltaCoalescing::recommended())
             .serve_test_llm_profile(provider, model)
             .build(lash::persistence::LeaseOwnerIdentity::opaque(
-                "cross-backend-differential-test",
-                "cross-backend-differential-test-boot",
+                lash::persistence::LeaseOwnerId::new("cross-backend-differential-test"),
+                lash::persistence::LeaseIncarnationId::new("cross-backend-differential-test-boot"),
             ))
             .expect("build differential lifecycle core")
     }

@@ -257,8 +257,8 @@ fn core_serving(double: &Double, entries: &[Entry<'_>], worker: &str, serve: boo
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "model-keys-worker",
-            worker,
+            lash::persistence::LeaseOwnerId::new("model-keys-worker"),
+            lash::persistence::LeaseIncarnationId::new(worker),
         ))
         .expect("the host core builds")
 }
@@ -390,8 +390,8 @@ fn core_over(
     }
     builder
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "model-keys-worker",
-            "keys-live-catalog",
+            lash::persistence::LeaseOwnerId::new("model-keys-worker"),
+            lash::persistence::LeaseIncarnationId::new("keys-live-catalog"),
         ))
         .expect("the host core builds")
 }
@@ -837,8 +837,8 @@ async fn an_unsupported_reasoning_selection_is_refused_where_it_is_stated(tier: 
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "model-keys-worker",
-            "keys-reasoning",
+            lash::persistence::LeaseOwnerId::new("model-keys-worker"),
+            lash::persistence::LeaseIncarnationId::new("keys-reasoning"),
         ))
         .expect("the host core builds");
 

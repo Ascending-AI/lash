@@ -385,8 +385,8 @@ impl CutDelivery {
                     .serve_test_llm_profile(served::model(Arc::default()), served::metadata())
                     .plugin(factory)
                     .build(lash::persistence::LeaseOwnerIdentity::opaque(
-                        "config-change-deployment",
-                        "config-change-boot",
+                        lash::persistence::LeaseOwnerId::new("config-change-deployment"),
+                        lash::persistence::LeaseIncarnationId::new("config-change-boot"),
                     ))
                     .expect("the core builds")
             })

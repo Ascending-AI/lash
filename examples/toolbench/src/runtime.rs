@@ -420,10 +420,7 @@ fn build_turn_core(
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate).execution_budgets(lash::ExecutionBudgets::recommended()).delta_coalescing(lash::DeltaCoalescing::recommended())
-        .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "toolbench",
-            format!("run-{run}-typescript-{}", task.id),
-        ))
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(lash::persistence::LeaseOwnerId::new("toolbench"), lash::persistence::LeaseIncarnationId::new(format!("run-{run}-typescript-{}", task.id))))
         .context("build Lash core")?;
     // The run's session spec: the bench's one model under the task's turn
     // budget and the run's reasoning effort.

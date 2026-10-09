@@ -166,8 +166,8 @@ async fn deploy_configured(
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "core-node-deployment",
-            "core-node-boot",
+            lash::persistence::LeaseOwnerId::new("core-node-deployment"),
+            lash::persistence::LeaseIncarnationId::new("core-node-boot"),
         ))
         .expect("the core builds");
     Deployment {

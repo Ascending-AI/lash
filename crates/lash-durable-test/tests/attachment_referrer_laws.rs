@@ -467,8 +467,8 @@ impl Law {
             ),
         ))
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "attachment-referrers-deployment",
-            build,
+            lash::persistence::LeaseOwnerId::new("attachment-referrers-deployment"),
+            lash::persistence::LeaseIncarnationId::new(build),
         ))
         .expect("the RLM core builds")
     }

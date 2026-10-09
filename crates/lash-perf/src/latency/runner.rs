@@ -468,8 +468,8 @@ pub(super) fn latency_llm_profile_spec() -> Result<lash::LlmProfileMetadata> {
 
 fn latency_owner() -> lash::persistence::LeaseOwnerIdentity {
     lash::persistence::LeaseOwnerIdentity::opaque(
-        "lash-perf-latency",
-        format!("{}", std::process::id()),
+        lash::persistence::LeaseOwnerId::new("lash-perf-latency"),
+        lash::persistence::LeaseIncarnationId::new(format!("{}", std::process::id())),
     )
 }
 

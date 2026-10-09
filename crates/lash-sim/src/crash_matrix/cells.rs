@@ -82,8 +82,8 @@ fn core(
     .serve_test_llm_profile(model(), metadata()?)
     .tools(ext_write(Arc::downgrade(world))?)
     .build(lash::persistence::LeaseOwnerIdentity::opaque(
-        "lash-sim-deployment",
-        "lash-sim-boot",
+        lash::persistence::LeaseOwnerId::new("lash-sim-deployment"),
+        lash::persistence::LeaseIncarnationId::new("lash-sim-boot"),
     ))
     .map_err(|error| format!("build the cell core: {error}"))
 }

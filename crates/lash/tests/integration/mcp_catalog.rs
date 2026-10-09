@@ -541,8 +541,8 @@ async fn turn_witness(store: Store, failure_law: bool) {
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .plugin(factory.clone())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "mcp-catalog",
-            uuid::Uuid::new_v4().to_string(),
+            lash::persistence::LeaseOwnerId::new("mcp-catalog"),
+            lash::persistence::LeaseIncarnationId::new(uuid::Uuid::new_v4().to_string()),
         ))
         .expect("core");
     let session = crate::created_session(&core, "catalog-fixture", "catalog-storm")

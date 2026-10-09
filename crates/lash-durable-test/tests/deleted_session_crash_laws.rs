@@ -186,8 +186,8 @@ impl DeletedSession {
                     .delta_coalescing(lash::DeltaCoalescing::recommended())
                     .serve_test_llm_profile(model(Arc::clone(&self.world)), metadata())
                     .build(lash::persistence::LeaseOwnerIdentity::opaque(
-                        "deleted-session-deployment",
-                        "deleted-session-boot",
+                        lash::persistence::LeaseOwnerId::new("deleted-session-deployment"),
+                        lash::persistence::LeaseIncarnationId::new("deleted-session-boot"),
                     ))
                     .expect("the core builds")
             })

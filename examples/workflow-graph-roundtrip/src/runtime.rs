@@ -635,8 +635,8 @@ pub fn core(backend: lash::Backend) -> lash::Result<WorkflowHost> {
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "workflow-graph",
-            uuid::Uuid::new_v4().to_string(),
+            lash::persistence::LeaseOwnerId::new("workflow-graph"),
+            lash::persistence::LeaseIncarnationId::new(uuid::Uuid::new_v4().to_string()),
         ))?;
     Ok(WorkflowHost { core, tools })
 }

@@ -211,8 +211,8 @@ impl FrameSwitch {
                     .serve_test_llm_profile(model(Arc::clone(&self.seen)), metadata())
                     .tools(switch_frame())
                     .build(lash::persistence::LeaseOwnerIdentity::opaque(
-                        "frame-switch-deployment",
-                        "frame-switch-boot",
+                        lash::persistence::LeaseOwnerId::new("frame-switch-deployment"),
+                        lash::persistence::LeaseIncarnationId::new("frame-switch-boot"),
                     ))
                     .expect("the core builds")
             })

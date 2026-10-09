@@ -71,8 +71,8 @@ pub fn compaction_core(world: &Arc<World>) -> Result<lash::LashCore, String> {
             lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
         ))
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "lash-sim-deployment",
-            "lash-sim-boot",
+            lash::persistence::LeaseOwnerId::new("lash-sim-deployment"),
+            lash::persistence::LeaseIncarnationId::new("lash-sim-boot"),
         ))
         .map_err(|error| format!("build the compaction core: {error}"))?;
     Ok(world.compaction_core().get_or_init(|| built).clone())

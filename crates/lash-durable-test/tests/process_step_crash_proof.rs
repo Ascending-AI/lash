@@ -313,8 +313,8 @@ impl StepProof {
                     .tools(ext_write(&self.world));
                 builder
                     .build(lash::persistence::LeaseOwnerIdentity::opaque(
-                        "process-step-deployment",
-                        "process-step-boot",
+                        lash::persistence::LeaseOwnerId::new("process-step-deployment"),
+                        lash::persistence::LeaseIncarnationId::new("process-step-boot"),
                     ))
                     .expect("the core builds")
             })
@@ -596,8 +596,8 @@ async fn restricted_process_tool_access_survives_reopen_and_redrive() {
             .tools(ext_write(&world))
             .plugin(probe)
             .build(lash::persistence::LeaseOwnerIdentity::opaque(
-                "authority-law",
-                format!("boot-{boot}"),
+                lash::persistence::LeaseOwnerId::new("authority-law"),
+                lash::persistence::LeaseIncarnationId::new(format!("boot-{boot}")),
             ))
             .expect("core");
         if boot == 0 {

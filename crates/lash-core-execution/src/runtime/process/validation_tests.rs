@@ -406,7 +406,10 @@ fn a_persisted_record_accepts_every_runtime_lifecycle_fact() {
         ProcessEventAppendRequest::first_started(
             &record.id,
             &ProcessStarted {
-                owner: crate::LeaseOwnerIdentity::opaque("owner", "incarnation"),
+                owner: crate::LeaseOwnerIdentity::opaque(
+                    crate::LeaseOwnerId::new("owner"),
+                    crate::LeaseIncarnationId::new("incarnation"),
+                ),
                 attempt: 1,
                 started_at_ms: 2,
                 generation: None,

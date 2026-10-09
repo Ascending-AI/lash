@@ -768,8 +768,8 @@ impl Crash {
                         world: Arc::clone(&self.world),
                     }))
                     .build(lash::persistence::LeaseOwnerIdentity::opaque(
-                        "tool-crash-deployment",
-                        "tool-crash-boot",
+                        lash::persistence::LeaseOwnerId::new("tool-crash-deployment"),
+                        lash::persistence::LeaseIncarnationId::new("tool-crash-boot"),
                     ))
                     .expect("the core builds")
             })
@@ -1537,8 +1537,8 @@ impl ProcessCrash {
                         world: Arc::clone(&self.world),
                     }))
                     .build(lash::persistence::LeaseOwnerIdentity::opaque(
-                        "process-state-deployment",
-                        "process-state-boot",
+                        lash::persistence::LeaseOwnerId::new("process-state-deployment"),
+                        lash::persistence::LeaseIncarnationId::new("process-state-boot"),
                     ))
                     .expect("the core builds")
             })

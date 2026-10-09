@@ -1,0 +1,13 @@
+error[E0308]: arguments to this function are incorrect
+ --> tests/ui/lease_owner_requires_named_parts.rs:4:13
+  |
+4 |     let _ = LeaseOwnerIdentity::opaque("boundary", "writer-0");
+  |             ^^^^^^^^^^^^^^^^^^^^^^^^^^ ----------  ---------- expected `LeaseIncarnationId`, found `&str`
+  |                                        |
+  |                                        expected `LeaseOwnerId`, found `&str`
+  |
+note: associated function defined here
+ --> $WORKSPACE/crates/lash-core-store/src/store/lease_owner.rs
+  |
+  |     pub fn opaque(
+  |            ^^^^^^

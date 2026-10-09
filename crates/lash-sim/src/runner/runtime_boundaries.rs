@@ -504,8 +504,8 @@ fn durable_effect_core(
         )
         .tools(Arc::new(tool) as Arc<dyn lash_core::ToolProvider>)
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            format!("lash-sim-durable-effect-{boot}"),
-            durable_key.to_owned(),
+            lash::persistence::LeaseOwnerId::new(format!("lash-sim-durable-effect-{boot}")),
+            lash::persistence::LeaseIncarnationId::new(durable_key.to_owned()),
         ))
         .map_err(|err| RuntimeBoundaryError::new(err.to_string()))
 }

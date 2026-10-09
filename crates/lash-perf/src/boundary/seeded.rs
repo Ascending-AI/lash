@@ -229,7 +229,8 @@ pub(super) async fn run(args: &Args) -> Result<Receipt> {
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "boundary", "seeded",
+            lash::persistence::LeaseOwnerId::new("boundary"),
+            lash::persistence::LeaseIncarnationId::new("seeded"),
         ))?;
     let result = execute(args, &workload, &core, &meter).await;
     core.shutdown().await?;

@@ -87,7 +87,10 @@ pub fn deferred_resolution_link_key(
 
 #[cfg(test)]
 pub(crate) fn runtime_lease_owner() -> lash_core::LeaseOwnerIdentity {
-    lash_core::LeaseOwnerIdentity::opaque("lash-runtime-test-worker", "lash-runtime-test-boot")
+    lash_core::LeaseOwnerIdentity::opaque(
+        lash_core::LeaseOwnerId::new("lash-runtime-test-worker"),
+        lash_core::LeaseIncarnationId::new("lash-runtime-test-boot"),
+    )
 }
 
 /// The normalized behavior-transcript vocabulary. Render a scenario's real facts

@@ -290,8 +290,8 @@ async fn core_with_responses(
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .plugin(plugin)
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "embed-plugins-test-worker",
-            "embed-plugins-test-boot",
+            lash::persistence::LeaseOwnerId::new("embed-plugins-test-worker"),
+            lash::persistence::LeaseIncarnationId::new("embed-plugins-test-boot"),
         ))
         .expect("core")
 }

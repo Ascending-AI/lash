@@ -85,8 +85,8 @@ pub(super) fn build(
         builder = builder.serve_test_llm_profile(provider, metadata()?);
     }
     Ok(builder.build(lash::persistence::LeaseOwnerIdentity::opaque(
-        owner,
-        format!("boundary-{}", std::process::id()),
+        lash::persistence::LeaseOwnerId::new(owner),
+        lash::persistence::LeaseIncarnationId::new(format!("boundary-{}", std::process::id())),
     ))?)
 }
 

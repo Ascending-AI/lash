@@ -172,8 +172,8 @@ impl Invocation {
             .execution_budgets(lash::ExecutionBudgets::recommended())
             .delta_coalescing(lash::DeltaCoalescing::recommended())
             .build(lash_core_store::store::LeaseOwnerIdentity::opaque(
-                "lashctl",
-                std::process::id().to_string(),
+                lash_core_store::store::LeaseOwnerId::new("lashctl"),
+                lash_core_store::store::LeaseIncarnationId::new(std::process::id().to_string()),
             ))
             .map_err(core_error)
     }

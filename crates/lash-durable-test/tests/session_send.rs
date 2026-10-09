@@ -351,8 +351,12 @@ async fn coalesced_inputs_commit_distinct_user_rows(tier: Tier) {
             .delta_coalescing(lash::DeltaCoalescing::recommended())
             .serve_test_llm_profile(served::model(Arc::clone(&scripts)), served::metadata())
             .build(lash::persistence::LeaseOwnerIdentity::opaque(
-                "input-rows",
-                if serve { "serving" } else { "producer" },
+                lash::persistence::LeaseOwnerId::new("input-rows"),
+                lash::persistence::LeaseIncarnationId::new(if serve {
+                    "serving"
+                } else {
+                    "producer"
+                }),
             ))
             .expect("the core builds")
     };
@@ -738,8 +742,8 @@ async fn sqlite_memory_cancelled_model_keeps_sealed_attempts() {
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .serve_test_llm_profile(provider, served::metadata())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "cancel-backoff",
-            "boot",
+            lash::persistence::LeaseOwnerId::new("cancel-backoff"),
+            lash::persistence::LeaseIncarnationId::new("boot"),
         ))
         .expect("core builds");
     let session = core

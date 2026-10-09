@@ -38,10 +38,12 @@ pub(crate) use projection::seed_runtime_state;
 fn runtime_perf_owner() -> lash::persistence::LeaseOwnerIdentity {
     static INCARNATION: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     lash::persistence::LeaseOwnerIdentity::opaque(
-        "lash-perf",
-        INCARNATION
-            .get_or_init(|| uuid::Uuid::new_v4().to_string())
-            .clone(),
+        lash::persistence::LeaseOwnerId::new("lash-perf"),
+        lash::persistence::LeaseIncarnationId::new(
+            INCARNATION
+                .get_or_init(|| uuid::Uuid::new_v4().to_string())
+                .clone(),
+        ),
     )
 }
 
@@ -1153,8 +1155,8 @@ pub(crate) fn checkpoint_benchmark_core(
     .with_explicit_ephemeral_facets()
     .plugins(plugins)
     .build(lash::persistence::LeaseOwnerIdentity::opaque(
-        format!("checkpoint-worker-{}", uuid::Uuid::new_v4()),
-        uuid::Uuid::new_v4().to_string(),
+        lash::persistence::LeaseOwnerId::new(format!("checkpoint-worker-{}", uuid::Uuid::new_v4())),
+        lash::persistence::LeaseIncarnationId::new(uuid::Uuid::new_v4().to_string()),
     ))?)
 }
 

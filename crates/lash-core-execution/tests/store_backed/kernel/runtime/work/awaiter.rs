@@ -373,7 +373,7 @@ mod tests {
                 ProcessStarted {
                     owner: crate::LeaseOwnerIdentity::engine_process_execution(
                         &lifecycle_id,
-                        "lifecycle-test",
+                        crate::LeaseIncarnationId::new("lifecycle-test"),
                     ),
                     attempt: 1,
                     started_at_ms: 1,

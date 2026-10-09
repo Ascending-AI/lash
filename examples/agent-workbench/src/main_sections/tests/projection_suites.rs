@@ -50,8 +50,8 @@ async fn durable_transcript_projection_fixture() -> Vec<crate::ChatRow> {
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "transcript-projection",
-            "transcript-projection-boot",
+            lash::persistence::LeaseOwnerId::new("transcript-projection"),
+            lash::persistence::LeaseIncarnationId::new("transcript-projection-boot"),
         ))
         .expect("the core builds");
     let session_id = lash::SessionId::from("transcript-projection");

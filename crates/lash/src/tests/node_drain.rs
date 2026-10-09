@@ -159,7 +159,10 @@ fn build_core(stores: Arc<dyn lash_core::StoreSet>, owner: &str, script: &Arc<Sc
         mock_llm_profile_spec(),
     )
     .tools(Arc::new(CountedEcho(Arc::clone(script))))
-    .build(lash_core::LeaseOwnerIdentity::opaque(owner, "boot-1"))
+    .build(lash_core::LeaseOwnerIdentity::opaque(
+        lash_core::LeaseOwnerId::new(owner),
+        lash_core::LeaseIncarnationId::new("boot-1"),
+    ))
     .expect("core")
 }
 

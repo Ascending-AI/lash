@@ -25,8 +25,8 @@ async fn core_on(
     );
     let core = standard_core_builder_over(lash_conformance::backend_over(stores.clone()))
         .build(lash_core::LeaseOwnerIdentity::opaque(
-            node,
-            format!("{node}-boot"),
+            lash_core::LeaseOwnerId::new(node),
+            lash_core::LeaseIncarnationId::new(format!("{node}-boot")),
         ))
         .expect("standard core");
     (stores, core)
@@ -111,8 +111,8 @@ async fn a_terminal_wait_wakes_on_the_process_change_hub() {
             poll_max: hour,
         })
         .build(lash_core::LeaseOwnerIdentity::opaque(
-            "fig-5570-waiter",
-            "fig-5570-waiter-boot",
+            lash_core::LeaseOwnerId::new("fig-5570-waiter"),
+            lash_core::LeaseIncarnationId::new("fig-5570-waiter-boot"),
         ))
         .expect("standard core");
     let registry = core.process_registry.clone();

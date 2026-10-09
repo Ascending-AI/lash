@@ -291,7 +291,8 @@ mod tests {
             .delta_coalescing(lash::DeltaCoalescing::recommended())
             .plugin(Arc::new(super::ConsumerPlugin(controls.clone())))
             .build(lash::persistence::LeaseOwnerIdentity::opaque(
-                "s30", "sqlite",
+                lash::persistence::LeaseOwnerId::new("s30"),
+                lash::persistence::LeaseIncarnationId::new("sqlite"),
             ))?;
         let id = lash::SessionId::parse("s30").expect("nonblank host identity");
         core.session(id.clone())

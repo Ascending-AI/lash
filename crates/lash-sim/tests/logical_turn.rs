@@ -206,8 +206,8 @@ fn standard_core_on(
         })
         .trace_sink(trace)
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "logical-turn-test",
-            "logical-turn-test-boot",
+            lash::persistence::LeaseOwnerId::new("logical-turn-test"),
+            lash::persistence::LeaseIncarnationId::new("logical-turn-test-boot"),
         ))
         .expect("build logical-turn sim core");
     (core, engine)
@@ -308,8 +308,8 @@ async fn admitted_switch_is_seeded_queued_after_earlier_work_and_exactly_once() 
         .tools(Arc::new(SeedSwitchTool { initial_nodes }))
         .trace_sink(trace.clone())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "logical-turn-test",
-            "logical-turn-test-boot",
+            lash::persistence::LeaseOwnerId::new("logical-turn-test"),
+            lash::persistence::LeaseIncarnationId::new("logical-turn-test-boot"),
         ))
         .expect("build logical-turn sim core");
     let session = created_session(&core, "logical-turn-sim")
@@ -607,8 +607,8 @@ async fn assert_switch_chain(limit: usize, switches: usize, finishes: bool) {
             .expect("valid execution budgets"),
         )
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "logical-turn-chain",
-            "chain-boot",
+            lash::persistence::LeaseOwnerId::new("logical-turn-chain"),
+            lash::persistence::LeaseIncarnationId::new("chain-boot"),
         ))
         .expect("build chain core");
     let session = created_session(&core, "logical-turn-bound")
@@ -774,8 +774,8 @@ finish({ baton: baton });
         .serve_test_llm_profile(provider, model())
         .trace_sink(trace.clone())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "logical-turn-test",
-            "logical-turn-test-boot",
+            lash::persistence::LeaseOwnerId::new("logical-turn-test"),
+            lash::persistence::LeaseIncarnationId::new("logical-turn-test-boot"),
         ))
         .expect("build RLM seed sim core");
     let session = created_session(&core, "logical-turn-rlm-seed")
@@ -902,8 +902,8 @@ await control.continue_as({
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .serve_test_llm_profile(provider, model())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "logical-turn-test",
-            "logical-turn-test-boot",
+            lash::persistence::LeaseOwnerId::new("logical-turn-test"),
+            lash::persistence::LeaseIncarnationId::new("logical-turn-test-boot"),
         ))
         .expect("build RLM shadowed-control sim core");
     let session = created_session(&core, "logical-turn-rlm-shadowed-control")

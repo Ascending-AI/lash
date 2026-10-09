@@ -104,7 +104,8 @@ async fn socket_outage_is_counted_and_shutdown_drains_acknowledged_export() -> R
                 .trace_jsonl_path(trace.path()),
         )
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "otlp", "socket",
+            lash::persistence::LeaseOwnerId::new("otlp"),
+            lash::persistence::LeaseIncarnationId::new("socket"),
         ))?;
 
     send(&core, "otlp-connected").await?;

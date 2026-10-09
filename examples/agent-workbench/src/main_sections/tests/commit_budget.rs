@@ -46,8 +46,8 @@ async fn commit_budget_is_explicit_host_policy_with_no_implicit_builder_fallback
     };
     let owner = || {
         lash::persistence::LeaseOwnerIdentity::opaque(
-            "agent-workbench-test",
-            uuid::Uuid::new_v4().to_string(),
+            lash::persistence::LeaseOwnerId::new("agent-workbench-test"),
+            lash::persistence::LeaseIncarnationId::new(uuid::Uuid::new_v4().to_string()),
         )
     };
 

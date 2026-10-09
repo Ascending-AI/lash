@@ -310,8 +310,8 @@ impl Steering {
                     )
                     .tools(steer_round(Arc::clone(&self.core), self.arrival))
                     .build(lash::persistence::LeaseOwnerIdentity::opaque(
-                        "steering-deployment",
-                        "steering-boot",
+                        lash::persistence::LeaseOwnerId::new("steering-deployment"),
+                        lash::persistence::LeaseIncarnationId::new("steering-boot"),
                     ))
                     .expect("the core builds")
             })

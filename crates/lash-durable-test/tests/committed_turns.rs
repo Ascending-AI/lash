@@ -347,8 +347,8 @@ async fn a_cursor_survives_a_process_restart(tier: Tier) {
             .delta_coalescing(lash::DeltaCoalescing::recommended())
             .serve_test_llm_profile(served::model(Arc::clone(&scripts)), served::metadata())
             .build(lash::persistence::LeaseOwnerIdentity::opaque(
-                "committed-turns-restart",
-                boot,
+                lash::persistence::LeaseOwnerId::new("committed-turns-restart"),
+                lash::persistence::LeaseIncarnationId::new(boot),
             ))
             .expect("the core builds")
     };

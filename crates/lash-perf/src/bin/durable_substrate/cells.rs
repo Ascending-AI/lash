@@ -67,8 +67,8 @@ pub fn core(
     .serve_test_llm_profile(model(scripts, recorder), metadata()?)
     .tools(echo()?)
     .build(lash::persistence::LeaseOwnerIdentity::opaque(
-        "durable-substrate",
-        "durable-substrate-boot",
+        lash::persistence::LeaseOwnerId::new("durable-substrate"),
+        lash::persistence::LeaseIncarnationId::new("durable-substrate-boot"),
     ))
     .map_err(|error| anyhow::anyhow!("build the cell core: {error}"))
 }

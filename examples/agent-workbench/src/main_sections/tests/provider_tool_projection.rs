@@ -72,8 +72,8 @@ async fn every_tool_a_standard_workbench_turn_offers_projects_under_every_provid
             );
         })
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "agent-workbench-test",
-            uuid::Uuid::new_v4().to_string(),
+            lash::persistence::LeaseOwnerId::new("agent-workbench-test"),
+            lash::persistence::LeaseIncarnationId::new(uuid::Uuid::new_v4().to_string()),
         ))
         .expect("build the Standard workbench core");
     let session_id = lash::SessionId::from("workbench-tool-projection");

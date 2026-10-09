@@ -246,8 +246,8 @@ fn core(double: &Double, dialect: Arc<dyn Dialect>, script: &Script) -> LashCore
             calls: Arc::clone(&script.tool_calls),
         }))
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "seam-proof-worker",
-            "seam-proof-boot",
+            lash::persistence::LeaseOwnerId::new("seam-proof-worker"),
+            lash::persistence::LeaseIncarnationId::new("seam-proof-boot"),
         ))
         .expect("RLM core")
 }

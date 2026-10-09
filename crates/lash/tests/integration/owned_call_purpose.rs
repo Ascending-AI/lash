@@ -225,8 +225,8 @@ async fn compaction_and_direct_calls_compose_only_their_own_purpose() {
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "purpose-probe-worker",
-            "purpose-probe-boot",
+            lash::persistence::LeaseOwnerId::new("purpose-probe-worker"),
+            lash::persistence::LeaseIncarnationId::new("purpose-probe-boot"),
         ))
         .expect("core");
     core.session(lash::SessionId::from("purpose-probe-session"))

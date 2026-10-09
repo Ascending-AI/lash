@@ -315,8 +315,8 @@ fn core(
         .serve_test_llm_profile(model(protocol, Arc::clone(seen)), metadata())
         .tools(ext_write(Arc::clone(world)))
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "v0-deployment",
-            "v0-boot",
+            lash::persistence::LeaseOwnerId::new("v0-deployment"),
+            lash::persistence::LeaseIncarnationId::new("v0-boot"),
         ))
         .expect("the core builds")
 }

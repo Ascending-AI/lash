@@ -252,8 +252,8 @@ pub fn core(backend: &Backend, witness: Witness, hold: Hold) -> Result<lash::Las
     .serve_test_llm_profile(model(witness.clone(), hold), metadata())
     .tools(ext_write(witness.clone(), hold))
     .build(lash::persistence::LeaseOwnerIdentity::opaque(
-        "workers-deployment",
-        witness.node(),
+        lash::persistence::LeaseOwnerId::new("workers-deployment"),
+        lash::persistence::LeaseIncarnationId::new(witness.node()),
     ))
     .map_err(|error| format!("build the core: {error}"))
 }

@@ -224,8 +224,8 @@ async fn workbench_prompt_sections_shape_the_prompt_the_provider_receives() {
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "workbench-prompt",
-            "workbench-prompt-boot",
+            lash::persistence::LeaseOwnerId::new("workbench-prompt"),
+            lash::persistence::LeaseIncarnationId::new("workbench-prompt-boot"),
         ))
         .expect("the core builds");
     let spec = lash::SessionSpec::new(

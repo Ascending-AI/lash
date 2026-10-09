@@ -302,7 +302,8 @@ async fn send(url: bool, tools: bool) -> Sent {
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
-            "ref-law", "node",
+            lash::persistence::LeaseOwnerId::new("ref-law"),
+            lash::persistence::LeaseIncarnationId::new("node"),
         ))
         .unwrap();
     let id = lash::SessionId::from("ref-law");

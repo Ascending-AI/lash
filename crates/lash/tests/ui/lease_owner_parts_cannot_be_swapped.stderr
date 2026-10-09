@@ -1,0 +1,18 @@
+error[E0308]: arguments to this function are incorrect
+ --> tests/ui/lease_owner_parts_cannot_be_swapped.rs:6:13
+  |
+6 |     let _ = LeaseOwnerIdentity::opaque(boot, node);
+  |             ^^^^^^^^^^^^^^^^^^^^^^^^^^ ----  ---- expected `LeaseIncarnationId`, found `LeaseOwnerId`
+  |                                        |
+  |                                        expected `LeaseOwnerId`, found `LeaseIncarnationId`
+  |
+note: associated function defined here
+ --> $WORKSPACE/crates/lash-core-store/src/store/lease_owner.rs
+  |
+  |     pub fn opaque(
+  |            ^^^^^^
+help: swap these arguments
+  |
+6 -     let _ = LeaseOwnerIdentity::opaque(boot, node);
+6 +     let _ = LeaseOwnerIdentity::opaque(node, boot);
+  |

@@ -187,8 +187,8 @@ impl Deployment {
             .delta_coalescing(lash::DeltaCoalescing::recommended())
             .serve_test_llm_profile(model(requests, answer), served::metadata())
             .build(lash::persistence::LeaseOwnerIdentity::opaque(
-                "recorded-behaviour-deployment",
-                self.build(),
+                lash::persistence::LeaseOwnerId::new("recorded-behaviour-deployment"),
+                lash::persistence::LeaseIncarnationId::new(self.build()),
             ))
             .expect("the core builds")
     }

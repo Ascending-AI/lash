@@ -528,8 +528,8 @@ impl Storage {
                         served::metadata(),
                     )
                     .build(lash::persistence::LeaseOwnerIdentity::opaque(
-                        "plugin-storage-deployment",
-                        "plugin-storage-boot",
+                        lash::persistence::LeaseOwnerId::new("plugin-storage-deployment"),
+                        lash::persistence::LeaseIncarnationId::new("plugin-storage-boot"),
                     ))
                     .expect("the core builds")
             })

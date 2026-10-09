@@ -615,7 +615,10 @@ async fn three_step_tool_calls_survive_owner_loss_and_cold_reattachment() {
                 ))
                 .serve_test_llm_profile(provider.clone(), mock_llm_profile_spec())
                 .tools(Arc::new(lash_core::testing::FixtureTools))
-                .build(lash_core::LeaseOwnerIdentity::opaque(owner, "boot"))
+                .build(lash_core::LeaseOwnerIdentity::opaque(
+                    lash_core::LeaseOwnerId::new(owner),
+                    lash_core::LeaseIncarnationId::new("boot"),
+                ))
                 .expect("core")
             };
             let old = build("three-steps-old");

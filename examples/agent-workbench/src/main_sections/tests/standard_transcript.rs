@@ -100,7 +100,10 @@ async fn two_round_turn() -> (lash::persistence::SessionReadView, TurnId) {
         .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
-        .build(lash::persistence::LeaseOwnerIdentity::opaque(MODEL, "boot"))
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            lash::persistence::LeaseOwnerId::new(MODEL),
+            lash::persistence::LeaseIncarnationId::new("boot"),
+        ))
         .expect("core");
     let session = core
         .session(lash::SessionId::from(MODEL))
