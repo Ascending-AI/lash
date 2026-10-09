@@ -261,6 +261,7 @@ pub mod facade_support {
     pub use crate::runtime::EventSink;
     pub use crate::runtime::NoopTurnActivitySink;
     pub use crate::runtime::ObservedProcess;
+    pub use crate::runtime::ObservedProcessChange;
     pub use crate::runtime::ObservedProcessEvent;
     pub use crate::runtime::ObservedProcessEventLite;
     pub use crate::runtime::ObservedProcessEventPage;
@@ -438,18 +439,17 @@ pub use lash_sansio::{
     ExecutedCallOutcome, ExecutionBudgets, ExecutionBudgetsConfig, ExecutionBudgetsError,
     ExecutionLimit, ExecutionPolicy, FrameKey, FrameKeyError, InputId, JsonSchema, LimitCause,
     LlmCallError, LlmUsage, MediaType, Message, MessageOrigin, MessageRole, NodeId,
-    ObservedProcessFailure, OmittedToolCalls, OutcomeShape, OutputRetentionPolicy, OutputValue,
-    ParkBound, Part, PartKind, PluginMessage, PluginRuntimeEvent, ProjectionMode,
-    ProviderAttemptLimits, RegistrationRefused, RetainedOutput, SchemaAdmissionError,
-    SchemaContract, SchemaDialect, SchemaProjectionOverride, SchemaProjectionPolicy,
-    SessionAppendNode, TextProjectionMetadata, TokenUsageOverflow, ToolAdmissionRefusal,
-    ToolArgumentProjectionPolicy, ToolBound, ToolBounds, ToolCallOutcome, ToolCallOutput,
-    ToolCallRecord, ToolCancellation, ToolCatalog, ToolCatalogBuildError, ToolCatalogEntry,
-    ToolCheckConflict, ToolCheckPhase, ToolCheckReply, ToolCheckVerdictKind, ToolContract,
-    ToolControl, ToolDeclaration, ToolDefinition, ToolDiscovery, ToolFailure, ToolFailureCause,
-    ToolFailureClass, ToolFailureSource, ToolId, ToolIntentIdentity, ToolIntentKind, ToolManifest,
-    ToolModule, ToolOutputContract, ToolValue, ToolView, ToolViewBlock, ToolViewMeta, TurnId,
-    TurnOutputSource, ValueMismatch,
+    OmittedToolCalls, OutcomeShape, OutputRetentionPolicy, OutputValue, ParkBound, Part, PartKind,
+    PluginMessage, PluginRuntimeEvent, ProjectionMode, ProviderAttemptLimits, RegistrationRefused,
+    RetainedOutput, SchemaAdmissionError, SchemaContract, SchemaDialect, SchemaProjectionOverride,
+    SchemaProjectionPolicy, SessionAppendNode, TextProjectionMetadata, TokenUsageOverflow,
+    ToolAdmissionRefusal, ToolArgumentProjectionPolicy, ToolBound, ToolBounds, ToolCallOutcome,
+    ToolCallOutput, ToolCallRecord, ToolCancellation, ToolCatalog, ToolCatalogBuildError,
+    ToolCatalogEntry, ToolCheckConflict, ToolCheckPhase, ToolCheckReply, ToolCheckVerdictKind,
+    ToolContract, ToolControl, ToolDeclaration, ToolDefinition, ToolDiscovery, ToolFailure,
+    ToolFailureCause, ToolFailureClass, ToolFailureSource, ToolId, ToolIntentIdentity,
+    ToolIntentKind, ToolManifest, ToolModule, ToolOutputContract, ToolValue, ToolView,
+    ToolViewBlock, ToolViewMeta, TurnId, TurnOutputSource, ValueMismatch,
 };
 pub use tool_provider::{ToolAttachmentClient, ToolDirectCompletionClient, ToolSessionLlmProfile};
 /// Project a successful tool control into its terminal turn outcome.

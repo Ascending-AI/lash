@@ -200,7 +200,7 @@ async fn work_api_keeps_orphaned_process_visible_and_routes_cancel_globally() {
         .expect("read the cancelled process")
         .expect("the process is still observable");
     assert!(
-        cancelled.cancel_request.is_some() || cancelled.terminal(),
+        cancelled.cancel_request.is_some() || cancelled.terminal().is_some(),
         "the cancel landed on the process: {cancelled:?}"
     );
     workbench.shutdown().await;

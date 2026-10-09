@@ -5610,7 +5610,7 @@
     // BEGIN WORKBENCH_EXECUTION_ROWS
     /* The work rail is a union of two backend surfaces that name the same
        process differently. `/api/work` keys it by incarnation
-       (`process:<id>:incarnation:<n>`, ObservedProcess::graph_key) because the
+       (`process:<id>:incarnation:<n>`, the workbench's `process_graph_key`) because the
        incarnation is part of that surface's identity; `/api/lashlang-graphs`
        keys it `process:<id>` (TraceRuntimeSubject::graph_key), and a trace
        subject has no incarnation to add. The two strings can never be equal, so

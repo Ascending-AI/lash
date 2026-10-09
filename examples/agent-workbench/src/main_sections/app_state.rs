@@ -692,8 +692,8 @@ pub(crate) fn truncate_chars(text: &str, max_chars: usize) -> String {
 }
 
 pub(crate) fn work_item_from_observed(item: lash::process::ObservedWorkItem) -> WorkItem {
-    let kind = item.kind().to_string();
-    let label = item.label().to_string();
+    let kind = item.process.identity.kind.as_str().to_string();
+    let label = crate::execution_graphs::process_label(&item.process).to_string();
     let state = item.state();
     let mut process = work_process_from_observed(item.process);
     process.status_label = work_item_status_label(state, process.status_label);
@@ -716,17 +716,19 @@ fn work_item_status_label(
 }
 
 pub(crate) fn work_process_from_observed(process: lash::process::ObservedProcess) -> WorkProcess {
-    let graph_key = process.graph_key();
-    let status_label = process.status_label().to_string();
-    let terminal = process.terminal();
-    let label = process.label().to_string();
+    let graph_key = crate::execution_graphs::process_graph_key(&process.process_id);
+    let status = process.status();
+    let status_label = status.label().to_string();
+    let terminal = process.terminal().is_some();
+    let label = crate::execution_graphs::process_label(&process).to_string();
+    let error = crate::execution_graphs::process_error(&process);
     WorkProcess {
         process_id: process.process_id,
         graph_key,
-        lifecycle: process.lifecycle,
+        lifecycle: status,
         status_label,
         terminal,
-        error: process.error,
+        error,
         created_at_ms: process.created_at_ms,
         updated_at_ms: process.updated_at_ms,
         input: compact_payload(serde_json::to_value(process.input).unwrap_or(Value::Null)),

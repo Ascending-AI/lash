@@ -62,12 +62,12 @@ pub async fn a_sleeping_process_reads_waiting_on_its_sleep_and_its_site(
         );
         let seen = observed(&backend, &process).await?;
         ensure!(
-            seen.lifecycle == ProcessStatus::Waiting
-                && blockers(&seen.waits) == expected
+            seen.status() == ProcessStatus::Waiting
+                && blockers(seen.waits()) == expected
                 && seen.park.is_none(),
             "a sleeping process is observed {:?} on {:?}, parked {:?}",
             seen.lifecycle,
-            seen.waits,
+            seen.waits(),
             seen.park
         );
         Ok(())
@@ -155,9 +155,9 @@ pub async fn a_process_with_two_parked_calls_lists_both_without_their_keys(
         );
         let seen = observed(&backend, &process).await?;
         ensure!(
-            seen.waits == parked.waits(),
+            seen.waits() == parked.waits(),
             "the observed waits {:?} are not the record's {:?}",
-            seen.waits,
+            seen.waits(),
             parked.waits()
         );
         let pinned = round::parked(
@@ -235,11 +235,11 @@ pub async fn a_process_parked_on_an_unknown_engine_shows_its_park_reason_beside_
                 == Some(ProcessParkReason::UnknownEngine {
                     kind: ABSENT_ENGINE_KIND.to_owned(),
                 })
-                && seen.lifecycle == ProcessStatus::Running
-                && seen.waits.is_empty(),
+                && seen.status() == ProcessStatus::Running
+                && seen.waits().is_empty(),
             "a process parked on an unknown engine is observed {:?} on {:?}, parked {:?}",
             seen.lifecycle,
-            seen.waits,
+            seen.waits(),
             seen.park
         );
         Ok(())

@@ -70,7 +70,7 @@ restart with the same content and identity. Retain a keyed start's process
 until its binding is recorded; after pruning, the host's own record answers a
 duplicate.
 
-Read `processes_changed_since`, `turns_changed_since` and per-process event
+Read `processes().changed_since`, `turns_changed_since` and per-process event
 pages for completeness. Advance a cursor after recording its page or completing
 its keyed deliveries. Respect projection watermarks and typed history gaps.
 Best-effort push improves freshness but cannot authorize skipping reconciliation.

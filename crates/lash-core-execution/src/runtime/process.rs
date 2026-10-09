@@ -98,9 +98,9 @@ pub use model::{
 };
 pub use model::{ConsumerHold, SessionTurnOutcome};
 pub use observation::{
-    ObservedProcess, ObservedProcessEvent, ObservedProcessEventLite, ObservedProcessEventPage,
-    ObservedProcessEventReadOutcome, ObservedWorkItem, ObservedWorkItemState, ProcessWorkObserver,
-    ProcessWorkSnapshot,
+    ObservedProcess, ObservedProcessChange, ObservedProcessEvent, ObservedProcessEventLite,
+    ObservedProcessEventPage, ObservedProcessEventReadOutcome, ObservedWorkItem,
+    ObservedWorkItemState, ProcessWorkObserver, ProcessWorkSnapshot,
 };
 pub use observer_intent::{
     SessionObserverIntentSource, reconcile_session_process_observer_intents,

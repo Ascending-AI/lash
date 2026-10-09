@@ -88,7 +88,7 @@ mod tests {
             item.event_tail_sequence(),
             "the retry must pair the refreshed terminal record with its event tail"
         );
-        assert!(item.process.terminal());
+        assert!(item.process.terminal().is_some());
     }
 
     #[tokio::test]
@@ -200,73 +200,158 @@ mod tests {
         assert_eq!(snapshot.visible_processes, vec![older_id, newer_id]);
     }
 
+    /// A process's observed state is its canonical lifecycle state: an
+    /// ended process is read with its typed outcome (the success output,
+    /// the failure, or the abandonment evidence) and a waiting one with its
+    /// wait, in the one read (FIG-5564).
     #[tokio::test]
-    async fn observed_process_reports_terminal_status_and_error_messages() {
+    async fn an_observed_process_carries_its_typed_outcome_or_its_wait_in_one_read() {
         let registry = memory_registry().await;
-        let mut ids = std::collections::BTreeMap::new();
-        for process_id in ["failed", "cancelled"] {
-            let registered = registry
-                .register_process(external_registration(process_id))
-                .await
-                .expect("register");
-            ids.insert(process_id, registered.id.clone());
-        }
-        registry
-            .complete_process(
-                &ids["failed"],
-                ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::failure(
-                    crate::ToolFailure::runtime(
-                        ToolFailureClass::External,
-                        "boom",
-                        "failed loudly",
-                    ),
-                )),
-                crate::ProcessCompletionAuthority::workflow_key(&ids["failed"]),
-            )
-            .await
-            .expect("fail process");
-        registry
-            .complete_process(
-                &ids["cancelled"],
-                ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::cancelled(
-                    crate::ToolCancellation::runtime("cancelled intentionally"),
-                )),
-                crate::ProcessCompletionAuthority::workflow_key(&ids["cancelled"]),
-            )
-            .await
-            .expect("cancel process");
-
         let observer = observer(Arc::clone(&registry));
-        let failed = observer
-            .process(&ids["failed"])
-            .await
-            .expect("read failed process")
-            .expect("failed process");
-        let cancelled = observer
-            .process(&ids["cancelled"])
-            .await
-            .expect("read cancelled process")
-            .expect("cancelled process");
+        let failure =
+            crate::ToolFailure::runtime(ToolFailureClass::External, "boom", "failed loudly");
+        let evidence = crate::AbandonEvidence {
+            writer: crate::AbandonWriter::Producer,
+            owner: None,
+            epoch_ms: 7,
+        };
+        let outcomes = [
+            ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+                json!({ "answer": 42 }),
+            )),
+            ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::failure(failure)),
+            ProcessAwaitOutput::Abandoned {
+                evidence: Box::new(evidence),
+                control: None,
+            },
+        ];
+        for (index, outcome) in outcomes.into_iter().enumerate() {
+            let id = registry
+                .register_process(external_registration(&format!("terminal-{index}")))
+                .await
+                .expect("register")
+                .id;
+            registry
+                .complete_process(
+                    &id,
+                    outcome.clone(),
+                    crate::ProcessCompletionAuthority::workflow_key(&id),
+                )
+                .await
+                .expect("end the process");
+            let seen = observer
+                .process(&id)
+                .await
+                .expect("read the ended process")
+                .expect("the ended process is retained");
+            let expected =
+                crate::ProcessTerminal::try_from(outcome).expect("the outcome is terminal");
+            assert_eq!(
+                seen.terminal(),
+                Some(&expected),
+                "an ended process is observed with the outcome it ended in"
+            );
+            assert_eq!(seen.status(), crate::ProcessStatus::from(expected.status()));
+        }
 
-        assert_eq!(failed.status_label(), "failed");
-        assert!(failed.terminal());
-        assert_eq!(failed.error.as_deref(), Some("failed loudly"));
-        assert_eq!(cancelled.status_label(), "cancelled");
-        assert!(cancelled.terminal());
-        assert_eq!(cancelled.error.as_deref(), Some("cancelled intentionally"));
-
-        // FIG-3094: a polling host reads the typed classification beside the
-        // display string instead of matching the prose.
+        let id = registry
+            .register_process(external_registration("waiting"))
+            .await
+            .expect("register")
+            .id;
+        let authority = crate::ProcessExecutionWriteAuthority::invocation(&id, "observation-law")
+            .bind_attempt(1);
+        registry
+            .record_first_started_with_authority(
+                &id,
+                authority.invocation_started().expect("an invocation start"),
+                &authority,
+            )
+            .await
+            .expect("start the process");
+        let wait = crate::WaitState {
+            kind: crate::WaitKind::Call {
+                call_id: crate::ToolCallId::fixture("observation-law"),
+                tool_id: crate::ToolId::from("observation_law"),
+            },
+            since_ms: 3,
+            site: None,
+        };
+        registry
+            .set_process_wait_with_authority(&id, wait.clone(), Vec::new(), &authority)
+            .await
+            .expect("enter the wait");
+        let seen = observer
+            .process(&id)
+            .await
+            .expect("read the waiting process")
+            .expect("the waiting process is retained");
         assert_eq!(
-            failed.error_code,
-            Some(crate::ObservedProcessFailure::Failed {
-                class: ToolFailureClass::External,
-                code: "boom".to_string(),
-            })
+            seen.lifecycle,
+            crate::ProcessLifecycleState::Waiting { waits: vec![wait] },
+            "a waiting process is observed with what it waits on"
+        );
+    }
+
+    /// An ended process keeps the time of the committed fact that ended it:
+    /// a fact appended afterwards moves the row's update time and leaves the
+    /// terminal time alone (FIG-5564).
+    #[tokio::test]
+    async fn a_fact_after_the_terminal_leaves_the_terminal_time_unchanged() {
+        let registry = memory_registry().await;
+        let observer = observer(Arc::clone(&registry));
+        let id = registry
+            .register_process(external_registration("ended"))
+            .await
+            .expect("register")
+            .id;
+        registry
+            .complete_process(
+                &id,
+                ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(json!({}))),
+                crate::ProcessCompletionAuthority::workflow_key(&id),
+            )
+            .await
+            .expect("end the process");
+        let terminal_fact = registry
+            .recent_events(&id, 1)
+            .await
+            .expect("read the terminal fact")
+            .pop()
+            .expect("the terminal fact is retained");
+        assert!(terminal_fact.fact.terminal().is_some());
+        let ended = observer
+            .process(&id)
+            .await
+            .expect("read the ended process")
+            .expect("the ended process is retained");
+        assert_eq!(
+            ended.lifecycle.terminal_at_ms(),
+            Some(terminal_fact.occurred_at)
+        );
+
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        registry
+            .add_observer(
+                &SessionId::from("late-observer"),
+                &id,
+                ProcessObserverBy::host("observation-test"),
+            )
+            .await
+            .expect("append a fact after the terminal");
+        let later = observer
+            .process(&id)
+            .await
+            .expect("read the ended process again")
+            .expect("the ended process is retained");
+        assert!(
+            later.last_event_sequence > ended.last_event_sequence
+                && later.updated_at_ms > terminal_fact.occurred_at,
+            "the later fact folded into the row at a later time"
         );
         assert_eq!(
-            cancelled.error_code,
-            Some(crate::ObservedProcessFailure::Cancelled { origin: None })
+            later.lifecycle, ended.lifecycle,
+            "a fact after the terminal changes neither the outcome nor its time"
         );
     }
 }

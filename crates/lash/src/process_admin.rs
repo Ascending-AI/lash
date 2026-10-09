@@ -471,6 +471,35 @@ impl Processes {
             .map_err(Into::into)
     }
 
+    /// Read the roster changes after `after`, oldest first: each process
+    /// whose row changed, as it now stands, and the tombstone of each pruned
+    /// one. A page converges on the latest row of a process; a process's own
+    /// facts are its event pages. Persist the returned cursor only after
+    /// applying every change in the page.
+    ///
+    /// The read covers every process on the store, whatever session observes
+    /// it, so the host must authorize access.
+    pub async fn changed_since(
+        &self,
+        after: lash_core::ProcessChangeCursor,
+        limit: std::num::NonZeroUsize,
+    ) -> Result<
+        crate::ChangePage<
+            lash_core::facade_support::ObservedProcessChange,
+            lash_core::ProcessChangeCursor,
+        >,
+    > {
+        let (changes, next) = self
+            .make_observer()?
+            .changed_since(after, limit.get())
+            .await?;
+        Ok(crate::ChangePage {
+            changes,
+            next,
+            retained_after: None,
+        })
+    }
+
     pub async fn get(
         &self,
         process_id: &ProcessId,

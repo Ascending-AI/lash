@@ -35,6 +35,30 @@ activation-loop budget), `ObservedProcess::park` carries its typed
 `ProcessParkReason` beside a lifecycle that still says what the record says.
 An operator's redrive or a cancel clears it.
 
+## One read shape
+
+Every read of a process answers an `ObservedProcess`: `processes().get`,
+the roster lists, each `ObservedProcessChange::Upsert` of
+`processes().changed_since`, and the retained view of an observation
+snapshot. It carries the process's identity, provenance, ancestry and
+lifetime, its park, and `lifecycle`, the one `ProcessLifecycleState` its row
+holds:
+
+- `Running`;
+- `Waiting { waits }`, with everything it is blocked on;
+- `Terminal { outcome, occurred_at_ms }`, with the typed `ProcessTerminal`
+  (the settled output of a success, failure or cancellation, or the
+  abandonment evidence) and the time of the committed fact that ended it.
+
+`occurred_at_ms` is the terminal fact's own time. A fact appended after the
+process ended (an observer change, an external reference) moves
+`updated_at_ms` and leaves it alone. `status()`, `waits()` and `terminal()`
+read the state; nothing is stored beside it.
+
+Lash formats nothing for display. A label for a process with none
+registered, a status line, a failure message and a key for a graph view are
+the host's to derive from these facts.
+
 `ProcessEffectOccurrence` records a settled effect's `node_id`, one-based
 `occurrence`, operation, outcome class and failure code when applicable.
 For a tool effect, its typed `call_id` identifies the logical Lash call

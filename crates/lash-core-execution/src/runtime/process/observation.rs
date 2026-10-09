@@ -6,11 +6,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::plugin::PluginError;
 
-use super::events::{ProcessAwaitOutput, ProcessEvent};
+use super::events::{ProcessEvent, ProcessTerminal};
 use super::model::{
-    ProcessExecutionEnvRef, ProcessExternalRef, ProcessId, ProcessIdentity, ProcessInput,
-    ProcessListFilter, ProcessOriginator, ProcessOriginatorFilter, ProcessRecord, ProcessStarted,
-    ProcessStatus, SessionScope, WaitState,
+    ProcessChange, ProcessChangeCursor, ProcessExecutionEnvRef, ProcessExternalRef, ProcessId,
+    ProcessIdentity, ProcessInput, ProcessLifecycleState, ProcessListFilter, ProcessOriginator,
+    ProcessOriginatorFilter, ProcessRecord, ProcessStarted, ProcessStatus, ProcessTombstone,
+    SessionScope, WaitState,
 };
 use super::registry::ProcessRegistry;
 
@@ -50,27 +51,29 @@ pub enum ObservedWorkItemState {
     },
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+/// A process as a host reads it: the facts of its durable row at
+/// `last_event_sequence`, and its actor's park. Every read of a process
+/// (one process, a roster, a change, an observation snapshot) answers this
+/// shape.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ObservedProcess {
     pub process_id: ProcessId,
     /// Sequence of the newest event folded into this observed record.
     pub last_event_sequence: u64,
-    pub lifecycle: ProcessStatus,
-    /// The recorded lifetime decision: what ends the process. `lifecycle`
-    /// above is the status fold.
+    /// The one state the process is in, as its row holds it: running,
+    /// waiting with everything it is blocked on (each wait names what it
+    /// waits for and the node that waits, never a key that would resolve
+    /// it), or terminal with its typed outcome and the time of the
+    /// committed fact that ended it.
+    pub lifecycle: ProcessLifecycleState,
+    /// The recorded lifetime decision: what ends the process.
     pub lifetime: crate::LifetimeDecision,
     /// The recorded ancestry, nearest first; empty for a root start.
     pub ancestry: crate::Ancestry,
     pub identity: ProcessIdentity,
-    /// Human-readable summary of the terminal failure, for display only.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
-    /// Typed classification of the same terminal failure. Present exactly when
-    /// `error` is, so a polling host discriminates a failure class or a
-    /// cancellation without matching the display string.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub error_code: Option<crate::ObservedProcessFailure>,
     pub created_at_ms: u64,
+    /// When the newest folded event occurred. A fact appended after the
+    /// process ended moves it; the terminal time is in `lifecycle`.
     pub updated_at_ms: u64,
     /// Durable execution-started fact, if the row has begun executing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -86,11 +89,6 @@ pub struct ObservedProcess {
     pub caused_by: Option<crate::CausalRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub external_ref: Option<ProcessExternalRef>,
-    /// Everything the process is blocked on while its lifecycle is
-    /// `waiting`, oldest first: each names what it waits for and the node
-    /// that waits, never a key that would resolve it.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub waits: Vec<WaitState>,
     /// Why the process's actor is parked, while it is: it runs no engine
     /// code until an operator redrives it. A fact of its actor, beside the
     /// lifecycle and never folded into it; `None` from an observer that was
@@ -99,6 +97,16 @@ pub struct ObservedProcess {
     pub park: Option<crate::ProcessParkReason>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub child_session_id: Option<SessionId>,
+}
+
+/// One change of the process roster, as a host reads it: the process as it
+/// now stands, or the tombstone of one that was pruned. A page of changes
+/// converges on the latest row of each process; it is not every transition.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ObservedProcessChange {
+    Upsert { process: Box<ObservedProcess> },
+    Deleted { tombstone: ProcessTombstone },
 }
 
 /// One lifecycle fact of a process's log, as a host observes it. It travels
@@ -165,16 +173,6 @@ pub type ObservedProcessEventPage =
 pub type ObservedProcessEventReadOutcome = super::ProcessEventReadOutcome<ObservedProcessEventPage>;
 
 impl ObservedWorkItem {
-    /// The observed process's identity kind.
-    pub fn kind(&self) -> &str {
-        self.process.kind()
-    }
-
-    /// The observed process's display label.
-    pub fn label(&self) -> &str {
-        self.process.label()
-    }
-
     /// Sequence of the newest event carried by `events`, or zero for an empty
     /// tail. Computed rather than carried: a stored copy could only ever agree
     /// or lie, so comparing this with `process.last_event_sequence` is the one
@@ -413,6 +411,29 @@ impl ProcessWorkObserver {
         self.observe_records(records).await
     }
 
+    /// Read the roster changes after `cursor`, oldest first, and the cursor
+    /// that continues them. Unscoped: it reads every process on the store, so
+    /// the host must authorize access.
+    pub async fn changed_since(
+        &self,
+        cursor: ProcessChangeCursor,
+        limit: usize,
+    ) -> Result<(Vec<ObservedProcessChange>, ProcessChangeCursor), PluginError> {
+        let (changes, next) = self.registry.processes_changed_since(cursor, limit).await?;
+        let mut observed = Vec::with_capacity(changes.len());
+        for change in changes {
+            observed.push(match change {
+                ProcessChange::Upsert { record } => ObservedProcessChange::Upsert {
+                    process: Box::new(self.observed(*record).await?),
+                },
+                ProcessChange::Deleted { tombstone } => {
+                    ObservedProcessChange::Deleted { tombstone }
+                }
+            });
+        }
+        Ok((observed, next))
+    }
+
     async fn observe_records(
         &self,
         records: Vec<ProcessRecord>,
@@ -488,27 +509,20 @@ impl ProcessWorkObserver {
 }
 
 impl ObservedProcess {
+    /// `record` as a host reads it, without its actor's park.
     fn from_record(record: ProcessRecord) -> Self {
-        let lifecycle = record.status();
-        let outcome = record.outcome();
-        let waits = record.waits().to_vec();
         let child_session_id = match record.input.as_ref() {
             ProcessInput::SessionTurn { .. } => record.lineage().session().cloned(),
             ProcessInput::Engine { .. } => None,
         };
         let input = record.input.as_ref().clone();
-        let identity = record.identity;
-        let process_id = record.id;
-        let last_event_sequence = record.last_event_sequence;
         Self {
-            process_id,
-            last_event_sequence,
-            lifecycle,
+            process_id: record.id,
+            last_event_sequence: record.last_event_sequence,
+            lifecycle: record.lifecycle,
             lifetime: record.lifetime,
             ancestry: record.ancestry,
-            identity,
-            error: terminal_error(outcome.as_ref()),
-            error_code: terminal_error_code(outcome.as_ref()),
+            identity: record.identity,
             created_at_ms: record.created_at_ms,
             updated_at_ms: record.updated_at_ms,
             first_started: record.first_started.map(|started| *started),
@@ -517,42 +531,25 @@ impl ObservedProcess {
             env_ref: record.env_ref,
             caused_by: record.provenance.caused_by,
             external_ref: record.external_ref,
-            waits,
             park: None,
             child_session_id,
             input,
         }
     }
 
-    /// Stable identity of this process in a host work graph.
-    ///
-    /// Computed rather than carried: it is a function of the minted process
-    /// id, so a transport that shipped it could only ever agree or lie.
-    pub fn graph_key(&self) -> String {
-        format!("process:{}", self.process_id)
+    /// The status the lifecycle state is.
+    pub fn status(&self) -> ProcessStatus {
+        self.lifecycle.status()
     }
 
-    /// The identity kind this process was registered under.
-    pub fn kind(&self) -> &str {
-        self.identity.kind.as_str()
+    /// Everything the process is blocked on; empty unless it waits.
+    pub fn waits(&self) -> &[WaitState] {
+        self.lifecycle.waits()
     }
 
-    /// The display label: the registered label, else the kind.
-    pub fn label(&self) -> &str {
-        self.identity
-            .label
-            .as_deref()
-            .unwrap_or(self.identity.kind.as_str())
-    }
-
-    /// The storage label of the current lifecycle status.
-    pub fn status_label(&self) -> &'static str {
-        self.lifecycle.label()
-    }
-
-    /// Whether the lifecycle status is terminal.
-    pub fn terminal(&self) -> bool {
-        self.lifecycle.is_terminal()
+    /// The outcome the process ended in.
+    pub fn terminal(&self) -> Option<&ProcessTerminal> {
+        self.lifecycle.terminal()
     }
 }
 
@@ -563,43 +560,5 @@ impl From<ProcessEvent> for ObservedProcessEvent {
             fact: event.fact,
             occurred_at_ms: event.occurred_at,
         }
-    }
-}
-
-/// The typed classification of the same terminal outcome `terminal_error`
-/// renders as prose. The two are produced from one settled outcome and are
-/// present or absent together.
-fn terminal_error_code(
-    outcome: Option<&ProcessAwaitOutput>,
-) -> Option<crate::ObservedProcessFailure> {
-    match outcome? {
-        ProcessAwaitOutput::Settled { output } => match &output.outcome {
-            crate::ToolCallOutcome::Failure(failure) => {
-                Some(crate::ObservedProcessFailure::Failed {
-                    class: failure.class.clone(),
-                    code: failure.code.clone(),
-                })
-            }
-            crate::ToolCallOutcome::Cancelled(cancellation) => {
-                Some(crate::ObservedProcessFailure::Cancelled {
-                    origin: cancellation.origin,
-                })
-            }
-            crate::ToolCallOutcome::Success(_) => None,
-        },
-        ProcessAwaitOutput::Abandoned { .. } | ProcessAwaitOutput::NoLongerRetained { .. } => None,
-    }
-}
-
-fn terminal_error(outcome: Option<&ProcessAwaitOutput>) -> Option<String> {
-    match outcome? {
-        ProcessAwaitOutput::Settled { output } => match &output.outcome {
-            crate::ToolCallOutcome::Failure(failure) => Some(failure.message.clone()),
-            crate::ToolCallOutcome::Cancelled(cancellation) => Some(cancellation.message.clone()),
-            crate::ToolCallOutcome::Success(_) => None,
-        },
-        // Abandonment is not a reported failure; the status label conveys it and
-        // the evidence rides the terminal event. No derived error string here.
-        ProcessAwaitOutput::Abandoned { .. } | ProcessAwaitOutput::NoLongerRetained { .. } => None,
     }
 }

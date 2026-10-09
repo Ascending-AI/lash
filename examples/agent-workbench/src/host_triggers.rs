@@ -1261,6 +1261,8 @@ pub(crate) const OCCURRENCE_RETENTION: Duration = Duration::from_secs(60 * 60);
 /// How often the notice pass reads the lifecycle cursor.
 const NOTICE_POLL: Duration = Duration::from_millis(250);
 const NOTICE_CURSOR: &str = "process-end-notices";
+/// How many process changes one notice pass reads.
+const NOTICE_PAGE: std::num::NonZeroUsize = std::num::NonZeroUsize::new(64).unwrap();
 
 /// The delivery and notice passes; [`Self::stop`] ends both.
 #[derive(Clone)]
@@ -1355,22 +1357,20 @@ pub(crate) async fn notify_ended_since(
     state: &crate::AppState,
     cursor: lash::process::ProcessChangeCursor,
 ) -> Result<lash::process::ProcessChangeCursor, HostTriggerError> {
-    let (changes, next) = state
+    let page = state
         .core
-        .process_registry()
-        .processes_changed_since(cursor, 64)
-        .await
-        .map_err(lash::EmbedError::from)?;
-    for change in changes {
-        let lash::process::ProcessChange::Upsert { record } = change else {
+        .processes()
+        .changed_since(cursor, NOTICE_PAGE)
+        .await?;
+    for change in page.changes {
+        let lash::process::ObservedProcessChange::Upsert { process } = change else {
             continue;
         };
-        let status = record.status();
+        let status = process.status();
         if !status.is_terminal() {
             continue;
         }
-        let lash::process::ProcessOriginator::Host { scope: Some(scope) } =
-            &record.provenance.originator
+        let lash::process::ProcessOriginator::Host { scope: Some(scope) } = &process.originator
         else {
             continue;
         };
@@ -1378,27 +1378,27 @@ pub(crate) async fn notify_ended_since(
             continue;
         };
         let triggers = &state.host_triggers;
-        if triggers.notice_skipped(&record.id)? {
+        if triggers.notice_skipped(&process.process_id)? {
             continue;
         }
         let sent = match SessionId::parse(owner) {
-            Ok(owner) => send_process_end_notice(state, &owner, &record.id, status).await,
+            Ok(owner) => send_process_end_notice(state, &owner, &process.process_id, status).await,
             Err(error) => Err(HostTriggerError::Identity(error.to_string())),
         };
         match sent {
-            Ok(()) => triggers.notice_sent(&record.id)?,
+            Ok(()) => triggers.notice_sent(&process.process_id)?,
             Err(error) => {
-                if !triggers.record_failed_notice(&record.id, &error.to_string())? {
+                if !triggers.record_failed_notice(&process.process_id, &error.to_string())? {
                     return Err(error);
                 }
                 eprintln!(
                     "agent-workbench triggers: the end notice of {} is skipped: {error}",
-                    record.id
+                    process.process_id
                 );
             }
         }
     }
-    Ok(next)
+    Ok(page.next)
 }
 
 /// Tell `owner` that the delivered process `process_id` ended in `status`.

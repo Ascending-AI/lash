@@ -41,7 +41,7 @@ async fn a_saved_workflow_runs_as_a_durable_process() {
         .await
         .expect("durable process read")
         .expect("retained process");
-    assert_eq!(process.lifecycle, lash::process::ProcessStatus::Completed);
+    assert_eq!(process.status(), lash::process::ProcessStatus::Completed);
     assert!(
         process.env_ref.is_some(),
         "execution uses the published environment"

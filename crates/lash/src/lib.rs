@@ -1091,7 +1091,7 @@ pub mod process {
         ConsumerHold, ProcessDefinitionStoredError, ProcessSpawnProvenance, ProcessStartDeclaration,
     };
     pub use lash_core_store::effect_opener::EffectOpenerError;
-    pub use lash_sansio::{HandleTarget, ObservedProcessFailure};
+    pub use lash_sansio::HandleTarget;
 
     pub use crate::admin::SessionProcessAdmin;
     pub use crate::artifacts::{HostArtifactPin, HostArtifacts, ProcessDefinitions};
@@ -1154,14 +1154,15 @@ pub mod process {
         ScopeRef, ScopeStorageError, SessionScope, StagedPluginState, StagedProcessStart, StartCx,
         StartCxError, StartKey, StoreLocalEffect, StoreLocalRows, TerminalProcessStatus,
         WatchedRegistry, facade_support::CanonicalProcessEventAppend,
-        facade_support::ObservedProcess, facade_support::ObservedProcessEvent,
-        facade_support::ObservedProcessEventLite, facade_support::ObservedProcessEventPage,
-        facade_support::ObservedProcessEventReadOutcome, facade_support::ObservedWorkItem,
-        facade_support::ObservedWorkItemState, facade_support::ProcessChangeHub,
-        facade_support::ProcessChangeSubscription, facade_support::ProcessEventSink,
-        facade_support::ProcessRuntimeHost, facade_support::ProcessToolVisibilityFilter,
-        facade_support::ProcessWorkObserver, facade_support::ProcessWorkSnapshot,
-        facade_support::SessionScopeId, facade_support::watch_process_registry, lifetime,
+        facade_support::ObservedProcess, facade_support::ObservedProcessChange,
+        facade_support::ObservedProcessEvent, facade_support::ObservedProcessEventLite,
+        facade_support::ObservedProcessEventPage, facade_support::ObservedProcessEventReadOutcome,
+        facade_support::ObservedWorkItem, facade_support::ObservedWorkItemState,
+        facade_support::ProcessChangeHub, facade_support::ProcessChangeSubscription,
+        facade_support::ProcessEventSink, facade_support::ProcessRuntimeHost,
+        facade_support::ProcessToolVisibilityFilter, facade_support::ProcessWorkObserver,
+        facade_support::ProcessWorkSnapshot, facade_support::SessionScopeId,
+        facade_support::watch_process_registry, lifetime,
     };
     pub use lash_core::{ArgsMismatch, ArgsMode};
     /// Test-only registry probes and the conformance-suite registry type that

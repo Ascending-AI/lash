@@ -270,6 +270,7 @@ pub mod facade_support {
     pub use crate::runtime::LiveReplayGap;
     pub use crate::runtime::NoopTurnActivitySink;
     pub use crate::runtime::ObservedProcess;
+    pub use crate::runtime::ObservedProcessChange;
     pub use crate::runtime::ObservedProcessEvent;
     pub use crate::runtime::ObservedProcessEventLite;
     pub use crate::runtime::ObservedProcessEventPage;
@@ -469,19 +470,18 @@ pub use lash_sansio::{
     ExecutedCallOutcome, ExecutionBudgets, ExecutionBudgetsConfig, ExecutionBudgetsError,
     ExecutionLimit, ExecutionPolicy, FrameKey, FrameKeyError, InputId, InternalPartKind,
     JsonSchema, LimitCause, LlmCallError, LlmUsage, MediaType, Message, MessageOrigin, MessageRole,
-    NodeId, ObservedProcessFailure, OmittedToolCalls, OutcomeShape, OutputRetentionPolicy,
-    OutputValue, ParkBound, Part, PartKind, PluginMessage, PluginRuntimeEvent, ProjectionMode,
-    ProviderAttemptLimits, RegistrationRefused, RetainedOutput, RunId, SchemaAdmissionError,
-    SchemaContract, SchemaDialect, SchemaProjectionOverride, SchemaProjectionPolicy,
-    SessionAppendNode, TOOL_BINDING_KEY, TextProjectionMetadata, TokenUsageOverflow,
-    ToolAdmissionRefusal, ToolArgumentProjectionPolicy, ToolBinding, ToolBound, ToolBounds,
-    ToolCallOutcome, ToolCallOutput, ToolCallRecord, ToolCancellation, ToolCatalog,
-    ToolCatalogBuildError, ToolCatalogEntry, ToolCheckConflict, ToolCheckPhase, ToolCheckReply,
-    ToolCheckVerdictKind, ToolContract, ToolControl, ToolDeclaration, ToolDefinition,
-    ToolDefinitionBindingExt, ToolDiscovery, ToolFailure, ToolFailureCause, ToolFailureClass,
-    ToolFailureSource, ToolId, ToolIntentIdentity, ToolIntentKind, ToolManifest, ToolModule,
-    ToolOutputContract, ToolValue, ToolView, ToolViewBlock, ToolViewMeta, TurnId, TurnOutputSource,
-    TurnReply, ValueMismatch,
+    NodeId, OmittedToolCalls, OutcomeShape, OutputRetentionPolicy, OutputValue, ParkBound, Part,
+    PartKind, PluginMessage, PluginRuntimeEvent, ProjectionMode, ProviderAttemptLimits,
+    RegistrationRefused, RetainedOutput, RunId, SchemaAdmissionError, SchemaContract,
+    SchemaDialect, SchemaProjectionOverride, SchemaProjectionPolicy, SessionAppendNode,
+    TOOL_BINDING_KEY, TextProjectionMetadata, TokenUsageOverflow, ToolAdmissionRefusal,
+    ToolArgumentProjectionPolicy, ToolBinding, ToolBound, ToolBounds, ToolCallOutcome,
+    ToolCallOutput, ToolCallRecord, ToolCancellation, ToolCatalog, ToolCatalogBuildError,
+    ToolCatalogEntry, ToolCheckConflict, ToolCheckPhase, ToolCheckReply, ToolCheckVerdictKind,
+    ToolContract, ToolControl, ToolDeclaration, ToolDefinition, ToolDefinitionBindingExt,
+    ToolDiscovery, ToolFailure, ToolFailureCause, ToolFailureClass, ToolFailureSource, ToolId,
+    ToolIntentIdentity, ToolIntentKind, ToolManifest, ToolModule, ToolOutputContract, ToolValue,
+    ToolView, ToolViewBlock, ToolViewMeta, TurnId, TurnOutputSource, TurnReply, ValueMismatch,
 };
 pub(crate) use lash_sansio::{
     BaseRenderCache, build_turn, messages_are_prompt_resume_safe, visible_response_parts,

@@ -637,7 +637,7 @@ async fn apply_operation(
             if let Ok(Some(record)) = handles.registry.get_process(&id).await {
                 let authority =
                     ProcessCompletionAuthority::workflow_key(format!("property:{}", record.id));
-                if let Ok(ProcessCompletionOutcome::Committed(_)) = handles
+                if let Ok(ProcessCompletionOutcome::Committed(committed)) = handles
                     .registry
                     .complete_process(&id, output.clone(), authority)
                     .await
@@ -652,6 +652,10 @@ async fn apply_operation(
                         );
                         expected.lifecycle = crate::ProcessLifecycleState::Terminal {
                             outcome: settled.try_into().expect("generated output is terminal"),
+                            occurred_at_ms: committed
+                                .lifecycle
+                                .terminal_at_ms()
+                                .expect("a committed completion is terminal"),
                         };
                     }
                 }

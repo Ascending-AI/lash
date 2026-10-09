@@ -435,7 +435,10 @@ pub fn apply_process_event_projection(
             return Ok(());
         }
         // The outcome is the state: it takes the wait with it.
-        record.lifecycle = ProcessLifecycleState::Terminal { outcome };
+        record.lifecycle = ProcessLifecycleState::Terminal {
+            outcome,
+            occurred_at_ms: event.occurred_at,
+        };
     }
     record.updated_at_ms = event.occurred_at;
     record.last_event_sequence = event.sequence;

@@ -166,7 +166,7 @@ pub(crate) async fn cancel_processes_parented_by_turn(
     for item in observed {
         // A terminal row is settled and a row already carrying a request is
         // converging on its own; re-asking for either is pure noise.
-        if item.process.terminal() || item.process.cancel_request.is_some() {
+        if item.process.terminal().is_some() || item.process.cancel_request.is_some() {
             continue;
         }
         if item.process.ancestry.starter() != Some(&turn_scope) {

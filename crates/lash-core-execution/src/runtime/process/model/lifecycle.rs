@@ -117,7 +117,9 @@ pub struct ProcessRecord {
 /// exist only in it, so a record cannot hold a wait beside an outcome, or a
 /// terminal status without one. A waiting process lists everything it is
 /// blocked on, oldest first, and never an empty list. A parked process is
-/// its actor's state (ADR 0132 §11), not a record fact.
+/// its actor's state (ADR 0132 §11), not a record fact. An ended process
+/// holds its outcome and the time of the committed fact that ended it: no
+/// later fact changes either.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ProcessLifecycleState {
@@ -128,6 +130,10 @@ pub enum ProcessLifecycleState {
     },
     Terminal {
         outcome: ProcessTerminal,
+        /// When the committed fact that ended the process occurred. Held
+        /// apart from the record's `updated_at_ms`, which every later fact
+        /// overwrites.
+        occurred_at_ms: u64,
     },
 }
 
@@ -156,6 +162,7 @@ impl ProcessLifecycleState {
     pub fn fixture(status: ProcessStatus) -> Self {
         let settled = |output| Self::Terminal {
             outcome: ProcessTerminal::from_tool_output(output),
+            occurred_at_ms: 0,
         };
         match status {
             ProcessStatus::Running => Self::running(),
@@ -191,6 +198,7 @@ impl ProcessLifecycleState {
                     }),
                     control: None,
                 },
+                occurred_at_ms: 0,
             },
         }
     }
@@ -201,7 +209,7 @@ impl ProcessLifecycleState {
         match self {
             Self::Running { .. } => ProcessStatus::Running,
             Self::Waiting { .. } => ProcessStatus::Waiting,
-            Self::Terminal { outcome } => outcome.status().into(),
+            Self::Terminal { outcome, .. } => outcome.status().into(),
         }
     }
 
@@ -246,7 +254,15 @@ impl ProcessLifecycleState {
     /// The outcome the process ended in.
     pub fn terminal(&self) -> Option<&ProcessTerminal> {
         match self {
-            Self::Terminal { outcome } => Some(outcome),
+            Self::Terminal { outcome, .. } => Some(outcome),
+            Self::Running { .. } | Self::Waiting { .. } => None,
+        }
+    }
+
+    /// When the committed fact that ended the process occurred.
+    pub fn terminal_at_ms(&self) -> Option<u64> {
+        match self {
+            Self::Terminal { occurred_at_ms, .. } => Some(*occurred_at_ms),
             Self::Running { .. } | Self::Waiting { .. } => None,
         }
     }

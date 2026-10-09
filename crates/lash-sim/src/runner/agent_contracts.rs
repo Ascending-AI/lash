@@ -1045,10 +1045,10 @@ async fn agent_contract_process_observations(
             process_ref: process_ref.clone(),
             observed: json!({
                 "process_ref": process_ref,
-                "kind": process.kind(),
-                "label": process.label(),
-                "status": process.lifecycle.label(),
-                "terminal": process.terminal(),
+                "kind": process.identity.kind.as_str(),
+                "label": process.identity.label,
+                "status": process.status().label(),
+                "terminal": process.terminal().is_some(),
                 "definition_present": process.identity.definition_id.is_some(),
                 "process_origin": process_origin.map(Value::from).unwrap_or(Value::Null),
                 "child_session_present": process.child_session_id.is_some(),
@@ -1069,7 +1069,7 @@ async fn agent_contract_process_origin(
     artifacts: &lash::persistence::LashlangArtifacts,
     process: &lash_core::facade_support::ObservedProcess,
 ) -> Result<Option<&'static str>, FixedScriptRunnerError> {
-    if process.kind() != lash_lashlang_runtime::LASHLANG_ENGINE_KIND {
+    if process.identity.kind.as_str() != lash_lashlang_runtime::LASHLANG_ENGINE_KIND {
         return Ok(None);
     }
     let Some(id) = process.identity.definition_id.as_ref() else {
@@ -1125,16 +1125,18 @@ async fn agent_contract_process_origin(
 }
 
 fn agent_contract_process_ref(process: &lash_core::facade_support::ObservedProcess) -> String {
-    let kind = process.kind();
-    let label = process.label();
-    let status = process.lifecycle.label();
-    let terminal = process.terminal().to_string();
+    let kind = process.identity.kind.as_str();
+    let label = process.identity.label.as_deref();
+    let status = process.status().label();
+    let terminal = process.terminal().is_some().to_string();
     let definition_present = process.identity.definition_id.is_some().to_string();
     let child_session_present = process.child_session_id.is_some().to_string();
     let mut hasher = Sha256::new();
     hasher.update(kind.as_bytes());
     hasher.update([0]);
-    hasher.update(label.as_bytes());
+    if let Some(label) = label {
+        hasher.update(label.as_bytes());
+    }
     hasher.update([0]);
     hasher.update(status.as_bytes());
     hasher.update([0]);

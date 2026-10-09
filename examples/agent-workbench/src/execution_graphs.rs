@@ -307,7 +307,7 @@ impl<'a> GraphProjection<'a> {
         let bridge_graph_key = child
             .child_graph_key
             .clone()
-            .unwrap_or_else(|| format!("process:{process_id}"));
+            .unwrap_or_else(|| process_graph_key(&process_id));
         let process = self.observed_process(&process_id).await;
         if let Some(process) = process.as_ref()
             && let Some(child_session_id) = process.child_session_id.clone()
@@ -319,13 +319,13 @@ impl<'a> GraphProjection<'a> {
                     parent_node_id: child.parent_node_id.clone(),
                     bridge_graph_key: bridge_graph_key.clone(),
                     bridge_process_id: Some(process_id.clone()),
-                    bridge_status: process.status_label().to_string(),
+                    bridge_status: process.status().label().to_string(),
                     bridge_title: lineage_bridge_title(child, Some(process), &process_id),
                     child_graph_key: None,
                     child_session_id: Some(child_session_id),
-                    pending: !process.terminal(),
-                    terminal: process.terminal(),
-                    error: process.error.clone(),
+                    pending: process.terminal().is_none(),
+                    terminal: process.terminal().is_some(),
+                    error: process_error(process),
                 });
             } else {
                 for graph in child_graphs {
@@ -334,13 +334,13 @@ impl<'a> GraphProjection<'a> {
                         parent_node_id: child.parent_node_id.clone(),
                         bridge_graph_key: bridge_graph_key.clone(),
                         bridge_process_id: Some(process_id.clone()),
-                        bridge_status: process.status_label().to_string(),
+                        bridge_status: process.status().label().to_string(),
                         bridge_title: lineage_bridge_title(child, Some(process), &process_id),
                         child_graph_key: Some(graph.graph_key.clone()),
                         child_session_id: Some(child_session_id.clone()),
                         pending: false,
-                        terminal: process.terminal(),
-                        error: process.error.clone(),
+                        terminal: process.terminal().is_some(),
+                        error: process_error(process),
                     });
                 }
             }
@@ -351,8 +351,7 @@ impl<'a> GraphProjection<'a> {
         let child_graph_observed = !child_graph_keys.is_empty();
         let terminal = process
             .as_ref()
-            .map(|process| process.terminal())
-            .unwrap_or(false);
+            .is_some_and(|process| process.terminal().is_some());
         let targets = if child_graph_keys.is_empty() {
             vec![None]
         } else {
@@ -367,14 +366,14 @@ impl<'a> GraphProjection<'a> {
                 bridge_process_id: Some(process_id.clone()),
                 bridge_status: process
                     .as_ref()
-                    .map(|process| process.status_label().to_string())
+                    .map(|process| process.status().label().to_string())
                     .unwrap_or_else(|| self.graph_presence_status(status_key)),
                 bridge_title: lineage_bridge_title(child, process.as_ref(), &process_id),
                 child_graph_key,
                 child_session_id: None,
                 pending: !child_graph_observed && !terminal,
                 terminal,
-                error: process.as_ref().and_then(|process| process.error.clone()),
+                error: process.as_ref().and_then(process_error),
             });
         }
     }
@@ -435,19 +434,47 @@ impl<'a> GraphProjection<'a> {
     }
 }
 
+/// The key a process's graph has in the work view.
+pub(crate) fn process_graph_key(process_id: &ProcessId) -> String {
+    format!("process:{process_id}")
+}
+
+/// What the work view calls a process: its registered label, else its kind.
+pub(crate) fn process_label(process: &lash::process::ObservedProcess) -> &str {
+    process
+        .identity
+        .label
+        .as_deref()
+        .unwrap_or(process.identity.kind.as_str())
+}
+
+/// The message of the failure or cancellation a process ended in.
+pub(crate) fn process_error(process: &lash::process::ObservedProcess) -> Option<String> {
+    match process.terminal()? {
+        lash::process::ProcessTerminal::Settled { output } => match &output.outcome {
+            lash::tools::ToolCallOutcome::Failure(failure) => Some(failure.message.clone()),
+            lash::tools::ToolCallOutcome::Cancelled(cancellation) => {
+                Some(cancellation.message.clone())
+            }
+            lash::tools::ToolCallOutcome::Success(_) => None,
+        },
+        lash::process::ProcessTerminal::Abandoned { .. } => None,
+    }
+}
+
 fn process_summary_from_observed(
     process: &lash::process::ObservedProcess,
 ) -> LashlangGraphProcessSummary {
     LashlangGraphProcessSummary {
         process_id: process.process_id.clone(),
-        status_label: process.status_label().to_string(),
-        lifecycle: process.lifecycle,
-        terminal: process.terminal(),
-        label: process.label().to_string(),
+        status_label: process.status().label().to_string(),
+        lifecycle: process.status(),
+        terminal: process.terminal().is_some(),
+        label: process_label(process).to_string(),
         created_at_ms: process.created_at_ms,
         updated_at_ms: process.updated_at_ms,
         input: compact_payload(serde_json::to_value(&process.input).unwrap_or(Value::Null)),
-        error: process.error.clone(),
+        error: process_error(process),
         child_session_id: process.child_session_id.clone(),
     }
 }
@@ -492,7 +519,7 @@ fn lineage_bridge_title(
     process_id: &ProcessId,
 ) -> String {
     process
-        .map(|process| process.label().to_string())
+        .map(|process| process_label(process).to_string())
         .or_else(|| child.child_entry_name.clone())
         .unwrap_or_else(|| process_id.to_string())
 }
