@@ -1,5 +1,5 @@
 fn cannot_write_resident_state(
-    runtime: &mut lash_core::runtime::LashRuntime,
+    runtime: &mut lash::runtime::LashRuntime,
     state: lash::persistence::RuntimeSessionState,
 ) {
     runtime.state = state;

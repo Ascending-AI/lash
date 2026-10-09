@@ -135,7 +135,7 @@ def overlay_sources(stage, destination, source):
             target.symlink_to(entry.resolve())
 
 
-def run_fixture(fixture, manifest, root, stage, output):
+def run_fixture(fixture, manifest, root, stage, output, bless=False):
     started = time.monotonic()
     name = fixture['name']
     source = root / fixture['source']
@@ -149,7 +149,10 @@ def run_fixture(fixture, manifest, root, stage, output):
         flags += ['--extern', alias + '=' + str(root / artifact)]
     command = [str(root / path) if index == 0 else path for index, path in enumerate(manifest['compiler'])]
     command += flags + ['--crate-name=' + name, '--out-dir', str(case), manifest['package'] + '/tests/ui/' + source.name]
-    process = subprocess.run(command, cwd=stage, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    # Import suggestions depend on whether the compiler is in bootstrap mode.
+    # Always retain the richer diagnostics, independently of libtest's env.
+    environment = dict(os.environ, RUSTC_BOOTSTRAP='1')
+    process = subprocess.run(command, cwd=stage, env=environment, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     actual = normalize(process.stdout, 'tests/ui/' + source.name, manifest['package'])
     expected = expected_path.read_text()
     (case / 'stderr.raw').write_text(process.stdout)
@@ -157,6 +160,14 @@ def run_fixture(fixture, manifest, root, stage, output):
     (case / 'stderr.expected').write_text(expected)
     difference = ''.join(difflib.unified_diff(expected.splitlines(keepends=True), actual.splitlines(keepends=True), fromfile=str(expected_path), tofile=name + '.actual'))
     (case / 'stderr.diff').write_text(difference)
+    if bless and process.returncode > 0:
+        # A testing re-export can legitimately add import suggestions. Keep
+        # the canonical pin for testing, and create a production pin only
+        # when its diagnostics differ. Subsequent runs declare it as input.
+        if 'testing' not in manifest['features'] and expected_path.suffix == '.stderr' and actual != expected:
+            expected_path = expected_path.with_suffix('.stderr.no-testing')
+        expected_path.write_text(actual)
+        expected = actual
     passed = process.returncode > 0 and actual == expected
     reason = 'rustc succeeded unexpectedly' if process.returncode == 0 else 'rustc terminated by signal' if process.returncode < 0 else 'diagnostic drift'
     return {'name': name, 'passed': passed, 'rustc_exit_code': process.returncode, 'reason': None if passed else reason, 'diff': difference, 'duration_seconds': time.monotonic() - started}
@@ -186,15 +197,19 @@ def main():
     started = time.monotonic()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--manifest', required=True, type=Path)
+    parser.add_argument('--bless', action='store_true', help='Write compiler diagnostics to the declared stderr pins')
+    parser.add_argument('--output-dir', type=Path, help='Directory for compiler evidence (required when blessing)')
     args = parser.parse_args()
     root = Path.cwd()
     manifest = json.loads(args.manifest.read_text())
     jobs = int(os.environ.get('UI_JOBS', '8'))
     if jobs <= 0 or not manifest['fixtures']:
         parser.error('UI_JOBS must be positive and the fixture set must not be empty')
-    output = Path(os.environ['TEST_UNDECLARED_OUTPUTS_DIR']).absolute() / 'ui-fixtures'
+    if args.bless and args.output_dir is None:
+        parser.error('--bless requires --output-dir')
+    output = (args.output_dir if args.output_dir else Path(os.environ['TEST_UNDECLARED_OUTPUTS_DIR']) / 'ui-fixtures').absolute()
     output.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix='lash-ui-') as temporary:
+    with tempfile.TemporaryDirectory(prefix='lash-ui-', dir=output) as temporary:
         stage = Path(temporary)
         for source in manifest['sources']:
             overlay_sources(stage, stage / source['package'], root / source['root'])
@@ -206,7 +221,7 @@ def main():
                 destination.unlink()
             destination.symlink_to(root / fixture['source'])
         with ThreadPoolExecutor(max_workers=jobs) as pool:
-            futures = [pool.submit(run_fixture, fixture, manifest, root, stage, output) for fixture in manifest['fixtures']]
+            futures = [pool.submit(run_fixture, fixture, manifest, root, stage, output, args.bless) for fixture in manifest['fixtures']]
             results = [future.result() for future in futures]
     lines = [f'running {len(results)} tests']
     for result in results:

@@ -1,4 +1,4 @@
-"""Direct-rustc UI contracts using the harness's exact Rust dependency graph."""
+"""Direct-rustc facade contracts using the harness's resolved libraries."""
 
 load("@prelude//decls:toolchains_common.bzl", "toolchains_common")
 load("@prelude//linking:link_info.bzl", "LinkStrategy")
@@ -29,8 +29,13 @@ def _fixture_harness_impl(ctx):
         if RustLinkInfo not in dep:
             fail("UI fixture named dependency lacks RustLinkInfo: {}".format(dep.label))
         strategy = strategy_info(toolchain, dep[RustLinkInfo], LinkStrategy("static_pic"))
-        externs[alias] = strategy.outputs[MetadataKind("link")]
-        libraries[externs[alias]] = None
+        artifact = strategy.outputs[MetadataKind("link")]
+        # A facade consumer names lash, not its implementation crates. The
+        # fixtures also explicitly use these three third-party dependencies.
+        # Keep the complete resolved closure on -L for metadata/proc macros.
+        if alias in ["lash", "async_trait", "serde", "serde_json"]:
+            externs[alias] = artifact
+        libraries[artifact] = None
         for transitive in strategy.transitive_deps[MetadataKind("link")].traverse():
             if transitive.crate.dynamic != None:
                 fail("UI fixtures require statically named dependency artifacts")
@@ -78,6 +83,11 @@ def _ui_fixtures_impl(ctx):
     if toolchain.sysroot_path == None:
         fail("The UI gate requires a declared Rust toolchain sysroot")
     expected = {file.basename.removesuffix(".stderr"): file for file in ctx.attrs.expected}
+    if "testing" not in harness.features:
+        for file in ctx.attrs.expected_without_testing:
+            name = file.basename.removesuffix(".stderr.no-testing")
+            if name in expected:
+                expected[name] = file
     fixtures = []
     names = {}
     for source in ctx.attrs.fixtures:
@@ -104,6 +114,9 @@ def _ui_fixtures_impl(ctx):
     local = read_root_config("kiln", "execution_mode", "remote") == "local"
     return [
         DefaultInfo(default_outputs = harness.harness_outputs),
+        # Bless locally against the very same declared compiler and libraries.
+        # The runner requires an explicit output directory for this mode.
+        RunInfo(args = cmd_args("/usr/bin/python3", ctx.attrs.runner, "--manifest", manifest)),
         ExternalRunnerTestInfo(
             type = "custom",
             command = [
@@ -144,6 +157,7 @@ _ui_fixtures = rule(
         "cpu": attrs.string(),
         "edition": attrs.string(),
         "expected": attrs.list(attrs.source()),
+        "expected_without_testing": attrs.list(attrs.source(), default = []),
         "fixtures": attrs.list(attrs.source()),
         "harness": attrs.dep(providers = [UIHarnessInfo]),
         "helpers": attrs.dep(default = "//tools/buck2:test_helpers"),
@@ -165,6 +179,7 @@ def ui_fixtures_test(name, harness, package, fixtures, expected, edition = "2024
         edition = edition,
         fixtures = fixtures,
         expected = expected,
+        expected_without_testing = native.glob(["tests/ui/*.stderr.no-testing"]),
         tags = tags,
         cpu = exec_properties.get("cpu_count", "1"),
         memory_kb = exec_properties.get("memory_kb", "1572864"),

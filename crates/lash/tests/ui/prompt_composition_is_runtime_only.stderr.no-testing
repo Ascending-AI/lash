@@ -8,14 +8,6 @@ error[E0432]: unresolved imports `lash::plugins::ComposedPrompt`, `lash::plugins
   |                     |               no `PromptCut` in `plugins`
   |                     no `ComposedPrompt` in `plugins`
   |
-  = help: consider importing this struct instead:
-          lash::testing::prompt::ComposedPrompt
-  = help: consider importing this struct instead:
-          lash::testing::prompt::PromptCut
-  = help: consider importing this struct instead:
-          lash::testing::prompt::PromptCutParts
-  = help: consider importing this struct instead:
-          lash::testing::prompt::PromptRenderPool
 help: a similar name exists in the module
   |
 5 - use lash::plugins::{ComposedPrompt, PromptCut, PromptCutParts, PromptRenderPool};

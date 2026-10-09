@@ -89,8 +89,8 @@ class CompilerFixtureTests(unittest.TestCase):
             'fixtures': [{'name': 'hidden', 'source': 'crates/lash/tests/ui/hidden.rs', 'expected': 'crates/lash/tests/ui/hidden.stderr'}],
         }))
 
-    def invoke(self):
-        return subprocess.run([sys.executable, str(RUNNER), '--manifest', str(self.manifest)], cwd=self.root, env=dict(os.environ, UI_JOBS='1', TEST_UNDECLARED_OUTPUTS_DIR=str(self.root / 'receipts')), capture_output=True, text=True)
+    def invoke(self, *arguments):
+        return subprocess.run([sys.executable, str(RUNNER), '--manifest', str(self.manifest), *arguments], cwd=self.root, env=dict(os.environ, UI_JOBS='1', TEST_UNDECLARED_OUTPUTS_DIR=str(self.root / 'receipts')), capture_output=True, text=True)
 
     def result(self):
         return json.loads((self.root / 'receipts/ui-fixtures/results.json').read_text())['results'][0]
@@ -151,6 +151,23 @@ class CompilerFixtureTests(unittest.TestCase):
         for filename in ['stderr.raw', 'stderr.actual', 'stderr.expected', 'stderr.diff']:
             self.assertTrue((case / filename).is_file())
         self.assertIn('-wrong diagnostic', (case / 'stderr.diff').read_text())
+
+    def test_bless_preserves_the_testing_pin_when_production_help_differs(self):
+        expected = self.fixtures / 'hidden.stderr'
+        expected.write_text('testing diagnostic\n')
+        outcome = self.invoke('--bless', '--output-dir', str(self.root / 'bless'))
+        self.assertEqual(outcome.returncode, 0, outcome.stdout + outcome.stderr)
+        self.assertEqual(expected.read_text(), 'testing diagnostic\n')
+        self.assertEqual(expected.with_suffix('.stderr.no-testing').read_text(), PIN)
+        self.assertIn('-testing diagnostic', (self.root / 'bless/hidden/stderr.diff').read_text())
+
+    def test_bless_cannot_accept_unexpected_compile_success(self):
+        (self.fixtures / 'hidden.rs').write_text('fn main() {}\n')
+        outcome = self.invoke('--bless', '--output-dir', str(self.root / 'bless'))
+        self.assertEqual(outcome.returncode, 1, outcome.stdout + outcome.stderr)
+        self.assertEqual((self.fixtures / 'hidden.stderr').read_text(), PIN)
+        self.assertFalse((self.fixtures / 'hidden.stderr.no-testing').exists())
+        self.assertIn('rustc succeeded unexpectedly', outcome.stdout)
 
     def test_parallel_mixed_verdicts_keep_each_case_and_failure_receipts(self):
         (self.fixtures / 'drift.rs').write_text((self.fixtures / 'hidden.rs').read_text())

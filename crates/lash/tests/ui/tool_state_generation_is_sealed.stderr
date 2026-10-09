@@ -1,8 +1,8 @@
 error[E0624]: method `with_generation` is private
- --> tests/ui/tool_state_generation_is_sealed.rs:2:50
+ --> tests/ui/tool_state_generation_is_sealed.rs:2:52
   |
-2 |     let forged = lash_core::ToolState::default().with_generation(9_999);
-  |                                                  ^^^^^^^^^^^^^^^ private method
+2 |     let forged = lash::tools::ToolState::default().with_generation(9_999);
+  |                                                    ^^^^^^^^^^^^^^^ private method
   |
  ::: $WORKSPACE/crates/lash-core-store/src/tool_state.rs
   |
