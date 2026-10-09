@@ -393,7 +393,11 @@ async fn a_real_loop_branch_names_the_typed_arm_it_takes_in_each_iteration() {
         document
             .graph()
             .nodes()
-            .find(|node| node.name == title)
+            .find(|node| {
+                node.label
+                    .as_ref()
+                    .is_some_and(|label| label.title.as_str() == title)
+            })
             .map(|node| node.id.to_string())
             .unwrap_or_else(|| panic!("`{title}` is in the document"))
     };
