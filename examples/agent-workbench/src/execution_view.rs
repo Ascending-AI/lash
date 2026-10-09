@@ -289,7 +289,7 @@ pub(crate) fn draw(
             .iter()
             .map(|child| ExecutionGraphChildLink {
                 parent_graph_key: child.parent_execution_key.clone(),
-                parent_node_id: child.parent_site.node_id.clone(),
+                parent_node_id: child.parent_site.node_id.to_string(),
                 child_graph_key: child.child_execution_key.clone(),
                 child_process_id: child.child_process_id.clone(),
                 child_attempt: child.child_attempt,

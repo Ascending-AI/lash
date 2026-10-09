@@ -692,7 +692,7 @@ fn form_edits(
                     slot.push(ExprSlot::Iterable);
                     edits.push(WorkflowEdit::ReplaceExpression {
                         target: lash::workflow::WorkflowExpressionRef::Node(handle),
-                        slot: WorkflowSlotPath::structural(slot),
+                        slot: WorkflowSlotPath::new(slot),
                         expression: iterable.clone(),
                     });
                 }
@@ -790,7 +790,7 @@ pub(crate) fn node_ir(node: &WorkflowNode) -> NodeIr {
             }
             path.push(slot);
             slots.push(IrSlot {
-                path: WorkflowSlotPath::structural(path.iter().copied()),
+                path: WorkflowSlotPath::new(path.iter().copied()),
                 variant: variant(child),
                 expression: child.clone(),
             });

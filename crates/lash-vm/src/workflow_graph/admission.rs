@@ -147,8 +147,9 @@ pub fn admit_workflow_graph(
     let submitted = workflow_program_from_graph(graph).map_err(|error| {
         let location = error
             .node_id()
+            .and_then(|node| WorkflowNodeId::new(node).ok())
             .map(|node| WorkflowAdmissionLocation::Node {
-                node: WorkflowNodeId::new(node.to_string()),
+                node,
                 slot: WorkflowSlotPath::default(),
             })
             .unwrap_or(WorkflowAdmissionLocation::Document);
@@ -302,7 +303,7 @@ fn locate(
             .unwrap_or_default();
         return WorkflowAdmissionLocation::Node {
             node: node.clone(),
-            slot: WorkflowSlotPath::structural(slots),
+            slot: WorkflowSlotPath::new(slots),
         };
     }
     let AstRoot::Declaration(index) = path.root else {

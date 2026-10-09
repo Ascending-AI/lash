@@ -1021,6 +1021,7 @@ fn loop_occurrences_match_the_program(
         .iter()
         .map(|(tag, site)| {
             let iterations = site
+                .at
                 .loops
                 .iter()
                 .map(|frame| match frame.position {
@@ -1040,7 +1041,7 @@ fn loop_occurrences_match_the_program(
     // Sites: one per call expression, two for the twin calls of one node.
     let mut sites = std::collections::BTreeMap::<_, std::collections::BTreeSet<_>>::new();
     for (tag, site) in &calls {
-        sites.entry(*tag).or_default().insert(site.site.site_ref());
+        sites.entry(*tag).or_default().insert(site.at.site.clone());
     }
     for (tag, count) in [("inner", 2), ("outer", 1), ("turn", 1)] {
         let Some(of_tag) = sites.get(tag) else {
@@ -1067,12 +1068,12 @@ fn loop_occurrences_match_the_program(
     let mut activations = std::collections::BTreeMap::new();
     let mut loops = std::collections::BTreeMap::<_, std::collections::BTreeSet<_>>::new();
     for (tag, site) in &calls {
-        for (depth, frame) in site.loops.iter().enumerate() {
+        for (depth, frame) in site.at.loops.iter().enumerate() {
             loops
                 .entry((*tag != "turn", depth))
                 .or_default()
                 .insert(frame.site.clone());
-            let outer_iteration = match site.loops[0].position {
+            let outer_iteration = match site.at.loops[0].position {
                 Position::Body(iteration) if depth == 1 => iteration,
                 _ => 0,
             };

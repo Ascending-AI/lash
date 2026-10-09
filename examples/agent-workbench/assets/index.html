@@ -5615,7 +5615,7 @@
       if (!lifecycle || lifecycle.state !== "waiting") return "";
       const blockers = (lifecycle.blockers || []).map(blocker => {
         const kind = blocker.kind || {};
-        const node = blocker.site?.node_id ? " at " + blocker.site.node_id : "";
+        const node = blocker.site?.site?.node_id ? " at " + blocker.site.site.node_id : "";
         if (kind.kind === "sleep") return "sleeping until " + formatTime(kind.until_ms) + node;
         if (kind.kind === "call") return "awaiting tool " + kind.tool_id + node;
         if (kind.kind === "process") return "awaiting process " + shortId(kind.process_id) + node;

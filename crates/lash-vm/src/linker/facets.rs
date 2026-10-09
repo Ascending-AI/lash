@@ -210,22 +210,15 @@ impl<'module> Linker<'module> {
         let (value, value_path) = workflow_node_value(expr, path.clone());
         let mut calls = Vec::new();
         receiver_calls_at(value, &value_path, &mut calls);
-        let multiple_calls = calls.len() > 1;
         let mut arguments = Vec::new();
-        for (call_index, (call, call_path)) in calls.into_iter().enumerate() {
+        for (call, call_path) in calls {
             let Expr::ReceiverCall { args, .. } = call else {
                 unreachable!("receiver-call collector only returns receiver calls")
             };
             for (argument_index, argument) in args.iter().enumerate() {
-                let slot = if multiple_calls {
-                    crate::WorkflowSlotPath::call_argument(call_index as u32, argument_index as u32)
-                } else {
-                    crate::WorkflowSlotPath::argument(argument_index as u32)
-                };
                 collect_expected_slots(
                     argument,
                     &call_path.child(argument_index as u32 + 1),
-                    slot,
                     &expected_type_facts.by_expression,
                     &mut arguments,
                 );
@@ -290,45 +283,27 @@ pub(super) fn recover_workflow_binding(expr: &Expr, scope: &mut Scope) {
 fn collect_expected_slots(
     expr: &Expr,
     path: &AstPath,
-    slot: crate::WorkflowSlotPath,
     expected: &BTreeMap<AstPath, TypeExpr>,
     arguments: &mut Vec<WorkflowLinkExpectedArgument>,
 ) {
     if let Some(ty) = expected.get(path) {
         arguments.push(WorkflowLinkExpectedArgument {
-            slot: slot.clone(),
             ty: ty.clone(),
             path: path.clone(),
         });
     }
     match expr {
         Expr::LabelAnnotated { expr, .. } | Expr::Await(expr) | Expr::ResultUnwrap(expr) => {
-            collect_expected_slots(expr, &path.child(0), slot, expected, arguments)
+            collect_expected_slots(expr, &path.child(0), expected, arguments)
         }
         Expr::Record(entries) => {
-            for (index, (name, value)) in entries.iter().enumerate() {
-                let mut field_slot = slot.clone();
-                field_slot.push(crate::WorkflowSlotPathSegment::Field(name.clone()));
-                collect_expected_slots(
-                    value,
-                    &path.child(index as u32),
-                    field_slot,
-                    expected,
-                    arguments,
-                );
+            for (index, (_, value)) in entries.iter().enumerate() {
+                collect_expected_slots(value, &path.child(index as u32), expected, arguments);
             }
         }
         Expr::List(items) => {
             for (index, item) in items.iter().enumerate() {
-                let mut item_slot = slot.clone();
-                item_slot.push(crate::WorkflowSlotPathSegment::Index(index as u32));
-                collect_expected_slots(
-                    item,
-                    &path.child(index as u32),
-                    item_slot,
-                    expected,
-                    arguments,
-                );
+                collect_expected_slots(item, &path.child(index as u32), expected, arguments);
             }
         }
         _ => {}

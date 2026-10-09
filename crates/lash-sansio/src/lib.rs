@@ -37,7 +37,6 @@ pub mod tool_output;
 pub mod turn;
 pub mod turn_driver;
 pub mod worker_limit;
-mod workflow;
 mod workflow_site;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -215,10 +214,10 @@ pub use turn_driver::{
     append_assistant_text_part, build_newest_writer_formats, normalized_response_parts,
     reasoning_part, visible_response_parts, visible_response_text_from_parts,
 };
-pub use workflow::WorkflowExecutionSite;
 pub use workflow_site::{
-    ExprSlot, WorkflowLoopFrame, WorkflowLoopPosition, WorkflowOccurrenceContext, WorkflowSitePath,
-    WorkflowSiteRef, WorkflowSiteRole, WorkflowSiteSegment,
+    EmptyWorkflowNodeId, ExprSlot, WorkflowLoopFrame, WorkflowLoopPosition, WorkflowNodeId,
+    WorkflowOccurrence, WorkflowSiteDescriptor, WorkflowSitePath, WorkflowSiteRef,
+    WorkflowSiteRole, WorkflowSlotPath,
 };
 mod execution_node_kind;
 pub use execution_node_kind::ExecutionNodeKind;

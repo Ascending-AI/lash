@@ -23,9 +23,9 @@ keyed by `WaitKind` in a non-empty `ProcessWaits` collection): a deferred call
 (`WaitKind::Key`), a sleep (`WaitKind::Sleep { until_ms }`) or another
 process's terminal (`WaitKind::Process { process_id }`). Each `WaitState`
 carries `since_ms` in signed store milliseconds, as is the sleep's `until_ms`,
-and, when the engine named one, the `site` (`node_id`, `occurrence` and
-`context`) that waits; the lash_vm engine names the site of
-a sleep and of an awaited process. A wait never carries a completion key or a wait id: those resolve the
+and, when the engine named one, the `site` that waits, a
+`WorkflowOccurrence`; the lash_vm engine names the site of a sleep and of an
+awaited process. A wait never carries a completion key or a wait id: those resolve the
 wait, and `Completions::parked` and `pinned_keys` hand them only to a host
 that asks for them. The process reads `running` again once its last wait
 ends. A process whose steps are still executing on a node is `running`
@@ -62,16 +62,18 @@ Lash formats nothing for display. A label for a process with none
 registered, a status line, a failure message and a key for a graph view are
 the host's to derive from these facts.
 
-`ProcessEffectOccurrence` records a settled effect's `node_id`, one-based
-`occurrence`, operation, outcome class and failure code when applicable. Its
-`context` names the exact site inside the node (`site_path`, the typed path
-to the expression that ran, in the statement the node stands for) and the
-loops around the occurrence, outermost first: each loop's site, its
-activation (unique within the run; a loop entered again is a new one) and its
-position, `body` with the one-based iteration or `check` with the one-based
-evaluation of a `while` condition. An occurrence counts per site, so two
-calls in one statement each start at 1. An effect at the node's own
-expression outside every loop omits `context`.
+`ProcessEffectOccurrence` records where a settled effect ran (`at`), its
+operation, outcome class and failure code when applicable. `at` is a
+`WorkflowOccurrence`, the one value every layer names an occurrence by: the
+`site` (`node_id` and `site_path`, the typed slot path to the expression that
+ran, in the statement the node stands for, with the role of a synthetic site
+such as a labeled step), the one-based `occurrence`, and the `loops` around
+it, outermost first: each loop's site, its activation (unique within the run;
+a loop entered again is a new one) and its position, `body` with the
+one-based iteration or `check` with the one-based evaluation of a `while`
+condition. An occurrence counts per site, so two calls in one statement each
+start at 1. A site at the node's own statement omits `site_path`, and an
+occurrence outside every loop omits `loops`.
 For a tool effect, its typed `call_id` identifies the logical Lash call
 and joins the effect evidence to its `ToolCallRecord` and language node
 start and terminal traces that carry the same call. It is absent for an
@@ -97,11 +99,12 @@ describes recovery ownership.
 ## Node execution is telemetry
 
 Language execution records use `TraceLanguageExecutionPayload`: execution
-start and finish, node start, waiting, resumption, completion, failure or
-cancellation, branch selection and child start. Each node record carries
-its site's occurrence number and the same `context` a durable effect
-occurrence carries; a continuation keeps both, so a run that parks and
-resumes numbers on. The enclosing `TraceRecord` supplies the timestamp;
+start and finish, and `Node { at, fact }` for a fact about one occurrence,
+where `fact` (`TraceNodeFact`) is a start, waiting, resumption, completion,
+failure or cancellation, a branch selection or a child start. `at` is the
+same `WorkflowOccurrence` a durable effect occurrence carries; a
+continuation keeps its numbering and loops, so a run that parks and resumes
+numbers on. The enclosing `TraceRecord` supplies the timestamp;
 node and wait timings come from the observed records, not a durable path
 log. A child link names related execution; it does not imply that the host
 has received the child's records.
@@ -162,11 +165,12 @@ Read the graph of what a process runs from Lash
 execution names): it carries the artifact's `source_identity`, which
 language traces also carry in `TraceLanguageExecutionIdentity`.
 
-Join a node trace to the graph using that source identity and `node_id`
-(or `parent_node_id` for a child start). Join a durable effect occurrence's
-`node_id` and `context.site_path` against the `execution_sites` of that node
-in the graph of the artifact its process executes, and use `occurrence` and
-`context.loops` to distinguish repeated visits to the same site. Its
+Join a node trace to the graph using that source identity and the
+`at.site` of the fact. Join a durable effect occurrence the same way: its
+`at.site.node_id` names the node, and its `at.site.site_path` is the
+`site_path` of one of that node's `execution_sites` in the graph of the
+artifact its process executes. Use `at.occurrence` and `at.loops` to
+distinguish repeated visits to the same site. Its
 call identity links the effect evidence with the tool-call trace. Preserve
 the process-to-artifact association with a recording; the occurrence alone
 does not carry a source identity. A draft claims no runtime source identity
@@ -297,7 +301,7 @@ arrives, and keep your own copy if you archive its observations. A document
 Lash no longer holds reads as `WorkflowDocumentRead::Unavailable`, and the
 overlay's `coverage.document_loaded` stays `false`. Events carry no labels,
 kinds or edges; look those up in the document by the event's site
-(`node_id` and `context.site_path`). A `BranchSelected` names the typed arm
+(`at.site`). A `BranchSelected` fact names the typed arm
 it took (`then` or `else`); which nodes the other arm holds is the document's
 to say.
 

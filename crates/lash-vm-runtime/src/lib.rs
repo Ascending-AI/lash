@@ -48,7 +48,7 @@ pub use language_runtime::{
 pub use lash_trace::{
     TraceLanguageChildExecution, TraceLanguageExecution, TraceLanguageExecutionFailure,
     TraceLanguageExecutionGeneration, TraceLanguageExecutionIdentity,
-    TraceLanguageExecutionPayload, TraceLanguageExecutionStatus, TraceNodeAwaited,
+    TraceLanguageExecutionPayload, TraceLanguageExecutionStatus, TraceNodeAwaited, TraceNodeFact,
     TraceNodeWaitKind, TraceNodeWaitResolution, WorkflowExecutionOverlay, WorkflowOverlayChildLink,
     WorkflowOverlayDocument, WorkflowOverlayOccurrence, WorkflowOverlaySite,
 };

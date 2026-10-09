@@ -84,28 +84,10 @@ export type WorkflowDiagnosticKind =
   | 'module_hash'
   | 'invalid_ast';
 /**
- * A deterministic node identifier minted from structural owner and AST path.
+ * A deterministic node identifier of a workflow document, minted from the
+ * node's structural owner and AST path. It is never empty.
  */
 export type WorkflowNodeId = string;
-/**
- * One structural step in a [`WorkflowSlotPath`].
- */
-export type WorkflowSlotPathSegment =
-  | {
-      call: number;
-    }
-  | {
-      arg: number;
-    }
-  | {
-      field: string;
-    }
-  | {
-      index: number;
-    }
-  | {
-      expr: ExprSlot;
-    };
 /**
  * The role one child expression plays in its parent expression of the
  * shared workflow IR.
@@ -148,21 +130,14 @@ export type ExprSlot =
   | 'items'
   | 'function';
 /**
- * An unambiguous address for one expression inside a workflow node.
- *
- * Two spellings share the type. A *structural* path is made only of
- * [`WorkflowSlotPathSegment::Expr`] segments and walks the typed child slots
- * of the node's statement ([`super::workflow_node_statement`]), so it reaches
- * every expression role of every IR variant; the empty path is the statement
- * itself. A *call-argument* path starts at a receiver call's argument
- * (`call`, `arg`, then record fields and list indexes) and is what type
- * facets name their expected arguments by.
+ * The typed path from a workflow node's statement to one expression inside
+ * it: the child slot taken at each step. The empty path is the statement
+ * itself.
  *
  * The serialized list is authoritative. [`Display`](std::fmt::Display) is a
- * derived spelling for text-only host contracts; field names use JSON string
- * quoting so they cannot collide with structural indexes or separators.
+ * derived spelling for text-only host contracts.
  */
-export type WorkflowSlotPath = WorkflowSlotPathSegment[];
+export type WorkflowSlotPath = ExprSlot[];
 
 export interface WorkflowNodeTypeFacets {
   available_variables?: WorkflowTypedVariable[];
@@ -197,6 +172,9 @@ export interface WorkflowTypeDiagnostic {
   [k: string]: unknown;
 }
 export interface WorkflowExpectedArgument {
+  /**
+   * The argument's expression, from the node's statement.
+   */
   slot: WorkflowSlotPath;
   ty: TypeExpr;
   [k: string]: unknown;

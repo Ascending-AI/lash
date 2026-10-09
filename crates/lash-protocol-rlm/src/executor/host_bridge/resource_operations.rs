@@ -231,9 +231,7 @@ impl HostBridge<'_> {
                 call.logical_call_id.clone(),
                 trace.language,
                 trace.identity().clone(),
-                call.call_site.site.node_id.clone(),
-                call.call_site.occurrence,
-                call.call_site.context(),
+                call.call_site.at.clone(),
             );
         }
         DispatchedCall {

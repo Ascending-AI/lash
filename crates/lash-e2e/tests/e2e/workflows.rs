@@ -1026,14 +1026,14 @@ async fn s38(case: &mut Case) -> Result<()> {
         {
             "op": "replace_expression",
             "node": draft.status.id,
-            "slot": WorkflowSlotPath::structural(status_slot),
+            "slot": WorkflowSlotPath::new(status_slot),
             "expression": signed_off,
         },
         // In the inner loop: only larger lines are reviewed.
         {
             "op": "replace_expression",
             "node": draft.threshold.id,
-            "slot": WorkflowSlotPath::structural(threshold_slot),
+            "slot": WorkflowSlotPath::new(threshold_slot),
             "expression": Expr::Number(3.0),
         },
         // In the inner loop: every line is recorded twice.

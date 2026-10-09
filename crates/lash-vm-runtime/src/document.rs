@@ -131,7 +131,7 @@ impl WorkflowExecutionDocument {
         ) {
             for node in body.nodes() {
                 sites.extend(node.execution_sites.iter().map(|site| {
-                    lash_sansio::WorkflowSiteRef::new(node.id.to_string(), site.site_path.clone())
+                    lash_sansio::WorkflowSiteRef::new(node.id.clone(), site.site_path.clone())
                 }));
                 if let lash_vm::WorkflowNodeKind::Container(container) = &node.kind {
                     for (_, child) in container.child_subgraphs() {

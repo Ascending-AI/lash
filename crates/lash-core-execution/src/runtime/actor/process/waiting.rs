@@ -6,11 +6,11 @@
 use super::activation::append_event as append;
 use super::driver::{Blocked, Driver};
 use crate::runtime::actor::round::{MemberState, RunFold};
-use crate::{ProcessId, ProcessRecord, StepEffectSite, StepRequest, WaitKind, WaitState};
+use crate::{ProcessId, ProcessRecord, StepRequest, WaitKind, WaitState};
 use lash_durable::ActorTx;
 
 /// What the engine itself waits for, beside its steps.
-fn engine_blocker(driver: &Driver) -> Option<(WaitKind, Option<StepEffectSite>)> {
+fn engine_blocker(driver: &Driver) -> Option<(WaitKind, Option<lash_sansio::WorkflowOccurrence>)> {
     match driver.blocked.as_ref()? {
         Blocked::External { name, site, .. } => {
             Some((WaitKind::Key { name: name.clone() }, site.clone()))
@@ -38,7 +38,7 @@ pub(super) fn project(
     fold: &RunFold,
     since_ms: i64,
 ) {
-    let mut blockers: Vec<(WaitKind, Option<StepEffectSite>)> = fold
+    let mut blockers: Vec<(WaitKind, Option<lash_sansio::WorkflowOccurrence>)> = fold
         .rounds()
         .flat_map(|round| round.members())
         .filter(|member| matches!(member.state(), MemberState::Waiting { .. }))

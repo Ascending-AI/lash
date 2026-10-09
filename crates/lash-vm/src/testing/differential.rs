@@ -22,10 +22,10 @@ use lash_sansio::sync::MutexExt;
 use crate::{
     AbilityOp, AbilityOutcome, Declaration, Entry, ExecutionBound, ExecutionBounds,
     ExecutionEnvironment, ExecutionHost, ExecutionHostError, ExecutionOutcome,
-    LashVmExecutionCallSite, LashVmExecutionObservation, LashVmExecutionSite,
-    LashVmHostEnvironment, LinkedModule, ModuleArtifact, Program, Record, ResourceOperation,
-    ResourceOperationBatchLeaf, ResourceOperationOutcome, RuntimeError, State, TypeExpr, Value,
-    WorkflowAdmission, WorkflowDeclaration, WorkflowDraft, WorkflowGraph, admit_workflow_graph,
+    LashVmExecutionCallSite, LashVmExecutionObservation, LashVmHostEnvironment, LinkedModule,
+    ModuleArtifact, Program, Record, ResourceOperation, ResourceOperationBatchLeaf,
+    ResourceOperationOutcome, RuntimeError, State, TypeExpr, Value, WorkflowAdmission,
+    WorkflowDeclaration, WorkflowDraft, WorkflowGraph, admit_workflow_graph,
     workflow_graph_from_artifact, workflow_graph_from_program,
 };
 
@@ -471,19 +471,6 @@ pub async fn document_runs_like_its_source(
     })
 }
 
-/// The site an observation reports.
-pub fn observed_site(observation: &LashVmExecutionObservation) -> &LashVmExecutionSite {
-    match observation {
-        LashVmExecutionObservation::NodeStarted { site, .. }
-        | LashVmExecutionObservation::ChildProcessWaiting { site, .. }
-        | LashVmExecutionObservation::NodeResumed { site, .. }
-        | LashVmExecutionObservation::NodeCompleted { site, .. }
-        | LashVmExecutionObservation::NodeFailed { site, .. }
-        | LashVmExecutionObservation::BranchSelected { site, .. }
-        | LashVmExecutionObservation::ChildStarted { site, .. } => site,
-    }
-}
-
 /// The site-attribution law: every site a run reports is a site of the
 /// document of the module that ran, and no two things that ran share one.
 ///
@@ -498,40 +485,42 @@ pub fn observed_sites_are_in_the_document(source: &SourceRun) -> Result<(), Stri
     let document = workflow_graph_from_artifact(&source.artifact);
     let sites = document
         .nodes()
-        .map(|node| (node.id.to_string(), &node.execution_sites))
+        .map(|node| (node.id.clone(), &node.execution_sites))
         .collect::<BTreeMap<_, _>>();
-    let listed = |entry: &str, site: &LashVmExecutionSite| {
+    let listed = |entry: &str, call: &LashVmExecutionCallSite| {
+        let site = &call.at.site;
         let Some(listed) = sites.get(&site.node_id) else {
-            return Err(format!("{entry}: {site:?} names no node of the document"));
+            return Err(format!("{entry}: {site} names no node of the document"));
         };
-        if listed.contains(&site.workflow_site) {
+        let described = lash_sansio::WorkflowSiteDescriptor {
+            site_path: site.site_path.clone(),
+            kind: call.kind,
+            label: call.label.clone(),
+        };
+        if listed.contains(&described) {
             Ok(())
         } else {
             Err(format!(
-                "{entry}: the document does not list {:?} on its node; it lists {listed:?}",
-                site.workflow_site
+                "{entry}: the document does not list {described:?} on its node; it lists {listed:?}"
             ))
         }
     };
     for entry in &source.run.entries {
         for observation in &entry.observations {
-            listed(&entry.entry, observed_site(observation))?;
+            listed(&entry.entry, &observation.call_site)?;
         }
         let mut occurrences = BTreeMap::new();
         for call in entry.calls.iter().filter_map(|call| call.site.as_ref()) {
-            listed(&entry.entry, &call.site)?;
-            let count = occurrences.entry(call.site.site_ref()).or_insert(0u64);
+            listed(&entry.entry, call)?;
+            let count = occurrences.entry(call.at.site.clone()).or_insert(0u64);
             *count += 1;
-            if call.occurrence != *count {
+            if call.at.occurrence.get() != *count {
                 return Err(format!(
                     "{}: call {} of {} is numbered {}",
-                    entry.entry,
-                    count,
-                    call.site.site_ref(),
-                    call.occurrence
+                    entry.entry, count, call.at.site, call.at.occurrence
                 ));
             }
-            for frame in &call.loops {
+            for frame in &call.at.loops {
                 let in_document = sites.get(&frame.site.node_id).is_some_and(|listed| {
                     listed
                         .iter()
@@ -540,9 +529,7 @@ pub fn observed_sites_are_in_the_document(source: &SourceRun) -> Result<(), Stri
                 if !in_document {
                     return Err(format!(
                         "{}: the loop {} around {} is no site of the document",
-                        entry.entry,
-                        frame.site,
-                        call.site.site_ref()
+                        entry.entry, frame.site, call.at.site
                     ));
                 }
             }

@@ -61,8 +61,8 @@ pub use jsonl_records::{
 };
 pub use language_execution::{
     LanguageExecutionObservation, StepBodyStarted, StepBodyStartedObservation,
-    TraceLanguageExecutionPayload, TraceNodeAwaited, TraceNodeWaitKind, TraceNodeWaitResolution,
-    WorkflowDocumentEntry, WorkflowDocumentRef,
+    TraceLanguageExecutionPayload, TraceNodeAwaited, TraceNodeFact, TraceNodeWaitKind,
+    TraceNodeWaitResolution, WorkflowDocumentEntry, WorkflowDocumentRef,
 };
 pub use language_execution_failure::TraceLanguageExecutionFailure;
 pub use lash_sansio::llm::types::GenerationReceipt;
@@ -204,7 +204,8 @@ pub use workflow_overlay::{
 ///         cover(
 ///             TraceRecord, TraceEvent, TraceTurnOutcome, TraceTurnCancellationEvidence,
 ///             TraceTurnCompletionReason, TraceTurnFailureReason, TraceLanguageExecutionPayload,
-///             StepBodyStarted, TraceNodeWaitKind, TraceNodeAwaited, TraceNodeWaitResolution,
+///             StepBodyStarted, TraceNodeFact, TraceNodeWaitKind, TraceNodeAwaited,
+///             TraceNodeWaitResolution,
 ///         ),
 ///     ),
 ///     items(path = "crates/lash-trace/src/workflow_overlay.rs", fold_workflow_overlay),

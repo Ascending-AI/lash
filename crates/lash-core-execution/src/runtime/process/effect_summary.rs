@@ -91,16 +91,9 @@ pub enum ProcessEffectOutcomeClass {
 #[serde(try_from = "ProcessEffectOccurrenceFields")]
 pub struct ProcessEffectOccurrence {
     pub vocabulary_version: u32,
-    pub node_id: String,
-    /// Which occurrence of its site this is, from 1, counted per site.
-    pub occurrence: u64,
-    /// The exact site inside the node and the loop activations around the
-    /// occurrence: two calls of one node stay apart after the live window.
-    #[serde(
-        default,
-        skip_serializing_if = "lash_sansio::WorkflowOccurrenceContext::is_default"
-    )]
-    pub context: lash_sansio::WorkflowOccurrenceContext,
+    /// The occurrence of the execution site the effect ran at: two calls of
+    /// one node stay apart after the live window.
+    pub at: lash_sansio::WorkflowOccurrence,
     pub operation: String,
     pub outcome_class: ProcessEffectOutcomeClass,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -114,10 +107,7 @@ pub struct ProcessEffectOccurrence {
 #[serde(deny_unknown_fields)]
 struct ProcessEffectOccurrenceFields {
     vocabulary_version: u32,
-    node_id: String,
-    occurrence: u64,
-    #[serde(default)]
-    context: lash_sansio::WorkflowOccurrenceContext,
+    at: lash_sansio::WorkflowOccurrence,
     operation: String,
     outcome_class: ProcessEffectOutcomeClass,
     #[serde(default, deserialize_with = "nonempty_failure_code")]
@@ -128,7 +118,6 @@ struct ProcessEffectOccurrenceFields {
 }
 
 const CODE_ON_A_NON_FAILURE: &str = "only a failed effect occurrence may carry a failure code";
-const OCCURRENCES_COUNT_FROM_ONE: &str = "an effect occurrence counts from 1";
 
 impl TryFrom<ProcessEffectOccurrenceFields> for ProcessEffectOccurrence {
     type Error = ProcessEffectReportError;
@@ -136,9 +125,7 @@ impl TryFrom<ProcessEffectOccurrenceFields> for ProcessEffectOccurrence {
     fn try_from(fields: ProcessEffectOccurrenceFields) -> Result<Self, Self::Error> {
         let outcome = Self {
             vocabulary_version: fields.vocabulary_version,
-            node_id: fields.node_id,
-            occurrence: fields.occurrence,
-            context: fields.context,
+            at: fields.at,
             operation: fields.operation,
             outcome_class: fields.outcome_class,
             code: fields.code,
@@ -174,8 +161,7 @@ fn nonempty_identifier(
 
 impl ProcessEffectOccurrence {
     pub fn new(
-        node_id: impl Into<String>,
-        occurrence: u64,
+        at: lash_sansio::WorkflowOccurrence,
         operation: impl Into<String>,
         outcome_class: ProcessEffectOutcomeClass,
         code: Option<lash_sansio::FailureCode>,
@@ -186,22 +172,13 @@ impl ProcessEffectOccurrence {
             vocabulary_version: fleet_format.writer_version(lash_core_store::surface_format!(
                 PROCESS_EVENT_VOCABULARY_VERSION
             )),
-            node_id: node_id.into(),
-            occurrence,
-            context: lash_sansio::WorkflowOccurrenceContext::default(),
+            at,
             operation: operation.into(),
             outcome_class,
             code,
             call_id: None,
             replay_key: replay_key.into(),
         }
-    }
-
-    /// This occurrence at the exact site and loop context `context`.
-    #[must_use]
-    pub fn at(mut self, context: lash_sansio::WorkflowOccurrenceContext) -> Self {
-        self.context = context;
-        self
     }
 
     /// `fleet_format` is the `F` the bound store recorded: the payload admits
@@ -243,17 +220,11 @@ impl ProcessEffectOccurrence {
     }
 
     fn check(&self) -> Result<(), ProcessEffectReportError> {
-        nonempty_identifier(&self.node_id, "node_id")?;
         nonempty_identifier(&self.operation, "operation")?;
         nonempty_identifier(&self.replay_key, "replay_key")?;
         if self.outcome_class != ProcessEffectOutcomeClass::Failure && self.code.is_some() {
             return Err(ProcessEffectReportError::InvalidPayload(
                 <serde_json::Error as serde::de::Error>::custom(CODE_ON_A_NON_FAILURE),
-            ));
-        }
-        if self.occurrence == 0 {
-            return Err(ProcessEffectReportError::InvalidPayload(
-                <serde_json::Error as serde::de::Error>::custom(OCCURRENCES_COUNT_FROM_ONE),
             ));
         }
         Ok(())
@@ -492,11 +463,14 @@ impl ProcessEffectReport {
         match fact {
             super::ProcessLifecycleFact::EffectOutcome(outcome) => {
                 outcome.admit(fleet_format)?;
-                let node = self.node_entry(&outcome.node_id);
+                let node = self.node_entry(outcome.at.site.node_id.as_str());
                 // Site order, then occurrence: one order whatever page the
                 // facts arrived in.
                 let key = |occurrence: &ProcessEffectOccurrence| {
-                    (occurrence.context.site_path.clone(), occurrence.occurrence)
+                    (
+                        occurrence.at.site.site_path.clone(),
+                        occurrence.at.occurrence,
+                    )
                 };
                 let position = node
                     .occurrences
@@ -563,14 +537,25 @@ fn vocabulary_version_schema() -> serde_json::Value {
     }
 }
 
-/// The shape of an occurrence's site context. The typed decode is strict
-/// about its segments; admission only bounds the envelope.
-fn occurrence_context_schema() -> serde_json::Value {
+/// The shape of an occurrence. The typed decode is strict about its site
+/// paths; admission only bounds the envelope.
+fn occurrence_schema() -> serde_json::Value {
+    let site = serde_json::json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["node_id"],
+        "properties": {
+            "node_id": { "type": "string", "minLength": 1 },
+            "site_path": { "type": "object" }
+        }
+    });
     serde_json::json!({
         "type": "object",
         "additionalProperties": false,
+        "required": ["site", "occurrence"],
         "properties": {
-            "site_path": { "type": "array", "items": { "type": ["object", "string"] } },
+            "site": site,
+            "occurrence": { "type": "integer", "minimum": 1, "maximum": u64::MAX },
             "loops": {
                 "type": "array",
                 "items": {
@@ -578,7 +563,7 @@ fn occurrence_context_schema() -> serde_json::Value {
                     "additionalProperties": false,
                     "required": ["site", "activation", "position"],
                     "properties": {
-                        "site": { "type": "object" },
+                        "site": site,
                         "activation": { "type": "integer", "minimum": 1, "maximum": u64::MAX },
                         "position": { "type": "object" }
                     }
@@ -597,16 +582,14 @@ pub(super) fn effect_outcome_payload_schema() -> crate::JsonSchema {
         "type": "object",
         "additionalProperties": false,
         "required": [
-            "vocabulary_version", "node_id", "occurrence", "operation",
+            "vocabulary_version", "at", "operation",
             "outcome_class", "call_id", "replay_key"
         ],
         "if": { "properties": { "outcome_class": { "const": "failure" } } },
         "else": { "not": { "required": ["code"] } },
         "properties": {
             "vocabulary_version": vocabulary_version_schema(),
-            "node_id": { "type": "string", "minLength": 1 },
-            "occurrence": { "type": "integer", "minimum": 1, "maximum": u64::MAX },
-            "context": occurrence_context_schema(),
+            "at": occurrence_schema(),
             "operation": { "type": "string", "minLength": 1 },
             "outcome_class": {
                 "type": "string",

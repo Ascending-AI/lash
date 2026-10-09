@@ -12,11 +12,9 @@ fn record(subject: TraceRuntimeSubject, occurrence: u64) -> TraceRecord {
     let payload = if occurrence == 0 {
         TraceLanguageExecutionPayload::ExecutionStarted
     } else {
-        TraceLanguageExecutionPayload::NodeStarted {
-            node_id: "node".into(),
-            occurrence,
-            call_id: None,
-            context: Default::default(),
+        TraceLanguageExecutionPayload::Node {
+            at: lash_sansio::WorkflowOccurrence::fixture("node", occurrence),
+            fact: lash_trace::TraceNodeFact::Started { call_id: None },
         }
     };
     fixture_record(
@@ -122,27 +120,23 @@ async fn a_process_cancelled_while_blocked_has_a_committed_cancelled_graph() {
         event.identity.engine_execution_id = Some(process.to_string());
         match &mut event.payload {
             _ if occurrence == 2 => {
-                event.payload = TraceLanguageExecutionPayload::NodeWaiting {
-                    node_id: "node".into(),
-                    occurrence: 1,
-                    awaited: lash_trace::TraceNodeAwaited::Sleep { deadline_ms: None },
-                    context: Default::default(),
+                event.payload = TraceLanguageExecutionPayload::Node {
+                    at: lash_sansio::WorkflowOccurrence::fixture("node", 1),
+                    fact: lash_trace::TraceNodeFact::Waiting {
+                        awaited: lash_trace::TraceNodeAwaited::Sleep { deadline_ms: None },
+                    },
                 };
             }
-            TraceLanguageExecutionPayload::NodeStarted {
-                node_id,
-                occurrence: node_occurrence,
-                ..
+            TraceLanguageExecutionPayload::Node {
+                at,
+                fact: lash_trace::TraceNodeFact::Started { .. },
             } if occurrence == 3 => {
-                *node_id = "running".into();
-                *node_occurrence = 1;
+                *at = lash_sansio::WorkflowOccurrence::fixture("running", 1);
             }
             _ if occurrence == 4 => {
-                event.payload = TraceLanguageExecutionPayload::NodeCompleted {
-                    node_id: "done".into(),
-                    occurrence: 1,
-                    call_id: None,
-                    context: Default::default(),
+                event.payload = TraceLanguageExecutionPayload::Node {
+                    at: lash_sansio::WorkflowOccurrence::fixture("done", 1),
+                    fact: lash_trace::TraceNodeFact::Completed { call_id: None },
                 };
             }
             _ => {}
@@ -151,9 +145,7 @@ async fn a_process_cancelled_while_blocked_has_a_committed_cancelled_graph() {
     }
     let step = lash_trace::StepBodyStarted {
         process_id: process.clone(),
-        node_id: "stepped".into(),
-        occurrence: 1,
-        context: Default::default(),
+        at: lash_sansio::WorkflowOccurrence::fixture("stepped", 1),
         call_id: lash_sansio::ToolCallId::fixture("stepped"),
         attempt: 1,
     };
@@ -208,7 +200,7 @@ async fn a_process_cancelled_while_blocked_has_a_committed_cancelled_graph() {
     let stepped = before
         .sites
         .iter()
-        .find(|site| site.site == step.site())
+        .find(|site| site.site == step.at.site)
         .expect("the step's site");
     assert!(matches!(
         stepped.occurrence,

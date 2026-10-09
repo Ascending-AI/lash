@@ -558,14 +558,18 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
     }
 }
 
-/// The live per-site counters of a continuation's counter list.
+/// The live per-site counters of a continuation's counter list. Structural
+/// validation has refused a zero count before a continuation is restored.
 fn site_occurrences(counters: Vec<VmSiteOccurrenceCounter>) -> SiteOccurrences {
     let mut occurrences = SiteOccurrences::default();
     for counter in counters {
+        let Some(count) = std::num::NonZeroU64::new(counter.count) else {
+            continue;
+        };
         occurrences
             .entry(counter.site.node_id)
             .or_default()
-            .push((counter.site.site_path, counter.count));
+            .push((counter.site.site_path, count));
     }
     occurrences
 }
@@ -582,7 +586,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     .iter()
                     .map(|(site_path, count)| VmSiteOccurrenceCounter {
                         site: lash_sansio::WorkflowSiteRef::new(node_id.clone(), site_path.clone()),
-                        count: *count,
+                        count: count.get(),
                     })
             })
             .collect();

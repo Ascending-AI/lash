@@ -145,15 +145,15 @@ fn event_is_failed_identifies_all_failure_outcomes() {
         ),
         (
             "language node failed",
-            language_execution(TraceLanguageExecutionPayload::NodeFailed {
-                node_id: "n1".to_string(),
-                occurrence: 1,
-                call_id: None,
-                failure: TraceLanguageExecutionFailure::Runtime {
-                    code: "test_failure".to_string(),
-                    message: "failed".to_string(),
+            language_execution(TraceLanguageExecutionPayload::Node {
+                at: lash_sansio::WorkflowOccurrence::fixture("n1", 1),
+                fact: TraceNodeFact::Failed {
+                    call_id: None,
+                    failure: TraceLanguageExecutionFailure::Runtime {
+                        code: "test_failure".to_string(),
+                        message: "failed".to_string(),
+                    },
                 },
-                context: Default::default(),
             }),
         ),
         (
@@ -219,11 +219,9 @@ fn event_is_failed_identifies_all_failure_outcomes() {
         ),
         (
             "started language node",
-            language_execution(TraceLanguageExecutionPayload::NodeStarted {
-                node_id: "n1".to_string(),
-                occurrence: 1,
-                call_id: None,
-                context: Default::default(),
+            language_execution(TraceLanguageExecutionPayload::Node {
+                at: lash_sansio::WorkflowOccurrence::fixture("n1", 1),
+                fact: TraceNodeFact::Started { call_id: None },
             }),
         ),
         (

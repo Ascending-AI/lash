@@ -30,7 +30,8 @@ variant names its children as typed slots (`Expr::slots`), in evaluation
 order. A place inside a node is therefore a slot path from its statement
 (`WorkflowSlotPath`): the `Arg(0)` of the call that is the `Value` of an
 assignment, for example. Slot paths are how you address an expression to
-edit, how an execution site is named, and where a diagnostic points.
+edit, how an execution site is named, where a diagnostic points, and which
+argument a type facet's expected type is for: one grammar for all four.
 
 Some of what a document carries is derived from the rest: node ids, edges,
 the variables in scope at a node, type facets and execution sites.

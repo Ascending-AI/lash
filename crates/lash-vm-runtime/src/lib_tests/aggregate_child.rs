@@ -134,8 +134,10 @@ async fn real_aggregate_child_await_names_both_without_fold_conflict() {
     assert!(graph.history.iter().any(|item| matches!(
         &item.fact,
         lash_trace::WorkflowOverlayFact::Language {
-            payload: TraceLanguageExecutionPayload::NodeWaiting {
-                awaited: TraceNodeAwaited::ChildProcesses { process_ids },
+            payload: TraceLanguageExecutionPayload::Node {
+                fact: lash_trace::TraceNodeFact::Waiting {
+                    awaited: TraceNodeAwaited::ChildProcesses { process_ids },
+                },
                 ..
             },
             ..
@@ -262,8 +264,10 @@ async fn public_trace_host_reports_a_parked_await_cancelled_after_partial_comple
     assert!(
         payloads.iter().any(|payload| matches!(
             payload,
-            TraceLanguageExecutionPayload::NodeResumed {
-                resolution: lash_trace::TraceNodeWaitResolution::Cancelled,
+            TraceLanguageExecutionPayload::Node {
+                fact: lash_trace::TraceNodeFact::Resumed {
+                    resolution: lash_trace::TraceNodeWaitResolution::Cancelled,
+                },
                 ..
             }
         )),
@@ -272,7 +276,10 @@ async fn public_trace_host_reports_a_parked_await_cancelled_after_partial_comple
     let cancelled = payloads
         .iter()
         .filter_map(|payload| match payload {
-            TraceLanguageExecutionPayload::NodeCancelled { node_id, .. } => Some(node_id.clone()),
+            TraceLanguageExecutionPayload::Node {
+                at,
+                fact: lash_trace::TraceNodeFact::Cancelled,
+            } => Some(at.site.node_id.clone()),
             _ => None,
         })
         .collect::<Vec<_>>();
@@ -280,7 +287,10 @@ async fn public_trace_host_reports_a_parked_await_cancelled_after_partial_comple
     assert!(
         !payloads.iter().any(|payload| matches!(
             payload,
-            TraceLanguageExecutionPayload::NodeFailed { node_id, .. } if node_id == &cancelled[0]
+            TraceLanguageExecutionPayload::Node {
+                at,
+                fact: lash_trace::TraceNodeFact::Failed { .. },
+            } if at.site.node_id == cancelled[0]
         )),
         "a cancelled occurrence must not also report a failure: {payloads:#?}"
     );
@@ -299,7 +309,7 @@ async fn public_trace_host_reports_a_parked_await_cancelled_after_partial_comple
             .occurrence
     };
     assert!(matches!(
-        occurrence(&cancelled[0]),
+        occurrence(cancelled[0].as_str()),
         WorkflowOverlayOccurrence::Cancelled { .. }
     ));
     assert!(
@@ -454,7 +464,13 @@ async fn a_real_loop_branch_names_the_typed_arm_it_takes_in_each_iteration() {
         matches!(
             &record.event,
             lash_trace::TraceEvent::LanguageExecution { event, .. }
-                if matches!(event.payload, TraceLanguageExecutionPayload::BranchSelected { .. })
+                if matches!(
+                    event.payload,
+                    TraceLanguageExecutionPayload::Node {
+                        fact: lash_trace::TraceNodeFact::BranchSelected { .. },
+                        ..
+                    }
+                )
         )
     };
     let second_selection = records

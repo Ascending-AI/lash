@@ -399,7 +399,7 @@ impl State {
             } => {
                 let location = target.location(slot.clone());
                 let refuse = |kind| (location.clone(), kind);
-                let slots = slot.expr_slots().ok_or_else(|| refuse(Kind::UnknownSlot))?;
+                let slots = slot.slots();
                 match target {
                     WorkflowExpressionRef::Node(node) => {
                         if slots.is_empty() {
@@ -407,7 +407,7 @@ impl State {
                         }
                         let subject = node_mut(&mut self.working, node)
                             .ok_or_else(|| refuse(Kind::UnknownHandle { handle: node }))?;
-                        replace_expression(subject, &slots, expression).map_err(refuse)?;
+                        replace_expression(subject, slots, expression).map_err(refuse)?;
                     }
                     WorkflowExpressionRef::Function(name) => {
                         let function = self
@@ -425,7 +425,7 @@ impl State {
                             .ok_or_else(|| refuse(Kind::UnknownFunction { name }))?;
                         *function
                             .body
-                            .at_slots_mut(&slots)
+                            .at_slots_mut(slots)
                             .ok_or_else(|| refuse(Kind::UnknownSlot))? = expression;
                     }
                     WorkflowExpressionRef::ProcessWrapper(process) => {
@@ -436,7 +436,7 @@ impl State {
                                 expected: "a process with a failure wrapper",
                             })
                         })?;
-                        *wrapper_argument_mut(wrapper, &slots).map_err(refuse)? = expression;
+                        *wrapper_argument_mut(wrapper, slots).map_err(refuse)? = expression;
                     }
                 }
                 self.journal.expression_edits.push(location.clone());
@@ -807,9 +807,8 @@ impl State {
                     slot: function.clone(),
                 };
                 let path = self.address(node).ok_or_else(|| unknown(node))?;
-                let root = function
-                    .expr_slots()
-                    .and_then(|slots| expr_at(&self.program, path)?.child_steps(&slots))
+                let root = expr_at(&self.program, path)
+                    .and_then(|statement| statement.child_steps(function.slots()))
                     .map(|steps| {
                         let mut root = path.clone();
                         root.steps.extend(steps);

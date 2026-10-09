@@ -1,3 +1,5 @@
+use std::num::NonZeroU64;
+
 use super::*;
 use crate::LashVmExecutionFailure;
 
@@ -41,7 +43,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
     pub(super) fn begin_lash_vm_execution(
         &mut self,
         instruction_ip: usize,
-    ) -> Option<ActiveLashVmExecutionNode> {
+    ) -> Option<LashVmExecutionCallSite> {
         let site = self.lash_vm_execution_site_at(instruction_ip)?.clone();
         Some(self.begin_lash_vm_execution_site(site))
     }
@@ -50,7 +52,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         &mut self,
         instruction_ip: usize,
         reissued: bool,
-    ) -> Option<ActiveLashVmExecutionNode> {
+    ) -> Option<LashVmExecutionCallSite> {
         if !reissued {
             return self.begin_lash_vm_execution(instruction_ip);
         }
@@ -65,14 +67,9 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
     pub(super) fn reissue_lash_vm_execution_site(
         &mut self,
         site: LashVmExecutionSite,
-    ) -> ActiveLashVmExecutionNode {
+    ) -> LashVmExecutionCallSite {
         let occurrence = next_occurrence(&mut self.lash_vm_execution_occurrences, &site);
-        ActiveLashVmExecutionNode {
-            site,
-            occurrence,
-            loops: self.loop_context(),
-            minted: false,
-        }
+        call_site(site, occurrence, self.loop_context())
     }
 
     /// The occurrence a handle minted by the instruction at `instruction_ip`
@@ -82,76 +79,57 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
     pub(super) fn mint_pending_occurrence(
         &mut self,
         instruction_ip: usize,
-    ) -> Option<crate::PendingOccurrence> {
+    ) -> Option<lash_sansio::WorkflowOccurrence> {
         let chunk = self.chunk;
         let site = chunk
             .lash_vm_execution_sites
             .get(instruction_ip)?
             .as_ref()?;
         let occurrence = next_occurrence(&mut self.lash_vm_execution_occurrences, site);
-        Some(crate::PendingOccurrence {
+        Some(lash_sansio::WorkflowOccurrence {
+            site: site.site.clone(),
             occurrence,
             loops: self.loop_context(),
         })
     }
 
     /// The node of an operation awaited through its handle: the occurrence
-    /// and loop context the handle was minted with, wherever the run is
-    /// now. It starts once, when it is first issued; issued again after a
-    /// park, it is the same node.
+    /// the handle was minted as, wherever the run is now. It starts once,
+    /// when it is first issued; issued again after a park, it is the same
+    /// node.
     pub(super) fn begin_minted_lash_vm_execution_site(
         &self,
         site: LashVmExecutionSite,
-        minted: &crate::PendingOccurrence,
+        minted: &lash_sansio::WorkflowOccurrence,
         reissued: bool,
-    ) -> ActiveLashVmExecutionNode {
+    ) -> LashVmExecutionCallSite {
+        let active = LashVmExecutionCallSite {
+            at: minted.clone(),
+            kind: site.kind,
+            label: site.label,
+        };
         if !reissued {
-            self.observe(|| LashVmExecutionObservation::NodeStarted {
-                site: site.clone(),
-                occurrence: minted.occurrence,
-                loops: minted.loops.clone(),
-            });
+            self.observe_fact(&active, || LashVmExecutionFact::NodeStarted);
         }
-        ActiveLashVmExecutionNode {
-            site,
-            occurrence: minted.occurrence,
-            loops: minted.loops.clone(),
-            minted: true,
-        }
+        active
     }
 
     /// Takes back the occurrence `active` began with: the run parked on the
-    /// operation its node issues, and issues it again when it resumes. An
-    /// occurrence a pending handle holds is not taken back: the handle is
-    /// live again and still names it.
-    pub(super) fn rewind_lash_vm_execution(&mut self, active: &ActiveLashVmExecutionNode) {
-        if active.minted {
-            return;
-        }
-        rewind_occurrence(
-            &mut self.lash_vm_execution_occurrences,
-            &active.site,
-            active.occurrence,
-        );
+    /// operation its node issues, and issues it again when it resumes. Never
+    /// called for an occurrence a pending handle holds: the handle is live
+    /// again and still names it.
+    pub(super) fn rewind_lash_vm_execution(&mut self, active: &LashVmExecutionCallSite) {
+        rewind_occurrence(&mut self.lash_vm_execution_occurrences, &active.at);
     }
 
     pub(super) fn begin_lash_vm_execution_site(
         &mut self,
         site: LashVmExecutionSite,
-    ) -> ActiveLashVmExecutionNode {
+    ) -> LashVmExecutionCallSite {
         let occurrence = next_occurrence(&mut self.lash_vm_execution_occurrences, &site);
-        let loops = self.loop_context();
-        self.observe(|| LashVmExecutionObservation::NodeStarted {
-            site: site.clone(),
-            occurrence,
-            loops: loops.clone(),
-        });
-        ActiveLashVmExecutionNode {
-            site,
-            occurrence,
-            loops,
-            minted: false,
-        }
+        let active = call_site(site, occurrence, self.loop_context());
+        self.observe_fact(&active, || LashVmExecutionFact::NodeStarted);
+        active
     }
 
     /// Starts the observed node of a call instruction, when the host observes
@@ -160,7 +138,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
     pub(super) fn begin_lash_vm_call(
         &mut self,
         instruction_ip: usize,
-    ) -> Option<ActiveLashVmExecutionNode> {
+    ) -> Option<LashVmExecutionCallSite> {
         if self.host.observes_lash_vm_execution() {
             return self.begin_lash_vm_execution(instruction_ip);
         }
@@ -186,17 +164,9 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         if !self.host.observes_lash_vm_execution() {
             return;
         }
-        let loops = self.loop_context();
-        self.observe(|| LashVmExecutionObservation::NodeStarted {
-            site: site.clone(),
-            occurrence,
-            loops: loops.clone(),
-        });
-        self.observe(|| LashVmExecutionObservation::NodeCompleted {
-            site: site.clone(),
-            occurrence,
-            loops,
-        });
+        let active = call_site(site.clone(), occurrence, self.loop_context());
+        self.observe_fact(&active, || LashVmExecutionFact::NodeStarted);
+        self.observe_fact(&active, || LashVmExecutionFact::NodeCompleted);
     }
 
     /// Keeps the loop context at one point of the loop whose site
@@ -214,7 +184,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             LoopMark::Enter => {
                 self.loop_activations += 1;
                 self.loop_stack.push(ActiveLoop {
-                    site: site.site_ref(),
+                    site: site.site.clone(),
                     activation: self.loop_activations,
                     checks: 0,
                     iterations: 0,
@@ -249,7 +219,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         let call_depth = self.frames.len();
         self.loop_stack
             .last_mut()
-            .filter(|active| active.call_depth == call_depth && site.is_at(&active.site))
+            .filter(|active| active.call_depth == call_depth && site.site == active.site)
     }
 
     /// Leaves every loop a return or a caught throw has left: those entered
@@ -287,17 +257,25 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         }
     }
 
-    pub(super) fn complete_lash_vm_execution(&self, active: &ActiveLashVmExecutionNode) {
-        self.observe(|| LashVmExecutionObservation::NodeCompleted {
-            site: active.site.clone(),
-            occurrence: active.occurrence,
-            loops: active.loops.clone(),
+    /// Hands the host one fact about the occurrence `active` names.
+    pub(super) fn observe_fact(
+        &self,
+        active: &LashVmExecutionCallSite,
+        fact: impl FnOnce() -> LashVmExecutionFact,
+    ) {
+        self.observe(|| LashVmExecutionObservation {
+            call_site: active.clone(),
+            fact: fact(),
         });
+    }
+
+    pub(super) fn complete_lash_vm_execution(&self, active: &LashVmExecutionCallSite) {
+        self.observe_fact(active, || LashVmExecutionFact::NodeCompleted);
     }
 
     pub(super) fn fail_lash_vm_execution(
         &self,
-        active: &ActiveLashVmExecutionNode,
+        active: &LashVmExecutionCallSite,
         error: &RuntimeError,
     ) {
         let failure = error
@@ -313,15 +291,10 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
 
     pub(super) fn emit_lash_vm_execution_failure(
         &self,
-        active: &ActiveLashVmExecutionNode,
+        active: &LashVmExecutionCallSite,
         failure: LashVmExecutionFailure,
     ) {
-        self.observe(|| LashVmExecutionObservation::NodeFailed {
-            site: active.site.clone(),
-            occurrence: active.occurrence,
-            loops: active.loops.clone(),
-            failure,
-        });
+        self.observe_fact(active, || LashVmExecutionFact::NodeFailed { failure });
     }
 
     pub(super) fn observe_branch_selection(
@@ -337,51 +310,72 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         else {
             return;
         };
-        if site.node_kind != lash_sansio::ExecutionNodeKind::Branch {
+        if site.kind != lash_sansio::ExecutionNodeKind::Branch {
             return;
         }
         let occurrence = next_occurrence(&mut self.lash_vm_execution_occurrences, site);
-        self.observe(|| LashVmExecutionObservation::BranchSelected {
-            site: site.clone(),
-            occurrence,
-            loops: self.loop_context(),
-            selected,
+        self.observe(|| LashVmExecutionObservation {
+            call_site: call_site(site.clone(), occurrence, self.loop_context()),
+            fact: LashVmExecutionFact::BranchSelected { selected },
         });
+    }
+}
+
+/// The occurrence `occurrence` of `site`, begun inside `loops`.
+fn call_site(
+    site: LashVmExecutionSite,
+    occurrence: NonZeroU64,
+    loops: Vec<lash_sansio::WorkflowLoopFrame>,
+) -> LashVmExecutionCallSite {
+    LashVmExecutionCallSite {
+        at: lash_sansio::WorkflowOccurrence {
+            site: site.site,
+            occurrence,
+            loops,
+        },
+        kind: site.kind,
+        label: site.label,
     }
 }
 
 /// Takes back the occurrence a site began with, when the run parked on the
 /// operation the site issues (FIG-4159): the resumed run begins it again,
 /// under the same occurrence an unparked run gives it.
-fn rewind_occurrence(
-    occurrences: &mut SiteOccurrences,
-    site: &LashVmExecutionSite,
-    occurrence: u64,
-) {
-    let Some(sites) = occurrences.get_mut(site.node_id.as_str()) else {
+fn rewind_occurrence(occurrences: &mut SiteOccurrences, at: &lash_sansio::WorkflowOccurrence) {
+    let site = &at.site;
+    let Some(sites) = occurrences.get_mut(&site.node_id) else {
         return;
     };
-    if occurrence <= 1 {
-        sites.retain(|(path, _)| path != site.site_path());
-        if sites.is_empty() {
-            occurrences.remove(site.node_id.as_str());
+    match NonZeroU64::new(at.occurrence.get() - 1) {
+        None => {
+            sites.retain(|(path, _)| *path != site.site_path);
+            if sites.is_empty() {
+                occurrences.remove(&site.node_id);
+            }
         }
-    } else if let Some((_, count)) = sites.iter_mut().find(|(path, _)| path == site.site_path()) {
-        *count = occurrence - 1;
+        Some(previous) => {
+            if let Some((_, count)) = sites.iter_mut().find(|(path, _)| *path == site.site_path) {
+                *count = previous;
+            }
+        }
     }
 }
 
 /// The next occurrence of `site`, counted per site: two sites of one node
 /// each count from 1.
-fn next_occurrence(occurrences: &mut SiteOccurrences, site: &LashVmExecutionSite) -> u64 {
-    if let Some(sites) = occurrences.get_mut(site.node_id.as_str()) {
-        if let Some((_, count)) = sites.iter_mut().find(|(path, _)| path == site.site_path()) {
-            *count += 1;
+fn next_occurrence(occurrences: &mut SiteOccurrences, site: &LashVmExecutionSite) -> NonZeroU64 {
+    let site = &site.site;
+    if let Some(sites) = occurrences.get_mut(&site.node_id) {
+        if let Some((_, count)) = sites.iter_mut().find(|(path, _)| *path == site.site_path) {
+            *count = count.saturating_add(1);
             return *count;
         }
-        sites.push((site.site_path().clone(), 1));
-        return 1;
+        sites.push((site.site_path.clone(), NonZeroU64::MIN));
+        return NonZeroU64::MIN;
     }
-    occurrences.insert(site.node_id.clone(), vec![(site.site_path().clone(), 1)]);
-    1
+    occurrences.insert(
+        site.node_id.clone(),
+        vec![(site.site_path.clone(), NonZeroU64::MIN)],
+    );
+    NonZeroU64::MIN
 }

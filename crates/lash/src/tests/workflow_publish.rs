@@ -575,7 +575,7 @@ async fn function_and_wrapper_slot_edits_publish_and_run_on_the_durable_engine()
     let process = draft
         .handle(&draft.document().process("guarded").expect("guarded").id)
         .expect("process handle");
-    let function_slot = WorkflowSlotPath::structural([ExprSlot::Right]);
+    let function_slot = WorkflowSlotPath::new([ExprSlot::Right]);
     draft
         .apply(WorkflowEditTransaction {
             base: draft.revision(),
@@ -605,7 +605,7 @@ async fn function_and_wrapper_slot_edits_publish_and_run_on_the_durable_engine()
     .await;
     assert_eq!(output, serde_json::json!("initial_edited"));
 
-    let wrapper_slot = WorkflowSlotPath::structural([ExprSlot::Arg(0), ExprSlot::Entry(0)]);
+    let wrapper_slot = WorkflowSlotPath::new([ExprSlot::Arg(0), ExprSlot::Entry(0)]);
     draft
         .apply(WorkflowEditTransaction {
             base: draft.revision(),

@@ -40,8 +40,7 @@ fn plan_append(
 
 fn effect_summary_request() -> crate::ProcessEventAppendRequest {
     ProcessEffectOccurrence::new(
-        "resource_operation:node",
-        1,
+        lash_sansio::WorkflowOccurrence::fixture("resource_operation:node", 1),
         "fixture.operation",
         ProcessEffectOutcomeClass::Failure,
         Some(crate::FailureCode::from_foreign_wire("fixture:failed")),
@@ -258,11 +257,7 @@ fn a_resume_ends_only_its_own_wait() {
     let sleep = WaitState {
         since_ms: 1,
         kind: WaitKind::Sleep { until_ms: 900 },
-        site: Some(crate::StepEffectSite {
-            node_id: "nap".to_owned(),
-            occurrence: 1,
-            context: Default::default(),
-        }),
+        site: Some(lash_sansio::WorkflowOccurrence::fixture("nap", 1)),
     };
     let child = WaitState {
         since_ms: 1,

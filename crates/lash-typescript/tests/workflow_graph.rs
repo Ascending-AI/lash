@@ -16,12 +16,11 @@ use lash_typescript::workflow_graph::{
     workflow_graph_from_source_with_facets, workflow_graph_to_source,
 };
 use lash_vm::{
-    Expr, LashVmHostCatalog, LashVmHostEnvironment, TypeExpr, TypeField, VariableVersion,
+    Expr, ExprSlot, LashVmHostCatalog, LashVmHostEnvironment, TypeExpr, TypeField, VariableVersion,
     WORKFLOW_GRAPH_SCHEMA_VERSION, WORKFLOW_TYPE_FACET_SCHEMA_VERSION, WorkflowArgument,
     WorkflowContainer, WorkflowDeclaration, WorkflowDiagnosticKind, WorkflowEdgeKind,
     WorkflowGraph, WorkflowGraphDecodeError, WorkflowNode, WorkflowNodeId, WorkflowNodeKind,
-    WorkflowSlotPath, WorkflowSlotPathSegment, WorkflowSubgraph, workflow_call_to_ir,
-    workflow_slot_value,
+    WorkflowSlotPath, WorkflowSubgraph, workflow_node_statement,
 };
 
 /// The one process a fixture lifts.
@@ -765,13 +764,13 @@ fn a_source_view_addresses_the_documents_own_nodes() {
     let canonical = canonical(source);
     let mut graph = workflow_graph_from_source(&canonical).expect("fixture projects");
     for (index, node) in graph.main.nodes_mut().into_iter().enumerate() {
-        node.id = WorkflowNodeId::new(format!("node:host-{index}"));
+        node.id = WorkflowNodeId::fixture(&format!("node:host-{index}"));
     }
     let view = lash_typescript::workflow_graph::source_view(&graph).expect("the lens has a view");
     assert_eq!(view.source, canonical);
     assert_eq!(view.source_identity, None);
     let text = |index: usize| {
-        let span = view.spans[&WorkflowNodeId::new(format!("node:host-{index}"))];
+        let span = view.spans[&WorkflowNodeId::fixture(&format!("node:host-{index}"))];
         &view.source[span.start..span.end]
     };
     assert_eq!(text(0), "let value = 1;");
@@ -1260,46 +1259,37 @@ fn facet_slot_paths_are_injective_for_hostile_record_keys() {
         arguments.len(),
         "dots, brackets, quotes, empty keys, and nested records need unique addresses"
     );
-    assert!(slots.contains(&WorkflowSlotPath(vec![
-        WorkflowSlotPathSegment::Arg(0),
-        WorkflowSlotPathSegment::Field("a.b".into()),
-    ])));
-    assert!(slots.contains(&WorkflowSlotPath(vec![
-        WorkflowSlotPathSegment::Arg(0),
-        WorkflowSlotPathSegment::Field("a".into()),
-        WorkflowSlotPathSegment::Field("b".into()),
-    ])));
+    // A facet names an argument as every other expression of its node is
+    // named: by the slot path from the node's statement. A record field is
+    // an entry by position, so no key spelling can collide with another.
+    let argument = slots
+        .iter()
+        .min_by_key(|slot| slot.slots().len())
+        .expect("the call's argument")
+        .clone();
+    assert_eq!(argument.slots().last(), Some(&ExprSlot::Arg(0)));
+    for entry in 0..6 {
+        let mut field = argument.clone();
+        field.0.push(ExprSlot::Entry(entry));
+        assert!(slots.contains(&field), "missing {field}: {slots:?}");
+    }
     assert_eq!(
-        serde_json::to_value(WorkflowSlotPath(vec![
-            WorkflowSlotPathSegment::Call(1),
-            WorkflowSlotPathSegment::Arg(0),
-            WorkflowSlotPathSegment::Field("a.b".into()),
-            WorkflowSlotPathSegment::Index(2),
+        serde_json::to_value(WorkflowSlotPath::new([
+            ExprSlot::Value,
+            ExprSlot::Arg(0),
+            ExprSlot::Entry(2),
+            ExprSlot::Item(0),
         ]))
         .expect("slot path serializes"),
-        serde_json::json!([
-            { "call": 1 },
-            { "arg": 0 },
-            { "field": "a.b" },
-            { "index": 2 }
-        ])
+        serde_json::json!(["value", { "arg": 0 }, { "entry": 2 }, { "item": 0 }])
     );
 
-    let WorkflowNodeKind::Call {
-        receiver,
-        operation,
-        arguments: call_arguments,
-        result_steps,
-        ..
-    } = &graph.main.nodes()[0].kind
-    else {
-        panic!("fixture projects as a call node");
-    };
-    let expression = workflow_call_to_ir(receiver, operation, call_arguments, result_steps);
+    let statement = workflow_node_statement(graph.main.nodes()[0]);
     let resolved = arguments
         .iter()
         .map(|argument| {
-            workflow_slot_value(&expression, &argument.slot)
+            statement
+                .at_slots(argument.slot.slots())
                 .map(|value| std::ptr::from_ref(value).addr())
                 .expect("every projected slot resolves")
         })
@@ -1332,7 +1322,7 @@ finish(second);
         first
             .expected_arguments
             .iter()
-            .any(|slot| slot.slot.to_string() == "arg[0]")
+            .any(|slot| slot.slot.slots().ends_with(&[ExprSlot::Arg(0)]))
     );
 
     let second = graph.main.nodes()[1]
@@ -1342,17 +1332,19 @@ finish(second);
     let slots = second
         .expected_arguments
         .iter()
-        .map(|slot| slot.slot.to_string())
+        .map(|slot| slot.slot.clone())
         .collect::<BTreeSet<_>>();
+    // The record argument, its `query` and `items` entries, and the first
+    // item of `items`.
     for expected in [
-        "arg[0]",
-        "arg[0][\"query\"]",
-        "arg[0][\"items\"]",
-        "arg[0][\"items\"][0]",
+        &[ExprSlot::Arg(0)][..],
+        &[ExprSlot::Arg(0), ExprSlot::Entry(0)],
+        &[ExprSlot::Arg(0), ExprSlot::Entry(1)],
+        &[ExprSlot::Arg(0), ExprSlot::Entry(1), ExprSlot::Item(0)],
     ] {
         assert!(
-            slots.contains(expected),
-            "missing slot {expected}: {slots:?}"
+            slots.iter().any(|slot| slot.slots().ends_with(expected)),
+            "missing slot {expected:?}: {slots:?}"
         );
     }
 
@@ -1363,18 +1355,27 @@ finish(second);
     let nested_slots = nested
         .expected_arguments
         .iter()
-        .map(|slot| slot.slot.to_string())
+        .map(|slot| slot.slot.clone())
         .collect::<BTreeSet<_>>();
-    for expected in [
-        "call[0].arg[0]",
-        "call[0].arg[0][\"text\"]",
-        "call[1].arg[0]",
-    ] {
-        assert!(
-            nested_slots.contains(expected),
-            "missing nested slot {expected}: {nested_slots:?}"
-        );
-    }
+    // The outer call's record argument, its `text` entry, and the argument
+    // of the call nested inside that entry: one path grammar reaches all
+    // three, with no call numbering.
+    let outer = nested_slots
+        .iter()
+        .min_by_key(|slot| slot.slots().len())
+        .expect("the outer call's argument");
+    assert_eq!(outer.slots().last(), Some(&ExprSlot::Arg(0)));
+    let mut text = outer.clone();
+    text.0.push(ExprSlot::Entry(0));
+    assert!(nested_slots.contains(&text), "{nested_slots:?}");
+    assert!(
+        nested_slots.iter().any(|slot| {
+            slot.slots().len() > text.slots().len()
+                && slot.slots().starts_with(text.slots())
+                && slot.slots().ends_with(&[ExprSlot::Arg(0)])
+        }),
+        "missing the nested call's argument: {nested_slots:?}"
+    );
 }
 
 #[test]
@@ -1395,9 +1396,15 @@ fn type_diagnostic_carries_slot_and_kind() {
         diagnostic.kind,
         WorkflowDiagnosticKind::IncompatibleExpectedLiteral
     );
+    // The `query` entry of the call's first argument, from the statement.
     assert_eq!(
-        diagnostic.slot.as_ref().map(ToString::to_string).as_deref(),
-        Some("arg[0][\"query\"]")
+        diagnostic.slot,
+        Some(WorkflowSlotPath::new([
+            ExprSlot::Operand,
+            ExprSlot::Operand,
+            ExprSlot::Arg(0),
+            ExprSlot::Entry(0),
+        ]))
     );
 }
 
@@ -1420,13 +1427,18 @@ fn multi_call_diagnostic_identifies_only_the_later_failing_call() {
         .diagnostics;
 
     assert_eq!(diagnostics.len(), 1);
+    // The argument of the call that is the outer call's `second` entry.
     assert_eq!(
-        diagnostics[0]
-            .slot
-            .as_ref()
-            .map(ToString::to_string)
-            .as_deref(),
-        Some("call[2].arg[0]")
+        diagnostics[0].slot,
+        Some(WorkflowSlotPath::new([
+            ExprSlot::Operand,
+            ExprSlot::Operand,
+            ExprSlot::Arg(0),
+            ExprSlot::Entry(1),
+            ExprSlot::Operand,
+            ExprSlot::Operand,
+            ExprSlot::Arg(0),
+        ]))
     );
 }
 
@@ -1468,7 +1480,11 @@ finish(1);
             .any(|variable| variable.name == "query")
     );
     assert!(call_facets.expected_arguments.iter().any(|argument| {
-        argument.slot.to_string() == "arg[0][\"query\"]" && argument.ty == TypeExpr::Str
+        argument
+            .slot
+            .slots()
+            .ends_with(&[ExprSlot::Arg(0), ExprSlot::Entry(0)])
+            && argument.ty == TypeExpr::Str
     }));
 
     let loop_facets = process.body.nodes()[2]

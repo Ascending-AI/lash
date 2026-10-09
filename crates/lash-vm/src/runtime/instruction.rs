@@ -260,7 +260,7 @@ pub(crate) struct CompiledResourceOperationBatchLeaf {
     /// The occurrence of `site` a leaf awaited through its handle was minted
     /// as. A leaf written in the aggregate itself has none: it takes its
     /// occurrence where the aggregate is issued.
-    pub(crate) minted: Option<super::PendingOccurrence>,
+    pub(crate) minted: Option<lash_sansio::WorkflowOccurrence>,
     pub(crate) source_span: Option<Span>,
 }
 

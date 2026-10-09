@@ -31,20 +31,19 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash_vm::{
-    Declaration, Entry, Expr, LinkedModule, ModuleArtifact, ProcessOrigin, WorkflowContainer,
-    WorkflowNodeKind, WorkflowSubgraph,
+    Declaration, Entry, Expr, LinkedModule, ModuleArtifact, ProcessOrigin, WorkflowNodeKind,
+    WorkflowSubgraph,
 };
 
 use super::corpora::{self, CorpusProgram};
 use super::{RESERVED_PREFIX, sessions};
 
-/// A compiled or mapped site: node id, kind, owner and path, and the branch
-/// arms (branch node id, `then`) it sits in.
+/// A compiled or mapped site: its address in the document, its kind and its
+/// label.
 type Site = (
-    String,
+    lash_sansio::WorkflowSiteRef,
     lash_sansio::ExecutionNodeKind,
-    lash_sansio::WorkflowExecutionSite,
-    BTreeSet<(String, bool)>,
+    String,
 );
 
 /// What a session cell's Node answer says it binds: the names bound after
@@ -230,7 +229,7 @@ fn check_artifact(linked: &LinkedModule) -> Vec<String> {
                 continue;
             }
         };
-        let compiled_sites = compiled_sites(&compiled, subgraph);
+        let compiled_sites = compiled_sites(&compiled);
         let mapped = mapped_sites(subgraph);
         for site in compiled_sites.difference(&mapped) {
             failures.push(format!(
@@ -263,90 +262,35 @@ fn check_artifact(linked: &LinkedModule) -> Vec<String> {
     failures
 }
 
-/// The compiled sites of one entry, each with the branch arms that enclose
-/// it in the IR: a site under a compiled branch's `then` or `else` child.
-/// Only an `if` container's children are arms; a loop or comprehension node
-/// can carry a `Branch` site of its own when an `if` lowers inside its
-/// condition or bind (the site then projects onto the container's path), so
-/// a `Branch` kind alone does not make a node an arm parent.
-fn compiled_sites(compiled: &lash_vm::CompiledProgram, graph: &WorkflowSubgraph) -> BTreeSet<Site> {
-    let mut arm_parents = BTreeSet::new();
-    if_container_ids(graph, &mut arm_parents);
-    let sites = lash_vm::testing::harness::compiled_execution_sites(compiled);
-    let branches = sites
-        .iter()
-        .filter(|site| site.node_kind == lash_sansio::ExecutionNodeKind::Branch)
-        .filter(|site| arm_parents.contains(&site.node_id))
-        .map(|site| {
-            (
-                site.workflow_site.owner.clone(),
-                site.workflow_site.path.clone(),
-                site.node_id.clone(),
-            )
-        })
-        .collect::<Vec<_>>();
-    sites
-        .iter()
-        .map(|site| {
-            let arms = branches
-                .iter()
-                .filter(|(owner, path, _)| {
-                    *owner == site.workflow_site.owner
-                        && site.workflow_site.path.len() > path.len() + 1
-                        && site.workflow_site.path.starts_with(path)
-                })
-                .filter_map(|(_, path, id)| match site.workflow_site.path[path.len()] {
-                    1 => Some((id.clone(), true)),
-                    2 => Some((id.clone(), false)),
-                    _ => None,
-                })
-                .collect();
-            (
-                site.node_id.clone(),
-                site.node_kind,
-                site.workflow_site.clone(),
-                arms,
-            )
-        })
+/// The compiled sites of one entry.
+fn compiled_sites(compiled: &lash_vm::CompiledProgram) -> BTreeSet<Site> {
+    lash_vm::testing::harness::compiled_execution_sites(compiled)
+        .into_iter()
+        .map(|site| (site.site.clone(), site.kind, site.label.clone()))
         .collect()
 }
 
-/// The ids of a subgraph's `if` containers: the only nodes whose children
-/// sit in branch arms.
-fn if_container_ids(graph: &WorkflowSubgraph, out: &mut BTreeSet<String>) {
-    for node in graph.nodes() {
-        if let WorkflowNodeKind::Container(container) = &node.kind {
-            if matches!(container, WorkflowContainer::If { .. }) {
-                out.insert(node.id.to_string());
-            }
-            for (_, child) in container.child_subgraphs() {
-                if_container_ids(child, out);
-            }
-        }
-    }
-}
-
 /// The trace map of one subgraph, as the trace skeleton flattens it: every
-/// node's execution sites, with the arms of the `if` containers above it.
+/// node's execution sites, addressed by the node that lists them.
 fn mapped_sites(graph: &WorkflowSubgraph) -> BTreeSet<Site> {
-    fn walk(graph: &WorkflowSubgraph, arms: &BTreeSet<(String, bool)>, out: &mut BTreeSet<Site>) {
+    fn walk(graph: &WorkflowSubgraph, out: &mut BTreeSet<Site>) {
         for node in graph.nodes() {
             for site in &node.execution_sites {
-                out.insert((node.id.to_string(), site.kind, site.clone(), arms.clone()));
+                out.insert((
+                    lash_sansio::WorkflowSiteRef::new(node.id.clone(), site.site_path.clone()),
+                    site.kind,
+                    site.label.clone(),
+                ));
             }
             if let WorkflowNodeKind::Container(container) = &node.kind {
-                for (slot, child) in container.child_subgraphs() {
-                    let mut inner = arms.clone();
-                    if let WorkflowContainer::If { .. } = container {
-                        inner.insert((node.id.to_string(), slot == "then"));
-                    }
-                    walk(child, &inner, out);
+                for (_, child) in container.child_subgraphs() {
+                    walk(child, out);
                 }
             }
         }
     }
     let mut out = BTreeSet::new();
-    walk(graph, &BTreeSet::new(), &mut out);
+    walk(graph, &mut out);
     out
 }
 

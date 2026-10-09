@@ -1,6 +1,6 @@
 use lash_sansio::{
-    ExecutionNodeKind, ExprSlot, ProcessId, WorkflowExecutionSite, WorkflowLoopFrame,
-    WorkflowOccurrenceContext, WorkflowSitePath, WorkflowSiteRef, WorkflowSiteRole,
+    ExecutionNodeKind, ExprSlot, ProcessId, WorkflowOccurrence, WorkflowSitePath, WorkflowSiteRef,
+    WorkflowSiteRole,
 };
 use serde::{Deserialize, Serialize};
 
@@ -63,7 +63,7 @@ impl LashVmExecutionSiteBuilder<'_> {
     ) -> LashVmExecutionSite {
         self.site(
             node_path,
-            WorkflowSitePath::slots(slots.iter().copied()),
+            WorkflowSitePath::at(slots.iter().copied()),
             kind,
             label,
         )
@@ -78,7 +78,7 @@ impl LashVmExecutionSiteBuilder<'_> {
     ) -> LashVmExecutionSite {
         self.site(
             node_path,
-            WorkflowSitePath::slots(slots.iter().copied()).role(WorkflowSiteRole::LabeledStep),
+            WorkflowSitePath::at(slots.iter().copied()).with_role(WorkflowSiteRole::LabeledStep),
             ExecutionNodeKind::Step,
             label,
         )
@@ -99,14 +99,11 @@ impl LashVmExecutionSiteBuilder<'_> {
         kind: ExecutionNodeKind,
         label: impl Into<String>,
     ) -> LashVmExecutionSite {
-        let label = label.into();
         let owner = self.context.entry.workflow_owner();
         LashVmExecutionSite {
-            node_id: workflow_node_id(&owner, node_path.indices()).to_string(),
-            node_kind: kind,
-            label: label.clone(),
-            workflow_site: WorkflowExecutionSite::new(owner, node_path.indices(), kind, label)
-                .at(site_path),
+            site: WorkflowSiteRef::new(workflow_node_id(&owner, node_path.indices()), site_path),
+            kind,
+            label: label.into(),
         }
     }
 }
@@ -115,61 +112,24 @@ pub fn process_ref_key(process_ref: &ProcessRef) -> String {
     format!("{}:{}", process_ref.component, process_ref.pos)
 }
 
+/// One execution site as the compiler attributes an instruction to it: its
+/// static address in the workflow document and a description of what runs
+/// there.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LashVmExecutionSite {
-    pub node_id: String,
-    pub node_kind: ExecutionNodeKind,
+    pub site: WorkflowSiteRef,
+    pub kind: ExecutionNodeKind,
     pub label: String,
-    pub workflow_site: WorkflowExecutionSite,
 }
 
-impl LashVmExecutionSite {
-    /// The typed path from the node's statement to this site's expression.
-    pub fn site_path(&self) -> &WorkflowSitePath {
-        &self.workflow_site.site_path
-    }
-
-    /// The site's static address in its workflow document.
-    pub fn site_ref(&self) -> WorkflowSiteRef {
-        WorkflowSiteRef::new(self.node_id.clone(), self.site_path().clone())
-    }
-
-    /// Where an occurrence of this site that began inside `loops` ran.
-    pub fn occurrence_context(&self, loops: &[WorkflowLoopFrame]) -> WorkflowOccurrenceContext {
-        WorkflowOccurrenceContext {
-            site_path: self.site_path().clone(),
-            loops: loops.to_vec(),
-        }
-    }
-
-    /// Whether `site` is this site's address.
-    pub fn is_at(&self, site: &WorkflowSiteRef) -> bool {
-        self.node_id == site.node_id && *self.site_path() == site.site_path
-    }
-}
-
-/// One occurrence of a site as the VM hands it to its host: the site, which
-/// run of that site this is (from 1), and the loop activations that enclosed
-/// it when it began.
+/// One occurrence of a site as the VM hands it to its host: which run of
+/// which site it is and the loop activations that enclosed it when it began
+/// (`at`), with the description of what runs at the site.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LashVmExecutionCallSite {
-    pub site: LashVmExecutionSite,
-    pub occurrence: u64,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub loops: Vec<WorkflowLoopFrame>,
-}
-
-impl LashVmExecutionCallSite {
-    /// The occurrence's identity within its execution: its site and number.
-    pub fn occurrence_key(&self) -> (WorkflowSiteRef, u64) {
-        (self.site.site_ref(), self.occurrence)
-    }
-
-    /// Where this occurrence ran inside its node, as a durable effect or
-    /// blocker records it.
-    pub fn context(&self) -> WorkflowOccurrenceContext {
-        self.site.occurrence_context(&self.loops)
-    }
+    pub at: WorkflowOccurrence,
+    pub kind: ExecutionNodeKind,
+    pub label: String,
 }
 
 /// Typed provenance for a failed external effect.
@@ -218,104 +178,21 @@ pub struct LashVmExecutionChild {
     pub process_name: String,
 }
 
-impl LashVmExecutionObservation {
-    /// The occurrence this observation is about: its site, which run of the
-    /// site it is, and the loop context it began in.
-    pub fn call_site(&self) -> LashVmExecutionCallSite {
-        match self {
-            Self::NodeStarted {
-                site,
-                occurrence,
-                loops,
-            }
-            | Self::ChildProcessWaiting {
-                site,
-                occurrence,
-                loops,
-                ..
-            }
-            | Self::NodeResumed {
-                site,
-                occurrence,
-                loops,
-            }
-            | Self::NodeCompleted {
-                site,
-                occurrence,
-                loops,
-            }
-            | Self::NodeFailed {
-                site,
-                occurrence,
-                loops,
-                ..
-            }
-            | Self::BranchSelected {
-                site,
-                occurrence,
-                loops,
-                ..
-            }
-            | Self::ChildStarted {
-                site,
-                occurrence,
-                loops,
-                ..
-            } => LashVmExecutionCallSite {
-                site: site.clone(),
-                occurrence: *occurrence,
-                loops: loops.clone(),
-            },
-        }
-    }
+/// One fact the VM observed about one occurrence of one execution site.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LashVmExecutionObservation {
+    pub call_site: LashVmExecutionCallSite,
+    pub fact: LashVmExecutionFact,
 }
 
+/// What happened to the occurrence a [`LashVmExecutionObservation`] names.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum LashVmExecutionObservation {
-    NodeStarted {
-        site: LashVmExecutionSite,
-        occurrence: u64,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        loops: Vec<WorkflowLoopFrame>,
-    },
-    ChildProcessWaiting {
-        site: LashVmExecutionSite,
-        occurrence: u64,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        loops: Vec<WorkflowLoopFrame>,
-        process_ids: Vec<ProcessId>,
-    },
-    NodeResumed {
-        site: LashVmExecutionSite,
-        occurrence: u64,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        loops: Vec<WorkflowLoopFrame>,
-    },
-    NodeCompleted {
-        site: LashVmExecutionSite,
-        occurrence: u64,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        loops: Vec<WorkflowLoopFrame>,
-    },
-    NodeFailed {
-        site: LashVmExecutionSite,
-        occurrence: u64,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        loops: Vec<WorkflowLoopFrame>,
-        failure: LashVmExecutionFailure,
-    },
-    BranchSelected {
-        site: LashVmExecutionSite,
-        occurrence: u64,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        loops: Vec<WorkflowLoopFrame>,
-        selected: ProcessBranchSelection,
-    },
-    ChildStarted {
-        site: LashVmExecutionSite,
-        occurrence: u64,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        loops: Vec<WorkflowLoopFrame>,
-        child: LashVmExecutionChild,
-    },
+pub enum LashVmExecutionFact {
+    NodeStarted,
+    ChildProcessWaiting { process_ids: Vec<ProcessId> },
+    NodeResumed,
+    NodeCompleted,
+    NodeFailed { failure: LashVmExecutionFailure },
+    BranchSelected { selected: ProcessBranchSelection },
+    ChildStarted { child: LashVmExecutionChild },
 }

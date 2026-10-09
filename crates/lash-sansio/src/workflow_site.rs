@@ -1,3 +1,5 @@
+use std::num::NonZeroU64;
+
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -94,48 +96,112 @@ pub enum WorkflowSiteRole {
     LabeledStep,
 }
 
-/// One step of a [`WorkflowSitePath`].
-#[derive(
-    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum WorkflowSiteSegment {
-    /// A typed child slot of the expression reached so far.
-    Slot(ExprSlot),
-    /// A site the expression reached so far owns beside its own.
-    Role(WorkflowSiteRole),
+/// A deterministic node identifier of a workflow document, minted from the
+/// node's structural owner and AST path. It is never empty.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, JsonSchema)]
+#[serde(transparent)]
+pub struct WorkflowNodeId(String);
+
+/// A node id was empty.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("a workflow node id is never empty")]
+pub struct EmptyWorkflowNodeId;
+
+impl WorkflowNodeId {
+    /// The id spelled `id`, as a document or a stored record names it.
+    pub fn new(id: impl Into<String>) -> Result<Self, EmptyWorkflowNodeId> {
+        let id = id.into();
+        if id.is_empty() {
+            return Err(EmptyWorkflowNodeId);
+        }
+        Ok(Self(id))
+    }
+
+    /// The id a projector mints from the hex digest of a node's preimage.
+    pub fn from_digest_hex(digest: &str) -> Self {
+        Self(format!("node:{digest}"))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// The node id spelled `label` in a test fixture.
+    ///
+    /// # Panics
+    ///
+    /// When `label` is empty.
+    #[doc(hidden)]
+    pub fn fixture(label: &str) -> Self {
+        assert!(!label.is_empty(), "a fixture node id is never empty");
+        Self(label.to_owned())
+    }
 }
 
-/// The typed path from a workflow node's statement to one executable
-/// subexpression. The empty path is the statement itself.
+impl std::fmt::Display for WorkflowNodeId {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+impl AsRef<str> for WorkflowNodeId {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::borrow::Borrow<str> for WorkflowNodeId {
+    fn borrow(&self) -> &str {
+        &self.0
+    }
+}
+
+impl PartialEq<str> for WorkflowNodeId {
+    fn eq(&self, other: &str) -> bool {
+        self.0 == other
+    }
+}
+
+impl PartialEq<&str> for WorkflowNodeId {
+    fn eq(&self, other: &&str) -> bool {
+        self.0 == *other
+    }
+}
+
+impl std::str::FromStr for WorkflowNodeId {
+    type Err = EmptyWorkflowNodeId;
+
+    fn from_str(id: &str) -> Result<Self, Self::Err> {
+        Self::new(id)
+    }
+}
+
+impl<'de> Deserialize<'de> for WorkflowNodeId {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Self::new(String::deserialize(deserializer)?).map_err(serde::de::Error::custom)
+    }
+}
+
+/// The typed path from a workflow node's statement to one expression inside
+/// it: the child slot taken at each step. The empty path is the statement
+/// itself.
 ///
-/// Slot segments walk the statement's typed child slots; a trailing role
-/// segment names a synthetic site of the expression they reach.
+/// The serialized list is authoritative. [`Display`](std::fmt::Display) is a
+/// derived spelling for text-only host contracts.
 #[derive(
     Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
 )]
 #[serde(transparent)]
-pub struct WorkflowSitePath(pub Vec<WorkflowSiteSegment>);
+pub struct WorkflowSlotPath(pub Vec<ExprSlot>);
 
-impl WorkflowSitePath {
+impl WorkflowSlotPath {
     /// The path through `slots`, from a node's statement.
-    pub fn slots(slots: impl IntoIterator<Item = ExprSlot>) -> Self {
-        Self(slots.into_iter().map(WorkflowSiteSegment::Slot).collect())
+    pub fn new(slots: impl IntoIterator<Item = ExprSlot>) -> Self {
+        Self(slots.into_iter().collect())
     }
 
-    /// This path with a synthetic `role` site of the expression it reaches.
-    #[must_use]
-    pub fn role(mut self, role: WorkflowSiteRole) -> Self {
-        self.0.push(WorkflowSiteSegment::Role(role));
-        self
-    }
-
-    /// The slots that reach the site's expression, without its role.
-    pub fn expr_slots(&self) -> impl Iterator<Item = ExprSlot> + '_ {
-        self.0.iter().filter_map(|segment| match segment {
-            WorkflowSiteSegment::Slot(slot) => Some(*slot),
-            WorkflowSiteSegment::Role(_) => None,
-        })
+    pub fn slots(&self) -> &[ExprSlot] {
+        &self.0
     }
 
     pub fn is_empty(&self) -> bool {
@@ -143,17 +209,64 @@ impl WorkflowSitePath {
     }
 }
 
-impl std::fmt::Display for WorkflowSitePath {
+impl FromIterator<ExprSlot> for WorkflowSlotPath {
+    fn from_iter<I: IntoIterator<Item = ExprSlot>>(slots: I) -> Self {
+        Self::new(slots)
+    }
+}
+
+impl std::fmt::Display for WorkflowSlotPath {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for segment in &self.0 {
-            match segment {
-                WorkflowSiteSegment::Slot(slot) => write!(formatter, "/{slot}")?,
-                WorkflowSiteSegment::Role(WorkflowSiteRole::LabeledStep) => {
-                    formatter.write_str("#labeled_step")?;
-                }
-            }
+        for slot in &self.0 {
+            write!(formatter, "/{slot}")?;
         }
         Ok(())
+    }
+}
+
+/// The address of one execution site inside a workflow node: the slot path
+/// from the node's statement to the site's expression, and the synthetic
+/// site of that expression it names, if it is not the expression's own. The
+/// default is the statement's own site.
+#[derive(
+    Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(deny_unknown_fields)]
+pub struct WorkflowSitePath {
+    #[serde(default, skip_serializing_if = "WorkflowSlotPath::is_empty")]
+    pub slots: WorkflowSlotPath,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<WorkflowSiteRole>,
+}
+
+impl WorkflowSitePath {
+    /// The own site of the expression `slots` reach from a node's statement.
+    pub fn at(slots: impl IntoIterator<Item = ExprSlot>) -> Self {
+        Self {
+            slots: WorkflowSlotPath::new(slots),
+            role: None,
+        }
+    }
+
+    /// The synthetic `role` site of the expression this path reaches.
+    #[must_use]
+    pub fn with_role(mut self, role: WorkflowSiteRole) -> Self {
+        self.role = Some(role);
+        self
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.slots.is_empty() && self.role.is_none()
+    }
+}
+
+impl std::fmt::Display for WorkflowSitePath {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{}", self.slots)?;
+        match self.role {
+            Some(WorkflowSiteRole::LabeledStep) => formatter.write_str("#labeled_step"),
+            None => Ok(()),
+        }
     }
 }
 
@@ -164,21 +277,18 @@ impl std::fmt::Display for WorkflowSitePath {
 )]
 #[serde(deny_unknown_fields)]
 pub struct WorkflowSiteRef {
-    pub node_id: String,
+    pub node_id: WorkflowNodeId,
     #[serde(default, skip_serializing_if = "WorkflowSitePath::is_empty")]
     pub site_path: WorkflowSitePath,
 }
 
 impl WorkflowSiteRef {
-    pub fn new(node_id: impl Into<String>, site_path: WorkflowSitePath) -> Self {
-        Self {
-            node_id: node_id.into(),
-            site_path,
-        }
+    pub fn new(node_id: WorkflowNodeId, site_path: WorkflowSitePath) -> Self {
+        Self { node_id, site_path }
     }
 
     /// The node's own statement site.
-    pub fn node(node_id: impl Into<String>) -> Self {
+    pub fn node(node_id: WorkflowNodeId) -> Self {
         Self::new(node_id, WorkflowSitePath::default())
     }
 }
@@ -189,6 +299,21 @@ impl std::fmt::Display for WorkflowSiteRef {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(formatter, "{}{}", self.node_id, self.site_path)
     }
+}
+
+/// One execution site of a workflow node as its document lists it: the exact
+/// executable subexpression inside the node's statement and a description of
+/// what runs there. The node that lists it is its owner; `kind` and `label`
+/// describe the site and are not its identity.
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(deny_unknown_fields)]
+pub struct WorkflowSiteDescriptor {
+    #[serde(default, skip_serializing_if = "WorkflowSitePath::is_empty")]
+    pub site_path: WorkflowSitePath,
+    pub kind: crate::ExecutionNodeKind,
+    pub label: String,
 }
 
 /// Where inside one loop activation something ran. Numbers are one-based.
@@ -219,23 +344,56 @@ pub struct WorkflowLoopFrame {
     pub position: WorkflowLoopPosition,
 }
 
-/// Where one occurrence of a site ran, beyond its node: the exact site
-/// inside the node's statement and the loop activations that enclosed the
-/// occurrence when it began, outermost first. The default is a node's own
-/// statement site outside every loop.
+/// One occurrence of one execution site: the site, which run of that site
+/// this is (from 1, counted per site within an execution), and the loop
+/// activations that enclosed the occurrence when it began, outermost first.
+///
+/// Every layer that names an occurrence (durable effect and wait records,
+/// trace facts, the overlay and the VM) holds this value.
 #[derive(
-    Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
 )]
 #[serde(deny_unknown_fields)]
-pub struct WorkflowOccurrenceContext {
-    #[serde(default, skip_serializing_if = "WorkflowSitePath::is_empty")]
-    pub site_path: WorkflowSitePath,
+pub struct WorkflowOccurrence {
+    pub site: WorkflowSiteRef,
+    pub occurrence: NonZeroU64,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub loops: Vec<WorkflowLoopFrame>,
 }
 
-impl WorkflowOccurrenceContext {
-    pub fn is_default(&self) -> bool {
-        self.site_path.is_empty() && self.loops.is_empty()
+impl WorkflowOccurrence {
+    /// Occurrence `occurrence` of `site`, outside every loop.
+    pub fn new(site: WorkflowSiteRef, occurrence: NonZeroU64) -> Self {
+        Self {
+            site,
+            occurrence,
+            loops: Vec::new(),
+        }
+    }
+
+    /// Occurrence `occurrence` of the own statement site of the node spelled
+    /// `node`, outside every loop, in a test fixture.
+    ///
+    /// # Panics
+    ///
+    /// When `node` is empty or `occurrence` is 0.
+    #[doc(hidden)]
+    pub fn fixture(node: &str, occurrence: u64) -> Self {
+        let Some(occurrence) = NonZeroU64::new(occurrence) else {
+            panic!("a fixture occurrence counts from 1");
+        };
+        Self::new(
+            WorkflowSiteRef::node(WorkflowNodeId::fixture(node)),
+            occurrence,
+        )
+    }
+
+    /// The occurrence's identity within its execution: its site and number.
+    pub fn key(&self) -> (&WorkflowSiteRef, NonZeroU64) {
+        (&self.site, self.occurrence)
     }
 }
+
+#[cfg(test)]
+#[path = "workflow_site_tests.rs"]
+mod tests;

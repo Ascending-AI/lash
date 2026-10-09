@@ -222,9 +222,9 @@ fn language_events(records: &[TraceRecord]) -> Vec<&TraceLanguageExecution> {
 }
 
 type Site = (
-    String,
+    lash_sansio::WorkflowSiteRef,
     lash_sansio::ExecutionNodeKind,
-    lash_sansio::WorkflowExecutionSite,
+    String,
 );
 
 /// Each execution's start, with the document it names.
@@ -250,8 +250,8 @@ fn emitted_sites(
     events
         .iter()
         .filter(|event| &event.identity == identity)
-        .filter_map(|event| event.payload.occurrence_key())
-        .map(|(site, _)| site)
+        .filter_map(|event| event.payload.at())
+        .map(|at| at.site.clone())
         .collect()
 }
 
@@ -279,11 +279,13 @@ async fn read_document(
 fn document_sites(document: &WorkflowExecutionDocument) -> BTreeSet<Site> {
     fn collect(body: &lash_vm::WorkflowSubgraph, sites: &mut BTreeSet<Site>) {
         for node in body.nodes() {
-            sites.extend(
-                node.execution_sites
-                    .iter()
-                    .map(|site| (node.id.to_string(), site.kind, site.clone())),
-            );
+            sites.extend(node.execution_sites.iter().map(|site| {
+                (
+                    lash_sansio::WorkflowSiteRef::new(node.id.clone(), site.site_path.clone()),
+                    site.kind,
+                    site.label.clone(),
+                )
+            }));
             if let lash_vm::WorkflowNodeKind::Container(container) = &node.kind {
                 for (_, child) in container.child_subgraphs() {
                     collect(child, sites);
@@ -309,13 +311,7 @@ fn assert_document_is_the_compiled_inventory(
 ) -> WorkflowExecutionOverlay {
     let inventory = lash_vm::testing::harness::compiled_execution_sites(compiled)
         .iter()
-        .map(|site| {
-            (
-                site.node_id.clone(),
-                site.node_kind,
-                site.workflow_site.clone(),
-            )
-        })
+        .map(|site| (site.site.clone(), site.kind, site.label.clone()))
         .collect::<BTreeSet<Site>>();
     let stated = document_sites(document);
     assert_eq!(
@@ -426,13 +422,13 @@ fn assert_untaken(
     assert!(
         document_sites(document)
             .iter()
-            .any(|(node_id, _, _)| *node_id == id),
+            .any(|(site, _, _)| site.node_id == id.as_str()),
         "the untaken `{marker}` arm is in the document"
     );
     let observed = overlay
         .sites
         .iter()
-        .filter(|site| site.site.node_id == id)
+        .filter(|site| site.site.node_id == id.as_str())
         .collect::<Vec<_>>();
     assert!(
         observed.is_empty(),
@@ -475,12 +471,7 @@ async fn production_rlm_document_is_the_compiled_inventory_for_every_loop_kind(t
     // A site's kind is the document's to state, not the event's.
     let kinds = document_sites(&document)
         .into_iter()
-        .map(|(node_id, kind, site)| {
-            (
-                lash_sansio::WorkflowSiteRef::new(node_id, site.site_path),
-                kind,
-            )
-        })
+        .map(|(site, kind, _)| (site, kind))
         .collect::<std::collections::BTreeMap<_, _>>();
     let resource_operations = emitted
         .iter()
@@ -794,11 +785,10 @@ finish(result);
         let starts = own
             .iter()
             .filter_map(|event| match &event.payload {
-                TraceLanguageExecutionPayload::NodeStarted {
-                    node_id,
-                    occurrence,
-                    ..
-                } => Some((node_id.clone(), *occurrence)),
+                TraceLanguageExecutionPayload::Node {
+                    at,
+                    fact: lash::tracing::TraceNodeFact::Started { .. },
+                } => Some(at.key()),
                 _ => None,
             })
             .collect::<Vec<_>>();
@@ -817,9 +807,12 @@ finish(result);
             let bound = records
                 .iter()
                 .filter_map(|record| match &record.event {
-                    lash_core::TraceEvent::StepBodyStarted { step } => {
-                        Some((step.site(), step.occurrence, &step.call_id, step.attempt))
-                    }
+                    lash_core::TraceEvent::StepBodyStarted { step } => Some((
+                        step.at.site.clone(),
+                        step.at.occurrence.get(),
+                        &step.call_id,
+                        step.attempt,
+                    )),
                     _ => None,
                 })
                 .collect::<Vec<_>>();
@@ -831,8 +824,8 @@ finish(result);
             assert!(
                 own.iter().all(|event| !matches!(
                     event.payload,
-                    TraceLanguageExecutionPayload::NodeStarted {
-                        call_id: Some(_),
+                    TraceLanguageExecutionPayload::Node {
+                        fact: lash::tracing::TraceNodeFact::Started { call_id: Some(_) },
                         ..
                     }
                 )),
@@ -882,7 +875,10 @@ finish(result);
                 own.iter()
                     .filter(|event| matches!(
                         event.payload,
-                        TraceLanguageExecutionPayload::NodeWaiting { .. }
+                        TraceLanguageExecutionPayload::Node {
+                            fact: lash::tracing::TraceNodeFact::Waiting { .. },
+                            ..
+                        }
                     ))
                     .count(),
                 2,
@@ -892,7 +888,10 @@ finish(result);
                 own.iter()
                     .filter(|event| matches!(
                         event.payload,
-                        TraceLanguageExecutionPayload::NodeResumed { .. }
+                        TraceLanguageExecutionPayload::Node {
+                            fact: lash::tracing::TraceNodeFact::Resumed { .. },
+                            ..
+                        }
                     ))
                     .count(),
                 2,
@@ -1033,8 +1032,8 @@ finish("started");
     };
     assert_eq!(first.process_id, ended.id);
     assert_eq!(
-        (retried.site(), retried.occurrence, &retried.call_id),
-        (first.site(), first.occurrence, &first.call_id),
+        (&retried.at, &retried.call_id),
+        (&first.at, &first.call_id),
         "the retried body keeps its site, occurrence and call"
     );
     assert_eq!(&first.call_id, first_call, "the call the body ran under");
@@ -1074,11 +1073,15 @@ finish("started");
     let [site] = called.as_slice() else {
         panic!("only the admitted step's site shows a call: {called:#?}");
     };
-    assert_eq!(site.site, first.site());
+    assert_eq!(site.site, first.at.site);
     let call = site.call.as_ref().expect("the bound call");
     assert_eq!(
         (call.occurrence, &call.call_id, call.attempt),
-        (first.occurrence, &first.call_id, Some(retried.attempt))
+        (
+            first.at.occurrence.get(),
+            &first.call_id,
+            Some(retried.attempt)
+        )
     );
     assert_eq!(
         site.summary.retained_occurrences, 1,

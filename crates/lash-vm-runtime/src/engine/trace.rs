@@ -8,23 +8,17 @@ use lash_core::plugin::PluginExecutionTrace;
 use lash_sansio::sync::MutexExt as _;
 use lash_trace::{
     TraceEvent, TraceLanguageExecution, TraceLanguageExecutionIdentity,
-    TraceLanguageExecutionPayload, TraceLanguageExecutionStatus, TraceRuntimeScope,
+    TraceLanguageExecutionPayload, TraceLanguageExecutionStatus, TraceNodeFact, TraceRuntimeScope,
     TraceRuntimeSubject,
 };
-
-/// One occurrence of one site: occurrences count per site.
-type OccurrenceKey = (lash_sansio::WorkflowSiteRef, u64);
-
-fn occurrence_key(call_site: &lash_vm::LashVmExecutionCallSite) -> OccurrenceKey {
-    (call_site.site.site_ref(), call_site.occurrence)
-}
 
 #[derive(Clone)]
 pub(super) struct ProcessTrace {
     tracing: PluginExecutionTrace,
     identity: TraceLanguageExecutionIdentity,
-    pending_resource_starts: Arc<Mutex<BTreeMap<OccurrenceKey, TraceLanguageExecutionPayload>>>,
-    settled_calls: Arc<Mutex<BTreeMap<OccurrenceKey, lash_core::ToolCallId>>>,
+    pending_resource_starts:
+        Arc<Mutex<BTreeMap<lash_sansio::WorkflowOccurrence, TraceLanguageExecutionPayload>>>,
+    settled_calls: Arc<Mutex<BTreeMap<lash_sansio::WorkflowOccurrence, lash_core::ToolCallId>>>,
 }
 
 impl ProcessTrace {
@@ -93,29 +87,27 @@ impl ProcessTrace {
         mut payload: TraceLanguageExecutionPayload,
         kind: lash_sansio::ExecutionNodeKind,
     ) {
-        use TraceLanguageExecutionPayload as Payload;
-        let Some(key) = payload.occurrence_key() else {
+        let TraceLanguageExecutionPayload::Node { at, fact } = &mut payload else {
             self.emit_payload(payload);
             return;
         };
-        if let Payload::NodeCompleted { call_id, .. } | Payload::NodeFailed { call_id, .. } =
-            &mut payload
-        {
-            *call_id = self.settled_calls.lock_recover().remove(&key);
+        if let TraceNodeFact::Completed { call_id } | TraceNodeFact::Failed { call_id, .. } = fact {
+            *call_id = self.settled_calls.lock_recover().remove(at);
         }
-        match &payload {
-            Payload::NodeStarted { .. }
+        match fact {
+            TraceNodeFact::Started { .. }
                 if kind == lash_vm::RESOURCE_OPERATION_EXECUTION_SITE_KIND =>
             {
+                let at = at.clone();
                 self.pending_resource_starts
                     .lock_recover()
-                    .insert(key, payload);
+                    .insert(at, payload);
                 return;
             }
-            Payload::NodeCompleted { .. }
-            | Payload::NodeFailed { .. }
-            | Payload::NodeCancelled { .. } => {
-                let pending = self.pending_resource_starts.lock_recover().remove(&key);
+            TraceNodeFact::Completed { .. }
+            | TraceNodeFact::Failed { .. }
+            | TraceNodeFact::Cancelled => {
+                let pending = self.pending_resource_starts.lock_recover().remove(at);
                 if let Some(started) = pending {
                     self.emit_payload(started);
                 }
@@ -155,7 +147,7 @@ impl ProcessTrace {
                 },
             ) = (site, leaf)
             {
-                calls.insert(occurrence_key(site), call.clone());
+                calls.insert(site.at.clone(), call.clone());
             }
         }
     }
@@ -166,43 +158,36 @@ impl ProcessTrace {
     pub(super) fn resource_issued(&self, call_site: &lash_vm::LashVmExecutionCallSite) {
         self.pending_resource_starts
             .lock_recover()
-            .remove(&occurrence_key(call_site));
+            .remove(&call_site.at);
     }
 
     fn emit_payload(&self, payload: TraceLanguageExecutionPayload) {
         use TraceLanguageExecutionPayload as Payload;
-        // The site, not the node, names an occurrence: two sites of one
-        // node each count from 1.
-        let at = payload
-            .occurrence_key()
-            .map(|(site, occurrence)| format!("{site}:{occurrence}"))
-            .unwrap_or_default();
         let (suffix, node) = match &payload {
             Payload::ExecutionStarted => ("started".to_owned(), None),
             Payload::ExecutionFinished { .. } => ("finished".to_owned(), None),
-            Payload::BranchSelected { node_id, .. } => (format!("branch:{at}"), Some(node_id)),
-            Payload::ChildStarted {
-                parent_node_id,
-                child,
-                ..
-            } => (
-                format!("child:{at}:{}", child.process_id),
-                Some(parent_node_id),
-            ),
-            Payload::NodeStarted { node_id, .. } => (format!("node:{at}:started"), Some(node_id)),
-            Payload::NodeCompleted { node_id, .. } => {
-                (format!("node:{at}:completed"), Some(node_id))
+            Payload::Node { at, fact } => {
+                // The site, not the node, names an occurrence: two sites of
+                // one node each count from 1.
+                let occurrence = format!("{}:{}", at.site, at.occurrence);
+                let suffix = match fact {
+                    TraceNodeFact::BranchSelected { .. } => format!("branch:{occurrence}"),
+                    TraceNodeFact::ChildStarted { child } => {
+                        format!("child:{occurrence}:{}", child.process_id)
+                    }
+                    TraceNodeFact::Started { .. } => format!("node:{occurrence}:started"),
+                    TraceNodeFact::Completed { .. } => format!("node:{occurrence}:completed"),
+                    TraceNodeFact::Failed { .. } => format!("node:{occurrence}:failed"),
+                    TraceNodeFact::Cancelled => format!("node:{occurrence}:cancelled"),
+                    TraceNodeFact::Waiting { .. } => format!("node:{occurrence}:waiting"),
+                    TraceNodeFact::Resumed { .. } => format!("node:{occurrence}:resumed"),
+                };
+                (suffix, Some(at.site.node_id.to_string()))
             }
-            Payload::NodeFailed { node_id, .. } => (format!("node:{at}:failed"), Some(node_id)),
-            Payload::NodeCancelled { node_id, .. } => {
-                (format!("node:{at}:cancelled"), Some(node_id))
-            }
-            Payload::NodeWaiting { node_id, .. } => (format!("node:{at}:waiting"), Some(node_id)),
-            Payload::NodeResumed { node_id, .. } => (format!("node:{at}:resumed"), Some(node_id)),
         };
         let event_key = format!("lash_vm_execution:{}:{suffix}", self.identity.graph_key());
         let mut context = self.tracing.trace_runtime().base_context().clone();
-        context.graph_node_id = node.cloned();
+        context.graph_node_id = node;
         let event = TraceLanguageExecution {
             event_key,
             identity: self.identity.clone(),
@@ -238,21 +223,19 @@ impl ProcessTrace {
             }
             _ => return,
         };
-        let payload = if resumed {
-            TraceLanguageExecutionPayload::NodeResumed {
-                node_id: site.site.node_id.clone(),
-                occurrence: site.occurrence,
+        let fact = if resumed {
+            TraceNodeFact::Resumed {
                 resolution: crate::TraceNodeWaitResolution::Resumed,
-                context: site.context(),
             }
         } else {
-            TraceLanguageExecutionPayload::NodeWaiting {
-                node_id: site.site.node_id.clone(),
-                occurrence: site.occurrence,
-                awaited,
-                context: site.context(),
-            }
+            TraceNodeFact::Waiting { awaited }
         };
-        self.emit(payload, site.site.node_kind);
+        self.emit(
+            TraceLanguageExecutionPayload::Node {
+                at: site.at.clone(),
+                fact,
+            },
+            site.kind,
+        );
     }
 }

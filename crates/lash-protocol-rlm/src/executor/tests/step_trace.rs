@@ -19,8 +19,10 @@ impl TraceSink for StepSink {
                 &record.event,
                 lash_trace::TraceEvent::LanguageExecution {
                     event: lash_vm_runtime::TraceLanguageExecution {
-                        payload: lash_vm_runtime::TraceLanguageExecutionPayload::NodeWaiting {
-                            awaited: lash_vm_runtime::TraceNodeAwaited::Sleep { .. },
+                        payload: lash_vm_runtime::TraceLanguageExecutionPayload::Node {
+                            fact: lash_vm_runtime::TraceNodeFact::Waiting {
+                                awaited: lash_vm_runtime::TraceNodeAwaited::Sleep { .. },
+                            },
                             ..
                         },
                         ..
@@ -119,22 +121,24 @@ fn real_foreground_sleep_reduces_waiting_then_completed() {
         let mut awaited_node = None;
         for (index, record) in records.iter().enumerate() {
             if let lash_trace::TraceEvent::LanguageExecution { event, .. } = &record.event
-                && let lash_vm_runtime::TraceLanguageExecutionPayload::NodeWaiting {
-                    node_id,
-                    awaited: lash_vm_runtime::TraceNodeAwaited::Sleep { deadline_ms: None },
-                    ..
+                && let lash_vm_runtime::TraceLanguageExecutionPayload::Node {
+                    at,
+                    fact:
+                        lash_vm_runtime::TraceNodeFact::Waiting {
+                            awaited: lash_vm_runtime::TraceNodeAwaited::Sleep { deadline_ms: None },
+                        },
                 } = &event.payload
             {
                 let graph = reduce(&records[..=index]);
                 assert_eq!(graph.execution_key, event.identity.graph_key());
                 assert!(graph.sites.iter().any(|site| {
-                    site.site.node_id == *node_id
+                    site.site.node_id == at.site.node_id
                         && matches!(
                             site.occurrence,
                             lash_vm_runtime::WorkflowOverlayOccurrence::Waiting { .. }
                         )
                 }));
-                awaited_node = Some((event.identity.graph_key(), node_id.clone()));
+                awaited_node = Some((event.identity.graph_key(), at.site.node_id.clone()));
             }
         }
         let (graph_key, node_id) = awaited_node.expect("sleep emitted a wait");
@@ -192,16 +196,18 @@ fn graphs_of(
 /// The nodes `records` report parked on a sleep.
 fn sleep_nodes(
     records: &[lash_core::facade_support::TraceRecord],
-) -> std::collections::BTreeSet<String> {
+) -> std::collections::BTreeSet<lash_sansio::WorkflowNodeId> {
     records
         .iter()
         .filter_map(|record| match &record.event {
             lash_trace::TraceEvent::LanguageExecution { event, .. } => match &event.payload {
-                lash_vm_runtime::TraceLanguageExecutionPayload::NodeWaiting {
-                    node_id,
-                    awaited: lash_vm_runtime::TraceNodeAwaited::Sleep { .. },
-                    ..
-                } => Some(node_id.clone()),
+                lash_vm_runtime::TraceLanguageExecutionPayload::Node {
+                    at,
+                    fact:
+                        lash_vm_runtime::TraceNodeFact::Waiting {
+                            awaited: lash_vm_runtime::TraceNodeAwaited::Sleep { .. },
+                        },
+                } => Some(at.site.node_id.clone()),
                 _ => None,
             },
             _ => None,
@@ -271,8 +277,10 @@ fn real_foreground_cancel_after_partial_completion_keeps_each_occurrence_honest(
             lash_trace::TraceEvent::LanguageExecution { event, .. }
                 if matches!(
                     event.payload,
-                    lash_vm_runtime::TraceLanguageExecutionPayload::NodeResumed {
-                        resolution: lash_vm_runtime::TraceNodeWaitResolution::Cancelled,
+                    lash_vm_runtime::TraceLanguageExecutionPayload::Node {
+                        fact: lash_vm_runtime::TraceNodeFact::Resumed {
+                            resolution: lash_vm_runtime::TraceNodeWaitResolution::Cancelled,
+                        },
                         ..
                     }
                 )

@@ -10,11 +10,10 @@ use super::*;
 mod types;
 pub(crate) use types::VM_PARKED_AWAIT_SETTLED_LIMIT;
 pub use types::{
-    ContinuationError, PendingOccurrence, PendingOperation, PendingOperationMap,
-    VmFinallyCompletionContinuation, VmFinallyContinuation, VmHandlerContinuation,
-    VmIteratorContinuation, VmIteratorCursor, VmLoopContinuation, VmLoopPhase,
-    VmPendingErrorOriginContinuation, VmProfileContinuation, VmResumePoint,
-    VmSiteOccurrenceCounter, VmSuspendedOperation,
+    ContinuationError, PendingOperation, PendingOperationMap, VmFinallyCompletionContinuation,
+    VmFinallyContinuation, VmHandlerContinuation, VmIteratorContinuation, VmIteratorCursor,
+    VmLoopContinuation, VmLoopPhase, VmPendingErrorOriginContinuation, VmProfileContinuation,
+    VmResumePoint, VmSiteOccurrenceCounter, VmSuspendedOperation,
 };
 
 use super::exceptions::PendingErrorOrigin;

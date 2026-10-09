@@ -1097,38 +1097,34 @@ fn aggregate_resource_sites_share_their_structural_node() {
     assert_eq!(
         list_sites
             .iter()
-            .map(|site| site.workflow_site.path.clone())
+            .map(|site| site.site.node_id.clone())
             .collect::<Vec<_>>(),
-        [vec![0], vec![0]]
-    );
-    assert!(list_sites.iter().all(|site| {
-        site.node_kind == lash_sansio::ExecutionNodeKind::ResourceOperation && site.label == "echo"
-    }));
-    assert_eq!(
-        list_sites[0].node_id, list_sites[1].node_id,
+        [
+            crate::workflow_node_id("main", &[0]),
+            crate::workflow_node_id("main", &[0])
+        ],
         "aggregate leaves are occurrences of one authored workflow node"
     );
+    assert!(list_sites.iter().all(|site| {
+        site.kind == lash_sansio::ExecutionNodeKind::ResourceOperation && site.label == "echo"
+    }));
 }
 
 fn execution_site_ids(compiled: &CompiledProgram) -> Vec<&str> {
     compiled
         .chunk
         .emitted_execution_sites()
-        .map(|site| site.node_id.as_str())
+        .map(|site| site.site.node_id.as_str())
         .collect()
 }
 
-fn compiled_site_descriptors(compiled: &CompiledProgram) -> Vec<(String, String, Vec<u32>)> {
+fn compiled_site_descriptors(
+    compiled: &CompiledProgram,
+) -> Vec<(String, String, lash_sansio::WorkflowSiteRef)> {
     let mut sites = compiled
         .chunk
         .emitted_execution_sites()
-        .map(|site| {
-            (
-                site.node_kind.to_string(),
-                site.label.clone(),
-                site.workflow_site.path.clone(),
-            )
-        })
+        .map(|site| (site.kind.to_string(), site.label.clone(), site.site.clone()))
         .collect::<Vec<_>>();
     sites.sort_by(|left, right| left.2.cmp(&right.2));
     sites

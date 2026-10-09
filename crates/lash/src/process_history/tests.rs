@@ -80,8 +80,7 @@ impl Fixture {
     /// Commit one runtime-owned effect-summary occurrence.
     async fn commit_outcome(&self, occurrence: u64) -> ProcessEvent {
         let outcome = lash_core::ProcessEffectOccurrence::new(
-            "node",
-            occurrence,
+            lash_sansio::WorkflowOccurrence::fixture("node", occurrence),
             "tools.echo",
             lash_core::ProcessEffectOutcomeClass::Success,
             None,

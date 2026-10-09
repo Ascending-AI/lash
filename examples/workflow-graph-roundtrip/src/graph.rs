@@ -5,8 +5,8 @@ use lash::typescript::workflow_graph::{
 };
 use lash::vm::ir::{
     Expr, VariableVersion, WorkflowContainer, WorkflowDeclaration, WorkflowEdge, WorkflowEffect,
-    WorkflowNode, WorkflowNodeId, WorkflowNodeKind, WorkflowSubgraph, WorkflowTerminal,
-    format_type_expr, workflow_call_from_ir, workflow_call_to_ir,
+    WorkflowNode, WorkflowNodeKind, WorkflowSubgraph, WorkflowTerminal, format_type_expr,
+    workflow_call_from_ir, workflow_call_to_ir,
 };
 use lash::workflow::{WorkflowCatch, WorkflowGraph, WorkflowStateWrite};
 use serde_json::json;
@@ -124,9 +124,7 @@ pub(crate) fn document_from_graph(
     }
     for node in &mut nodes {
         for diagnostic in &mut node.data.diagnostics {
-            diagnostic.span = spans
-                .get(&WorkflowNodeId::new(diagnostic.node_id.clone()))
-                .copied();
+            diagnostic.span = spans.get(diagnostic.node_id.as_str()).copied();
         }
     }
     WorkflowDocument {
@@ -298,6 +296,12 @@ fn node_data(node: &WorkflowNode, children: Vec<ChildGroup>, graph_scope: &Graph
             },
         }),
     };
+    // The editor keys an argument's facets by the argument's place in its
+    // call, so the host spells that key from the node's own statement.
+    let statement = lash::workflow::workflow_node_statement(node);
+    let slot_text = |slot: &lash::vm::ir::WorkflowSlotPath| {
+        argument_slot_text(&statement, slot.slots()).unwrap_or_else(|| slot.to_string())
+    };
     NodeData {
         name: NodeName::projected(node.label.as_ref(), &node.name),
         body,
@@ -323,7 +327,7 @@ fn node_data(node: &WorkflowNode, children: Vec<ChildGroup>, graph_scope: &Graph
                     .expected_arguments
                     .iter()
                     .map(|argument| ExpectedArgumentType {
-                        slot: argument.slot.to_string(),
+                        slot: slot_text(&argument.slot),
                         expected_type: format_type_expr(&argument.ty),
                     })
                     .collect()
@@ -340,7 +344,7 @@ fn node_data(node: &WorkflowNode, children: Vec<ChildGroup>, graph_scope: &Graph
                         node_id: diagnostic.node_id.to_string(),
                         kind: diagnostic_kind_text(diagnostic.kind),
                         classification: diagnostic.classification,
-                        slot: diagnostic.slot.as_ref().map(ToString::to_string),
+                        slot: diagnostic.slot.as_ref().map(&slot_text),
                         message: diagnostic.message.clone(),
                         span: None,
                     })
@@ -348,6 +352,57 @@ fn node_data(node: &WorkflowNode, children: Vec<ChildGroup>, graph_scope: &Graph
             })
             .unwrap_or_default(),
     }
+}
+
+/// The editor's text key for the call argument `slots` reach from
+/// `statement`: `arg[0]`, then `["field"]` for a record entry and `[2]` for
+/// a list item, prefixed `call[n].` when the statement holds several receiver
+/// calls (numbered in evaluation order). `None` when the path reaches no
+/// call argument.
+fn argument_slot_text(
+    statement: &lash::vm::ir::Expr,
+    slots: &[lash::vm::ir::ExprSlot],
+) -> Option<String> {
+    use lash::vm::ir::{Expr, ExprSlot};
+    fn receiver_calls<'a>(expression: &'a Expr, calls: &mut Vec<&'a Expr>) {
+        if matches!(expression, Expr::ReceiverCall { .. }) {
+            calls.push(expression);
+        }
+        for child in expression.children() {
+            receiver_calls(child, calls);
+        }
+    }
+    let mut calls = Vec::new();
+    receiver_calls(statement, &mut calls);
+    let mut expression = statement;
+    let mut text = None::<String>;
+    for slot in slots {
+        match (slot, expression) {
+            (ExprSlot::Arg(argument), Expr::ReceiverCall { .. }) => {
+                let call = calls
+                    .iter()
+                    .position(|call| std::ptr::eq(*call, expression))?;
+                text = Some(if calls.len() > 1 {
+                    format!("call[{call}].arg[{argument}]")
+                } else {
+                    format!("arg[{argument}]")
+                });
+            }
+            (ExprSlot::Entry(entry), Expr::Record(entries)) => {
+                if let (Some(text), Some((name, _))) = (&mut text, entries.get(*entry as usize)) {
+                    text.push_str(&format!("[{}]", json!(name.as_str())));
+                }
+            }
+            (ExprSlot::Item(item), Expr::List(_)) => {
+                if let Some(text) = &mut text {
+                    text.push_str(&format!("[{item}]"));
+                }
+            }
+            _ => {}
+        }
+        expression = expression.slot(*slot)?;
+    }
+    text
 }
 
 /// An effect's own expression, without the binding its statement assigns.

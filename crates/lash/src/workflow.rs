@@ -38,11 +38,12 @@
 //! `Expr::slots`.
 //!
 //! What runs is named the same way. Each node lists its `execution_sites`,
-//! and a site's `site_path` is that slot path to the expression that runs:
-//! two calls in one statement are two sites of its node. A run reports a
-//! site with its per-site occurrence and the loops around it
-//! ([`crate::vm::WorkflowOccurrenceContext`]), in language traces, durable
-//! effect occurrences and waits alike.
+//! and a site's `site_path` holds that slot path to the expression that
+//! runs: two calls in one statement are two sites of its node. A run reports
+//! one occurrence of a site as one value
+//! ([`crate::vm::WorkflowOccurrence`]: the site, its per-site occurrence and
+//! the loops around it), in language traces, durable effect occurrences and
+//! waits alike.
 //!
 //! # Editing
 //!

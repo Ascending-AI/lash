@@ -342,7 +342,7 @@ impl Script<'_> {
                 };
                 WorkflowEdit::ReplaceExpression {
                     target: lash_vm::WorkflowExpressionRef::Node(node),
-                    slot: WorkflowSlotPath::structural(slot),
+                    slot: WorkflowSlotPath::new(slot),
                     expression: self.expression(),
                 }
             }
@@ -363,7 +363,7 @@ impl Script<'_> {
                 let paths = expression_slots(&function.body);
                 WorkflowEdit::ReplaceExpression {
                     target: lash_vm::WorkflowExpressionRef::Function(name),
-                    slot: WorkflowSlotPath::structural(paths[self.pick(paths.len())].clone()),
+                    slot: WorkflowSlotPath::new(paths[self.pick(paths.len())].clone()),
                     expression: self.expression(),
                 }
             }
@@ -395,7 +395,7 @@ impl Script<'_> {
                 };
                 WorkflowEdit::ReplaceExpression {
                     target: lash_vm::WorkflowExpressionRef::ProcessWrapper(process),
-                    slot: WorkflowSlotPath::structural(slot),
+                    slot: WorkflowSlotPath::new(slot),
                     expression: self.expression(),
                 }
             }
@@ -612,7 +612,7 @@ impl Script<'_> {
                     WorkflowEdgeDrag::Data {
                         from,
                         to,
-                        slot: WorkflowSlotPath::structural(slot),
+                        slot: WorkflowSlotPath::new(slot),
                     }
                 };
                 // A drag that names no edit is the insert below: what an

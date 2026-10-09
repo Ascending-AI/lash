@@ -337,10 +337,8 @@ fn write(step: &str, x: u64, site: Option<(&str, u64)>) -> lash_core::EngineActi
             step: lash_core::StepName(step.to_owned()),
             tool: lash_core::ToolId::new(WRITE_TOOL),
             input: serde_json::json!({ "x": x }),
-            site: site.map(|(node_id, occurrence)| lash_core::StepEffectSite {
-                node_id: node_id.to_owned(),
-                occurrence,
-                context: Default::default(),
+            site: site.map(|(node_id, occurrence)| {
+                lash_sansio::WorkflowOccurrence::fixture(node_id, occurrence)
             }),
         }],
         wake: None,
@@ -445,17 +443,12 @@ const NODE_WRITES: u64 = lash_core::PROCESS_EFFECT_OCCURRENCE_CAP + 1;
 /// The site of the `n`-th write of [`NODE`], from 0: the writes alternate
 /// between two call sites of the one node, each counting its own occurrences
 /// from 1.
-fn node_site(n: u64) -> lash_core::StepEffectSite {
-    lash_core::StepEffectSite {
-        node_id: NODE.to_owned(),
-        occurrence: n / 2 + 1,
-        context: lash_sansio::WorkflowOccurrenceContext {
-            site_path: lash_sansio::WorkflowSitePath::slots([lash_sansio::ExprSlot::Item(
-                u32::try_from(n % 2).expect("0 or 1"),
-            )]),
-            loops: Vec::new(),
-        },
-    }
+fn node_site(n: u64) -> lash_sansio::WorkflowOccurrence {
+    let mut at = lash_sansio::WorkflowOccurrence::fixture(NODE, n / 2 + 1);
+    at.site.site_path = lash_sansio::WorkflowSitePath::at([lash_sansio::ExprSlot::Item(
+        u32::try_from(n % 2).expect("0 or 1"),
+    )]);
+    at
 }
 
 /// Writes [`NODE_WRITES`] times for [`NODE`], one settled before the next,
@@ -511,20 +504,16 @@ async fn each_committed_effect_is_one_effect_outcome_event(tier: Tier) {
                     .expect("an effect outcome decodes")
             })
             .collect();
-    let recorded: Vec<(lash_sansio::WorkflowOccurrenceContext, u64)> = outcomes
-        .iter()
-        .map(|outcome| (outcome.context.clone(), outcome.occurrence))
-        .collect();
+    let recorded: Vec<lash_sansio::WorkflowOccurrence> =
+        outcomes.iter().map(|outcome| outcome.at.clone()).collect();
     let first_cap: Vec<_> = (0..lash_core::PROCESS_EFFECT_OCCURRENCE_CAP)
         .map(node_site)
-        .map(|site| (site.context, site.occurrence))
         .collect();
     assert_eq!(
         recorded, first_cap,
         "the node's first cap occurrences, each at its own site: {events:#?}"
     );
     for outcome in &outcomes {
-        assert_eq!(outcome.node_id, NODE);
         assert_eq!(outcome.operation, WRITE_TOOL);
         assert_eq!(
             outcome.outcome_class,

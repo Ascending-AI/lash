@@ -1033,7 +1033,7 @@ pub mod plugins {
     pub use lash_core::{
         EngineAction, EngineEvent, EngineState, EngineStateFormat, EngineStepKind,
         EngineStepRefusal, EngineStepRun, EngineSteps, KeyName, Material, NamesMaterial,
-        SettledOutput, SettledOutputRefusal, StepEffectSite, StepName, StepRequest,
+        SettledOutput, SettledOutputRefusal, StepName, StepRequest,
     };
     /// Executable identity and terminal rendering returned by protocol integrators.
     pub use lash_core::{ExecutableGeneration, RecordedRender};

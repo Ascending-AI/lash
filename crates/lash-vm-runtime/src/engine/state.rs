@@ -82,7 +82,7 @@ pub(crate) enum Wait {
         /// The node that sleeps and which occurrence of it, when the VM
         /// tracks it.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        site: Option<lash_core::StepEffectSite>,
+        site: Option<lash_sansio::WorkflowOccurrence>,
     },
     /// Another process's terminal.
     Process {
@@ -90,7 +90,7 @@ pub(crate) enum Wait {
         /// The site that awaits and which occurrence of it, when the VM
         /// tracks it.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        site: Option<lash_core::StepEffectSite>,
+        site: Option<lash_sansio::WorkflowOccurrence>,
     },
 }
 
@@ -222,7 +222,7 @@ pub(crate) enum IssuedOperation {
         /// The node that sleeps and which occurrence of it, when the VM
         /// tracks it.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        site: Option<lash_core::StepEffectSite>,
+        site: Option<lash_sansio::WorkflowOccurrence>,
     },
     /// An await of another process's terminal.
     AwaitProcess {
@@ -230,7 +230,7 @@ pub(crate) enum IssuedOperation {
         /// The site that awaits and which occurrence of it, when the VM
         /// tracks it.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        site: Option<lash_core::StepEffectSite>,
+        site: Option<lash_sansio::WorkflowOccurrence>,
     },
 }
 
@@ -244,7 +244,7 @@ pub(crate) enum IssuedLeaf {
         input: serde_json::Value,
         /// The call's node and occurrence, when the VM tracks it.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        site: Option<lash_core::StepEffectSite>,
+        site: Option<lash_sansio::WorkflowOccurrence>,
     },
 
     /// A timer that settles at `until_ms`.

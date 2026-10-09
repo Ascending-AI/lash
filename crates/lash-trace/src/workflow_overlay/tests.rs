@@ -53,7 +53,23 @@ fn reference() -> WorkflowDocumentRef {
 }
 
 fn site(node: &str) -> WorkflowSiteRef {
-    WorkflowSiteRef::node(node)
+    WorkflowSiteRef::node(lash_sansio::WorkflowNodeId::fixture(node))
+}
+
+/// Occurrence `occurrence` of `site`, outside every loop.
+fn occurrence_at(site: &WorkflowSiteRef, occurrence: u64) -> lash_sansio::WorkflowOccurrence {
+    lash_sansio::WorkflowOccurrence::new(
+        site.clone(),
+        std::num::NonZeroU64::new(occurrence).expect("occurrences count from 1"),
+    )
+}
+
+/// A fact about occurrence `occurrence` of the node `node`'s own site.
+fn node_fact(node: &str, occurrence: u64, fact: TraceNodeFact) -> TraceLanguageExecutionPayload {
+    TraceLanguageExecutionPayload::Node {
+        at: occurrence_at(&site(node), occurrence),
+        fact,
+    }
 }
 
 /// The fixture document: a branch, a call in each arm, and a statement with
@@ -72,14 +88,10 @@ fn document() -> WorkflowOverlayDocument {
 }
 
 fn arg_site(node: &str, arg: u32) -> WorkflowSiteRef {
-    WorkflowSiteRef::new(node, WorkflowSitePath::slots([ExprSlot::Arg(arg)]))
-}
-
-fn context(site: &WorkflowSiteRef) -> lash_sansio::WorkflowOccurrenceContext {
-    lash_sansio::WorkflowOccurrenceContext {
-        site_path: site.site_path.clone(),
-        loops: Vec::new(),
-    }
+    WorkflowSiteRef::new(
+        lash_sansio::WorkflowNodeId::fixture(node),
+        WorkflowSitePath::at([ExprSlot::Arg(arg)]),
+    )
 }
 
 fn at(ms: i64) -> chrono::DateTime<Utc> {
@@ -101,11 +113,9 @@ fn started_event(event_key: &str) -> TraceLanguageExecution {
 fn started_at(event_key: &str, site: &WorkflowSiteRef, occurrence: u64) -> TraceLanguageExecution {
     language(
         event_key,
-        TraceLanguageExecutionPayload::NodeStarted {
-            node_id: site.node_id.clone(),
-            occurrence,
-            call_id: None,
-            context: context(site),
+        TraceLanguageExecutionPayload::Node {
+            at: occurrence_at(site, occurrence),
+            fact: TraceNodeFact::Started { call_id: None },
         },
     )
 }
@@ -117,11 +127,9 @@ fn completed_at(
 ) -> TraceLanguageExecution {
     language(
         event_key,
-        TraceLanguageExecutionPayload::NodeCompleted {
-            node_id: site.node_id.clone(),
-            occurrence,
-            call_id: None,
-            context: context(site),
+        TraceLanguageExecutionPayload::Node {
+            at: occurrence_at(site, occurrence),
+            fact: TraceNodeFact::Completed { call_id: None },
         },
     )
 }
@@ -137,16 +145,17 @@ fn node_completed(event_key: &str, occurrence: u64) -> TraceLanguageExecution {
 fn node_failed(event_key: &str, occurrence: u64, error: &str) -> TraceLanguageExecution {
     language(
         event_key,
-        TraceLanguageExecutionPayload::NodeFailed {
-            node_id: "branch".to_string(),
+        node_fact(
+            "branch",
             occurrence,
-            call_id: None,
-            failure: TraceLanguageExecutionFailure::Runtime {
-                code: "test_failure".to_string(),
-                message: error.to_string(),
+            TraceNodeFact::Failed {
+                call_id: None,
+                failure: TraceLanguageExecutionFailure::Runtime {
+                    code: "test_failure".to_string(),
+                    message: error.to_string(),
+                },
             },
-            context: Default::default(),
-        },
+        ),
     )
 }
 
@@ -157,12 +166,7 @@ fn node_waiting(
 ) -> TraceLanguageExecution {
     language(
         event_key,
-        TraceLanguageExecutionPayload::NodeWaiting {
-            node_id: "branch".to_string(),
-            occurrence,
-            awaited,
-            context: Default::default(),
-        },
+        node_fact("branch", occurrence, TraceNodeFact::Waiting { awaited }),
     )
 }
 
@@ -179,12 +183,11 @@ fn execution_finished(event_key: &str, status: LanguageExecutionStatus) -> Trace
 fn branch_selected(occurrence: u64, selected: TraceBranchSelection) -> TraceLanguageExecution {
     language(
         "branch",
-        TraceLanguageExecutionPayload::BranchSelected {
-            node_id: "branch".to_string(),
+        node_fact(
+            "branch",
             occurrence,
-            context: Default::default(),
-            selected,
-        },
+            TraceNodeFact::BranchSelected { selected },
+        ),
     )
 }
 
@@ -212,9 +215,7 @@ fn record_at(event: TraceLanguageExecution, ms: i64) -> TraceRecord {
 fn step_body(process: &ProcessId, occurrence: u64, call: &str, attempt: u32) -> StepBodyStarted {
     StepBodyStarted {
         process_id: process.clone(),
-        node_id: "then".to_string(),
-        occurrence,
-        context: Default::default(),
+        at: occurrence_at(&site("then"), occurrence),
         call_id: lash_sansio::ToolCallId::fixture(call),
         attempt,
     }
@@ -539,12 +540,13 @@ fn a_step_body_start_binds_its_occurrence_to_the_call_and_a_retry_keeps_both() {
         in_process(
             language(
                 "done",
-                TraceLanguageExecutionPayload::NodeCompleted {
-                    node_id: "then".to_string(),
-                    occurrence: 1,
-                    call_id: Some(lash_sansio::ToolCallId::fixture("call-1")),
-                    context: Default::default(),
-                },
+                node_fact(
+                    "then",
+                    1,
+                    TraceNodeFact::Completed {
+                        call_id: Some(lash_sansio::ToolCallId::fixture("call-1")),
+                    },
+                ),
             ),
             &process,
         ),
@@ -947,12 +949,13 @@ fn a_wait_keeps_its_awaited_identity_and_resolves_only_its_own_occurrence() {
     let resumed = |occurrence| {
         language(
             "resumed",
-            TraceLanguageExecutionPayload::NodeResumed {
-                node_id: "branch".to_string(),
+            node_fact(
+                "branch",
                 occurrence,
-                context: Default::default(),
-                resolution: crate::TraceNodeWaitResolution::Resumed,
-            },
+                TraceNodeFact::Resumed {
+                    resolution: crate::TraceNodeWaitResolution::Resumed,
+                },
+            ),
         )
     };
     let waiting = [
@@ -1014,11 +1017,7 @@ fn a_cancellation_changes_only_an_observed_in_flight_occurrence() {
     let cancelled = |occurrence| {
         language(
             "cancelled",
-            TraceLanguageExecutionPayload::NodeCancelled {
-                node_id: "branch".to_string(),
-                occurrence,
-                context: Default::default(),
-            },
+            node_fact("branch", occurrence, TraceNodeFact::Cancelled),
         )
     };
     let unobserved = fold(None, &[record_at(cancelled(1), 2_000)]).expect("cancel alone");
@@ -1056,22 +1055,23 @@ fn a_child_link_names_the_parent_site_and_the_child_execution() {
         &[record_at(
             language(
                 "child",
-                TraceLanguageExecutionPayload::ChildStarted {
-                    parent_node_id: "then".to_string(),
-                    occurrence: 1,
-                    context: Default::default(),
-                    child: crate::TraceLanguageChildExecution {
-                        scope: TraceRuntimeScope::none(),
-                        process_id: child.clone(),
-                        attempt: Some(1),
-                        document: Some(WorkflowDocumentRef {
-                            entry: WorkflowDocumentEntry::Process {
-                                process_ref: "0:1".to_owned(),
-                            },
-                            ..reference()
-                        }),
+                node_fact(
+                    "then",
+                    1,
+                    TraceNodeFact::ChildStarted {
+                        child: crate::TraceLanguageChildExecution {
+                            scope: TraceRuntimeScope::none(),
+                            process_id: child.clone(),
+                            attempt: Some(1),
+                            document: Some(WorkflowDocumentRef {
+                                entry: WorkflowDocumentEntry::Process {
+                                    process_ref: "0:1".to_owned(),
+                                },
+                                ..reference()
+                            }),
+                        },
                     },
-                },
+                ),
             ),
             1_000,
         )],

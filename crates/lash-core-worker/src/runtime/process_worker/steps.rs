@@ -124,14 +124,12 @@ impl DurableProcessWorker {
         }
         let started = lash_trace::StepBodyStarted {
             process_id: process.id.clone(),
-            node_id: site.node_id.clone(),
-            occurrence: site.occurrence,
-            context: site.context.clone(),
+            at: site.clone(),
             call_id: execution.call().clone(),
             attempt: execution.attempt(),
         };
         let mut context = tracing.trace_runtime().base_context().clone();
-        context.graph_node_id = Some(site.node_id.clone());
+        context.graph_node_id = Some(site.site.node_id.to_string());
         tracing.observe_language(&started.event_key(), || {
             (
                 context.clone(),

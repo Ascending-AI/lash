@@ -39,6 +39,7 @@ fn assert_classified_producer(recovered: bool, with_owner: bool) {
         let facets = projected_node_type_facets(
             Some(&analysis),
             if with_owner { &owner } else { &path },
+            &crate::WorkflowOwnership::default(),
             &[],
             &id,
         )

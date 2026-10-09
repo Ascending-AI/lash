@@ -18,7 +18,7 @@ use crate::{
     StepBodyStarted, TRACE_SCHEMA_VERSION, TraceEvent, TraceLanguageExecutionFailure,
     TraceLanguageExecutionGeneration, TraceLanguageExecutionIdentity as LanguageIdentity,
     TraceLanguageExecutionPayload, TraceLanguageExecutionStatus as LanguageExecutionStatus,
-    TraceRecord, TraceRuntimeScope, TraceRuntimeSubject, WorkflowDocumentRef,
+    TraceNodeFact, TraceRecord, TraceRuntimeScope, TraceRuntimeSubject, WorkflowDocumentRef,
 };
 
 mod accumulator;
@@ -497,32 +497,29 @@ fn materialize_overlay(
                 folded.started(item.timestamp);
                 folded.bind(step.call_id.clone(), Some(step.attempt));
             }
-            WorkflowOverlayFact::Language { payload, .. } => match payload {
-                TraceLanguageExecutionPayload::ExecutionStarted
-                | TraceLanguageExecutionPayload::ExecutionFinished { .. } => {}
-                TraceLanguageExecutionPayload::NodeStarted { call_id, .. } => {
+            WorkflowOverlayFact::Language { payload, .. } => match payload.node_fact() {
+                None => {}
+                Some(TraceNodeFact::Started { call_id }) => {
                     let folded = folded!();
                     folded.started(item.timestamp);
                     if let Some(call_id) = call_id {
                         folded.bind(call_id.clone(), None);
                     }
                 }
-                TraceLanguageExecutionPayload::NodeWaiting { awaited, .. } => {
+                Some(TraceNodeFact::Waiting { awaited }) => {
                     folded!().waiting = Some((item.timestamp, awaited.clone()));
                 }
-                TraceLanguageExecutionPayload::NodeResumed { .. } => {
+                Some(TraceNodeFact::Resumed { .. }) => {
                     folded!().resumed = Some(item.timestamp);
                 }
-                TraceLanguageExecutionPayload::NodeCompleted { call_id, .. } => {
+                Some(TraceNodeFact::Completed { call_id }) => {
                     let folded = folded!();
                     folded.explicit_terminal = Some(OccurrenceTerminal::Completed(item.timestamp));
                     if let Some(call_id) = call_id {
                         folded.bind(call_id.clone(), None);
                     }
                 }
-                TraceLanguageExecutionPayload::NodeFailed {
-                    call_id, failure, ..
-                } => {
+                Some(TraceNodeFact::Failed { call_id, failure }) => {
                     let folded = folded!();
                     folded.explicit_terminal =
                         Some(OccurrenceTerminal::Failed(item.timestamp, failure.clone()));
@@ -530,16 +527,16 @@ fn materialize_overlay(
                         folded.bind(call_id.clone(), None);
                     }
                 }
-                TraceLanguageExecutionPayload::NodeCancelled { .. } => {
+                Some(TraceNodeFact::Cancelled) => {
                     folded!().explicit_terminal =
                         Some(OccurrenceTerminal::Cancelled(item.timestamp));
                 }
-                TraceLanguageExecutionPayload::BranchSelected { selected, .. } => {
+                Some(TraceNodeFact::BranchSelected { selected }) => {
                     state.branch = Some(*selected);
                     folded!().provisional_terminal =
                         Some(OccurrenceTerminal::Completed(item.timestamp));
                 }
-                TraceLanguageExecutionPayload::ChildStarted { child, .. } => {
+                Some(TraceNodeFact::ChildStarted { child }) => {
                     let link = child_link(&execution_key, &site, child);
                     children.insert(child_link_key(&link), link);
                 }
@@ -893,7 +890,11 @@ fn merge_late_retained_event(
     match fact {
         WorkflowOverlayFact::StepBodyStarted { .. }
         | WorkflowOverlayFact::Language {
-            payload: TraceLanguageExecutionPayload::NodeStarted { .. },
+            payload:
+                TraceLanguageExecutionPayload::Node {
+                    fact: TraceNodeFact::Started { .. },
+                    ..
+                },
             ..
         } => {
             let start = match &retention.state.occurrence {
@@ -990,93 +991,97 @@ fn merge_late_retained_event(
                 }
             }
         }
-        WorkflowOverlayFact::Language { payload, .. } => match payload {
-            TraceLanguageExecutionPayload::NodeCompleted { occurrence, .. }
-            | TraceLanguageExecutionPayload::NodeFailed { occurrence, .. }
-            | TraceLanguageExecutionPayload::NodeCancelled { occurrence, .. } => {
-                if retention.state.occurrence.is_terminal() {
-                    return;
-                }
-                if matches!(payload, TraceLanguageExecutionPayload::NodeCancelled { .. })
-                    && !matches!(&retention.state.occurrence,
-                        WorkflowOverlayOccurrence::Running { occurrence: retained, .. }
-                        | WorkflowOverlayOccurrence::Waiting { occurrence: retained, .. }
-                        if retained == occurrence)
-                {
-                    return;
-                }
-                let start = match retention.state.occurrence {
-                    WorkflowOverlayOccurrence::Running {
-                        occurrence: retained,
-                        start,
-                    } if retained == *occurrence => Some(start),
-                    _ => None,
-                };
-                let duration_ms = start.map(|start| {
-                    timestamp
-                        .signed_duration_since(start)
-                        .num_milliseconds()
-                        .max(0)
-                });
-                let (status, observation) = match payload {
-                    TraceLanguageExecutionPayload::NodeFailed { failure, .. } => (
-                        WorkflowOverlayTerminalStatus::Failed,
-                        WorkflowOverlayOccurrence::Failed {
-                            occurrence: *occurrence,
+        WorkflowOverlayFact::Language { payload, .. } => {
+            let TraceLanguageExecutionPayload::Node { at, fact: node } = payload else {
+                return;
+            };
+            let occurrence = at.occurrence.get();
+            match node {
+                TraceNodeFact::Completed { .. }
+                | TraceNodeFact::Failed { .. }
+                | TraceNodeFact::Cancelled => {
+                    if retention.state.occurrence.is_terminal() {
+                        return;
+                    }
+                    if matches!(node, TraceNodeFact::Cancelled)
+                        && !matches!(&retention.state.occurrence,
+                            WorkflowOverlayOccurrence::Running { occurrence: retained, .. }
+                            | WorkflowOverlayOccurrence::Waiting { occurrence: retained, .. }
+                            if *retained == occurrence)
+                    {
+                        return;
+                    }
+                    let start = match retention.state.occurrence {
+                        WorkflowOverlayOccurrence::Running {
+                            occurrence: retained,
                             start,
-                            end: timestamp,
-                            duration_ms,
-                            failure: failure.clone(),
-                        },
-                    ),
-                    TraceLanguageExecutionPayload::NodeCancelled { .. } => (
-                        WorkflowOverlayTerminalStatus::Cancelled,
-                        WorkflowOverlayOccurrence::Cancelled {
-                            occurrence: *occurrence,
-                            start,
-                            end: timestamp,
-                        },
-                    ),
-                    _ => (
-                        WorkflowOverlayTerminalStatus::Completed,
-                        WorkflowOverlayOccurrence::Completed {
-                            occurrence: *occurrence,
-                            start,
-                            end: timestamp,
-                            duration_ms,
-                        },
-                    ),
-                };
-                retention.state.occurrence = observation;
-                retention.state.summary.terminal_count += 1;
-                let terminal = WorkflowOverlayTerminalRecord {
-                    occurrence: *occurrence,
-                    status,
-                    end: timestamp,
-                };
-                retention.state.summary.first_terminal = Some(terminal.clone());
-                retention.state.summary.last_terminal = Some(terminal);
-            }
-            TraceLanguageExecutionPayload::BranchSelected { selected, .. } => {
-                retention.state.branch = Some(*selected);
-            }
-            TraceLanguageExecutionPayload::ChildStarted { child, .. } => {
-                let link = child_link(&execution.key(), &retention.site, child);
-                if !retention
-                    .children
-                    .iter()
-                    .any(|current| child_link_key(current) == child_link_key(&link))
-                {
-                    retention.children.push(link);
-                    retention.children.sort_by_key(child_link_key);
+                        } if retained == occurrence => Some(start),
+                        _ => None,
+                    };
+                    let duration_ms = start.map(|start| {
+                        timestamp
+                            .signed_duration_since(start)
+                            .num_milliseconds()
+                            .max(0)
+                    });
+                    let (status, observation) = match node {
+                        TraceNodeFact::Failed { failure, .. } => (
+                            WorkflowOverlayTerminalStatus::Failed,
+                            WorkflowOverlayOccurrence::Failed {
+                                occurrence,
+                                start,
+                                end: timestamp,
+                                duration_ms,
+                                failure: failure.clone(),
+                            },
+                        ),
+                        TraceNodeFact::Cancelled => (
+                            WorkflowOverlayTerminalStatus::Cancelled,
+                            WorkflowOverlayOccurrence::Cancelled {
+                                occurrence,
+                                start,
+                                end: timestamp,
+                            },
+                        ),
+                        _ => (
+                            WorkflowOverlayTerminalStatus::Completed,
+                            WorkflowOverlayOccurrence::Completed {
+                                occurrence,
+                                start,
+                                end: timestamp,
+                                duration_ms,
+                            },
+                        ),
+                    };
+                    retention.state.occurrence = observation;
+                    retention.state.summary.terminal_count += 1;
+                    let terminal = WorkflowOverlayTerminalRecord {
+                        occurrence,
+                        status,
+                        end: timestamp,
+                    };
+                    retention.state.summary.first_terminal = Some(terminal.clone());
+                    retention.state.summary.last_terminal = Some(terminal);
                 }
+                TraceNodeFact::BranchSelected { selected } => {
+                    retention.state.branch = Some(*selected);
+                }
+                TraceNodeFact::ChildStarted { child } => {
+                    let link = child_link(&execution.key(), &retention.site, child);
+                    if !retention
+                        .children
+                        .iter()
+                        .any(|current| child_link_key(current) == child_link_key(&link))
+                    {
+                        retention.children.push(link);
+                        retention.children.sort_by_key(child_link_key);
+                    }
+                }
+                TraceNodeFact::Started { .. }
+                | TraceNodeFact::Waiting { .. }
+                | TraceNodeFact::Resumed { .. } => {}
             }
-            TraceLanguageExecutionPayload::ExecutionStarted
-            | TraceLanguageExecutionPayload::ExecutionFinished { .. }
-            | TraceLanguageExecutionPayload::NodeStarted { .. }
-            | TraceLanguageExecutionPayload::NodeWaiting { .. }
-            | TraceLanguageExecutionPayload::NodeResumed { .. } => {}
-        },
+        }
     }
 }
 
@@ -1102,8 +1107,8 @@ fn event_identity(fact: &WorkflowOverlayFact) -> WorkflowOverlayEventIdentity {
     let payload = match fact {
         WorkflowOverlayFact::StepBodyStarted { step } => {
             return WorkflowOverlayEventIdentity {
-                site: Some(step.site()),
-                occurrence: Some(step.occurrence),
+                site: Some(step.at.site.clone()),
+                occurrence: Some(step.at.occurrence.get()),
                 transition: Transition::StepBodyStarted,
                 step_attempt: Some(step.attempt),
             };
@@ -1113,16 +1118,21 @@ fn event_identity(fact: &WorkflowOverlayFact) -> WorkflowOverlayEventIdentity {
     let transition = match payload {
         TraceLanguageExecutionPayload::ExecutionStarted => Transition::ExecutionStarted,
         TraceLanguageExecutionPayload::ExecutionFinished { .. } => Transition::ExecutionFinished,
-        TraceLanguageExecutionPayload::NodeStarted { .. } => Transition::NodeStarted,
-        TraceLanguageExecutionPayload::NodeWaiting { .. } => Transition::NodeWaiting,
-        TraceLanguageExecutionPayload::NodeResumed { .. } => Transition::NodeResumed,
-        TraceLanguageExecutionPayload::NodeCompleted { .. }
-        | TraceLanguageExecutionPayload::NodeFailed { .. }
-        | TraceLanguageExecutionPayload::NodeCancelled { .. } => Transition::NodeTerminal,
-        TraceLanguageExecutionPayload::BranchSelected { .. } => Transition::BranchSelected,
-        TraceLanguageExecutionPayload::ChildStarted { .. } => Transition::ChildStarted,
+        TraceLanguageExecutionPayload::Node { fact, .. } => match fact {
+            TraceNodeFact::Started { .. } => Transition::NodeStarted,
+            TraceNodeFact::Waiting { .. } => Transition::NodeWaiting,
+            TraceNodeFact::Resumed { .. } => Transition::NodeResumed,
+            TraceNodeFact::Completed { .. }
+            | TraceNodeFact::Failed { .. }
+            | TraceNodeFact::Cancelled => Transition::NodeTerminal,
+            TraceNodeFact::BranchSelected { .. } => Transition::BranchSelected,
+            TraceNodeFact::ChildStarted { .. } => Transition::ChildStarted,
+        },
     };
-    let (site, occurrence) = payload.occurrence_key().unzip();
+    let (site, occurrence) = payload
+        .at()
+        .map(|at| (at.site.clone(), at.occurrence.get()))
+        .unzip();
     WorkflowOverlayEventIdentity {
         site,
         occurrence,

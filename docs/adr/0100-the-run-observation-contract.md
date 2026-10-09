@@ -43,8 +43,9 @@ Evidence: `crates/lash-vm/src/workflow_graph.rs::workflow_node_id`,
 ### R1: the document carries the site
 
 Graph and runtime node ids come from the same structural mint. Each document
-node states its `WorkflowExecutionSite`s, including owner, AST path, and site
-kind. An execution's start names that document by reference
+node states its execution sites (`WorkflowSiteDescriptor`: the site's path
+inside the node's statement, its kind and its label); the node that lists a
+site is its owner. An execution's start names that document by reference
 (`WorkflowDocumentRef`) and carries no copy of it; events name exact sites
 and a host looks labels and kinds up in the document. A host needs no pairing
 table or secondary id.

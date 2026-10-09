@@ -723,19 +723,9 @@ fn plugin_extensions_return_typed_catalog_conflicts() {
 
 pub(crate) fn test_start_site(node_id: &str, occurrence: u64) -> lash_vm::LashVmExecutionCallSite {
     lash_vm::LashVmExecutionCallSite {
-        site: lash_vm::LashVmExecutionSite {
-            node_id: node_id.to_string(),
-            node_kind: lash_sansio::ExecutionNodeKind::Call,
-            label: "start scan".to_string(),
-            workflow_site: lash_vm::WorkflowExecutionSite::new(
-                "process:scan",
-                [],
-                lash_sansio::ExecutionNodeKind::Call,
-                "start scan",
-            ),
-        },
-        occurrence,
-        loops: Default::default(),
+        at: lash_sansio::WorkflowOccurrence::fixture(node_id, occurrence),
+        kind: lash_sansio::ExecutionNodeKind::Call,
+        label: "start scan".to_string(),
     }
 }
 

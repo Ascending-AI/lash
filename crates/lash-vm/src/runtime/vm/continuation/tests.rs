@@ -507,10 +507,15 @@ fn pending_operation_law_has_a_tagged_site_and_operands() {
         tool.clone(),
         Some(PendingOperation::Tool {
             site: 3,
-            occurrence: Some(PendingOccurrence {
-                occurrence: 2,
+            occurrence: Some(lash_sansio::WorkflowOccurrence {
+                site: lash_sansio::WorkflowSiteRef::node(crate::WorkflowNodeId::fixture(
+                    "node:call",
+                )),
+                occurrence: std::num::NonZeroU64::new(2).expect("nonzero"),
                 loops: vec![lash_sansio::WorkflowLoopFrame {
-                    site: lash_sansio::WorkflowSiteRef::node("node:loop"),
+                    site: lash_sansio::WorkflowSiteRef::node(crate::WorkflowNodeId::fixture(
+                        "node:loop",
+                    )),
                     activation: 1,
                     position: lash_sansio::WorkflowLoopPosition::Body(2),
                 }],
@@ -530,7 +535,7 @@ fn pending_operation_law_has_a_tagged_site_and_operands() {
     let wire = serde_json::to_value(&continuation).expect("wire");
     assert_eq!(
         wire["pending_tools"][tool.as_str()],
-        serde_json::json!({"kind":"tool","site":3,"occurrence":{"occurrence":2,"loops":[{"site":{"node_id":"node:loop"},"activation":1,"position":{"body":2}}]},"receiver":{"kind":"null"},"args":[{"kind":"bool","value":true}]})
+        serde_json::json!({"kind":"tool","site":3,"occurrence":{"site":{"node_id":"node:call"},"occurrence":2,"loops":[{"site":{"node_id":"node:loop"},"activation":1,"position":{"body":2}}]},"receiver":{"kind":"null"},"args":[{"kind":"bool","value":true}]})
     );
     assert_eq!(
         wire["pending_tools"][timer.as_str()]["occurrence"],

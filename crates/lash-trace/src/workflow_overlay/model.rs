@@ -125,7 +125,6 @@ pub enum WorkflowOverlayFact {
     /// What the language execution reported.
     Language {
         document: Box<WorkflowDocumentRef>,
-        #[serde(flatten)]
         payload: TraceLanguageExecutionPayload,
     },
     /// The admitted body of a process step started.

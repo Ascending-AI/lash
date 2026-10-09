@@ -105,17 +105,17 @@ pub use runtime::{
     LASH_HOST_DESCRIPTOR_VALUE_KEY, LASH_HOST_REQUIREMENTS_REF_KEY, LASH_MODULE_REF_KEY,
     LASH_PROCESS_NAME_KEY, LASH_PROCESS_REF_KEY, LASH_PROCESS_VALUE_KEY, LASH_TYPE_KEY,
     LASH_VM_SNAPSHOT_VERSION, LinkedProgramCache, LinkedProgramCacheError, ListValue,
-    PendingOccurrence, PendingOperation, PendingOperationMap, ProcessStart, ProfileReport,
-    ProfileStat, ProjectedBindingError, ProjectedBindings, ProjectedReadRequest,
-    ProjectedReadResponse, ProjectedValue, ProjectionCatalog, ProjectionError, ProjectionProvider,
-    ProjectionReadError, ProjectionReader, ProjectionRefusal, ProjectionType, Record,
-    ResourceHandle, ResourceOperation, ResourceOperationBatch, ResourceOperationBatchLeaf,
-    ResourceOperationBatchOutcome, ResourceOperationOutcome, ResourceRef, RuntimeError,
-    RuntimeFailure, Sleep, SleepKind, Snapshot, SnapshotDecodeError, State, StringValue,
-    UnawaitedToolCall, VM_CONTINUATION_FORMAT_VERSION, Value, Vm, VmComplete, VmContinuation,
-    VmExecutionStart, VmFinallyCompletionContinuation, VmFinallyContinuation, VmGuestError,
-    VmHandlerContinuation, VmHeapContinuation, VmInstance, VmInterrupt, VmIteratorContinuation,
-    VmIteratorCursor, VmLoopContinuation, VmLoopPhase, VmPacing, VmParkReason, VmParked,
+    PendingOperation, PendingOperationMap, ProcessStart, ProfileReport, ProfileStat,
+    ProjectedBindingError, ProjectedBindings, ProjectedReadRequest, ProjectedReadResponse,
+    ProjectedValue, ProjectionCatalog, ProjectionError, ProjectionProvider, ProjectionReadError,
+    ProjectionReader, ProjectionRefusal, ProjectionType, Record, ResourceHandle, ResourceOperation,
+    ResourceOperationBatch, ResourceOperationBatchLeaf, ResourceOperationBatchOutcome,
+    ResourceOperationOutcome, ResourceRef, RuntimeError, RuntimeFailure, Sleep, SleepKind,
+    Snapshot, SnapshotDecodeError, State, StringValue, UnawaitedToolCall,
+    VM_CONTINUATION_FORMAT_VERSION, Value, Vm, VmComplete, VmContinuation, VmExecutionStart,
+    VmFinallyCompletionContinuation, VmFinallyContinuation, VmGuestError, VmHandlerContinuation,
+    VmHeapContinuation, VmInstance, VmInterrupt, VmIteratorContinuation, VmIteratorCursor,
+    VmLoopContinuation, VmLoopPhase, VmPacing, VmParkReason, VmParked,
     VmPendingErrorOriginContinuation, VmProfileContinuation, VmRequest, VmResume, VmResumePoint,
     VmRunConfig, VmRunOutcome, VmSiteOccurrenceCounter, VmStep, VmStepError, VmSuspended,
     VmSuspendedOperation, cancel_checkpoint_reached, compile, execute, from_json,
@@ -213,12 +213,13 @@ pub const LANGUAGE_RUNTIME_RANDOM_OPERATION: &str = "random";
 pub const BYTECODE_FORMAT_VERSION: u32 = 30;
 
 pub use lash_sansio::{
-    WorkflowExecutionSite, WorkflowLoopFrame, WorkflowLoopPosition, WorkflowOccurrenceContext,
-    WorkflowSitePath, WorkflowSiteRef, WorkflowSiteRole, WorkflowSiteSegment,
+    EmptyWorkflowNodeId, WorkflowLoopFrame, WorkflowLoopPosition, WorkflowOccurrence,
+    WorkflowSiteDescriptor, WorkflowSitePath, WorkflowSiteRef, WorkflowSiteRole,
 };
 pub use tracking::{
-    LashVmEffectFailure, LashVmExecutionCallSite, LashVmExecutionChild, LashVmExecutionFailure,
-    LashVmExecutionObservation, LashVmExecutionSite, ProcessBranchSelection, process_ref_key,
+    LashVmEffectFailure, LashVmExecutionCallSite, LashVmExecutionChild, LashVmExecutionFact,
+    LashVmExecutionFailure, LashVmExecutionObservation, LashVmExecutionSite,
+    ProcessBranchSelection, process_ref_key,
 };
 
 pub use workflow_graph::{
@@ -236,8 +237,8 @@ pub use workflow_graph::{
     WorkflowExpectedArgument, WorkflowGraph, WorkflowGraphDecodeError, WorkflowGraphVersionRefusal,
     WorkflowNode, WorkflowNodeId, WorkflowNodeKind, WorkflowNodePath, WorkflowNodeTypeFacets,
     WorkflowOwnership, WorkflowProcess, WorkflowProjection, WorkflowResultStep, WorkflowSlotPath,
-    WorkflowSlotPathSegment, WorkflowSubgraph, WorkflowTerminal, WorkflowTerminalKind,
-    WorkflowTypeDiagnostic, WorkflowTypedVariable, child_path, execution_sites,
+    WorkflowSubgraph, WorkflowTerminal, WorkflowTerminalKind, WorkflowTypeDiagnostic,
+    WorkflowTypedVariable, child_path, execution_sites,
 };
 pub use workflow_graph::{
     WorkflowAdmission, WorkflowAdmissionDiagnostic, WorkflowAdmissionDiagnosticKind,
@@ -252,7 +253,7 @@ pub use workflow_graph::{
 };
 pub use workflow_graph::{
     projected_node_type_facets, workflow_call_from_ir, workflow_call_to_ir, workflow_node_id,
-    workflow_slot_accepts_value, workflow_slot_value,
+    workflow_slot_accepts_value,
 };
 
 /// Internals the workflow-graph projector needs.

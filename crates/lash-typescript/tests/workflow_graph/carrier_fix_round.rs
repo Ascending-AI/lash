@@ -137,7 +137,7 @@ fn a_lifted_process_body_renders_after_host_text_round_trips_and_moves() {
             *value = lash_vm::Expr::Number(7.0);
         }
         let mut inserted = edited.main.nodes()[0].clone();
-        inserted.id = WorkflowNodeId::new("node:0123456789abcdef01234567".to_string());
+        inserted.id = WorkflowNodeId::fixture("node:0123456789abcdef01234567");
         inserted.kind = WorkflowNodeKind::Data {
             binding: Some(lash_vm::AssignTarget::variable("greeting".into())),
             expression: lash_vm::Expr::String("hello".into()),

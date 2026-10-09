@@ -3,7 +3,9 @@ use std::sync::Mutex;
 
 use lash_sansio::ExecutionNodeKind;
 use lash_sansio::sync::MutexExt;
-use lash_trace::{TraceBranchSelection, TraceLanguageExecutionPayload, TraceRuntimeScope};
+use lash_trace::{
+    TraceBranchSelection, TraceLanguageExecutionPayload, TraceNodeFact, TraceRuntimeScope,
+};
 
 use crate::TraceWaitBookkeeping;
 
@@ -34,12 +36,12 @@ pub fn trace_failure(
 ///
 /// Cancellation follows the engine hosts' rule: an in-flight occurrence that
 /// ends while the wrapped host reports cancellation is reported as
-/// `NodeCancelled`, preceded by a cancelled wait resolution when it was
+/// cancelled, preceded by a cancelled wait resolution when it was
 /// parked. Occurrences that never started stay unobserved.
 pub struct LanguageTraceHost<H, O> {
     host: H,
     observer: O,
-    active_nodes: Mutex<BTreeSet<(lash_sansio::WorkflowSiteRef, ExecutionNodeKind, u64)>>,
+    active_nodes: Mutex<BTreeSet<lash_sansio::WorkflowOccurrence>>,
     waiting_nodes: TraceWaitBookkeeping,
 }
 
@@ -123,67 +125,36 @@ where
     }
 
     fn observe_lash_vm_execution(&self, observation: lash_vm::LashVmExecutionObservation) {
-        use lash_vm::LashVmExecutionObservation as Observation;
-        let active = |site: &lash_vm::LashVmExecutionSite, occurrence: u64| {
-            (site.site_ref(), site.node_kind, occurrence)
-        };
-        match &observation {
-            Observation::NodeStarted {
-                site, occurrence, ..
-            } => {
-                self.active_nodes
-                    .lock_recover()
-                    .insert(active(site, *occurrence));
+        use lash_vm::LashVmExecutionFact as Fact;
+        let call_site = &observation.call_site;
+        let at = &call_site.at;
+        match &observation.fact {
+            Fact::NodeStarted => {
+                self.active_nodes.lock_recover().insert(at.clone());
             }
-            Observation::ChildProcessWaiting {
-                site, occurrence, ..
-            } => {
-                self.waiting_nodes.mark_waiting(site, *occurrence);
+            Fact::ChildProcessWaiting { .. } => self.waiting_nodes.mark_waiting(at),
+            Fact::NodeResumed => {
+                self.waiting_nodes.finish(at);
             }
-            Observation::NodeResumed {
-                site, occurrence, ..
-            } => {
-                self.waiting_nodes.finish(site, *occurrence);
-            }
-            Observation::NodeFailed {
-                site,
-                occurrence,
-                loops,
-                ..
-            } if self.host.is_cancelled() => {
-                if self
-                    .active_nodes
-                    .lock_recover()
-                    .remove(&active(site, *occurrence))
-                {
-                    self.emit_cancelled(site, *occurrence, loops);
+            Fact::NodeFailed { .. } if self.host.is_cancelled() => {
+                if self.active_nodes.lock_recover().remove(at) {
+                    self.emit_cancelled(call_site);
                     return;
                 }
             }
-            Observation::NodeCompleted {
-                site,
-                occurrence,
-                loops,
-            } if self.host.is_cancelled() && self.waiting_nodes.is_waiting(site, *occurrence) => {
-                self.active_nodes
-                    .lock_recover()
-                    .remove(&active(site, *occurrence));
-                self.emit_cancelled(site, *occurrence, loops);
+            Fact::NodeCompleted
+                if self.host.is_cancelled() && self.waiting_nodes.is_waiting(at) =>
+            {
+                self.active_nodes.lock_recover().remove(at);
+                self.emit_cancelled(call_site);
                 return;
             }
-            Observation::NodeCompleted {
-                site, occurrence, ..
+            Fact::NodeCompleted | Fact::NodeFailed { .. } => {
+                self.active_nodes.lock_recover().remove(at);
             }
-            | Observation::NodeFailed {
-                site, occurrence, ..
-            } => {
-                self.active_nodes
-                    .lock_recover()
-                    .remove(&active(site, *occurrence));
-            }
-            Observation::BranchSelected { .. } | Observation::ChildStarted { .. } => {}
+            Fact::BranchSelected { .. } | Fact::ChildStarted { .. } => {}
         }
-        let kind = observation.call_site().site.node_kind;
+        let kind = call_site.kind;
         (self.observer)(&self.host, public_payload(observation), kind);
     }
 }
@@ -192,116 +163,48 @@ impl<H, O> LanguageTraceHost<H, O>
 where
     O: Fn(&H, TraceLanguageExecutionPayload, ExecutionNodeKind),
 {
-    fn emit_cancelled(
-        &self,
-        site: &lash_vm::LashVmExecutionSite,
-        occurrence: u64,
-        loops: &[lash_sansio::WorkflowLoopFrame],
-    ) {
-        if self.waiting_nodes.finish(site, occurrence) {
+    fn emit_cancelled(&self, call_site: &lash_vm::LashVmExecutionCallSite) {
+        let node = |fact| TraceLanguageExecutionPayload::Node {
+            at: call_site.at.clone(),
+            fact,
+        };
+        if self.waiting_nodes.finish(&call_site.at) {
             (self.observer)(
                 &self.host,
-                TraceLanguageExecutionPayload::NodeResumed {
-                    node_id: site.node_id.clone(),
-                    occurrence,
-                    context: site.occurrence_context(loops),
+                node(TraceNodeFact::Resumed {
                     resolution: lash_trace::TraceNodeWaitResolution::Cancelled,
-                },
-                site.node_kind,
+                }),
+                call_site.kind,
             );
         }
-        (self.observer)(
-            &self.host,
-            TraceLanguageExecutionPayload::NodeCancelled {
-                node_id: site.node_id.clone(),
-                occurrence,
-                context: site.occurrence_context(loops),
-            },
-            site.node_kind,
-        );
+        (self.observer)(&self.host, node(TraceNodeFact::Cancelled), call_site.kind);
     }
 }
 
 fn public_payload(
     observation: lash_vm::LashVmExecutionObservation,
 ) -> TraceLanguageExecutionPayload {
-    match observation {
-        lash_vm::LashVmExecutionObservation::ChildProcessWaiting {
-            site,
-            occurrence,
-            process_ids,
-            loops,
-        } => TraceLanguageExecutionPayload::NodeWaiting {
-            context: site.occurrence_context(&loops),
-            node_id: site.node_id,
-            occurrence,
+    use lash_vm::LashVmExecutionFact as Fact;
+    let fact = match observation.fact {
+        Fact::ChildProcessWaiting { process_ids } => TraceNodeFact::Waiting {
             awaited: lash_trace::TraceNodeAwaited::ChildProcesses { process_ids },
         },
-        lash_vm::LashVmExecutionObservation::NodeResumed {
-            site,
-            occurrence,
-            loops,
-        } => TraceLanguageExecutionPayload::NodeResumed {
-            context: site.occurrence_context(&loops),
-            node_id: site.node_id,
-            occurrence,
+        Fact::NodeResumed => TraceNodeFact::Resumed {
             resolution: lash_trace::TraceNodeWaitResolution::Resumed,
         },
-        lash_vm::LashVmExecutionObservation::NodeStarted {
-            site,
-            occurrence,
-            loops,
-        } => TraceLanguageExecutionPayload::NodeStarted {
-            context: site.occurrence_context(&loops),
-            node_id: site.node_id,
-            occurrence,
-            call_id: None,
-        },
-        lash_vm::LashVmExecutionObservation::NodeCompleted {
-            site,
-            occurrence,
-            loops,
-        } => TraceLanguageExecutionPayload::NodeCompleted {
-            context: site.occurrence_context(&loops),
-            node_id: site.node_id,
-            occurrence,
-            call_id: None,
-        },
-        lash_vm::LashVmExecutionObservation::NodeFailed {
-            site,
-            occurrence,
-            failure,
-            loops,
-        } => TraceLanguageExecutionPayload::NodeFailed {
-            context: site.occurrence_context(&loops),
-            node_id: site.node_id,
-            occurrence,
+        Fact::NodeStarted => TraceNodeFact::Started { call_id: None },
+        Fact::NodeCompleted => TraceNodeFact::Completed { call_id: None },
+        Fact::NodeFailed { failure } => TraceNodeFact::Failed {
             call_id: None,
             failure: trace_failure(failure),
         },
-        lash_vm::LashVmExecutionObservation::BranchSelected {
-            site,
-            occurrence,
-            selected,
-            loops,
-        } => TraceLanguageExecutionPayload::BranchSelected {
-            context: site.occurrence_context(&loops),
-            node_id: site.node_id,
-            occurrence,
+        Fact::BranchSelected { selected } => TraceNodeFact::BranchSelected {
             selected: match selected {
                 lash_vm::ProcessBranchSelection::Then => TraceBranchSelection::Then,
                 lash_vm::ProcessBranchSelection::Else => TraceBranchSelection::Else,
             },
         },
-        lash_vm::LashVmExecutionObservation::ChildStarted {
-            site,
-            occurrence,
-            child,
-            loops,
-        } => TraceLanguageExecutionPayload::ChildStarted {
-            context: site.occurrence_context(&loops),
-            parent_node_id: site.node_id,
-            occurrence,
+        Fact::ChildStarted { child } => TraceNodeFact::ChildStarted {
             child: lash_trace::TraceLanguageChildExecution {
                 scope: TraceRuntimeScope::none(),
                 process_id: child.process_id,
@@ -309,5 +212,9 @@ fn public_payload(
                 document: None,
             },
         },
+    };
+    TraceLanguageExecutionPayload::Node {
+        at: observation.call_site.at,
+        fact,
     }
 }

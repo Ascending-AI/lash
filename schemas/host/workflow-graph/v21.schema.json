@@ -2203,42 +2203,11 @@
         }
       ]
     },
-    "WorkflowExecutionSite": {
-      "description": "One execution site of a workflow node: the node (`owner` and `path`), the\nexact executable subexpression inside its statement (`site_path`), and a\ndescription of what runs there. `kind` and `label` describe the site; they\nare not its identity.",
-      "properties": {
-        "kind": {
-          "$ref": "#/$defs/ExecutionNodeKind"
-        },
-        "label": {
-          "type": "string"
-        },
-        "owner": {
-          "type": "string"
-        },
-        "path": {
-          "default": [],
-          "items": {
-            "format": "uint32",
-            "minimum": 0,
-            "type": "integer"
-          },
-          "type": "array"
-        },
-        "site_path": {
-          "$ref": "#/$defs/WorkflowSitePath"
-        }
-      },
-      "required": [
-        "owner",
-        "kind",
-        "label"
-      ],
-      "type": "object"
-    },
     "WorkflowExpectedArgument": {
       "properties": {
         "slot": {
-          "$ref": "#/$defs/WorkflowSlotPath"
+          "$ref": "#/$defs/WorkflowSlotPath",
+          "description": "The argument's expression, from the node's statement."
         },
         "ty": {
           "$ref": "#/$defs/TypeExpr"
@@ -2306,7 +2275,7 @@
         },
         "execution_sites": {
           "items": {
-            "$ref": "#/$defs/WorkflowExecutionSite"
+            "$ref": "#/$defs/WorkflowSiteDescriptor"
           },
           "type": "array"
         },
@@ -2357,7 +2326,7 @@
       "type": "object"
     },
     "WorkflowNodeId": {
-      "description": "A deterministic node identifier minted from structural owner and AST path.",
+      "description": "A deterministic node identifier of a workflow document, minted from the\nnode's structural owner and AST path. It is never empty.",
       "type": "string"
     },
     "WorkflowNodeKind": {
@@ -3107,12 +3076,45 @@
       ],
       "type": "object"
     },
-    "WorkflowSitePath": {
-      "description": "The typed path from a workflow node's statement to one executable\nsubexpression. The empty path is the statement itself.\n\nSlot segments walk the statement's typed child slots; a trailing role\nsegment names a synthetic site of the expression they reach.",
-      "items": {
-        "$ref": "#/$defs/WorkflowSiteSegment"
+    "WorkflowSiteDescriptor": {
+      "additionalProperties": false,
+      "description": "One execution site of a workflow node as its document lists it: the exact\nexecutable subexpression inside the node's statement and a description of\nwhat runs there. The node that lists it is its owner; `kind` and `label`\ndescribe the site and are not its identity.",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/ExecutionNodeKind"
+        },
+        "label": {
+          "type": "string"
+        },
+        "site_path": {
+          "$ref": "#/$defs/WorkflowSitePath"
+        }
       },
-      "type": "array"
+      "required": [
+        "kind",
+        "label"
+      ],
+      "type": "object"
+    },
+    "WorkflowSitePath": {
+      "additionalProperties": false,
+      "description": "The address of one execution site inside a workflow node: the slot path\nfrom the node's statement to the site's expression, and the synthetic\nsite of that expression it names, if it is not the expression's own. The\ndefault is the statement's own site.",
+      "properties": {
+        "role": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkflowSiteRole"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "slots": {
+          "$ref": "#/$defs/WorkflowSlotPath"
+        }
+      },
+      "type": "object"
     },
     "WorkflowSiteRole": {
       "description": "What a site that is not an expression of its own stands for.",
@@ -3124,115 +3126,12 @@
         }
       ]
     },
-    "WorkflowSiteSegment": {
-      "description": "One step of a [`WorkflowSitePath`].",
-      "oneOf": [
-        {
-          "additionalProperties": false,
-          "description": "A typed child slot of the expression reached so far.",
-          "properties": {
-            "slot": {
-              "$ref": "#/$defs/ExprSlot"
-            }
-          },
-          "required": [
-            "slot"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "A site the expression reached so far owns beside its own.",
-          "properties": {
-            "role": {
-              "$ref": "#/$defs/WorkflowSiteRole"
-            }
-          },
-          "required": [
-            "role"
-          ],
-          "type": "object"
-        }
-      ]
-    },
     "WorkflowSlotPath": {
-      "description": "An unambiguous address for one expression inside a workflow node.\n\nTwo spellings share the type. A *structural* path is made only of\n[`WorkflowSlotPathSegment::Expr`] segments and walks the typed child slots\nof the node's statement ([`super::workflow_node_statement`]), so it reaches\nevery expression role of every IR variant; the empty path is the statement\nitself. A *call-argument* path starts at a receiver call's argument\n(`call`, `arg`, then record fields and list indexes) and is what type\nfacets name their expected arguments by.\n\nThe serialized list is authoritative. [`Display`](std::fmt::Display) is a\nderived spelling for text-only host contracts; field names use JSON string\nquoting so they cannot collide with structural indexes or separators.",
+      "description": "The typed path from a workflow node's statement to one expression inside\nit: the child slot taken at each step. The empty path is the statement\nitself.\n\nThe serialized list is authoritative. [`Display`](std::fmt::Display) is a\nderived spelling for text-only host contracts.",
       "items": {
-        "$ref": "#/$defs/WorkflowSlotPathSegment"
+        "$ref": "#/$defs/ExprSlot"
       },
       "type": "array"
-    },
-    "WorkflowSlotPathSegment": {
-      "description": "One structural step in a [`WorkflowSlotPath`].",
-      "oneOf": [
-        {
-          "additionalProperties": false,
-          "properties": {
-            "call": {
-              "format": "uint32",
-              "minimum": 0,
-              "type": "integer"
-            }
-          },
-          "required": [
-            "call"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "arg": {
-              "format": "uint32",
-              "minimum": 0,
-              "type": "integer"
-            }
-          },
-          "required": [
-            "arg"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "field": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "field"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "index": {
-              "format": "uint32",
-              "minimum": 0,
-              "type": "integer"
-            }
-          },
-          "required": [
-            "index"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "One typed child slot of the IR expression reached so far.",
-          "properties": {
-            "expr": {
-              "$ref": "#/$defs/ExprSlot"
-            }
-          },
-          "required": [
-            "expr"
-          ],
-          "type": "object"
-        }
-      ]
     },
     "WorkflowSubgraph": {
       "additionalProperties": false,

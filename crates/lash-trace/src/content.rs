@@ -5,9 +5,9 @@ use serde_json::Value;
 
 use crate::{
     TraceEffectEnvelopeDiffValue, TraceEvent, TraceLanguageExecutionFailure,
-    TraceLanguageExecutionPayload, TraceProgramStepOutcome, TraceProviderBodyOmission,
-    TraceRetryAttempt, TraceRetryAttemptDetail, TraceRuntimeStreamPayload, TraceToolAttemptOutcome,
-    TraceToolCallOutcome, TraceToolSpec,
+    TraceLanguageExecutionPayload, TraceNodeFact, TraceProgramStepOutcome,
+    TraceProviderBodyOmission, TraceRetryAttempt, TraceRetryAttemptDetail,
+    TraceRuntimeStreamPayload, TraceToolAttemptOutcome, TraceToolCallOutcome, TraceToolSpec,
 };
 use lash_sansio::llm::types::StreamBlockEvent;
 
@@ -238,18 +238,20 @@ impl TraceEvent {
             Self::ProtocolStep { payload, .. } => *payload = Value::Null,
             Self::LanguageExecution { event, .. } => match &mut event.payload {
                 TraceLanguageExecutionPayload::ExecutionFinished { error, .. } => *error = None,
-                TraceLanguageExecutionPayload::NodeFailed { failure, .. } => match failure {
-                    TraceLanguageExecutionFailure::Effect { message, .. }
-                    | TraceLanguageExecutionFailure::Runtime { message, .. } => message.clear(),
+                TraceLanguageExecutionPayload::Node { fact, .. } => match fact {
+                    TraceNodeFact::Failed { failure, .. } => match failure {
+                        TraceLanguageExecutionFailure::Effect { message, .. }
+                        | TraceLanguageExecutionFailure::Runtime { message, .. } => message.clear(),
+                    },
+                    TraceNodeFact::Started { .. }
+                    | TraceNodeFact::Waiting { .. }
+                    | TraceNodeFact::Resumed { .. }
+                    | TraceNodeFact::Cancelled
+                    | TraceNodeFact::Completed { .. }
+                    | TraceNodeFact::BranchSelected { .. }
+                    | TraceNodeFact::ChildStarted { .. } => {}
                 },
-                TraceLanguageExecutionPayload::ExecutionStarted
-                | TraceLanguageExecutionPayload::NodeStarted { .. }
-                | TraceLanguageExecutionPayload::NodeWaiting { .. }
-                | TraceLanguageExecutionPayload::NodeResumed { .. }
-                | TraceLanguageExecutionPayload::NodeCancelled { .. }
-                | TraceLanguageExecutionPayload::NodeCompleted { .. }
-                | TraceLanguageExecutionPayload::BranchSelected { .. }
-                | TraceLanguageExecutionPayload::ChildStarted { .. } => {}
+                TraceLanguageExecutionPayload::ExecutionStarted => {}
             },
             // Typed identities, counts, hashes, statuses and classes only: a
             // model attempt is its sealed record, whose error is a class, a

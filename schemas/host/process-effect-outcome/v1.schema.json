@@ -17,18 +17,7 @@
     }
   },
   "properties": {
-    "call_id": {
-      "pattern": "^tc_[0-9a-f]{64}$",
-      "type": [
-        "string",
-        "null"
-      ]
-    },
-    "code": {
-      "minLength": 1,
-      "type": "string"
-    },
-    "context": {
+    "at": {
       "additionalProperties": false,
       "properties": {
         "loops": {
@@ -44,6 +33,19 @@
                 "type": "object"
               },
               "site": {
+                "additionalProperties": false,
+                "properties": {
+                  "node_id": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "site_path": {
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "node_id"
+                ],
                 "type": "object"
               }
             },
@@ -56,26 +58,44 @@
           },
           "type": "array"
         },
-        "site_path": {
-          "items": {
-            "type": [
-              "object",
-              "string"
-            ]
+        "occurrence": {
+          "maximum": 18446744073709551615,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "site": {
+          "additionalProperties": false,
+          "properties": {
+            "node_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "site_path": {
+              "type": "object"
+            }
           },
-          "type": "array"
+          "required": [
+            "node_id"
+          ],
+          "type": "object"
         }
       },
+      "required": [
+        "site",
+        "occurrence"
+      ],
       "type": "object"
     },
-    "node_id": {
+    "call_id": {
+      "pattern": "^tc_[0-9a-f]{64}$",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "code": {
       "minLength": 1,
       "type": "string"
-    },
-    "occurrence": {
-      "maximum": 18446744073709551615,
-      "minimum": 1,
-      "type": "integer"
     },
     "operation": {
       "minLength": 1,
@@ -99,8 +119,7 @@
   },
   "required": [
     "vocabulary_version",
-    "node_id",
-    "occurrence",
+    "at",
     "operation",
     "outcome_class",
     "call_id",

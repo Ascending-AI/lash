@@ -16,12 +16,12 @@ use super::super::{
     Value, execution_host_error_value, is_process_handle, parse_handle_record,
     record_with_capacity, success, unwrap_tool_result,
 };
+use super::Vm;
 use super::control::VmOutcome;
 use super::pending_tools::{
     AwaitedValue, ensure_no_tool_handle_arguments, is_runtime_process_handle_id,
     plain_value_awaited,
 };
-use super::{ActiveLashVmExecutionNode, Vm};
 
 #[derive(Clone, Copy)]
 pub(super) enum VmEffect {
@@ -122,7 +122,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
     async fn resolve_effect_inner(
         &mut self,
         effect: VmEffect,
-        active: Option<&ActiveLashVmExecutionNode>,
+        active: Option<&LashVmExecutionCallSite>,
         instruction_ip: usize,
         reissued: Option<&super::VmSuspendedOperation>,
     ) -> Result<Option<VmOutcome>, RuntimeError> {
@@ -137,7 +137,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                         receiver,
                         operation: operation_name.clone(),
                         args,
-                        call_site: active.map(lash_vm_execution_call_site).map(Box::new),
+                        call_site: active.cloned().map(Box::new),
                     })))
                     .await
                 {
@@ -175,7 +175,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                         receiver,
                         operation: operation_name.clone(),
                         args,
-                        call_site: active.map(lash_vm_execution_call_site).map(Box::new),
+                        call_site: active.cloned().map(Box::new),
                     })))
                     .await;
                 if matches!(result, Ok(AbilityOutcome::HandedOver)) {
@@ -310,7 +310,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     .perform(AbilityOp::Sleep(Sleep {
                         kind,
                         value,
-                        call_site: active.map(lash_vm_execution_call_site).map(Box::new),
+                        call_site: active.cloned().map(Box::new),
                     }))
                     .await;
                 if matches!(result, Ok(AbilityOutcome::HandedOver)) {
@@ -540,7 +540,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
     ) -> Result<
         (
             Vec<ResourceOperationBatchLeaf>,
-            Vec<Option<ActiveLashVmExecutionNode>>,
+            Vec<Option<LashVmExecutionCallSite>>,
         ),
         RuntimeError,
     > {
@@ -556,10 +556,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 .get(leaf.receiver_stack_index)
                 .cloned()
                 .ok_or(RuntimeError::ResourceBatchReceiverOutOfRange)?;
-            let call_site = active
-                .as_ref()
-                .map(lash_vm_execution_call_site)
-                .map(Box::new);
+            let call_site = active.as_ref().cloned().map(Box::new);
             if leaf.timer {
                 operations.push(ResourceOperationBatchLeaf::Timer(Sleep {
                     kind: SleepKind::For,
@@ -598,7 +595,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
     ) -> Result<Awaited<Vec<Value>>, RuntimeError> {
         let (operations, active_nodes) = self.batch_leaf_operations(batch, values, reissued)?;
         let reply = match self
-            .perform_resource_operation_batch(operations, &active_nodes, batch.consumer, None)
+            .perform_resource_operation_batch(operations, &active_nodes, batch, None)
             .await?
         {
             Awaited::Settled(reply) => reply,
@@ -703,12 +700,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         }
         let (operations, active_nodes) = self.batch_leaf_operations(batch, values, reissued)?;
         let reply = match self
-            .perform_resource_operation_batch(
-                operations,
-                &active_nodes,
-                batch.consumer,
-                settled_value_after,
-            )
+            .perform_resource_operation_batch(operations, &active_nodes, batch, settled_value_after)
             .await?
         {
             Awaited::Settled(reply) => reply,
@@ -806,10 +798,11 @@ impl<H: ExecutionHost> Vm<'_, H> {
     async fn perform_resource_operation_batch(
         &mut self,
         leaves: Vec<ResourceOperationBatchLeaf>,
-        active_nodes: &[Option<ActiveLashVmExecutionNode>],
-        consumer: AggregateConsumer,
+        active_nodes: &[Option<LashVmExecutionCallSite>],
+        batch: &super::super::CompiledResourceOperationBatch,
         settled_value_after: Option<usize>,
     ) -> Result<Awaited<ResourceOperationBatchOutcome>, RuntimeError> {
+        let consumer = batch.consumer;
         let expected = leaves.len();
         let result = self
             .perform(AbilityOp::ResourceOperationBatch(ResourceOperationBatch {
@@ -822,9 +815,12 @@ impl<H: ExecutionHost> Vm<'_, H> {
             Ok(AbilityOutcome::ResourceOperationBatch(reply)) => reply,
             Ok(AbilityOutcome::HandedOver) => {
                 // Last begun, first taken back: leaves of one node give their
-                // occurrences back down to the first they took.
-                for active in active_nodes.iter().rev().flatten() {
-                    self.rewind_lash_vm_execution(active);
+                // occurrences back down to the first they took. An occurrence
+                // a pending handle holds stays the handle's.
+                for (active, leaf) in active_nodes.iter().zip(batch.leaves.iter()).rev() {
+                    if let (Some(active), None) = (active, &leaf.minted) {
+                        self.rewind_lash_vm_execution(active);
+                    }
                 }
                 return Ok(Awaited::Parked(()));
             }
@@ -915,7 +911,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
 
     fn fail_resource_operation_batch(
         &mut self,
-        active_nodes: &[Option<ActiveLashVmExecutionNode>],
+        active_nodes: &[Option<LashVmExecutionCallSite>],
         error: RuntimeError,
     ) -> RuntimeError {
         for active in active_nodes.iter().flatten() {
@@ -934,7 +930,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         &mut self,
         leaves: impl Iterator<Item = (bool, Option<Span>)>,
         results: Vec<ResourceOperationOutcome>,
-        active_nodes: &[Option<ActiveLashVmExecutionNode>],
+        active_nodes: &[Option<LashVmExecutionCallSite>],
     ) -> Result<Vec<Value>, RuntimeError> {
         let mut first_rejection = None;
         let mut leaf_values = Vec::with_capacity(results.len());
@@ -990,7 +986,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
     async fn await_value(
         &self,
         handle: Value,
-        active: Option<&ActiveLashVmExecutionNode>,
+        active: Option<&LashVmExecutionCallSite>,
         reissued: bool,
         settled: Vec<Value>,
     ) -> Result<Awaited<Value, Vec<Value>>, RuntimeError> {
@@ -1000,7 +996,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         let mut cursor = AwaitCursor {
             replay: settled.into_iter(),
             settled: Vec::new(),
-            call_site: active.map(lash_vm_execution_call_site),
+            call_site: active.cloned(),
         };
         match self
             .await_value_at(handle, String::new(), &mut cursor)
@@ -1123,7 +1119,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
     async fn await_value_unwrap(
         &self,
         handle: Value,
-        active: Option<&ActiveLashVmExecutionNode>,
+        active: Option<&LashVmExecutionCallSite>,
         reissued: bool,
         settled: Vec<Value>,
     ) -> Result<Awaited<Value, Vec<Value>>, RuntimeError> {
@@ -1139,7 +1135,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 let result = self
                     .perform(AbilityOp::Await(Await {
                         handle: Value::Record(handles),
-                        call_site: active.map(lash_vm_execution_call_site).map(Box::new),
+                        call_site: active.cloned().map(Box::new),
                     }))
                     .await;
                 if matches!(result, Ok(AbilityOutcome::HandedOver)) {
@@ -1173,32 +1169,21 @@ impl<H: ExecutionHost> Vm<'_, H> {
         }
     }
 
-    fn observe_child_process_wait(
-        &self,
-        active: Option<&ActiveLashVmExecutionNode>,
-        value: &Value,
-    ) {
+    fn observe_child_process_wait(&self, active: Option<&LashVmExecutionCallSite>, value: &Value) {
         let Some(active) = active else { return };
         let mut process_ids = Vec::new();
         collect_awaited_process_ids(value, &mut process_ids);
         if process_ids.is_empty() {
             return;
         }
-        self.observe(|| crate::LashVmExecutionObservation::ChildProcessWaiting {
-            site: active.site.clone(),
-            occurrence: active.occurrence,
-            loops: active.loops.clone(),
+        self.observe_fact(active, || crate::LashVmExecutionFact::ChildProcessWaiting {
             process_ids,
         });
     }
 
-    fn observe_wait_resumed(&self, active: Option<&ActiveLashVmExecutionNode>) {
+    fn observe_wait_resumed(&self, active: Option<&LashVmExecutionCallSite>) {
         if let Some(active) = active {
-            self.observe(|| crate::LashVmExecutionObservation::NodeResumed {
-                site: active.site.clone(),
-                occurrence: active.occurrence,
-                loops: active.loops.clone(),
-            });
+            self.observe_fact(active, || crate::LashVmExecutionFact::NodeResumed);
         }
     }
 }
@@ -1345,14 +1330,6 @@ fn build_aggregate_await_shape<H: ExecutionHost>(
             }
             Ok(Value::Record(Arc::new(record)))
         }
-    }
-}
-
-fn lash_vm_execution_call_site(active: &ActiveLashVmExecutionNode) -> LashVmExecutionCallSite {
-    LashVmExecutionCallSite {
-        site: active.site.clone(),
-        occurrence: active.occurrence,
-        loops: active.loops.clone(),
     }
 }
 

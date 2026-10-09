@@ -286,34 +286,24 @@ async fn process_handle_await_reports_the_child_and_its_resolution() {
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let waiting = observations
         .iter()
-        .find_map(|observation| match observation {
-            LashVmExecutionObservation::ChildProcessWaiting {
-                site,
-                occurrence,
-                process_ids,
-                ..
-            } => Some((site, occurrence, process_ids)),
+        .find_map(|observation| match &observation.fact {
+            crate::LashVmExecutionFact::ChildProcessWaiting { process_ids } => {
+                Some((&observation.call_site, process_ids))
+            }
             _ => None,
         });
-    let (site, occurrence, process_ids) = waiting.expect("observed child-process wait");
+    let (waited_at, process_ids) = waiting.expect("observed child-process wait");
     // The await the host is asked to perform names the site that awaits
     // (FIG-5575): the wait a host records is the one the run observed.
     let [Some(awaited_at)] = awaits.as_slice() else {
         panic!("one await, with its site: {awaits:?}");
     };
-    assert_eq!(
-        (&awaited_at.site, &awaited_at.occurrence),
-        (site, occurrence)
-    );
+    assert_eq!(awaited_at, waited_at);
     assert_eq!(process_ids, &[lash_sansio::ProcessId::fixture("proc-1")]);
-    assert!(observations.iter().any(|observation| matches!(
-        observation,
-        LashVmExecutionObservation::NodeResumed {
-            site: resumed_site,
-            occurrence: resumed_occurrence,
-            ..
-        } if resumed_site.node_id == site.node_id && resumed_occurrence == occurrence
-    )));
+    assert!(observations.iter().any(|observation| {
+        observation.fact == crate::LashVmExecutionFact::NodeResumed
+            && observation.call_site.at.key() == waited_at.at.key()
+    }));
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -390,10 +380,8 @@ async fn aggregate_await_reports_all_children_once() {
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let waits = observations
         .iter()
-        .filter_map(|observation| match observation {
-            LashVmExecutionObservation::ChildProcessWaiting { process_ids, .. } => {
-                Some(process_ids)
-            }
+        .filter_map(|observation| match &observation.fact {
+            crate::LashVmExecutionFact::ChildProcessWaiting { process_ids } => Some(process_ids),
             _ => None,
         })
         .collect::<Vec<_>>();
@@ -407,10 +395,7 @@ async fn aggregate_await_reports_all_children_once() {
     assert_eq!(
         observations
             .iter()
-            .filter(|observation| matches!(
-                observation,
-                LashVmExecutionObservation::NodeResumed { .. }
-            ))
+            .filter(|observation| observation.fact == crate::LashVmExecutionFact::NodeResumed)
             .count(),
         1,
     );

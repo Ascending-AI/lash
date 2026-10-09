@@ -4,7 +4,7 @@ use std::sync::Arc;
 use lash::LashCore;
 use lash::persistence::ProcessStartReceipt;
 use lash::process::*;
-use lash::tracing::TraceLanguageExecutionPayload;
+use lash::tracing::{TraceLanguageExecutionPayload, TraceNodeFact};
 use lash::vm::ir::{
     AssignPathStep, Expr, WorkflowDeclaration, WorkflowNodeId, WorkflowProjection,
     lifted_process_identity,
@@ -468,7 +468,7 @@ impl Overlay {
             ProcessEffectOutcomeClass::Success => {
                 if let Some(call) = &occurrence.call_id {
                     self.completed_calls
-                        .insert(call.to_string(), occurrence.node_id.clone());
+                        .insert(call.to_string(), occurrence.at.site.node_id.to_string());
                 }
                 RunStatus::Succeeded
             }
@@ -477,7 +477,7 @@ impl Overlay {
             }
         };
         vec![self.event(
-            occurrence.node_id.clone(),
+            occurrence.at.site.node_id.to_string(),
             status,
             DisplayDelta::default(),
             occurrence.code.as_ref().map(ToString::to_string),
@@ -573,14 +573,15 @@ impl Overlay {
         // The engine resumes the VM with a settled step's recorded output.
         // NodeCompleted identifies that logical call even after the bounded
         // effect summary stops carrying individual loop occurrences.
-        if let TraceLanguageExecutionPayload::NodeCompleted {
-            node_id,
-            call_id: Some(call),
-            ..
+        if let TraceLanguageExecutionPayload::Node {
+            at,
+            fact: TraceNodeFact::Completed {
+                call_id: Some(call),
+            },
         } = &observation.execution.payload
         {
             self.completed_calls
-                .insert(call.to_string(), node_id.clone());
+                .insert(call.to_string(), at.site.node_id.to_string());
         }
         self.accumulator.observe(observation)?;
         let mut events = self.changed();

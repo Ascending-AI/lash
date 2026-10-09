@@ -87,7 +87,7 @@ pub enum StepRequest {
         /// site's `process.effect_outcome`, and the start of its admitted
         /// body is observed there ([`lash_trace::StepBodyStarted`]).
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        site: Option<StepEffectSite>,
+        site: Option<lash_sansio::WorkflowOccurrence>,
     },
     /// A body of the process's own engine, run through the [`EngineSteps`]
     /// its registration declares, under the retry policy its kind declares
@@ -103,26 +103,6 @@ pub enum StepRequest {
         /// The body's input.
         input: serde_json::Value,
     },
-}
-
-/// One occurrence of an execution site of an engine's workflow document:
-/// what a step's committed outcome is recorded under
-/// (`process.effect_outcome`), and where a wait says the process is blocked.
-/// The process's definition scopes the node; core reads none of it.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct StepEffectSite {
-    /// The node's id in the engine's workflow document.
-    pub node_id: String,
-    /// Which occurrence of the site this is, from 1, counted per site.
-    pub occurrence: u64,
-    /// The exact site inside the node and the loop activations around this
-    /// occurrence.
-    #[serde(
-        default,
-        skip_serializing_if = "lash_sansio::WorkflowOccurrenceContext::is_default"
-    )]
-    pub context: lash_sansio::WorkflowOccurrenceContext,
 }
 
 impl StepRequest {
@@ -144,7 +124,7 @@ impl StepRequest {
 
     /// The effect node the step runs for, if its engine named one.
     #[must_use]
-    pub fn site(&self) -> Option<&StepEffectSite> {
+    pub fn site(&self) -> Option<&lash_sansio::WorkflowOccurrence> {
         match self {
             Self::Tool { site, .. } => site.as_ref(),
             Self::Engine { .. } => None,
@@ -289,7 +269,7 @@ pub enum EngineAction {
         /// The wait's name.
         name: KeyName,
         /// The node that waits, when the engine's workflow document names one.
-        site: Option<StepEffectSite>,
+        site: Option<lash_sansio::WorkflowOccurrence>,
     },
     /// Wait for another process's terminal.
     AwaitProcess {
@@ -299,14 +279,14 @@ pub enum EngineAction {
         /// lash default or ceiling.
         bound: crate::ParkBound,
         /// The node that waits, when the engine's workflow document names one.
-        site: Option<StepEffectSite>,
+        site: Option<lash_sansio::WorkflowOccurrence>,
     },
     /// Sleep until a durable instant.
     Sleep {
         /// When the process wakes.
         until: DurableInstant,
         /// The node that sleeps, when the engine's workflow document names one.
-        site: Option<StepEffectSite>,
+        site: Option<lash_sansio::WorkflowOccurrence>,
     },
     /// Nothing to do and no deadline: the process waits until the next
     /// mailbox event (`Cancelled`, a resolved wait or a settled step)

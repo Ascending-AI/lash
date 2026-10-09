@@ -362,7 +362,8 @@
     "WorkflowExpectedArgument": {
       "properties": {
         "slot": {
-          "$ref": "#/$defs/WorkflowSlotPath"
+          "$ref": "#/$defs/WorkflowSlotPath",
+          "description": "The argument's expression, from the node's statement."
         },
         "ty": {
           "$ref": "#/$defs/TypeExpr"
@@ -375,87 +376,15 @@
       "type": "object"
     },
     "WorkflowNodeId": {
-      "description": "A deterministic node identifier minted from structural owner and AST path.",
+      "description": "A deterministic node identifier of a workflow document, minted from the\nnode's structural owner and AST path. It is never empty.",
       "type": "string"
     },
     "WorkflowSlotPath": {
-      "description": "An unambiguous address for one expression inside a workflow node.\n\nTwo spellings share the type. A *structural* path is made only of\n[`WorkflowSlotPathSegment::Expr`] segments and walks the typed child slots\nof the node's statement ([`super::workflow_node_statement`]), so it reaches\nevery expression role of every IR variant; the empty path is the statement\nitself. A *call-argument* path starts at a receiver call's argument\n(`call`, `arg`, then record fields and list indexes) and is what type\nfacets name their expected arguments by.\n\nThe serialized list is authoritative. [`Display`](std::fmt::Display) is a\nderived spelling for text-only host contracts; field names use JSON string\nquoting so they cannot collide with structural indexes or separators.",
+      "description": "The typed path from a workflow node's statement to one expression inside\nit: the child slot taken at each step. The empty path is the statement\nitself.\n\nThe serialized list is authoritative. [`Display`](std::fmt::Display) is a\nderived spelling for text-only host contracts.",
       "items": {
-        "$ref": "#/$defs/WorkflowSlotPathSegment"
+        "$ref": "#/$defs/ExprSlot"
       },
       "type": "array"
-    },
-    "WorkflowSlotPathSegment": {
-      "description": "One structural step in a [`WorkflowSlotPath`].",
-      "oneOf": [
-        {
-          "additionalProperties": false,
-          "properties": {
-            "call": {
-              "format": "uint32",
-              "minimum": 0,
-              "type": "integer"
-            }
-          },
-          "required": [
-            "call"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "arg": {
-              "format": "uint32",
-              "minimum": 0,
-              "type": "integer"
-            }
-          },
-          "required": [
-            "arg"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "field": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "field"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "index": {
-              "format": "uint32",
-              "minimum": 0,
-              "type": "integer"
-            }
-          },
-          "required": [
-            "index"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "One typed child slot of the IR expression reached so far.",
-          "properties": {
-            "expr": {
-              "$ref": "#/$defs/ExprSlot"
-            }
-          },
-          "required": [
-            "expr"
-          ],
-          "type": "object"
-        }
-      ]
     },
     "WorkflowTypeDiagnostic": {
       "description": "A semantic diagnostic at a node and optional argument slot. A source view\nsupplies text coordinates when a host shows the diagnostic in source.",

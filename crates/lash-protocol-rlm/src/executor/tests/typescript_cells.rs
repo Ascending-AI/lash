@@ -268,8 +268,9 @@ fn scalar_and_batch_tool_failures_keep_recorded_provenance_on_node_failed() {
                 .find_map(|record| match &record.event {
                     lash_core::TraceEvent::LanguageExecution { event, .. } => {
                         match &event.payload {
-                            TraceLanguageExecutionPayload::NodeFailed {
-                                call_id, failure, ..
+                            TraceLanguageExecutionPayload::Node {
+                                fact: lash_vm_runtime::TraceNodeFact::Failed { call_id, failure },
+                                ..
                             } => Some((call_id, failure)),
                             _ => None,
                         }
@@ -863,8 +864,10 @@ fn runtime_schema_validation_uses_declared_contract_after_inference_widens() {
                 facets
                     .expected_arguments
                     .iter()
-                    .any(|slot| slot.slot.to_string() == "arg[0]"
-                        && slot.ty == lash_vm::TypeExpr::Any),
+                    .any(
+                        |slot| slot.slot.slots().last() == Some(&lash_sansio::ExprSlot::Arg(0))
+                            && slot.ty == lash_vm::TypeExpr::Any
+                    ),
                 "the multi-allOf schema widens: {facets:?}"
             );
             let calls = Arc::new(AtomicUsize::new(0));

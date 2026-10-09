@@ -24,7 +24,7 @@ fn echo(value: Expr) -> Expr {
 
 /// The slot of the value an `echo` statement passes.
 fn echoed() -> WorkflowSlotPath {
-    WorkflowSlotPath::structural([
+    WorkflowSlotPath::new([
         ExprSlot::Operand,
         ExprSlot::Operand,
         ExprSlot::Arg(0),
@@ -225,10 +225,7 @@ fn removing_a_producer_with_live_uses_is_refused_unless_the_transaction_reconnec
         "the diagnostic points at the read"
     );
     let statement = workflow_node_statement(draft.node(consumer).expect("still there"));
-    assert_eq!(
-        statement.at_slots(&echoed().expr_slots().expect("structural")),
-        Some(&b::var("value"))
-    );
+    assert_eq!(statement.at_slots(echoed().slots()), Some(&b::var("value")));
 
     let stale = draft.revision();
     apply(
@@ -362,7 +359,7 @@ fn a_try_region_is_edited_in_place() {
             },
             WorkflowEdit::ReplaceExpression {
                 target: super::WorkflowExpressionRef::Node(handler),
-                slot: WorkflowSlotPath::structural([ExprSlot::Operand]),
+                slot: WorkflowSlotPath::new([ExprSlot::Operand]),
                 expression: b::var("problem"),
             },
             WorkflowEdit::InsertNode {
@@ -470,7 +467,7 @@ fn a_lifted_process_is_edited_through_its_container_and_keeps_its_handles() {
         vec![
             WorkflowEdit::ReplaceExpression {
                 target: super::WorkflowExpressionRef::Node(print),
-                slot: WorkflowSlotPath::structural([ExprSlot::Operand]),
+                slot: WorkflowSlotPath::new([ExprSlot::Operand]),
                 expression: b::string("started"),
             },
             WorkflowEdit::InsertNode {
@@ -946,7 +943,7 @@ fn removing_a_function_with_live_calls_is_refused_unless_the_transaction_removes
         location,
         WorkflowEditLocation::Node {
             node: caller,
-            slot: WorkflowSlotPath::structural([ExprSlot::Value]),
+            slot: WorkflowSlotPath::new([ExprSlot::Value]),
         },
         "the diagnostic points at the call"
     );
@@ -1003,7 +1000,7 @@ async fn a_function_body_expression_is_edited_by_slot_and_publishes_and_runs() {
         )
     };
     let mut draft = open(&program(2.0));
-    let slot = WorkflowSlotPath::structural([ExprSlot::Right]);
+    let slot = WorkflowSlotPath::new([ExprSlot::Right]);
     let change = apply(
         &mut draft,
         vec![WorkflowEdit::ReplaceExpression {
@@ -1037,7 +1034,7 @@ async fn a_function_body_expression_is_edited_by_slot_and_publishes_and_runs() {
             name: "missing".into()
         }
     );
-    let unknown_slot = WorkflowSlotPath::structural([ExprSlot::Arg(99)]);
+    let unknown_slot = WorkflowSlotPath::new([ExprSlot::Arg(99)]);
     let (_, diagnostic, kind) = refused(
         &mut draft,
         vec![WorkflowEdit::ReplaceExpression {
@@ -1110,7 +1107,7 @@ async fn a_wrapper_argument_expression_is_edited_by_slot_and_publishes_and_runs(
         .handle(&draft.document().process("worker").expect("worker").id)
         .expect("handle");
     let body = draft.body(&WorkflowBodyRef::Process(worker));
-    let slot = WorkflowSlotPath::structural([ExprSlot::Arg(0), ExprSlot::Entry(0)]);
+    let slot = WorkflowSlotPath::new([ExprSlot::Arg(0), ExprSlot::Entry(0)]);
     let change = apply(
         &mut draft,
         vec![WorkflowEdit::ReplaceExpression {
@@ -1141,8 +1138,7 @@ async fn a_wrapper_argument_expression_is_edited_by_slot_and_publishes_and_runs(
             name: "missing".into()
         }
     );
-    let body_slot =
-        WorkflowSlotPath::structural([ExprSlot::Callee, ExprSlot::Arg(0), ExprSlot::Body]);
+    let body_slot = WorkflowSlotPath::new([ExprSlot::Callee, ExprSlot::Arg(0), ExprSlot::Body]);
     let (_, diagnostic, kind) = refused(
         &mut draft,
         vec![WorkflowEdit::ReplaceExpression {
@@ -1159,7 +1155,7 @@ async fn a_wrapper_argument_expression_is_edited_by_slot_and_publishes_and_runs(
         }
     );
     assert_eq!(kind, Kind::SlotInChildBody);
-    let driver_slot = WorkflowSlotPath::structural([ExprSlot::Callee, ExprSlot::Arg(1)]);
+    let driver_slot = WorkflowSlotPath::new([ExprSlot::Callee, ExprSlot::Arg(1)]);
     let change = apply(
         &mut draft,
         vec![WorkflowEdit::ReplaceExpression {

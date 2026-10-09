@@ -49,8 +49,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use lash_sansio::WorkflowExecutionSite;
+use lash_sansio::WorkflowSiteDescriptor;
 use lash_sansio::core_support::Blake3DomainHasher;
+pub use lash_sansio::{WorkflowNodeId, WorkflowSlotPath};
 
 use crate::ast::{
     AssignPathStep, AssignTarget, AstString, AttributeAssignParts, Expr, FunctionDecl,
@@ -164,19 +165,6 @@ pub const WORKFLOW_GRAPH_SCHEMA_VERSION: u32 = 21;
 /// format_manifest = "WorkflowGraphSchema"
 pub const WORKFLOW_GRAPH_SCHEMA_VERSION: u32 = 22;
 
-/// A deterministic node identifier minted from structural owner and AST path.
-#[derive(
-    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
-)]
-#[serde(transparent)]
-pub struct WorkflowNodeId(String);
-
-impl WorkflowNodeId {
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
 /// Mints the structural identity shared by workflow projection and execution.
 ///
 /// The owner and owner-relative AST path are the complete preimage. Artifact
@@ -191,13 +179,7 @@ pub fn workflow_node_id(owner: &str, path: &[u32]) -> WorkflowNodeId {
     for index in path {
         hasher.update(index.to_be_bytes());
     }
-    WorkflowNodeId(format!("node:{}", &hasher.finalize_hex()[..24]))
-}
-
-impl std::fmt::Display for WorkflowNodeId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
+    WorkflowNodeId::from_digest_hex(&hasher.finalize_hex()[..24])
 }
 
 /// The single serializable graph document used for editing and run overlays.
@@ -658,7 +640,7 @@ pub struct WorkflowNode {
     pub outputs: Vec<VariableVersion>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[serde(deserialize_with = "deserialize_strict")]
-    pub execution_sites: Vec<WorkflowExecutionSite>,
+    pub execution_sites: Vec<WorkflowSiteDescriptor>,
 }
 
 impl WorkflowNode {
@@ -1383,16 +1365,6 @@ pub struct WorkflowEdge {
 pub enum WorkflowEdgeKind {
     DataDependency { variable: String, version: u32 },
     Sequence,
-}
-
-impl WorkflowNodeId {
-    /// Wraps an already-minted node identifier.
-    ///
-    /// Graph documents a host builds carry ids it read off a projection, so
-    /// the constructor is public; the value is opaque everywhere else.
-    pub fn new(id: String) -> Self {
-        Self(id)
-    }
 }
 
 fn collect_subgraph_nodes<'a>(graph: &'a WorkflowSubgraph, nodes: &mut Vec<&'a WorkflowNode>) {

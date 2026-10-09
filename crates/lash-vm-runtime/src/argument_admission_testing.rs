@@ -109,19 +109,15 @@ pub async fn nested_process_arguments_reject_forged_aliases_and_try_later_union_
                 .clone(),
             host_requirements_ref: receiver.host_requirements_ref.clone(),
             start_site: lash_vm::LashVmExecutionCallSite {
-                site: lash_vm::LashVmExecutionSite {
-                    node_id: "nested-union".into(),
-                    node_kind: lash_sansio::ExecutionNodeKind::Call,
-                    label: "nested start".into(),
-                    workflow_site: lash_vm::WorkflowExecutionSite::new(
+                at: lash_sansio::WorkflowOccurrence::new(
+                    lash_sansio::WorkflowSiteRef::node(lash_vm::workflow_node_id(
                         "process:install",
-                        [],
-                        lash_sansio::ExecutionNodeKind::Call,
-                        "nested start",
-                    ),
-                },
-                occurrence: 1,
-                loops: Default::default(),
+                        &[],
+                    )),
+                    std::num::NonZeroU64::MIN,
+                ),
+                kind: lash_sansio::ExecutionNodeKind::Call,
+                label: "nested start".into(),
             },
             process_name: "install".into(),
             args,

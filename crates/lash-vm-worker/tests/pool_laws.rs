@@ -1544,12 +1544,7 @@ fn a_long_loop_streams_its_observations_in_chunks_within_the_decode_bounds() {
             rmp_serde::from_slice(&chunk.0).expect("an observation chunk");
         loop_steps += observations
             .iter()
-            .filter(|observation| {
-                matches!(
-                    observation,
-                    lash_vm::LashVmExecutionObservation::NodeCompleted { .. }
-                )
-            })
+            .filter(|observation| observation.fact == lash_vm::LashVmExecutionFact::NodeCompleted)
             .count();
     }
     assert!(

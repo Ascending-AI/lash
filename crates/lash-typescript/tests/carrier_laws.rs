@@ -38,7 +38,7 @@ fn link(source: &str) -> LinkedModule {
         .unwrap_or_else(|error| panic!("corpus source links: {error}\n{source}"))
 }
 
-type NodeFacts = BTreeMap<String, (String, Vec<lash_vm::WorkflowExecutionSite>)>;
+type NodeFacts = BTreeMap<String, (String, Vec<lash_vm::WorkflowSiteDescriptor>)>;
 
 /// Every node's kind and execution sites, by id, processes included.
 fn node_facts(graph: &WorkflowGraph) -> NodeFacts {
@@ -250,7 +250,10 @@ struct LiftedOwner {
     lens: String,
     linked: String,
     reloaded: String,
-    runtime: BTreeSet<String>,
+    /// The nodes of the process the lens's container became, and the nodes
+    /// the runtime's sites name.
+    lens_nodes: BTreeSet<lash_vm::WorkflowNodeId>,
+    runtime_nodes: BTreeSet<lash_vm::WorkflowNodeId>,
 }
 
 fn lifted_owner(source: &str) -> LiftedOwner {
@@ -267,14 +270,17 @@ fn lifted_owner(source: &str) -> LiftedOwner {
         .nodes
         .get(container)
         .expect("admission names the container");
-    let lens = admission
+    let (lens, lens_nodes) = admission
         .graph
         .declarations
         .iter()
         .find_map(|declaration| match declaration {
-            WorkflowDeclaration::Process(process) if process.id == *reached => {
-                Some(process.name.clone())
-            }
+            WorkflowDeclaration::Process(process) if process.id == *reached => Some((
+                process.name.clone(),
+                std::iter::once(process.id.clone())
+                    .chain(process.body.nodes().into_iter().map(|node| node.id.clone()))
+                    .collect::<BTreeSet<_>>(),
+            )),
             _ => None,
         })
         .expect("the container became a process");
@@ -315,9 +321,10 @@ fn lifted_owner(source: &str) -> LiftedOwner {
         lens,
         linked: name,
         reloaded: lifted(&reloaded),
-        runtime: lash_vm::testing::harness::compiled_execution_sites(&compiled)
+        lens_nodes,
+        runtime_nodes: lash_vm::testing::harness::compiled_execution_sites(&compiled)
             .into_iter()
-            .map(|site| site.workflow_site.owner.clone())
+            .map(|site| site.site.node_id.clone())
             .collect(),
     }
 }
@@ -341,9 +348,10 @@ fn l3_a_rename_inside_a_lifted_literal_remints_one_owner_everywhere() {
             "the lens's container becomes the linker's owner"
         );
         assert_eq!(owner.linked, owner.reloaded, "the stored artifact agrees");
-        assert_eq!(
-            owner.runtime,
-            BTreeSet::from([format!("process:{}", owner.linked)]),
+        // A node id is minted from its owner, so a runtime site that names
+        // a node of the admitted process names that process as its owner.
+        assert!(
+            !owner.runtime_nodes.is_empty() && owner.runtime_nodes.is_subset(&owner.lens_nodes),
             "the runtime's sites name the same owner"
         );
     }
@@ -391,7 +399,7 @@ fn l4_draft_and_admitted_projections_agree() {
         for (id, (kind, _)) in node_facts(&draft) {
             let reached = admission
                 .nodes
-                .get(&lash_vm::WorkflowNodeId::new(id.clone()))
+                .get(id.as_str())
                 .and_then(|reached| admitted_facts.get(reached.as_str()));
             assert_eq!(
                 reached.map(|(kind, _)| kind),

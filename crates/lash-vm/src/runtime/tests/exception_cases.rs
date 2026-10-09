@@ -273,7 +273,10 @@ impl ExecutionHost for ExceptionRecordingHost {
             self.operations.lock_recover().push((
                 operation.operation.clone(),
                 value.clone(),
-                operation.call_site.as_ref().map(|site| site.occurrence),
+                operation
+                    .call_site
+                    .as_ref()
+                    .map(|site| site.at.occurrence.get()),
             ));
             if operation.operation == "missing" {
                 return if self.operations.lock_recover().len() == 1 {

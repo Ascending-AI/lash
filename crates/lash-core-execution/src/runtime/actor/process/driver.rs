@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use lash_durable::domain::WaitId;
 use serde::{Deserialize, Serialize};
 
-use crate::runtime::process::engine_state::{KeyName, StepEffectSite, StepName, StepRequest};
+use crate::runtime::process::engine_state::{KeyName, StepName, StepRequest};
 use crate::{ProcessId, ToolCallId};
 
 /// The driver's state of one process.
@@ -102,7 +102,7 @@ pub(super) enum Blocked {
         wait: StoredWaitId,
         /// The node that waits, when the engine named one.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        site: Option<StepEffectSite>,
+        site: Option<lash_sansio::WorkflowOccurrence>,
     },
     /// Another process's terminal.
     Process {
@@ -112,7 +112,7 @@ pub(super) enum Blocked {
         wait: StoredWaitId,
         /// The node that waits, when the engine named one.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        site: Option<StepEffectSite>,
+        site: Option<lash_sansio::WorkflowOccurrence>,
     },
     /// A durable instant.
     Sleep {
@@ -120,7 +120,7 @@ pub(super) enum Blocked {
         until: i64,
         /// The node that sleeps, when the engine named one.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        site: Option<StepEffectSite>,
+        site: Option<lash_sansio::WorkflowOccurrence>,
     },
     /// Nothing but its mailbox.
     Idle,

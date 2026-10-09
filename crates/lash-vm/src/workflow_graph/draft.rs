@@ -71,8 +71,13 @@ const HANDLE_ID_PREFIX: &str = "draft:";
 pub struct WorkflowDraftHandle(u64);
 
 impl WorkflowDraftHandle {
+    #[expect(
+        clippy::expect_used,
+        reason = "a handle id starts with the nonempty handle prefix, so it is never empty"
+    )]
     fn id(self) -> WorkflowNodeId {
         WorkflowNodeId::new(format!("{HANDLE_ID_PREFIX}{}", self.0))
+            .expect("a handle id is never empty")
     }
 
     fn of(id: &WorkflowNodeId) -> Option<Self> {
@@ -836,7 +841,7 @@ impl State {
                 .unwrap_or_default();
             return WorkflowEditLocation::Node {
                 node: *handle,
-                slot: WorkflowSlotPath::structural(slots),
+                slot: WorkflowSlotPath::new(slots),
             };
         }
         let AstRoot::Declaration(index) = path.root else {
@@ -846,7 +851,7 @@ impl State {
             Some(Owner::Process(process)) => WorkflowEditLocation::Process { process },
             Some(Owner::Function(name)) => WorkflowEditLocation::Function {
                 name,
-                slot: WorkflowSlotPath::structural(
+                slot: WorkflowSlotPath::new(
                     expr_at(&self.program, &AstPath::declaration(index, Vec::new()))
                         .and_then(|body| body.slot_path(&path.steps))
                         .unwrap_or_default(),
@@ -893,7 +898,7 @@ impl State {
             {
                 return Some(WorkflowEditLocation::ProcessWrapper {
                     process: *self.handles.get(&process.id)?,
-                    slot: WorkflowSlotPath::structural(call_slots.iter().copied()),
+                    slot: WorkflowSlotPath::new(call_slots.iter().copied()),
                 });
             }
         }

@@ -240,9 +240,10 @@ async fn a_saved_workflow_runs_as_a_durable_process() {
         .collect::<Vec<_>>();
     assert!(!outcomes.is_empty(), "the engine recorded graph effects");
     assert!(outcomes.iter().all(|outcome| {
-        events
-            .iter()
-            .any(|event| event.node_id == outcome.node_id && event.status == RunStatus::Succeeded)
+        events.iter().any(|event| {
+            outcome.at.site.node_id == event.node_id.as_str()
+                && event.status == RunStatus::Succeeded
+        })
     }));
     assert!(durable.iter().any(|event| matches!(&event.fact,
         lash::process::ProcessLifecycleFact::Terminal { outcome, .. }

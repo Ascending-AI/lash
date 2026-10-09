@@ -496,11 +496,7 @@ fn an_aggregates_timer_leaf_sleeps_on_a_durable_wake_until_it_fires() {
 /// on re-answers the same deadline and node.
 #[test]
 fn a_sleep_stands_until_it_wakes() {
-    let site = lash_core::StepEffectSite {
-        node_id: "nap".to_owned(),
-        occurrence: 2,
-        context: Default::default(),
-    };
+    let site = lash_sansio::WorkflowOccurrence::fixture("nap", 2);
     let (mut driven, action) = Driven::parked_on(IssuedOperation::Sleep {
         until_ms: 5_000,
         site: Some(site.clone()),
@@ -525,14 +521,8 @@ fn a_sleep_stands_until_it_wakes() {
 #[test]
 fn an_await_stands_until_its_process_ends() {
     let awaited = ProcessId::fixture("awaited");
-    let site = lash_core::StepEffectSite {
-        node_id: "await.node".to_owned(),
-        occurrence: 2,
-        context: lash_sansio::WorkflowOccurrenceContext {
-            site_path: lash_sansio::WorkflowSitePath::slots([lash_sansio::ExprSlot::Value]),
-            loops: Vec::new(),
-        },
-    };
+    let mut site = lash_sansio::WorkflowOccurrence::fixture("await.node", 2);
+    site.site.site_path = lash_sansio::WorkflowSitePath::at([lash_sansio::ExprSlot::Value]);
     let (mut driven, action) = Driven::parked_on(IssuedOperation::AwaitProcess {
         process: awaited.clone(),
         site: Some(site.clone()),
@@ -912,7 +902,10 @@ async fn a_dialect_free_process_never_claims_a_source_language() {
     )));
     assert!(language_events.iter().any(|payload| matches!(
         payload,
-        lash_trace::TraceLanguageExecutionPayload::NodeWaiting { .. }
+        lash_trace::TraceLanguageExecutionPayload::Node {
+            fact: lash_trace::TraceNodeFact::Waiting { .. },
+            ..
+        }
     )));
     assert!(language_events.iter().any(|payload| matches!(
         payload,

@@ -113,18 +113,14 @@ impl RuntimeExecutionContext<'_> {
         call_id: crate::ToolCallId,
         language: impl Into<String>,
         identity: lash_trace::TraceLanguageExecutionIdentity,
-        parent_node_id: impl Into<String>,
-        occurrence: u64,
-        context: lash_sansio::WorkflowOccurrenceContext,
+        at: lash_sansio::WorkflowOccurrence,
     ) {
         self.language_calls.lock_recover().insert(
             call_id,
             Arc::new(crate::runtime::process::LanguageCallAttribution {
                 language: language.into(),
                 identity,
-                parent_node_id: parent_node_id.into(),
-                occurrence,
-                context,
+                at,
             }),
         );
     }

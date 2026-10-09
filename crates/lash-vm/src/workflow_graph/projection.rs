@@ -280,10 +280,11 @@ impl Session<'_, '_> {
         let (kind, name, outputs) =
             self.project_kind(statement, expression, owner, ownership, versions);
         let id = workflow_node_id(owner, path);
-        let execution_sites = execution_sites(expression, owner, &facts_path, ownership, label);
+        let execution_sites = execution_sites(expression, &facts_path, ownership, label);
         let mut type_facets = projected_node_type_facets(
             self.projector.analysis,
             &facts_path,
+            ownership,
             &available_variables,
             &id,
         );

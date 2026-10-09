@@ -17,7 +17,6 @@ use crate::{
     WorkflowGraphDecodeError, WorkflowGraphError, WorkflowNodeId, WorkflowNodeKind,
     WorkflowSlotPath, validate_ast, walk_expr_slots, workflow_graph_from_artifact,
     workflow_graph_from_program, workflow_node_statement, workflow_program_from_graph,
-    workflow_slot_value,
 };
 
 fn echo(value: Expr) -> Expr {
@@ -465,7 +464,7 @@ fn derived_views_are_recomputed_and_never_read() {
         graph.edges.clear();
         for node in graph.nodes_mut() {
             *counter += 1;
-            node.id = WorkflowNodeId::new(format!("node:host-{counter}"));
+            node.id = WorkflowNodeId::new(format!("node:host-{counter}")).expect("node id");
             node.available_variables = vec!["stale".to_string()];
             node.outputs.clear();
             node.execution_sites.clear();
@@ -485,7 +484,7 @@ fn derived_views_are_recomputed_and_never_read() {
         for declaration in &mut edited.declarations {
             if let crate::WorkflowDeclaration::Process(process) = declaration {
                 counter += 1;
-                process.id = WorkflowNodeId::new(format!("node:host-{counter}"));
+                process.id = WorkflowNodeId::new(format!("node:host-{counter}")).expect("node id");
                 scramble(&mut process.body, &mut counter);
             }
         }
@@ -546,9 +545,9 @@ fn every_expression_of_a_node_has_a_typed_slot_address() {
             let mut paths = Paths(vec![Vec::new()]);
             walk_expr_slots(&mut paths, &statement);
             for path in paths.0 {
-                let address = WorkflowSlotPath::structural(path.iter().copied());
+                let address = WorkflowSlotPath::new(path.iter().copied());
                 assert!(
-                    workflow_slot_value(&statement, &address).is_some(),
+                    statement.at_slots(address.slots()).is_some(),
                     "{name}: {address} resolves in node `{}`",
                     node.name
                 );

@@ -2,12 +2,12 @@ use crate::ast::{AstPath, Expr, LabelMetadata};
 use crate::runtime::{
     STEP_EXECUTION_SITE_KIND, execution_site_descriptor, label_attaches_to_concrete_node,
 };
-use lash_sansio::{WorkflowExecutionSite, WorkflowSitePath, WorkflowSiteRole};
+use lash_sansio::{WorkflowSiteDescriptor, WorkflowSitePath, WorkflowSiteRole};
 
 use super::{WorkflowNodePath, WorkflowOwnership};
 
-/// Every execution site a workflow node contributes. A site's address is its
-/// node and the typed slot path from the node's statement to the executable
+/// Every execution site a workflow node contributes. A site's address is the
+/// node that lists it and the typed slot path from the node's statement to the executable
 /// subexpression, read from the same ownership walk the compiler attributes
 /// instructions with: two calls in one statement are two sites.
 ///
@@ -16,17 +16,16 @@ use super::{WorkflowNodePath, WorkflowOwnership};
 /// `lash-typescript`.
 pub fn execution_sites(
     expression: &Expr,
-    owner: &str,
     ast_path: &AstPath,
     ownership: &WorkflowOwnership,
     label: Option<&LabelMetadata>,
-) -> Vec<WorkflowExecutionSite> {
+) -> Vec<WorkflowSiteDescriptor> {
     let mut sites = Vec::new();
     let Some(node_path) = ownership.path_for_ast(ast_path) else {
         panic!("projected execution-site expression must have workflow ownership");
     };
     collect_execution_sites(
-        expression, owner, ast_path, node_path, ownership, label, &mut sites,
+        expression, ast_path, node_path, ownership, label, &mut sites,
     );
     sites.sort();
     sites
@@ -34,12 +33,11 @@ pub fn execution_sites(
 
 fn collect_execution_sites(
     expression: &Expr,
-    owner: &str,
     ast_path: &AstPath,
     node_path: &WorkflowNodePath,
     ownership: &WorkflowOwnership,
     label: Option<&LabelMetadata>,
-    sites: &mut Vec<WorkflowExecutionSite>,
+    sites: &mut Vec<WorkflowSiteDescriptor>,
 ) {
     // An inline process literal's body runs in the process it lifts to,
     // never under the node that holds it, so it contributes no site here.
@@ -51,18 +49,12 @@ fn collect_execution_sites(
     if let Some(label) = label
         && !label_attaches_to_concrete_node(expression)
     {
-        sites.push(
-            WorkflowExecutionSite::new(
-                owner,
-                node_path.indices(),
-                STEP_EXECUTION_SITE_KIND,
-                label.title.as_str(),
-            )
-            .at(site_path(ast_path, ownership).role(WorkflowSiteRole::LabeledStep)),
-        );
-        collect_execution_sites(
-            expression, owner, ast_path, node_path, ownership, None, sites,
-        );
+        sites.push(WorkflowSiteDescriptor {
+            site_path: site_path(ast_path, ownership).with_role(WorkflowSiteRole::LabeledStep),
+            kind: STEP_EXECUTION_SITE_KIND,
+            label: label.title.to_string(),
+        });
+        collect_execution_sites(expression, ast_path, node_path, ownership, None, sites);
         return;
     }
     match expression {
@@ -74,7 +66,6 @@ fn collect_execution_sites(
                 .count() as u32;
             collect_execution_sites(
                 expr,
-                owner,
                 &ast_path.child(value_index),
                 node_path,
                 ownership,
@@ -83,27 +74,13 @@ fn collect_execution_sites(
             );
         }
         Expr::Await(expr) | Expr::ResultUnwrap(expr) if label.is_some() => {
-            collect_execution_sites(
-                expr,
-                owner,
-                &ast_path.child(0),
-                node_path,
-                ownership,
-                label,
-                sites,
-            );
+            collect_execution_sites(expr, &ast_path.child(0), node_path, ownership, label, sites);
         }
         _ => {
             if execution_site_descriptor(expression).is_some() {
-                push_execution_site_descriptor(
-                    expression,
-                    owner,
-                    node_path.indices(),
-                    site_path(ast_path, ownership),
-                    sites,
-                );
+                push_execution_site_descriptor(expression, site_path(ast_path, ownership), sites);
             }
-            collect_child_execution_sites(expression, owner, ast_path, node_path, ownership, sites);
+            collect_child_execution_sites(expression, ast_path, node_path, ownership, sites);
         }
     }
 }
@@ -114,14 +91,16 @@ fn collect_execution_sites(
 )]
 fn push_execution_site_descriptor(
     expression: &Expr,
-    owner: &str,
-    node_path: &[u32],
     site_path: WorkflowSitePath,
-    sites: &mut Vec<WorkflowExecutionSite>,
+    sites: &mut Vec<WorkflowSiteDescriptor>,
 ) {
     let (kind, label) = execution_site_descriptor(expression)
         .expect("execution-site expression must have a compiler descriptor");
-    sites.push(WorkflowExecutionSite::new(owner, node_path, kind, label).at(site_path));
+    sites.push(WorkflowSiteDescriptor {
+        site_path,
+        kind,
+        label: label.into(),
+    });
 }
 
 /// The typed path from the owning node's statement to the expression at
@@ -129,22 +108,20 @@ fn push_execution_site_descriptor(
 fn site_path(ast_path: &AstPath, ownership: &WorkflowOwnership) -> WorkflowSitePath {
     ownership
         .site_for_ast(ast_path)
-        .map(|(_, slots)| WorkflowSitePath::slots(slots.iter().copied()))
+        .map(|(_, slots)| WorkflowSitePath::at(slots.iter().copied()))
         .unwrap_or_default()
 }
 
 fn collect_child_execution_sites(
     expression: &Expr,
-    owner: &str,
     ast_path: &AstPath,
     node_path: &WorkflowNodePath,
     ownership: &WorkflowOwnership,
-    sites: &mut Vec<WorkflowExecutionSite>,
+    sites: &mut Vec<WorkflowSiteDescriptor>,
 ) {
     for (index, child) in expression.children().enumerate() {
         collect_execution_sites(
             child,
-            owner,
             &ast_path.child(index as u32),
             node_path,
             ownership,

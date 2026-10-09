@@ -404,15 +404,9 @@ export type WorkflowBodyItem =
 export type ExecutionNodeKind =
   'resource_operation' | 'sleep' | 'wait' | 'terminal' | 'process_event' | 'branch' | 'loop' | 'call' | 'step';
 /**
- * One step of a [`WorkflowSitePath`].
+ * What a site that is not an expression of its own stands for.
  */
-export type WorkflowSiteSegment =
-  | {
-      slot: ExprSlot;
-    }
-  | {
-      role: WorkflowSiteRole;
-    };
+export type WorkflowSiteRole = 'labeled_step';
 /**
  * The role one child expression plays in its parent expression of the
  * shared workflow IR.
@@ -455,19 +449,17 @@ export type ExprSlot =
   | 'items'
   | 'function';
 /**
- * What a site that is not an expression of its own stands for.
- */
-export type WorkflowSiteRole = 'labeled_step';
-/**
- * The typed path from a workflow node's statement to one executable
- * subexpression. The empty path is the statement itself.
+ * The typed path from a workflow node's statement to one expression inside
+ * it: the child slot taken at each step. The empty path is the statement
+ * itself.
  *
- * Slot segments walk the statement's typed child slots; a trailing role
- * segment names a synthetic site of the expression they reach.
+ * The serialized list is authoritative. [`Display`](std::fmt::Display) is a
+ * derived spelling for text-only host contracts.
  */
-export type WorkflowSitePath = WorkflowSiteSegment[];
+export type WorkflowSlotPath = ExprSlot[];
 /**
- * A deterministic node identifier minted from structural owner and AST path.
+ * A deterministic node identifier of a workflow document, minted from the
+ * node's structural owner and AST path. It is never empty.
  */
 export type WorkflowNodeId = string;
 export type WorkflowNodeKind =
@@ -695,41 +687,6 @@ export type WorkflowDiagnosticKind =
   | 'incompatible_iteration_target'
   | 'module_hash'
   | 'invalid_ast';
-/**
- * One structural step in a [`WorkflowSlotPath`].
- */
-export type WorkflowSlotPathSegment =
-  | {
-      call: number;
-    }
-  | {
-      arg: number;
-    }
-  | {
-      field: string;
-    }
-  | {
-      index: number;
-    }
-  | {
-      expr: ExprSlot;
-    };
-/**
- * An unambiguous address for one expression inside a workflow node.
- *
- * Two spellings share the type. A *structural* path is made only of
- * [`WorkflowSlotPathSegment::Expr`] segments and walks the typed child slots
- * of the node's statement ([`super::workflow_node_statement`]), so it reaches
- * every expression role of every IR variant; the empty path is the statement
- * itself. A *call-argument* path starts at a receiver call's argument
- * (`call`, `arg`, then record fields and list indexes) and is what type
- * facets name their expected arguments by.
- *
- * The serialized list is authoritative. [`Display`](std::fmt::Display) is a
- * derived spelling for text-only host contracts; field names use JSON string
- * quoting so they cannot collide with structural indexes or separators.
- */
-export type WorkflowSlotPath = WorkflowSlotPathSegment[];
 export type WorkflowEdgeKind =
   | {
       kind: 'data_dependency';
@@ -899,7 +856,7 @@ export interface WorkflowNode {
    * Identifiers visible before this node executes, in stable lexical order.
    */
   available_variables?: string[];
-  execution_sites?: WorkflowExecutionSite[];
+  execution_sites?: WorkflowSiteDescriptor[];
   id: WorkflowNodeId;
   kind: WorkflowNodeKind;
   /**
@@ -917,18 +874,25 @@ export interface WorkflowNode {
   type_facets?: WorkflowNodeTypeFacets | null;
 }
 /**
- * One execution site of a workflow node: the node (`owner` and `path`), the
- * exact executable subexpression inside its statement (`site_path`), and a
- * description of what runs there. `kind` and `label` describe the site; they
- * are not its identity.
+ * One execution site of a workflow node as its document lists it: the exact
+ * executable subexpression inside the node's statement and a description of
+ * what runs there. The node that lists it is its owner; `kind` and `label`
+ * describe the site and are not its identity.
  */
-export interface WorkflowExecutionSite {
+export interface WorkflowSiteDescriptor {
   kind: ExecutionNodeKind;
   label: string;
-  owner: string;
-  path?: number[];
   site_path?: WorkflowSitePath;
-  [k: string]: unknown;
+}
+/**
+ * The address of one execution site inside a workflow node: the slot path
+ * from the node's statement to the site's expression, and the synthetic
+ * site of that expression it names, if it is not the expression's own. The
+ * default is the statement's own site.
+ */
+export interface WorkflowSitePath {
+  role?: WorkflowSiteRole | null;
+  slots?: WorkflowSlotPath;
 }
 /**
  * The catch clause of a [`WorkflowContainer::Try`]: `binding` names the
@@ -966,6 +930,9 @@ export interface WorkflowTypeDiagnostic {
   [k: string]: unknown;
 }
 export interface WorkflowExpectedArgument {
+  /**
+   * The argument's expression, from the node's statement.
+   */
   slot: WorkflowSlotPath;
   ty: TypeExpr;
   [k: string]: unknown;

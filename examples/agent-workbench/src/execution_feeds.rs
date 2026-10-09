@@ -571,8 +571,10 @@ async fn follow_process(graphs: ExecutionGraphs, state: AppState, process_id: Pr
             match item? {
                 ProcessObservationStreamItem::Event(event) => match &event.payload {
                     ProcessObservationEventPayload::LanguageExecution(observation) => {
-                        if let TraceLanguageExecutionPayload::ChildStarted { child, .. } =
-                            &observation.execution.payload
+                        if let TraceLanguageExecutionPayload::Node {
+                            fact: lash::tracing::TraceNodeFact::ChildStarted { child },
+                            ..
+                        } = &observation.execution.payload
                         {
                             graphs.follow_process(&state, &child.process_id);
                         }
@@ -671,11 +673,9 @@ mod tests {
             process_id,
             "node-started",
             1_100,
-            TraceLanguageExecutionPayload::NodeStarted {
-                node_id: "sleep".to_string(),
-                occurrence: 1,
-                call_id: None,
-                context: Default::default(),
+            TraceLanguageExecutionPayload::Node {
+                at: lash::vm::WorkflowOccurrence::fixture("sleep", 1),
+                fact: lash::tracing::TraceNodeFact::Started { call_id: None },
             },
         )
     }

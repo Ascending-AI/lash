@@ -17,11 +17,11 @@ pub use lash_vm::{
     GlobalPatchOutcome, HeapId, INSTRUCTION_ACCOUNTING_VERSION, ImageValue,
     LASH_HOST_DESCRIPTOR_TYPE_KEY, LASH_HOST_DESCRIPTOR_VALUE_KEY, LASH_HOST_REQUIREMENTS_REF_KEY,
     LASH_MODULE_REF_KEY, LASH_PROCESS_NAME_KEY, LASH_PROCESS_REF_KEY, LASH_PROCESS_VALUE_KEY,
-    LASH_TYPE_KEY, LinkedProgramCache, LinkedProgramCacheError, ListValue, PendingOccurrence,
-    PendingOperation, PendingOperationMap, ProcessStart, ProfileReport, ProfileStat,
-    ProjectedBindingError, ProjectedBindings, ProjectedReadRequest, ProjectedReadResponse,
-    ProjectedValue, ProjectionCatalog, ProjectionError, ProjectionProvider, ProjectionReadError,
-    ProjectionReader, ProjectionRefusal, ProjectionType, Record, ResourceHandle, ResourceOperation,
+    LASH_TYPE_KEY, LinkedProgramCache, LinkedProgramCacheError, ListValue, PendingOperation,
+    PendingOperationMap, ProcessStart, ProfileReport, ProfileStat, ProjectedBindingError,
+    ProjectedBindings, ProjectedReadRequest, ProjectedReadResponse, ProjectedValue,
+    ProjectionCatalog, ProjectionError, ProjectionProvider, ProjectionReadError, ProjectionReader,
+    ProjectionRefusal, ProjectionType, Record, ResourceHandle, ResourceOperation,
     ResourceOperationBatch, ResourceOperationBatchLeaf, ResourceOperationBatchOutcome,
     ResourceOperationOutcome, ResourceRef, RuntimeError as VmRuntimeError, RuntimeFailure, Sleep,
     SleepKind, Snapshot, SnapshotDecodeError, State, StringValue, UnawaitedToolCall, Value, Vm,
@@ -47,6 +47,10 @@ pub use lash_vm::{
 };
 pub use lash_vm::{DEFAULT_HEAP_LOGICAL_BYTE_LIMIT, HEAP_GC_ALLOCATION_INTERVAL};
 pub use lash_vm::{DEFAULT_HOST_MEMORY_LIMIT_BYTES, DEFAULT_MAX_VM_FRAME_DEPTH};
+pub use lash_vm::{
+    EmptyWorkflowNodeId, WorkflowLoopFrame, WorkflowLoopPosition, WorkflowOccurrence,
+    WorkflowSiteDescriptor, WorkflowSitePath, WorkflowSiteRef, WorkflowSiteRole,
+};
 pub use lash_vm::{HostDescriptor, HostDescriptorError};
 pub use lash_vm::{
     INSTANCE_STDLIB_SIGNATURES, LiteralReceivers, STATIC_STDLIB_SIGNATURES, StdlibSignature,
@@ -61,8 +65,9 @@ pub use lash_vm::{
     format_link_diagnostic, format_runtime_diagnostic, format_source_diagnostic,
 };
 pub use lash_vm::{
-    LashVmEffectFailure, LashVmExecutionCallSite, LashVmExecutionChild, LashVmExecutionFailure,
-    LashVmExecutionObservation, LashVmExecutionSite, ProcessBranchSelection, process_ref_key,
+    LashVmEffectFailure, LashVmExecutionCallSite, LashVmExecutionChild, LashVmExecutionFact,
+    LashVmExecutionFailure, LashVmExecutionObservation, LashVmExecutionSite,
+    ProcessBranchSelection, process_ref_key,
 };
 pub use lash_vm::{
     LashVmHostCatalog, LashVmHostCatalogError, LashVmHostEnvironment, LashVmLanguageFeatures,
@@ -88,10 +93,6 @@ pub use lash_vm::{
     RESOURCE_OPERATION_EXECUTION_SITE_KIND, execution_site_descriptor, is_pure_expr,
 };
 pub use lash_vm::{VM_CONTINUATION_READ_RANGE, vm_contract_reads, vm_contract_versions};
-pub use lash_vm::{
-    WorkflowExecutionSite, WorkflowLoopFrame, WorkflowLoopPosition, WorkflowOccurrenceContext,
-    WorkflowSitePath, WorkflowSiteRef, WorkflowSiteRole, WorkflowSiteSegment,
-};
 pub use lash_vm::{WorkflowLinkAnalysis, analyze_workflow_program};
 
 #[cfg(feature = "testing")]
@@ -126,13 +127,13 @@ pub mod ir {
         WorkflowEffect, WorkflowEffectKind, WorkflowExpectedArgument, WorkflowGraphDecodeError,
         WorkflowGraphVersionRefusal, WorkflowNode, WorkflowNodeId, WorkflowNodeKind,
         WorkflowNodePath, WorkflowNodeTypeFacets, WorkflowOwnership, WorkflowProcess,
-        WorkflowProjection, WorkflowResultStep, WorkflowSlotPath, WorkflowSlotPathSegment,
-        WorkflowSubgraph, WorkflowTerminal, WorkflowTerminalKind, WorkflowTypeDiagnostic,
-        WorkflowTypedVariable, child_path, execution_sites,
+        WorkflowProjection, WorkflowResultStep, WorkflowSlotPath, WorkflowSubgraph,
+        WorkflowTerminal, WorkflowTerminalKind, WorkflowTypeDiagnostic, WorkflowTypedVariable,
+        child_path, execution_sites,
     };
     pub use lash_vm::{
         projected_node_type_facets, workflow_call_from_ir, workflow_call_to_ir, workflow_node_id,
-        workflow_slot_accepts_value, workflow_slot_value,
+        workflow_slot_accepts_value,
     };
 }
 

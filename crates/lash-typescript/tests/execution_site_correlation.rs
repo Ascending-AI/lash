@@ -27,37 +27,39 @@ fn workflow_graph_from_program(program: &lash_vm::Program) -> lash_vm::WorkflowG
     lash_vm::workflow_graph_from_program(program)
 }
 
-/// A `(kind, label, path)` triple for every execution site the compiler emitted,
-/// ordered by path so the compiler's and the graph's lists are comparable.
+/// A `(kind, label, site)` triple for every execution site the compiler emitted,
+/// ordered by site so the compiler's and the graph's lists are comparable.
 fn compiled_site_descriptors(
     compiled: &lash_vm::CompiledProgram,
-) -> Vec<(String, String, Vec<u32>)> {
+) -> Vec<(String, String, lash_sansio::WorkflowSiteRef)> {
     let mut sites = compiled_execution_sites(compiled)
         .into_iter()
-        .map(|site| {
-            (
-                site.node_kind.to_string(),
-                site.label.clone(),
-                site.workflow_site.path.clone(),
-            )
-        })
+        .map(|site| (site.kind.to_string(), site.label.clone(), site.site.clone()))
         .collect::<Vec<_>>();
-    // Path first, then the descriptor: sites sharing a path compare as a set,
-    // independent of instruction order or the projector's kind order.
-    sites.sort_by(|left, right| left.2.cmp(&right.2).then_with(|| left.cmp(right)));
+    // By descriptor, then site: independent of instruction order or the
+    // projector's kind order.
+    sites.sort();
     sites
 }
 
 /// The same triples, read off the projected graph instead.
-fn graph_site_descriptors(program: &Program) -> Vec<(String, String, Vec<u32>)> {
-    let mut sites = workflow_graph_from_program(program)
+fn graph_site_descriptors(
+    program: &Program,
+) -> Vec<(String, String, lash_sansio::WorkflowSiteRef)> {
+    let graph = workflow_graph_from_program(program);
+    let mut sites = graph
         .nodes()
-        .flat_map(|node| node.execution_sites.iter())
-        .map(|site| (site.kind.to_string(), site.label.clone(), site.path.clone()))
+        .flat_map(|node| {
+            node.execution_sites.iter().map(|site| {
+                (
+                    site.kind.to_string(),
+                    site.label.clone(),
+                    lash_sansio::WorkflowSiteRef::new(node.id.clone(), site.site_path.clone()),
+                )
+            })
+        })
         .collect::<Vec<_>>();
-    // Path first, then the descriptor: sites sharing a path compare as a set,
-    // independent of instruction order or the projector's kind order.
-    sites.sort_by(|left, right| left.2.cmp(&right.2).then_with(|| left.cmp(right)));
+    sites.sort();
     sites
 }
 
@@ -69,7 +71,7 @@ fn parse_program(source: &str) -> Program {
 async fn real_run_observations_use_projected_workflow_node_ids_directly() {
     #[derive(Default)]
     struct ObservationHost {
-        node_ids: std::sync::Mutex<Vec<String>>,
+        node_ids: std::sync::Mutex<Vec<lash_vm::WorkflowNodeId>>,
     }
 
     impl ExecutionHost for ObservationHost {
@@ -82,19 +84,10 @@ async fn real_run_observations_use_projected_workflow_node_ids_directly() {
         }
 
         fn observe_lash_vm_execution(&self, observation: LashVmExecutionObservation) {
-            let site = match observation {
-                LashVmExecutionObservation::NodeStarted { site, .. }
-                | LashVmExecutionObservation::ChildProcessWaiting { site, .. }
-                | LashVmExecutionObservation::NodeResumed { site, .. }
-                | LashVmExecutionObservation::NodeCompleted { site, .. }
-                | LashVmExecutionObservation::NodeFailed { site, .. }
-                | LashVmExecutionObservation::BranchSelected { site, .. }
-                | LashVmExecutionObservation::ChildStarted { site, .. } => site,
-            };
             self.node_ids
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .push(site.node_id);
+                .push(observation.call_site.at.site.node_id);
         }
     }
 
@@ -111,7 +104,7 @@ finish(first);
     let linked = link_labeled(parse_program(source));
     let graph_node_ids = workflow_graph_from_program(linked.artifact.ir())
         .nodes()
-        .map(|node| node.id.to_string())
+        .map(|node| node.id.clone())
         .collect::<std::collections::BTreeSet<_>>();
     let compiled = lash_vm::testing::harness::compile_linked_main(&linked);
     let host = ObservationHost::default();
@@ -264,30 +257,8 @@ finish(selected);
         let correlated = observations
             .iter()
             .map(|observation| {
-                let (site, occurrence) = match observation {
-                    LashVmExecutionObservation::NodeStarted {
-                        site, occurrence, ..
-                    }
-                    | LashVmExecutionObservation::ChildProcessWaiting {
-                        site, occurrence, ..
-                    }
-                    | LashVmExecutionObservation::NodeResumed {
-                        site, occurrence, ..
-                    }
-                    | LashVmExecutionObservation::NodeCompleted {
-                        site, occurrence, ..
-                    }
-                    | LashVmExecutionObservation::NodeFailed {
-                        site, occurrence, ..
-                    }
-                    | LashVmExecutionObservation::BranchSelected {
-                        site, occurrence, ..
-                    }
-                    | LashVmExecutionObservation::ChildStarted {
-                        site, occurrence, ..
-                    } => (site, *occurrence),
-                };
-                let node_id = lash_vm::WorkflowNodeId::new(site.node_id.clone());
+                let at = &observation.call_site.at;
+                let (node_id, occurrence) = (at.site.node_id.clone(), at.occurrence.get());
                 assert!(
                     graph.nodes().any(|node| node.id == node_id),
                     "correlated node id must belong to the projected graph"
@@ -300,9 +271,9 @@ finish(selected);
             .iter()
             .filter(|(observation, _, _)| {
                 matches!(
-                    observation,
-                    LashVmExecutionObservation::NodeStarted { .. }
-                        | LashVmExecutionObservation::BranchSelected { .. }
+                    observation.fact,
+                    lash_vm::LashVmExecutionFact::NodeStarted
+                        | lash_vm::LashVmExecutionFact::BranchSelected { .. }
                 )
             })
             .map(|(_, node_id, occurrence)| {
@@ -407,12 +378,19 @@ finish(identity(1));
 "#;
     let linked = link_labeled(parse_program(source));
     let compiled = lash_vm::testing::harness::compile_linked_main(&linked);
-    let expected = vec![
-        ("call".to_string(), "function call".to_string(), vec![1]),
-        ("terminal".to_string(), "result".to_string(), vec![1]),
-    ];
-    assert_eq!(compiled_site_descriptors(&compiled), expected);
-    assert_eq!(graph_site_descriptors(linked.artifact.ir()), expected);
+    let finish = lash_vm::workflow_node_id("main", &[1]);
+    let compiler = compiled_site_descriptors(&compiled);
+    assert_eq!(
+        compiler
+            .iter()
+            .map(|(kind, label, site)| (kind.as_str(), label.as_str(), &site.node_id))
+            .collect::<Vec<_>>(),
+        vec![
+            ("call", "function call", &finish),
+            ("terminal", "result", &finish)
+        ]
+    );
+    assert_eq!(graph_site_descriptors(linked.artifact.ir()), compiler);
 }
 
 /// A wrapped effect takes its graph name from the compiler's descriptor.
@@ -458,10 +436,13 @@ while (false) {
         .collect::<Vec<_>>();
 
     assert_eq!(
-        compiler,
+        compiler
+            .iter()
+            .map(|(kind, label, site)| (kind.as_str(), label.as_str(), &site.node_id))
+            .collect::<Vec<_>>(),
         vec![
-            ("loop".to_string(), "for".to_string(), vec![0]),
-            ("loop".to_string(), "while".to_string(), vec![1]),
+            ("loop", "for", &lash_vm::workflow_node_id("main", &[0])),
+            ("loop", "while", &lash_vm::workflow_node_id("main", &[1])),
         ]
     );
     assert_eq!(graph, compiler);
@@ -480,11 +461,11 @@ finish(selected);
     let graph = workflow_graph_from_program(linked.artifact.ir());
     let graph_ids = graph
         .nodes()
-        .map(|node| node.id.to_string())
+        .map(|node| node.id.clone())
         .collect::<std::collections::BTreeSet<_>>();
     for site in compiled_execution_sites(&compiled) {
         assert!(
-            graph_ids.contains(&site.node_id),
+            graph_ids.contains(&site.site.node_id),
             "runtime site must name a projected graph node: {site:?}"
         );
     }
@@ -523,22 +504,17 @@ fn direct_ir_process_sites_are_children_of_the_process_root() {
     let process = graph.process("direct").expect("projected process");
     let graph_ids = graph
         .nodes()
-        .map(|node| node.id.to_string())
+        .map(|node| node.id.clone())
         .collect::<std::collections::BTreeSet<_>>();
 
     for site in compiled_execution_sites(&compiled) {
         assert!(
-            graph_ids.contains(&site.node_id),
+            graph_ids.contains(&site.site.node_id),
             "runtime site must name a projected graph node: {site:?}"
         );
         assert_ne!(
-            site.node_id,
-            process.id.as_str(),
+            site.site.node_id, process.id,
             "the process root is a non-executable container"
-        );
-        assert!(
-            !site.workflow_site.path.is_empty(),
-            "an executable process site must have a child path"
         );
     }
 }
@@ -546,7 +522,7 @@ fn direct_ir_process_sites_are_children_of_the_process_root() {
 fn descriptor_pairs(compiled: &lash_vm::CompiledProgram) -> Vec<(String, String)> {
     compiled_execution_sites(compiled)
         .into_iter()
-        .map(|site| (site.node_kind.to_string(), site.label.clone()))
+        .map(|site| (site.kind.to_string(), site.label.clone()))
         .collect()
 }
 
@@ -577,13 +553,13 @@ finish(1);
     .expect("process should compile");
     let site = compiled_execution_sites(&compiled)
         .into_iter()
-        .find(|site| site.node_kind == lash_sansio::ExecutionNodeKind::ResourceOperation)
+        .find(|site| site.kind == lash_sansio::ExecutionNodeKind::ResourceOperation)
         .expect("resource operation execution site");
 
     let graph = workflow_graph_from_program(linked.artifact.ir());
     let graph_node = graph
         .nodes()
-        .find(|node| node.id.as_str() == site.node_id)
+        .find(|node| node.id == site.site.node_id)
         .unwrap_or_else(|| {
             panic!(
                 "runtime site {site:?} does not match graph nodes {:?}",
@@ -608,8 +584,8 @@ finish(1);
         !compiled_execution_sites(&compiled)
             .into_iter()
             .any(
-                |candidate| candidate.node_kind == lash_sansio::ExecutionNodeKind::Step
-                    && candidate.workflow_site.path == site.workflow_site.path
+                |candidate| candidate.kind == lash_sansio::ExecutionNodeKind::Step
+                    && candidate.site.node_id == site.site.node_id
             ),
         "a resource operation should not also emit a generic step site at its own path"
     );
@@ -690,9 +666,7 @@ finish(result);
 
 // ---- Exact sites, per-site occurrences and loop context (FIG-5575) ----
 
-use lash_sansio::{
-    WorkflowExecutionSite, WorkflowLoopFrame, WorkflowLoopPosition, WorkflowSitePath,
-};
+use lash_sansio::{WorkflowLoopFrame, WorkflowLoopPosition, WorkflowSitePath};
 use lash_vm::{
     LashVmExecutionCallSite, ResourceOperationBatchLeaf, ResourceOperationBatchOutcome,
     ResourceOperationOutcome, VmExecutionStart, VmInstance, VmRequest, VmResume, VmRunConfig,
@@ -883,7 +857,8 @@ fn compile_main(source: &str) -> (lash_vm::WorkflowGraph, lash_vm::CompiledProgr
 /// The loop context of a call as `(activation, position)` per enclosing
 /// loop, outermost first.
 fn loop_positions(call: &LashVmExecutionCallSite) -> Vec<(u64, WorkflowLoopPosition)> {
-    call.loops
+    call.at
+        .loops
         .iter()
         .map(|frame| (frame.activation, frame.position))
         .collect()
@@ -895,28 +870,28 @@ fn assert_sites_resolve_in_the_document(
     graph: &lash_vm::WorkflowGraph,
     compiled: &lash_vm::CompiledProgram,
 ) {
-    let mut graph_sites = Vec::<WorkflowExecutionSite>::new();
+    let mut graph_sites = Vec::new();
     for node in graph.nodes() {
         let statement = lash_vm::workflow_node_statement(node);
         for site in &node.execution_sites {
-            let slots = lash_vm::WorkflowSlotPath::structural(site.site_path.expr_slots());
-            let expression = lash_vm::workflow_slot_value(&statement, &slots)
+            let expression = statement
+                .at_slots(site.site_path.slots.slots())
                 .unwrap_or_else(|| panic!("site {site:?} resolves in its node's statement"));
-            let labeled_step = matches!(
-                site.site_path.0.last(),
-                Some(lash_sansio::WorkflowSiteSegment::Role(_))
-            );
-            if !labeled_step {
+            if site.site_path.role.is_none() {
                 let (kind, label) = lash_vm::execution_site_descriptor(expression)
                     .unwrap_or_else(|| panic!("site {site:?} names an executable expression"));
                 assert_eq!((kind, label.as_ref()), (site.kind, site.label.as_str()));
             }
-            graph_sites.push(site.clone());
+            graph_sites.push(lash_vm::LashVmExecutionSite {
+                site: lash_sansio::WorkflowSiteRef::new(node.id.clone(), site.site_path.clone()),
+                kind: site.kind,
+                label: site.label.clone(),
+            });
         }
     }
     let unique = graph_sites
         .iter()
-        .map(|site| (&site.owner, &site.path, &site.site_path))
+        .map(|site| &site.site)
         .collect::<std::collections::BTreeSet<_>>();
     assert_eq!(
         unique.len(),
@@ -925,9 +900,8 @@ fn assert_sites_resolve_in_the_document(
     );
     for site in compiled_execution_sites(compiled) {
         assert!(
-            graph_sites.contains(&site.workflow_site),
-            "compiled site {:?} is a site of the document",
-            site.workflow_site
+            graph_sites.contains(site),
+            "compiled site {site:?} is a site of the document"
         );
     }
 }
@@ -958,28 +932,28 @@ fn two_calls_in_one_statement_are_two_sites_in_the_document_and_in_events() {
     let [(_, first), (_, second)] = run.calls.as_slice() else {
         panic!("two calls: {:?}", run.calls);
     };
-    assert_eq!(first.site.node_id, finish.id.as_str());
-    assert_eq!(second.site.node_id, finish.id.as_str());
+    assert_eq!(first.at.site.node_id, finish.id);
+    assert_eq!(second.at.site.node_id, finish.id);
     assert_eq!(
-        [&first.site.workflow_site, &second.site.workflow_site],
-        [operations[0], operations[1]],
+        [&first.at.site.site_path, &second.at.site.site_path],
+        [&operations[0].site_path, &operations[1].site_path],
         "each call reports the document's site for it, in evaluation order"
     );
     assert_eq!(
-        (first.occurrence, second.occurrence),
+        (first.at.occurrence.get(), second.at.occurrence.get()),
         (1, 1),
         "occurrences count per site, not per node"
     );
     let started = run
         .observations
         .iter()
-        .filter_map(|observation| match observation {
-            LashVmExecutionObservation::NodeStarted {
-                site, occurrence, ..
-            } if site.node_kind == lash_vm::RESOURCE_OPERATION_EXECUTION_SITE_KIND => {
-                Some((site.site_path().clone(), *occurrence))
-            }
-            _ => None,
+        .filter(|observation| {
+            observation.fact == lash_vm::LashVmExecutionFact::NodeStarted
+                && observation.call_site.kind == lash_vm::RESOURCE_OPERATION_EXECUTION_SITE_KIND
+        })
+        .map(|observation| {
+            let at = &observation.call_site.at;
+            (at.site.site_path.clone(), at.occurrence.get())
         })
         .collect::<Vec<_>>();
     assert_eq!(
@@ -1011,7 +985,7 @@ fn nested_loops_give_each_occurrence_its_activation_and_iteration() {
     assert_eq!(
         run.calls
             .iter()
-            .map(|(_, call)| (call.occurrence, loop_positions(call)))
+            .map(|(_, call)| (call.at.occurrence.get(), loop_positions(call)))
             .collect::<Vec<_>>(),
         vec![
             (1, vec![(1, Body(1)), (2, Body(1))]),
@@ -1027,13 +1001,13 @@ fn nested_loops_give_each_occurrence_its_activation_and_iteration() {
                 .iter()
                 .any(|site| site.kind == lash_sansio::ExecutionNodeKind::Loop)
         })
-        .map(|node| node.id.to_string())
+        .map(|node| node.id.clone())
         .collect::<Vec<_>>();
     let [outer, inner] = loops.as_slice() else {
         panic!("two loop nodes: {loops:?}");
     };
     for (_, call) in &run.calls {
-        let frames: Vec<&WorkflowLoopFrame> = call.loops.iter().collect();
+        let frames: Vec<&WorkflowLoopFrame> = call.at.loops.iter().collect();
         assert_eq!(
             [&frames[0].site.node_id, &frames[1].site.node_id],
             [outer, inner],
@@ -1085,7 +1059,7 @@ finish(n);
         .map(|(value, call)| {
             (
                 matches!(value, Value::Bool(_)),
-                call.occurrence,
+                call.at.occurrence.get(),
                 loop_positions(call),
             )
         })
@@ -1180,24 +1154,18 @@ fn tool_transitions(run: &SiteRun) -> Vec<(&'static str, u64, LoopPositions)> {
     run.observations
         .iter()
         .filter_map(|observation| {
-            let (name, site, occurrence, loops) = match observation {
-                LashVmExecutionObservation::NodeStarted {
-                    site,
-                    occurrence,
-                    loops,
-                } => ("started", site, occurrence, loops),
-                LashVmExecutionObservation::NodeCompleted {
-                    site,
-                    occurrence,
-                    loops,
-                } => ("completed", site, occurrence, loops),
+            let name = match observation.fact {
+                lash_vm::LashVmExecutionFact::NodeStarted => "started",
+                lash_vm::LashVmExecutionFact::NodeCompleted => "completed",
                 _ => return None,
             };
-            (site.node_kind == lash_vm::RESOURCE_OPERATION_EXECUTION_SITE_KIND).then(|| {
+            let call = &observation.call_site;
+            (call.kind == lash_vm::RESOURCE_OPERATION_EXECUTION_SITE_KIND).then(|| {
                 (
                     name,
-                    *occurrence,
-                    loops
+                    call.at.occurrence.get(),
+                    call.at
+                        .loops
                         .iter()
                         .map(|frame| (frame.activation, frame.position))
                         .collect(),
@@ -1225,11 +1193,14 @@ fn handles_awaited_after_their_loops_report_the_iteration_that_minted_them() {
     let [(_, gate), leaves @ ..] = run.calls.as_slice() else {
         panic!("the gate call and the batch: {:?}", run.calls);
     };
-    assert!(gate.loops.is_empty(), "a call after the loops is in none");
+    assert!(
+        gate.at.loops.is_empty(),
+        "a call after the loops is in none"
+    );
     assert_eq!(
         leaves
             .iter()
-            .map(|(_, call)| (call.occurrence, loop_positions(call)))
+            .map(|(_, call)| (call.at.occurrence.get(), loop_positions(call)))
             .collect::<Vec<_>>(),
         minted,
         "each leaf of the batch, in handle order"
@@ -1293,7 +1264,13 @@ finish("done");
     let seen = run
         .calls
         .iter()
-        .map(|(value, call)| (value.to_string(), call.occurrence, loop_positions(call)))
+        .map(|(value, call)| {
+            (
+                value.to_string(),
+                call.at.occurrence.get(),
+                loop_positions(call),
+            )
+        })
         .collect::<Vec<_>>();
     assert_eq!(
         seen,

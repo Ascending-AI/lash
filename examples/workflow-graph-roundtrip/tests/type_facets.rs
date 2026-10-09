@@ -32,9 +32,8 @@ async fn projected_diagnostics_are_located_by_the_source_view() {
     let graph = lash::typescript::workflow_graph::workflow_graph_from_source(&document.source)
         .expect("graph");
     let view = lash::typescript::workflow_graph::source_view(&graph).expect("source view");
-    let id = lash::vm::ir::WorkflowNodeId::new(diagnostic.node_id.clone());
     let span = diagnostic.span.expect("source coordinates");
-    assert_eq!(Some(&span), view.spans.get(&id));
+    assert_eq!(Some(&span), view.spans.get(diagnostic.node_id.as_str()));
     assert!(document.source[span.start..span.end].contains("shape.missing"));
     server.abort();
 }

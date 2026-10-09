@@ -1304,34 +1304,32 @@ fn record_effect(
     // ran at: a site's own occurrence number says nothing about it.
     let recorded = driver
         .recorded_effects
-        .get(&site.node_id)
+        .get(site.site.node_id.as_str())
         .copied()
         .unwrap_or_default();
     if recorded >= driver.effect_occurrence_cap {
         driver
             .omitted_effects
-            .entry(site.node_id.clone())
+            .entry(site.site.node_id.to_string())
             .or_default()
             .record(class);
         return;
     }
     driver
         .recorded_effects
-        .insert(site.node_id.clone(), recorded + 1);
+        .insert(site.site.node_id.to_string(), recorded + 1);
     let operation = match &step.request {
         StepRequest::Tool { tool, .. } => tool.as_str().to_owned(),
         StepRequest::Engine { kind, .. } => kind.0.clone(),
     };
     let mut occurrence = crate::runtime::process::ProcessEffectOccurrence::new(
-        site.node_id.clone(),
-        site.occurrence,
+        site.clone(),
         operation,
         class,
         code,
         format!("process:{process}:effect:{}", step.call),
         fleet,
-    )
-    .at(site.context.clone());
+    );
     occurrence.call_id = match &step.request {
         StepRequest::Tool { .. } => Some(step.call.clone()),
         StepRequest::Engine { .. } => None,

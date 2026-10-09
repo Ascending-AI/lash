@@ -10,10 +10,10 @@ use crate::{
     CellFailure, ExecCodeFailureReason, TextProjectionMetadata, TraceAttemptObservation,
     TraceDomainCompletion, TraceDomainStatus, TraceEffectEnvelopeDiffEvent, TraceError,
     TraceExecToolCall, TraceLanguageExecution, TraceLanguageExecutionPayload,
-    TraceLanguageExecutionStatus, TraceLlmRequest, TraceLlmResponse, TraceProgramStepOutcome,
-    TracePromptComponent, TraceProviderEvent, TraceProviderReplayDropEvent, TraceRetryAttempt,
-    TraceRuntimeStreamEvent, TraceStoreErrorClass, TraceToolCallOutcome, TraceToolCallOutput,
-    TraceToolSpec, TraceTurnOutcome,
+    TraceLanguageExecutionStatus, TraceLlmRequest, TraceLlmResponse, TraceNodeFact,
+    TraceProgramStepOutcome, TracePromptComponent, TraceProviderEvent,
+    TraceProviderReplayDropEvent, TraceRetryAttempt, TraceRuntimeStreamEvent, TraceStoreErrorClass,
+    TraceToolCallOutcome, TraceToolCallOutput, TraceToolSpec, TraceTurnOutcome,
 };
 
 #[derive(
@@ -259,7 +259,7 @@ impl TraceEvent {
     ///   `ToolError`); and
     /// - [`Self::ProgramStep`] when compile/link failed; and
     /// - [`Self::LanguageExecution`] for
-    ///   [`TraceLanguageExecutionPayload::NodeFailed`] or
+    ///   [`TraceNodeFact::Failed`] or
     ///   [`TraceLanguageExecutionPayload::ExecutionFinished`] with
     ///   [`TraceLanguageExecutionStatus::Failed`].
     ///
@@ -285,21 +285,16 @@ impl TraceEvent {
             Self::TurnCompleted { outcome, .. } => outcome.is_failed(),
             Self::DomainCompleted { completion } => completion.status == TraceDomainStatus::Failed,
             Self::LanguageExecution { event, .. } => match &event.payload {
-                TraceLanguageExecutionPayload::NodeFailed { .. } => true,
+                TraceLanguageExecutionPayload::Node { fact, .. } => {
+                    matches!(fact, TraceNodeFact::Failed { .. })
+                }
                 TraceLanguageExecutionPayload::ExecutionFinished { status, .. } => match status {
                     TraceLanguageExecutionStatus::Failed => true,
                     TraceLanguageExecutionStatus::Running
                     | TraceLanguageExecutionStatus::Completed
                     | TraceLanguageExecutionStatus::Cancelled => false,
                 },
-                TraceLanguageExecutionPayload::ExecutionStarted
-                | TraceLanguageExecutionPayload::NodeStarted { .. }
-                | TraceLanguageExecutionPayload::NodeWaiting { .. }
-                | TraceLanguageExecutionPayload::NodeResumed { .. }
-                | TraceLanguageExecutionPayload::NodeCancelled { .. }
-                | TraceLanguageExecutionPayload::NodeCompleted { .. }
-                | TraceLanguageExecutionPayload::BranchSelected { .. }
-                | TraceLanguageExecutionPayload::ChildStarted { .. } => false,
+                TraceLanguageExecutionPayload::ExecutionStarted => false,
             },
             Self::TurnStarted { .. }
             | Self::PromptBuilt { .. }

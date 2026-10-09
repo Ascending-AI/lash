@@ -350,9 +350,9 @@ fn lifted_worker(artifact: &lash_vm::ModuleArtifact) -> String {
 }
 
 type SiteKey = (
-    String,
+    lash_sansio::WorkflowSiteRef,
     lash_sansio::ExecutionNodeKind,
-    lash_sansio::WorkflowExecutionSite,
+    String,
 );
 
 fn compiled_sites(
@@ -362,13 +362,7 @@ fn compiled_sites(
     let compiled = lash_vm::compile(artifact, entry, None).expect("the mini entry compiles");
     lash_vm::testing::harness::compiled_execution_sites(&compiled)
         .into_iter()
-        .map(|site| {
-            (
-                site.node_id.clone(),
-                site.node_kind,
-                site.workflow_site.clone(),
-            )
-        })
+        .map(|site| (site.site.clone(), site.kind, site.label.clone()))
         .collect()
 }
 
@@ -400,11 +394,13 @@ fn execution_document(
 fn document_sites(document: &WorkflowExecutionDocument) -> BTreeSet<SiteKey> {
     fn collect(body: &lash_vm::WorkflowSubgraph, sites: &mut BTreeSet<SiteKey>) {
         for node in body.nodes() {
-            sites.extend(
-                node.execution_sites
-                    .iter()
-                    .map(|site| (node.id.to_string(), site.kind, site.clone())),
-            );
+            sites.extend(node.execution_sites.iter().map(|site| {
+                (
+                    lash_sansio::WorkflowSiteRef::new(node.id.clone(), site.site_path.clone()),
+                    site.kind,
+                    site.label.clone(),
+                )
+            }));
             if let lash_vm::WorkflowNodeKind::Container(container) = &node.kind {
                 for (_, child) in container.child_subgraphs() {
                     collect(child, sites);
@@ -422,9 +418,8 @@ fn document_sites(document: &WorkflowExecutionDocument) -> BTreeSet<SiteKey> {
 fn assert_overlay_index_covers(document: &WorkflowExecutionDocument, sites: &BTreeSet<SiteKey>) {
     let index = document.overlay_document();
     assert_eq!(index.reference(), document.reference());
-    for (node_id, _, site) in sites {
-        let site = lash_sansio::WorkflowSiteRef::new(node_id.clone(), site.site_path.clone());
-        assert!(index.contains(&site), "{site} is outside the overlay index");
+    for (site, _, _) in sites {
+        assert!(index.contains(site), "{site} is outside the overlay index");
     }
 }
 
@@ -476,14 +471,9 @@ fn a_second_front_end_gets_complete_documents_for_main_and_its_lifted_process() 
     );
     assert_overlay_index_covers(&worker_document, &worker_sites);
     assert!(
-        main_sites.iter().any(|(node_id, _, site)| {
-            !worker_document
-                .overlay_document()
-                .contains(&lash_sansio::WorkflowSiteRef::new(
-                    node_id.clone(),
-                    site.site_path.clone(),
-                ))
-        }),
+        main_sites
+            .iter()
+            .any(|(site, _, _)| !worker_document.overlay_document().contains(site)),
         "the index holds the entry's body, not the whole module"
     );
 

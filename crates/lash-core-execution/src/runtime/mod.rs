@@ -119,7 +119,7 @@ pub use process::{
     ProjectionWatermark, ReleasedProcessEvent, ResolvedProcessDefinition, RetiredProcessStatus,
     SCOPE_STORAGE_PAYLOAD_VERSION, ScopeGrant, ScopeId, ScopeRef, ScopeStorageError, SessionId,
     SessionObserverIntentSource, SessionScope, SessionScopeId, SettledOutput, SettledOutputRefusal,
-    StartCx, StartCxError, StartKey, StepEffectSite, StepName, StepRequest, StoreRealization,
+    StartCx, StartCxError, StartKey, StepName, StepRequest, StoreRealization,
     TerminalProcessStatus, UnavailableProcessService, WaitKind, WaitState, WatchedRegistry,
     WeakProcessEngineRegistry, abandoned_consumer_refusal, allocate_process_event_sequence,
     apply_process_event_projection, artifact_referrer_ended, check_retained_start,

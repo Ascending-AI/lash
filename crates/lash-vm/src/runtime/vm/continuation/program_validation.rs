@@ -35,16 +35,19 @@ fn validate_pending_occurrence(
         .and_then(Option::as_ref);
     let (site, minted) = match (site, pending.occurrence()) {
         (None, None) => return Ok(()),
-        (Some(site), Some(minted)) => (site.site_ref(), minted),
+        (Some(site), Some(minted)) => (&site.site, minted),
         (Some(_), None) => return Err("its instruction's execution site has no occurrence"),
         (None, Some(_)) => return Err("its instruction has no execution site"),
     };
     let counted = continuation
         .occurrence_counters
         .iter()
-        .find(|counter| counter.site == site)
+        .find(|counter| counter.site == *site)
         .map_or(0, |counter| counter.count);
-    if minted.occurrence == 0 || minted.occurrence > counted {
+    if minted.site != *site {
+        return Err("it names another site than its instruction's");
+    }
+    if minted.occurrence.get() > counted {
         return Err("its site never counted that occurrence");
     }
     let mut enclosing = 0;

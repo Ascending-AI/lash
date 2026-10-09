@@ -4,11 +4,8 @@ use crate::ActorContext;
 pub(crate) struct LanguageCallAttribution {
     pub language: String,
     pub identity: lash_trace::TraceLanguageExecutionIdentity,
-    pub parent_node_id: String,
-    /// Which occurrence of the call's site this is, counted per site.
-    pub occurrence: u64,
-    /// The call's exact site inside its node and the loops around it.
-    pub context: lash_sansio::WorkflowOccurrenceContext,
+    /// The occurrence of the call's site.
+    pub at: lash_sansio::WorkflowOccurrence,
 }
 
 pub(crate) type LanguageCallAttributions = std::sync::Arc<
@@ -74,28 +71,27 @@ impl<'scope> ProcessOpScope<'scope> {
                     }
                     _ => None,
                 },
-                graph_node_id: Some(call.parent_node_id.clone()),
+                graph_node_id: Some(call.at.site.node_id.to_string()),
                 ..Default::default()
             };
             let event = lash_trace::TraceLanguageExecution {
                 event_key: format!(
-                    "lash_vm_execution:{}:child:{}{}:{}:process:{process_id}",
+                    "lash_vm_execution:{}:child:{}:{}:process:{process_id}",
                     identity.graph_key(),
-                    call.parent_node_id,
-                    call.context.site_path,
-                    call.occurrence,
+                    call.at.site,
+                    call.at.occurrence,
                 ),
                 identity: identity.clone(),
-                payload: lash_trace::TraceLanguageExecutionPayload::ChildStarted {
-                    parent_node_id: call.parent_node_id.clone(),
-                    occurrence: call.occurrence,
-                    child: lash_trace::TraceLanguageChildExecution {
-                        scope: identity.scope.clone(),
-                        process_id: process_id.clone(),
-                        attempt: None,
-                        document: None,
+                payload: lash_trace::TraceLanguageExecutionPayload::Node {
+                    at: call.at.clone(),
+                    fact: lash_trace::TraceNodeFact::ChildStarted {
+                        child: lash_trace::TraceLanguageChildExecution {
+                            scope: identity.scope.clone(),
+                            process_id: process_id.clone(),
+                            attempt: None,
+                            document: None,
+                        },
                     },
-                    context: call.context.clone(),
                 },
             };
             (

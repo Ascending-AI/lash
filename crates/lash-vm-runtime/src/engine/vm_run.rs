@@ -542,7 +542,7 @@ impl QuietPointHost {
             AbilityOp::Await(lash_vm::Await { handle, call_site }) => {
                 Issue::Park(IssuedOperation::AwaitProcess {
                     process: awaited_process(&handle)?,
-                    site: call_site.as_deref().map(effect_site),
+                    site: call_site.as_deref().map(|call_site| call_site.at.clone()),
                 })
             }
             AbilityOp::Sleep(sleep) => {
@@ -552,7 +552,10 @@ impl QuietPointHost {
                         i64::try_from(deadline_ms).unwrap_or(i64::MAX)
                     }
                 };
-                let site = sleep.call_site.as_deref().map(effect_site);
+                let site = sleep
+                    .call_site
+                    .as_deref()
+                    .map(|call_site| call_site.at.clone());
                 Issue::Park(IssuedOperation::Sleep { until_ms, site })
             }
             AbilityOp::Finish(_) | AbilityOp::Fail(_) | AbilityOp::Print(_) => {
@@ -593,7 +596,7 @@ impl QuietPointHost {
             args,
             call_site,
         } = operation;
-        let site = call_site.as_deref().map(effect_site);
+        let site = call_site.as_deref().map(|call_site| call_site.at.clone());
         let Value::Resource(receiver) = &receiver else {
             return Err(LashVmHostError::ModuleAuthorityRequired { operation }.into());
         };
@@ -633,17 +636,6 @@ impl QuietPointHost {
         let bits = std::collections::hash_map::RandomState::new().hash_one(self.now_ms)
             & ((1_u64 << 53) - 1);
         Value::Number(bits as f64 / (1_u64 << 53) as f64)
-    }
-}
-
-/// The neutral reference core records an effect or a blocker under: the
-/// site's node, which occurrence of the site this is, and where inside the
-/// node and its loops it ran.
-fn effect_site(call_site: &lash_vm::LashVmExecutionCallSite) -> lash_core::StepEffectSite {
-    lash_core::StepEffectSite {
-        node_id: call_site.site.node_id.clone(),
-        occurrence: call_site.occurrence,
-        context: call_site.context(),
     }
 }
 

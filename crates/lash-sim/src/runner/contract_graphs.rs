@@ -152,10 +152,10 @@ fn contract_document_site<'a>(
     site: &lash::vm::WorkflowSiteRef,
 ) -> Option<(
     &'a lash::vm::ir::WorkflowNode,
-    &'a lash::vm::WorkflowExecutionSite,
+    &'a lash::vm::WorkflowSiteDescriptor,
 )> {
     body.nodes().into_iter().find_map(|node| {
-        if node.id.as_str() == site.node_id {
+        if node.id == site.node_id {
             return node
                 .execution_sites
                 .iter()

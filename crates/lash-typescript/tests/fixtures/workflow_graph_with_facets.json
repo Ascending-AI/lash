@@ -49,6 +49,9 @@
               "expected_arguments": [
                 {
                   "slot": [
+                    "value",
+                    "operand",
+                    "operand",
                     {
                       "arg": 0
                     }
@@ -65,11 +68,14 @@
                 },
                 {
                   "slot": [
+                    "value",
+                    "operand",
+                    "operand",
                     {
                       "arg": 0
                     },
                     {
-                      "field": "query"
+                      "entry": 0
                     }
                   ],
                   "ty": "Str"
@@ -84,10 +90,13 @@
             ],
             "execution_sites": [
               {
-                "owner": "main",
-                "path": [
-                  0
-                ],
+                "site_path": {
+                  "slots": [
+                    "value",
+                    "operand",
+                    "operand"
+                  ]
+                },
                 "kind": "resource_operation",
                 "label": "lookup"
               }
@@ -126,10 +135,6 @@
             },
             "execution_sites": [
               {
-                "owner": "main",
-                "path": [
-                  1
-                ],
                 "kind": "terminal",
                 "label": "result"
               }

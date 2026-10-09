@@ -61,11 +61,9 @@ pub fn process_language_observation(
                 engine_execution_id: None,
                 generation: None,
             },
-            payload: lash_trace::TraceLanguageExecutionPayload::NodeStarted {
-                node_id: label.to_string(),
-                occurrence: 0,
-                call_id: None,
-                context: Default::default(),
+            payload: lash_trace::TraceLanguageExecutionPayload::Node {
+                at: lash_sansio::WorkflowOccurrence::fixture(label, 1),
+                fact: lash_trace::TraceNodeFact::Started { call_id: None },
             },
         },
         observed_at_ms: 0,
@@ -78,16 +76,17 @@ pub fn process_observation_label(event: &crate::ProcessObservationEvent) -> Stri
     match &event.payload {
         crate::ProcessObservationEventPayload::LanguageExecution(observation) => {
             match &observation.execution.payload {
-                lash_trace::TraceLanguageExecutionPayload::NodeStarted { node_id, .. } => {
-                    node_id.clone()
-                }
+                lash_trace::TraceLanguageExecutionPayload::Node {
+                    at,
+                    fact: lash_trace::TraceNodeFact::Started { .. },
+                } => at.site.node_id.to_string(),
                 other => format!("language:{other:?}"),
             }
         }
         crate::ProcessObservationEventPayload::StepBodyStarted(observation) => {
             format!(
                 "step body {} attempt {}",
-                observation.step.node_id, observation.step.attempt
+                observation.step.at.site.node_id, observation.step.attempt
             )
         }
         crate::ProcessObservationEventPayload::Committed { event } => {
@@ -107,9 +106,7 @@ pub fn process_step_body_started(
     lash_trace::StepBodyStartedObservation {
         step: lash_trace::StepBodyStarted {
             process_id: process.clone(),
-            node_id: label.to_owned(),
-            occurrence: 1,
-            context: Default::default(),
+            at: lash_sansio::WorkflowOccurrence::fixture(label, 1),
             call_id: crate::ToolCallId::fixture(label),
             attempt,
         },

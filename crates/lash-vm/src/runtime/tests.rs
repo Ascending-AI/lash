@@ -99,8 +99,10 @@ async fn failed_vm_effect_without_tool_fact_is_a_runtime_failure() {
             .iter()
             .any(|observation| matches!(
                 observation,
-                crate::LashVmExecutionObservation::NodeFailed {
-                    failure: crate::LashVmExecutionFailure::Runtime { code, message },
+                crate::LashVmExecutionObservation {
+                    fact: crate::LashVmExecutionFact::NodeFailed {
+                        failure: crate::LashVmExecutionFailure::Runtime { code, message },
+                    },
                     ..
                 } if code == "SleepFailed" && message.contains("sleep refused")
             ))

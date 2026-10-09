@@ -1,11 +1,15 @@
 //! Bytecode executor for compiled chunks, host effects, and trace/profile data.
 
 use lash_sansio::profile::ProfileMark;
+use std::num::NonZeroU64;
 use std::sync::Arc;
 
 use crate::ast::{CoercingBinaryOp, CoercingUnaryOp};
 use crate::span::Span;
-use crate::{LashVmExecutionObservation, LashVmExecutionSite, ProcessBranchSelection};
+use crate::{
+    LashVmExecutionCallSite, LashVmExecutionFact, LashVmExecutionObservation, LashVmExecutionSite,
+    ProcessBranchSelection,
+};
 use rustc_hash::FxHashMap;
 
 mod builtin_functions;
@@ -38,7 +42,7 @@ pub use continuation::VM_CONTINUATION_FORMAT_VERSION;
 #[cfg(test)]
 pub(crate) use continuation::VM_PARKED_AWAIT_SETTLED_LIMIT;
 pub use continuation::{
-    ContinuationError, PendingOccurrence, PendingOperation, PendingOperationMap, VmContinuation,
+    ContinuationError, PendingOperation, PendingOperationMap, VmContinuation,
     VmFinallyCompletionContinuation, VmFinallyContinuation, VmHandlerContinuation,
     VmHeapContinuation, VmIteratorContinuation, VmIteratorCursor, VmLoopContinuation, VmLoopPhase,
     VmPendingErrorOriginContinuation, VmProfileContinuation, VmResumePoint, VmRunOutcome,
@@ -283,22 +287,10 @@ pub struct Vm<'a, H> {
     heapify_passes: u64,
 }
 
-#[derive(Clone)]
-pub(super) struct ActiveLashVmExecutionNode {
-    pub(super) site: LashVmExecutionSite,
-    pub(super) occurrence: u64,
-    /// The loop context the occurrence began in. Every transition of the
-    /// occurrence reports it, however far its loops have advanced since.
-    pub(super) loops: Vec<lash_sansio::WorkflowLoopFrame>,
-    /// Whether a pending handle took the occurrence when it was minted. A
-    /// park on the operation gives back an occurrence taken where it was
-    /// issued; one a handle holds stays the handle's.
-    pub(super) minted: bool,
-}
-
 /// How many times each execution site has run, by node then site path. A
 /// node has few sites, so its counters are a short list.
-pub(super) type SiteOccurrences = FxHashMap<String, Vec<(lash_sansio::WorkflowSitePath, u64)>>;
+pub(super) type SiteOccurrences =
+    FxHashMap<lash_sansio::WorkflowNodeId, Vec<(lash_sansio::WorkflowSitePath, NonZeroU64)>>;
 
 /// One loop the run is inside.
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -1,8 +1,8 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::WorkflowNodeId;
-use crate::ast::{AstPath, AstString, Expr, ExprSlot, TypeExpr};
+use super::{WorkflowNodeId, WorkflowOwnership, WorkflowSlotPath};
+use crate::ast::{AstPath, TypeExpr};
 use crate::linker::{LinkError, WorkflowLinkAnalysis};
 
 /// Version of the optional, derived workflow type-facet contract. Version 4
@@ -40,161 +40,9 @@ pub struct WorkflowTypedVariable {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct WorkflowExpectedArgument {
+    /// The argument's expression, from the node's statement.
     pub slot: WorkflowSlotPath,
     pub ty: TypeExpr,
-}
-
-/// An unambiguous address for one expression inside a workflow node.
-///
-/// Two spellings share the type. A *structural* path is made only of
-/// [`WorkflowSlotPathSegment::Expr`] segments and walks the typed child slots
-/// of the node's statement ([`super::workflow_node_statement`]), so it reaches
-/// every expression role of every IR variant; the empty path is the statement
-/// itself. A *call-argument* path starts at a receiver call's argument
-/// (`call`, `arg`, then record fields and list indexes) and is what type
-/// facets name their expected arguments by.
-///
-/// The serialized list is authoritative. [`Display`](std::fmt::Display) is a
-/// derived spelling for text-only host contracts; field names use JSON string
-/// quoting so they cannot collide with structural indexes or separators.
-#[derive(
-    Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
-)]
-#[serde(transparent)]
-pub struct WorkflowSlotPath(pub Vec<WorkflowSlotPathSegment>);
-
-impl WorkflowSlotPath {
-    pub fn argument(index: u32) -> Self {
-        Self(vec![WorkflowSlotPathSegment::Arg(index)])
-    }
-
-    pub fn call_argument(call: u32, argument: u32) -> Self {
-        Self(vec![
-            WorkflowSlotPathSegment::Call(call),
-            WorkflowSlotPathSegment::Arg(argument),
-        ])
-    }
-
-    /// The structural path through `slots`, from a node's statement.
-    pub fn structural(slots: impl IntoIterator<Item = ExprSlot>) -> Self {
-        Self(
-            slots
-                .into_iter()
-                .map(WorkflowSlotPathSegment::Expr)
-                .collect(),
-        )
-    }
-
-    /// The typed child slots of a structural path, or `None` when the path
-    /// is a call-argument path.
-    pub fn expr_slots(&self) -> Option<Vec<ExprSlot>> {
-        self.0
-            .iter()
-            .map(|segment| match segment {
-                WorkflowSlotPathSegment::Expr(slot) => Some(*slot),
-                _ => None,
-            })
-            .collect()
-    }
-
-    pub fn push(&mut self, segment: WorkflowSlotPathSegment) {
-        self.0.push(segment);
-    }
-
-    pub fn segments(&self) -> &[WorkflowSlotPathSegment] {
-        &self.0
-    }
-}
-
-impl std::fmt::Display for WorkflowSlotPath {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for (index, segment) in self.0.iter().enumerate() {
-            match segment {
-                WorkflowSlotPathSegment::Call(call) => write!(formatter, "call[{call}]")?,
-                WorkflowSlotPathSegment::Arg(argument) => {
-                    if index != 0 {
-                        formatter.write_str(".")?;
-                    }
-                    write!(formatter, "arg[{argument}]")?;
-                }
-                WorkflowSlotPathSegment::Field(field) => {
-                    let quoted =
-                        serde_json::to_string(field.as_str()).map_err(|_| std::fmt::Error)?;
-                    write!(formatter, "[{quoted}]")?;
-                }
-                WorkflowSlotPathSegment::Index(item) => write!(formatter, "[{item}]")?,
-                WorkflowSlotPathSegment::Expr(slot) => write!(formatter, "/{slot}")?,
-            }
-        }
-        Ok(())
-    }
-}
-
-/// One structural step in a [`WorkflowSlotPath`].
-#[derive(
-    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum WorkflowSlotPathSegment {
-    Call(u32),
-    Arg(u32),
-    Field(AstString),
-    Index(u32),
-    /// One typed child slot of the IR expression reached so far.
-    Expr(ExprSlot),
-}
-
-/// Resolves a typed slot address against the authoritative expression IR.
-///
-/// A path without a `call` segment is valid only when the expression contains
-/// exactly one receiver call. A path with a `call` segment uses depth-first IR
-/// walk order, matching facet derivation.
-pub fn workflow_slot_value<'a>(expression: &'a Expr, path: &WorkflowSlotPath) -> Option<&'a Expr> {
-    if let Some(slots) = path.expr_slots() {
-        return expression.at_slots(&slots);
-    }
-    let mut segments = path.segments().iter();
-    let first = segments.next()?;
-    let mut calls = Vec::new();
-    receiver_calls(expression, &mut calls);
-    let call = match first {
-        WorkflowSlotPathSegment::Call(index) => calls.get(*index as usize).copied()?,
-        WorkflowSlotPathSegment::Arg(_) if calls.len() == 1 => calls[0],
-        _ => return None,
-    };
-    let argument_segment = match first {
-        WorkflowSlotPathSegment::Call(_) => segments.next()?,
-        WorkflowSlotPathSegment::Arg(_) => first,
-        _ => return None,
-    };
-    let WorkflowSlotPathSegment::Arg(argument) = argument_segment else {
-        return None;
-    };
-    let Expr::ReceiverCall { args, .. } = call else {
-        return None;
-    };
-    let mut value = args.get(*argument as usize)?;
-    for segment in segments {
-        value = match (segment, value) {
-            (WorkflowSlotPathSegment::Field(field), Expr::Record(entries)) => entries
-                .iter()
-                .find_map(|(name, value)| (name == field).then_some(value))?,
-            (WorkflowSlotPathSegment::Index(index), Expr::List(items)) => {
-                items.get(*index as usize)?
-            }
-            _ => return None,
-        };
-    }
-    Some(value)
-}
-
-fn receiver_calls<'a>(expression: &'a Expr, calls: &mut Vec<&'a Expr>) {
-    if matches!(expression, Expr::ReceiverCall { .. }) {
-        calls.push(expression);
-    }
-    for child in expression.children() {
-        receiver_calls(child, calls);
-    }
 }
 
 /// A semantic diagnostic at a node and optional argument slot. A source view
@@ -430,13 +278,21 @@ pub fn workflow_slot_accepts_value(value_type: &TypeExpr, expected_slot_type: &T
 ///
 /// The facets describe types, never syntax, so the derivation stays in
 /// `lash_vm` while the projector that calls it lives in `lash-typescript`.
+/// An argument is addressed as every other expression of the node is: by the
+/// slot path `ownership` gives it from the node's statement.
 pub fn projected_node_type_facets(
     analysis: Option<&WorkflowLinkAnalysis>,
     path: &AstPath,
+    ownership: &WorkflowOwnership,
     available_variables: &[String],
     id: &WorkflowNodeId,
 ) -> Option<WorkflowNodeTypeFacets> {
     let facts = analysis?.facts_for(path)?;
+    let slot = |argument: &AstPath| {
+        ownership
+            .site_for_ast(argument)
+            .map(|(_, slots)| WorkflowSlotPath::new(slots.iter().copied()))
+    };
     Some(WorkflowNodeTypeFacets {
         available_variables: available_variables
             .iter()
@@ -452,9 +308,11 @@ pub fn projected_node_type_facets(
         expected_arguments: facts
             .expected_arguments
             .iter()
-            .map(|argument| WorkflowExpectedArgument {
-                slot: argument.slot.clone(),
-                ty: argument.ty.clone(),
+            .filter_map(|argument| {
+                Some(WorkflowExpectedArgument {
+                    slot: slot(&argument.path)?,
+                    ty: argument.ty.clone(),
+                })
             })
             .collect(),
         diagnostics: facts
@@ -464,21 +322,15 @@ pub fn projected_node_type_facets(
                 node_id: id.clone(),
                 kind: WorkflowDiagnosticKind::from_link_error(&diagnostic.error),
                 classification: diagnostic.classification,
-                slot: diagnostic_slot(&diagnostic.path, &facts.expected_arguments),
+                slot: facts
+                    .expected_arguments
+                    .iter()
+                    .find(|argument| argument.path == diagnostic.path)
+                    .and_then(|argument| slot(&argument.path)),
                 message: diagnostic.error.to_string(),
             })
             .collect(),
     })
-}
-
-fn diagnostic_slot(
-    error_path: &AstPath,
-    arguments: &[crate::linker::WorkflowLinkExpectedArgument],
-) -> Option<WorkflowSlotPath> {
-    arguments
-        .iter()
-        .find(|argument| argument.path == *error_path)
-        .map(|argument| argument.slot.clone())
 }
 
 #[cfg(test)]
