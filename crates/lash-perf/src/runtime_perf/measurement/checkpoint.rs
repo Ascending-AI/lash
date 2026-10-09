@@ -975,7 +975,7 @@ pub(crate) async fn run_once_embed(
     chat_turns: usize,
 ) -> anyhow::Result<RuntimePerfRunResult> {
     let mut run = RunRecorder::start(scenario, chat_turns);
-    let (store, session, turn_entry) = run
+    let (_core, store, session, turn_entry) = run
         .build(async {
             let (core, store_factory, turn_entry) = build_embed_core(scenario).await?;
             let session_id = SessionId::fixture(format!("runtime-perf-{}", scenario.name()));
@@ -992,7 +992,9 @@ pub(crate) async fn run_once_embed(
             let store = store_factory
                 .session_store(&session_id)
                 .ok_or_else(|| anyhow::anyhow!("embed session store was not opened"))?;
-            Ok((store, session, turn_entry))
+            // The core owns the serving node. Its session handle alone cannot
+            // keep an engine alive to answer sends. Hold it through export.
+            Ok((core, store, session, turn_entry))
         })
         .await?;
     run.seed(async { Ok(()) }).await?;

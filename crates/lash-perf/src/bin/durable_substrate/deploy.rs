@@ -151,6 +151,12 @@ impl Deployment {
     /// A backend over a fresh store set, recorded as `node`'s.
     async fn backend(&self, node: &str) -> Result<(Backend, Option<PostgresStorage>)> {
         let (stores, storage) = self.stores().await?;
+        // Registration acquires this content-addressed environment. Publish
+        // its bytes before any process measurement or recording begins.
+        lash_core_execution::testing::process_execution_env_fixture(
+            stores.process_env_store().as_ref(),
+        )
+        .await;
         let recorded = RecordingStores::new(stores, node, Arc::clone(&self.recorder));
         let backend = Backend::assemble(BackendParts {
             stores: Arc::new(recorded),

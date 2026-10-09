@@ -4,8 +4,6 @@ use lash_sansio::SessionId;
 const PRIOR_HISTORY_ROWS: [usize; 4] = [0, 1_000, 8_000, 32_000];
 const CURRENT_FRAME_ROWS: usize = 64;
 const HEAP_ALLOWANCE_BYTES: i64 = 64 * 1024;
-// FIG-3843 owns the quiet-host rebaseline of this perf-gated latency law.
-const COMMIT_LATENCY_RATIO: f64 = 1.2;
 const SEED_BUDGET: lash_core::CommitBudget =
     lash_core::CommitBudget::bounded(64 * 1024 * 1024, 40_000);
 
@@ -15,6 +13,7 @@ struct FramePoint {
     decoded_rows: usize,
     commit_median_ms: f64,
     commit_samples_ms: Vec<f64>,
+    commit_graph_rows: Vec<usize>,
 }
 
 fn check_reopened_frame_residency(points: &[FramePoint]) -> anyhow::Result<()> {
@@ -41,6 +40,25 @@ fn check_reopened_frame_residency(points: &[FramePoint]) -> anyhow::Result<()> {
                 measured.prior_rows,
                 heap_delta,
                 heap_limit
+            );
+        }
+    }
+    Ok(())
+}
+
+fn check_frame_curve(points: &[FramePoint]) -> anyhow::Result<()> {
+    check_reopened_frame_residency(points)?;
+    for point in points {
+        if point
+            .commit_graph_rows
+            .iter()
+            .any(|rows| *rows != CURRENT_FRAME_ROWS)
+        {
+            anyhow::bail!(
+                "{} prior rows changed submitted graph rows per commit: {:?}, expected {}",
+                point.prior_rows,
+                point.commit_graph_rows,
+                CURRENT_FRAME_ROWS
             );
         }
     }
@@ -103,11 +121,12 @@ fn append_messages(state: &mut RuntimeSessionState, prefix: &str, count: usize) 
 async fn commit_state(
     store: &dyn lash_core::DeploymentStore,
     state: &RuntimeSessionState,
-) -> anyhow::Result<f64> {
+) -> anyhow::Result<(f64, usize)> {
     let commit = RuntimeCommit::persisted_state_for_test_with_budget(state, SEED_BUDGET);
+    let graph_rows = commit.graph.nodes().len();
     let started = Instant::now();
     store.commit_runtime_state(commit).await?;
-    Ok(elapsed_ms(started))
+    Ok((elapsed_ms(started), graph_rows))
 }
 
 fn open_next_frame(
@@ -192,9 +211,12 @@ async fn point(
         );
     }
     let mut commit_samples_ms = Vec::with_capacity(commit_samples);
+    let mut commit_graph_rows = Vec::with_capacity(commit_samples);
     for sample in 1..=commit_samples {
         open_next_frame(&mut state, prior_rows, sample)?;
-        commit_samples_ms.push(commit_state(catalog.as_ref(), &state).await?);
+        let (elapsed, graph_rows) = commit_state(catalog.as_ref(), &state).await?;
+        commit_samples_ms.push(elapsed);
+        commit_graph_rows.push(graph_rows);
         state = load_frame(catalog.clone(), &session_id).await?;
         if state.session_graph.nodes.len() != CURRENT_FRAME_ROWS {
             anyhow::bail!("commit sample {sample} changed the current-frame row count");
@@ -208,6 +230,7 @@ async fn point(
         decoded_rows,
         commit_median_ms,
         commit_samples_ms,
+        commit_graph_rows,
     })
 }
 
@@ -261,12 +284,7 @@ pub(super) async fn run_once_frame_residency_curve(
         );
         points.push(measured);
     }
-    check_reopened_frame_residency(&points)?;
-    let baseline = &points[0];
-    let commit_ratio = points[3].commit_median_ms / baseline.commit_median_ms.max(f64::EPSILON);
-    if commit_ratio > COMMIT_LATENCY_RATIO {
-        anyhow::bail!("32,000-row commit median ratio {commit_ratio:.3} exceeds 1.2");
-    }
+    check_frame_curve(&points)?;
     let mut counters = BTreeMap::new();
     counters.insert(
         "frame_residency.current_frame_rows".into(),
@@ -289,6 +307,18 @@ pub(super) async fn run_once_frame_residency_curve(
             ),
             measured.live_heap_bytes.max(0) as u64,
         );
+        counters.insert(
+            format!(
+                "frame_residency.prior_{}.commit_graph_rows_max",
+                measured.prior_rows
+            ),
+            measured
+                .commit_graph_rows
+                .iter()
+                .copied()
+                .max()
+                .unwrap_or(0) as u64,
+        );
         metric_samples_ms.insert(
             format!("frame_residency.prior_{}.commit_ms", measured.prior_rows),
             measured.commit_samples_ms.clone(),
@@ -306,6 +336,36 @@ pub(super) async fn run_once_frame_residency_curve(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn frame_curve_verdict_ignores_shared_host_commit_time() {
+        let mut points = PRIOR_HISTORY_ROWS.map(|prior_rows| FramePoint {
+            prior_rows,
+            live_heap_bytes: 100_000,
+            decoded_rows: CURRENT_FRAME_ROWS,
+            commit_median_ms: if prior_rows == 32_000 { 10_000.0 } else { 1.0 },
+            commit_samples_ms: vec![1.0],
+            commit_graph_rows: vec![CURRENT_FRAME_ROWS],
+        });
+        check_frame_curve(&points).expect("fixed counted work passes despite descheduling");
+        points[3].decoded_rows += 1;
+        assert!(
+            check_frame_curve(&points).is_err(),
+            "extra decoded rows remain a regression"
+        );
+        points[3].decoded_rows = CURRENT_FRAME_ROWS;
+        points[3].commit_graph_rows[0] += 1;
+        assert!(
+            check_frame_curve(&points).is_err(),
+            "extra submitted graph rows remain a regression"
+        );
+        points[3].commit_graph_rows[0] = CURRENT_FRAME_ROWS;
+        points[3].live_heap_bytes += 100_000;
+        assert!(
+            check_frame_curve(&points).is_err(),
+            "resident heap growth remains a regression"
+        );
+    }
 
     #[tokio::test]
     async fn reopened_frame_heap_and_decoded_rows_ignore_prior_history() {

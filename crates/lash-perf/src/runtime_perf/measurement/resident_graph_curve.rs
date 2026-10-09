@@ -312,7 +312,15 @@ pub(super) async fn run_once_resident_graph_append_curve(
             .sum(),
         ..RunTail::default()
     });
-    assert_allocations_flat_in_resident_size(&result.phase_profile)?;
+    if let Err(error) = assert_allocations_flat_in_resident_size(&result.phase_profile) {
+        // Preserve the measured window even when the counted contract rejects
+        // it. This is the existing run shape; the command still exits nonzero.
+        eprintln!(
+            "resident_graph_rejected_run={}",
+            serde_json::to_string(&result)?
+        );
+        return Err(error);
+    }
     let _ = exported;
     Ok(result)
 }

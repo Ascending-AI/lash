@@ -411,6 +411,23 @@ async fn run_once_inner(
     // Both the run and the await closures insert counters while their span
     // is open, so the map is shared through a Mutex rather than borrowed.
     let extra_counters = std::sync::Mutex::new(BTreeMap::new());
+    if matches!(scenario, RuntimePerfScenario::RlmLargePrint) {
+        extra_counters.lock_recover().insert(
+            "rlm.configured_instruction_limit_per_cell".into(),
+            super::super::harness::benchmark_rlm_instruction_limit(scenario),
+        );
+    }
+    if scenario.wiring().large_tool_catalog_plugin {
+        extra_counters.lock_recover().insert(
+            "prompt.configured_section_bytes_limit_per_call".into(),
+            512 * 1024,
+        );
+        extra_counters.lock_recover().insert(
+            "prompt.configured_total_bytes_limit_per_call".into(),
+            1024 * 1024,
+        );
+    }
+
     let mut deep_session: Option<lash::LashSession> = None;
     for turn_index in 0..chat_turns {
         let mut extra_phase_profile = BTreeMap::new();

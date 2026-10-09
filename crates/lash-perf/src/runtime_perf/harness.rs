@@ -717,13 +717,28 @@ fn preview(value: &str, max_chars: usize) -> String {
     preview.replace('\n', "\\n")
 }
 
+// A configured fixture bound, not an observed opcode count. The 70 string
+// concatenations already exhaust 1M fuel with only 1,902 profiled opcodes:
+// proportional string work and heap traversals share the opcode budget.
+// The full print fixture also carries sixteen repeated rows across a tool call.
+pub(crate) fn benchmark_rlm_instruction_limit(scenario: RuntimePerfScenario) -> u64 {
+    if matches!(scenario, RuntimePerfScenario::RlmLargePrint) {
+        8_000_000
+    } else {
+        1_000_000
+    }
+}
+
 fn benchmark_rlm_protocol_factory(
+    scenario: RuntimePerfScenario,
     backend: &lash::Backend,
 ) -> lash_protocol_rlm::RlmProtocolPluginFactory {
     lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()
             .channel(lash_protocol_rlm::RlmChannel::Cell)
-            .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
+            .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(
+                benchmark_rlm_instruction_limit(scenario),
+            ))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),
         std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
@@ -885,7 +900,7 @@ pub(crate) async fn build_embed_core(
         ExecutionMode::Rlm => benchmark_rlm_builder(
             backend.clone(),
             provider,
-            benchmark_rlm_protocol_factory(&backend),
+            benchmark_rlm_protocol_factory(scenario, &backend),
         )
         .with_explicit_ephemeral_facets()
         .tools(Arc::new(BenchmarkEchoTool::new(effect_host)))
@@ -966,7 +981,7 @@ pub(crate) async fn build_runtime(
             BenchmarkCore::Standard(builder.build(runtime_perf_owner())?)
         }
         ExecutionMode::Rlm => {
-            let factory = benchmark_rlm_protocol_factory(&backend);
+            let factory = benchmark_rlm_protocol_factory(scenario, &backend);
             let mut tracing = lash_core::trace::TraceRuntime::new(backend.clock());
             if let Some(path) = trace_config
                 .as_ref()
@@ -989,14 +1004,21 @@ pub(crate) async fn build_runtime(
         }
     };
     let session_id = SessionId::fixture(format!("runtime-perf-{}", scenario.name()));
+    let mut creation = lash::SessionCreation::root(
+        lash::plugins::SessionToolAccess::ambient(),
+        core.session_spec(),
+    );
+    if wiring.large_tool_catalog_plugin {
+        // The Gmail-sized fixture renders roughly 266 KiB of declarations.
+        // Its configured limits admit that population without changing the
+        // product's general-purpose prompt limits or shrinking the catalog.
+        let mut plan = lash::prompt::PromptPlan::default();
+        plan.limits.max_section_bytes = std::num::NonZeroU32::MIN.saturating_add(512 * 1024 - 1);
+        plan.limits.max_total_bytes = std::num::NonZeroU32::MIN.saturating_add(1024 * 1024 - 1);
+        creation = creation.with_prompt_plan(plan);
+    }
     let session = core
-        .create_and_open_session(
-            session_id.clone(),
-            lash::SessionCreation::root(
-                lash::plugins::SessionToolAccess::ambient(),
-                core.session_spec(),
-            ),
-        )
+        .create_and_open_session(session_id.clone(), creation)
         .await?;
     let store = store_factory
         .session_store(&session_id)
@@ -1088,14 +1110,21 @@ pub(crate) async fn build_runtime_with_sqlite_store(
     }
     let core = durable_benchmark_core(backend, mode_id, provider, plugin_stack)?;
     let session_id = SessionId::fixture(format!("runtime-perf-{}", scenario.name()));
+    let mut creation = lash::SessionCreation::root(
+        lash::plugins::SessionToolAccess::ambient(),
+        core.session_spec(),
+    );
+    if wiring.large_tool_catalog_plugin {
+        // The Gmail-sized fixture renders roughly 266 KiB of declarations.
+        // Its configured limits admit that population without changing the
+        // product's general-purpose prompt limits or shrinking the catalog.
+        let mut plan = lash::prompt::PromptPlan::default();
+        plan.limits.max_section_bytes = std::num::NonZeroU32::MIN.saturating_add(512 * 1024 - 1);
+        plan.limits.max_total_bytes = std::num::NonZeroU32::MIN.saturating_add(1024 * 1024 - 1);
+        creation = creation.with_prompt_plan(plan);
+    }
     let session = core
-        .create_and_open_session(
-            session_id.clone(),
-            lash::SessionCreation::root(
-                lash::plugins::SessionToolAccess::ambient(),
-                core.session_spec(),
-            ),
-        )
+        .create_and_open_session(session_id.clone(), creation)
         .await?;
     Ok(BenchmarkRuntime {
         store_metrics,
@@ -1138,7 +1167,7 @@ fn durable_benchmark_core(
     let builder = match mode_id {
         ExecutionMode::Standard => benchmark_standard_builder(backend, provider),
         ExecutionMode::Rlm => {
-            let factory = benchmark_rlm_protocol_factory(&backend);
+            let factory = benchmark_rlm_protocol_factory(RuntimePerfScenario::Rlm, &backend);
             benchmark_rlm_builder(backend, provider, factory)
         }
     };
