@@ -88,14 +88,14 @@ fn of_type<'a>(entries: &'a [serde_json::Value], kind: &str) -> Vec<&'a serde_js
         .collect()
 }
 
-fn text_call(text: &str) -> MockCall {
+pub(super) fn text_call(text: &str) -> MockCall {
     MockCall {
         stream_events: Vec::new(),
         response: Ok(text_response(text)),
     }
 }
 
-fn tool_call(call_id: &str, tool_name: &str, input_json: &str) -> MockCall {
+pub(super) fn tool_call(call_id: &str, tool_name: &str, input_json: &str) -> MockCall {
     MockCall {
         stream_events: Vec::new(),
         response: Ok(LlmResponse {
@@ -1291,7 +1291,7 @@ async fn resolve_tree_key(core: &LashCore, key: &lash_core::PinnedKey) -> Result
 /// build exactly the golden tree: every record once, under the parent it
 /// has in the golden run, the tool's records under the turn and the model
 /// calls' under the turn.
-#[ignore = "FIG-5353: a node-run turn writes no turn_started, turn_completed or tool_call record"]
+#[ignore = "FIG-5353: the node that resumes a parked tool call writes a second tool_call_started"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn golden_tree_survives_a_kill_and_resume_on_another_node() -> Result<()> {
     let send = |session: &crate::LashSession| {

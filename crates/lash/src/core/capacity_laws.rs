@@ -94,9 +94,7 @@ async fn facade_held_observation_capacity_limits_the_live_suffix() {
         standing.observe_deferred(|| {
             (
                 TraceContext::default(),
-                TraceEvent::DurableWaitParked {
-                    wait_kind: "event".into(),
-                },
+                TraceEvent::CompactionCompleted { summary_nodes: 0 },
             )
         });
     }

@@ -5,20 +5,16 @@ Scope `lash`, version `1.0`. GenAI snapshot `b31e9e8ea26ac1c086d3313d474e31d7c3f
 | Span name or prefix | Kind | Ownership |
 |---|---|---|
 | `lash.admission.attempt` | Internal | Candidate |
-| `lash.run.admitted` | Internal | Candidate |
 | `lash.turn.admitted` | Internal | Candidate |
 | `lash.tool.admitted` | Internal | Candidate |
 | `lash.tool_intent.admitted` | Internal | Candidate |
 | `lash.process.admitted` | Internal | Candidate |
 | `lash.send` | Producer | Live |
-| `lash.run` | Internal | Transition |
 | `invoke_agent` | Internal | Transition |
 | `chat` | Client | Live |
-| `execute_tool` | Internal | Transition |
-| `lash.tool_intent` | Internal | Live |
+| `execute_tool` | Internal | Live |
+| `lash.tool_intent` | Internal | Transition |
 | `lash.process` | Internal | Transition |
-| `lash.process.segment` | Internal | Transition |
-| `lash.wait` | Internal | Transition |
 | `lash.exec_code` | Internal | Live |
 
 | Attribute | Type |
@@ -53,7 +49,6 @@ Scope `lash`, version `1.0`. GenAI snapshot `b31e9e8ea26ac1c086d3313d474e31d7c3f
 | `lash.request.model_variant` | String |
 | `lash.response.text_chars` | Integer |
 | `lash.outcome` | String |
-| `lash.wait.kind` | String |
 | `error.type` | String |
 | `lash.context.metadata` | String |
 | `lash.payload.json` | String |
@@ -64,8 +59,6 @@ Scope `lash`, version `1.0`. GenAI snapshot `b31e9e8ea26ac1c086d3313d474e31d7c3f
 | `lash.tool_intent.refusal_reason` | String |
 | `lash.provider` | String |
 | `lash.provider.retry.kind` | String |
-| `lash.session_execution_lane.wait.outcome` | String |
-| `lash.session_execution_lane.give_up` | String |
 | `lash.store.pool.acquire.outcome` | String |
 | `lash.durable.commit.label` | String |
 | `lash.runtime_commit.budget.outcome` | String |
@@ -79,9 +72,6 @@ Scope `lash`, version `1.0`. GenAI snapshot `b31e9e8ea26ac1c086d3313d474e31d7c3f
 |---|---|---|---|
 | `lash.provider.retries` | Counter | `` | Live |
 | `lash.provider.throttle_wait.duration` | Histogram | `ms` | Live |
-| `lash.session_execution_lane.contention_wait.duration` | Histogram | `ms` | Live |
-| `lash.session_execution_lane.give_ups` | Counter | `` | Live |
-| `lash.queued_work.wake_retries` | Counter | `` | Live |
 | `lash.store.pool.acquire_wait.duration` | Histogram | `ms` | Physical |
 | `lash.durable.commit.acquire_wait.duration` | Histogram | `us` | Physical |
 | `lash.durable.commit.transaction.duration` | Histogram | `us` | Physical |
@@ -91,8 +81,6 @@ Scope `lash`, version `1.0`. GenAI snapshot `b31e9e8ea26ac1c086d3313d474e31d7c3f
 | `lash.durable.commit.group_commit.members` | Histogram | `` | Physical |
 | `lash.runtime_commit.budgeted_size` | Histogram | `By` | Live |
 | `lash.parked_work.parks` | Counter | `` | Transition |
-| `lash.parked_work.count` | Gauge | `` | Gauge |
-| `lash.parked_work.oldest_age` | Gauge | `ms` | Gauge |
 | `lash.tool_intent.executed` | Counter | `` | Transition |
 | `lash.tool_intent.refused` | Counter | `` | Transition |
 | `lash.obligation.attempts` | Counter | `` | Transition |

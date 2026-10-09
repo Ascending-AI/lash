@@ -31,6 +31,7 @@ pub mod session_mail;
 mod tool_round;
 mod turn_cancel;
 pub mod turn_scope;
+mod turn_trace;
 
 pub use lash_core_execution::runtime::actor::process::ProcessActivation;
 

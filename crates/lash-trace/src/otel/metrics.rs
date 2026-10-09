@@ -33,9 +33,6 @@ mod enabled {
     const TOOL_INTENT_REFUSAL_ATTRIBUTE: &str = AttributeKey::ToolIntentRefusal.definition().key;
     const PROVIDER_ATTRIBUTE: &str = AttributeKey::Provider.definition().key;
     const PROVIDER_RETRY_KIND_ATTRIBUTE: &str = AttributeKey::ProviderRetryKind.definition().key;
-    const SESSION_LANE_WAIT_OUTCOME_ATTRIBUTE: &str =
-        AttributeKey::LaneWaitOutcome.definition().key;
-    const SESSION_LANE_GIVE_UP_ATTRIBUTE: &str = AttributeKey::LaneGiveUp.definition().key;
     const POOL_ACQUIRE_OUTCOME_ATTRIBUTE: &str = AttributeKey::PoolAcquireOutcome.definition().key;
     const RUNTIME_COMMIT_BUDGET_OUTCOME_ATTRIBUTE: &str =
         AttributeKey::CommitBudgetOutcome.definition().key;
@@ -50,9 +47,6 @@ mod enabled {
     pub struct RuntimeTuningMetrics {
         provider_retries: Counter<u64>,
         provider_throttle_wait_duration: Histogram<u64>,
-        session_lane_contention_wait_duration: Histogram<u64>,
-        session_lane_give_ups: Counter<u64>,
-        queued_work_wake_retries: Counter<u64>,
         pool_acquire_wait_duration: Histogram<u64>,
         runtime_commit_budgeted_size: Histogram<u64>,
         durable_acquire_wait: Histogram<u64>,
@@ -68,12 +62,6 @@ mod enabled {
             Self {
                 provider_retries: counter(&meter, Metric::ProviderRetries),
                 provider_throttle_wait_duration: histogram(&meter, Metric::ProviderThrottleWait),
-                session_lane_contention_wait_duration: histogram(
-                    &meter,
-                    Metric::LaneContentionWait,
-                ),
-                session_lane_give_ups: counter(&meter, Metric::LaneGiveUps),
-                queued_work_wake_retries: counter(&meter, Metric::WakeRetries),
                 pool_acquire_wait_duration: histogram(&meter, Metric::PoolAcquireWait),
                 runtime_commit_budgeted_size: histogram(&meter, Metric::CommitBudgetedSize),
                 durable_acquire_wait: histogram(&meter, Metric::DurableAcquireWait),
@@ -103,26 +91,6 @@ mod enabled {
                 duration_millis(wait),
                 &[KeyValue::new(PROVIDER_ATTRIBUTE, provider.to_string())],
             );
-        }
-
-        pub fn record_session_lane_contention_wait(
-            &self,
-            wait: std::time::Duration,
-            outcome: &'static str,
-        ) {
-            self.session_lane_contention_wait_duration.record(
-                duration_millis(wait),
-                &[KeyValue::new(SESSION_LANE_WAIT_OUTCOME_ATTRIBUTE, outcome)],
-            );
-        }
-
-        pub fn record_session_lane_give_up(&self, reason: &'static str) {
-            self.session_lane_give_ups
-                .add(1, &[KeyValue::new(SESSION_LANE_GIVE_UP_ATTRIBUTE, reason)]);
-        }
-
-        pub fn record_queued_work_wake_retry(&self) {
-            self.queued_work_wake_retries.add(1, &[]);
         }
 
         pub fn record_pool_acquire_wait(&self, wait: std::time::Duration, outcome: &'static str) {
@@ -176,27 +144,23 @@ mod enabled {
         u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
     }
 
-    /// Runtime-facing OpenTelemetry instruments for parked work (FIG-3659).
+    /// Runtime-facing OpenTelemetry instrument for parked work.
     ///
-    /// `kind` names the parked lane (`turn` today; `process` lands with NOW-B),
-    /// `reason` the park's reason code.
+    /// `kind` names the parked actor (`session` or `process`), `reason` the
+    /// park's reason code.
     #[derive(Clone)]
     pub struct ParkedWorkMetrics {
         parks: Counter<u64>,
-        count: Gauge<u64>,
-        oldest_age: Gauge<u64>,
     }
 
     impl ParkedWorkMetrics {
         pub fn new(meter: Meter) -> Self {
             Self {
                 parks: counter(&meter, Metric::Parks),
-                count: gauge(&meter, Metric::ParkCount),
-                oldest_age: gauge(&meter, Metric::ParkOldestAge),
             }
         }
 
-        /// Count one park write — a first park or a same-turn re-park alike.
+        /// Count one committed park of an actor.
         pub fn record_park(&self, kind: &'static str, reason: &'static str) {
             self.parks.add(
                 1,
@@ -205,25 +169,6 @@ mod enabled {
                     KeyValue::new(PARKED_WORK_REASON_ATTRIBUTE, reason),
                 ],
             );
-        }
-
-        /// Report the live parked count for one (kind, reason) cell; zero-valued
-        /// cells are recorded too so a cleared reason drops to 0.
-        pub fn record_count(&self, kind: &'static str, reason: &'static str, count: u64) {
-            self.count.record(
-                count,
-                &[
-                    KeyValue::new(PARKED_WORK_KIND_ATTRIBUTE, kind),
-                    KeyValue::new(PARKED_WORK_REASON_ATTRIBUTE, reason),
-                ],
-            );
-        }
-
-        /// Report the oldest live park's age in milliseconds; zero when nothing
-        /// is parked.
-        pub fn record_oldest_age(&self, kind: &'static str, age_ms: u64) {
-            self.oldest_age
-                .record(age_ms, &[KeyValue::new(PARKED_WORK_KIND_ATTRIBUTE, kind)]);
         }
     }
 
@@ -330,17 +275,6 @@ mod disabled {
         pub fn record_provider_throttle_wait(&self, provider: &str, wait: std::time::Duration) {
             let _ = (provider, wait);
         }
-        pub fn record_session_lane_contention_wait(
-            &self,
-            wait: std::time::Duration,
-            outcome: &'static str,
-        ) {
-            let _ = (wait, outcome);
-        }
-        pub fn record_session_lane_give_up(&self, reason: &'static str) {
-            let _ = (reason,);
-        }
-        pub fn record_queued_work_wake_retry(&self) {}
         pub fn record_pool_acquire_wait(&self, wait: std::time::Duration, outcome: &'static str) {
             let _ = (wait, outcome);
         }
@@ -361,12 +295,6 @@ mod disabled {
     impl ParkedWorkMetrics {
         pub fn record_park(&self, kind: &'static str, reason: &'static str) {
             let _ = (kind, reason);
-        }
-        pub fn record_count(&self, kind: &'static str, reason: &'static str, count: u64) {
-            let _ = (kind, reason, count);
-        }
-        pub fn record_oldest_age(&self, kind: &'static str, age_ms: u64) {
-            let _ = (kind, age_ms);
         }
     }
     #[derive(Clone, Default)]
@@ -474,11 +402,6 @@ mod tests {
             .record_provider_throttle_wait("test", wait);
         metrics
             .runtime_tuning
-            .record_session_lane_contention_wait(wait, "acquired");
-        metrics.runtime_tuning.record_session_lane_give_up("busy");
-        metrics.runtime_tuning.record_queued_work_wake_retry();
-        metrics
-            .runtime_tuning
             .record_pool_acquire_wait(wait, "success");
         metrics.runtime_tuning.record_durable_commit(
             "round.outcome",
@@ -495,9 +418,7 @@ mod tests {
         metrics
             .runtime_tuning
             .record_runtime_commit_budgeted_size(42, "admitted");
-        metrics.parked_work.record_park("turn", "pending");
-        metrics.parked_work.record_count("turn", "pending", 1);
-        metrics.parked_work.record_oldest_age("turn", 10);
+        metrics.parked_work.record_park("session", "pass_loop");
         metrics.tool_intent.record_executed("start_process");
         metrics
             .tool_intent
@@ -539,7 +460,7 @@ mod tests {
             .collect::<Vec<_>>();
         expected.sort_unstable_by_key(|entry| entry.0);
         assert_eq!(actual, expected);
-        assert_eq!(actual.len(), 22);
+        assert_eq!(actual.len(), 17);
         let isolated = second.get_finished_metrics().expect("second export");
         let names = isolated
             .iter()

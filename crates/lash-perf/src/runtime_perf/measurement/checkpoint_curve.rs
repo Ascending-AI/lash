@@ -346,8 +346,6 @@ pub(crate) async fn run_once_durable_checkpoint_curve(
                 ("changed_body_bytes", shape.changed_body_bytes),
                 ("runtime_hash_count", work.hash_passes),
                 ("runtime_hash_bytes", work.hashed_bytes),
-                ("runtime_body_copy_count", work.body_copy_passes),
-                ("runtime_body_copy_bytes", work.copied_bytes),
             ];
             for (name, value) in counts {
                 metric_samples

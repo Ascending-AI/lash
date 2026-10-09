@@ -139,10 +139,93 @@ pub fn record_terminal(
     Ok(())
 }
 
+impl ProcessParkReason {
+    /// The reason's code: the `lash.parked_work.reason` of its park.
+    #[must_use]
+    pub const fn code(&self) -> &'static str {
+        match self {
+            Self::ActivationLoop { .. } => "activation_loop",
+            Self::UnknownEngine { .. } => "unknown_engine",
+            Self::UndecodableState { .. } => "undecodable_state",
+            Self::UndecodableDriver { .. } => "undecodable_driver",
+            Self::AdvanceRefused { .. } => "advance_refused",
+            Self::UnservedSessionTurn => "unserved_session_turn",
+            Self::CommitRefused { .. } => "commit_refused",
+        }
+    }
+}
+
 /// Park the committing actor with `reason` on `tx`.
 pub fn record_park(tx: &mut ActorTx, reason: &ProcessParkReason) {
     tx.write(DomainWrite::ParkEvent(ParkEventWrite::Park {
         reason_json: reason.encode(),
     }));
     tx.give_up(lash_durable::Release::Parked);
+}
+
+impl super::activation::ProcessActivation {
+    /// Commit `tx`, which records `process`'s terminal, and report it.
+    ///
+    /// The acknowledged commit is the terminal's first writer: an owner that
+    /// finds the process ended commits no terminal and reports none. The
+    /// record is read back for the scope its registration retained and the
+    /// time its terminal retained; an owner that loses the acknowledgement,
+    /// or the read, reports nothing.
+    pub(super) async fn commit_terminal(
+        &self,
+        owned: &lash_durable::runner::Owned,
+        tx: ActorTx,
+        process: &ProcessId,
+    ) -> Result<(), DurableError> {
+        owned
+            .commit(tx, lash_durable::CommitLabel::PROCESS_TERMINAL)
+            .await?;
+        let Some(tracing) = self
+            .tracing
+            .as_ref()
+            .filter(|tracing| tracing.is_observed())
+        else {
+            return Ok(());
+        };
+        let Ok(Some(record)) = self.backend.process_registry().get_process(process).await else {
+            return Ok(());
+        };
+        let (
+            Some(scope),
+            crate::ProcessLifecycleState::Terminal {
+                outcome,
+                occurred_at_ms,
+            },
+        ) = (record.trace, record.lifecycle)
+        else {
+            return Ok(());
+        };
+        let status = match outcome.status() {
+            crate::TerminalProcessStatus::Completed => lash_trace::TraceDomainStatus::Completed,
+            crate::TerminalProcessStatus::Cancelled => lash_trace::TraceDomainStatus::Cancelled,
+            crate::TerminalProcessStatus::Failed | crate::TerminalProcessStatus::Abandoned => {
+                lash_trace::TraceDomainStatus::Failed
+            }
+        };
+        let started_at_ms = scope.started_at_ms;
+        tracing.unreplayed(Some(scope)).transition(
+            Some(&lash_trace::EmissionPermit::new_transition()),
+            occurred_at_ms,
+            lash_trace::TraceTransitionKind::Terminal,
+            0,
+            || {
+                (
+                    lash_trace::TraceContext::default(),
+                    lash_trace::TraceEvent::DomainCompleted {
+                        completion: lash_trace::TraceDomainCompletion::new(
+                            lash_trace::TraceDomainOperation::Process,
+                            started_at_ms,
+                            status,
+                        ),
+                    },
+                )
+            },
+        );
+        Ok(())
+    }
 }

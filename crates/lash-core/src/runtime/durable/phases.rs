@@ -46,7 +46,7 @@ use super::session::{
 use super::session_mail::{agent_frame_switches, follow_on_mail};
 use super::tool_round::{self, RoundExit};
 use super::turn_scope::end_turn_scope;
-use super::{model_call, turn_cancel};
+use super::{model_call, turn_cancel, turn_trace};
 use crate::plugin::prompt::{admission_record, load_admitted_call};
 use crate::{ActorContext, Effect, HostTurnProtocol, SessionStreamEvent, TurnMachine};
 use lash_sansio::llm::types::AdmittedSend;
@@ -472,6 +472,7 @@ pub async fn run_phases(
                 };
                 let cause = done.run_terminal_cause(&run)?;
                 let kind = cause.kind();
+                let traced = turn_trace::outcome(services.tracing(), &cause);
                 // A frame switch mails its follow-on with its commit.
                 let follow_on = match &done.outcome {
                     Some(outcome) => follow_on_mail(&session, outcome, switches)?,
@@ -523,6 +524,7 @@ pub async fn run_phases(
                         };
                         refusal.map_or(TurnError::Durable(error), TurnError::Runtime)
                     })?;
+                turn_trace::ended(services.tracing(), &row, traced);
                 drive.committed().await;
                 // The commit moved the head: the next turn loads it again.
                 heads.evict();
@@ -550,6 +552,7 @@ pub async fn run_phases(
 /// [`TurnError::Durable`]: ownership lost, or the turn no longer open.
 pub(super) async fn refuse(
     cx: &ActorContext,
+    tracing: Option<&crate::trace::TraceRuntime>,
     row: &TurnRow,
     refusal: crate::RuntimeError,
 ) -> Result<(), TurnError> {
@@ -569,16 +572,19 @@ pub(super) async fn refuse(
     }
     let mut tx = cx.begin().await?;
     tool_round::cancel_open_round(cx, &mut tx, row).await?;
+    let cause = crate::store::RunTerminalCause::Refused {
+        refusal: refusal.into(),
+    };
+    let traced = turn_trace::outcome(tracing, &cause);
     tx.write(DomainWrite::Turn(TurnWrite::Terminal {
         session: row.session.clone(),
         run: row.run.clone(),
-        cause: Box::new(crate::store::RunTerminalCause::Refused {
-            refusal: refusal.into(),
-        }),
+        cause: Box::new(cause),
         head_revision: None,
     }));
     end_turn_scope(cx, &mut tx, &row.session, &row.run).await?;
     cx.commit(tx, CommitLabel::TURN_COMMIT).await?;
+    turn_trace::ended(tracing, row, traced);
     Ok(())
 }
 

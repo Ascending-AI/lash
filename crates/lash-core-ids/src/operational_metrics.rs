@@ -101,50 +101,6 @@ pub fn record_provider_throttle_wait(
         .record_provider_throttle_wait(provider, wait);
 }
 
-/// Live observation for `lash.session_execution_lane.contention_wait.duration`.
-pub fn record_session_lane_contention_wait(
-    metrics: &TelemetryMetrics,
-    permit: Option<&EmissionPermit>,
-    wait: Duration,
-    outcome: &'static str,
-) {
-    if !permit.is_some_and(|permit| matches!(permit.source(), EmissionSource::LiveExecution { .. }))
-    {
-        return;
-    }
-    #[cfg(any(test, feature = "testing"))]
-    observe_test_metric("lash.session_execution_lane.contention_wait.duration");
-    metrics
-        .runtime_tuning
-        .record_session_lane_contention_wait(wait, outcome);
-}
-
-/// Live observation for `lash.session_execution_lane.give_ups`.
-pub fn record_session_lane_give_up(
-    metrics: &TelemetryMetrics,
-    permit: Option<&EmissionPermit>,
-    reason: &'static str,
-) {
-    if !permit.is_some_and(|permit| matches!(permit.source(), EmissionSource::LiveExecution { .. }))
-    {
-        return;
-    }
-    #[cfg(any(test, feature = "testing"))]
-    observe_test_metric("lash.session_execution_lane.give_ups");
-    metrics.runtime_tuning.record_session_lane_give_up(reason);
-}
-
-/// Live observation for `lash.queued_work.wake_retries`.
-pub fn record_queued_work_wake_retry(metrics: &TelemetryMetrics, permit: Option<&EmissionPermit>) {
-    if !permit.is_some_and(|permit| matches!(permit.source(), EmissionSource::LiveExecution { .. }))
-    {
-        return;
-    }
-    #[cfg(any(test, feature = "testing"))]
-    observe_test_metric("lash.queued_work.wake_retries");
-    metrics.runtime_tuning.record_queued_work_wake_retry();
-}
-
 /// Physical resource observation for `lash.store.pool.acquire_wait.duration`.
 pub fn record_pool_acquire_wait(metrics: &TelemetryMetrics, wait: Duration, outcome: &'static str) {
     #[cfg(any(test, feature = "testing"))]
@@ -167,25 +123,6 @@ pub fn record_work_parked(
     #[cfg(any(test, feature = "testing"))]
     observe_test_metric("lash.parked_work.parks");
     metrics.parked_work.record_park(kind, reason);
-}
-
-/// Gauge observation for `lash.parked_work.count`.
-pub fn record_parked_work_count(
-    metrics: &TelemetryMetrics,
-    kind: &'static str,
-    reason: &'static str,
-    count: u64,
-) {
-    #[cfg(any(test, feature = "testing"))]
-    observe_test_metric("lash.parked_work.count");
-    metrics.parked_work.record_count(kind, reason, count);
-}
-
-/// Gauge observation for `lash.parked_work.oldest_age`.
-pub fn record_parked_work_oldest_age(metrics: &TelemetryMetrics, kind: &'static str, age_ms: u64) {
-    #[cfg(any(test, feature = "testing"))]
-    observe_test_metric("lash.parked_work.oldest_age");
-    metrics.parked_work.record_oldest_age(kind, age_ms);
 }
 
 /// Transition observation for `lash.obligation.attempts`.

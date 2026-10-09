@@ -80,6 +80,9 @@ use crate::{
 /// The activation of claimed process actors: one per node, routed by
 /// [`lash_durable::ActorDispatch`].
 pub struct ProcessActivation {
+    /// What a process's terminal and a park are reported through; a node
+    /// given none reports neither.
+    pub(super) tracing: Option<crate::trace::TraceRuntime>,
     trace_limits: lash_trace::TraceLimits,
     pub(super) backend: Backend,
     steps: Arc<dyn ProcessSteps>,
@@ -102,6 +105,7 @@ impl ProcessActivation {
     ) -> Self {
         Self {
             backend,
+            tracing: None,
             trace_limits: lash_trace::TraceLimits::standard(),
             steps,
             probe,
@@ -110,10 +114,14 @@ impl ProcessActivation {
         }
     }
 
-    /// Configure evidence cuts for newly started process runs.
+    /// This activation reporting through `tracing`: its evidence cuts bound
+    /// newly started process runs, a process's committed terminal emits its
+    /// `lash.process` completion under the trace scope its registration
+    /// retained, and a committed park counts in `lash.parked_work.parks`.
     #[must_use]
-    pub fn with_trace_limits(mut self, limits: lash_trace::TraceLimits) -> Self {
-        self.trace_limits = limits;
+    pub fn with_tracing(mut self, tracing: crate::trace::TraceRuntime) -> Self {
+        self.trace_limits = tracing.limits();
+        self.tracing = Some(tracing);
         self
     }
 
@@ -502,7 +510,7 @@ impl ProcessActivation {
             record_omitted_effects(&mut tx, process, &driver, self.fleet());
             record_terminal(&mut tx, process, &cancelled(origin, true))?;
             tx.ack_seen();
-            owned.commit(tx, CommitLabel::PROCESS_TERMINAL).await?;
+            self.commit_terminal(owned, tx, process).await?;
             return Ok(Pass::Again);
         }
         let rows = reads
@@ -624,7 +632,7 @@ impl ProcessActivation {
             record_omitted_effects(&mut tx, process, &driver, self.fleet());
             record_terminal(&mut tx, process, &outcome)?;
             tx.ack_seen();
-            owned.commit(tx, CommitLabel::PROCESS_TERMINAL).await?;
+            self.commit_terminal(owned, tx, process).await?;
             return Ok(Pass::Again);
         }
         tx.write(DomainWrite::Process(ProcessWrite::Advance {
@@ -697,6 +705,14 @@ impl ProcessActivation {
         tx.ack_seen();
         record_park(&mut tx, reason);
         owned.commit(tx, CommitLabel::PROCESS_ADVANCE).await?;
+        if let Some(tracing) = &self.tracing {
+            crate::operational_metrics::record_work_parked(
+                tracing.metrics(),
+                Some(&lash_trace::EmissionPermit::new_transition()),
+                "process",
+                reason.code(),
+            );
+        }
         Ok(Pass::Released)
     }
 
@@ -716,8 +732,8 @@ impl ProcessActivation {
             let mut tx = owned.begin().await?;
             record_terminal(&mut tx, process, &commit_refused(&message))?;
             tx.ack_seen();
-            match owned.commit(tx, CommitLabel::PROCESS_TERMINAL).await {
-                Ok(_) => return Ok(Pass::Again),
+            match self.commit_terminal(owned, tx, process).await {
+                Ok(()) => return Ok(Pass::Again),
                 Err(error @ DurableError::OwnershipLost(_)) => return Err(error),
                 Err(_) => {}
             }
@@ -778,7 +794,7 @@ impl ProcessActivation {
             }));
         }
         tx.ack_seen();
-        owned.commit(tx, CommitLabel::PROCESS_TERMINAL).await?;
+        self.commit_terminal(owned, tx, process).await?;
         Ok(Pass::Again)
     }
 

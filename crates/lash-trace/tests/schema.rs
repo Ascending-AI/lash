@@ -2,9 +2,8 @@ use lash_sansio::llm::types::{
     LlmProviderTraceDirection, LlmUsage, StreamBlockEvent, StreamBlockIdentity, StreamBlockKind,
 };
 use lash_trace::{
-    TraceBranchSelection, TraceContext, TraceDurableTimerStatus, TraceDurableWaitResolution,
-    TraceEffectEnvelopeDiffEntry, TraceEffectEnvelopeDiffEvent, TraceEffectEnvelopeDiffValue,
-    TraceError, TraceEvent, TraceEventKind, TraceExecToolCall, TraceJournaledEffectStatus,
+    TraceBranchSelection, TraceContext, TraceEffectEnvelopeDiffEntry, TraceEffectEnvelopeDiffEvent,
+    TraceEffectEnvelopeDiffValue, TraceError, TraceEvent, TraceEventKind, TraceExecToolCall,
     TraceLanguageChildExecution, TraceLanguageExecution, TraceLanguageExecutionIdentity,
     TraceLanguageExecutionPayload, TraceLanguageExecutionStatus, TraceLlmRequest, TraceLlmResponse,
     TraceProviderEvent, TraceProviderReplayDropEvent, TraceProviderReplayDropReason,
@@ -261,7 +260,7 @@ fn event_samples() -> Vec<TraceEvent> {
         },
         TraceEvent::DomainCompleted {
             completion: lash_trace::TraceDomainCompletion::new(
-                lash_trace::TraceDomainOperation::Run,
+                lash_trace::TraceDomainOperation::Process,
                 1,
                 lash_trace::TraceDomainStatus::Completed,
             ),
@@ -372,12 +371,6 @@ fn event_samples() -> Vec<TraceEvent> {
                 },
             },
         },
-        TraceEvent::ToolReceipt {
-            call_id: lash_sansio::ToolCallId::fixture("call-1"),
-            name: "search".to_string(),
-            started_at_ms: 1,
-            terminal: Some(lash_trace::TraceToolTerminal::Final),
-        },
         TraceEvent::ToolCallStarted {
             call_id: lash_sansio::ToolCallId::fixture("call-1"),
             provider_call_id: None,
@@ -409,28 +402,6 @@ fn event_samples() -> Vec<TraceEvent> {
         },
         TraceEvent::ObservationProjection {
             projections: Vec::new(),
-        },
-        TraceEvent::JournaledEffectStarted {
-            effect_name: "lash:turn:llm:1".to_string(),
-            effect_kind: "llm_call".to_string(),
-        },
-        TraceEvent::JournaledEffectSettled {
-            effect_name: "lash:turn:llm:1".to_string(),
-            effect_kind: "llm_call".to_string(),
-            status: TraceJournaledEffectStatus::Completed,
-        },
-        TraceEvent::DurableWaitParked {
-            wait_kind: "await_event".to_string(),
-        },
-        TraceEvent::DurableWaitResolved {
-            started_at_ms: 0,
-            wait_kind: "await_event".to_string(),
-            resolution: TraceDurableWaitResolution::Ok,
-        },
-        TraceEvent::DurableTimerStarted { duration_ms: 250 },
-        TraceEvent::DurableTimerResolved {
-            duration_ms: 250,
-            status: TraceDurableTimerStatus::Resolved,
         },
         TraceEvent::StoreErrorObserved {
             operation: "session_restore".to_string(),

@@ -6241,7 +6241,7 @@ laws = [
 disposition = "replaced-by:crates/lash/src/tests/tracing.rs::golden_tree_survives_a_kill_and_resume_on_another_node"
 status = "deleted"
 owed = "a turn's span tree is the golden tree after a kill and resume on another node"
-note = "FIG-5307 wrote the law at the trace-record layer the OTel adapter projects spans from: a turn parked on a pending tool on node A, A shut down, node B over the same SQLite memory stores resolves and finishes it; A's and B's records build the golden tree of the turn run on one node, no identity repeating. The cut half passes; the law is ignored on FIG-5353 (a node-run turn writes no turn_started, turn_completed or tool_call record)"
+note = "FIG-5307 wrote the law at the trace-record layer the OTel adapter projects spans from: a turn parked on a pending tool on node A, A shut down, node B over the same SQLite memory stores resolves and finishes it; A's and B's records build the golden tree of the turn run on one node, no identity repeating. The cut half passes; the law is ignored on FIG-5353 (the node that resumes the parked tool call writes a second tool_call_started; turn_started and turn_completed are written once across both nodes since FIG-5658)"
 
 [[row]]
 path = "crates/lash-restate/src/tests/parent_end_on_the_double.rs"

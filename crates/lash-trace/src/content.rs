@@ -265,16 +265,9 @@ impl TraceEvent {
             | Self::LlmAttemptCompleted { .. }
             | Self::DomainCompleted { .. }
             | Self::ProviderReplayDropped { .. }
-            | Self::ToolReceipt { .. }
             | Self::StepBodyStarted { .. }
             | Self::ToolCheckConflict { .. }
             | Self::ObservationProjection { .. }
-            | Self::JournaledEffectStarted { .. }
-            | Self::JournaledEffectSettled { .. }
-            | Self::DurableWaitParked { .. }
-            | Self::DurableWaitResolved { .. }
-            | Self::DurableTimerStarted { .. }
-            | Self::DurableTimerResolved { .. }
             | Self::TurnCompleted { .. }
             // The producer's own structured evidence (`TelemetryContent`).
             | Self::Custom { .. } => {}

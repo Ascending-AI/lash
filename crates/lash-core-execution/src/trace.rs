@@ -171,8 +171,7 @@ fn assign_span_identity(context: &mut TraceContext, event: &TraceEvent) {
             set_span(context, self_id, turn_node);
         }
         TraceEvent::ToolCallStarted { call_id, .. }
-        | TraceEvent::ToolCallCompleted { call_id, .. }
-        | TraceEvent::ToolReceipt { call_id, .. } => {
+        | TraceEvent::ToolCallCompleted { call_id, .. } => {
             set_span(context, Some(tool_node_id(call_id.as_str())), turn_node);
         }
         TraceEvent::ProviderEvent { .. }
@@ -197,12 +196,6 @@ fn assign_span_identity(context: &mut TraceContext, event: &TraceEvent) {
         | TraceEvent::ExecCodeCompleted { .. }
         | TraceEvent::ExecCodeFailed { .. }
         | TraceEvent::ObservationProjection { .. }
-        | TraceEvent::JournaledEffectStarted { .. }
-        | TraceEvent::JournaledEffectSettled { .. }
-        | TraceEvent::DurableWaitParked { .. }
-        | TraceEvent::DurableWaitResolved { .. }
-        | TraceEvent::DurableTimerStarted { .. }
-        | TraceEvent::DurableTimerResolved { .. }
         | TraceEvent::StoreErrorObserved { .. } => set_span(context, None, turn_node),
         TraceEvent::CompactionStarted { .. } | TraceEvent::CompactionCompleted { .. } => {
             set_span(context, None, turn_node.or(session_node));
@@ -711,9 +704,7 @@ mod span_identity_tests {
             constructions.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             (
                 TraceContext::default(),
-                TraceEvent::DurableWaitParked {
-                    wait_kind: "event".into(),
-                },
+                TraceEvent::CompactionCompleted { summary_nodes: 0 },
             )
         });
         let held = constructions.clone();
@@ -721,9 +712,7 @@ mod span_identity_tests {
             held.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             (
                 TraceContext::default(),
-                TraceEvent::DurableWaitParked {
-                    wait_kind: "event".into(),
-                },
+                TraceEvent::CompactionCompleted { summary_nodes: 0 },
             )
         });
         standing.conclude();

@@ -4,12 +4,12 @@ use lash_sansio::ProcessId;
 
 use lash_sansio::SessionId;
 
-const SESSION: &str = "intent-ingress-session";
-const SCOPE: &str = "intent-ingress-turn";
+pub(super) const SESSION: &str = "intent-ingress-session";
+pub(super) const SCOPE: &str = "intent-ingress-turn";
 
 /// The id of the process a start intent registered, read off the handle its
 /// executed outcome answers.
-fn started_process_id(outcome: &crate::tools::ToolIntentIngressOutcome) -> ProcessId {
+pub(super) fn started_process_id(outcome: &crate::tools::ToolIntentIngressOutcome) -> ProcessId {
     let crate::tools::ToolIntentIngressOutcome::Admitted {
         outcome:
             lash_core::ToolIntentExecutionOutcome::Executed {
@@ -92,7 +92,7 @@ fn ingress_start_without_lifetime_is_refused_before_submission() {
     assert!(error.to_string().contains("lifetime"));
 }
 
-const INGRESS_ENGINE_KIND: &str = "ingress-admission-engine";
+pub(super) const INGRESS_ENGINE_KIND: &str = "ingress-admission-engine";
 
 /// Engine registered on the ingress host, so a submitted start can be checked
 /// against a kind that exists and one that does not.
@@ -165,11 +165,19 @@ impl lash_core::ProcessEngine for IngressAdmissionEngine {
     fn advance(
         &self,
         state: lash_core::EngineState,
-        _event: lash_core::EngineEvent,
+        event: lash_core::EngineEvent,
     ) -> std::result::Result<
         (lash_core::EngineState, lash_core::EngineAction),
         lash_core::ProcessInfraError,
     > {
+        // The `refuse` program's first transition is refused: its process parks.
+        if let lash_core::EngineEvent::Started { payload } = &event
+            && payload.get("program").and_then(serde_json::Value::as_str) == Some("refuse")
+        {
+            return Err(lash_core::ProcessInfraError::new(
+                lash_core::PluginError::Session("the ingress engine refuses this program".into()),
+            ));
+        }
         Ok((
             state,
             lash_core::EngineAction::Terminal(lash_core::ProcessAwaitOutput::from_tool_output(
@@ -274,11 +282,21 @@ impl lash_core::plugin::PluginDefinition for IngressAdmissionEngineFactory {
 async fn ingress_engine_core(
     backend: lash_core::Backend,
 ) -> Result<(LashCore, Arc<dyn ProcessRegistry>)> {
+    ingress_engine_core_with(backend, |builder| builder).await
+}
+
+/// [`ingress_engine_core`] with the host's own additions to its builder.
+pub(super) async fn ingress_engine_core_with(
+    backend: lash_core::Backend,
+    configure: impl FnOnce(crate::core::LashCoreBuilder) -> crate::core::LashCoreBuilder,
+) -> Result<(LashCore, Arc<dyn ProcessRegistry>)> {
     let registry = backend.process_registry();
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
-        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
-        .plugin(Arc::new(IngressAdmissionEngineFactory))
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = configure(
+        explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
+            .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
+            .plugin(Arc::new(IngressAdmissionEngineFactory)),
+    )
+    .build(crate::testing::runtime_lease_owner())?;
     core.host_artifacts()
         .publish_process_env(
             &lash_core::HostArtifactPin::mint(),
@@ -305,7 +323,7 @@ async fn ingress_engine_core(
     Ok((core, registry))
 }
 
-fn engine_start_intent(kind: &str, payload: serde_json::Value) -> lash_core::ToolIntent {
+pub(super) fn engine_start_intent(kind: &str, payload: serde_json::Value) -> lash_core::ToolIntent {
     lash_core::ToolIntent::StartProcess(Box::new(lash_core::StartProcessIntent {
         owner: crate::RuntimeOwner::Session(SessionId::fixture(SESSION.to_string())),
         declaration: lash_core::ProcessStartDeclaration::new(

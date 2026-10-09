@@ -140,29 +140,6 @@ fn event_is_failed_identifies_all_failure_outcomes() {
             },
         ),
         (
-            "journaled effect failed",
-            TraceEvent::JournaledEffectSettled {
-                effect_name: "effect".to_string(),
-                effect_kind: "run".to_string(),
-                status: TraceJournaledEffectStatus::Failed,
-            },
-        ),
-        (
-            "durable timer failed",
-            TraceEvent::DurableTimerResolved {
-                duration_ms: 1,
-                status: TraceDurableTimerStatus::Failed,
-            },
-        ),
-        (
-            "durable wait failed",
-            TraceEvent::DurableWaitResolved {
-                started_at_ms: 0,
-                wait_kind: "event".to_string(),
-                resolution: TraceDurableWaitResolution::Failed,
-            },
-        ),
-        (
             "tool call failed",
             tool_completed(TraceToolCallOutcome::Failure(Value::Null)),
         ),
@@ -200,6 +177,7 @@ fn event_is_failed_identifies_all_failure_outcomes() {
         TraceTurnFailureReason::ContextOverflow,
         TraceTurnFailureReason::PluginAbort,
         TraceTurnFailureReason::RuntimeError,
+        TraceTurnFailureReason::AgentFrameSwitchLimit,
         TraceTurnFailureReason::SubmittedError,
         TraceTurnFailureReason::ToolError,
     ] {
@@ -348,7 +326,7 @@ fn trace_reader_preserves_attempt_and_domain_completions() {
             TraceContext::default(),
             TraceEvent::DomainCompleted {
                 completion: TraceDomainCompletion::new(
-                    TraceDomainOperation::Run,
+                    TraceDomainOperation::Process,
                     1,
                     TraceDomainStatus::Completed,
                 ),

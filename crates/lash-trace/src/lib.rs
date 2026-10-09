@@ -203,8 +203,7 @@ pub use workflow_overlay::{
 ///         path = "crates/lash-trace/src/*.rs",
 ///         cover(
 ///             TraceRecord, TraceEvent, TraceTurnOutcome, TraceTurnCancellationEvidence,
-///             TraceTurnCompletionReason, TraceTurnFailureReason, TraceJournaledEffectStatus,
-///             TraceDurableWaitResolution, TraceDurableTimerStatus, TraceLanguageExecutionPayload,
+///             TraceTurnCompletionReason, TraceTurnFailureReason, TraceLanguageExecutionPayload,
 ///             StepBodyStarted, TraceNodeWaitKind, TraceNodeAwaited, TraceNodeWaitResolution,
 ///         ),
 ///     ),
@@ -574,16 +573,6 @@ pub struct TraceToolCallOutput {
     pub outcome: TraceToolCallOutcome,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub control: Option<Value>,
-}
-
-/// The recorded final-or-cancel decision of one logical tool call.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum TraceToolTerminal {
-    Final,
-    Denied,
-    Cancelled,
-    Aborted,
 }
 
 impl TraceToolCallOutput {
@@ -964,106 +953,13 @@ pub enum TraceTurnFailureReason {
     ContextOverflow,
     PluginAbort,
     RuntimeError,
+    /// The durable follow-on reached its chain's frame-switch bound.
+    AgentFrameSwitchLimit,
     SubmittedError,
     ToolError,
 }
 
 impl TraceTurnFailureReason {
-    /// The snake_case tag serde writes for this variant.
-    pub fn wire_tag(&self) -> String {
-        wire_tag(self)
-    }
-}
-
-/// Terminal status of a journaled `ctx.run` effect.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum TraceJournaledEffectStatus {
-    Completed,
-    Failed,
-}
-
-impl TraceJournaledEffectStatus {
-    /// The shared failure predicate matches on the variant; no status string is compared
-    /// anywhere.
-    pub fn is_failed(&self) -> bool {
-        match self {
-            Self::Failed => true,
-            Self::Completed => false,
-        }
-    }
-
-    /// The snake_case tag serde writes for this variant.
-    pub fn wire_tag(&self) -> String {
-        wire_tag(self)
-    }
-}
-
-/// How a durable wait left its park.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum TraceDurableWaitResolution {
-    /// The awaited event delivered a value.
-    Ok,
-    /// The awaited event delivered a host-domain error value.
-    Error,
-    /// The wait itself was cancelled.
-    Cancelled,
-    /// A parked process command completed.
-    Resolved,
-    /// The enclosing turn was cancelled while the wait was parked.
-    TurnCancelled,
-    /// The session was revoked while the wait was parked.
-    SessionRevoked,
-    /// The controller could not complete the wait.
-    Failed,
-}
-
-impl TraceDurableWaitResolution {
-    /// The shared failure predicate matches on the variant; no status string is compared
-    /// anywhere.
-    pub fn is_failed(&self) -> bool {
-        match self {
-            Self::Failed => true,
-            Self::Ok
-            | Self::Error
-            | Self::Cancelled
-            | Self::Resolved
-            | Self::TurnCancelled
-            | Self::SessionRevoked => false,
-        }
-    }
-
-    /// The snake_case tag serde writes for this variant.
-    pub fn wire_tag(&self) -> String {
-        wire_tag(self)
-    }
-}
-
-/// How a durable timer left its sleep.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum TraceDurableTimerStatus {
-    /// The timer elapsed.
-    Resolved,
-    /// The enclosing turn was cancelled while the timer was pending.
-    Cancelled,
-    /// The session was revoked while the timer was pending.
-    SessionRevoked,
-    /// The controller could not complete the sleep.
-    Failed,
-}
-
-impl TraceDurableTimerStatus {
-    /// The shared failure predicate matches on the variant; no status string is compared
-    /// anywhere.
-    pub fn is_failed(&self) -> bool {
-        match self {
-            Self::Failed => true,
-            Self::Resolved | Self::Cancelled | Self::SessionRevoked => false,
-        }
-    }
-
     /// The snake_case tag serde writes for this variant.
     pub fn wire_tag(&self) -> String {
         wire_tag(self)

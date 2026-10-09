@@ -21,7 +21,7 @@ use crate::telemetry::{
 };
 use crate::{
     TraceContext, TraceDomainOperation, TraceDomainStatus, TraceEvent, TraceRecord,
-    TraceRetryAttemptDetail, TraceToolAttemptOutcome, TraceToolTerminal, TraceTurnOutcome,
+    TraceRetryAttemptDetail, TraceToolAttemptOutcome, TraceTurnOutcome,
 };
 
 /// Exact API namespace supported by this adapter.
@@ -562,7 +562,6 @@ impl Drop for AdmissionCandidate {
 
 fn admitted(kind: TraceScopeKind) -> DomainSpan {
     match kind {
-        TraceScopeKind::Run => DomainSpan::RunAdmitted,
         TraceScopeKind::Turn => DomainSpan::TurnAdmitted,
         TraceScopeKind::Tool => DomainSpan::ToolAdmitted,
         TraceScopeKind::ToolIntent => DomainSpan::IntentAdmitted,
@@ -606,12 +605,10 @@ fn correlation_attributes(
     out: &mut Vec<KeyValue>,
 ) {
     let (session, turn, run, process) = match &scope.owner {
-        TraceScopeOwner::Run { session_id, run } => (Some(session_id), None, Some(run), None),
         TraceScopeOwner::Turn {
             session_id,
             turn_id,
         } => (Some(session_id), Some(turn_id), None, None),
-        TraceScopeOwner::Operation { session_id, .. } => (Some(session_id), None, None, None),
         TraceScopeOwner::Process { process_id } => (None, None, None, Some(process_id)),
         TraceScopeOwner::Tool { owner, .. } => match owner {
             TraceToolOwner::Turn {
@@ -696,10 +693,7 @@ impl<'a> Projection<'a> {
             }
             TraceEvent::DomainCompleted { completion } => {
                 projection.span = match completion.operation {
-                    TraceDomainOperation::Run => DomainSpan::Run,
                     TraceDomainOperation::Process => DomainSpan::Process,
-                    TraceDomainOperation::ProcessSegment => DomainSpan::ProcessSegment,
-                    TraceDomainOperation::Send => DomainSpan::Send,
                     TraceDomainOperation::ToolIntent => DomainSpan::Intent,
                 };
                 projection.started_at_ms = Some(completion.started_at_ms);
@@ -712,30 +706,11 @@ impl<'a> Projection<'a> {
                 projection.operation = Some("execute_tool");
                 projection.tool = Some(name);
             }
-            TraceEvent::ToolReceipt {
-                name,
-                started_at_ms,
-                terminal: Some(_),
-                ..
-            } => {
-                projection.span = DomainSpan::Tool;
-                projection.operation = Some("execute_tool");
-                projection.tool = Some(name);
-                projection.started_at_ms = Some(*started_at_ms);
-            }
             TraceEvent::ExecCodeCompleted { duration_ms, .. } => {
                 projection.span = DomainSpan::ExecCode;
                 projection.duration_ms = Some(*duration_ms);
             }
             TraceEvent::ExecCodeFailed { .. } => projection.span = DomainSpan::ExecCode,
-            TraceEvent::DurableWaitResolved { started_at_ms, .. } => {
-                projection.span = DomainSpan::Wait;
-                projection.started_at_ms = Some(*started_at_ms);
-            }
-            TraceEvent::DurableTimerResolved { duration_ms, .. } => {
-                projection.span = DomainSpan::Wait;
-                projection.duration_ms = Some(*duration_ms);
-            }
             _ => return None,
         }
         Some(projection)
@@ -805,7 +780,6 @@ impl<'a> Projection<'a> {
                     TraceDomainStatus::Completed => "completed",
                     TraceDomainStatus::Failed => "failed",
                     TraceDomainStatus::Cancelled => "cancelled",
-                    TraceDomainStatus::Yielded => "yielded",
                 }));
                 if let Some(kind) = &completion.intent_kind {
                     out.push(A::ToolIntentKind.value(kind.clone()));
@@ -858,16 +832,6 @@ impl<'a> Projection<'a> {
                     out.push(A::ErrorType.value(class.unwrap_or_else(|| "unknown".into())));
                 }
             }
-            TraceEvent::ToolReceipt {
-                call_id, terminal, ..
-            } => {
-                out.push(A::ToolCallId.value(call_id.to_string()));
-                if let Some(terminal @ (TraceToolTerminal::Denied | TraceToolTerminal::Aborted)) =
-                    terminal
-                {
-                    out.push(A::ErrorType.value(crate::wire_tag(terminal)));
-                }
-            }
             TraceEvent::TurnCompleted { outcome } => {
                 out.push(A::Outcome.value(match outcome {
                     TraceTurnOutcome::Completed { .. } => "completed",
@@ -891,22 +855,6 @@ impl<'a> Projection<'a> {
                     .map(crate::wire_tag)
                     .unwrap_or_else(|| crate::wire_tag(&error.kind));
                 out.push(A::ErrorType.value(reason));
-            }
-            TraceEvent::DurableWaitResolved {
-                wait_kind,
-                resolution,
-                ..
-            } => {
-                out.push(A::WaitKind.value(wait_kind.clone()));
-                if self.failed(record) {
-                    out.push(A::ErrorType.value(resolution.wire_tag()));
-                }
-            }
-            TraceEvent::DurableTimerResolved { status, .. } => {
-                out.push(A::WaitKind.value("timer"));
-                if status.is_failed() {
-                    out.push(A::ErrorType.value(status.wire_tag()));
-                }
             }
             _ if self.failed(record) => out.push(A::ErrorType.value("domain_failure")),
             _ => {}

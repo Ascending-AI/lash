@@ -97,7 +97,6 @@ impl LashRuntime {
             .plugins
             .adopt_state_segment(crate::tool_run::SegmentOrdinal(state_segment));
         let mut turn_delta = Vec::new();
-        let mut input_item_count = 0;
         let mut user_messages = Vec::new();
         for pending in admissions
             .turn_inputs
@@ -105,7 +104,6 @@ impl LashRuntime {
             .flat_map(|admitted| &admitted.inputs)
         {
             let normalized = normalize_input_items(&pending.input.items);
-            input_item_count += normalized.len();
             let user_id = crate::runtime::ingress_message_id(&pending.input_id);
             user_messages.push(opening_user_message(
                 user_id,
@@ -124,7 +122,6 @@ impl LashRuntime {
             ));
         }
         turn_delta.extend(user_messages);
-        let trace_metadata = prepare::turn_trace_metadata(&self.state, input_item_count);
         let mut initial_turn_input_applications = Vec::new();
         for admitted in &mut admissions.turn_inputs {
             admitted.record_initial_turn_application(run, &turn_delta);
@@ -282,7 +279,6 @@ impl LashRuntime {
         .with_fleet_format(self.fleet_format())
         .with_definition_engines(self.host.core.process_engines.clone())
         .with_metrics(self.host.core.tracing.metrics().clone())
-        .with_trace_metadata(trace_metadata)
         .with_trace(
             self.host
                 .core

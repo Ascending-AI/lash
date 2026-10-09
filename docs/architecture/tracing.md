@@ -8,9 +8,10 @@ export, provider flush and shutdown. Lash accepts one adapter per core;
 every plugin with its clock, scope, emitter and metric instruments.
 
 The [instrumentation contract](../../crates/lash/docs/instrumentation-contract.md)
-lists the registered spans, attributes and metrics. It describes what the
-adapter can project, rather than proving that every engine producer emits
-those observations. Arbitrary context metadata is off by default.
+lists the registered spans, attributes and metrics. Every trace record,
+span and operational metric lash declares has a production producer; an
+entry without one is deleted, not left registered (FIG-5658). Arbitrary
+context metadata is off by default.
 
 ## Telemetry content
 
@@ -108,10 +109,8 @@ A failed code cell exports Error status and its closed execution reason, or
 its cell failure kind when the executor returned a cell failure. A recovered
 outer turn keeps its own successful status. Tool failures export the terminal
 outcome's typed class, using the last attempt's class when the terminal payload
-has no class. Turn failures export their stop reason, and failed waits and
-timers their resolution/status tag as `error.type`. Tool receipts export their
-closed denied or aborted terminal. Missing typed tool failure evidence exports
-`unknown`. Model failures retain their provider code or normalized class and,
+has no class. Turn failures export their stop reason as `error.type`.
+Missing typed tool failure evidence exports `unknown`. Model failures retain their provider code or normalized class and,
 when present, `http.response.status_code`. Human-readable failure detail remains
 subject to the payload policy.
 
@@ -184,12 +183,31 @@ Trace delivery does not decide control flow or billing.
 ## Integration status
 
 Production admission proposes an SDK candidate and retains the selected
-anchor before it dispatches children. Turn, tool, wait, run and process
-terminals emit from committed first-writer receipts, with their retained
-times. Model attempts report the provider's actual responses.
-`tests::otel_laws::golden_tree_survives_replay_and_redrive` checks the
-exported SDK tree across replay, redrive, adapter recreation and a second
-send.
+anchor before it dispatches children. Model attempts report the provider's
+actual responses. Each logical record is emitted by the owner whose commit
+was acknowledged, which is the record's first-writer receipt:
+
+| Record | Span or metric | Producer | Time |
+| --- | --- | --- | --- |
+| `turn_started` | none (`lash.turn.admitted` is the admission) | the session actor, after `turn.admit` | the scope's retained start |
+| `turn_completed` | `invoke_agent` | the session actor, after the commit that writes the turn's terminal (`turn.commit`, a refusal, a cancel, a session close) | the owner's clock at the acknowledgement |
+| `domain_completed` (process) | `lash.process` | the process actor, after `process.terminal` | the terminal's retained `occurred_at_ms` |
+| `domain_completed` (tool intent) | `lash.tool_intent`, `lash.tool_intent.executed`, `lash.tool_intent.refused` | the host ingress, after the ledger retains the settlement | the settlement's retained time |
+| none | `lash.parked_work.parks` | the session or process actor, after the commit that parks it | not timed |
+
+An owner that dies between its commit and the emission loses that record:
+there is no telemetry outbox. The next owner finds the terminal already
+written and emits nothing, so a resend, a redrive or a takeover never
+exports a second logical completion. A terminal no operator caused through
+the turn (an operator cancel, a fork, a deleted session, applied commands)
+writes no `turn_completed`.
+
+Lash emits no wait, timer, tool-receipt or journaled-effect record, and no
+run or process-segment span. A wait is not the unit an operator acts on:
+the tool call or process that waited carries the outcome, and a parked
+actor is counted by `lash.parked_work.parks`. A host reads how many actors
+are parked, and for how long, from the parked-work reads of `lash::admin`,
+not from a gauge.
 
 Core tracing names no plugin, durable substrate, store backend or LLM
 provider. Events, scopes and instruments use the engine's typed vocabulary.
@@ -201,14 +219,17 @@ A tool call runs in memory inside the admitted execution that makes it
 durable (ADR 0132 §5), and nothing replays it. Its trace scope is
 retained by that admission, so the call is admitted once however many
 attempts or owners run it. Its start and completion are live observations
-under that scope: each execution that reaches the call observes it once. No store receipt grants tool
-transitions any more; the transition-class `lash.tool_intent.*` counters
-have no first writer until the substrate's trace lane gives them one.
+under that scope: each execution that reaches the call observes it once,
+and `execute_tool` is a live span. No store receipt grants tool transitions.
 
-Process tool scopes retain their process parent.
-Deferred `AwaitToolCompletions` uses the same durable wait request and resolution
-receipts as other engine waits. The SQL commit wrapper owns the Live permit
-for its physical budget validation and histogram observation.
+A host-submitted tool intent proposes its admission candidate at the
+ingress and retains the selected anchor on its ledger row. The submission
+that first retains the settlement exports `lash.tool_intent` and counts the
+outcome; a redelivery of the key finds the settlement and exports nothing.
+
+Process tool scopes retain their process parent. The SQL commit wrapper
+owns the Live permit for its physical budget validation and histogram
+observation.
 
 Recorded model usage and provider responses remain result data. Lash has no
 billing ledger, and tracing never resends a provider request.

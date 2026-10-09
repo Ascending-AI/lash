@@ -17,8 +17,8 @@ pub use lash_trace::{
     TraceDomainCompletion, TraceDomainOperation, TraceDomainProjector, TraceDomainStatus,
     TraceEventKind, TraceHostOperation, TraceLinks, TraceRecordIdentity, TraceScopeAdmission,
     TraceScopeFactory, TraceScopeId, TraceScopeKind, TraceScopeOffer, TraceScopeOwner,
-    TraceToolOwner, TraceToolTerminal, TraceTransitionKind, UntracedScopes, W3cSpanId,
-    W3cTraceFlags, W3cTraceId, W3cTraceState,
+    TraceToolOwner, TraceTransitionKind, UntracedScopes, W3cSpanId, W3cTraceFlags, W3cTraceId,
+    W3cTraceState,
 };
 pub use lash_trace::{TRACE_LINK_LIMIT, TRACESTATE_CHAR_LIMIT, TRACESTATE_MEMBER_LIMIT};
 
@@ -56,8 +56,7 @@ pub use lash_trace::{
 /// `lash-trace` re-exports rather than `rlm`-gated.
 pub use lash_trace::{
     ExecCodeFailureReason, StepBodyStarted, TRACE_SCHEMA_VERSION, TextProjectionMetadata,
-    TraceAgentFrameSwitch, TraceDurableTimerStatus, TraceDurableWaitResolution, TraceExecToolCall,
-    TraceFailureCode, TraceJournaledEffectStatus, TraceLanguageChildExecution,
+    TraceAgentFrameSwitch, TraceExecToolCall, TraceFailureCode, TraceLanguageChildExecution,
     TraceLanguageExecution, TraceLanguageExecutionFailure, TraceLanguageExecutionGeneration,
     TraceLanguageExecutionIdentity, TraceLanguageExecutionPayload, TraceLanguageExecutionStatus,
     TraceLlmTerminalReason, TraceNodeAwaited, TraceNodeWaitKind, TraceNodeWaitResolution,

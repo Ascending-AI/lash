@@ -356,6 +356,10 @@ impl TurnServices for RuntimeTurnServices {
         self.runtimes.tracing().scopes().export_admitted(scope);
     }
 
+    fn tracing(&self) -> Option<&crate::trace::TraceRuntime> {
+        Some(self.runtimes.tracing())
+    }
+
     async fn announce_head(&self, cx: &ActorContext, session: &SessionId) {
         announce_head(
             cx.backend(),

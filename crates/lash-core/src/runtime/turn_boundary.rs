@@ -92,7 +92,6 @@ pub(super) struct TurnBoundary {
     commit_budget: crate::CommitBudget,
     metrics: lash_trace::telemetry::metrics::TelemetryMetrics,
     trace: Option<crate::trace::TraceStanding>,
-    trace_metadata: std::collections::BTreeMap<String, serde_json::Value>,
     /// In-turn graph appends riding this turn's commit. Held here as well as
     /// on the draft so services created after finalization still share it.
     graph_appends: TurnGraphAppendDraft,
@@ -131,14 +130,6 @@ impl TurnBoundary {
         metrics: lash_trace::telemetry::metrics::TelemetryMetrics,
     ) -> Self {
         self.metrics = metrics;
-        self
-    }
-
-    pub(super) fn with_trace_metadata(
-        mut self,
-        metadata: std::collections::BTreeMap<String, serde_json::Value>,
-    ) -> Self {
-        self.trace_metadata = metadata;
         self
     }
 
@@ -210,7 +201,6 @@ impl TurnBoundary {
             commit_budget,
             metrics: Default::default(),
             trace: None,
-            trace_metadata: Default::default(),
             graph_appends,
             protocol_terminal_output: materialize::ProtocolTerminalOutput::default(),
         }

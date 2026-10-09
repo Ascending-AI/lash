@@ -107,6 +107,7 @@ pub(super) async fn unless_cancelled<F: Future>(
 /// [`TurnError::Durable`]: ownership lost, or the turn no longer open.
 pub(super) async fn finalize(
     cx: &ActorContext,
+    tracing: Option<&crate::trace::TraceRuntime>,
     row: &TurnRow,
     request: &TurnCancelRequest,
     stopped_cell: Option<(crate::EffectId, CellToolCalls)>,
@@ -116,15 +117,18 @@ pub(super) async fn finalize(
     let mut stopped_cell =
         stopped_cell.map(|(id, calls)| super::tool_round::AnsweredCell { id, calls });
     super::tool_round::record_answered_cell(cx, &mut tx, row, &mut stopped_cell)?;
+    let cause = cancelled_cause(cancel_evidence(request));
+    let traced = super::turn_trace::outcome(tracing, &cause);
     tx.write(DomainWrite::Turn(TurnWrite::Terminal {
         session: row.session.clone(),
         run: row.run.clone(),
-        cause: Box::new(cancelled_cause(cancel_evidence(request))),
+        cause: Box::new(cause),
         head_revision: None,
     }));
     // The turn's scope ends with its cancel (L6b): its waits are revoked and
     // its first batch of `Until` children marked; the next pass marks the rest.
     super::turn_scope::end_turn_scope(cx, &mut tx, &row.session, &row.run).await?;
     cx.commit(tx, CommitLabel::TURN_CANCEL).await?;
+    super::turn_trace::ended(tracing, row, traced);
     Ok(())
 }

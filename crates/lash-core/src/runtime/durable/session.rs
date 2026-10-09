@@ -44,7 +44,7 @@ use lash_sansio::llm::types::RecordedRequestTemplate;
 use tokio_util::sync::CancellationToken;
 
 use super::head::{HeadCache, SessionHead};
-use super::{phases, turn_cancel};
+use super::{phases, turn_cancel, turn_trace};
 use crate::{
     ActorContext, AdmittedScope, Backend, Effect, EffectId, HostTurnProtocol, LlmRequest,
     SessionId, TurnId, TurnMachine, TurnMachineConfig, TurnOutcome,
@@ -158,6 +158,13 @@ pub trait TurnServices: Send + Sync {
     /// commit's acknowledgement before it selected the candidate. The
     /// adapter dedupes the identity (FIG-5395, FIG-5457).
     fn export_turn_admission(&self, _scope: &lash_trace::DurableTraceScope) {}
+
+    /// The trace runtime a turn's `turn_started` and `turn_completed`
+    /// records are emitted through, once the commit each reports is
+    /// acknowledged. `None` when the services trace nothing.
+    fn tracing(&self) -> Option<&crate::trace::TraceRuntime> {
+        None
+    }
 }
 
 /// Commit the record that `run`'s admission exported the admission of the
@@ -607,7 +614,7 @@ impl SessionActivation {
             .is_some_and(|close| !close.is_tombstone())
         {
             drop(tx);
-            return match run_session_close(cx, session)
+            return match run_session_close(cx, session, self.services.tracing())
                 .await
                 .map_err(|error| TurnError::Close(Box::new(error)))?
             {
@@ -638,8 +645,9 @@ impl SessionActivation {
                         .propose_turn_trace(cx, &admitted.run)
                         .map(|proposal| (Some(proposal.scope), Some(proposal.candidate)))
                         .unwrap_or_default();
+                    let inputs = admitted.admission.input_ids().len();
                     let admitted = AdmittedInputs {
-                        admission: admitted.admission.with_trace(trace),
+                        admission: admitted.admission.with_trace(trace.clone()),
                         ..admitted
                     };
                     let run = admitted.run.clone();
@@ -656,6 +664,13 @@ impl SessionActivation {
                         settle_trace_admission(candidate, &committed);
                     }
                     committed?;
+                    turn_trace::started(
+                        self.services.tracing(),
+                        session,
+                        &run,
+                        trace.as_ref(),
+                        inputs,
+                    );
                     // The candidate is selected: the admission's export is
                     // discharged before the turn starts, so an owner that
                     // takes the turn over exports it no more (FIG-5457).
@@ -707,7 +722,7 @@ impl SessionActivation {
                     None => return Err(error),
                 },
             };
-            turn_cancel::finalize(cx, &row, &request, stopped).await?;
+            turn_cancel::finalize(cx, self.services.tracing(), &row, &request, stopped).await?;
             // The stop then waits for the children its cancel marked (G1b,
             // L6b): the rest of its cascade first, then their terminals,
             // bounded by the stop's grace. A child still running at the
@@ -771,7 +786,7 @@ impl SessionActivation {
             // its creation never recorded, FIG-4553), ends with that refusal
             // as its run's cause: no pass would clear it.
             Err(TurnError::Runtime(refusal)) if refusal.is_terminal() => {
-                phases::refuse(cx, &row, refusal).await?;
+                phases::refuse(cx, self.services.tracing(), &row, refusal).await?;
                 return Ok(Pass::Again);
             }
             Err(error) => return Err(error),
@@ -781,7 +796,7 @@ impl SessionActivation {
             // after-turn callback's), ends the run with it, as one met at
             // preparation does: retrying the pass would meet it again.
             Err(TurnError::Runtime(refusal)) if refusal.is_terminal() => {
-                phases::refuse(cx, &row, refusal).await?;
+                phases::refuse(cx, self.services.tracing(), &row, refusal).await?;
                 return Ok(Pass::Again);
             }
             ran => ran?,
@@ -902,7 +917,18 @@ impl Activation for SessionActivation {
                     };
                     if let Some(reason) = reason {
                         match park(&cx, &reason).await {
-                            Ok(()) | Err(DurableError::OwnershipLost(_)) => return Exit::Released,
+                            Ok(()) => {
+                                if let Some(tracing) = self.services.tracing() {
+                                    crate::operational_metrics::record_work_parked(
+                                        tracing.metrics(),
+                                        Some(&lash_trace::EmissionPermit::new_transition()),
+                                        "session",
+                                        reason.code(),
+                                    );
+                                }
+                                return Exit::Released;
+                            }
+                            Err(DurableError::OwnershipLost(_)) => return Exit::Released,
                             Err(park_error) => tracing::warn!(
                                 session_id = %session,
                                 %error,
@@ -1023,6 +1049,15 @@ fn undecodable_state(error: &TurnError) -> Option<SessionParkReason> {
 }
 
 impl SessionParkReason {
+    /// The reason's code: the `lash.parked_work.reason` of its park.
+    #[must_use]
+    pub const fn code(&self) -> &'static str {
+        match self {
+            Self::PassLoop { .. } => "pass_loop",
+            Self::UndecodableState { .. } => "undecodable_state",
+        }
+    }
+
     /// The park feed's encoding.
     #[expect(
         clippy::expect_used,

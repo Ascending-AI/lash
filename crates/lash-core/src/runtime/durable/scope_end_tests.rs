@@ -447,7 +447,7 @@ async fn a_session_close_cut_at_any_step_resumes_there_and_deletes_nothing_while
         let mut child_ended = false;
         let mut closed = false;
         for _ in 0..16 {
-            match run_session_close(&cx, &world.session).await {
+            match run_session_close(&cx, &world.session, None).await {
                 Ok(Some(SessionCloseExit::Closed)) => {
                     closed = true;
                     break;
@@ -580,7 +580,7 @@ async fn a_session_close_whose_process_ends_before_its_wait_commits_still_closes
     }
 
     assert_eq!(
-        run_session_close(&cx, &world.session)
+        run_session_close(&cx, &world.session, None)
             .await
             .expect("the close runs"),
         Some(SessionCloseExit::Waiting),
@@ -607,7 +607,7 @@ async fn a_session_close_whose_process_ends_before_its_wait_commits_still_closes
 
     let cx = world.claim().await;
     assert_eq!(
-        run_session_close(&cx, &world.session)
+        run_session_close(&cx, &world.session, None)
             .await
             .expect("the woken close runs"),
         Some(SessionCloseExit::Closed)
@@ -787,7 +787,7 @@ async fn assert_closes_only_after(world: &World, cx: &ActorContext, live: &Proce
         .await
         .expect("drain the close request");
     assert_eq!(
-        run_session_close(cx, &world.session)
+        run_session_close(cx, &world.session, None)
             .await
             .expect("the close runs"),
         Some(SessionCloseExit::Waiting),
@@ -809,7 +809,7 @@ async fn assert_closes_only_after(world: &World, cx: &ActorContext, live: &Proce
     end_process(&world.backend, live).await;
     let cx = world.claim().await;
     assert_eq!(
-        run_session_close(&cx, &world.session)
+        run_session_close(&cx, &world.session, None)
             .await
             .expect("the woken close runs"),
         Some(SessionCloseExit::Closed),

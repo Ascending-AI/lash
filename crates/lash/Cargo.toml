@@ -131,6 +131,7 @@ rmp-serde = { workspace = true }
 serde_bytes = { workspace = true }
 trybuild = "1"
 tracing-subscriber = { workspace = true }
+opentelemetry_sdk = { version = "0.33", features = ["metrics", "testing"] }
 
 [[bin]]
 name = "lash-seam-proof-worker"

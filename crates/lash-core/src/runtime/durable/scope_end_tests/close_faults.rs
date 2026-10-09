@@ -103,7 +103,7 @@ async fn a_failed_close_step_answers_its_typed_cause_and_the_next_claim_resumes_
                 .fail_next_session_delete(injected(failing)),
         }
 
-        let error = run_session_close(&cx, &world.session)
+        let error = run_session_close(&cx, &world.session, None)
             .await
             .expect_err("the faulted step fails the close's pass");
         match (failing, &error) {
@@ -162,7 +162,7 @@ async fn a_failed_close_step_answers_its_typed_cause_and_the_next_claim_resumes_
 
         let cx = world.claim().await;
         assert_eq!(
-            run_session_close(&cx, &world.session)
+            run_session_close(&cx, &world.session, None)
                 .await
                 .expect("the next claim resumes the close"),
             Some(SessionCloseExit::Closed),

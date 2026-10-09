@@ -762,8 +762,6 @@ async fn run_once_inner(
         for (name, value) in [
             ("runtime_work.hash_passes", work.hash_passes),
             ("runtime_work.hashed_bytes", work.hashed_bytes),
-            ("runtime_work.body_copy_passes", work.body_copy_passes),
-            ("runtime_work.copied_bytes", work.copied_bytes),
         ] {
             extra_counters
                 .lock_recover()

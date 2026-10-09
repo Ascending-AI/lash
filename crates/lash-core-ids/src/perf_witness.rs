@@ -17,8 +17,6 @@ const ACTIVE: u8 = 2;
 static COLLECTOR_STATE: AtomicU8 = AtomicU8::new(INACTIVE);
 static HASH_PASSES: AtomicU64 = AtomicU64::new(0);
 static HASHED_BYTES: AtomicU64 = AtomicU64::new(0);
-static BODY_COPY_PASSES: AtomicU64 = AtomicU64::new(0);
-static COPIED_BYTES: AtomicU64 = AtomicU64::new(0);
 // Pool-wait sample serialization is acceptable here because this recorder is
 // compiled in only for the explicitly enabled performance-witness feature.
 static POOL_CHECKOUT_WAIT_NANOS: LazyLock<Mutex<Vec<u64>>> =
@@ -128,8 +126,6 @@ impl SqlVerb {
 pub struct Snapshot {
     pub hash_passes: u64,
     pub hashed_bytes: u64,
-    pub body_copy_passes: u64,
-    pub copied_bytes: u64,
     pub pool_checkout_wait_nanos: Vec<u64>,
     /// Only the count is recorded, not the time: SQLite's profile clock is
     /// quantised to whole milliseconds, so summing its per-statement durations
@@ -174,8 +170,6 @@ impl Collector {
             .map_err(|_| AlreadyInstalled)?;
         HASH_PASSES.store(0, Ordering::Relaxed);
         HASHED_BYTES.store(0, Ordering::Relaxed);
-        BODY_COPY_PASSES.store(0, Ordering::Relaxed);
-        COPIED_BYTES.store(0, Ordering::Relaxed);
         SQL_STATEMENTS.store(0, Ordering::Relaxed);
         SQL_RECEIPTS
             .lock()
@@ -195,8 +189,6 @@ impl Collector {
         Snapshot {
             hash_passes: HASH_PASSES.load(Ordering::Relaxed),
             hashed_bytes: HASHED_BYTES.load(Ordering::Relaxed),
-            body_copy_passes: BODY_COPY_PASSES.load(Ordering::Relaxed),
-            copied_bytes: COPIED_BYTES.load(Ordering::Relaxed),
             pool_checkout_wait_nanos: lock_pool_checkout_waits().clone(),
             sql_statements: SQL_STATEMENTS.load(Ordering::Relaxed),
             sql_receipts: SQL_RECEIPTS
@@ -230,16 +222,6 @@ pub fn record_hash_pass(bytes: usize) {
     }
     HASH_PASSES.fetch_add(1, Ordering::Relaxed);
     HASHED_BYTES.fetch_add(bytes as u64, Ordering::Relaxed);
-}
-
-/// Record one explicit checkpoint-body clone or copy.
-#[inline]
-pub fn record_body_copy(bytes: usize) {
-    if COLLECTOR_STATE.load(Ordering::Relaxed) != ACTIVE {
-        return;
-    }
-    BODY_COPY_PASSES.fetch_add(1, Ordering::Relaxed);
-    COPIED_BYTES.fetch_add(bytes as u64, Ordering::Relaxed);
 }
 
 #[inline]

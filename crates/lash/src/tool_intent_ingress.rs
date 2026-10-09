@@ -612,23 +612,53 @@ impl ToolIntentIngress {
         trace: &SubmissionTrace,
     ) -> std::result::Result<Option<lash_core::ToolIntentRealized>, RealizationFailure> {
         let kind = intent.kind();
-        let submitted =
-            lash_core::ToolIntentSubmissionRecord::new(identity.clone(), intent.clone())
-                .map(|record| trace.offered(record))
-                .map_err(|error| {
-                    RealizationFailure::Command(
-                        kind,
-                        lash_core::PluginError::Session(format!(
-                            "failed to hash tool-intent submission: {error}"
-                        )),
-                    )
-                })?;
-        let admission = self
+        let record = lash_core::ToolIntentSubmissionRecord::new(identity.clone(), intent.clone())
+            .map_err(|error| {
+            RealizationFailure::Command(
+                kind,
+                lash_core::PluginError::Session(format!(
+                    "failed to hash tool-intent submission: {error}"
+                )),
+            )
+        })?;
+        let registry = self
             .process_registry()
-            .map_err(|error| RealizationFailure::Command(kind, error))?
+            .map_err(|error| RealizationFailure::Command(kind, error))?;
+        // The submission's admission proposes the anchor its scope retains,
+        // so the committed settlement has a parent to export under.
+        let candidate = self
+            .core
+            .env
+            .core
+            .tracing
+            .scopes()
+            .propose(&record.trace_scope_id(), trace.offer.cause());
+        let submitted = record.with_trace_offer(
+            lash_core::TraceScopeOffer::new(trace.offer.cause().clone(), candidate.anchor()),
+            trace.submitted_at_ms,
+        );
+        let admission = match registry
             .admit_tool_intent_submission(submitted.clone())
             .await
-            .map_err(|error| RealizationFailure::Command(kind, error))?;
+        {
+            Ok(admission) => admission,
+            Err(error) => {
+                // The row may have committed: a later reader reconciles it.
+                candidate.defer();
+                return Err(RealizationFailure::Command(kind, error));
+            }
+        };
+        candidate.settle(match &admission {
+            lash_core::ToolIntentSubmissionAdmission::Admitted => {
+                lash_trace::TraceCandidateOutcome::Selected
+            }
+            lash_core::ToolIntentSubmissionAdmission::Existing(_) => {
+                lash_trace::TraceCandidateOutcome::Reused
+            }
+            lash_core::ToolIntentSubmissionAdmission::Reclaimed => {
+                lash_trace::TraceCandidateOutcome::Refused
+            }
+        });
         let existing = match admission {
             lash_core::ToolIntentSubmissionAdmission::Admitted => return Ok(None),
             lash_core::ToolIntentSubmissionAdmission::Existing(existing) => existing,
@@ -738,6 +768,8 @@ impl ToolIntentIngress {
                     .as_ref()
                     .map(|settlement| settlement.at_ms),
             ) {
+                // Reconciles an admission whose candidate was deferred.
+                runtime.scopes().export_admitted(scope);
                 runtime.unreplayed(Some(scope.clone())).transition(
                     permit.as_ref(),
                     at_ms,

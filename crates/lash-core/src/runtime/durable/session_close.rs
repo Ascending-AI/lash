@@ -224,7 +224,8 @@ pub enum SessionCloseError {
 }
 
 /// Run what remains of `session`'s close, from the step after the stored
-/// one. `None` when the session is not closing.
+/// one. `None` when the session is not closing. The open turn its cancel
+/// step ends reports `turn_completed` through `tracing`.
 ///
 /// # Errors
 ///
@@ -232,6 +233,7 @@ pub enum SessionCloseError {
 pub async fn run_session_close(
     cx: &ActorContext,
     session: &SessionId,
+    tracing: Option<&crate::trace::TraceRuntime>,
 ) -> Result<Option<SessionCloseExit>, SessionCloseError> {
     let backend = cx.backend();
     let Some(row) = backend.durable().session_close(session).await? else {
@@ -247,10 +249,19 @@ pub async fn run_session_close(
                     reason: Some(SESSION_CLOSED.to_owned()),
                     ..crate::runtime::TurnCancellationEvidence::internal(SESSION_CLOSED)
                 };
-                if let Some(turn) = cancel_open_turn(cx, &mut tx, &cause).await? {
+                let cancelled = cancel_open_turn(cx, &mut tx, &cause).await?;
+                if let Some(turn) = &cancelled {
                     end_turn_scope(cx, &mut tx, session, &turn.run).await?;
                 }
                 commit_step(cx, tx, session, step).await?;
+                // The close's cancel is the open turn's terminal.
+                if let Some(turn) = &cancelled {
+                    let traced = super::turn_trace::outcome(
+                        tracing,
+                        &super::session::cancelled_cause(cause),
+                    );
+                    super::turn_trace::ended(tracing, turn, traced);
+                }
                 continue_scope_ends(cx, session).await?;
             }
             SessionCloseStep::Revoke => {

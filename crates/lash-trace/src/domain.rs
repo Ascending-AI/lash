@@ -34,10 +34,7 @@ pub struct TraceAttemptObservation {
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum TraceDomainOperation {
-    Run,
     Process,
-    ProcessSegment,
-    Send,
     ToolIntent,
 }
 
@@ -49,9 +46,6 @@ pub enum TraceDomainStatus {
     Completed,
     Failed,
     Cancelled,
-    /// The operation ended without finishing its work here: a segment that
-    /// yielded to a wait or handed over, a send that was reused.
-    Yielded,
 }
 
 /// The terminal of one durable domain operation.

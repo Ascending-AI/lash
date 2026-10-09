@@ -2162,96 +2162,19 @@
     "TraceDomainOperation": {
       "description": "The durable domain operation a [`TraceEvent::DomainCompleted`] ends.",
       "enum": [
-        "run",
         "process",
-        "process_segment",
-        "send",
         "tool_intent"
       ],
       "type": "string"
     },
     "TraceDomainStatus": {
       "description": "How a durable domain operation ended.",
-      "oneOf": [
-        {
-          "enum": [
-            "completed",
-            "failed",
-            "cancelled"
-          ],
-          "type": "string"
-        },
-        {
-          "const": "yielded",
-          "description": "The operation ended without finishing its work here: a segment that\nyielded to a wait or handed over, a send that was reused.",
-          "type": "string"
-        }
-      ]
-    },
-    "TraceDurableTimerStatus": {
-      "description": "How a durable timer left its sleep.",
-      "oneOf": [
-        {
-          "const": "resolved",
-          "description": "The timer elapsed.",
-          "type": "string"
-        },
-        {
-          "const": "cancelled",
-          "description": "The enclosing turn was cancelled while the timer was pending.",
-          "type": "string"
-        },
-        {
-          "const": "session_revoked",
-          "description": "The session was revoked while the timer was pending.",
-          "type": "string"
-        },
-        {
-          "const": "failed",
-          "description": "The controller could not complete the sleep.",
-          "type": "string"
-        }
-      ]
-    },
-    "TraceDurableWaitResolution": {
-      "description": "How a durable wait left its park.",
-      "oneOf": [
-        {
-          "const": "ok",
-          "description": "The awaited event delivered a value.",
-          "type": "string"
-        },
-        {
-          "const": "error",
-          "description": "The awaited event delivered a host-domain error value.",
-          "type": "string"
-        },
-        {
-          "const": "cancelled",
-          "description": "The wait itself was cancelled.",
-          "type": "string"
-        },
-        {
-          "const": "resolved",
-          "description": "A parked process command completed.",
-          "type": "string"
-        },
-        {
-          "const": "turn_cancelled",
-          "description": "The enclosing turn was cancelled while the wait was parked.",
-          "type": "string"
-        },
-        {
-          "const": "session_revoked",
-          "description": "The session was revoked while the wait was parked.",
-          "type": "string"
-        },
-        {
-          "const": "failed",
-          "description": "The controller could not complete the wait.",
-          "type": "string"
-        }
-      ]
+      "enum": [
+        "completed",
+        "failed",
+        "cancelled"
+      ],
+      "type": "string"
     },
     "TraceEffectEnvelopeDiffEntry": {
       "properties": {
@@ -2388,14 +2311,6 @@
         "status"
       ],
       "type": "object"
-    },
-    "TraceJournaledEffectStatus": {
-      "description": "Terminal status of a journaled `ctx.run` effect.",
-      "enum": [
-        "completed",
-        "failed"
-      ],
-      "type": "string"
     },
     "TraceLanguageChildExecution": {
       "properties": {
@@ -3724,16 +3639,6 @@
       ],
       "type": "object"
     },
-    "TraceToolTerminal": {
-      "description": "The recorded final-or-cancel decision of one logical tool call.",
-      "enum": [
-        "final",
-        "denied",
-        "cancelled",
-        "aborted"
-      ],
-      "type": "string"
-    },
     "TraceTurnCancellationEvidence": {
       "description": "Durable evidence that the traced turn was cancelled. Mirrors the runtime's\n`TurnCancellationEvidence`, which only [`TurnStop::Cancelled`] can carry, so\na cancelled trace outcome can never be stated without saying which request\nproduced it.\n\n[`TurnStop::Cancelled`]: lash_sansio::session_model::TurnStop::Cancelled",
       "properties": {
@@ -3770,19 +3675,28 @@
     },
     "TraceTurnFailureReason": {
       "description": "Why a [`TraceTurnOutcome::Failed`] turn stopped. Mirrors the non-cancelled\n`TurnStop` reasons.",
-      "enum": [
-        "incomplete",
-        "invalid_input",
-        "max_turns",
-        "tool_failure",
-        "provider_error",
-        "context_overflow",
-        "plugin_abort",
-        "runtime_error",
-        "submitted_error",
-        "tool_error"
-      ],
-      "type": "string"
+      "oneOf": [
+        {
+          "enum": [
+            "incomplete",
+            "invalid_input",
+            "max_turns",
+            "tool_failure",
+            "provider_error",
+            "context_overflow",
+            "plugin_abort",
+            "runtime_error",
+            "submitted_error",
+            "tool_error"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "agent_frame_switch_limit",
+          "description": "The durable follow-on reached its chain's frame-switch bound.",
+          "type": "string"
+        }
+      ]
     },
     "TraceTurnOutcome": {
       "description": "The single terminal outcome of a traced turn.\n\nOne closed shape replaces the former `status` / `done_reason` /\n`agent_frame_switch` triple: each variant owns exactly the data its state\ncan carry, so an agent-frame switch cannot be reported without a frame key\nand a cancellation cannot be reported without its evidence. Cancellation is\nits own variant rather than a failure reason \u2014 [`Self::is_failed`] is\n`false` for it.",
@@ -4548,7 +4462,7 @@
       "type": "object"
     },
     {
-      "description": "The terminal of a durable domain operation that has no record of its\nown kind: a run, a process, a process segment, a host send or a tool\nintent. It is a logical record of the operation's scope.",
+      "description": "The terminal of a durable domain operation that has no record of its\nown kind: a process or a tool intent. It is a logical record of the\noperation's scope.",
       "properties": {
         "completion": {
           "$ref": "#/$defs/TraceDomainCompletion"
@@ -4661,43 +4575,6 @@
         "call_id",
         "name",
         "args"
-      ],
-      "type": "object"
-    },
-    {
-      "description": "A logical receipt from recorded Run events. A final is observed only\nafter its protected presentation; a Deferred attempt has no terminal.",
-      "properties": {
-        "call_id": {
-          "type": "string"
-        },
-        "name": {
-          "type": "string"
-        },
-        "started_at_ms": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "terminal": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/TraceToolTerminal"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "type": {
-          "const": "tool_receipt",
-          "type": "string"
-        }
-      },
-      "required": [
-        "type",
-        "call_id",
-        "name",
-        "started_at_ms"
       ],
       "type": "object"
     },
@@ -4875,138 +4752,6 @@
       "required": [
         "type",
         "projections"
-      ],
-      "type": "object"
-    },
-    {
-      "description": "A journaled effect is about to cross its durable substrate's journal\ncommand boundary.",
-      "properties": {
-        "effect_kind": {
-          "type": "string"
-        },
-        "effect_name": {
-          "type": "string"
-        },
-        "type": {
-          "const": "journaled_effect_started",
-          "type": "string"
-        }
-      },
-      "required": [
-        "type",
-        "effect_name",
-        "effect_kind"
-      ],
-      "type": "object"
-    },
-    {
-      "description": "A journaled effect returned its recorded or newly executed outcome.",
-      "properties": {
-        "effect_kind": {
-          "type": "string"
-        },
-        "effect_name": {
-          "type": "string"
-        },
-        "status": {
-          "$ref": "#/$defs/TraceJournaledEffectStatus"
-        },
-        "type": {
-          "const": "journaled_effect_settled",
-          "type": "string"
-        }
-      },
-      "required": [
-        "type",
-        "effect_name",
-        "effect_kind",
-        "status"
-      ],
-      "type": "object"
-    },
-    {
-      "description": "A durable wait has issued its park command.",
-      "properties": {
-        "type": {
-          "const": "durable_wait_parked",
-          "type": "string"
-        },
-        "wait_kind": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "type",
-        "wait_kind"
-      ],
-      "type": "object"
-    },
-    {
-      "description": "A durable wait resumed with a terminal resolution.",
-      "properties": {
-        "resolution": {
-          "$ref": "#/$defs/TraceDurableWaitResolution"
-        },
-        "started_at_ms": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "type": {
-          "const": "durable_wait_resolved",
-          "type": "string"
-        },
-        "wait_kind": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "type",
-        "started_at_ms",
-        "wait_kind",
-        "resolution"
-      ],
-      "type": "object"
-    },
-    {
-      "description": "A durable timer has been issued.",
-      "properties": {
-        "duration_ms": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "type": {
-          "const": "durable_timer_started",
-          "type": "string"
-        }
-      },
-      "required": [
-        "type",
-        "duration_ms"
-      ],
-      "type": "object"
-    },
-    {
-      "description": "A durable timer resumed or was cancelled.",
-      "properties": {
-        "duration_ms": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "status": {
-          "$ref": "#/$defs/TraceDurableTimerStatus"
-        },
-        "type": {
-          "const": "durable_timer_resolved",
-          "type": "string"
-        }
-      },
-      "required": [
-        "type",
-        "duration_ms",
-        "status"
       ],
       "type": "object"
     },

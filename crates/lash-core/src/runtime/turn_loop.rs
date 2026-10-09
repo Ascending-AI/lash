@@ -10,10 +10,6 @@ use lash_sansio::core_support::*;
 mod context_pressure;
 mod durable;
 mod execute;
-#[cfg(feature = "testing")]
-pub mod prepare;
-#[cfg(not(feature = "testing"))]
-mod prepare;
 mod resident_session;
 
 pub(in crate::runtime) use durable::DurableTurn;

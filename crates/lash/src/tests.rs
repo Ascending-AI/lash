@@ -433,6 +433,8 @@ mod projection;
 #[cfg(feature = "rlm")]
 mod recorded_carriers;
 mod telemetry_content;
+#[cfg(feature = "otel-trace")]
+mod trace_emission;
 mod tracing;
 pub(crate) use harness::{
     DecoratedBackend, explicit_ephemeral_facets, explicit_ephemeral_facets_with_budget,

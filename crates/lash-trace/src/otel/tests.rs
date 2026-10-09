@@ -350,18 +350,6 @@ fn emitted_domain_shape_matches_registry() {
     adapter
         .metrics
         .runtime_tuning
-        .record_session_lane_contention_wait(Duration::from_millis(1), "acquired");
-    adapter
-        .metrics
-        .runtime_tuning
-        .record_session_lane_give_up("busy");
-    adapter
-        .metrics
-        .runtime_tuning
-        .record_queued_work_wake_retry();
-    adapter
-        .metrics
-        .runtime_tuning
         .record_pool_acquire_wait(Duration::from_millis(2), "success");
     adapter
         .metrics
@@ -381,12 +369,10 @@ fn emitted_domain_shape_matches_registry() {
             },
         );
     }
-    adapter.metrics.parked_work.record_park("turn", "budget");
     adapter
         .metrics
         .parked_work
-        .record_count("turn", "budget", 1);
-    adapter.metrics.parked_work.record_oldest_age("turn", 4);
+        .record_park("session", "pass_loop");
     adapter.metrics.tool_intent.record_executed("start_process");
     adapter
         .metrics
@@ -664,15 +650,8 @@ fn typed_domain_completions_cover_operations_times_and_permit_classes() {
     let adapter = OtelTelemetry::new(&provider, &meter, OtelOptions::default());
     let scope = admit(&adapter, TraceCause::Root);
     let operations = [
-        (TraceDomainOperation::Run, DomainSpan::Run, false),
         (TraceDomainOperation::Process, DomainSpan::Process, false),
-        (
-            TraceDomainOperation::ProcessSegment,
-            DomainSpan::ProcessSegment,
-            false,
-        ),
-        (TraceDomainOperation::Send, DomainSpan::Send, true),
-        (TraceDomainOperation::ToolIntent, DomainSpan::Intent, true),
+        (TraceDomainOperation::ToolIntent, DomainSpan::Intent, false),
     ];
     for (operation, span, is_live) in operations {
         let mut completion = TraceDomainCompletion::new(operation, 4000, TraceDomainStatus::Failed);
@@ -723,7 +702,7 @@ fn typed_domain_completions_cover_operations_times_and_permit_classes() {
                 .any(|attr| attr.key.as_str().starts_with("gen_ai.usage."))
         );
     }
-    assert_eq!(exporter.get_finished_spans().unwrap().len(), 6);
+    assert_eq!(exporter.get_finished_spans().unwrap().len(), 3);
 }
 
 #[test]
@@ -810,7 +789,7 @@ fn provider_attempts_use_reported_identity_and_never_project_aggregate_calls() {
 }
 
 #[test]
-fn tool_wait_and_code_completions_use_explicit_scope_and_local_leaf_durations() {
+fn tool_and_code_completions_use_explicit_scope_and_local_leaf_durations() {
     let (provider, meter, exporter, _) = providers(Sampler::AlwaysOn);
     let adapter = OtelTelemetry::new(&provider, &meter, OtelOptions::default());
     let scope = admit(&adapter, TraceCause::Root);
@@ -829,28 +808,9 @@ fn tool_wait_and_code_completions_use_explicit_scope_and_local_leaf_durations() 
                 issuing_node_id: None,
                 attempts: None,
             },
-            EmissionSource::NewTransition,
+            live(),
             "execute_tool unfamiliar-tool",
             1000,
-        ),
-        (
-            TraceEvent::DurableWaitResolved {
-                started_at_ms: 1000,
-                wait_kind: "custom-wait".into(),
-                resolution: crate::TraceDurableWaitResolution::Failed,
-            },
-            EmissionSource::NewTransition,
-            "lash.wait",
-            1000,
-        ),
-        (
-            TraceEvent::DurableTimerResolved {
-                duration_ms: 200,
-                status: crate::TraceDurableTimerStatus::Failed,
-            },
-            EmissionSource::NewTransition,
-            "lash.wait",
-            8800,
         ),
         (
             TraceEvent::ExecCodeCompleted {
@@ -908,7 +868,7 @@ fn tool_wait_and_code_completions_use_explicit_scope_and_local_leaf_durations() 
             text(span)
         );
     }
-    assert_eq!(exporter.get_finished_spans().unwrap().len(), 5);
+    assert_eq!(exporter.get_finished_spans().unwrap().len(), 3);
 
     // The same tool completion under a captured policy exports its payload.
     let (captured, source) = captured_tool.expect("tool completion");
@@ -1051,25 +1011,9 @@ fn correlation_ids_are_attributes_with_payload_export_off() {
     let process_value = process_id.to_string();
     let owners = [
         (
-            TraceScopeOwner::Run {
-                session_id: "conversation".into(),
-                run: "durable-run".into(),
-            },
-            Some("durable-run"),
-            None,
-        ),
-        (
             TraceScopeOwner::Turn {
                 session_id: "conversation".into(),
                 turn_id: "physical-turn".into(),
-            },
-            None,
-            None,
-        ),
-        (
-            TraceScopeOwner::Operation {
-                session_id: "conversation".into(),
-                operation_id: "operation".into(),
             },
             None,
             None,
@@ -1310,55 +1254,13 @@ fn failure_attributes_preserve_typed_classes_and_model_http_status() {
             },
             Some("context_overflow"),
         ),
-        (
-            TraceEvent::DurableWaitResolved {
-                started_at_ms: 1000,
-                wait_kind: "event".into(),
-                resolution: crate::TraceDurableWaitResolution::Failed,
-            },
-            Some("failed"),
-        ),
-        (
-            TraceEvent::DurableWaitResolved {
-                started_at_ms: 1000,
-                wait_kind: "event".into(),
-                resolution: crate::TraceDurableWaitResolution::Error,
-            },
-            None,
-        ),
-        (
-            TraceEvent::DurableTimerResolved {
-                duration_ms: 10,
-                status: crate::TraceDurableTimerStatus::Failed,
-            },
-            Some("failed"),
-        ),
-        (
-            TraceEvent::ToolReceipt {
-                call_id: lash_sansio::ToolCallId::fixture("receipt"),
-                name: "tool".into(),
-                started_at_ms: 1000,
-                terminal: Some(crate::TraceToolTerminal::Denied),
-            },
-            Some("denied"),
-        ),
-        (
-            TraceEvent::ToolReceipt {
-                call_id: lash_sansio::ToolCallId::fixture("receipt"),
-                name: "tool".into(),
-                started_at_ms: 1000,
-                terminal: Some(crate::TraceToolTerminal::Cancelled),
-            },
-            None,
-        ),
     ];
     for (event, expected) in events {
-        adapter.project(
-            &scope,
-            None,
-            &EmissionSource::NewTransition,
-            &record(&scope, event, 9000),
-        );
+        let source = match &event {
+            TraceEvent::ToolCallCompleted { .. } => live(),
+            _ => EmissionSource::NewTransition,
+        };
+        adapter.project(&scope, None, &source, &record(&scope, event, 9000));
         let spans = exporter.get_finished_spans().unwrap();
         let span = spans.last().unwrap();
         assert_eq!(

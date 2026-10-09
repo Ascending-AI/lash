@@ -260,7 +260,7 @@ impl ProcessActivation {
     ) -> Result<Pass, DurableError> {
         record_terminal(&mut tx, process, outcome)?;
         tx.ack_seen();
-        owned.commit(tx, CommitLabel::PROCESS_TERMINAL).await?;
+        self.commit_terminal(owned, tx, process).await?;
         Ok(Pass::Again)
     }
 }

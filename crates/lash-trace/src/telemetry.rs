@@ -543,17 +543,10 @@ impl TraceCause {
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum TraceScopeOwner {
-    /// An admitted run, the owner of its execution.
-    Run { session_id: SessionId, run: TurnId },
     /// One physical agent turn, including a follow-on within a run.
     Turn {
         session_id: SessionId,
         turn_id: TurnId,
-    },
-    /// One logical operation Run.
-    Operation {
-        session_id: SessionId,
-        operation_id: String,
     },
     /// One tool call under its original logical owner.
     Tool {
@@ -591,7 +584,6 @@ pub enum TraceToolOwner {
 /// The kind of a scope owner: the static spelling exported telemetry uses.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum TraceScopeKind {
-    Run,
     Turn,
     Tool,
     ToolIntent,
@@ -601,7 +593,6 @@ pub enum TraceScopeKind {
 impl TraceScopeKind {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Run => "run",
             Self::Turn => "turn",
             Self::Tool => "tool",
             Self::ToolIntent => "tool_intent",
@@ -644,8 +635,6 @@ impl TraceScopeId {
 
     pub fn kind(&self) -> TraceScopeKind {
         match self.owner {
-            TraceScopeOwner::Run { .. } => TraceScopeKind::Run,
-            TraceScopeOwner::Operation { .. } => TraceScopeKind::Run,
             TraceScopeOwner::Turn { .. } => TraceScopeKind::Turn,
             TraceScopeOwner::Tool { .. } => TraceScopeKind::Tool,
             TraceScopeOwner::ToolIntent { .. } => TraceScopeKind::ToolIntent,

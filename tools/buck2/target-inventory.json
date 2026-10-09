@@ -46763,6 +46763,7 @@
         "lash-internal-vm-client",
         "lash-internal-vm-runtime",
         "lash-internal-vm-worker",
+        "opentelemetry_sdk",
         "rmp-serde",
         "rusqlite",
         "serde",

@@ -1007,6 +1007,7 @@ PACKAGE_DEPS = {
             "lash_provider_anthropic": "//crates/lash-provider-anthropic:lash-provider-anthropic",
             "lash_sqlite_store": "//crates/lash-sqlite-store:lash-sqlite-store",
             "lash_vm": "//crates/lash-vm:lash-vm",
+            "opentelemetry_sdk": "//third-party/rust:p0223",
             "rmp_serde": "//third-party/rust:p0282",
             "rusqlite": "//third-party/rust:p0283",
             "serde_bytes": "//third-party/rust:p0308",

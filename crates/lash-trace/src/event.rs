@@ -8,13 +8,12 @@ use serde_json::Value;
 
 use crate::{
     CellFailure, ExecCodeFailureReason, TextProjectionMetadata, TraceAttemptObservation,
-    TraceDomainCompletion, TraceDomainStatus, TraceDurableTimerStatus, TraceDurableWaitResolution,
-    TraceEffectEnvelopeDiffEvent, TraceError, TraceExecToolCall, TraceJournaledEffectStatus,
-    TraceLanguageExecution, TraceLanguageExecutionPayload, TraceLanguageExecutionStatus,
-    TraceLlmRequest, TraceLlmResponse, TraceProgramStepOutcome, TracePromptComponent,
-    TraceProviderEvent, TraceProviderReplayDropEvent, TraceRetryAttempt, TraceRuntimeStreamEvent,
-    TraceStoreErrorClass, TraceToolCallOutcome, TraceToolCallOutput, TraceToolSpec,
-    TraceToolTerminal, TraceTurnOutcome,
+    TraceDomainCompletion, TraceDomainStatus, TraceEffectEnvelopeDiffEvent, TraceError,
+    TraceExecToolCall, TraceLanguageExecution, TraceLanguageExecutionPayload,
+    TraceLanguageExecutionStatus, TraceLlmRequest, TraceLlmResponse, TraceProgramStepOutcome,
+    TracePromptComponent, TraceProviderEvent, TraceProviderReplayDropEvent, TraceRetryAttempt,
+    TraceRuntimeStreamEvent, TraceStoreErrorClass, TraceToolCallOutcome, TraceToolCallOutput,
+    TraceToolSpec, TraceTurnOutcome,
 };
 
 #[derive(
@@ -129,8 +128,8 @@ pub enum TraceEvent {
         observation: TraceAttemptObservation,
     },
     /// The terminal of a durable domain operation that has no record of its
-    /// own kind: a run, a process, a process segment, a host send or a tool
-    /// intent. It is a logical record of the operation's scope.
+    /// own kind: a process or a tool intent. It is a logical record of the
+    /// operation's scope.
     DomainCompleted {
         completion: TraceDomainCompletion,
     },
@@ -156,14 +155,6 @@ pub enum TraceEvent {
         args: Value,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         issuing_node_id: Option<String>,
-    },
-    /// A logical receipt from recorded Run events. A final is observed only
-    /// after its protected presentation; a Deferred attempt has no terminal.
-    ToolReceipt {
-        call_id: lash_sansio::ToolCallId,
-        name: String,
-        started_at_ms: u64,
-        terminal: Option<TraceToolTerminal>,
     },
     ToolCallCompleted {
         /// Lash's identity for the call (ADR 0117).
@@ -203,37 +194,6 @@ pub enum TraceEvent {
     },
     ObservationProjection {
         projections: Vec<TextProjectionMetadata>,
-    },
-    /// A journaled effect is about to cross its durable substrate's journal
-    /// command boundary.
-    JournaledEffectStarted {
-        effect_name: String,
-        effect_kind: String,
-    },
-    /// A journaled effect returned its recorded or newly executed outcome.
-    JournaledEffectSettled {
-        effect_name: String,
-        effect_kind: String,
-        status: TraceJournaledEffectStatus,
-    },
-    /// A durable wait has issued its park command.
-    DurableWaitParked {
-        wait_kind: String,
-    },
-    /// A durable wait resumed with a terminal resolution.
-    DurableWaitResolved {
-        started_at_ms: u64,
-        wait_kind: String,
-        resolution: TraceDurableWaitResolution,
-    },
-    /// A durable timer has been issued.
-    DurableTimerStarted {
-        duration_ms: u64,
-    },
-    /// A durable timer resumed or was cancelled.
-    DurableTimerResolved {
-        duration_ms: u64,
-        status: TraceDurableTimerStatus,
     },
     /// The runtime received a typed, non-retryable store integrity failure.
     StoreErrorObserved {
@@ -291,15 +251,12 @@ impl TraceEvent {
     /// - [`Self::ExecCodeFailed`] always and [`Self::ExecCodeCompleted`] when
     ///   its executor reported a [`CellFailure`];
     /// - [`Self::DomainCompleted`] only with [`TraceDomainStatus::Failed`];
-    /// - [`Self::JournaledEffectSettled`] only with
-    ///   [`TraceJournaledEffectStatus::Failed`];
-    /// - [`Self::DurableTimerResolved`] only with [`TraceDurableTimerStatus::Failed`];
-    /// - [`Self::DurableWaitResolved`] only with [`TraceDurableWaitResolution::Failed`];
     /// - [`Self::ToolCallCompleted`] only with [`TraceToolCallOutcome::Failure`];
     /// - [`Self::TurnCompleted`] only with [`TraceTurnOutcome::Failed`], for any
     ///   [`crate::TraceTurnFailureReason`] (`Incomplete`, `InvalidInput`, `MaxTurns`,
     ///   `ToolFailure`, `ProviderError`, `ContextOverflow`, `PluginAbort`,
-    ///   `RuntimeError`, `SubmittedError`, or `ToolError`); and
+    ///   `RuntimeError`, `AgentFrameSwitchLimit`, `SubmittedError`, or
+    ///   `ToolError`); and
     /// - [`Self::ProgramStep`] when compile/link failed; and
     /// - [`Self::LanguageExecution`] for
     ///   [`TraceLanguageExecutionPayload::NodeFailed`] or
@@ -321,17 +278,10 @@ impl TraceEvent {
                 TraceProgramStepOutcome::Ok => false,
                 TraceProgramStepOutcome::Failure { .. } => true,
             },
-            Self::JournaledEffectSettled { status, .. } => status.is_failed(),
-            Self::DurableTimerResolved { status, .. } => status.is_failed(),
-            Self::DurableWaitResolved { resolution, .. } => resolution.is_failed(),
             Self::ToolCallCompleted { output, .. } => match &output.outcome {
                 TraceToolCallOutcome::Failure(_) => true,
                 TraceToolCallOutcome::Success(_) | TraceToolCallOutcome::Cancelled(_) => false,
             },
-            Self::ToolReceipt { terminal, .. } => matches!(
-                terminal,
-                Some(TraceToolTerminal::Denied | TraceToolTerminal::Aborted)
-            ),
             Self::TurnCompleted { outcome, .. } => outcome.is_failed(),
             Self::DomainCompleted { completion } => completion.status == TraceDomainStatus::Failed,
             Self::LanguageExecution { event, .. } => match &event.payload {
@@ -368,9 +318,6 @@ impl TraceEvent {
             | Self::ToolCallStarted { .. }
             | Self::ExecCodeStarted { .. }
             | Self::ObservationProjection { .. }
-            | Self::JournaledEffectStarted { .. }
-            | Self::DurableWaitParked { .. }
-            | Self::DurableTimerStarted { .. }
             | Self::ProtocolStep { .. }
             | Self::StepBodyStarted { .. }
             | Self::ToolCheckConflict { .. }
