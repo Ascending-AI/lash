@@ -434,6 +434,11 @@ follows is released once it has been idle for `max_age`; a window with a
 live subscriber is not, so a process that waits longer than that does not
 gap its connected followers.
 
+The aggregate process count and byte bounds are hard limits: capacity pressure
+evicts the least recently touched window even with live subscribers (subscribing
+and subscriber upkeep refresh that touch), gaps its cursors and closes its
+subscriptions.
+
 The store holds what was published to it. Cores that share one store share
 every observation. Across OS processes, provisional node history crosses only
 through a store they share; with separate in-memory stores a follower still

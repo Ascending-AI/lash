@@ -462,8 +462,10 @@ async fn the_idlest_window_is_evicted_to_keep_the_aggregate_bounds() {
     } = replicas(|policy| policy.data.max_processes = 2).await;
     let [one, two, three] = ["one", "two", "three"].map(ProcessId::fixture);
     let first = publish(&a, &one, "k", "one").await;
-    publish(&a, &two, "k", "two").await;
     let mut on_b = subscribed(&b, &first.cursor).await;
+    // Subscribing touches one's head (FIG-5627). Publish two afterwards
+    // so one is still the idlest, despite its live subscriber.
+    publish(&a, &two, "k", "two").await;
     let third = publish(&b, &three, "k", "three").await;
     assert_eq!(
         replay(&a, &first.cursor).await.err(),
@@ -483,6 +485,14 @@ async fn the_idlest_window_is_evicted_to_keep_the_aggregate_bounds() {
         cursors(&replay(&a, &start).await.expect("replay")),
         std::slice::from_ref(&third.cursor)
     );
+    let ((resident, reserved), (heads, held, over)) = budget(database.url(), &schema).await;
+    assert_eq!(
+        (resident, reserved),
+        (heads, held),
+        "the sentinel's budget is the heads'"
+    );
+    assert_eq!(resident, 2);
+    assert!(over <= 0, "no window holds more than it reserved");
     let again = publish(&a, &one, "k", "one again").await;
     assert!(
         again.live_position() > first.live_position(),
@@ -503,7 +513,7 @@ async fn the_idlest_window_is_evicted_to_keep_the_aggregate_bounds() {
         database,
         schema,
         a,
-        ..
+        b,
     } = replicas(|policy| {
         policy.data.max_bytes_per_process = STEP;
         policy.data.reservation_bytes = STEP;
@@ -511,11 +521,17 @@ async fn the_idlest_window_is_evicted_to_keep_the_aggregate_bounds() {
     })
     .await;
     let first = publish(&a, &one, "k", "one").await;
+    let mut on_b = subscribed(&b, &first.cursor).await;
     publish(&a, &two, "k", "two").await;
     assert_eq!(
         replay(&a, &first.cursor).await.err(),
         Some(ProcessReplayGapReason::Unavailable),
         "the idlest process's reservation was taken for the second"
+    );
+    let ended = next_item(&mut on_b).await;
+    assert!(
+        matches!(ended, None | Some(Err(ProcessReplayStoreError::Closed))),
+        "a subscription to a byte-evicted process closes, got {ended:?}"
     );
     let ((resident, reserved), (heads, held, over)) = budget(database.url(), &schema).await;
     assert_eq!(
