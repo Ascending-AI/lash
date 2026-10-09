@@ -842,7 +842,6 @@
   },
   {
    "name": "single_and_list_waiters_on_one_promise",
-   "deviation": "TS_JOIN_WAKE_ORDER",
    "source": "\nconst member = async () => {\n  await echo(\"m\");\n};\nconst promise = member();\nconst all = Promise.all([promise]);\nconst single = async () => {\n  await promise;\n  console.log(\"single 1\");\n  await null;\n  console.log(\"single 2\");\n};\nconst waiting = single();\nawait all;\nconsole.log(\"all\");\nawait waiting;\n",
    "deliveries": [
     [

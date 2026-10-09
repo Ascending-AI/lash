@@ -392,7 +392,6 @@ await ticks;
   },
   {
     name: "single_and_list_waiters_on_one_promise",
-    deviation: "TS_JOIN_WAKE_ORDER",
     source: `
 const member = async () => {
   await echo("m");

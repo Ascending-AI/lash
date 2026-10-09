@@ -258,29 +258,88 @@ main {
     );
 }
 
-/// `K-TASK-008`: when a task ends, the tasks joined on its handle alone
-/// become ready in the order they joined, and then the list joins it
-/// decides.
+/// `K-TASK-008`, `K-TASK-010`: single and list joins become ready in
+/// join-start order, for every mode and either outcome. Repeated members
+/// give one wake, and a list join not yet decided keeps waiting.
 #[test]
-fn joiners_wake_in_join_order_and_list_joins_after_them() {
-    let (end, embedder) = run(r#"
-fn target() { let r = perform echo("t") as Any return r }
-fn single(h, tag) { let v = join h print tag return v }
-fn many(h, tag) { let hs = [h] let v = join all hs print tag return v }
-main {
+fn single_and_list_joiners_wake_in_join_start_order() {
+    for mode in ["all", "settled", "race", "any"] {
+        for outcome in ["return r", "throw r"] {
+            let mut embedder = Embedder::new(&format!(
+                r#"
+fn target() {{ let r = perform echo("t") as Any {outcome} }}
+fn other() {{ do perform echo("other") as Any }}
+fn single(h, tag) {{ try {{ do join h }} catch e {{ }} print tag }}
+fn many(h, tag) {{ let hs = [h, h] try {{ do join {mode} hs }} catch e {{ }} print tag }}
+fn pending(h, other) {{ let hs = [h, other] do join settled hs print "pending" }}
+main {{
   let t = spawn call target()
-  let m = spawn call many(t, "list")
-  let a = spawn call single(t, "first")
-  let b = spawn call single(t, "second")
-  let rest = [m, a, b]
+  let other = spawn call other()
+  let p = spawn call pending(t, other)
+  let m = spawn call many(t, "list first")
+  let a = spawn call single(t, "single first")
+  let n = spawn call many(t, "list second")
+  let b = spawn call single(t, "single second")
+  let rest = [p, m, a, n, b]
   do join all rest
   return "done"
-}"#);
-    assert_eq!(result(end), text("done"));
-    assert_eq!(
-        embedder.world.printed,
-        [text("first"), text("second"), text("list")]
-    );
+}}"#
+            ));
+            assert_eq!(result(embedder.run_to_end(&["t", "other"])), text("done"));
+            assert_eq!(
+                embedder.world.printed,
+                [
+                    text("list first"),
+                    text("single first"),
+                    text("list second"),
+                    text("single second"),
+                    text("pending"),
+                ],
+                "join {mode}, {outcome}"
+            );
+        }
+    }
+}
+
+/// `K-TASK-017`, `K-TASK-008`: cancelling a waiting join withdraws it;
+/// joining again registers after the surviving single and list waiters.
+#[test]
+fn cancelled_joiners_rejoin_at_the_back_of_the_wake_queue() {
+    for join in ["join h", "join all hs"] {
+        let mut embedder = Embedder::new(&format!(
+            r#"
+fn target() {{ do perform echo("t") as Any }}
+fn again(h) {{
+  let hs = [h, h]
+  try {{ do {join} }} catch e {{ print e.kind }}
+  do {join}
+  print "rejoined"
+}}
+fn single(h) {{ do join h print "single" }}
+fn many(h) {{ let hs = [h] do join all hs print "list" }}
+main {{
+  let t = spawn call target()
+  let a = spawn call again(t)
+  let m = spawn call many(t)
+  let s = spawn call single(t)
+  do cancel a
+  let rest = [a, m, s]
+  do join all rest
+  return "done"
+}}"#
+        ));
+        assert_eq!(result(embedder.run_to_end(&["t"])), text("done"));
+        assert_eq!(
+            embedder.world.printed,
+            [
+                text("cancelled"),
+                text("list"),
+                text("single"),
+                text("rejoined")
+            ],
+            "{join}"
+        );
+    }
 }
 
 /// `K-TASK-009`: joining a handle again gives the same result value, or a

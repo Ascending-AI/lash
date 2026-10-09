@@ -1,5 +1,6 @@
 //! Actions: calls, waits and tasks (`K-STMT-001`, `K-TASK`).
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -11,7 +12,7 @@ use num_traits::{Signed, ToPrimitive};
 
 use super::exec::Call;
 use super::{
-    Control, Eval, Halt, Incoming, Interrupt, KernelMachine, ListJoin, PendingWait, Task,
+    Control, Eval, Halt, Incoming, Interrupt, Joiner, KernelMachine, ListJoin, PendingWait, Task,
     TaskState, Wait, bound, error, fault, raise,
 };
 use crate::compile::{
@@ -122,7 +123,7 @@ impl KernelMachine {
                 if matches!(self.task(joined)?.state, TaskState::Ended(_)) {
                     return self.join_result(joined).map(Some);
                 }
-                self.task(joined)?.joiners.push(task);
+                self.task(joined)?.joiners.push(Joiner::Single(task));
                 self.suspend(task, stmt, Wait::Join(joined))?;
                 Ok(None)
             }
@@ -167,6 +168,13 @@ impl KernelMachine {
                     None => {
                         let order = self.next_join;
                         self.next_join += 1;
+                        // Repeated handles keep their places in the result,
+                        // but register only one wake on each live member.
+                        for member in tasks.iter().copied().collect::<BTreeSet<_>>() {
+                            if !matches!(self.task(member)?.state, TaskState::Ended(_)) {
+                                self.task(member)?.joiners.push(Joiner::List(order));
+                            }
+                        }
                         self.joins.insert(
                             order,
                             ListJoin {
@@ -402,6 +410,20 @@ impl KernelMachine {
         Ok(())
     }
 
+    /// Removes a decided or cancelled list join from every member's wake
+    /// queue, so no later ending can wake its joiner again.
+    pub(super) fn remove_list_join(&mut self, order: u64) -> Result<Option<ListJoin>, Halt> {
+        let join = self.joins.remove(&order);
+        if let Some(join) = &join {
+            for member in &join.members {
+                self.task(*member)?
+                    .joiners
+                    .retain(|joiner| *joiner != Joiner::List(order));
+            }
+        }
+        Ok(join)
+    }
+
     /// Whether a list `join` is decided, and how (`K-TASK-011` to
     /// `K-TASK-014`). `ended` is the member that has just ended; `None`
     /// is a `join` that is starting, which reads its members in list
@@ -511,11 +533,11 @@ impl KernelMachine {
             Wait::Join(joined) => self
                 .task(joined)?
                 .joiners
-                .retain(|joiner| *joiner != target),
+                .retain(|joiner| *joiner != Joiner::Single(target)),
             Wait::JoinMany(order) => {
                 // The join raises `cancelled`, so its members have been
                 // through a join that raised.
-                if let Some(join) = self.joins.remove(&order) {
+                if let Some(join) = self.remove_list_join(order)? {
                     self.pass(&join.members)?;
                 }
             }

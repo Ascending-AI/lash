@@ -82,18 +82,14 @@ fn three_parked_tasks_resume_in_arrival_order() {
     );
 }
 
-/// `TS_JOIN_WAKE_ORDER`: a task that ends wakes the tasks joined on its
-/// handle alone before the list joins it decides (`K-TASK-008`), where
-/// JavaScript runs a promise's reactions in the order they were
-/// registered. Here `Promise.all` registered first.
+/// `K-TASK-008`: an aggregate registered before a direct waiter wakes
+/// first, so their continuations interleave as Node's promise reactions do.
 #[test]
-fn a_single_waiter_wakes_before_a_list_waiter_registered_earlier() {
+fn single_and_list_waiters_interleave_as_node_does() {
     let case = witness("single_and_list_waiters_on_one_promise");
-    assert_eq!(case.deviation.as_deref(), Some("TS_JOIN_WAKE_ORDER"));
+    assert!(case.deviation.is_none());
     assert_eq!(case.node.lines(), ["single 1", "all", "single 2"]);
-    let kernel = run(&case.source, &case.deliveries);
-    assert_eq!(kernel.lines(), ["single 1", "single 2", "all"]);
-    assert_eq!(kernel.end, "ok");
+    assert_eq!(run(&case.source, &case.deliveries), case.node);
 }
 
 /// `TS_RUN_END_STRICT`: a cell that ends while a promise's task is still

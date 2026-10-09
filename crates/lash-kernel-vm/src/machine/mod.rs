@@ -187,14 +187,21 @@ enum Incoming {
     Join(TaskId),
 }
 
+/// One waiting join in a task's wake queue (`K-TASK-008`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Joiner {
+    Single(TaskId),
+    List(u64),
+}
+
 #[derive(Debug)]
 struct Task {
     identity: TaskIdentity,
     frames: Vec<Frame>,
     state: TaskState,
     incoming: Option<Incoming>,
-    /// The tasks waiting on this handle alone, in the order they joined.
-    joiners: Vec<TaskId>,
+    /// Every join waiting on this task, in join-start order.
+    joiners: Vec<Joiner>,
     /// A `join` on the handle raised the task's error.
     observed: bool,
     /// The task is or was a member of a list `join` that has returned or
@@ -496,29 +503,25 @@ impl KernelMachine {
             return Ok(());
         }
         for joiner in joiners {
-            self.wake(joiner, Incoming::Join(task))?;
-        }
-        let deciding: Vec<u64> = self
-            .joins
-            .iter()
-            .filter(|(_, join)| join.members.contains(&task))
-            .map(|(order, _)| *order)
-            .collect();
-        for order in deciding {
-            let Some(join) = self.joins.get(&order) else {
-                continue;
-            };
-            let (mode, members, joiner) = (join.mode, join.members.clone(), join.joiner);
-            if let Some(decision) = self.decide(mode, &members, Some(task))? {
-                self.joins.remove(&order);
-                self.pass(&members)?;
-                self.wake(
-                    joiner,
-                    match decision {
-                        Ok(value) => Incoming::Value(value),
-                        Err(value) => Incoming::Raise(value),
-                    },
-                )?;
+            match joiner {
+                Joiner::Single(joiner) => self.wake(joiner, Incoming::Join(task))?,
+                Joiner::List(order) => {
+                    let Some(join) = self.joins.get(&order) else {
+                        continue;
+                    };
+                    let (mode, members, joiner) = (join.mode, join.members.clone(), join.joiner);
+                    if let Some(decision) = self.decide(mode, &members, Some(task))? {
+                        self.remove_list_join(order)?;
+                        self.pass(&members)?;
+                        self.wake(
+                            joiner,
+                            match decision {
+                                Ok(value) => Incoming::Value(value),
+                                Err(value) => Incoming::Raise(value),
+                            },
+                        )?;
+                    }
+                }
             }
         }
         Ok(())
