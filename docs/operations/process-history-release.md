@@ -75,7 +75,7 @@ Evidence: [release types and digest](../../crates/lash-core-execution/src/runtim
 [SQLite release](../../crates/lash-sqlite-store/src/process_registry/event_release.rs),
 [PostgreSQL release](../../crates/lash-postgres-store/src/postgres/process_registry/event_release.rs),
 [host API](../../crates/lash/src/process_admin.rs),
-[snapshot fold](../../crates/lash/src/process_observation.rs),
+[snapshot fold](../../crates/lash/src/process_feed.rs),
 [event awaits](../../crates/lash-core-execution/src/runtime/work/awaiter.rs) and
 [process wait projection](../../crates/lash-core-execution/src/runtime/process/validation.rs).
 
@@ -136,8 +136,8 @@ storage bound needs new proof about dead lifecycle identities and live-state ret
 The [store law](../../crates/lash-conformance/src/conformance/process_registry/event_release.rs)
 checks typed expiry, tails, equal-key and conflicting retry,
 monotonic allocation, clamping and repetition on all three storage tiers.
-The [facade law](../../crates/lash/src/process_observation/tests.rs) checks the
-read gap, cursor and incomplete fold.
+The [facade law](../../crates/lash/src/process_history/tests.rs) checks the
+read gap, continuation and incomplete fold.
 
 Transaction serialization and rollback above are source reasoning. Crash-reopen
 release transactions, concurrent append/release stress and a many-segment live-retention benchmark remain useful cases.

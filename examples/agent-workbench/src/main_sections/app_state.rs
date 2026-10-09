@@ -717,15 +717,15 @@ fn work_item_status_label(
 
 pub(crate) fn work_process_from_observed(process: lash::process::ObservedProcess) -> WorkProcess {
     let graph_key = crate::execution_graphs::process_graph_key(&process.process_id);
-    let status = process.status();
-    let status_label = status.label().to_string();
+    let lifecycle = WorkLifecycle::of(&process);
+    let status_label = process.status().label().to_string();
     let terminal = process.terminal().is_some();
     let label = crate::execution_graphs::process_label(&process).to_string();
     let error = crate::execution_graphs::process_error(&process);
     WorkProcess {
         process_id: process.process_id,
         graph_key,
-        lifecycle: status,
+        lifecycle,
         status_label,
         terminal,
         error,

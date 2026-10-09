@@ -26,7 +26,7 @@ use lash_core::facade_support::{TraceRecord, TraceSink, TraceSinkError};
 use lash_sansio::sync::MutexExt as _;
 use lash_vm_runtime::{
     TraceLanguageExecution, TraceLanguageExecutionIdentity, TraceLanguageExecutionMap,
-    TraceLanguageExecutionPayload, TraceLashlangGraphStore, TraceLashlangNodeObservation,
+    TraceLanguageExecutionPayload, TraceLashlangNodeObservation,
 };
 
 use served::{Tier, World};
@@ -358,7 +358,12 @@ async fn stored_artifact(world: &World, module_ref: &str) -> Arc<lash_vm::Module
 
 /// Whether `node` folded to `Skipped`.
 fn assert_skipped(records: &[TraceRecord], artifact: &lash_vm::ModuleArtifact, marker: &str) {
-    let graph = TraceLashlangGraphStore::fold(None, records).expect("the records fold");
+    let graph = lash::tracing::fold_lashlang_graph(
+        None,
+        records,
+        lash::tracing::DEFAULT_LASH_VM_GRAPH_HISTORY_LIMIT,
+    )
+    .expect("the records fold");
     let id = node_naming(artifact, marker);
     let node = graph
         .nodes

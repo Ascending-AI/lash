@@ -19,6 +19,7 @@ mod cron;
 mod deferred_tools;
 #[path = "../../shared/e2e_live_budget.rs"]
 mod e2e_live_budget;
+mod execution_feeds;
 mod execution_graphs;
 mod failure_provider;
 mod host_triggers;
@@ -60,7 +61,7 @@ use lash::{
     LashCore, SessionSpec, TurnActivity, TurnActivitySink, TurnEvent,
     tracing::{
         JsonlTraceSink, StderrTraceSink, TeeTraceSink, TraceContext, TraceEvent,
-        TraceLashlangGraph, TraceLashlangGraphStore, TraceLevel, TraceRecord, TraceSink,
+        TraceLashlangGraph, TraceLevel, TraceRecord, TraceSink,
     },
 };
 

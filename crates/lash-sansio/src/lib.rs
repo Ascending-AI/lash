@@ -19,7 +19,6 @@ pub mod llm;
 pub mod llm_profile;
 pub mod module_artifact_refusal;
 pub mod plugin;
-pub mod process_cursor;
 pub mod profile;
 mod redacted;
 mod retained_output;
@@ -143,10 +142,6 @@ pub use plugin::{
     CheckpointKind, PluginFailureClass, PluginFailureOrigin, PluginHookFailure, PluginMessage,
     PluginOperationFailure, PluginRuntimeEvent, ToolCheckConflict, ToolCheckPhase, ToolCheckReply,
     ToolCheckVerdictKind,
-};
-pub use process_cursor::{
-    PROCESS_CURSOR_UNROUTED_EPOCH, PROCESS_CURSOR_VERSION, ProcessCursor, ProcessCursorError,
-    ProcessCursorReference,
 };
 pub use redacted::Redacted;
 pub use retained_output::{OutputRetentionPolicy, OutputValue, RetainedOutput};

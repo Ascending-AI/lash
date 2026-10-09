@@ -32,7 +32,8 @@ pub(crate) struct AppState {
     pub(crate) messages: Arc<Mutex<Vec<ChatMessage>>>,
     pub(crate) selected_llm_profile: Arc<Mutex<LlmProfileSelection>>,
     pub(crate) trace_sink: Option<Arc<dyn TraceSink>>,
-    pub(crate) lash_vm_execution: Arc<TraceLashlangGraphStore>,
+    /// The execution graphs folded from the session and process feeds.
+    pub(crate) execution_graphs: crate::execution_feeds::ExecutionGraphs,
     pub(crate) event_tx: SessionEventRegistry,
     pub(crate) mail_world: mail::MailWorld,
     pub(crate) active_turns: ActiveTurns,
@@ -920,31 +921,6 @@ pub(crate) struct TurnCancelResponse {
     pub(crate) cancellations: Vec<TurnCancelReceipt>,
 }
 
-/// Best-effort [`ProcessEventSink`](lash::process::ProcessEventSink) that hands
-/// each appended process event to a channel (ADR 0017). `emit` runs inline on
-/// the registry append path, so it must return fast: it does no I/O, only a
-/// non-blocking `try_send`. Dropping on a full channel is intentional — the
-/// durable paged event log is the reconcile source, not this feed.
-///
-#[derive(Clone)]
-pub(crate) struct ChannelProcessEventSink {
-    pub(crate) tx: mpsc::Sender<lash::process::ProcessEvent>,
-}
-
-impl ChannelProcessEventSink {
-    pub(crate) fn new(tx: mpsc::Sender<lash::process::ProcessEvent>) -> Self {
-        Self { tx }
-    }
-}
-
-#[async_trait]
-impl lash::process::ProcessEventSink for ChannelProcessEventSink {
-    async fn emit(&self, event: &lash::process::ProcessEvent) {
-        // Non-blocking: drop on a full channel rather than slow every append.
-        let _ = self.tx.try_send(event.clone());
-    }
-}
-
 // Process work is now resolved through LashCore's substrate port.
 // The AppState no longer mirrors that driver as a second source of truth.
 
@@ -957,11 +933,44 @@ pub(crate) struct WorkItem {
     pub(crate) label: String,
 }
 
+/// The state a process is in, as its row holds it: running, waiting with
+/// everything it is blocked on, or ended. A waiting or sleeping process is
+/// live work, the same as a running one.
+#[derive(Debug, Serialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub(crate) enum WorkLifecycle {
+    Running,
+    Waiting {
+        blockers: Vec<lash::process::WaitState>,
+    },
+    Terminal {
+        status: lash::process::ProcessStatus,
+        occurred_at_ms: u64,
+    },
+}
+
+impl WorkLifecycle {
+    pub(crate) fn of(process: &lash::process::ObservedProcess) -> Self {
+        match &process.lifecycle {
+            lash::process::ProcessLifecycleState::Running {} => Self::Running,
+            lash::process::ProcessLifecycleState::Waiting { waits } => Self::Waiting {
+                blockers: waits.clone(),
+            },
+            lash::process::ProcessLifecycleState::Terminal { occurred_at_ms, .. } => {
+                Self::Terminal {
+                    status: process.status(),
+                    occurred_at_ms: *occurred_at_ms,
+                }
+            }
+        }
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub(crate) struct WorkProcess {
     pub(crate) process_id: ProcessId,
     pub(crate) graph_key: String,
-    pub(crate) lifecycle: lash::process::ProcessStatus,
+    pub(crate) lifecycle: WorkLifecycle,
     pub(crate) status_label: String,
     pub(crate) terminal: bool,
     pub(crate) error: Option<String>,

@@ -217,13 +217,30 @@ impl ProcessReadView {
     }
 }
 
-/// One retained process at `process.last_event_sequence`: its row and the
-/// effect evidence folded through that sequence. Appends after it belong to
-/// a later view.
+/// One retained process at `process.last_event_sequence`: its row, the
+/// effect evidence folded through that sequence and the document it runs.
+/// Appends after it belong to a later view.
 #[derive(Clone, Debug)]
 pub struct RetainedProcessView {
     pub process: ObservedProcess,
     pub effects: ProcessEffectEvidence,
+    pub document: ProcessDocumentIdentity,
+}
+
+/// Which workflow document a process runs: a reference, never the graph. A
+/// host reads the graph by it and joins provisional node evidence only
+/// within the document and execution it names. It is independent of the
+/// lifecycle and of effect coverage: a process whose artifact was released
+/// is still observed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ProcessDocumentIdentity {
+    Available(lash_trace::WorkflowDocumentRef),
+    /// Nothing retains an artifact the definition reads.
+    ArtifactUnavailable {
+        artifact: crate::ArtifactName,
+    },
+    /// The process's engine has no workflow document.
+    Unsupported,
 }
 
 /// The bounded effect evidence of a process: retained occurrences and

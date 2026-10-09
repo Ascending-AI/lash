@@ -55,11 +55,21 @@ use lash_sansio::ProcessId;
 use crate::support::{Arc, EmbedError, Result, RuntimeErrorCode};
 
 /// How much of a process's durable history one snapshot may read to fold
-/// its effect evidence.
+/// its effect evidence: the core's
+/// [`ObservationWorkLimits`](lash_trace::ObservationWorkLimits).
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct EffectFoldBudget {
     pub(crate) pages: usize,
     pub(crate) page_size: NonZeroUsize,
+}
+
+impl EffectFoldBudget {
+    pub(crate) fn of(limits: lash_trace::ObservationWorkLimits) -> Self {
+        Self {
+            pages: limits.process_effect_fold_pages,
+            page_size: limits.process_effect_fold_page_size,
+        }
+    }
 }
 
 /// A process's history was pruned while it was read.
@@ -167,6 +177,8 @@ pub(crate) struct ProcessFeedSource {
     work_limits: lash_trace::ObservationWorkLimits,
     process_id: ProcessId,
     registry: Arc<dyn ProcessRegistry>,
+    /// The engines whose document providers name a process's document.
+    engines: lash_core::ProcessEngineRegistry,
     replay: Arc<dyn ProcessReplayStore>,
     effect_budget: EffectFoldBudget,
     reconcile: FeedReconcile,
@@ -176,8 +188,8 @@ impl ProcessFeedSource {
     pub(crate) fn new(
         process_id: ProcessId,
         registry: Arc<dyn ProcessRegistry>,
+        engines: lash_core::ProcessEngineRegistry,
         replay: Arc<dyn ProcessReplayStore>,
-        effect_budget: EffectFoldBudget,
         work_limits: lash_trace::ObservationWorkLimits,
         reconcile: FeedReconcile,
     ) -> Self {
@@ -185,8 +197,9 @@ impl ProcessFeedSource {
             work_limits,
             process_id,
             registry,
+            engines,
             replay,
-            effect_budget,
+            effect_budget: EffectFoldBudget::of(work_limits),
             reconcile,
         }
     }
@@ -235,7 +248,12 @@ impl ProcessFeedSource {
             .await?
             {
                 Ok(effects) => {
-                    ProcessReadView::Retained(Box::new(RetainedProcessView { process, effects }))
+                    let document = self.document(&process).await?;
+                    ProcessReadView::Retained(Box::new(RetainedProcessView {
+                        process,
+                        effects,
+                        document,
+                    }))
                 }
                 Err(Pruned {
                     terminal_label,
@@ -246,6 +264,29 @@ impl ProcessFeedSource {
                 },
             },
         )
+    }
+
+    /// Which document `process` runs, named by its engine's document
+    /// provider from the process's recorded input.
+    async fn document(
+        &self,
+        process: &lash_core::facade_support::ObservedProcess,
+    ) -> Result<lash_core::ProcessDocumentIdentity> {
+        use lash_core::ProcessDocumentIdentity;
+        let lash_core::ProcessInput::Engine { kind, payload } = &process.input else {
+            return Ok(ProcessDocumentIdentity::Unsupported);
+        };
+        let Some(provider) = self.engines.document_provider(kind) else {
+            return Ok(ProcessDocumentIdentity::Unsupported);
+        };
+        Ok(match provider.document_ref(payload).await? {
+            lash_core::ProcessDocumentRefRead::Named(reference) => {
+                ProcessDocumentIdentity::Available(reference)
+            }
+            lash_core::ProcessDocumentRefRead::ArtifactMissing { artifact } => {
+                ProcessDocumentIdentity::ArtifactUnavailable { artifact }
+            }
+        })
     }
 
     /// The durable read view with the earliest cursor the replay retains,

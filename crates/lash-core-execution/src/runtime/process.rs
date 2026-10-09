@@ -60,8 +60,9 @@ pub use effect_summary::{
 };
 pub use engine::{
     AdmittedProcessIdentity, InspectedProcessDefinition, ProcessDocument, ProcessDocumentProvider,
-    ProcessDocumentRead, ProcessEngine, ProcessEngineAdmission, ProcessEngineRegistration,
-    ProcessEngineRegistry, ProcessInfraError, ProcessRunOutcome, WeakProcessEngineRegistry,
+    ProcessDocumentRead, ProcessDocumentRefRead, ProcessEngine, ProcessEngineAdmission,
+    ProcessEngineRegistration, ProcessEngineRegistry, ProcessInfraError, ProcessRunOutcome,
+    WeakProcessEngineRegistry,
 };
 pub use engine_state::{
     EngineAction, EngineEvent, EngineState, EngineStateFormat, EngineStepKind, EngineStepRefusal,

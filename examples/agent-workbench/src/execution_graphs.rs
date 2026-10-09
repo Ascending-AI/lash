@@ -36,7 +36,7 @@ pub(crate) struct LashVmGraphSummary {
 pub(crate) struct LashVmGraphProcessSummary {
     pub(crate) process_id: ProcessId,
     pub(crate) status_label: String,
-    pub(crate) lifecycle: lash::process::ProcessStatus,
+    pub(crate) lifecycle: crate::WorkLifecycle,
     pub(crate) terminal: bool,
     pub(crate) label: String,
     pub(crate) created_at_ms: u64,
@@ -468,7 +468,7 @@ fn process_summary_from_observed(
     LashVmGraphProcessSummary {
         process_id: process.process_id.clone(),
         status_label: process.status().label().to_string(),
-        lifecycle: process.status(),
+        lifecycle: crate::WorkLifecycle::of(process),
         terminal: process.terminal().is_some(),
         label: process_label(process).to_string(),
         created_at_ms: process.created_at_ms,

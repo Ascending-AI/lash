@@ -24,27 +24,25 @@ use lash::process::{
     ObservedProcess, ObservedProcessEvent, ObservedWorkItem, ObservedWorkItemState, ParentEndPlan,
     ProcessAwaitOutput, ProcessCancelReceipt, ProcessChange, ProcessChangeCursor, ProcessChangeHub,
     ProcessChangeSubscription, ProcessClockRebind, ProcessCompletionAuthority,
-    ProcessCompletionOutcome, ProcessCursor, ProcessCursorError, ProcessCursorReference,
-    ProcessDefinitionRef, ProcessDefinitionRefusal, ProcessDefinitionResolution,
-    ProcessDefinitionValue, ProcessDurableCompleteness, ProcessDurableSnapshot, ProcessEngineKind,
-    ProcessEvent, ProcessEventAppendReceipt, ProcessEventAppendRequest,
-    ProcessEventHistoryRetention, ProcessEventKind, ProcessEventLite, ProcessEventLog,
-    ProcessEventPage, ProcessEventPageEvents, ProcessEventPageMore, ProcessEventQueryMode,
-    ProcessEventReadOutcome, ProcessEventSink, ProcessEventsFrom, ProcessEventsRead,
-    ProcessExecutionContext, ProcessExecutionEnvRef, ProcessExecutionEnvSpec,
-    ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessHandleView, ProcessIdentity,
-    ProcessInput, ProcessLifecycle, ProcessLifecycleFact, ProcessLineage, ProcessListFilter,
-    ProcessListMode, ProcessLiveReferenceView, ProcessObservationItem, ProcessObservationSnapshot,
-    ProcessObserverBy, ProcessObserverRegistry, ProcessOpScope, ProcessOriginator,
-    ProcessOriginatorFilter, ProcessOutcome, ProcessProvenance, ProcessPruneReport, ProcessQuery,
-    ProcessRecord, ProcessRegistrar, ProcessRegistration, ProcessRegistry, ProcessRegistryCursor,
-    ProcessRetention, ProcessRuntimeHost, ProcessService, ProcessSessionDeleteReport,
-    ProcessSignature, ProcessStartOptions, ProcessStartOutcome, ProcessStartRequest,
-    ProcessStarted, ProcessStatus, ProcessStatusFilter, ProcessTerminalWait, ProcessTombstone,
-    ProcessToolIntents, ProcessToolVisibilityFilter, ProcessWorkObserver, ProcessWorkSnapshot,
-    ProcessWorkSubstrate, ProcessWorkWiring, Processes, ProjectionWatermark, ScopeGrant, ScopeId,
-    ScopeRef, SessionProcessAdmin, SessionScope, SessionScopeId, StartCx, StartCxError, WaitKind,
-    WaitState, WatchedRegistry, lifetime, watch_process_registry,
+    ProcessCompletionOutcome, ProcessDefinitionRef, ProcessDefinitionRefusal,
+    ProcessDefinitionResolution, ProcessDefinitionValue, ProcessEngineKind, ProcessEvent,
+    ProcessEventAppendReceipt, ProcessEventAppendRequest, ProcessEventHistoryRetention,
+    ProcessEventKind, ProcessEventLite, ProcessEventLog, ProcessEventPage, ProcessEventPageEvents,
+    ProcessEventPageMore, ProcessEventQueryMode, ProcessEventReadOutcome, ProcessEventSink,
+    ProcessEventsRead, ProcessExecutionContext, ProcessExecutionEnvRef, ProcessExecutionEnvSpec,
+    ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessHandleView,
+    ProcessHistoryContinuation, ProcessIdentity, ProcessInput, ProcessLifecycle,
+    ProcessLifecycleFact, ProcessLineage, ProcessListFilter, ProcessListMode,
+    ProcessLiveReferenceView, ProcessObserverBy, ProcessObserverRegistry, ProcessOpScope,
+    ProcessOriginator, ProcessOriginatorFilter, ProcessOutcome, ProcessProvenance,
+    ProcessPruneReport, ProcessQuery, ProcessRecord, ProcessRegistrar, ProcessRegistration,
+    ProcessRegistry, ProcessRegistryCursor, ProcessRetention, ProcessRuntimeHost, ProcessService,
+    ProcessSessionDeleteReport, ProcessSignature, ProcessStartOptions, ProcessStartOutcome,
+    ProcessStartRequest, ProcessStarted, ProcessStatus, ProcessStatusFilter, ProcessTerminalWait,
+    ProcessTombstone, ProcessToolIntents, ProcessToolVisibilityFilter, ProcessWorkObserver,
+    ProcessWorkSnapshot, ProcessWorkSubstrate, ProcessWorkWiring, Processes, ProjectionWatermark,
+    ScopeGrant, ScopeId, ScopeRef, SessionProcessAdmin, SessionScope, SessionScopeId, StartCx,
+    StartCxError, WaitKind, WaitState, WatchedRegistry, lifetime, watch_process_registry,
 };
 // FIG-4656: the lifecycle state a record holds, the outcome a terminal state
 // owns, the statuses derived from them, and the start target a request names.
@@ -53,9 +51,9 @@ use lash::process::{
     ProcessTerminal, RetiredProcessStatus, TerminalProcessStatus,
 };
 
-fn paged_events_signature_is_public(processes: &Processes, cursor: ProcessCursor) {
+fn paged_events_signature_is_public(processes: &Processes, from: ProcessHistoryContinuation) {
     let _future = processes.events(
-        ProcessEventsFrom::After(cursor),
+        from,
         std::num::NonZeroUsize::new(64).unwrap(),
         ProcessEventQueryMode::Lite,
     );

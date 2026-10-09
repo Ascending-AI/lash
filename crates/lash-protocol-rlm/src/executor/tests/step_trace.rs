@@ -116,10 +116,8 @@ fn real_foreground_sleep_reduces_waiting_then_completed() {
     block_on(async {
         let (response, records) = Box::pin(run_step("await sleep(0); finish(null);")).await;
         assert!(response.error().is_none(), "{:?}", response.error());
-        let store = lash_vm_runtime::TraceLashlangGraphStore::default();
         let mut awaited_node = None;
-        for record in &records {
-            store.append(record).expect("reduce real foreground trace");
+        for (index, record) in records.iter().enumerate() {
             if let lash_trace::TraceEvent::LanguageExecution { event, .. } = &record.event
                 && let lash_vm_runtime::TraceLanguageExecutionPayload::NodeWaiting {
                     node_id,
@@ -127,9 +125,8 @@ fn real_foreground_sleep_reduces_waiting_then_completed() {
                     ..
                 } = &event.payload
             {
-                let graph = store
-                    .graph(&event.identity.graph_key())
-                    .expect("waiting graph");
+                let graph = reduce(&records[..=index]);
+                assert_eq!(graph.graph_key, event.identity.graph_key());
                 assert!(graph.nodes.iter().any(|node| {
                     node.id == *node_id
                         && matches!(
@@ -141,7 +138,8 @@ fn real_foreground_sleep_reduces_waiting_then_completed() {
             }
         }
         let (graph_key, node_id) = awaited_node.expect("sleep emitted a wait");
-        let graph = store.graph(&graph_key).expect("completed graph");
+        let graph = reduce(&records);
+        assert_eq!(graph.graph_key, graph_key);
         assert!(graph.nodes.iter().any(|node| {
             node.id == node_id
                 && matches!(
@@ -155,11 +153,31 @@ fn real_foreground_sleep_reduces_waiting_then_completed() {
 fn reduce(
     records: &[lash_core::facade_support::TraceRecord],
 ) -> lash_vm_runtime::TraceLashlangGraph {
-    let store = lash_vm_runtime::TraceLashlangGraphStore::default();
+    graphs_of(records)
+        .into_iter()
+        .next()
+        .expect("execution graph")
+}
+
+/// The graph of each execution `records` observe, in graph-key order.
+fn graphs_of(
+    records: &[lash_core::facade_support::TraceRecord],
+) -> Vec<lash_vm_runtime::TraceLashlangGraph> {
+    let mut graphs =
+        std::collections::BTreeMap::<String, lash_trace::TraceLashlangGraphAccumulator>::new();
     for record in records {
-        store.append(record).expect("reduce foreground trace");
+        if let lash_trace::TraceEvent::LanguageExecution { event, .. } = &record.event {
+            graphs
+                .entry(event.identity.graph_key())
+                .or_default()
+                .fold(std::slice::from_ref(record))
+                .expect("reduce foreground trace");
+        }
     }
-    store.graphs().into_iter().next().expect("execution graph")
+    graphs
+        .values()
+        .filter_map(lash_trace::TraceLashlangGraphAccumulator::snapshot)
+        .collect()
 }
 
 fn observations_of_kind(
@@ -263,11 +281,11 @@ fn oversized_link_failure_diagnostic_is_bounded_without_changing_feedback() {
 #[tokio::test]
 async fn rlm_uses_runtime_scope_without_suppressing_product_replay() {
     let exported = Arc::new(StepSink::default());
-    let graphs = Arc::new(lash_trace::TraceLashlangGraphStore::default());
+    let observed = Arc::new(StepSink::default());
     let clock = Arc::new(lash_core::testing::TestClock::new(1_700_000_000_123));
     let runtime = lash_core::trace::TraceRuntime::new(clock)
         .with_trace_sink(exported.clone())
-        .with_product_observer(graphs.clone());
+        .with_product_observer(observed.clone());
     let scope = lash_trace::DurableTraceScope {
         scope: lash_trace::TraceScopeId::admission(lash_trace::TraceScopeOwner::Turn {
             session_id: "trace-session".into(),
@@ -315,7 +333,7 @@ async fn rlm_uses_runtime_scope_without_suppressing_product_replay() {
             error: None,
         },
     });
-    let original = graphs.graphs();
+    let original = graphs_of(&observed.records.lock().unwrap());
     assert_eq!(original.len(), 1);
     assert!(original[0].conflicts.is_empty());
     let records = exported.records.lock().unwrap().clone();
@@ -326,7 +344,7 @@ async fn rlm_uses_runtime_scope_without_suppressing_product_replay() {
             .iter()
             .all(|record| record.timestamp.timestamp_millis() == 1_700_000_000_123)
     );
-    graphs.clear();
+    observed.records.lock().unwrap().clear();
     let replay = context(runtime.shift(Some(scope.clone()), &controller));
     let trace = foreground_lash_vm_execution_trace(&replay, &artifact, "typescript")
         .expect("product observation stays enabled on replay");
@@ -341,7 +359,7 @@ async fn rlm_uses_runtime_scope_without_suppressing_product_replay() {
         },
     });
     assert_eq!(
-        graphs.graphs(),
+        graphs_of(&observed.records.lock().unwrap()),
         original,
         "replay rebuilds the product graph"
     );

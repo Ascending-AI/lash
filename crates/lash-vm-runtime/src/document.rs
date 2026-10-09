@@ -100,4 +100,33 @@ impl lash_core::ProcessDocumentProvider for LashVmDocumentProvider {
             },
         )))
     }
+
+    async fn document_ref(
+        &self,
+        payload: &serde_json::Value,
+    ) -> Result<lash_core::ProcessDocumentRefRead, lash_core::PluginError> {
+        let identity = payload_definition_identity(payload)?;
+        let Some(inspected) = self
+            .workers
+            .inspect_document(&self.artifact_store, &identity.module_ref)
+            .await?
+        else {
+            return Ok(lash_core::ProcessDocumentRefRead::ArtifactMissing {
+                artifact: lash_core::ArtifactName {
+                    store: lash_core::ArtifactStoreId::VmModule,
+                    artifact_ref: identity.module_ref.as_str().to_owned(),
+                },
+            });
+        };
+        Ok(lash_core::ProcessDocumentRefRead::Named(
+            lash_trace::WorkflowDocumentRef {
+                source_identity: inspected.artifact.source_identity(),
+                module_ref: identity.module_ref.to_string(),
+                entry: lash_trace::WorkflowDocumentEntry::Process {
+                    process_ref: lash_vm::process_ref_key(&identity.process_ref),
+                },
+                ir_version: inspected.graph.ir_version,
+            },
+        ))
+    }
 }

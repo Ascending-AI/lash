@@ -655,7 +655,7 @@ pub(crate) async fn settle_retired_slot(
     );
     if replaced_current {
         state.messages.lock_recover().clear();
-        state.lash_vm_execution.clear();
+        state.execution_graphs.clear();
         state.mail_world.clear();
         record_accounts_context(state).await?;
     }
@@ -888,7 +888,7 @@ pub(crate) async fn await_work(
         }
     };
     let mut events = Vec::new();
-    let mut from = lash::process::ProcessEventsFrom::Start(process_id.clone());
+    let mut from = lash::process::ProcessHistoryContinuation::start(process_id.clone());
     loop {
         let read = state
             .core
@@ -915,12 +915,10 @@ pub(crate) async fn await_work(
             sequence: event.sequence,
             event_type: event.kind.as_str().to_owned(),
         }));
-        from = match (page.more, read.cursor) {
-            (lash::process::ProcessEventPageMore::More { .. }, Some(cursor)) => {
-                lash::process::ProcessEventsFrom::After(cursor)
-            }
-            _ => break,
-        };
+        if matches!(page.more, lash::process::ProcessEventPageMore::Complete) {
+            break;
+        }
+        from = read.next;
     }
     state.trace(
         "api.work.await",
@@ -942,10 +940,11 @@ pub(crate) async fn list_lash_vm_graphs(
     Query(query): Query<SessionQuery>,
 ) -> Result<Json<execution_graphs::LashVmGraphIndex>, AppError> {
     let session_id = state.admit_session(&query, "api.lash_vm_graphs").await?;
+    state.execution_graphs.follow(&state, &session_id).await;
     let index = execution_graphs::index_for_session(
         &state.process_observer,
         &session_id,
-        state.lash_vm_execution.graphs(),
+        state.execution_graphs.graphs(),
     )
     .await?;
     Ok(Json(index))
@@ -957,10 +956,11 @@ pub(crate) async fn lash_vm_graph(
     Query(query): Query<SessionQuery>,
 ) -> Result<Json<TraceLashlangGraph>, AppError> {
     let session_id = state.admit_session(&query, "api.lash_vm_graph").await?;
+    state.execution_graphs.follow(&state, &session_id).await;
     let graph = execution_graphs::visible_graph_by_key(
         &state.process_observer,
         &session_id,
-        state.lash_vm_execution.graphs(),
+        state.execution_graphs.graphs(),
         &graph_key,
     )
     .await?;

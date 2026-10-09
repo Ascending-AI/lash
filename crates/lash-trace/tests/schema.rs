@@ -823,8 +823,12 @@ fn published_graph_schema_accepts_a_folded_snapshot_and_enforces_its_row() {
         "../../../schemas/host/trace-lashlang-graph/v36.schema.json"
     ))
     .expect("published trace schema");
-    let graph = lash_trace::TraceLashlangGraphStore::fold(None, &language_execution_records())
-        .expect("fold every payload kind");
+    let graph = lash_trace::fold_lashlang_graph(
+        None,
+        &language_execution_records(),
+        lash_trace::DEFAULT_LASH_VM_GRAPH_HISTORY_LIMIT,
+    )
+    .expect("fold every payload kind");
     assert!(!graph.nodes.is_empty() && !graph.history.is_empty());
     let mut value = serde_json::to_value(&graph).expect("encode graph");
     assert_schema_accepts(&validator, &value, "a folded graph snapshot");

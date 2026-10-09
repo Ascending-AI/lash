@@ -289,10 +289,12 @@ reference invokes it before snapshot/observation, turn enqueue, turn-input
 enqueue, and cancellation. Its local default is intentionally allow-all; a
 production host replaces `AllowAllWorkbenchAuthorizer` with its identity and
 policy adapter. Lash does not define product-specific auth.
-The Lash VM graph panel is backed by `TraceLashlangGraphStore`, a public
-trace-derived observation store for foreground blocks, durable process runs,
-and child execution links; command operations still go through the session's
-`SessionProcessAdmin` facade.
+The Lash VM graph panel is backed by a bounded host cache
+(`src/execution_feeds.rs`): the workbench follows each session's feed for its
+foreground blocks and each process's feed for its run, and folds what they
+deliver with lash's pure graph reducer. A process's committed end settles its
+graph, and a feed gap discards the provisional history it covered. Command
+operations still go through the session's `SessionProcessAdmin` facade.
 
 ## Recoverable-chat host structure
 

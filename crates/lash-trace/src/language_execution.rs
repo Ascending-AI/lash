@@ -28,6 +28,34 @@ impl LanguageExecutionObservation {
     }
 }
 
+/// Which workflow document an execution runs, and where it enters it. It
+/// names the document; it is never the document. A host reads the graph the
+/// reference names through the facade's workflow inspection and may cache
+/// it under this value, which is immutable for a process.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct WorkflowDocumentRef {
+    /// The definition identity of the admitted module the document
+    /// projects; the document's own `source_identity`.
+    pub source_identity: String,
+    /// The stored module the document is read from.
+    pub module_ref: String,
+    /// Where the execution enters the document.
+    pub entry: WorkflowDocumentEntry,
+    /// The interpretation of the IR the document is written under.
+    pub ir_version: u32,
+}
+
+/// The entry of a [`WorkflowDocumentRef`].
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum WorkflowDocumentEntry {
+    /// The module's main body.
+    Main,
+    /// One exported process, by the persisted reference the module's
+    /// exports name it with.
+    Process { process_ref: String },
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TraceLanguageExecutionPayload {

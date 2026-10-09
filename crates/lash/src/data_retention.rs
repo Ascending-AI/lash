@@ -3,7 +3,6 @@
 use crate::observe::InMemoryLiveReplayStoreConfig;
 use crate::persistence::AttachmentPolicy;
 use crate::process::InMemoryProcessReplayStoreConfig;
-use crate::process::ProcessObservationConfig;
 
 /// What a host keeps, how much of it and for how long. A core is not built
 /// without one ([`LashCoreBuilder::data_retention`](crate::LashCoreBuilder::data_retention)):
@@ -35,9 +34,6 @@ pub struct DataRetention {
     /// states that store's retention where it constructs it, and this value
     /// then configures nothing.
     pub process_replay: InMemoryProcessReplayStoreConfig,
-    /// What the process observation hub keeps for live observers, and what
-    /// one snapshot may read.
-    pub process_observation: ProcessObservationConfig,
 }
 
 impl DataRetention {
@@ -52,10 +48,7 @@ impl DataRetention {
     ///   events per session for 120 seconds, 4,096 sessions, 64 MiB);
     /// - process replay: [`InMemoryProcessReplayStoreConfig::standard`]
     ///   (2,048 events per process for 120 seconds, 8 MiB per process, 4,096
-    ///   processes, 64 MiB);
-    /// - process observation: [`ProcessObservationConfig::standard`] (a
-    ///   2,048-item ring kept 120 idle seconds, snapshots of 64 pages of 256
-    ///   events).
+    ///   processes, 64 MiB).
     ///
     /// No measurement backs these values. The retained-output limit alone
     /// is sized against something: the standard renderer's 16,000-character
@@ -66,7 +59,6 @@ impl DataRetention {
             session_revisions: crate::Retention::UntilGc,
             live_replay: InMemoryLiveReplayStoreConfig::standard(),
             process_replay: InMemoryProcessReplayStoreConfig::standard(),
-            process_observation: ProcessObservationConfig::standard(),
         }
     }
 }

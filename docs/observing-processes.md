@@ -121,16 +121,16 @@ it. The host owns retention, storage failures and any indication that its
 recording is incomplete.
 
 A `TraceSink` receives records, and `JsonlTraceSink` writes one JSON line
-per record. `TeeTraceSink` lets a host keep records while also updating a
-live graph. Ordinary passive tracing can be installed through
+per record. Ordinary passive tracing can be installed through
 `LashCoreBuilder::trace_sink` or `LashCoreBuilder::trace_jsonl_path`.
-For language graph records, the workbench installs its tee with
-`TraceRuntime::with_product_observer` and passes that runtime through
-`LashCoreBuilder::trace_runtime`.
+To keep the language execution records, install a sink with
+`TraceRuntime::with_product_observer` and pass that runtime through
+`LashCoreBuilder::trace_runtime`. This export is a recording. The graphs a
+host shows live come from the feeds described below, never from it.
 
 The concrete example is
 [`examples/agent-workbench/src/main_sections/bootstrap.rs`](../examples/agent-workbench/src/main_sections/bootstrap.rs).
-It tees language execution records to a live graph store and a JSONL sink.
+It writes language execution records to a JSONL sink.
 `AGENT_WORKBENCH_LASH_VM_EXECUTION_TRACE` selects the file; by default it is
 `lash-vm-execution.jsonl` beneath `AGENT_WORKBENCH_DATA_DIR`. Its separate
 passive diagnostic trace is selected by `AGENT_WORKBENCH_TRACE` and defaults
@@ -203,13 +203,33 @@ while let Some(item) = feed.next().await {
 `snapshot()` reads the durable process: a `ProcessReadView` at one durable
 event sequence, which is the revision of this contract (`ProcessSequence`).
 
-- `Retained` carries the process's row and its effect evidence folded through
-  that sequence. The evidence is bounded: retained occurrences and omission
-  counts, with `coverage` saying whether the fold reached the sequence, ran
-  out of its read budget, met an undecodable fact or started after a released
-  prefix. It is never every call the process made.
+- `Retained` carries the process's row, its effect evidence folded through
+  that sequence, and the document it runs. The evidence is bounded: retained
+  occurrences and omission counts, with `coverage` saying whether the fold
+  reached the sequence, ran out of its read budget, met an undecodable fact
+  or started after a released prefix. It is never every call the process
+  made. The read budget is the core's
+  `ObservationWorkLimits::process_effect_fold_pages` pages of
+  `process_effect_fold_page_size` events (64 pages of 256 in the standard
+  preset), stated with `LashCoreBuilder::observation_work_limits`; an open
+  feed reads missed facts under the same budget.
 - `Retired` is a pruned process's tombstone, and `Unknown` an id no row or
   tombstone names. Neither is an empty process at sequence zero.
+
+The snapshot names the workflow document, and never carries the graph.
+`RetainedProcessView::document` is a `ProcessDocumentIdentity`:
+
+- `Available(WorkflowDocumentRef)`: the document's `source_identity`, the
+  `module_ref` it is read from, the `entry` the process starts at
+  (`WorkflowDocumentEntry::Process { process_ref }`) and the `ir_version` it
+  is written under. The reference never changes for a process.
+- `ArtifactUnavailable { artifact }`: nothing retains an artifact the
+  definition reads. The process is still observed.
+- `Unsupported`: the process's engine has no workflow document.
+
+Read the graph with `processes().graph(&process_id)` and cache it under the
+reference. Join provisional node evidence to it only where the observation's
+`source_identity` is the reference's.
 
 The snapshot's cursor is the earliest position the replay store still retains
 for the process, so a feed from it replays the retained window: an observer
@@ -232,6 +252,39 @@ A feed yields two kinds of event.
 Node history is not durable. Starts, branches, loop occurrences, waits and
 timings live only in the replay window; a committed effect occurrence proves
 that effect's outcome and nothing else about the timeline.
+
+### Folding a graph
+
+Lash keeps no graph of a running process. A host that shows one folds the
+feed's `LanguageExecution` observations itself, with the pure reducer:
+
+```rust,ignore
+let mut graph = TraceLashlangGraphAccumulator::default();
+graph.observe(&observation)?;          // a LanguageExecution event
+graph.settle(settlement);              // a committed Terminal, or a terminal read view
+graph.reset_live();                    // a gap
+let view = graph.snapshot();
+```
+
+`settle` takes the process's durable end
+(`TraceLashlangGraphSettlement { terminal, occurred_at }`): from a committed
+`Terminal` fact its `occurred_at_ms`, from a terminal read view the
+lifecycle's `occurred_at_ms`. A settled graph cancels only the occurrences it
+observed in flight, never starts an unobserved node, and is not reopened by
+node evidence replayed after it. `reset_live` discards the provisional
+history at a gap and keeps the document and the durable end.
+
+Keep one accumulator per `identity.graph_key()` and bound the cache: the
+reducer bounds the occurrences of one node, not the number of processes. The
+cache is a projection; it is never what a feed recovers from.
+
+A session's cells run the same language. Their observations arrive on the
+session's feed as `SessionObservationEventPayload::LanguageExecution`
+([observing turns](observing-turns.md)), with the effect's identity in the
+payload, and fold the same way. Lash publishes each observation once: a
+cell's on its session's feed, a process's on the process feed.
+[`examples/agent-workbench/src/execution_feeds.rs`](../examples/agent-workbench/src/execution_feeds.rs)
+follows both into one bounded cache.
 
 ### Gaps
 
@@ -272,6 +325,43 @@ invalidates the process's continuity, which observers see as a gap.
 To resume after a restart, persist `feed.cursor()`: it carries the sequence
 the consumer holds. An event's own cursor names the sequence the event was
 published at, which for a provisional event may be older.
+
+### Convergence across cores
+
+An open feed converges on the durable process whoever committed to it. A
+commit on the feed's own core reaches the replay store after the commit. A
+commit by another core over the same stores does not pass through this
+core's publisher, so the feed looks for it: the registry's change signal
+ticks when a commit grew the process's log, on this node directly and on
+another through the backend's node wakes. At a tick the feed compares the
+durable sequence with the one its consumer holds, publishes the retained
+facts between to the replay store and delivers them in order. Facts it can
+no longer read (released, pruned, or more than its read budget) are a
+`CommitUnbridged` gap with the durable read view.
+
+A tick can be lost, and a store may deliver no wake at all.
+`ObserverPacing::process_reconcile` is how long an open feed waits without a
+tick before it compares anyway: from its initial delay after a tick, backing
+off to its maximum (25 ms to 1 s in the standard preset). It bounds how stale
+an idle follower can be. No host timer, event-page loop or resubscribe is
+needed; a host only reads the feed.
+
+What crosses cores this way is the committed facts. Provisional node events
+cross only through a shared replay store, as the next section says.
+
+`processes().await_output` waits on the same change signal: a terminal
+committed by any core over the stores wakes it, with the work cadence as the
+fallback for a lost wake.
+
+### Durable history pages
+
+`processes().events(from, limit, mode)` pages the committed log for
+deliberate inspection. `from` is a `ProcessHistoryContinuation`: a process
+and the last sequence the reader holds (`ProcessHistoryContinuation::start`
+before the first event). Each read returns `next`, where the following page
+starts; a read inside a released prefix answers the typed release and
+continues after it. A continuation is a position in the durable log and
+nothing else. It is not a feed cursor and establishes no live continuity.
 
 ### The replay store
 

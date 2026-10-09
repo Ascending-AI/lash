@@ -116,7 +116,8 @@ test("one running process is one row in the work rail", () => {
          process: {
            process_id: ${JSON.stringify(processId)},
            graph_key: ${JSON.stringify("process:" + processId + ":incarnation:5")},
-           lifecycle: "running",
+           lifecycle: { state: "running" },
+           status_label: "running",
            terminal: false,
          },
        }],
@@ -147,7 +148,7 @@ test("a graph-only process still renders, and an incarnation is not needed to ma
   const rows = vm.runInNewContext(
     `${markedSource("WORKBENCH_EXECUTION_ROWS", "WORKBENCH_EXECUTION_ROWS")}
      executionRows(
-       [{ kind: "process", process: { process_id: "in-the-work-api", lifecycle: "running" } }],
+       [{ kind: "process", process: { process_id: "in-the-work-api", lifecycle: { state: "running" }, status_label: "running" } }],
        [
          { kind: "process", graph_key: "process:in-the-work-api", title: "__process_dedup_me", node_count: 1 },
          { kind: "process", graph_key: "process:graph-only", title: "__process_keep_me", node_count: 2 },

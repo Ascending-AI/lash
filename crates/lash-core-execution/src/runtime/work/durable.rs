@@ -11,6 +11,7 @@ use crate::{Backend, PluginError};
 /// Process work over the durable backend: a start wakes the process actor.
 pub struct DurableProcessWork {
     backend: Backend,
+    changes: Option<crate::runtime::process::ProcessChangeHub>,
     work_cadence: super::WorkCadencePolicy,
 }
 
@@ -20,8 +21,21 @@ impl DurableProcessWork {
     pub fn new(backend: Backend) -> Self {
         Self {
             backend,
+            changes: None,
             work_cadence: super::WorkCadencePolicy::standard(),
         }
+    }
+
+    /// Wake terminal waits from `changes`, the hub that ticks when a commit
+    /// grew a process's log. Without it a wait only polls on the work
+    /// cadence.
+    #[must_use]
+    pub fn with_process_changes(
+        mut self,
+        changes: crate::runtime::process::ProcessChangeHub,
+    ) -> Self {
+        self.changes = Some(changes);
+        self
     }
 }
 
@@ -53,7 +67,12 @@ impl ProcessWorkSubstrate for DurableProcessWork {
         &self,
         process_id: &crate::ProcessId,
     ) -> Result<ProcessTerminalWait, PluginError> {
-        super::ProcessRegistryAwaiter::for_registry(self.backend.process_registry())
+        let registry = self.backend.process_registry();
+        let awaiter = match &self.changes {
+            Some(changes) => super::ProcessRegistryAwaiter::new(registry, changes.clone()),
+            None => super::ProcessRegistryAwaiter::for_registry(registry),
+        };
+        awaiter
             .with_work_cadence(self.work_cadence.clone())
             .await_terminal(process_id)
             .await

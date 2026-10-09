@@ -7,9 +7,11 @@ the saved version and streams node-correlated display events over SSE.
 The backend owns in-memory editor versions. Run publishes the saved artifact
 and process definition through `core.host_artifacts()`, then calls
 `core.processes().start()`. The durable engine executes the process over SQLite.
-The overlay folds `core.processes().events()` and uses
-`lash::process::trace_lashlang_process_map` to validate node identities.
-Live process observation supplies transient node starts and waits. Display events
+The overlay reads one snapshot from `core.processes().observe()` and follows
+its recovering feed: committed facts settle effects, waits and the run's end,
+and provisional language observations supply transient node starts and waits.
+`core.processes().graph()` supplies the document whose nodes it validates
+identities against. Display events
 carry the stable tool-call ID used to correlate their deltas with observed nodes. Lash VM owns
 graph projection, validation/rendering, and execution-site correlation. Canvas
 layout is deliberately frontend-owned and never appears in source or API graph

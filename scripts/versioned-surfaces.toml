@@ -21,11 +21,6 @@ constant_path = "crates/lash-postgres-store/src/lib.rs"
 reason = "lower bound of the planner's window under the registered POSTGRES_SCHEMA_VERSION, not a format of its own"
 
 [[unregistered]]
-constant = "PROCESS_CURSOR_UNROUTED_EPOCH"
-constant_path = "crates/lash-sansio/src/process_cursor.rs"
-reason = "the reserved publisher-epoch value of a cursor minted with no live route; an epoch names a publisher lifetime, not a format"
-
-[[unregistered]]
 constant = "SCHEMA_VERSION"
 constant_path = "crates/lash-postgres-store/src/lib.rs"
 reason = "the registered POSTGRES_SCHEMA_VERSION in the stamp column's type: an alias, not a number of its own"

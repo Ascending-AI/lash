@@ -142,10 +142,6 @@ impl TraceLashlangGraphAccumulator {
         self.status = None;
     }
 
-    pub(super) fn identity(&self) -> Option<&LanguageIdentity> {
-        self.identity.as_ref()
-    }
-
     pub(super) fn append(&mut self, timestamp: DateTime<Utc>, event: &TraceLanguageExecution) {
         let identity = match self.identity.take() {
             Some(previous) => canonical_identity_fields(previous, event.identity.clone()),

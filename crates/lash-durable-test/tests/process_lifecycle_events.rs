@@ -1,15 +1,12 @@
 //! A host observes a durable process's lifecycle and effects (FIG-5372).
 //!
 //! Each law builds a deployment the way a host does: a durable backend over
-//! a store set, and a lash core over it, with a host process event sink,
-//! whose own node runs the processes. Work enters only through the core's
-//! process API.
+//! a store set, and a lash core over it, whose own node runs the
+//! processes. Work enters only through the core's process API.
 //!
 //! - **effects:** each committed step outcome that names an effect node is
 //!   one `process.effect_outcome` event; one past the per-node cap is
 //!   counted in the `process.effect_omissions` record its terminal carries.
-//! - **publication:** the host's sink hears every event the log holds, each
-//!   once, in sequence order.
 //! - **publication across commits and cuts** (FIG-5396), on simulated nodes
 //!   and virtual time: a host append held across the actor's terminal
 //!   commit publishes each event once; a successor of an owner that died
@@ -88,7 +85,7 @@ async fn stores(tier: Tier) -> (Arc<dyn StoreSet>, Vec<Box<dyn std::any::Any + S
     }
 }
 
-/// What a host's process event sink heard.
+/// What a process event sink attached to a node's registry heard.
 #[derive(Clone, Default)]
 struct Heard(Arc<Mutex<Vec<lash::process::ProcessEvent>>>);
 
@@ -112,13 +109,11 @@ impl Heard {
     }
 }
 
-/// A core over `stores` whose node advances `engine`, with the write tool
-/// and `heard` as its host's process event sink.
+/// A core over `stores` whose node advances `engine`, with the write tool.
 fn core(
     stores: &Arc<dyn StoreSet>,
     engine: Advance,
     world: &Arc<World>,
-    heard: &Heard,
     boot: &str,
 ) -> (lash::Backend, lash::LashCore) {
     let backend = lash::durable::DurableBackendBuilder::new(Arc::clone(stores))
@@ -127,7 +122,6 @@ fn core(
         .expect("the backend assembles");
     let core = lash::LashCore::standard_builder(backend.clone())
         .tools(write_tool(world))
-        .process_event_sink(Arc::new(heard.clone()))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
@@ -429,30 +423,6 @@ async fn log(
         .expect("the log is read")
 }
 
-/// Wait until the host's sink heard `process`'s whole log, and check it heard
-/// each event once, in sequence order.
-async fn heard_the_log(
-    heard: &Heard,
-    backend: &lash::Backend,
-    process: &lash_core::ProcessId,
-) -> Vec<lash::process::ProcessEvent> {
-    let events = log(backend, process).await;
-    let logged: Vec<u64> = events.iter().map(|event| event.sequence).collect();
-    tokio::time::timeout(Duration::from_secs(60), async {
-        while heard.sequences(process).len() < logged.len() {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-    })
-    .await
-    .expect("the sink hears the log within a minute");
-    assert_eq!(
-        heard.sequences(process),
-        logged,
-        "the sink heard every logged event once, in order"
-    );
-    events
-}
-
 fn of_type<'a>(
     events: &'a [lash::process::ProcessEvent],
     event_type: &str,
@@ -494,16 +464,15 @@ fn effects_advance(
 /// Each committed step outcome that names an effect node is one
 /// `process.effect_outcome` of that node, keyed by its call; an occurrence
 /// past the cap is counted in the omissions record committed just before
-/// the terminal. The host's sink hears the whole log, once.
+/// the terminal.
 async fn each_committed_effect_is_one_effect_outcome_event(tier: Tier) {
     let (stores, _keep) = stores(tier).await;
     let world = Arc::new(World::default());
-    let heard = Heard::default();
-    let (backend, core) = core(&stores, effects_advance, &world, &heard, "effects");
+    let (backend, core) = core(&stores, effects_advance, &world, "effects");
     let process = start(&core).await;
     ended(&core, &process).await;
 
-    let events = heard_the_log(&heard, &backend, &process).await;
+    let events = log(&backend, &process).await;
     let fleet = lash_core::FleetFormat::current();
     let outcomes: Vec<lash_core::ProcessEffectOccurrence> =
         of_type(&events, lash_core::PROCESS_EFFECT_OUTCOME_EVENT_TYPE)
@@ -571,7 +540,7 @@ async fn process_effects_name_their_tool_call_records_after_a_sqlite_reopen() {
             .await
             .expect("the SQLite file opens"),
         );
-        let (_backend, core) = core(&stores, advance, &world, &Heard::default(), "before-reopen");
+        let (_backend, core) = core(&stores, advance, &world, "before-reopen");
         let process = start(&core).await;
         ended(&core, &process).await;
         core.shutdown().await.expect("the first deployment stops");
@@ -585,7 +554,7 @@ async fn process_effects_name_their_tool_call_records_after_a_sqlite_reopen() {
         .await
         .expect("the SQLite file reopens"),
     );
-    let (backend, core) = core(&stores, advance, &world, &Heard::default(), "after-reopen");
+    let (backend, core) = core(&stores, advance, &world, "after-reopen");
     let events = log(&backend, &process).await;
     let outcomes = of_type(&events, lash_core::PROCESS_EFFECT_OUTCOME_EVENT_TYPE);
     assert_eq!(
@@ -1003,8 +972,7 @@ fn deferred_advance(
 async fn a_deferred_call_records_one_waiting_event_and_resumes(tier: Tier) {
     let (stores, _keep) = stores(tier).await;
     let world = Arc::new(World::default());
-    let heard = Heard::default();
-    let (backend, core) = core(&stores, deferred_advance, &world, &heard, "deferred");
+    let (backend, core) = core(&stores, deferred_advance, &world, "deferred");
     let process = start(&core).await;
     let (key, call_id) = tokio::time::timeout(Duration::from_secs(60), async {
         loop {
@@ -1093,18 +1061,11 @@ async fn parked_call(
 }
 
 /// FIG-5411: takeover retains the pending call, identity, capability and
-/// deadline; settled calls are absent and neither sink publishes a fact twice.
-async fn a_deferred_call_survives_takeover_without_duplicate_publication(tier: Tier) {
+/// deadline; settled calls are absent and the earlier log is preserved.
+async fn a_deferred_call_survives_takeover(tier: Tier) {
     let (stores, _keep) = stores(tier).await;
     let world = Arc::new(World::default());
-    let first_heard = Heard::default();
-    let (backend, first) = core(
-        &stores,
-        deferred_advance,
-        &world,
-        &first_heard,
-        "park-first",
-    );
+    let (backend, first) = core(&stores, deferred_advance, &world, "park-first");
     let process = start(&first).await;
     let before = parked_call(&first, &backend, &process).await;
     assert_eq!(
@@ -1142,17 +1103,9 @@ async fn a_deferred_call_survives_takeover_without_duplicate_publication(tier: T
             .unwrap()
             .is_empty()
     );
-    let prefix = heard_the_log(&first_heard, &backend, &process).await;
-    let first_sequences = first_heard.sequences(&process);
+    let prefix = log(&backend, &process).await;
     first.shutdown().await.unwrap();
-    let second_heard = Heard::default();
-    let (backend, second) = core(
-        &stores,
-        deferred_advance,
-        &world,
-        &second_heard,
-        "park-second",
-    );
+    let (backend, second) = core(&stores, deferred_advance, &world, "park-second");
     let after = parked_call(&second, &backend, &process).await;
     assert!(
         before == after,
@@ -1186,53 +1139,6 @@ async fn a_deferred_call_survives_takeover_without_duplicate_publication(tier: T
     let events = log(&backend, &process).await;
     assert_eq!(of_type(&events, "process.waiting").len(), 1);
     assert_eq!(of_type(&events, "process.resumed").len(), 1);
-    let terminal = events.last().unwrap().sequence;
-    tokio::time::timeout(Duration::from_secs(60), async {
-        while !second_heard.sequences(&process).contains(&terminal) {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-    })
-    .await
-    .unwrap();
-    let second_sequences = second_heard.sequences(&process);
-    // FIG-5396: a successor may redeliver an event the previous node
-    // published before recording its durable mark. Publication is once per
-    // node; (process, sequence) remains the host's deduplication identity.
-    for sequences in [&first_sequences, &second_sequences] {
-        assert!(
-            sequences.windows(2).all(|pair| pair[0] < pair[1]),
-            "each node publishes once, in sequence order"
-        );
-    }
-    let published: std::collections::BTreeSet<_> = first_sequences
-        .into_iter()
-        .chain(second_sequences)
-        .collect();
-    assert_eq!(
-        published.into_iter().collect::<Vec<_>>(),
-        events
-            .iter()
-            .map(|event| event.sequence)
-            .collect::<Vec<_>>(),
-        "the two hosts deliver every logged identity"
-    );
-    for heard in [&first_heard, &second_heard] {
-        for event in heard
-            .0
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|event| event.process_id == process)
-        {
-            assert_eq!(
-                Some(event),
-                events
-                    .iter()
-                    .find(|logged| logged.sequence == event.sequence),
-                "every delivery is the immutable event at its stable identity"
-            );
-        }
-    }
     assert_eq!(
         &events[..prefix.len()],
         prefix.as_slice(),
@@ -1240,7 +1146,7 @@ async fn a_deferred_call_survives_takeover_without_duplicate_publication(tier: T
     );
     second.shutdown().await.unwrap();
 }
-on_every_tier!(a_deferred_call_survives_takeover_without_duplicate_publication);
+on_every_tier!(a_deferred_call_survives_takeover);
 
 fn publication_idle(
     _state: &mut serde_json::Value,

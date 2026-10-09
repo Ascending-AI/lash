@@ -61,7 +61,7 @@ pub use jsonl_records::{
 };
 pub use language_execution::{
     LanguageExecutionObservation, TraceLanguageExecutionPayload, TraceNodeAwaited,
-    TraceNodeWaitKind, TraceNodeWaitResolution,
+    TraceNodeWaitKind, TraceNodeWaitResolution, WorkflowDocumentEntry, WorkflowDocumentRef,
 };
 pub use language_execution_failure::TraceLanguageExecutionFailure;
 pub use lash_sansio::llm::types::GenerationReceipt;
@@ -75,9 +75,9 @@ pub use lashlang_graph::{
     TraceLashlangGraphChildLink, TraceLashlangGraphCompleteness, TraceLashlangGraphConflict,
     TraceLashlangGraphConflictKind, TraceLashlangGraphEdge, TraceLashlangGraphFoldError,
     TraceLashlangGraphHistoryEvent, TraceLashlangGraphNode, TraceLashlangGraphSettlement,
-    TraceLashlangGraphStore, TraceLashlangGraphTerminal, TraceLashlangNodeObservation,
-    TraceLashlangNodeReport, TraceLashlangNodeRetention, TraceLashlangNodeTerminalRecord,
-    TraceLashlangNodeTerminalStatus, fold_lashlang_graph,
+    TraceLashlangGraphTerminal, TraceLashlangNodeObservation, TraceLashlangNodeReport,
+    TraceLashlangNodeRetention, TraceLashlangNodeTerminalRecord, TraceLashlangNodeTerminalStatus,
+    fold_lashlang_graph,
 };
 pub use telemetry::{
     AttemptObservation, DurableTraceScope, EmissionPermit, EmissionSource, InvalidTraceCarrier,

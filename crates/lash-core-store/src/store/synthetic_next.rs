@@ -248,8 +248,4 @@ pub(super) const WRITER_PINS: &[WriterPin] = &[
     owner_pin("RLM_SNAPSHOT_VERSION"),
     owner_pin("RLM_DRIVER_STATE_VERSION"),
     owner_pin("SQLITE_BLOB_ENVELOPE_VERSION"),
-    pin(
-        "PROCESS_CURSOR_VERSION",
-        lash_sansio::PROCESS_CURSOR_VERSION - 1,
-    ),
 ];

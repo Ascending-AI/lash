@@ -372,13 +372,13 @@ pub(crate) fn workbench_session_defaults(
     .attachment_acceptance(Arc::new(workbench_attachment_acceptance()))
 }
 
-/// Where a workbench core reports: its trace sink, the sink its trace
-/// runtime's product observer feeds the Lash VM execution graphs through,
-/// and the host's process event feed, when it keeps one.
+/// Where a workbench core reports: its trace sink, and the diagnostic
+/// export of its Lash VM execution observations, when it keeps one. The
+/// execution graphs the workbench shows come from lash's feeds, never from
+/// this export.
 pub(crate) struct WorkbenchTracing {
     pub(crate) trace_sink: Arc<dyn TraceSink>,
-    pub(crate) lash_vm_execution_sink: Arc<dyn TraceSink>,
-    pub(crate) process_events: Option<Arc<dyn lash::process::ProcessEventSink>>,
+    pub(crate) lash_vm_execution_sink: Option<Arc<dyn TraceSink>>,
 }
 
 /// The workbench core over `stores`: the durable backend over the store set
@@ -396,13 +396,12 @@ pub(crate) async fn build_workbench_core(
     let host_backend = lash::durable::DurableBackendBuilder::new(Arc::clone(stores))
         .build()
         .context("build the durable backend")?;
-    let trace_runtime = lash::runtime::TraceRuntime::new(host_backend.clock())
-        .with_product_observer(tracing.lash_vm_execution_sink);
-    let mut builder =
-        workbench_core_builder(host_backend, rlm_channel, context_window_tokens, plugins).await?;
-    if let Some(process_events) = tracing.process_events {
-        builder = builder.process_event_sink(process_events);
+    let mut trace_runtime = lash::runtime::TraceRuntime::new(host_backend.clock());
+    if let Some(export) = tracing.lash_vm_execution_sink {
+        trace_runtime = trace_runtime.with_product_observer(export);
     }
+    let builder =
+        workbench_core_builder(host_backend, rlm_channel, context_window_tokens, plugins).await?;
     builder
         .trace_runtime(trace_runtime)
         .trace_sink(tracing.trace_sink)
@@ -428,7 +427,6 @@ pub(crate) struct WorkbenchHost {
     pub(crate) host_triggers: host_triggers::HostTriggers,
     pub(crate) selected_llm_profile: LlmProfileSelection,
     pub(crate) trace_sink: Option<Arc<dyn TraceSink>>,
-    pub(crate) lash_vm_execution: Arc<TraceLashlangGraphStore>,
 }
 
 /// The state every route serves from: `core` and the stores of the store set
@@ -453,7 +451,7 @@ pub(crate) fn workbench_app_state(
         messages: Arc::new(Mutex::new(Vec::new())),
         selected_llm_profile: Arc::new(Mutex::new(host.selected_llm_profile)),
         trace_sink: host.trace_sink,
-        lash_vm_execution: host.lash_vm_execution,
+        execution_graphs: crate::execution_feeds::ExecutionGraphs::default(),
         event_tx: host.event_tx,
         mail_world: host.mail_world,
         active_turns: host.active_turns,
@@ -481,6 +479,9 @@ pub(crate) async fn start_workbench(state: &AppState) -> AnyhowResult<()> {
     reconcile_approvals(state).await;
     turns::resume_turn_followers(state).await;
     turns::watch_session_runs(state, &state.current_session_id()).await;
+    state
+        .execution_graphs
+        .follow_session(state, &state.current_session_id());
     state.trigger_passes.start(state.clone());
     state.cron.start(state.clone());
     Ok(())
@@ -538,11 +539,8 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         "agent-workbench Lash VM execution trace: {}",
         lash_vm_execution_path.display()
     );
-    let lash_vm_execution = Arc::new(TraceLashlangGraphStore::default());
-    let lash_vm_execution_sink = Arc::new(TeeTraceSink::new([
-        Arc::clone(&lash_vm_execution) as Arc<dyn TraceSink>,
-        Arc::new(JsonlTraceSink::new(lash_vm_execution_path.clone())) as Arc<dyn TraceSink>,
-    ])) as Arc<dyn TraceSink>;
+    let lash_vm_execution_sink =
+        Arc::new(JsonlTraceSink::new(lash_vm_execution_path.clone())) as Arc<dyn TraceSink>;
 
     let model = dev_provider_scenario
         .map(|scenario| scenario.initial_profile().to_string())
@@ -621,38 +619,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         .context("open workbench approval ledger")?;
     let host_triggers = host_triggers::HostTriggers::open(data_dir.join("host-triggers.db"))
         .context("open workbench trigger tables")?;
-    // Freshness feed for appended process events (ADR 0017). The sink is a
-    // freshness overlay on the durable event log, never truth: each event
-    // arrives at least once, identified by its (process, sequence), and a
-    // consumer needing completeness reconciles from paged event reads.
-    // Terminal observation still rides `await_terminal`.
-    // `emit` must be fast, so it only hands each event to this channel; the
-    // consumer task does the projection off the append path.
     let (host_shutdown, _) = tokio::sync::watch::channel(false);
-    let (process_event_tx, mut process_event_rx) =
-        mpsc::channel::<lash::process::ProcessEvent>(256);
-    let mut process_event_shutdown = host_shutdown.subscribe();
-    let process_event_task = tokio::spawn(async move {
-        loop {
-            tokio::select! {
-                biased;
-                changed = process_event_shutdown.changed() => {
-                    if changed.is_err() || *process_event_shutdown.borrow() {
-                        break;
-                    }
-                }
-                event = process_event_rx.recv() => match event {
-                    Some(event) => eprintln!(
-                        "agent-workbench process event: process={} seq={} type={}",
-                        event.process_id, event.sequence, event.fact.event_type()
-                    ),
-                    None => break,
-                }
-            }
-        }
-    });
-    let process_event_sink = Arc::new(ChannelProcessEventSink::new(process_event_tx))
-        as Arc<dyn lash::process::ProcessEventSink>;
     // FIG-1407: the workbench used to run `TurnBudget::Unbounded` with no
     // second bound, so a turn whose cells never committed re-called the
     // provider until someone noticed — one measured send bought 1,223 calls.
@@ -736,8 +703,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         plugins,
         WorkbenchTracing {
             trace_sink: Arc::clone(&trace_sink),
-            lash_vm_execution_sink,
-            process_events: Some(process_event_sink),
+            lash_vm_execution_sink: Some(lash_vm_execution_sink),
         },
         provider.clone(),
         lash::persistence::LeaseOwnerIdentity::opaque(node, process_incarnation_id()),
@@ -816,7 +782,6 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
                     model_variant: Some(model_variant),
                 },
                 trace_sink: Some(Arc::clone(&trace_sink)),
-                lash_vm_execution,
             },
         )?;
         start_workbench(&state).await?;
@@ -946,10 +911,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
     }
     .await;
     let _ = host_shutdown.send(true);
-    for (name, task) in [
-        ("process event logger", process_event_task),
-        ("stalled obligation logger", stalled_task),
-    ] {
+    for (name, task) in [("stalled obligation logger", stalled_task)] {
         if let Err(error) = task.await {
             eprintln!("agent-workbench: {name} task join failed: {error}");
         }

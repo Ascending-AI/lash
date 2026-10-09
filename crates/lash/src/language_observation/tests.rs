@@ -416,11 +416,8 @@ async fn a_reconciled_commit_cannot_overtake_an_accepted_language_observation() 
         source: crate::process_feed::ProcessFeedSource::new(
             process.clone(),
             registry.clone(),
+            lash_core::ProcessEngineRegistry::default(),
             replay.clone(),
-            crate::process_feed::EffectFoldBudget {
-                pages: 64,
-                page_size: std::num::NonZeroUsize::new(256).expect("page size"),
-            },
             lash_trace::ObservationWorkLimits::standard(),
             crate::process_feed::FeedReconcile {
                 publisher: Arc::clone(&publisher),

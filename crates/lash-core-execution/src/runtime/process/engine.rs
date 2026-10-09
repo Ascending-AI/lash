@@ -229,6 +229,16 @@ pub enum ProcessDocumentRead {
     },
 }
 
+/// What a [`ProcessDocumentProvider`] names a definition's document by.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ProcessDocumentRefRead {
+    Named(lash_trace::WorkflowDocumentRef),
+    /// Nothing retains an artifact the definition reads.
+    ArtifactMissing {
+        artifact: crate::ArtifactName,
+    },
+}
+
 /// An engine's optional reading of its definitions as a language document
 /// (FIG-5563). An engine registered without one has no document: a host's
 /// inspection of its processes and definitions answers `Unsupported`.
@@ -240,6 +250,13 @@ pub trait ProcessDocumentProvider: Send + Sync {
         &self,
         payload: &serde_json::Value,
     ) -> Result<ProcessDocumentRead, crate::PluginError>;
+
+    /// The reference of that document, without the document: what a process
+    /// observation snapshot carries.
+    async fn document_ref(
+        &self,
+        payload: &serde_json::Value,
+    ) -> Result<ProcessDocumentRefRead, crate::PluginError>;
 }
 
 /// A process identity the engine registry produced.

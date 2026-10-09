@@ -1,9 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::Mutex;
 
 use chrono::{DateTime, Utc};
 use lash_sansio::ExecutionNodeKind;
-use lash_sansio::sync::MutexExt;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
@@ -11,35 +9,15 @@ use crate::{
     TRACE_SCHEMA_VERSION, TraceEvent, TraceLanguageExecution, TraceLanguageExecutionFailure,
     TraceLanguageExecutionIdentity as LanguageIdentity,
     TraceLanguageExecutionMap as LanguageExecutionMap, TraceLanguageExecutionPayload,
-    TraceLanguageExecutionStatus as LanguageExecutionStatus, TraceRecord, TraceSink,
-    TraceSinkError,
+    TraceLanguageExecutionStatus as LanguageExecutionStatus, TraceRecord,
 };
 
 mod accumulator;
 mod model;
 mod settlement;
-use accumulator::TraceLashlangGraphAccumulator as GraphAccumulator;
 pub use accumulator::TraceLashlangGraphAccumulator;
 pub use model::*;
 use settlement::{observed_execution_status, settle_incomplete_nodes, settle_retained_nodes};
-
-/// Process-local indexed accumulator with snapshots matching the pure fold.
-#[derive(Default)]
-pub struct TraceLashlangGraphStore {
-    inner: Mutex<ObservedGraphs>,
-}
-
-#[derive(Default)]
-struct ObservedGraphs {
-    publication: u64,
-    graphs: BTreeMap<String, ObservedGraph>,
-}
-
-struct ObservedGraph {
-    first_publication: u64,
-    last_publication: u64,
-    accumulator: GraphAccumulator,
-}
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum TraceLashlangGraphFoldError {
@@ -55,135 +33,15 @@ pub enum TraceLashlangGraphFoldError {
     ZeroHistoryLimit,
 }
 
-impl TraceLashlangGraphStore {
-    /// Returns a snapshot for one observed Lash VM graph key.
-    pub fn graph(&self, graph_key: &str) -> Option<TraceLashlangGraph> {
-        let graphs = self.inner.lock_recover();
-        let observed = graphs.graphs.get(graph_key)?;
-        let mut graph = observed.accumulator.snapshot()?;
-        resolve_child_graph_keys(&mut graph, observed.last_publication, &graphs.graphs);
-        Some(graph)
-    }
-
-    /// Returns snapshots for all observed executions in stable graph-key order.
-    pub fn graphs(&self) -> Vec<TraceLashlangGraph> {
-        let graphs = self.inner.lock_recover();
-        graphs
-            .graphs
-            .values()
-            .filter_map(|observed| {
-                let mut graph = observed.accumulator.snapshot()?;
-                resolve_child_graph_keys(&mut graph, observed.last_publication, &graphs.graphs);
-                Some(graph)
-            })
-            .collect()
-    }
-
-    /// Clears all reduced graph projections and replay de-duplication keys.
-    pub fn clear(&self) {
-        *self.inner.lock_recover() = ObservedGraphs::default();
-    }
-
-    /// Pure deterministic bounded fold.
-    ///
-    /// The snapshot retains canonical events, so folding partitions is byte
-    /// identical to folding their concatenation. Input order is irrelevant;
-    /// terminal transitions dominate starts for one occurrence; a later
-    /// occurrence remains visible; identical duplicates disappear; divergent
-    /// duplicates become typed conflicts. When the limit is exceeded, only
-    /// identities after the canonical watermark remain eligible, making later
-    /// batches obey the same truncation decision as a batch fold.
-    pub fn fold(
-        previous: Option<&TraceLashlangGraph>,
-        records: &[TraceRecord],
-    ) -> Result<TraceLashlangGraph, TraceLashlangGraphFoldError> {
-        Self::fold_with_history_limit(previous, records, DEFAULT_LASH_VM_GRAPH_HISTORY_LIMIT)
-    }
-
-    pub fn fold_with_history_limit(
-        previous: Option<&TraceLashlangGraph>,
-        records: &[TraceRecord],
-        history_limit: usize,
-    ) -> Result<TraceLashlangGraph, TraceLashlangGraphFoldError> {
-        fold_lashlang_graph(previous, records, history_limit)
-    }
-}
-
-impl TraceSink for TraceLashlangGraphStore {
-    fn append(&self, record: &TraceRecord) -> Result<(), TraceSinkError> {
-        let TraceEvent::LanguageExecution { language, event } = &record.event else {
-            return Ok(());
-        };
-        // Any dialect's executions reduce into this projection. The events
-        // describe the Lash VM's node and edge lifecycle under every
-        // dialect. The `language` field describes the source that ran, and
-        // dropping a session's graph because its source was TypeScript would
-        // empty every TypeScript session's execution view. The filter existed
-        // when `lash_vm` was the only value this field could take.
-        let _ = language;
-        let graph_key = event.identity.graph_key();
-        let mut graphs = self.inner.lock_recover();
-        graphs.publication += 1;
-        let publication = graphs.publication;
-        let observed = graphs
-            .graphs
-            .entry(graph_key)
-            .or_insert_with(|| ObservedGraph {
-                first_publication: publication,
-                last_publication: publication,
-                accumulator: GraphAccumulator::default(),
-            });
-        observed.last_publication = publication;
-        observed.accumulator.append(record.timestamp, event);
-        Ok(())
-    }
-}
-
-fn resolve_child_graph_keys(
-    graph: &mut TraceLashlangGraph,
-    parent_publication: u64,
-    graphs: &BTreeMap<String, ObservedGraph>,
-) {
-    let process_graphs = graphs
-        .values()
-        .filter_map(|observed| {
-            let identity = observed.accumulator.identity()?;
-            let crate::TraceRuntimeSubject::Process { process_id } = &identity.subject else {
-                return None;
-            };
-            let generation = identity.generation?;
-            Some((
-                process_id.clone(),
-                generation.attempt(),
-                identity.graph_key(),
-                observed.first_publication,
-            ))
-        })
-        .collect::<Vec<_>>();
-    for child in &mut graph.children {
-        let mut matches = process_graphs
-            .iter()
-            .filter(|(process_id, attempt, _, _)| {
-                process_id == child.child_process_id
-                    && child
-                        .child_attempt
-                        .is_none_or(|expected| expected == *attempt)
-            })
-            .collect::<Vec<_>>();
-        matches.sort_by_key(|entry| entry.3);
-        // Previously, a unique join stayed on the parent snapshot until
-        // its next append rebuilt it. Preserve that publication boundary
-        // when another attempt makes the child ambiguous before a read.
-        if matches.len() == 1
-            || matches
-                .get(1)
-                .is_some_and(|entry| parent_publication < entry.3)
-        {
-            child.child_graph_key = Some(matches[0].2.clone());
-        }
-    }
-}
-
+/// Pure deterministic bounded fold.
+///
+/// The snapshot retains canonical events, so folding partitions is byte
+/// identical to folding their concatenation. Input order is irrelevant;
+/// terminal transitions dominate starts for one occurrence; a later
+/// occurrence remains visible; identical duplicates disappear; divergent
+/// duplicates become typed conflicts. When the limit is exceeded, only
+/// identities after the canonical watermark remain eligible, making later
+/// batches obey the same truncation decision as a batch fold.
 pub fn fold_lashlang_graph(
     previous: Option<&TraceLashlangGraph>,
     records: &[TraceRecord],

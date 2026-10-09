@@ -93,8 +93,8 @@ mod postgres_process_replay;
 pub mod preflight;
 pub(crate) mod process_admin;
 mod process_feed;
+mod process_history;
 mod process_lifecycle;
-mod process_observation;
 /// A session's config and the typed commands that change it (FIG-4379).
 ///
 /// Every installed owner records its namespace when a session is created,
@@ -969,9 +969,9 @@ pub mod plugins {
     pub use lash_core::{
         AgentFrameAssignment, AgentFrameReason, AgentFrameRecord, FrameNodeId, HostTurnProtocol,
         InspectedProcessDefinition, ProcessDocument, ProcessDocumentProvider, ProcessDocumentRead,
-        ProcessEngine, ProcessEngineAdmission, ProcessEngineRegistration, ProcessInfraError,
-        ProcessRunOutcome, ProtocolBuildInput, ProtocolDriverState, ProtocolTurnOptionsError,
-        TurnDriverPreamble,
+        ProcessDocumentRefRead, ProcessEngine, ProcessEngineAdmission, ProcessEngineRegistration,
+        ProcessInfraError, ProcessRunOutcome, ProtocolBuildInput, ProtocolDriverState,
+        ProtocolTurnOptionsError, TurnDriverPreamble,
     };
     /// The session services a hook context hands a plugin: read-through state
     /// access ([`SessionStateService`]) and durable graph appends
@@ -1089,7 +1089,6 @@ pub mod secrets {
 /// Durable process definitions, handles, and events.
 pub mod process {
     // The vocabulary this module's signatures name (the facade-completeness rule).
-    pub use lash_core::facade_support::ProcessEventSinkRegistration;
     pub use lash_core::{
         ConsumerHold, ProcessDefinitionStoredError, ProcessSpawnProvenance, ProcessStartDeclaration,
     };
@@ -1103,14 +1102,7 @@ pub mod process {
         ObservableProcess, ProcessObservationEventId, ProcessObservationStream,
         ProcessObservationStreamItem,
     };
-    pub use crate::process_observation::{
-        ProcessCursor, ProcessCursorError, ProcessCursorReference, ProcessDurableCompleteness,
-        ProcessDurableGapReason, ProcessDurableSnapshot, ProcessEventsFrom, ProcessEventsRead,
-        ProcessLiveIncompleteness, ProcessObservationCompleteness, ProcessObservationConfig,
-        ProcessObservationGapReason, ProcessObservationHub, ProcessObservationItem,
-        ProcessObservationProjection, ProcessObservationSnapshot, ProcessObservationSubscription,
-        ProcessObservationWorkLimits,
-    };
+    pub use crate::process_history::{ProcessEventsRead, ProcessHistoryContinuation};
     /// The origin of a lifecycle cancellation submitted to a registry.
     pub use lash_core::CancelOrigin;
     pub use lash_core::SessionTurnOutcome;
@@ -1180,13 +1172,14 @@ pub mod process {
     /// typed gaps and the replay store behind a process feed.
     pub use lash_core::{
         InMemoryProcessReplayStore, InMemoryProcessReplayStoreConfig, LanguageExecutionObservation,
-        ParsedProcessObservationCursor, ProcessEffectCoverage, ProcessEffectEvidence,
-        ProcessEffectGapReason, ProcessObservation, ProcessObservationCursor,
-        ProcessObservationCursorError, ProcessObservationEvent, ProcessObservationEventPayload,
-        ProcessObservationGapCause, ProcessObservationIdentity, ProcessReadView,
-        ProcessReplayEventDraft, ProcessReplayGap, ProcessReplayGapReason, ProcessReplayOutcome,
-        ProcessReplayStore, ProcessReplayStoreError, ProcessReplaySubscribeOutcome,
-        ProcessReplaySubscription, ProcessSequence, RetainedProcessView,
+        ParsedProcessObservationCursor, ProcessDocumentIdentity, ProcessEffectCoverage,
+        ProcessEffectEvidence, ProcessEffectGapReason, ProcessObservation,
+        ProcessObservationCursor, ProcessObservationCursorError, ProcessObservationEvent,
+        ProcessObservationEventPayload, ProcessObservationGapCause, ProcessObservationIdentity,
+        ProcessReadView, ProcessReplayEventDraft, ProcessReplayGap, ProcessReplayGapReason,
+        ProcessReplayOutcome, ProcessReplayStore, ProcessReplayStoreError,
+        ProcessReplaySubscribeOutcome, ProcessReplaySubscription, ProcessSequence,
+        RetainedProcessView,
     };
     #[cfg(feature = "rlm")]
     pub use lash_vm_runtime::{

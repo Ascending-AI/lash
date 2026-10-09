@@ -118,11 +118,8 @@ impl Fixture {
             source: ProcessFeedSource::new(
                 process_id.clone(),
                 Arc::clone(&self.registry),
+                lash_core::ProcessEngineRegistry::default(),
                 self.replay.clone(),
-                EffectFoldBudget {
-                    pages: 64,
-                    page_size: NonZeroUsize::new(256).expect("page size"),
-                },
                 lash_trace::ObservationWorkLimits::standard(),
                 self.reconcile.clone(),
             ),

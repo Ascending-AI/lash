@@ -80,17 +80,25 @@ pub struct ObservationWorkLimits {
     pub publisher_batch: std::num::NonZeroUsize,
     pub process_snapshot_event_tail: usize,
     pub session_dedup_ids: usize,
+    /// Durable event pages one process observation snapshot, or one feed
+    /// reconcile, may read.
+    pub process_effect_fold_pages: usize,
+    /// Events per durable page those reads ask for.
+    pub process_effect_fold_page_size: std::num::NonZeroUsize,
 }
 impl ObservationWorkLimits {
     /// Standard preset: expire 64 sessions per store call, publish 32 records
-    /// per task poll, read 32 process tail events and remember 4096 session
-    /// event IDs. These exact values have no supporting workload measurements.
+    /// per task poll, read 32 process tail events, remember 4096 session
+    /// event IDs and fold a process's effects from at most 64 pages of 256
+    /// events. These exact values have no supporting workload measurements.
     pub const fn standard() -> Self {
         Self {
             replay_expiry_batch: std::num::NonZeroUsize::MIN.saturating_add(63),
             publisher_batch: std::num::NonZeroUsize::MIN.saturating_add(31),
             process_snapshot_event_tail: 32,
             session_dedup_ids: 4096,
+            process_effect_fold_pages: 64,
+            process_effect_fold_page_size: std::num::NonZeroUsize::MIN.saturating_add(255),
         }
     }
 }

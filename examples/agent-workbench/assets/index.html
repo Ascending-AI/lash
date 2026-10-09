@@ -5501,8 +5501,10 @@
       workCount.title = hidden ? hidden + " hidden by filter" : "";
       workCount.textContent = rows.length + (rows.length === 1 ? " execution" : " executions")
         + (hidden ? " · " + hidden + " hidden" : "");
-      const running = allRows.filter(row => row.status === "running").length;
-      workLinkCount.textContent = running ? running + " running" : String(allRows.length || "");
+      // A process is live work until it ends: a waiting or sleeping one
+      // counts the same as a running one.
+      const running = allRows.filter(row => row.process_id ? !row.terminal : row.status === "running").length;
+      workLinkCount.textContent = running ? running + " active" : String(allRows.length || "");
       workLinkCount.hidden = !allRows.length;
       workLinkCount.classList.toggle("live", running > 0);
       if (!rows.length) {
@@ -5608,6 +5610,21 @@
     }
 
     // BEGIN WORKBENCH_EXECUTION_ROWS
+    // What a waiting process is blocked on, from its lifecycle's blockers.
+    function blockerDetail(lifecycle) {
+      if (!lifecycle || lifecycle.state !== "waiting") return "";
+      const blockers = (lifecycle.blockers || []).map(blocker => {
+        const kind = blocker.kind || {};
+        const node = blocker.site?.node_id ? " at " + blocker.site.node_id : "";
+        if (kind.kind === "sleep") return "sleeping until " + formatTime(kind.until_ms) + node;
+        if (kind.kind === "call") return "awaiting tool " + kind.tool_id + node;
+        if (kind.kind === "process") return "awaiting process " + shortId(kind.process_id) + node;
+        if (kind.kind === "key") return "awaiting " + kind.name + node;
+        return "waiting" + node;
+      });
+      return blockers.length ? "blocked: " + blockers.join("; ") : "";
+    }
+
     /* The work rail is a union of two backend surfaces that name the same
        process differently. `/api/work` keys it by incarnation
        (`process:<id>:incarnation:<n>`, the workbench's `process_graph_key`) because the
@@ -5673,14 +5690,14 @@
           process_id: process.process_id,
           terminal: Boolean(process.terminal),
           title: item.label || process.label || shortId(process.process_id),
-          status: process.status_label || process.lifecycle,
+          status: process.status_label || process.lifecycle?.state,
           error: process.error || null,
           meta: [
             kindLabel(item.kind),
             graph ? graph.node_count + (graph.node_count === 1 ? " node" : " nodes") : "pending graph",
             formatTime(process.updated_at_ms)
           ].filter(Boolean).join(" · "),
-          detail: process.error ? "error: " + process.error : ""
+          detail: process.error ? "error: " + process.error : blockerDetail(process.lifecycle)
         });
       }
       rows.sort((left, right) => {

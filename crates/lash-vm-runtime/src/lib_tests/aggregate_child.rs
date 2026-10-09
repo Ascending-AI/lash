@@ -82,7 +82,9 @@ async fn real_aggregate_child_await_names_both_without_fold_conflict() {
             b::finish(b::var("both")),
         ],
     );
-    let store = Arc::new(TraceLashlangGraphStore::default());
+    let store = Arc::new(std::sync::Mutex::new(
+        lash_trace::TraceLashlangGraphAccumulator::default(),
+    ));
     let identity = TraceLanguageExecutionIdentity {
         scope: lash_trace::TraceRuntimeScope::none(),
         subject: lash_trace::TraceRuntimeSubject::Process {
@@ -103,20 +105,26 @@ async fn real_aggregate_child_await_names_both_without_fold_conflict() {
             identity: identity.clone(),
             payload,
         };
-        lash_trace::TraceSink::append(
-            &*observer_store,
-            &product_record(lash_trace::TraceEvent::LanguageExecution {
-                language: "lashvm".to_string(),
-                event,
-            }),
-        )
-        .expect("trace append");
+        observer_store
+            .lock()
+            .expect("graph")
+            .fold(std::slice::from_ref(&product_record(
+                lash_trace::TraceEvent::LanguageExecution {
+                    language: "lashvm".to_string(),
+                    event,
+                },
+            )))
+            .expect("trace append");
     });
     let compiled = lash_vm::testing::harness::compile_labeled_program(program);
     lash_vm::execute(&compiled, &mut lash_vm::State::new(), &traced)
         .await
         .expect("aggregate await executes");
-    let graph = store.graphs().into_iter().next().expect("aggregate graph");
+    let graph = store
+        .lock()
+        .expect("graph")
+        .snapshot()
+        .expect("aggregate graph");
     assert!(
         graph.conflicts.is_empty(),
         "one await occurrence must have one wait and resume"
@@ -202,7 +210,9 @@ async fn public_trace_host_reports_a_parked_await_cancelled_after_partial_comple
             b::finish(b::var("value")),
         ],
     );
-    let store = Arc::new(TraceLashlangGraphStore::default());
+    let store = Arc::new(std::sync::Mutex::new(
+        lash_trace::TraceLashlangGraphAccumulator::default(),
+    ));
     let identity = TraceLanguageExecutionIdentity {
         scope: lash_trace::TraceRuntimeScope::none(),
         subject: lash_trace::TraceRuntimeSubject::Process {
@@ -223,18 +233,20 @@ async fn public_trace_host_reports_a_parked_await_cancelled_after_partial_comple
         CancellingHost::default(),
         move |_: &CancellingHost, payload: TraceLanguageExecutionPayload| {
             observed.lock().expect("payload log").push(payload.clone());
-            lash_trace::TraceSink::append(
-                &*observer_store,
-                &product_record(lash_trace::TraceEvent::LanguageExecution {
-                    language: "lashvm".to_string(),
-                    event: TraceLanguageExecution {
-                        event_key: "public-cancel".to_string(),
-                        identity: identity.clone(),
-                        payload,
+            observer_store
+                .lock()
+                .expect("graph")
+                .fold(std::slice::from_ref(&product_record(
+                    lash_trace::TraceEvent::LanguageExecution {
+                        language: "lashvm".to_string(),
+                        event: TraceLanguageExecution {
+                            event_key: "public-cancel".to_string(),
+                            identity: identity.clone(),
+                            payload,
+                        },
                     },
-                }),
-            )
-            .expect("trace append");
+                )))
+                .expect("trace append");
         },
     );
     let compiled = lash_vm::testing::harness::compile_labeled_program(program);
@@ -265,7 +277,11 @@ async fn public_trace_host_reports_a_parked_await_cancelled_after_partial_comple
         )),
         "a cancelled occurrence must not also report a failure: {payloads:#?}"
     );
-    let graph = store.graphs().into_iter().next().expect("cancelled graph");
+    let graph = store
+        .lock()
+        .expect("graph")
+        .snapshot()
+        .expect("cancelled graph");
     assert!(graph.conflicts.is_empty(), "{:?}", graph.conflicts);
     let observation = |id: &str| {
         &graph
@@ -428,15 +444,12 @@ async fn real_loop_branch_skips_the_untaken_arm_in_each_iteration() {
         .nth(1)
         .expect("the branch is selected in both iterations");
     let fold = |records: &[lash_trace::TraceRecord]| {
-        let store = TraceLashlangGraphStore::default();
-        for record in records {
-            lash_trace::TraceSink::append(&store, record).expect("fold loop branch");
-        }
-        store
-            .graphs()
-            .into_iter()
-            .next()
-            .expect("loop branch graph")
+        lash_trace::fold_lashlang_graph(
+            None,
+            records,
+            lash_trace::DEFAULT_LASH_VM_GRAPH_HISTORY_LIMIT,
+        )
+        .expect("loop branch graph")
     };
     let observation = |graph: &lash_trace::TraceLashlangGraph, id: &str| {
         graph

@@ -97,3 +97,67 @@ async fn a_commit_on_one_core_ticks_the_process_change_hub_of_another() {
     assert_eq!(seen.last_event_sequence, terminal.last_event_sequence);
     assert!(seen.outcome().is_some(), "core A reads the terminal");
 }
+
+/// FIG-5570: a host's terminal wait wakes on the process change hub, like
+/// every other process reader. The core's work cadence polls once an hour;
+/// the wait subscribes to the hub and returns at the commit's tick.
+#[tokio::test]
+async fn a_terminal_wait_wakes_on_the_process_change_hub() {
+    let hour = Duration::from_secs(3600);
+    let stores = sqlite_memory_store_set().await;
+    let core = standard_core_builder_over(lash_conformance::backend_over(stores))
+        .work_cadence(crate::WorkCadencePolicy {
+            poll_initial: hour,
+            poll_max: hour,
+        })
+        .build(lash_core::LeaseOwnerIdentity::opaque(
+            "fig-5570-waiter",
+            "fig-5570-waiter-boot",
+        ))
+        .expect("standard core");
+    let registry = core.process_registry.clone();
+    let process_id = registry
+        .register_process(
+            lash_core::ProcessRegistration::new(
+                lash_core::testing::held_engine_input(serde_json::Value::Null),
+                lash_core::ProcessProvenance::host(),
+                lash_core::Lifetime::Detached,
+            )
+            .with_execution_env_ref(Some(lash_core::testing::process_execution_env_fixture_ref())),
+        )
+        .await
+        .expect("register the process")
+        .id;
+
+    let waiter = {
+        let (core, process_id) = (core.clone(), process_id.clone());
+        tokio::spawn(async move { core.processes().await_output(&process_id).await })
+    };
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while core.process_changes().tracked_processes() == 0 {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("the terminal wait subscribes to the change hub");
+
+    registry
+        .complete_process(
+            &process_id,
+            lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
+                serde_json::Value::Null,
+            )),
+            lash_core::ProcessCompletionAuthority::workflow_key(&process_id),
+        )
+        .await
+        .expect("complete the process");
+    let output = tokio::time::timeout(Duration::from_secs(10), waiter)
+        .await
+        .expect("the wait returns at the commit's tick, not on its cadence")
+        .expect("the wait task")
+        .expect("the terminal is read");
+    assert!(matches!(
+        output,
+        lash_core::ProcessAwaitOutput::Settled { .. }
+    ));
+}

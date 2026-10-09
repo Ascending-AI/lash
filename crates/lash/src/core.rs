@@ -43,13 +43,10 @@ pub struct LashCore {
     /// The session commits this core's node is publishing: its turn services
     /// mark them, and its session feeds wait for them.
     pub(crate) published_heads: Arc<lash_core::runtime::durable::services::PublishedHeads>,
-    /// What one process snapshot may read to fold its effect evidence.
-    pub(crate) process_effect_fold_budget: crate::process_feed::EffectFoldBudget,
-    pub(crate) process_observation_hub: Arc<crate::process_observation::ProcessObservationHub>,
     pub(crate) process_lifecycle_feed: Arc<crate::process_lifecycle::ProcessLifecycleFeed>,
-    /// The core's process event sinks, its own lifecycle feed first: each
-    /// stays attached while any clone of the core lives.
-    pub(crate) _process_event_registrations: Arc<Vec<facade_support::ProcessEventSinkRegistration>>,
+    /// The core's lifecycle feed, attached to the registry's process events
+    /// while any clone of the core lives.
+    pub(crate) _process_event_registration: Arc<facade_support::ProcessEventSinkRegistration>,
     /// Whether process lifecycle is available; threaded into rebuilt session plugin hosts.
     pub(crate) process_lifecycle_available: bool,
     /// Base plugin-contributed engines available to host-level process APIs.
@@ -666,8 +663,6 @@ pub struct LashCoreBuilder {
     process_tool_visibility_filter: Option<Arc<dyn facade_support::ProcessToolVisibilityFilter>>,
     live_replay_store: Option<Arc<dyn LiveReplayStore>>,
     process_replay_store: Option<Arc<dyn lash_core::ProcessReplayStore>>,
-    process_event_sinks: Vec<Arc<dyn facade_support::ProcessEventSink>>,
-    process_observation_work_limits: crate::process_observation::ProcessObservationWorkLimits,
     serves_sessions: bool,
     attachment_reclamation_retry: crate::persistence::AttachmentReclamationRetryPolicy,
     work_cadence: crate::WorkCadencePolicy,
@@ -733,8 +728,6 @@ impl LashCoreBuilder {
             process_tool_visibility_filter: None,
             live_replay_store: None,
             process_replay_store: None,
-            process_event_sinks: Vec::new(),
-            process_observation_work_limits: Default::default(),
             serves_sessions: Self::STANDARD_SERVE_SESSIONS,
             attachment_reclamation_retry:
                 crate::persistence::AttachmentReclamationRetryPolicy::standard(),
@@ -1102,30 +1095,6 @@ impl LashCoreBuilder {
         self
     }
 
-    /// Add a host sink for process events. Every event appended to a
-    /// process's durable log, through the registry or by a commit of a
-    /// process this core's node runs, reaches it after the commit: once
-    /// each on this node, in sequence order per process. A node that takes
-    /// a process over publishes from its durable publication mark, so an
-    /// event may arrive again after a crash, under the same
-    /// `(process_id, sequence)` (see [`facade_support::ProcessEventSink`]).
-    /// It is a freshness feed, never truth:
-    /// [`crate::process::Processes::events`] pages the log.
-    pub fn process_event_sink(mut self, sink: Arc<dyn facade_support::ProcessEventSink>) -> Self {
-        self.process_event_sinks.push(sink);
-        self
-    }
-
-    /// Configure live graph history and fold batching separately from retention.
-    /// Defaults to [`crate::process::ProcessObservationWorkLimits::standard`].
-    pub fn process_observation_work_limits(
-        mut self,
-        limits: crate::process::ProcessObservationWorkLimits,
-    ) -> Self {
-        self.process_observation_work_limits = limits;
-        self
-    }
-
     /// Build a core under the host's stable worker identity.
     ///
     /// The owner id is stable for the worker or process and never scoped to a
@@ -1150,12 +1119,6 @@ impl LashCoreBuilder {
                 session_revisions: data_retention.session_revisions,
             })?
             .with_provider_file_uploaders(std::mem::take(&mut self.provider_file_uploaders));
-        let process_observation_hub = Arc::new(
-            crate::process_observation::ProcessObservationHub::new(
-                data_retention.process_observation,
-            )
-            .with_work_limits(self.process_observation_work_limits),
-        );
         let live_replay_store = self.live_replay_store.take().unwrap_or_else(|| {
             Arc::new(
                 InMemoryLiveReplayStore::with_clock(
@@ -1190,33 +1153,29 @@ impl LashCoreBuilder {
             None => observation_sink,
         };
         let core = core.with_process_observation_sink(observation_sink);
-        let process_effect_fold_budget = crate::process_feed::EffectFoldBudget {
-            pages: data_retention.process_observation.snapshot_page_budget,
-            page_size: data_retention.process_observation.snapshot_page_size,
-        };
         // Appends through this core tick the other nodes' process change
         // hubs, and theirs tick this core's, through the backend's node hints.
         let watched = lash_core::runtime::watch_process_registry(backend.process_registry());
         watched.announce_through(backend.hints().clone());
+        let process_changes = watched.hub().clone();
         let process_work = lash_core::ProcessWorkWiring::new(
             watched,
             Arc::new(
                 lash_core::DurableProcessWork::new(backend.clone())
+                    .with_process_changes(process_changes)
                     .with_work_cadence(self.work_cadence.clone())?,
             ),
         );
         let process_lifecycle_feed = Arc::new(crate::process_lifecycle::ProcessLifecycleFeed::new(
             Arc::clone(&live_replay_store),
-            Arc::clone(&process_observation_hub),
             Arc::clone(&language_observation_publisher),
         ));
         let process_lifecycle_sink: Arc<dyn facade_support::ProcessEventSink> =
             process_lifecycle_feed.clone();
-        let process_event_registrations = Arc::new(
-            std::iter::once(process_lifecycle_sink)
-                .chain(std::mem::take(&mut self.process_event_sinks))
-                .map(|sink| process_work.watched().add_event_sink(sink))
-                .collect::<Vec<_>>(),
+        let process_event_registration = Arc::new(
+            process_work
+                .watched()
+                .add_event_sink(process_lifecycle_sink),
         );
         let mut plugin_factories = Vec::new();
         if !self.tool_providers.is_empty() {
@@ -1296,10 +1255,8 @@ impl LashCoreBuilder {
             process_replay_store,
             language_observation_publisher,
             published_heads: Arc::default(),
-            process_effect_fold_budget,
-            process_observation_hub,
             process_lifecycle_feed,
-            _process_event_registrations: process_event_registrations,
+            _process_event_registration: process_event_registration,
             protocol_factory,
             process_lifecycle_available,
             host_process_engines,

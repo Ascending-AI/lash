@@ -60,8 +60,8 @@ impl Processes {
             source: crate::process_feed::ProcessFeedSource::new(
                 process_id.clone(),
                 self.registry(),
+                self.core.host_process_engines.clone(),
                 Arc::clone(&self.core.process_replay_store),
-                self.core.process_effect_fold_budget,
                 self.core.env.core.observation_work_limits,
                 crate::process_feed::FeedReconcile {
                     publisher: Arc::clone(&self.core.language_observation_publisher),
@@ -537,24 +537,17 @@ impl Processes {
         .await
     }
 
-    /// Read one durable event page from a process cursor, or from the start of
-    /// the lifetime a process id currently names. Full/Lite is a request
-    /// parameter; the returned cursor continues the history and resumes live
-    /// observation.
+    /// Read one durable event page after `from`. Full/Lite is a request
+    /// parameter; the returned continuation names where the next page
+    /// starts. It pages the durable log only: following a process live is
+    /// [`observe`](Self::observe).
     pub async fn events(
         &self,
-        from: crate::process_observation::ProcessEventsFrom,
+        from: crate::process_history::ProcessHistoryContinuation,
         limit: std::num::NonZeroUsize,
         mode: lash_core::ProcessEventQueryMode,
-    ) -> Result<crate::process_observation::ProcessEventsRead> {
-        Ok(crate::process_observation::read_events(
-            &self.registry(),
-            Some(self.core.process_observation_hub.as_ref()),
-            from,
-            limit,
-            mode,
-        )
-        .await?)
+    ) -> Result<crate::process_history::ProcessEventsRead> {
+        Ok(crate::process_history::read_events(&self.registry(), from, limit, mode).await?)
     }
 
     pub async fn await_output(
@@ -691,9 +684,9 @@ impl Processes {
     /// keep their sequence, kind and replay identity, so the release
     /// is safe while the process runs. A read starting below the horizon
     /// answers [`ProcessEventHistoryRetention::Released`](lash_core::ProcessEventHistoryRetention::Released)
-    /// with a cursor after it, and an observation snapshot reports its effect
-    /// summary incomplete with
-    /// [`ProcessDurableGapReason::HistoryReleased`](crate::process_observation::ProcessDurableGapReason::HistoryReleased).
+    /// with a continuation after it, and an observation snapshot reports its
+    /// effect evidence incomplete with
+    /// [`ProcessEffectGapReason::HistoryReleased`](lash_core::ProcessEffectGapReason::HistoryReleased).
     /// Pruning a retired process remains [`Self::prune`].
     pub async fn release_events(
         &self,

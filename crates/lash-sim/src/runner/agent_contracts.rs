@@ -787,11 +787,49 @@ finish({ recovered: true });
     .await
 }
 
-/// A contract core, the Lash VM graph store its executions trace into, and
-/// the engine it serves its processes on.
+/// The graphs of the executions a contract core observes: one bounded
+/// accumulator per graph key, fed by the core's product observer.
+#[derive(Default)]
+struct ContractGraphs(
+    std::sync::Mutex<BTreeMap<String, lash::tracing::TraceLashlangGraphAccumulator>>,
+);
+
+impl ContractGraphs {
+    /// Every observed graph, in graph-key order.
+    fn graphs(&self) -> Vec<lash::tracing::TraceLashlangGraph> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .values()
+            .filter_map(lash::tracing::TraceLashlangGraphAccumulator::snapshot)
+            .collect()
+    }
+}
+
+impl lash::tracing::TraceSink for ContractGraphs {
+    fn append(
+        &self,
+        record: &lash::tracing::TraceRecord,
+    ) -> Result<(), lash::tracing::TraceSinkError> {
+        if let lash::tracing::TraceEvent::LanguageExecution { event, .. } = &record.event {
+            // One key per accumulator, so the fold cannot refuse the record.
+            let _ = self
+                .0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .entry(event.identity.graph_key())
+                .or_default()
+                .fold(std::slice::from_ref(record));
+        }
+        Ok(())
+    }
+}
+
+/// A contract core, the graphs its executions trace into, and the engine it
+/// serves its processes on.
 type ContractCore = (
     lash::LashCore,
-    Arc<lash::tracing::TraceLashlangGraphStore>,
+    Arc<ContractGraphs>,
     crate::backend::SimEngine,
 );
 
@@ -810,7 +848,7 @@ async fn agent_process_contract_core_with_options(
     tools: Option<Arc<dyn lash_core::ToolProvider>>,
     install_delegation: bool,
 ) -> Result<ContractCore, FixedScriptRunnerError> {
-    let graph_store = Arc::new(lash::tracing::TraceLashlangGraphStore::default());
+    let graph_store = Arc::new(ContractGraphs::default());
     let (engine, backend) = contract_world().await?;
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()
@@ -942,7 +980,7 @@ async fn wait_for_contract_durable_input_park(
 #[allow(clippy::too_many_arguments)]
 async fn agent_process_execution_result(
     core: &lash::LashCore,
-    graph_store: &lash::tracing::TraceLashlangGraphStore,
+    graph_store: &ContractGraphs,
     result: lash::TurnReport,
     events: Arc<RuntimeProofRecordingEvents>,
     provider_kind: &'static str,
@@ -1242,7 +1280,8 @@ async fn agent_contract_process_event_facts(
     let mut events = Vec::new();
     let mut identities = ContractEventIdentities::default();
     for process in processes {
-        let mut from = lash::process::ProcessEventsFrom::Start(process.raw_process_id.clone());
+        let mut from =
+            lash::process::ProcessHistoryContinuation::start(process.raw_process_id.clone());
         loop {
             let read = core
                 .processes()
@@ -1273,12 +1312,10 @@ async fn agent_contract_process_event_facts(
                     "payload": identities.normalize(&event_type, event.fact.payload()),
                 }));
             }
-            from = match (page.more, read.cursor) {
-                (lash::process::ProcessEventPageMore::More { .. }, Some(cursor)) => {
-                    lash::process::ProcessEventsFrom::After(cursor)
-                }
-                _ => break,
-            };
+            if matches!(page.more, lash::process::ProcessEventPageMore::Complete) {
+                break;
+            }
+            from = read.next;
         }
     }
     events.sort_by(|left, right| {

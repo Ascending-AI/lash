@@ -14,8 +14,8 @@ use super::{LashRuntime, ProcessHandleView, ProcessRecord, ProcessRegistry};
 
 pub use process_replay::{
     InMemoryProcessReplayStore, InMemoryProcessReplayStoreConfig, LanguageExecutionObservation,
-    ParsedProcessObservationCursor, ProcessEffectCoverage, ProcessEffectEvidence,
-    ProcessEffectGapReason, ProcessObservation, ProcessObservationCursor,
+    ParsedProcessObservationCursor, ProcessDocumentIdentity, ProcessEffectCoverage,
+    ProcessEffectEvidence, ProcessEffectGapReason, ProcessObservation, ProcessObservationCursor,
     ProcessObservationCursorError, ProcessObservationEvent, ProcessObservationEventPayload,
     ProcessObservationGapCause, ProcessObservationIdentity, ProcessReadView,
     ProcessReplayEventDraft, ProcessReplayGap, ProcessReplayGapReason, ProcessReplayOutcome,

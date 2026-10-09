@@ -97,7 +97,7 @@ async fn a_saved_workflow_runs_as_a_durable_process() {
     let page = core
         .processes()
         .events(
-            lash::process::ProcessEventsFrom::Start(process_id),
+            lash::process::ProcessHistoryContinuation::start(process_id),
             std::num::NonZeroUsize::new(128).expect("nonzero page"),
             lash::process::ProcessEventQueryMode::Full,
         )

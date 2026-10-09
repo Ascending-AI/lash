@@ -51,8 +51,7 @@ pub use lash_trace::{
     TraceLanguageExecutionMapEdge, TraceLanguageExecutionMapNode, TraceLanguageExecutionPayload,
     TraceLanguageExecutionStatus, TraceLashlangEdgeSelection, TraceLashlangGraph,
     TraceLashlangGraphChildLink, TraceLashlangGraphEdge, TraceLashlangGraphNode,
-    TraceLashlangGraphStore, TraceLashlangNodeObservation, TraceNodeAwaited, TraceNodeWaitKind,
-    TraceNodeWaitResolution,
+    TraceLashlangNodeObservation, TraceNodeAwaited, TraceNodeWaitKind, TraceNodeWaitResolution,
 };
 pub use lash_vm::{
     LASH_TYPE_KEY, LashVmArtifacts, LashVmHostCatalog, LashVmHostEnvironment,

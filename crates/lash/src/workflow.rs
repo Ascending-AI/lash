@@ -60,6 +60,9 @@
 //! The IR the document carries (`Expr`, its slots, declarations and types)
 //! is `lash::vm::ir`; this module is the document itself.
 
+/// Which document a process runs, as its observation snapshot names it
+/// ([`ProcessDocumentIdentity`](crate::process::ProcessDocumentIdentity)).
+pub use lash_trace::{WorkflowDocumentEntry, WorkflowDocumentRef};
 pub use lash_vm::{
     WORKFLOW_IR_VERSION, WorkflowBodyForm, WorkflowCatch, WorkflowCompletionGroup, WorkflowGraph,
     WorkflowGraphError, WorkflowIrVersionRefusal, WorkflowPinnedSlots, WorkflowProcessWrapper,

@@ -77,15 +77,14 @@ impl SessionProcessAdmin {
             .find(|process| process.process_id == process_id))
     }
 
-    /// Read one durable event page from a process cursor, or from the start
-    /// of the lifetime a process id currently names. This session routes no
-    /// live observation, so a cursor it mints carries the unrouted epoch.
+    /// Read one durable event page after `from`; the returned continuation
+    /// names where the next page starts.
     pub async fn events(
         &self,
-        from: crate::process_observation::ProcessEventsFrom,
+        from: crate::process_history::ProcessHistoryContinuation,
         limit: std::num::NonZeroUsize,
         mode: lash_core::ProcessEventQueryMode,
-    ) -> Result<crate::process_observation::ProcessEventsRead> {
+    ) -> Result<crate::process_history::ProcessEventsRead> {
         let Some(registry) = self.control.runtime.observe().process_registry.clone() else {
             let events = match mode {
                 lash_core::ProcessEventQueryMode::Full => {
@@ -95,17 +94,17 @@ impl SessionProcessAdmin {
                     lash_core::ProcessEventPageEvents::Lite(Vec::new())
                 }
             };
-            return Ok(crate::process_observation::ProcessEventsRead {
+            return Ok(crate::process_history::ProcessEventsRead {
                 outcome: lash_core::ProcessEventReadOutcome::Retained(
                     lash_core::ProcessEventPage {
                         events,
                         more: lash_core::ProcessEventPageMore::Complete,
                     },
                 ),
-                cursor: None,
+                next: from,
             });
         };
-        Ok(crate::process_observation::read_events(&registry, None, from, limit, mode).await?)
+        Ok(crate::process_history::read_events(&registry, from, limit, mode).await?)
     }
 
     pub async fn await_output(
