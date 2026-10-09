@@ -177,6 +177,8 @@ pub enum WorkflowEditDiagnosticKind {
     BindingNameTaken { name: AstString },
     #[error("no process `{name}` is declared")]
     UnknownProcess { name: AstString },
+    /// An edit named a function the document does not declare, or a call
+    /// names one: its declaration was removed, or never was.
     #[error("no function `{name}` is declared")]
     UnknownFunction { name: AstString },
     /// A lifted process is derived from the literal that carries it: its name
@@ -801,10 +803,10 @@ impl State {
             diagnostics.push(WorkflowEditDiagnostic {
                 edit: None,
                 location: self.locate(&occurrence.path),
-                kind: if occurrence.role == Role::Process {
-                    WorkflowEditDiagnosticKind::UnknownProcess { name }
-                } else {
-                    WorkflowEditDiagnosticKind::UnresolvedBinding { name }
+                kind: match occurrence.role {
+                    Role::Process => WorkflowEditDiagnosticKind::UnknownProcess { name },
+                    Role::Function => WorkflowEditDiagnosticKind::UnknownFunction { name },
+                    _ => WorkflowEditDiagnosticKind::UnresolvedBinding { name },
                 },
             });
         }
@@ -834,7 +836,7 @@ impl State {
                 .iter()
                 .filter(|occurrence| {
                     occurrence.frame == frame
-                        && occurrence.role != Role::Process
+                        && !matches!(occurrence.role, Role::Process | Role::Function)
                         && inside(occurrence)
                         && bound_outside.contains(&occurrence.name)
                 })

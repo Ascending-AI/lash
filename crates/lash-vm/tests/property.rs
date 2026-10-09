@@ -18,10 +18,16 @@ use lash_vm::{
 };
 use proptest::prelude::*;
 
+#[path = "property/edits.rs"]
+mod edits;
 #[path = "support/execute.rs"]
 mod execute_support;
+#[path = "property/ir_gen.rs"]
+mod ir_gen;
 
 use execute_support::{ExecuteError, execute};
+use lash_vm::testing::differential;
+use proptest::test_runner::TestCaseError;
 
 #[derive(Default)]
 struct DeterministicHost;
@@ -558,4 +564,549 @@ proptest! {
         prop_assert_eq!(result, value.to_value());
     }
 
+}
+
+/// A tape of choices from a seed: the fixed programs the coverage laws read.
+fn seeded_tape(seed: u64) -> Vec<u16> {
+    let mut state = seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ 0x5578;
+    (0..96)
+        .map(|_| {
+            state = state.wrapping_add(0x9e37_79b9_7f4a_7c15);
+            let mut word = state;
+            word = (word ^ (word >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+            word = (word ^ (word >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+            (word ^ (word >> 31)) as u16
+        })
+        .collect()
+}
+
+/// How many seeded programs the coverage laws read.
+const SEEDED_PROGRAMS: u64 = 256;
+
+/// The generator's own contract: every program it builds is valid IR that
+/// the linker admits against the host environment, and together the
+/// programs and the artifacts they admit to hold every variant of the IR.
+/// The variant names come from the exhaustive match beside the slot walk, so
+/// a variant added to the IR fails this law until the generator builds it.
+#[test]
+fn generated_programs_admit_and_hold_every_ir_variant() {
+    let environment = ir_gen::environment();
+    let mut seen = std::collections::BTreeSet::new();
+    let mut refused = std::collections::BTreeMap::<String, (usize, u64)>::new();
+    for seed in 0..SEEDED_PROGRAMS {
+        let program = ir_gen::program(&seeded_tape(seed));
+        lash_vm::validate_ast(&program)
+            .unwrap_or_else(|error| panic!("seed {seed} is valid IR: {error}\n{program:#?}"));
+        seen.extend(lash_vm::testing::ir_variants::variants_in(&program));
+        match lash_vm::LinkedModule::link(program, &environment) {
+            Ok(linked) => {
+                seen.extend(lash_vm::testing::ir_variants::variants_in(
+                    linked.artifact.ir(),
+                ));
+            }
+            Err(error) => {
+                let entry = refused.entry(error.to_string()).or_insert((0, seed));
+                entry.0 += 1;
+            }
+        }
+    }
+    assert!(
+        refused.is_empty(),
+        "generated programs the linker refuses (refusal: count, first seed): {refused:#?}"
+    );
+    let all = lash_vm::testing::ir_variants::EXPR_VARIANT_NAMES
+        .into_iter()
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        seen,
+        all,
+        "the generated programs miss {:?}",
+        all.difference(&seen).collect::<Vec<_>>()
+    );
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "law driver builds the fixed-configuration tokio runtime, per the message"
+)]
+fn block_on<F: std::future::Future>(future: F) -> F::Output {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("test runtime")
+        .block_on(future)
+}
+
+fn through_wire(graph: &lash_vm::WorkflowGraph) -> Result<lash_vm::WorkflowGraph, TestCaseError> {
+    differential::through_wire(graph).map_err(TestCaseError::fail)
+}
+
+fn fail(error: &dyn std::fmt::Display) -> TestCaseError {
+    TestCaseError::fail(error.to_string())
+}
+
+fn link(program: lash_vm::Program) -> Result<lash_vm::LinkedModule, TestCaseError> {
+    lash_vm::LinkedModule::link(program, ir_gen::environment()).map_err(|error| fail(&error))
+}
+
+/// The round-trip law: a program projected to its document and
+/// reconstructed is the same program, and admits to the same definition,
+/// with no dialect involved. It holds for the draft a host authors (process
+/// literals still inline) and for the artifact the linker admits (processes
+/// lifted, calls resolved).
+fn document_round_trips(program: lash_vm::Program) -> Result<(), TestCaseError> {
+    let document = lash_vm::workflow_graph_from_program(&program);
+    let held = through_wire(&document)?;
+    prop_assert_eq!(&held, &document, "the draft document survives its encoding");
+    let rebuilt = lash_vm::workflow_program_from_graph(&held).map_err(|error| fail(&error))?;
+    prop_assert_eq!(&rebuilt, &program, "the draft document spells its program");
+    let linked = link(program)?;
+    let relinked = link(rebuilt)?;
+    prop_assert_eq!(
+        relinked.artifact.source_identity(),
+        linked.artifact.source_identity()
+    );
+    prop_assert_eq!(relinked.artifact.module_ref(), linked.artifact.module_ref());
+
+    let admitted = lash_vm::workflow_graph_from_artifact(&linked.artifact);
+    prop_assert_eq!(
+        admitted.source_identity.clone(),
+        Some(linked.artifact.source_identity()),
+        "an admitted document names its definition"
+    );
+    let rebuilt = lash_vm::workflow_program_from_graph(&through_wire(&admitted)?)
+        .map_err(|error| fail(&error))?;
+    prop_assert_eq!(
+        &rebuilt,
+        linked.artifact.ir(),
+        "the admitted document spells the admitted program"
+    );
+    let complete = lash_vm::ModuleArtifact::from_program(rebuilt).map_err(|error| fail(&error))?;
+    prop_assert_eq!(
+        complete.source_identity(),
+        linked.artifact.source_identity(),
+        "the admitted document admits to the same definition"
+    );
+    prop_assert_eq!(complete.exports(), linked.artifact.exports());
+    let readmitted =
+        differential::readmitted_from_document(&linked.artifact, &ir_gen::environment())
+            .map_err(TestCaseError::fail)?;
+    prop_assert_eq!(
+        &readmitted.linked.artifact,
+        &linked.artifact,
+        "admitting an admitted document again changes nothing"
+    );
+    prop_assert_eq!(&readmitted.graph, &admitted);
+    Ok(())
+}
+
+/// The differential law over one generated program
+/// ([`differential::document_runs_like_its_source`]), and the site law over
+/// its run.
+fn document_runs_like_its_source(
+    program: &lash_vm::Program,
+) -> Result<differential::SourceRun, TestCaseError> {
+    let run = block_on(differential::document_runs_like_its_source(
+        program,
+        &ir_gen::environment(),
+    ))
+    .map_err(TestCaseError::fail)?;
+    differential::observed_sites_are_in_the_document(&run).map_err(TestCaseError::fail)?;
+    Ok(run)
+}
+
+/// The seeded programs do run: most reach their finish, some stop on a
+/// failure nothing handles, and they perform effects, start processes and
+/// take branches. Without this the differential law could hold over
+/// programs that all stop at their first statement.
+#[test]
+fn generated_programs_exercise_the_vm() {
+    let mut finished = 0usize;
+    let mut failed = 0usize;
+    let mut stopped = 0usize;
+    let mut effects = 0usize;
+    let mut observations = 0usize;
+    let mut processes = 0usize;
+    let mut lifted = 0usize;
+    for seed in 0..SEEDED_PROGRAMS {
+        let differential::SourceRun { artifact, run } =
+            document_runs_like_its_source(&ir_gen::program(&seeded_tape(seed)))
+                .unwrap_or_else(|error| panic!("seed {seed}: {error}"));
+        lifted += usize::from(artifact.ir().declarations.iter().any(|declaration| {
+            matches!(declaration, lash_vm::Declaration::Process(process) if process.origin.is_lifted())
+        }));
+        processes += run.entries.len() - 1;
+        for entry in &run.entries {
+            match &entry.outcome {
+                Ok(ExecutionOutcome::Finished(_)) => finished += 1,
+                Ok(ExecutionOutcome::Failed(_)) => failed += 1,
+                Ok(ExecutionOutcome::Continued) | Err(_) => stopped += 1,
+            }
+            effects += entry.effects.len();
+            observations += entry.observations.len();
+        }
+    }
+    assert!(
+        finished > 2 * (failed + stopped) && failed > 0 && stopped > 0,
+        "finished {finished}, failed {failed}, stopped {stopped}"
+    );
+    assert!(effects > 1000 && observations > 2000 && processes > 100);
+    assert!(
+        lifted > 50 && lifted < SEEDED_PROGRAMS as usize,
+        "programs with and without a lifted process are both generated: {lifted}"
+    );
+}
+
+/// What admission said of the documents a script of edits left.
+#[derive(Default)]
+struct Published {
+    admitted: usize,
+    /// The kind of each diagnostic of each document it refused.
+    refused: Vec<lash_vm::WorkflowAdmissionDiagnosticKind>,
+}
+
+/// The edit law ([`edits::fuzz`]) and what follows it: every document an
+/// applied transaction leaves goes to admission, which admits it or refuses
+/// it with located, typed diagnostics and never anything else, and the last
+/// program it admits round-trips through its document and runs like its
+/// source.
+fn edited_documents_stay_programs(
+    program_words: &[u16],
+    edit_words: &[u16],
+) -> Result<(edits::Fuzzed, Published), TestCaseError> {
+    let fuzzed = edits::fuzz(&ir_gen::program(program_words), edit_words)?;
+    let environment = ir_gen::environment();
+    let mut published = Published::default();
+    let mut last = None;
+    for program in &fuzzed.programs {
+        let document = lash_vm::workflow_graph_from_program(program);
+        match lash_vm::admit_workflow_graph(&document, &environment) {
+            Ok(_) => {
+                published.admitted += 1;
+                last = Some(program);
+            }
+            Err(refusal) => {
+                prop_assert!(!refusal.diagnostics.is_empty(), "a refusal says why");
+                published
+                    .refused
+                    .extend(refusal.diagnostics.iter().map(|diagnostic| diagnostic.kind));
+            }
+        }
+    }
+    if let Some(program) = last {
+        document_round_trips(program.clone())?;
+        document_runs_like_its_source(program)?;
+    }
+    Ok((fuzzed, published))
+}
+
+/// The seeded edit scripts reach every edit: each kind applies at least
+/// once, refusals of every class occur, and admission both admits and
+/// refuses what edits leave. The kind names come from an exhaustive match,
+/// so an edit added to the draft fails this law until a script applies it.
+#[test]
+fn seeded_edit_scripts_apply_every_edit_kind() {
+    let mut applied = std::collections::BTreeMap::<&str, usize>::new();
+    let mut refused = std::collections::BTreeMap::<(&str, &str), usize>::new();
+    let mut admitted = 0usize;
+    let mut admission_refused = std::collections::BTreeMap::<String, usize>::new();
+    for seed in 0..SEEDED_PROGRAMS {
+        let (fuzzed, published) =
+            edited_documents_stay_programs(&seeded_tape(seed), &seeded_tape(seed + 10_000))
+                .unwrap_or_else(|error| panic!("seed {seed}: {error}"));
+        for kind in fuzzed.applied {
+            *applied.entry(kind).or_default() += 1;
+        }
+        for refusal in fuzzed.refused {
+            *refused.entry(refusal).or_default() += 1;
+        }
+        admitted += published.admitted;
+        for kind in published.refused {
+            *admission_refused.entry(format!("{kind:?}")).or_default() += 1;
+        }
+    }
+    let kinds = lash_vm::testing::workflow_edits::WORKFLOW_EDIT_KINDS;
+    assert_eq!(
+        applied.keys().copied().collect::<Vec<_>>(),
+        {
+            let mut kinds = kinds.to_vec();
+            kinds.sort_unstable();
+            kinds
+        },
+        "every edit kind applies in some script: {applied:#?}"
+    );
+    let codes = refused
+        .keys()
+        .map(|(_, code)| *code)
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        codes.into_iter().collect::<Vec<_>>(),
+        DRAFT_REFUSAL_CODES,
+        "every refusal the draft has is reached: {refused:#?}"
+    );
+    assert!(
+        admitted > 500 && !admission_refused.is_empty(),
+        "admission takes most of what edits leave and refuses some: {admitted} admitted, {admission_refused:#?}"
+    );
+}
+
+/// The code of every refusal a draft has, in order.
+const DRAFT_REFUSAL_CODES: [&str; 17] = [
+    "anchor_outside_body",
+    "binding_captured",
+    "binding_name_taken",
+    "derived_process",
+    "edit_does_not_apply",
+    "invalid_document",
+    "invalid_program",
+    "move_into_own_subtree",
+    "slot_in_child_body",
+    "stale_revision",
+    "unknown_binding",
+    "unknown_body",
+    "unknown_function",
+    "unknown_handle",
+    "unknown_process",
+    "unknown_slot",
+    "unresolved_binding",
+];
+
+/// A program whose loops run a number of times its shape decides: `outer`
+/// passes of a loop that runs an inner loop of `inner` elements, left early
+/// at element `stop`, then `turns` passes of a counted loop that skips its
+/// second. Each body calls the host with its own tag, and the inner one
+/// makes the same call twice in one statement.
+fn loop_nest(outer: usize, inner: usize, stop: Option<usize>, turns: usize) -> lash_vm::Program {
+    use lash_vm::CoercingBinaryOp as Op;
+    use lash_vm::testing::ast_builders as b;
+    let numbers = |count: usize| b::list((0..count).map(|index| b::num(index as f64)).collect());
+    let call = |tag: &str| {
+        b::module_call(
+            &["tools"],
+            "echo",
+            vec![b::record(vec![("value", b::string(tag))])],
+        )
+    };
+    let when =
+        |condition, control| b::if_else(condition, b::block(vec![control]), b::block(Vec::new()));
+    let mut inner_body = Vec::new();
+    if let Some(stop) = stop {
+        inner_body.push(when(
+            b::binary(b::var("b"), Op::StrictEqual, b::num(stop as f64)),
+            lash_vm::Expr::Break,
+        ));
+    }
+    inner_body.push(b::list(vec![call("inner"), call("inner")]));
+    b::program(vec![
+        b::for_in(
+            "a",
+            numbers(outer),
+            b::block(vec![
+                b::for_in("b", numbers(inner), b::block(inner_body)),
+                call("outer"),
+            ]),
+        ),
+        b::assign("k", b::num(0.0)),
+        b::while_loop(
+            b::binary(b::var("k"), Op::Less, b::num(turns as f64)),
+            b::block(vec![
+                b::assign("k", b::binary(b::var("k"), Op::Add, b::num(1.0))),
+                when(
+                    b::binary(b::var("k"), Op::StrictEqual, b::num(2.0)),
+                    lash_vm::Expr::Continue,
+                ),
+                call("turn"),
+            ]),
+        ),
+        b::finish(b::null()),
+    ])
+}
+
+/// What [`loop_nest`] asks its host for, by a reference count of its loops:
+/// each call's tag and the body iteration of every loop around it,
+/// outermost first.
+fn loop_nest_reference(
+    outer: usize,
+    inner: usize,
+    stop: Option<usize>,
+    turns: usize,
+) -> Vec<(&'static str, Vec<u64>)> {
+    let mut calls = Vec::new();
+    for a in 1..=outer as u64 {
+        for b in 1..=stop.map_or(inner, |stop| stop.min(inner)) as u64 {
+            calls.push(("inner", vec![a, b]));
+            calls.push(("inner", vec![a, b]));
+        }
+        calls.push(("outer", vec![a]));
+    }
+    for k in (1..=turns as u64).filter(|k| *k != 2) {
+        calls.push(("turn", vec![k]));
+    }
+    calls
+}
+
+/// The loop law: the calls a program makes in its loops are attributed as a
+/// reference count of those loops says.
+///
+/// * Each call names the body iteration of every loop around it, across
+///   loop re-entry, `break` and `continue`.
+/// * Two identical calls in one statement are two sites of one node, and no
+///   two calls of the program share a site.
+/// * A loop is one site. Entering it again is a new activation, and an
+///   activation is never shared by two loops.
+fn loop_occurrences_match_the_program(
+    outer: usize,
+    inner: usize,
+    stop: Option<usize>,
+    turns: usize,
+) -> Result<(), TestCaseError> {
+    use lash_vm::WorkflowLoopPosition as Position;
+    let source = document_runs_like_its_source(&loop_nest(outer, inner, stop, turns))?;
+    let main = &source.run.entries[0];
+    prop_assert!(matches!(main.outcome, Ok(ExecutionOutcome::Finished(_))));
+    let calls = main
+        .calls
+        .iter()
+        .map(|call| {
+            let value = call
+                .argument
+                .as_ref()
+                .and_then(Value::as_record)
+                .and_then(|record| record.get("value"))?;
+            let tag = ["inner", "outer", "turn"]
+                .into_iter()
+                .find(|tag| *value == Value::String((*tag).into()))?;
+            Some((tag, call.site.as_ref()?))
+        })
+        .collect::<Option<Vec<_>>>()
+        .ok_or_else(|| TestCaseError::fail("a call has no tag or no site"))?;
+    let observed = calls
+        .iter()
+        .map(|(tag, site)| {
+            let iterations = site
+                .loops
+                .iter()
+                .map(|frame| match frame.position {
+                    Position::Body(iteration) => Some(iteration),
+                    Position::Check(_) => None,
+                })
+                .collect::<Option<Vec<_>>>();
+            (*tag, iterations)
+        })
+        .collect::<Vec<_>>();
+    let reference = loop_nest_reference(outer, inner, stop, turns)
+        .into_iter()
+        .map(|(tag, iterations)| (tag, Some(iterations)))
+        .collect::<Vec<_>>();
+    prop_assert_eq!(observed, reference);
+
+    // Sites: one per call expression, two for the twin calls of one node.
+    let mut sites = std::collections::BTreeMap::<_, std::collections::BTreeSet<_>>::new();
+    for (tag, site) in &calls {
+        sites.entry(*tag).or_default().insert(site.site.site_ref());
+    }
+    for (tag, count) in [("inner", 2), ("outer", 1), ("turn", 1)] {
+        let Some(of_tag) = sites.get(tag) else {
+            continue;
+        };
+        prop_assert_eq!(of_tag.len(), count, "`{}` has {} site(s)", tag, count);
+        let nodes = of_tag
+            .iter()
+            .map(|site| &site.node_id)
+            .collect::<std::collections::BTreeSet<_>>();
+        prop_assert_eq!(nodes.len(), 1, "the calls of one statement are one node");
+    }
+    let distinct = sites
+        .values()
+        .flatten()
+        .collect::<std::collections::BTreeSet<_>>();
+    prop_assert_eq!(
+        distinct.len(),
+        sites.values().map(|of_tag| of_tag.len()).sum::<usize>()
+    );
+
+    // Loops: the frame at each depth is one loop, and each entry of a loop
+    // is its own activation.
+    let mut activations = std::collections::BTreeMap::new();
+    let mut loops = std::collections::BTreeMap::<_, std::collections::BTreeSet<_>>::new();
+    for (tag, site) in &calls {
+        for (depth, frame) in site.loops.iter().enumerate() {
+            loops
+                .entry((*tag != "turn", depth))
+                .or_default()
+                .insert(frame.site.clone());
+            let outer_iteration = match site.loops[0].position {
+                Position::Body(iteration) if depth == 1 => iteration,
+                _ => 0,
+            };
+            let entered = activations
+                .entry(frame.activation)
+                .or_insert((frame.site.clone(), outer_iteration));
+            prop_assert_eq!(
+                &*entered,
+                &(frame.site.clone(), outer_iteration),
+                "activation {} is one entry of one loop",
+                frame.activation
+            );
+        }
+    }
+    prop_assert!(loops.values().all(|at_depth| at_depth.len() == 1));
+    let distinct = loops
+        .values()
+        .flatten()
+        .collect::<std::collections::BTreeSet<_>>();
+    prop_assert_eq!(distinct.len(), loops.len(), "each loop is its own site");
+    let entries = activations
+        .values()
+        .collect::<std::collections::BTreeSet<_>>();
+    prop_assert_eq!(
+        entries.len(),
+        activations.len(),
+        "one entry of a loop has one activation"
+    );
+    Ok(())
+}
+
+fn tape() -> impl Strategy<Value = Vec<u16>> {
+    prop::collection::vec(any::<u16>(), 0..120)
+}
+
+proptest! {
+    // Fixed seeds: the cases are the same on every run, and a failure is
+    // shrunk to the smallest tape that still fails. A shrunk failure's seed
+    // line goes in `proptest-regressions/property.txt`, whose cases run
+    // before the seeded ones.
+    #![proptest_config(ProptestConfig {
+        cases: 256,
+        rng_seed: proptest::test_runner::RngSeed::Fixed(0x5578),
+        .. ProptestConfig::default()
+    })]
+
+    #[test]
+    fn a_generated_program_round_trips_through_its_document(words in tape()) {
+        document_round_trips(ir_gen::program(&words))?;
+    }
+
+    #[test]
+    fn a_document_published_program_runs_like_its_source(words in tape()) {
+        document_runs_like_its_source(&ir_gen::program(&words))?;
+    }
+
+    #[test]
+    fn loop_occurrences_count_what_the_program_runs(
+        outer in 0usize..4,
+        inner in 0usize..4,
+        stop in prop::option::of(0usize..4),
+        turns in 0usize..5,
+    ) {
+        loop_occurrences_match_the_program(outer, inner, stop, turns)?;
+    }
+
+    #[test]
+    fn an_edit_script_leaves_a_program_or_refuses_whole(
+        program in tape(),
+        script in tape(),
+    ) {
+        edited_documents_stay_programs(&program, &script)?;
+    }
 }

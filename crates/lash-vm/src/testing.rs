@@ -17,6 +17,16 @@ pub mod harness;
 /// feature so they never ship in a production build.
 pub mod ast_builders;
 
+/// The names of the IR's variants, for laws that claim to cover all of them.
+pub mod ir_variants;
+
+/// The names of the typed workflow edits, for laws that claim to apply all
+/// of them.
+pub mod workflow_edits;
+
+/// Running one program two ways and comparing everything a host can see.
+pub mod differential;
+
 /// Test projections behind a real provider and catalog (ADR 0132 §9).
 pub mod projection;
 

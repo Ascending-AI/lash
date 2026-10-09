@@ -6,6 +6,8 @@
 //!   the same `module_ref` and `source_identity` — or the printer refuses it
 //!   with a typed error an explicit, ratcheted allowlist names with a reason.
 //! * [`invariants`]: the structural invariants of every admitted artifact.
+//! * [`document_differential`]: every program published from its workflow
+//!   document runs like the program admitted from its source.
 //! * [`sessions`]: the Node session corpus's own discipline.
 //! * [`vm_instance`]: a reset VM instance is a fresh one, and a run driven
 //!   step by step, or parked and reopened, matches it run straight through.
@@ -21,8 +23,12 @@ use std::collections::BTreeSet;
 
 use lash_vm::{Declaration, Expr, Program};
 
+#[path = "workflow_graph/ai_workflows.rs"]
+mod ai_workflows;
 #[path = "corpus_laws/corpora.rs"]
 mod corpora;
+#[path = "corpus_laws/document_differential.rs"]
+mod document_differential;
 #[path = "workflow_graph/goldens.rs"]
 mod goldens;
 #[path = "test262/support/ingest.rs"]

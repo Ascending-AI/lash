@@ -1,0 +1,10 @@
+# AI-style workflows the lens printer refuses, typed (FIG-5578). Each row
+# names the program, the exact refusal and why the printer cannot spell it.
+# These programs stay valid workflow documents: the document differential
+# publishes and runs each one from its graph with no source involved.
+# program id	refusal	reason
+ai-workflow:nested-supervisor	generated binding `__lash_vm_heap_new` has no authored TypeScript spelling	`new Error(...)` lowers to the heap builtin, which the lens printer does not re-sugar
+ai-workflow:closure-aggregation	generated binding `__lash_vm_stdlib` has no authored TypeScript spelling	`Object.keys` and the sort callback lower to stdlib calls, which the lens printer does not re-sugar
+ai-workflow:guarded-approval	generated binding `__lash_vm_heap_new` has no authored TypeScript spelling	`new Error(...)` lowers to the heap builtin, which the lens printer does not re-sugar
+ai-workflow:staged-pipeline	generated binding `__lash_vm_regexp` has no authored TypeScript spelling	a string split lowers through the regexp builtin, which the lens printer does not re-sugar
+ai-workflow:waiting-definition	generated binding `__lash_vm_heap_new` has no authored TypeScript spelling	`new Error(...)` lowers to the heap builtin, which the lens printer does not re-sugar

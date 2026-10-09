@@ -9,6 +9,7 @@
 use std::collections::BTreeSet;
 
 use crate::testing::ast_builders as b;
+use crate::testing::ir_variants::{EXPR_VARIANT_NAMES, program_bodies, variants_in};
 use crate::{
     AstPath, CoercingBinaryOp, CoercingUnaryOp, Declaration, Expr, ExprSlot, ExprSlotVisitor,
     FunctionExpr, MethodKey, ModuleArtifact, OperandLogicalOp, ProcessDecl, ProcessOrigin,
@@ -18,103 +19,6 @@ use crate::{
     workflow_graph_from_program, workflow_node_statement, workflow_program_from_graph,
     workflow_slot_value,
 };
-
-/// Every [`Expr`] variant's name. The match has no wildcard arm, so a new
-/// variant does not compile until it is named here, and the corpus law below
-/// then fails until a program holds it.
-fn variant(expr: &Expr) -> &'static str {
-    match expr {
-        Expr::Block(_) => "Block",
-        Expr::LabelAnnotated { .. } => "LabelAnnotated",
-        Expr::Null => "Null",
-        Expr::Absent => "Absent",
-        Expr::Bool(_) => "Bool",
-        Expr::Number(_) => "Number",
-        Expr::String(_) => "String",
-        Expr::Variable(_) => "Variable",
-        Expr::List(_) => "List",
-        Expr::Record(_) => "Record",
-        Expr::Assign { .. } => "Assign",
-        Expr::If { .. } => "If",
-        Expr::For { .. } => "For",
-        Expr::While { .. } => "While",
-        Expr::Role { .. } => "Role",
-        Expr::Break => "Break",
-        Expr::Continue => "Continue",
-        Expr::ProcessRef { .. } => "ProcessRef",
-        Expr::HostDescriptorConstructor { .. } => "HostDescriptorConstructor",
-        Expr::ResourceRef(_) => "ResourceRef",
-        Expr::ReceiverCall { .. } => "ReceiverCall",
-        Expr::Await(_) => "Await",
-        Expr::SleepFor(_) => "SleepFor",
-        Expr::ResultUnwrap(_) => "ResultUnwrap",
-        Expr::Print(_) => "Print",
-        Expr::Finish(_) => "Finish",
-        Expr::Fail(_) => "Fail",
-        Expr::BuiltinCall { .. } => "BuiltinCall",
-        Expr::Function(_) => "Function",
-        Expr::ProcessLiteral(_) => "ProcessLiteral",
-        Expr::Call { .. } => "Call",
-        Expr::MethodCall { .. } => "MethodCall",
-        Expr::ThisCall { .. } => "ThisCall",
-        Expr::FunctionCall { .. } => "FunctionCall",
-        Expr::Map { .. } => "Map",
-        Expr::Try(_) => "Try",
-        Expr::Throw(_) => "Throw",
-        Expr::FunctionReturn(_) => "FunctionReturn",
-        Expr::Field { .. } => "Field",
-        Expr::Index { .. } => "Index",
-        Expr::CoercingUnary { .. } => "CoercingUnary",
-        Expr::CoercingBinary { .. } => "CoercingBinary",
-        Expr::OperandLogical { .. } => "OperandLogical",
-    }
-}
-
-const VARIANTS: [&str; 43] = [
-    "Block",
-    "LabelAnnotated",
-    "Null",
-    "Absent",
-    "Bool",
-    "Number",
-    "String",
-    "Variable",
-    "List",
-    "Record",
-    "Assign",
-    "If",
-    "For",
-    "While",
-    "Role",
-    "Break",
-    "Continue",
-    "ProcessRef",
-    "HostDescriptorConstructor",
-    "ResourceRef",
-    "ReceiverCall",
-    "Await",
-    "SleepFor",
-    "ResultUnwrap",
-    "Print",
-    "Finish",
-    "Fail",
-    "BuiltinCall",
-    "Function",
-    "ProcessLiteral",
-    "Call",
-    "MethodCall",
-    "ThisCall",
-    "FunctionCall",
-    "Map",
-    "Try",
-    "Throw",
-    "FunctionReturn",
-    "Field",
-    "Index",
-    "CoercingUnary",
-    "CoercingBinary",
-    "OperandLogical",
-];
 
 fn echo(value: Expr) -> Expr {
     b::module_call(&["tools"], "echo", vec![b::record(vec![("value", value)])])
@@ -518,31 +422,12 @@ fn corpus() -> Vec<(&'static str, Program)> {
     ]
 }
 
-fn bodies(program: &Program) -> Vec<&Expr> {
-    let mut bodies = vec![&program.main];
-    for declaration in &program.declarations {
-        bodies.push(match declaration {
-            Declaration::Process(process) => &process.body,
-            Declaration::Function(function) => &function.body,
-        });
-    }
-    bodies
-}
-
 #[test]
 fn projecting_then_reconstructing_is_the_identity_for_every_ir_variant() {
-    struct Seen(BTreeSet<&'static str>);
-    impl ExprSlotVisitor for Seen {
-        fn visit_slot(&mut self, _path: &[ExprSlot], expr: &Expr) {
-            self.0.insert(variant(expr));
-        }
-    }
-    let mut seen = Seen(BTreeSet::new());
+    let mut seen = BTreeSet::new();
     for (name, program) in corpus() {
         validate_ast(&program).unwrap_or_else(|error| panic!("{name} is valid IR: {error}"));
-        for body in bodies(&program) {
-            walk_expr_slots(&mut seen, body);
-        }
+        seen.extend(variants_in(&program));
         let graph = workflow_graph_from_program(&program);
         let rebuilt = workflow_program_from_graph(&graph)
             .unwrap_or_else(|error| panic!("{name} reconstructs: {error}"));
@@ -552,8 +437,8 @@ fn projecting_then_reconstructing_is_the_identity_for_every_ir_variant() {
         );
     }
     assert_eq!(
-        seen.0,
-        VARIANTS.into_iter().collect(),
+        seen,
+        EXPR_VARIANT_NAMES.into_iter().collect(),
         "the corpus holds every IR variant"
     );
 }
@@ -630,7 +515,7 @@ fn every_expression_of_a_node_has_a_typed_slot_address() {
         }
     }
     for (name, program) in corpus() {
-        for body in bodies(&program) {
+        for body in program_bodies(&program) {
             let mut paths = Paths(Vec::new());
             walk_expr_slots(&mut paths, body);
             for path in paths.0 {

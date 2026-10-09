@@ -201,20 +201,29 @@ fn link_normalized(
     normalized: adapter::Program,
     host: &lash_vm::LashVmHostEnvironment,
 ) -> Result<lash_vm::LinkedModule, Diagnostic> {
+    let program = lower_normalized(&normalized, host)?;
+    lash_vm::LinkedModule::link(program, host)
+        .map_err(|error| Diagnostic::new(DiagnosticCode::LinkError, error.to_string(), None))
+}
+
+/// The program [`link`] hands the linker: lowered against the session and
+/// the module catalogue `host` describes.
+fn lower_normalized(
+    normalized: &adapter::Program,
+    host: &lash_vm::LashVmHostEnvironment,
+) -> Result<lash_vm::Program, Diagnostic> {
     let module_authority_roots = host
         .resources
         .module_instances()
         .filter_map(|(_, module)| module.path.first().cloned())
         .collect();
-    let program = lower::lower_with_context(
-        &normalized,
+    lower::lower_with_context(
+        normalized,
         &host.globals,
         &host.process_handles,
         &module_authority_roots,
         &host.expired_functions,
-    )?;
-    lash_vm::LinkedModule::link(program, host)
-        .map_err(|error| Diagnostic::new(DiagnosticCode::LinkError, error.to_string(), None))
+    )
 }
 
 /// Test support: compiles TypeScript the way a test that wants bytecode for a
@@ -222,6 +231,15 @@ fn link_normalized(
 #[cfg(feature = "testing")]
 pub mod testing {
     use crate::{Diagnostic, DiagnosticCode};
+
+    /// The program [`crate::link`] lowers `source` to before it links it:
+    /// the draft a host holds, with every process literal still inline.
+    pub fn lower_for_link(
+        source: &str,
+        host: &lash_vm::LashVmHostEnvironment,
+    ) -> Result<lash_vm::Program, Diagnostic> {
+        crate::lower_normalized(&crate::adapter::parse(source)?, host)
+    }
 
     /// Parses `source` and compiles it as the main entry of the raw module
     /// artifact it forms. Source spans are kept for runtime diagnostics.

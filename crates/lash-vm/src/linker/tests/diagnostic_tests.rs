@@ -336,3 +336,20 @@ fn link_diagnostics_render_deduplicated_operation_hints() {
     );
     assert_eq!(diagnostic.matches("tools.echo").count(), 1, "{diagnostic}");
 }
+
+/// A program built as IR can call a function no declaration names: no parser
+/// resolved the call. The linker refuses it by name, as it refuses any name
+/// nothing binds (FIG-5578: it used to panic).
+#[test]
+fn a_call_to_an_undeclared_function_is_refused_by_name() {
+    let program = builders::program(vec![builders::finish(builders::function_call(
+        "missing",
+        vec![builders::num(1.0)],
+    ))]);
+    let error = LinkedModule::link(program, full_host_environment())
+        .expect_err("nothing declares the function");
+    assert!(
+        matches!(&error, LinkError::UnknownName { name, .. } if name == "missing"),
+        "{error:?}"
+    );
+}

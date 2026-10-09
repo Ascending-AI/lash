@@ -397,10 +397,25 @@ fn exported_names(ir: &lash_vm::Program) -> BTreeSet<String> {
 }
 
 /// Every lifted declaration is the literal the draft holds at its site: the
-/// literal digests to the declaration's name and carries as many hidden
-/// arguments as the declaration has hidden parameters. TypeScript declares
-/// no process.
+/// literal digests to the declaration's name and carries one hidden argument
+/// for each hidden parameter the declaration has. A hidden argument that
+/// names another literal's binding is no parameter: that literal lifted to a
+/// declaration, and the linker resolves the name to it instead of passing it
+/// at start. TypeScript declares no process.
 fn origins_are_derived(ir: &lash_vm::Program, draft: &lash_vm::Program) -> Vec<String> {
+    fn literal_bindings(expr: &Expr, names: &mut BTreeSet<String>) {
+        if let Expr::Assign { target, expr } = expr
+            && target.is_simple()
+            && matches!(expr.as_ref(), Expr::ProcessLiteral(_))
+        {
+            names.insert(target.root.to_string());
+        }
+        for child in expr.children() {
+            literal_bindings(child, names);
+        }
+    }
+    let mut literals = BTreeSet::new();
+    literal_bindings(&draft.main, &mut literals);
     let mut failures = Vec::new();
     for declaration in &ir.declarations {
         let Declaration::Process(process) = declaration else {
@@ -425,7 +440,12 @@ fn origins_are_derived(ir: &lash_vm::Program, draft: &lash_vm::Program) -> Vec<S
             Some(Expr::ProcessLiteral(literal))
                 if lash_vm::lifted_process_identity(&literal.body, &site.steps)
                     == process.name.as_str()
-                    && literal.hidden_args.len() == *hidden_params as usize => {}
+                    && literal
+                        .hidden_args
+                        .iter()
+                        .filter(|hidden| !literals.contains(hidden.name.as_str()))
+                        .count()
+                        == *hidden_params as usize => {}
             _ => failures.push(format!(
                 "`{}` does not derive from the literal at its site {:?}",
                 process.name, site
@@ -447,7 +467,7 @@ fn every_admitted_artifact_holds_the_structural_invariants() {
     let bound_after = session_bindings();
     let mut failures = Vec::new();
     let mut checked = 0usize;
-    for program in corpora::all() {
+    for program in corpora::with_workflows() {
         // A program the round-trip law records as not admitting is that
         // law's concern; every admitted one is held to the invariants here.
         let problems = check(&program, bound_after.get(&program.id));

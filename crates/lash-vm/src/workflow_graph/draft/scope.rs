@@ -8,7 +8,9 @@
 //! precedes the read in evaluation order: the two branches of an `if` and the
 //! body and catch of a `try` each start from what was visible before them,
 //! and a loop element or a catch binding is visible only inside its region.
-//! These are the linker's rules, read without a host environment.
+//! A process reference and a function call name a declaration of the
+//! program, from any frame. These are the linker's rules, read without a host
+//! environment.
 
 use std::collections::BTreeSet;
 
@@ -28,6 +30,8 @@ pub(super) struct Lexical {
     /// processes, and `main` bindings of a process literal, which a literal's
     /// body reads as the process the binding lifts to.
     pub(super) processes: BTreeSet<AstString>,
+    /// The declared functions, which a call names from any frame.
+    pub(super) functions: BTreeSet<AstString>,
 }
 
 pub(super) struct Frame {
@@ -68,6 +72,8 @@ pub(super) enum Role {
     Capture,
     /// A reference to a declared process.
     Process,
+    /// A call to a declared function.
+    Function,
 }
 
 impl Lexical {
@@ -76,10 +82,16 @@ impl Lexical {
             frames: Vec::new(),
             occurrences: Vec::new(),
             processes: BTreeSet::new(),
+            functions: BTreeSet::new(),
         };
         for declaration in &program.declarations {
-            if let Declaration::Process(process) = declaration {
-                lexical.processes.insert(process.name.clone());
+            match declaration {
+                Declaration::Process(process) => {
+                    lexical.processes.insert(process.name.clone());
+                }
+                Declaration::Function(function) => {
+                    lexical.functions.insert(function.name.clone());
+                }
             }
         }
         collect_literal_bindings(&program.main, &mut lexical.processes);
@@ -134,7 +146,7 @@ impl Lexical {
                     Role::Read | Role::Update | Role::Capture => {
                         !self.processes.contains(&occurrence.name)
                     }
-                    Role::Process => true,
+                    Role::Process | Role::Function => true,
                     Role::Bind => false,
                 }
         })
@@ -227,6 +239,13 @@ impl Lexical {
             Expr::ProcessRef { process } => {
                 let known = self.processes.contains(process);
                 self.occurrence(frame, process, path, Role::Process, known);
+            }
+            Expr::FunctionCall { function, args } => {
+                let declared = self.functions.contains(function);
+                self.occurrence(frame, function, path, Role::Function, declared);
+                for (index, argument) in (0u32..).zip(args) {
+                    self.walk(argument, &path.child(index), frame, scope);
+                }
             }
             Expr::Assign { target, expr } => {
                 let mut child = 0;

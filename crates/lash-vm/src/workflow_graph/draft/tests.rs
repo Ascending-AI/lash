@@ -843,3 +843,83 @@ fn an_edge_drag_is_a_typed_edit_and_no_order_is_a_cycle() {
     assert_eq!(edit, Some(0));
     assert_eq!(kind, Kind::MoveIntoOwnSubtree);
 }
+
+#[test]
+fn removing_a_function_with_live_calls_is_refused_unless_the_transaction_removes_them() {
+    let double = |name: &str| {
+        b::function_decl(
+            name,
+            vec![b::function_param("value", TypeExpr::Any)],
+            TypeExpr::Any,
+            b::binary(
+                b::var("value"),
+                crate::CoercingBinaryOp::Multiply,
+                b::num(2.0),
+            ),
+        )
+    };
+    let mut draft = open(&b::module(
+        vec![double("double")],
+        vec![
+            b::assign("twice", b::function_call("double", vec![b::num(2.0)])),
+            b::print(b::string("done")),
+        ],
+    ));
+    let [caller, _] = main(&draft)[..] else {
+        panic!("two statements");
+    };
+
+    let (edit, location, kind) = refused(
+        &mut draft,
+        vec![WorkflowEdit::RemoveFunction {
+            name: "double".into(),
+        }],
+    );
+    assert_eq!(edit, None, "calls are checked on the whole result");
+    assert_eq!(
+        kind,
+        Kind::UnknownFunction {
+            name: "double".into()
+        }
+    );
+    assert_eq!(
+        location,
+        WorkflowEditLocation::Node {
+            node: caller,
+            slot: WorkflowSlotPath::structural([ExprSlot::Value]),
+        },
+        "the diagnostic points at the call"
+    );
+
+    // A statement that calls a function nothing declares is refused the
+    // same way, wherever the call came from.
+    let (_, _, kind) = refused(
+        &mut draft,
+        vec![WorkflowEdit::InsertNode {
+            body: WorkflowBodyRef::Main,
+            before: None,
+            statement: b::print(b::function_call("triple", vec![b::num(1.0)])),
+        }],
+    );
+    assert_eq!(
+        kind,
+        Kind::UnknownFunction {
+            name: "triple".into()
+        }
+    );
+
+    apply(
+        &mut draft,
+        vec![
+            WorkflowEdit::RemoveFunction {
+                name: "double".into(),
+            },
+            WorkflowEdit::RemoveNode { node: caller },
+        ],
+    )
+    .expect("the same transaction removes the call");
+    assert_eq!(
+        spelled(&draft),
+        b::program(vec![b::print(b::string("done"))])
+    );
+}

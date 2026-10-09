@@ -1062,10 +1062,6 @@ impl<'module> Linker<'module> {
     /// makes the declared return type usable: the call's binding is the
     /// declared output, so a function result flows into typed positions exactly
     /// like a process result does.
-    #[expect(
-        clippy::expect_used,
-        reason = "function calls are only lowered after the declared-function pass registered the signature, per the message"
-    )]
     pub(super) fn lower_function_call(
         &self,
         function: &AstString,
@@ -1073,11 +1069,14 @@ impl<'module> Linker<'module> {
         path: &AstPath,
         scope: &mut Scope,
     ) -> Result<(Expr, Binding), LinkError> {
-        let signature = self
-            .function_signatures
-            .get(function.as_str())
-            .expect("a function call is only lowered for a declared function")
-            .clone();
+        // A front end resolves a call before it spells this node, so only a
+        // program built or edited as IR can name a function nothing declares.
+        let Some(signature) = self.function_signatures.get(function.as_str()).cloned() else {
+            return Err(LinkError::UnknownName {
+                name: function.to_string(),
+                span: scope.span,
+            });
+        };
         if args.len() != signature.params.len() {
             return Err(LinkError::FunctionArgumentCount {
                 function: function.to_string(),

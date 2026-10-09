@@ -2,8 +2,9 @@
 //!
 //! The corpus laws run over all of them (FIG-3599): the Node differential
 //! table, the Test262 slice, the Node session corpus (each cell, linked
-//! against the globals its earlier cells bound), the workflow-graph goldens
-//! and the typescript-host-flows cells. A new corpus joins here, or the laws do not
+//! against the globals its earlier cells bound), the workflow-graph goldens,
+//! the typescript-host-flows cells, the teaching witnesses and the AI-style
+//! workflows. A new corpus joins here, or the laws do not
 //! see it.
 
 // FIG-2971: this file is test/tooling/host code; ambient fs/env/process
@@ -15,6 +16,7 @@ use std::collections::BTreeSet;
 
 use lash_vm::{LashVmHostEnvironment, TypeExpr};
 
+use super::ai_workflows;
 use super::goldens;
 use super::ingest::{data_path, harness_bindings, test_script};
 use super::metadata::{self, Phase, TestFlag};
@@ -40,7 +42,7 @@ impl CorpusProgram {
     }
 }
 
-/// Every program of every corpus.
+/// Every program of every corpus the VM-instance laws run.
 pub(crate) fn all() -> Vec<CorpusProgram> {
     let mut programs = differential();
     programs.extend(test262());
@@ -53,6 +55,22 @@ pub(crate) fn all() -> Vec<CorpusProgram> {
         .map(|program| program.id.as_str())
         .collect::<BTreeSet<_>>();
     assert_eq!(ids.len(), programs.len(), "corpus ids are unique");
+    programs
+}
+
+/// [`all`] and the AI-style workflows: what the document laws run (the
+/// print round trip, the structural invariants and the document
+/// differential).
+///
+/// The workflows hand compound values to `tools.echo`, and the VM-instance
+/// park law does not hold for a program that does: a straight run gets the
+/// very object it passed back from the echo host, a run parked on the call
+/// gets a copy, and the two leave different heaps (FIG-5578's report has the
+/// three-line program). Until the host boundary settles which of the two a
+/// guest sees, these programs stay out of [`all`].
+pub(crate) fn with_workflows() -> Vec<CorpusProgram> {
+    let mut programs = all();
+    programs.extend(ai_workflows());
     programs
 }
 
@@ -219,6 +237,15 @@ fn goldens() -> Vec<CorpusProgram> {
             }),
     );
     programs
+}
+
+fn ai_workflows() -> Vec<CorpusProgram> {
+    ai_workflows::ALL
+        .iter()
+        .map(|(name, source)| {
+            CorpusProgram::new(format!("ai-workflow:{name}"), (*source).to_string())
+        })
+        .collect()
 }
 
 fn host_flows() -> Vec<CorpusProgram> {
