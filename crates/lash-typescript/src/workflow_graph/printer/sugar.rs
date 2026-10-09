@@ -4,11 +4,12 @@
 
 use lashlang::{Expr, FunctionExpr, ResourceRefExpr, StructuralRole};
 
-use crate::LOWERED_BINDING_PREFIX;
 use crate::signatures::INSTANCE_STDLIB_SIGNATURES;
 
 use super::templates::{template_parts, template_text};
-use super::{Printed, Printer, TypeScriptSourceError, javascript_binary_op, stdlib_call};
+use super::{
+    Printed, Printer, TypeScriptSourceError, is_lowered_binding, javascript_binary_op, stdlib_call,
+};
 
 impl<'p> Printer<'p> {
     /// Re-sugar one lowered shape, or `Ok(None)` if this is not one.
@@ -252,7 +253,7 @@ fn all_settled_results_source<'a>(items: &'a Expr, function: &'a Expr) -> Option
         return None;
     }
     let result = function.params[0].as_str();
-    if !result.starts_with(LOWERED_BINDING_PREFIX) {
+    if !is_lowered_binding(result) {
         return None;
     }
     let field = |expression: &Expr, name: &str| {

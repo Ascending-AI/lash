@@ -718,7 +718,7 @@ async fn data_terminal_call_and_effect_edits_round_trip_without_raw_constructor_
     assert!(
         saved
             .source
-            .contains("await (display.set_status({ key: \"phase\", value: \"ready\" }))")
+            .contains("await display.set_status({ key: \"phase\", value: \"ready\" })")
     );
     assert!(saved.source.contains("await sleep(\"1ms\")"));
 
@@ -781,7 +781,7 @@ async fn data_terminal_call_and_effect_edits_round_trip_without_raw_constructor_
     assert!(
         switched
             .source
-            .contains("await (display.show_message({ text: \"switched\", tone: \"warm\" }))")
+            .contains("await display.show_message({ text: \"switched\", tone: \"warm\" })")
     );
     assert!(!switched.source.contains("key: \"phase\""));
     assert!(!switched.source.contains("value: \"ready\""));
@@ -812,7 +812,7 @@ async fn data_terminal_call_and_effect_edits_round_trip_without_raw_constructor_
     assert!(
         restored
             .source
-            .contains("await (display.show_message({ text: \"switched\" }))")
+            .contains("await display.show_message({ text: \"switched\" })")
     );
     assert!(!restored.source.contains("tone:"));
     assert!(restored.nodes.iter().any(|node| {
@@ -1651,7 +1651,7 @@ async fn new_call_node_saves_reprojects_and_runs_with_canonical_correlation() {
     assert!(
         saved
             .source
-            .contains("await (display.set_status({ key: \"k\", value: \"v\" }))")
+            .contains("await display.set_status({ key: \"k\", value: \"v\" })")
     );
     let call_id = saved
         .nodes

@@ -798,8 +798,7 @@ impl<'p> Printer<'p> {
                 let path = type_name.split('.').collect::<Vec<_>>();
                 if path.len() >= 2
                     && path.iter().all(|segment| {
-                        is_typescript_identifier(segment)
-                            && !segment.starts_with(LOWERED_BINDING_PREFIX)
+                        is_typescript_identifier(segment) && !is_lowered_binding(segment)
                     })
                 {
                     Ok(format!("{type_name}({})", self.expression(input)?))
@@ -1045,6 +1044,9 @@ impl<'p> Printer<'p> {
 
     fn unary_operand(&self, expression: &Expr) -> Printed {
         match expression {
+            // The unwrap has no TypeScript spelling, so its operand owns
+            // precedence too: an awaited host call needs no parentheses.
+            Expr::ResultUnwrap(value) => self.unary_operand(value),
             Expr::CoercingBinary { .. } | Expr::OperandLogical { .. } | Expr::If { .. } => {
                 self.expression(expression)
             }
@@ -1071,7 +1073,7 @@ impl<'p> Printer<'p> {
     }
 
     fn identifier(&self, context: &'static str, name: &str) -> Printed {
-        if name.starts_with(LOWERED_BINDING_PREFIX) {
+        if is_lowered_binding(name) {
             return Err(TypeScriptSourceError::GeneratedBinding {
                 name: name.to_string(),
             });
@@ -1084,6 +1086,13 @@ impl<'p> Printer<'p> {
         }
         Ok(name.to_string())
     }
+}
+
+/// The lens owns the lowerer's private binding namespace. Re-sugaring uses
+/// this only alongside the lowered IR shape, and otherwise refuses to spell
+/// a private slot as an authored identifier.
+fn is_lowered_binding(name: &str) -> bool {
+    name.starts_with(LOWERED_BINDING_PREFIX)
 }
 
 /// The statements of a body, in authored order, without the structure that

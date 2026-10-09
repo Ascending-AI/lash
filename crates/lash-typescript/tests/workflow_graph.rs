@@ -1651,7 +1651,7 @@ fn comments_that_are_not_the_label_form_stay_trivia() {
 #[test]
 fn an_edit_inside_a_process_container_survives_the_round_trip() {
     const SOURCE: &str = "const flow = async () => {\n  \
-        await (display.show_message({ text: \"before\" }));\n  \
+        await display.show_message({ text: \"before\" });\n  \
         let total = 1;\n  \
         return total;\n};\n";
 

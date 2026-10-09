@@ -1170,8 +1170,8 @@ finish([state, introduced]);
                 && node.data.binding().as_deref() == Some("runs")
                 && node.data.expression().as_deref()
                     == Some(
-                        "[await (processes.start({ definition: worker })), \
-                         await (processes.start({ definition: worker }))]",
+                        "[await processes.start({ definition: worker }), \
+                         await processes.start({ definition: worker })]",
                     )
         }));
 

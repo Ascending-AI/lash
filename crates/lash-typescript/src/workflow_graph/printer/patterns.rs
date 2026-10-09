@@ -18,7 +18,7 @@ use std::collections::BTreeMap;
 use lashlang::{CoercingBinaryOp, Expr, FunctionExpr, OperandLogicalOp, StructuralRole};
 
 use super::{
-    LOWERED_BINDING_PREFIX, Printed, Printer, TypeScriptSourceError, is_typescript_identifier, key,
+    Printed, Printer, TypeScriptSourceError, is_lowered_binding, is_typescript_identifier, key,
     stdlib_call,
 };
 
@@ -149,7 +149,7 @@ impl<'p> Printer<'p> {
         let mut counting = true;
         for (index, param) in function.params.iter().enumerate() {
             let is_rest = accepts_rest && index + 1 == function.params.len();
-            let (mut spelling, defaulted) = if param.as_str().starts_with(LOWERED_BINDING_PREFIX) {
+            let (mut spelling, defaulted) = if is_lowered_binding(param.as_str()) {
                 match self.parameter_pattern(param.as_str(), rest, &mut bound)? {
                     Some(found) => {
                         rest = &rest[found.used..];
@@ -245,7 +245,7 @@ impl<'p> Printer<'p> {
         if !target.is_simple() {
             return Ok(None);
         }
-        let generated = target.root.as_str().starts_with(LOWERED_BINDING_PREFIX);
+        let generated = is_lowered_binding(target.root.as_str());
         // `[..]`: the pattern copies the incoming iterable into a generated
         // slot the element reads index.
         if generated
@@ -360,9 +360,7 @@ impl<'p> Printer<'p> {
             expr: key_value,
         }) = items.get(used)
         {
-            if !key_target.is_simple()
-                || !key_target.root.as_str().starts_with(LOWERED_BINDING_PREFIX)
-            {
+            if !key_target.is_simple() || !is_lowered_binding(key_target.root.as_str()) {
                 break;
             }
             let Some(property) = self.pattern_in(
@@ -402,7 +400,7 @@ impl<'p> Printer<'p> {
         // bound ones deleted from the copy, and the rest bound to it.
         if let Some(Expr::Assign { target, expr }) = items.get(used)
             && target.is_simple()
-            && target.root.as_str().starts_with(LOWERED_BINDING_PREFIX)
+            && is_lowered_binding(target.root.as_str())
             && let Some([entries]) = stdlib_call(expr.as_ref(), "Object.fromEntries")
             && let Some([Expr::Variable(from)]) = stdlib_call(entries, "Object.entries")
             && from.as_str() == input
