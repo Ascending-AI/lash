@@ -597,3 +597,23 @@ fn empty_array_search_does_not_convert_from_index() {
         ]),
     );
 }
+
+/// ECMA whitespace includes BOM and excludes NEL for both trim and number parsing.
+#[test]
+fn trim_and_number_parsing_use_ecma_whitespace() {
+    assert_finished(
+        execute(
+            "finish(['\\uFEFF x \\uFEFF'.trim(), '\\uFEFFx'.trimStart(), 'x\\uFEFF'.trimEnd(), '\\u0085x\\u0085'.trim(), Number('\\uFEFF1'), parseInt('\\uFEFF1'), parseFloat('\\uFEFF1'), Number.isNaN(Number('\\u00851'))]);",
+        ),
+        Datum::List(vec![
+            Datum::Text("x".into()),
+            Datum::Text("x".into()),
+            Datum::Text("x".into()),
+            Datum::Text("\u{85}x\u{85}".into()),
+            Datum::Float(lash_kernel_doc::Float::new(1.0)),
+            Datum::Float(lash_kernel_doc::Float::new(1.0)),
+            Datum::Float(lash_kernel_doc::Float::new(1.0)),
+            Datum::Bool(true),
+        ]),
+    );
+}

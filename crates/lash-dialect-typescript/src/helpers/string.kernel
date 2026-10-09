@@ -22,9 +22,6 @@ use text.from_code_points
 use text.from_utf16_units
 use text.lower_u17_0_0
 use text.repeat
-use text.trim_end_u17_0_0
-use text.trim_start_u17_0_0
-use text.trim_u17_0_0
 use text.upper_u17_0_0
 use text.utf16_find
 use text.utf16_get
@@ -65,6 +62,7 @@ use ts.string.toLowerCase
 use ts.string.toString
 use ts.string.toUpperCase
 use ts.string.trim
+use ts.string.trim_value
 use ts.string.trimEnd
 use ts.string.trimStart
 use ts.string.uint32
@@ -470,7 +468,8 @@ errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
 charge sum(8, deep(result))
 body {
   let text = invoke ts.string.receiver(this)
-  return text.trim_u17_0_0(text)
+  let output = invoke ts.string.trim_value(text, true, true)
+  return output
 }
 
 function ts.string.trimStart(this: Any, args: List(Any)) -> Text
@@ -479,7 +478,8 @@ errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
 charge sum(8, deep(result))
 body {
   let text = invoke ts.string.receiver(this)
-  return text.trim_start_u17_0_0(text)
+  let output = invoke ts.string.trim_value(text, true, false)
+  return output
 }
 
 function ts.string.trimEnd(this: Any, args: List(Any)) -> Text
@@ -488,7 +488,8 @@ errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
 charge sum(8, deep(result))
 body {
   let text = invoke ts.string.receiver(this)
-  return text.trim_end_u17_0_0(text)
+  let output = invoke ts.string.trim_value(text, false, true)
+  return output
 }
 
 function ts.string.repeat(this: Any, args: List(Any)) -> Text

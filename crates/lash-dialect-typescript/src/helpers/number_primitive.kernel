@@ -1,6 +1,10 @@
 # JavaScript number_primitive behavior, expressed in kernel code.
 use bool.not
 use eq
+use list.contains
+use text.utf16_get
+use text.utf16_len
+use text.utf16_slice
 use float.parse
 use float.to_int
 use int.div_trunc
@@ -25,7 +29,7 @@ use text.ends_with
 use text.len
 use text.repeat
 use text.slice
-use text.trim_u17_0_0
+use ts.string.trim_value
 use ts.number.digit
 use ts.number.layout
 use ts.number.parse
@@ -35,6 +39,30 @@ use ts.number.parts
 use ts.number.ratio
 use ts.number.round_decimal
 use ts.number.to_string
+
+# ECMA WhiteSpace and LineTerminator code units: BOM is included, NEL is not.
+function ts.string.trim_value(text: Text, leading: Bool, trailing: Bool) -> Text
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, size(text))
+body {
+  let whitespace = [9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279]
+  let start = 0
+  let end = text.utf16_len(text)
+  if leading {
+    while num.lt(start, end) {
+      if list.contains(whitespace, text.utf16_get(text, start)) {} else { break }
+      set start = num.add(start, 1)
+    }
+  }
+  if trailing {
+    while num.lt(start, end) {
+      if list.contains(whitespace, text.utf16_get(text, num.sub(end, 1))) {} else { break }
+      set end = num.sub(end, 1)
+    }
+  }
+  return text.utf16_slice(text, start, end)
+}
 
 function ts.number.digit(character: Text, radix: Int) -> Int
 kernel 1
@@ -61,7 +89,7 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(12, product(size(source), size(source)))
 body {
-  let source = text.trim_u17_0_0(source)
+  let source = invoke ts.string.trim_value(source, true, true)
   let length = text.len(source)
   let i = 0
   let sign = 1.0
@@ -101,7 +129,7 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(16, product(size(source), 20))
 body {
-  let source = text.trim_u17_0_0(source)
+  let source = invoke ts.string.trim_value(source, true, true)
   let length = text.len(source)
   let i = 0
   let sign = 1.0
@@ -159,7 +187,7 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(24, product(size(source), size(source)))
 body {
-  let source = text.trim_u17_0_0(source)
+  let source = invoke ts.string.trim_value(source, true, true)
   if same(source, "") { return 0.0 }
   let prefix = text.slice(source, 0, 2)
   let base = 0
