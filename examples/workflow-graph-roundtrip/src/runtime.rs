@@ -5,7 +5,10 @@ use lash::LashCore;
 use lash::persistence::ProcessStartReceipt;
 use lash::process::*;
 use lash::tracing::TraceLanguageExecutionPayload;
-use lash::vm::ir::{Expr, WorkflowDeclaration, WorkflowNodeId, WorkflowNodeKind};
+use lash::vm::ir::{
+    AssignPathStep, Expr, WorkflowDeclaration, WorkflowNodeId, WorkflowProjection,
+    lifted_process_identity,
+};
 use lash::workflow::{
     WorkflowCorrespondence, WorkflowCorrespondenceEntry, WorkflowDocumentRead, WorkflowDraft,
     WorkflowDraftHandle, WorkflowEntry, WorkflowExecutionDocument,
@@ -29,6 +32,8 @@ pub(crate) enum RunError {
     Display(#[from] lash::vm::ExecutionHostError),
     #[error(transparent)]
     Json(#[from] serde_json::Error),
+    #[error(transparent)]
+    Graph(#[from] lash::workflow::WorkflowGraphError),
     #[error("{0}")]
     Invalid(String),
 }
@@ -106,6 +111,38 @@ pub(crate) fn surviving_ids(
 /// it remain part of its document, but are not the workflow selected to run.
 /// A document with several top-level workflows needs an explicit host choice.
 pub(crate) fn select_entry(draft: &WorkflowDraft) -> Result<WorkflowEntry, RunError> {
+    let program = lash::workflow::workflow_program_from_graph(draft.document())?;
+    let main = WorkflowProjection::for_main(&program);
+    // Source-authored drafts still bind process literals; admitted documents
+    // bind references instead. The projection supplies the literal's exact
+    // site, so its container is resolved without walking nested process bodies.
+    let bound_in_main = main
+        .body()
+        .statements
+        .iter()
+        .filter_map(|statement| {
+            let (expression, path) = match statement.expr {
+                Expr::LabelAnnotated { expr, .. } => (expr.as_ref(), statement.ast_path.child(0)),
+                expression => (expression, statement.ast_path.clone()),
+            };
+            let Expr::Assign { target, expr } = expression else {
+                return None;
+            };
+            let value_index = target
+                .steps
+                .iter()
+                .filter(|step| matches!(step, AssignPathStep::Index(_)))
+                .count() as u32;
+            match expr.as_ref() {
+                Expr::ProcessRef { process } => Some(process.to_string()),
+                Expr::ProcessLiteral(literal) => Some(lifted_process_identity(
+                    &literal.body,
+                    &path.child(value_index).steps,
+                )),
+                _ => None,
+            }
+        })
+        .collect::<BTreeSet<_>>();
     let mut workflows = draft
         .document()
         .declarations
@@ -114,12 +151,8 @@ pub(crate) fn select_entry(draft: &WorkflowDraft) -> Result<WorkflowEntry, RunEr
             let WorkflowDeclaration::Process(process) = declaration else {
                 return None;
             };
-            let bound_in_main = draft.document().main.nodes.iter().any(|node| {
-                matches!(&node.kind, WorkflowNodeKind::Data {
-                binding: Some(_), expression: Expr::ProcessRef { process: name },
-            } if name.as_str() == process.name)
-            });
-            (process.origin.is_declared() || bound_in_main).then_some(process)
+            (process.origin.is_declared() || bound_in_main.contains(&process.name))
+                .then_some(process)
         });
     match (workflows.next(), workflows.next()) {
         (Some(process), None) => Ok(WorkflowEntry::Process(process.id.clone())),
