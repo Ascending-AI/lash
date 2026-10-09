@@ -1,15 +1,12 @@
-use std::collections::{BTreeMap, BTreeSet};
-
 use lash::typescript::workflow_graph::{
     typescript_assign_target_source, typescript_expression_source, typescript_for_of_source,
-    typescript_process_wrapper,
 };
 use lash::vm::ir::{
-    Expr, ProcessParam, VariableVersion, WorkflowContainer, WorkflowDeclaration, WorkflowEdge,
-    WorkflowNode, WorkflowNodeId, WorkflowNodeKind, WorkflowSubgraph, format_type_expr,
-    workflow_call_from_ir, workflow_call_to_ir, workflow_effect_from_ir, workflow_effect_to_ir,
+    Expr, VariableVersion, WorkflowContainer, WorkflowDeclaration, WorkflowEdge, WorkflowNode,
+    WorkflowNodeKind, WorkflowSubgraph, format_type_expr, workflow_call_from_ir,
+    workflow_call_to_ir, workflow_effect_from_ir, workflow_effect_to_ir,
 };
-use lash::workflow::{WorkflowBodyForm, WorkflowCatch, WorkflowGraph};
+use lash::workflow::{WorkflowCatch, WorkflowGraph};
 use serde_json::json;
 
 use crate::{
@@ -23,7 +20,7 @@ mod process;
 
 use editable::*;
 
-use process::{editable_process_param, process_from_data, seeded_process_body};
+use process::editable_process_param;
 
 pub(crate) fn validate_fragment(request: ValidateRequest) -> ValidateResponse {
     // A fragment is validated in the scope it will be edited in: the host sends
@@ -138,246 +135,6 @@ pub(crate) fn document_from_graph(
         nodes,
         edges,
         roots,
-    }
-}
-
-/// The document `document` asks for, as a graph over `baseline`: a node the
-/// document still names keeps its id, and keeps its typed IR exactly unless
-/// its form was edited. The result states what to reach, not a program to
-/// trust: [`crate::edits::apply_document`] turns it into typed edits of the
-/// baseline's draft, and lash derives everything else again.
-pub(crate) fn graph_from_document(
-    document: WorkflowDocument,
-    baseline: &WorkflowGraph,
-) -> Result<WorkflowGraph, RenderErrorResponse> {
-    let mut seen = BTreeSet::new();
-    for node in &document.nodes {
-        if !seen.insert(node.id.as_str()) {
-            return Err(RenderErrorResponse::document(
-                format!("duplicate flow node id `{}`", node.id),
-                json!({ "nodeId": node.id }),
-            ));
-        }
-    }
-    let nodes = document
-        .nodes
-        .iter()
-        .map(|node| (node.id.as_str(), node))
-        .collect::<BTreeMap<_, _>>();
-    let edges = document.edges.iter().fold(
-        BTreeMap::<&str, Vec<&FlowEdge>>::new(),
-        |mut by_scope, edge| {
-            by_scope
-                .entry(edge.data.scope.as_str())
-                .or_default()
-                .push(edge);
-            by_scope
-        },
-    );
-    let baseline_nodes = baseline
-        .nodes()
-        .map(|node| (node.id.to_string(), node.clone()))
-        .collect::<BTreeMap<_, _>>();
-    let baseline_processes = baseline
-        .declarations
-        .iter()
-        .filter_map(|declaration| match declaration {
-            WorkflowDeclaration::Process(process) => {
-                Some((process.id.to_string(), process.clone()))
-            }
-            WorkflowDeclaration::Function(_) => None,
-        })
-        .collect::<BTreeMap<_, _>>();
-    let graph_scope = GraphScope::main(document_process_bindings(&document, baseline));
-    let mut graph = baseline.clone();
-    graph.schema_version = document.schema_version;
-    graph.facet_schema_version = None;
-    graph.main = build_subgraph(
-        "main",
-        &document.roots.main,
-        &nodes,
-        &baseline_nodes,
-        &edges,
-        &graph_scope,
-    )?;
-    let mut declarations = baseline
-        .declarations
-        .iter()
-        .filter(|declaration| matches!(declaration, WorkflowDeclaration::Function(_)))
-        .cloned()
-        .collect::<Vec<_>>();
-    for process_id in &document.roots.processes {
-        let flow_process = nodes.get(process_id.as_str()).copied().ok_or_else(|| {
-            RenderErrorResponse::document(
-                format!("missing process container `{process_id}`"),
-                json!({ "processId": process_id }),
-            )
-        })?;
-        if flow_process.data.kind() != "process" {
-            return Err(RenderErrorResponse::invalid_node_payload(
-                process_id,
-                "a process root needs `data.kind` set to `process`",
-            ));
-        }
-        let is_new = !baseline_processes.contains_key(process_id);
-        let baseline_process = baseline_processes.get(process_id);
-        let mut process =
-            process_from_data(process_id, &flow_process.data, baseline_process.cloned())?;
-        // The wrapper passes the authored parameters to the run body, so a
-        // process that is new or whose parameters changed takes the wrapper
-        // the dialect lowers for the parameters it has now.
-        if baseline_process.is_none_or(|baseline| baseline.params != process.params) {
-            let hidden = match &process.origin {
-                lash::vm::ir::ProcessOrigin::Lifted { hidden_params, .. } => {
-                    *hidden_params as usize
-                }
-                lash::vm::ir::ProcessOrigin::Declared => 0,
-            };
-            let authored = process.params.len().saturating_sub(hidden);
-            process.wrapper = Some(Box::new(typescript_process_wrapper(
-                &process.params[..authored],
-            )));
-        }
-        let rebuilt = rebuild_process_body(
-            &RebuiltProcess {
-                id: process_id,
-                params: &process.params,
-                is_new,
-            },
-            &flow_process.data,
-            &nodes,
-            &baseline_nodes,
-            &edges,
-            &graph_scope.in_process(),
-        )?;
-        process.body = rebuilt;
-        declarations.push(WorkflowDeclaration::Process(process));
-    }
-    graph.declarations = declarations;
-    bind_declared_processes(&mut graph);
-    Ok(graph)
-}
-
-/// Give every declared process its module binding.
-///
-/// A TypeScript process is `const name = async (..) => {..}`: the module body
-/// holds the binding and the declaration hangs off it, so a graph whose main
-/// subgraph never binds a declared process cannot be rendered. A host that adds
-/// a process container gets that binding here rather than having to know the
-/// module shape.
-///
-/// A *lifted* process is the exception (ADR 0095): its authored arrow already
-/// travels inline in the statement that binds or passes it, and the lens
-/// deliberately renders no module declaration for it. Synthesising a
-/// `name = name` binding for one emits a read of a name nothing declares, so
-/// lifted processes are left to the statement that already carries them.
-fn bind_declared_processes(graph: &mut WorkflowGraph) {
-    // A renamed process leaves its old module binding pointing at a name no
-    // declaration answers to, and that binding cannot be rendered. The binding
-    // is derived from the process, not authored, so a stale one is dropped and
-    // the new name is bound below.
-    let declared = graph
-        .declarations
-        .iter()
-        .filter_map(|declaration| match declaration {
-            WorkflowDeclaration::Process(process) => Some(process.name.clone()),
-            _ => None,
-        })
-        .collect::<BTreeSet<_>>();
-    graph.main.nodes.retain(|node| match &node.kind {
-        WorkflowNodeKind::Data {
-            binding: Some(binding),
-            expression: Expr::ProcessRef { process },
-        } if binding.is_simple() && binding.root == *process => declared.contains(process.as_str()),
-        _ => true,
-    });
-    let bound = graph
-        .main
-        .nodes
-        .iter()
-        .filter_map(|node| match &node.kind {
-            WorkflowNodeKind::Data {
-                binding: Some(binding),
-                expression: Expr::ProcessRef { process },
-            } if binding.is_simple() && binding.root == *process => Some(process.to_string()),
-            _ => None,
-        })
-        .collect::<BTreeSet<_>>();
-    let missing = graph
-        .declarations
-        .iter()
-        .filter_map(|declaration| match declaration {
-            WorkflowDeclaration::Process(process)
-                if !bound.contains(&process.name) && !process.origin.is_lifted() =>
-            {
-                Some(process.name.clone())
-            }
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    for (offset, name) in missing.into_iter().enumerate() {
-        let node = WorkflowNode {
-            id: workflow_node_id(&format!("process-binding:{name}")),
-            name: "data".to_string(),
-            description: None,
-            name_source: lash::vm::ir::WorkflowNodeNameSource::Derived,
-            kind: WorkflowNodeKind::Data {
-                binding: Some(lash::vm::ir::AssignTarget::variable(name.clone().into())),
-                expression: Expr::ProcessRef {
-                    process: name.into(),
-                },
-            },
-            available_variables: Vec::new(),
-            type_facets: None,
-            outputs: Vec::new(),
-            execution_sites: Vec::new(),
-            source_span: None,
-        };
-        graph.main.nodes.insert(offset, node);
-    }
-}
-
-/// The freshly declared process a body is being rebuilt for.
-struct RebuiltProcess<'a> {
-    id: &'a str,
-    params: &'a [ProcessParam],
-    is_new: bool,
-}
-
-fn rebuild_process_body(
-    process: &RebuiltProcess<'_>,
-    data: &NodeData,
-    flow_nodes: &BTreeMap<&str, &FlowNode>,
-    baseline_nodes: &BTreeMap<String, WorkflowNode>,
-    flow_edges: &BTreeMap<&str, Vec<&FlowEdge>>,
-    graph_scope: &GraphScope,
-) -> Result<WorkflowSubgraph, RenderErrorResponse> {
-    let RebuiltProcess {
-        id: process_id,
-        params,
-        is_new,
-    } = *process;
-    let body = data.children().iter().find(|child| child.slot == "body");
-    match body {
-        Some(body) => {
-            if is_new && body.node_ids.is_empty() {
-                Ok(seeded_process_body(process_id, params))
-            } else {
-                build_subgraph(
-                    &body.scope,
-                    &body.node_ids,
-                    flow_nodes,
-                    baseline_nodes,
-                    flow_edges,
-                    graph_scope,
-                )
-            }
-        }
-        None if is_new => Ok(seeded_process_body(process_id, params)),
-        None => Err(RenderErrorResponse::document(
-            format!("process container `{process_id}` is missing its body"),
-            json!({ "processId": process_id, "child": "body" }),
-        )),
     }
 }
 
@@ -635,117 +392,6 @@ fn child_groups(node: &WorkflowNode) -> Vec<ChildGroup> {
             .collect(),
         _ => Vec::new(),
     }
-}
-
-fn build_subgraph(
-    scope: &str,
-    node_ids: &[String],
-    flow_nodes: &BTreeMap<&str, &FlowNode>,
-    baseline_nodes: &BTreeMap<String, WorkflowNode>,
-    flow_edges: &BTreeMap<&str, Vec<&FlowEdge>>,
-    graph_scope: &GraphScope,
-) -> Result<WorkflowSubgraph, RenderErrorResponse> {
-    let mut nodes = Vec::with_capacity(node_ids.len());
-    for id in node_ids {
-        let flow = flow_nodes.get(id.as_str()).copied().ok_or_else(|| {
-            RenderErrorResponse::document(
-                format!("scope `{scope}` references missing flow node `{id}`"),
-                json!({ "scope": scope, "nodeId": id }),
-            )
-        })?;
-        let (mut node, is_new) = match baseline_nodes.get(id).cloned() {
-            Some(mut node) => {
-                // A node whose form the host did not touch keeps its typed
-                // IR exactly: nothing is read back through a text field.
-                if !same_form(&flow.data, &node_data(&node, Vec::new(), graph_scope)) {
-                    apply_editable_data(&mut node, &flow.data, graph_scope)?;
-                }
-                (node, false)
-            }
-            None => (node_from_flow_data(id, &flow.data, graph_scope)?, true),
-        };
-        rebuild_children(
-            &mut node,
-            flow.data.children(),
-            flow_nodes,
-            baseline_nodes,
-            flow_edges,
-            is_new,
-            graph_scope,
-        )?;
-        nodes.push(node);
-    }
-    let edges = flow_edges
-        .get(scope)
-        .into_iter()
-        .flatten()
-        .map(|edge| workflow_edge(edge))
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(WorkflowSubgraph {
-        form: WorkflowBodyForm::default(),
-        nodes,
-        edges,
-    })
-}
-
-fn workflow_edge(edge: &FlowEdge) -> Result<WorkflowEdge, RenderErrorResponse> {
-    let parse_id = |id: &str| {
-        serde_json::from_value::<WorkflowNodeId>(serde_json::Value::String(id.to_string())).map_err(
-            |error| {
-                RenderErrorResponse::document(
-                    format!("invalid workflow node id `{id}`: {error}"),
-                    json!({ "nodeId": id }),
-                )
-            },
-        )
-    };
-    let kind = edge.data.body.clone();
-    Ok(WorkflowEdge {
-        id: edge.id.clone(),
-        from: parse_id(&edge.source)?,
-        to: parse_id(&edge.target)?,
-        kind,
-    })
-}
-
-fn rebuild_children(
-    node: &mut WorkflowNode,
-    children: &[ChildGroup],
-    flow_nodes: &BTreeMap<&str, &FlowNode>,
-    baseline_nodes: &BTreeMap<String, WorkflowNode>,
-    flow_edges: &BTreeMap<&str, Vec<&FlowEdge>>,
-    allow_empty_default: bool,
-    graph_scope: &GraphScope,
-) -> Result<(), RenderErrorResponse> {
-    let node_id = node.id.to_string();
-    let build = |slot: &str| -> Result<WorkflowSubgraph, RenderErrorResponse> {
-        let Some(child) = children.iter().find(|child| child.slot == slot) else {
-            // A clause the form just switched on starts empty.
-            if allow_empty_default || matches!(slot, "catch" | "finally") {
-                return Ok(WorkflowSubgraph::default());
-            }
-            return Err(RenderErrorResponse::document(
-                format!("node `{node_id}` is missing required child `{slot}`"),
-                json!({ "nodeId": node_id, "child": slot }),
-            ));
-        };
-        build_subgraph(
-            &child.scope,
-            &child.node_ids,
-            flow_nodes,
-            baseline_nodes,
-            flow_edges,
-            graph_scope,
-        )
-    };
-    if let WorkflowNodeKind::Container(container) = &mut node.kind {
-        for (slot, graph) in container.child_subgraphs_mut() {
-            let rebuilt = build(slot)?;
-            graph.nodes = rebuilt.nodes;
-            graph.edges = rebuilt.edges;
-        }
-    }
-    Ok(())
 }
 
 #[expect(
@@ -1089,9 +735,18 @@ fn apply_editable_data(
             terminal,
             expression,
         } => {
-            *terminal = required_terminal_kind(&node_id, data.terminal_kind())?;
-            *expression =
-                terminal_expression(&node_id, terminal, data.expression().as_ref(), &scope)?;
+            if reworded || data.terminal_kind() != shown.terminal_kind() {
+                let returns = matches!(expression, Expr::FunctionReturn(_));
+                *terminal = required_terminal_kind(&node_id, data.terminal_kind())?;
+                let mut terminal_scope = scope.clone();
+                terminal_scope.in_process = returns;
+                *expression = terminal_expression(
+                    &node_id,
+                    terminal,
+                    data.expression().as_ref(),
+                    &terminal_scope,
+                )?;
+            }
         }
         WorkflowNodeKind::Container(WorkflowContainer::If {
             binding, condition, ..
@@ -1180,26 +835,6 @@ fn apply_editable_data(
     Ok(())
 }
 
-/// Whether two forms of one node say the same thing. Child membership and
-/// the facets a client echoes back are not part of a node's own form.
-fn same_form(submitted: &NodeData, projected: &NodeData) -> bool {
-    let own = |data: &NodeData| {
-        let mut value = serde_json::to_value(data).unwrap_or_default();
-        if let Some(fields) = value.as_object_mut() {
-            for derived in [
-                "children",
-                "availableVars",
-                "expectedArgTypes",
-                "diagnostics",
-            ] {
-                fields.remove(derived);
-            }
-        }
-        value
-    };
-    own(submitted) == own(projected)
-}
-
 fn canonical_editable_expression(
     node_id: &str,
     expression: Option<&String>,
@@ -1257,202 +892,30 @@ fn node_ids(graph: &WorkflowSubgraph) -> Vec<String> {
     graph.nodes.iter().map(|node| node.id.to_string()).collect()
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// The document a save of `document` over `baseline` leaves: the typed
-    /// edits the document means, applied to the baseline's draft.
-    fn saved(document: WorkflowDocument, baseline: &WorkflowGraph) -> WorkflowGraph {
-        let target = graph_from_document(document, baseline).expect("the document reads");
-        let draft = lash::workflow::WorkflowDraft::open(baseline).expect("the baseline opens");
-        let named = draft
-            .opened()
-            .map(|(handle, id)| (id.clone(), handle))
-            .collect();
-        crate::edits::apply_document(draft, &named, baseline, &target)
-            .unwrap_or_else(|error| panic!("the document's edits apply: {error}"))
-            .draft
-            .document()
-            .clone()
+/// Lower just the form being edited. Child bodies and process wrappers stay in
+/// the draft and are changed only by their explicit operations.
+pub(crate) fn form_node(
+    id: &str,
+    data: &NodeData,
+    baseline: Option<&WorkflowNode>,
+    graph: &WorkflowGraph,
+    in_process: bool,
+) -> Result<WorkflowNode, RenderErrorResponse> {
+    let mut scope = GraphScope::main(process_bindings(graph));
+    scope.in_process = in_process;
+    if let Some(baseline) = baseline {
+        let mut node = baseline.clone();
+        apply_editable_data(&mut node, data, &scope)?;
+        Ok(node)
+    } else {
+        node_from_flow_data(id, data, &scope)
     }
-
-    /// FIG-3630: the editor saves an admitted workflow whose process is a
-    /// lifted literal after the author adds a statement in front of it and
-    /// edits the process body. The document carries the literal's reference
-    /// as text; the save must read it back as that reference and find the
-    /// lifted body wherever the statement now sits.
-    #[test]
-    fn a_statement_added_before_a_lifted_process_saves_its_body_edit() {
-        let source = "const blank = async () => {\n  return 0;\n};\n";
-        let environment = crate::runtime::host_environment();
-        let graph = lash::typescript::workflow_graph::workflow_graph_from_source_with_facets(
-            source,
-            Some(&environment),
-        )
-        .expect("the blank workflow admits");
-        let mut document = document_from_graph(1, Ok(source.to_string()), graph.clone());
-
-        let binding = document
-            .nodes
-            .iter()
-            .find(|node| node.node_type == "data")
-            .expect("the process binding")
-            .clone();
-        let mut inserted = binding;
-        inserted.id = "new:before-process".to_string();
-        *inserted.data.binding_mut().expect("binding node") = Some("greeting".to_string());
-        *inserted.data.expression_mut().expect("expression node") = Some("\"hello\"".to_string());
-        document.roots.main.insert(0, inserted.id.clone());
-        document.nodes.push(inserted);
-        document
-            .nodes
-            .iter_mut()
-            .find(|node| node.node_type == "terminal")
-            .expect("the process terminal")
-            .data
-            .expression_mut()
-            .expect("expression node")
-            .replace("7".to_string());
-
-        let rebuilt = saved(document, &graph);
-        let rendered = lash::typescript::workflow_graph::workflow_graph_to_source(&rebuilt)
-            .unwrap_or_else(|error| panic!("the edited workflow renders: {error}"));
-        assert_eq!(
-            rendered,
-            "let greeting = \"hello\";\nconst blank = async () => {\n  return 7;\n};\n"
-        );
-    }
-
-    #[test]
-    fn promoted_constructs_flatten_and_rebuild_as_typed_nodes() {
-        let input = r#"const worker = async () => {
-  return 1;
-};
-const runs = [await processes.start({ definition: worker }), await processes.start({ definition: worker })];
-const state = { count: 0 };
-state.count = 1;
-while (state.count < 2) {
-  state.count = state.count + 1;
 }
-let introduced = 0;
-for (const item of [1, 2]) {
-  state.count = item;
-  introduced = item;
-}
-finish([state, introduced]);
-"#;
-        let graph = lash::typescript::workflow_graph::workflow_graph_from_source(input)
-            .expect("project promoted graph");
-        let source = lash::typescript::workflow_graph::workflow_graph_to_source(&graph)
-            .expect("render promoted graph");
-        let document = document_from_graph(1, Ok(source.clone()), graph.clone());
 
-        for kind in [
-            "data",
-            "computation",
-            "state_update",
-            "container",
-            "terminal",
-        ] {
-            assert!(
-                document.nodes.iter().any(|node| node.node_type == kind),
-                "missing flattened {kind} node"
-            );
-        }
-        assert!(!document.nodes.iter().any(|node| node.node_type == "opaque"));
-        assert!(document.nodes.iter().any(|node| {
-            node.data.name.title() == "while"
-                && node.data.condition().as_deref() == Some("(state.count < 2)")
-                && node
-                    .data
-                    .children()
-                    .iter()
-                    .any(|child| child.slot == "body")
-        }));
-        assert!(document.nodes.iter().any(|node| {
-            node.node_type == "state_update"
-                && node.data.target().as_deref() == Some("state.count")
-                && node.data.expression().is_some()
-        }));
-        assert!(document.nodes.iter().any(|node| {
-            node.node_type == "computation"
-                && node.data.binding().as_deref() == Some("runs")
-                && node.data.expression().as_deref()
-                    == Some(
-                        "[await processes.start({ definition: worker }), \
-                         await processes.start({ definition: worker })]",
-                    )
-        }));
-
-        let rebuilt = saved(document, &graph);
-        assert_eq!(
-            lash::typescript::workflow_graph::workflow_graph_to_source(&rebuilt)
-                .expect("render rebuilt graph"),
-            source
-        );
-        assert_eq!(
-            lash::typescript::workflow_graph::workflow_graph_from_source(&source)
-                .expect("reproject rebuilt source"),
-            graph
-        );
-    }
-
-    #[test]
-    fn api_document_transport_preserves_every_nested_container_kind() {
-        let input = r#"const items = [1, 2].map((value) => value * 2);
-if (true) {
-  for (const item of items) {
-    while (false) {
-    }
-  }
-} else {
-}
-finish(items);
-"#;
-        let graph = lash::typescript::workflow_graph::workflow_graph_from_source(input)
-            .expect("project container graph");
-        let source = lash::typescript::workflow_graph::workflow_graph_to_source(&graph)
-            .expect("render container graph");
-        let document = document_from_graph(1, Ok(source.clone()), graph.clone());
-
-        let transported_json =
-            serde_json::to_string(&document).expect("serialize public workflow document");
-        let transported: WorkflowDocument =
-            serde_json::from_str(&transported_json).expect("deserialize public workflow document");
-
-        let container_kinds = transported
-            .nodes
-            .iter()
-            .filter(|node| node.data.kind() == "container")
-            .filter_map(|node| node.data.subkind())
-            .collect::<BTreeSet<_>>();
-        assert_eq!(container_kinds, BTreeSet::from(["for", "if", "while"]));
-        assert!(transported.nodes.iter().any(|node| {
-            node.data.subkind() == Some("if")
-                && node
-                    .data
-                    .children()
-                    .iter()
-                    .any(|child| child.slot == "else" && child.node_ids.is_empty())
-        }));
-        assert!(transported.nodes.iter().any(|node| {
-            node.data.subkind() == Some("while")
-                && node
-                    .data
-                    .children()
-                    .iter()
-                    .any(|child| child.slot == "body" && child.node_ids.is_empty())
-        }));
-
-        let rebuilt = saved(transported, &graph);
-        let rendered = lash::typescript::workflow_graph::workflow_graph_to_source(&rebuilt)
-            .expect("render transported workflow graph");
-        assert_eq!(rendered, source);
-        assert_eq!(
-            lash::typescript::workflow_graph::workflow_graph_from_source(&rendered)
-                .expect("reproject transported source"),
-            graph
-        );
-    }
+pub(crate) fn form_process(
+    id: &str,
+    data: &NodeData,
+    baseline: Option<lash::vm::ir::WorkflowProcess>,
+) -> Result<lash::vm::ir::WorkflowProcess, RenderErrorResponse> {
+    process::process_from_data(id, data, baseline)
 }

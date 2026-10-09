@@ -21,7 +21,7 @@ in `examples/workflow-graph-roundtrip/frontend/dist/` (or directly in
 | `GET` | `/workflows` | Built-in catalog as a list of `WorkflowCatalogEntry` objects |
 | `GET` | `/workflow` | Current saved workflow as a `WorkflowDocument` |
 | `POST` | `/workflow/select` | Reset the current workflow to a built-in example and return its `WorkflowDocument` |
-| `POST` | `/workflow` | Save a mutated `WorkflowDocument`; returns the new canonical version |
+| `POST` | `/workflow` | Apply explicit edits or an explicit source import; returns the new canonical version |
 | `GET` | `/workflow/ir` | The saved workflow as Lash's typed document, with every node's statement and replaceable expressions |
 | `POST` | `/workflow/ir` | Open a workflow given as a typed document; returns its `WorkflowDocument` |
 | `POST` | `/workflow/edits` | Apply typed edits as one transaction; returns the new canonical version |
@@ -186,7 +186,7 @@ node ID (for example, in `localStorage`).
 
 ## Saving
 
-Send the complete mutated `WorkflowDocument` back as JSON:
+Send the recorded operations and the saved version as JSON:
 
 ```http
 POST /workflow
@@ -204,7 +204,7 @@ The editable surface is:
 - `data.catchBinding` and `data.finally` on a `try`. Switching a clause on
   adds its child group (omit the group and it starts empty); switching it off
   removes the clause with its body.
-- `nodes`, `edges`, `roots`, and `children[].nodeIds` for delete/reorder edits.
+- Explicit insert, move and remove operations for structural edits.
 
 The structured text fields and their render-time validation are:
 
@@ -218,27 +218,35 @@ The structured text fields and their render-time validation are:
 | `data.clauses[].iterable` / `.condition` | `list_comprehension` `for` / `if` clauses | `invalid_expression` (`clause iterable` or `clause condition`) |
 | `data.clauses[].binding` | `list_comprehension` `for` clauses | `invalid_assignment_target` (`clause binding`); a syntactically valid non-simple binding is `invalid_node_payload` |
 
-A `schemaVersion` outside the graph read window yields
-`unsupported_schema_version`. Its details carry `found`, `supportedRange`
-with `min` and `max`, and `fleetWriterVersion`. Regenerate an older derived
-graph from its module. Removing a required child group yields `missing_required_child`: `if` requires `then` and
-`else`, `for` and `while` require `body`, and `list_comprehension` requires
-`element`.
+Typed documents opened through `/workflow/ir` carry the graph's schema
+version. Form saves address the already opened draft and do not echo schema
+versions, edges or child membership.
 
-To delete a node, remove it from `nodes`, remove its ID from its root or child
-group, and remove incident edges. To reorder nodes, reorder the relevant root
-or child `nodeIds`. A save is optimistic: the submitted `version` must still be
-current.
+`POST /workflow` accepts an explicit save request:
 
-The backend keeps one `lash::workflow::WorkflowDraft` per workflow. A save
-turns the submitted document into typed edits of that draft, by node
-identity: a node the document still names keeps its draft handle (moved,
-relabelled, rebound or replaced as its form says), a node it names for the
-first time is inserted, and a node it stopped naming is removed. The edits
-apply as one transaction, and the edited draft is published with
-`HostArtifacts::publish_workflow`: Lash admits the document's IR in its VM
-workers and holds the new definition under a pin the version keeps. No
-TypeScript is printed or parsed to save.
+```json
+{ "kind": "edit", "version": 1, "edits": [] }
+```
+
+The form editor records actions as operations: `insertForm` (request-local `id`,
+`body`, optional `before`, `data`), `insertFormProcess` (`id`, `data`),
+`setForm` (`node`, `data`), and the typed `moveNode`, `removeNode` and
+`removeProcess` operations listed below. Child membership and edges are views;
+they are never read back from a form. A request-local insertion id may be used
+by later operations in the same save, including children of a new container.
+Undo/redo retain both the view and its operation list.
+
+The backend lowers only the addressed form's edited text fields to
+`WorkflowEdit`s against its existing `WorkflowDraft`. Untouched IR, child
+handles and process wrappers stay in the draft. No target graph is rebuilt or
+diffed. Lash owns signature updates, including parameter pass-through in
+existing wrappers. The host never asks a dialect to rebuild a wrapper.
+
+A save is optimistic: `version` must still be current. Operations run on a
+private draft; a refusal saves and publishes nothing. A successful save
+publishes the edited IR with `HostArtifacts::publish_workflow` and holds the
+new definition under the version's pin. TypeScript is printed only as the
+response's source view, never to choose the save's meaning.
 
 When a workflow is opened, the host selects its sole top-level process (a
 declaration or a process bound directly in module main, as a literal in a
@@ -254,14 +262,19 @@ entry chooser.
 
 The success response is a new `WorkflowDocument` with incremented `version`
 and the ids of the admitted document, plus `idMap`: for every id the
-submitted document used, the id that node has now. The map is read from
+request named, the id that node has now. The map is read from
 Lash's edit correspondence, never from positions; a removed node has no
 entry. Replace the frontend's whole document with this response before Play.
 
-A document whose `source` differs from the saved version's came from the
-source pane (`POST /project`). It is a TypeScript import with no edit
-history, so the save opens a new draft from that source and applies the
-document's edits to it.
+Source import is an explicit request choice, including when its text equals
+the current source view:
+
+```json
+{ "kind": "importSource", "version": 1, "source": "const flow = async () => { return 0; };", "edits": [] }
+```
+
+This opens a new draft from that source and applies the listed operations to
+it. Operations address the ids returned by `POST /project` for the import.
 
 Invalid graph edits return HTTP `422`:
 

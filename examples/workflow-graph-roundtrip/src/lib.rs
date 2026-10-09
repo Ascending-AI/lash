@@ -43,8 +43,9 @@ pub use contract::{
     EditableValue, ErrorBody, ErrorDetail, ExpectedArgumentType, FlowEdge, FlowNode, GraphRoots,
     NodeBody, NodeContainer, NodeData, NodeName, OpenWorkflowRequest, OperationCatalogEntry,
     OperationField, ProjectWorkflowRequest, ProjectWorkflowResponse, RenderErrorResponse, RunEvent,
-    RunStatus, SaveWorkflowResponse, SourceProjectionErrorResponse, TypeDiagnostic, TypedVariable,
-    ValidateRequest, ValidateResponse, ValidationKind, WorkflowDocument, WorkflowIrResponse,
+    RunStatus, SaveWorkflowRequest, SaveWorkflowResponse, SourceProjectionErrorResponse,
+    TypeDiagnostic, TypedVariable, ValidateRequest, ValidateResponse, ValidationKind,
+    WorkflowDocument, WorkflowIrResponse,
 };
 pub use edits::{BindingRef, BodyRef, EditOperation, IrSlot, NodeIr};
 pub use runtime::{WorkflowHost, core as workflow_core};
@@ -154,10 +155,10 @@ impl SavedWorkflow {
     }
 
     /// The handle of each node, by the id clients know it under.
-    fn named(&self) -> BTreeMap<WorkflowNodeId, WorkflowDraftHandle> {
+    fn named(&self) -> BTreeMap<String, WorkflowDraftHandle> {
         self.ids
             .iter()
-            .map(|(handle, id)| (id.clone(), *handle))
+            .map(|(handle, id)| (id.to_string(), *handle))
             .collect()
     }
 
@@ -418,53 +419,46 @@ fn saved_response(
     }
 }
 
-/// Saves the document a form editor submits. The document is turned into
-/// typed edits of the draft it was read from, by node identity, and the
-/// edited draft is published; the response maps every id the document used
-/// to the id that node has now, read from lash's edit correspondence.
+/// Forms submit operations; importing source is an explicit request choice.
 async fn save_workflow(
     State(state): State<AppState>,
-    Json(document): Json<WorkflowDocument>,
+    Json(request): Json<SaveWorkflowRequest>,
 ) -> Result<Json<SaveWorkflowResponse>, RenderErrorResponse> {
     let _publishing = state.publishing.lock().await;
     let current = state.current();
-    if document.version != current.version {
+    let (version, source, operations) = match request {
+        SaveWorkflowRequest::Edit { version, edits } => (version, None, edits),
+        SaveWorkflowRequest::ImportSource {
+            version,
+            source,
+            edits,
+        } => (version, Some(source), edits),
+    };
+    if version != current.version {
         return Err(RenderErrorResponse::version_conflict(
-            document.version,
+            version,
             current.version,
         ));
     }
-    WorkflowGraph::admit_schema_version_for_fleet(
-        document.schema_version,
-        lash::persistence::FleetFormat::current(),
-    )
-    .map_err(|refusal| RenderErrorResponse::render(refusal.into()))?;
-    // A document names the nodes of the workflow it was read from. One that
-    // came from the source pane is a TypeScript import with no edit history:
-    // it is a new workflow, read again from its own source into a new draft.
-    let imported = !document.source.is_empty() && current.source().as_ref() != Ok(&document.source);
-    let (draft, named, base, entry) = if imported {
-        let graph = workflow_graph_from_source(&document.source)
-            .map_err(RenderErrorResponse::projection)?;
+    let (draft, named, entry) = if let Some(source) = source {
+        let graph = workflow_graph_from_source(&source).map_err(RenderErrorResponse::projection)?;
         let draft = WorkflowDraft::open(&graph).map_err(RenderErrorResponse::open)?;
         let named = draft
             .opened()
-            .map(|(handle, id)| (id.clone(), handle))
+            .map(|(handle, id)| (id.to_string(), handle))
             .collect();
         let entry = runtime::select_entry(&draft).map_err(Arc::new);
-        (draft, named, graph, entry)
+        (draft, named, entry)
     } else {
         (
             current.draft.clone(),
             current.named(),
-            current.graph.clone(),
             current.entry.clone(),
         )
     };
-    let target = graph::graph_from_document(document, &base)?;
     let original = draft.clone();
     let applied =
-        edits::apply_document(draft, &named, &base, &target).map_err(RenderErrorResponse::edit)?;
+        edits::apply_operations(draft, &named, operations).map_err(RenderErrorResponse::edit)?;
     let entry = SavedWorkflow::edited_entry(&original, &entry, &applied.draft);
     let saved = state.install(applied.draft, entry).await;
     Ok(Json(saved_response(&saved, applied.handles)))
@@ -485,16 +479,11 @@ async fn edit_workflow(
         ));
     }
     let named = current.named();
-    let draft = edits::apply_operations(current.draft.clone(), &named, request.edits)
+    let applied = edits::apply_operations(current.draft.clone(), &named, request.edits)
         .map_err(RenderErrorResponse::edit)?;
-    let entry = SavedWorkflow::edited_entry(&current.draft, &current.entry, &draft);
-    let saved = state.install(draft, entry).await;
-    Ok(Json(saved_response(
-        &saved,
-        named
-            .into_iter()
-            .map(|(id, handle)| (id.to_string(), handle)),
-    )))
+    let entry = SavedWorkflow::edited_entry(&current.draft, &current.entry, &applied.draft);
+    let saved = state.install(applied.draft, entry).await;
+    Ok(Json(saved_response(&saved, applied.handles)))
 }
 
 #[expect(
@@ -668,40 +657,5 @@ impl IntoResponse for SourceProjectionErrorResponse {
 impl From<GraphRenderError> for RenderErrorResponse {
     fn from(error: GraphRenderError) -> Self {
         Self::render(error)
-    }
-}
-
-#[cfg(test)]
-mod save_tests {
-    use super::*;
-
-    /// FIG-3630: a document projected from source that is not the saved
-    /// workflow saves as that source. Its process is a lifted literal whose
-    /// origin the save re-derives from the document's own source, and its
-    /// parameter type survives as the annotation that lowers to it.
-    #[tokio::test]
-    async fn a_projected_workflow_with_a_lifted_process_saves_as_its_source() {
-        let stores = lash::sqlite::SqliteStoreSet::memory()
-            .await
-            .expect("SQLite memory stores");
-        let backend = lash::durable::DurableBackendBuilder::new(std::sync::Arc::new(stores))
-            .build()
-            .expect("the durable backend");
-        let core = workflow_core(backend).expect("workflow core");
-        let state = AppState::new(core).await.expect("default workflow");
-        let Json(projected) = project_source(
-            State(state.clone()),
-            Json(ProjectWorkflowRequest {
-                source: "const typed = async (name: string) => {\n  return name;\n};\n".to_string(),
-            }),
-        )
-        .await
-        .unwrap_or_else(|_| panic!("the source projects"));
-        let source = projected.document.source.clone();
-        let Json(saved) = save_workflow(State(state), Json(projected.document))
-            .await
-            .unwrap_or_else(|error| panic!("the projected workflow saves: {:?}", error.body));
-        assert_eq!(saved.document.source, source);
-        assert!(saved.document.source.contains("async (name: string)"));
     }
 }

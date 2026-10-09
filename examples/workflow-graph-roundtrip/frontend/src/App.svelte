@@ -61,6 +61,66 @@
 
   let draftDoc = $state(null);
   let canonicalSource = $state('');
+  let pendingEdits = $state([]);
+  let importSource = $state(null);
+  let forms = new Map();
+  const plain = (value) => JSON.parse(JSON.stringify(value));
+  const form = (node) => {
+    const data = plain(node.data);
+    for (const field of ['children', 'diagnostics', 'expectedArgTypes']) delete data[field];
+    return data;
+  };
+  function rememberForms() {
+    forms = new Map(draftDoc.nodes.map((node) => [node.id, JSON.stringify(form(node))]));
+  }
+  function captureFormEdits() {
+    for (const node of draftDoc.nodes) {
+      const data = form(node);
+      if (forms.has(node.id) && forms.get(node.id) !== JSON.stringify(data)) {
+        pendingEdits.push({ op: 'setForm', node: node.id, data });
+      }
+    }
+    rememberForms();
+  }
+  function snapshot() {
+    return { document: draftDoc, edits: pendingEdits, importSource };
+  }
+  function location(id) {
+    if (draftDoc.roots.main.includes(id)) {
+      const ids = draftDoc.roots.main;
+      return { body: { kind: 'main' }, before: ids[ids.indexOf(id) + 1] ?? null };
+    }
+    for (const owner of draftDoc.nodes) {
+      for (const group of owner.data.children ?? []) {
+        if (!group.nodeIds.includes(id)) continue;
+        return {
+          body: owner.data.kind === 'process'
+            ? { kind: 'process', process: owner.id }
+            : { kind: 'child', node: owner.id, slot: group.slot },
+          before: group.nodeIds[group.nodeIds.indexOf(id) + 1] ?? null,
+        };
+      }
+    }
+    return null;
+  }
+  function recordMove(id) {
+    const at = location(id);
+    if (at) pendingEdits.push({ op: 'moveNode', node: id, ...at });
+  }
+  function recordInsert(id) {
+    const node = draftDoc.nodes.find((node) => node.id === id);
+    if (!node) return;
+    if (node.data.kind === 'process') {
+      pendingEdits.push({ op: 'insertFormProcess', id, data: form(node) });
+    } else {
+      pendingEdits.push({ op: 'insertForm', id, ...location(id), data: form(node) });
+    }
+    // Reverse order makes each next-sibling anchor exist before it is used.
+    for (const group of node.data.children ?? []) {
+      for (const child of [...group.nodeIds].reverse()) recordInsert(child);
+    }
+    rememberForms();
+  }
   let documentEpoch = $state(0);
   let savedVersion = $state(0);
   // The saved version's admitted definition: the artifact a run executes and
@@ -106,41 +166,50 @@
   // Record a committed edit (blur of a field): mark the draft dirty and push a
   // history snapshot. Field values are already written live into the draft.
   function onCommit() {
+    captureFormEdits();
     dirty = true;
     saveOk = null;
     clearFacetDiagnostics(draftDoc);
     documentEpoch += 1;
-    history.commit(draftDoc);
+    history.commit(snapshot());
   }
 
   // A structural change already applied to the draft (e.g. adding/removing a
   // comprehension clause) that also needs a relayout: commit + rebuild.
   function onRebuild() {
+    captureFormEdits();
     dirty = true;
     saveOk = null;
     clearFacetDiagnostics(draftDoc);
     documentEpoch += 1;
-    history.commit(draftDoc);
+    history.commit(snapshot());
     rebuild();
   }
 
   function onDelete(id) {
+    captureFormEdits();
+    const node = draftDoc.nodes.find((node) => node.id === id);
+    if (!node) return;
+    pendingEdits.push(node.data.kind === 'process'
+      ? { op: 'removeProcess', process: id } : { op: 'removeNode', node: id });
     deleteNodeFromDoc(draftDoc, id);
     dirty = true;
     saveOk = null;
     clearFacetDiagnostics(draftDoc);
     documentEpoch += 1;
-    history.commit(draftDoc);
+    history.commit(snapshot());
     rebuild();
   }
 
   function onAddNode(ownerId, slot, operation) {
-    addNodeToDoc(draftDoc, { ownerId, slot }, operation, ops.entries ?? []);
+    captureFormEdits();
+    const id = addNodeToDoc(draftDoc, { ownerId, slot }, operation, ops.entries ?? []);
+    if (id) recordInsert(id);
     dirty = true;
     saveOk = null;
     clearFacetDiagnostics(draftDoc);
     documentEpoch += 1;
-    history.commit(draftDoc);
+    history.commit(snapshot());
     rebuild();
   }
 
@@ -148,49 +217,57 @@
   // trailing-terminal barrier), then reorders the new node to `index` so it lands exactly
   // where the "+" sat between two cards.
   function onInsert(target, index, operation) {
+    captureFormEdits();
     const id = addNodeToDoc(draftDoc, target, operation, ops.entries ?? []);
     if (id && Number.isFinite(index)) reorderNodeInDoc(draftDoc, id, index);
+    if (id) recordInsert(id);
     dirty = true;
     saveOk = null;
     clearFacetDiagnostics(draftDoc);
     documentEpoch += 1;
-    history.commit(draftDoc);
+    history.commit(snapshot());
     rebuild(id ? new Set([id]) : null);
   }
 
   let mainMenuOpen = $state(false);
   function onAddMain(operation) {
     mainMenuOpen = false;
-    addNodeToDoc(draftDoc, { main: true }, operation, ops.entries ?? []);
+    captureFormEdits();
+    const id = addNodeToDoc(draftDoc, { main: true }, operation, ops.entries ?? []);
+    if (id) recordInsert(id);
     dirty = true;
     saveOk = null;
     clearFacetDiagnostics(draftDoc);
     documentEpoch += 1;
-    history.commit(draftDoc);
+    history.commit(snapshot());
     rebuild();
   }
 
   function onReorder(id, direction) {
+    captureFormEdits();
     if (reorderNodeInDoc(draftDoc, id, direction)) {
+      recordMove(id);
       dirty = true;
       saveOk = null;
       clearFacetDiagnostics(draftDoc);
       documentEpoch += 1;
-      history.commit(draftDoc);
+      history.commit(snapshot());
       rebuild(new Set([id]));
     }
   }
 
   // Snap it out of any dragged position so it lays out cleanly.
   function onMoveTo(id, dest) {
+    captureFormEdits();
     if (moveNodeToGroup(draftDoc, id, dest)) {
+      recordMove(id);
       clearPosition(id);
       positions = loadPositions();
       dirty = true;
       saveOk = null;
       clearFacetDiagnostics(draftDoc);
       documentEpoch += 1;
-      history.commit(draftDoc);
+      history.commit(snapshot());
       rebuild(new Set([id]));
     }
   }
@@ -285,7 +362,10 @@
     savedVersion = doc.version;
     savedDefinition = doc.definition ?? null;
     dirty = false;
-    history.reset(draftDoc);
+    pendingEdits = [];
+    importSource = null;
+    rememberForms();
+    history.reset(snapshot());
     if (refit) flowKey += 1;
     rebuild(keepSelection);
   }
@@ -294,11 +374,14 @@
   // saved document this is an unsaved draft: keep it dirty and start a new
   // history baseline entry from it.
   function adoptProjected(doc) {
+    pendingEdits = [];
+    importSource = doc.source;
     draftDoc = structuredClone($state.snapshot(doc));
     canonicalSource = doc.source;
+    rememberForms();
     dirty = true;
     saveOk = null;
-    history.commit(draftDoc);
+    history.commit(snapshot());
     flowKey += 1;
     rebuild();
   }
@@ -318,7 +401,10 @@
     saveOk = null;
     const selectedIds = flowNodes.filter((n) => n.selected).map((n) => n.id);
     const shapeBefore = shapeSignature(draftDoc);
-    const payload = JSON.parse(JSON.stringify(draftDoc));
+    captureFormEdits();
+    const payload = importSource === null
+      ? { kind: 'edit', version: savedVersion, edits: plain(pendingEdits) }
+      : { kind: 'importSource', version: savedVersion, source: importSource, edits: plain(pendingEdits) };
     const result = await saveWorkflow(payload);
     saving = false;
     if (result.ok) {
@@ -357,10 +443,14 @@
   }
 
   // --- Undo / redo -----------------------------------------------------------
-  function applySnapshot(doc) {
-    if (!doc) return;
+  function applySnapshot(saved) {
+    if (!saved) return;
+    const doc = saved.document;
+    pendingEdits = saved.edits;
+    importSource = saved.importSource;
     documentEpoch += 1;
     draftDoc = doc;
+    rememberForms();
     canonicalSource = doc.source;
     dirty = history.index > 0;
     saveOk = null;
@@ -416,6 +506,7 @@
   }
 
   function handleDragStop({ targetNode, nodes }) {
+    captureFormEdits();
     const moved = nodes && nodes.length ? nodes : targetNode ? [targetNode] : [];
     let reordered = false;
     for (const n of moved) {
@@ -426,7 +517,7 @@
       } catch {
         didReorder = false;
       }
-      if (didReorder) reordered = true;
+      if (didReorder) { recordMove(n.id); reordered = true; }
       else savePosition(n.id, n.position);
     }
     positions = loadPositions();
@@ -435,7 +526,7 @@
       saveOk = null;
       clearFacetDiagnostics(draftDoc);
       documentEpoch += 1;
-      history.commit(draftDoc);
+      history.commit(snapshot());
       rebuild();
     }
   }

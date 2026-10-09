@@ -372,3 +372,17 @@ describe('source projection publication', () => {
     expect(target.querySelector('.run-ev')?.textContent).toContain('1 evt');
   });
 });
+
+
+it('saves an explicit import and restores edit intent on undo', async () => {
+  const request = await start('imported');
+  await finish(request, 'imported');
+  api.saveWorkflow.mockResolvedValue({ ok: false, status: 422 });
+  await click('Save');
+  expect(api.saveWorkflow).toHaveBeenLastCalledWith({
+    kind: 'importSource', version: 1, source: 'imported', edits: [],
+  });
+  await click('undo');
+  await click('Save');
+  expect(api.saveWorkflow).toHaveBeenLastCalledWith({ kind: 'edit', version: 1, edits: [] });
+});

@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 0,
   "cargo_package_count": 53,
-  "cargo_target_count": 219,
+  "cargo_target_count": 218,
   "facade_production_check_targets": [
     "//crates/lash-core-effect:lash-core-effect__fv_48d34494[check]",
     "//crates/lash-core-effect:lash-core-effect__fv_e38b9031[check]",
@@ -41893,7 +41893,7 @@
       "//crates/lash:lash__fv_f474fc78"
     ]
   },
-  "generated_label_count": 281,
+  "generated_label_count": 280,
   "main_test_exclusions": {
     "//crates/lash-s3-store:lash-s3-store__unit_test": "requires an external service or credentials"
   },
@@ -42382,7 +42382,6 @@
     "//examples/e2e-consumer:otlp_export__test",
     "//examples/integrator-contract:integrator-contract__unit_test",
     "//examples/toolbench:toolbench__unit_test",
-    "//examples/workflow-graph-roundtrip:authoring__test",
     "//examples/workflow-graph-roundtrip:durable_run__test",
     "//examples/workflow-graph-roundtrip:generic_editing__test",
     "//examples/workflow-graph-roundtrip:roundtrip__test",
@@ -42888,7 +42887,6 @@
     "//examples/e2e-consumer:otlp_export__test",
     "//examples/integrator-contract:integrator-contract__unit_test",
     "//examples/toolbench:toolbench__unit_test",
-    "//examples/workflow-graph-roundtrip:authoring__test",
     "//examples/workflow-graph-roundtrip:durable_run__test",
     "//examples/workflow-graph-roundtrip:generic_editing__test",
     "//examples/workflow-graph-roundtrip:roundtrip__test",
@@ -47353,19 +47351,6 @@
           "tags": []
         },
         {
-          "build_label": "//examples/workflow-graph-roundtrip:authoring__test",
-          "cargo": "authoring",
-          "cargo_only": "uses the Cargo-owned generated frontend asset workflow",
-          "check_label": "//examples/workflow-graph-roundtrip:authoring__test[check]",
-          "clippy_label": "//examples/workflow-graph-roundtrip:authoring__test__clippy[clippy.txt]",
-          "kind": "test",
-          "label": "//examples/workflow-graph-roundtrip:authoring__test",
-          "tags": [
-            "cargo-frontend-assets",
-            "manual"
-          ]
-        },
-        {
           "build_label": "//examples/workflow-graph-roundtrip:durable_run__test",
           "cargo": "durable_run",
           "cargo_only": "uses the Cargo-owned generated frontend asset workflow",
@@ -48045,7 +48030,6 @@
     "//examples/e2e-consumer:otlp_export__test": 300,
     "//examples/integrator-contract:integrator-contract__unit_test": 300,
     "//examples/toolbench:toolbench__unit_test": 300,
-    "//examples/workflow-graph-roundtrip:authoring__test": 300,
     "//examples/workflow-graph-roundtrip:durable_run__test": 300,
     "//examples/workflow-graph-roundtrip:generic_editing__test": 300,
     "//examples/workflow-graph-roundtrip:roundtrip__test": 300,
@@ -48324,7 +48308,6 @@
     "//examples/integrator-contract:integrator-contract__unit_test",
     "//examples/toolbench:toolbench",
     "//examples/toolbench:toolbench__unit_test",
-    "//examples/workflow-graph-roundtrip:authoring__test",
     "//examples/workflow-graph-roundtrip:durable_run__test",
     "//examples/workflow-graph-roundtrip:generic_editing__test",
     "//examples/workflow-graph-roundtrip:roundtrip__test",
@@ -48654,7 +48637,6 @@
     "//examples/integrator-contract:integrator-contract__unit_test[check]",
     "//examples/toolbench:toolbench[check]",
     "//examples/toolbench:toolbench__unit_test[check]",
-    "//examples/workflow-graph-roundtrip:authoring__test[check]",
     "//examples/workflow-graph-roundtrip:durable_run__test[check]",
     "//examples/workflow-graph-roundtrip:generic_editing__test[check]",
     "//examples/workflow-graph-roundtrip:roundtrip__test[check]",
@@ -48936,7 +48918,6 @@
     "//examples/integrator-contract:integrator-contract__unit_test__clippy[clippy.txt]",
     "//examples/toolbench:toolbench__clippy[clippy.txt]",
     "//examples/toolbench:toolbench__unit_test__clippy[clippy.txt]",
-    "//examples/workflow-graph-roundtrip:authoring__test__clippy[clippy.txt]",
     "//examples/workflow-graph-roundtrip:durable_run__test__clippy[clippy.txt]",
     "//examples/workflow-graph-roundtrip:generic_editing__test__clippy[clippy.txt]",
     "//examples/workflow-graph-roundtrip:roundtrip__test__clippy[clippy.txt]",
@@ -49218,7 +49199,6 @@
     "//examples/integrator-contract:integrator-contract__unit_test",
     "//examples/toolbench:toolbench",
     "//examples/toolbench:toolbench__unit_test",
-    "//examples/workflow-graph-roundtrip:authoring__test",
     "//examples/workflow-graph-roundtrip:durable_run__test",
     "//examples/workflow-graph-roundtrip:generic_editing__test",
     "//examples/workflow-graph-roundtrip:roundtrip__test",
@@ -49501,7 +49481,6 @@
     "//examples/integrator-contract:integrator-contract__unit_test",
     "//examples/toolbench:toolbench",
     "//examples/toolbench:toolbench__unit_test",
-    "//examples/workflow-graph-roundtrip:authoring__test",
     "//examples/workflow-graph-roundtrip:durable_run__test",
     "//examples/workflow-graph-roundtrip:generic_editing__test",
     "//examples/workflow-graph-roundtrip:roundtrip__test",
@@ -50567,7 +50546,6 @@
     "//examples/e2e-consumer:otlp_export__test",
     "//examples/integrator-contract:integrator-contract__unit_test",
     "//examples/toolbench:toolbench__unit_test",
-    "//examples/workflow-graph-roundtrip:authoring__test",
     "//examples/workflow-graph-roundtrip:durable_run__test",
     "//examples/workflow-graph-roundtrip:generic_editing__test",
     "//examples/workflow-graph-roundtrip:roundtrip__test",

@@ -148,32 +148,6 @@ lash_rust_unit_test(
 )
 
 lash_rust_integration_test(
-    name = "authoring__test",
-    crate_features = [],
-    crate_name = "authoring",
-    crate_root = "tests/authoring.rs",
-    declared_features = [],
-    exec_properties = sized_exec_properties("workflow-graph-roundtrip", "authoring", "//examples/workflow-graph-roundtrip:authoring__test"),
-    extra_compile_data = [
-        "//examples:shared_rust_sources",
-    ],
-    extra_data = [
-        "//crates/lash-vm-worker:lash-vm-worker__bin",
-    ],
-    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
-    library = ":workflow-graph-roundtrip",
-    library_crate_name = "workflow_graph_roundtrip",
-    manifest_dir = "examples/workflow-graph-roundtrip",
-    package_name = "workflow-graph-roundtrip",
-    rustc_env = {},
-    tags = [
-        "cargo-frontend-assets",
-        "manual",
-    ],
-    version = "0.0.0-dev",
-)
-
-lash_rust_integration_test(
     name = "durable_run__test",
     crate_features = [],
     crate_name = "durable_run",

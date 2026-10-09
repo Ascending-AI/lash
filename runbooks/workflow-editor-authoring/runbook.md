@@ -16,7 +16,7 @@ mock operations. Do not configure OpenRouter for this run.
 
 **The canonical source in this scenario is not an RLM dialect.** This host opens no RLM
 session and prompts no model. The text the code pane shows is the **workflow-graph lens's**
-canonical printer over the IR — the `/project` and `/workflow` seams round-trip through it.
+canonical printer over the IR — `/project` imports source; `/workflow` applies explicit operations.
 **That printer now emits TypeScript.** The Blank baseline reads
 
 ```ts
@@ -38,7 +38,7 @@ changes when the lens's printer changes, not with this arc.
    return the Blank baseline even while the browser shows authored cards. Play only after
    a successful Save, because `/run` executes the saved version.
 2. **Both directions of the lens must agree.** `POST /project` is source → graph.
-   `POST /workflow` is graph → canonical source plus save (the example's render seam).
+   `POST /workflow` applies the form's operation list, or an explicit `importSource` request.
    At each save gate, the response document, a fresh `GET /workflow`, canonical source
    pane, Steps order, and Canvas nesting must agree.
 3. **Malformed means a typed 422.** Deliberately save one malformed result expression.

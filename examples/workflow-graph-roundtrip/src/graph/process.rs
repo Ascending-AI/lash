@@ -1,7 +1,4 @@
-use lash::vm::ir::{
-    ProcessParam, WorkflowNode, WorkflowNodeKind, WorkflowNodeNameSource, WorkflowProcess,
-    WorkflowSubgraph, WorkflowTerminalKind, format_type_expr,
-};
+use lash::vm::ir::{ProcessParam, WorkflowProcess, WorkflowSubgraph, format_type_expr};
 
 use crate::{EditableProcessField, NodeData, RenderErrorResponse};
 
@@ -44,30 +41,6 @@ pub(super) fn process_from_data(
         .map(|field| process_param_from_data(&process_id, field))
         .collect::<Result<_, _>>()?;
     Ok(process)
-}
-
-pub(super) fn seeded_process_body(process_id: &str, params: &[ProcessParam]) -> WorkflowSubgraph {
-    WorkflowSubgraph {
-        form: Default::default(),
-        nodes: vec![WorkflowNode {
-            id: workflow_node_id(&format!("{process_id}:seed:finish")),
-            name: "finish".to_string(),
-            description: None,
-            name_source: WorkflowNodeNameSource::Derived,
-            kind: WorkflowNodeKind::Terminal {
-                terminal: WorkflowTerminalKind::Finish,
-                expression: lash::vm::ir::Expr::FunctionReturn(Box::new(
-                    lash::vm::ir::Expr::Number(0.0),
-                )),
-            },
-            available_variables: params.iter().map(|param| param.name.to_string()).collect(),
-            type_facets: None,
-            outputs: Vec::new(),
-            execution_sites: Vec::new(),
-            source_span: None,
-        }],
-        edges: Vec::new(),
-    }
 }
 
 pub(super) fn editable_process_param(param: &ProcessParam) -> EditableProcessField {

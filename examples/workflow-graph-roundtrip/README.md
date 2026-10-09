@@ -8,8 +8,8 @@ The workflow is Lash's typed document. The backend keeps one
 `WorkflowDraft` per workflow and in-memory editor versions over it:
 
 - **Editing.** The canvas forms cover the common nodes: calls, effects,
-  values, `if`, `for`, `while`, `try`, blocks and `throw`. A save turns the
-  submitted document into typed edits of the draft, by node identity. The
+  values, `if`, `for`, `while`, `try`, blocks and `throw`. The form records
+  typed operations against the draft, including each insert, move and removal. The
   structured editor reaches everything else: it lists any node's statement
   and its expressions (a closure's body, a computed target) and replaces one
   by its slot path, as typed IR.
@@ -28,8 +28,11 @@ The workflow is Lash's typed document. The backend keeps one
 
 TypeScript is an optional lens. The built-in examples are imported from
 TypeScript, and the source pane shows the workflow's canonical TypeScript and
-imports edits of it. Nothing else prints or parses source, and a workflow
-with no TypeScript spelling is edited, published and run the same way.
+imports edits of it. The host retains its `lash/typescript` dependency for the built-in source
+catalog, source import/display, fragment validation and text fields in forms.
+The generic IR editor, admission, publication and execution use the typed
+workflow directly. Import is an explicit save request choice; source views
+never decide whether a save is an import.
 
 Display events carry the stable tool-call ID used to correlate their deltas
 with observed nodes. Canvas layout is frontend-owned and never appears in

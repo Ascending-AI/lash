@@ -1,10 +1,10 @@
 # The substrate port ledger (ADR 0132 §14, FIG-5179).
 #
 # BEGIN SUMMARY (scripts/check-substrate-port-ledger.py --write-summary)
-# 1732 rows over 870 files, 4088 laws.
-# By class: mechanical 196, semantic 140, delete 954, replace 442.
-# By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 99, L9c 367, L9d 124, L9e 141, L9f 125, L9g 98, L9h 122, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49, P4 22, P5 2.
-# By status: todo 0, ported 191, deleted 1541.
+# 1731 rows over 869 files, 4064 laws.
+# By class: mechanical 196, semantic 140, delete 954, replace 441.
+# By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 99, L9c 367, L9d 124, L9e 141, L9f 125, L9g 98, L9h 121, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49, P4 22, P5 2.
+# By status: todo 0, ported 191, deleted 1540.
 #
 # New laws owed (replace rows), by owning lane:
 # - none
@@ -17655,26 +17655,6 @@ status = "deleted"
 note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine."
 
 [[row]]
-path = "examples/workflow-graph-roundtrip/tests/authoring.rs"
-test = "*"
-area = "workflow-graph-roundtrip"
-needs = ["wait", "round", "multinode"]
-class = "replace"
-lane = "L9h"
-laws = [
-  "blank_workflow_full_authoring_round_trip_rejects_malformed_then_runs",
-  "renaming_a_node_keeps_the_authored_title_through_save_and_reprojection",
-  "an_authored_action_saves_only_with_the_awaited_receiver_call_the_editor_emits",
-  "a_non_display_action_saves_against_its_own_receiver_and_expression_defaults",
-  "switching_a_call_to_another_receivers_operation_re_synthesizes_the_receiver_call",
-  "literal_expression_members_survive_projection_json_and_save",
-]
-disposition = "replaced-by:examples/workflow-graph-roundtrip/tests/authoring.rs::renaming_a_node_keeps_the_authored_title_through_save_and_reprojection"
-status = "deleted"
-owed = "blank workflow full authoring round trip rejects malformed then runs; and 5 more law(s) of the file, by test name"
-note = "FIG-5308: restored from 5ad9641f9e^ onto a durable SQLite core; the example's process commands now start and signal through the core's process API. All six pass; blank_workflow_full_authoring_round_trip_rejects_malformed_then_runs runs since FIG-5337/FIG-5339 gave a process step's tools their process execution. FIG-5419: retained generic property; historical references to process signal, wake, emit or trigger fixtures do not carry those retired subjects forward."
-
-[[row]]
 path = "examples/workflow-graph-roundtrip/tests/durable_run.rs"
 test = "*"
 area = "workflow-graph-roundtrip"
@@ -17698,31 +17678,14 @@ class = "replace"
 lane = "L9h"
 laws = [
   "operation_catalog_and_fragment_validation_match_the_editor_contract",
-  "catalog_process_shape_adds_a_seeded_top_level_process_that_reprojects_and_runs",
-  "process_name_params_and_signals_add_remove_and_round_trip",
-  "newly_catalogued_nodes_save_reproject_and_run_from_their_catalog_shapes",
   "source_projection_is_a_stateless_canonical_fixpoint_with_typed_errors",
   "projected_available_vars_follow_ssa_and_nested_lexical_scope",
-  "data_terminal_call_and_effect_edits_round_trip_without_raw_constructor_source",
-  "lists_selects_projects_and_runs_built_in_workflows",
-  "project_mutate_save_and_run_streams_correlated_events",
-  "edited_counter_loop_condition_saves_reprojects_and_runs",
-  "bare_counter_loop_condition_rewraps_canonically_and_runs",
-  "expression_valued_call_fields_save_reproject_and_reject_malformed_edits",
-  "edited_if_condition_and_for_iterable_save_reproject_and_run",
-  "delete_node_edit_round_trips_and_runs_the_saved_graph",
-  "new_call_node_saves_reprojects_and_runs_with_canonical_correlation",
-  "new_if_while_and_for_containers_save_reproject_and_run",
-  "new_statement_containers_allow_empty_bodies",
-  "reordered_process_statements_save_reproject_and_run_in_node_id_order",
-  "moved_statement_between_scopes_saves_reprojects_and_runs_in_new_scope",
-  "new_call_without_receiver_expression_returns_typed_error",
-  "invalid_graph_post_returns_typed_unprocessable_entity",
+  "lists_selects_projects_and_runs_built_in_workflows"
 ]
 disposition = "replaced-by:examples/workflow-graph-roundtrip/tests/roundtrip.rs::operation_catalog_and_fragment_validation_match_the_editor_contract"
 status = "deleted"
-owed = "operation catalog and fragment validation match the editor contract; and 20 more law(s) of the file, by test name"
-note = "FIG-5308 restored these laws onto a durable SQLite core. FIG-5372 restored committed lifecycle and effect outcomes. FIG-5378 enables project_mutate_save_and_run_streams_correlated_events and new_call_node_saves_reprojects_and_runs_with_canonical_correlation; both pass with admitted call-to-node language bindings accepted by the process observation hub. lists_selects_projects_and_runs_built_in_workflows remains ignored because preparing a workflow after another is refused with artifact_referrer_ended for the detached execution referrer, as found by FIG-5372. FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired."
+owed = "4 surviving laws"
+note = "FIG-5645 deleted the superseded whole-document form-save laws. Explicit form operations and import intent are pinned by generic_editing::form_saves_apply_operations_and_import_only_when_requested; typed edit and correspondence laws own structural semantics."
 
 [[row]]
 path = "examples/workflow-graph-roundtrip/tests/type_facets.rs"
@@ -17732,13 +17695,12 @@ needs = ["round"]
 class = "replace"
 lane = "L9h"
 laws = [
-  "type_facets_are_projected_and_client_echoes_are_ignored_on_save",
-  "mocked_tool_schemas_project_into_seed_workflow_facets",
+  "mocked_tool_schemas_project_into_seed_workflow_facets"
 ]
-disposition = "replaced-by:examples/workflow-graph-roundtrip/tests/type_facets.rs::type_facets_are_projected_and_client_echoes_are_ignored_on_save"
+disposition = "replaced-by:examples/workflow-graph-roundtrip/tests/type_facets.rs::mocked_tool_schemas_project_into_seed_workflow_facets"
 status = "deleted"
-owed = "type facets are projected and client echoes are ignored on save; and 1 more law(s) of the file, by test name"
-note = "FIG-5308: restored from 5ad9641f9e^ onto a durable SQLite core; the example's process commands now start and signal through the core's process API. Both pass. FIG-5419: retained generic property; historical references to process signal, wake, emit or trigger fixtures do not carry those retired subjects forward."
+owed = "1 surviving laws"
+note = "FIG-5645 deleted the superseded whole-document form-save laws. Explicit form operations and import intent are pinned by generic_editing::form_saves_apply_operations_and_import_only_when_requested; typed edit and correspondence laws own structural semantics."
 
 [[row]]
 path = "runbooks/restate-postgres-workers/src/batch_journal.rs"

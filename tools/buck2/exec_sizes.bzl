@@ -754,7 +754,6 @@ TEST_RUN_REQUESTS = {
     "//examples/e2e-consumer:otlp_export__test": {"cpu_count": 2, "memory_kb": 524288},
     "//examples/integrator-contract:integrator-contract__unit_test": {"cpu_count": 1, "memory_kb": 262144},
     "//examples/toolbench:toolbench__unit_test": {"cpu_count": 2, "memory_kb": 786432},
-    "//examples/workflow-graph-roundtrip:authoring__test": {"cpu_count": 2, "memory_kb": 524288},
     "//examples/workflow-graph-roundtrip:durable_run__test": {"cpu_count": 2, "memory_kb": 524288},
     "//examples/workflow-graph-roundtrip:generic_editing__test": {"cpu_count": 2, "memory_kb": 524288},
     "//examples/workflow-graph-roundtrip:roundtrip__test": {"cpu_count": 2, "memory_kb": 524288},

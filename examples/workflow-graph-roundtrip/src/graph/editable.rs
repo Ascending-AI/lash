@@ -17,7 +17,7 @@ use lash::vm::ir::{
 use lash::workflow::WorkflowGraph;
 
 use super::required_text;
-use crate::{EditableValue, NodeData, RenderErrorResponse, WorkflowDocument};
+use crate::{EditableValue, NodeData, RenderErrorResponse};
 
 pub(super) fn editable_expression(
     id: &str,
@@ -442,23 +442,6 @@ pub(super) fn process_bindings(graph: &WorkflowGraph) -> BTreeSet<String> {
             _ => None,
         })
         .collect()
-}
-
-/// The process bindings an edited document declares, which is the
-/// baseline's set plus any process the host renamed or added in this edit.
-pub(super) fn document_process_bindings(
-    document: &WorkflowDocument,
-    baseline: &WorkflowGraph,
-) -> BTreeSet<String> {
-    let mut names = process_bindings(baseline);
-    names.extend(
-        document
-            .nodes
-            .iter()
-            .filter(|node| node.data.kind() == "process")
-            .filter_map(|node| node.data.process_name().clone()),
-    );
-    names
 }
 
 pub(super) fn parse_fragment(

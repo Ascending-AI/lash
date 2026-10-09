@@ -47,6 +47,22 @@ pub struct SaveWorkflowResponse {
     pub id_map: BTreeMap<String, String>,
 }
 
+/// Save operations against the current version, or explicitly import source
+/// and apply operations against the projected document.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
+pub enum SaveWorkflowRequest {
+    Edit {
+        version: u64,
+        edits: Vec<crate::edits::EditOperation>,
+    },
+    ImportSource {
+        version: u64,
+        source: String,
+        edits: Vec<crate::edits::EditOperation>,
+    },
+}
+
 /// A set of typed edits to apply to the saved workflow as one transaction.
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -1268,6 +1284,7 @@ impl RenderErrorResponse {
         use crate::edits::EditError;
         use lash::workflow::WorkflowEditDiagnosticKind as Kind;
         let refusal = match error {
+            EditError::Form(response) => return *response,
             EditError::Statement { node, error } => {
                 let mut response = Self::render(GraphRenderError::Document(error));
                 response.body.error.details["nodeId"] = json!(node);
