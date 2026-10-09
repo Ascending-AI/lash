@@ -28,9 +28,30 @@ async fn conformance_fixtures_do_not_hold_the_shared_database_lock() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn conformance_resets_and_reopens_stay_in_the_laws_database() {
-    let Some((_first_guard, first)) = storage().await else {
+    use sqlx::ConnectOptions as _;
+
+    let Some(base_url) = database_url() else {
         return;
     };
+    // Shells are pooled by maintenance URL. Give this law its own pool key:
+    // after Drop, its two retired names must survive until the probes below.
+    let fixture_url = base_url
+        .parse::<sqlx::postgres::PgConnectOptions>()
+        .expect("parse fixture database URL")
+        .application_name(&format!(
+            "fixture_isolation_{}",
+            uuid::Uuid::new_v4().simple()
+        ))
+        .to_url_lossy()
+        .to_string();
+    let open_fixture = || async {
+        let guard = IsolatedDatabase::create(&fixture_url).await;
+        let storage = lash_postgres_store::testing::connect(guard.url())
+            .await
+            .expect("connect law fixture");
+        (guard, storage)
+    };
+    let (_first_guard, first) = open_fixture().await;
     let mut connection = first.pool().acquire().await.expect("acquire fixture probe");
     let acquired: bool = sqlx::query_scalar("SELECT pg_try_advisory_lock_shared($1)")
         .bind(0x4c41_5348_5f50_4754_i64)
@@ -47,7 +68,7 @@ async fn conformance_resets_and_reopens_stay_in_the_laws_database() {
         .await
         .expect("release fixture probe");
     drop(connection);
-    let (_second_guard, second) = storage().await.expect("open companion fixture");
+    let (_second_guard, second) = open_fixture().await;
     assert_ne!(first.catalog_id(), second.catalog_id());
     let databases = vec![
         _first_guard.database_name().to_owned(),
@@ -92,6 +113,9 @@ async fn conformance_resets_and_reopens_stay_in_the_laws_database() {
     drop(held_read);
     first.pool().close().await;
     second.pool().close().await;
+    // Pin the loaded-run interleaving: another law opens a cell after these
+    // cells retire, but before their sealing and session counts are observed.
+    let (_competing_guard, competing) = storage().await.expect("open competing law fixture");
     let cleanup = sqlx::postgres::PgPoolOptions::new()
         .max_connections(1)
         .connect(&database_url().expect("configured fixture database"))
@@ -113,4 +137,5 @@ async fn conformance_resets_and_reopens_stay_in_the_laws_database() {
             .expect("probe retired cell sessions");
     assert_eq!(sessions, 0, "retirement ends even held read transactions");
     cleanup.close().await;
+    competing.pool().close().await;
 }
