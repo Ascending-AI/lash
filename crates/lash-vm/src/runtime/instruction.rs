@@ -257,6 +257,10 @@ pub(crate) struct CompiledResourceOperationBatchLeaf {
     pub(crate) receiver_stack_index: usize,
     pub(crate) unwrap: bool,
     pub(crate) site: Option<LashVmExecutionSite>,
+    /// The occurrence of `site` a leaf awaited through its handle was minted
+    /// as. A leaf written in the aggregate itself has none: it takes its
+    /// occurrence where the aggregate is issued.
+    pub(crate) minted: Option<super::PendingOccurrence>,
     pub(crate) source_span: Option<Span>,
 }
 

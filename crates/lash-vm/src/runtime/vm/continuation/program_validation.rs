@@ -21,11 +21,51 @@ fn function_code_range(
     }
 }
 
+/// A pending operation holds an occurrence exactly when its instruction has
+/// an execution site: one that site has counted, inside loops the run has
+/// begun, each newer than the loop enclosing it.
+fn validate_pending_occurrence(
+    continuation: &VmContinuation,
+    chunk: &Chunk,
+    pending: &PendingOperation,
+) -> Result<(), &'static str> {
+    let site = chunk
+        .lash_vm_execution_sites
+        .get(pending.site())
+        .and_then(Option::as_ref);
+    let (site, minted) = match (site, pending.occurrence()) {
+        (None, None) => return Ok(()),
+        (Some(site), Some(minted)) => (site.site_ref(), minted),
+        (Some(_), None) => return Err("its instruction's execution site has no occurrence"),
+        (None, Some(_)) => return Err("its instruction has no execution site"),
+    };
+    let counted = continuation
+        .occurrence_counters
+        .iter()
+        .find(|counter| counter.site == site)
+        .map_or(0, |counter| counter.count);
+    if minted.occurrence == 0 || minted.occurrence > counted {
+        return Err("its site never counted that occurrence");
+    }
+    let mut enclosing = 0;
+    for frame in &minted.loops {
+        if frame.activation <= enclosing || frame.activation > continuation.loop_activations {
+            return Err("a loop it names was never begun inside the loop enclosing it");
+        }
+        enclosing = frame.activation;
+    }
+    Ok(())
+}
+
 pub(super) fn validate_program_continuation(
     continuation: &VmContinuation,
     chunk: &Chunk,
 ) -> Result<(), ContinuationError> {
-    for pending in continuation.pending_tools.values().flatten() {
+    let mut minted = std::collections::BTreeSet::new();
+    for (handle, pending) in &continuation.pending_tools {
+        let Some(pending) = pending else {
+            continue;
+        };
         let matches_instruction = match pending {
             PendingOperation::Tool { site, args, .. } => {
                 matches!(chunk.code.get(*site), Some(Instruction::PendingTool { argc, .. }) if *argc == args.len())
@@ -38,6 +78,20 @@ pub(super) fn validate_program_continuation(
             return Err(ContinuationError::UnserializableValue {
                 location: "pending operation".into(),
                 variant: "pending operation does not match its instruction",
+            });
+        }
+        validate_pending_occurrence(continuation, chunk, pending).map_err(|reason| {
+            ContinuationError::InvalidPendingOccurrence {
+                handle: handle.as_str().to_owned(),
+                reason,
+            }
+        })?;
+        if let Some(occurrence) = pending.occurrence()
+            && !minted.insert((pending.site(), occurrence.occurrence))
+        {
+            return Err(ContinuationError::InvalidPendingOccurrence {
+                handle: handle.as_str().to_owned(),
+                reason: "another pending operation holds it",
             });
         }
     }

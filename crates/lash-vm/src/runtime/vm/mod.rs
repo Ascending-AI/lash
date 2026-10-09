@@ -38,7 +38,7 @@ pub use continuation::VM_CONTINUATION_FORMAT_VERSION;
 #[cfg(test)]
 pub(crate) use continuation::VM_PARKED_AWAIT_SETTLED_LIMIT;
 pub use continuation::{
-    ContinuationError, PendingOperation, PendingOperationMap, VmContinuation,
+    ContinuationError, PendingOccurrence, PendingOperation, PendingOperationMap, VmContinuation,
     VmFinallyCompletionContinuation, VmFinallyContinuation, VmHandlerContinuation,
     VmHeapContinuation, VmIteratorContinuation, VmIteratorCursor, VmLoopContinuation, VmLoopPhase,
     VmPendingErrorOriginContinuation, VmProfileContinuation, VmResumePoint, VmRunOutcome,
@@ -290,6 +290,10 @@ pub(super) struct ActiveLashVmExecutionNode {
     /// The loop context the occurrence began in. Every transition of the
     /// occurrence reports it, however far its loops have advanced since.
     pub(super) loops: Vec<lash_sansio::WorkflowLoopFrame>,
+    /// Whether a pending handle took the occurrence when it was minted. A
+    /// park on the operation gives back an occurrence taken where it was
+    /// issued; one a handle holds stays the handle's.
+    pub(super) minted: bool,
 }
 
 /// How many times each execution site has run, by node then site path. A

@@ -12,13 +12,28 @@ use lash_sansio::handle::HandleId;
 /// continuations.
 pub type PendingOperationMap = std::collections::BTreeMap<HandleId, Option<PendingOperation>>;
 
-/// Captured operands of the pending instruction at `site`.
+/// Which run of its instruction's execution site a pending operation is:
+/// the site's occurrence and the loops that enclosed it when its handle was
+/// minted, outermost first. Wherever the handle is awaited, its dispatch,
+/// wait, reissue and completion report this and not the context of the
+/// `await` that consumes it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PendingOccurrence {
+    pub occurrence: u64,
+    pub loops: Vec<lash_sansio::WorkflowLoopFrame>,
+}
+
+/// Captured operands of the pending instruction at `site`, and the
+/// occurrence of that instruction's execution site the handle was minted as
+/// (`None` when the instruction has no execution site).
 /// Operation identity and argument count belong to that instruction.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum PendingOperation {
     Tool {
         site: usize,
+        occurrence: Option<PendingOccurrence>,
         #[serde(
             serialize_with = "continuation_serde::serialize_value",
             deserialize_with = "continuation_serde::deserialize_value"
@@ -32,6 +47,7 @@ pub enum PendingOperation {
     },
     Timer {
         site: usize,
+        occurrence: Option<PendingOccurrence>,
         #[serde(
             serialize_with = "continuation_serde::serialize_value",
             deserialize_with = "continuation_serde::deserialize_value"
@@ -44,6 +60,12 @@ impl PendingOperation {
     pub(crate) fn site(&self) -> usize {
         match self {
             Self::Tool { site, .. } | Self::Timer { site, .. } => *site,
+        }
+    }
+
+    pub(crate) fn occurrence(&self) -> Option<&PendingOccurrence> {
+        match self {
+            Self::Tool { occurrence, .. } | Self::Timer { occurrence, .. } => occurrence.as_ref(),
         }
     }
 
@@ -443,6 +465,13 @@ pub enum ContinuationError {
     InvalidLoopContext { index: usize, reason: &'static str },
     #[error("continuation counts execution site {site:?} more than once or at zero")]
     InvalidOccurrenceCounter { site: lash_sansio::WorkflowSiteRef },
+    #[error(
+        "continuation pending operation {handle} is not an occurrence the parked run can have minted: {reason}"
+    )]
+    InvalidPendingOccurrence {
+        handle: String,
+        reason: &'static str,
+    },
     #[error("continuation has {actual} slots but program requires {expected}")]
     SlotCountMismatch { expected: usize, actual: usize },
     #[error(

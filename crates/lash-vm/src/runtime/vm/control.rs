@@ -1135,6 +1135,7 @@ mod tests {
                             lash_sansio::handle::HandleId::tool(0, 0),
                             Some(crate::PendingOperation::Tool {
                                 site: 0,
+                                occurrence: None,
                                 receiver: Value::Null,
                                 args: vec![root.clone()],
                             }),

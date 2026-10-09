@@ -530,7 +530,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
 
     /// One host operation per unique leaf, in leaf order, with each leaf's
     /// execution node begun, or, for a batch issued again after a park, its
-    /// occurrence taken again without starting it a second time.
+    /// occurrence taken again without starting it a second time. A leaf
+    /// awaited through its handle is the occurrence the handle was minted as.
     fn batch_leaf_operations(
         &mut self,
         batch: &super::super::CompiledResourceOperationBatch,
@@ -546,12 +547,10 @@ impl<H: ExecutionHost> Vm<'_, H> {
         let mut operations = Vec::with_capacity(batch.leaves.len());
         let mut active_nodes = Vec::with_capacity(batch.leaves.len());
         for leaf in batch.leaves.iter() {
-            let active = leaf.site.clone().map(|site| {
-                if reissued {
-                    self.reissue_lash_vm_execution_site(site)
-                } else {
-                    self.begin_lash_vm_execution_site(site)
-                }
+            let active = leaf.site.clone().map(|site| match &leaf.minted {
+                Some(minted) => self.begin_minted_lash_vm_execution_site(site, minted, reissued),
+                None if reissued => self.reissue_lash_vm_execution_site(site),
+                None => self.begin_lash_vm_execution_site(site),
             });
             let receiver = values
                 .get(leaf.receiver_stack_index)

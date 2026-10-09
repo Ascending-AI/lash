@@ -700,7 +700,9 @@ use lash_sansio::{
     WorkflowExecutionSite, WorkflowLoopFrame, WorkflowLoopPosition, WorkflowSitePath,
 };
 use lash_vm::{
-    LashVmExecutionCallSite, VmExecutionStart, VmInstance, VmRequest, VmResume, VmRunConfig, VmStep,
+    LashVmExecutionCallSite, ResourceOperationBatchLeaf, ResourceOperationBatchOutcome,
+    ResourceOperationOutcome, VmExecutionStart, VmInstance, VmRequest, VmResume, VmRunConfig,
+    VmStep,
 };
 
 /// What one run showed its host.
@@ -715,7 +717,7 @@ struct SiteRun {
 }
 
 /// Runs `compiled` stepwise as an echoing host, parking on the tool calls
-/// `park` names by their position among the calls the run issues and
+/// and batch leaves `park` names by their position among those the run issues and
 /// reopening every parked run from its bytes on a pristine instance.
 fn run_sites(compiled: lash_vm::CompiledProgram, park: impl Fn(usize) -> bool) -> (SiteRun, usize) {
     let program = std::sync::Arc::new(compiled);
@@ -732,6 +734,7 @@ fn run_sites(compiled: lash_vm::CompiledProgram, park: impl Fn(usize) -> bool) -
     let mut calls = Vec::new();
     let mut parks = 0;
     let mut held = None::<Value>;
+    let mut held_batch = None::<Vec<LashVmExecutionCallSite>>;
     let mut step = instance
         .start(program.clone(), VmExecutionStart::Session, config.clone())
         .expect("the run starts");
@@ -761,6 +764,63 @@ fn run_sites(compiled: lash_vm::CompiledProgram, park: impl Fn(usize) -> bool) -
                                     VmResume::Park
                                 } else {
                                     VmResume::Effect(Ok(AbilityOutcome::Value(value)))
+                                }
+                            }
+                        }
+                    }
+                    // A batch parks when `park` names any of its leaves, and
+                    // the batch issued again names every leaf's site as the
+                    // parked one did.
+                    VmRequest::Effect(AbilityOp::ResourceOperationBatch(batch)) => {
+                        let leaves = batch
+                            .leaves
+                            .into_iter()
+                            .map(|leaf| match leaf {
+                                ResourceOperationBatchLeaf::Operation(operation) => (
+                                    operation
+                                        .args
+                                        .first()
+                                        .and_then(Value::as_record)
+                                        .and_then(|record| record.get("value"))
+                                        .cloned()
+                                        .unwrap_or(Value::Null),
+                                    *operation.call_site.expect("a tool leaf names its site"),
+                                ),
+                                ResourceOperationBatchLeaf::Timer(sleep) => {
+                                    panic!("unexpected timer leaf {sleep:?}")
+                                }
+                            })
+                            .collect::<Vec<_>>();
+                        let results = || {
+                            AbilityOutcome::ResourceOperationBatch(
+                                ResourceOperationBatchOutcome::AllResults(
+                                    leaves
+                                        .iter()
+                                        .map(|(value, _)| {
+                                            ResourceOperationOutcome::Value(value.clone())
+                                        })
+                                        .collect(),
+                                ),
+                            )
+                        };
+                        match held_batch.take() {
+                            Some(parked) => {
+                                assert_eq!(
+                                    leaves.iter().map(|(_, site)| site).collect::<Vec<_>>(),
+                                    parked.iter().collect::<Vec<_>>(),
+                                    "a batch issued again names the sites it parked with"
+                                );
+                                VmResume::Effect(Ok(results()))
+                            }
+                            None => {
+                                let first = calls.len();
+                                calls.extend(leaves.iter().cloned());
+                                if (first..calls.len()).any(&park) {
+                                    held_batch =
+                                        Some(leaves.into_iter().map(|(_, site)| site).collect());
+                                    VmResume::Park
+                                } else {
+                                    VmResume::Effect(Ok(results()))
                                 }
                             }
                         }
@@ -1102,4 +1162,247 @@ finish("done");
     );
     let (parked, _) = run_sites(compiled, |_| true);
     assert_eq!(parked, run);
+}
+
+// ---- Deferred handles keep the context they were minted in (FIG-5670) ----
+
+const HANDLES_COLLECTED_IN_NESTED_LOOPS: &str = r#"const hs = [];
+for (const a of [1, 2]) {
+  for (const b of [1, 2]) {
+    hs.push(tools.echo({ value: a * 10 + b }));
+  }
+}
+await tools.echo({ value: "gate" });
+finish(await Promise.all(hs));
+"#;
+
+/// A loop context as `(activation, position)` per enclosing loop, outermost
+/// first.
+type LoopPositions = Vec<(u64, WorkflowLoopPosition)>;
+
+/// The occurrence and loop context of every start and completion of a tool
+/// call the run reported, in order.
+fn tool_transitions(run: &SiteRun) -> Vec<(&'static str, u64, LoopPositions)> {
+    run.observations
+        .iter()
+        .filter_map(|observation| {
+            let (name, site, occurrence, loops) = match observation {
+                LashVmExecutionObservation::NodeStarted {
+                    site,
+                    occurrence,
+                    loops,
+                } => ("started", site, occurrence, loops),
+                LashVmExecutionObservation::NodeCompleted {
+                    site,
+                    occurrence,
+                    loops,
+                } => ("completed", site, occurrence, loops),
+                _ => return None,
+            };
+            (site.node_kind == lash_vm::RESOURCE_OPERATION_EXECUTION_SITE_KIND).then(|| {
+                (
+                    name,
+                    *occurrence,
+                    loops
+                        .iter()
+                        .map(|frame| (frame.activation, frame.position))
+                        .collect(),
+                )
+            })
+        })
+        .collect()
+}
+
+/// A tool handle minted in a loop and awaited after it reports the
+/// occurrence, activation and iteration it was minted in: at dispatch, and
+/// at the start and completion of its node.
+#[test]
+fn handles_awaited_after_their_loops_report_the_iteration_that_minted_them() {
+    use WorkflowLoopPosition::Body;
+    let (_, compiled) = compile_main(HANDLES_COLLECTED_IN_NESTED_LOOPS);
+    let (run, _) = run_sites(compiled, |_| false);
+    assert!(run.end.contains("Finished"), "{}", run.end);
+    let minted = vec![
+        (1, vec![(1, Body(1)), (2, Body(1))]),
+        (2, vec![(1, Body(1)), (2, Body(2))]),
+        (3, vec![(1, Body(2)), (3, Body(1))]),
+        (4, vec![(1, Body(2)), (3, Body(2))]),
+    ];
+    let [(_, gate), leaves @ ..] = run.calls.as_slice() else {
+        panic!("the gate call and the batch: {:?}", run.calls);
+    };
+    assert!(gate.loops.is_empty(), "a call after the loops is in none");
+    assert_eq!(
+        leaves
+            .iter()
+            .map(|(_, call)| (call.occurrence, loop_positions(call)))
+            .collect::<Vec<_>>(),
+        minted,
+        "each leaf of the batch, in handle order"
+    );
+    let mut transitions = vec![("started", 1, vec![]), ("completed", 1, vec![])];
+    for name in ["started", "completed"] {
+        transitions.extend(
+            minted
+                .iter()
+                .map(|(occurrence, loops)| (name, *occurrence, loops.clone())),
+        );
+    }
+    assert_eq!(
+        tool_transitions(&run),
+        transitions,
+        "the gate, then every leaf starts and every leaf completes"
+    );
+}
+
+/// A run that parks between minting the handles and awaiting them, or on the
+/// batch that awaits them, and resumes from its bytes reports exactly what a
+/// run that never parked reports: each handle's occurrence and loop context
+/// ride the continuation, and the batch issued again starts no node twice.
+#[test]
+fn parked_handles_keep_the_iteration_that_minted_them_across_a_continuation() {
+    let (_, compiled) = compile_main(HANDLES_COLLECTED_IN_NESTED_LOOPS);
+    let (straight, straight_parks) = run_sites(compiled.clone(), |_| false);
+    assert_eq!(straight_parks, 0);
+    assert_eq!(straight.calls.len(), 5, "the gate and four leaves");
+    let (gate_parked, parks) = run_sites(compiled.clone(), |position| position == 0);
+    assert_eq!(parks, 1, "the run parks on the gate, holding four handles");
+    assert_eq!(gate_parked, straight);
+    let (batch_parked, parks) = run_sites(compiled.clone(), |position| position == 3);
+    assert_eq!(parks, 1, "the run parks on the batch");
+    assert_eq!(batch_parked, straight);
+    let (always, parks) = run_sites(compiled, |_| true);
+    assert_eq!(parks, 2);
+    assert_eq!(always, straight);
+}
+
+/// A handle awaited inside a loop other than the one that minted it keeps
+/// the context it was minted in, and so does one awaited in the same loop a
+/// later iteration: the awaiting loop names only what is issued in it.
+#[test]
+fn a_handle_awaited_in_another_loop_keeps_the_loop_that_minted_it() {
+    use WorkflowLoopPosition::Body;
+    let (_, compiled) = compile_main(
+        r#"const hs = [];
+for (const a of [1, 2]) {
+  hs.push(tools.echo({ value: a }));
+}
+for (const h of hs) {
+  await h;
+  await tools.echo({ value: "inside" });
+}
+finish("done");
+"#,
+    );
+    let (run, _) = run_sites(compiled.clone(), |_| false);
+    assert!(run.end.contains("Finished"), "{}", run.end);
+    let seen = run
+        .calls
+        .iter()
+        .map(|(value, call)| (value.to_string(), call.occurrence, loop_positions(call)))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        seen,
+        vec![
+            ("1".to_string(), 1, vec![(1, Body(1))]),
+            ("inside".to_string(), 1, vec![(2, Body(1))]),
+            ("2".to_string(), 2, vec![(1, Body(2))]),
+            ("inside".to_string(), 2, vec![(2, Body(2))]),
+        ]
+    );
+    let (parked, parks) = run_sites(compiled, |_| true);
+    assert_eq!(parks, 4);
+    assert_eq!(parked, run);
+}
+
+/// A handle's occurrence is resume state the next segment trusts: a
+/// continuation whose pending operation names an occurrence its site never
+/// counted, or a loop the run never began, is refused when it resumes.
+#[test]
+fn a_continuation_refuses_a_handle_its_run_cannot_have_minted() {
+    let (_, compiled) = compile_main(HANDLES_COLLECTED_IN_NESTED_LOOPS);
+    let program = std::sync::Arc::new(compiled);
+    let config = VmRunConfig::new(
+        lash_vm::ExecutionMode::Foreground,
+        lash_vm::ExecutionBounds::new(
+            lash_vm::ExecutionBound::Unbounded,
+            lash_vm::ExecutionBound::Unbounded,
+        ),
+    );
+    let mut instance = VmInstance::pristine();
+    let mut step = instance
+        .start(program.clone(), VmExecutionStart::Session, config.clone())
+        .expect("the run starts");
+    let parked = loop {
+        step = match step {
+            VmStep::Suspended(suspended) => {
+                let resume = match suspended.request {
+                    VmRequest::Effect(AbilityOp::ResourceOperation(_)) => VmResume::Park,
+                    VmRequest::CancelCheckpoint(_) => {
+                        VmResume::CancelCheckpoint { cancelled: false }
+                    }
+                    VmRequest::Boundary => VmResume::Continue,
+                    other => panic!("unexpected request {other:?}"),
+                };
+                instance.resume(resume).expect("the resume answers")
+            }
+            VmStep::Parked(parked) => break parked,
+            _ => panic!("the run parks on the gate"),
+        };
+    };
+    let wire: serde_json::Value = serde_json::from_slice(
+        &parked
+            .continuation
+            .to_bytes()
+            .expect("a parked continuation encodes"),
+    )
+    .expect("continuation json");
+    let handle = wire["pending_tools"]
+        .as_object()
+        .expect("pending operations")
+        .keys()
+        .next()
+        .expect("a live handle")
+        .clone();
+    let refused = |edit: &dyn Fn(&mut serde_json::Value)| {
+        let mut wire = wire.clone();
+        edit(&mut wire["pending_tools"][handle.as_str()]["occurrence"]);
+        let bytes = serde_json::to_vec(&wire).expect("continuation bytes");
+        let mut instance = VmInstance::pristine();
+        let continuation = instance
+            .open_continuation(&bytes)
+            .expect("the continuation decodes");
+        match instance.start(
+            program.clone(),
+            VmExecutionStart::Continuation(Box::new(continuation)),
+            config.clone(),
+        ) {
+            Ok(step) => panic!("the continuation resumed: {step:?}"),
+            Err(error) => error.to_string(),
+        }
+    };
+    for (edit, reason) in [
+        (
+            &(|occurrence: &mut serde_json::Value| occurrence["occurrence"] = 5.into())
+                as &dyn Fn(&mut serde_json::Value),
+            "its site never counted that occurrence",
+        ),
+        (
+            &|occurrence: &mut serde_json::Value| occurrence["occurrence"] = 2.into(),
+            "another pending operation holds it",
+        ),
+        (
+            &|occurrence: &mut serde_json::Value| {
+                occurrence["loops"][1]["activation"] = 9.into();
+            },
+            "a loop it names was never begun inside the loop enclosing it",
+        ),
+        (
+            &|occurrence: &mut serde_json::Value| *occurrence = serde_json::Value::Null,
+            "its instruction's execution site has no occurrence",
+        ),
+    ] {
+        let error = refused(edit);
+        assert!(error.contains(reason), "{reason}: {error}");
+    }
 }

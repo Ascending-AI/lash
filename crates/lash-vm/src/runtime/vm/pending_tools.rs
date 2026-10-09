@@ -94,10 +94,13 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 pending: Vec::new(),
             })?;
         let id = HandleId::tool(self.execution_nonce, request);
+        let site = self.current_instruction_ip();
+        let occurrence = self.mint_pending_occurrence(site);
         self.pending_tools.insert(
             id.clone(),
             Some(PendingOperation::Tool {
-                site: self.current_instruction_ip(),
+                site,
+                occurrence,
                 receiver,
                 args,
             }),
@@ -160,6 +163,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
     /// timers"). Its entry captures the site and duration. The duration is only
     /// recorded here — the timer's start point is its **admission**, when the
     /// aggregate that awaits it is formed and the host records its deadline.
+    /// What the entry does fix here is which occurrence of its site the timer
+    /// is, and in which loops.
     pub(super) fn create_pending_timer(&mut self) -> Result<(), RuntimeError> {
         let duration = self.pop_stack()?;
         let request =
@@ -169,10 +174,13 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 pending: Vec::new(),
             })?;
         let id = HandleId::tool(self.execution_nonce, request);
+        let site = self.current_instruction_ip();
+        let occurrence = self.mint_pending_occurrence(site);
         self.pending_tools.insert(
             id.clone(),
             Some(PendingOperation::Timer {
-                site: self.current_instruction_ip(),
+                site,
+                occurrence,
                 duration,
             }),
         );
@@ -265,6 +273,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                             .get(site)
                             .cloned()
                             .flatten(),
+                        minted: call.occurrence().cloned(),
                         source_span: self.chunk.spans.get(site).copied().flatten(),
                     });
                     values.extend(call.values().cloned());

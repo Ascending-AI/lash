@@ -89,10 +89,10 @@ pub(crate) use vm::SlotState;
 pub(crate) use vm::VmParkableRun;
 #[allow(unused_imports)]
 pub use vm::{
-    ContinuationError, PendingOperation, PendingOperationMap, REGEXP_EXECUTION_FUEL,
-    REGEXP_FUEL_PER_INSTRUCTION, REGEXP_MAX_NESTING, REGEXP_MAX_PATTERN_CODE_UNITS,
-    RegExpValidationError, VM_CONTINUATION_FORMAT_VERSION, Vm, VmContinuation,
-    VmFinallyCompletionContinuation, VmFinallyContinuation, VmHandlerContinuation,
+    ContinuationError, PendingOccurrence, PendingOperation, PendingOperationMap,
+    REGEXP_EXECUTION_FUEL, REGEXP_FUEL_PER_INSTRUCTION, REGEXP_MAX_NESTING,
+    REGEXP_MAX_PATTERN_CODE_UNITS, RegExpValidationError, VM_CONTINUATION_FORMAT_VERSION, Vm,
+    VmContinuation, VmFinallyCompletionContinuation, VmFinallyContinuation, VmHandlerContinuation,
     VmHeapContinuation, VmIteratorContinuation, VmIteratorCursor, VmLoopContinuation, VmLoopPhase,
     VmPendingErrorOriginContinuation, VmProfileContinuation, VmResumePoint, VmRunOutcome,
     VmSiteOccurrenceCounter, VmSuspendedOperation, validate_regexp, validate_regexp_shape,

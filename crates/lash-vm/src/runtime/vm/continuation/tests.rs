@@ -507,6 +507,14 @@ fn pending_operation_law_has_a_tagged_site_and_operands() {
         tool.clone(),
         Some(PendingOperation::Tool {
             site: 3,
+            occurrence: Some(PendingOccurrence {
+                occurrence: 2,
+                loops: vec![lash_sansio::WorkflowLoopFrame {
+                    site: lash_sansio::WorkflowSiteRef::node("node:loop"),
+                    activation: 1,
+                    position: lash_sansio::WorkflowLoopPosition::Body(2),
+                }],
+            }),
             receiver: Value::Null,
             args: vec![Value::Bool(true)],
         }),
@@ -515,21 +523,27 @@ fn pending_operation_law_has_a_tagged_site_and_operands() {
         timer.clone(),
         Some(PendingOperation::Timer {
             site: 4,
+            occurrence: None,
             duration: Value::Number(10.0),
         }),
     );
     let wire = serde_json::to_value(&continuation).expect("wire");
     assert_eq!(
         wire["pending_tools"][tool.as_str()],
-        serde_json::json!({"kind":"tool","site":3,"receiver":{"kind":"null"},"args":[{"kind":"bool","value":true}]})
+        serde_json::json!({"kind":"tool","site":3,"occurrence":{"occurrence":2,"loops":[{"site":{"node_id":"node:loop"},"activation":1,"position":{"body":2}}]},"receiver":{"kind":"null"},"args":[{"kind":"bool","value":true}]})
+    );
+    assert_eq!(
+        wire["pending_tools"][timer.as_str()]["occurrence"],
+        serde_json::Value::Null
     );
     assert_eq!(wire["pending_tools"][timer.as_str()]["kind"], "timer");
     assert_eq!(wire["pending_tools"][timer.as_str()]["site"], 4);
     let restored: VmContinuation = serde_json::from_value(wire.clone()).expect("restore");
     assert_eq!(restored.pending_tools, continuation.pending_tools);
     for invalid in [
-        serde_json::json!({"kind":"tool","site":3.5,"receiver":{"kind":"null"},"args":[]}),
-        serde_json::json!({"kind":"tool","site":3,"receiver":{"kind":"null"},"args":[],"operation":7}),
+        serde_json::json!({"kind":"tool","site":3.5,"occurrence":null,"receiver":{"kind":"null"},"args":[]}),
+        serde_json::json!({"kind":"tool","site":3,"occurrence":null,"receiver":{"kind":"null"},"args":[],"operation":7}),
+        serde_json::json!({"kind":"tool","site":3,"occurrence":{"occurrence":2},"receiver":{"kind":"null"},"args":[]}),
         serde_json::json!({"kind":"set","value":{"kind":"list","value":[]}}),
     ] {
         let mut corrupted = wire.clone();

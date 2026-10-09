@@ -386,6 +386,7 @@ impl Compiler {
             receiver_stack_index,
             unwrap,
             site,
+            minted: None,
             source_span,
         });
         *stack_value_count += args.len() + 1;

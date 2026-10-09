@@ -71,12 +71,63 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             site,
             occurrence,
             loops: self.loop_context(),
+            minted: false,
+        }
+    }
+
+    /// The occurrence a handle minted by the instruction at `instruction_ip`
+    /// is of that instruction's site, in the loops the run is inside now.
+    /// Nothing starts here: the operation's node starts when the handle is
+    /// awaited, under this occurrence.
+    pub(super) fn mint_pending_occurrence(
+        &mut self,
+        instruction_ip: usize,
+    ) -> Option<crate::PendingOccurrence> {
+        let chunk = self.chunk;
+        let site = chunk
+            .lash_vm_execution_sites
+            .get(instruction_ip)?
+            .as_ref()?;
+        let occurrence = next_occurrence(&mut self.lash_vm_execution_occurrences, site);
+        Some(crate::PendingOccurrence {
+            occurrence,
+            loops: self.loop_context(),
+        })
+    }
+
+    /// The node of an operation awaited through its handle: the occurrence
+    /// and loop context the handle was minted with, wherever the run is
+    /// now. It starts once, when it is first issued; issued again after a
+    /// park, it is the same node.
+    pub(super) fn begin_minted_lash_vm_execution_site(
+        &self,
+        site: LashVmExecutionSite,
+        minted: &crate::PendingOccurrence,
+        reissued: bool,
+    ) -> ActiveLashVmExecutionNode {
+        if !reissued {
+            self.observe(|| LashVmExecutionObservation::NodeStarted {
+                site: site.clone(),
+                occurrence: minted.occurrence,
+                loops: minted.loops.clone(),
+            });
+        }
+        ActiveLashVmExecutionNode {
+            site,
+            occurrence: minted.occurrence,
+            loops: minted.loops.clone(),
+            minted: true,
         }
     }
 
     /// Takes back the occurrence `active` began with: the run parked on the
-    /// operation its node issues, and issues it again when it resumes.
+    /// operation its node issues, and issues it again when it resumes. An
+    /// occurrence a pending handle holds is not taken back: the handle is
+    /// live again and still names it.
     pub(super) fn rewind_lash_vm_execution(&mut self, active: &ActiveLashVmExecutionNode) {
+        if active.minted {
+            return;
+        }
         rewind_occurrence(
             &mut self.lash_vm_execution_occurrences,
             &active.site,
@@ -99,6 +150,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             site,
             occurrence,
             loops,
+            minted: false,
         }
     }
 
