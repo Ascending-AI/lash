@@ -4,7 +4,7 @@
 use lash_kernel_doc::{Action, Callee, Expr, Literal, Stmt};
 
 use super::patterns::Mode;
-use super::{BindingKind, FunctionFrame, Known, Lowerer, Lowering, Operand};
+use super::{BindingKind, FunctionFrame, Lowerer, Lowering, Operand, Ty};
 use crate::adapter as ast;
 
 impl Lowerer<'_> {
@@ -34,7 +34,7 @@ impl Lowerer<'_> {
                 .is_some_and(|(_, binding)| binding.predeclared);
             if named {
                 self.initialise(name, closure);
-                Operand::variable(kernel, Known::Unknown)
+                Operand::variable(kernel, Ty::Unknown)
             } else {
                 closure
             }
@@ -80,7 +80,11 @@ impl Lowerer<'_> {
         });
         self.span = outer_span;
         self.functions.pop();
-        Ok(self.emit_closure(vec![this, args], body?))
+        let closure = self.emit_closure(vec![this, args], body?);
+        Ok(Operand {
+            atom: closure.atom,
+            ty: self.facts.function(function.return_ty.as_ref()),
+        })
     }
 
     /// Binds a function's parameters from its argument list. A missing
@@ -90,7 +94,7 @@ impl Lowerer<'_> {
         params: &[ast::Pattern],
         args: &lash_kernel_doc::Name,
     ) -> Lowering<()> {
-        let args = Operand::variable(args.clone(), Known::Unknown);
+        let args = Operand::variable(args.clone(), Ty::Unknown);
         let positional = params
             .iter()
             .take_while(|param| !matches!(param, ast::Pattern::Rest(_)))
@@ -100,14 +104,14 @@ impl Lowerer<'_> {
         let padded = if positional == 0 {
             args.clone()
         } else {
-            self.invoke("ts.pad", &[args.clone(), count.clone()], Known::Unknown)?
+            self.invoke("ts.pad", &[args.clone(), count.clone()], Ty::Unknown)?
         };
         for (index, param) in params.iter().enumerate() {
             let value = match param {
                 ast::Pattern::Rest(_) => {
-                    self.invoke("ts.rest", &[args.clone(), count.clone()], Known::Unknown)?
+                    self.invoke("ts.rest", &[args.clone(), count.clone()], Ty::Unknown)?
                 }
-                _ => self.let_expr(Self::element(&padded, index), Known::Unknown),
+                _ => self.let_expr(Self::element(&padded, index), Ty::Unknown),
             };
             self.destructure(param, value, Mode::Local)?;
         }
@@ -129,7 +133,7 @@ impl Lowerer<'_> {
                         lash_kernel_doc::Atom::Variable(args),
                     ],
                 },
-                Known::Unknown,
+                Ty::Unknown,
             );
             lowerer.emit(Stmt::Return {
                 value: result.expr(),

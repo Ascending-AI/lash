@@ -3,7 +3,7 @@
 use lash_kernel_doc::{Expr, Literal, Place};
 
 use super::calls::Key;
-use super::{BindingKind, Buf, Known, Lowerer, Lowering, Operand};
+use super::{BindingKind, Buf, Lowerer, Lowering, Operand, Ty};
 use crate::adapter as ast;
 
 /// What a pattern's names are.
@@ -53,20 +53,20 @@ impl Lowerer<'_> {
                 self.destructure(target, value, mode)
             }
             ast::Pattern::Array { elements, rest } => {
-                let items = self.invoke("ts.iterate", &[value], Known::Unknown)?;
+                let items = self.invoke("ts.iterate", &[value], Ty::Unknown)?;
                 #[expect(clippy::cast_precision_loss, reason = "a pattern's element count")]
                 let count = Operand::number(elements.len() as f64);
                 if elements.iter().any(Option::is_some) {
                     let padded =
-                        self.invoke("ts.pad", &[items.clone(), count.clone()], Known::Unknown)?;
+                        self.invoke("ts.pad", &[items.clone(), count.clone()], Ty::Unknown)?;
                     for (index, element) in elements.iter().enumerate() {
                         let Some(element) = element else { continue };
-                        let item = self.let_expr(Self::element(&padded, index), Known::Unknown);
+                        let item = self.let_expr(Self::element(&padded, index), Ty::Unknown);
                         self.destructure(element, item, mode)?;
                     }
                 }
                 if let Some(rest) = rest {
-                    let tail = self.invoke("ts.rest", &[items, count], Known::Unknown)?;
+                    let tail = self.invoke("ts.rest", &[items, count], Ty::Unknown)?;
                     self.destructure(rest, tail, mode)?;
                 }
                 Ok(())
@@ -76,7 +76,7 @@ impl Lowerer<'_> {
                 let checked = self.invoke(
                     "ts.require_object_coercible",
                     std::slice::from_ref(&value),
-                    Known::Unknown,
+                    Ty::Unknown,
                 )?;
                 self.discard(checked);
                 let mut taken = Vec::new();
@@ -93,8 +93,8 @@ impl Lowerer<'_> {
                     self.destructure(&property.value, member, mode)?;
                 }
                 if let Some(rest) = rest {
-                    let taken = self.let_expr(Expr::List(taken), Known::Unknown);
-                    let others = self.invoke("ts.object_rest", &[value, taken], Known::Unknown)?;
+                    let taken = self.let_expr(Expr::List(taken), Ty::Unknown);
+                    let others = self.invoke("ts.object_rest", &[value, taken], Ty::Unknown)?;
                     self.destructure(rest, others, mode)?;
                 }
                 Ok(())
@@ -114,6 +114,6 @@ impl Lowerer<'_> {
             Ok(())
         })?;
         self.emit_if(missing, fill, Buf::default());
-        Ok(Operand::variable(slot, Known::Unknown))
+        Ok(Operand::variable(slot, Ty::Unknown))
     }
 }

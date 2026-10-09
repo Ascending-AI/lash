@@ -2,7 +2,7 @@
 
 use lash_kernel_doc::{Action, Atom, Callee, Expr, Literal, Place, Stmt};
 
-use super::{Buf, Known, Lowerer, Lowering, Operand};
+use super::{Buf, Lowerer, Lowering, Operand, Ty};
 use crate::adapter as ast;
 use crate::{Diagnostic, DiagnosticCode, SourceSpan};
 
@@ -48,17 +48,39 @@ impl Lowerer<'_> {
     }
 
     /// `object.key` or `object[key]`.
+    ///
+    /// An element of an array read by a number, and an array's length, are
+    /// the kernel's own `list.get` and `list.len`. Every other read keeps
+    /// JavaScript's meaning, and what it gives is believed to be what the
+    /// object's type says.
     pub(super) fn get_member(&mut self, object: &Operand, key: &Key) -> Lowering<Operand> {
+        if let Ty::List(element) = &object.ty {
+            match key {
+                Key::Computed(index) if index.ty.is_number() => {
+                    let read = self.native("list.get", vec![object.expr(), index.expr()])?;
+                    return Ok(self.let_expr(read, (**element).clone()));
+                }
+                Key::Static(name) if name == "length" => {
+                    let length = self.native("list.len", vec![object.expr()])?;
+                    return Ok(self.let_expr(length, Ty::Number));
+                }
+                _ => {}
+            }
+        }
+        let ty = match key {
+            Key::Static(name) => object.ty.property(name),
+            Key::Computed(_) => Ty::Unknown,
+        };
         if let Key::Static(name) = key
             && self.table.properties.contains_key(name.as_str())
         {
             return self.invoke(
                 &format!("ts.property.{name}"),
                 std::slice::from_ref(object),
-                Known::Unknown,
+                ty,
             );
         }
-        self.invoke("ts.get", &[object.clone(), key.operand()], Known::Unknown)
+        self.invoke("ts.get", &[object.clone(), key.operand()], ty)
     }
 
     /// `object[key] = value`.
@@ -71,7 +93,7 @@ impl Lowerer<'_> {
         let written = self.invoke(
             "ts.set",
             &[object.clone(), key.operand(), value],
-            Known::Unknown,
+            Ty::Unknown,
         )?;
         self.discard(written);
         Ok(())
@@ -107,7 +129,7 @@ impl Lowerer<'_> {
             return Some(self.read(name, span));
         }
         if let Some(function) = self.table.values.get(path).copied() {
-            return Some(self.invoke(function, &[], Known::Unknown));
+            return Some(self.invoke(function, &[], Ty::Unknown));
         }
         if let Some(function) = self.table.functions.get(path).copied() {
             return Some(self.builtin_closure(function));
@@ -164,12 +186,14 @@ impl Lowerer<'_> {
 
     /// Calls a function value: `apply f(this, args)`.
     fn apply(&mut self, function: Operand, this: Operand, args: Operand) -> Operand {
+        // A call gives what the function's declared return type says.
+        let returned = function.ty.returned();
         let function = match function.atom {
             Atom::Variable(name) => name,
             Atom::Literal(_) => {
                 // Calling a literal raises the kernel's `type_error`, which
                 // is what the language asks for.
-                let held = self.let_expr(function.expr(), function.known);
+                let held = self.let_expr(function.expr(), function.ty);
                 super::statements::variable_of(&held)
             }
         };
@@ -178,7 +202,7 @@ impl Lowerer<'_> {
                 callee: Callee::Value(function),
                 args: vec![this.atom, args.atom],
             },
-            Known::Unknown,
+            returned,
         )
     }
 
@@ -188,16 +212,12 @@ impl Lowerer<'_> {
         if let Key::Static(name) = key
             && self.table.methods.contains_key(name.as_str())
         {
-            return self.invoke(
-                &format!("ts.method.{name}"),
-                &[object, args],
-                Known::Unknown,
-            );
+            return self.invoke(&format!("ts.method.{name}"), &[object, args], Ty::Unknown);
         }
         self.invoke(
             "ts.call_member",
             &[object, key.operand(), args],
-            Known::Unknown,
+            Ty::Unknown,
         )
     }
 
@@ -213,7 +233,7 @@ impl Lowerer<'_> {
         if let Some(path) = self.global_path(callee) {
             if let Some(function) = self.table.functions.get(path.as_str()).copied() {
                 let args = self.arguments(args)?;
-                return self.invoke(function, &[Operand::undefined(), args], Known::Unknown);
+                return self.invoke(function, &[Operand::undefined(), args], Ty::Unknown);
             }
             if !path.starts_with("globalThis.") && !self.table.values.contains_key(path.as_str()) {
                 return Err(Diagnostic::refusal(
@@ -279,7 +299,7 @@ impl Lowerer<'_> {
             ));
         };
         let args = self.arguments(args)?;
-        self.invoke(function, &[Operand::undefined(), args], Known::Unknown)
+        self.invoke(function, &[Operand::undefined(), args], Ty::Unknown)
     }
 
     /// `base?.a.b?.(x)`: each `?.` ends the whole chain with `undefined`
@@ -289,7 +309,7 @@ impl Lowerer<'_> {
         base: &ast::Expr,
         operations: &[ast::OptionalOperation],
     ) -> Lowering<Operand> {
-        let result = self.let_expr(Expr::Literal(Literal::Absent), Known::Unknown);
+        let result = self.let_expr(Expr::Literal(Literal::Absent), Ty::Unknown);
         let place = Place::Variable(super::statements::variable_of(&result));
         let link = match base {
             ast::Expr::Member {
@@ -373,7 +393,7 @@ impl Lowerer<'_> {
         if !optional {
             return lower(self);
         }
-        let nullish = self.invoke("ts.is_nullish", std::slice::from_ref(value), Known::Bool)?;
+        let nullish = self.invoke("ts.is_nullish", std::slice::from_ref(value), Ty::Bool)?;
         let onward = self.block(lower)?;
         self.emit_if(nullish.expr(), Buf::default(), onward);
         Ok(())

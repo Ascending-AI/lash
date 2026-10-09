@@ -7,9 +7,16 @@
 //! be lowered and admitted; nothing built on it runs. When the library
 //! lands, its registry replaces this module and a renamed function is one
 //! `use` line in a helper source.
+//!
+//! The lowerer calls some of these directly where it knows an operand's
+//! type (`crate::types`). That is sound only while each takes exactly the
+//! kinds its name says and raises `type_error` for any other, and while
+//! `list.get(list, index)` reads an integral index from `0` up to the
+//! list's length and raises `index_out_of_range` for any other, with no
+//! counting from the end.
 
 use lash_kernel_dialect::NamedLibrary;
-use lash_kernel_doc::parse_definition;
+use lash_kernel_doc::{FunctionDefinition, parse_definition};
 
 /// The kernel library functions the dialect's helpers and lowerer call,
 /// with the number of arguments each takes.
@@ -49,26 +56,41 @@ pub const KERNEL_FUNCTIONS: &[(&str, usize)] = &[
     ("text.lt_utf16", 2),
     ("text.code_points", 1),
     ("list.len", 1),
+    ("list.get", 2),
     ("record.get", 2),
     ("record.has", 2),
     ("record.keys", 1),
     ("json.stringify", 1),
 ];
 
-/// A library that holds [`KERNEL_FUNCTIONS`] as native definitions.
+/// [`KERNEL_FUNCTIONS`] as native definitions, each taking and giving any
+/// value.
+#[expect(
+    clippy::expect_used,
+    reason = "the table is a constant, and every law of this crate builds the library from it"
+)]
+pub fn kernel_definitions() -> Vec<FunctionDefinition> {
+    KERNEL_FUNCTIONS
+        .iter()
+        .map(|(name, arity)| {
+            let params: Vec<String> = (0..*arity).map(|index| format!("p{index}: Any")).collect();
+            let text = format!(
+                "function {name}({}) -> Any\nkernel 1\ncharge 1\nnative\n",
+                params.join(", ")
+            );
+            parse_definition(&text).expect("a stand-in definition is kernel text")
+        })
+        .collect()
+}
+
+/// A library that holds [`kernel_definitions`].
 #[expect(
     clippy::expect_used,
     reason = "the table is a constant, and every law of this crate builds the library from it"
 )]
 pub fn kernel_library() -> NamedLibrary {
     let mut library = NamedLibrary::new();
-    for (name, arity) in KERNEL_FUNCTIONS {
-        let params: Vec<String> = (0..*arity).map(|index| format!("p{index}: Any")).collect();
-        let text = format!(
-            "function {name}({}) -> Any\nkernel 1\ncharge 1\nnative\n",
-            params.join(", ")
-        );
-        let definition = parse_definition(&text).expect("a stand-in definition is kernel text");
+    for definition in kernel_definitions() {
         library
             .insert(definition)
             .expect("each stand-in name is listed once");

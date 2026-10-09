@@ -5,34 +5,35 @@ use lash_kernel_doc::{Expr, Literal, Member, Place, RecordEntry};
 
 use super::calls::Key;
 use super::patterns::Mode;
-use super::{Buf, Known, Lowerer, Lowering, Operand, unknown_binding};
+use super::{Buf, Lowerer, Lowering, Operand, Ty, unknown_binding};
 use crate::adapter::{self as ast, AssignOp, BinaryOp, LogicalOp, UnaryOp};
+use crate::types::{self, Direct};
 use crate::{Diagnostic, DiagnosticCode, SourceSpan};
 
-/// The helper a binary operator calls and what it always gives.
-fn binary_helper(op: BinaryOp) -> (&'static str, Known) {
+/// The helper that carries a binary operator's JavaScript meaning.
+fn binary_helper(op: BinaryOp) -> &'static str {
     match op {
-        BinaryOp::Add => ("ts.add", Known::Unknown),
-        BinaryOp::Subtract => ("ts.sub", Known::Number),
-        BinaryOp::Multiply => ("ts.mul", Known::Number),
-        BinaryOp::Divide => ("ts.div", Known::Number),
-        BinaryOp::Remainder => ("ts.rem", Known::Number),
-        BinaryOp::Exponent => ("ts.pow", Known::Number),
-        BinaryOp::BitAnd => ("ts.bit_and", Known::Number),
-        BinaryOp::BitOr => ("ts.bit_or", Known::Number),
-        BinaryOp::BitXor => ("ts.bit_xor", Known::Number),
-        BinaryOp::ShiftLeft => ("ts.shl", Known::Number),
-        BinaryOp::ShiftRight => ("ts.shr", Known::Number),
-        BinaryOp::ShiftRightUnsigned => ("ts.ushr", Known::Number),
-        BinaryOp::StrictEqual => ("ts.strict_equals", Known::Bool),
-        BinaryOp::StrictNotEqual => ("ts.strict_not_equals", Known::Bool),
-        BinaryOp::LooseEqual => ("ts.loose_equals", Known::Bool),
-        BinaryOp::LooseNotEqual => ("ts.loose_not_equals", Known::Bool),
-        BinaryOp::Less => ("ts.lt", Known::Bool),
-        BinaryOp::LessEqual => ("ts.le", Known::Bool),
-        BinaryOp::Greater => ("ts.gt", Known::Bool),
-        BinaryOp::GreaterEqual => ("ts.ge", Known::Bool),
-        BinaryOp::In => ("ts.has", Known::Bool),
+        BinaryOp::Add => "ts.add",
+        BinaryOp::Subtract => "ts.sub",
+        BinaryOp::Multiply => "ts.mul",
+        BinaryOp::Divide => "ts.div",
+        BinaryOp::Remainder => "ts.rem",
+        BinaryOp::Exponent => "ts.pow",
+        BinaryOp::BitAnd => "ts.bit_and",
+        BinaryOp::BitOr => "ts.bit_or",
+        BinaryOp::BitXor => "ts.bit_xor",
+        BinaryOp::ShiftLeft => "ts.shl",
+        BinaryOp::ShiftRight => "ts.shr",
+        BinaryOp::ShiftRightUnsigned => "ts.ushr",
+        BinaryOp::StrictEqual => "ts.strict_equals",
+        BinaryOp::StrictNotEqual => "ts.strict_not_equals",
+        BinaryOp::LooseEqual => "ts.loose_equals",
+        BinaryOp::LooseNotEqual => "ts.loose_not_equals",
+        BinaryOp::Less => "ts.lt",
+        BinaryOp::LessEqual => "ts.le",
+        BinaryOp::Greater => "ts.gt",
+        BinaryOp::GreaterEqual => "ts.ge",
+        BinaryOp::In => "ts.has",
         BinaryOp::InstanceOf => unreachable!("`instanceof` is resolved by its class"),
     }
 }
@@ -62,13 +63,13 @@ impl Lowerer<'_> {
                         Operand::text(pattern.clone()).expr(),
                         Operand::text(flags.clone()).expr(),
                     ]),
-                    Known::Unknown,
+                    Ty::Unknown,
                 );
-                self.invoke(constructor, &[Operand::undefined(), args], Known::Unknown)
+                self.invoke(constructor, &[Operand::undefined(), args], Ty::Unknown)
             }
             ast::Expr::Ident(name, span) => self.read(name, *span),
             ast::Expr::This => match self.this_binding() {
-                Some(this) => Ok(Operand::variable(this, Known::Unknown)),
+                Some(this) => Ok(Operand::variable(this, Ty::Unknown)),
                 None => Err(Diagnostic::new(
                     DiagnosticCode::ThisUnsupported,
                     "`this` outside a function is not in the TypeScript dialect",
@@ -86,30 +87,43 @@ impl Lowerer<'_> {
             ast::Expr::Unary { op, value } => self.lower_unary(*op, value),
             ast::Expr::Binary { left, op, right } => self.lower_binary(left, *op, right),
             ast::Expr::Logical { left, op, right } => {
+                let shown = self.narrowing(left);
                 let left = self.lower_expr(left)?;
-                self.short_circuit(*op, left, |this| this.lower_expr(right))
+                // The right operand runs only where the left one did not
+                // decide.
+                let shown = match op {
+                    LogicalOp::And => shown.when_true,
+                    LogicalOp::Or => shown.when_false,
+                    LogicalOp::Nullish => Vec::new(),
+                };
+                self.short_circuit(*op, left, |this| {
+                    this.narrowed(shown, |this| this.lower_expr(right))
+                })
             }
             ast::Expr::Conditional {
                 test,
                 consequent,
                 alternate,
             } => {
+                let shown = self.narrowing(test);
                 let test = self.lower_expr(test)?;
                 let condition = self.condition(test)?;
-                let result = self.let_expr(Expr::Literal(Literal::Absent), Known::Unknown);
-                let place = Place::Variable(super::statements::variable_of(&result));
-                let then_block = self.block(|this| {
-                    let value = this.lower_expr(consequent)?;
-                    this.store(place.clone(), value);
-                    Ok(())
-                })?;
-                let else_block = self.block(|this| {
-                    let value = this.lower_expr(alternate)?;
-                    this.store(place.clone(), value);
-                    Ok(())
-                })?;
+                let result = self.let_expr(Expr::Literal(Literal::Absent), Ty::Unknown);
+                let name = super::statements::variable_of(&result);
+                let place = Place::Variable(name.clone());
+                let mut ty = Ty::Never;
+                let mut branch = |this: &mut Self, shown: Vec<(String, Ty)>, value: &ast::Expr| {
+                    this.block(|this| {
+                        let value = this.narrowed(shown, |this| this.lower_expr(value))?;
+                        ty = ty.join(&value.ty);
+                        this.store(place.clone(), value);
+                        Ok(())
+                    })
+                };
+                let then_block = branch(self, shown.when_true, consequent)?;
+                let else_block = branch(self, shown.when_false, alternate)?;
                 self.emit_if(condition, then_block, else_block);
-                Ok(result)
+                Ok(Operand::variable(name, ty))
             }
             ast::Expr::Template {
                 quasis,
@@ -127,11 +141,20 @@ impl Lowerer<'_> {
                 delta,
                 prefix,
             } => self.lower_update(target, *delta, *prefix),
+            ast::Expr::As { value, ty } => {
+                // The value itself, believed to be what the assertion says;
+                // `as any` says nothing is known of it.
+                let value = self.lower_expr(value)?;
+                Ok(Operand {
+                    atom: value.atom,
+                    ty: self.facts.believed(ty),
+                })
+            }
             ast::Expr::Delete { object, property } => {
                 let object = self.lower_expr(object)?;
                 let object = self.pin(object);
                 let key = self.lower_key(property)?;
-                self.invoke("ts.delete", &[object, key.operand()], Known::Bool)
+                self.invoke("ts.delete", &[object, key.operand()], Ty::Bool)
             }
         }
     }
@@ -141,7 +164,7 @@ impl Lowerer<'_> {
     pub(super) fn read(&mut self, name: &str, span: Option<SourceSpan>) -> Lowering<Operand> {
         let span = span.or(self.span);
         if let Some(kernel) = self.resolve(name, span)? {
-            return Ok(Operand::variable(kernel, Known::Unknown));
+            return Ok(Operand::variable(kernel, self.type_of_binding(name)));
         }
         match name {
             "undefined" => return Ok(Operand::undefined()),
@@ -149,7 +172,7 @@ impl Lowerer<'_> {
             "Infinity" => return Ok(Operand::number(f64::INFINITY)),
             "arguments" => {
                 return match self.arguments_binding() {
-                    Some(args) => Ok(Operand::variable(args, Known::Unknown)),
+                    Some(args) => Ok(Operand::variable(args, Ty::Unknown)),
                     None => Err(Diagnostic::new(
                         DiagnosticCode::ArgumentsUnsupported,
                         "`arguments` outside a function is not in the TypeScript dialect",
@@ -191,7 +214,7 @@ impl Lowerer<'_> {
         let mut operands = self.operands(&exprs)?;
         if items.iter().all(|(spread, _)| !spread) {
             let values = operands.iter().map(Operand::expr).collect();
-            return Ok(self.let_expr(Expr::List(values), Known::Unknown));
+            return Ok(self.let_expr(Expr::List(values), Ty::Unknown));
         }
         // Each spread value is iterated where the source evaluates it; the
         // values between spreads are lists of their own.
@@ -202,7 +225,7 @@ impl Lowerer<'_> {
                 if !run.is_empty() {
                     parts.push(Expr::List(std::mem::take(&mut run)));
                 }
-                let items = self.invoke("ts.iterate", &[operand], Known::Unknown)?;
+                let items = self.invoke("ts.iterate", &[operand], Ty::Unknown)?;
                 parts.push(items.expr());
             } else {
                 run.push(operand.expr());
@@ -211,8 +234,8 @@ impl Lowerer<'_> {
         if !run.is_empty() {
             parts.push(Expr::List(run));
         }
-        let parts = self.let_expr(Expr::List(parts), Known::Unknown);
-        self.invoke("ts.spread", &[parts], Known::Unknown)
+        let parts = self.let_expr(Expr::List(parts), Ty::Unknown);
+        self.invoke("ts.spread", &[parts], Ty::Unknown)
     }
 
     fn lower_object(&mut self, properties: &[ast::ObjectProperty]) -> Lowering<Operand> {
@@ -242,11 +265,11 @@ impl Lowerer<'_> {
                     value: value.expr(),
                 })
                 .collect();
-            return Ok(self.let_expr(Expr::Record(entries), Known::Unknown));
+            return Ok(self.let_expr(Expr::Record(entries), Ty::Unknown));
         }
         // A computed key, a repeated key or a spread: the object is built
         // one property at a time, in source order.
-        let object = self.let_expr(Expr::Record(Vec::new()), Known::Unknown);
+        let object = self.let_expr(Expr::Record(Vec::new()), Ty::Unknown);
         for property in properties {
             match property {
                 ast::ObjectProperty::KeyValue(key, value) => {
@@ -272,7 +295,7 @@ impl Lowerer<'_> {
                 ast::ObjectProperty::Spread(source) => {
                     let source = self.lower_expr(source)?;
                     let copied =
-                        self.invoke("ts.assign", &[object.clone(), source], Known::Unknown)?;
+                        self.invoke("ts.assign", &[object.clone(), source], Ty::Unknown)?;
                     self.discard(copied);
                 }
             }
@@ -296,11 +319,24 @@ impl Lowerer<'_> {
         }
         let value = self.lower_expr(value)?;
         match op {
-            UnaryOp::Plus => self.invoke("ts.to_number", &[value], Known::Number),
-            UnaryOp::Minus => self.invoke("ts.neg", &[value], Known::Number),
-            UnaryOp::Not => self.invoke("ts.not", &[value], Known::Bool),
-            UnaryOp::TypeOf => self.invoke("ts.typeof", &[value], Known::Text),
-            UnaryOp::BitNot => self.invoke("ts.bit_not", &[value], Known::Number),
+            UnaryOp::Plus | UnaryOp::Minus if value.ty.is_number() => {
+                let number = self.float(&value)?;
+                let number = if op == UnaryOp::Minus {
+                    self.native("num.neg", vec![number])?
+                } else {
+                    number
+                };
+                Ok(self.let_expr(number, Ty::Float))
+            }
+            UnaryOp::Not if value.ty == Ty::Bool => {
+                let negated = self.native("bool.not", vec![value.expr()])?;
+                Ok(self.let_expr(negated, Ty::Bool))
+            }
+            UnaryOp::Plus => self.invoke("ts.to_number", &[value], Ty::Float),
+            UnaryOp::Minus => self.invoke("ts.neg", &[value], Ty::Float),
+            UnaryOp::Not => self.invoke("ts.not", &[value], Ty::Bool),
+            UnaryOp::TypeOf => self.invoke("ts.typeof", &[value], Ty::Text),
+            UnaryOp::BitNot => self.invoke("ts.bit_not", &[value], Ty::Float),
             UnaryOp::Void => {
                 self.discard(value);
                 Ok(Operand::undefined())
@@ -329,8 +365,8 @@ impl Lowerer<'_> {
                 ));
             };
             let value = self.lower_expr(left)?;
-            let args = self.let_expr(Expr::List(vec![value.expr()]), Known::Unknown);
-            return self.invoke(test, &[Operand::undefined(), args], Known::Bool);
+            let args = self.let_expr(Expr::List(vec![value.expr()]), Ty::Unknown);
+            return self.invoke(test, &[Operand::undefined(), args], Ty::Bool);
         }
         let mut operands = self.operands(&[left, right])?.into_iter();
         let (Some(left), Some(right)) = (operands.next(), operands.next()) else {
@@ -346,12 +382,49 @@ impl Lowerer<'_> {
         left: Operand,
         right: Operand,
     ) -> Lowering<Operand> {
-        let (helper, known) = binary_helper(op);
+        let ty = types::binary_result(op, &left.ty, &right.ty);
+        if let Some(direct) = types::direct_binary(op, &left.ty, &right.ty) {
+            let value = match direct {
+                Direct::Numeric(function) => {
+                    let args = vec![self.float(&left)?, self.float(&right)?];
+                    self.native(function, args)?
+                }
+                Direct::NumericSwapped(function) => {
+                    let args = vec![self.float(&right)?, self.float(&left)?];
+                    self.native(function, args)?
+                }
+                Direct::NumericEqual { negated } => {
+                    let args = vec![self.float(&left)?, self.float(&right)?];
+                    let equal = self.native("eq", args)?;
+                    if negated {
+                        self.native("bool.not", vec![equal])?
+                    } else {
+                        equal
+                    }
+                }
+                Direct::Concat => self.native("text.concat", vec![left.expr(), right.expr()])?,
+            };
+            return Ok(self.let_expr(value, ty));
+        }
+        let helper = binary_helper(op);
         if op == BinaryOp::In {
             // `key in object`: the helper takes the object first.
-            return self.invoke(helper, &[right, left], known);
+            return self.invoke(helper, &[right, left], ty);
         }
-        self.invoke(helper, &[left, right], known)
+        self.invoke(helper, &[left, right], ty)
+    }
+
+    /// `operand + delta` as a number, with the number the operand was: the
+    /// two values `++` and `--` give.
+    fn stepped(&mut self, current: Operand, delta: f64) -> Lowering<(Operand, Operand)> {
+        let old = if current.ty.is_number() {
+            let number = self.float(&current)?;
+            self.let_expr(number, Ty::Float)
+        } else {
+            self.invoke("ts.to_number", &[current], Ty::Float)?
+        };
+        let new = self.binary(BinaryOp::Add, old.clone(), Operand::number(delta))?;
+        Ok((old, new))
     }
 
     /// `left && right`, `left || right` and `left ?? right`: the right
@@ -365,13 +438,15 @@ impl Lowerer<'_> {
     ) -> Lowering<Operand> {
         let result = self.temp();
         self.bind(result.clone(), left.clone());
-        let held = Operand::variable(result.clone(), left.known);
+        let held = Operand::variable(result.clone(), left.ty.clone());
+        let mut ty = left.ty;
         let test = match op {
             LogicalOp::And | LogicalOp::Or => self.condition(held)?,
-            LogicalOp::Nullish => self.invoke("ts.is_nullish", &[held], Known::Bool)?.expr(),
+            LogicalOp::Nullish => self.invoke("ts.is_nullish", &[held], Ty::Bool)?.expr(),
         };
         let branch = self.block(|this| {
             let value = right(this)?;
+            ty = ty.join(&value.ty);
             this.store(Place::Variable(result.clone()), value);
             Ok(())
         })?;
@@ -379,7 +454,7 @@ impl Lowerer<'_> {
             LogicalOp::And | LogicalOp::Nullish => self.emit_if(test, branch, Buf::default()),
             LogicalOp::Or => self.emit_if(test, Buf::default(), branch),
         }
-        Ok(Operand::variable(result, Known::Unknown))
+        Ok(Operand::variable(result, ty))
     }
 
     fn lower_template(
@@ -401,15 +476,15 @@ impl Lowerer<'_> {
             let value = self.lower_expr(expression)?;
             // Each value is converted where the source evaluates it: a
             // conversion may run the value's own `toString`.
-            let spelled = if value.known == Known::Text {
+            let spelled = if value.ty == Ty::Text {
                 self.pin(value)
             } else {
-                self.invoke("ts.to_string", &[value], Known::Text)?
+                self.invoke("ts.to_string", &[value], Ty::Text)?
             };
             parts.push(spelled.expr());
         }
-        let parts = self.let_expr(Expr::List(parts), Known::Unknown);
-        self.invoke("ts.join", &[parts], Known::Text)
+        let parts = self.let_expr(Expr::List(parts), Ty::Unknown);
+        self.invoke("ts.join", &[parts], Ty::Text)
     }
 
     fn lower_assign(
@@ -471,10 +546,10 @@ impl Lowerer<'_> {
         match op {
             AssignOp::Assign => {
                 let value = self.lower_expr(value)?;
-                let known = value.known;
+                let ty = value.ty.clone();
                 let kernel = self.resolve_for_write(name, self.span)?;
                 self.store(Place::Variable(kernel.clone()), value);
-                Ok(Operand::variable(kernel, known))
+                Ok(Operand::variable(kernel, ty))
             }
             AssignOp::Binary(op) => {
                 let current = self.read(name, None)?;
@@ -485,10 +560,10 @@ impl Lowerer<'_> {
                 };
                 let value = self.lower_expr(value)?;
                 let result = self.binary(op, current, value)?;
-                let known = result.known;
+                let ty = result.ty.clone();
                 let kernel = self.resolve_for_write(name, self.span)?;
                 self.store(Place::Variable(kernel.clone()), result);
-                Ok(Operand::variable(kernel, known))
+                Ok(Operand::variable(kernel, ty))
             }
             AssignOp::Logical(op) => {
                 let current = self.read(name, None)?;
@@ -515,16 +590,11 @@ impl Lowerer<'_> {
         match target {
             ast::AssignTarget::Ident(name) | ast::AssignTarget::ParenIdent(name) => {
                 let current = self.read(name, None)?;
-                let old = self.invoke("ts.to_number", &[current], Known::Number)?;
-                let new = self.invoke(
-                    "ts.add",
-                    &[old.clone(), Operand::number(delta)],
-                    Known::Number,
-                )?;
+                let (old, new) = self.stepped(current, delta)?;
                 let kernel = self.resolve_for_write(name, self.span)?;
                 self.store(Place::Variable(kernel.clone()), new);
                 Ok(if prefix {
-                    Operand::variable(kernel, Known::Number)
+                    Operand::variable(kernel, Ty::Float)
                 } else {
                     old
                 })
@@ -534,12 +604,7 @@ impl Lowerer<'_> {
                 let object = self.pin(object);
                 let key = self.lower_key(property)?;
                 let current = self.get_member(&object, &key)?;
-                let old = self.invoke("ts.to_number", &[current], Known::Number)?;
-                let new = self.invoke(
-                    "ts.add",
-                    &[old.clone(), Operand::number(delta)],
-                    Known::Number,
-                )?;
+                let (old, new) = self.stepped(current, delta)?;
                 self.set_member(&object, &key, new.clone())?;
                 Ok(if prefix { new } else { old })
             }

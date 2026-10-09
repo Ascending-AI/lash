@@ -9,6 +9,10 @@
 //! evaluated after it and before its use could run other code, because that
 //! code, or another task while it waits, may assign the variable.
 //!
+//! Where the type analysis (`crate::types`) knows an operand's type, the
+//! operation is instead a direct call of the kernel function for that type,
+//! inside an expression: `num.add(a, b)` for two numbers.
+//!
 //! A JavaScript function is a closure of two parameters, `fn(this, args)`.
 //! Source bindings keep their names; a binding that would shadow another in
 //! scope, and every temporary, takes a name the source does not spell, so
@@ -26,6 +30,7 @@ use lash_kernel_doc::{
 use crate::adapter as ast;
 use crate::builtins::{self, Table};
 use crate::node_label::NodeLabel;
+use crate::types::{Facts, Ty};
 use crate::{Diagnostic, DiagnosticCode, SourceSpan};
 
 mod annotate;
@@ -43,7 +48,21 @@ pub(crate) type Lowering<T> = Result<T, Diagnostic>;
 /// library that lacks one cannot run a lowered document.
 #[cfg(test)]
 pub(crate) const CORE_OPERATIONS: &[&str] = &[
+    "bool.not",
+    "eq",
+    "list.get",
+    "list.len",
+    "num.add",
+    "num.div",
+    "num.le",
+    "num.lt",
+    "num.mul",
+    "num.neg",
+    "num.rem_trunc",
+    "num.sub",
+    "num.to_float",
     "same",
+    "text.concat",
     "ts.add",
     "ts.await",
     "ts.assign",
@@ -92,66 +111,54 @@ pub(crate) const CORE_OPERATIONS: &[&str] = &[
     "ts.ushr",
 ];
 
-/// What the lowerer knows about an operand's kind without a type analysis:
-/// what a literal is and what an operator always gives.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Known {
-    Unknown,
-    Undefined,
-    Null,
-    Bool,
-    Number,
-    Text,
-}
-
 /// A value an expression lowered to: a variable or a literal, never a
 /// computation.
 #[derive(Clone, Debug)]
 pub(crate) struct Operand {
     pub(crate) atom: Atom,
-    pub(crate) known: Known,
+    pub(crate) ty: Ty,
 }
 
 impl Operand {
     pub(crate) fn undefined() -> Self {
         Self {
             atom: Atom::Literal(Literal::Absent),
-            known: Known::Undefined,
+            ty: Ty::Undefined,
         }
     }
 
     pub(crate) fn null() -> Self {
         Self {
             atom: Atom::Literal(Literal::Null),
-            known: Known::Null,
+            ty: Ty::Null,
         }
     }
 
     pub(crate) fn bool(value: bool) -> Self {
         Self {
             atom: Atom::Literal(Literal::Bool(value)),
-            known: Known::Bool,
+            ty: Ty::Bool,
         }
     }
 
     pub(crate) fn number(value: f64) -> Self {
         Self {
             atom: Atom::Literal(Literal::Float(Float::new(value))),
-            known: Known::Number,
+            ty: Ty::Float,
         }
     }
 
     pub(crate) fn text(value: impl Into<String>) -> Self {
         Self {
             atom: Atom::Literal(Literal::Text(value.into())),
-            known: Known::Text,
+            ty: Ty::Text,
         }
     }
 
-    pub(crate) fn variable(name: Name, known: Known) -> Self {
+    pub(crate) fn variable(name: Name, ty: Ty) -> Self {
         Self {
             atom: Atom::Variable(name),
-            known,
+            ty,
         }
     }
 
@@ -255,6 +262,10 @@ pub(crate) struct Lowerer<'a> {
     span: Option<SourceSpan>,
     used: BTreeMap<FunctionId, FunctionName>,
     private: BTreeSet<Name>,
+    facts: Facts,
+    /// What tests have shown of names, innermost last, for the code being
+    /// lowered now.
+    narrowed: Vec<(String, Ty)>,
 }
 
 /// Lowers a parsed program against `environment`.
@@ -294,6 +305,8 @@ pub(crate) fn lower(
         span: None,
         used: BTreeMap::new(),
         private: BTreeSet::new(),
+        facts: Facts::analyse(program, environment.bindings),
+        narrowed: Vec::new(),
     };
     lowerer.push_scope();
     lowerer.declare_vars(&program.statements);
@@ -522,11 +535,8 @@ impl Lowerer<'_> {
     fn initialised(&mut self, kernel: Name, name: &str) -> Lowering<Name> {
         let checked = self.invoke(
             "ts.tdz",
-            &[
-                Operand::variable(kernel, Known::Unknown),
-                Operand::text(name),
-            ],
-            Known::Unknown,
+            &[Operand::variable(kernel, Ty::Unknown), Operand::text(name)],
+            Ty::Unknown,
         )?;
         let Atom::Variable(checked) = checked.atom else {
             unreachable!("a call is bound to a temporary");
@@ -551,7 +561,7 @@ impl Lowerer<'_> {
                 if let Some(checked) = self.resolve(name, span)?
                     && checked != kernel
                 {
-                    self.discard(Operand::variable(checked, Known::Unknown));
+                    self.discard(Operand::variable(checked, Ty::Unknown));
                 }
             }
             return Ok(kernel);
@@ -703,26 +713,26 @@ impl Lowerer<'_> {
             },
             vec![body.notes],
         );
-        Operand::variable(name, Known::Unknown)
+        Operand::variable(name, Ty::Unknown)
     }
 
-    pub(crate) fn let_expr(&mut self, value: Expr, known: Known) -> Operand {
+    pub(crate) fn let_expr(&mut self, value: Expr, ty: Ty) -> Operand {
         let name = self.temp();
         self.emit(Stmt::Let {
             name: name.clone(),
             value: Rhs::Expr(value),
         });
-        Operand::variable(name, known)
+        Operand::variable(name, ty)
     }
 
     /// Runs an action and binds its result to a temporary.
-    pub(crate) fn emit_action(&mut self, action: Action, known: Known) -> Operand {
+    pub(crate) fn emit_action(&mut self, action: Action, ty: Ty) -> Operand {
         let name = self.temp();
         self.emit(Stmt::Let {
             name: name.clone(),
             value: Rhs::Action(action),
         });
-        Operand::variable(name, known)
+        Operand::variable(name, ty)
     }
 
     /// The identity of a library function, listed in the manifest.
@@ -741,20 +751,69 @@ impl Lowerer<'_> {
     }
 
     /// Calls a helper as its own statement.
-    pub(crate) fn invoke(
-        &mut self,
-        function: &str,
-        args: &[Operand],
-        known: Known,
-    ) -> Lowering<Operand> {
+    pub(crate) fn invoke(&mut self, function: &str, args: &[Operand], ty: Ty) -> Lowering<Operand> {
         let function = self.function(function)?;
         Ok(self.emit_action(
             Action::Call {
                 callee: Callee::Library(function),
                 args: args.iter().map(|arg| arg.atom.clone()).collect(),
             },
-            known,
+            ty,
         ))
+    }
+
+    /// A call of a kernel function with a native implementation, as an
+    /// expression (`K-STMT-002`).
+    pub(crate) fn native(&mut self, function: &str, args: Vec<Expr>) -> Lowering<Expr> {
+        Ok(Expr::Call {
+            function: self.function(function)?,
+            args,
+        })
+    }
+
+    /// A number as a float. An operand known only to be a number may be an
+    /// integer, which JavaScript's arithmetic and comparison do not have:
+    /// `num.to_float` converts it, and raises `type_error` when the operand
+    /// is no number at all.
+    pub(crate) fn float(&mut self, operand: &Operand) -> Lowering<Expr> {
+        if operand.ty == Ty::Float {
+            return Ok(operand.expr());
+        }
+        self.native("num.to_float", vec![operand.expr()])
+    }
+
+    // Types.
+
+    /// The type of the source binding `name`, where lowering now stands.
+    pub(crate) fn type_of_binding(&self, name: &str) -> Ty {
+        if let Some((_, ty)) = self.narrowed.iter().rev().find(|(entry, _)| entry == name) {
+            return ty.clone();
+        }
+        self.facts.of(name).cloned().unwrap_or(Ty::Unknown)
+    }
+
+    /// What `test` proves about the names it reads.
+    pub(crate) fn narrowing(&self, test: &ast::Expr) -> crate::types::Narrowing {
+        let current = |name: &str| {
+            self.facts
+                .narrowable(name)
+                .then(|| self.type_of_binding(name))
+        };
+        let undefined = self.facts.of("undefined").is_none() && !self.is_bound("undefined");
+        crate::types::narrow(test, &current, undefined)
+    }
+
+    /// Lowers code that runs only where `shown` holds.
+    pub(crate) fn narrowed<T>(
+        &mut self,
+        shown: Vec<(String, Ty)>,
+        lower: impl FnOnce(&mut Self) -> Lowering<T>,
+    ) -> Lowering<T> {
+        let outer = self.narrowed.len();
+        self.narrowed.extend(shown);
+        let result = lower(self);
+        self.narrowed.truncate(outer);
+        result
     }
 
     /// `same(a, b)`, the kernel's identity test, as an expression.
@@ -835,7 +894,7 @@ impl Lowerer<'_> {
     fn pin(&mut self, operand: Operand) -> Operand {
         match &operand.atom {
             Atom::Variable(name) if !self.temporaries.contains(name) => {
-                self.let_expr(operand.expr(), operand.known)
+                self.let_expr(operand.expr(), operand.ty.clone())
             }
             _ => operand,
         }
@@ -860,17 +919,15 @@ impl Lowerer<'_> {
     }
 
     /// A bool the kernel's `if` and `while` accept: the operand itself when
-    /// it is known to be one, else its ToBoolean.
+    /// it is ty to be one, else its ToBoolean.
     fn condition(&mut self, operand: Operand) -> Lowering<Expr> {
-        if operand.known == Known::Bool {
+        if operand.ty == Ty::Bool {
             return Ok(operand.expr());
         }
-        Ok(self
-            .invoke("ts.to_boolean", &[operand], Known::Bool)?
-            .expr())
+        Ok(self.invoke("ts.to_boolean", &[operand], Ty::Bool)?.expr())
     }
 
-    /// A read of `target[index]` where the target is known to be a list or
+    /// A read of `target[index]` where the target is ty to be a list or
     /// a tuple the lowerer built.
     fn element(target: &Operand, index: usize) -> Expr {
         Expr::Member(Box::new(Member::Index {

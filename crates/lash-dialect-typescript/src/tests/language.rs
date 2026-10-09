@@ -43,7 +43,8 @@ fn a_closure_made_in_a_for_loop_captures_that_pass() {
     for expected in [
         "let i_1 = 0.0",
         "  let i_2 = i_1",
-        "    set i_2 = invoke ts.add(t3, 1.0)",
+        "    set i_2 = num.add(t3, 1.0)",
+        "  let t5 = num.lt(i_2, 3.0)",
         "    set i_1 = i_2\n    continue",
         "    return i_2",
         "  set i_1 = i_2\n}",

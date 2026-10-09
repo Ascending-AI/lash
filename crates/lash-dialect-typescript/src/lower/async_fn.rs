@@ -29,7 +29,7 @@
 
 use lash_kernel_doc::{Action, Atom, Callee, EffectName, Expr, Literal, Member, Place, Rhs, Stmt};
 
-use super::{Known, Lowerer, Lowering, Operand};
+use super::{Lowerer, Lowering, Operand, Ty};
 use crate::adapter as ast;
 use crate::{Diagnostic, DiagnosticCode, SourceSpan};
 
@@ -75,7 +75,7 @@ impl Lowerer<'_> {
             return self.wait_in_place(wait, args);
         }
         let value = self.lower_expr(value)?;
-        self.invoke("ts.await", &[value], Known::Unknown)
+        self.invoke("ts.await", &[value], Ty::Unknown)
     }
 
     /// A tool call or a `sleep` that is not awaited where it stands: a
@@ -196,7 +196,11 @@ impl Lowerer<'_> {
         match wait {
             Wait::Effect(effect) => {
                 let signature = self.effects[&effect].clone();
+                // The perform states the result type the tool declares, so
+                // an `Int` or a `Float` is decoded as declared, and what
+                // it gives is known to be that type.
                 let result = signature.result.clone();
+                let ty = Ty::decoded(&result);
                 self.performed.insert(effect.clone(), signature);
                 Ok(self.emit_action(
                     Action::Perform {
@@ -204,7 +208,7 @@ impl Lowerer<'_> {
                         args,
                         result,
                     },
-                    Known::Unknown,
+                    ty,
                 ))
             }
             Wait::Sleep => {
@@ -231,10 +235,14 @@ impl Lowerer<'_> {
             self.emit(pause);
             return Ok(result);
         }
-        let result = self.let_expr(Expr::Literal(Literal::Absent), Known::Unknown);
-        let place = Place::Variable(super::statements::variable_of(&result));
+        let result = self.let_expr(Expr::Literal(Literal::Absent), Ty::Unknown);
+        let name = super::statements::variable_of(&result);
+        let place = Place::Variable(name.clone());
+        // Code after the `try` runs only when the effect gave its result.
+        let mut ty = Ty::Unknown;
         let body = self.block(|lowerer| {
             let outcome = lowerer.wait_action(wait, args)?;
+            ty = outcome.ty.clone();
             lowerer.store(place, outcome);
             Ok(())
         })?;
@@ -243,7 +251,7 @@ impl Lowerer<'_> {
             Ok(())
         })?;
         self.emit_try(body, None, Some(finally));
-        Ok(result)
+        Ok(Operand::variable(name, ty))
     }
 
     /// Starts `body(this, args)` as a task and gives its promise:
@@ -253,7 +261,7 @@ impl Lowerer<'_> {
     /// set p.task = spawn invoke ts.promise.run(p, body, this, args)
     /// ```
     fn start_promise(&mut self, body: &Operand, this: Atom, args: Atom) -> Lowering<Operand> {
-        let promise = self.invoke("ts.promise.pending", &[], Known::Unknown)?;
+        let promise = self.invoke("ts.promise.pending", &[], Ty::Unknown)?;
         let run = self.function("ts.promise.run")?;
         self.emit(Stmt::Assign {
             place: Place::Member(Member::Field {

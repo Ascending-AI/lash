@@ -3,7 +3,7 @@
 use lash_kernel_doc::{Expr, Literal, Member, Name, Place, Stmt};
 
 use super::patterns::Mode;
-use super::{BindingKind, Buf, Control, Known, Lowerer, Lowering, Note, Operand, walk};
+use super::{BindingKind, Buf, Control, Lowerer, Lowering, Note, Operand, Ty, walk};
 use crate::adapter::{self as ast, VarKind};
 use crate::{Diagnostic, DiagnosticCode};
 
@@ -85,10 +85,25 @@ impl Lowerer<'_> {
                 self.initialise(name, closure);
             }
         }
-        for statement in rest {
+        // What an `if` that always leaves showed false holds of every
+        // statement after it in the block.
+        let outer = self.narrowed.len();
+        let result = rest.iter().try_for_each(|statement| {
             self.lower_statement(statement)?;
-        }
-        Ok(())
+            if let ast::Stmt::If {
+                test,
+                consequent,
+                alternate: None,
+            } = statement.unlabeled()
+                && walk::always_leaves(consequent)
+            {
+                let shown = self.narrowing(test).when_false;
+                self.narrowed.extend(shown);
+            }
+            Ok(())
+        });
+        self.narrowed.truncate(outer);
+        result
     }
 
     /// A statement as a block of its own, with its own scope.
@@ -124,7 +139,7 @@ impl Lowerer<'_> {
                 }
                 Ok(())
             }
-            ast::Stmt::Empty | ast::Stmt::Function { .. } => Ok(()),
+            ast::Stmt::Empty | ast::Stmt::TypeAlias { .. } | ast::Stmt::Function { .. } => Ok(()),
             ast::Stmt::Expr(expr) => {
                 if self.discards_effect(expr) {
                     return Err(Diagnostic::new(
@@ -174,11 +189,14 @@ impl Lowerer<'_> {
                 consequent,
                 alternate,
             } => {
+                let shown = self.narrowing(test);
                 let test = self.lower_expr(test)?;
                 let condition = self.condition(test)?;
-                let then_block = self.body(consequent)?;
+                let then_block = self.narrowed(shown.when_true, |this| this.body(consequent))?;
                 let else_block = match alternate {
-                    Some(alternate) => self.body(alternate)?,
+                    Some(alternate) => {
+                        self.narrowed(shown.when_false, |this| this.body(alternate))?
+                    }
                     None => Buf::default(),
                 };
                 self.emit_if(condition, then_block, else_block);
@@ -195,7 +213,7 @@ impl Lowerer<'_> {
                 Ok(())
             }
             ast::Stmt::DoWhile { body, test, .. } => {
-                let first = self.let_expr(truth(), Known::Bool);
+                let first = self.let_expr(truth(), Ty::Bool);
                 let body = self.loop_block(Vec::new(), |this| {
                     this.unless_first(&first, |this| {
                         let test = this.lower_expr(test)?;
@@ -293,12 +311,12 @@ impl Lowerer<'_> {
     }
 
     fn lower_enum(&mut self, name: &str, members: &[ast::EnumMember]) -> Lowering<()> {
-        let object = self.let_expr(Expr::Record(Vec::new()), Known::Unknown);
+        let object = self.let_expr(Expr::Record(Vec::new()), Ty::Unknown);
         self.initialise(name, object);
         let Some(object) = self.resolve(name, self.span)? else {
             unreachable!("the enum was just declared");
         };
-        let object = Operand::variable(object, Known::Unknown);
+        let object = Operand::variable(object, Ty::Unknown);
         for member in members {
             let value = self.lower_expr(&member.value)?;
             let value = self.pin(value);
@@ -313,7 +331,7 @@ impl Lowerer<'_> {
                 let written = self.invoke(
                     "ts.set",
                     &[object.clone(), value, Operand::text(member.name.clone())],
-                    Known::Unknown,
+                    Ty::Unknown,
                 )?;
                 self.discard(written);
             }
@@ -380,7 +398,7 @@ impl Lowerer<'_> {
             }
             self.lower_statement(init)?;
         }
-        let first = update.map(|_| self.let_expr(truth(), Known::Bool));
+        let first = update.map(|_| self.let_expr(truth(), Ty::Bool));
         // The head's variable and the pass's copy of it, by source name.
         let mut copies: Vec<(String, Name, Name)> = Vec::new();
         let outer_names: Vec<(String, Name)> = per_pass
@@ -448,9 +466,9 @@ impl Lowerer<'_> {
         body: &ast::Stmt,
     ) -> Lowering<()> {
         let subject = self.lower_expr(subject)?;
-        let items = self.invoke(helper, &[subject], Known::Unknown)?;
+        let items = self.invoke(helper, &[subject], Ty::Unknown)?;
         let item = self.temp();
-        let element = Operand::variable(item.clone(), Known::Unknown);
+        let element = Operand::variable(item.clone(), Ty::Unknown);
         let body = self.loop_block(Vec::new(), |this| {
             let mode = match kind {
                 None => Mode::Assign,
@@ -475,7 +493,7 @@ impl Lowerer<'_> {
         let discriminant = self.lower_expr(discriminant)?;
         let discriminant = self.pin(discriminant);
         let unchosen = Operand::number(-1.0);
-        let chosen = self.let_expr(unchosen.expr(), Known::Number);
+        let chosen = self.let_expr(unchosen.expr(), Ty::Float);
         let chosen_name = variable_of(&chosen);
         let choose = |index: usize| Stmt::Assign {
             place: Place::Variable(chosen_name.clone()),
@@ -486,11 +504,8 @@ impl Lowerer<'_> {
             let undecided = self.same(chosen.expr(), unchosen.expr())?;
             let attempt = self.block(|this| {
                 let test = this.lower_expr(test)?;
-                let equal = this.invoke(
-                    "ts.strict_equals",
-                    &[discriminant.clone(), test],
-                    Known::Bool,
-                )?;
+                let equal =
+                    this.invoke("ts.strict_equals", &[discriminant.clone(), test], Ty::Bool)?;
                 this.emit_if(equal.expr(), one(choose(index)), Buf::default());
                 Ok(())
             })?;
@@ -500,7 +515,7 @@ impl Lowerer<'_> {
             let undecided = self.same(chosen.expr(), unchosen.expr())?;
             self.emit_if(undecided, one(choose(default)), Buf::default());
         }
-        let running = self.let_expr(Expr::Literal(Literal::Bool(false)), Known::Bool);
+        let running = self.let_expr(Expr::Literal(Literal::Bool(false)), Ty::Bool);
         let running_name = variable_of(&running);
         self.frame_mut().controls.push(Control::Switch {
             continue_flag: None,
@@ -621,7 +636,7 @@ impl Lowerer<'_> {
                             binding = Some(caught.clone());
                             this.destructure(
                                 pattern,
-                                Operand::variable(caught, Known::Unknown),
+                                Operand::variable(caught, Ty::Unknown),
                                 Mode::Local,
                             )?;
                         }

@@ -143,7 +143,7 @@ impl Checker {
         match stmt {
             Stmt::Spanned(span, stmt) => self.statement(stmt, Some(*span)),
             Stmt::Labeled { stmt, .. } => self.statement(stmt, span),
-            Stmt::Empty | Stmt::Break | Stmt::Continue => Ok(()),
+            Stmt::Empty | Stmt::TypeAlias { .. } | Stmt::Break | Stmt::Continue => Ok(()),
             Stmt::Expr(expr) | Stmt::Throw(expr) => self.expr(expr),
             Stmt::Return(expr) => expr.iter().try_for_each(|expr| self.expr(expr)),
             Stmt::Block(body) => self.block(body),
@@ -393,7 +393,9 @@ impl Checker {
                 self.expr(object)?;
                 self.member_property(property)
             }
-            Expr::Unary { value, .. } | Expr::Await { value, .. } => self.expr(value),
+            Expr::Unary { value, .. } | Expr::Await { value, .. } | Expr::As { value, .. } => {
+                self.expr(value)
+            }
             Expr::Binary { left, right, .. } | Expr::Logical { left, right, .. } => {
                 self.expr(left)?;
                 self.expr(right)

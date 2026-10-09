@@ -28,7 +28,8 @@ use prototype_chain::{
     prototype_access_rejection,
 };
 use rejections::{parser_diagnostic, reject, reject_defect, reject_refusal, source_span};
-pub(crate) use types::TypeAnnotation;
+use types::unasserted;
+pub(crate) use types::{TypeAnnotation, TypeShape};
 
 /// This is deliberately below the shared AST and 2 MiB native-stack limits.
 pub const MAX_SOURCE_NESTING_DEPTH: usize = 28;
@@ -36,6 +37,10 @@ pub const MAX_SOURCE_NESTING_DEPTH: usize = 28;
 #[derive(Clone, Debug)]
 pub(crate) struct Program {
     pub(crate) statements: Vec<Stmt>,
+    /// The name of every type parameter a function of the source declares.
+    /// Inside that function the name is the parameter, whatever `type` or
+    /// `interface` shares it.
+    pub(crate) type_parameters: BTreeSet<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -51,6 +56,12 @@ pub(crate) enum Stmt {
         stmt: Box<Stmt>,
     },
     Expr(Expr),
+    /// `type Name = ...` or `interface Name { ... }`: it runs nothing, and
+    /// the type analysis reads what `Name` stands for.
+    TypeAlias {
+        name: String,
+        ty: TypeAnnotation,
+    },
     Block(Vec<Stmt>),
     Var {
         kind: VarKind,
@@ -160,17 +171,9 @@ pub(crate) struct SwitchCase {
 
 #[derive(Clone, Debug)]
 pub(crate) enum Pattern {
-    /// A bound name, with the type annotation written on it if there was one.
-    /// The annotation is decorative everywhere but a process-literal
-    /// parameter, where it becomes the process's declared input type.
-    Ident(
-        String,
-        #[expect(
-            dead_code,
-            reason = "read by the type analysis, which is not written yet"
-        )]
-        Option<TypeAnnotation>,
-    ),
+    /// A bound name, with the type annotation written on it if there was
+    /// one. An optional parameter's annotation is its type or `undefined`.
+    Ident(String, Option<TypeAnnotation>),
     Rest(Box<Pattern>),
     Member {
         object: Box<Expr>,
@@ -207,10 +210,6 @@ pub(crate) struct Function {
     pub(crate) name: Option<String>,
     pub(crate) params: Vec<Pattern>,
     pub(crate) body: FunctionBody,
-    #[expect(
-        dead_code,
-        reason = "read by the type analysis, which is not written yet"
-    )]
     pub(crate) return_ty: Option<TypeAnnotation>,
     pub(crate) is_async: bool,
     /// An arrow has no receiver of its own: its `this` is its enclosing
@@ -302,6 +301,12 @@ pub(crate) enum Expr {
         object: Box<Expr>,
         property: MemberProperty,
     },
+    /// `value as T` and `<T>value`: the value itself, which the type
+    /// analysis believes to be a `T`.
+    As {
+        value: Box<Expr>,
+        ty: TypeAnnotation,
+    },
     LoneSurrogateString,
 }
 
@@ -366,7 +371,7 @@ pub(crate) enum MemberProperty {
     Index(Box<Expr>),
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum UnaryOp {
     Plus,
     Minus,
@@ -469,6 +474,7 @@ fn parse_from_goal(source: &str, first: Goal) -> Result<Program, Diagnostic> {
     }
     let program = Program {
         statements: converted?,
+        type_parameters: adapter.type_parameters.take(),
     };
     declarations::check(&program)?;
     Ok(program)
@@ -485,6 +491,7 @@ struct Adapter<'a> {
     respellings: BTreeMap<u32, swc_ecma_parser::error::Error>,
     /// The respelled words the adapter has read as identifiers or names.
     validated_respellings: RefCell<BTreeSet<u32>>,
+    type_parameters: RefCell<BTreeSet<String>>,
     /// Whether the adapter stands in an async function's body or parameters.
     in_async_function: Cell<bool>,
     /// Set when `await` was refused as an identifier only because the Module
@@ -815,7 +822,14 @@ impl Adapter<'_> {
                 "using declarations",
                 span,
             )),
-            swc::Decl::TsInterface(_) | swc::Decl::TsTypeAlias(_) => Ok(Stmt::Empty),
+            swc::Decl::TsTypeAlias(alias) => Ok(Stmt::TypeAlias {
+                name: alias.id.sym.to_string(),
+                ty: types::convert_alias(alias),
+            }),
+            swc::Decl::TsInterface(interface) => Ok(Stmt::TypeAlias {
+                name: interface.id.sym.to_string(),
+                ty: types::convert_interface(interface),
+            }),
             swc::Decl::Var(decl) => {
                 if decl.declare {
                     return Err(reject(
@@ -907,13 +921,10 @@ impl Adapter<'_> {
     fn convert_pattern_inner(&self, pattern: &swc::Pat) -> Result<Pattern, Diagnostic> {
         let span = Some(source_span(pattern.span()));
         Ok(match pattern {
-            swc::Pat::Ident(name) => Pattern::Ident(
-                self.identifier(&name.id)?,
-                name.type_ann
-                    .as_ref()
-                    .map(|annotation| types::convert_type(&annotation.type_ann)),
-            ),
-            swc::Pat::Expr(expr) => match self.convert_expr(expr)? {
+            swc::Pat::Ident(name) => {
+                Pattern::Ident(self.identifier(&name.id)?, types::convert_binding(name))
+            }
+            swc::Pat::Expr(expr) => match unasserted(self.convert_expr(expr)?) {
                 Expr::Ident(name, _) => Pattern::Ident(name, None),
                 Expr::Member {
                     object, property, ..
@@ -1107,6 +1118,7 @@ impl Adapter<'_> {
                 Expr::Function(self.convert_function(name, &function.function)?)
             }
             swc::Expr::Arrow(function) => {
+                self.note_type_parameters(function.type_params.as_deref());
                 if function.is_generator {
                     return Err(reject(
                         DiagnosticCode::GeneratorUnsupported,
@@ -1217,10 +1229,16 @@ impl Adapter<'_> {
             }
             swc::Expr::Tpl(template) => self.convert_template(template)?,
             swc::Expr::Paren(expr) => optional_chain::parenthesized(self.convert_expr(&expr.expr)?),
-            swc::Expr::TsTypeAssertion(expr) => self.convert_expr(&expr.expr)?,
+            swc::Expr::TsTypeAssertion(expr) => Expr::As {
+                value: Box::new(self.convert_expr(&expr.expr)?),
+                ty: types::convert_type(&expr.type_ann),
+            },
             swc::Expr::TsConstAssertion(expr) => self.convert_expr(&expr.expr)?,
             swc::Expr::TsNonNull(expr) => self.convert_expr(&expr.expr)?,
-            swc::Expr::TsAs(expr) => self.convert_expr(&expr.expr)?,
+            swc::Expr::TsAs(expr) => Expr::As {
+                value: Box::new(self.convert_expr(&expr.expr)?),
+                ty: types::convert_type(&expr.type_ann),
+            },
             swc::Expr::TsInstantiation(expr) => self.convert_expr(&expr.expr)?,
             swc::Expr::TsSatisfies(expr) => self.convert_expr(&expr.expr)?,
             swc::Expr::This(_) => Expr::This,
@@ -1480,7 +1498,7 @@ impl Adapter<'_> {
         if let Some(diagnostic) = expr.as_member().and_then(builtin_prototype_mutation) {
             return Err(diagnostic);
         }
-        match self.convert_expr(expr)? {
+        match unasserted(self.convert_expr(expr)?) {
             Expr::Ident(name, _) => Ok(AssignTarget::Ident(name)),
             Expr::Member {
                 object, property, ..
@@ -1514,7 +1532,7 @@ impl Adapter<'_> {
                 Ok(AssignTarget::Member { object, property })
             }
             swc::AssignTarget::Simple(swc::SimpleAssignTarget::Paren(paren)) => {
-                match self.convert_expr(&paren.expr)? {
+                match unasserted(self.convert_expr(&paren.expr)?) {
                     Expr::Ident(name, _) => Ok(AssignTarget::ParenIdent(name)),
                     Expr::Member {
                         object, property, ..

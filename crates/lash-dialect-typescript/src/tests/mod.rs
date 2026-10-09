@@ -9,10 +9,12 @@ use lash_kernel_doc::{
 use crate::{Diagnostic, define_helpers, provisional};
 
 mod async_fn;
+mod deviations;
 mod hoisting;
 mod language;
 mod machine;
 mod package;
+mod typed;
 
 /// The stand-in kernel library with the dialect's helpers defined in it.
 pub(crate) fn library() -> &'static NamedLibrary {

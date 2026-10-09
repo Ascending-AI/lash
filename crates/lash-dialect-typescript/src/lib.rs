@@ -14,6 +14,7 @@ mod lower;
 mod node_label;
 mod package;
 pub mod provisional;
+mod types;
 
 #[cfg(test)]
 mod tests;

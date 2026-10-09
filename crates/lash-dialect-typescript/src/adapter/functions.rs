@@ -3,12 +3,24 @@
 use super::*;
 
 impl Adapter<'_> {
+    pub(super) fn note_type_parameters(&self, declared: Option<&swc::TsTypeParamDecl>) {
+        if let Some(declared) = declared {
+            self.type_parameters.borrow_mut().extend(
+                declared
+                    .params
+                    .iter()
+                    .map(|param| param.name.sym.to_string()),
+            );
+        }
+    }
+
     pub(super) fn convert_function(
         &self,
         name: Option<String>,
         function: &swc::Function,
     ) -> Result<Function, Diagnostic> {
         let span = Some(source_span(function.span));
+        self.note_type_parameters(function.type_params.as_deref());
         if function.is_generator {
             return Err(reject(
                 DiagnosticCode::GeneratorUnsupported,

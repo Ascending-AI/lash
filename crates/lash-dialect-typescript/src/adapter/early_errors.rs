@@ -242,7 +242,7 @@ impl Adapter<'_> {
         {
             return Err(diagnostic);
         }
-        match self.convert_expr(operand)? {
+        match super::unasserted(self.convert_expr(operand)?) {
             Expr::Member {
                 object, property, ..
             } => Ok(Expr::Delete { object, property }),

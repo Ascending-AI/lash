@@ -17,7 +17,7 @@ pub(super) fn is_inert(expr: &Expr) -> bool {
             | Expr::Ident(..)
             | Expr::This
             | Expr::Function(_)
-    )
+    ) || matches!(expr, Expr::As { value, .. } if is_inert(value))
 }
 
 /// Whether evaluating `expr` neither runs code nor reads a binding: a
@@ -46,11 +46,21 @@ fn is_constant(expr: &Expr) -> bool {
 pub(super) fn declares_constants(statement: &Stmt) -> bool {
     match statement {
         Stmt::Spanned(_, inner) | Stmt::Labeled { stmt: inner, .. } => declares_constants(inner),
-        Stmt::Empty | Stmt::Function { .. } => true,
+        Stmt::Empty | Stmt::TypeAlias { .. } | Stmt::Function { .. } => true,
         Stmt::Var { declarations, .. } => declarations.iter().all(|declaration| {
             matches!(declaration.pattern, Pattern::Ident(..))
                 && declaration.init.as_ref().is_none_or(is_constant)
         }),
+        _ => false,
+    }
+}
+
+/// Whether a statement never runs to its end: it returns, throws, or
+/// leaves or restarts a loop.
+pub(super) fn always_leaves(statement: &Stmt) -> bool {
+    match statement.unlabeled() {
+        Stmt::Return(_) | Stmt::Throw(_) | Stmt::Break | Stmt::Continue => true,
+        Stmt::Block(body) => body.last().is_some_and(always_leaves),
         _ => false,
     }
 }
@@ -164,7 +174,7 @@ pub(super) fn statement_makes_function(statement: &Stmt) -> bool {
         Stmt::Spanned(_, inner) | Stmt::Labeled { stmt: inner, .. } => {
             statement_makes_function(inner)
         }
-        Stmt::Empty | Stmt::Break | Stmt::Continue => false,
+        Stmt::Empty | Stmt::TypeAlias { .. } | Stmt::Break | Stmt::Continue => false,
         Stmt::Function { .. } => true,
         Stmt::Expr(expr) | Stmt::Throw(expr) => makes_function(expr),
         Stmt::Block(body) => body.iter().any(statement_makes_function),
@@ -329,7 +339,9 @@ fn makes_function(expr: &Expr) -> bool {
         | Expr::Delete { object, property } => {
             makes_function(object) || property_makes_function(property)
         }
-        Expr::Unary { value, .. } | Expr::Await { value, .. } => makes_function(value),
+        Expr::Unary { value, .. } | Expr::Await { value, .. } | Expr::As { value, .. } => {
+            makes_function(value)
+        }
         Expr::Binary { left, right, .. } | Expr::Logical { left, right, .. } => {
             makes_function(left) || makes_function(right)
         }

@@ -1,20 +1,14 @@
-//! Declared TypeScript types, carried from a parameter annotation to the
-//! process signature.
+//! Declared TypeScript types, as written.
 //!
-//! Process-literal parameters and returns declare the process's durable
-//! signature. Everywhere else the dialect stays
-//! structurally typed and an annotation is ignored, so this module only
-//! *records* what was written and never refuses on its own — the refusal is
-//! raised at the process, where the parameter has a name to blame.
-
-#![expect(
-    dead_code,
-    reason = "what was written is recorded for the type analysis, which is not written yet"
-)]
+//! This module only *records* an annotation and never refuses on its own:
+//! the type analysis decides what a written type lets the lowerer believe,
+//! and a shape it cannot use is one it believes nothing about.
 
 use swc_ecma_ast as swc;
 
 use crate::SourceSpan;
+
+use super::Expr;
 
 use super::rejections::source_span;
 
@@ -41,7 +35,8 @@ pub(crate) enum TypeShape {
     /// absent type, so both land on `null` — the shape a missing durable input
     /// arrives as.
     Undefined,
-    StringLiteral(String),
+    /// A string literal type: some string.
+    StringLiteral,
     Array(Box<TypeAnnotation>),
     Object(Vec<TypeAnnotationField>),
     Union(Vec<TypeAnnotation>),
@@ -49,9 +44,12 @@ pub(crate) enum TypeShape {
     /// `timer.Tick`. It is resolved against the artifact's alias table and the
     /// host catalog at registration, not here.
     Reference(String),
-    /// A construct with no durable representation, carrying the words the
-    /// refusal names it with.
-    Unsupported(&'static str),
+    /// A construct the type analysis believes nothing about, carrying the
+    /// words that name it.
+    Unsupported(
+        #[expect(dead_code, reason = "kept for a diagnostic that names the construct")]
+        &'static str,
+    ),
 }
 
 #[derive(Clone, Debug)]
@@ -73,9 +71,7 @@ pub(crate) fn convert_type(ty: &swc::TsType) -> TypeAnnotation {
             TypeShape::Array(Box::new(convert_type(&array.elem_type)))
         }
         swc::TsType::TsLitType(literal) => match &literal.lit {
-            swc::TsLit::Str(value) => {
-                TypeShape::StringLiteral(value.value.to_string_lossy().into_owned())
-            }
+            swc::TsLit::Str(_) => TypeShape::StringLiteral,
             swc::TsLit::Bool(_) => TypeShape::Boolean,
             _ => TypeShape::Unsupported("a numeric or template literal type"),
         },
@@ -196,5 +192,74 @@ fn entity_name(name: &swc::TsEntityName) -> Option<String> {
             entity_name(&qualified.left)?,
             qualified.right.sym
         )),
+    }
+}
+
+/// `T | undefined`: what an optional parameter or property holds.
+fn or_undefined(ty: TypeAnnotation) -> TypeAnnotation {
+    let span = ty.span;
+    let undefined = TypeAnnotation {
+        span,
+        shape: TypeShape::Undefined,
+    };
+    TypeAnnotation {
+        span,
+        shape: TypeShape::Union(vec![ty, undefined]),
+    }
+}
+
+fn unsupported(span: swc_common::Span, what: &'static str) -> TypeAnnotation {
+    TypeAnnotation {
+        span: source_span(span),
+        shape: TypeShape::Unsupported(what),
+    }
+}
+
+/// An interface as the object type of its own properties. One that extends
+/// another or takes type parameters is believed nothing about.
+pub(crate) fn convert_interface(interface: &swc::TsInterfaceDecl) -> TypeAnnotation {
+    if !interface.extends.is_empty() || interface.type_params.is_some() {
+        return unsupported(interface.span, "an interface that extends or is generic");
+    }
+    let literal = swc::TsTypeLit {
+        span: interface.body.span,
+        members: interface.body.body.clone(),
+    };
+    let shape = match object_shape(&literal) {
+        Some(fields) => TypeShape::Object(fields),
+        None => TypeShape::Unsupported("an object type with a non-property member"),
+    };
+    TypeAnnotation {
+        span: source_span(interface.span),
+        shape,
+    }
+}
+
+/// A `type` alias as what it stands for. A generic one is believed nothing
+/// about.
+pub(crate) fn convert_alias(alias: &swc::TsTypeAliasDecl) -> TypeAnnotation {
+    if alias.type_params.is_some() {
+        return unsupported(alias.span, "a generic type alias");
+    }
+    convert_type(&alias.type_ann)
+}
+
+/// The annotation on a bound name. An optional parameter's is its type or
+/// `undefined`.
+pub(crate) fn convert_binding(name: &swc::BindingIdent) -> Option<TypeAnnotation> {
+    let ty = convert_type(&name.type_ann.as_ref()?.type_ann);
+    Some(if name.id.optional {
+        or_undefined(ty)
+    } else {
+        ty
+    })
+}
+
+/// An expression without the type assertions around it: an assertion
+/// changes what a value is believed to be, never what a target is.
+pub(crate) fn unasserted(expr: Expr) -> Expr {
+    match expr {
+        Expr::As { value, .. } => unasserted(*value),
+        other => other,
     }
 }

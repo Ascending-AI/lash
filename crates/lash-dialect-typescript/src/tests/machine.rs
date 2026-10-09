@@ -145,6 +145,7 @@ fn native(name: &str) -> Option<Native> {
         "num.sub" => |call| arithmetic(call, |a, b| a - b),
         "num.mul" => |call| arithmetic(call, |a, b| a * b),
         "num.div" => |call| Ok(float(number(&call.args[0])? / number(&call.args[1])?)),
+        "num.rem_trunc" => |call| arithmetic(call, |a, b| a % b),
         "num.neg" => |call| arithmetic_one(call, |a| -a),
         "num.floor" => |call| arithmetic_one(call, f64::floor),
         "num.is_finite" => |call| Ok(Value::Bool(number(&call.args[0])?.is_finite())),
@@ -201,6 +202,23 @@ fn native(name: &str) -> Option<Native> {
         "list.len" => |call| match call.args[0].object() {
             Some(object) => Ok(int(call.heap.len(object))),
             None => Err(raise("expected a collection")),
+        },
+        "list.get" => |call| {
+            let Value::List(list) = call.args[0] else {
+                return Err(raise("expected a list"));
+            };
+            let index = number(&call.args[1])?;
+            #[expect(
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss,
+                reason = "the index is checked to be a whole number that is not negative"
+            )]
+            let element = (index >= 0.0 && index.fract() == 0.0)
+                .then(|| call.heap.list_get(list, index as usize))
+                .flatten();
+            element.ok_or_else(|| {
+                NativeError::Raised(ErrorValue::new("index_out_of_range", "no such element"))
+            })
         },
         "record.get" => |call| match &call.args[0] {
             Value::Record(record) => Ok(call
@@ -441,13 +459,11 @@ fn answer(request: &Request) -> (WaitId, Outcome) {
 fn ending(end: End) -> String {
     match end {
         End::Finished(_) => "ok".to_string(),
-        End::Error(RunError::Uncaught(error)) if error.kind == "thrown" => match error.data {
-            Datum::Text(text) => format!("error {text}"),
-            other => format!("error {other:?}"),
-        },
-        End::Error(RunError::Uncaught(error)) => {
+        End::Error(RunError::Uncaught(Datum::Text(text))) => format!("error {text}"),
+        End::Error(RunError::Uncaught(Datum::Error(error))) => {
             format!("error {}: {}", error.kind, error.message)
         }
+        End::Error(RunError::Uncaught(other)) => format!("error {other:?}"),
         End::Error(RunError::TasksOutstanding {
             unfinished,
             unobserved,
@@ -462,10 +478,29 @@ fn ending(end: End) -> String {
     }
 }
 
-/// Lowers `source` as a first cell and runs it to its end. At each park the
-/// next batch of `deliveries` is delivered, in the order it lists; once the
-/// script is used up, the oldest pending request.
-pub(crate) fn run(source: &str, deliveries: &[Vec<String>]) -> Recorded {
+/// How a cell that calls no tool ended: the value it gave `finish`, or
+/// the kind of the error nothing caught.
+#[derive(Debug, PartialEq)]
+pub(crate) enum Ended {
+    Finished(Datum),
+    Raised(String),
+}
+
+/// Lowers `source` as a first cell and runs it to its end without a park.
+pub(crate) fn end(source: &str) -> Ended {
+    let (mut machine, text) = start(source);
+    match machine.run(&mut Console::default(), u64::MAX) {
+        Ok(Step::Ended(End::Finished(finished))) => Ended::Finished(finished.result),
+        Ok(Step::Ended(End::Error(RunError::Uncaught(Datum::Error(error))))) => {
+            Ended::Raised(error.kind)
+        }
+        other => panic!("{other:?}\n{text}"),
+    }
+}
+
+/// Lowers `source` as a first cell and starts a machine on it. Gives the
+/// machine and the document's kernel text.
+fn start(source: &str) -> (KernelMachine, String) {
     let library = super::library();
     let effects = effects();
     let bindings = BTreeSet::new();
@@ -488,8 +523,16 @@ pub(crate) fn run(source: &str, deliveries: &[Vec<String>]) -> Recorded {
         args: Vec::new(),
         bindings: Bindings::default(),
     };
-    let mut machine =
+    let machine =
         KernelMachine::start(program, BOUNDS, start).unwrap_or_else(|error| panic!("{error}"));
+    (machine, text)
+}
+
+/// Lowers `source` as a first cell and runs it to its end. At each park the
+/// next batch of `deliveries` is delivered, in the order it lists; once the
+/// script is used up, the oldest pending request.
+pub(crate) fn run(source: &str, deliveries: &[Vec<String>]) -> Recorded {
+    let (mut machine, text) = start(source);
     let mut console = Console::default();
     let mut pending: Vec<Request> = Vec::new();
     let mut script = deliveries.iter();
