@@ -8,6 +8,7 @@ import json
 import os
 import subprocess
 import sys
+from perf_capture import run_profiled
 from datetime import datetime, timezone
 from perf_artifacts import add_build_report_arg, artifacts
 from pathlib import Path
@@ -208,8 +209,11 @@ def resolve_profile_scenarios(values: list[str], known: list[str]) -> list[str]:
     return resolve_requested(values, known, known)
 
 
-def run_command(root: Path, cmd: list[str]) -> str:
-    proc = subprocess.run(cmd, cwd=root, check=False, capture_output=True, text=True)
+def run_command(root: Path, cmd: list[str], *, receipt: Path | None = None,
+                cpu: bool = False, off_cpu: bool = False,
+                population: str | None = None) -> str:
+    proc = run_profiled(cmd, receipt=receipt, cpu=cpu, off_cpu=off_cpu,
+                        population=population, cwd=root)
     if proc.returncode != 0:
         if proc.stdout:
             print(proc.stdout, file=sys.stderr, end="")
@@ -529,7 +533,7 @@ def main() -> int:
     names = ["perf", "profile", "function_perf"]
     labels = [f"//crates/lash-vm:{name}__example" for name in names]
     binaries = artifacts(root, labels, build=args.build, report=args.build_report,
-                         optimized=not args.debug, symbolized=args.cpu_profile)
+                         optimized=not args.debug, symbolized=args.cpu_profile or args.off_cpu)
     apply_stack_budget(stack_budget_bytes)
     perf_bin = binaries[labels[0]]
     profile_bin = binaries[labels[1]]
@@ -545,6 +549,13 @@ def main() -> int:
     profile_scenarios = resolve_profile_scenarios(args.profile_scenario, known_scenarios)
     stack_profile = current_stack_profile(stack_budget_bytes)
 
+    out = args.out or default_out(root)
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    def sampled(cmd: list[str], population: str) -> str:
+        return run_command(root, cmd, receipt=out, cpu=args.cpu_profile,
+                           off_cpu=args.off_cpu, population=population)
+
     perf_results = []
     if not args.skip_perf:
         if not perf_bin.exists():
@@ -552,7 +563,7 @@ def main() -> int:
         for mode in modes:
             iterations = max(args.iterations, 1)
             for scenario in scenarios:
-                parsed = parse_perf_output(run_command(root, [str(perf_bin), mode, scenario, str(iterations)]))
+                parsed = parse_perf_output(sampled([str(perf_bin), mode, scenario, str(iterations)], f"perf-{mode}-{scenario}"))
                 parsed["mode_arg"] = mode
                 parsed["scenario_arg"] = scenario
                 parsed["stack_profile"] = dict(stack_profile)
@@ -562,9 +573,9 @@ def main() -> int:
         function_scenarios = load_scenarios(root, function_perf_bin)
         for scenario in function_scenarios:
             parsed = parse_perf_output(
-                run_command(
-                    root,
+                sampled(
                     [str(function_perf_bin), scenario, str(max(args.iterations, 1))],
+                    f"function-{scenario}",
                 )
             )
             parsed["mode_arg"] = "compiled_ast_execute"
@@ -577,7 +588,7 @@ def main() -> int:
         if not profile_bin.exists():
             raise SystemExit(f"error: profile example not found: {profile_bin}")
         for scenario in profile_scenarios:
-            parsed = parse_profile_output(run_command(root, [str(profile_bin), scenario, str(max(args.profile_iterations, 1))]))
+            parsed = parse_profile_output(sampled([str(profile_bin), scenario, str(max(args.profile_iterations, 1))], f"profile-{scenario}"))
             parsed["scenario_arg"] = scenario
             parsed["stack_profile"] = dict(stack_profile)
             profile_results.append(parsed)

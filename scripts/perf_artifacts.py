@@ -50,7 +50,12 @@ def add_build_report_arg(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--cpu-profile", action="store_true",
-        help="Build optimized code with line tables and frame pointers for sampling.",
+        help="Record symbolized CPU samples, folded stacks and top 30 beside the receipt.",
+    )
+
+    parser.add_argument(
+        "--off-cpu", action="store_true",
+        help="Record scheduler switches and blocked-time stacks (requires tracepoint permissions).",
     )
 
 

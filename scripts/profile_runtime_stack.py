@@ -18,6 +18,7 @@ import re
 import subprocess
 import sys
 import tempfile
+from perf_capture import run_profiled
 from perf_artifacts import (
     add_boundary_args,
     add_build_report_arg,
@@ -207,7 +208,7 @@ def resolve_binary(args: argparse.Namespace, root: Path) -> Path:
         return args.binary.resolve()
     label = runtime_label(args.cargo_feature)
     return artifacts(root, [label], build=args.build, report=args.build_report,
-                     optimized=args.release, symbolized=args.cpu_profile or label != runtime_label([]))[label]
+                     optimized=args.release, symbolized=args.cpu_profile or args.off_cpu or label != runtime_label([]))[label]
 
 
 def file_sha256(path: Path) -> str | None:
@@ -379,6 +380,8 @@ def run_sample(
     warmups: int,
     turns: int,
     timeout_seconds: int,
+    cpu_profile: bool = False,
+    off_cpu: bool = False,
 ) -> dict[str, object]:
     sample_out = result_path(out, scenario, stack_bytes)
     cmd = [
@@ -393,11 +396,9 @@ def run_sample(
     ]
     started = dt.datetime.now(dt.timezone.utc)
     try:
-        proc = subprocess.run(
-            cmd,
+        proc = run_profiled(
+            cmd, receipt=sample_out, cpu=cpu_profile, off_cpu=off_cpu,
             cwd=root,
-            capture_output=True,
-            text=True,
             timeout=timeout_seconds,
         )
     except subprocess.TimeoutExpired as exc:
@@ -453,6 +454,8 @@ def run_boundary_sample(
     stack_bytes: int,
     out: Path,
     timeout_seconds: int,
+    cpu_profile: bool = False,
+    off_cpu: bool = False,
 ) -> dict[str, object]:
     """One boundary case on Tokio workers of `stack_bytes`."""
     sample_out = out.with_name(f"{out.stem}-{case}-{stack_bytes}.boundary.json")
@@ -472,7 +475,8 @@ def run_boundary_sample(
         cmd = boundary_command(binary, case, sample_out, Path(scratch) / "store",
                                [*extra, f"--worker-stack-bytes={stack_bytes}"])
         try:
-            proc = subprocess.run(cmd, cwd=root, env=env, capture_output=True, text=True,
+            proc = run_profiled(cmd, receipt=sample_out, cpu=cpu_profile, off_cpu=off_cpu,
+                                cwd=root, env=env,
                                   timeout=timeout_seconds)
         except subprocess.TimeoutExpired as exc:
             return sample | {
@@ -577,7 +581,7 @@ def main() -> int:
             binary, worker = boundary_artifacts(
                 root, label, build=args.build, report=args.build_report,
                 optimized=args.release,
-                symbolized=args.cpu_profile or label != runtime_label([]))
+                symbolized=args.cpu_profile or args.off_cpu or label != runtime_label([]))
         scenarios = [args.boundary]
     else:
         binary = resolve_binary(args, root)
@@ -608,6 +612,8 @@ def main() -> int:
                 stack_bytes=stack_bytes,
                 out=out,
                 timeout_seconds=args.timeout_seconds,
+                cpu_profile=args.cpu_profile,
+                off_cpu=args.off_cpu,
             ) if args.boundary else run_sample(
                 root=root,
                 binary=binary,
@@ -618,6 +624,8 @@ def main() -> int:
                 warmups=args.warmups,
                 turns=args.turns,
                 timeout_seconds=args.timeout_seconds,
+                cpu_profile=args.cpu_profile,
+                off_cpu=args.off_cpu,
             )
             samples.append(sample)
             print(f"  -> {sample['status']} rc={sample['returncode']}", file=sys.stderr)

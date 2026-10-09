@@ -6,9 +6,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import subprocess
 import sys
 import tempfile
+from datetime import datetime, timezone
+from perf_capture import run_profiled
 from pathlib import Path
 
 from perf_artifacts import (
@@ -159,7 +160,7 @@ def resolve_binary(args: argparse.Namespace, repo_root: Path) -> Path:
         return args.binary.resolve()
     label = runtime_label(args.cargo_feature, args.dhat)
     return artifacts(repo_root, [label], build=args.build, report=args.build_report,
-                     optimized=args.release, symbolized=args.cpu_profile or args.dhat)[label]
+                     optimized=args.release, symbolized=args.cpu_profile or args.off_cpu or args.dhat)[label]
 
 
 def default_dhat_out(out: Path) -> Path:
@@ -174,7 +175,7 @@ def run_boundary(args: argparse.Namespace, repo_root: Path) -> int:
         binary, worker = boundary_artifacts(
             repo_root, runtime_label(args.cargo_feature, args.dhat), build=args.build,
             report=args.build_report, optimized=args.release,
-            symbolized=args.cpu_profile or args.dhat)
+            symbolized=args.cpu_profile or args.off_cpu or args.dhat)
     out = args.out or repo_root / ".benchmarks" / "boundary" / f"{args.boundary}.json"
     out = out if out.is_absolute() else repo_root / out
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -189,7 +190,12 @@ def run_boundary(args: argparse.Namespace, repo_root: Path) -> int:
     with tempfile.TemporaryDirectory(prefix="boundary-", dir=out.parent) as scratch:
         # The case refuses an existing store directory.
         cmd = boundary_command(binary, args.boundary, out, Path(scratch) / "store", extra)
-        proc = subprocess.run(cmd, cwd=repo_root, env=env)
+        proc = run_profiled(cmd, receipt=out, cpu=args.cpu_profile, off_cpu=args.off_cpu,
+                            cwd=repo_root, env=env)
+    if proc.stdout:
+        print(proc.stdout, end="")
+    if proc.stderr:
+        print(proc.stderr, file=sys.stderr, end="")
     if proc.returncode != 0:
         raise SystemExit(proc.returncode)
     print(f"Boundary receipt: {out}", file=sys.stderr)
@@ -203,6 +209,9 @@ def main() -> int:
     repo_root = Path(__file__).resolve().parents[1]
     if args.boundary:
         return run_boundary(args, repo_root)
+    if args.out is None and (args.cpu_profile or args.off_cpu):
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        args.out = repo_root / ".benchmarks/runtime-perf" / f"{stamp}.json"
     binary = resolve_binary(args, repo_root)
     profile_defaults = PROFILE_DEFAULTS[args.profile]
     runs = args.runs if args.runs is not None else profile_defaults["runs"]
@@ -243,7 +252,8 @@ def main() -> int:
     for scenario in args.scenario:
         cmd.extend(["--runtime-perf-scenario", scenario])
 
-    proc = subprocess.run(cmd, cwd=repo_root, capture_output=True, text=True)
+    proc = run_profiled(cmd, receipt=args.out, cpu=args.cpu_profile,
+                        off_cpu=args.off_cpu, cwd=repo_root)
     if proc.stdout:
         print(proc.stdout, end="")
     # Always forward stderr: advisory wall-clock exceedances are reported there
