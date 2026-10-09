@@ -4,12 +4,12 @@ use std::sync::Arc;
 use lash::LashCore;
 use lash::process::*;
 use lash::tracing::TraceLanguageExecutionPayload;
-use lash::vm::ir::{WorkflowDeclaration, WorkflowNodeId};
+use lash::vm::ir::{Expr, WorkflowDeclaration, WorkflowNodeId, WorkflowNodeKind};
 use lash::workflow::{
-    WorkflowAdmissionDiagnosticKind, WorkflowCorrespondence, WorkflowCorrespondenceEntry,
-    WorkflowDocumentRead, WorkflowDraft, WorkflowDraftHandle, WorkflowEntry,
-    WorkflowExecutionDocument, WorkflowExecutionOverlayAccumulator, WorkflowGraph,
-    WorkflowOverlayOccurrence, WorkflowOverlaySettlement, WorkflowOverlayTerminal, WorkflowPublish,
+    WorkflowCorrespondence, WorkflowCorrespondenceEntry, WorkflowDocumentRead, WorkflowDraft,
+    WorkflowDraftHandle, WorkflowEntry, WorkflowExecutionDocument,
+    WorkflowExecutionOverlayAccumulator, WorkflowGraph, WorkflowOverlayOccurrence,
+    WorkflowOverlaySettlement, WorkflowOverlayTerminal, WorkflowPublish,
 };
 use tokio::sync::mpsc;
 use tokio_stream::StreamExt as _;
@@ -101,66 +101,65 @@ pub(crate) fn surviving_ids(
     ids
 }
 
-/// Publishes `draft` as a definition under a pin of its own. Lash admits
-/// the document's IR in its VM workers against the run environment; no
-/// source is printed or parsed. The entry is the first process of the
-/// document the admitted module exports.
-pub(crate) async fn publish(
-    core: &LashCore,
-    draft: &WorkflowDraft,
-) -> Result<Publication, RunError> {
-    let entries = draft
+/// The host opens one top-level workflow for editing. Inline processes inside
+/// it remain part of its document, but are not the workflow selected to run.
+/// A document with several top-level workflows needs an explicit host choice.
+pub(crate) fn select_entry(draft: &WorkflowDraft) -> Result<WorkflowEntry, RunError> {
+    let mut workflows = draft
         .document()
         .declarations
         .iter()
-        .filter_map(|declaration| match declaration {
-            WorkflowDeclaration::Process(process) => Some(process.id.clone()),
-            WorkflowDeclaration::Function(_) => None,
-        })
-        .collect::<Vec<_>>();
+        .filter_map(|declaration| {
+            let WorkflowDeclaration::Process(process) = declaration else {
+                return None;
+            };
+            let bound_in_main = draft.document().main.nodes.iter().any(|node| {
+                matches!(&node.kind, WorkflowNodeKind::Data {
+                binding: Some(_), expression: Expr::ProcessRef { process: name },
+            } if name.as_str() == process.name)
+            });
+            (process.origin.is_declared() || bound_in_main).then_some(process)
+        });
+    match (workflows.next(), workflows.next()) {
+        (Some(process), None) => Ok(WorkflowEntry::Process(process.id.clone())),
+        _ => Err(RunError::Invalid(
+            "open a document with one top-level workflow to select its entry".into(),
+        )),
+    }
+}
+
+/// Publishes the host-selected `entry` of `draft` under a pin of its own.
+/// Lash admits the document's IR against the run environment in its VM workers.
+pub(crate) async fn publish(
+    core: &LashCore,
+    draft: &WorkflowDraft,
+    entry: WorkflowEntry,
+) -> Result<Publication, RunError> {
     let pin = HostArtifactPin::mint();
     let artifacts = core.host_artifacts();
     let environment = environment();
     let result = async {
-        let mut refused = None;
-        for entry in entries {
-            match artifacts
-                .publish_workflow(&pin, draft, WorkflowEntry::Process(entry), &environment)
-                .await?
-            {
-                WorkflowPublish::Published(publication) => {
-                    let env_ref = artifacts.publish_process_env(&pin, &environment).await?;
-                    return Ok(Publication {
-                        published: Published {
-                            definition: publication.definition,
-                            env_ref,
-                            pin: pin.clone(),
-                        },
-                        graph: publication.document.graph,
-                        ids: surviving_ids(&publication.correspondence),
-                    });
-                }
-                // A process the module does not export is not an entry; the
-                // next one may be.
-                WorkflowPublish::Refused(refusal)
-                    if refusal.diagnostics.iter().all(|diagnostic| {
-                        diagnostic.kind == WorkflowAdmissionDiagnosticKind::Entry
-                    }) =>
-                {
-                    refused.get_or_insert(refusal);
-                }
-                WorkflowPublish::Refused(refusal) => return Err(RunError::Refused(refusal)),
-                WorkflowPublish::Unsupported { engine_kind } => {
-                    return Err(RunError::Invalid(format!(
-                        "engine `{engine_kind}` admits no workflow documents"
-                    )));
-                }
+        match artifacts
+            .publish_workflow(&pin, draft, entry, &environment)
+            .await?
+        {
+            WorkflowPublish::Published(publication) => {
+                let env_ref = artifacts.publish_process_env(&pin, &environment).await?;
+                Ok(Publication {
+                    published: Published {
+                        definition: publication.definition,
+                        env_ref,
+                        pin: pin.clone(),
+                    },
+                    graph: publication.document.graph,
+                    ids: surviving_ids(&publication.correspondence),
+                })
             }
+            WorkflowPublish::Refused(refusal) => Err(RunError::Refused(refusal)),
+            WorkflowPublish::Unsupported { engine_kind } => Err(RunError::Invalid(format!(
+                "engine `{engine_kind}` admits no workflow documents"
+            ))),
         }
-        Err(match refused {
-            Some(refusal) => RunError::Refused(refusal),
-            None => RunError::Invalid("saved workflow has no process to run".into()),
-        })
     }
     .await;
     if result.is_err() {

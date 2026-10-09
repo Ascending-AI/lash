@@ -240,6 +240,15 @@ apply as one transaction, and the edited draft is published with
 workers and holds the new definition under a pin the version keeps. No
 TypeScript is printed or parsed to save.
 
+When a workflow is opened, the host selects its sole top-level process (a
+declaration or a process bound directly in module main), and keeps that `WorkflowEntry`
+in the saved draft state. Inline processes nested inside it are not candidate
+entries. Edits carry the selection through the process's draft handle, even
+when its name or document id changes. Removing the selected process makes the
+version unrunnable; it never falls back to another export. Opening a document
+with zero or several top-level processes saves an unrunnable version because
+this editor has no entry chooser.
+
 The success response is a new `WorkflowDocument` with incremented `version`
 and the ids of the admitted document, plus `idMap`: for every id the
 submitted document used, the id that node has now. The map is read from

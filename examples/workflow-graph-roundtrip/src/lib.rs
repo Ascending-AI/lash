@@ -30,7 +30,7 @@ use lash::typescript::workflow_graph::{
 };
 use lash::vm::ir::WorkflowNodeId;
 use lash::workflow::{
-    WorkflowDraft, WorkflowDraftHandle, WorkflowDraftOpenError, WorkflowGraph,
+    WorkflowDraft, WorkflowDraftHandle, WorkflowDraftOpenError, WorkflowEntry, WorkflowGraph,
     workflow_program_from_graph,
 };
 use tokio::sync::mpsc;
@@ -120,6 +120,8 @@ struct SavedWorkflow {
     /// The workflow as the host edits it. The draft lives across saves, so
     /// every node keeps its handle for as long as edits keep the node.
     draft: WorkflowDraft,
+    /// The host-selected entry in the draft, retained through edit handles.
+    entry: Result<WorkflowEntry, Arc<runtime::RunError>>,
     /// The document clients are served: the admitted document when lash
     /// admitted the version (a run reports against its ids), else the
     /// draft's own.
@@ -131,6 +133,26 @@ struct SavedWorkflow {
 }
 
 impl SavedWorkflow {
+    /// Edits can change a process's name and document id. Its draft handle
+    /// carries the selected entry to the edited document, or records its removal.
+    fn edited_entry(
+        original: &WorkflowDraft,
+        entry: &Result<WorkflowEntry, Arc<runtime::RunError>>,
+        draft: &WorkflowDraft,
+    ) -> Result<WorkflowEntry, Arc<runtime::RunError>> {
+        let entry = entry.as_ref().map_err(Arc::clone)?;
+        if let WorkflowEntry::Process(id) = entry
+            && let Some(handle) = original.handle(id)
+            && draft.process(handle).is_some()
+            && let Some(id) = draft.node_id(handle)
+        {
+            return Ok(WorkflowEntry::Process(id.clone()));
+        }
+        Err(Arc::new(runtime::RunError::Invalid(
+            "the selected workflow entry was removed".into(),
+        )))
+    }
+
     /// The handle of each node, by the id clients know it under.
     fn named(&self) -> BTreeMap<WorkflowNodeId, WorkflowDraftHandle> {
         self.ids
@@ -193,7 +215,7 @@ impl AppState {
         };
         let graph = workflow_graph_from_source(DEFAULT_WORKFLOW)?;
         let draft = WorkflowDraft::open(&graph)?;
-        state.install(draft).await;
+        state.open(draft).await;
         Ok(state)
     }
 
@@ -213,8 +235,23 @@ impl AppState {
     /// Saves `draft` as the next version and publishes it: lash admits the
     /// draft's document as a definition under a pin the version holds. A
     /// draft lash refuses is still saved, as a version that cannot run.
-    async fn install(&self, draft: WorkflowDraft) -> SavedWorkflow {
-        let (graph, ids, published) = match runtime::publish(&self.core, &draft).await {
+    async fn open(&self, draft: WorkflowDraft) -> SavedWorkflow {
+        let entry = runtime::select_entry(&draft).map_err(Arc::new);
+        self.install(draft, entry).await
+    }
+
+    async fn install(
+        &self,
+        draft: WorkflowDraft,
+        entry: Result<WorkflowEntry, Arc<runtime::RunError>>,
+    ) -> SavedWorkflow {
+        let publication = match &entry {
+            Ok(entry) => runtime::publish(&self.core, &draft, entry.clone())
+                .await
+                .map_err(Arc::new),
+            Err(error) => Err(error.clone()),
+        };
+        let (graph, ids, published) = match publication {
             Ok(publication) => (
                 publication.graph,
                 publication.ids,
@@ -223,7 +260,7 @@ impl AppState {
             Err(refusal) => (
                 draft.document().clone(),
                 runtime::surviving_ids(&draft.correspondence_since_open()),
-                Err(Arc::new(refusal)),
+                Err(refusal),
             ),
         };
         let (saved, superseded) = {
@@ -232,6 +269,7 @@ impl AppState {
             let saved = SavedWorkflow {
                 version,
                 draft,
+                entry,
                 graph,
                 ids,
                 published,
@@ -314,7 +352,7 @@ async fn select_workflow(
     let graph = workflow_graph_from_source(source).map_err(RenderErrorResponse::projection)?;
     let draft = WorkflowDraft::open(&graph).map_err(RenderErrorResponse::open)?;
     let _publishing = state.publishing.lock().await;
-    Ok(Json(state.install(draft).await.document()))
+    Ok(Json(state.open(draft).await.document()))
 }
 
 pub async fn serve(listener: tokio::net::TcpListener, state: AppState) -> std::io::Result<()> {
@@ -361,7 +399,7 @@ async fn open_workflow_ir(
         WorkflowGraph::decode_json_value(request.graph).map_err(RenderErrorResponse::decode)?;
     let draft = WorkflowDraft::open(&graph).map_err(RenderErrorResponse::open)?;
     let _publishing = state.publishing.lock().await;
-    Ok(Json(state.install(draft).await.document()))
+    Ok(Json(state.open(draft).await.document()))
 }
 
 /// The response to an edit: the new version, and where each node the
@@ -405,7 +443,7 @@ async fn save_workflow(
     // came from the source pane is a TypeScript import with no edit history:
     // it is a new workflow, read again from its own source into a new draft.
     let imported = !document.source.is_empty() && current.source().as_ref() != Ok(&document.source);
-    let (draft, named, base) = if imported {
+    let (draft, named, base, entry) = if imported {
         let graph = workflow_graph_from_source(&document.source)
             .map_err(RenderErrorResponse::projection)?;
         let draft = WorkflowDraft::open(&graph).map_err(RenderErrorResponse::open)?;
@@ -413,18 +451,22 @@ async fn save_workflow(
             .opened()
             .map(|(handle, id)| (id.clone(), handle))
             .collect();
-        (draft, named, graph)
+        let entry = runtime::select_entry(&draft).map_err(Arc::new);
+        (draft, named, graph, entry)
     } else {
         (
             current.draft.clone(),
             current.named(),
             current.graph.clone(),
+            current.entry.clone(),
         )
     };
     let target = graph::graph_from_document(document, &base)?;
+    let original = draft.clone();
     let applied =
         edits::apply_document(draft, &named, &base, &target).map_err(RenderErrorResponse::edit)?;
-    let saved = state.install(applied.draft).await;
+    let entry = SavedWorkflow::edited_entry(&original, &entry, &applied.draft);
+    let saved = state.install(applied.draft, entry).await;
     Ok(Json(saved_response(&saved, applied.handles)))
 }
 
@@ -445,7 +487,8 @@ async fn edit_workflow(
     let named = current.named();
     let draft = edits::apply_operations(current.draft.clone(), &named, request.edits)
         .map_err(RenderErrorResponse::edit)?;
-    let saved = state.install(draft).await;
+    let entry = SavedWorkflow::edited_entry(&current.draft, &current.entry, &draft);
+    let saved = state.install(draft, entry).await;
     Ok(Json(saved_response(
         &saved,
         named
