@@ -3,11 +3,6 @@
 use lash_core::*;
 mod conformance;
 pub use conformance::*;
-#[expect(
-    dead_code,
-    reason = "the explorer's one law, send versus redrive, was deleted with the shift (L3s, FIG-5196); L9c re-proves it on the session actor"
-)]
-mod interleave;
 use lash_core::attachments::*;
 use lash_core::facade_support::*;
 use lash_core::runtime::*;
