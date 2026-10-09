@@ -24,6 +24,8 @@ How asynchronous source maps to kernel tasks is described in `src/lower/async_fn
 | `TS_TYPED_ARRAY_INDEX_RANGE` | `xs[i]` is `undefined` when `i` is negative, fractional or past the end. | With `xs` declared an array and `i` a `number`, such an index raises `index_out_of_range`. | Sam's ruling (kernel spec §4): a front end trusts type annotations and documents the difference. The kernel function chosen takes exactly the declared type (`K-NUM-008`), so a wrong type is an error and never another answer. | `tests::deviations::array_index_out_of_range_raises` |
 | `TS_TYPED_ARRAY_LENGTH` | `xs.length` reads the property of whatever `xs` is. | With `xs` declared an array, a value that is not an array raises `type_error`. | Sam's ruling (kernel spec §4): a front end trusts type annotations and documents the difference. The kernel function chosen takes exactly the declared type (`K-NUM-008`), so a wrong type is an error and never another answer. | `tests::deviations::array_length_raises_on_a_value_that_is_not_an_array` |
 | `TS_DATE_VALUE_IDENTITY` | Dates are distinct mutable objects even when their times match. | Valid Dates are immutable kernel timestamp values; equal times compare equal. Invalid Dates are branded records. | FIG-5709's required timestamp representation follows kernel value equality. | `tests::remaining_builtins::dates_use_timestamps_iso_parsing_utc_arithmetic_and_invalid_values` |
+| `TS_RESERVED_IDENTIFIER` | `k` is an ordinary identifier. | Binding `k` is refused; it names the kernel namespace. | Kernel surface names are reserved by K-DIALECT-001 (kernel spec §4). | `tests::printer::reserved_operations_obey_the_kernel_statement_rule` |
+| `TS_LONE_SURROGATE` | Strings may contain isolated UTF-16 surrogate units. | A lone-surrogate literal is refused with `TS_LONE_SURROGATE_LITERAL_UNSUPPORTED`; a String result raises `TS_LONE_SURROGATE_UNSUPPORTED`. | Kernel Text contains only Unicode scalar values (K-VAL-006). | `runner::lone_surrogate_literals_and_results_have_typed_refusals` |
 
 ## Types
 
@@ -35,5 +37,20 @@ Test262 is the oracle for the untyped language (`tests/test262_kernel.rs`). A te
 
 | Test | Code |
 | --- | --- |
+| `test/built-ins/Array/prototype/find/predicate-call-parameters.js` | `TS_RESERVED_IDENTIFIER` |
+| `test/built-ins/Array/prototype/find/predicate-call-this-strict.js` | `TS_RESERVED_IDENTIFIER` |
+| `test/built-ins/Array/prototype/findIndex/predicate-call-parameters.js` | `TS_RESERVED_IDENTIFIER` |
+| `test/built-ins/Array/prototype/findIndex/predicate-call-this-strict.js` | `TS_RESERVED_IDENTIFIER` |
+| `test/built-ins/JSON/stringify/replacer-function-array-circular.js` | `TS_RESERVED_IDENTIFIER` |
+| `test/built-ins/JSON/stringify/replacer-function-object-circular.js` | `TS_RESERVED_IDENTIFIER` |
+| `test/built-ins/RegExp/S15.10.2.10_A5.1_T1.js` | `TS_RESERVED_IDENTIFIER` |
+| `test/built-ins/RegExp/S15.10.2.12_A3_T5.js` | `TS_RESERVED_IDENTIFIER` |
+| `test/built-ins/RegExp/S15.10.2.12_A4_T5.js` | `TS_RESERVED_IDENTIFIER` |
+| `test/built-ins/parseInt/S15.1.2.2_A7.2_T1.js` | `TS_RESERVED_IDENTIFIER` |
+| `test/built-ins/parseInt/S15.1.2.2_A7.3_T1.js` | `TS_RESERVED_IDENTIFIER` |
+| `test/language/identifiers/vals-eng-alpha-lower-via-escape-hex.js` | `TS_RESERVED_IDENTIFIER` |
+| `test/language/identifiers/vals-eng-alpha-lower-via-escape-hex4.js` | `TS_RESERVED_IDENTIFIER` |
+| `test/language/identifiers/vals-eng-alpha-lower.js` | `TS_RESERVED_IDENTIFIER` |
+| `test/language/statements/let/syntax/let-closure-inside-initialization.js` | `TS_RESERVED_IDENTIFIER` |
 
-There are none. Test262 programs carry no annotation, so no `TS_TYPED_*` row applies to them.
+Test262 programs carry no annotation, so no `TS_TYPED_*` row applies to them.

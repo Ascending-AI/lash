@@ -35,10 +35,14 @@ const EARLY_ERROR_CODES: [DiagnosticCode; 5] = [
     DiagnosticCode::RegexInvalid,
 ];
 
-/// The bounds one test runs under. A program that passes one diverges.
+/// Fixed measurement bounds, identical for every Test262 case. Crossing one is
+/// a failure with the kernel's typed bound error, never a conformance exemption.
+/// These cases test semantics, not billion-element materialization. Four million
+/// charge units and 8 MiB of guest memory allow ordinary harnesses and programs
+/// while bounding dense representations of JavaScript's huge sparse arrays.
 const BOUNDS: Bounds = Bounds {
-    charge: 4_000_000_000,
-    memory: 1 << 30,
+    charge: 4_000_000,
+    memory: 8 << 20,
     call_depth: 1_000,
     live_tasks: 1_024,
     requests_per_park: 1_024,
@@ -50,7 +54,7 @@ const BOUNDS: Bounds = Bounds {
 pub(crate) enum Observed {
     Pass,
     /// The front end refused the program, with this diagnostic code.
-    Refused(String),
+    Refused(String, String),
     /// The program ran and did not do what the test expects.
     Diverged(String),
     /// The test needs a harness include that has no rendering.
@@ -61,7 +65,7 @@ impl Observed {
     pub(crate) fn class(&self) -> &'static str {
         match self {
             Self::Pass => "pass",
-            Self::Refused(_) => "refused",
+            Self::Refused(_, _) => "refused",
             Self::Diverged(_) => "fail",
             Self::Harness(_) => "harness",
         }
@@ -257,7 +261,7 @@ pub(crate) fn run(relative: &str, executor: &dyn Executor) -> Observed {
         let body = source_without_unshimmed(&path, &meta, meta.negative.is_none());
         return match lower(&body) {
             Err(diagnostic) if diagnostic.code != DiagnosticCode::UnknownBinding => {
-                Observed::Refused(diagnostic.code.as_str().to_string())
+                Observed::Refused(diagnostic.code.as_str().to_string(), diagnostic.message)
             }
             _ => Observed::Harness(include.to_string()),
         };
@@ -273,7 +277,9 @@ pub(crate) fn run(relative: &str, executor: &dyn Executor) -> Observed {
         Err(diagnostic) if parse_negative && EARLY_ERROR_CODES.contains(&diagnostic.code) => {
             return Observed::Pass;
         }
-        Err(diagnostic) => return Observed::Refused(diagnostic.code.as_str().to_string()),
+        Err(diagnostic) => {
+            return Observed::Refused(diagnostic.code.as_str().to_string(), diagnostic.message);
+        }
     };
     if let Some(negative) = meta.negative.as_ref().filter(|_| parse_negative) {
         return Observed::Diverged(format!(
@@ -317,16 +323,6 @@ pub(crate) fn recorded_classes() -> BTreeMap<String, String> {
     let mut classes = BTreeMap::new();
     tables(&data_path("outcomes"), &mut classes);
     classes
-}
-
-/// The stratified sample of the selection, `sample.tsv`.
-pub(crate) fn sample_paths() -> Vec<String> {
-    std::fs::read_to_string(data_path("sample.tsv"))
-        .expect("read the Test262 sample")
-        .lines()
-        .filter(|line| !line.trim().is_empty() && !line.starts_with('#'))
-        .map(str::to_string)
-        .collect()
 }
 
 /// A test's directory, two levels below `test/`: `language/expressions`,
@@ -384,7 +380,7 @@ pub(crate) fn report(
     // construct a family is waiting on.
     let mut codes: BTreeMap<&str, usize> = BTreeMap::new();
     for (_, observed) in observations {
-        if let Observed::Refused(code) = observed {
+        if let Observed::Refused(code, _) = observed {
             *codes.entry(code.as_str()).or_default() += 1;
         }
     }
@@ -534,6 +530,20 @@ fn assert_finished(end: End, expected: Datum) {
         End::Finished(finished) => assert_eq!(finished.result, expected),
         other => panic!("expected {expected:?}, got {other:?}"),
     }
+}
+
+/// K-BND-001: dense materialization of a huge JavaScript sparse index must
+/// end at the memory bound, so the next conformance case can still run.
+#[test]
+fn huge_sparse_array_writes_end_at_the_memory_bound() {
+    let end = execute("const xs = []; xs[2147483648] = 1; finish(xs.length);");
+    assert!(
+        matches!(end, End::Error(RunError::Bound(lash_kernel_vm::BoundExceeded {
+        bound: lash_kernel_vm::Bound::Memory,
+        limit,
+    })) if limit == BOUNDS.memory),
+        "{end:?}"
+    );
 }
 
 /// ECMA Array.prototype.unshift: with no arguments, only ToLength and the
@@ -756,6 +766,7 @@ fn exponentiation_of_unit_magnitude_by_infinity_is_nan() {
     );
 }
 
+/// Compound assignment converts a computed property key once; object literals
 /// convert each key before evaluating its value.
 #[test]
 fn computed_property_keys_convert_once_and_before_object_values() {
@@ -779,6 +790,20 @@ fn computed_member_reads_check_the_base_before_key_conversion() {
             "const key = {toString() { throw new Error('key'); }}; let count = 0; for (const base of [null, undefined]) { try { base[key]; } catch (e) { if (e.name === 'TypeError') count++; } } finish(count);",
         ),
         Datum::Float(lash_kernel_doc::Float::new(2.0)),
+    );
+}
+
+/// K-VAL-006: kernel Text holds scalar values, so a lone surrogate has no value.
+#[test]
+fn lone_surrogate_literals_and_results_have_typed_refusals() {
+    let diagnostic = lower(r#"finish("\uD800");"#).expect_err("a lone surrogate is refused");
+    assert_eq!(
+        diagnostic.code,
+        DiagnosticCode::LoneSurrogateLiteralUnsupported
+    );
+    let end = execute("finish(String.fromCharCode(0xD800));");
+    assert!(
+        matches!(end, End::Error(RunError::Uncaught(error)) if thrown_name(&error).as_deref() == Some("TS_LONE_SURROGATE_UNSUPPORTED"))
     );
 }
 

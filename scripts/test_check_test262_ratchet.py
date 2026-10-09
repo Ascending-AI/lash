@@ -101,6 +101,27 @@ class RatchetTest(unittest.TestCase):
                 ]
             )
 
+    def test_kernel_gate_requires_every_main_case_and_never_waives_a_refusal_code(self):
+        refused = dict(self.base, **{"a.js": ("refused", "TS_NEW_CODE")})
+        self.assertEqual(len(ratchet.kernel_regressions(self.base, refused, {})), 1)
+        dropped = {path: outcome for path, outcome in self.base.items() if path != "d.js"}
+        self.assertEqual(len(ratchet.kernel_regressions(self.base, dropped, {})), 1)
+        with self.assertRaises(SystemExit):
+            ratchet.parse("test/a.js\tpass\t-\ntest/a.js\tfail\tkernel\n")
+
+    def test_kernel_gate_exempts_only_an_exact_registered_main_pass(self):
+        failed = dict(self.base, **{"a.js": ("fail", "kernel")})
+        self.assertEqual(ratchet.kernel_regressions(self.base, failed, {"a.js": "TS_RULE"}), [])
+        self.assertEqual(len(ratchet.kernel_regressions(self.base, failed, {"b.js": "TS_RULE"})), 2)
+
+    def test_kernel_exclusions_require_a_real_unique_deviation(self):
+        register = "| `TS_RULE` | kernel K-VAL-006 |\n## Test262 exclusions\n| `test/a.js` | `TS_RULE` |\n"
+        self.assertEqual(ratchet.kernel_exclusions(register), {"test/a.js": "TS_RULE"})
+        with self.assertRaises(ValueError):
+            ratchet.kernel_exclusions(register.replace("test/a.js` | `TS_RULE", "test/a.js` | `TS_OTHER"))
+        with self.assertRaises(ValueError):
+            ratchet.kernel_exclusions(register + "| `test/a.js` | `TS_RULE` |\n")
+
     def test_outcome_paths_picks_up_both_record_layouts(self):
         listed = lambda ref, *paths: subprocess.CompletedProcess(
             args=[], returncode=0, stdout="\n".join(paths) + "\n"

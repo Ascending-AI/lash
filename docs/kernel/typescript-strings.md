@@ -10,8 +10,9 @@ boundary. `codePointAt` combines a high and low surrogate; `charCodeAt` returns
 either unit independently. Operations that would return an isolated surrogate
 raise `TS_LONE_SURROGATE_UNSUPPORTED`. String iteration groups surrogate pairs,
 matching JavaScript's iterator without confusing positions with scalar indexes.
-Unicode case conversion and whitespace trimming use the library's pinned
-Unicode 17.0.0 definitions.
+Unicode case conversion uses the library's pinned Unicode 17.0.0 definitions.
+Trimming and numeric parsing use ECMAScript WhiteSpace and LineTerminator
+code units: BOM is included and NEL is excluded.
 
 A guest RegExp is `{brand: "regex.ecma", pattern, flags, lastIndex}`. Its visible
 `lastIndex` may hold any JavaScript value; a helper coerces it with ToLength and

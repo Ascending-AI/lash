@@ -17,23 +17,13 @@ use std::collections::BTreeMap;
 
 use runner::Observed;
 
-/// The tests to run: the stratified sample, or every recorded test whose
-/// path starts with `TEST262_KERNEL_FILTER` (`test/built-ins/Array/`).
-fn selection(recorded: &BTreeMap<String, String>) -> Vec<String> {
-    // Test tooling reads its selection from the environment.
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "test tooling reads its selection from the environment"
-    )]
-    let filter = std::env::var("TEST262_KERNEL_FILTER").ok();
-    match filter {
-        Some(prefix) => recorded
-            .keys()
-            .filter(|path| path.starts_with(&prefix))
-            .cloned()
-            .collect(),
-        None => runner::sample_paths(),
-    }
+// Test tooling may read an explicit local selection; the default covers the record.
+#[allow(clippy::disallowed_methods)]
+fn selection_filter() -> Vec<String> {
+    std::env::var("TEST262_KERNEL_FILTER")
+        .ok()
+        .map(|value| value.split(',').map(str::to_owned).collect())
+        .unwrap_or_default()
 }
 
 const REGISTER: &str = include_str!("../deviations.md");
@@ -62,12 +52,27 @@ fn registered_exclusions() -> BTreeMap<String, String> {
 
 /// Every selected test has one observation, and the report counts them by
 /// directory. Every recorded pass must run to its expected end or be
-/// explicitly refused in the outcome record and census, or excluded by a
-/// registered dialect deviation.
-#[test]
-fn the_selection_runs_on_the_kernel_and_is_counted_by_directory() {
+/// excluded by an exact registered dialect deviation.
+fn run_selection(shard: usize) {
     let recorded = runner::recorded_classes();
-    let paths = selection(&recorded);
+    let filter = selection_filter();
+    for prefix in &filter {
+        assert!(
+            recorded.keys().any(|path| path.starts_with(prefix)),
+            "no recorded case matches {prefix}"
+        );
+    }
+    // A stable partition of the complete record. Concurrent libtest laws keep
+    // expensive families from monopolizing the single test action's deadline.
+    let paths: Vec<_> = recorded
+        .keys()
+        .enumerate()
+        .filter(|(index, path)| {
+            index % 40 == shard
+                && (filter.is_empty() || filter.iter().any(|prefix| path.starts_with(prefix)))
+        })
+        .map(|(_, path)| path.clone())
+        .collect();
     assert!(!paths.is_empty(), "the selection is empty");
     let executor = runner::executor();
     let observations: Vec<(String, Observed)> = paths
@@ -77,7 +82,18 @@ fn the_selection_runs_on_the_kernel_and_is_counted_by_directory() {
                 recorded.contains_key(path),
                 "{path} has no recorded outcome"
             );
-            (path.clone(), runner::run(path, executor.as_ref()))
+            println!("case-start\t{path}");
+            let observed = runner::run(path, executor.as_ref());
+            let qualifier = match &observed {
+                Observed::Pass => "-",
+                Observed::Refused(code, _) | Observed::Harness(code) => code,
+                Observed::Diverged(_) => "kernel",
+            };
+            println!("outcome\t{path}\t{}\t{qualifier}", observed.class());
+            if observed != Observed::Pass {
+                println!("detail\t{path}\t{observed:?}");
+            }
+            (path.clone(), observed)
         })
         .collect();
     let report = runner::report(&observations, &recorded);
@@ -120,7 +136,7 @@ fn the_selection_runs_on_the_kernel_and_is_counted_by_directory() {
     }
     assert!(
         regressed.is_empty(),
-        "{} recorded passes did not pass on the kernel; register a real dialect refusal in the census and outcome record, or fix the implementation",
+        "{} recorded passes did not pass on the kernel; register an exact kernel-rule deviation or fix the implementation",
         regressed.len()
     );
 }
@@ -139,4 +155,56 @@ fn every_lowered_test262_program_prints_to_the_same_kernel_behavior() {
         recorded.len(),
         recorded.len() - accepted
     );
+}
+
+/// Every recorded case belongs to exactly one of these full-selection laws.
+mod selection {
+    macro_rules! shards {
+        ($($name:ident: $index:literal),* $(,)?) => {$ (
+            #[test]
+            fn $name() { super::run_selection($index); }
+        )*};
+    }
+    shards! {
+        shard_00: 0,
+        shard_01: 1,
+        shard_02: 2,
+        shard_03: 3,
+        shard_04: 4,
+        shard_05: 5,
+        shard_06: 6,
+        shard_07: 7,
+        shard_08: 8,
+        shard_09: 9,
+        shard_10: 10,
+        shard_11: 11,
+        shard_12: 12,
+        shard_13: 13,
+        shard_14: 14,
+        shard_15: 15,
+        shard_16: 16,
+        shard_17: 17,
+        shard_18: 18,
+        shard_19: 19,
+        shard_20: 20,
+        shard_21: 21,
+        shard_22: 22,
+        shard_23: 23,
+        shard_24: 24,
+        shard_25: 25,
+        shard_26: 26,
+        shard_27: 27,
+        shard_28: 28,
+        shard_29: 29,
+        shard_30: 30,
+        shard_31: 31,
+        shard_32: 32,
+        shard_33: 33,
+        shard_34: 34,
+        shard_35: 35,
+        shard_36: 36,
+        shard_37: 37,
+        shard_38: 38,
+        shard_39: 39,
+    }
 }

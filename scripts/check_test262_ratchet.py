@@ -28,6 +28,7 @@ reviewed record of that decision. Every such move is printed.
 from __future__ import annotations
 
 import argparse
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -46,6 +47,8 @@ def parse(text: str) -> dict[str, tuple[str, str]]:
         if not line.strip() or line.startswith("#"):
             continue
         path, outcome_class, qualifier = line.split("\t")
+        if path in outcomes:
+            raise SystemExit(f"check_test262_ratchet: duplicate observation for {path}")
         outcomes[path] = (outcome_class, qualifier)
     return outcomes
 
@@ -171,11 +174,88 @@ def new_refusal_codes(base: str) -> frozenset[str]:
     return frozenset(code for row, code in head.items() if base_rows.get(row) != code)
 
 
+def kernel_exclusions(register: str) -> dict[str, str]:
+    """Exact cases with a reviewed deviation, not diagnostic-wide waivers."""
+    grounds, separator, table = register.partition("## Test262 exclusions")
+    if not separator:
+        raise ValueError("the deviation register has no Test262 exclusions table")
+    codes = set(re.findall(r"^\| `([^`]+)` \|", grounds, re.MULTILINE))
+    excluded: dict[str, str] = {}
+    for line in table.splitlines():
+        if not line.startswith("| `test/"):
+            continue
+        fields = [field.strip().strip("`") for field in line.strip("|").split("|")]
+        if len(fields) != 2:
+            raise ValueError(f"invalid Test262 exclusion: {line}")
+        path, code = fields
+        if path in excluded:
+            raise ValueError(f"duplicate Test262 exclusion: {path}")
+        if code not in codes:
+            raise ValueError(f"{path}: unregistered deviation {code}")
+        excluded[path] = code
+    return excluded
+
+
+def kernel_regressions(
+    base: dict[str, tuple[str, str]],
+    observed: dict[str, tuple[str, str]],
+    excluded: dict[str, str],
+) -> list[str]:
+    """Gate 1: the complete kernel run preserves each main pass or names its
+    deviation. Routing a missing feature never exempts it from this gate."""
+    problems = []
+    for path, code in sorted(excluded.items()):
+        if base.get(path, (None, None))[0] != "pass":
+            problems.append(f"{path}: {code} excludes a case main does not mark pass")
+    for path in sorted(set(base) - set(observed)):
+        problems.append(f"{path}: missing from the kernel run")
+    for path in sorted(set(observed) - set(base)):
+        problems.append(f"{path}: not in main's selection")
+    for path, (outcome, qualifier) in sorted(observed.items()):
+        if outcome not in {"pass", "refused", "fail", "harness"}:
+            problems.append(f"{path}: unknown kernel outcome {outcome}")
+        if base.get(path, (None, None))[0] == "pass" and outcome != "pass" and path not in excluded:
+            problems.append(f"{path}: passed on main, kernel `{outcome} {qualifier}`")
+    return problems
+
+
+def check_kernel(base: dict[str, tuple[str, str]], outcomes: Path, register: Path) -> int:
+    observed = parse_shards([(str(outcomes), outcomes.read_text())])
+    excluded = kernel_exclusions(register.read_text())
+    problems = kernel_regressions(base, observed, excluded)
+    print("check_test262_ratchet: kernel compared with main's record:")
+    for (outcome, qualifier), count in sorted(tallies(observed).items()):
+        print(f"  {outcome}\t{qualifier}\t{count}")
+    deviations = sum(
+        path in excluded and base.get(path, (None, None))[0] == "pass" and outcome != "pass"
+        for path, (outcome, _) in observed.items()
+    )
+    print(f"  recorded-pass\t-\t{sum(outcome == 'pass' for outcome, _ in base.values())}")
+    print(f"  deviation\t-\t{deviations}")
+    print(f"  regression\t-\t{len(problems)}")
+    for problem in problems:
+        print(f"  {problem}", file=sys.stderr)
+    return int(bool(problems))
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--base", required=True, help="the commit the head is compared with")
+    parser.add_argument(
+        "--kernel-outcomes", type=Path,
+        help="complete kernel observation TSV emitted by test262_kernel (Gate 1)",
+    )
+    parser.add_argument(
+        "--deviations", type=Path,
+        default=ROOT / "crates/lash-dialect-typescript/deviations.md",
+        help="kernel dialect's reviewed deviation register",
+    )
     args = parser.parse_args()
     base = base_outcomes(args.base)
+    if args.kernel_outcomes is not None:
+        if base is None:
+            parser.error("kernel comparison requires main's existing outcome record")
+        return check_kernel(base, args.kernel_outcomes, args.deviations)
     if base is None:
         print("check_test262_ratchet: the outcomes record is new at this head; nothing to compare")
         return 0
