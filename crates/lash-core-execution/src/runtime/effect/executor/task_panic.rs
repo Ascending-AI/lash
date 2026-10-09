@@ -17,15 +17,19 @@ pub(super) fn map_effect_task_join(
         Some(call) => Ok(RuntimeEffectOutcome::ToolAttempt {
             launch: Box::new(crate::ToolAttemptLaunch::Done {
                 record: Box::new(crate::ToolCallRecord {
-                    call_id: call.call_id,
+                    call_id: call.call_id.clone(),
                     provider_call_id: call.provider_call_id,
-                    tool: call.tool_name,
+                    tool: call.tool_name.clone(),
                     args: call.args,
                     output: crate::ToolCallOutput::failure(crate::ToolFailure::runtime(
                         crate::ToolFailureClass::Internal,
                         "tool_panicked",
+                        "The tool panicked. Outside work may already have happened; check outside state before calling again.",
+                    ).with_cause(crate::ToolFailureCause::Panicked {
+                        tool_name: call.tool_name,
+                        call_id: call.call_id,
                         message,
-                    )),
+                    })),
                 }),
                 intents: crate::ToolIntents::default(),
             }),

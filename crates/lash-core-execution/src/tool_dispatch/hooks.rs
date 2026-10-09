@@ -80,6 +80,9 @@ pub async fn finalize_tool_result_with_execution_context(
         Ok(output) => output,
         Err(pending) => return ToolOutcome::pending(pending),
     };
+    if output.tool_panic_stop().is_some() {
+        return ToolOutcome::from_output(output);
+    }
     let (original, control) = ToolResultCandidate::split(output);
     let argument_projection =
         super::preparation::resolve_callable_manifest_by_id(context, prepared.tool_id())

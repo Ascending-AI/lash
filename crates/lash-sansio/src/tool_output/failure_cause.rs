@@ -4,6 +4,13 @@ use serde::{Deserialize, Serialize};
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ToolFailureCause {
     Interrupted,
+    /// The host body panicked. It may already have performed outside work;
+    /// this terminal is never retried or sent back to the model for repair.
+    Panicked {
+        tool_name: String,
+        call_id: crate::ToolCallId,
+        message: String,
+    },
     /// An admitted engine step has no registered body on this deployment.
     /// Its exact registration refusal is retained in the failure's raw value.
     EngineStepRegistrationUnavailable {

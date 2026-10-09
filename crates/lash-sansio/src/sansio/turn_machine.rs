@@ -1077,6 +1077,23 @@ impl<M: TurnProtocol> TurnMachine<M> {
         expansion: &ToolExpansionPlan,
         completed: Vec<CompletedToolCall<M::IntentOutcome>>,
     ) {
+        // Host panic evidence must not enter protocol expansion or repair.
+        if let Some(stop) = completed
+            .iter()
+            .find_map(|call| call.output.tool_panic_stop())
+        {
+            for call in &completed {
+                self.emit(SessionStreamEvent::ToolCall {
+                    call_id: call.call_id.clone(),
+                    provider_call_id: call.provider_call_id.clone(),
+                    name: call.tool_name.clone(),
+                    args: call.args.clone(),
+                    output: call.output.clone(),
+                });
+            }
+            self.finish(TurnOutcome::Stopped(stop));
+            return;
+        }
         let completed = if expansion.is_empty() {
             completed
         } else {
@@ -1111,6 +1128,15 @@ impl<M: TurnProtocol> TurnMachine<M> {
         driver_state: M::DriverState,
         result: Result<crate::ExecResponse, crate::ExecCodeFailure>,
     ) {
+        if let Some(stop) = result.as_ref().ok().and_then(|response| {
+            response
+                .tool_calls
+                .iter()
+                .find_map(|call| call.output.tool_panic_stop())
+        }) {
+            self.finish(TurnOutcome::Stopped(stop));
+            return;
+        }
         self.run_abort = result.as_ref().ok().and_then(|response| {
             RunAbort::first_in(response.tool_calls.iter().map(|record| &record.output))
         });

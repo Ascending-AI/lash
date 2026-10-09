@@ -1,7 +1,7 @@
 # The substrate port ledger (ADR 0132 §14, FIG-5179).
 #
 # BEGIN SUMMARY (scripts/check-substrate-port-ledger.py --write-summary)
-# 1731 rows over 869 files, 4064 laws.
+# 1731 rows over 869 files, 4066 laws.
 # By class: mechanical 196, semantic 140, delete 954, replace 441.
 # By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 99, L9c 367, L9d 124, L9e 141, L9f 125, L9g 98, L9h 121, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49, P4 22, P5 2.
 # By status: todo 0, ported 190, deleted 1541.
@@ -524,16 +524,18 @@ lane = "L9b"
 laws = [
   "provider_panic_is_typed_and_non_retryable",
   "manufactured_provider_panic_bypasses_text_classification",
-  "tool_panic_is_recorded_and_the_session_runs_its_next_turn",
+  "standard_tool_panic_stops_before_another_model_call",
+  "cell_tool_panic_stops_before_another_model_call",
+  "process_tool_panic_stops_before_another_model_call",
+  "tool_panic_effect_is_identical_before_quiet_return_or_loud_reraise",
   "provider_panic_records_the_typed_attempt_releases_the_lease_and_next_turn_succeeds",
   "provider_panic_effect_is_identical_before_quiet_return_or_loud_reraise",
   "provider_turn_panic_reaches_the_harness_when_loud",
   "provider_auxiliary_panics_are_typed_in_quiet_and_loud_modes",
-  "provider_desugared_construction_panics_are_typed_in_quiet_and_loud_modes",
 ]
 disposition = "port"
 status = "ported"
-note = "ported by FIG-5307: the two provider-level laws stay in place; the turn laws run through a host's send() on the core's node over SQLite memory in crates/lash/src/tests/panic_containment.rs; the auxiliary and desugared-construction laws run at the provider handle, quiet and loud, in crates/lash-core/tests/panic_containment.rs, their turn half held by the facade provider-panic law; provider_turn_panic_reaches_the_harness_when_loud folds into provider_panic_effect_is_identical_before_quiet_return_or_loud_reraise; ignored on their tickets: provider_panic_effect_is_identical_before_quiet_return_or_loud_reraise (FIG-5349)"
+note = "FIG-5775 replaces the tool member-failure and immediate loudness laws with terminal panic laws on the durable node over SQLite memory. Provider and tool loudness laws now require the typed terminal to commit before propagation; FIG-5349's provider law is active. The close callback's quiet/loud containment remains at the provider seam."
 
 [[row]]
 path = "crates/lash-core/tests/restate_double.rs"

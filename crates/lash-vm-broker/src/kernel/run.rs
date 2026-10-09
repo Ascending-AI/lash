@@ -63,6 +63,12 @@ pub trait KernelEffects: Send + Sync {
         super::store::outcome_of(output)
     }
 
+    /// A committed host outcome ends this run before guest code resumes.
+    /// The host retains its typed terminal in its state.
+    fn stop_requested(&self) -> bool {
+        false
+    }
+
     /// The host's own state for the run at this save, opaque to the broker.
     fn host_state(&self) -> Result<Option<EncodedPayload>, ParentFault> {
         Ok(None)
@@ -484,6 +490,12 @@ impl KernelBroker<'_> {
                     return Ok(KernelEnd::Suspended);
                 }
             };
+            if self.effects.stop_requested() {
+                if let Some(stopped) = machine.take() {
+                    stopped.release().await?;
+                }
+                return self.ended(&document, ledger, End::Cancelled, saved).await;
+            }
             // A machine that gave its worker back is rebuilt from its saved
             // state, and reads these outcomes again once it has parked.
             let Some(running) = machine.as_mut() else {

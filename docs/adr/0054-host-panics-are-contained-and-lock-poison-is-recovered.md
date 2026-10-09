@@ -13,8 +13,14 @@ does not establish that the protected value is unusable.
 
 ## Decision
 
-`Provider::complete` and `ToolProvider::execute` contain attempt panics as
-non-retryable `provider_panicked` and `tool_panicked` failures. Auxiliary
+`Provider::send` and `ToolProvider::execute` contain attempt panics as
+non-retryable typed host failures. A provider panic records
+`lash:provider_panicked` and stops the turn with `TurnStop::ProviderError`.
+A tool panic records `ToolFailureCause::Panicked`, naming the tool, call id
+and panic text, and stops the turn with `TurnStop::ToolPanicked`. Outside
+work may already have happened; the outcome does not assert it was undone.
+Neither protocol repair nor a caught guest error resumes the panicked turn.
+Cell and process tool calls preserve the same typed cause. Auxiliary
 provider callback `close` contains panics as
 non-retryable `ProviderPanicked` failures too.
 
@@ -25,7 +31,10 @@ generic task-join failure.
 Loudness is a process-scoped runtime flag. Production leaves it disabled;
 harnesses, the simulator and confidence binaries enable it at startup. Cargo
 features do not choose panic behavior. The failure mapping forms the typed
-outcome before loudness can re-raise the panic.
+outcome before loudness can re-raise the panic. For a turn, both the call's
+outcome and the terminal turn commit before the post-commit callback raises
+it. A redrive reads the terminal and invokes neither the tool nor provider
+again.
 
 Standard-library `Mutex` and `RwLock` acquisitions recover poisoned guards with
 `PoisonError::into_inner`. `lash_sansio::sync`, also exported through

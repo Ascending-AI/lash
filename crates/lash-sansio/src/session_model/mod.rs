@@ -596,6 +596,13 @@ pub enum TurnStop {
     InvalidInput,
     MaxTurns,
     ToolFailure,
+    /// Host code panicked during this call. Outside effects are unknown;
+    /// the turn stops before another model call.
+    ToolPanicked {
+        tool_name: String,
+        call_id: crate::ToolCallId,
+        message: String,
+    },
     ProviderError,
     /// The model refused the request because the assembled context exceeded
     /// the model's window. Distinct from [`TurnStop::ProviderError`] because

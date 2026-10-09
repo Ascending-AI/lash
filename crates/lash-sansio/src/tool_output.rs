@@ -178,6 +178,26 @@ impl ToolCallOutput {
         self
     }
 
+    /// The host panic that ends a turn, preserved through process outputs.
+    pub fn tool_panic_stop(&self) -> Option<crate::TurnStop> {
+        let ToolCallOutcome::Failure(failure) = &self.outcome else {
+            return None;
+        };
+        let ToolFailureCause::Panicked {
+            tool_name,
+            call_id,
+            message,
+        } = failure.cause.as_deref()?
+        else {
+            return None;
+        };
+        Some(crate::TurnStop::ToolPanicked {
+            tool_name: tool_name.clone(),
+            call_id: call_id.clone(),
+            message: message.clone(),
+        })
+    }
+
     pub fn is_success(&self) -> bool {
         matches!(self.outcome, ToolCallOutcome::Success(_))
     }

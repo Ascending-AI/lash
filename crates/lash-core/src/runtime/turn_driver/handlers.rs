@@ -1,6 +1,5 @@
 use super::*;
 use crate::runtime::durable::session::CellExit;
-use lash_sansio::session_model::{FailureCode, TurnFailureCode};
 
 impl RuntimeTurnDriver<'_> {
     fn handle_machine_response(
@@ -177,10 +176,14 @@ impl RuntimeTurnDriver<'_> {
             }
             result => result,
         };
-        let loud_provider_panic = result.as_ref().err().and_then(|error| {
-            (error.code == Some(FailureCode::lash(TurnFailureCode::ProviderPanicked)))
-                .then(|| error.message.clone())
-        });
+        if let Err(error) = &result
+            && error.code
+                == Some(crate::FailureCode::lash(
+                    crate::TurnFailureCode::ProviderPanicked,
+                ))
+        {
+            self.provider_panic = Some(error.message.clone());
+        }
         if let Ok(response) = &result
             && !text_streamed
         {
@@ -209,9 +212,6 @@ impl RuntimeTurnDriver<'_> {
                 text_streamed,
             },
         )?;
-        if let Some(message) = loud_provider_panic {
-            crate::panic_containment::enforce_message("provider_panicked", &message);
-        }
         Ok(())
     }
 

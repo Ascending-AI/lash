@@ -326,7 +326,9 @@ impl TurnCommitOutcome {
                 TurnStop::Incomplete => Self::Failed(TurnCommitFailureCause::Incomplete),
                 TurnStop::InvalidInput => Self::Failed(TurnCommitFailureCause::InvalidInput),
                 TurnStop::MaxTurns => Self::Failed(TurnCommitFailureCause::MaxTurns),
-                TurnStop::ToolFailure => Self::Failed(TurnCommitFailureCause::ToolFailure),
+                TurnStop::ToolFailure | TurnStop::ToolPanicked { .. } => {
+                    Self::Failed(TurnCommitFailureCause::ToolFailure)
+                }
                 TurnStop::ProviderError => Self::Failed(TurnCommitFailureCause::ProviderError),
                 TurnStop::ContextOverflow => Self::Failed(TurnCommitFailureCause::ContextOverflow),
                 TurnStop::PluginAbort => Self::Failed(TurnCommitFailureCause::PluginAbort),

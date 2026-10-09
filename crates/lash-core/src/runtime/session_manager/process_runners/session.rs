@@ -308,6 +308,11 @@ fn process_turn_stop_classification(
             "process_session_turn_max_turns",
             "background session turn reached its turn limit",
         ),
+        crate::TurnStop::ToolPanicked { .. } => (
+            Class::Internal,
+            "tool_panicked",
+            "a host tool panicked in the child turn",
+        ),
         crate::TurnStop::ToolFailure => (
             Class::Execution,
             "process_session_turn_tool_failure",
@@ -491,6 +496,19 @@ fn output_from_process_turn(
             _ => crate::ToolCancellation::runtime("background session turn was cancelled"),
         };
         return crate::ToolCallOutput::cancelled(cancellation);
+    }
+    if let crate::TurnOutcome::Stopped(crate::TurnStop::ToolPanicked {
+        tool_name,
+        call_id,
+        message,
+    }) = &turn.outcome
+    {
+        return crate::ToolCallOutput::failure(crate::ToolFailure::runtime(
+            crate::ToolFailureClass::Internal, "tool_panicked",
+            "The tool panicked. Outside work may already have happened; check outside state before calling again.",
+        ).with_cause(crate::ToolFailureCause::Panicked {
+            tool_name: tool_name.clone(), call_id: call_id.clone(), message: message.clone(),
+        }));
     }
     if state == crate::ProcessStatus::Failed {
         return crate::ToolCallOutput::failure(failure_from_process_turn(&turn, limits, cuts));

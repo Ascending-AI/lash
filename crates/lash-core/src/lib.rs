@@ -67,7 +67,7 @@ pub use tokio_util::sync::CancellationToken;
 /// The module lives in `lash-core-ids`; this facade re-exports its public
 /// surface unchanged and keeps the crate-internal helpers crate-internal.
 pub mod panic_containment {
-    pub(crate) use lash_core_ids::panic_containment::{enforce_message, payload_message};
+    pub(crate) use lash_core_ids::panic_containment::payload_message;
     pub use lash_core_ids::panic_containment::{is_loud, set_loud};
 }
 pub use lash_core_execution::hook_key;

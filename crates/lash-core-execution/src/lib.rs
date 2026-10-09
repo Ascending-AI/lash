@@ -73,9 +73,7 @@ pub(crate) use lash_core_llm::llm_profile;
 /// The module lives in `lash-core-ids`; this facade re-exports its public
 /// surface unchanged and keeps the crate-internal helpers crate-internal.
 pub mod panic_containment {
-    pub(crate) use lash_core_ids::panic_containment::{
-        enforce_loudness, enforce_message, payload_message,
-    };
+    pub(crate) use lash_core_ids::panic_containment::payload_message;
     pub use lash_core_ids::panic_containment::{is_loud, set_loud};
 }
 #[cfg(feature = "perf-witness")]

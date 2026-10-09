@@ -670,14 +670,6 @@ impl ProviderHandle {
                                 error,
                                 call_record: Box::new(sideband.call_record(call_id)),
                             };
-                            if matches!(
-                                cause,
-                                RetryDeclineCause::NotRetryable
-                                    | RetryDeclineCause::RetryBudgetExhausted
-                            ) && let Some(payload) = panic_payload
-                            {
-                                crate::panic_containment::enforce_loudness(payload);
-                            }
                             return Err(completion_error);
                         }
                         RetryVerdict::Throttle { wait, class } => {

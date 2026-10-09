@@ -65,6 +65,7 @@ pub(in crate::runtime) struct RuntimeDrive {
 struct AfterCommit {
     state: Option<crate::plugin::StagedPluginState>,
     finalized: Option<crate::AssembledTurn>,
+    panic: Option<(&'static str, String)>,
 }
 
 impl Drop for RuntimeDrive {
@@ -410,12 +411,24 @@ impl TurnDrive for RuntimeDrive {
         call: u32,
         request: Arc<LlmRequest>,
     ) -> Result<PreparedCall, TurnError> {
-        Box::pin(
-            self.driver
-                .prepare_call(&mut self.machine, id, call, request, &self.observer),
-        )
+        let prepared = Box::pin(self.driver.prepare_call(
+            &mut self.machine,
+            id,
+            call,
+            request,
+            &self.observer,
+        ))
         .await
-        .map_err(runtime)
+        .map_err(runtime)?;
+        if let PreparedCall::Unsent(error) = &prepared
+            && error.code
+                == Some(crate::FailureCode::lash(
+                    crate::TurnFailureCode::ProviderPanicked,
+                ))
+        {
+            self.driver.provider_panic = Some(error.message.clone());
+        }
+        Ok(prepared)
     }
 
     fn delivered_inputs(&self) -> Vec<crate::AdmittedTurnInputs> {
@@ -723,7 +736,18 @@ impl TurnDrive for RuntimeDrive {
         attachments.sort();
         attachments.dedup();
         commit = commit.with_committed_attachments(attachments);
+        let panic = match &outcome {
+            TurnOutcome::Stopped(TurnStop::ToolPanicked { message, .. }) => {
+                Some(("tool_panicked", message.clone()))
+            }
+            TurnOutcome::Stopped(TurnStop::ProviderError) => driver
+                .provider_panic
+                .take()
+                .map(|message| ("provider_panicked", message)),
+            _ => None,
+        };
         self.after_commit = AfterCommit {
+            panic,
             state: after_turn.map(|after_turn| after_turn.state),
             finalized: finished
                 .filter(|_| observed)
@@ -769,7 +793,11 @@ impl TurnDrive for RuntimeDrive {
             self.driver.turn_phase_probe.clone(),
             RuntimeTurnPhase::PostCommitDelivery,
         );
-        let AfterCommit { state, finalized } = std::mem::take(&mut self.after_commit);
+        let AfterCommit {
+            state,
+            finalized,
+            panic,
+        } = std::mem::take(&mut self.after_commit);
         let plugins = Arc::clone(self.driver.session.plugins());
         if let Some(state) = state
             && let Err(error) = plugins.publish_committed_state(state.resolutions())
@@ -803,6 +831,13 @@ impl TurnDrive for RuntimeDrive {
                 .await
         {
             tracing::warn!(%error, "a finalized turn's lifecycle observers failed");
+        }
+        // Both the call's typed outcome and its terminal turn are durable.
+        // A redrive reads that terminal instead of invoking host code again.
+        if let Some((code, message)) = panic
+            && crate::panic_containment::is_loud()
+        {
+            panic!("{code}: {message}");
         }
     }
 }

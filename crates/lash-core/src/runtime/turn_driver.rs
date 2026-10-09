@@ -45,6 +45,8 @@ pub(super) struct RuntimeTurnDriver<'a> {
     pub(super) prelude: Box<crate::runtime::effect::TurnPrelude>,
     /// Parent-session calls only. Child runtimes assemble their own ledgers.
     pub(super) llm_calls: Vec<crate::LlmCallRecord>,
+    /// Contained provider panic, deferred until the terminal turn commits.
+    pub(super) provider_panic: Option<String>,
     /// Non-transcript evidence from charge-safety-refused generations, with
     /// cardinality capped at one component per sealed provider attempt.
     pub(super) failure_evidence: Vec<crate::TurnFailureEvidence>,

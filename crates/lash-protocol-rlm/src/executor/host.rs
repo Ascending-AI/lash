@@ -333,6 +333,15 @@ impl KernelEffects for CellHost<'_> {
         Some(outcome)
     }
 
+    fn stop_requested(&self) -> bool {
+        self.ledgers
+            .lock_recover()
+            .calls
+            .iter()
+            .filter_map(|call| call.record.as_ref())
+            .any(|call| call.output.tool_panic_stop().is_some())
+    }
+
     fn host_state(&self) -> Result<Option<EncodedPayload>, ParentFault> {
         self.envelope
             .at_park(&self.ctx, self.ledgers(), &self.prints.lock_recover())

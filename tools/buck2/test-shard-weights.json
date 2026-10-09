@@ -1368,7 +1368,6 @@
     "tests::output_retention::oversized_rlm_print_and_final_value_are_retained_before_they_enter_history_on_sqlite": 10170,
     "tests::output_retention::oversized_tool_output_is_retained_before_it_enters_history_on_sqlite": 453,
     "tests::panic_containment::provider_panic_records_the_typed_attempt_releases_the_lease_and_next_turn_succeeds": 379,
-    "tests::panic_containment::tool_panic_is_recorded_and_the_session_runs_its_next_turn": 248,
     "tests::plugin_build_refusal::a_refused_plugin_build_fails_the_turn_typed_on_sqlite": 350,
     "tests::plugin_build_refusal::a_retryably_refused_plugin_build_completes_the_turn_on_sqlite": 385,
     "tests::plugin_lifecycle::observer_failure_is_advisory_and_keeps_committed_state": 394,

@@ -130,6 +130,9 @@ impl ProductionToolHandlers<'_> {
             return Ok(Vec::new());
         }
         let captured: Captured = decode(capture.output().ok_or("final has no output")?)?;
+        if captured.output.tool_panic_stop().is_some() {
+            return Ok(Vec::new());
+        }
         let prepared = self
             .prepared
             .lock_recover()
@@ -251,6 +254,19 @@ impl ProductionToolHandlers<'_> {
                 start_refusal: None,
             },
         };
+        if let Some(crate::TurnStop::ToolPanicked { tool_name, .. }) =
+            captured.output.tool_panic_stop()
+        {
+            return encode(&Presented {
+                presentation: crate::runtime::effect::ToolPresentation {
+                    model_return: crate::ModelToolReturn::from_output(tool_name, &captured.output),
+                    artifacts: Vec::new(),
+                    retention: self.context.attachment_store().output_retention(),
+                },
+                intent_outcomes: Vec::new(),
+            })
+            .map_err(fault);
+        }
         let prepared = self
             .prepared
             .lock_recover()

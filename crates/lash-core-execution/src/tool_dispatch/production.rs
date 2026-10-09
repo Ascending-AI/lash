@@ -264,6 +264,16 @@ impl<'run> ProductionToolHandlers<'run> {
         occurrence: crate::plugin::ToolHookOccurrence,
         intents: ToolIntents,
     ) -> Result<Captured, String> {
+        // Host panic evidence is terminal, not a plugin result candidate.
+        if output.tool_panic_stop().is_some() {
+            return Ok(Captured {
+                original: None,
+                output,
+                occurrence,
+                intents: ToolIntents::default(),
+                start_refusal: None,
+            });
+        }
         let dispatch = self.dispatch(&prepared.input).await?;
         let view = crate::plugin::PreparedCallReadView::new(prepared.call.clone());
         let hook = hooks::context(&dispatch, &prepared);
@@ -348,23 +358,26 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
 
     fn cached_capture(&self, output: String) -> Result<SingletonCapture, String> {
         let capture: Captured = decode(&output)?;
-        Ok(
-            if matches!(capture.output.outcome, crate::ToolCallOutcome::Success(_)) {
-                SingletonCapture::Done {
-                    output,
-                    commands: Vec::new(),
-                    intents: Vec::new(),
-                    stream: Default::default(),
-                    start: None,
-                }
-            } else {
-                SingletonCapture::Failed {
-                    output,
-                    stream: Default::default(),
-                    suggested_delay_ms: None,
-                }
-            },
-        )
+        Ok(if capture.output.tool_panic_stop().is_some() {
+            SingletonCapture::Panicked {
+                output,
+                stream: Default::default(),
+            }
+        } else if matches!(capture.output.outcome, crate::ToolCallOutcome::Success(_)) {
+            SingletonCapture::Done {
+                output,
+                commands: Vec::new(),
+                intents: Vec::new(),
+                stream: Default::default(),
+                start: None,
+            }
+        } else {
+            SingletonCapture::Failed {
+                output,
+                stream: Default::default(),
+                suggested_delay_ms: None,
+            }
+        })
     }
     fn plugin_session(&self) -> Option<Arc<crate::PluginSession>> {
         Some(self.context.dispatch().plugins.clone())
@@ -853,6 +866,11 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                         start: None,
                     }),
                     crate::ToolCallOutcome::Failure(failure) => match failure.cause.as_deref() {
+                        // A host panic has a final capture, not a reported failure
+                        // the admitted Repeatable policy may retry.
+                        Some(crate::ToolFailureCause::Panicked { .. }) => {
+                            Ok(SingletonBodyOutcome::Panicked { output })
+                        }
                         Some(crate::ToolFailureCause::Interrupted) => {
                             Ok(SingletonBodyOutcome::Interrupted)
                         }

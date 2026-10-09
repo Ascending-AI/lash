@@ -596,6 +596,25 @@ impl ProcessActivation {
             // engine asks for now run within the grace.
             live.lifecycle.cancel_runs_before(RunSeq(driver.next_run));
         }
+        // A tool panic is a host terminal, not an event the engine may
+        // recover from by resuming its guest or scheduling another step.
+        if let EngineEvent::StepSettled { outcome, .. } = &event
+            && let Some(output) = outcome
+                .payload()
+                .and_then(|payload| serde_json::from_str::<crate::ToolCallOutput>(payload).ok())
+            && output.tool_panic_stop().is_some()
+        {
+            super::waiting::end(&mut tx, process, &record);
+            record_omitted_effects(&mut tx, process, &driver, self.fleet());
+            record_terminal(
+                &mut tx,
+                process,
+                &crate::ProcessOutcome::from_tool_output(output),
+            )?;
+            tx.ack_seen();
+            self.commit_terminal(owned, tx, process).await?;
+            return Ok(Pass::Again);
+        }
         let (next, action) = match engine.advance(state, event) {
             Ok(transition) => transition,
             Err(error) => {

@@ -448,6 +448,9 @@ impl<'a> AdmittedToolCall<'a> {
                     },
                 }
             }
+            SingletonBodyOutcome::Panicked { output } => {
+                SingletonCapture::Panicked { output, stream }
+            }
             SingletonBodyOutcome::Failed {
                 output,
                 suggested_delay_ms,

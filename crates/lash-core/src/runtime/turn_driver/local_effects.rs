@@ -254,6 +254,7 @@ pub(super) fn turn_effect_executor(
         .with_metrics(driver.host.core.tracing.metrics().clone())
         .with_trace(driver.trace.clone()),
         llm_calls: Vec::new(),
+        provider_panic: None,
         failure_evidence: Vec::new(),
         session_services: Arc::clone(&driver.session_services),
         // A step body runs no after-turn callback.

@@ -94,6 +94,11 @@ pub enum SingletonCapture {
         /// The process start the result declares.
         start: Option<Arc<DeclaredStartObligation>>,
     },
+    /// Host panic evidence, never retried or transformed by result checks.
+    Panicked {
+        output: String,
+        stream: AttemptStream,
+    },
     /// A failure the body reported.
     Failed {
         output: String,
@@ -125,7 +130,9 @@ impl SingletonCapture {
     #[must_use]
     pub fn output(&self) -> Option<&str> {
         match self {
-            Self::Done { output, .. } | Self::Failed { output, .. } => Some(output),
+            Self::Done { output, .. }
+            | Self::Failed { output, .. }
+            | Self::Panicked { output, .. } => Some(output),
             Self::TimedOut {
                 evidence: Some(output),
                 ..
@@ -146,7 +153,9 @@ impl SingletonCapture {
     #[must_use]
     pub fn stream(&self) -> Option<&AttemptStream> {
         match self {
-            Self::Done { stream, .. } | Self::Failed { stream, .. } => Some(stream),
+            Self::Done { stream, .. }
+            | Self::Failed { stream, .. }
+            | Self::Panicked { stream, .. } => Some(stream),
             Self::Refused { .. }
             | Self::StartRefused { .. }
             | Self::Isolated { .. }
@@ -161,7 +170,8 @@ impl SingletonCapture {
     pub fn intents(&self) -> &[ToolIntentKind] {
         match self {
             Self::Done { intents, .. } => intents,
-            Self::Failed { .. }
+            Self::Panicked { .. }
+            | Self::Failed { .. }
             | Self::Refused { .. }
             | Self::StartRefused { .. }
             | Self::Isolated { .. }
@@ -177,7 +187,8 @@ impl SingletonCapture {
         match self {
             Self::Done { start, .. } => start.as_deref(),
             Self::Isolated { binding } => Some(&binding.obligation),
-            Self::Failed { .. }
+            Self::Panicked { .. }
+            | Self::Failed { .. }
             | Self::Refused { .. }
             | Self::StartRefused { .. }
             | Self::Cancelled { .. }
@@ -203,6 +214,10 @@ pub enum SingletonBodyOutcome {
         /// One process start the result declares, under its stable start
         /// key. The Run binds its environment and consumer hold.
         start: Option<Box<ProcessStartRegistration>>,
+    },
+    /// A host panic's terminal capture; its outside effects are unknown.
+    Panicked {
+        output: String,
     },
     Failed {
         output: String,

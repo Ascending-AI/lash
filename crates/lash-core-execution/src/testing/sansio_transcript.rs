@@ -210,6 +210,7 @@ fn stop_reason(stop: &TurnStop) -> &'static str {
         TurnStop::InvalidInput => "invalid_input",
         TurnStop::MaxTurns => "max_turns",
         TurnStop::ToolFailure => "tool_failure",
+        TurnStop::ToolPanicked { .. } => "tool_panicked",
         TurnStop::ProviderError => "provider_error",
         TurnStop::ContextOverflow => "context_overflow",
         TurnStop::PluginAbort => "plugin_abort",

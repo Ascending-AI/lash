@@ -164,12 +164,6 @@ pub async fn coordinate_tool_invocation<'run>(
                 };
             }
         };
-        if let crate::ToolAttemptLaunch::Done { record, .. } = &outcome.launch
-            && let crate::ToolCallOutcome::Failure(failure) = &record.output.outcome
-            && failure.code == "tool_panicked"
-        {
-            crate::panic_containment::enforce_message("tool_panicked", &failure.message);
-        }
         match outcome.launch {
             crate::ToolAttemptLaunch::Done {
                 mut record,
@@ -193,6 +187,7 @@ pub async fn coordinate_tool_invocation<'run>(
                                 failure.cause.as_deref(),
                                 Some(
                                     crate::ToolFailureCause::Interrupted
+                                        | crate::ToolFailureCause::Panicked { .. }
                                         | crate::ToolFailureCause::ExecutionLimit {
                                             cause: crate::LimitCause::ExecutionTotal
                                                 | crate::LimitCause::WaitDeadline,

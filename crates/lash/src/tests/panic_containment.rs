@@ -10,22 +10,47 @@ use crate::support::TurnInput;
 use lash_core::llm::types::LlmOutputPart;
 use std::collections::VecDeque;
 
-/// The fixture echo tool, whose body panics.
-struct PanicTool;
+/// The fixture echo tool panics during future construction or polling.
+#[derive(Default)]
+struct PanicTool {
+    calls: AtomicUsize,
+    construction: bool,
+}
 
-#[async_trait]
 impl ToolProvider for PanicTool {
     fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
-        lash_core::testing::FixtureTools.tool_manifests()
+        vec![panic_tool_definition().manifest()]
     }
 
     fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
-        lash_core::testing::FixtureTools.resolve_contract(name)
+        (name == lash_core::testing::FIXTURE_ECHO_TOOL)
+            .then(|| Arc::new(panic_tool_definition().contract()))
     }
 
-    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-        panic!("tool payload only")
+    fn execute<'life0, 'life1, 'async_trait>(
+        &'life0 self,
+        _call: lash_core::ToolCall<'life1>,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = lash_core::ToolAttemptOutcome> + Send + 'async_trait>,
+    >
+    where
+        'life0: 'async_trait,
+        'life1: 'async_trait,
+        Self: 'async_trait,
+    {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        if self.construction {
+            panic!("tool payload only");
+        }
+        Box::pin(async { panic!("tool payload only") })
     }
+}
+
+fn panic_tool_definition() -> lash_core::ToolDefinition {
+    lash_core::ToolDefinitionBindingExt::with_tool_binding(
+        lash_core::testing::fixture_echo_definition(),
+        lash_core::ToolBinding::new(["tools"], "fixture_echo"),
+    )
 }
 
 /// Answers `replies` in order; `panic_first` makes the first call panic
@@ -74,51 +99,176 @@ async fn session(
     Ok((core, session))
 }
 
+/// FIG-5775: a host tool panic stops its turn before another model call.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn tool_panic_is_recorded_and_the_session_runs_its_next_turn() -> Result<()> {
+async fn standard_tool_panic_stops_before_another_model_call() -> Result<()> {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let counted = Arc::clone(&calls);
+    let model = crate::testing::TestProvider::builder()
+        .kind("panic-containment")
+        .complete(move |_| {
+            let ordinal = counted.fetch_add(1, Ordering::SeqCst);
+            async move {
+                Ok(if ordinal == 0 {
+                    panic_tool_response()
+                } else {
+                    text_response("next turn works")
+                })
+            }
+        })
+        .build()
+        .into_handle();
     let (core, session) = session(
         "tool-panic-session",
-        provider(
-            false,
-            vec![
-                LlmResponse {
-                    parts: vec![LlmOutputPart::ToolCall {
-                        call_id: "panic-call".to_owned(),
-                        tool_name: lash_core::testing::FIXTURE_ECHO_TOOL.to_owned(),
-                        input_json: r#"{"value":"boom"}"#.to_owned(),
-                        replay: None,
-                    }],
-                    ..LlmResponse::default()
-                },
-                text_response("turn recovered"),
-                text_response("next turn works"),
-            ],
-        ),
-        Some(Arc::new(PanicTool)),
+        model,
+        Some(Arc::new(PanicTool::default())),
     )
     .await?;
-
     let first = session
         .send(TurnInput::text("call the tool"))
         .output()
         .await?;
-    let lash_core::ToolCallOutcome::Failure(failure) = &first.result.tool_calls[0].output.outcome
-    else {
-        panic!(
-            "a tool panic is recorded as the call's failure: {:?}",
-            first.result.tool_calls
-        )
-    };
-    assert_eq!(failure.class, lash_core::ToolFailureClass::Internal);
-    assert_eq!(failure.code, "tool_panicked");
-    assert_eq!(failure.message, "tool payload only");
-    assert_eq!(failure.suggested_delay_ms, None);
-    assert_eq!(first.assistant_message(), Some("turn recovered"));
-
+    assert_tool_panic(&first);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
     let next = session.send(TurnInput::text("continue")).output().await?;
     assert_eq!(next.assistant_message(), Some("next turn works"));
     core.shutdown().await?;
     Ok(())
+}
+
+fn panic_tool_response() -> LlmResponse {
+    LlmResponse {
+        parts: vec![LlmOutputPart::ToolCall {
+            call_id: "panic-call".to_owned(),
+            tool_name: lash_core::testing::FIXTURE_ECHO_TOOL.to_owned(),
+            input_json: r#"{"value":"boom"}"#.to_owned(),
+            replay: None,
+        }],
+        ..LlmResponse::default()
+    }
+}
+
+fn assert_tool_panic(output: &crate::TurnOutput) {
+    let crate::TurnOutcome::Stopped(crate::TurnStop::ToolPanicked {
+        tool_name,
+        call_id,
+        message,
+    }) = &output.result.outcome
+    else {
+        panic!("expected ToolPanicked, got {:?}", output.result.outcome);
+    };
+    assert_eq!(tool_name, "fixture_echo");
+    assert_eq!(message, "tool payload only");
+    let failed = output
+        .result
+        .tool_calls
+        .iter()
+        .find(|call| call.output.tool_panic_stop().is_some())
+        .expect("committed panicked call");
+    let lash_core::ToolCallOutcome::Failure(failure) = &failed.output.outcome else {
+        unreachable!()
+    };
+    assert!(
+        failure
+            .message
+            .contains("Outside work may already have happened")
+    );
+    assert_eq!(
+        failed.output.tool_panic_stop(),
+        Some(crate::TurnStop::ToolPanicked {
+            tool_name: tool_name.clone(),
+            call_id: call_id.clone(),
+            message: message.clone(),
+        })
+    );
+    assert_eq!(output.assistant_message(), None);
+}
+
+#[cfg(feature = "rlm")]
+async fn cell_panic(process: bool) -> Result<()> {
+    let script = if process {
+        r#"const run = async () => {
+  let result;
+  try { result = await tools.fixture_echo({value: "boom"}); } catch (e) { result = e; }
+  await tools.fixture_echo({value: "after panic"});
+  return 1;
+};
+const handle = await processes.start({definition: run});
+let result;
+try { result = await handle; } catch (e) { result = e; }
+finish("must not finish");"#
+    } else {
+        r#"let result;
+try { result = await tools.fixture_echo({value: "boom"}); } catch (e) { result = e; }
+await tools.fixture_echo({value: "after panic"});
+finish("must not finish");"#
+    };
+    let calls = Arc::new(AtomicUsize::new(0));
+    let counted = Arc::clone(&calls);
+    let model = crate::testing::TestProvider::builder()
+        .kind("panic-cell")
+        .complete(move |_| {
+            let first = counted.fetch_add(1, Ordering::SeqCst) == 0;
+            async move {
+                Ok(text_response(&typescript_block(if first {
+                    script
+                } else {
+                    "finish(2);"
+                })))
+            }
+        })
+        .build()
+        .into_handle();
+    let tool = Arc::new(PanicTool::default());
+    let core =
+        explicit_ephemeral_facets(rlm_core_builder_over(sqlite_memory_store_backend().await))
+            .serve_test_llm_profile(model, mock_llm_profile_spec())
+            .tools(tool.clone())
+            .plugin(Arc::new(
+                lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(
+                    lash_core::lifetime::session_or_starter,
+                ),
+            ))
+            .build(crate::testing::runtime_lease_owner())?;
+    let session = core
+        .session(
+            crate::SessionId::parse(if process {
+                "process-panic"
+            } else {
+                "cell-panic"
+            })
+            .expect("session id"),
+        )
+        .created()
+        .await
+        .open()
+        .await?;
+    let output = session
+        .send(TurnInput::text("call the tool"))
+        .output()
+        .await?;
+    assert_eq!(
+        tool.calls.load(Ordering::SeqCst),
+        1,
+        "tool must run: {:?}",
+        output.activities
+    );
+    assert_tool_panic(&output);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    core.shutdown().await?;
+    Ok(())
+}
+
+#[cfg(feature = "rlm")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cell_tool_panic_stops_before_another_model_call() -> Result<()> {
+    cell_panic(false).await
+}
+
+#[cfg(feature = "rlm")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn process_tool_panic_stops_before_another_model_call() -> Result<()> {
+    cell_panic(true).await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -182,7 +332,6 @@ fn panicked_attempt(output: &crate::TurnOutput) -> (Option<String>, String) {
     clippy::disallowed_methods,
     reason = "isolated test processes own the process-scoped panic mode"
 )]
-#[ignore = "FIG-5349: a loud panic kills the node's turn task before its typed attempt commits, so the node redrives the call"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn provider_panic_effect_is_identical_before_quiet_return_or_loud_reraise() -> Result<()> {
     const TEST: &str = "tests::panic_containment::provider_panic_effect_is_identical_before_quiet_return_or_loud_reraise";
@@ -193,7 +342,7 @@ async fn provider_panic_effect_is_identical_before_quiet_return_or_loud_reraise(
             let output = tokio::time::timeout(
                 std::time::Duration::from_secs(60),
                 tokio::process::Command::new(std::env::current_exe().expect("test binary"))
-                    .args(["--exact", TEST, "--include-ignored", "--nocapture"])
+                    .args(["--exact", TEST, "--nocapture"])
                     .args(["--test-threads=1"])
                     .env(CASE, case)
                     .kill_on_drop(true)
@@ -226,6 +375,8 @@ async fn provider_panic_effect_is_identical_before_quiet_return_or_loud_reraise(
     crate::testing::set_loud(loud);
     let reraised = Arc::new(AtomicUsize::new(0));
     let hook_count = Arc::clone(&reraised);
+    let raised = Arc::new(tokio::sync::Notify::new());
+    let hook_raised = Arc::clone(&raised);
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         if info
@@ -234,6 +385,7 @@ async fn provider_panic_effect_is_identical_before_quiet_return_or_loud_reraise(
             .is_some_and(|message| message == "provider_panicked: provider payload only")
         {
             hook_count.fetch_add(1, Ordering::SeqCst);
+            hook_raised.notify_one();
         }
         previous(info);
     }));
@@ -260,6 +412,11 @@ async fn provider_panic_effect_is_identical_before_quiet_return_or_loud_reraise(
     )
     .await
     .expect("the turn settles")?;
+    if loud {
+        tokio::time::timeout(std::time::Duration::from_secs(30), raised.notified())
+            .await
+            .expect("loud propagation follows the committed terminal");
+    }
     let effect = panicked_attempt(&output);
     println!("EFFECT {effect:?}");
     assert_eq!(
@@ -277,6 +434,108 @@ async fn provider_panic_effect_is_identical_before_quiet_return_or_loud_reraise(
         usize::from(loud),
         "only a loud run re-raises the panic"
     );
+    core.shutdown().await?;
+    Ok(())
+}
+
+/// ADR 0054 and FIG-5775: the loud tool path commits its terminal before unwinding.
+#[allow(
+    clippy::disallowed_methods,
+    reason = "isolated processes own panic policy"
+)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn tool_panic_effect_is_identical_before_quiet_return_or_loud_reraise() -> Result<()> {
+    const TEST: &str = "tests::panic_containment::tool_panic_effect_is_identical_before_quiet_return_or_loud_reraise";
+    const CASE: &str = "LASH_TOOL_PANIC_CASE";
+    let Ok(case) = std::env::var(CASE) else {
+        let mut effects = Vec::new();
+        for mode in ["quiet", "loud"] {
+            let output = tokio::time::timeout(
+                std::time::Duration::from_secs(60),
+                tokio::process::Command::new(std::env::current_exe().expect("test binary"))
+                    .args(["--exact", TEST, "--nocapture", "--test-threads=1"])
+                    .env(CASE, mode)
+                    .kill_on_drop(true)
+                    .output(),
+            )
+            .await
+            .expect("bounded isolated case")
+            .expect("isolated case");
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            assert!(
+                output.status.success() && stdout.contains("1 passed"),
+                "{mode}: {stdout}\n{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            effects.push(
+                stdout
+                    .lines()
+                    .find_map(|line| {
+                        line.split_once("EFFECT ")
+                            .map(|(_, effect)| effect.to_owned())
+                    })
+                    .expect("effect"),
+            );
+        }
+        assert_eq!(effects[0], effects[1]);
+        return Ok(());
+    };
+    let loud = case == "loud";
+    crate::testing::set_loud(loud);
+    let raised = Arc::new(tokio::sync::Notify::new());
+    let hook_raised = Arc::clone(&raised);
+    let reraised = Arc::new(AtomicUsize::new(0));
+    let hook_count = Arc::clone(&reraised);
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        if info
+            .payload()
+            .downcast_ref::<String>()
+            .is_some_and(|message| message == "tool_panicked: tool payload only")
+        {
+            hook_count.fetch_add(1, Ordering::SeqCst);
+            hook_raised.notify_one();
+        }
+        previous(info);
+    }));
+    let tool = Arc::new(PanicTool {
+        construction: true,
+        ..Default::default()
+    });
+    let (core, session) = session(
+        "tool-effect-session",
+        provider(
+            false,
+            vec![panic_tool_response(), text_response("redriven")],
+        ),
+        Some(tool.clone()),
+    )
+    .await?;
+    let input = TurnInput::text("panic tool");
+    let first = session
+        .send(input.clone())
+        .id(crate::TurnId::fixture("tool-panic-turn"))
+        .output()
+        .await?;
+    assert_tool_panic(&first);
+    if loud {
+        tokio::time::timeout(std::time::Duration::from_secs(30), raised.notified())
+            .await
+            .expect("loud propagation follows the committed terminal");
+    }
+    assert_eq!(reraised.load(Ordering::SeqCst), usize::from(loud));
+    let replay = session
+        .send(input)
+        .id(crate::TurnId::fixture("tool-panic-turn"))
+        .output()
+        .await?;
+    assert_eq!(first.result.outcome, replay.result.outcome);
+    assert_eq!(
+        tool.calls.load(Ordering::SeqCst),
+        1,
+        "a committed panic never calls the tool again"
+    );
+    println!("EFFECT {:?}", first.result.outcome);
     core.shutdown().await?;
     Ok(())
 }

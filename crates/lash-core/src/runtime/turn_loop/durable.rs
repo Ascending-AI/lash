@@ -323,6 +323,7 @@ impl LashRuntime {
             turn_index,
             turn_pipeline,
             llm_calls: Vec::new(),
+            provider_panic: None,
             failure_evidence: Vec::new(),
             session_services: manager,
             after_turn_reads,
