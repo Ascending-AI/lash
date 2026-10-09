@@ -1,0 +1,36 @@
+[package]
+name = "lash-kernel-edit"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+rust-version.workspace = true
+description = "The lash kernel's edits: drafts over a document, typed serialisable edit transactions and the correspondence they publish."
+keywords = ["lash", "kernel", "workflow", "editor"]
+categories = ["data-structures"]
+publish = false
+
+[lib]
+name = "lash_kernel_edit"
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+lash-kernel-check = { workspace = true }
+lash-kernel-doc = { workspace = true }
+schemars = { workspace = true, features = ["derive"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+lash-kernel-vm = { workspace = true }
+
+[[bin]]
+name = "kernel_edit_schema_generator"
+path = "src/bin/kernel_edit_schema_generator.rs"
