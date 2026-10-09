@@ -124,7 +124,7 @@ lash-postgres-store = { workspace = true, features = ["testing"] }
 lash-provider-anthropic = { workspace = true, features = ["testing"] }
 lash-protocol-rlm = { workspace = true, features = ["testing"] }
 tempfile = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "test-util"] }
 rusqlite = { version = "0.37", features = ["bundled"] }
 sqlx = { workspace = true, features = ["runtime-tokio", "postgres"] }
 rmp-serde = { workspace = true }

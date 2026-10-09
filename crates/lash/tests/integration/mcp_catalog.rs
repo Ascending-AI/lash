@@ -730,13 +730,27 @@ fn mcp_lifecycle_choices_are_preserved_in_host_json() {
 }
 
 const LIFECYCLE_PEER: &str = r#"
-import json, os, signal, sys, threading, time
+import json, os, signal, socket, sys, threading, time
 if os.environ['MODE'] == 'shutdown':
     signal.signal(signal.SIGTERM, signal.SIG_IGN)
 with open(os.environ['STARTS'], 'a') as f:
     f.write('start\n')
+output_lock = threading.Lock()
 def send(m):
-    print(json.dumps(m), flush=True)
+    with output_lock:
+        print(json.dumps(m), flush=True)
+control_path = os.environ.get('CONTROL_SOCKET')
+if control_path:
+    control = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    control.connect(control_path)
+    def commands():
+        for i, line in enumerate(control.makefile('r')):
+            assert line.strip() == 'progress'
+            send({'jsonrpc':'2.0','method':'notifications/progress',
+                'params':{'progressToken':token,'progress':i}})
+            # The reply proves the host read the preceding progress frame.
+            send({'jsonrpc':'2.0','id':'progress-' + str(i),'method':'ping'})
+    threading.Thread(target=commands, daemon=True).start()
 for line in sys.stdin:
     m = json.loads(line)
     method = m.get('method')
@@ -747,23 +761,68 @@ for line in sys.stdin:
     elif method == 'tools/list':
         send({'jsonrpc':'2.0','id':m['id'],'result':{'tools':[
             {'name':'work','inputSchema':{'type':'object'}}]}})
-    elif method == 'tools/call' and os.environ['MODE'] == 'progress':
+    elif method == 'tools/call':
         token = m['params']['_meta']['progressToken']
-        def progress(token):
-            for i in range(100):
-                send({'jsonrpc':'2.0','method':'notifications/progress',
-                    'params':{'progressToken':token,'progress':i}})
-                time.sleep(0.005)
-        threading.Thread(target=progress, args=(token,), daemon=True).start()
+        control.sendall(b'call\n')
+    elif method == 'ping':
+        control.sendall(b'probe\n')
+    elif str(m.get('id', '')).startswith('progress-'):
+        assert 'result' in m, m
+        control.sendall(b'progress\n')
 if os.environ['MODE'] == 'shutdown':
     while True:
         time.sleep(1)
 
 "#;
 
+// A blocking task prevents Tokio from automatically advancing paused time
+// while the external peer is being scheduled or its stdio is being read.
+struct CallPolicyClock(std::sync::mpsc::Sender<()>);
+
+impl CallPolicyClock {
+    async fn pause() -> Self {
+        let (hold, release) = std::sync::mpsc::channel();
+        let (ready, started) = tokio::sync::oneshot::channel();
+        tokio::task::spawn_blocking(move || {
+            assert!(ready.send(()).is_ok(), "clock holder started");
+            let _ = release.recv();
+        });
+        assert!(started.await.is_ok(), "clock holder ready");
+        tokio::time::pause();
+        Self(hold)
+    }
+}
+
+impl Drop for CallPolicyClock {
+    fn drop(&mut self) {
+        tokio::time::resume();
+        let _ = self.0.send(());
+    }
+}
+
 /// D-DEFAULTS2: facade call/probe choices govern actual attempts and bindings.
 #[tokio::test]
 async fn mcp_call_policy_controls_attempts_and_recorded_bindings() {
+    use std::future::{Future, poll_fn};
+    use std::pin::Pin;
+    use std::task::Poll;
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    use tokio::net::{UnixListener, UnixStream};
+
+    async fn pending<F: Future>(mut call: Pin<&mut F>) {
+        assert!(
+            poll_fn(|cx| Poll::Ready(call.as_mut().poll(cx)))
+                .await
+                .is_pending()
+        );
+    }
+
+    async fn event(peer: &mut BufReader<UnixStream>, expected: &str) {
+        let mut line = String::new();
+        assert_ne!(peer.read_line(&mut line).await.expect("peer event"), 0);
+        assert_eq!(line.trim(), expected);
+    }
+
     use lash::mcp::{
         McpCallPolicy, McpConnectionPool, McpShutdownPolicy, ReconnectAttempts,
         TimeoutDisconnectPolicy,
@@ -774,6 +833,9 @@ async fn mcp_call_policy_controls_attempts_and_recorded_bindings() {
         ("silent", TimeoutDisconnectPolicy::PingProbe),
     ] {
         let root = tempfile::tempdir().expect("fixture");
+        let clock = CallPolicyClock::pause().await;
+        let control_path = root.path().join("control.sock");
+        let listener = UnixListener::bind(&control_path).expect("peer control socket");
         let policy = McpCallPolicy {
             call_timeout_ms: 20,
             call_max_total_timeout_ms: 70,
@@ -790,6 +852,7 @@ async fn mcp_call_policy_controls_attempts_and_recorded_bindings() {
             .with_env([
                 ("MODE", mode.to_string()),
                 ("STARTS", root.path().join("starts").display().to_string()),
+                ("CONTROL_SOCKET", control_path.display().to_string()),
             ]),
         );
         config.call_policy = policy.clone();
@@ -817,13 +880,57 @@ async fn mcp_call_policy_controls_attempts_and_recorded_bindings() {
             serde_json::from_slice(&serde_json::to_vec(&tool.manifest).expect("record binding"))
                 .expect("cold decode of recorded manifest");
         assert_eq!(restored.bindings["lash.mcp"], *binding);
-        let result = pool
-            .call_tool(
-                tool.name(),
-                &serde_json::json!({}),
-                &lash_core::testing::mock_attempt_context(),
-            )
-            .await;
+        let args = serde_json::json!({});
+        let context = lash_core::testing::mock_attempt_context();
+        let call = pool.call_tool(tool.name(), &args, &context);
+        tokio::pin!(call);
+        pending(call.as_mut()).await;
+        let (peer, _) = listener.accept().await.expect("peer control connection");
+        let mut peer = BufReader::new(peer);
+        event(&mut peer, "call").await;
+        pending(call.as_mut()).await;
+        let started = tokio::time::Instant::now();
+        if mode == "progress" {
+            for _ in 0..6 {
+                tokio::time::advance(Duration::from_millis(10)).await;
+                peer.get_mut()
+                    .write_all(b"progress\n")
+                    .await
+                    .expect("request progress");
+                // rmcp queues the reset before handling the peer's ping on
+                // the same stdio stream. Poll the call to consume that reset
+                // before moving time again, even on a busy host.
+                event(&mut peer, "progress").await;
+                pending(call.as_mut()).await;
+            }
+            tokio::time::advance(Duration::from_millis(9)).await;
+            pending(call.as_mut()).await;
+            // Cross Tokio's millisecond timer tick at the unchanged 70 ms cap.
+            tokio::time::advance(Duration::from_millis(2)).await;
+        } else {
+            tokio::time::advance(Duration::from_millis(19)).await;
+            pending(call.as_mut()).await;
+            tokio::time::advance(Duration::from_millis(2)).await;
+            if disconnect == TimeoutDisconnectPolicy::PingProbe {
+                tokio::select! {
+                    result = call.as_mut() => panic!("call finished before its probe: {result:?}"),
+                    () = event(&mut peer, "probe") => {}
+                }
+                pending(call.as_mut()).await;
+                tokio::time::advance(Duration::from_millis(29)).await;
+                pending(call.as_mut()).await;
+                tokio::time::advance(Duration::from_millis(2)).await;
+            }
+        }
+        let result = call.await;
+        assert_eq!(
+            started.elapsed(),
+            Duration::from_millis(match (mode, disconnect) {
+                ("progress", _) => 71,
+                (_, TimeoutDisconnectPolicy::PingProbe) => 52,
+                _ => 21,
+            })
+        );
         let output = result.as_done_output().expect("inline attempt");
         let lash::tools::ToolCallOutcome::Failure(failure) = &output.outcome else {
             panic!("silent tool must time out: {output:?}");
@@ -840,6 +947,7 @@ async fn mcp_call_policy_controls_attempts_and_recorded_bindings() {
             assert_eq!(raw["timeout_ms"], if mode == "progress" { 70 } else { 20 });
             assert_eq!(raw["deadline"], mode == "progress");
         }
+        drop(clock);
         pool.shutdown_all().await;
     }
 }
