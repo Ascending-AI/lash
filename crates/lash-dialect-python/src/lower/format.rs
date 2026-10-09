@@ -7,7 +7,7 @@
 
 use lash_kernel_doc::{Expr, Literal};
 use ruff_python_ast::{self as ast};
-use ruff_text_size::TextRange;
+use ruff_text_size::Ranged;
 
 use super::{Lowerer, Lowering, Operand};
 use crate::diagnostics::{self, Code};
@@ -126,16 +126,26 @@ pub(crate) fn parse(spec: &str) -> Result<Spec, String> {
     Ok(parsed)
 }
 
-fn refuse(problem: impl Into<String>, range: TextRange) -> lash_kernel_dialect::Diagnostic {
-    diagnostics::refusal(
-        Code::FormatSpecUnsupported,
-        problem,
-        range,
-        "format the number with `d`, `f`, `e`, `%`, `x`, `o` or `b`, a literal width and precision",
-    )
-}
-
 impl Lowerer<'_> {
+    fn format_refusal(
+        &self,
+        problem: impl Into<String>,
+        field: &ast::InterpolatedElement,
+    ) -> lash_kernel_dialect::Diagnostic {
+        let value = self.text(field.expression.range());
+        let forms =
+            ["d", "f", "e", "%", "x", "o", "b"].map(|spec| format!("`f\"{{{value}:{spec}}}\"`"));
+        diagnostics::with_repair(
+            Code::FormatSpecUnsupported,
+            problem,
+            field.range,
+            format!(
+                "format `{value}` with a supported literal specification: {}; width and precision must be literal",
+                forms.join(", ")
+            ),
+        )
+    }
+
     pub(super) fn fstring(&mut self, fstring: &ast::ExprFString) -> Lowering<Operand> {
         // Each part is a literal or is bound where it is formatted, so the
         // parts are joined from values no later field can change.
@@ -179,9 +189,9 @@ impl Lowerer<'_> {
     /// One replacement field as text.
     fn field(&mut self, field: &ast::InterpolatedElement) -> Lowering<Operand> {
         if field.debug_text.is_some() {
-            return Err(refuse(
+            return Err(self.format_refusal(
                 "the `=` form of a replacement field is not in the dialect",
-                field.range,
+                field,
             ));
         }
         let conversion = match field.conversion {
@@ -189,10 +199,7 @@ impl Lowerer<'_> {
             ast::ConversionFlag::Str => "s",
             ast::ConversionFlag::Repr => "r",
             ast::ConversionFlag::Ascii => {
-                return Err(refuse(
-                    "the `!a` conversion is not in the dialect",
-                    field.range,
-                ));
+                return Err(self.format_refusal("the `!a` conversion is not in the dialect", field));
             }
         };
         let value = self.expr(&field.expression)?;
@@ -209,15 +216,15 @@ impl Lowerer<'_> {
                 ast::InterpolatedStringElement::Literal(literal) => {
                     written.push_str(&literal.value)
                 }
-                ast::InterpolatedStringElement::Interpolation(nested) => {
-                    return Err(refuse(
+                ast::InterpolatedStringElement::Interpolation(_) => {
+                    return Err(self.format_refusal(
                         "a format specification is written out here, not computed",
-                        nested.range,
+                        field,
                     ));
                 }
             }
         }
-        let spec = parse(&written).map_err(|problem| refuse(problem, spec.range))?;
+        let spec = parse(&written).map_err(|problem| self.format_refusal(problem, field))?;
         let text = |value: Option<char>| Operand::text(value.map(String::from).unwrap_or_default());
         let precision = match spec.precision {
             Some(precision) => Operand::literal(Literal::Int(i64::from(precision).into()), Ty::Int),

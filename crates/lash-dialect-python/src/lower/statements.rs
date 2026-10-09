@@ -72,6 +72,9 @@ impl Lowerer<'_> {
                 Ok(())
             }
             PyStmt::Assign(assign) => {
+                for target in &assign.targets {
+                    self.check_assignment_repair(target, &assign.value, "=")?;
+                }
                 let value = self.expr(&assign.value)?;
                 match assign.targets.as_slice() {
                     [target] => self.assign(target, value),
@@ -86,12 +89,20 @@ impl Lowerer<'_> {
             }
             PyStmt::AnnAssign(assign) => match &assign.value {
                 Some(value) => {
+                    self.check_assignment_repair(&assign.target, value, "=")?;
                     let value = self.expr(value)?;
                     self.assign(&assign.target, value)
                 }
                 None => Ok(()),
             },
-            PyStmt::AugAssign(assign) => self.augmented(assign),
+            PyStmt::AugAssign(assign) => {
+                self.check_assignment_repair(
+                    &assign.target,
+                    &assign.value,
+                    &format!("{}=", assign.op.as_str()),
+                )?;
+                self.augmented(assign)
+            }
             PyStmt::Return(ret) => {
                 if self.in_module() {
                     return Err(diagnostics::diagnostic(
@@ -144,13 +155,13 @@ impl Lowerer<'_> {
                         .iter()
                         .any(|scope| scope.bindings.locals.contains(id))
                     {
-                        return Err(diagnostics::refusal(
+                        return Err(diagnostics::with_repair(
                             Code::GlobalShadowed,
                             format!(
                                 "`global {id}` inside a function that an enclosing function's `{id}` hides"
                             ),
                             name.range,
-                            "rename one of the two variables",
+                            format!("rename one of the two `{id}` variables"),
                         ));
                     }
                 }
@@ -218,7 +229,7 @@ impl Lowerer<'_> {
                             self.invoke_do("py.delitem", &operands)?;
                         }
                         other => {
-                            return Err(diagnostics::refusal(
+                            return Err(diagnostics::with_repair(
                                 Code::DeleteUnsupported,
                                 "`del` removes one item of a list or a dict here, nothing else",
                                 other.range(),
@@ -234,21 +245,21 @@ impl Lowerer<'_> {
                 if self.in_module() && self.classes.contains(class.name.id.as_str()) {
                     return Ok(());
                 }
-                Err(class_refusal(class.range))
+                Err(class_refusal(class.range, class.name.id.as_str()))
             }
-            PyStmt::With(with) => Err(diagnostics::refusal(
+            PyStmt::With(with) => Err(diagnostics::with_repair(
                 Code::WithUnsupported,
                 "`with` is not in the dialect",
                 with.range,
                 "write `try:` and `finally:` around the block",
             )),
-            PyStmt::Match(node) => Err(diagnostics::refusal(
+            PyStmt::Match(node) => Err(diagnostics::with_repair(
                 Code::MatchUnsupported,
                 "`match` is not in the dialect",
                 node.range,
                 "write `if` and `elif` tests",
             )),
-            PyStmt::TypeAlias(node) => Err(diagnostics::refusal(
+            PyStmt::TypeAlias(node) => Err(diagnostics::with_repair(
                 Code::SyntaxUnsupported,
                 "a `type` statement is not in the dialect",
                 node.range,
@@ -400,7 +411,7 @@ impl Lowerer<'_> {
         span: Option<lash_kernel_dialect::Span>,
     ) -> Lowering<()> {
         if for_loop.is_async {
-            return Err(diagnostics::refusal(
+            return Err(diagnostics::with_repair(
                 Code::AsyncUnsupported,
                 "`async for` is not in the dialect",
                 for_loop.range,
@@ -442,11 +453,14 @@ impl Lowerer<'_> {
             }
             PyExpr::Subscript(subscript) => {
                 if matches!(subscript.slice.as_ref(), PyExpr::Slice(_)) {
-                    return Err(diagnostics::refusal(
+                    return Err(diagnostics::with_repair(
                         Code::TargetUnsupported,
                         "assignment to a slice is not in the dialect",
                         subscript.range,
-                        "build the new list and assign it whole",
+                        format!(
+                            "build the replacement list and assign it to `{}` whole",
+                            self.text(subscript.value.range())
+                        ),
                     ));
                 }
                 // The value is evaluated before the target's parts.
@@ -458,11 +472,14 @@ impl Lowerer<'_> {
             PyExpr::Tuple(ast::ExprTuple { elts, .. })
             | PyExpr::List(ast::ExprList { elts, .. }) => {
                 if let Some(starred) = elts.iter().find(|elt| elt.is_starred_expr()) {
-                    return Err(diagnostics::refusal(
+                    return Err(diagnostics::with_repair(
                         Code::StarUnsupported,
                         "a starred assignment target is not in the dialect",
                         starred.range(),
-                        "take the rest with a slice: `first, rest = xs[0], xs[1:]`",
+                        format!(
+                            "take the values assigned to `{}` with indices and slices of the assigned sequence",
+                            self.text(target.range())
+                        ),
                     ));
                 }
                 let count = Operand::literal(
@@ -481,11 +498,11 @@ impl Lowerer<'_> {
                 }
                 Ok(())
             }
-            other => Err(diagnostics::refusal(
+            other => Err(diagnostics::with_repair(
                 Code::TargetUnsupported,
                 "an assignment writes a variable, an item, or a tuple of those",
                 other.range(),
-                "objects with attributes are not in the dialect; keep the value in a dict",
+                self.target_repair(other),
             )),
         }
     }
@@ -514,11 +531,11 @@ impl Lowerer<'_> {
                 let result = self.in_place(assign, current, operand)?;
                 self.invoke_do("py.setitem", &[container, index, result])
             }
-            other => Err(diagnostics::refusal(
+            other => Err(diagnostics::with_repair(
                 Code::TargetUnsupported,
                 "an augmented assignment writes a variable or an item",
                 other.range(),
-                "objects with attributes are not in the dialect; keep the value in a dict",
+                self.target_repair(other),
             )),
         }
     }
@@ -535,7 +552,13 @@ impl Lowerer<'_> {
         if assign.op == ast::Operator::Add && !typed {
             return self.invoke("py.iadd", &[left, right], Ty::Unknown);
         }
-        self.binary(assign.op, left, right, assign.range)
+        self.binary(
+            assign.op,
+            left,
+            right,
+            assign.range,
+            [assign.target.range(), assign.value.range()],
+        )
     }
 
     fn attempt(
@@ -544,7 +567,7 @@ impl Lowerer<'_> {
         span: Option<lash_kernel_dialect::Span>,
     ) -> Lowering<()> {
         if attempt.is_star {
-            return Err(diagnostics::refusal(
+            return Err(diagnostics::with_repair(
                 Code::SyntaxUnsupported,
                 "`except*` is not in the dialect",
                 attempt.range,
@@ -714,7 +737,7 @@ impl Lowerer<'_> {
             .into_iter()
             .map(|class| {
                 self.exception_class(class).ok_or_else(|| {
-                    diagnostics::refusal(
+                    diagnostics::with_repair(
                         Code::ExceptionClass,
                         "`except` names exception classes the front end can see",
                         class.range(),
@@ -814,7 +837,7 @@ impl Lowerer<'_> {
                 {
                     self.classes.declare(name, &base);
                 }
-                _ => return Err(class_refusal(class.range)),
+                _ => return Err(class_refusal(class.range, class.name.id.as_str())),
             }
         }
         Ok(())
@@ -822,15 +845,19 @@ impl Lowerer<'_> {
 
     fn function_def(&mut self, def: &ast::StmtFunctionDef) -> Lowering<()> {
         if let Some(decorator) = def.decorator_list.first() {
-            return Err(diagnostics::refusal(
+            return Err(diagnostics::with_repair(
                 Code::DecoratorUnsupported,
                 "decorators are not in the dialect",
                 decorator.range,
-                "call the wrapping function and assign its result",
+                format!(
+                    "remove the decorator, then wrap the defined function: `{0} = ({1})({0})`",
+                    def.name.id,
+                    self.text(decorator.expression.range())
+                ),
             ));
         }
         if def.type_params.is_some() {
-            return Err(diagnostics::refusal(
+            return Err(diagnostics::with_repair(
                 Code::SyntaxUnsupported,
                 "type parameters are not in the dialect",
                 def.range,
@@ -877,7 +904,7 @@ impl Lowerer<'_> {
             .or_else(|| parameters.vararg.as_ref().map(|param| param.range))
             .or_else(|| parameters.kwarg.as_ref().map(|param| param.range));
         if let Some(range) = unsupported {
-            return Err(diagnostics::refusal(
+            return Err(diagnostics::with_repair(
                 Code::StarUnsupported,
                 "`*args`, `**kwargs`, keyword-only and positional-only parameters are not in the dialect",
                 range,
@@ -1011,14 +1038,14 @@ impl Lowerer<'_> {
 
 fn unsupported_import(module: &str, range: TextRange) -> lash_kernel_dialect::Diagnostic {
     if module == "re" || module.starts_with("re.") {
-        return diagnostics::refusal(
+        return diagnostics::with_repair(
             Code::RegexUnsupported,
             "regular expressions are not in the dialect: it ships no `re` extension",
             range,
             "use `str` methods (`find`, `split`, `startswith`, `replace`)",
         );
     }
-    diagnostics::refusal(
+    diagnostics::with_repair(
         Code::ImportUnsupported,
         format!("`{module}` cannot be imported: the dialect has `import asyncio` and nothing else"),
         range,
@@ -1026,11 +1053,13 @@ fn unsupported_import(module: &str, range: TextRange) -> lash_kernel_dialect::Di
     )
 }
 
-fn class_refusal(range: TextRange) -> lash_kernel_dialect::Diagnostic {
-    diagnostics::refusal(
+fn class_refusal(range: TextRange, name: &str) -> lash_kernel_dialect::Diagnostic {
+    diagnostics::with_repair(
         Code::ClassUnsupported,
         "classes are not in the dialect, except an exception class with an empty body",
         range,
-        "keep state in dicts and behaviour in functions; `class Name(Exception): pass` at the top level declares an exception",
+        format!(
+            "keep `{name}` state in dicts and behaviour in functions; `class {name}(Exception): pass` at the top level declares an exception"
+        ),
     )
 }

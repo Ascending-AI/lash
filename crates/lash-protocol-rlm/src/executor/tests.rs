@@ -2,6 +2,8 @@
 //! through the production entry, in a worker, on a claimed session actor
 //! over a SQLite durable store.
 
+mod python;
+
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 

@@ -16,6 +16,7 @@ mod annotate;
 mod calls;
 mod expressions;
 mod format;
+mod repairs;
 mod statements;
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
@@ -133,6 +134,7 @@ struct Found {
 }
 
 pub(crate) struct Lowerer<'a> {
+    source: &'a str,
     library: &'a dyn Library,
     effects: &'a BTreeMap<EffectName, Signature>,
     performed: BTreeMap<EffectName, Signature>,
@@ -186,6 +188,7 @@ pub(crate) fn lower(
             .map(|name| name.as_str().to_string()),
     );
     let mut lowerer = Lowerer {
+        source,
         library: environment.library,
         effects: environment.effects,
         performed: BTreeMap::new(),
@@ -418,27 +421,33 @@ impl Lowerer<'_> {
 
     fn not_a_variable(&self, id: &str, range: TextRange) -> Diagnostic {
         if self.effects.keys().any(|effect| effect.as_str() == id) {
-            return diagnostics::refusal(
+            return diagnostics::with_repair(
                 Code::CoroutineNotAwaited,
                 format!("`{id}` is a tool; it is called and awaited, not passed around"),
                 range,
-                &format!("write `await {id}(...)`, or `asyncio.create_task({id}(...))`"),
+                format!(
+                    "call `{id}` with its required arguments and await the call; use `asyncio.create_task` to run that call beside this code"
+                ),
             );
         }
         if self.classes.contains(id) {
-            return diagnostics::refusal(
+            return diagnostics::with_repair(
                 Code::ExceptionClass,
                 format!("the exception class `{id}` is not a value in this dialect"),
                 range,
-                &format!("name it in `raise {id}(...)`, `except {id}` or `isinstance(e, {id})`"),
+                format!("name it in `raise {id}()` or `except {id}`"),
             );
         }
         if calls::is_builtin(id) {
-            return diagnostics::refusal(
+            return diagnostics::with_repair(
                 Code::BuiltinAsValue,
                 format!("the built-in `{id}` is called by name, not passed as a value"),
                 range,
-                &format!("wrap it: `lambda x: {id}(x)`"),
+                &if calls::is_supported_builtin(id) {
+                    format!("wrap `{id}` in a function and call it with its required arguments")
+                } else {
+                    format!("replace `{id}` with a supported built-in or an ordinary function")
+                },
             );
         }
         diagnostics::diagnostic(
@@ -760,7 +769,7 @@ impl Lowerer<'_> {
         lower: impl FnOnce(&mut Self) -> Lowering<T>,
     ) -> Lowering<T> {
         if self.nesting >= MAX_SOURCE_NESTING {
-            return Err(diagnostics::refusal(
+            return Err(diagnostics::with_repair(
                 Code::TooDeep,
                 "the program nests deeper than the dialect lowers",
                 range,

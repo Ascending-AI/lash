@@ -90,14 +90,14 @@ pub(crate) fn diagnostic(code: Code, message: impl Into<String>, range: TextRang
 }
 
 /// A rejection with what to write instead.
-pub(crate) fn refusal(
+pub(crate) fn with_repair(
     code: Code,
     message: impl Into<String>,
     range: TextRange,
-    repair: &str,
+    repair: impl Into<String>,
 ) -> Diagnostic {
     let mut diagnostic = diagnostic(code, message, range);
-    diagnostic.repairs.push(repair.to_string());
+    diagnostic.repairs.push(repair.into());
     diagnostic
 }
 

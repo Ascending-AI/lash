@@ -91,6 +91,10 @@ const UNSUPPORTED: &[&str] = &[
     "anext",
 ];
 
+pub(super) fn is_supported_builtin(id: &str) -> bool {
+    SUPPORTED.contains(&id)
+}
+
 pub(super) fn is_builtin(id: &str) -> bool {
     SUPPORTED.contains(&id) || UNSUPPORTED.contains(&id)
 }
@@ -220,11 +224,14 @@ impl Lowerer<'_> {
                     .map(|keyword| keyword.range)
             });
         match starred {
-            Some(range) => Err(diagnostics::refusal(
+            Some(range) => Err(diagnostics::with_repair(
                 Code::StarUnsupported,
                 "`*` and `**` at a call are not in the dialect",
                 range,
-                "pass each argument by itself",
+                format!(
+                    "pass the values of `{}` as individual arguments",
+                    self.text(range)
+                ),
             )),
             None => Ok(()),
         }
@@ -267,12 +274,14 @@ impl Lowerer<'_> {
                 }
                 if let Some((effect, signature)) = self.effect(call) {
                     if !awaited {
-                        return Err(diagnostics::refusal(
+                        return Err(diagnostics::with_repair(
                             Code::CoroutineNotAwaited,
                             format!("the tool `{id}` is called without `await`"),
                             call.range(),
-                            &format!(
-                                "write `await {id}(...)`, or `asyncio.create_task({id}(...))` to run it beside this code"
+                            format!(
+                                "write `await {}`, or `asyncio.create_task({})` to run it beside this code",
+                                self.text(call.range()),
+                                self.text(call.range())
                             ),
                         ));
                     }
@@ -283,13 +292,8 @@ impl Lowerer<'_> {
                     return self.builtin(id, call);
                 }
                 if UNSUPPORTED.contains(&id) {
-                    let repair = match id {
-                        "map" | "filter" => "write a comprehension",
-                        "format" => "use an f-string",
-                        "pow" => "use `**`",
-                        _ => "the dialect has no such built-in; see its README for the ones it has",
-                    };
-                    return Err(diagnostics::refusal(
+                    let repair = self.builtin_repair(id, call);
+                    return Err(diagnostics::with_repair(
                         Code::BuiltinUnsupported,
                         format!("the built-in `{id}` is not in the dialect"),
                         call.range(),
@@ -323,11 +327,14 @@ impl Lowerer<'_> {
                 .as_ref()
                 .is_some_and(|signature| signature.is_async)
         {
-            return Err(diagnostics::refusal(
+            return Err(diagnostics::with_repair(
                 Code::CoroutineNotAwaited,
                 "a coroutine function is called without `await`",
                 call.range(),
-                "write `await f(...)`, or `asyncio.create_task(f(...))` to run it beside this code",
+                format!(
+                    "write `await {0}`, or `asyncio.create_task({0})` to run it beside this code",
+                    self.text(call.range())
+                ),
             ));
         }
         let positional = call.arguments.args.len();
@@ -340,11 +347,15 @@ impl Lowerer<'_> {
         let callee = operands.pop().unwrap_or_else(Operand::none);
         if !call.arguments.keywords.is_empty() {
             let Some(signature) = &signature else {
-                return Err(diagnostics::refusal(
+                return Err(diagnostics::with_repair(
                     Code::KeywordCallDynamic,
                     "keyword arguments need a callee the front end can see",
                     call.range(),
-                    "call a function that one `def` in an enclosing scope binds, or pass the arguments by position",
+                    format!(
+                        "bind `{}` with a visible `def`, or pass these values by position: `{}`",
+                        self.text(call.func.range()),
+                        self.positional_repair(call)
+                    ),
                 ));
             };
             // A call Python would refuse when it runs raises then, not
@@ -532,11 +543,11 @@ impl Lowerer<'_> {
         awaited: bool,
     ) -> Lowering<Operand> {
         let not_awaited = |range| {
-            diagnostics::refusal(
+            diagnostics::with_repair(
                 Code::CoroutineNotAwaited,
-                format!("`asyncio.{function}(...)` is called without `await`"),
+                format!("`{}` is called without `await`", self.text(call.range())),
                 range,
-                &format!("write `await asyncio.{function}(...)`"),
+                format!("write `await {}`", self.text(call.range())),
             )
         };
         match function {
@@ -585,11 +596,14 @@ impl Lowerer<'_> {
             }
             "run" => {
                 if !self.in_module() {
-                    return Err(diagnostics::refusal(
+                    return Err(diagnostics::with_repair(
                         Code::AsyncUnsupported,
                         "`asyncio.run` stands at the top level of a cell",
                         call.range(),
-                        "inside a function, `await` the coroutine",
+                        format!(
+                            "inside an async function, await the coroutine passed to `{}`",
+                            self.text(call.range())
+                        ),
                     ));
                 }
                 self.plain_arguments(&call.arguments, "asyncio.run")?;
@@ -604,11 +618,14 @@ impl Lowerer<'_> {
                 self.invoke_do("tasks.cancel_all", &[])?;
                 Ok(value)
             }
-            other => Err(diagnostics::refusal(
+            other => Err(diagnostics::with_repair(
                 Code::AsyncUnsupported,
                 format!("`asyncio.{other}` is not in the dialect"),
                 call.range(),
-                "the dialect has asyncio.sleep, gather, create_task and run",
+                format!(
+                    "replace `{}` with asyncio.sleep, gather, create_task or run",
+                    self.text(call.func.range())
+                ),
             )),
         }
     }
@@ -617,7 +634,7 @@ impl Lowerer<'_> {
     /// coroutine call, made in order, and each task given as it is.
     fn gather_members(&mut self, call: &ast::ExprCall) -> Lowering<Operand> {
         if let Some(keyword) = call.arguments.keywords.first() {
-            return Err(diagnostics::refusal(
+            return Err(diagnostics::with_repair(
                 Code::AsyncUnsupported,
                 "asyncio.gather takes no keyword arguments here",
                 keyword.range,
@@ -632,11 +649,14 @@ impl Lowerer<'_> {
         for member in &call.arguments.args {
             let task = match member {
                 PyExpr::Starred(starred) => {
-                    return Err(diagnostics::refusal(
+                    return Err(diagnostics::with_repair(
                         Code::StarUnsupported,
                         "asyncio.gather takes one `*tasks` or the awaitables themselves",
                         starred.range,
-                        "put every task in one list and pass `*tasks`",
+                        format!(
+                            "put the tasks passed to `{}` in one list, then pass that list with `*`",
+                            self.text(call.func.range())
+                        ),
                     ));
                 }
                 PyExpr::Call(_) => self.spawn(member)?,
@@ -654,12 +674,16 @@ impl Lowerer<'_> {
     /// arguments are evaluated here; the call itself runs in the task,
     /// when the ready queue reaches it.
     fn spawn(&mut self, coroutine: &PyExpr) -> Lowering<Operand> {
+        let written = self.text(coroutine.range()).to_string();
         let refusal = |range| {
-            diagnostics::refusal(
+            diagnostics::with_repair(
                 Code::AsyncUnsupported,
                 "a task is made from a coroutine call written in place",
                 range,
-                "write `asyncio.create_task(f(x))`, where `f` is an `async def` or a tool",
+                format!(
+                    "replace `{}` with a coroutine call written in place; pass that call to `asyncio.create_task`",
+                    written
+                ),
             )
         };
         let PyExpr::Call(call) = coroutine else {
@@ -770,10 +794,15 @@ impl Lowerer<'_> {
         let name = attribute.attr.id.as_str();
         let Some(method) = METHODS.iter().find(|method| method.name == name) else {
             let repair = match name {
-                "format" => "use an f-string".to_string(),
-                _ => format!("the dialect's methods are: {}", method_names().join(", ")),
+                "format" => self.format_repair(call),
+                _ => format!(
+                    "replace `{}` with a supported method of `{}`; the dialect's methods are: {}",
+                    self.text(attribute.range),
+                    self.text(attribute.value.range()),
+                    method_names().join(", ")
+                ),
             };
-            return Err(diagnostics::refusal(
+            return Err(diagnostics::with_repair(
                 Code::MethodUnsupported,
                 format!("the method `{name}` is not in the dialect"),
                 attribute.range,
@@ -969,11 +998,11 @@ impl Lowerer<'_> {
             }
             "isinstance" => return self.isinstance(call),
             "type" => {
-                return Err(diagnostics::refusal(
+                return Err(diagnostics::with_repair(
                     Code::BuiltinUnsupported,
                     "a type is not a value in the dialect",
                     call.range(),
-                    "write `type(x).__name__` for the name, or `isinstance(x, int)`",
+                    self.type_repair(call),
                 ));
             }
             "len" => simple("py.length", 1, 1, Ty::Int),
@@ -995,7 +1024,7 @@ impl Lowerer<'_> {
             "chr" => simple("py.chr", 1, 1, Ty::Str),
             "divmod" => simple("py.divmod", 2, 2, Ty::Tuple),
             other => {
-                return Err(diagnostics::refusal(
+                return Err(diagnostics::with_repair(
                     Code::BuiltinUnsupported,
                     format!("the built-in `{other}` is not in the dialect"),
                     call.range(),
@@ -1034,11 +1063,15 @@ impl Lowerer<'_> {
                 _ => None,
             };
             let Some(known) = known else {
-                return Err(diagnostics::refusal(
+                return Err(diagnostics::with_repair(
                     Code::BuiltinUnsupported,
                     "`isinstance` tests against int, float, str, bool, list, dict, set and tuple, named in place",
                     ty.range(),
-                    "catch an exception class with `except`; compare `type(x).__name__` for anything else",
+                    format!(
+                        "catch `{}` with `except` if it is an exception class; otherwise compare `type({}).__name__`",
+                        self.text(ty.range()),
+                        self.text(value.range())
+                    ),
                 ));
             };
             names.push(Expr::Literal(Literal::Text(known.to_string())));

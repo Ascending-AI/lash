@@ -29,20 +29,20 @@ impl Lowerer<'_> {
             }
             PyExpr::NumberLiteral(literal) => number(&literal.value, literal.range),
             PyExpr::StringLiteral(literal) => Ok(Operand::text(literal.value.to_str())),
-            PyExpr::BytesLiteral(literal) => Err(diagnostics::refusal(
+            PyExpr::BytesLiteral(literal) => Err(diagnostics::with_repair(
                 Code::LiteralUnsupported,
                 "bytes literals are not in the dialect",
                 literal.range,
                 "use a str",
             )),
-            PyExpr::EllipsisLiteral(literal) => Err(diagnostics::refusal(
+            PyExpr::EllipsisLiteral(literal) => Err(diagnostics::with_repair(
                 Code::LiteralUnsupported,
                 "`...` is not a value in the dialect",
                 literal.range,
                 "use None",
             )),
             PyExpr::FString(fstring) => self.fstring(fstring),
-            PyExpr::TString(tstring) => Err(diagnostics::refusal(
+            PyExpr::TString(tstring) => Err(diagnostics::with_repair(
                 Code::SyntaxUnsupported,
                 "template strings are not in the dialect",
                 tstring.range,
@@ -56,11 +56,15 @@ impl Lowerer<'_> {
                         PyExpr::StringLiteral(_) | PyExpr::FString(_)
                     )
                 {
-                    return Err(diagnostics::refusal(
+                    return Err(diagnostics::with_repair(
                         Code::OperatorUnsupported,
                         "`%` formatting of a str is not in the dialect",
                         operation.range,
-                        "use an f-string",
+                        format!(
+                            "replace the format `{}` with an f-string containing the value: `f\"{{{}}}\"`",
+                            self.text(operation.left.range()),
+                            self.text(operation.right.range())
+                        ),
                     ));
                 }
                 let operands = self.operands(&[&operation.left, &operation.right])?;
@@ -69,6 +73,7 @@ impl Lowerer<'_> {
                     operands[0].clone(),
                     operands[1].clone(),
                     operation.range,
+                    [operation.left.range(), operation.right.range()],
                 )
             }
             PyExpr::UnaryOp(operation) => self.unary(operation),
@@ -119,7 +124,7 @@ impl Lowerer<'_> {
                 let mut exprs = Vec::with_capacity(dict.items.len() * 2);
                 for item in &dict.items {
                     let Some(key) = &item.key else {
-                        return Err(diagnostics::refusal(
+                        return Err(diagnostics::with_repair(
                             Code::StarUnsupported,
                             "`**` in a dict display is not in the dialect",
                             item.value.range(),
@@ -169,7 +174,7 @@ impl Lowerer<'_> {
                     Collect::Dict(key, &comprehension.value),
                     &comprehension.generators,
                 ),
-                None => Err(diagnostics::refusal(
+                None => Err(diagnostics::with_repair(
                     Code::StarUnsupported,
                     "`**` in a dict comprehension is not in the dialect",
                     comprehension.range,
@@ -195,23 +200,27 @@ impl Lowerer<'_> {
                     self.invoke("py.getitem", &operands, Ty::Unknown)
                 }
             },
-            PyExpr::Slice(slice) => Err(diagnostics::refusal(
+            PyExpr::Slice(slice) => Err(diagnostics::with_repair(
                 Code::SyntaxUnsupported,
                 "a slice stands only inside a subscript",
                 slice.range,
                 "write `xs[start:stop]`",
             )),
-            PyExpr::Starred(starred) => Err(diagnostics::refusal(
+            PyExpr::Starred(starred) => Err(diagnostics::with_repair(
                 Code::StarUnsupported,
                 "`*` unpacking is not in the dialect here",
                 starred.range,
                 "concatenate with `+`",
             )),
-            PyExpr::Named(named) => Err(diagnostics::refusal(
+            PyExpr::Named(named) => Err(diagnostics::with_repair(
                 Code::SyntaxUnsupported,
                 "an assignment expression (`:=`) is not in the dialect",
                 named.range,
-                "assign on a line of its own",
+                format!(
+                    "assign on a line of its own: `{} = {}`",
+                    self.text(named.target.range()),
+                    self.text(named.value.range())
+                ),
             )),
             PyExpr::Yield(node) => Err(generator(node.range)),
             PyExpr::YieldFrom(node) => Err(generator(node.range)),
@@ -240,6 +249,7 @@ impl Lowerer<'_> {
         left: Operand,
         right: Operand,
         range: TextRange,
+        operand_ranges: [TextRange; 2],
     ) -> Lowering<Operand> {
         use ast::Operator;
         let numbers = left.ty.is_number() && right.ty.is_number();
@@ -278,11 +288,23 @@ impl Lowerer<'_> {
                 return self.invoke("py.set_op", &[symbol, left, right], Ty::Set);
             }
             Operator::MatMult | Operator::LShift | Operator::RShift => {
-                return Err(diagnostics::refusal(
+                return Err(diagnostics::with_repair(
                     Code::OperatorUnsupported,
                     format!("the operator `{}` is not in the dialect", op.as_str()),
                     range,
-                    "use `*`, `//` and `**` with a power of two for shifts",
+                    match op {
+                        Operator::LShift | Operator::RShift => format!(
+                            "write `({}) {} (2 ** ({}))`",
+                            self.text(operand_ranges[0]),
+                            if op == Operator::LShift { "*" } else { "//" },
+                            self.text(operand_ranges[1])
+                        ),
+                        _ => format!(
+                            "compute the matrix product of `{}` and `{}` with loops over their entries",
+                            self.text(operand_ranges[0]),
+                            self.text(operand_ranges[1])
+                        ),
+                    },
                 ));
             }
         };
@@ -325,11 +347,11 @@ impl Lowerer<'_> {
                 }
                 self.invoke("py.pos", &[operand], Ty::Unknown)
             }
-            ast::UnaryOp::Invert => Err(diagnostics::refusal(
+            ast::UnaryOp::Invert => Err(diagnostics::with_repair(
                 Code::OperatorUnsupported,
                 "the operator `~` is not in the dialect",
                 operation.range,
-                "write `-x - 1`",
+                format!("write `-({}) - 1`", self.text(operation.operand.range())),
             )),
         }
     }
@@ -479,11 +501,15 @@ impl Lowerer<'_> {
                 let value = self.expr(&attribute.value)?;
                 self.invoke(helper, &[value], Ty::Unknown)
             }
-            _ => Err(diagnostics::refusal(
+            _ => Err(diagnostics::with_repair(
                 Code::AttributeUnsupported,
                 format!("the attribute `{name}` is not in the dialect"),
                 attribute.range,
-                "values have methods, and an exception has `args` and `__cause__`; keep named fields in a dict",
+                format!(
+                    "keep `{}` in a dict and read `({})[{name:?}]`; exceptions also have `args` and `__cause__`",
+                    self.text(attribute.value.range()),
+                    self.text(attribute.value.range())
+                ),
             )),
         }
     }
@@ -518,7 +544,7 @@ impl Lowerer<'_> {
             return self.collect(collect, out);
         };
         if generator.is_async {
-            return Err(diagnostics::refusal(
+            return Err(diagnostics::with_repair(
                 Code::AsyncUnsupported,
                 "`async for` in a comprehension is not in the dialect",
                 generator.range,
@@ -634,7 +660,7 @@ fn number(value: &ast::Number, range: TextRange) -> Lowering<Operand> {
             };
             match integer {
                 Some(integer) => Ok(Operand::literal(Literal::Int(integer), Ty::Int)),
-                None => Err(diagnostics::refusal(
+                None => Err(diagnostics::with_repair(
                     Code::LiteralUnsupported,
                     "an integer this large is written in decimal here",
                     range,
@@ -646,7 +672,7 @@ fn number(value: &ast::Number, range: TextRange) -> Lowering<Operand> {
             Literal::Float(Float::new(*value)),
             Ty::Float,
         )),
-        ast::Number::Complex { .. } => Err(diagnostics::refusal(
+        ast::Number::Complex { .. } => Err(diagnostics::with_repair(
             Code::LiteralUnsupported,
             "complex numbers are not in the dialect",
             range,
@@ -656,7 +682,7 @@ fn number(value: &ast::Number, range: TextRange) -> Lowering<Operand> {
 }
 
 fn generator(range: TextRange) -> lash_kernel_dialect::Diagnostic {
-    diagnostics::refusal(
+    diagnostics::with_repair(
         Code::GeneratorUnsupported,
         "generators are not in the dialect",
         range,
