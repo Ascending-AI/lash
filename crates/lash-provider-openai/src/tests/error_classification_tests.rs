@@ -68,6 +68,26 @@ async fn typed_validation_error_is_not_overridden_by_user_text_echo() {
     assert_eq!(failure.kind, ProviderFailureKind::Validation);
     assert_eq!(failure.terminal_reason, LlmTerminalReason::ProviderError);
     assert!(!failure.is_retryable());
+
+    // Typed Validation overrides even a conflicting transient transport verdict.
+    use lash_core::provider::{DefaultProviderFailureClassifier, ProviderFailureClassifier};
+    let failure = DefaultProviderFailureClassifier.classify(
+        LlmTransportError::new("request rejected")
+            .with_kind(ProviderFailureKind::Validation)
+            .with_code(lash_sansio::FailureCode::provider("invalid_request_error"))
+            .with_raw(
+                r#"{"error":{"message":"The user wrote: context length is a useful phrase"}}"#,
+            )
+            .with_retry_verdict(TransportRetryVerdict::RetryableTransient),
+    );
+    assert_eq!(failure.kind, ProviderFailureKind::Validation);
+    assert_eq!(failure.retry_verdict, TransportRetryVerdict::Forbidden);
+    assert!(!failure.is_retryable());
+    assert_eq!(
+        failure.code.as_ref().map(ToString::to_string).as_deref(),
+        Some("provider:invalid_request_error")
+    );
+    assert_eq!(failure.terminal_reason, LlmTerminalReason::ProviderError);
 }
 
 #[tokio::test]

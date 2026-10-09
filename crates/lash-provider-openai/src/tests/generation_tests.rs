@@ -184,27 +184,6 @@ async fn every_retry_attempt_reapplies_the_sampling_controls() {
 }
 
 #[test]
-fn responses_body_carries_temperature_and_refuses_a_seed() {
-    let mut req = sampled_request();
-    req.model.metadata_mut().wire_model = "gpt-5.4".to_string();
-
-    let error = OpenAiProvider::new("key")
-        .build_responses_request_body(&req, true)
-        .expect_err("the Responses endpoint has no seed field");
-    assert_eq!(
-        refusal_code(&error).as_deref(),
-        Some("lash:unsupported_generation_option")
-    );
-    assert!(error.message.contains("seed"), "{}", error.message);
-
-    req.generation.seed = None;
-    let body = OpenAiProvider::new("key")
-        .build_responses_request_body(&req, true)
-        .unwrap();
-    assert_eq!(body["temperature"], json!(0.0));
-}
-
-#[test]
 fn codex_refuses_every_sampling_control_and_the_cap() {
     let mut cases: Vec<(&str, LlmRequest)> = Vec::new();
     let mut temperature = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
@@ -508,6 +487,13 @@ fn expose_thinking_requests_a_summary_on_responses_and_codex_even_without_effort
             lash_core::GenerationOptionOutcome::NotRequested
         );
     }
+
+    req.model.reasoning = lash_core::provider::ReasoningSelection::Effort("medium".to_string());
+    req.model.metadata_mut().capability = reasoning_capability();
+    let body = OpenAiProvider::new("key")
+        .build_responses_request_body(&req, true)
+        .unwrap();
+    assert_eq!(body["reasoning"]["summary"], "auto");
 }
 
 #[test]

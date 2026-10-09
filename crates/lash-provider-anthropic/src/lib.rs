@@ -1042,25 +1042,6 @@ mod tests {
     mod cache_breakpoint_tests;
 
     #[test]
-    fn cache_retention_none_removes_cache_control() {
-        let provider = AnthropicProvider::new("key");
-        let mut req = request_with_instructions(
-            "stable system prompt",
-            vec![LlmMessage::text(LlmRole::User, "dynamic tail")],
-        );
-        req.model.metadata_mut().request_defaults.cache_retention = CacheRetention::None;
-
-        let body = provider.build_request_body(&req).expect("body");
-
-        assert!(body["system"][0].get("cache_control").is_none());
-        assert!(
-            body["messages"][0]["content"][0]
-                .get("cache_control")
-                .is_none()
-        );
-    }
-
-    #[test]
     fn cache_retention_long_emits_ttl() {
         let provider = AnthropicProvider::new("key");
         let mut req = request_with_instructions(

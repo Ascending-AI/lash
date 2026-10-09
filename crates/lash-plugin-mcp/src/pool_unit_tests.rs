@@ -40,6 +40,17 @@ async fn mcp_view_preserves_order_and_filters_nonassistant_blocks() {
     assert!(
         matches!(&blocks[2], ToolViewBlock::Text { text, .. } if text == "file:///source\nbody")
     );
+
+    let result = serde_json::from_value(json!({
+        "content":[{"type":"text","text":"private","annotations":{"audience":["user"]}}]
+    }))
+    .expect("valid result");
+    let output = tool_result_from_rmcp(result, &lash_core::testing::mock_attempt_context())
+        .await
+        .into_done_output()
+        .expect("settled");
+    assert_eq!(output.value_for_projection(), json!({"content":[]}));
+    assert!(output.view.expect("empty assistant view").blocks.is_empty());
 }
 
 #[tokio::test]
@@ -191,20 +202,6 @@ async fn mcp_json_copy_stays_in_mixed_view_but_not_code_envelope() {
             meta: Default::default(),
         })
     );
-}
-
-#[tokio::test]
-async fn mcp_user_only_content_has_an_empty_assistant_view() {
-    let result = serde_json::from_value(json!({
-        "content":[{"type":"text","text":"private","annotations":{"audience":["user"]}}]
-    }))
-    .expect("valid result");
-    let output = tool_result_from_rmcp(result, &lash_core::testing::mock_attempt_context())
-        .await
-        .into_done_output()
-        .expect("settled");
-    assert_eq!(output.value_for_projection(), json!({"content":[]}));
-    assert!(output.view.expect("empty assistant view").blocks.is_empty());
 }
 
 fn mcp_name(server: &str, native_tool: &str) -> String {

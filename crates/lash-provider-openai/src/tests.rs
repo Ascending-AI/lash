@@ -598,19 +598,6 @@ fn responses_body_emits_reasoning_from_capability_variant() {
 }
 
 #[test]
-fn responses_body_requests_reasoning_summaries_when_provider_exposes_thinking() {
-    let provider = OpenAiProvider::new("key");
-    let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-    req.model.metadata_mut().request_defaults.expose_thinking = true;
-    req.model.reasoning = lash_core::provider::ReasoningSelection::Effort("medium".to_string());
-    req.model.metadata_mut().capability = reasoning_capability();
-
-    let body = provider.build_responses_request_body(&req, true).unwrap();
-
-    assert_eq!(body["reasoning"]["summary"], "auto");
-}
-
-#[test]
 fn openai_compatible_wire_config_serializes_only_when_customized() {
     let mut provider = OpenAiCompatibleProvider::new("key", "https://proxy.example/v1");
     assert!(provider.serialize_config().get("wire").is_none());

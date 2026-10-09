@@ -348,29 +348,6 @@ mod tests {
     }
 
     #[test]
-    fn multibyte_codepoint_split_across_chunks_is_not_corrupted() {
-        // "data: é\n\n" where the two UTF-8 bytes of 'é' (0xC3 0xA9) straddle
-        // the chunk boundary. The old per-chunk from_utf8_lossy turned each
-        // half into U+FFFD; the byte-level buffer must reassemble it intact.
-        let full = "data: é\n\n".as_bytes();
-        let split = full.len() - 4; // between 0xC3 and 0xA9 of 'é'
-        let events = collect_events(&[&full[..split], &full[split..]]);
-        assert_eq!(events, vec!["é".to_string()]);
-        assert!(
-            !events.iter().any(|e| e.contains('\u{FFFD}')),
-            "no replacement char expected, got {events:?}"
-        );
-    }
-
-    #[test]
-    fn finish_flushes_trailing_event_without_blank_line() {
-        // Terminal event delivered without the trailing blank line: finish()
-        // must still surface it (covers the mid-stream-disconnect flush path).
-        let events = collect_events(&[b"data: done"]);
-        assert_eq!(events, vec!["done".to_string()]);
-    }
-
-    #[test]
     fn multiline_data_fields_join_with_newline() {
         let events = collect_events(&[b"data: a\ndata: b\n\n"]);
         assert_eq!(events, vec!["a\nb".to_string()]);

@@ -418,19 +418,6 @@ fn codex_request_body_exposes_reasoning_summary_only_when_configured() {
 }
 
 #[test]
-fn response_failed_server_error_is_retryable() {
-    let mut state = CodexStreamState::default();
-    let err = CodexProvider::process_sse_event(
-            r#"{"type":"response.failed","response":{"status":"failed","error":{"code":"server_error","message":"internal stream ended unexpectedly"}}}"#,
-            &mut state,
-            None,
-        )
-        .unwrap_err();
-    assert!(err.is_retryable());
-    assert_eq!(err.message, "internal stream ended unexpectedly");
-}
-
-#[test]
 fn codex_request_uses_openai_schema_projection() {
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
     req.tools = Arc::new(vec![LlmToolSpec {

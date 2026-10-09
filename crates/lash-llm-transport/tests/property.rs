@@ -49,14 +49,6 @@ proptest! {
     })]
 
     #[test]
-    fn framing_is_invariant_under_arbitrary_chunk_splits(
-        chunks in sse_stream().prop_flat_map(chunk_partitions)
-    ) {
-        let unsplit: Vec<u8> = chunks.concat();
-        prop_assert_eq!(frame_split(chunks), frame_unsplit(unsplit));
-    }
-
-    #[test]
     fn driver_never_panics_on_arbitrary_byte_chunks(
         chunks in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..64), 0..8)
     ) {

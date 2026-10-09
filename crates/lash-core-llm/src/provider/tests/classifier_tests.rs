@@ -132,30 +132,6 @@ fn default_failure_classifier_preserves_explicit_non_retryability() {
 }
 
 #[test]
-fn default_failure_classifier_makes_structured_validation_forbidden_without_scraping_echo() {
-    // Deliberately, the more-specific provider-kind semantics take precedence
-    // over an explicitly classified but conflicting transport verdict.
-    let failure = DefaultProviderFailureClassifier.classify(
-        LlmTransportError::new("request rejected")
-            .with_kind(ProviderFailureKind::Validation)
-            .with_code(FailureCode::provider("invalid_request_error"))
-            .with_raw(
-                r#"{"error":{"message":"The user wrote: context length is a useful phrase"}}"#,
-            )
-            .with_retry_verdict(TransportRetryVerdict::RetryableTransient),
-    );
-
-    assert_eq!(failure.kind, ProviderFailureKind::Validation);
-    assert_eq!(failure.retry_verdict, TransportRetryVerdict::Forbidden);
-    assert!(!failure.is_retryable());
-    assert_eq!(code_of(&failure), "provider:invalid_request_error");
-    assert_eq!(
-        failure.terminal_reason,
-        crate::LlmTerminalReason::ProviderError
-    );
-}
-
-#[test]
 fn default_failure_classifier_does_not_override_structured_content_filter_echo() {
     let failure = DefaultProviderFailureClassifier.classify(
         LlmTransportError::new("request rejected")

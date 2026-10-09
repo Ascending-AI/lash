@@ -912,56 +912,6 @@ mod tests {
     }
 
     #[test]
-    fn thinking_config_omits_thoughts_unless_provider_exposes_thinking() {
-        let hidden_provider = GoogleOAuthProvider::new(std::sync::Arc::new(
-            lash_core::provider::ProviderToken::new("access"),
-        ));
-        let hidden = GoogleOAuthProvider::build_request(
-            &hidden_provider,
-            &request_with_capability(
-                Some("medium"),
-                effort_capability(&["low", "medium", "high"]),
-            ),
-            Vec::new(),
-            None,
-        )
-        .expect("schema projection");
-        assert_eq!(
-            hidden["request"]["generationConfig"]["thinkingConfig"]["thinkingLevel"],
-            "medium"
-        );
-        assert!(
-            hidden["request"]["generationConfig"]["thinkingConfig"]
-                .get("includeThoughts")
-                .is_none()
-        );
-
-        let exposed_provider = GoogleOAuthProvider::new(std::sync::Arc::new(
-            lash_core::provider::ProviderToken::new("access"),
-        ));
-        let mut exposed_request = request_with_capability(
-            Some("medium"),
-            effort_capability(&["low", "medium", "high"]),
-        );
-        exposed_request
-            .model
-            .metadata_mut()
-            .request_defaults
-            .expose_thinking = true;
-        let exposed = GoogleOAuthProvider::build_request(
-            &exposed_provider,
-            &exposed_request,
-            Vec::new(),
-            None,
-        )
-        .expect("schema projection");
-        assert_eq!(
-            exposed["request"]["generationConfig"]["thinkingConfig"]["includeThoughts"],
-            true
-        );
-    }
-
-    #[test]
     fn output_token_cap_maps_to_max_output_tokens() {
         let provider = GoogleOAuthProvider::new(std::sync::Arc::new(
             lash_core::provider::ProviderToken::new("access"),

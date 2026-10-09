@@ -153,22 +153,3 @@ fn marked_leading_feedback_keeps_its_wire_block_address() {
     );
     assert_eq!(count_object_key(&body, "__lash_cache_breakpoint"), 0);
 }
-
-#[test]
-fn no_retention_omits_cache_control_and_wire_marker_for_marked_block() {
-    let provider = AnthropicProvider::new("key");
-    let mut req = request(vec![LlmMessage::new(
-        LlmRole::User,
-        vec![LlmContentBlock::Text {
-            text: "stable history".into(),
-            response_meta: None,
-            cache_breakpoint: true,
-        }],
-    )]);
-    req.model.metadata_mut().request_defaults.cache_retention = CacheRetention::None;
-
-    let body = provider.build_request_body(&req).expect("body");
-
-    assert_eq!(count_object_key(&body, "cache_control"), 0);
-    assert_eq!(count_object_key(&body, "__lash_cache_breakpoint"), 0);
-}

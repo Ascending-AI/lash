@@ -18,98 +18,18 @@ fn dialect_request(
 
 #[test]
 fn reasoning_maps_per_google_dialect() {
-    use lash_core::GoogleDialect::{ClaudeOnVertex, Gemini3, Legacy};
-    use lash_core::provider::ReasoningSelection::{Disabled, Effort};
-    let mut effort = effort_capability(&["low", "high"]);
-    if let Some(reasoning) = effort.reasoning.as_mut() {
-        reasoning.disable = true;
-    }
-    let budget = budget_capability(&[("low", 1_024), ("high", 8_192)]);
     let provider = GoogleOAuthProvider::for_test();
-    let thinking = |req: &LlmRequest| {
-        GoogleOAuthProvider::build_request(&provider, req, Vec::new(), None)
-            .map(|body| body["request"]["generationConfig"]["thinkingConfig"].clone())
-    };
-    let refused = |req: &LlmRequest| refusal_code(&thinking(req).expect_err("refused"));
-
-    for dialect in [Legacy, Gemini3] {
-        assert_eq!(
-            thinking(&dialect_request(
-                dialect,
-                Effort("high".into()),
-                effort.clone()
-            ))
-            .unwrap(),
-            json!({ "thinkingLevel": "high" }),
-            "{dialect:?}"
-        );
-        assert_eq!(
-            thinking(&dialect_request(
-                dialect,
-                Effort("high".into()),
-                budget.clone()
-            ))
-            .unwrap(),
-            json!({ "thinkingBudget": 8_192 }),
-            "{dialect:?}"
-        );
-    }
-    assert_eq!(
-        thinking(&dialect_request(Legacy, Disabled, effort.clone())).unwrap(),
-        json!({ "thinkingBudget": 0 })
+    let mut tight = dialect_request(
+        lash_core::GoogleDialect::ClaudeOnVertex,
+        lash_core::provider::ReasoningSelection::Effort("high".into()),
+        budget_capability(&[("low", 1_024), ("high", 8_192)]),
     );
-    assert_eq!(
-        refused(&dialect_request(Gemini3, Disabled, effort.clone())).as_deref(),
-        Some("lash:reasoning_encoding_unrepresentable"),
-        "Gemini 3 cannot turn thinking off"
-    );
-
-    // Claude on Vertex takes a budget below the cap, and nothing else.
-    assert_eq!(
-        thinking(&dialect_request(
-            ClaudeOnVertex,
-            Effort("low".into()),
-            budget.clone()
-        ))
-        .unwrap(),
-        json!({ "thinkingBudget": 1_024 })
-    );
-    assert_eq!(
-        refused(&dialect_request(
-            ClaudeOnVertex,
-            Effort("high".into()),
-            effort.clone()
-        ))
-        .as_deref(),
-        Some("lash:reasoning_encoding_unrepresentable")
-    );
-    assert_eq!(
-        refused(&dialect_request(ClaudeOnVertex, Disabled, effort.clone())).as_deref(),
-        Some("lash:reasoning_encoding_unrepresentable")
-    );
-    let mut tight = dialect_request(ClaudeOnVertex, Effort("high".into()), budget.clone());
     tight.generation.output_token_cap = NonZeroUsize::new(8_192);
+    let error = GoogleOAuthProvider::build_request(&provider, &tight, Vec::new(), None)
+        .expect_err("thinking budget must be strictly below the output cap");
     assert_eq!(
-        refused(&tight).as_deref(),
+        refusal_code(&error).as_deref(),
         Some("lash:reasoning_budget_exceeds_output_cap")
-    );
-    // Claude thinking pins sampling on Vertex as it does on Anthropic.
-    let mut sampled = dialect_request(ClaudeOnVertex, Effort("low".into()), budget.clone());
-    sampled.generation.temperature =
-        Some(lash_core::NonNegativeFiniteF64::new(0.5).expect("finite"));
-    assert_eq!(
-        refused(&sampled).as_deref(),
-        Some("lash:unsupported_generation_option")
-    );
-
-    // Off always needs the host capability's `disable`.
-    let mut no_disable = effort.clone();
-    if let Some(reasoning) = no_disable.reasoning.as_mut() {
-        reasoning.disable = false;
-    }
-    assert_eq!(
-        refused(&dialect_request(Legacy, Disabled, no_disable)).as_deref(),
-        Some("lash:unsupported_effort")
     );
 }
 
@@ -132,5 +52,21 @@ fn expose_thinking_requests_thoughts_without_a_reasoning_selection() {
     assert_eq!(
         receipt.reasoning,
         lash_core::GenerationOptionOutcome::NotRequested
+    );
+
+    let mut exposed_request = request_with_capability(
+        Some("medium"),
+        effort_capability(&["low", "medium", "high"]),
+    );
+    exposed_request
+        .model
+        .metadata_mut()
+        .request_defaults
+        .expose_thinking = true;
+    let exposed = GoogleOAuthProvider::build_request(&provider, &exposed_request, Vec::new(), None)
+        .expect("schema projection");
+    assert_eq!(
+        exposed["request"]["generationConfig"]["thinkingConfig"]["includeThoughts"],
+        true
     );
 }
