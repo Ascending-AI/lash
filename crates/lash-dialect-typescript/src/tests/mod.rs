@@ -13,6 +13,7 @@ mod async_fn;
 mod builtin_values;
 mod controls;
 mod deviations;
+mod guarded_text;
 mod hoisting;
 mod json;
 mod language;

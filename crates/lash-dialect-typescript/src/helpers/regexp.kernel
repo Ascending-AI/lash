@@ -66,10 +66,15 @@ use ts.string.replace_value
 use ts.string.search
 use ts.string.slice_units
 use ts.string.split
+use ts.string.split_generic
 use ts.string.substitute
 use ts.string.uint32
 use ts.to_property_key
 use ts.to_string
+
+use float.to_int
+
+use num.floor
 
 function ts.regexp.is(value: Any) -> Bool
 kernel 1
@@ -428,7 +433,7 @@ body {
   return output_value
 }
 
-function ts.string.split(this: Any, args: List(Any)) -> List(Any)
+function ts.string.split_generic(this: Any, args: List(Any)) -> List(Any)
 kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
 charge sum(8, deep(result))
@@ -476,6 +481,37 @@ body {
     }
   }
   return text.split(text, separator, limit)
+}
+
+# Nonempty primitive separators and uint32 limits need no regex/coercion walk.
+function ts.string.split(this: Any, args: List(Any)) -> List(Any)
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  if same(kind(this), "text") {
+    if num.lt(0, list.len(args)) {
+      let separator = args[0]
+      if same(kind(separator), "text") {
+        if same(separator, "") {} else {
+          let input = absent
+          if num.lt(1, list.len(args)) { set input = args[1] }
+          let limit = 4294967295
+          let plain = same(input, absent)
+          if same(kind(input), "float") {
+            if num.le(0, input) {
+              if num.le(input, 4294967295) {
+                if eq(input, num.floor(input)) { set plain = true set limit = float.to_int(input) }
+              }
+            }
+          }
+          if plain { return text.split(this, separator, limit) }
+        }
+      }
+    }
+  }
+  let out = invoke ts.string.split_generic(this, args)
+  return out
 }
 
 function ts.string.substitute(replacement: Text, text: Text, needle: Text, position: Int) -> Text

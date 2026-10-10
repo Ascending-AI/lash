@@ -14,6 +14,9 @@ use num.is_nan
 use num.le
 use num.lt
 use num.mul
+use num.min
+use num.max
+use num.trunc
 use num.neg
 use num.sub
 use num.to_float
@@ -36,6 +39,7 @@ use ts.receiver
 use ts.is_nullish
 use ts.require_object_coercible
 use ts.string.at
+use ts.string.at_generic
 use ts.string.charAt
 use ts.string.charCodeAt
 use ts.string.clamp
@@ -43,10 +47,13 @@ use ts.string.codePointAt
 use ts.string.concat
 use ts.string.create
 use ts.string.endsWith
+use ts.string.endsWith_generic
 use ts.string.fromCharCode
 use ts.string.fromCodePoint
 use ts.string.includes
+use ts.string.includes_generic
 use ts.string.indexOf
+use ts.string.indexOf_generic
 use ts.string.integer
 use ts.string.lastIndexOf
 use ts.string.length
@@ -59,9 +66,12 @@ use ts.string.receiver
 use ts.string.relative
 use ts.string.repeat
 use ts.string.slice
+use ts.string.slice_generic
 use ts.string.slice_units
 use ts.string.startsWith
+use ts.string.startsWith_generic
 use ts.string.substring
+use ts.string.substring_generic
 use ts.string.toLowerCase
 use ts.string.toString
 use ts.string.toUpperCase
@@ -189,7 +199,7 @@ body {
   throw error.new("type_error", "String method requires a string receiver", null)
 }
 
-function ts.string.at(this: Any, args: List(Any)) -> Any
+function ts.string.at_generic(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
 charge sum(8, deep(result))
@@ -205,6 +215,37 @@ body {
   let index = float.to_int(num.to_float(n))
   let end = num.add(index, 1)
   let out = invoke ts.string.slice_units(text, index, end)
+  return out
+}
+
+# Admit primitive bounds before any coercion; the generic path owns hooks.
+function ts.string.at(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  if same(kind(this), "text") {
+    let input = absent
+    if num.lt(0, list.len(args)) { set input = args[0] }
+    let plain = same(input, absent)
+    if same(kind(input), "float") { set plain = true }
+    if plain {
+      let n = 0
+      if same(input, absent) {} else {
+        set n = input
+        if num.is_nan(n) { set n = 0 } else { set n = num.trunc(n) }
+      }
+      let length = text.utf16_len(this)
+      if num.lt(n, 0) { set n = num.add(length, n) }
+      if num.lt(n, 0) { return absent }
+      if num.lt(n, length) {} else { return absent }
+      let index = float.to_int(num.to_float(n))
+      let end = num.add(index, 1)
+      let out = invoke ts.string.slice_units(this, index, end)
+      return out
+    }
+  }
+  let out = invoke ts.string.at_generic(this, args)
   return out
 }
 
@@ -273,7 +314,7 @@ body {
   return num.to_float(unit)
 }
 
-function ts.string.slice(this: Any, args: List(Any)) -> Text
+function ts.string.slice_generic(this: Any, args: List(Any)) -> Text
 kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
 charge sum(8, deep(result))
@@ -292,7 +333,47 @@ body {
   return out
 }
 
-function ts.string.substring(this: Any, args: List(Any)) -> Text
+# Admit primitive bounds before any coercion; the generic path owns hooks.
+function ts.string.slice(this: Any, args: List(Any)) -> Text
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  if same(kind(this), "text") {
+    let lower = absent
+    let upper = absent
+    if num.lt(0, list.len(args)) { set lower = args[0] }
+    if num.lt(1, list.len(args)) { set upper = args[1] }
+    let plain = true
+    if same(lower, absent) {} else { if same(kind(lower), "float") {} else { set plain = false } }
+    if same(upper, absent) {} else { if same(kind(upper), "float") {} else { set plain = false } }
+    if plain {
+      let length = text.utf16_len(this)
+      let start = 0
+      let end = length
+      if same(lower, absent) {} else {
+        set start = lower
+        if num.is_nan(start) { set start = 0 } else { set start = num.trunc(start) }
+        if num.lt(start, 0) { set start = num.add(length, start) }
+        set start = num.min(num.max(start, 0), length)
+      }
+      if same(upper, absent) {} else {
+        set end = upper
+        if num.is_nan(end) { set end = 0 } else { set end = num.trunc(end) }
+        if num.lt(end, 0) { set end = num.add(length, end) }
+        set end = num.min(num.max(end, 0), length)
+      }
+      let first = float.to_int(num.to_float(start))
+      let last = float.to_int(num.to_float(end))
+      let out = invoke ts.string.slice_units(this, first, last)
+      return out
+    }
+  }
+  let out = invoke ts.string.slice_generic(this, args)
+  return out
+}
+
+function ts.string.substring_generic(this: Any, args: List(Any)) -> Text
 kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
 charge sum(8, deep(result))
@@ -317,7 +398,48 @@ body {
   return out
 }
 
-function ts.string.indexOf(this: Any, args: List(Any)) -> Any
+# Admit primitive bounds before any coercion; the generic path owns hooks.
+function ts.string.substring(this: Any, args: List(Any)) -> Text
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  if same(kind(this), "text") {
+    let lower = absent
+    let upper = absent
+    if num.lt(0, list.len(args)) { set lower = args[0] }
+    if num.lt(1, list.len(args)) { set upper = args[1] }
+    let plain = true
+    if same(lower, absent) {} else { if same(kind(lower), "float") {} else { set plain = false } }
+    if same(upper, absent) {} else { if same(kind(upper), "float") {} else { set plain = false } }
+    if plain {
+      let length = text.utf16_len(this)
+      let start = 0
+      let end = length
+      if same(lower, absent) {} else {
+        set start = lower
+        if num.is_nan(start) { set start = 0 } else { set start = num.trunc(start) }
+
+        set start = num.min(num.max(start, 0), length)
+      }
+      if same(upper, absent) {} else {
+        set end = upper
+        if num.is_nan(end) { set end = 0 } else { set end = num.trunc(end) }
+
+        set end = num.min(num.max(end, 0), length)
+      }
+      if num.lt(end, start) { let old = start set start = end set end = old }
+      let first = float.to_int(num.to_float(start))
+      let last = float.to_int(num.to_float(end))
+      let out = invoke ts.string.slice_units(this, first, last)
+      return out
+    }
+  }
+  let out = invoke ts.string.substring_generic(this, args)
+  return out
+}
+
+function ts.string.indexOf_generic(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
 charge sum(8, deep(result))
@@ -333,6 +455,36 @@ body {
   set position = invoke ts.string.clamp(n, length)
   let found = text.utf16_find(text, needle, position)
   return num.to_float(found)
+}
+
+# Primitive text needs neither receiver/needle coercion nor argument padding.
+# The same UTF-16 native answers both paths; objects and RegExp stay generic.
+function ts.string.indexOf(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  if same(kind(this), "text") {
+    if num.lt(0, list.len(args)) {
+      if same(kind(args[0]), "text") {
+        let position = 0
+        let input = absent
+        if num.lt(1, list.len(args)) { set input = args[1] }
+        let plain = same(input, absent)
+        if same(kind(input), "float") { set plain = true }
+        if plain {
+          if same(input, absent) {} else {
+            let n = input
+            if num.is_nan(n) { set n = 0 } else { set n = num.trunc(n) }
+            set position = float.to_int(num.to_float(num.min(num.max(n, 0), text.utf16_len(this))))
+          }
+          return num.to_float(text.utf16_find(this, args[0], position))
+        }
+      }
+    }
+  }
+  let out = invoke ts.string.indexOf_generic(this, args)
+  return out
 }
 
 function ts.string.lastIndexOf(this: Any, args: List(Any)) -> Any
@@ -362,7 +514,7 @@ body {
   return num.to_float(found)
 }
 
-function ts.string.includes(this: Any, args: List(Any)) -> Any
+function ts.string.includes_generic(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
 charge sum(8, deep(result))
@@ -385,7 +537,9 @@ body {
   return num.le(0, found)
 }
 
-function ts.string.startsWith(this: Any, args: List(Any)) -> Any
+# Primitive text needs neither receiver/needle coercion nor argument padding.
+# The same UTF-16 native answers both paths; objects and RegExp stay generic.
+function ts.string.startsWith_generic(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
 charge sum(8, deep(result))
@@ -408,7 +562,9 @@ body {
   return eq(found, position)
 }
 
-function ts.string.endsWith(this: Any, args: List(Any)) -> Any
+# Primitive text needs neither receiver/needle coercion nor argument padding.
+# The same UTF-16 native answers both paths; objects and RegExp stay generic.
+function ts.string.endsWith_generic(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
 charge sum(8, deep(result))
@@ -433,6 +589,95 @@ body {
   let start = num.sub(position, text.utf16_len(needle))
   if num.lt(start, 0) { return false }
   return eq(text.utf16_find(text, needle, start), start)
+}
+
+# Primitive text needs neither receiver/needle coercion nor argument padding.
+# The same UTF-16 native answers both paths; objects and RegExp stay generic.
+function ts.string.includes(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  if same(kind(this), "text") {
+    if num.lt(0, list.len(args)) {
+      if same(kind(args[0]), "text") {
+        let position = 0
+        let input = absent
+        if num.lt(1, list.len(args)) { set input = args[1] }
+        let plain = same(input, absent)
+        if same(kind(input), "float") { set plain = true }
+        if plain {
+          if same(input, absent) {} else {
+            let n = input
+            if num.is_nan(n) { set n = 0 } else { set n = num.trunc(n) }
+            set position = float.to_int(num.to_float(num.min(num.max(n, 0), text.utf16_len(this))))
+          }
+          return num.le(0, text.utf16_find(this, args[0], position))
+        }
+      }
+    }
+  }
+  let out = invoke ts.string.includes_generic(this, args)
+  return out
+}
+
+function ts.string.startsWith(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  if same(kind(this), "text") {
+    if num.lt(0, list.len(args)) {
+      if same(kind(args[0]), "text") {
+        let position = 0
+        let input = absent
+        if num.lt(1, list.len(args)) { set input = args[1] }
+        let plain = same(input, absent)
+        if same(kind(input), "float") { set plain = true }
+        if plain {
+          if same(input, absent) {} else {
+            let n = input
+            if num.is_nan(n) { set n = 0 } else { set n = num.trunc(n) }
+            set position = float.to_int(num.to_float(num.min(num.max(n, 0), text.utf16_len(this))))
+          }
+          return eq(text.utf16_find(this, args[0], position), position)
+        }
+      }
+    }
+  }
+  let out = invoke ts.string.startsWith_generic(this, args)
+  return out
+}
+
+function ts.string.endsWith(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  if same(kind(this), "text") {
+    if num.lt(0, list.len(args)) {
+      if same(kind(args[0]), "text") {
+  let length = text.utf16_len(this)
+        let position = length
+        let input = absent
+        if num.lt(1, list.len(args)) { set input = args[1] }
+        let plain = same(input, absent)
+        if same(kind(input), "float") { set plain = true }
+        if plain {
+          if same(input, absent) {} else {
+            let n = input
+            if num.is_nan(n) { set n = 0 } else { set n = num.trunc(n) }
+            set position = float.to_int(num.to_float(num.min(num.max(n, 0), text.utf16_len(this))))
+          }
+          let start = num.sub(position, text.utf16_len(args[0]))
+        if num.lt(start, 0) { return false }
+        return eq(text.utf16_find(this, args[0], start), start)
+        }
+      }
+    }
+  }
+  let out = invoke ts.string.endsWith_generic(this, args)
+  return out
 }
 
 function ts.string.concat(this: Any, args: List(Any)) -> Text

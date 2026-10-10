@@ -56,6 +56,7 @@ use ts.array.at
 use ts.array.push
 use ts.array.pop
 use ts.array.slice
+use ts.array.slice_generic
 use ts.array.concat
 use ts.array.fill
 use ts.array.copyWithin
@@ -334,7 +335,7 @@ body {
   return value
 }
 
-function ts.array.slice(this: Any, args: List(Any)) -> Any
+function ts.array.slice_generic(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
 charge 8
@@ -362,6 +363,44 @@ body {
     set start = num.add(start, 1)
   }
   return output
+}
+
+# Admit primitive bounds before any coercion; the generic path owns hooks.
+function ts.array.slice(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  if same(kind(this), "list") {
+    let lower = absent
+    let upper = absent
+    if num.lt(0, list.len(args)) { set lower = args[0] }
+    if num.lt(1, list.len(args)) { set upper = args[1] }
+    let plain = true
+    if same(lower, absent) {} else { if same(kind(lower), "float") {} else { set plain = false } }
+    if same(upper, absent) {} else { if same(kind(upper), "float") {} else { set plain = false } }
+    if plain {
+      let length = list.len(this)
+      let start = 0
+      let end = length
+      if same(lower, absent) {} else {
+        set start = lower
+        if num.is_nan(start) { set start = 0 } else { set start = num.trunc(start) }
+        if num.lt(start, 0) { set start = num.add(length, start) }
+        set start = num.min(num.max(start, 0), length)
+      }
+      if same(upper, absent) {} else {
+        set end = upper
+        if num.is_nan(end) { set end = 0 } else { set end = num.trunc(end) }
+        if num.lt(end, 0) { set end = num.add(length, end) }
+        set end = num.min(num.max(end, 0), length)
+      }
+      if num.lt(4294967295.0, num.sub(end, start)) { throw error.new("RangeError", "Invalid array length", null) }
+      return list.slice(this, start, end)
+    }
+  }
+  let out = invoke ts.array.slice_generic(this, args)
+  return out
 }
 
 function ts.array.concat(this: Any, args: List(Any)) -> Any
