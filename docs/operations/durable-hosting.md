@@ -787,40 +787,34 @@ key. Nothing is promoted at runtime: the declaration decides.
 
 ## 7. Projection providers
 
-A VM never holds a live host object. A projection value is plain data:
-`lash_vm::ProjectedValue::resource(name, type_name, ResourceRef)` (in the
-facade, `lash::vm::ir`). It snapshots with the heap and pins no node.
+A run never holds a live host object. A projection is a kernel handle
+(`K-VAL-016`): a host kind and a host identifier, both text, and plain data
+that is saved with the run and pins no node. A read through it,
+`read(handle, request)`, is a host read (`K-HOST-004`): the machine asks the
+host at once, inside the statement, and the answer is kernel data.
 
-- **`ResourceRef { projection, id, revision }`** names the provider's type,
-  the resource, and optionally a revision or snapshot id. A provider that must
-  answer identically after a failover, when another node reads the same value,
-  sets `revision` and answers reads at that revision.
-- **`ProjectionProvider`** answers one `ProjectionType`:
-  - `projection_type()`;
-  - `read(resource, ProjectedReadRequest)` returns
-    `Result<Option<ProjectedReadResponse>, ProjectionError>`;
-  - `read_range(resource, requests)` answers a batch in order, in one IPC
-    frame. Use it for hot loops.
+- **`ProjectionProvider`** (`lash::vm::ProjectionProvider`) answers one handle
+  kind:
+  - `kind()`;
+  - `read(handle, request)` returns `Result<Datum, ErrorDatum>`. An `Err` is
+    raised in the guest at the read, which may catch it.
 
-  `Ok(None)` means the provider does not answer that request at all, which is
-  not the same as "no value". No method has a default body.
+  A provider that must answer identically after a failover, when another node
+  reads the same handle, puts a revision or snapshot id in the identifier and
+  answers reads at that revision. No method has a default body.
 - **Registration.** Register providers on `DurableBackendBuilder::projection_provider`,
-  one per type, as tools are registered in the catalog. A read dispatches to
-  the provider on whichever node runs the actor. A value whose type has no
-  provider is refused with `ProjectionRefusal::NoProvider`, never a
-  placeholder.
-- **Purity.** Reads are pure and `Repeatable`, and they are not journaled. A
-  read before a snapshot is already in the heap; a read after a restore reads
-  again. A provider must not write, and must tolerate reading the same thing
-  twice.
-- **`history`** is lash's own provider over the session transcript, pinned at
-  a revision in its `ResourceRef` (`lash_protocol_rlm::HISTORY_PROJECTION`).
-  A host provider of the `history` type is refused at build.
+  one per kind, as tools are registered in the catalog. A read is answered by
+  the provider on whichever node runs the actor. A read of a kind with no
+  provider raises in the guest; nothing answers with a placeholder.
+- **Purity.** Reads are not recorded (`K-HOST-001`). A read before a park is
+  already in the saved state; a read after a resume reads again. A provider
+  must not write, and must tolerate reading the same thing twice.
+- **`history`** is lash's own provider over the session transcript
+  (`lash_protocol_rlm::HISTORY_PROJECTION`). A host provider of the `history`
+  kind is refused at build with `DurableBuildError::DuplicateProvider`.
 
-The live-object export registry, exported host descriptors and the
-unavailable-after-restore placeholder are deleted. A host object that used to
-be exported (a sandbox handle, a document, a ticket) becomes a `ResourceRef`
-naming it plus a provider that reads it.
+A host object such as a sandbox, a document or a ticket is a handle naming it
+plus a provider that reads it.
 
 ## 8. Operations
 

@@ -496,7 +496,7 @@ async fn postgres_switch_carrying_a_module_its_frame_does_not_hold_fails_closed(
             successor.frame_node_id().clone(),
         );
         transition.carries = vec![lash_core_execution::ArtifactName {
-            store: lash_core_execution::ArtifactStoreId::VmModule,
+            store: lash_core_execution::ArtifactStoreId::KernelDocument,
             artifact_ref: forged.into(),
         }];
         let commit = lash_core_execution::RuntimeCommit::persisted_state_for_test(&state)
@@ -540,7 +540,7 @@ async fn lock_artifact_mutations<'a>(
 ) -> sqlx::Transaction<'a, sqlx::Postgres> {
     let mut tx = storage.pool().begin().await.expect("begin blocker");
     sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
-        .bind(format!("lash-artifact:vm_module:{artifact_ref}"))
+        .bind(format!("lash-artifact:kernel_document:{artifact_ref}"))
         .execute(&mut *tx)
         .await
         .expect("lock artifact mutation key");
@@ -589,7 +589,7 @@ async fn postgres_referrer_end_preserves_an_edge_committed_ahead_of_it() {
     sqlx::query(
         "INSERT INTO lash_artifact_referrer_edges
         (namespace, artifact_ref, referrer_kind, referrer_id)
-        VALUES ('vm_module', $1, $2, $3)",
+        VALUES ('kernel_document', $1, $2, $3)",
     )
     .bind(artifact_ref)
     .bind(b.kind().as_str())
@@ -745,7 +745,7 @@ async fn postgres_artifact_read_refuses_an_undecodable_referrer_id() {
         .expect("publish under live host pin");
     let empty_id = sqlx::query(
         "UPDATE lash_artifact_referrer_edges SET referrer_id = ''
-         WHERE namespace = 'vm_module' AND artifact_ref = $1",
+         WHERE namespace = 'kernel_document' AND artifact_ref = $1",
     )
     .bind(artifact_ref)
     .execute(storage.pool())
@@ -756,7 +756,7 @@ async fn postgres_artifact_read_refuses_an_undecodable_referrer_id() {
     );
     sqlx::query(
         "UPDATE lash_artifact_referrer_edges SET referrer_id = 'invalid-host-pin'
-         WHERE namespace = 'vm_module' AND artifact_ref = $1",
+         WHERE namespace = 'kernel_document' AND artifact_ref = $1",
     )
     .bind(artifact_ref)
     .execute(storage.pool())

@@ -278,27 +278,24 @@ mapping survive resume.
 `{status:"cancelled"}` smuggled into an `allSettled` array, no placeholder for a
 call that did not settle.
 
-**L7 — a Lash VM-native aggregate reports its first written rejection.** Every
-Lash VM-native aggregate, the standalone list-batch included, asks for every
-result (`AllSettled` at the boundary) and reports its first *written* unwrapped
-rejection. Only the TypeScript `Promise.*` aggregates carry an ECMA consumer
-mode. ADR 0086's comprehension rules are untouched.
-
-`AbilityOp::ResourceOperationBatch` carries the consumer mode and answers with
-`ResourceOperationBatchOutcome`'s four arms — `AllResults`, `Selected`,
-`SettledValue`, `ExhaustedRejections`. Infrastructure failure and cancellation
-are the ability's `Err`, which the VM raises as the uncatchable
-`AggregateHostControl` terminal — no guest `catch` sees it — and a live
-infrastructure error commits nothing for the cell, so the cell aborts and
-recomputes from its last committed snapshot rather than committing an outcome
-its aggregate never answered. The VM deduplicates a handle written twice into one
-leaf and expands its outcome to every position.
+**L7 — a kernel run's aggregates are list joins.** A kernel run asks for each
+member's outcome as its own `perform`, admitted with the park that requests it
+(`K-TASK-024`). `join all`, `settled`, `race` and `any` decide inside the run
+(`K-TASK-011` to `K-TASK-014`) and cancel nothing (`K-TASK-015`). Only the
+TypeScript `Promise.*` helpers carry an ECMA consumer mode. ADR 0086's
+comprehension rules are untouched. Infrastructure failure and cancellation
+never reach the guest as a member's outcome: a live infrastructure error
+commits nothing for the cell, so the cell resumes from its last committed park
+rather than committing an outcome its aggregate never answered. A promise
+written twice into one aggregate is one task joined twice (`K-TASK-009`).
 
 ### 11. Value model
 
-**One pending-operation handle for tools and timers.** ADR 0095 made the VM's
-single encoding `{__handle__: "lash", id}` with one mint/parse pair; timers use
-it too.
+**One task per pending operation.** In the TypeScript dialect a tool call or
+`sleep(ms)` that is not awaited where it stands is a promise whose task performs
+the effect or sleeps (`crates/lash-dialect-typescript/src/lower/async_fn.rs`).
+The `Promise.*` combinators are dialect helpers over the kernel's list joins
+(`crates/lash-dialect-typescript/src/helpers/promise.kernel`).
 
 1. **Bound arrays and duplicates.** An operand may be a literal array, an
    array-valued expression or an array held in a binding, and the same pending
@@ -314,39 +311,27 @@ it too.
    `undefined`.** Admission records the timer's deadline once as a due time on a
    timer wait row (ADR 0132 §6); resume and reattachment reuse that deadline,
    and duplicate positions share the same timer. Recovery never starts a fresh duration.
-5. **`Promise.race([])` never settles, faithfully.** ECMA-262 returns a
-   forever-pending promise and there is no exception to catch. The dialect
-   awaits aggregates in place and admits nothing for zero operands; the host
-   detects an await that nothing can resolve and **fails the cell with a typed
-   host-level unsettled-await error**, the analogue of Node exiting with code 13
-   on an unsettled top-level await. It is not a catchable exception and not a
-   registered ECMA deviation; it is a host lifetime contract, recorded in
-   ADR 0062 beside opener close. The error code is
-   `RuntimeErrorCode::AggregateAwaitUnsettled` (`aggregate_await_unsettled`),
-   raised by the VM as the uncatchable `AggregateAwaitUnsettled` terminal.
+5. **`Promise.race([])` rejects with the kernel error `empty_join`**
+   (`K-TASK-013`). ECMA-262 returns a forever-pending promise; a task that can
+   never end would make every cell that holds one end in `TasksOutstanding` or
+   `Deadlock`, so this is the registered deviation `TS_PROMISE_RACE_EMPTY`.
 6. **`Promise.any([])` rejects with an `AggregateError` whose `errors` is
    empty**, as ECMA-262 specifies, and admits nothing.
-   `crates/lash-vm/src/runtime/heap/validation.rs` refuses a non-aggregate error
-   that carries `AggregateError` errors.
 7. **`Promise.all([])` and `Promise.allSettled([])` return `[]`.**
 8. **`AggregateError.errors` is input-ordered**, not settlement-ordered. Settlement
    order decides *which* rejection an unwrapping aggregate reports (§10 L2); it
    never reorders the collected errors.
-9. **A raw process handle at an element position stays refused**, with the repair
-   naming the tool: `crates/lash-vm/src/runtime/vm/pending_tools.rs` carries
-   `PROCESS_HANDLE_LEAF`, which tells the program to call
-   `processes.await(handle)` and await that call.
-10. **Async-map operands are aggregate operands.** The v1 async array driver runs
-    callbacks sequentially, a registered deviation (`TS_ASYNC_MAP_SEQUENTIAL_V1`):
-    result order matches Node, while callback interleaving and shared-mutation
-    order can differ. Its census row indexes the deviation; it is not executable
-    evidence of callback semantics.
+9. **A process handle is data.** At an element position it is a plain value,
+   a promise already fulfilled with it, like any other value that is no
+   promise; a program waits for a process by awaiting
+   `processes.await(handle)`.
+10. **An async callback is a task.** `items.map(async (item) => …)` yields one
+    promise per element, each the task of one call, interleaved as Node
+    interleaves them; `Promise.all` over them is a list join.
 
-An unawaited `sleep(ms)` mints a pending timer under the one handle encoding.
-A timer carries no identity of its own, so an aggregate that holds one folds
-every timer's position and duration, and the command that formed it, into the
-aggregate's recorded admission: two timer aggregates at two sites are two
-aggregates.
+An unawaited `sleep(ms)` is a task that sleeps. Its wait is named by its
+effect identity (`K-EFF-008`) like any other, so two timers at two sites are
+two waits.
 
 ### 12. Deferred sources and process awaits (K4, L07)
 

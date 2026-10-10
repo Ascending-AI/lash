@@ -2,17 +2,25 @@
 #
 # Each entry is `<path>::<scope>::<NAME>  # <reason>`. Only guest-free constants,
 # build tables and test-only instrumentation belong here: guest-derived state
-# lives in the `VmInstance`, which a worker reset drops and replaces.
+# lives in the machine instance a worker hosts, which a worker reset drops.
 
-crates/lash-vm/src/ecma_stdlib.rs::is_instance_method::METHODS  # build table projected from the ECMA stdlib constant list; no guest input
-crates/lash-vm/src/runtime/cache.rs::<module>::COMPILED_PROCESS_KEYS_BUILT  # cfg(test) counter of cache-key constructions; never compiled into a worker
-crates/lash-vm/src/runtime/heap.rs::next_revision::CLOCK  # heap write-stamp uniqueness counter; carries no guest content and is never guest-readable, persisted or sent
-crates/lash-vm/src/runtime/instruction.rs::result_wrapper_names::NAMES  # the constant `ok`/`value`/`error` result-wrapper names; no guest input
-crates/lash-vm/src/runtime/vm/javascript_stdlib.rs::normalized_static_arguments::ARITIES  # build table of static-method arities from the ECMA stdlib constant list
-crates/lash-vm/src/runtime/vm/javascript_stdlib.rs::normalized_instance_arguments::ARITIES  # build table of instance-method arities from the ECMA stdlib constant list
-crates/lash-typescript/src/lower/stdlib.rs::instance_stdlib_methods::METHODS  # build table projected from the constant signature table; no guest input
-crates/lash-typescript/src/workflow_graph/printer.rs::<module>::PROGRAM_PRINT_COUNT  # cfg(test) thread-local print counter; never compiled into a worker
-crates/lash-vm-runtime/src/lib_tests.rs::<module>::HELD_STORE_SETS  # test module fixture keeping stores alive; never compiled into a worker
-crates/lash-vm-runtime/src/process.rs::<module>::SEGMENT_BOUNDARY_DECLINED_TOTAL  # parent-side operator telemetry count of declined segment boundaries; a count, never guest-readable
-crates/lash-vm-runtime/src/process.rs::<module>::EXECUTION_BOUND_EXHAUSTION_LOUD  # test/testing-feature assertion toggle; never set by guest code
+crates/lash-dialect-python/src/tests/machine.rs::installed::INSTALLED  # cfg(test) kernel library and helpers built once per test binary; never compiled into a worker
+crates/lash-dialect-python/src/tests/machine.rs::controls::CONTROLS  # cfg(test) constant table of the turn-ending effect controls; never compiled into a worker
+crates/lash-dialect-typescript/src/builtins/mod.rs::table::TABLE  # build table of the dialect's built-in rows, derived from constants; no guest input
+crates/lash-dialect-typescript/src/lower/process.rs::<module>::NO_SESSION  # the constant empty binding set a process body lowers against; no guest input
+crates/lash-dialect-typescript/src/tests/array.rs::kernel::KERNEL  # cfg(test) kernel library built once per test binary; never compiled into a worker
+crates/lash-dialect-typescript/src/tests/machine.rs::registry::REGISTRY  # cfg(test) function registry built once per test binary; never compiled into a worker
+crates/lash-dialect-typescript/src/tests/mod.rs::library::LIBRARY  # cfg(test) named library over the test registry; never compiled into a worker
+crates/lash-dialect-typescript/src/tests/mod.rs::controls::CONTROLS  # cfg(test) constant table of the turn-ending effect controls; never compiled into a worker
+crates/lash-kernel-vm/src/laws/embedder.rs::<module>::REPEAT_BUILDS  # cfg(test) counter of a law's native calls; never compiled into a worker
+crates/lash-regress/src/unicodetables.rs::<module>::BASIC_EMOJI  # Unicode property data table; no guest input
+crates/lash-regress/src/unicodetables.rs::<module>::EMOJI_KEYCAP_SEQUENCE  # Unicode property data table; no guest input
+crates/lash-regress/src/unicodetables.rs::<module>::RGI_EMOJI_FLAG_SEQUENCE  # Unicode property data table; no guest input
+crates/lash-regress/src/unicodetables.rs::<module>::RGI_EMOJI_MODIFIER_SEQUENCE  # Unicode property data table; no guest input
+crates/lash-regress/src/unicodetables.rs::<module>::RGI_EMOJI_TAG_SEQUENCE  # Unicode property data table; no guest input
+crates/lash-regress/src/unicodetables.rs::<module>::RGI_EMOJI_ZWJ_SEQUENCE  # Unicode property data table; no guest input
+crates/lash-regress/src/unicodetables.rs::<module>::RGI_EMOJI  # Unicode property data table; no guest input
+crates/lash-vm-worker/src/embedding.rs::standard_functions::FUNCTIONS  # the shipped function registry, assembled from constant definitions; no guest input
 crates/lash-vm-worker/src/embedding.rs::<module>::HELPER_DEFINITIONS  # cfg(test) thread-local count of TypeScript helper definitions; never compiled into a worker
+crates/lash-vm-worker/src/heap_profile.rs::<module>::WINDOW  # opt-in dhat profiler window of the worker process; holds no guest value
+crates/lash-vm-worker/src/main.rs::<module>::ALLOCATOR  # dhat-heap feature global allocator; holds no guest value

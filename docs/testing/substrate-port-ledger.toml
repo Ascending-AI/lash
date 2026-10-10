@@ -2,9 +2,9 @@
 #
 # BEGIN SUMMARY (scripts/check-substrate-port-ledger.py --write-summary)
 # 1731 rows over 869 files, 4066 laws.
-# By class: mechanical 196, semantic 140, delete 954, replace 441.
+# By class: mechanical 195, semantic 140, delete 955, replace 441.
 # By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 99, L9c 367, L9d 124, L9e 141, L9f 125, L9g 98, L9h 121, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49, P4 22, P5 2.
-# By status: todo 0, ported 190, deleted 1541.
+# By status: todo 0, ported 189, deleted 1542.
 #
 # New laws owed (replace rows), by owning lane:
 # - none
@@ -10821,7 +10821,7 @@ path = "crates/lash/tests/seam_proof_dialect.rs"
 test = "*"
 area = "dialects"
 needs = ["turn", "cell"]
-class = "mechanical"
+class = "delete"
 lane = "L9e"
 laws = [
   "a_seam_proof_dialect_runs_a_real_turn_through_the_host",
@@ -10829,9 +10829,9 @@ laws = [
   "a_suspended_session_keeps_its_selected_dialect_on_sqlite_file",
   "a_suspended_session_keeps_its_selected_dialect_on_postgres",
 ]
-disposition = "port"
-status = "ported"
-note = "ported by FIG-5307 onto the durable node with its dialect and worker restored: a real turn passes; a TypeScript host refuses the seam-proof session at its first send (an open builds no runtime), but the refusal reaches it untyped, so a_suspended_session_keeps_its_selected_dialect_on_{sqlite_memory,sqlite_file} are ignored on FIG-5324; the PostgreSQL leg needs a server"
+disposition = "subject-deleted"
+status = "deleted"
+note = "FIG-5717 deletes the seam-proof test dialect with the old IR it lowered to; the Python dialect (crates/lash-dialect-python) is the second front end on the unchanged kernel. Before that, ported by FIG-5307 onto the durable node with its dialect and worker restored: a real turn passes; a TypeScript host refuses the seam-proof session at its first send (an open builds no runtime), but the refusal reaches it untyped, so a_suspended_session_keeps_its_selected_dialect_on_{sqlite_memory,sqlite_file} are ignored on FIG-5324; the PostgreSQL leg needs a server"
 
 [[row]]
 path = "examples/agent-workbench/src/execution_graphs.rs"

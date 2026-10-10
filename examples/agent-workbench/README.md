@@ -50,7 +50,7 @@ use `agent-workbench-reset` for them; it deliberately deletes the evidence they 
 ## Sessions
 
 The workbench serves many sessions. The sidebar lists them, switches between
-them, and adds new ones. TypeScript is the sole RLM language (ADR 0096); the
+them, and adds new ones. TypeScript is the sole RLM language (ADR 0139); the
 language menu is still served by `GET /api/sessions`, never written into the
 page.
 

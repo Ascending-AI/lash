@@ -91,10 +91,10 @@ impl Fixture {
     )]
     pub async fn edges(&self) -> Vec<Edge> {
         const SQLITE_QUERY: &str = "SELECT artifact_ref, referrer_kind, referrer_id
-            FROM artifact_referrer_edges WHERE namespace = 'vm_module'
+            FROM artifact_referrer_edges WHERE namespace = 'kernel_document'
             ORDER BY artifact_ref, referrer_kind, referrer_id";
         const POSTGRES_QUERY: &str = "SELECT artifact_ref, referrer_kind, referrer_id
-            FROM lash_artifact_referrer_edges WHERE namespace = 'vm_module'
+            FROM lash_artifact_referrer_edges WHERE namespace = 'kernel_document'
             ORDER BY artifact_ref, referrer_kind, referrer_id";
         match &self.database {
             Database::Sqlite(uri) => {

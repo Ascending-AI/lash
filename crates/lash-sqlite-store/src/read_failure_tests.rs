@@ -182,7 +182,7 @@ async fn readonly_connection_rejects_every_surviving_blob_write_path() {
                     ),
                 )
                 .expect("host pin claim"),
-                module.module_ref().as_str(),
+                module.key(),
                 &module.to_store_bytes().expect("encode module"),
             )
             .await

@@ -6,7 +6,7 @@
 //! `processes_evidence_b.rs` through the path a host or integrator would
 //! name — `lash::` for facade surface, `lash_core::` for internal seams the
 //! integrator classes consume directly. The 86 rows whose item no longer
-//! exists anywhere in this workspace (typed `ProcessRef` migration,
+//! exists anywhere in this workspace (typed process-reference migration,
 //! parent-end plan removal, retired status filters, and other upstream
 //! surface changes since the ledger retired) are listed in the pull request
 //! rather than witnessed here.

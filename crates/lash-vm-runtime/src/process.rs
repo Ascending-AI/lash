@@ -164,7 +164,7 @@ pub fn definition_draft(
             "entry": definition.entry,
         })),
         vec![lash_core::ArtifactName {
-            store: lash_core::ArtifactStoreId::VmModule,
+            store: lash_core::ArtifactStoreId::KernelDocument,
             artifact_ref: definition.artifact_ref(),
         }],
     )
@@ -436,7 +436,7 @@ impl lash_core::ProcessEngine for KernelProcessEngine {
         payload: &serde_json::Value,
     ) -> Result<Vec<lash_core::ArtifactName>, lash_core::PluginError> {
         Ok(vec![lash_core::ArtifactName {
-            store: lash_core::ArtifactStoreId::VmModule,
+            store: lash_core::ArtifactStoreId::KernelDocument,
             artifact_ref: payload_definition(payload)?.artifact_ref(),
         }])
     }

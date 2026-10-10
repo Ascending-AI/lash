@@ -633,9 +633,7 @@ PACKAGE_DEPS = {
             "lash_vm_protocol": "//crates/lash-vm-protocol:lash-vm-protocol",
             "lash_vm_runtime": "//crates/lash-vm-runtime:lash-vm-runtime",
             "lash_vm_worker": "//crates/lash-vm-worker:lash-vm-worker",
-            "rmp_serde": "//third-party/rust:p0284",
             "serde": "//third-party/rust:p0314",
-            "serde_bytes": "//third-party/rust:p0315",
             "serde_json": "//third-party/rust:p0319",
             "thiserror": "//third-party/rust:p0372",
             "tokio": "//third-party/rust:p0378"
@@ -869,13 +867,11 @@ PACKAGE_DEPS = {
             "lash_kernel_vm": "//crates/lash-kernel-vm:lash-kernel-vm",
             "lash_sansio": "//crates/lash-sansio:lash-sansio",
             "lash_vm_protocol": "//crates/lash-vm-protocol:lash-vm-protocol",
-            "rmp_serde": "//third-party/rust:p0284",
             "serde": "//third-party/rust:p0314",
             "serde_json": "//third-party/rust:p0319",
             "thiserror": "//third-party/rust:p0372",
             "tokio": "//third-party/rust:p0378",
-            "tokio_util": "//third-party/rust:p0385",
-            "tracing": "//third-party/rust:p0394"
+            "tokio_util": "//third-party/rust:p0385"
         }
     },
     "lash-internal-vm-client": {
@@ -966,7 +962,6 @@ PACKAGE_DEPS = {
             "serde_bytes": "//third-party/rust:p0315"
         },
         "normal": {
-            "blake3": "//third-party/rust:p0031",
             "lash_core_execution": "//crates/lash-core-execution:lash-core-execution",
             "lash_dialect_typescript": "//crates/lash-dialect-typescript:lash-dialect-typescript",
             "lash_ext_date_ecma": "//crates/lash-ext-date-ecma:lash-ext-date-ecma",
@@ -1135,13 +1130,11 @@ PACKAGE_DEPS = {
             "lash_sansio": "//crates/lash-sansio:lash-sansio",
             "lash_sqlite_store": "//crates/lash-sqlite-store:lash-sqlite-store",
             "lash_vm_client": "//crates/lash-vm-client:lash-vm-client",
-            "lash_vm_protocol": "//crates/lash-vm-protocol:lash-vm-protocol",
             "lash_vm_runtime": "//crates/lash-vm-runtime:lash-vm-runtime",
             "lash_vm_worker": "//crates/lash-vm-worker:lash-vm-worker",
             "libc": "//third-party/rust:p0186",
             "opentelemetry_sdk": "//third-party/rust:p0224",
             "rand_chacha": "//third-party/rust:p0265",
-            "rmp_serde": "//third-party/rust:p0284",
             "schemars": "//third-party/rust:p0306",
             "serde": "//third-party/rust:p0314",
             "serde_json": "//third-party/rust:p0319",

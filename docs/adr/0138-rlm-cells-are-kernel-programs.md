@@ -53,8 +53,8 @@ variables prompt lists such a name with why it is not bound.
 ends `main` where it settles, and the cell's outcome is
 `CellOutcome::Controlled`, read from that call's settled record: the turn's
 answer is the value the call carried. The control is decided at
-BeforeCompletion, where input that arrives supersedes it. A value no handler took fails the cell with the error's
-kind and message. A cell that ends with a task unfinished, or failed with
+BeforeCompletion, where input that arrives overrides it. A value no handler
+took fails the cell with the error's kind and message. A cell that ends with a task unfinished, or failed with
 an error nothing awaited, ends in the kernel's `TasksOutstanding`
 (`K-TASK-018`): the model reads `CELL_TASKS_OUTSTANDING`
 (`CellDefect::TasksOutstanding`) with the source line of the code still

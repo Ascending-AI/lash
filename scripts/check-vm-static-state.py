@@ -2,13 +2,13 @@
 """Keep guest-derived state out of statics in the VM crates (FIG-4158, ADR 0123).
 
 Model code runs in a worker that is reset and reused across sessions. A reset
-drops the one owned `VmInstance` and installs a pristine one, so every piece of
-guest-derived state has to live in that instance: anything a `static`,
+drops the one machine the worker hosts, so every piece of guest-derived state
+has to live in that instance: anything a `static`,
 `thread_local!`, `OnceLock`, `LazyLock` or `lazy_static!` holds survives the
 reset and is shared by the next session.
 
-This check refuses every static item in the VM, compiler and runtime crates
-unless `scripts/vm-static-state-allowlist.txt` lists it with a one-line reason.
+This check refuses every static item in the kernel crates, the worker and
+lash's side of the machine's host boundary unless `scripts/vm-static-state-allowlist.txt` lists it with a one-line reason.
 The allowlist is for guest-free constants and build tables only: data no guest
 input ever reaches, or test-only instrumentation that never links into a
 worker. An entry that no longer matches a static fails the check too, so the
@@ -35,13 +35,12 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 ALLOWLIST = Path("scripts/vm-static-state-allowlist.txt")
 
-# The crates whose code runs inside a VM worker. The worker crate joins the
-# list the moment it exists, so its first static is reviewed like any other.
-VM_CRATES = (
-    "crates/lash-vm",
-    "crates/lash-typescript",
-    "crates/lash-vm-runtime",
-)
+# The crates whose code runs inside a VM worker: the kernel set (machine,
+# library, dialects, extensions and the engines they fork) and lash's side of
+# the machine's host boundary. A new kernel crate joins the list by its name,
+# so its first static is reviewed like any other.
+VM_CRATE_PATTERN = re.compile(r"^lash-(kernel|dialect|ext)-|^lash-regress$")
+VM_CRATES = ("crates/lash-vm-runtime",)
 WORKER_CRATE = "crates/lash-vm-worker"
 
 STATIC_ITEM = re.compile(r"(?<![\w'])static\s+(?:mut\s+|ref\s+)?([A-Za-z_]\w*)\s*:")
@@ -61,6 +60,12 @@ class StaticItem:
 
 def checked_crates(root: Path) -> list[str]:
     crates = list(VM_CRATES)
+    if (root / "crates").is_dir():
+        crates.extend(
+            f"crates/{path.name}"
+            for path in sorted((root / "crates").iterdir())
+            if path.is_dir() and VM_CRATE_PATTERN.match(path.name)
+        )
     if (root / WORKER_CRATE).is_dir():
         crates.append(WORKER_CRATE)
     return crates
@@ -196,7 +201,7 @@ def check(root: Path) -> list[str]:
         if item.key not in allowlist:
             problems.append(
                 f"{item.path}:{item.line}: static `{item.name}` (in `{item.scope}`) is not on "
-                f"{ALLOWLIST}; guest-derived state belongs in the VmInstance, and a guest-free "
+                f"{ALLOWLIST}; guest-derived state belongs in the hosted machine, and a guest-free "
                 "constant needs an allowlist entry with its reason"
             )
     for key in sorted(set(allowlist) - seen):

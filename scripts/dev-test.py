@@ -33,9 +33,6 @@ LIVE_STORES = (
 )
 # `LASH_QUICK`: the opt-in iteration knob for the heavy lanes.
 QUICK = "LASH_QUICK"
-# Comma-separated shards/paths the quick test262 selection keeps whole.
-QUICK_TEST262_INCLUDE = "LASH_TEST262_QUICK_INCLUDE"
-TEST262_PREFIX = "crates/lash-dialect-typescript/tests/test262/"
 SUMMARY_LINES = 40
 
 
@@ -138,31 +135,7 @@ def quick_enabled() -> bool:
     return bool(value) and value != "0"
 
 
-def quick_test262_includes(paths: list[str]) -> set[str]:
-    """The test262 shards a changed file asks the quick subset to keep whole.
-
-    The quick selection samples ~10% of each stratum; a diff under
-    `test/<shard>/` or `outcomes/<shard>.tsv` keeps that shard's tests in the
-    run so the change actually exercises the area it edits. Any other test262
-    input (census.tsv, the harness, the shared runner) is selection-wide, so
-    it keeps every shard whole. The Rust side resolves shard names and `*`.
-    """
-    includes = set()
-    for path in paths:
-        if not path.startswith(TEST262_PREFIX):
-            continue
-        rest = path[len(TEST262_PREFIX):].split("/")
-        if rest[0] == "test" and len(rest) > 2:
-            includes.add(rest[1])
-        elif rest[0] == "outcomes" and rest[-1].endswith(".tsv"):
-            includes.add(rest[-1].removesuffix(".tsv"))
-        else:
-            includes.add("*")
-    # A selection-wide change keeps every shard; shard names add nothing.
-    return {"*"} if "*" in includes else includes
-
-
-def quick_test_args(paths: list[str]) -> list[str]:
+def quick_test_args() -> list[str]:
     """The `--test_env` flags that carry LASH_QUICK into remote test actions.
 
     Emitting the env only when the knob is set keeps a full run's action keys
@@ -171,11 +144,7 @@ def quick_test_args(paths: list[str]) -> list[str]:
     """
     if not quick_enabled():
         return []
-    args = [f"--test_env={QUICK}=1"]
-    includes = sorted(quick_test262_includes(paths))
-    if includes:
-        args.append(f"--test_env={QUICK_TEST262_INCLUDE}={','.join(includes)}")
-    return args
+    return [f"--test_env={QUICK}=1"]
 
 
 def root_cell_label(label: str) -> str:
@@ -322,7 +291,7 @@ def plan(base: str, dependents: bool, include_deferred: bool = False) -> dict:
     if builds:
         commands.append(["kiln", "build", *builds])
     if labels:
-        commands.append(["kiln", "test", *quick_test_args(paths), *labels])
+        commands.append(["kiln", "test", *quick_test_args(), *labels])
     result = {
         "base": base,
         "head": git("rev-parse", "HEAD").decode().strip(),

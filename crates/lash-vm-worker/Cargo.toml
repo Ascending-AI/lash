@@ -43,7 +43,6 @@ workspace = true
 
 [dependencies]
 dhat = { version = "0.3", optional = true }
-blake3 = { workspace = true }
 lash-vm-client = { workspace = true }
 lash-core-execution = { workspace = true }
 lash-vm-protocol = { workspace = true }

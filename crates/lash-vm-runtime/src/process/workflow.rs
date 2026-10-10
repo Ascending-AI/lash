@@ -239,7 +239,7 @@ fn unresolvable(message: String) -> lash_core::PluginError {
 
 fn missing(document: &DocumentId) -> lash_core::ArtifactName {
     lash_core::ArtifactName {
-        store: lash_core::ArtifactStoreId::VmModule,
+        store: lash_core::ArtifactStoreId::KernelDocument,
         artifact_ref: document.to_string(),
     }
 }

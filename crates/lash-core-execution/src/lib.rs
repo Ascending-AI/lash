@@ -56,10 +56,7 @@ pub use backend::{
 /// The durable store a [`StoreSet`] hands out (ADR 0132 §1).
 pub use lash_durable::{DurableConfig, DurableSettings, DurableStore};
 mod module_artifacts;
-pub use lash_sansio::module_artifact_refusal::{
-    ModuleArtifactAstRefusal, ModuleArtifactCorruption, ModuleArtifactGeneration,
-    ModuleArtifactRefusal,
-};
+pub use lash_sansio::module_artifact_refusal::{ModuleArtifactCorruption, ModuleArtifactRefusal};
 pub use module_artifacts::{ArtifactStoreError, DurabilityTier, ModuleArtifactStore};
 pub mod direct;
 pub mod direct_completion_client;

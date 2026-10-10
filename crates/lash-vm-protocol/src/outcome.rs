@@ -145,8 +145,6 @@ pub enum SequenceFault {
     InvalidPhase,
     #[error("worker CPU accounting regressed")]
     CpuAccountingRegressed,
-    #[error("exchange timing arrived unasked")]
-    UnexpectedExchangeTiming,
     #[error("a failed worker cannot reset")]
     FailedWorkerReset,
     #[error("the stream ended inside a frame")]

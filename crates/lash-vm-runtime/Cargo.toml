@@ -12,13 +12,6 @@ description = "The lash side of the kernel machine's host boundary."
 keywords = ["lash", "agent", "runtime", "lashvm"]
 categories = ["asynchronous", "api-bindings"]
 
-
-# FIG-3571 (ADR 0100 R8): `scripts/check-workflow-graph-model.sh` reads this
-# role. A language-neutral crate may not reach a front-end crate through its
-# dependency graph.
-[package.metadata.lash]
-role = "language-neutral"
-
 [lib]
 name = "lash_vm_runtime"
 doctest = false

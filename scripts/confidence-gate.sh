@@ -93,7 +93,6 @@ fi
 ci_features="${LASH_CI_FEATURES:-}"
 critical_packages=(
   lash-internal-core
-  lash-internal-vm
   lash-internal-protocol-rlm
   lash-internal-protocol-standard
   lash-internal-sqlite-store
@@ -110,7 +109,7 @@ else
     trigger) selected_packages=(lash-internal-core-execution) ;;
     effect-host) selected_packages=(lash-internal-core-execution lash-internal-core-effect lash-internal-conformance) ;;
     provider) selected_packages=(lash-internal-core-execution lash-internal-core-llm lash-internal-sansio) ;;
-    protocol) selected_packages=(lash-internal-vm lash-internal-protocol-rlm lash-internal-protocol-standard) ;;
+    protocol) selected_packages=(lash-internal-protocol-rlm lash-internal-protocol-standard) ;;
     sim) selected_packages=(lash-sim) ;;
   esac
   case "$area" in
@@ -263,7 +262,6 @@ SIM_SEARCH_SETUP_SECONDS=1500
 MUTATION_PACKAGES_SMOKE_MUTANTS=12
 declare -A MUTATION_PACKAGES_FULL_MUTANTS=(
   [lash-internal-core]="5"
-  [lash-internal-vm]="48"
   [lash-internal-protocol-rlm]="20"
   [lash-internal-protocol-standard]="64"
   [lash-internal-sqlite-store]="16"
@@ -1113,11 +1111,6 @@ run_state_machine_and_fault_matrix() {
       settlement_is_predicated_on_the_run
     run_cargo_tests -p lash-internal-sqlite-store --locked --test conformance_memory \
       concurrent_admissions_bind_every_row_to_at_most_one_run
-  fi
-
-  if area_selected protocol; then
-    step "Lash VM property suite"
-    run_cargo_tests -p lash-internal-vm --locked --test property
   fi
 
   if area_selected provider; then
@@ -2105,7 +2098,6 @@ EOF
     --output-path "${coverage_dir}/summary.json"
   local critical_package_regex
   critical_package_regex="$(IFS='|'; printf '%s' "${selected_packages[*]}")"
-  critical_package_regex="${critical_package_regex//lash-internal-vm/lash_vm}"
   critical_package_regex="${critical_package_regex//lash-internal-/lash-}"
   awk -v critical_package_regex="$critical_package_regex" '
     /^SF:/ {

@@ -117,7 +117,7 @@ write that ledger inside its own transaction
 #### 2.3 Cleanup records and resolved cleanups
 
 `ArtifactName` identifies an artifact and its store: `ProcessEnv`,
-`VmModule`, `ProcessDefinition`, or `Engine(kind)`. `ArtifactCarry`
+`KernelDocument`, `ProcessDefinition`, or `Engine(kind)`. `ArtifactCarry`
 names a destination referrer. `ArtifactCleanup` is the durable obligation
 body: `Ended { referrer, carries, gate }` or `Await(ReferrerGuard)`.
 Only an ended record can carry a settlement gate.

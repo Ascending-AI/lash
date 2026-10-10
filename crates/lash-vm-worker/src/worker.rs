@@ -16,16 +16,6 @@ use lash_vm_client::ipc::{Bootstrap, FrameSource, write_frame, write_frames};
 use lash_vm_client::wire::{self, EndWire, OutcomeWire, ParkWire, RecordedEnd, StartWire};
 use lash_vm_protocol::*;
 
-#[derive(Default)]
-struct ExchangeTiming {
-    active: bool,
-    started: Option<Instant>,
-    serializing: Option<Instant>,
-    response_started_ns: u64,
-    decode_ns: std::cell::Cell<u64>,
-    guest_ns: u64,
-}
-
 /// The one run a worker hosts between resets.
 struct Hosted {
     machine: KernelMachine,
@@ -41,8 +31,7 @@ struct Hosted {
     ended: bool,
 }
 
-pub(crate) struct Server<'embedding, const MEASURE: bool = false> {
-    timing: ExchangeTiming,
+pub(crate) struct Server<'embedding> {
     embedding: &'embedding Embedding,
     pipe: UnixStream,
     /// The parent's frames, shared with the run's host reads.
@@ -102,7 +91,7 @@ fn encode_worker(
     (frame.message, bytes)
 }
 
-impl<'embedding, const MEASURE: bool> Server<'embedding, MEASURE> {
+impl<'embedding> Server<'embedding> {
     pub(crate) fn new(
         pipe: UnixStream,
         codec: FrameCodec,
@@ -112,7 +101,6 @@ impl<'embedding, const MEASURE: bool> Server<'embedding, MEASURE> {
         let tuning = bootstrap.tuning;
         let mut server = Self {
             embedding,
-            timing: ExchangeTiming::default(),
             pipe,
             inbound: Arc::new(Mutex::new(FrameSource::with_capacity(
                 tuning.inbound_buffer_bytes,
@@ -157,10 +145,6 @@ impl<'embedding, const MEASURE: bool> Server<'embedding, MEASURE> {
         }
     }
     fn progress(&mut self, phase: WorkerPhase) -> Result<(), PoolError> {
-        if MEASURE && self.timing.active && phase == WorkerPhase::Serializing {
-            self.timing.response_started_ns = lash_vm_client::ipc::monotonic_nanos()?;
-            self.timing.serializing = Some(Instant::now());
-        }
         if phase == WorkerPhase::Computing && self.cpu_ceiling.is_none() {
             let nanos = u128::from(cpu_nanos()?) + u128::from(self.bootstrap.cpu_nanos);
             let seconds = nanos
@@ -208,24 +192,7 @@ impl<'embedding, const MEASURE: bool> Server<'embedding, MEASURE> {
                 }
                 Err(error) => return Err(error),
             };
-            if MEASURE {
-                self.timing = ExchangeTiming {
-                    started: Some(Instant::now()),
-                    ..ExchangeTiming::default()
-                };
-            }
             let frame = self.codec.decode_parent(&bytes).map_err(PoolError::from)?;
-            if MEASURE {
-                self.timing.active = matches!(
-                    &frame.message,
-                    ParentMessage::Start(_) | ParentMessage::Run { .. }
-                );
-                self.timing.decode_ns.set(
-                    self.timing
-                        .started
-                        .map_or(0, |start| start.elapsed().as_nanos() as u64),
-                );
-            }
             let mut fences = self
                 .fences
                 .lock()
@@ -382,15 +349,8 @@ impl<'embedding, const MEASURE: bool> Server<'embedding, MEASURE> {
             }
             .into());
         }
-        let measured = (MEASURE && self.timing.active).then(Instant::now);
         self.codec.check_payload(&payload.0)?;
-        let result = wire::decode(kind, payload);
-        if let Some(measured) = measured {
-            self.timing
-                .decode_ns
-                .set(self.timing.decode_ns.get() + measured.elapsed().as_nanos() as u64);
-        }
-        result
+        wire::decode(kind, payload)
     }
     /// The run a `Start` put here, while it has not ended.
     fn running(&mut self) -> Result<&mut Hosted, PoolError> {
@@ -487,7 +447,6 @@ impl<'embedding, const MEASURE: bool> Server<'embedding, MEASURE> {
             cancel,
             printed: Vec::new(),
         };
-        let guest_started = (MEASURE && self.timing.active).then(Instant::now);
         let hosted = self.running()?;
         let step = hosted
             .machine
@@ -497,9 +456,6 @@ impl<'embedding, const MEASURE: bool> Server<'embedding, MEASURE> {
         let memory = hosted.memory;
         if matches!(step, Step::Ended(_)) {
             hosted.ended = true;
-        }
-        if let Some(guest_started) = guest_started {
-            self.timing.guest_ns = guest_started.elapsed().as_nanos() as u64;
         }
         let meters = RunMeters {
             charged: meters.charged,
@@ -628,9 +584,6 @@ impl<'embedding, const MEASURE: bool> Server<'embedding, MEASURE> {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .outgoing;
         fence.next_header();
-        if MEASURE && self.timing.active {
-            fence.next_header();
-        }
         let header = fence.next_header();
         let (message, bytes) = match encode_worker(&self.codec, header, message) {
             (
@@ -644,13 +597,6 @@ impl<'embedding, const MEASURE: bool> Server<'embedding, MEASURE> {
             ),
             (message, bytes) => (message, bytes?),
         };
-        let encode_ns = if MEASURE && self.timing.active {
-            self.timing
-                .serializing
-                .map_or(0, |start| start.elapsed().as_nanos() as u64)
-        } else {
-            0
-        };
         // Responding and the answer leave in one write: nothing happens
         // between them, and the parent then wakes once for both (FIG-4433).
         let responding = {
@@ -658,19 +604,6 @@ impl<'embedding, const MEASURE: bool> Server<'embedding, MEASURE> {
                 .fences
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            let telemetry = if MEASURE && self.timing.active {
-                Some(fences.encode(
-                    &self.codec,
-                    WorkerMessage::ExchangeTiming {
-                        response_started_ns: self.timing.response_started_ns,
-                        decode_ns: self.timing.decode_ns.get(),
-                        encode_ns,
-                        guest_ns: self.timing.guest_ns,
-                    },
-                )?)
-            } else {
-                None
-            };
             let responding = fences.encode(
                 &self.codec,
                 WorkerMessage::Progress {
@@ -679,12 +612,7 @@ impl<'embedding, const MEASURE: bool> Server<'embedding, MEASURE> {
                 },
             )?;
             fences.outgoing.next_header();
-            if let Some(mut bytes) = telemetry {
-                bytes.extend_from_slice(&responding);
-                bytes
-            } else {
-                responding
-            }
+            responding
         };
         write_frames(
             &mut self.pipe,
@@ -736,8 +664,7 @@ mod tests {
             .and_then(crate::embedding::Embedder::finish)
             .expect("embedding");
         let mut server =
-            Server::<false>::new(pipe, codec.clone(), Bootstrap::from(&config), &embedding)
-                .expect("server");
+            Server::new(pipe, codec.clone(), Bootstrap::from(&config), &embedding).expect("server");
         read_frame(&mut parent, &codec, Instant::now() + Duration::from_secs(1)).expect("ready");
         let drain = std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(100));
@@ -767,8 +694,7 @@ mod tests {
             .and_then(crate::embedding::Embedder::finish)
             .expect("embedding");
         let mut server =
-            Server::<false>::new(pipe, codec.clone(), Bootstrap::from(&config), &embedding)
-                .expect("server");
+            Server::new(pipe, codec.clone(), Bootstrap::from(&config), &embedding).expect("server");
         let mut fence = MessageFence::new(ExecutionLease(0), OwnerEpoch(0), FrameEpoch(0));
         let ready = read_frame(&mut parent, &codec, Instant::now() + Duration::from_secs(1))
             .expect("ready");

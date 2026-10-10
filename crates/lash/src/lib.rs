@@ -702,8 +702,8 @@ pub mod persistence {
     };
     /// The Lash VM module-artifact port a backend's store set supplies.
     pub use lash_core::{
-        ArtifactStoreError, DurabilityTier, ModuleArtifactAstRefusal, ModuleArtifactCorruption,
-        ModuleArtifactGeneration, ModuleArtifactRefusal, ModuleArtifactStore,
+        ArtifactStoreError, DurabilityTier, ModuleArtifactCorruption, ModuleArtifactRefusal,
+        ModuleArtifactStore,
     };
     pub use lash_core::{
         BlobRef, DurableItem, DurablePayload, DurableScan, DurableScanPage, DurableSurface,

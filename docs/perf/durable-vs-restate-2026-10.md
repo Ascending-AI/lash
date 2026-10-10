@@ -459,10 +459,8 @@ kiln test //crates/lash-postgres-workers:failover__test --test_output all --no-t
   --test_arg=a_turn_killed_mid_model_call_without_the_liveness_lock_finishes_within_the_lease_bound \
   --test_arg=a_cleanly_stopped_node_hands_its_turn_over_at_once --test_arg=--nocapture
 
-# H5: S1's VM bench on today's code
-kiln run --config=optimized //crates/lash-perf:vm-snapshot__bin -- --out "$PWD/.kiln/FIG-5188/vm-snapshot-optimized.json" \
-  --samples 100 --case small-cell --case deep-process --case history-10 --case history-10000 \
-  --case numbers-10000 --case records-10000 --case numbers-100000
+# H5: S1's VM bench measured the old VM's snapshots and was deleted with it;
+# the H5 figures above are from that run and are not reproducible on the kernel.
 
 # The ledger and these tables
 python3 crates/lash-perf/src/bin/durable_substrate/report.py --inputs docs/perf/durable-substrate-2026-10.jsonl

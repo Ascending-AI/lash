@@ -1,6 +1,6 @@
 # Lash kernel: one dialect-free workflow language, many front ends
 
-Status: proposal for Sam, revision 4, 2026-10-09. Whole-hog: this is the end state and a clean cutover. No dual IR, no reader for today's graph, continuation or snapshot formats, no transition plan. Research: `/workspace/notes/lash/tasks/lanes/wfrep/`. Reviews of revisions 1 to 3: `/workspace/notes/lash/tasks/lanes/kspec/`.
+Status: accepted as [ADR 0139](../adr/0139-the-lash-vm-is-a-dialect-free-kernel.md); revision 4, 2026-10-09. This is the design the kernel was built to, as a clean cutover: no dual IR, no reader for the old VM's graph, continuation or snapshot formats, no transition plan. Where it says "today" it means the tree before the cutover, which is deleted. The rules themselves are in [the kernel semantics](semantics.md).
 
 ## 1. What this is for
 
@@ -145,9 +145,9 @@ A dialect is a package of a front end, a printer and the functions (helpers and 
 
 ## 6. Parked runs
 
-A parked run is saved in the document's vocabulary. Its schema is derived from today's `VmContinuation` (`crates/lash-vm/src/runtime/vm/continuation.rs:216`) and the broker's snapshot (`crates/lash-vm-broker/src/snapshot.rs`). Every field of both gets a row or a stated reason for having none; the table below is the starting point, and [parked-state.md](parked-state.md) is the completed one, held by laws.
+A parked run is saved in the document's vocabulary. Its schema was derived from the old VM's continuation and the broker's snapshot of the time. Every field of both gets a row or a stated reason for having none; the table below is the starting point, and [parked-state.md](parked-state.md) is the completed one, held by laws.
 
-| Today | In the kernel schema |
+| The old VM | In the kernel schema |
 | --- | --- |
 | `executable`, `format_version` | Document identity, kernel version, and the manifest's function identities |
 | (one line of control) | The set of tasks with their identities, the ready queue in order, each handle's state (ready, waiting on what, or ended with its result or error), whether its error has been observed, and which joins it was a member of |
@@ -168,7 +168,7 @@ A parked run is saved in the document's vocabulary. Its schema is derived from t
 | `VmLoopPhase` (fuel-slice and cancel checkpoint) | The fuel-slice return of §6 |
 | `last_value`, `profile`, `pending_error_span` | Not saved |
 
-**Roots.** State is saved as fragments, one per root. Roots are: each active call's bindings, each session binding, each task handle, and each value held only by control state (a pending throw or return value, an iterator's taken values). An object reachable from several roots is owned by the first that reaches it in a fixed order, as between cells today (`crates/lash-vm/src/runtime/state/durable.rs`). Only changed fragments are rewritten. In flight this is new work.
+**Roots.** State is saved as fragments, one per root. Roots are: each active call's bindings, each session binding, each task handle, and each value held only by control state (a pending throw or return value, an iterator's taken values). An object reachable from several roots is owned by the first that reaches it in a fixed order, as the old VM did between cells. Only changed fragments are rewritten. In flight this is new work.
 
 **Law.** Resuming from saved state continues the computation and its effect ownership exactly, without re-running committed work. For each saved row the corpus holds a pair of states that differ only there and must resume differently; for each derived or discarded row it holds a pair that must resume the same.
 
@@ -207,7 +207,7 @@ Both versions coexist for the one-release window (ADR 0115). Short runs drain; a
 
 ## 8. What is deleted, what stays, what is rewritten
 
-**Deleted.** The ECMAScript operators, `Absent`-as-`undefined` and the f64-only number model in the IR; the JavaScript runtime and object kinds in the VM (RegExp, Date, Url, Map and Set as exotics, the Error family, prototype and receiver machinery); the separate pure declared-function kind and its link-time effect ban; pending tool handles as a VM object kind; process forms in the IR; the sequential async-map deviation (`TS_ASYNC_MAP_SEQUENTIAL_V1`); continuations bound to a bytecode position and an exact executable; the hand-written TypeScript printer and its round-trip laws; the "exact ECMA-262 subset" ruling and ADRs 0060, 0062, 0064, 0095 and 0096 as written; FIG-5654 and FIG-5655, which this supersedes.
+**Deleted.** The ECMAScript operators, `Absent`-as-`undefined` and the f64-only number model in the IR; the JavaScript runtime and object kinds in the VM (RegExp, Date, Url, Map and Set as exotics, the Error family, prototype and receiver machinery); the separate pure declared-function kind and its link-time effect ban; pending tool handles as a VM object kind; process forms in the IR; the sequential async-map deviation; continuations bound to a bytecode position and an exact executable; the hand-written TypeScript printer and its round-trip laws; the "exact ECMA-262 subset" ruling and ADRs 0060, 0062, 0064, 0095 and 0096 as written; FIG-5654 and FIG-5655, which this supersedes.
 
 **Unreadable at cutover.** Every stored definition, parked process and session snapshot. A host re-imports from source it kept. ADR 0115's one-release rolling upgrade does not span the cutover.
 
@@ -217,7 +217,7 @@ Both versions coexist for the one-release window (ADR 0115). Short runs drain; a
 
 ## 9. Crates and boundaries
 
-The kernel is a set of small crates that depend on nothing else in lash, so the set can move to its own repository and serve other projects. Today `lash-vm` depends on `lash-core-execution`, `lash-sansio`, `lash-render` and `lash-vm-protocol`; that direction is reversed.
+The kernel is a set of small crates that depend on nothing else in lash, so the set can move to its own repository and serve other projects. The old VM depended on `lash-core-execution`, `lash-sansio`, `lash-render` and `lash-vm-protocol`; the kernel reverses that direction.
 
 | Crate | Owns | Used by |
 | --- | --- | --- |
@@ -253,8 +253,8 @@ None is open. The five items listed in §1 as written in on the reviewers' agree
 It is built directly, on an arc branch, in the crates of §9. Every lane that replaces something deletes what it replaces in the same change: the old code, its tests, its docs, its dependencies. Nothing is kept for compatibility: no aliases, shims, dual readers, feature flags or legacy tests, and no reader for any format written before the cutover. The branch may be red between lanes; it lands on main once, whole. The work and its order are the Linear arc; this section states what proves it.
 
 **Oracles.**
-1. **Test262.** lash vendors the tests its TypeScript dialect supports and records one outcome per test (`crates/lash-typescript/tests/test262/outcomes/`). The TypeScript dialect on the kernel must pass every test that record marks as passing, or carry a row in the deviation register (§4) that names the test. The ratchet (`scripts/check_test262_ratchet.py`) holds it. The kernel runner defaults to the complete record, partitioned into `selection::shard_00` through `selection::shard_39`; invoke exact selectors in small groups to stay inside each action’s deadline. Every case uses the same deterministic kernel bounds, and a bound trip remains a failure. Its stdout emits `outcome\t<path>\t<class>\t<qualifier>` for each case. Collect the last three fields into a TSV, then run `python3 scripts/check_test262_ratchet.py --base origin/main --kernel-outcomes <observations.tsv>`. This mode requires every main case exactly once and permits only exact cases in `crates/lash-dialect-typescript/deviations.md`; a diagnostic-wide refusal or a routed feature gap never exempts a regression. `TEST262_KERNEL_FILTER` accepts comma-separated path prefixes for focused local reruns; partial output cannot pass the complete ratchet.
-2. **lash's own TypeScript laws** (`crates/lash-typescript/tests/`), ported where their subject survives and deleted where it does not.
+1. **Test262.** lash vendors the tests its TypeScript dialect supports and records one outcome per test (`crates/lash-dialect-typescript/tests/test262/outcomes/`). The TypeScript dialect on the kernel must pass every test that record marks as passing, or carry a row in the deviation register (§4) that names the test. The ratchet (`scripts/check_test262_ratchet.py`) holds it. The kernel runner defaults to the complete record, partitioned into `selection::shard_00` through `selection::shard_39`; invoke exact selectors in small groups to stay inside each action’s deadline. Every case uses the same deterministic kernel bounds, and a bound trip remains a failure. Its stdout emits `outcome\t<path>\t<class>\t<qualifier>` for each case. Collect the last three fields into a TSV, then run `python3 scripts/check_test262_ratchet.py --base origin/main --kernel-outcomes <observations.tsv>`. This mode requires every main case exactly once and permits only exact cases in `crates/lash-dialect-typescript/deviations.md`; a diagnostic-wide refusal or a routed feature gap never exempts a regression. `TEST262_KERNEL_FILTER` accepts comma-separated path prefixes for focused local reruns; partial output cannot pass the complete ratchet.
+2. **lash's own TypeScript laws**, ported to `crates/lash-dialect-typescript` where their subject survived and deleted where it did not.
 3. **The kernel corpus** (`lash-kernel-conformance`): one named case per rule of §2, per row of §6 and per edit, written in kernel text and independent of any dialect.
 4. **Python witnesses.** The Python dialect's cases carry values, errors and effect traces recorded from CPython.
 
@@ -264,7 +264,7 @@ It is built directly, on an arc branch, in the crates of §9. Every lane that re
 3. a generic host with no dialect code cannot change an effect argument, insert a statement and replace a condition using only typed edits;
 4. parking at every park, discarding the executable, rebuilding it with a different layout and a native function swapped for its kernel body, then resuming, changes any value, error, effect identity or charge; or a crash injected before admission, after admission and after an outcome commits runs a committed effect again;
 5. a regex's result, charge or point of failure differs between cold and warm caches;
-6. the programs of `crates/lash-vm/benches/benchmark.rs`, lowered through the new TypeScript front end, run more than 3 times slower than today, VM time only.
+6. the programs of the old VM's benchmark suite, lowered through the new TypeScript front end, run more than 3 times slower than on the old VM, VM time only.
 
 ## 12. Order
 

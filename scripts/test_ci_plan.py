@@ -729,8 +729,8 @@ class RustRuntimeDocInputTests(unittest.TestCase):
         )
         self.assertNotIn("docs/instrumentation-contract.md", referenced)
         self.assertIn(
-            "crates/lash-typescript/tests/deviation_register.rs",
-            referenced["docs/adr/0062-the-typescript-dialect-is-an-exact-ecma-262-subset.md"],
+            "crates/lash-kernel-conformance/src/tests.rs",
+            referenced["docs/kernel/semantics.md"],
         )
 
     def test_every_doc_path_named_in_rust_is_a_rust_input(self) -> None:
@@ -793,7 +793,7 @@ class GateScopeTests(unittest.TestCase):
         self.assertEqual(frozenset({self.RUST, self.SCRIPTS}), scope.families)
 
     def test_a_pinned_doc_input_runs_the_rust_battery(self) -> None:
-        scope = self.scope("docs/adr/0062-the-typescript-dialect-is-an-exact-ecma-262-subset.md")
+        scope = self.scope("docs/kernel/semantics.md")
         self.assertEqual("rust-input-docs", scope.classification)
         self.assertEqual(frozenset({self.RUST}), scope.families)
 
@@ -1294,38 +1294,17 @@ class PrTailLabelTests(unittest.TestCase):
     because nothing ran the deferred test on the PR.
     """
 
-    # Every `dev-deferred` label the checked-in inventory currently assigns to
-    # `crates/lash-typescript`. Pinned as a literal: a retag that changes this
-    # set is a deliberate edit, not a silent one.
-    TYPESCRIPT_TAIL = [
-        "//crates/lash-typescript:carrier_laws__test",
-        "//crates/lash-typescript:corpus_laws__test",
-        "//crates/lash-typescript:integration__test",
-        "//crates/lash-typescript:race_any_runtime__test",
-        "//crates/lash-typescript:test262_full__test",
-        "//crates/lash-typescript:test262_ratchet__test",
-    ]
-
-    def test_the_2109_diff_yields_the_typescript_deferred_labels(self) -> None:
-        labels = ci_plan.pr_tail_labels(
-            ["crates/lash-typescript/tests/differential/expectations/findings.tsv"]
-        )
-        self.assertEqual(self.TYPESCRIPT_TAIL, labels)
-        plan = ci_plan.classify(
-            [("M", "crates/lash-typescript/tests/differential/expectations/findings.tsv")]
-        )
-        self.assertEqual(" ".join(self.TYPESCRIPT_TAIL), plan["pr_tail_labels"])
-
     def test_an_untouched_packages_labels_are_not_selected(self) -> None:
-        self.assertEqual([], ci_plan.pr_tail_labels(["crates/lash-vm/src/lib.rs"]))
-        plan = ci_plan.classify([("M", "crates/lash-vm/src/lib.rs")])
-        self.assertNotIn("lash-typescript", plan["pr_tail_labels"])
+        self.assertEqual([], ci_plan.pr_tail_labels(["crates/lash-kernel-vm/src/lib.rs"]))
+        plan = ci_plan.classify([("M", "crates/lash-kernel-vm/src/lib.rs")])
+        self.assertNotIn("lash-sim", plan["pr_tail_labels"])
 
     def test_a_docs_diff_selects_none(self) -> None:
-        # docs/adr/0062 is a Rust runtime input, so it classifies above docs,
-        # but it still owns no package's labels; a true docs path is the same.
+        # docs/kernel/semantics.md is a Rust runtime input, so it classifies
+        # above docs, but it still owns no package's labels; a true docs path
+        # is the same.
         for path in (
-            "docs/adr/0062-the-typescript-dialect-is-an-exact-ecma-262-subset.md",
+            "docs/kernel/semantics.md",
             "docs/guide.md",
         ):
             with self.subTest(path=path):
@@ -1385,7 +1364,7 @@ class PrTailLabelTests(unittest.TestCase):
             [f"{directory}/src/lib.rs" for directory in directories]
         )
         # The sweep must name the known deferred set, not silently zero out.
-        self.assertIn("//crates/lash-typescript:corpus_laws__test", labels)
+        self.assertIn("//crates/lash-postgres-workers:failover__test", labels)
         self.assertIn("//crates/lash-sim:lash-sim__unit_test", labels)
         tags = {
             target["label"]: target.get("tags", [])
@@ -1642,7 +1621,7 @@ def apply_event_deferrals(needs: dict, event: str, trusted: bool = True) -> dict
 GUARDED_SURFACE_FILES = (
     "crates/lash-postgres-store/schema.sql",
     "crates/lash-sqlite-store/src/schema_fragments.rs",
-    "crates/lash-vm/src/runtime/compiler/expr.rs",
+    "crates/lash-kernel-doc/src/document.rs",
     "crates/lash-postgres-store/src/postgres/migrate.rs",
 )
 

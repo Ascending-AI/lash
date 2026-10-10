@@ -19,7 +19,9 @@ version = "0.0.0"
 edition = "2024"
 
 [dependencies]
-lash-vm = { package = "lash-internal-vm", git = "file://${repo_root}", rev = "${source_sha}" }
+lash-kernel-vm = { git = "file://${repo_root}", rev = "${source_sha}" }
+lash-kernel-lib = { git = "file://${repo_root}", rev = "${source_sha}" }
+lash-dialect-typescript = { git = "file://${repo_root}", rev = "${source_sha}" }
 EOF
 cat > "$consumer_dir/src/main.rs" <<'EOF'
 fn main() {}
@@ -27,4 +29,4 @@ EOF
 
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-${repo_root}/target/lash-vm-git-consumer}"
 cargo check --manifest-path "$consumer_dir/Cargo.toml"
-echo "lash_vm Git consumer passed without a patch mirror at ${source_sha}"
+echo "kernel Git consumer passed without a patch mirror at ${source_sha}"

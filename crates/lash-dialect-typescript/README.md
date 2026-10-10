@@ -42,3 +42,18 @@ What no row covers keeps JavaScript's behaviour: `**`, the bitwise operators,
 method call, and every read of an object's property. A read from a declared
 object type or array gives a value the front end believes to be what the
 type says, so a later operation on it is a row.
+
+## Asynchronous code
+
+An `async` function runs as a kernel task, with the interleaving Node gives.
+A tool call or `sleep(ms)` awaited where it stands is one `perform` or
+`sleep`; one that is not is a promise whose task performs it. `Promise.all`,
+`allSettled`, `race` and `any` are helpers over the kernel's list joins. The
+lowering is described in `src/lower/async_fn.rs` and
+`src/helpers/promise.kernel`, and the Node witnesses are in `witness/async/`.
+
+## Test262
+
+Test262 is the oracle (`tests/test262/README.md`). Every test main's record
+marks as passing passes on the kernel, or a row of the deviation register
+names it. `scripts/check_test262_ratchet.py --kernel-outcomes` holds that.

@@ -214,7 +214,7 @@ where
     artifacts
         .publish_module_artifact(
             &claim,
-            artifact.module_ref().as_str(),
+            artifact.key(),
             &artifact.to_store_bytes().expect("encode module"),
         )
         .await
@@ -226,7 +226,7 @@ where
         .expect("publish process environment");
 
     let module = artifacts
-        .get_module_artifact(artifact.module_ref().as_str())
+        .get_module_artifact(artifact.key())
         .await
         .expect("module artifact isolated from environment writes")
         .expect("module artifact present");

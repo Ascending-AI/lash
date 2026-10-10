@@ -504,9 +504,8 @@ pub use lash_core_execution::{
 };
 pub use lash_core_execution::{
     ArtifactStoreError, Backend, BackendParts, DurabilityTier, DurableBuildError, DurableConfig,
-    DurableSettings, DurableStore, ModuleArtifactAstRefusal, ModuleArtifactCorruption,
-    ModuleArtifactGeneration, ModuleArtifactRefusal, ModuleArtifactStore, RetirementCheck,
-    StoreBindingId, StoreSet,
+    DurableSettings, DurableStore, ModuleArtifactCorruption, ModuleArtifactRefusal,
+    ModuleArtifactStore, RetirementCheck, StoreBindingId, StoreSet,
 };
 pub use lash_core_execution::{
     DriverAction, DriverContextView, Effect, HostTurnProtocol, PreparedTurnMachine,

@@ -92,14 +92,12 @@ registers a trigger named `shared-blue-watch` for the Blue host button, starts t
 process, and records the button occurrence. Pin the `subscription_key` literally in that
 cell. Submit the two registration turns concurrently.
 
-Pin the process label too, or expect the lift name. A trigger target defined inline is a
-**lifted** process and is named by content hash — `LIFTED_PROCESS_NAME_PREFIX = "__process_"`
-(`crates/lash-vm/src/ast.rs:554`) — so the rail renders
-`__process_<hash> ← ui.button.pressed`, not `mirror_job`. (Process identifiers cannot contain
-hyphens, which is why the name has no hyphen, but that does not mean the identifier survives
-the lift.) To gate on the literal label `mirror_job`, the pinned cell must call
+Pin the process label too, or expect the entry name. A process started without a declared
+label is labelled with the name of the document entry it starts (`admit_kernel_process` in
+`crates/lash-vm-runtime/src/process.rs`), so the rail renders `<entry> ← ui.button.pressed`.
+To gate on the literal label `mirror_job`, the pinned cell must call
 `processes.start({ label: "mirror_job" })` explicitly; otherwise gate on both tabs rendering
-**the same** lift name.
+**the same** entry name.
 
 Poll each tab to idle **independently** — the two registration turns run concurrently, so a
 single shared wait reads one session's trigger list before its turn commits and sees an empty

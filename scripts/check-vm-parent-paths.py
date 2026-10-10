@@ -1,5 +1,14 @@
 #!/usr/bin/env python3
-"""Refuse production VM execution or artifact decoding outside owned workers."""
+"""Model code runs and lowers only in owned workers (ADR 0123).
+
+A host never starts or imports a kernel run, and never parses or lowers model
+source, in its own process: the worker does both, and the parent drives it
+over the worker protocol. This check refuses those entry points in the
+production code of every crate outside the worker and the kernel set:
+`KernelMachine::start`/`import` (or through the `Machine` trait), and a
+dialect's `parse`, `lower`, `lower_*` and `Parser`. Test items and test files
+are exempt.
+"""
 from pathlib import Path
 import importlib.util
 import re
@@ -10,15 +19,18 @@ spec = importlib.util.spec_from_file_location("vm_static", ROOT / "scripts/check
 static = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = static
 spec.loader.exec_module(static)
-# These are the compiler/VM implementation and its explicitly hosted benchmark.
-# They do not serve model cells, durable process bodies or process creation.
-LIBRARIES = {"lash-vm", "lash-typescript", "lash-vm-worker"}
-# The conformance crate is a test harness: these constructors create fixed AST
-# storage fixtures, and none is reachable from a model execution entry point.
-TEST_HARNESSES = {"lash-conformance"}
-REFERENCE_TOOLS: set[str] = set()
-ENTRY = re.compile(r"(?:\b(?:lash_typescript|typescript|lash_vm)::(?:parse(?:_[A-Za-z0-9_]+)?|link(?:_[A-Za-z0-9_]+)?|compile(?:_[A-Za-z0-9_]+)?)|\b(?:LinkedModule|ModuleArtifact)::(?:link|from_program|from_store_bytes)|\bVmInstance::(?:new|pristine)|\.(?:execute_program|execute_compiled|run_program|compile_program))\s*\(")
-IMPORT = re.compile(r"\buse\s+(?:lash_typescript|lash_vm)::[^;]*\b(?:parse(?:_[A-Za-z0-9_]+)?|link(?:_[A-Za-z0-9_]+)?|compile(?:_[A-Za-z0-9_]+)?|VmInstance)\b[^;]*;")
+# The worker hosts runs and lowering; the kernel set is the machine and the
+# dialects themselves.
+WORKER = "lash-vm-worker"
+KERNEL_SET = re.compile(r"^lash-(kernel|dialect|ext)-")
+DIALECT_ENTRY = r"(?:lower(?:_[a-z_]+)?|parse|Parser)"
+ENTRY = re.compile(
+    rf"\b(?:KernelMachine|Machine)::(?:start|import)\s*\(|\blash_dialect_[a-z]+::{DIALECT_ENTRY}\b"
+)
+IMPORT = re.compile(
+    rf"\buse\s+lash_dialect_[a-z]+::[^;]*\b{DIALECT_ENTRY}\b[^;]*;"
+    r"|\buse\s+lash_kernel_vm::[^;]*\bKernelMachine\b[^;]*;"
+)
 TEST_CFG = re.compile(r'#\s*\[\s*cfg\s*\((?:test|feature\s*=\s*"testing"|any\(\s*test\s*,\s*feature\s*=\s*"testing"\s*\))\)\s*\]')
 
 
@@ -47,7 +59,7 @@ def check(root: Path) -> list[str]:
     for path in sorted((root / "crates").glob("*/src/**/*.rs")):
         relative = path.relative_to(root).as_posix()
         crate = path.relative_to(root / "crates").parts[0]
-        if crate in LIBRARIES | TEST_HARNESSES or relative in REFERENCE_TOOLS:
+        if crate == WORKER or KERNEL_SET.match(crate):
             continue
         if any(part in {"testing", "tests", "lib_tests"} or part.endswith("_tests.rs") or part == "tests.rs" for part in path.parts):
             continue
@@ -64,7 +76,7 @@ def main() -> int:
     if problems:
         print("Parent VM path inventory failed:\n"+"\n".join(problems),file=sys.stderr)
         return 1
-    print("Parent VM path inventory passed: model source and VM artifact entry points are worker owned")
+    print("Parent VM path inventory passed: kernel runs and model-source lowering are worker owned")
     return 0
 
 if __name__ == "__main__":

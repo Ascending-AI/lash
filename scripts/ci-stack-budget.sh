@@ -9,7 +9,6 @@ rust_min_stack="${LASH_RUST_MIN_STACK_BUDGET:-2097152}"
 
 # The runtime selection lives behind lash-runtime's `rlm` feature; without it
 # `stack_budget` compiles no test and the run passes vacuously (FIG-4432).
-cargo test -p lash-internal-vm --test stack_budget --locked --no-run
 cargo test -p lash-runtime --features rlm stack_budget --locked --no-run
 cargo build -p lash-perf --locked
 
@@ -41,7 +40,6 @@ run_stack_budget() {
 (
   ulimit -s "$stack_kb"
   export RUST_MIN_STACK="$rust_min_stack"
-  run_stack_budget lash_vm cargo test -p lash-internal-vm --test stack_budget --locked -- --nocapture --test-threads=1
   run_stack_budget runtime cargo test -p lash-runtime --features rlm stack_budget --locked -- --nocapture --test-threads=1
 )
 

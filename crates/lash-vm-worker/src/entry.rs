@@ -83,22 +83,18 @@ fn worker_entry_inner(
             detail: Detail::new(error),
         })
     })?;
-    if args.iter().any(|arg| arg == "--lash-vm-measure") {
-        run_server::<true>(pipe, codec, bootstrap, &embedding, &mut hook)?;
-    } else {
-        run_server::<false>(pipe, codec, bootstrap, &embedding, &mut hook)?;
-    }
+    run_server(pipe, codec, bootstrap, &embedding, &mut hook)?;
     Ok(true)
 }
 
-fn run_server<const MEASURE: bool>(
+fn run_server(
     pipe: std::os::unix::net::UnixStream,
     codec: FrameCodec,
     bootstrap: Bootstrap,
     embedding: &Embedding,
     hook: &mut Option<&mut dyn FnMut(&ParentMessage)>,
 ) -> Result<(), PoolError> {
-    let mut server = Server::<MEASURE>::new(pipe, codec, bootstrap, embedding)?;
+    let mut server = Server::new(pipe, codec, bootstrap, embedding)?;
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| server.run(hook)))
         .unwrap_or_else(|panic| {
             let reason = panic

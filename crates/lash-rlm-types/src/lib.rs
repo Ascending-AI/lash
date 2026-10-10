@@ -772,10 +772,9 @@ impl RlmSeedPluginBody {
     }
 }
 
-/// Reserved JSON key used as the canonical wire encoding for
-/// `lash_vm::Value::Projected` across the lash_vm→host bridge. When the
-/// model passes a projected source as a tool argument, lash_vm serializes it
-/// as `{"__projected__": <tagged seed entry>}`.
+/// Reserved JSON key that encodes a projected seed entry when the model
+/// passes a projected source as a tool argument:
+/// `{"__projected__": <tagged seed entry>}`.
 pub const PROJECTED_JSON_TAG: &str = "__projected__";
 
 #[cfg(test)]

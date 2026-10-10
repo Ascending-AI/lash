@@ -118,7 +118,7 @@ fn user_functions_and_bind_poison_restricted_properties() {
 }
 
 #[test]
-fn number_parsers_and_decimal_formatters_keep_javascript_edges() {
+fn number_parsers_and_decimal_formatters_keep_ecmascript_edges() {
     agrees(
         "await finish(Number.isNaN(parseInt()) && Number('0x10') === 16 && Number('  ') === 0 && Number.isNaN(Number('-0x1')) && parseInt(' -0x10tail') === -16 && parseFloat('1.25e2tail') === 125 && (1e20).toString() === '100000000000000000000' && (1e-6).toString() === '0.000001' && (1e21).toString() === '1e+21' && (2.55).toFixed(1) === '2.5' && (1.25).toExponential(1) === '1.3e+0' && (123.4).toPrecision(3) === '123' && (0.001).toExponential(2) === '1.00e-3' && (0.001).toPrecision(3) === '0.00100');",
     );

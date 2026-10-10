@@ -11,13 +11,19 @@ SCRIPT = ROOT / "scripts/check-kernel-boundary.py"
 
 WORKSPACE = """\
 [workspace]
-members = ["crates/lash-kernel-doc", "crates/lash-kernel-vm", "crates/lash-ext-regex", "crates/lash-regress", "crates/lash-core"]
+members = [
+    "crates/lash-kernel-doc", "crates/lash-kernel-vm", "crates/lash-ext-regex", "crates/lash-regress",
+    "crates/lash-core", "crates/lash-sqlite-store", "crates/lash-dialect-python", "crates/lash",
+]
 
 [workspace.dependencies]
 serde = "1"
 lash-kernel-doc = { path = "crates/lash-kernel-doc" }
 lash-regress = { path = "crates/lash-regress" }
 lash-core = { package = "lash-internal-core", path = "crates/lash-core" }
+lash-kernel-vm = { path = "crates/lash-kernel-vm" }
+lash-dialect-python = { path = "crates/lash-dialect-python" }
+lash = { path = "crates/lash" }
 """
 
 
@@ -39,6 +45,22 @@ CLEAN = {
     "crates/lash-regress": manifest("lash-regress", '[dependencies]\nmemchr = "2"\n'),
     # Lash may depend on the kernel; only the reverse is refused.
     "crates/lash-core": manifest("lash-internal-core", "[dependencies]\nlash-kernel-doc = { workspace = true }\n"),
+    # A store's tests may drive the facade with a dialect selected.
+    "crates/lash-sqlite-store": manifest(
+        "lash-internal-sqlite-store",
+        "[dependencies]\nlash-core = { workspace = true }\n[dev-dependencies]\nlash = { workspace = true }\n",
+    ),
+    # A dialect's tests may run what it lowers.
+    "crates/lash-dialect-python": manifest(
+        "lash-dialect-python",
+        "[dependencies]\nlash-kernel-doc = { workspace = true }\n"
+        "[dev-dependencies]\nlash-kernel-vm = { workspace = true }\n",
+    ),
+    "crates/lash": manifest(
+        "lash",
+        "[dependencies]\nlash-core = { workspace = true }\n"
+        "lash-dialect-python = { workspace = true, optional = true }\n",
+    ),
 }
 
 
@@ -73,6 +95,39 @@ class KernelBoundary(unittest.TestCase):
                     self.assertEqual(result.returncode, 1, result.stdout)
                     self.assertIn("lash-internal-core", result.stderr)
                     self.assertIn(f"crates/{crate}/Cargo.toml", result.stderr)
+
+    def test_a_language_neutral_crate_linking_a_dialect_is_refused(self) -> None:
+        cases = {
+            # Directly, optional or not.
+            "crates/lash-core": manifest(
+                "lash-internal-core",
+                "[dependencies]\nlash-dialect-python = { workspace = true, optional = true }\n",
+            ),
+            "crates/lash-kernel-doc": manifest(
+                "lash-kernel-doc", "[build-dependencies]\nlash-dialect-python = { workspace = true }\n"
+            ),
+            # Through another crate's normal dependencies.
+            "crates/lash-sqlite-store": manifest(
+                "lash-internal-sqlite-store", "[dependencies]\nlash = { workspace = true }\n"
+            ),
+        }
+        for crate, text in cases.items():
+            with self.subTest(crate=crate):
+                result = self.run_check({crate: text})
+                self.assertEqual(result.returncode, 1, result.stdout)
+                self.assertIn(f"{crate}/Cargo.toml", result.stderr)
+                self.assertIn("reaches the dialect `lash-dialect-python`", result.stderr)
+
+    def test_a_dialect_linking_the_machine_is_refused(self) -> None:
+        for table in ("dependencies", "build-dependencies", "target.'cfg(unix)'.dependencies"):
+            with self.subTest(table=table):
+                result = self.run_check({
+                    "crates/lash-dialect-python": manifest(
+                        "lash-dialect-python", f"[{table}]\nlash-kernel-vm = {{ workspace = true }}\n"
+                    ),
+                })
+                self.assertEqual(result.returncode, 1, result.stdout)
+                self.assertIn("is the machine crate `lash-kernel-vm`", result.stderr)
 
     def test_this_repository_passes(self) -> None:
         result = subprocess.run(["python3", str(SCRIPT)], capture_output=True, text=True, check=False)

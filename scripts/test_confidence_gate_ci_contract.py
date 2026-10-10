@@ -1625,11 +1625,6 @@ run_mutants_recorded() {{ printf 'RECORDED %s\\n' "$*"; }}
             "--enforce-budgets",
             validate_release,
         )
-        self.assertIn(
-            "profile_lash_vm.py --iterations 2500 --profile-iterations 2500 "
-            "--enforce-budgets",
-            validate_release,
-        )
 
     def test_full_perf_is_release_gated_and_only_manually_dispatchable(self) -> None:
         release_cache_workflow = RELEASE_CACHE_WORKFLOW.read_text(encoding="utf-8")
@@ -1651,14 +1646,9 @@ run_mutants_recorded() {{ printf 'RECORDED %s\\n' "$*"; }}
         )
         self.assertIn("cargo build --locked --release --workspace", release_cache)
         self.assertNotIn("--target x86_64-unknown-linux-gnu", release_cache)
-        for command in (
-            "profile_runtime.py --profile full --release --scenario all "
-            "--enforce-budgets",
-            "profile_lash_vm.py --iterations 2500 --profile-iterations 2500 "
-            "--enforce-budgets",
-        ):
-            self.assertIn(command, perf)
-            self.assertIn(command, release)
+        command = "profile_runtime.py --profile full --release --scenario all --enforce-budgets"
+        self.assertIn(command, perf)
+        self.assertIn(command, release)
 
         self.assertIn("image: postgres:18-alpine", perf)
         self.assertRegex(

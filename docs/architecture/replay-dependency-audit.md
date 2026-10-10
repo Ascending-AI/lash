@@ -17,7 +17,7 @@ Each row has one class:
 
 - the session activation (`lash-core/src/runtime/durable/session.rs`);
 - the `TurnMachine` with `checkpoint` / `restore_from_checkpoint`;
-- a TypeScript cell lowered by `lash-typescript` and run on the Lash VM, through `lash-vm-broker::cell::run_cell` and the `DurableSnapshotStore`;
+- a TypeScript cell lowered by `lash-dialect-typescript` and run on a kernel machine, through the broker's `KernelBroker` and the `DurableSnapshotStore`;
 - the admitted-execution primitive (`round::{admit, run_body, settle, fold}`);
 - the L1 store on SQLite memory, SQLite file and PostgreSQL;
 - the L2 harness (`FaultStore`, `SimClock`, `SimNodes`, `Matrix`, `Tripwire`).

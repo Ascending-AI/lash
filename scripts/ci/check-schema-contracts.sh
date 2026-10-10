@@ -27,8 +27,21 @@ build_dir="$(mktemp -d)"
 trap 'rm -rf -- "$build_dir"' EXIT
 # Cargo reports the actual executable rather than assuming a target directory
 # or profile. Do not send compiler diagnostics into the generator's JSON.
+# The same generators as the root BUCK's `host_schema_documents`.
+generators=(
+  "lash-internal-trace trace_schema_generator"
+  "lash-internal-core-execution process_event_schema_generator"
+  "lash-kernel-doc kernel_schema_generator"
+  "lash-kernel-edit kernel_edit_schema_generator"
+  "lash-kernel-state parked_schema_generator"
+)
 if [[ "$context" == untrusted ]]; then
-  cargo build --locked -p lash-internal-vm --bin workflow_schema_generator \
+  build_args=()
+  for generator in "${generators[@]}"; do
+    read -r package bin <<<"$generator"
+    build_args+=(-p "$package" --bin "$bin")
+  done
+  cargo build --locked "${build_args[@]}" \
     --message-format=json-render-diagnostics > "$build_dir/host-build.json"
 fi
 executable() {
@@ -45,6 +58,10 @@ else:
 PY
 }
 if [[ "$context" == untrusted ]]; then
-  python3 scripts/generate-workflow-schemas.py --check \
-    --generator "$(executable "$build_dir/host-build.json" workflow_schema_generator)"
+  check_args=()
+  for generator in "${generators[@]}"; do
+    read -r _ bin <<<"$generator"
+    check_args+=(--generator "$(executable "$build_dir/host-build.json" "$bin")")
+  done
+  python3 scripts/generate-workflow-schemas.py --check "${check_args[@]}"
 fi

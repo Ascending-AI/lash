@@ -668,6 +668,78 @@ mod tests {
             "each function once per version"
         );
     }
+
+    /// The host flow cells under `examples/typescript-host-flows/` lower as a
+    /// host lowers a cell, against a catalogue that offers their tools, so a
+    /// retired spelling fails here instead of rotting in the example.
+    #[test]
+    fn the_typescript_host_flow_examples_lower_against_their_host_catalogue() {
+        use lash_kernel_doc::{EffectName, Name, Signature};
+        use std::collections::BTreeSet;
+
+        let embedding = standard(&WorkerTuning::standard()).expect("the standard embedding");
+        let tool = Signature {
+            params: vec![lash_kernel_doc::Param {
+                name: Name::new("input"),
+                ty: lash_kernel_doc::Type::Any,
+                optional: false,
+            }],
+            result: lash_kernel_doc::Type::Any,
+        };
+        let effects: BTreeMap<_, _> = [
+            "web.fetch",
+            "host.approval",
+            "processes.start",
+            "control.finish",
+        ]
+        .into_iter()
+        .map(|name| (EffectName::new(name).expect("a tool's name"), tool.clone()))
+        .collect();
+        let controls = BTreeMap::from([(
+            EffectName::new("control.finish").expect("a tool's name"),
+            BTreeSet::from([lash_kernel_dialect::EffectControl::Finish]),
+        )]);
+        let tool_roots: BTreeSet<Name> = ["web", "host", "processes", "control"]
+            .into_iter()
+            .map(Name::new)
+            .collect();
+        let bindings = BTreeSet::new();
+        let functions = BTreeMap::new();
+        for (cell, source) in [
+            (
+                "turn.ts",
+                include_str!("../../../examples/typescript-host-flows/turn.ts"),
+            ),
+            (
+                "durable-process.ts",
+                include_str!("../../../examples/typescript-host-flows/durable-process.ts"),
+            ),
+        ] {
+            let lowered = embedding
+                .lower(
+                    TYPESCRIPT,
+                    source,
+                    &lash_kernel_dialect::Environment {
+                        library: embedding.library(),
+                        effects: &effects,
+                        tool_roots: &tool_roots,
+                        controls: &controls,
+                        bindings: &bindings,
+                        functions: &functions,
+                    },
+                )
+                .expect("the TypeScript dialect is installed")
+                .unwrap_or_else(|diagnostic| panic!("{cell} does not lower: {diagnostic:?}"));
+            lash_kernel_doc::validate_document(
+                &lowered.document,
+                embedding
+                    .registry()
+                    .expect("the standard functions")
+                    .as_ref(),
+            )
+            .unwrap_or_else(|invalid| panic!("{cell} lowers to an invalid document: {invalid}"));
+        }
+    }
 }
 
 #[cfg(test)]

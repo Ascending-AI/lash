@@ -170,6 +170,7 @@ The generated region below is checked against the live filenames and headings.
 | 0136 | [Hosts own their wire contracts](0136-hosts-own-their-wire-contracts.md) |
 | 0137 | [The host owns events, routing and scheduling](0137-the-host-owns-events-routing-and-scheduling.md) |
 | 0138 | [An RLM session's cells are kernel programs](0138-rlm-cells-are-kernel-programs.md) |
+| 0139 | [The Lash VM is a dialect-free kernel](0139-the-lash-vm-is-a-dialect-free-kernel.md) |
 <!-- adr-index:end -->
 
 ## Replaced and retired decisions
@@ -182,6 +183,11 @@ every decision from 0001 to 0131.
 | --- | --- | --- |
 | 0021 | Replaced | ADR 0137 |
 | 0059 | Replaced | ADR 0128 |
+| 0060 | Replaced | ADR 0139 |
+| 0062 | Replaced | ADR 0139 |
+| 0064 | Replaced | ADR 0139 |
+| 0095 | Replaced | ADR 0139 |
+| 0096 | Replaced | ADR 0139 |
 | 0103 | Replaced | ADR 0132 §8 |
 | 0104 | Replaced | ADR 0132 |
 | 0111 | Retired: engine service names | ADR 0102 D2 owns deployment separation |

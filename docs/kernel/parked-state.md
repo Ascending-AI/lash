@@ -1,6 +1,6 @@
 # Parked runs: the schema, row by row
 
-A run that is not executing is data in the document's terms ([design](design.md) §6). This page is the schema's checked table: every field the old engine saved, in `VmContinuation` (`crates/lash-vm/src/runtime/vm/continuation.rs`) and in the broker's snapshot (`crates/lash-vm-broker/src/snapshot.rs`, `ledger.rs`), with its counterpart in the kernel schema or the reason it has none. The schema is `lash-kernel-state`; the machine writes and reads it in `crates/lash-kernel-vm/src/machine/parked.rs`.
+A run that is not executing is data in the document's terms ([design](design.md) §6). This page is the schema's checked table: every field the old engine saved, in its `VmContinuation` and in the broker's snapshot (`crates/lash-vm-broker/src/snapshot.rs`, `ledger.rs`), with its counterpart in the kernel schema or the reason it has none. The schema is `lash-kernel-state`; the machine writes and reads it in `crates/lash-kernel-vm/src/machine/parked.rs`.
 
 A row is one of three kinds:
 
@@ -39,7 +39,7 @@ A parked run is stored whole, as the one document `ParkedRun` is, or in parts: a
 
 The encoding is JSON, as the document's is, with every object closed to unknown members. `schemas/host/kernel-parked-run`, `kernel-parked-header` and `kernel-parked-fragment` are the checked-in schemas. A value nests 128 deep (`K-VAL-034`), two JSON levels to each of its own: a reader of the whole document lifts its JSON decoder's nesting limit, as `ParkedRun::load` does for the parts. The format has no version of its own: the kernel version pins it (`K-VER-001`), and a reader checks the header's `kernel` before it decodes anything else. `lash-kernel-state` commits nothing: the embedder stores the header and the changed fragments in the transaction that admits the park's effects, and declares the stored surface (ADR 0131) where it writes them.
 
-This is the per-root scheme sessions use between cells (`crates/lash-vm/src/runtime/state/durable.rs`: first-discovery ownership, write stamps, a fixed-point read), applied to the kernel's roots. It is written in `lash-kernel-state` and not as an extension of that file, because a kernel crate depends on no other lash crate; there is one encoding of a heap object, `Object`'s own.
+This is the per-root scheme the old VM's sessions used between cells (first-discovery ownership, write stamps, a fixed-point read), applied to the kernel's roots, and written in `lash-kernel-state`, because a kernel crate depends on no other lash crate; there is one encoding of a heap object, `Object`'s own.
 
 ## `VmContinuation`
 

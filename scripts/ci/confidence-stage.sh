@@ -43,7 +43,7 @@ case "$LASH_CONFIDENCE_STAGE" in
     ;;
   mutation-packages-rotating)
     case "${LASH_CONFIDENCE_PACKAGE:-}" in
-      lash-internal-core|lash-internal-vm|lash-internal-protocol-rlm|lash-internal-protocol-standard|lash-internal-sqlite-store|lash-internal-postgres-store) ;;
+      lash-internal-core|lash-internal-protocol-rlm|lash-internal-protocol-standard|lash-internal-sqlite-store|lash-internal-postgres-store) ;;
       *) echo 'Unknown full mutation package' >&2; exit 2 ;;
     esac
     selected_packages=("$LASH_CONFIDENCE_PACKAGE")

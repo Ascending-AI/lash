@@ -357,15 +357,6 @@ pub struct Checkout {
     execution_recorded: bool,
 }
 impl Checkout {
-    /// Returns measured transport and worker phases for the last exchange.
-    pub fn exchange_timing(&self) -> Result<crate::ipc::ExchangeTiming, PoolError> {
-        Ok(self
-            .worker
-            .as_ref()
-            .ok_or_else(PoolError::eof)?
-            .exchange_timing)
-    }
-
     fn charge_cpu(&self, cpu_nanos: u64) -> Result<(), PoolError> {
         #[cfg(feature = "testing")]
         {
@@ -451,7 +442,7 @@ impl Checkout {
         self.document = Some(document.to_owned());
         self.print_budget = bounds.memory;
         self.started = true;
-        match self.exchange::<false>(
+        match self.exchange(
             ParentMessage::Start(Box::new(start)),
             self.pool.config.protocol.no_response_watchdog,
         )? {
@@ -464,28 +455,10 @@ impl Checkout {
     /// `slice` charge units or ends. With `cancel` the machine observes a
     /// run cancel at its next safe point.
     pub fn run(&mut self, slice: u64, cancel: bool) -> Result<RunStep, PoolError> {
-        self.run_inner::<false>(slice, cancel)
-    }
-
-    /// [`run`](Self::run) through the clock-instrumented transport. The
-    /// configured worker must have `--lash-vm-measure` in its entry arguments.
-    pub fn run_measured(&mut self, slice: u64, cancel: bool) -> Result<RunStep, PoolError> {
-        self.worker
-            .as_mut()
-            .ok_or_else(PoolError::eof)?
-            .exchange_timing = crate::ipc::ExchangeTiming::default();
-        self.run_inner::<true>(slice, cancel)
-    }
-
-    fn run_inner<const MEASURE: bool>(
-        &mut self,
-        slice: u64,
-        cancel: bool,
-    ) -> Result<RunStep, PoolError> {
         if self.pending.is_some() || !self.started {
             return Err(PoolError::breach(SequenceFault::NoRun));
         }
-        let message = self.exchange::<MEASURE>(
+        let message = self.exchange(
             ParentMessage::Run { slice, cancel },
             self.pool.config.protocol.no_response_watchdog,
         )?;
@@ -508,7 +481,7 @@ impl Checkout {
             return Err(error);
         }
         self.pending = None;
-        let message = self.exchange::<false>(
+        let message = self.exchange(
             ParentMessage::HostAnswer { id, answer },
             self.pool.config.protocol.no_response_watchdog,
         )?;
@@ -537,7 +510,7 @@ impl Checkout {
             self.discard();
             return Err(error);
         }
-        match self.exchange::<false>(
+        match self.exchange(
             ParentMessage::Deliver { wait, outcome },
             self.pool.config.protocol.no_response_watchdog,
         )? {
@@ -551,7 +524,7 @@ impl Checkout {
         if self.pending.is_some() || !self.started {
             return Err(PoolError::breach(SequenceFault::NoRun));
         }
-        match self.exchange::<false>(
+        match self.exchange(
             ParentMessage::Export,
             self.pool.config.protocol.no_response_watchdog,
         )? {
@@ -589,7 +562,7 @@ impl Checkout {
         }
         self.owner = Some(owner.clone());
         self.started = true;
-        match self.exchange::<false>(
+        match self.exchange(
             ParentMessage::Prepare { owner, request },
             self.pool.config.protocol.no_response_watchdog,
         )? {
@@ -603,7 +576,7 @@ impl Checkout {
     /// Physical stop, followed by bounded hard kill on silence. The broker
     /// retains the durable cancellation and completion winner.
     pub fn cancel(&mut self) -> Result<WorkerMessage, PoolError> {
-        let response = self.exchange::<false>(
+        let response = self.exchange(
             ParentMessage::Cancel,
             self.pool.config.deadlines.cancel_grace,
         );
@@ -617,7 +590,7 @@ impl Checkout {
             self.discard();
             return Err(PoolError::breach(SequenceFault::FailedWorkerReset));
         }
-        self.send::<false>(
+        self.send(
             ParentMessage::Reset,
             self.pool.config.protocol.no_response_watchdog,
         )?;
@@ -662,24 +635,16 @@ impl Checkout {
             }
         }
     }
-    fn send<const MEASURE: bool>(
-        &mut self,
-        message: ParentMessage,
-        timeout: Duration,
-    ) -> Result<(), PoolError> {
+    fn send(&mut self, message: ParentMessage, timeout: Duration) -> Result<(), PoolError> {
         let frame = ParentFrame {
             header: self.outgoing.next_header_copy(),
             message,
         };
         let worker = self.worker.as_mut().ok_or_else(PoolError::eof)?;
-        let measured = MEASURE.then(Instant::now);
         let bytes = worker
             .codec
             .encode_parent(&frame)
             .map_err(PoolError::from)?;
-        if let Some(measured) = measured {
-            worker.exchange_timing.parent_encode_ns += measured.elapsed().as_nanos() as u64;
-        }
         if matches!(
             frame.message,
             ParentMessage::Start(_) | ParentMessage::Prepare { .. }
@@ -688,7 +653,7 @@ impl Checkout {
             return Err(PoolError::QueueFull { bytes: bytes.len() });
         }
         self.outgoing.next_header();
-        worker.send_encoded_measured::<MEASURE>(&bytes, timeout)
+        worker.send_encoded(&bytes, timeout)
     }
     fn receive_control(&mut self, timeout: Duration) -> Result<WorkerMessage, PoolError> {
         let frame = self
@@ -701,12 +666,12 @@ impl Checkout {
             .map_err(PoolError::breach)?;
         Ok(frame.message)
     }
-    fn exchange<const MEASURE: bool>(
+    fn exchange(
         &mut self,
         message: ParentMessage,
         timeout: Duration,
     ) -> Result<WorkerMessage, PoolError> {
-        let result = self.exchange_inner::<MEASURE>(message, timeout);
+        let result = self.exchange_inner(message, timeout);
         if result.is_err() {
             self.discard();
             #[cfg(feature = "testing")]
@@ -727,14 +692,14 @@ impl Checkout {
         }
         result
     }
-    fn exchange_inner<const MEASURE: bool>(
+    fn exchange_inner(
         &mut self,
         message: ParentMessage,
         timeout: Duration,
     ) -> Result<WorkerMessage, PoolError> {
         self.resettable = false;
         self.printed_bytes = 0;
-        self.send::<MEASURE>(message, timeout)?;
+        self.send(message, timeout)?;
         let mut deadline = Instant::now() + timeout;
         let mut phase = None;
         #[cfg(feature = "testing")]
@@ -744,7 +709,7 @@ impl Checkout {
                 .worker
                 .as_mut()
                 .ok_or_else(PoolError::eof)?
-                .receive_measured::<MEASURE>(deadline);
+                .receive(deadline);
             let frame = match received {
                 Err(PoolError::Infrastructure(InfrastructureOutcome::WorkerUnresponsive {
                     ..
@@ -776,26 +741,6 @@ impl Checkout {
                 .admit(&frame.header)
                 .map_err(PoolError::breach)?;
             match frame.message {
-                WorkerMessage::ExchangeTiming {
-                    response_started_ns,
-                    decode_ns,
-                    encode_ns,
-                    guest_ns,
-                } => {
-                    if !MEASURE {
-                        return Err(PoolError::breach(SequenceFault::UnexpectedExchangeTiming));
-                    }
-                    let timing = &mut self
-                        .worker
-                        .as_mut()
-                        .ok_or_else(PoolError::eof)?
-                        .exchange_timing;
-                    timing.response_started_ns = response_started_ns;
-                    timing.worker_decode_ns += decode_ns;
-                    timing.worker_encode_ns += encode_ns;
-                    timing.guest_ns += guest_ns;
-                    timing.worker_samples += 1;
-                }
                 WorkerMessage::Progress {
                     phase: next,
                     cpu_nanos,

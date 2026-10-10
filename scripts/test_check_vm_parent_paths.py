@@ -20,25 +20,29 @@ class ParentPaths(unittest.TestCase):
             path.write_text(source)
             return CHECK.check(root)
 
-    def test_qualified_frontends_are_refused(self):
-        for entry in ["lash_typescript::parse", "lash_typescript::parse_with_globals", "lash_typescript::parse_workflow_fragment", "lash_vm::compile_program"]:
+    def test_qualified_dialect_entries_are_refused(self):
+        for entry in ["lash_dialect_typescript::lower", "lash_dialect_typescript::lower_kernel_text", "lash_dialect_python::lower", "lash_dialect_typescript::parse"]:
             with self.subTest(entry=entry):
-                self.assertTrue(self.problems(f"fn run() {{ {entry}(source); }}"))
+                self.assertTrue(self.problems(f"fn run() {{ {entry}(source, &environment); }}"))
 
     def test_imported_aliases_are_refused(self):
-        for source in ["use lash_typescript::{parse as parse_guest}; fn run() { parse_guest(source); }", "use lash_vm::VmInstance as GuestVm; fn run() { GuestVm::pristine(); }"]:
+        for source in ["use lash_dialect_typescript::{lower as lower_guest}; fn run() { lower_guest(source); }", "use lash_kernel_vm::KernelMachine as GuestVm; fn run() { GuestVm::import(program, bounds, parked); }"]:
             with self.subTest(source=source):
                 self.assertTrue(self.problems(source))
 
-    def test_vm_and_artifact_entry_points_are_refused(self):
-        for entry in ["ModuleArtifact::from_store_bytes", "LinkedModule::link", "vm.execute_compiled", "vm.compile_program"]:
+    def test_machine_entry_points_are_refused(self):
+        for entry in ["KernelMachine::start", "KernelMachine::import", "Machine::start"]:
             with self.subTest(entry=entry):
-                self.assertTrue(self.problems(f"fn run() {{ {entry}(bytes); }}"))
+                self.assertTrue(self.problems(f"fn run() {{ {entry}(program, bounds, start); }}"))
 
-    def test_worker_and_testing_items_are_allowed(self):
-        self.assertFalse(self.problems("fn run() { VmInstance::pristine(); }", "lash-vm-worker"))
-        self.assertFalse(self.problems('#[cfg(test)]\nmod tests { fn run() { lash_typescript::parse(source); } }'))
-        self.assertFalse(self.problems("fn run() { let note = \"lash_typescript::parse(source)\"; }"))
+    def test_printing_a_document_is_allowed(self):
+        self.assertFalse(self.problems("fn show() { lash_dialect_typescript::print(&document); }"))
+
+    def test_worker_kernel_and_testing_items_are_allowed(self):
+        self.assertFalse(self.problems("fn run() { KernelMachine::start(program, bounds, start); }", "lash-vm-worker"))
+        self.assertFalse(self.problems("fn run() { KernelMachine::start(program, bounds, start); }", "lash-kernel-vm"))
+        self.assertFalse(self.problems('#[cfg(test)]\nmod tests { fn run() { lash_dialect_typescript::lower(source, &environment); } }'))
+        self.assertFalse(self.problems("fn run() { let note = \"lash_dialect_typescript::lower(source)\"; }"))
 
     def test_repository_has_no_parent_vm_entry_points(self):
         self.assertEqual(CHECK.check(ROOT), [])

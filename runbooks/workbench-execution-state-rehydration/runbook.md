@@ -85,7 +85,7 @@ the post-restart code ran — never on the assistant's ability to recall.
   `fig1196_counter_next` to `fig1196_counter + 29` and finishes with it.
   **A later cell cannot mutate an earlier cell's binding:** every hydrated session
   global is re-declared `BindingKind::Const` in the next cell's ambient scope
-  (`crates/lash-typescript/src/lower/mod.rs`), so `fig1196_counter += 29` always
+  (`crates/lash-dialect-typescript/src/lower/mod.rs`), so `fig1196_counter += 29` always
   fails `TS_ASSIGN_CONST` and `let fig1196_counter = fig1196_counter + 29`
   fails `TS_TEMPORAL_DEAD_ZONE`, whatever keyword Phase 1 used. Dirty the root
   with a new name, not with a mutation; an accepted in-place mutation would be

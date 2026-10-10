@@ -159,27 +159,16 @@ jobs:
           kiln build --config=optimized --materializations=final \
             --build-report .benchmarks/perf-guard/build-report.json \
             //crates/lash-perf:lash-perf__bin \
-            //crates/lash-vm:perf__example //crates/lash-vm:profile__example \
-            //crates/lash-vm:function_perf__example \
             //crates/lash-vm-worker:lash-vm-worker__bin
           worker="$(python3 tools/buck2/outputs.py \
             --report .benchmarks/perf-guard/build-report.json \
             --label //crates/lash-vm-worker:lash-vm-worker__bin --single)"
           echo "LASH_VM_WORKER=${worker}" >> "$GITHUB_ENV"
 
-      # Two steps, not two commands in one step: a failure in the runtime
-      # profile used to abort before the lash_vm profile ran at all, so its
-      # rows never reached the log and a single dispatch could only ever
-      # report one of the two guards.
       - name: Run full runtime performance checks
         run: |
           python3 scripts/profile_runtime.py --profile full --release --scenario all --enforce-budgets --out .benchmarks/perf-guard/runtime.json --no-build --build-report .benchmarks/perf-guard/build-report.json \
             --duration-history .benchmarks/perf-history/runtime-full.jsonl
-
-      - name: Run full lash_vm performance checks
-        if: '!cancelled()'
-        run: |
-          python3 scripts/profile_lash_vm.py --iterations 2500 --profile-iterations 2500 --enforce-budgets --out .benchmarks/perf-guard/lash_vm.json --no-build --build-report .benchmarks/perf-guard/build-report.json
 
       # Only trunk extends the durable series. It runs before the summary and
       # upload steps rather than after them so a later step's failure cannot
@@ -195,7 +184,7 @@ jobs:
       - name: Publish performance summaries
         if: '!cancelled()'
         run: |
-          for report in runtime lash_vm; do
+          for report in runtime; do
             path=".benchmarks/perf-guard/${report}.json"
             if [ -f "${path}" ]; then
               python3 scripts/perfreport.py "${path}" >> "$GITHUB_STEP_SUMMARY"

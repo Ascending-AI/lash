@@ -10,6 +10,10 @@ import tomllib
 from typing import Any, Iterator
 
 REPO = Path(__file__).resolve().parents[1]
+# The kernel crates are a library of their own that any embedder links
+# directly, inside lash or not (docs/kernel/design.md §9); only lash's own
+# crates sit behind the facade.
+KERNEL_SET = re.compile(r"^lash_(kernel|dialect|ext)_")
 
 
 def dependency_tables(
@@ -43,7 +47,7 @@ def forbidden_crates() -> set[str]:
                 crate = alias.replace("-", "_")
                 # Workspace aliases retain the implementation crate name even
                 # when the published package is named lash-internal-*.
-                if crate in forbidden or not crate.startswith("lash_"):
+                if crate in forbidden or not crate.startswith("lash_") or KERNEL_SET.match(crate):
                     continue
                 forbidden.add(crate)
                 if crate in manifests:

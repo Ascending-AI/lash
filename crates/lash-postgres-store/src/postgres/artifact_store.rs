@@ -56,7 +56,7 @@ pub(crate) fn artifact_sql() -> &'static ArtifactSql {
     &ARTIFACT_SQL
 }
 
-pub(crate) const MODULE_ARTIFACT_NAMESPACE: &str = "vm_module";
+pub(crate) const MODULE_ARTIFACT_NAMESPACE: &str = "kernel_document";
 pub(crate) const PROCESS_ENV_NAMESPACE: &str = "process_execution_env";
 pub(crate) const PROCESS_DEFINITION_NAMESPACE: &str = "process_definition";
 pub(crate) const TOOL_MATERIAL_NAMESPACE: &str = "tool_material";
@@ -72,7 +72,7 @@ pub(crate) fn store_namespace(
 ) -> Option<&'static str> {
     use lash_core_execution::ArtifactStoreId;
     match store {
-        ArtifactStoreId::VmModule => Some(MODULE_ARTIFACT_NAMESPACE),
+        ArtifactStoreId::KernelDocument => Some(MODULE_ARTIFACT_NAMESPACE),
         ArtifactStoreId::ProcessEnv => Some(PROCESS_ENV_NAMESPACE),
         ArtifactStoreId::ProcessDefinition => Some(PROCESS_DEFINITION_NAMESPACE),
         ArtifactStoreId::ToolMaterial => Some(TOOL_MATERIAL_NAMESPACE),
@@ -91,7 +91,7 @@ fn definition_manifest(
         .iter()
         .map(|artifact| {
             let namespace = match &artifact.store {
-                ArtifactStoreId::VmModule => MODULE_ARTIFACT_NAMESPACE,
+                ArtifactStoreId::KernelDocument => MODULE_ARTIFACT_NAMESPACE,
                 ArtifactStoreId::ProcessEnv => PROCESS_ENV_NAMESPACE,
                 other => {
                     return Err(ArtifactStoreError::Backend(format!(

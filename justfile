@@ -248,7 +248,3 @@ package-workspace *args:
 # Deterministic DOM/API/SQL transcript acceptance (Surfaces A-E).
 workbench-transcript-projection-e2e:
   uv run --script "{{repo}}/scripts/workbench-transcript-projection-e2e.py"
-
-# Certify the selected Lash VM allocation, time, scaling and complete opcode budgets.
-perf-guard *args:
-  python3 "{{repo}}/scripts/profile_lash_vm.py" --enforce-budgets {{args}}

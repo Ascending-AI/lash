@@ -290,7 +290,7 @@ async fn sqlite_factory_delete_session_removes_only_the_selected_session() {
         .expect("insert host artifact blob");
         conn.execute(
             "INSERT INTO artifact_refs (namespace, artifact_ref, blob_ref)
-             VALUES ('vm_module', 'shared-module', 'host-artifact-blob')",
+             VALUES ('kernel_document', 'shared-module', 'host-artifact-blob')",
             [],
         )
         .expect("insert host artifact ref");
@@ -324,7 +324,7 @@ async fn sqlite_factory_delete_session_removes_only_the_selected_session() {
     let host_ref_count: i64 = conn
         .query_row(
             "SELECT COUNT(*) FROM artifact_refs
-             WHERE namespace = 'vm_module' AND artifact_ref = 'shared-module'",
+             WHERE namespace = 'kernel_document' AND artifact_ref = 'shared-module'",
             [],
             |row| row.get(0),
         )

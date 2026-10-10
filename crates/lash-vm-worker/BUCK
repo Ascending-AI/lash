@@ -72,7 +72,9 @@ lash_rust_unit_test(
         "testing",
     ],
     exec_properties = sized_exec_properties("lash-internal-vm-worker", "lash_vm_worker", "//crates/lash-vm-worker:lash-vm-worker__unit_test"),
-    extra_compile_data = [],
+    extra_compile_data = [
+        "//examples:typescript_host_flow_cells",
+    ],
     extra_data = [
         "//crates/lash-vm-worker:lash-vm-worker__bin",
     ],
@@ -827,7 +829,9 @@ lash_rust_feature_test(
         "testing",
     ],
     exec_properties = sized_exec_properties("lash-internal-vm-worker", "lash_vm_worker", "//crates/lash-vm-worker:lash-vm-worker__unit_test__fv_b2e3611b"),
-    extra_compile_data = [],
+    extra_compile_data = [
+        "//examples:typescript_host_flow_cells",
+    ],
     extra_data = [
         "//crates/lash-vm-worker:lash-vm-worker__bin",
     ],
@@ -857,7 +861,9 @@ lash_rust_feature_test(
         "testing",
     ],
     exec_properties = sized_exec_properties("lash-internal-vm-worker", "lash_vm_worker", "//crates/lash-vm-worker:lash-vm-worker__unit_test__fv_bc898383"),
-    extra_compile_data = [],
+    extra_compile_data = [
+        "//examples:typescript_host_flow_cells",
+    ],
     extra_data = [
         "//crates/lash-vm-worker:lash-vm-worker__bin__fv_bc898383",
     ],
@@ -887,7 +893,9 @@ lash_rust_feature_test(
         "testing",
     ],
     exec_properties = sized_exec_properties("lash-internal-vm-worker", "lash_vm_worker", "//crates/lash-vm-worker:lash-vm-worker__unit_test__fv_cf4910d0"),
-    extra_compile_data = [],
+    extra_compile_data = [
+        "//examples:typescript_host_flow_cells",
+    ],
     extra_data = [
         "//crates/lash-vm-worker:lash-vm-worker__bin",
     ],

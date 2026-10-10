@@ -1,20 +1,19 @@
-//! The Lash VM module-artifact port a store set supplies (ADR 0104, B2;
-//! ADR 0113).
+//! The module-artifact port a store set supplies (ADR 0113): the store of
+//! admitted kernel documents.
 //!
-//! The port stores a module's verified store bytes under its module
-//! reference, kept alive by referrer edges, and never decodes them: lash_vm
-//! owns the artifact codec and wraps this port in its typed
-//! `LashVmArtifacts`. The port sits here, below lash_vm, so
-//! [`StoreSet`](crate::StoreSet) can supply it like every other persistence
-//! port, and the artifacts an RLM session writes live in the storage that
-//! reopens the session.
+//! The port stores a document's canonical bytes under its identity, kept
+//! alive by referrer edges, and never decodes them: the kernel process engine
+//! owns the encoding and wraps this port in its typed `KernelDocuments`. The
+//! port sits here, below the engine, so [`StoreSet`](crate::StoreSet) can
+//! supply it like every other persistence port, and the documents an RLM
+//! session writes live in the storage that reopens the session.
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
-    ArtifactReferrer, ModuleArtifactCorruption, ModuleArtifactGeneration, ModuleArtifactRefusal,
-    ReferrerClaim, ResolvedArtifactCleanup,
+    ArtifactReferrer, ModuleArtifactCorruption, ModuleArtifactRefusal, ReferrerClaim,
+    ResolvedArtifactCleanup,
 };
 
 /// Durability tier established by the execution path's concrete store or host.
@@ -40,8 +39,6 @@ pub enum ArtifactStoreError {
     },
     #[error("failed to encode artifact: {0}")]
     Encode(String),
-    #[error("unsupported module artifact generation: {refusal}")]
-    UnsupportedGeneration { refusal: ModuleArtifactGeneration },
     /// Publish or acquire named a referrer that has a fence.
     #[error("artifact referrer `{referrer}` has ended")]
     ReferrerEnded { referrer: ArtifactReferrer },
@@ -111,7 +108,6 @@ impl From<crate::StoreError> for ArtifactStoreError {
 impl From<ModuleArtifactRefusal> for ArtifactStoreError {
     fn from(refusal: ModuleArtifactRefusal) -> Self {
         match refusal {
-            ModuleArtifactRefusal::Generation(refusal) => Self::UnsupportedGeneration { refusal },
             ModuleArtifactRefusal::Corrupt(source) => Self::StoredDataCorrupt { source },
         }
     }
@@ -150,9 +146,6 @@ impl From<ArtifactStoreError> for crate::PluginError {
             ArtifactStoreError::StoredDataCorrupt { source, .. } => {
                 module_artifact_refused(ModuleArtifactRefusal::Corrupt(source))
             }
-            ArtifactStoreError::UnsupportedGeneration { refusal } => {
-                module_artifact_refused(ModuleArtifactRefusal::Generation(refusal))
-            }
             ArtifactStoreError::StoreRefusal(refusal) => crate::PluginError::StoreRefusal(refusal),
             ArtifactStoreError::Incompatible { refusal } => {
                 crate::StoreError::Incompatible { refusal }.into()
@@ -173,20 +166,18 @@ impl From<ArtifactStoreError> for crate::PluginError {
 }
 
 fn module_artifact_refused(refusal: ModuleArtifactRefusal) -> crate::PluginError {
-    let code = match &refusal {
-        ModuleArtifactRefusal::Generation(_) => crate::RuntimeErrorCode::StoreIncompatible,
-        ModuleArtifactRefusal::Corrupt(_) => crate::RuntimeErrorCode::RuntimeStoreCorrupt,
-    };
     crate::PluginError::Runtime(
-        crate::RuntimeError::new(code, refusal.to_string()).with_cause(
-            crate::RuntimeErrorCause::ModuleArtifactRefused {
-                refusal: Box::new(refusal),
-            },
-        ),
+        crate::RuntimeError::new(
+            crate::RuntimeErrorCode::RuntimeStoreCorrupt,
+            refusal.to_string(),
+        )
+        .with_cause(crate::RuntimeErrorCause::ModuleArtifactRefused {
+            refusal: Box::new(refusal),
+        }),
     )
 }
 
-/// The Lash VM module-artifact store of one store set.
+/// The module-artifact store of one store set: the admitted kernel documents.
 ///
 /// A module is published once under its module reference (an opaque key) as
 /// its verified store bytes, and kept alive by referrer edges. Only the

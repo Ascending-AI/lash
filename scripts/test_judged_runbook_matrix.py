@@ -102,9 +102,11 @@ class JudgedRunbookMatrixTests(unittest.TestCase):
         self.assertTrue((ROOT / emitted[0]["runbook"]).is_file())
         for cell in ("turn.ts", "durable-process.ts"):
             self.assertTrue((ROOT / "examples" / "typescript-host-flows" / cell).is_file())
-        tests = ROOT / "crates" / "lash-typescript" / "tests"
-        self.assertIn("mod host_flow_examples;", (tests / "main.rs").read_text())
-        self.assertIn("typescript-host-flows", (tests / "host_flow_examples.rs").read_text())
+        embedding = ROOT / "crates" / "lash-vm-worker" / "src" / "embedding.rs"
+        self.assertIn(
+            "fn the_typescript_host_flow_examples_lower_against_their_host_catalogue",
+            embedding.read_text(),
+        )
         self.assertEqual(MATRIX.MATRIX.name, "judged-matrix.toml")
 
     def test_every_existing_runbook_has_exactly_one_typescript_row(self) -> None:

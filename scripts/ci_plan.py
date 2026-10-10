@@ -425,7 +425,8 @@ DOC_SUFFIXES = frozenset({".md", ".rst", ".txt"})
 RUST_RUNTIME_DOC_INPUTS = frozenset(
     {
         "crates/lash/docs/instrumentation-contract.md",
-        "docs/adr/0062-the-typescript-dialect-is-an-exact-ecma-262-subset.md",
+        "docs/kernel/library-text-json.md",
+        "docs/kernel/semantics.md",
     }
 )
 

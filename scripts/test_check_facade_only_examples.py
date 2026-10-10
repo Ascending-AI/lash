@@ -21,7 +21,7 @@ class FacadeOnlyExamplesTests(unittest.TestCase):
         self.write(
             "crates/lash/Cargo.toml",
             '[dependencies]\nlash-core = "0.1"\nlash-durable = "0.1"\n'
-            'lash-vm = "0.1"\n',
+            'lash-vm-runtime = "0.1"\n',
         )
         patch = mock.patch.object(gate, "REPO", self.repo)
         patch.start()
@@ -65,16 +65,24 @@ class FacadeOnlyExamplesTests(unittest.TestCase):
             gate.violations(),
         )
 
-    def test_rlm_has_no_lash_vm_source_exemptions(self) -> None:
+    def test_rlm_has_no_vm_runtime_source_exemptions(self) -> None:
         self.write(
             "examples/agent-workbench/Cargo.toml",
             '[dependencies]\nlash = { version = "0.1", features = ["rlm"] }\n',
         )
-        self.write("examples/agent-workbench/src/turns.rs", "use lash_vm::Program;\n")
+        self.write("examples/agent-workbench/src/turns.rs", "use lash_vm_runtime::KernelDocuments;\n")
         self.assertEqual(
-            [(Path("examples/agent-workbench/src/turns.rs"), 1, "lash_vm::")],
+            [(Path("examples/agent-workbench/src/turns.rs"), 1, "lash_vm_runtime::")],
             gate.violations(),
         )
+
+    def test_a_kernel_embedder_links_the_kernel_crates_directly(self) -> None:
+        self.write(
+            "examples/kernel-embedder/Cargo.toml",
+            '[dependencies]\nlash-kernel-vm = { path = "../../crates/lash-kernel-vm" }\n',
+        )
+        self.write("examples/kernel-embedder/src/lib.rs", "use lash_kernel_vm::KernelMachine;\n")
+        self.assertEqual([], gate.violations())
 
     def test_seeded_runbook_host_import_fails_the_gate(self) -> None:
         self.write("runbooks/rlm-smoke/src/main.rs", "use lash_core::LashCore;\n")
@@ -90,13 +98,13 @@ class FacadeOnlyExamplesTests(unittest.TestCase):
         )
         self.write(
             "examples/plain/src/main.rs",
-            "use engine::DurableBackend;\nuse lash_core as core;\nextern crate lash_vm;\n",
+            "use engine::DurableBackend;\nuse lash_core as core;\nextern crate lash_vm_runtime;\n",
         )
         self.assertEqual(
             [
                 (Path("examples/plain/src/main.rs"), 1, "engine::"),
                 (Path("examples/plain/src/main.rs"), 2, "lash_core"),
-                (Path("examples/plain/src/main.rs"), 3, "lash_vm"),
+                (Path("examples/plain/src/main.rs"), 3, "lash_vm_runtime"),
             ],
             gate.violations(),
         )

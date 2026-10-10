@@ -33,13 +33,11 @@ lash-sansio = { workspace = true }
 lash-vm-protocol = { workspace = true }
 async-trait = { workspace = true }
 blake3 = { workspace = true }
-rmp-serde = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["sync", "time", "macros"] }
 tokio-util = { workspace = true }
-tracing = { workspace = true }
 
 [dev-dependencies]
 # The durable laws drive the broker over the durable store, cut by the

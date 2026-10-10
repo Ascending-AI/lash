@@ -25,16 +25,16 @@ Key features:
     2. RLM: the model works in a persistent REPL
 6. **RLM, a custom code mode**
     1. The model writes code cells in a persistent REPL: state carries from cell to cell, and printed values come back as observations
-    2. Tools are typed functions the code calls, so one cell can loop over and combine many calls
-    3. Runs on a suspendable VM built for it; a crashed cell resumes from its snapshot without re-running finished tool calls
-    4. The VM supports multiple "frontend" dialects; TypeScript provided
+    2. Tools are typed functions the code calls, so one cell can loop over and combine many calls, and run them concurrently as tasks
+    3. Runs on the Lash VM, a small kernel language built for it; a cell saves its state whenever it waits, and a crashed cell resumes from there without re-running finished tool calls
+    4. Dialects lower to the kernel and none is built into it; TypeScript provided
     5. Model code runs in resettable worker processes, and every effect crosses the host
     6. Deferred tools resolve mid-session, and a granted tool stays callable after a restart
 7. **Workflows**
-    1. Durable workflows built on the same VM
-    2. The agent writes them in TypeScript, or in any dialect built on the VM
-    3. Every dialect compiles to the same representation
-    4. That representation can be edited programmatically, which is what a workflow-editing UI needs
+    1. Durable workflows built on the same kernel
+    2. The agent writes them in TypeScript, or in any dialect that lowers to the kernel
+    3. Every dialect lowers to one representation, the kernel document
+    4. A host reads and edits that document through typed transactions, with no dialect code, which is what a workflow-editing UI needs
 
 
 > **Alpha:** works today, API still moving fast — pin to an exact `=0.1.0-alpha.N` version when you embed.

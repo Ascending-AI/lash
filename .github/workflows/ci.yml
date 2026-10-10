@@ -397,7 +397,7 @@ jobs:
       - name: Hold the lash-runtime dependency boundary
         run: |
           set -euo pipefail
-          forbidden='lash-internal-protocol-rlm|lash-internal-vm-runtime|lash-internal-vm'
+          forbidden='lash-internal-protocol-rlm|lash-internal-vm-|lash-kernel-vm|lash-kernel-state|lash-dialect-'
           for resolution in "--no-default-features" "" "--no-default-features --features testing"; do
             # shellcheck disable=SC2086
             if cargo tree -p lash-runtime -e normal $resolution --locked | grep -E "$forbidden"; then
@@ -494,8 +494,9 @@ jobs:
         run: cargo shear
 
   # A dependency workspace's [patch] table is invisible to its consumers.
-  # Resolve lash_vm from this checkout as a Git dependency in a fresh external
-  # crate so every dependency needed by downstream users is carried explicitly.
+  # Resolve the kernel crates from this checkout as Git dependencies in a fresh
+  # external crate so every dependency needed by downstream users is carried
+  # explicitly.
   lash-vm-git-consumer:
     name: Lash VM Git consumer
     runs-on: ubuntu-24.04
@@ -526,7 +527,7 @@ jobs:
       - name: Install mold
         uses: ./.github/actions/setup-mold
 
-      - name: Check lash_vm Git consumer without patch mirror
+      - name: Check kernel Git consumer without patch mirror
         run: bash scripts/check-lash-vm-git-consumer.sh "${GITHUB_SHA}"
 
       - name: Report cache disk capacity

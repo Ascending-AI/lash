@@ -1033,13 +1033,6 @@ def root_buck(inventory: dict) -> str:
     )
     return aggregates + '''
 filegroup(
-    name = "dialect_deviation_register",
-    srcs = ["docs/adr/0062-the-typescript-dialect-is-an-exact-ecma-262-subset.md"],
-    copy = False,
-    visibility = ["PUBLIC"],
-)
-
-filegroup(
     name = "host_schemas",
     srcs = glob(["schemas/host/*/*.schema.json"]),
     copy = False,

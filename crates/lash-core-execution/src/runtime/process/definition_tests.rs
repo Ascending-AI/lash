@@ -12,7 +12,7 @@ const SIGNED_ENGINE_KIND: &str = "signed-engine";
 
 fn module(artifact_ref: &str) -> ArtifactName {
     ArtifactName {
-        store: ArtifactStoreId::VmModule,
+        store: ArtifactStoreId::KernelDocument,
         artifact_ref: artifact_ref.to_string(),
     }
 }
@@ -438,7 +438,7 @@ fn definition_id_golden_vectors_are_frozen() {
             "01",
             "0000000000000005",
             "656e763a31",
-            // vm_module "module:1"
+            // kernel_document "module:1"
             "0000000000000011",
             "02",
             "0000000000000008",
@@ -645,7 +645,7 @@ fn a_draft_refuses_empty_names_and_unknown_fields() {
         serde_json::json!({
             "engine_kind": SIGNED_ENGINE_KIND,
             "value": {"program": "payout"},
-            "artifacts": [{"store": {"store": "vm_module"}, "artifact_ref": "module:payout"}],
+            "artifacts": [{"store": {"store": "kernel_document"}, "artifact_ref": "module:payout"}],
         })
     );
     assert_eq!(

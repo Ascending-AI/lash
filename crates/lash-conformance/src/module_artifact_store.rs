@@ -17,25 +17,24 @@ pub struct ReopenableModuleArtifactStore {
     pub reopen: Arc<dyn Fn() -> Arc<dyn ModuleArtifactStore> + Send + Sync>,
 }
 
-/// Bytes a store can publish, and the content reference they publish under.
+/// Bytes a store can publish, and the content reference they publish under:
+/// the hex digest of the bytes, the shape of a kernel document's identity.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SampleArtifact {
     bytes: Vec<u8>,
-    module_ref: lash_sansio::ModuleRef,
+    key: String,
 }
 
 impl SampleArtifact {
     /// A sample that differs for each `name`.
     pub fn named(name: &str) -> Self {
         let bytes = format!(r#"{{"sample_module":"{name}"}}"#).into_bytes();
-        let module_ref = lash_sansio::ModuleRef::new(&lash_sansio::ContentHash::new(
-            blake3::hash(&bytes).to_hex().to_string(),
-        ));
-        Self { bytes, module_ref }
+        let key = blake3::hash(&bytes).to_hex().to_string();
+        Self { bytes, key }
     }
 
-    pub fn module_ref(&self) -> &lash_sansio::ModuleRef {
-        &self.module_ref
+    pub fn key(&self) -> &str {
+        &self.key
     }
 
     pub fn to_store_bytes(&self) -> Result<Vec<u8>, std::convert::Infallible> {
@@ -88,7 +87,7 @@ pub async fn lash_vm_artifact_store_durability_tier(
 pub async fn last_referrer_reclaims_module(store: Arc<dyn ModuleArtifactStore>) {
     let artifact = module("worker");
     let bytes = artifact.to_store_bytes().expect("module bytes");
-    let key = artifact.module_ref().as_str();
+    let key = artifact.key();
     let (first, first_claim) = host_claim();
     let (second, second_claim) = host_claim();
     store
@@ -126,7 +125,7 @@ pub async fn last_referrer_reclaims_module(store: Arc<dyn ModuleArtifactStore>) 
 pub async fn abandoned_start_reclaims_module(store: Arc<dyn ModuleArtifactStore>) {
     let artifact = module("abandoned");
     let bytes = artifact.to_store_bytes().expect("module bytes");
-    let key = artifact.module_ref().as_str();
+    let key = artifact.key();
     let start = lash_core::StartKey::for_host("abandoned-module");
     let journal = lash_core::ExecutionScope::runtime_operation("abandoned-module")
         .journal_identity()
@@ -155,7 +154,7 @@ pub async fn abandoned_start_reclaims_module(store: Arc<dyn ModuleArtifactStore>
 pub async fn carry_preserves_module(store: Arc<dyn ModuleArtifactStore>) {
     let artifact = module("carried");
     let bytes = artifact.to_store_bytes().expect("module bytes");
-    let key = artifact.module_ref().as_str();
+    let key = artifact.key();
     let (source, claim) = host_claim();
     let (destination, _) = host_claim();
     store
@@ -166,7 +165,7 @@ pub async fn carry_preserves_module(store: Arc<dyn ModuleArtifactStore>) {
         referrer: source.clone(),
         carries: vec![ArtifactCarry {
             artifact: ArtifactName {
-                store: ArtifactStoreId::VmModule,
+                store: ArtifactStoreId::KernelDocument,
                 artifact_ref: key.to_owned(),
             },
             to: destination.clone(),
@@ -209,7 +208,7 @@ pub async fn ended_referrer_fences_late_publication(store: Arc<dyn ModuleArtifac
         .await
         .expect("end pin");
     let refusal = store
-        .publish_module_artifact(&claim, artifact.module_ref().as_str(), &bytes)
+        .publish_module_artifact(&claim, artifact.key(), &bytes)
         .await
         .expect_err("fenced publication");
     assert!(
@@ -226,7 +225,7 @@ pub async fn survives_reopen(reopenable: ReopenableModuleArtifactStore) {
     let first_handle = Arc::downgrade(&open);
     let artifact = module("reopen");
     let bytes = artifact.to_store_bytes().expect("module bytes");
-    let key = artifact.module_ref().as_str();
+    let key = artifact.key();
     let (referrer, claim) = host_claim();
     open.publish_module_artifact(&claim, key, &bytes)
         .await

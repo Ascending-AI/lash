@@ -247,10 +247,10 @@ failure — do not press RED to "get to the real test".
 
 Require the registration in **both** rails: the rail is a 1.4 s scoped `/api/triggers`
 poll, so a registration created by A's turn must appear in B without B acting. Expect the
-**lifted process hash**, not the friendly name: a trigger target defined inline is a lifted
-process named by content hash (`LIFTED_PROCESS_NAME_PREFIX = "__process_"`,
-`crates/lash-vm/src/ast.rs:554`), so the rail renders `__process_<hash> ← ui.button.pressed`
-by design. Gate on the same registration appearing in both rails, not on the name the prompt
+**entry name**, not the friendly name the prompt asked for: a process started without a
+declared label is labelled with the name of the document entry it starts
+(`admit_kernel_process` in `crates/lash-vm-runtime/src/process.rs`), so the rail renders
+`<entry> ← ui.button.pressed` by design. Gate on the same registration appearing in both rails, not on the name the prompt
 asked for; a driver hunting for that name will report a false defect. Screenshot
 `02a-registered-{a,b,both}.png`; save `02a-triggers.json`.
 

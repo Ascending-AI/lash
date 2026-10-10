@@ -825,33 +825,17 @@ class DevTestTests(unittest.TestCase):
         self.assertIn("BUCK2-NOISE-MARKER-LINE", result.stdout)
         self.assertNotIn("failing targets:", result.stdout)
 
-    def test_quick_mode_forwards_test_env_and_shard_includes(self):
-        package = self.root / "crates/lash-typescript"
+    def test_quick_mode_forwards_test_env(self):
+        package = self.root / "crates/lash-sim"
         package.mkdir()
         (package / "BUCK").write_text("# fixture\n")
-        outcomes = self.root / "crates/lash-typescript/tests/test262/outcomes"
-        outcomes.mkdir(parents=True)
-        (outcomes / "built-ins.tsv").write_text("# rows\n")
-        vendored = self.root / "crates/lash-typescript/tests/test262/test/language/statements"
-        vendored.mkdir(parents=True)
-        (vendored / "for.js").write_text("await control.finish(true);\n")
+        (package / "lib.rs").write_text("// change\n")
         self.env["LASH_QUICK"] = "1"
         commands = json.loads(self.invoke("--dry-run").stdout)["commands"]
         test_commands = [c for c in commands if c[:2] == ["kiln", "test"]]
         self.assertTrue(test_commands)
         flags = [arg for c in test_commands for arg in c if arg.startswith("--test_env=")]
-        self.assertIn("--test_env=LASH_QUICK=1", flags)
-        self.assertIn(
-            "--test_env=LASH_TEST262_QUICK_INCLUDE=built-ins,language", flags)
-        # A selection-wide input keeps every shard whole.
-        (self.root / "crates/lash-typescript/tests/test262/census.tsv").write_text("# census\n")
-        flags = [
-            arg
-            for c in json.loads(self.invoke("--dry-run").stdout)["commands"]
-            for arg in c if arg.startswith("--test_env=")
-        ]
-        self.assertIn(
-            "--test_env=LASH_TEST262_QUICK_INCLUDE=*", flags)
+        self.assertEqual(["--test_env=LASH_QUICK=1"], sorted(set(flags)))
         # Without the knob the commands carry no quick flags at all.
         del self.env["LASH_QUICK"]
         commands = json.loads(self.invoke("--dry-run").stdout)["commands"]
@@ -902,20 +886,6 @@ class FormatterTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.module = dev_test_module()
-
-    def test_quick_includes_map_changed_paths_to_shards(self):
-        includes = self.module.quick_test262_includes
-        self.assertEqual(
-            includes(["crates/lash-typescript/tests/test262/test/language/foo/a.js"]),
-            {"language"})
-        self.assertEqual(
-            includes(["crates/lash-typescript/tests/test262/outcomes/built-ins.tsv"]),
-            {"built-ins"})
-        self.assertEqual(
-            includes(["crates/lash-typescript/tests/test262/census.tsv",
-                      "crates/lash-typescript/tests/test262/test/language/a.js",
-                      "crates/other/src/lib.rs"]),
-            {"*"})
 
     def test_failed_targets_reads_the_test_report(self):
         with tempfile.TemporaryDirectory() as tmp:

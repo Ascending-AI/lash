@@ -13,11 +13,6 @@ SCRIPT = ROOT / "scripts/check-dialect-boundary.py"
 ADAPTER = "crates/lash-protocol-rlm/src/dialect/typescript.rs"
 SHARED = "crates/lash-protocol-rlm/src/rlm_support.rs"
 HOST = "examples/toolbench/src/runtime.rs"
-FIXTURE_TEST = "crates/lash/tests/seam_proof_dialect.rs"
-FIXTURE_NAME = "Seam" + "ProofDialect"
-FIXTURE_FRONTEND = "Seam" + "ProofFrontend"
-FIXTURE_ID = "seam" + "-proof"
-FIXTURE_TAG = "<" + "seam>"
 
 CLEAN = {
     ADAPTER: (
@@ -31,24 +26,12 @@ CLEAN = {
         "use lash::rlm::TypescriptPrompts;\n"
         "fn host() { factory(config, CellDialect::typescript()); }\n"
     ),
-    FIXTURE_TEST: (
-        f"struct {FIXTURE_NAME};\n"
-        f"const LANGUAGE_ID: &str = \"{FIXTURE_ID}\";\n"
-        f"const OPEN: &str = \"{FIXTURE_TAG}\";\n"
-    ),
     "crates/lash-protocol-rlm/src/driver.rs": (
         "fn prompt() {}\n"
         "#[cfg(test)]\n"
         "mod tests {\n"
         "    fn t() { let _ = \"<typescript>\"; let _ = TypescriptPrompts::default(); }\n"
         "}\n"
-    ),
-    "docs/adr/0096-typescript-is-the-sole-rlm-dialect.md": (
-        "- The law in [the seam proof](../../crates/lash/tests/seam_proof_dialect.rs), "
-        f"`{FIXTURE_ID}` included.\n"
-    ),
-    "docs/adr/0105-the-shift-is-deterministic-workflow-code.md": (
-        "The evidence is the seam proof (`lane-seam-proof.report.md`).\n"
     ),
 }
 
@@ -84,35 +67,22 @@ class DialectBoundaryTests(unittest.TestCase):
         result = self.run_check(self.tree({}))
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_the_fixture_dialect_in_a_src_file_fails(self) -> None:
-        self.assert_fails(
-            {"crates/lash-protocol-rlm/src/testing/mod.rs": f"struct {FIXTURE_NAME};\n"},
-            "crates/lash-protocol-rlm/src/testing/mod.rs:1: the seam-proof test dialect",
-        )
-
-    def test_the_fixture_frontend_in_a_production_worker_fails(self) -> None:
-        self.assert_fails(
-            {"crates/lash-vm-worker/src/main.rs": f"worker_entry(&{FIXTURE_FRONTEND});\n"},
-            "crates/lash-vm-worker/src/main.rs:1: the seam-proof test dialect",
-        )
-
-    def test_the_fixture_frontend_in_its_test_worker_passes(self) -> None:
+    def test_prompt_text_in_a_cfg_test_module_file_passes(self) -> None:
         result = self.run_check(self.tree({
-            "crates/lash/tests/seam_proof_dialect/worker.rs":
-                f"worker_entry_with_frontend(&{FIXTURE_FRONTEND});\n",
+            "crates/lash-protocol-rlm/src/native/mod.rs": "#[cfg(test)]\nmod cell_reply_laws;\n",
+            "crates/lash-protocol-rlm/src/native/cell_reply_laws.rs":
+                'const REPLY: &str = "<typescript>print(1)</typescript>";\n',
         }))
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_the_fixture_dialect_in_a_docs_page_fails(self) -> None:
+    def test_prompt_text_in_a_production_module_file_fails(self) -> None:
         self.assert_fails(
-            {"docs/guide.md": f"Try the `{FIXTURE_ID}` dialect with `{FIXTURE_TAG}` cells.\n"},
-            "docs/guide.md:1: the seam-proof test dialect",
-        )
-
-    def test_an_adr_0096_mention_without_the_evidence_path_fails(self) -> None:
-        self.assert_fails(
-            {"docs/adr/0096-typescript-is-the-sole-rlm-dialect.md": f"{FIXTURE_NAME} proves it.\n"},
-            "docs/adr/0096-typescript-is-the-sole-rlm-dialect.md:1",
+            {
+                "crates/lash-protocol-rlm/src/native/mod.rs": "mod cell_reply;\n",
+                "crates/lash-protocol-rlm/src/native/cell_reply.rs":
+                    'const REPLY: &str = "<typescript>print(1)</typescript>";\n',
+            },
+            "TypeScript prompt text belongs in",
         )
 
     def test_the_concrete_type_carried_outside_the_adapter_fails(self) -> None:

@@ -138,7 +138,7 @@ impl ArtifactReferrerPorts {
             .partition(|name| matches!(name.store, ArtifactStoreId::Engine(_)));
         for name in store_names {
             let acquired = match &name.store {
-                ArtifactStoreId::VmModule => {
+                ArtifactStoreId::KernelDocument => {
                     self.modules
                         .acquire_module_artifact(claim, &name.artifact_ref)
                         .await

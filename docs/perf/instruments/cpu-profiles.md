@@ -29,11 +29,10 @@ certify that sampling succeeded. Failed captures discard previous profile output
 `--no-build --build-report .kiln/profiles/build.json` reuses the materialized
 binary. `--binary` also accepts an explicit executable: the caller must supply
 one built with symbols and frame pointers. The profiling flags choose the
-profiling platform even without `--release`. They also work for `--boundary`,
-`scripts/profile_runtime_stack.py` and `scripts/profile_lash_vm.py`. Matrix
-members have separate profile directories named by scenario, stack size or VM
-population beside the aggregate receipt; capture receipts name the workload
-receipt. VM scenario enumeration is not sampled.
+profiling platform even without `--release`. They also work for `--boundary` and
+`scripts/profile_runtime_stack.py`. Matrix members have separate profile
+directories named by scenario or stack size beside the aggregate receipt;
+capture receipts name the workload receipt.
 
 ## Direct `perf record`
 

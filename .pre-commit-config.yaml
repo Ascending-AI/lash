@@ -9,7 +9,7 @@
 # The vendored Test262 corpus (tests, upstream harness, LICENSE) is kept
 # byte-for-byte at its pinned upstream commit and sync-verified; "fixing"
 # its whitespace breaks the byte-comparison.
-exclude: '^(docs/pagefind/|crates/lash-typescript/tests/test262/(test/|harness/|LICENSE))'
+exclude: '^(docs/pagefind/|crates/lash-dialect-typescript/tests/test262/(test/|harness/|LICENSE))'
 repos:
   - repo: builtin
     hooks:

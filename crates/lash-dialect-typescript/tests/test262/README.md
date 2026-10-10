@@ -4,7 +4,7 @@ This directory vendors every [tc39/test262](https://github.com/tc39/test262)
 test the census accepts, at commit `3655e7464de3d52643ecddd4b5f9f4f3e7f62398`.
 Every file under `test/` and `harness/` is a byte-for-byte copy of the upstream
 file; `LICENSE` is the upstream BSD license. Normal tests and CI never access
-the network (ADR 0062).
+the network.
 
 ## Figures
 
@@ -20,9 +20,6 @@ print them, run:
 ```sh
 python3 scripts/check_test262_ratchet.py --base origin/main
 ```
-
-The `test262` and `test262_ratchet` test binaries print the same tallies in
-their output.
 
 ## Selection
 
@@ -42,7 +39,7 @@ the `skip-register/<kind>/<name>.tsv` shard of that census row):
 3. **Each of its flags.** A `flag` census row rules on every flag
    INTERPRETING.md defines:
    - `noStrict` and `raw` are skipped because the dialect is strict-only. Every
-     cell is one strict script (ADR 0062), and Test262 forbids running either
+     cell is one strict script, and Test262 forbids running either
      kind in strict mode.
    - `module` is skipped because a cell is a Script, never module code.
    - `CanBlockIsTrue` is skipped because the host never blocks.
@@ -59,108 +56,44 @@ runs and changes only when the selection does.
 
 ## Outcomes and the ratchet
 
-The `outcomes/**/*.tsv` shards record one outcome per selected test, sorted
-by path inside each file. There is no bare `fail` and no wildcard.
+The `outcomes/**/*.tsv` shards are main's record: one outcome per selected
+test, sorted by path inside each file. There is no bare `fail` and no
+wildcard.
 
 - **`pass`:** the test runs and meets the specification. For a negative test of
-  phase `parse`, this means the front end reports an early error
-  (`TS_SYNTAX_ERROR`, `TS_REGEX_INVALID`, `TS_DUPLICATE_BINDING`, …).
-- **`refused <code>`:** the dialect refuses the test with a real diagnostic.
-  The refusal is either static, or a shape-dependent refusal at run time that
-  the crate README's deviation register names. Every code in the record must be
-  the diagnostic of a `rejected` census row, and that row carries a probe that
-  fires it. ES5 constructs carry no feature tag, so their rulings are
-  `typescript`-kind rows (for example `accessors`, `binding-reassignment`,
-  `this`, `closed-shape-field-guard`).
-- **`fail <owner>`:** the test runs and diverges from the specification. The
-  owner is the ticket (`FIG-…`) or `registered-deviation:<name>` that owns the
-  divergence. Two cases count as divergences rather than refusals:
-  - an early-error diagnostic on a valid, non-negative test, because the front
-    end rejects a program ECMAScript accepts;
-  - an identifier the linker resolves as a module.
+  phase `parse`, this means the front end reports an early error.
+- **`refused <code>`:** the dialect refuses the test with a real diagnostic,
+  the code of a `rejected` census row.
+- **`fail <owner>`:** the test runs and diverges from the specification; the
+  owner is the ticket or registered deviation that owns the divergence.
 - **`harness <capability>`:** the runner cannot give the test what it needs
-  in-dialect. `harness-shim/unshimmable.tsv` names the capability for each
-  case: an include that cannot be rendered, `program-size` (the test fits the
-  64 KiB cell alone but not with the harness prepended), `host-effects` or
-  `binding-collision` (the test's own declarations meet a name a shim binds —
-  upstream's harness bindings are var-scoped and redeclarable, the shims' are
-  lexical). A fifth qualifier, `instruction-cost`, is not an unshimmable
-  capability: it names a selected test whose full run exceeds the CI lane's
-  cost bound, registered in `harness-cost.tsv` (see below).
+  in-dialect; `harness-shim/unshimmable.tsv` names the capability.
 
-The runner admits each test the way a cell is admitted: lowered, linked
-against a host environment, compiled from the linked artifact, then run under
-a deterministic instruction budget. The ratchet has three layers:
+The kernel runner (`//crates/lash-dialect-typescript:test262_kernel__test`,
+`tests/test262_kernel.rs`) lowers each recorded test with this crate and runs
+it on a kernel machine under the same deterministic bounds for every case; a
+bound trip is a failure. The record is partitioned into the laws
+`selection::shard_00` to `selection::shard_39`; run exact selectors in small
+groups to stay inside each action's deadline. `TEST262_KERNEL_FILTER` takes
+comma-separated path prefixes for a focused local rerun. For each case the
+runner prints `outcome\t<path>\t<class>\t<qualifier>`.
 
-- **Each outcome.** `test262` (the sample, in `//:dev_tests`), `test262_full`
-  (the whole selection as corpus-partition cases the Buck2 shards spread, in
-  the `//:workspace_tests` tail and the nightly `Test262 nightly` workflow)
-  fail when a test's outcome changes from its record in any
-  of three ways:
-  - a new failure;
-  - a pass that is not promoted;
-  - a refusal whose code changed.
-
-  A recorded failure matches any divergence; its evidence is not pinned. The
-  record's tallies are derived.
-- **Bookkeeping.** `test262_ratchet` checks that the selection listing equals
-  the record's keys, with no missing or stale entries. It prints the record's
-  tallies without executing the corpus (FIG-4761).
-- **Across commits.** `scripts/check_test262_ratchet.py --base <base>` (CI)
-  holds the record to its base: a test that passed keeps passing, and a
-  failure is new only where the base could not run the test (refused or
-  harness).
-
-To re-record after a deliberate change, run:
+The ratchet holds the kernel to the record. Collect the last three fields of
+every `outcome` line into a TSV and run:
 
 ```sh
-. ./env.sh
-kiln test //crates/lash-typescript:test262_full__test \
-  --test_arg=--ignored --test_arg=--exact --test_arg=bless_full_selection \
-  --test_sharding_strategy=disabled \
-  --local-test-execution --nocache_test_results \
-  --test_env=BUILD_WORKSPACE_DIRECTORY="$PWD" \
-  --test_env=TEST262_BLESS=1 \
-  --test_env=TEST262_EVIDENCE="$PWD/.buck2/test262-evidence.tsv"
+python3 scripts/check_test262_ratchet.py --base origin/main \
+  --kernel-outcomes <observations.tsv>
 ```
 
-This rewrites every `outcomes/**/*.tsv` shard from a full run and prints
-the record's tallies, and writes each divergence's and refusal's evidence to
-the evidence file. A shard whose directory selects no test is removed, and
-an emptied directory goes with it; bless twice and the second run diffs
-nothing.
-
-- a divergence keeps its recorded owner;
-- a new one is recorded as `UNTRIAGED`, which the record checks refuse until a
-  ticket owns it.
-
-Unbound dotted calls use the dialect's unresolved tool-call path, including
-`$262.evalScript(...)`; this harness does not implement script evaluation.
-A discarded call therefore refuses as `TS_UNAWAITED_TOOL` before later
-unknown-binding or `this` refusals. Its diagnostic span must name the call,
-and unused ordinary declarations must remain legal. The focused
-`fig_4570_unused_declarations_and_unresolved_calls_have_distinct_outcomes`
-law checks both boundaries and the four affected global-code records.
-
-## The cost register and the wall-clock backstop
-
-`harness-cost.tsv` registers the few selected tests whose full run exceeds
-the CI lane's cost bound. The runner records each as
-`harness instruction-cost` **without executing it**. The register's rules:
-
-- a test enters only with a ticket that owns making it affordable;
-- a test enters only when it exceeds the CI cost bound — never to hide a
-  wrong answer;
-- the register only shrinks: a registered path that is no longer selected, or
-  whose recorded outcome is no longer `harness instruction-cost`, fails the
-  record checks, so a test leaves the register by running inside the bound
-  again as the VM gets faster (FIG-3730), not by being edited out.
-
-Separately, a wall-clock backstop bounds any single test at 300 s. Worker
-threads cannot be killed once a test starts, so the coordinating thread
-records each test's start time and, once the backstop passes, reports the
-unfinished tests by name and exits non-zero: the CI job fails fast with names
-instead of hanging.
+It requires every recorded case exactly once. Every case the record marks
+`pass` must pass, or be excluded by an exact row of the deviation register
+(`crates/lash-dialect-typescript/deviations.md`); a diagnostic-wide refusal or
+a routed feature gap never exempts a regression. Every demotion is printed.
+The nightly `Test262 nightly` workflow runs the whole partition and this
+check. Without `--kernel-outcomes`, the script holds the record itself to its
+base: a test that passed keeps passing, and a failure is new only where the
+base could not run the test.
 
 ## Harness
 
@@ -177,8 +110,8 @@ renderings that keep upstream's pass/fail semantics and message text:
 - `Test262Error` is a factory for an error record named `Test262Error`, and
   `__test262ErrorThrower` is `Test262Error.thrower`.
 - `assert.throws` receives the expected class by name and compares it with the
-  caught error's `name`. The dialect has no constructor values. A VM fault
-  (`RuntimeError`) propagates as itself, so the record shows the fault or the
+  caught error's `name`. The dialect has no constructor values. A kernel error
+  propagates as itself, so the record shows the fault or the
   refusal it carries rather than a mismatched class.
 - Failure messages name an object by its kind. A plain object has no string
   conversion in the dialect, and a failing assertion must report its failure,
@@ -192,9 +125,6 @@ renderings that keep upstream's pass/fail semantics and message text:
 - `asyncHelpers.js` awaits the test function where upstream chains `.then`.
 
 Other renderings note their own differences in spelling.
-`every_harness_rendering_compiles_and_runs` and
-`assertion_harness_keeps_upstream_semantics` in `test262_sample.rs` run every
-rendering on its own and pin the assertion semantics.
 
 The dialect reserves dotted method-call syntax for its method allowlist. At
 ingestion, the runner rewrites a small set of spellings in code only; strings,
@@ -213,7 +143,7 @@ Clone Test262 separately, check out the pinned commit, and refresh the
 inventory first:
 
 ```sh
-node crates/lash-typescript/tests/test262/sync.mjs inventory /path/to/test262
+node crates/lash-dialect-typescript/tests/test262/sync.mjs inventory /path/to/test262
 ```
 
 Then, in order:
@@ -225,11 +155,12 @@ Then, in order:
 2. Regenerate the selection:
 
    ```sh
-   node crates/lash-typescript/tests/test262/sync.mjs sync /path/to/test262
-   node crates/lash-typescript/tests/test262/sync.mjs check /path/to/test262
+   node crates/lash-dialect-typescript/tests/test262/sync.mjs sync /path/to/test262
+   node crates/lash-dialect-typescript/tests/test262/sync.mjs check /path/to/test262
    ```
 
-3. Re-record the outcomes as above.
+3. Record the outcome of every newly selected test in `outcomes/`, and run
+   the ratchet above.
 
 The script refuses a checkout whose commit differs from the pin. `check` is
 non-mutating. It regenerates every derived file in memory and fails on any

@@ -1,137 +1,120 @@
 # VM workers
 
-`lash_vm_client::WorkerPool::new(PoolConfig::standard(WorkerEntry::helper(path)))` prewarms a
-credential-free helper. There is no in-process fallback. A host may instead
-register `worker_entry()` as its first action and
-configure `WorkerEntry::reexec()`. Register the
-entry before creating a runtime, loading credentials, opening stores, or
-constructing providers.
+A worker hosts one kernel machine (`lash_kernel_vm::KernelMachine`) for one
+execution between resets, and lowers and prints dialect source. The parent's
+pool, framing, queue admission and opaque state client live in
+`lash-vm-client`; the broker that commits each park lives in `lash-vm-broker`
+(ADR 0123).
+
+`lash_vm_client::WorkerPool::new(PoolConfig::standard(WorkerEntry::helper(path)))`
+prewarms a credential-free helper. There is no in-process fallback. A host may
+instead register `worker_entry()` as its first action and configure
+`WorkerEntry::reexec()`. Register the entry before creating a runtime, loading
+credentials, opening stores, or constructing providers.
 
 The launcher clears the environment. Immediately after exec, the entry closes
 all inherited descriptors except its socket. Linux uses `close_range` and
-requires kernel 5.9 or newer. Lash VM workers support Linux only. Non-Linux
-targets fail compilation.
-The language limits guest authority and the process contains native crashes.
-This does not provide OS confinement against a native escape.
+requires kernel 5.9 or newer. Workers support Linux only; elsewhere the entry
+refuses with `PoolError::UnsupportedPlatform`. The kernel limits guest
+authority and the process contains native crashes. This does not provide OS
+confinement against a native escape. Before guest work an owned child installs
+a CPU ceiling (`RLIMIT_CPU`) from the configured execution budget.
 
 `checkout` reserves the complete encoded input size and bounds its wait. A
-checkout owns one execution lease. `start` accepts source or stored artifact
-bytes and explicit `vm_run` descriptions encoded from `RunContext`. VM state is
-opaque in the parent; semantic decoding, linking, compilation, and execution
-happen in the worker. Effect requests carry typed MessagePack `AbilityOp`; a value
-answer carries heapless MessagePack `AbilityOutcome`, and a failure carries
-`ExecutionHostError`. Descriptions contain no grants or backing host handles.
-The parent broker must authorize requests against its admitted context.
+checkout owns one execution lease. `start` hands the worker the admitted
+document's encoding, a fresh start or opaque parked state, and the run's
+bounds; the worker validates and compiles the document. `run` runs ready tasks
+for one slice of charge units and answers `Parked`, `Slice` or `Ended`.
+Host reads (clock, random, projection reads) arrive mid-slice and are answered
+with `host_answer`; prints are collected with `take_printed`. `deliver` hands
+the machine one committed outcome, and `export` writes its state between
+slices. Parked state is opaque in the parent: only a worker imports it, under
+the document it names. Descriptions carry no grants or backing host handles;
+the broker admits every effect against its admitted context.
 
-Each TypeScript frontend owns one lazy parser thread, shared by its sequential
-Starts and preparation requests. Its reserved stack is 8 MiB plus 40,000 bytes
-per source byte at the 64 KiB source cap, about 2.45 GiB of address space. Pages
-commit only when touched. This preserves the standalone parser's arithmetic
-stack bound without creating a thread per cell. Both channels are rendezvous
-channels; each source and parsed tree moves out before the next request. The
-frontend retains no guest data or parse cache, and its drop joins the thread.
-A reset still drops and replaces the VM instance.
+`prepare` runs pure work in a worker: `Request::Lower` lowers source in a
+dialect to a kernel document against the effects the host supplies and the
+session bindings in scope, and `Request::Print` prints a document as source.
+Both read guest-controlled input, so both run here. A dialect's parser runs on
+a thread whose reserved stack is 8 MiB plus 40,000 bytes per source byte at
+the 64 KiB source cap; pages commit only when touched.
 
 The pool never retries guest execution. On infrastructure failure, it fences
-the checkout, kills and reaps the process, then replenishes its minimum.
-The broker must settle admitted operations and redrive the owning substrate
-invocation through its real journal. Carry the parent-owned `ExecutionBudget`
-through replacement. The backend's recovery store preserves known CPU,
-consumed attempts and unknown CPU attempts across substrate redrive, independently
-of positional effect journals. CPU is charged
-from process-clock progress and final `wait4` evidence, including a crash before
-the final frame. Physical cancellation does not decide the journaled winner.
+the checkout, kills and reaps the process, then replenishes its minimum. The
+run resumes from its last committed park through the durable engine. CPU is
+charged from process-clock progress and final `wait4` evidence, including a
+crash before the final frame. Physical cancellation does not decide the
+recorded winner.
 
-Release exchanges Reset and ResetDone before reuse. The reset drops the entire
-VmInstance. Dropping an unreleased checkout discards it. After an error, a limit,
-protocol violation, timeout, or reset failure, the process cannot return to the
-idle pool. Repeated failures trip a typed restart storm and wake queued work.
+Release exchanges `Reset` and `ResetDone` before reuse. The reset drops the
+machine, its host wire, its owner and its CPU ceiling. Dropping an unreleased
+checkout discards it. After an error, a limit, protocol violation, timeout, or
+reset failure, the process cannot return to the idle pool. Repeated failures
+trip a typed restart storm and wake queued work.
 
 Compute, serialization, and response phases have separate absolute deadlines.
 Repeating a phase cannot extend it. The no-response watchdog bounds IPC waits,
-bootstrap, and reset; it is not the compute deadline. Parent-owned effect waits
-pause execution deadlines. CPU and retry totals remain in the parent budget.
+bootstrap, and reset; it is not the compute deadline. Parent-owned host waits
+pause execution deadlines. CPU and attempt totals remain in the parent budget.
 
-`Checkout::park` parks the run on its pending request: a process-mode
-`ProcessBoundary`, or an effect the run can issue again (a resource operation,
-a durable sleep or a deferred host-tool wait, FIG-4159). The worker serializes its VM, and
-`release` resets the process, so the parent can admit nested compilation on a
-one-worker pool and then resume the continuation with `Start`; a run parked on
-an effect issues that request again. A run that cannot be captured where it
-stands declines with `ParkDeclined` and, once that is answered, issues its
-request again on the same checkout. A nested checkout still has a bounded queue
-and returns `CheckoutTimedOut` when no slot frees. It never waits silently
-forever.
+A run that parks releases its worker: between a park and its deliveries the
+run is committed state, so a one-worker pool completes a cell that awaits a
+process it started. A nested checkout still has a bounded queue and returns
+`CheckoutTimedOut` when no slot frees. It never waits silently forever.
 
-The standard presets retained after FIG-4162 are min 1/max 4, two queued items/eight
-MiB, four MiB frames, two MiB VM state, one MiB effect values, 64 KiB source,
-100,000 decoded nodes, 64 MiB charged decode allocation and five seconds IPC
-silence. Checkout is five seconds, compute thirty seconds, serialization five
-seconds, cancellation grace 100 ms and cumulative CPU ten seconds. An invocation
-allows three attempts; the pool permits eight failed replacements per minute.
-These are host bounds, not latency targets or guarantees for arbitrary guests.
-The optimized matrix and its sampling contract live in
-`crates/lash-perf/src/vm_worker_matrix/`; ADR 0123 records the measured result.
+The standard presets are min 1/max 4, two queued items/eight MiB, four MiB
+frames, two MiB parked state, one MiB effect values, 64 KiB source, 100,000
+decoded nodes, 64 MiB charged decode allocation and five seconds IPC silence.
+Runs allow fifty million charge units, 64 MiB of machine memory, call depth
+1,024, 1,024 live tasks, 256 requests per park and 1,024 `join` members.
+Checkout is five seconds, compute thirty seconds, serialization five seconds,
+cancellation grace 100 ms and cumulative CPU ten seconds. An invocation allows
+three attempts; the pool permits eight failed replacements per minute. These
+are host bounds, not latency targets or guarantees for arbitrary guests.
+`PoolConfig::rlm` raises parked state to 64 MiB, frames and queued input to
+128 MiB and charged decode allocation to 256 MiB. Hosts can supply a smaller
+`PoolConfig` for their own admitted workload.
 
-The shipped RLM/process service currently allows 64 MiB VM state, 128 MiB
-frames, 256 MiB charged decode allocation and 128 MiB queued input. The existing
-process and conformance fixtures exceed the pool's smaller baseline presets.
-This larger compatibility profile stays explicit: the small synthetic matrix
-does not justify rejecting existing valid process state. Hosts can supply a
-smaller `PoolConfig` for their own admitted workload.
-
-Effect values use explicit variants and IEEE number bits, preserving undefined,
-non-finite numbers, negative zero, tuples and record order. Projection identities use parent-owned namespaces and keys; they carry no
-backing host handles. Frames include their eight-byte envelope in
-the configured cap, and encoding stops before crossing that allocation bound.
-Linux native-process laws run in this lane. Persistence and kill points belong to
-the broker/adapter lanes.
+Effect values cross as JSON text with every number carried as written.
+Frames include their eight-byte envelope in the configured cap, and encoding
+stops before crossing that allocation bound.
 
 `lash-vm-protocol` defines `WORKER_PROTOCOL_VERSION` and
 `MIN_SUPPORTED_WORKER_PROTOCOL_VERSION` once for both sides. Pool admission
 checks the worker's `Ready` message before guest work. An out-of-range version
 returns `PoolError::ProtocolVersion` with both protocol versions, the supported
 range and both crate versions. Crate versions are diagnostic only. The wire
-version stays at 1 until 1.0. The `synthetic-next` acceptance feature moves both
-ends of the supported range to 2, so N and N+1 cannot pair at admission; reviewed shape changes refresh the committed
+version stays at 1 until 1.0. The `synthetic-next` acceptance feature moves
+both ends of the supported range to 2, so N and N+1 cannot pair at admission;
+reviewed shape changes refresh the committed
 `lash-vm-client/tests/snapshots/wire-v1*.snap` snapshots in place. After 1.0,
-the repository gate requires snapshot changes to bump the protocol version and retain the old
-versioned snapshot. The syntax-derived snapshot includes every service request
-and response variant, field type and Serde attribute, under both feature selections.
+the repository gate requires snapshot changes to bump the protocol version and
+retain the old versioned snapshot.
 
-Hosts select `WorkerEntry::helper(path)` or `Service::subprocess(path)` explicitly.
-The SDK's `Service::default()` uses the documented `lash-vm-worker` executable
-beside the host executable. It does not search PATH or a checkout. Tests receive
-an explicit helper path through the runner's `LASH_VM_WORKER` environment.
+Hosts select `WorkerEntry::helper(path)` or `Service::subprocess(path)`
+explicitly. The SDK's `Service::default()` uses the documented `lash-vm-worker`
+executable beside the host executable. It does not search PATH or a checkout.
+Tests receive an explicit helper path through the runner's `LASH_VM_WORKER`
+environment.
 
-SDK releases attach `lash-sdk-worker-VERSION-linux-ARCH.tar.gz` plus its SHA256.
-The archive contains `bin/lash-vm-worker`, optional reference sources under
-`sdk/`, and `manifest.json` with protocol and crate diagnostics, the explicit
-worker binary path, and file checksums. SDK hosts can build from registry
-packages; they do not need those reference sources, a matching checkout,
-compiler or build profile. Pass the extracted binary path to the service.
-`lash-vm-worker --version` prints JSON diagnostics, including the protocol range,
-crate version, target and build flags. Packaging requires an optimized helper
-without testing controls; runtime compatibility depends only on the protocol.
+SDK releases attach `lash-sdk-worker-VERSION-linux-ARCH.tar.gz` plus its
+SHA256. The archive contains `bin/lash-vm-worker`, optional reference sources
+under `sdk/`, and `manifest.json` with protocol and crate diagnostics, the
+explicit worker binary path, and file checksums. SDK hosts can build from
+registry packages; they do not need those reference sources, a matching
+checkout, compiler or build profile. Pass the extracted binary path to the
+service. `lash-vm-worker --version` prints JSON diagnostics, including the
+protocol range, crate version, target and build flags. Packaging requires an
+optimized helper without testing controls; runtime compatibility depends only
+on the protocol.
 
 For a single executable, `crates/lash/examples/worker_host.rs` registers its
-frontend and early re-exec entry before any runtime, credentials or stores.
+early re-exec entry before any runtime, credentials or stores.
 
 The native bootstrap lives in `entry.rs`. The core boundary gate allows only
 its argv read and empty-environment probe; every other ambient read in the
 worker library remains refused.
 
-RLM and process hosts share `lash_vm_client::service::Service`. The facade names
-its configuration as `lash::vm::WorkerService`, `WorkerPoolConfig`, `WorkerEntry`
-and `WorkerDeadlines`. Pure artifact inspection and state restoration also run in
-workers. Source and VM entry points remain in `lash-vm-worker`; the parent's pool,
-framing, queue admission and opaque state client live in `lash-vm-client`.
-
-Resident RLM cells request `capture_state_view`. Their completion carries the
-final outcome and the snapshot's guest metadata together. The parent adopts
-both without reopening and reserializing the completed snapshot in another
-worker, so state inspection cannot exhaust the cell's CPU budget after its
-final has arrived. Completion metadata is bounded and its definition IDs must
-match the opaque snapshot. A malformed completion refuses the turn with
-`ExecutionStateCaptureFailed` before any output enters history. Process runs
-request the outcome alone.
+RLM and process hosts share `lash_vm_client::service::Service`. The facade
+names its configuration as `lash::vm::WorkerService`, `WorkerPoolConfig`,
+`WorkerEntry` and `WorkerDeadlines`.

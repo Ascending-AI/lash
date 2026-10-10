@@ -260,19 +260,19 @@ run_runtime_feature_boundary_check() {
   [ "$count" -ge 130 ] || { echo "default-build lash-runtime tests regressed: $count"; exit 1; }
 
   if cargo tree -p lash-runtime -e normal --no-default-features --locked \
-    | grep -E 'lash-internal-protocol-rlm|lash-internal-vm-runtime|lash-internal-vm'; then
+    | grep -E 'lash-internal-protocol-rlm|lash-internal-vm-|lash-kernel-vm|lash-kernel-state|lash-dialect-'; then
     echo "default-off lash-runtime pulled RLM/Lash VM dependencies" >&2
     exit 1
   fi
 
   if cargo tree -p lash-runtime -e normal --locked \
-    | grep -E 'lash-internal-protocol-rlm|lash-internal-vm-runtime|lash-internal-vm'; then
+    | grep -E 'lash-internal-protocol-rlm|lash-internal-vm-|lash-kernel-vm|lash-kernel-state|lash-dialect-'; then
     echo "default lash-runtime pulled RLM/Lash VM dependencies" >&2
     exit 1
   fi
 
   if cargo tree -p lash-runtime -e normal --no-default-features --features testing --locked \
-    | grep -E 'lash-internal-protocol-rlm|lash-internal-vm-runtime|lash-internal-vm'; then
+    | grep -E 'lash-internal-protocol-rlm|lash-internal-vm-|lash-kernel-vm|lash-kernel-state|lash-dialect-'; then
     echo "testing-only lash-runtime pulled RLM/Lash VM dependencies" >&2
     exit 1
   fi
@@ -367,8 +367,7 @@ run_s3_conformance() {
 #     pass here.
 #
 #   scripts/ci-stack-budget.sh, scripts/confidence-gate.sh fast shards,
-#   scripts/profile_runtime.py, scripts/profile_lash_vm.py,
-#   the browser E2E leg, and the package feature checks
+#   scripts/profile_runtime.py, the browser E2E leg, and the package feature checks
 #     Breadth this gate trades for wall-clock. Each resolves a feature graph
 #     or a container stack of its own — a `-p` build is a different
 #     feature-unified graph, not a slice of the workspace one — and CI shards

@@ -2,8 +2,8 @@ schema_version = 3
 judge_model_floor = "gpt-5.6-sol"
 artifact_layout = "<run-root>/<scenario>/<label>"
 
-# ADR 0096: one IR and VM support extensible dialects. TypeScript is the
-# only shipped dialect today, so each judged RLM scenario has one row.
+# ADR 0139: every dialect lowers to one kernel. The judged RLM scenarios are
+# written for the TypeScript dialect, so each has one row.
 # `language` names the dialect these rows exercise; the no-RLM rows
 # below carry `standard`, which is a mode rather than a language.
 language = "typescript"
@@ -86,6 +86,9 @@ typescript-host-flows = { tier = "frontier", model = "openai/gpt-5.6-sol" }
 # RLM session served it, and these rows cannot make that claim.
 [no_rlm_session_only]
 workbench-valid-empty-completion = { tier = "deterministic", model = "scripted-provider" }
+# Re-judged against the kernel-document runbook (FIG-5717): it opens no RLM
+# session and calls no provider, and a judge reads the page and the run's SSE
+# overlay, so it stays a judged `standard` row at the deterministic tier.
 workflow-editor-authoring = { tier = "deterministic", model = "scripted-provider" }
 
 # Live-model scripted harnesses with deterministic shell oracles. They open an

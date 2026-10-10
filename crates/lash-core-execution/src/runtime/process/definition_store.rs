@@ -52,7 +52,7 @@ use crate::{
 /// [`Self::end_process_definition_referrer`].
 ///
 /// `manifest` is always the descriptor's store-set share: names under
-/// [`ArtifactStoreId::VmModule`] and [`ArtifactStoreId::ProcessEnv`],
+/// [`ArtifactStoreId::KernelDocument`] and [`ArtifactStoreId::ProcessEnv`],
 /// which live in the descriptor's own database. Any other store in it is
 /// refused.
 #[async_trait::async_trait]
@@ -339,7 +339,7 @@ fn partition_manifest(
     let mut engine_names = Vec::new();
     for artifact in draft.artifacts() {
         match &artifact.store {
-            ArtifactStoreId::VmModule | ArtifactStoreId::ProcessEnv => {
+            ArtifactStoreId::KernelDocument | ArtifactStoreId::ProcessEnv => {
                 store_set.push(artifact.clone());
             }
             ArtifactStoreId::Engine(_) => engine_names.push(artifact.clone()),

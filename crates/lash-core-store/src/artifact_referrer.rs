@@ -729,7 +729,8 @@ impl ReferrerClaim {
 #[serde(tag = "store", content = "kind", rename_all = "snake_case")]
 pub enum ArtifactStoreId {
     ProcessEnv,
-    VmModule,
+    /// The admitted kernel documents behind the module artifact port.
+    KernelDocument,
     /// A process engine's own store, by engine kind.
     Engine(String),
     /// The immutable process-definition descriptors, keyed by their
@@ -748,7 +749,7 @@ impl ArtifactStoreId {
     /// The store behind the module artifact port.
     #[must_use]
     pub const fn module() -> Self {
-        Self::VmModule
+        Self::KernelDocument
     }
 }
 

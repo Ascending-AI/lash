@@ -50,8 +50,6 @@ EXPECTED_INTERNAL_PACKAGES = {
     "lash-vm-client": "lash-internal-vm-client",
     "lash-vm-protocol": "lash-internal-vm-protocol",
     "lash-vm-worker": "lash-internal-vm-worker",
-    "lash-typescript": "lash-internal-typescript",
-    "lash-vm": "lash-internal-vm",
 }
 
 
@@ -248,7 +246,7 @@ class PublishWorkspaceTest(unittest.TestCase):
         layers = publish_workspace.compute_layers(packages)
         self.assertEqual(layers, [["a", "b"], ["top"]])
 
-    def test_lash_regress_publishes_before_lash_vm(self) -> None:
+    def test_lash_regress_publishes_before_the_regex_extension(self) -> None:
         publish_workspace = load_publish_workspace_module()
         packages = {
             "lash-regress": {
@@ -257,15 +255,15 @@ class PublishWorkspaceTest(unittest.TestCase):
                 "version": "1",
                 "workspace_dependencies": set(),
             },
-            "lash-vm": {
-                "id": "lash-vm",
-                "name": "lash-internal-vm",
+            "lash-ext-regex-ecma": {
+                "id": "lash-ext-regex-ecma",
+                "name": "lash-ext-regex-ecma",
                 "version": "1",
                 "workspace_dependencies": {"lash-regress"},
             },
         }
         layers = publish_workspace.compute_layers(packages)
-        self.assertEqual(layers, [["lash-regress"], ["lash-vm"]])
+        self.assertEqual(layers, [["lash-regress"], ["lash-ext-regex-ecma"]])
 
     def test_compute_layers_skips_already_completed_crates(self) -> None:
         # A resumed run seeds the already-visible crate as completed, so the

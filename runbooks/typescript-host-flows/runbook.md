@@ -12,13 +12,14 @@ Workbench worker restart.
 
 ## The contract this row judges
 
-TypeScript is the only shipped cell dialect today
-([ADR 0096](../../docs/adr/0096-typescript-is-the-sole-rlm-dialect.md)).
+TypeScript is the only shipped cell dialect
+([ADR 0139](../../docs/adr/0139-the-lash-vm-is-a-dialect-free-kernel.md)).
 This row judges whether the model can author the catalogue's host flows first-shot.
 
-A process is an ordinary uncalled `async` arrow, and every control is a leaf
-tool the catalogue declares
-([ADR 0095](../../docs/adr/0095-processes-are-values-and-process-controls-are-tools.md)):
+A process is an ordinary uncalled `async` arrow, which the dialect lowers to
+an entry of the cell's document, and every control is an effect the catalogue
+declares
+([ADR 0139](../../docs/adr/0139-the-lash-vm-is-a-dialect-free-kernel.md)):
 
 | Intent | Shipped spelling |
 | --- | --- |
@@ -167,11 +168,9 @@ Stop everything started by this row. Write `fluency-hits.json` even when empty.
 | Full resumed judged turn finishes correctly | | `04-resumed-judge.json` |
 | No deleted form reached for; hit list recorded | | `fluency-hits.json` |
 
-The exact first-settled rejection ordering remains covered by the TypeScript
-conformance tests in `crates/lash-typescript/tests/agent_surface.rs` —
-`uncaught_throw_fails_a_durable_process` and
-`durable_process_resumes_after_shared_promise_batch` — and the worked cells this
-row's contract table quotes are linked in
-`crates/lash-typescript/tests/host_flow_examples.rs`, while this live row
+The worked cells this row's contract table quotes are lowered against their
+host catalogue by
+`the_typescript_host_flow_examples_lower_against_their_host_catalogue`
+(`crates/lash-vm-worker/src/embedding.rs`), while this live row
 covers the host-level aggregate rejection semantics and the lifecycle a model
 has to author unaided.

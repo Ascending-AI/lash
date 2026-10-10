@@ -108,7 +108,7 @@ def outer_summary(passed, failed=0):
     return f'\ntest result: {"FAILED" if failed else "ok"}. {passed} passed; {failed} failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.00s\n\n'
 
 
-# Several test threads, as `//crates/lash-typescript:integration__test` prints:
+# Several test threads, as a kernel test binary prints:
 # each test re-runs itself, or a helper, in children that write to the
 # parent's stdout. One child fails as its parent expects, one prints a name
 # the binary did not run, and another test's record lands inside a child's block.

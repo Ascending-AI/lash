@@ -1,13 +1,14 @@
 name: Test262 nightly
 
-# FIG-3646: the whole Test262 selection, uncached, once a day. The PR lane
-# runs a stratified sample (`//crates/lash-typescript:test262__test`, in
-# `//:dev_tests`) and the merge group runs the full target in the
-# `//:workspace_tests` tail, where an unchanged input set is a cache hit. This
-# run executes it regardless, so a nondeterministic outcome, or one that only
-# a cold run shows, surfaces within a day rather than on the next change to
-# the dialect. The corpus is vendored at the pinned commit; nothing here
-# touches the network beyond the build pool (ADR 0062).
+# The whole Test262 selection on the kernel, uncached, once a day: the
+# TypeScript dialect lowers every vendored test and a kernel machine runs it.
+# The merge group runs the same target in the `//:workspace_tests` tail, where
+# an unchanged input set is a cache hit. This run executes it regardless, so a
+# nondeterministic outcome, or one that only a cold run shows, surfaces within
+# a day rather than on the next change to the dialect. The kernel's outcomes
+# are then held to the checked-in record: every recorded pass passes, or the
+# deviation register names it (ADR 0139). The corpus is vendored at the
+# pinned commit; nothing here touches the network beyond the build pool.
 on:
   schedule:
     - cron: "43 3 * * *"
@@ -68,17 +69,19 @@ jobs:
           set -euo pipefail
           scripts/ci/buck2-test.sh test262-full \
             --no-test-cache --test_arg=--nocapture \
-            //crates/lash-typescript:test262_full__test \
-            //crates/lash-typescript:test262_ratchet__test
+            //crates/lash-dialect-typescript:test262_kernel__test
 
-      - name: Report the figures
+      - name: Hold the kernel to the outcome record
         if: always()
         shell: bash
         run: |
-          log="$RUNNER_TEMP/test262-full-test-results/root/crates/lash-typescript/test262_ratchet__test/test.log"
-          if [ -f "$log" ]; then
-            grep -h '^Test262:' "$log" >> "$GITHUB_STEP_SUMMARY" || true
-          fi
+          set -euo pipefail
+          observed="$RUNNER_TEMP/test262-kernel-outcomes.tsv"
+          find "$RUNNER_TEMP/test262-full-test-results" -type f -path '*test262_kernel__test*' -print0 \
+            | xargs -0 --no-run-if-empty cat \
+            | awk -F '\t' '$1 == "outcome" { print $2 "\t" $3 "\t" $4 }' > "$observed"
+          python3 scripts/check_test262_ratchet.py --base HEAD --kernel-outcomes "$observed" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Remove client credentials
         if: always()

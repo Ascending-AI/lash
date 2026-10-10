@@ -93,7 +93,7 @@ where
 {
     let handles = make().open;
     let artifact = module("racing");
-    let key = artifact.module_ref().as_str().to_owned();
+    let key = artifact.key().to_owned();
     let bytes = artifact.to_store_bytes().expect("module bytes");
     let frame = ArtifactReferrer::FrameEnvironment(FrameEnvironmentId::new(
         lash_core::SessionId::fixture(format!("artifact-race-{}", HostArtifactPin::mint())),
@@ -155,7 +155,7 @@ where
 {
     let handles = make().open;
     let artifact = module("pinned");
-    let module_ref = artifact.module_ref().as_str();
+    let module_ref = artifact.key();
     let module_bytes = artifact.to_store_bytes().expect("module bytes");
     let env = lash_core::ProcessExecutionEnvSpec::new(
         lash_core::AdmittedPluginConfig::default(),
@@ -276,7 +276,7 @@ where
 {
     let handles = make().open;
     let artifact = module("idempotent");
-    let key = artifact.module_ref().as_str();
+    let key = artifact.key();
     let bytes = artifact.to_store_bytes().expect("module bytes");
     let env = lash_core::ProcessExecutionEnvSpec::new(
         lash_core::AdmittedPluginConfig::default(),
@@ -305,7 +305,7 @@ where
         referrer: source.clone(),
         carries: vec![ArtifactCarry {
             artifact: ArtifactName {
-                store: ArtifactStoreId::VmModule,
+                store: ArtifactStoreId::KernelDocument,
                 artifact_ref: key.to_owned(),
             },
             to: destination.clone(),

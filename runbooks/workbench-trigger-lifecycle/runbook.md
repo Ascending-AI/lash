@@ -183,9 +183,9 @@ Poll `GET /api/triggers` until it returns exactly one enabled registration named
 `subscription_id`, source type, and source configuration, and require the registrations
 rail to show the target and source with the registration alias in its details/title and a
 **disable** action. The rendered name is the **process label**, not the trigger alias, and a
-target defined inline is a *lifted* process named by content hash
-(`LIFTED_PROCESS_NAME_PREFIX = "__process_"`, `crates/lash-vm/src/ast.rs:554`), so the row
-renders as `__process_<hash> ← mail.received`, not as a readable process name. The
+process started without a declared label is labelled with the name of the document entry it
+starts (`admit_kernel_process` in `crates/lash-vm-runtime/src/process.rs`), so the row renders
+as `<entry> ← mail.received`. The
 `trigger key` is likewise the **derived subscription key** (`derived/v3/<hash>`), not the
 alias; the alias appears as a separate `alias lifecycle-forwarder` field, and only in the
 row's `title` attribute — the visible text truncates it away, so read the alias from the

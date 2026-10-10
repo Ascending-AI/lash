@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The code-mode dialect seam stays a seam (ADR 0096).
+"""The code-mode dialect seam stays a seam (ADR 0139).
 
 A host selects its dialect by naming it where it constructs the RLM protocol
 (`CellDialect::typescript()`), and everything that words prompts in a language
@@ -12,14 +12,11 @@ lives in that dialect's prompt adapter. This check fails when:
   (`TYPESCRIPT_TOOL_BINDING_KEY`, `required_tool_typescript_*`, the
   `typescript.tool` key, `StreamMessageKind::TypescriptCode`);
 - TypeScript prompt text appears in shared code-mode production sources outside
-  the TypeScript adapter;
-- the test-only seam-proof dialect leaks out of the lash integration tests. Its
-  only permitted mention elsewhere is ADR 0096's evidence line citing the test
-  file.
+  the TypeScript adapter.
 
 Test code (test modules at the end of a file, `tests/`, `testing/` and
-`*_tests.rs` files) is exempt from the first three rules: TypeScript tests
-select TypeScript.
+`*_tests.rs` files, and a file its parent declares as a `#[cfg(test)]`
+module) is exempt: TypeScript tests select TypeScript.
 """
 
 from __future__ import annotations
@@ -57,16 +54,13 @@ TYPESCRIPT_PROMPT_TEXT = re.compile(
     r"</?typescript>|console\.log|Promise<|HistoryItem\[\]|Promise\.race"
 )
 
-SEAM_PROOF = re.compile(r"SeamProof(?:Dialect|Frontend)|(?<![\w-])seam-proof(?![\w.-])|</?seam>")
-SEAM_PROOF_HOME = "crates/lash/tests/"
-SEAM_PROOF_EVIDENCE_ADR = "docs/adr/0096-"
-SEAM_PROOF_EVIDENCE_PATH = "crates/lash/tests/seam_proof_dialect.rs"
-CHECK_FILES = (
-    "scripts/check-dialect-boundary.py",
-    "scripts/test_check_dialect_boundary.py",
-)
-
 TEST_MODULE_TAIL = re.compile(r"^#\[cfg\(test\)\]\s*\n(?:#\[[^\n]*\]\s*\n)*mod\s", re.MULTILINE)
+
+# `#[cfg(test)] mod name;`: the module's file is test code.
+TEST_MODULE_DECLARATION = re.compile(
+    r"^\s*#\[cfg\(test\)\]\s*\n(?:\s*#\[[^\n]*\]\s*\n)*\s*mod\s+([a-z_][a-z0-9_]*)\s*;",
+    re.MULTILINE,
+)
 
 
 def tracked_files(root: Path) -> list[str]:
@@ -86,9 +80,30 @@ def production_text(text: str) -> str:
     return text[: match.start()] if match else text
 
 
+def test_module_files(root: Path, paths: list[str]) -> set[str]:
+    """The files that a parent module declares under `#[cfg(test)]`."""
+    files: set[str] = set()
+    for path in paths:
+        if not path.endswith(".rs"):
+            continue
+        try:
+            text = (root / path).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        parent = Path(path).parent
+        stem = Path(path).stem
+        children = parent if stem in ("mod", "lib", "main") else parent / stem
+        for name in TEST_MODULE_DECLARATION.findall(text):
+            files.add(str(children / f"{name}.rs"))
+            files.add(str(children / name / "mod.rs"))
+    return files
+
+
 def violations(root: Path) -> list[str]:
     found: list[str] = []
-    for path in tracked_files(root):
+    paths = tracked_files(root)
+    test_files = test_module_files(root, paths)
+    for path in paths:
         file = root / path
         if not file.is_file():
             continue
@@ -97,17 +112,7 @@ def violations(root: Path) -> list[str]:
         except UnicodeDecodeError:
             continue
 
-        if path not in CHECK_FILES and not path.startswith(SEAM_PROOF_HOME):
-            for number, line in enumerate(text.splitlines(), start=1):
-                if not SEAM_PROOF.search(line):
-                    continue
-                if path.startswith(SEAM_PROOF_EVIDENCE_ADR) and SEAM_PROOF_EVIDENCE_PATH in line:
-                    continue
-                found.append(
-                    f"{path}:{number}: the seam-proof test dialect lives only in {SEAM_PROOF_HOME}"
-                )
-
-        if not path.endswith(".rs") or TEST_PATH.search(path):
+        if not path.endswith(".rs") or TEST_PATH.search(path) or path in test_files:
             continue
         production = production_text(text)
         for number, line in enumerate(production.splitlines(), start=1):
@@ -135,7 +140,7 @@ def main() -> int:
         print(violation, file=sys.stderr)
     if found:
         print(
-            f"check-dialect-boundary: {len(found)} violation(s); see ADR 0096",
+            f"check-dialect-boundary: {len(found)} violation(s); see ADR 0139",
             file=sys.stderr,
         )
         return 1

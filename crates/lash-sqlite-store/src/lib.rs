@@ -446,7 +446,7 @@ fn process_encode_json<T: serde::Serialize>(
 pub enum PersistedArtifactKind {
     CheckpointManifest,
     CheckpointComponent,
-    VmModule,
+    KernelDocument,
     ProcessExecutionEnv,
     ProcessDefinition,
     ToolMaterial,
@@ -489,7 +489,7 @@ impl BlobArtifactDescriptor {
         ])
     }
 
-    pub fn lash_vm_module() -> Self {
+    pub fn kernel_document() -> Self {
         Self::new(vec![
             BlobStorageHint::Compressible,
             BlobStorageHint::LargePayload,

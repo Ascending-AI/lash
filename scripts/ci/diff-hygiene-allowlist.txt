@@ -7,7 +7,7 @@ third-party/Cargo.lock
 # The generated Test262 outcome record: `outcomes/**/*.tsv` shards, one per
 # test directory cut as deep as the tree is hot (FIG-3646, FIG-3727),
 # ratcheted by scripts/check_test262_ratchet.py.
-crates/lash-typescript/tests/test262/outcomes/*.tsv
+crates/lash-dialect-typescript/tests/test262/outcomes/*.tsv
 
 # sync.py generates the complete first-party Lash target and feature-lane graph.
 crates/lash/BUCK

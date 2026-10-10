@@ -19,10 +19,7 @@ fi
 started=$SECONDS
 # --lib excludes development dependencies: a host must never need testing.
 bash scripts/ci/facade-production.sh
-# This publish-cycle development edge was hidden by workspace unification
-# (FIG-5015/FIG-5042). Exercise its isolated graph before the shared graph.
-cargo check --package lash-internal-vm "${args[@]}"
 cargo check --workspace "${args[@]}"
 # The host endpoint witness is another independently reproduced omission.
 cargo check --package integrator-contract "${args[@]}"
-printf 'cargo parity passed: workspace and 2 isolated packages in %ss\n' "$((SECONDS - started))"
+printf 'cargo parity passed: workspace and 1 isolated package in %ss\n' "$((SECONDS - started))"
