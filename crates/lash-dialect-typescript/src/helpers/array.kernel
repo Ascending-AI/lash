@@ -23,6 +23,7 @@ use text.join
 use text.utf16_compare
 use list.len
 use list.copy
+use list.slice
 use list.sort
 use ts.require_object_coercible
 use ts.get
@@ -344,6 +345,14 @@ body {
   let stop = invoke ts.array.argument(args, 1)
   let end = invoke ts.array.bound(stop, length, length)
   if num.lt(4294967295.0, num.sub(end, start)) { throw error.new("RangeError", "Invalid array length", null) }
+  if same(kind(this), "list") {
+    let output = list.slice(this, start, end)
+    # Bound coercion can shrink the source after its length was captured.
+    # The removed positions still contribute holes to the result's length.
+    let count = num.max(num.sub(end, start), 0)
+    while num.lt(list.len(output), count) { set output[list.len(output)] = () }
+    return output
+  }
   let output = []
   while num.lt(start, end) {
     let present = invoke ts.has_own(this, start)
@@ -542,14 +551,26 @@ body {
   let output = []
   do invoke ts.set(output, "length", length)
   let index = 0.0
+  let actual_list = same(kind(this), "list")
   while num.lt(index, length) {
     if num.lt(index, 0) { break }
-    let present = invoke ts.has_own(this, index)
+    let present = false
+    let value = absent
+    if actual_list {
+      # Callbacks can delete slots or shorten the source. Test its live
+      # length before the direct read, then distinguish holes from undefined.
+      if num.lt(index, list.len(this)) {
+        set value = this[index]
+        set present = bool.not(same(value, ()))
+      }
+    } else {
+      set present = invoke ts.has_own(this, index)
+      if present { set value = invoke ts.get(this, index) }
+    }
     if present {
-      let value = invoke ts.get(this, index)
       let passed = [value, num.to_float(index), this]
       let answer = apply callback(context, passed)
-      do invoke ts.set(output, index, answer)
+      set output[index] = answer
     }
     set index = num.add(index, 1.0)
   }

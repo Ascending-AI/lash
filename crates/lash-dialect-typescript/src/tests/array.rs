@@ -182,6 +182,28 @@ fn callbacks_snapshot_length_but_read_live_properties() {
         await finish(indices === '012' && mapped.join(',') === '11,12,13'
             && sparse.length === 3 && !(1 in sparse) && sparse[2] === 6);
     "#);
+    law(r#"
+        const a = [undefined, 2, 3, 4]; let indices = ''; const calls = [];
+        const mapped = a.map(function(value, index, receiver) {
+            indices += index; calls.push(arguments);
+            if (index === 0) { delete a[1]; a.length = 3; a.push(5, 6); }
+            if (index === 2) { a.length = 3; }
+            return value;
+        });
+        const like = {0: 1, 2: 3, length: 3};
+        const generic = Array.prototype.map.call(like, function(value, index, receiver) {
+            if (index === 0) { like[1] = 2; delete like[2]; }
+            return value + (receiver === like ? 0 : 100);
+        });
+        const slots = indices === '02' && mapped.length === 4 && (0 in mapped)
+            && mapped[0] === undefined && !(1 in mapped) && mapped[2] === 3
+            && !(3 in mapped);
+        const escaped = calls.length === 2 && calls[0] !== calls[1]
+            && calls[0][1] === 0 && calls[1][1] === 2 && calls[0][2] === a;
+        const fallback = generic.length === 3 && generic[0] === 1 && generic[1] === 2
+            && !(2 in generic);
+        await finish(slots && escaped && fallback);
+    "#);
 }
 
 /// A split with a limit builds only the pieces it returns: a list of a
@@ -282,6 +304,24 @@ fn generic_receivers_bounds_search_and_reduce_follow_ecma_steps() {
         const from = {valueOf() { shortened.length = 0; return 0; }};
         const shrink = shortened.indexOf(undefined, from) === -1;
         await finish(sparse && holes && nans && bounds && shrink && reduced === 8 && reverse === '431');
+    "#);
+    law(r#"
+        const inner = {value: 1}; const a = [inner, , undefined, 4]; let order = '';
+        const start = {valueOf() { order += 's'; a.length = 2; return -3.9; }};
+        const stop = {valueOf() { order += 'e'; a[1] = inner; return Infinity; }};
+        const sliced = a.slice(start, stop);
+        sliced[0].value = 9;
+        const sparse = [1, , undefined].slice(1);
+        const grown = [1, 2];
+        const growth = {valueOf() { grown.push(3); return -1; }};
+        const snapshot = grown.slice(growth);
+        const shrunk = order === 'se' && sliced.length === 3 && sliced[0] === inner
+            && inner.value === 9 && !(1 in sliced) && !(2 in sliced);
+        const slots = sparse.length === 2 && !(0 in sparse) && (1 in sparse)
+            && sparse[1] === undefined;
+        const empty = a.slice(Infinity).length === 0 && a.slice(1, -Infinity).length === 0
+            && a.slice(NaN, -0).length === 0;
+        await finish(shrunk && slots && empty && snapshot.join(',') === '2');
     "#);
 }
 
