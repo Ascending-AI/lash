@@ -1047,10 +1047,32 @@ async fn an_unjournaled_bind_fault_seals_nothing_and_recovers_after_the_park(tie
     assert_eq!(snapshots, 0, "a recorded model is never minted again");
     assert!(binds >= 1, "the unrecorded call asked for its binding");
     let park = park_of(&session, "keys-bind-fault-park-run").await;
-    assert!(
-        format!("{:?}", park.reason).contains(KIMI),
-        "the run's park carries the unbindable key: {park:?}"
+    assert_eq!(park.run.as_str(), "keys-bind-fault-park-run");
+    assert_eq!(
+        park.reason.profile_key().map(lash::LlmProfileKey::as_str),
+        Some(KIMI),
+        "the run's park names the unbindable key, typed: {park:?}"
     );
+
+    catalog.serve(registry_of(KIMI, "kimi-k3", kimi.handle()));
+    assert!(
+        session
+            .durable()
+            .redrive("operator")
+            .await
+            .expect("the redrive commits"),
+        "the session was parked"
+    );
+    let resumed = tokio::time::timeout(
+        std::time::Duration::from_secs(60),
+        answer_of(
+            session.attach_id(lash::TurnId::parse("keys-bind-fault-park-run").expect("nonblank")),
+        ),
+    )
+    .await
+    .expect("the redriven run answers its follower");
+    assert_eq!(resumed, "kimi answers");
+    assert_eq!(kimi.calls(), 1, "the redriven run made its call once");
 }
 
 const ASK_TWICE: &str = "ask_twice";
@@ -1429,10 +1451,7 @@ tiered!(
 );
 tiered!(an_unsupported_reasoning_selection_is_refused_where_it_is_stated);
 tiered!(a_replay_after_the_key_left_the_catalog_completes_with_zero_resolver_calls);
-tiered!(
-    an_unjournaled_bind_fault_seals_nothing_and_recovers_after_the_park,
-    ignore = "FIG-5367: a parked session's run never answers its follower, and a host has no redrive for it"
-);
+tiered!(an_unjournaled_bind_fault_seals_nothing_and_recovers_after_the_park);
 tiered!(
     a_tool_is_not_run_past_a_bind_fault_of_its_direct_completion,
     ignore = "FIG-5368: a direct completion's bind fault reaches its tool, which records it as its result"

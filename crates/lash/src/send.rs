@@ -40,7 +40,7 @@ use lash_core::{GenerationOptions, LlmProfileKey, ReasoningSelection, RunSpec};
 use lash_core::facade_support::{
     TurnCancelMode, TurnCancelReceipt, TurnCancelUndeliveredInputPolicy,
 };
-use lash_core::store::{ParkId, ParkReason, StallReason};
+use lash_core::store::StallReason;
 
 pub use batch::{BatchInput, SendBatchBuilder};
 use follow::{Subject, Tap};
@@ -600,7 +600,8 @@ pub enum SendOutcome {
 /// How an input's run stands once it stopped moving.
 ///
 /// Parked is not terminal: the run holds its work until an operator
-/// redrives, cancels or forks it, and a host re-awaits it through
+/// redrives its session ([`DurableSession::redrive`](crate::DurableSession::redrive))
+/// or cancels it, and a host re-awaits it through
 /// [`LashSession::run`](crate::LashSession::run).
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
@@ -635,15 +636,17 @@ pub struct StalledDelivery {
     pub stalled_at_ms: u64,
 }
 
-/// A run that parked (ADR 0104 O3): durable and non-terminal.
+/// A run whose session parked with the run open (FIG-5367): durable and
+/// non-terminal. The run resumes once an operator repairs the cause and
+/// redrives the session ([`DurableSession::redrive`](crate::DurableSession::redrive)).
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ParkedTurn {
     pub session_id: SessionId,
     pub run: TurnId,
-    pub park_id: ParkId,
-    pub reason: ParkReason,
-    pub since_ms: u64,
-    pub attempts: u32,
+    /// Why the session parked, as its actor recorded it: a recorded model
+    /// no deployment serves names its key
+    /// ([`SessionParkReason::profile_key`](crate::SessionParkReason::profile_key)).
+    pub reason: crate::SessionParkReason,
 }
 
 impl SendOutcome {

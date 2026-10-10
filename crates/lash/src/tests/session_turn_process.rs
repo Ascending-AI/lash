@@ -377,32 +377,6 @@ async fn a_partially_created_child_finishes_from_its_recorded_creation_config() 
     Ok(())
 }
 
-/// Redrive `session`'s parked actor as an operator. Answers whether it was
-/// parked. The facade has no session redrive verb (FIG-5401), so this
-/// writes the substrate's redrive mail.
-async fn redrive_session(core: &LashCore, session: &str) -> Result<bool> {
-    use lash_core::durable_port as durable;
-    let mut tx = durable::MailTx::new();
-    tx.write(durable::MailDomainWrite::Redrive(
-        durable::domain::RedriveRequest {
-            actor: durable::ActorKey::session(session).expect("a session's actor key"),
-            requester: "operator".to_owned(),
-        },
-    ));
-    let commit = core
-        .backend()
-        .durable()
-        .commit_mail(tx, durable::CommitLabel::MAIL_PROCESS)
-        .await
-        .expect("the redrive mail commits");
-    Ok(commit.answers.iter().any(|answer| {
-        matches!(
-            answer,
-            durable::MailAnswer::Redrive(durable::domain::RedriveAnswer::Redriven)
-        )
-    }))
-}
-
 /// A session-turn process on a profile key this deployment does not serve is never
 /// settled by the refusal: the process stays open while its child session
 /// parks, and once a deployment serves the key, an operator's redrive of the
@@ -446,7 +420,12 @@ async fn a_session_turn_on_an_unserved_profile_is_repaired_by_a_serving_deployme
     .await?;
     // The child parks once its passes exhaust the activation-loop budget,
     // or else this deployment's claim runs it and the redrive is a no-op.
-    redrive_session(&core, CHILD).await?;
+    core.session(crate::SessionId::parse(CHILD).expect("nonblank host identity"))
+        .open()
+        .await?
+        .durable()
+        .redrive("operator")
+        .await?;
     let output = tokio::time::timeout(
         std::time::Duration::from_secs(60),
         core.processes().await_output(&started.process_id),

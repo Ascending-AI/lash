@@ -1985,6 +1985,7 @@ async fn a_node_without_an_isolated_tools_engine_leaves_the_turn_to_one_that_reg
     let lash::SessionParkReason::PassLoop { error, .. } = &parked else {
         panic!("the session parked for another reason: {parked:?}");
     };
+    let error = error.to_string();
     assert!(
         error.contains("isolation_engine_unavailable")
             && error.contains(ISOLATED_TOOL)

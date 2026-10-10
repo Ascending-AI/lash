@@ -505,6 +505,18 @@ pub(super) async fn follow(
                         gaps: observation.gaps,
                     })));
                 }
+                Resolution::Parked { run, reason } => {
+                    adoption.adopt(run.clone(), tap).await;
+                    drain(ctx, &mut adoption, &mut observation, tap).await;
+                    return Ok(Followed::Answered(Box::new(SendOutcome::Parked {
+                        parked: crate::ParkedTurn {
+                            session_id: ctx.parts.session_id.clone(),
+                            run,
+                            reason,
+                        },
+                        gaps: observation.gaps,
+                    })));
+                }
                 Resolution::Faulted(fault) => {
                     drain(ctx, &mut adoption, &mut observation, tap).await;
                     return Err(EmbedError::Runtime(fault));

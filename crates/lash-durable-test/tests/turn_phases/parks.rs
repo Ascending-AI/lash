@@ -67,7 +67,7 @@ impl Scenario for RefusedForTheDeployment {
                         failed_passes,
                         error,
                     })) if failed_passes == budget
-                        && error.contains("is outside the writer range") => {}
+                        && error.message.contains("is outside the writer range") => {}
                     other => violations.push(format!(
                         "the session parked for {other:?}, not after {budget} writer-range refusals"
                     )),

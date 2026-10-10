@@ -421,32 +421,27 @@ impl DurableSession {
 
     /// Why the session is parked, if it is: the typed reason its actor
     /// parked with, as it recorded it. A parked session runs nothing until
-    /// an operator redrives it or a turn cancel readies it, and its
-    /// unfinished turn stays open ([`current_turn`](Self::current_turn)).
-    /// `None` while it is not parked, and for a session no node ever ran.
+    /// an operator redrives it ([`redrive`](Self::redrive)) or a turn cancel
+    /// readies it, and its unfinished turn stays open
+    /// ([`current_turn`](Self::current_turn)); its run's follower is answered
+    /// [`TurnStatus::Parked`](crate::TurnStatus::Parked). `None` while it is
+    /// not parked, and for a session no node ever ran.
     pub async fn park_reason(&self) -> Result<Option<crate::SessionParkReason>> {
-        let Ok(actor) = lash_core::durable_port::ActorKey::session(self.session_id.as_str()) else {
-            return Ok(None);
-        };
-        let snapshot = self
+        session_park(self.effect_host.backend(), &self.session_id).await
+    }
+
+    /// Redrive the parked session as an operator, `requester`, once what
+    /// parked it is repaired (a deployment serves the recorded model again,
+    /// say): its park clears and its next claim runs its unfinished turn
+    /// again from its committed state, so the run its park held answers its
+    /// followers. Answers whether the session was parked; a session that is
+    /// not parked is left as it is.
+    pub async fn redrive(&self, requester: &str) -> Result<bool> {
+        Ok(self
             .effect_host
             .backend()
-            .durable()
-            .actor(&actor)
-            .await
-            .map_err(EmbedError::from)?;
-        let Some(park) = snapshot
-            .filter(|snapshot| snapshot.state == lash_core::durable_port::ActorState::Parked)
-            .and_then(|snapshot| snapshot.park)
-        else {
-            return Ok(None);
-        };
-        serde_json::from_str(&park).map(Some).map_err(|error| {
-            EmbedError::Plugin(lash_core::PluginError::StoredDataCorrupt {
-                record_kind: "session park".to_owned(),
-                message: error.to_string(),
-            })
-        })
+            .redrive_session(&self.session_id, requester)
+            .await?)
     }
 
     /// Pin `target`: the revision it resolves to is retained through every
@@ -593,4 +588,32 @@ impl DurableSession {
             .map(|lookup| matches!(lookup, lash_core::store::SessionLookup::Deleted))
             .map_err(EmbedError::Store)
     }
+}
+
+/// Why `session` is parked, if it is: its actor's typed park reason, read
+/// while the actor is parked.
+pub(crate) async fn session_park(
+    backend: &crate::Backend,
+    session: &SessionId,
+) -> Result<Option<crate::SessionParkReason>> {
+    let Ok(actor) = lash_core::durable_port::ActorKey::session(session.as_str()) else {
+        return Ok(None);
+    };
+    let snapshot = backend
+        .durable()
+        .actor(&actor)
+        .await
+        .map_err(EmbedError::from)?;
+    let Some(park) = snapshot
+        .filter(|snapshot| snapshot.state == lash_core::durable_port::ActorState::Parked)
+        .and_then(|snapshot| snapshot.park)
+    else {
+        return Ok(None);
+    };
+    serde_json::from_str(&park).map(Some).map_err(|error| {
+        EmbedError::Plugin(lash_core::PluginError::StoredDataCorrupt {
+            record_kind: "session park".to_owned(),
+            message: error.to_string(),
+        })
+    })
 }

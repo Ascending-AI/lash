@@ -498,7 +498,7 @@ async fn a_catalog_row_with_no_head_is_refused_and_never_opened_with_defaults(
         matches!(
             &reason,
             Some(Ok(lash_core::runtime::durable::session::SessionParkReason::PassLoop { error, .. }))
-                if error.contains("recorded no config")
+                if error.message.contains("recorded no config")
         ),
         "the session parks for its unrecorded creation: {reason:?}"
     );

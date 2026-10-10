@@ -37,6 +37,12 @@ pub(super) enum Resolution {
         run: TurnId,
         refusal: lash_core::RuntimeError,
     },
+    /// The run is open and its session parked (FIG-5367): it runs nothing
+    /// until an operator redrives the session, and `reason` is why.
+    Parked {
+        run: TurnId,
+        reason: crate::SessionParkReason,
+    },
     /// The input is open and its session carries a fault (ADR 0109 §9): no
     /// run admits it until an operator clears the fault, whose typed
     /// error is the answer.
@@ -123,7 +129,8 @@ async fn unbound_input(parts: &SendParts, input: &InputId) -> Result<Resolution>
 ///
 /// A run the head commit of its final physical turn ended is settled with
 /// the outcome that commit wrote. A run whose execution
-/// ended with a typed refusal is refused. Any other run is undecided.
+/// ended with a typed refusal is refused. Any other run is parked while its
+/// session's actor is parked, and undecided otherwise.
 pub(super) async fn resolve_run(parts: &SendParts, run: &TurnId) -> Result<Resolution> {
     let cause = parts
         .store
@@ -246,6 +253,16 @@ pub(super) async fn resolve_run(parts: &SendParts, run: &TurnId) -> Result<Resol
         return Ok(Resolution::Refused {
             run: run.clone(),
             refusal,
+        });
+    }
+    // A run with no end whose session parked is the session's open run: a
+    // session runs one run at a time, and its park holds that run.
+    if let Some(reason) =
+        crate::durable_session::session_park(parts.effect_host.backend(), &parts.session_id).await?
+    {
+        return Ok(Resolution::Parked {
+            run: run.clone(),
+            reason,
         });
     }
     Ok(Resolution::Undecided {

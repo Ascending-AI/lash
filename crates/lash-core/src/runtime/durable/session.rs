@@ -34,7 +34,7 @@
 
 use std::sync::Arc;
 
-use lash_durable::domain::{MailAnswer, MailDomainWrite, ParkEventWrite, TurnWrite};
+use lash_durable::domain::{MailAnswer, MailDomainWrite, TurnWrite};
 use lash_durable::runner::{Activation, Exit, Owned};
 use lash_durable::{
     ActorTx, CommitLabel, DomainWrite, DurableError, DurableInstant, DurableProbe, MailTx, Release,
@@ -59,6 +59,11 @@ use super::session_close::{
 };
 use super::session_mail::{InputBatching, OneInputPerRun, SessionMailError, drain_session_mail};
 use super::turn_scope::{TurnChildrenStopError, await_turn_children, continue_scope_ends};
+
+mod park;
+
+pub use park::{ParkedTurnState, SessionParkReason, SessionPassFailure};
+use park::{park, undecodable_state};
 
 /// What a session's turns run with: the deployment's protocol, model,
 /// environment and code cells. It opens one [`TurnDrive`] per turn an owner
@@ -960,7 +965,7 @@ impl Activation for SessionActivation {
                         Some(reason) => Some(reason),
                         None => (failed_passes >= budget).then(|| SessionParkReason::PassLoop {
                             failed_passes,
-                            error: error.to_string(),
+                            error: SessionPassFailure::of(&error),
                         }),
                     };
                     if let Some(reason) = reason {
@@ -1011,123 +1016,6 @@ fn passes_by_itself(error: &TurnError) -> bool {
                 })
         )
     )
-}
-
-/// Why a session actor parked: the park feed's typed reason. A parked
-/// session runs nothing until an operator redrives it or a control wake (a
-/// turn cancel) readies it.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "reason", rename_all = "snake_case", deny_unknown_fields)]
-pub enum SessionParkReason {
-    /// Its passes failed `failed_passes` times in a row within one claim,
-    /// each with an error a retry does not clear: the activation-loop budget
-    /// (FIG-5230).
-    PassLoop {
-        /// The passes in a row that failed.
-        failed_passes: u32,
-        /// The last pass's error.
-        error: String,
-    },
-    /// Its unfinished turn resumes from a state this build does not decode:
-    /// another build wrote it. The turn's restore refused it before any of
-    /// the turn's work was re-delivered (no cell ran again, no model call
-    /// was resent), so nothing of the turn was committed or settled for it,
-    /// and its rows keep the state: a build that reads it resumes the turn
-    /// on a redrive, and a turn cancel ends it without reading it
-    /// (FIG-5592, FIG-5601).
-    UndecodableState {
-        /// Which of the turn's states.
-        state: ParkedTurnState,
-        /// The decoder's account.
-        message: String,
-    },
-}
-
-/// One of the states an unfinished turn resumes from.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
-pub enum ParkedTurnState {
-    /// The phase checkpoint its row holds.
-    Checkpoint,
-    /// What its protocol driver parked in that checkpoint while a model
-    /// call or a code cell ran.
-    DriverState {
-        /// The driver that refused it.
-        driver: String,
-    },
-    /// The admission record of the model call it resends.
-    AdmittedCall {
-        /// The call's ordinal among the turn's calls.
-        call: u32,
-    },
-    /// The snapshot the code cell it stopped in resumes from.
-    CellSnapshot,
-    /// A plugin namespace its run committed beside its checkpoint, which a
-    /// resume reinstalls.
-    PluginState,
-}
-
-/// The park of a pass that failed on a state its turn resumes from and this
-/// build does not decode; `None` for every other failure.
-fn undecodable_state(error: &TurnError) -> Option<SessionParkReason> {
-    use lash_sansio::TurnCheckpointRestoreError as Checkpoint;
-    let (state, reason) = match error {
-        TurnError::UndecodableState { state, reason } => (state.clone(), reason.clone()),
-        TurnError::Restore(TurnRestoreError::Checkpoint(Checkpoint::UndecodableDriverState(
-            refusal,
-        ))) => (
-            ParkedTurnState::DriverState {
-                driver: refusal.driver.clone(),
-            },
-            refusal.reason.clone(),
-        ),
-        TurnError::Restore(
-            restore @ (TurnRestoreError::Undecodable { .. }
-            | TurnRestoreError::Checkpoint(
-                Checkpoint::IncompatibleSchemaVersion { .. }
-                | Checkpoint::IncompatibleFormat { .. },
-            )),
-        ) => (ParkedTurnState::Checkpoint, restore.to_string()),
-        _ => return None,
-    };
-    Some(SessionParkReason::UndecodableState {
-        state,
-        message: reason,
-    })
-}
-
-impl SessionParkReason {
-    /// The reason's code: the `lash.parked_work.reason` of its park.
-    #[must_use]
-    pub const fn code(&self) -> &'static str {
-        match self {
-            Self::PassLoop { .. } => "pass_loop",
-            Self::UndecodableState { .. } => "undecodable_state",
-        }
-    }
-
-    /// The park feed's encoding.
-    #[expect(
-        clippy::expect_used,
-        reason = "a park reason is plain data whose encoding cannot fail"
-    )]
-    #[must_use]
-    pub fn encode(&self) -> String {
-        serde_json::to_string(self).expect("a park reason encodes")
-    }
-}
-
-/// Park the session with `reason`: its park-feed entry and its release as
-/// `parked`, one commit. Its unread mail stays for the claim that follows a
-/// redrive.
-async fn park(cx: &ActorContext, reason: &SessionParkReason) -> Result<(), DurableError> {
-    tracing::warn!(actor = %cx.actor(), reason = %reason.encode(), "session parked");
-    let mut tx = cx.begin().await?;
-    tx.write(DomainWrite::ParkEvent(ParkEventWrite::Park {
-        reason_json: reason.encode(),
-    }));
-    tx.give_up(Release::Parked);
-    cx.commit(tx, CommitLabel::SESSION_RELEASE).await.map(drop)
 }
 
 /// The inputs a drain hands the activation to admit as one turn.

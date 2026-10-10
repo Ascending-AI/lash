@@ -228,7 +228,9 @@ pub use lash_core::engine::{RecoveryLeaseConfig, RecoveryLeaseTimings, RecoveryP
 /// Why a session's actor parked, read by
 /// [`DurableSession::park_reason`], and the state of its unfinished turn a
 /// build refused to decode.
-pub use lash_core::runtime::durable::session::{ParkedTurnState, SessionParkReason};
+pub use lash_core::runtime::durable::session::{
+    ParkedTurnState, SessionParkReason, SessionPassFailure,
+};
 mod pacing;
 pub use lash_core::facade_support::{
     TurnCancelAffectedInput, TurnCancelInputOutcome, TurnCancelMode,

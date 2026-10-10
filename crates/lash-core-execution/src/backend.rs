@@ -506,12 +506,7 @@ impl Backend {
     ///
     /// The store's refusal.
     pub async fn wake_process(&self, process: &crate::ProcessId) -> Result<(), DurableError> {
-        let actor = lash_durable::ActorKey::process(process.as_str()).map_err(|error| {
-            DurableError::Store(lash_durable::StoreFailure {
-                kind: lash_durable::StoreFailureKind::Corrupt,
-                message: error.to_string(),
-            })
-        })?;
+        let actor = lash_durable::ActorKey::process(process.as_str()).map_err(corrupt_key)?;
         let mut tx = lash_durable::MailTx::new();
         tx.wake(actor);
         self.durable()
@@ -532,12 +527,35 @@ impl Backend {
         process: &crate::ProcessId,
         requester: &str,
     ) -> Result<bool, DurableError> {
-        let actor = lash_durable::ActorKey::process(process.as_str()).map_err(|error| {
-            DurableError::Store(lash_durable::StoreFailure {
-                kind: lash_durable::StoreFailureKind::Corrupt,
-                message: error.to_string(),
-            })
-        })?;
+        let actor = lash_durable::ActorKey::process(process.as_str()).map_err(corrupt_key)?;
+        self.redrive(actor, requester, lash_durable::CommitLabel::MAIL_PROCESS)
+            .await
+    }
+
+    /// Redrive `session`'s parked actor as an operator, `requester`, as
+    /// [`redrive_process`](Self::redrive_process) redrives a process's: its
+    /// next claim runs its unfinished turn again from its committed state
+    /// (FIG-5367). Answers whether it was parked.
+    ///
+    /// # Errors
+    ///
+    /// The store's refusal.
+    pub async fn redrive_session(
+        &self,
+        session: &crate::SessionId,
+        requester: &str,
+    ) -> Result<bool, DurableError> {
+        let actor = lash_durable::ActorKey::session(session.as_str()).map_err(corrupt_key)?;
+        self.redrive(actor, requester, lash_durable::CommitLabel::MAIL_SESSION)
+            .await
+    }
+
+    async fn redrive(
+        &self,
+        actor: lash_durable::ActorKey,
+        requester: &str,
+        label: lash_durable::CommitLabel,
+    ) -> Result<bool, DurableError> {
         let mut tx = lash_durable::MailTx::new();
         tx.write(lash_durable::MailDomainWrite::Redrive(
             lash_durable::domain::RedriveRequest {
@@ -545,10 +563,7 @@ impl Backend {
                 requester: requester.to_owned(),
             },
         ));
-        let commit = self
-            .durable()
-            .commit_mail(tx, lash_durable::CommitLabel::MAIL_PROCESS)
-            .await?;
+        let commit = self.durable().commit_mail(tx, label).await?;
         Ok(commit.answers.iter().any(|answer| {
             matches!(
                 answer,
@@ -708,4 +723,12 @@ pub trait StoreSet: Send + Sync {
     /// [`ObligationKind::ArtifactCleanup`](crate::store::ObligationKind::ArtifactCleanup),
     /// with the verbs beyond ADR 0109's.
     fn artifact_cleanup(&self) -> Arc<dyn crate::store::ArtifactCleanupLedger>;
+}
+
+/// An id no actor key can carry, as the store's refusal.
+fn corrupt_key(error: lash_durable::ActorKeyError) -> DurableError {
+    DurableError::Store(lash_durable::StoreFailure {
+        kind: lash_durable::StoreFailureKind::Corrupt,
+        message: error.to_string(),
+    })
 }
