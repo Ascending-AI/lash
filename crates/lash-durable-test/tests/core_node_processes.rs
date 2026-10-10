@@ -1959,32 +1959,32 @@ async fn a_node_without_an_isolated_tools_engine_leaves_the_turn_to_one_that_reg
         ))
         .await
         .expect("the session is created");
-    let parked = {
-        let output = session
+    // FIG-5367: following a parked run answers its park; it does not settle
+    // the turn. Read that answer directly so a park notification cannot race
+    // a separate poll of the session's park reason.
+    let outcome = tokio::time::timeout(Duration::from_secs(60), async {
+        session
             .send(lash::TurnInput::text("call the isolated tool"))
-            .output();
-        tokio::pin!(output);
-        tokio::time::timeout(Duration::from_secs(60), async {
-            loop {
-                tokio::select! {
-                    output = &mut output => {
-                        panic!("the turn settled on a node without the engine: {output:?}")
-                    }
-                    () = tokio::time::sleep(Duration::from_millis(20)) => {
-                        let park = session.park_reason().await.expect("the park is read");
-                        if let Some(reason) = park {
-                            break reason;
-                        }
-                    }
-                }
-            }
-        })
-        .await
-        .expect("the session parks within a minute")
+            .await?
+            .outcome()
+            .await
+    })
+    .await
+    .expect("the session parks within a minute")
+    .expect("the host reads the turn's park");
+    let lash::SendOutcome::Parked { parked, .. } = outcome else {
+        panic!("the turn settled on a node without the engine: {outcome:?}");
     };
+    assert_eq!(parked.session_id, session_id);
+    let parked = parked.reason;
     let lash::SessionParkReason::PassLoop { error, .. } = &parked else {
         panic!("the session parked for another reason: {parked:?}");
     };
+    assert_eq!(
+        error.code,
+        Some(lash_core::RuntimeErrorCode::IsolationEngineUnavailable),
+        "the park keeps the node's missing engine typed"
+    );
     let error = error.to_string();
     assert!(
         error.contains("isolation_engine_unavailable")

@@ -49,6 +49,12 @@ async fn codex_websocket_idle_before_response_start_emits_no_stream_events() {
         ws.url.clone(),
         Some(SCRIPTED_WEBSOCKET_IDLE_TIMEOUT_MS),
     );
+    // Before the first frame, the response-start bound applies; the chunk
+    // bound alone leaves this wait at the ordinary five-second deadline.
+    provider.options.reliability = provider
+        .options
+        .reliability
+        .response_start_timeout_ms(Some(SCRIPTED_WEBSOCKET_IDLE_TIMEOUT_MS));
     let events = Arc::new(Mutex::new(Vec::new()));
     let event_sink = Arc::clone(&events);
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
@@ -96,6 +102,12 @@ async fn codex_scripted_websocket_idle_before_start_falls_back_to_sse() {
         ws.url.clone(),
         Some(SCRIPTED_WEBSOCKET_IDLE_TIMEOUT_MS),
     );
+    // Before the first frame, the response-start bound applies; the chunk
+    // bound alone leaves this wait at the ordinary five-second deadline.
+    provider.options.reliability = provider
+        .options
+        .reliability
+        .response_start_timeout_ms(Some(SCRIPTED_WEBSOCKET_IDLE_TIMEOUT_MS));
 
     let request = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
     let completion = tokio::spawn(async move {
@@ -108,7 +120,7 @@ async fn codex_scripted_websocket_idle_before_start_falls_back_to_sse() {
             .await
     });
     advance_scripted_websocket_idle_timeout(&idle_ready).await;
-    let response = tokio::time::timeout(Duration::from_secs(5), completion)
+    let response = tokio::time::timeout(Duration::from_secs(1), completion)
         .await
         .expect("idle WebSocket fallback must not hang")
         .expect("join idle WebSocket fallback")
