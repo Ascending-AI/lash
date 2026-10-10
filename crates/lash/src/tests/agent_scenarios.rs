@@ -68,7 +68,7 @@ const enrich = async (event) => {
   return enriched;
 };
 const handle = await processes.start({ definition: enrich, args: { event: { email: "hello@example.com" } } });
-finish(await handle);"#,
+await control.finish(await handle);"#,
                 ),
                 r#"{"kind":"value","value":{"name":"email"},"error":null}"#.to_owned(),
                 r#"{"kind":"value","value":{"category":"personal","confidence":0.98},"error":null}"#
@@ -92,7 +92,7 @@ finish(await handle);"#,
         .output()
         .await?;
     assert_eq!(
-        result.final_value(),
+        result.finished().map(|(_, value)| value),
         Some(&serde_json::json!({ "category": "personal", "confidence": 0.98 }))
     );
     let requests = requests.lock_recover().clone();
@@ -209,7 +209,7 @@ const retryDirect = async () => {
   return value;
 };
 const handle = await processes.start({ definition: retryDirect });
-finish(await handle);"#,
+await control.finish(await handle);"#,
                 ),
                 "first-provider-result".to_owned(),
                 "second-provider-result".to_owned(),
@@ -235,7 +235,7 @@ finish(await handle);"#,
         .output()
         .await?;
     assert_eq!(
-        result.final_value(),
+        result.finished().map(|(_, value)| value),
         Some(&serde_json::json!("second-provider-result"))
     );
     let requests = requests.lock_recover().clone();

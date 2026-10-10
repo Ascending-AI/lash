@@ -546,9 +546,7 @@ impl TurnDrive for L3Drive {
                 self.machine
                     .handle_response(Response::ExecutionEnvironmentSynced {
                         id,
-                        result: Ok(ExecutionEnvironmentSync {
-                            tool_specs: Arc::new(Vec::new()),
-                        }),
+                        result: Ok(ExecutionEnvironmentSync::default()),
                     });
             }
             Effect::Checkpoint { id, .. } => {

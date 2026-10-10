@@ -23,7 +23,7 @@ mod source;
 mod tests;
 
 pub use diagnostic::{Diagnostic, DiagnosticKind, Span};
-pub use dialect::{Environment, FrontEnd, Lowered, Package, Printer};
+pub use dialect::{EffectControl, Environment, FrontEnd, Lowered, Package, Printer};
 pub use library::{Library, LibraryError, NamedLibrary};
 pub use saved::{
     CaptureRefusal, Left, NotSaved, SavedFunction, Unusable, WRITTEN, Written, closure_of, install,
@@ -34,6 +34,3 @@ pub use source::{SourceError, define_functions};
 pub use imperative::{
     SourceExpr, SourcePlace, SourceStmt, Spelling, imperative_source, render_source,
 };
-
-/// The terminal name reserved by the dialects and taught by their prompts.
-pub const FINISH_NAME: &str = "finish";

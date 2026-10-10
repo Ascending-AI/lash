@@ -253,6 +253,9 @@ pub(crate) struct Lowerer<'a> {
     library: &'a dyn Library,
     /// The effects the host supplies: a call of one is a tool call.
     effects: &'a BTreeMap<EffectName, Signature>,
+    /// The effects whose call ends the turn: a control call ends `main`
+    /// when it settles, and is written only where it can.
+    controls: &'a BTreeMap<EffectName, BTreeSet<lash_kernel_dialect::EffectControl>>,
     /// The effects the document performs, for its manifest (`K-DOC-002`).
     performed: BTreeMap<EffectName, Signature>,
     session: &'a BTreeSet<Name>,
@@ -289,12 +292,31 @@ pub(crate) struct Lowerer<'a> {
 }
 
 /// Session names are checked before either source or saved state can mask a built-in.
-pub(crate) fn check_binding_names<'a>(names: impl IntoIterator<Item = &'a str>) -> Lowering<()> {
+/// A tool namespace root (`control`, `tools`, ...: the first segment of an
+/// effect the environment offers) is reserved the same way: a binding of
+/// that name would hide the session's tools from every later cell.
+pub(crate) fn check_binding_names<'a>(
+    names: impl IntoIterator<Item = &'a str>,
+    effects: &BTreeMap<EffectName, lash_kernel_doc::Signature>,
+) -> Lowering<()> {
     for name in names.into_iter().collect::<BTreeSet<_>>() {
-        if builtins::is_global(name) || name == lash_kernel_dialect::FINISH_NAME {
+        if builtins::is_global(name) {
             return Err(Diagnostic::with_repair(
                 DiagnosticCode::ShadowsBuiltin,
                 format!("`{name}` is a built-in; a top-level binding cannot reuse its name"),
+                format!("rename `{name}` to `{name}_` and update its references"),
+                None,
+            ));
+        }
+        if effects
+            .keys()
+            .any(|effect| effect.as_str().split('.').next() == Some(name))
+        {
+            return Err(Diagnostic::with_repair(
+                DiagnosticCode::ShadowsBuiltin,
+                format!(
+                    "`{name}` names the session's tools; a top-level binding cannot reuse its name"
+                ),
                 format!("rename `{name}` to `{name}_` and update its references"),
                 None,
             ));
@@ -324,6 +346,7 @@ pub(crate) fn lower(
         source,
         library: environment.library,
         effects: environment.effects,
+        controls: environment.controls,
         performed: BTreeMap::new(),
         session: environment.bindings,
         table: builtins::table(),
@@ -354,7 +377,10 @@ pub(crate) fn lower(
     lowerer.push_scope();
     lowerer.declare_vars(&program.statements);
     lowerer.declare_block(&program.statements)?;
-    check_binding_names(lowerer.scopes[0].bindings.keys().map(String::as_str))?;
+    check_binding_names(
+        lowerer.scopes[0].bindings.keys().map(String::as_str),
+        environment.effects,
+    )?;
     lowerer.lower_statements(&program.statements)?;
     lowerer.pop_scope();
     let main = std::mem::take(&mut lowerer.buf);
@@ -373,6 +399,7 @@ pub(crate) fn lower(
             environment.functions,
             &lowerer.saved_used,
             environment.effects,
+            environment.controls,
             &|function| catalog.definition(function).is_some(),
         )
         .map_err(|unusable| {

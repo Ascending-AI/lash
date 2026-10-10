@@ -232,22 +232,22 @@ fn response(
             );
             let code = match config.scenario.as_str() {
                 "S11" => {
-                    "const winner = tools.winner({}); const loser = tools.loser({}); const value = await Promise.race([winner,loser]); await tools.after({}); finish(value);"
+                    "const winner = tools.winner({}); const loser = tools.loser({}); const value = await Promise.race([winner,loser]); await tools.after({}); await control.finish(value);"
                 }
                 "S12" => {
-                    "const gate = await tools.gate({}); const value = await tools.source({}); finish(gate + '|' + value);"
+                    "const gate = await tools.gate({}); const value = await tools.source({}); await control.finish(gate + '|' + value);"
                 }
                 "S18" => {
-                    "const h = await tools.handle({}); const r = await processes.await({ handle: h }); finish('awaited');"
+                    "const h = await tools.handle({}); const r = await processes.await({ handle: h }); await control.finish('awaited');"
                 }
                 "S31" => {
-                    "const winner = tools.winner({}); const loser = tools.loser({}); const value = await Promise.race([winner,loser]); const gate = await tools.gate({}); finish(value + '|' + gate);"
+                    "const winner = tools.winner({}); const loser = tools.loser({}); const value = await Promise.race([winner,loser]); const gate = await tools.gate({}); await control.finish(value + '|' + gate);"
                 }
                 "S23" => {
-                    "const winner = tools.winner({}); const source = tools.source({}); const value = await Promise.race([winner,source]); const gate = await tools.gate({}); const later = await tools.later({}); finish(value + '|' + gate + '|' + later);"
+                    "const winner = tools.winner({}); const source = tools.source({}); const value = await Promise.race([winner,source]); const gate = await tools.gate({}); const later = await tools.later({}); await control.finish(value + '|' + gate + '|' + later);"
                 }
                 "S32" => {
-                    "const winner = tools.winner({}); const source = tools.source({}); const value = await Promise.race([winner,source]); const gate = await tools.gate({}); finish(value + '|' + gate);"
+                    "const winner = tools.winner({}); const source = tools.source({}); const value = await Promise.race([winner,source]); const gate = await tools.gate({}); await control.finish(value + '|' + gate);"
                 }
                 _ => return Err(anyhow!("scenario needs a Standard channel")),
             };

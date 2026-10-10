@@ -12,7 +12,7 @@ use crate::workbench;
 fn cell(value: &str) -> Vec<String> {
     vec![
         "<typescript>\n".to_owned(),
-        format!("finish('{value}');\n</typescript>"),
+        format!("await control.finish('{value}');\n</typescript>"),
     ]
 }
 

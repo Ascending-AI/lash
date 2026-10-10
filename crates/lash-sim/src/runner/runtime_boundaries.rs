@@ -291,13 +291,17 @@ impl RuntimeBoundaryHarness {
                     format!("exit code {exit_code}"),
                 ))
             } else {
-                lash_core::CellOutcome::Finished(
-                    json!({
-                        "output": output,
-                        "exit_code": exit_code,
-                    })
-                    .into(),
-                )
+                lash_core::CellOutcome::Controlled {
+                    tool_name: "finish".into(),
+                    call_id: lash_core::ToolCallId::fixture(&event.boundary_id),
+                    control: lash_core::CellControl::Finish {
+                        value: json!({
+                            "output": output,
+                            "exit_code": exit_code,
+                        })
+                        .into(),
+                    },
+                }
             },
             retained_finish_value: None,
             degraded_bindings: Vec::new(),

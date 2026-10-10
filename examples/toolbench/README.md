@@ -61,7 +61,7 @@ channel's constraints and renders standard prompts with the catalog's
 ordinary underscore-separated tool names.
 
 Standard adds `submit`, requiring `{"value": <any JSON>}`. Its handler records
-the value and returns `ToolControl::Finish`, so no later model output is needed
+the value and emits its declared Finish control, so no later model output is needed
 or graded. Submits are counted before argument/ID validation; their values are
 recorded in `submit_values`, while malformed arguments are recorded in
 `malformed_submits`. Malformed submits are metrics only, so a malformed call

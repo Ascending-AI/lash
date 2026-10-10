@@ -1835,7 +1835,7 @@ fn isolated_core(backend: &lash::Backend, tools: &Arc<IsolatedTools>) -> lash::L
         text(
             request,
             "<typescript>\nconst started = await iso.run({label: \"isolated-law\"});\n\
-             finish(started);\n</typescript>",
+             await control.finish(started);\n</typescript>",
         )
     });
     rlm_core(backend)
@@ -1880,7 +1880,8 @@ async fn an_isolated_rlm_tool_starts_one_process_and_answers_its_descriptor(tier
     assert!(output.is_success(), "{output:?}");
     let descriptor: lash_core::tool_dispatch::IsolatedProcessDescriptor = serde_json::from_value(
         output
-            .final_value()
+            .finished()
+            .map(|(_, value)| value)
             .cloned()
             .unwrap_or_else(|| panic!("the cell finishes with the call's answer: {output:?}")),
     )

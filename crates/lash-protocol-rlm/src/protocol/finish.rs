@@ -113,13 +113,25 @@ pub(super) fn finish_required_reminder_message(
     }
 }
 
-pub(super) fn finish_schema_mismatch_message(dialect: &SessionDialect, id: String) -> Message {
+/// What the model reads when input arrived at BeforeCompletion and its
+/// control call therefore did not end the turn.
+pub(crate) fn completion_superseded_message(
+    id: String,
+    candidate: &lash_core::CompletionCandidate,
+) -> Message {
+    let did = match candidate.control {
+        lash_core::TurnControl::Finish { .. } => "finish the turn",
+        lash_core::TurnControl::SwitchAgentFrame { .. } => "switch the agent frame",
+    };
     Message {
         id: id.clone(),
         role: MessageRole::System,
         parts: shared_parts(vec![Part::text(
             format!("{id}.p0"),
-            dialect.finish_schema_mismatch_copy(),
+            format!(
+                "The `{}` call did not {did}: new input arrived before it took effect, so it was superseded and the turn goes on. Read the new input, and end the turn again when the work is complete.",
+                candidate.tool_name
+            ),
             None,
         )]),
         origin: Some(lash_core::MessageOrigin::Plugin {
@@ -195,6 +207,28 @@ pub(crate) fn validate_finish_value(
     schema: &lash_sansio::JsonSchema,
 ) -> Result<(), lash_sansio::ValueMismatch> {
     schema.validate(value)
+}
+
+/// Whether the value Lash's finish tool took is one the turn's required
+/// output admits. A host tool's Finish is checked by that tool's own input
+/// contract, and a frame switch carries no answer.
+pub(crate) fn finish_value_admitted(
+    tool_name: &str,
+    control: &lash_core::TurnControl,
+    schema: Option<&lash_sansio::JsonSchema>,
+) -> Result<(), lash_sansio::ValueMismatch> {
+    match (control, schema) {
+        (lash_core::TurnControl::Finish { value }, Some(schema))
+            if tool_name == crate::control_tools::FINISH_TOOL_NAME =>
+        {
+            validate_finish_value(
+                &lash_core::ToolCallOutput::success_tool_value(value.clone())
+                    .value_for_projection(),
+                schema,
+            )
+        }
+        _ => Ok(()),
+    }
 }
 
 /// The transcript record left behind when a turn exhausts its no-progress

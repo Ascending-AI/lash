@@ -162,18 +162,19 @@ pub use schema_contract::{
     project_anthropic_bedrock_schema, project_for_dialect, resolve_schema,
 };
 pub use session::{
-    BindingChanges, CellDefect, CellFailure, CellFailureKind, CellOutcome, CellPrint, CellRecord,
-    DegradedBinding, ExecCodeFailure, ExecCodeFailureReason, ExecResponse, ExecutedCall,
-    ExecutedCallOutcome, OmittedToolCalls, TextProjectionMetadata,
+    BindingChanges, CellControl, CellDefect, CellFailure, CellFailureKind, CellOutcome, CellPrint,
+    CellRecord, DegradedBinding, ExecCodeFailure, ExecCodeFailureReason, ExecResponse,
+    ExecutedCall, ExecutedCallOutcome, OmittedToolCalls, TextProjectionMetadata,
 };
 pub use session_model::message::{MessageOrigin, TurnOutputSource, TurnReply, same_message};
 pub use session_model::{
-    AcceptedInjectedTurnInput, BaseRenderCache, ConversationRecord, ErrorEnvelope, FailureCode,
-    HostNamespace, InternalPartKind, InvalidNamespace, LlmUsage, MaxToolCalls, Message,
-    MessageRole, MessageSequence, Namespace, NoProgressBudget, Part, PartAttachment, PartKind,
-    ProtocolEvent, RenderedPrompt, ReportedFailure, RetryProgress, SessionAppendNode,
-    SessionHistoryRecord, SessionStreamEvent, StoredDataCorruption, StreamMessageKind,
-    TokenUsageOverflow, ToolCallLimitExceeded, ToolCallLimitScope, TurnBudget, TurnCancelMode,
+    AcceptedInjectedTurnInput, BaseRenderCache, CompletionCandidate, CompletionDisposition,
+    ConversationRecord, ErrorEnvelope, FailureCode, HostNamespace, InternalPartKind,
+    InvalidNamespace, LlmUsage, MaxToolCalls, Message, MessageRole, MessageSequence, Namespace,
+    NoProgressBudget, Part, PartAttachment, PartKind, ProtocolEvent, RenderedPrompt,
+    ReportedFailure, RetryProgress, SessionAppendNode, SessionHistoryRecord, SessionStreamEvent,
+    StoredDataCorruption, StreamMessageKind, TerminationMode, TokenUsageOverflow,
+    ToolCallLimitExceeded, ToolCallLimitScope, TurnBudget, TurnCancelMode,
     TurnCancelUndeliveredInputPolicy, TurnCancellationEvidence, TurnFailureCode, TurnFailureKind,
     TurnFinish, TurnOutcome, TurnStop, messages_are_prompt_resume_safe, same_history_record,
     shared_parts,
@@ -198,13 +199,15 @@ pub use tool_contract::{
     ToolOutputContract, ToolPresentationConfig, X_LASH_KEYWORD, XLashParam, XLashSignature,
     XLashType, is_named_type_reference, schema_for,
 };
-pub use tool_declaration::{DeclarationRefusal, OutcomeShape, ToolDeclaration};
+pub use tool_declaration::{
+    DeclarationRefusal, OutcomeShape, ToolDeclaration, TurnControlKind, TurnControls,
+};
 pub use tool_output::{
     AttachmentMaterializationNotice, AttachmentMaterializationReason, CancelOrigin, CancelRequest,
     ModelToolReturn, ModelToolReturnPart, ToolCallOutcome, ToolCallOutput, ToolCallRecord,
     ToolCallStatus, ToolCancellation, ToolControl, ToolFailure, ToolFailureCause, ToolFailureClass,
     ToolFailureSource, ToolIntentIdentity, ToolIntentKind, ToolValue, ToolView, ToolViewBlock,
-    ToolViewMeta, format_tool_output_content, tool_result_text,
+    ToolViewMeta, TurnControl, format_tool_output_content, tool_result_text,
 };
 pub use turn::{PreparedTurnMachine, SansIoTurnInput, build_turn};
 pub use turn_driver::{

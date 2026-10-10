@@ -282,6 +282,8 @@ pub struct TurnCheckpoint<M: TurnProtocol = UnitTurnProtocol> {
     /// The environment the machine last synced, and the iteration it was
     /// synced for. `None` only before the protocol-start sync is answered.
     pub(super) environment: Option<SyncedEnvironment>,
+    /// The turn's decided completion candidates, in decision order.
+    pub(super) completion_candidates: Vec<crate::CompletionCandidate>,
 }
 
 /// A progress boundary that delivered protocol records: how many messages
@@ -588,7 +590,7 @@ impl<M: TurnProtocol> MachineState<M> {
             Err(work) => {
                 *self = Self::Waiting {
                     effect_id,
-                    work,
+                    work: *work,
                     delivery,
                 };
                 None
@@ -635,6 +637,8 @@ pub struct TurnMachine<M: TurnProtocol = UnitTurnProtocol> {
     /// delivered (ADR 0128). The driver still records those results; the
     /// machine then finishes instead of starting further work.
     pub(super) run_abort: Option<RunAbort>,
+    /// The turn's decided completion candidates, in decision order.
+    pub(super) completion_candidates: Vec<crate::CompletionCandidate>,
 }
 
 /// The Run control a tool result carried: the namespaced code and message

@@ -357,7 +357,7 @@ async fn a_saved_function_is_called_after_a_cold_restore() {
         &host,
         "exec-code:1",
         tools,
-        "finish([await scale(), await scale(value=7)])",
+        "await control_finish([await scale(), await scale(value=7)])",
     )
     .await;
     assert_eq!(finish_of(&called), serde_json::json!([42, 21]));
@@ -396,7 +396,7 @@ async fn a_new_session_created_with_a_saved_function_calls_it() {
         &host,
         "exec-code:1",
         tools,
-        "finish([greet(), greet(name='world')])",
+        "await control_finish([greet(), greet(name='world')])",
     )
     .await;
     assert_eq!(
@@ -436,7 +436,7 @@ async fn a_saved_function_is_refused_where_a_tool_it_calls_is_missing() {
             Arc::new(super::saved_functions::NoTools),
         ),
         &python_services(),
-        "finish(await shout('b'))",
+        "await control_finish(await shout('b'))",
     )
     .await;
     let error = refused.error().expect("missing tool refuses the cell");
@@ -471,7 +471,7 @@ async fn a_saved_function_keeps_the_captures_its_cell_left() {
         &host,
         "exec-code:2",
         tools,
-        "finish([clamp(3), clamp(50), factor, limits['top']])",
+        "await control_finish([clamp(3), clamp(50), factor, limits['top']])",
     )
     .await;
     assert_eq!(finish_of(&called), serde_json::json!([6, 10, 100, 1000]));
@@ -507,7 +507,7 @@ async fn a_function_that_captures_a_task_is_not_carried_and_says_so() {
         &mut state,
         cell_context(&host, SESSION, TURN, "exec-code:1", tools),
         &python_services(),
-        "finish(later())",
+        "await control_finish(later())",
     )
     .await;
     assert!(refused.error().is_some());

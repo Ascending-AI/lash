@@ -7,7 +7,8 @@ use super::*;
 /// replays no stale busy-state change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn done_stream_items_are_transient_and_not_snapshotted() {
-    let workbench = Workbench::replying("<typescript>\nfinish(\"done\");\n</typescript>").await;
+    let workbench =
+        Workbench::replying("<typescript>\nawait control.finish(\"done\");\n</typescript>").await;
     let state = &workbench.state;
     let session_id = state.current_session_id();
     let mut events = state.event_tx.subscribe(&session_id);

@@ -97,7 +97,19 @@ fn workbench_effects() -> lash::vm::HostBoundary {
             ),
         };
         boundary
-            .offer_tool(&path, id, &input, &output)
+            .offer_tool(
+                &path,
+                id,
+                &input,
+                &output,
+                match path.as_str() {
+                    "control.finish" | "workbench_surface.terminal" => {
+                        lash::tools::TurnControls::finish()
+                    }
+                    "control.continue_as" => lash::tools::TurnControls::switch_agent_frame(),
+                    _ => lash::tools::TurnControls::none(),
+                },
+            )
             .expect("a workbench tool is offered as an effect");
     };
     offer(
@@ -106,7 +118,7 @@ fn workbench_effects() -> lash::vm::HostBoundary {
     );
     for (module, operations) in [
         ("agents", &["spawn"][..]),
-        ("control", &["continue_as"][..]),
+        ("control", &["finish", "continue_as"][..]),
         ("inbox.work", &["list", "send", "delete"][..]),
         ("inbox.personal", &["list", "send", "delete"][..]),
         ("workbench_surface", &["terminal"][..]),
@@ -135,13 +147,16 @@ fn workbench_effects() -> lash::vm::HostBoundary {
 fn the_workbench_typescript_tutorials_lower() {
     let embedding =
         lash::vm::standard_worker_embedding(&lash::vm::WorkerTuning::default()).expect("embedding");
-    let effects = workbench_effects().signatures();
+    let boundary = workbench_effects();
+    let effects = boundary.signatures();
+    let controls = boundary.controls();
     let lower = |program: &str| {
         embedding
             .lower(
                 "typescript",
                 program,
                 &effects,
+                &controls,
                 &Default::default(),
                 &Default::default(),
             )
@@ -168,7 +183,7 @@ fn the_workbench_typescript_tutorials_lower() {
     );
     // The front end must be able to refuse, or an empty list proves nothing.
     assert!(
-        lower("class Unsupported {} finish(1);").is_err(),
+        lower("class Unsupported {} await control.finish(1);").is_err(),
         "the control must be refused"
     );
 }
@@ -183,7 +198,7 @@ fn the_workbench_tutorials_never_print_a_registration_key() {
     let finishes = programs
         .iter()
         .flat_map(|program| program.lines())
-        .filter(|line| line.trim_start().starts_with("finish("))
+        .filter(|line| line.trim_start().starts_with("await control.finish("))
         .collect::<Vec<_>>();
     assert!(
         finishes.len() >= 3,

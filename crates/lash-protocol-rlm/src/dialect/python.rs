@@ -81,7 +81,6 @@ impl DialectPrompts for PythonPrompts {
     }
 
     fn render_execution_section(&self, request: ExecutionSectionRequest<'_>) -> ExecutionSection {
-        let finish_name = lash_kernel_dialect::FINISH_NAME;
         let ExecutionSectionRequest {
             channel,
             tools,
@@ -117,7 +116,7 @@ impl DialectPrompts for PythonPrompts {
                 "the `execute_code` program".to_string(),
                 concat!(
                     "### Tool transport\n\nEach response makes one `execute_code` call with ",
-                    "`{\"code\": \"<complete program>\"}`. Tool calls and `finish` run inside ",
+                    "`{\"code\": \"<complete program>\"}`. Tool calls, `control_finish` included, run inside ",
                     "the program.\n"
                 )
                 .to_string(),
@@ -134,13 +133,13 @@ impl DialectPrompts for PythonPrompts {
 {response_shape}
 {example}
 
-Built-in names, including `{finish_name}`, cannot be reused by top-level bindings. Top-level variables persist across executions as data. A function bound to a top-level name persists as a self-contained copy: its captures are frozen when its cell ends, so later changes to those variables are not seen and changes the function makes to them are not kept. Functions capturing tasks, and functions held inside data, are not carried. Keep a task's result, not the task. A saved function can start a durable process with `await processes_start({{"definition": saved_fn, "args": {{"parameter": value}}}})` when the process tools are offered.
+Built-in names cannot be reused by top-level bindings. Top-level variables persist across executions as data. A function bound to a top-level name persists as a self-contained copy: its captures are frozen when its cell ends, so later changes to those variables are not seen and changes the function makes to them are not kept. Functions capturing tasks, and functions held inside data, are not carried. Keep a task's result, not the task. A saved function can start a durable process with `await processes_start({{"definition": saved_fn, "args": {{"parameter": value}}}})` when the process tools are offered.
 
 This is a Python subset, not CPython: there are no imports beyond `asyncio`, and no file, network or process access except through the tools.
 
 ### Host API
 
-`print(value)` shows output in the next step. A failed tool call raises an exception whose message says why. The top level is already asynchronous: `await` works there. Run calls concurrently with `await asyncio.gather(a(), b())`. Every task the program starts must be awaited before the program ends; a program that ends with a task still running, or failed with an exception nothing awaited, fails with `CELL_TASKS_OUTSTANDING` naming the code that is still running."#
+`print(value)` shows output in the next step. `await control_finish(value)` ends the turn with `value`: nothing after it runs, so await it directly, as the last thing the program does, after every other task has been awaited. A failed tool call raises an exception whose message says why. The top level is already asynchronous: `await` works there. Run calls concurrently with `await asyncio.gather(a(), b())`. Every task the program starts must be awaited before the program ends; a program that ends with a task still running, or failed with an exception nothing awaited, fails with `CELL_TASKS_OUTSTANDING` naming the code that is still running."#
             ),
             declarations,
         }
@@ -157,9 +156,7 @@ const PYTHON_PROMPT_VOCABULARY: DialectPromptVocabulary = DialectPromptVocabular
     print_call: "print",
     print_statement_prefix: "print(",
     print_statement_suffix: ")",
-    finish_name: lash_kernel_dialect::FINISH_NAME,
-    finish_statement: "finish(value)",
-    finish_null_statement: "finish(None)",
+    finish_call: "await control_finish(value)",
     continue_as_call: "control_continue_as(...)",
     continue_as_example: "await control_continue_as({\"task\": \"continue the audit from the summarized findings\", \"seed\": {\"problem\": input[\"prompt\"], \"findings\": findings}})",
     not_carried_repair: "Await the task and keep its result, or define the function using captures that are data or other saved functions.",

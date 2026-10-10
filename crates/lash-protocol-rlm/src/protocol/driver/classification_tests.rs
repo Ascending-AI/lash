@@ -24,9 +24,15 @@ fn non_cell_reply_classification_table_is_byte_identical() {
         protocol_iteration: iteration,
         output_token_cap: Some(512),
     };
-    let finish_required = RlmTermination::FinishRequired { schema: None };
-    let natural = RlmTermination::Natural { schema: None };
-    let malformed = "<typescript >\nfinish(1)\n</typescript>";
+    let completion = |mode| {
+        crate::rlm_support::RlmCompletion::from(lash_rlm_types::RlmTurnOptions {
+            termination: Some(mode),
+            ..Default::default()
+        })
+    };
+    let finish_required = completion(lash_core::TerminationMode::TerminalRequired);
+    let natural = completion(lash_core::TerminationMode::Natural);
+    let malformed = "<typescript >\nawait control.finish(1)\n</typescript>";
     let reasoning = [RlmReasoningPart {
         text: "thinking".to_string(),
         replay: None,
@@ -44,20 +50,22 @@ fn non_cell_reply_classification_table_is_byte_identical() {
             reasoning,
         }
     }
-    let classify =
-        |extraction, terminal_reason, termination: &RlmTermination, reply: ReplyProjections<'_>| {
-            match driver.classify_reply(&attempt, extraction, terminal_reason, termination, reply) {
-                ReplyClass::Cell(_) => Outcome::Cell,
-                ReplyClass::Finish => Outcome::Finish,
-                ReplyClass::Repair(prompt) => Outcome::Repair {
-                    decision: prompt.decision,
-                    assistant_message: prompt
-                        .assistant_message
-                        .map(|(text, purpose)| (text.to_string(), purpose)),
-                    correction_id: prompt.correction.id,
-                },
-            }
-        };
+    let classify = |extraction,
+                    terminal_reason,
+                    termination: &crate::rlm_support::RlmCompletion,
+                    reply: ReplyProjections<'_>| {
+        match driver.classify_reply(&attempt, extraction, terminal_reason, termination, reply) {
+            ReplyClass::Cell(_) => Outcome::Cell,
+            ReplyClass::Finish => Outcome::Finish,
+            ReplyClass::Repair(prompt) => Outcome::Repair {
+                decision: prompt.decision,
+                assistant_message: prompt
+                    .assistant_message
+                    .map(|(text, purpose)| (text.to_string(), purpose)),
+                correction_id: prompt.correction.id,
+            },
+        }
+    };
     let repair = |decision,
                   assistant_message: Option<(&'static str, &'static str)>,
                   purpose: &str| {
@@ -201,7 +209,7 @@ fn non_cell_reply_classification_table_is_byte_identical() {
             "a usable cell stays on the mainline",
             classify(
                 extract_cell(
-                    "<typescript>\nfinish(1)\n</typescript>",
+                    "<typescript>\nawait control.finish(1)\n</typescript>",
                     driver.dialect.cell_tags(),
                 ),
                 LlmTerminalReason::Stop,

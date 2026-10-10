@@ -16,6 +16,12 @@ pub struct Environment<'a> {
     /// The effects the host supplies, with the signature each is performed
     /// under.
     pub effects: &'a BTreeMap<EffectName, Signature>,
+    /// The turn-ending controls each effect declares its result may be
+    /// ([`EffectControl`]): the effects named here are control calls. An
+    /// effect that declares none is absent. A front end ends `main` right
+    /// after a control call settles, and a saved function pins what its
+    /// effects declared.
+    pub controls: &'a BTreeMap<EffectName, BTreeSet<EffectControl>>,
     /// The session bindings in scope when `main` starts (`K-SES-001`).
     pub bindings: &'a BTreeSet<Name>,
     /// The functions the session holds, by the binding each is called
@@ -23,6 +29,19 @@ pub struct Environment<'a> {
     /// document it lowers ([`crate::install`]); every name here is also one
     /// of `bindings`.
     pub functions: &'a BTreeMap<Name, crate::SavedFunction>,
+}
+
+/// A way an effect's call may end its caller's turn: what the host's tool
+/// declares, in terms no kernel form reads.
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum EffectControl {
+    /// The turn ends with the value the call carries.
+    Finish,
+    /// The turn ends by switching to a fresh agent frame.
+    SwitchAgentFrame,
 }
 
 /// A source text as a kernel program.

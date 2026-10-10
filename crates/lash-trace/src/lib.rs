@@ -936,8 +936,8 @@ impl TraceTurnOutcome {
 #[serde(rename_all = "snake_case")]
 pub enum TraceTurnCompletionReason {
     AssistantMessage,
-    FinalValue,
-    ToolValue,
+    /// A declared Finish control ended the turn.
+    Finished,
 }
 
 impl TraceTurnCompletionReason {

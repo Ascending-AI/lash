@@ -159,7 +159,7 @@ fn process_cell(labels: &[&str]) -> lash_core::llm::types::LlmResponse {
         .map(|index| format!("await h{index}"))
         .collect::<Vec<_>>()
         .join(", ");
-    served::cell(&format!("{starts}\nfinish([{awaits}]);"))
+    served::cell(&format!("{starts}\nawait control.finish([{awaits}]);"))
 }
 
 /// A process body's call is named by the process it runs in: the same
@@ -227,7 +227,7 @@ async fn tool_call_limit_counts_what_a_process_holds(tier: Tier) {
     let cell = served::cell(&format!(
         "{body}\n\
          const held = await processes.start({{ definition: body }});\n\
-         finish(await held);"
+         await control.finish(await held);"
     ));
     let _ = world
         .run("process-holding", served::spec(LIMIT), vec![cell])
@@ -299,7 +299,7 @@ fn groups_cell(groups: &[&[&str]]) -> lash_core::llm::types::LlmResponse {
     served::cell(&format!(
         "const body = async () => {{\n{awaits}  return \"done\";\n}};\n\
          const held = await processes.start({{ definition: body }});\n\
-         finish(await held);"
+         await control.finish(await held);"
     ))
 }
 
@@ -414,7 +414,7 @@ async fn typescript_process_body_resolves_journaled_clock_and_randomness(tier: T
             const roll = Math.random();\n  \
             return { stamp: stamp, ms: ms, roll: roll };\n};\n\
          const held = await processes.start({ definition: worker });\n\
-         finish(JSON.stringify(await held));",
+         await control.finish(JSON.stringify(await held));",
     );
     let output = world
         .run("process-runtime-values", served::spec(64), vec![cell])
@@ -425,7 +425,8 @@ async fn typescript_process_body_resolves_journaled_clock_and_randomness(tier: T
         .map(str::to_owned)
         .or_else(|| {
             output
-                .final_value()
+                .finished()
+                .map(|(_, value)| value)
                 .and_then(|value| value.as_str())
                 .map(str::to_owned)
         })

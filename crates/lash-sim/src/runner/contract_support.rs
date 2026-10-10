@@ -623,9 +623,10 @@ pub(super) fn turn_outcome_contract_json(
             "stop_reason": format!("{other:?}"),
         }),
         lash_core::facade_support::TurnOutcome::Finished(
-            lash_core::facade_support::TurnFinish::FinalValue { value },
+            lash_core::facade_support::TurnFinish::Finished { tool_name, value },
         ) => json!({
-            "kind": "final_value",
+            "kind": "finished",
+            "tool_name": tool_name,
             "value": value,
         }),
         lash_core::facade_support::TurnOutcome::Finished(other) => json!({

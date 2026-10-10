@@ -20,12 +20,12 @@ use lash_protocol_standard::scenario_contracts::STANDARD_PROTOCOL_SCENARIO_CONTR
 use lash_provider_anthropic::AnthropicProvider;
 use lash_provider_google::GoogleOAuthProvider;
 use lash_provider_openai::{CodexProvider, OpenAiCompatibleProvider, OpenAiProvider};
-use lash_rlm_types::{RlmProtocolEvent, RlmTermination, RlmTurnOptions};
+use lash_rlm_types::{RlmProtocolEvent, RlmTurnOptions};
 use serde::Serialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
-use lash::rlm::RlmSendBuilderExt as _;
+use lash::rlm::{RlmSendBuilderExt as _, TerminationMode};
 use lash_vm_runtime::ToolDefinitionBindingExt as _;
 
 use crate::artifacts::*;

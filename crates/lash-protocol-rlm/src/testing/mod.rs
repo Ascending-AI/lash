@@ -96,6 +96,81 @@ pub(crate) fn cell_context(
     replay_key: &'static str,
     provider: Arc<dyn lash_core::ToolProvider>,
 ) -> lash_core::RuntimeExecutionContext<'static> {
+    let (provider, catalog) = with_finish(provider);
+    lash_core::testing::code_execution_context_with_tool_provider_catalog_and_invocation(
+        host.ports(),
+        provider,
+        catalog,
+        lash_core::testing::exec_code_invocation(session, turn, 0, 0, "exec-code", replay_key),
+    )
+}
+
+/// A provider that offers no tool of its own.
+pub(crate) struct NoTools;
+
+#[async_trait::async_trait]
+impl lash_core::ToolProvider for NoTools {
+    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+        Vec::new()
+    }
+
+    fn resolve_contract(&self, _name: &str) -> Option<Arc<lash_core::ToolContract>> {
+        None
+    }
+
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        lash_core::ToolOutcome::err_fmt(format_args!("Unknown tool: {}", call.name())).into()
+    }
+}
+
+/// `provider`'s tools and Lash's `control.finish`, which a law's cell ends
+/// with to answer a value.
+struct WithFinish {
+    tools: Arc<dyn lash_core::ToolProvider>,
+    finish: lash_core::ToolDefinition,
+}
+
+#[async_trait::async_trait]
+impl lash_core::ToolProvider for WithFinish {
+    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+        let mut manifests = self.tools.tool_manifests();
+        manifests.push(self.finish.manifest());
+        manifests
+    }
+
+    fn resolve_manifest_by_id(&self, id: &lash_core::ToolId) -> Option<lash_core::ToolManifest> {
+        let finish = self.finish.manifest();
+        if &finish.id == id {
+            return Some(finish);
+        }
+        self.tools.resolve_manifest_by_id(id)
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+        let finish = self.finish.manifest();
+        if name == finish.name || name == finish.id.as_str() {
+            return Some(Arc::new(self.finish.contract()));
+        }
+        self.tools.resolve_contract(name)
+    }
+
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        if call.name() == crate::FINISH_TOOL_NAME {
+            return lash_core::ToolOutcome::finish(call.args.clone()).into();
+        }
+        self.tools.execute(call).await
+    }
+}
+
+/// `provider` with `control.finish` beside its tools, and the catalog of
+/// both.
+pub(crate) fn with_finish(
+    provider: Arc<dyn lash_core::ToolProvider>,
+) -> (Arc<dyn lash_core::ToolProvider>, lash_core::ToolCatalog) {
+    let provider: Arc<dyn lash_core::ToolProvider> = Arc::new(WithFinish {
+        tools: provider,
+        finish: crate::finish_tool_definition(&crate::dialect::TypescriptPrompts),
+    });
     let catalog = lash_core::ToolCatalog::from_tool_definitions(
         provider
             .tool_manifests()
@@ -109,12 +184,7 @@ pub(crate) fn cell_context(
             })
             .collect(),
     );
-    lash_core::testing::code_execution_context_with_tool_provider_catalog_and_invocation(
-        host.ports(),
-        provider,
-        catalog,
-        lash_core::testing::exec_code_invocation(session, turn, 0, 0, "exec-code", replay_key),
-    )
+    (provider, catalog)
 }
 
 /// The name of [`python_worker_entry`], as libtest spells it.

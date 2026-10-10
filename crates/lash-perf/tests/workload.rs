@@ -781,5 +781,5 @@ async fn an_admitted_turn_and_an_earlier_queued_input_keep_every_tool_plan() {
     for key in &keys {
         assert!(source.contains(key), "input {key} was omitted");
     }
-    assert_eq!(source.matches("finish(").count(), 1);
+    assert_eq!(source.matches("await control.finish(").count(), 1);
 }

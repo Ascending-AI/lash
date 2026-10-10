@@ -574,13 +574,105 @@ pub enum TurnFinish {
     AssistantMessage {
         text: String,
     },
-    FinalValue {
-        value: serde_json::Value,
-    },
-    ToolValue {
+    /// A declared Finish control ended the turn with `value`. `tool_name`
+    /// is `finish` for Lash's `control.finish`, or the host tool's name.
+    Finished {
         tool_name: String,
         value: serde_json::Value,
     },
+}
+
+/// How a session's turns may end.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum TerminationMode {
+    /// Only a declared Finish or SwitchAgentFrame control ends the turn:
+    /// prose alone never does.
+    TerminalRequired,
+    /// Prose ends the turn as its answer, and so does a declared control.
+    #[default]
+    Natural,
+}
+
+impl TerminationMode {
+    /// Whether a prose-only reply ends the turn as its answer.
+    pub fn prose_ends_turn(self) -> bool {
+        matches!(self, Self::Natural)
+    }
+}
+
+/// What became of a [`CompletionCandidate`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CompletionDisposition {
+    /// The control settled; the turn has not passed BeforeCompletion.
+    Pending,
+    /// Nothing arrived at BeforeCompletion: the turn ended or switched.
+    Accepted,
+    /// Input arrived at BeforeCompletion: the turn went on, and the
+    /// candidate never ends it.
+    Superseded,
+}
+
+/// A settled control call that may end its turn: recorded when the call
+/// settles, and decided once at BeforeCompletion.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CompletionCandidate {
+    /// The protocol iteration that admitted the control call.
+    pub iteration: usize,
+    pub call_id: crate::ToolCallId,
+    pub tool_name: String,
+    pub control: crate::TurnControl,
+    pub disposition: CompletionDisposition,
+}
+
+impl CompletionCandidate {
+    /// The candidate a settled control call records.
+    pub fn pending(
+        iteration: usize,
+        call_id: crate::ToolCallId,
+        tool_name: impl Into<String>,
+        control: crate::TurnControl,
+    ) -> Self {
+        Self {
+            iteration,
+            call_id,
+            tool_name: tool_name.into(),
+            control,
+            disposition: CompletionDisposition::Pending,
+        }
+    }
+
+    /// The outcome the turn ends with when this candidate is accepted.
+    pub fn outcome(&self) -> TurnOutcome {
+        match &self.control {
+            crate::TurnControl::Finish { value } => TurnOutcome::Finished(TurnFinish::Finished {
+                tool_name: self.tool_name.clone(),
+                value: crate::ToolCallOutput::success_tool_value(value.clone())
+                    .value_for_projection(),
+            }),
+            crate::TurnControl::SwitchAgentFrame {
+                frame_key,
+                initial_nodes,
+                task,
+            } => TurnOutcome::AgentFrameSwitch {
+                frame_key: frame_key.clone(),
+                task: task.clone(),
+                initial_nodes: initial_nodes.clone(),
+            },
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

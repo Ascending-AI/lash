@@ -1,13 +1,37 @@
 use lash_core::plugin::PluginSessionRequest;
 use lash_core::sansio::Response;
 use lash_core::{Effect, LlmOutputPart, LlmResponse, TurnMachine, TurnMachineConfig};
-use lash_rlm_types::{RlmProtocolEvent, RlmTermination, RlmTurnOptions};
+use lash_rlm_types::{RlmProtocolEvent, RlmTurnOptions};
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use std::collections::VecDeque;
 use std::sync::Arc;
 
-pub(super) fn config(native: bool, termination: RlmTermination) -> TurnMachineConfig {
+/// How a test's turns may end, and the schema `control.finish` takes its
+/// value under.
+#[derive(Clone)]
+pub(super) struct Ending {
+    mode: lash_core::TerminationMode,
+    schema: Option<serde_json::Value>,
+}
+
+impl From<lash_core::TerminationMode> for Ending {
+    fn from(mode: lash_core::TerminationMode) -> Self {
+        Self { mode, schema: None }
+    }
+}
+
+impl Ending {
+    fn with_schema(mode: lash_core::TerminationMode, schema: serde_json::Value) -> Self {
+        Self {
+            mode,
+            schema: Some(schema),
+        }
+    }
+}
+
+pub(super) fn config(native: bool, ending: impl Into<Ending>) -> TurnMachineConfig {
+    let ending = ending.into();
     let factory = crate::RlmProtocolPluginFactory::new(
         crate::RlmProtocolPluginConfig::builder()
             .channel(if native {
@@ -67,7 +91,10 @@ pub(super) fn config(native: bool, termination: RlmTermination) -> TurnMachineCo
         emit_llm_trace: false,
         writer_formats: lash_core::build_newest_writer_formats(),
         termination: crate::plugin::RlmRecordedConfig::for_testing(RlmTurnOptions {
-            termination: Some(termination),
+            termination: Some(ending.mode),
+            finish_schema: ending
+                .schema
+                .map(|schema| lash_sansio::JsonSchema::admit(schema).expect("valid finish schema")),
             render: None,
         }),
     }
@@ -145,7 +172,7 @@ fn phased_text(phase: &str, text: &str) -> LlmOutputPart {
         }),
     }
 }
-fn typescript_cell_config(termination: RlmTermination) -> TurnMachineConfig {
+fn typescript_cell_config(termination: impl Into<Ending>) -> TurnMachineConfig {
     let mut config = config(false, termination);
     config.protocol_driver = Arc::new(crate::protocol::RlmDriver::new(
         crate::dialect::CellDialect::typescript(),
@@ -172,7 +199,14 @@ pub(super) fn drain(machine: &mut TurnMachine) -> Vec<Effect> {
         if let Effect::SyncExecutionEnvironment { id } = effect {
             machine.handle_response(lash_core::sansio::Response::ExecutionEnvironmentSynced {
                 id,
-                result: Ok(lash_core::sansio::ExecutionEnvironmentSync::default()),
+                result: Ok(lash_core::sansio::ExecutionEnvironmentSync {
+                    turn_controls: [(
+                        crate::FINISH_TOOL_NAME.to_string(),
+                        lash_core::TurnControls::finish(),
+                    )]
+                    .into(),
+                    ..lash_core::sansio::ExecutionEnvironmentSync::default()
+                }),
             });
             continue;
         }
@@ -209,10 +243,11 @@ pub(super) fn reply_with_reason(
 }
 fn run(
     native: bool,
-    termination: RlmTermination,
+    termination: impl Into<Ending>,
     prose: Option<&str>,
     exec: Option<Result<lash_core::ExecResponse, lash_core::ExecCodeFailure>>,
 ) -> (Vec<serde_json::Value>, Vec<lash_core::CellRecord>) {
+    let termination: Ending = termination.into();
     let mut machine = TurnMachine::new(
         config(native, termination.clone()),
         Vec::new(),
@@ -231,9 +266,11 @@ fn run(
         None if native => vec![call(
             "provider-id",
             "execute_code",
-            r#"{"code":"finish(1);"}"#,
+            r#"{"code":"await control.finish(1);"}"#,
         )],
-        None => vec![text("<typescript>\nfinish(1);\n</typescript>")],
+        None => vec![text(
+            "<typescript>\nawait control.finish(1);\n</typescript>",
+        )],
     };
     let attempted_finish =
         matches!(&exec, Some(Ok(response)) if response.finish_value().cloned().is_some());
@@ -307,11 +344,11 @@ fn run(
                 let scenario = format!(
                     "{}_{}_{}",
                     if native { "native" } else { "cell" },
-                    match termination {
-                        RlmTermination::Natural { schema: None } => "natural",
-                        RlmTermination::Natural { schema: Some(_) } => "natural_schema",
-                        RlmTermination::FinishRequired { schema: None } => "finish",
-                        RlmTermination::FinishRequired { schema: Some(_) } => "schema",
+                    match (termination.mode, termination.schema.is_some()) {
+                        (lash_core::TerminationMode::Natural, false) => "natural",
+                        (lash_core::TerminationMode::Natural, true) => "natural_schema",
+                        (lash_core::TerminationMode::TerminalRequired, false) => "finish",
+                        (lash_core::TerminationMode::TerminalRequired, true) => "schema",
                     },
                     if prose.is_some() {
                         "prose"
@@ -338,15 +375,33 @@ fn run(
     }
     (checkpoints, trajectory)
 }
+/// What the executor answers for a cell: one that ran to its end, or one
+/// that `control.finish(value)` ended, with that call's settled record.
 fn response(finish: Option<serde_json::Value>) -> lash_core::ExecResponse {
+    let call_id = lash_core::ToolCallId::fixture("finish-call");
     lash_core::ExecResponse {
         prints_retained: None,
         prints: Vec::new(),
         calls: Vec::new(),
-        tool_calls: Vec::new(),
+        tool_calls: finish
+            .iter()
+            .map(|value| lash_core::ToolCallRecord {
+                call_id: call_id.clone(),
+                provider_call_id: None,
+                tool: crate::FINISH_TOOL_NAME.to_string(),
+                args: value.clone(),
+                output: lash_core::ToolCallOutput::finish(value.clone()),
+            })
+            .collect(),
         printed_images: Vec::new(),
         result: finish.map_or(lash_core::CellOutcome::Completed, |value| {
-            lash_core::CellOutcome::Finished(value.into())
+            lash_core::CellOutcome::Controlled {
+                tool_name: crate::FINISH_TOOL_NAME.to_string(),
+                call_id,
+                control: lash_core::CellControl::Finish {
+                    value: value.into(),
+                },
+            }
         }),
         retained_finish_value: None,
         degraded_bindings: Vec::new(),
@@ -376,7 +431,7 @@ fn assert_driver_stops_before_queued_provider_response(
         "the queued response must prove it would schedule the forbidden effect"
     );
     let mut provider_script = VecDeque::from([allowed_response, queued_response]);
-    let mut turn_config = config(native, RlmTermination::Natural { schema: None });
+    let mut turn_config = config(native, lash_core::TerminationMode::Natural);
     turn_config.turn_budget = lash_core::TurnBudget::bounded(1);
     let mut machine = TurnMachine::new(turn_config, Vec::new(), Default::default(), 0);
     let mut pending = drain(&mut machine);
@@ -519,7 +574,7 @@ fn cell_driver_stops_at_budget_before_queued_provider_response() {
 }
 
 fn assert_simultaneous_turn_and_no_progress_exhaustion_prefers_silent_turn_stop(native: bool) {
-    let mut turn_config = config(native, RlmTermination::FinishRequired { schema: None });
+    let mut turn_config = config(native, lash_core::TerminationMode::TerminalRequired);
     turn_config.turn_budget = lash_core::TurnBudget::bounded(1);
     turn_config.no_progress_budget = lash_core::NoProgressBudget::bounded(1);
     let mut machine = TurnMachine::new(turn_config, Vec::new(), Default::default(), 0);
@@ -576,15 +631,13 @@ fn cell_protocol_simultaneous_turn_and_no_progress_exhaustion_prefers_silent_tur
 #[test]
 fn termination_and_trajectory_parity() {
     for termination in [
-        RlmTermination::Natural { schema: None },
+        Ending::from(lash_core::TerminationMode::Natural),
         natural_text_schema(),
-        RlmTermination::FinishRequired { schema: None },
-        RlmTermination::FinishRequired {
-            schema: Some(
-                lash_sansio::JsonSchema::admit(serde_json::json!({"type":"string"}))
-                    .expect("valid finish schema"),
-            ),
-        },
+        Ending::from(lash_core::TerminationMode::TerminalRequired),
+        Ending::with_schema(
+            lash_core::TerminationMode::TerminalRequired,
+            serde_json::json!({"type":"string"}),
+        ),
     ] {
         for prose in ["answer", ""] {
             assert_eq!(
@@ -662,7 +715,7 @@ fn native_normalization_covers_every_schema_refusal() {
     ];
     for (parts, decision) in cases {
         let mut machine = TurnMachine::new(
-            config(true, RlmTermination::Natural { schema: None }),
+            config(true, lash_core::TerminationMode::Natural),
             Vec::new(),
             Default::default(),
             0,
@@ -696,7 +749,7 @@ fn native_normalization_covers_every_schema_refusal() {
         assert_eq!(decisions, vec![serde_json::json!(decision)]);
     }
     let mut machine = TurnMachine::new(
-        config(true, RlmTermination::Natural { schema: None }),
+        config(true, lash_core::TerminationMode::Natural),
         Vec::new(),
         Default::default(),
         0,
@@ -716,7 +769,7 @@ fn native_normalization_covers_every_schema_refusal() {
 #[test]
 fn native_reasoning_only_is_provider_error() {
     let mut machine = TurnMachine::new(
-        config(true, RlmTermination::Natural { schema: None }),
+        config(true, lash_core::TerminationMode::Natural),
         Vec::new(),
         Default::default(),
         0,
@@ -820,7 +873,7 @@ async fn factory_selects_native_abi_and_completed_cell_events() {
 #[test]
 fn multiple_calls_spend_one_stall_attempt_and_answer_every_id() {
     let mut machine = TurnMachine::new(
-        config(true, RlmTermination::Natural { schema: None }),
+        config(true, lash_core::TerminationMode::Natural),
         Vec::new(),
         Default::default(),
         0,
@@ -915,7 +968,7 @@ fn multiple_calls_spend_one_stall_attempt_and_answer_every_id() {
 fn output_limit_prose_repairs_on_both_plugins() {
     for native in [false, true] {
         let mut machine = TurnMachine::new(
-            config(native, RlmTermination::Natural { schema: None }),
+            config(native, lash_core::TerminationMode::Natural),
             Vec::new(),
             Default::default(),
             0,
@@ -947,7 +1000,7 @@ fn output_limit_prose_repairs_on_both_plugins() {
         let saved =
             serde_json::from_str(&serde_json::to_string(&machine.checkpoint()).unwrap()).unwrap();
         machine = TurnMachine::restore_from_checkpoint(
-            config(native, RlmTermination::Natural { schema: None }),
+            config(native, lash_core::TerminationMode::Natural),
             saved,
             None,
         )
@@ -983,7 +1036,7 @@ fn output_limit_prose_repairs_on_both_plugins() {
 fn output_limit_calls_repair_without_execution_until_stall_budget() {
     for arguments in [r#"{"code":"finish(1);"}"#, r#"{"code":"finish"#] {
         let mut machine = TurnMachine::new(
-            config(true, RlmTermination::Natural { schema: None }),
+            config(true, lash_core::TerminationMode::Natural),
             Vec::new(),
             Default::default(),
             0,
@@ -1021,7 +1074,7 @@ fn output_limit_calls_repair_without_execution_until_stall_budget() {
                 serde_json::from_str(&serde_json::to_string(&machine.checkpoint()).unwrap())
                     .unwrap();
             machine = TurnMachine::restore_from_checkpoint(
-                config(true, RlmTermination::Natural { schema: None }),
+                config(true, lash_core::TerminationMode::Natural),
                 saved,
                 None,
             )
@@ -1088,7 +1141,7 @@ fn cell_channel_tool_call_on_a_tool_less_request_repairs_then_stops_on_budget() 
         )]
     };
     let mut machine = TurnMachine::new(
-        config(false, RlmTermination::Natural { schema: None }),
+        config(false, lash_core::TerminationMode::Natural),
         Vec::new(),
         Default::default(),
         0,
@@ -1155,7 +1208,7 @@ fn cell_channel_tool_call_on_a_tool_less_request_repairs_then_stops_on_budget() 
         let saved =
             serde_json::from_str(&serde_json::to_string(&machine.checkpoint()).unwrap()).unwrap();
         machine = TurnMachine::restore_from_checkpoint(
-            config(false, RlmTermination::Natural { schema: None }),
+            config(false, lash_core::TerminationMode::Natural),
             saved,
             None,
         )
@@ -1223,7 +1276,7 @@ fn cell_channel_tool_call_on_a_tool_less_request_repairs_then_stops_on_budget() 
 #[test]
 fn cell_channel_tool_call_repair_lets_the_next_cell_finish() {
     let mut machine = TurnMachine::new(
-        typescript_cell_config(RlmTermination::Natural { schema: None }),
+        typescript_cell_config(lash_core::TerminationMode::Natural),
         Vec::new(),
         Default::default(),
         0,
@@ -1253,7 +1306,9 @@ fn cell_channel_tool_call_repair_lets_the_next_cell_finish() {
     effects = reply(
         &mut machine,
         &effects,
-        vec![text("<typescript>\nfinish(1);\n</typescript>")],
+        vec![text(
+            "<typescript>\nawait control.finish(1);\n</typescript>",
+        )],
     );
     let id = effects
         .iter()
@@ -1285,7 +1340,7 @@ fn cell_channel_tool_call_repair_lets_the_next_cell_finish() {
             effect,
             Effect::Emit(lash_core::session_model::SessionStreamEvent::TurnOutcome {
                 outcome: lash_core::facade_support::TurnOutcome::Finished(
-                    lash_core::facade_support::TurnFinish::FinalValue { .. }
+                    lash_core::facade_support::TurnFinish::Finished { .. }
                 )
             })
         )),
@@ -1298,7 +1353,7 @@ fn configured_prompt_is_instructions_on_both_channels() {
     for native in [false, true] {
         for (prompt, expected) in [("configured prompt", Some("configured prompt")), ("", None)] {
             let mut machine = TurnMachine::new(
-                config(native, RlmTermination::Natural { schema: None }),
+                config(native, lash_core::TerminationMode::Natural),
                 Vec::new(),
                 Default::default(),
                 0,
@@ -1339,7 +1394,7 @@ fn configured_prompt_is_instructions_on_both_channels() {
 #[test]
 fn multipart_response_preserves_executable_cell() {
     let mut machine = TurnMachine::new(
-        typescript_cell_config(RlmTermination::Natural { schema: None }),
+        typescript_cell_config(lash_core::TerminationMode::Natural),
         Vec::new(),
         Default::default(),
         0,
@@ -1368,7 +1423,7 @@ fn multipart_response_preserves_executable_cell() {
 #[test]
 fn no_cell_multipart_response_finishes_with_final_answer_prose() {
     let mut machine = TurnMachine::new(
-        typescript_cell_config(RlmTermination::Natural { schema: None }),
+        typescript_cell_config(lash_core::TerminationMode::Natural),
         Vec::new(),
         Default::default(),
         0,
@@ -1426,12 +1481,9 @@ fn markdown_fenced_finish_requests_an_explicit_no_execution_repair() {
         for schema in [None, Some(serde_json::json!({"type": "number"}))] {
             let mut config = config(
                 false,
-                RlmTermination::FinishRequired {
-                    schema: schema
-                        .clone()
-                        .map(lash_sansio::JsonSchema::admit)
-                        .transpose()
-                        .expect("valid finish schema"),
+                Ending {
+                    mode: lash_core::TerminationMode::TerminalRequired,
+                    schema: schema.clone(),
                 },
             );
             config.protocol_driver = Arc::new(crate::protocol::RlmDriver::with_dialect(
@@ -1442,7 +1494,7 @@ fn markdown_fenced_finish_requests_an_explicit_no_execution_repair() {
             let effects = reply(
                 &mut machine,
                 &initial,
-                vec![text("```typescript\nfinish(1)\n```")],
+                vec![text("```typescript\nawait control.finish(1)\n```")],
             );
             assert!(
                 !effects
@@ -1502,7 +1554,7 @@ fn native_extraction_payloads(machine: &TurnMachine) -> Vec<serde_json::Value> {
 fn native_reasoning_does_not_move_the_stall_reply_fingerprint() {
     let fingerprint_for = |reasoning: &str| {
         let mut machine = TurnMachine::new(
-            config(true, RlmTermination::Natural { schema: None }),
+            config(true, lash_core::TerminationMode::Natural),
             Vec::new(),
             Default::default(),
             0,
@@ -1542,7 +1594,7 @@ fn native_reasoning_does_not_move_the_stall_reply_fingerprint() {
 fn native_user_stop_is_terminal_live_and_after_restore() {
     for restore in [false, true] {
         let mut machine = TurnMachine::new(
-            config(true, RlmTermination::Natural { schema: None }),
+            config(true, lash_core::TerminationMode::Natural),
             Vec::new(),
             Default::default(),
             0,
@@ -1558,7 +1610,7 @@ fn native_user_stop_is_terminal_live_and_after_restore() {
                 serde_json::from_slice(&serde_json::to_vec(&machine.checkpoint()).unwrap())
                     .unwrap();
             machine = TurnMachine::restore_from_checkpoint(
-                config(true, RlmTermination::Natural { schema: None }),
+                config(true, lash_core::TerminationMode::Natural),
                 checkpoint,
                 None,
             )
@@ -1630,7 +1682,7 @@ fn a_step_archive_survives_both_driver_checkpoint_paths() {
         exec.prints_retained = Some(archive.clone());
         let (_, steps) = run(
             native,
-            RlmTermination::Natural { schema: None },
+            lash_core::TerminationMode::Natural,
             None,
             Some(Ok(exec)),
         );
@@ -1650,7 +1702,7 @@ fn a_recorded_tool_terminal_keeps_its_payload_and_usage_across_both_checkpoints(
         serde_json::json!({"terminal": "x".repeat(80_000), "nested": [1, {"complete": true}]});
     for native in [false, true] {
         let mut machine = TurnMachine::new(
-            config(native, RlmTermination::Natural { schema: None }),
+            config(native, lash_core::TerminationMode::Natural),
             Vec::new(),
             Default::default(),
             0,
@@ -1691,7 +1743,7 @@ fn a_recorded_tool_terminal_keeps_its_payload_and_usage_across_both_checkpoints(
         let saved = serde_json::to_value(machine.checkpoint()).unwrap();
         let usage = saved["checkpoint"]["cumulative_usage"].clone();
         machine = TurnMachine::restore_from_checkpoint(
-            config(native, RlmTermination::Natural { schema: None }),
+            config(native, lash_core::TerminationMode::Natural),
             serde_json::from_value(saved).unwrap(),
             None,
         )
@@ -1720,12 +1772,15 @@ fn a_recorded_tool_terminal_keeps_its_payload_and_usage_across_both_checkpoints(
             provider_call_id: None,
             tool: "app_lookup".into(),
             args: serde_json::json!({}),
-            output: lash_core::ToolCallOutput::success(payload.clone()).with_control(
-                lash_core::ToolControl::Finish {
-                    value: lash_core::ToolValue::untrusted_json(payload.clone()),
-                },
-            ),
+            output: lash_core::ToolCallOutput::finish(payload.clone()),
         });
+        exec.result = lash_core::CellOutcome::Controlled {
+            tool_name: "app_lookup".into(),
+            call_id: lash_core::ToolCallId::fixture("terminal-call"),
+            control: lash_core::CellControl::Finish {
+                value: payload.clone().into(),
+            },
+        };
         machine.handle_response(Response::ExecResult {
             id: exec_id,
             result: Ok(exec),
@@ -1755,7 +1810,7 @@ fn a_recorded_tool_terminal_keeps_its_payload_and_usage_across_both_checkpoints(
         let saved = serde_json::to_value(machine.checkpoint()).unwrap();
         assert_eq!(saved["checkpoint"]["cumulative_usage"], usage);
         machine = TurnMachine::restore_from_checkpoint(
-            config(native, RlmTermination::Natural { schema: None }),
+            config(native, lash_core::TerminationMode::Natural),
             serde_json::from_value(saved).unwrap(),
             None,
         )
@@ -1783,7 +1838,7 @@ fn a_recorded_tool_terminal_keeps_its_payload_and_usage_across_both_checkpoints(
         assert_eq!(
             *outcome,
             lash_core::facade_support::TurnOutcome::Finished(
-                lash_core::facade_support::TurnFinish::ToolValue {
+                lash_core::facade_support::TurnFinish::Finished {
                     tool_name: "app_lookup".into(),
                     value: payload.clone()
                 },
@@ -1801,14 +1856,13 @@ fn a_recorded_tool_terminal_keeps_its_payload_and_usage_across_both_checkpoints(
     }
 }
 
-/// A chat turn's termination: prose ends it, and `finish` must carry text.
-fn natural_text_schema() -> RlmTermination {
-    RlmTermination::Natural {
-        schema: Some(
-            lash_sansio::JsonSchema::admit(serde_json::json!({"type": "string"}))
-                .expect("valid finish schema"),
-        ),
-    }
+/// A chat turn's ending: prose ends it, and `control.finish` must carry
+/// text.
+fn natural_text_schema() -> Ending {
+    Ending::with_schema(
+        lash_core::TerminationMode::Natural,
+        serde_json::json!({"type": "string"}),
+    )
 }
 
 /// Replies to the pending model call with one program that finishes, answers
@@ -1865,13 +1919,12 @@ fn turn_outcome(effects: &[Effect]) -> Option<&lash_core::facade_support::TurnOu
     })
 }
 
-/// FIG-5104: a Natural turn with a text finish schema refuses
-/// `finish(<tool record>)` as a program failure carrying the value mismatch,
-/// asks the model to finish again with the mismatch copy, and then ends with
+/// FIG-5104, FIG-5781: a Natural turn with a text finish schema refuses
+/// `control.finish(<tool record>)` as a failed call carrying the value
+/// mismatch, so the turn goes on and the model reads why, and then ends with
 /// the text it finishes with. Both channels adjudicate it alike.
 #[test]
 fn a_natural_text_schema_refuses_a_record_finish_and_accepts_text() {
-    let mismatch_copy = crate::dialect::typescript_test_dialect().finish_schema_mismatch_copy();
     for native in [false, true] {
         let mut machine = TurnMachine::new(
             config(native, natural_text_schema()),
@@ -1884,7 +1937,7 @@ fn a_natural_text_schema_refuses_a_record_finish_and_accepts_text() {
             &mut machine,
             &initial,
             native,
-            "finish(await tools.order_lookup({ id: 7 }));",
+            "await control.finish(await tools.order_lookup({ id: 7 }));",
             serde_json::json!({ "id": 7, "status": "shipped" }),
         );
         assert_eq!(turn_outcome(&refused), None, "native={native}: {refused:?}");
@@ -1897,21 +1950,22 @@ fn a_natural_text_schema_refuses_a_record_finish_and_accepts_text() {
             .unwrap_or_else(|| panic!("native={native}: the model is asked again: {refused:?}"));
         let rendered = serde_json::to_string(&retry.messages).expect("messages serialize");
         assert!(
-            rendered.contains(&mismatch_copy),
-            "native={native}: the retry carries the mismatch copy: {rendered}"
+            rendered.contains("`await control.finish(value)` refused its value"),
+            "native={native}: the retry says the call was refused and why: {rendered}"
         );
 
         let finished = finish_with(
             &mut machine,
             &refused,
             native,
-            r#"finish("Order 7 has shipped.");"#,
+            r#"await control.finish("Order 7 has shipped.");"#,
             serde_json::json!("Order 7 has shipped."),
         );
         assert_eq!(
             turn_outcome(&finished),
             Some(&lash_core::facade_support::TurnOutcome::Finished(
-                lash_core::facade_support::TurnFinish::FinalValue {
+                lash_core::facade_support::TurnFinish::Finished {
+                    tool_name: crate::FINISH_TOOL_NAME.to_string(),
                     value: serde_json::json!("Order 7 has shipped."),
                 }
             )),
@@ -1941,8 +1995,8 @@ fn a_natural_text_schema_refuses_a_record_finish_and_accepts_text() {
         assert_eq!(failure.kind, lash_core::CellFailureKind::Program);
         assert!(failure.value_mismatch.is_some(), "native={native}");
         assert_eq!(
-            accepted,
-            &lash_core::CellOutcome::Finished(lash_core::OutputValue::Inline(serde_json::json!(
+            accepted.finish(),
+            Some(&lash_core::OutputValue::Inline(serde_json::json!(
                 "Order 7 has shipped."
             ))),
             "native={native}"
@@ -1959,7 +2013,7 @@ fn a_natural_finish_schema_still_lets_prose_end_the_turn() {
         let (with_schema, _) = run(native, natural_text_schema(), Some("answer"), None);
         let (without, _) = run(
             native,
-            RlmTermination::Natural { schema: None },
+            lash_core::TerminationMode::Natural,
             Some("answer"),
             None,
         );

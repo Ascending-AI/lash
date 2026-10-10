@@ -13,14 +13,16 @@ use tokio::sync::Mutex as TokioMutex;
 // imperative loop does. The core's node runs the turn over SQLite memory
 // stores (FIG-5307).
 
-/// Counts the turn's completed tool calls.
+/// Counts the turn's completed order fetches: its tool calls other than
+/// the `control.finish` that ends the cell.
 #[derive(Default)]
 struct CompletedCalls(AtomicUsize);
 
 #[async_trait]
 impl TurnActivitySink for CompletedCalls {
     async fn emit(&self, activity: TurnActivity) {
-        if matches!(activity.event, TurnEvent::ToolCallCompleted { .. }) {
+        if matches!(&activity.event, TurnEvent::ToolCallCompleted { name, .. } if name != "finish")
+        {
             self.0.fetch_add(1, Ordering::SeqCst);
         }
     }
@@ -100,7 +102,7 @@ async fn delivered_orders_printed_by(cell: &str) -> Result<(String, usize)> {
     let captured = Arc::clone(&requests);
     let cells = Arc::new(TokioMutex::new(VecDeque::from(vec![
         typescript_block(cell),
-        typescript_block(r#"finish("done");"#),
+        typescript_block(r#"await control.finish("done");"#),
     ])));
     let provider = crate::testing::TestProvider::builder()
         .kind("fig2764-comprehension")
@@ -136,7 +138,7 @@ async fn delivered_orders_printed_by(cell: &str) -> Result<(String, usize)> {
     assert!(
         matches!(
             result.outcome,
-            TurnOutcome::Finished(lash_core::facade_support::TurnFinish::FinalValue { .. })
+            TurnOutcome::Finished(lash_core::facade_support::TurnFinish::Finished { .. })
         ),
         "the cell must finish, got {:?}",
         result.outcome

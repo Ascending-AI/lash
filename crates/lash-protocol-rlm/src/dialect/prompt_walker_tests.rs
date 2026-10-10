@@ -197,6 +197,7 @@ fn the_marker_list_and_the_example_rewriter_are_not_vacuous() {
             &lash_kernel_dialect::Environment {
                 library: embedding.library(),
                 effects: &effects,
+                controls: &std::collections::BTreeMap::new(),
                 bindings: &bindings,
                 functions: &std::collections::BTreeMap::new(),
             },
@@ -231,9 +232,9 @@ fn the_marker_list_and_the_example_rewriter_are_not_vacuous() {
     );
     assert_eq!(
         typescript
-            .render_tool_example("page = await web.fetch({ url: \"u\" })?\nfinish page")
+            .render_tool_example("page = await web.fetch({ url: \"u\" })?")
             .as_deref(),
-        Some("const page = await web.fetch({ url: \"u\" });\nfinish(page);")
+        Some("const page = await web.fetch({ url: \"u\" });")
     );
 
     // And the markers themselves must be present in the retired surface's real
@@ -265,7 +266,7 @@ fn authored_tool_examples() -> Vec<&'static str> {
         r#"await files.glob({ pattern: "**/*.rs", path: "crates/lash/src", limit: 50 })?"#,
         r#"await files.write({ path: "hello.txt", content: "hello\n" })?"#,
         r#"await jobs.run({ target: "//crates/lash-protocol-rlm:protocol_drivers__test", timeout_ms: 600000 })?"#,
-        "probe = await files.stat({ path: \"Cargo.lock\" })?\nfinish probe.size > 0",
+        r#"probe = await files.stat({ path: "Cargo.lock" })?"#,
         r#"await jobs.start({ name: "daemon", args: ["--serve"], detach: true })?"#,
         r#"await jobs.send({ process_id: "call-job-1", message: "", close: true })?"#,
         r#"await processes.list({ status: "any" })?"#,
@@ -522,7 +523,8 @@ async fn assembled_prompt_fragments_with_projection(
         "finalization",
         dialect
             .finalization_copy(
-                &lash_rlm_types::RlmTermination::FinishRequired { schema: None },
+                lash_core::TerminationMode::TerminalRequired,
+                None,
                 crate::plugin::RlmChannel::Cell,
             )
             .to_string(),
@@ -531,7 +533,8 @@ async fn assembled_prompt_fragments_with_projection(
         "finalization (natural)",
         dialect
             .finalization_copy(
-                &lash_rlm_types::RlmTermination::Natural { schema: None },
+                lash_core::TerminationMode::Natural,
+                None,
                 crate::plugin::RlmChannel::Cell,
             )
             .to_string(),
@@ -549,11 +552,8 @@ async fn assembled_prompt_fragments_with_projection(
         fragments.push((
             name,
             dialect.finalization_copy(
-                &lash_rlm_types::RlmTermination::Natural {
-                    schema: Some(
-                        lash_sansio::JsonSchema::admit(schema).expect("valid finish schema"),
-                    ),
-                },
+                lash_core::TerminationMode::Natural,
+                Some(&lash_sansio::JsonSchema::admit(schema).expect("valid finish schema")),
                 crate::plugin::RlmChannel::Cell,
             ),
         ));
@@ -561,12 +561,11 @@ async fn assembled_prompt_fragments_with_projection(
     fragments.push((
         "finalization (schema)",
         dialect.finalization_copy(
-            &lash_rlm_types::RlmTermination::FinishRequired {
-                schema: Some(
-                    lash_sansio::JsonSchema::admit(serde_json::json!({"type": "number"}))
-                        .expect("valid finish schema"),
-                ),
-            },
+            lash_core::TerminationMode::TerminalRequired,
+            Some(
+                &lash_sansio::JsonSchema::admit(serde_json::json!({"type": "number"}))
+                    .expect("valid finish schema"),
+            ),
             crate::plugin::RlmChannel::Cell,
         ),
     ));
@@ -591,7 +590,6 @@ async fn assembled_prompt_fragments_with_projection(
         "finish schema",
         dialect.finish_required_copy(true, crate::plugin::RlmChannel::Cell),
     ));
-    fragments.push(("schema mismatch", dialect.finish_schema_mismatch_copy()));
     fragments.push((
         "invalid cell retry",
         dialect.invalid_cell_retry_copy("no closing tag"),

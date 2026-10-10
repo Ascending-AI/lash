@@ -20,9 +20,12 @@ pub(crate) fn perform(
             dialect,
             source,
             effects,
+            controls,
             bindings,
             functions,
-        } => match embedding.lower(&dialect, &source, &effects, &bindings, &functions) {
+        } => match embedding.lower(
+            &dialect, &source, &effects, &controls, &bindings, &functions,
+        ) {
             None => Response::UnknownDialect { dialect },
             Some(Ok(lowered)) => Response::Lowered {
                 document: encoded(lowered.document.to_json())?,

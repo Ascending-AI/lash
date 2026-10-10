@@ -20,7 +20,7 @@ expression: "serde_json::to_string_pretty(&request.messages).unwrap()"
     "blocks": [
       {
         "Text": {
-          "text": "Call `finish(value)` inside the `code` argument of an `execute_code` call when the task is complete, with a value matching the required output schema.",
+          "text": "Call `await control.finish(value)` inside the `code` argument of an `execute_code` call when the task is complete, with a value matching the required output schema. It ends the turn: make it the last thing the program does.",
           "response_meta": null,
           "cache_breakpoint": true
         }

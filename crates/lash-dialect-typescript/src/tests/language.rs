@@ -198,7 +198,7 @@ fn member_reference_failure_precedes_argument_effects() {
     use super::machine::{Ended, end};
     assert_eq!(
         end(
-            "let ran = false; const o = {}; try { o.missing.call(ran = true); } catch (e) {} finish(ran);"
+            "let ran = false; const o = {}; try { o.missing.call(ran = true); } catch (e) {} await finish(ran);"
         ),
         Ended::Finished(lash_kernel_doc::Datum::Bool(false))
     );
@@ -209,7 +209,7 @@ fn member_reference_failure_precedes_argument_effects() {
 fn parenthesized_optional_member_keeps_the_receiver() {
     use super::machine::{Ended, end};
     assert_eq!(
-        end("const o = { x: 7, f() { return this.x; } }; finish((o?.f)());"),
+        end("const o = { x: 7, f() { return this.x; } }; await finish((o?.f)());"),
         Ended::Finished(lash_kernel_doc::Datum::Float(lash_kernel_doc::Float::new(
             7.0
         )))
@@ -222,7 +222,7 @@ fn strict_arguments_have_object_brand_and_restricted_callee() {
     use super::machine::{Ended, end};
     assert_eq!(
         end(
-            "function f(a) { const args = arguments; args.length = 4294967296; let poisoned = false; try { args.callee; } catch(e) { poisoned = e.name === 'TypeError'; } const lexical = () => arguments; const independent = args[0] === a; args[0] = 8; const unmapped = a === 3; const huge = args.length === 4294967296; delete args.length; args.length = 'small'; return !Array.isArray(args) && poisoned && independent && unmapped && huge && args.length === 'small' && lexical() === args; } finish(f(3));"
+            "function f(a) { const args = arguments; args.length = 4294967296; let poisoned = false; try { args.callee; } catch(e) { poisoned = e.name === 'TypeError'; } const lexical = () => arguments; const independent = args[0] === a; args[0] = 8; const unmapped = a === 3; const huge = args.length === 4294967296; delete args.length; args.length = 'small'; return !Array.isArray(args) && poisoned && independent && unmapped && huge && args.length === 'small' && lexical() === args; } await finish(f(3));"
         ),
         Ended::Finished(lash_kernel_doc::Datum::Bool(true))
     );
@@ -234,7 +234,7 @@ fn for_of_reads_map_and_set_iterators_live() {
     use super::machine::{Ended, end};
     assert_eq!(
         end(
-            "const s = new Set([1]); let n = 0; for (const value of s) { n++; if(value === 1) s.add(2); } const m = new Map([[0, 'a']]); let c = 0; for (var entry of m) { if(entry[0] === 0 && entry[1] === 'a') m.set(1, 'b'); c++; } finish(n === 2 && c === 2);"
+            "const s = new Set([1]); let n = 0; for (const value of s) { n++; if(value === 1) s.add(2); } const m = new Map([[0, 'a']]); let c = 0; for (var entry of m) { if(entry[0] === 0 && entry[1] === 'a') m.set(1, 'b'); c++; } await finish(n === 2 && c === 2);"
         ),
         Ended::Finished(lash_kernel_doc::Datum::Bool(true))
     );
@@ -245,7 +245,7 @@ fn for_of_reads_map_and_set_iterators_live() {
 fn membership_distinguishes_inherited_and_own_properties() {
     use super::machine::{Ended, end};
     assert_eq!(
-        end("const o = {}; finish(('valueOf' in o) && !Object.hasOwn(o, 'valueOf'));"),
+        end("const o = {}; await finish(('valueOf' in o) && !Object.hasOwn(o, 'valueOf'));"),
         Ended::Finished(lash_kernel_doc::Datum::Bool(true))
     );
 }
@@ -264,7 +264,7 @@ fn primitive_global_member_access_uses_runtime_semantics() {
     use super::machine::{Ended, end};
     assert_eq!(
         end(
-            "let caught = false; try { undefined.toString(); } catch(e) { caught = e.name === 'TypeError'; } finish(caught);"
+            "let caught = false; try { undefined.toString(); } catch(e) { caught = e.name === 'TypeError'; } await finish(caught);"
         ),
         Ended::Finished(lash_kernel_doc::Datum::Bool(true))
     );
@@ -276,7 +276,7 @@ fn arguments_iteration_reads_live_length_and_indices() {
     use super::machine::{Ended, end};
     assert_eq!(
         end(
-            "function f(a) { const copy = [...arguments]; let sum = 0; for(const value of arguments) { sum += value; if(value === 1) { arguments[1] = 2; arguments.length = 2; } } return copy[0] === 1 && sum === 3; } finish(f(1));"
+            "function f(a) { const copy = [...arguments]; let sum = 0; for(const value of arguments) { sum += value; if(value === 1) { arguments[1] = 2; arguments.length = 2; } } return copy[0] === 1 && sum === 3; } await finish(f(1));"
         ),
         Ended::Finished(lash_kernel_doc::Datum::Bool(true))
     );

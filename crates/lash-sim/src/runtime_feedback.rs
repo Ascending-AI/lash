@@ -311,7 +311,7 @@ async fn captured_output_limit_retry() -> Vec<LlmRequest> {
     let captures = Arc::new(std::sync::Mutex::new(Vec::new()));
     let responses = Arc::new(tokio::sync::Mutex::new(VecDeque::from([
         "partial output before truncation".to_string(),
-        "<typescript>\nfinish(42);\n</typescript>".to_string(),
+        "<typescript>\nawait control.finish(42);\n</typescript>".to_string(),
     ])));
     let provider = lash_core::testing::TestProvider::builder()
         .kind("cache-regression-rlm")

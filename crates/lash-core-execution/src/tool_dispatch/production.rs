@@ -694,6 +694,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                             prepared.input.definition.manifest.declaration().admits(
                                 OutcomeShape::Done {
                                     intents: &[crate::ToolIntentKind::StartProcess],
+                                    control: None,
                                 },
                             )
                         } else {
@@ -815,7 +816,8 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                 }
             }
             crate::ToolAttemptOutcome::Done { result, intents } => {
-                let (mut output, mut commands) = result.into_parts();
+                let (output, mut commands) = result.into_parts();
+                let mut output = output.settled();
                 let mut intents = intents;
                 if let Err(refusal) =
                     prepared
@@ -829,6 +831,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                                 .iter()
                                 .map(crate::ToolIntent::kind)
                                 .collect::<Vec<_>>(),
+                            control: output.turn_control_kind(),
                         })
                 {
                     output = ToolCallOutput::failure(

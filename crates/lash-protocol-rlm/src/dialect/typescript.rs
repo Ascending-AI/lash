@@ -91,9 +91,7 @@ const TYPESCRIPT_PROMPT_VOCABULARY: DialectPromptVocabulary = DialectPromptVocab
     print_call: "console.log",
     print_statement_prefix: "console.log(",
     print_statement_suffix: ")",
-    finish_name: lash_kernel_dialect::FINISH_NAME,
-    finish_statement: "finish(value)",
-    finish_null_statement: "finish(null)",
+    finish_call: "await control.finish(value)",
     continue_as_call: "control.continue_as(...)",
     continue_as_example: "await control.continue_as({ task: \"continue the audit from the summarized findings\", seed: { problem: input.prompt, findings: findings } });",
     // A wrong field name is the one mistake this runtime does not report.
@@ -137,8 +135,8 @@ A started handle outlives the turn; Stop cancels only the awaited handle; cancel
 ///
 /// Deliberately a small, total rewriter over the shapes the authored corpus
 /// actually uses rather than a translator: every example is a sequence of
-/// statement lines that are either an awaited call, an assignment, or a
-/// `finish`. Anything it does not recognize still loses the try-operator
+/// statement lines that are either an awaited call or an assignment.
+/// Anything it does not recognize still loses the try-operator
 /// and gains a terminator, which is the difference between "reads like
 /// TypeScript" and "is a syntax error".
 ///
@@ -160,14 +158,11 @@ fn render_tool_example(example: &str) -> String {
             // `expr?` — the Lash VM try-operator. TypeScript propagates a
             // rejection from `await` itself, so the operator has no twin.
             let body = body.strip_suffix('?').unwrap_or(body);
-            let body = match body.strip_prefix("finish ") {
-                Some(value) => format!("finish({value})"),
-                None => match body.split_once(" = ") {
-                    Some((name, value)) if is_plain_identifier(name) => {
-                        format!("const {name} = {value}")
-                    }
-                    _ => body.to_string(),
-                },
+            let body = match body.split_once(" = ") {
+                Some((name, value)) if is_plain_identifier(name) => {
+                    format!("const {name} = {value}")
+                }
+                _ => body.to_string(),
             };
             let body = if body.ends_with(';') || body.ends_with('{') || body.ends_with(',') {
                 body
@@ -181,7 +176,6 @@ fn render_tool_example(example: &str) -> String {
 }
 
 fn render_execution_section(request: ExecutionSectionRequest<'_>) -> ExecutionSection {
-    let finish_name = lash_kernel_dialect::FINISH_NAME;
     let ExecutionSectionRequest {
         channel,
         tools,
@@ -216,7 +210,7 @@ fn render_execution_section(request: ExecutionSectionRequest<'_>) -> ExecutionSe
         crate::plugin::RlmChannel::Cell => super::cell_response_shape(TYPESCRIPT_CELL_TAGS),
         crate::plugin::RlmChannel::NativeTool => concat!(
             "### Tool transport\n\nEach response makes one `execute_code` call with ",
-            "`{\"code\": \"<complete program>\"}`. Tool calls and `finish` run inside ",
+            "`{\"code\": \"<complete program>\"}`. Tool calls, `control.finish` included, run inside ",
             "the program; prose before the call is commentary.\n"
         )
         .to_string(),
@@ -229,7 +223,7 @@ fn render_execution_section(request: ExecutionSectionRequest<'_>) -> ExecutionSe
     };
     let sleep = "\n\n`await sleep(ms)` pauses the program. For a timeout, race a call against a timer — `await Promise.race([call, sleep(ms)])` is `undefined` when the timer wins, and the losing call is cancelled.";
     let host_api = format!(
-        r#"Built-in names, including `{finish_name}`, cannot be reused by top-level bindings. Top-level bindings persist across executions as data. A function bound to a top-level name persists too, as a copy: what it reads from outside itself is frozen when its cell ends, so a later change to a top-level variable is not seen by it, and a change it makes to one is not kept. A pending promise does not outlive the cell that created it, nor does a function that holds one: a later cell that uses such a binding fails with `SESSION_BINDING_NOT_CARRIED`, so keep a promise's awaited result, not the promise. Return exactly the value and type the task asks for with `finish(value)`; do not finish an unexamined whole tool result. Putting an object into a string — with `+`, `` `${{...}}` `` or `String(...)` — gives the placeholder `[object Object]`, never its contents; read the value with `console.log(value)` or serialize it with `JSON.stringify(value)`.
+        r#"Built-in names cannot be reused by top-level bindings. Top-level bindings persist across executions as data. A function bound to a top-level name persists too, as a copy: what it reads from outside itself is frozen when its cell ends, so a later change to a top-level variable is not seen by it, and a change it makes to one is not kept. A pending promise does not outlive the cell that created it, nor does a function that holds one: a later cell that uses such a binding fails with `SESSION_BINDING_NOT_CARRIED`, so keep a promise's awaited result, not the promise. Return exactly the value and type the task asks for with `await control.finish(value)`; do not finish with an unexamined whole tool result. Putting an object into a string — with `+`, `` `${{...}}` `` or `String(...)` — gives the placeholder `[object Object]`, never its contents; read the value with `console.log(value)` or serialize it with `JSON.stringify(value)`.
 
 `Math`, `Date` (UTC), `String`, `Array`, `Object`, `JSON`, `Map`/`Set`, `RegExp` and `URL` are available; this is not Node or a browser, and classes, generators and `new Promise(...)` are not supported.
 
@@ -241,10 +235,10 @@ An `async` function starts running when it is called, and async callbacks run co
 
 ### Host API
 
-`console.log(value)` shows output in the next step; `finish(value)` ends the turn. A failed tool call throws; wrap it in `try`/`catch` to carry on.{sleep}{durable}"#
+`console.log(value)` shows output in the next step. `await control.finish(value)` ends the turn with `value`: nothing after it runs, so await it directly, as the last thing the program does, after every other promise has been awaited. A failed tool call throws; wrap it in `try`/`catch` to carry on.{sleep}{durable}"#
     );
     // One worked program, rendered in each channel's own call shape.
-    let example_program = "const total = 1 + 2;\nfinish(total);";
+    let example_program = "const total = 1 + 2;\nawait control.finish(total);";
     let example = match channel {
         crate::plugin::RlmChannel::Cell => format!(
             "### Example cell\n\n{open}\n{example_program}\n{close}",

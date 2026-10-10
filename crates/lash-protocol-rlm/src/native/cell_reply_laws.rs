@@ -9,7 +9,7 @@ use lash_core::facade_support::{TurnFinish, TurnOutcome, TurnStop};
 use lash_core::sansio::Response;
 use lash_core::session_model::SessionStreamEvent;
 use lash_core::{Effect, LlmOutputPart, LlmTerminalReason, TurnMachine};
-use lash_rlm_types::{RlmProtocolEvent, RlmTermination};
+use lash_rlm_types::RlmProtocolEvent;
 
 macro_rules! code {
     () => {
@@ -59,7 +59,7 @@ enum Next {
 
 fn answer(native: bool, parts: Vec<LlmOutputPart>, reason: LlmTerminalReason) -> Next {
     let mut machine = TurnMachine::new(
-        config(native, RlmTermination::Natural { schema: None }),
+        config(native, lash_core::TerminationMode::Natural),
         Vec::new(),
         Default::default(),
         0,
@@ -260,7 +260,7 @@ fn a_text_cell_on_the_native_channel_is_corrected_toward_execute_code() {
 #[test]
 fn the_native_text_cell_correction_reaches_the_next_request() {
     let mut machine = TurnMachine::new(
-        config(true, RlmTermination::Natural { schema: None }),
+        config(true, lash_core::TerminationMode::Natural),
         Vec::new(),
         Default::default(),
         0,

@@ -194,6 +194,26 @@ impl Lowerer<'_> {
         }
     }
 
+    /// The refusal of a control call written where the turn cannot end on
+    /// it: made into a task, or called inside a function. Only the
+    /// program's top level ends the turn.
+    fn control_placement(
+        &self,
+        effect: &EffectName,
+        call: &ast::ExprCall,
+    ) -> lash_kernel_dialect::Diagnostic {
+        diagnostics::with_repair(
+            Code::ControlCallPlacement,
+            format!(
+                "`{effect}` ends the turn, so it is awaited directly at the top level of the program: not passed to `asyncio.gather` or `asyncio.create_task`, or called inside a function"
+            ),
+            call.range(),
+            format!(
+                "await everything else first, then write `await {effect}(...)` as the last top-level statement; a function returns its value for the top level to pass on"
+            ),
+        )
+    }
+
     /// The tool a call names, if it names one.
     fn effect(&self, call: &ast::ExprCall) -> Option<(EffectName, Signature)> {
         let PyExpr::Name(name) = call.func.as_ref() else {
@@ -256,16 +276,6 @@ impl Lowerer<'_> {
                 Some("gather") => Ok(()),
                 _ => Err(error),
             })?;
-        if matches!(call.func.as_ref(), PyExpr::Name(name) if name.id.as_str() == lash_kernel_dialect::FINISH_NAME && self.variable(name.id.as_str()).is_none())
-        {
-            self.plain_arguments(&call.arguments, "finish")?;
-            let [value] = &*call.arguments.args else {
-                return Err(arguments_error("finish takes one value", call.range()));
-            };
-            let value = self.expr(value)?;
-            self.emit(Stmt::Finish { value: value.expr });
-            return Ok(Operand::none());
-        }
         if let Some(class) = self.exception_class(&call.func) {
             self.plain_arguments(&call.arguments, "an exception")?;
             let exprs: Vec<&PyExpr> = call.arguments.args.iter().collect();
@@ -295,8 +305,22 @@ impl Lowerer<'_> {
                             ),
                         ));
                     }
+                    let control = self.controls.contains_key(&effect);
+                    if control && !self.in_module() {
+                        return Err(self.control_placement(&effect, call));
+                    }
                     let action = self.perform(&effect, &signature, call)?;
-                    return Ok(self.let_rhs(Rhs::Action(action), Ty::Unknown));
+                    let result = self.let_rhs(Rhs::Action(action), Ty::Unknown);
+                    if control {
+                        // The call settled, so the turn is over: nothing
+                        // after it runs (`K-FORM-019`). The host reads the
+                        // control from the settled call, never from this
+                        // value.
+                        self.emit(Stmt::Finish {
+                            value: Expr::Literal(Literal::Null),
+                        });
+                    }
+                    return Ok(result);
                 }
                 if SUPPORTED.contains(&id) {
                     return self.builtin(id, call);
@@ -735,6 +759,9 @@ impl Lowerer<'_> {
             Some(_) => return Err(refusal(call.range())),
             None => {
                 if let Some((effect, signature)) = self.effect(call) {
+                    if self.controls.contains_key(&effect) {
+                        return Err(self.control_placement(&effect, call));
+                    }
                     self.perform(&effect, &signature, call)?
                 } else {
                     let callable = match call.func.as_ref() {

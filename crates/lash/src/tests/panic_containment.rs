@@ -196,12 +196,12 @@ async fn cell_panic(process: bool) -> Result<()> {
 const handle = await processes.start({definition: run});
 let result;
 try { result = await handle; } catch (e) { result = e; }
-finish("must not finish");"#
+await control.finish("must not finish");"#
     } else {
         r#"let result;
 try { result = await tools.fixture_echo({value: "boom"}); } catch (e) { result = e; }
 await tools.fixture_echo({value: "after panic"});
-finish("must not finish");"#
+await control.finish("must not finish");"#
     };
     let calls = Arc::new(AtomicUsize::new(0));
     let counted = Arc::clone(&calls);
@@ -213,7 +213,7 @@ finish("must not finish");"#
                 Ok(text_response(&typescript_block(if first {
                     script
                 } else {
-                    "finish(2);"
+                    "await control.finish(2);"
                 })))
             }
         })

@@ -1,6 +1,6 @@
 //! Members, calls and the globals a built-in row answers for.
 
-use lash_kernel_doc::{Action, Atom, Callee, Expr, Literal, Place, Stmt};
+use lash_kernel_doc::{Action, Atom, Callee, Expr, Literal, Place};
 
 use super::{Buf, Lowerer, Lowering, Operand, Ty};
 use crate::adapter as ast;
@@ -342,26 +342,6 @@ impl Lowerer<'_> {
             }
         }
         match callee {
-            ast::Expr::Ident(name, _)
-                if name == lash_kernel_dialect::FINISH_NAME && !self.is_bound(name) =>
-            {
-                let value = match args {
-                    [] => Operand::undefined(),
-                    [ast::CallArg::Value(value)] => self.lower_expr(value)?,
-                    _ => {
-                        return Err(Diagnostic::defect(
-                            DiagnosticCode::UnsupportedExpression,
-                            format!("`{}` takes one value", lash_kernel_dialect::FINISH_NAME),
-                            Some(span),
-                        ));
-                    }
-                };
-                let value = self.invoke("ts.boundary", &[value], Ty::Unknown)?;
-                self.emit(Stmt::Finish {
-                    value: value.expr(),
-                });
-                Ok(Operand::undefined())
-            }
             ast::Expr::Member {
                 object, property, ..
             } => {

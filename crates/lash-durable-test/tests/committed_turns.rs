@@ -23,7 +23,7 @@ use lash::transcript::{
 };
 use lash_core::ToolDefinitionBindingExt as _;
 use lash_core::store::TurnCommitOutcome;
-use lash_core::{ToolCall, ToolControl, ToolOutcome};
+use lash_core::{ToolCall, ToolOutcome};
 use served::{Tier, WATCHDOG, World};
 
 /// A page small enough that every read pages.
@@ -136,24 +136,23 @@ struct SwitchFrame;
 #[async_trait::async_trait]
 impl StaticToolExecute for SwitchFrame {
     async fn execute(&self, _call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-        ToolOutcome::ok(serde_json::json!({ "ok": true }))
-            .with_control(ToolControl::SwitchAgentFrame {
-                frame_key: lash_core::FrameKey::from_caller_material("committed-turns-law")
-                    .expect("non-empty caller material"),
-                initial_nodes: Vec::new(),
-                task: Some(TASK.to_owned()),
-            })
-            .into()
+        ToolOutcome::switch_agent_frame(
+            lash_core::FrameKey::from_caller_material("committed-turns-law")
+                .expect("non-empty caller material"),
+            TASK.to_owned(),
+            Vec::new(),
+        )
+        .into()
     }
 }
 
 fn switch_frame() -> Arc<dyn lash_core::ToolProvider> {
-    let definition = lash_core::ToolDefinition::raw(
+    let definition = lash_core::ToolDefinition::control(
         SWITCH_TOOL,
         SWITCH_TOOL,
         "Switches the agent frame and hands the new frame a task.",
         serde_json::json!({ "type": "object", "additionalProperties": false, "properties": {} }),
-        serde_json::json!({ "type": "object" }),
+        lash_core::TurnControls::switch_agent_frame(),
     )
     .expect("switch_frame's schemas")
     .with_execution(std::time::Duration::from_secs(120));
@@ -646,7 +645,8 @@ fn render(entries: &[TranscriptEntry]) -> Vec<String> {
                     match &cell.result {
                         CellOutcome::Completed => "completed".to_owned(),
                         CellOutcome::Failed(failure) => format!("failed:{}", failure.message),
-                        CellOutcome::Finished(value) => format!("finished:{value:?}"),
+                        CellOutcome::Controlled { control, .. } =>
+                            format!("controlled:{control:?}"),
                     },
                     cell.calls.len(),
                     cell.calls_omitted,
@@ -866,7 +866,7 @@ async fn a_host_renders_standard_and_rlm_history_from_typed_entries_live_and_aft
             served::cell(
                 "for (let n = 0; n < 130; n++) { await tools.echo({ n }); }\nconsole.log(\"called\");",
             ),
-            served::cell("finish(\"rlm reply\");"),
+            served::cell("await control.finish(\"rlm reply\");"),
         ],
         rlm_with_echo,
     )
@@ -881,7 +881,7 @@ async fn a_host_renders_standard_and_rlm_history_from_typed_entries_live_and_aft
         "the calling cell renders its recorded calls and the omitted count: {rlm:#?}"
     );
     assert!(
-        cells[1].contains("result=finished:") && cells[1].contains("rlm reply"),
+        cells[1].contains("result=controlled:Finish") && cells[1].contains("rlm reply"),
         "the finishing cell renders its typed terminal value: {rlm:#?}"
     );
     let replies = rlm

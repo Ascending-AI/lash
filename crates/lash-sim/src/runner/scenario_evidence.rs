@@ -314,9 +314,6 @@ fn operational_cases_for_semantic(semantic_oracle: &str) -> &'static [&'static s
         "rlm.streamed_lash_vm_cell_exec_persists_trajectory" => {
             &["rlm-lash-vm-exec", "scheduler-owned-provider-events"]
         }
-        "rlm.typed_schema_mismatch_repair_loop" | "rlm.typed_schema_any_of_mismatch" => {
-            &["provider-failure", "repair-loop"]
-        }
         semantic if semantic.starts_with("rlm.") => &["rlm-protocol-transition"],
         "agent.durable_input_suspension_resolution" => &["durable-effect", "observer-reconnect"],
         semantic if semantic.starts_with("agent.") => &["agent-process-graph"],
@@ -404,8 +401,6 @@ fn scenario_transition_kind(contract: &ScenarioContractSpec) -> &'static str {
         "rlm.exec_result_no_tool_call_replay" => {
             "rlm.exec-result-without-tool-call-replay-transition"
         }
-        "rlm.typed_schema_mismatch_repair_loop" => "rlm.typed-schema-mismatch-repair-transition",
-        "rlm.typed_schema_any_of_mismatch" => "rlm.typed-anyof-mismatch-repair-transition",
         semantic if semantic.starts_with("rlm.") => "rlm.provider-repair-or-finish-transition",
         "agent.foreground_tool_call_round_trip" => {
             "agent.foreground-tool-call-round-trip-transition"
@@ -887,7 +882,7 @@ fn event_satisfies_scenario_evidence(
                     .observed
                     .pointer("/contract_execution/result/runtime_final_value_facts/outcome_kind")
                     .and_then(Value::as_str)
-                    == Some("final_value")
+                    == Some("finished")
                 && event
                     .observed
                     .pointer(

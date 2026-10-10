@@ -428,7 +428,12 @@ impl<'a> AdmittedToolCall<'a> {
                 if start.is_some() && !declared.contains(&ToolIntentKind::StartProcess) {
                     declared.push(ToolIntentKind::StartProcess);
                 }
-                match declaration.admits(OutcomeShape::Done { intents: &declared }) {
+                // The handlers checked the result's turn control against the
+                // declaration before they encoded the output.
+                match declaration.admits(OutcomeShape::Done {
+                    intents: &declared,
+                    control: None,
+                }) {
                     Err(refusal) => SingletonCapture::Refused { refusal },
                     Ok(()) => match start.map(|start| {
                         bind_start(

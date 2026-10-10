@@ -838,6 +838,8 @@ impl ProtocolDriverHandle for ToolBatchDriver {
     ) -> Vec<DriverAction> {
         vec![DriverAction::Start(PendingWork::WaitingForToolResults {
             settled: None,
+            held: Vec::new(),
+            earlier: Vec::new(),
             calls: vec![
                 PendingToolCall {
                     call_id: crate::ToolCallId::fixture("call-read"),
@@ -1850,6 +1852,7 @@ fn recorded_environment(tool: &str) -> ExecutionEnvironmentSync {
             output_schema: crate::SchemaContract::admit(serde_json::json!({ "type": "object" }))
                 .expect("valid declared schema"),
         }]),
+        turn_controls: Default::default(),
     }
 }
 

@@ -86,25 +86,6 @@ pub(super) fn text_cell_correction_message(dialect: &SessionDialect, id: String)
     }
 }
 
-pub(super) fn finish_schema_mismatch_message(dialect: &SessionDialect, id: String) -> Message {
-    Message {
-        id: id.clone(),
-        role: MessageRole::System,
-        parts: shared_parts(vec![Part::text(
-            format!("{id}.p0"),
-            dialect.finish_schema_mismatch_copy(),
-            None,
-        )]),
-        origin: Some(lash_core::MessageOrigin::Plugin {
-            plugin_id: crate::plugin::RLM_PROTOCOL_PLUGIN_ID.to_string(),
-            transient: false,
-        }),
-        reply_marker: None,
-    }
-}
-
-pub(super) use crate::protocol::finish::validate_finish_value;
-
 /// The transcript record left behind when a turn exhausts its no-progress
 /// budget.
 ///

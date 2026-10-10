@@ -186,6 +186,10 @@ pub enum RegistrationRefused {
     /// register: an isolated call never falls back to an inline body.
     #[error("tool `{tool}` is isolated in process engine `{engine}`, which is not registered")]
     UnregisteredIsolationEngine { tool: String, engine: String },
+    /// A tool defined with an output declares a turn control. A control
+    /// call has no output: [`ToolDefinition::control`] defines one.
+    #[error("tool `{tool}` declares a turn control, but it is defined with an output")]
+    ControlDeclaresOutput { tool: String },
 }
 
 fn default_tool_execution_policy() -> ExecutionPolicy {
@@ -927,6 +931,8 @@ pub struct ToolDraft {
     description: String,
     bindings: std::collections::BTreeMap<String, serde_json::Value>,
     contract: ToolContract,
+    /// The turn controls a [`ToolDefinition::control`] draft declares.
+    controls: crate::TurnControls,
 }
 
 impl ToolDraft {
@@ -976,7 +982,7 @@ impl ToolDraft {
                 execution_policy: default_tool_execution_policy(),
                 execution,
                 park: None,
-                declaration: ToolDeclaration::default(),
+                declaration: ToolDeclaration::default().with_controls(self.controls),
                 isolation_engine: None,
             },
             contract: self.contract,
@@ -1137,6 +1143,7 @@ impl ToolDefinition {
         let description = description.into();
         Ok(ToolDraft {
             description,
+            controls: crate::TurnControls::none(),
             bindings: std::collections::BTreeMap::new(),
             contract: ToolContract {
                 identity: Some(ToolContractIdentity {
@@ -1150,6 +1157,31 @@ impl ToolDefinition {
             id,
             name,
         })
+    }
+
+    /// A tool whose call may end its caller's turn with one of `controls`.
+    /// It has no output: its result is the control alone, so its output
+    /// schema is the null schema and no catalog renders a return for it.
+    ///
+    /// # Errors
+    ///
+    /// [`ToolCatalogBuildError`] for an input schema that is not admitted.
+    pub fn control(
+        id: impl Into<ToolId>,
+        name: impl Into<String>,
+        description: impl Into<String>,
+        input_schema: serde_json::Value,
+        controls: crate::TurnControls,
+    ) -> Result<ToolDraft, ToolCatalogBuildError> {
+        let mut draft = Self::raw(
+            id,
+            name,
+            description,
+            input_schema,
+            serde_json::json!({ "type": "null" }),
+        )?;
+        draft.controls = controls;
+        Ok(draft)
     }
 
     pub fn typed<Args, Output>(
@@ -1204,12 +1236,23 @@ impl ToolDefinition {
     ///
     /// [`RegistrationRefused`]: an invalid declaration, a deferring tool
     /// without a park bound, a park bound on a tool that never defers, or an
-    /// isolated declaration, which [`Self::isolated_in`] makes.
+    /// isolated declaration, which [`Self::isolated_in`] makes; or a turn
+    /// control on a tool that [`Self::control`] did not define. The
+    /// controls a [`Self::control`] definition states are kept.
     pub fn with_declaration(
         mut self,
-        declaration: ToolDeclaration,
+        mut declaration: ToolDeclaration,
         park: Option<ParkBound>,
     ) -> Result<Self, RegistrationRefused> {
+        let defined = &self.manifest.declaration.controls;
+        if defined.is_empty() && !declaration.controls.is_empty() {
+            return Err(RegistrationRefused::ControlDeclaresOutput {
+                tool: self.manifest.name.clone(),
+            });
+        }
+        for kind in defined.iter() {
+            declaration.controls = declaration.controls.with(kind);
+        }
         self.manifest = self.manifest.declared(declaration, park, None)?;
         Ok(self)
     }

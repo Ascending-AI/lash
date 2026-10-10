@@ -196,12 +196,21 @@ impl crate::HostBoundary {
         output: &serde_json::Value,
     ) -> Result<(), ToolBindingError> {
         let binding = required_tool_executable(manifest)?;
-        self.offer_tool(&binding.call_path(), manifest.id.clone(), input, output)?;
+        self.offer_tool(
+            &binding.call_path(),
+            manifest.id.clone(),
+            input,
+            output,
+            manifest.declaration().controls.clone(),
+        )?;
         Ok(())
     }
 
     /// Every tool of `catalog` under its binding's call path: what a
-    /// process of that catalog may perform.
+    /// process of that catalog may perform. A tool that declares a turn
+    /// control is not offered: a process cannot end a session turn, so a
+    /// process document that performs one is refused at admission as an
+    /// effect its catalog does not offer.
     ///
     /// # Errors
     ///
@@ -210,6 +219,9 @@ impl crate::HostBoundary {
     pub fn of_catalog(catalog: &lash_core::ToolCatalog) -> Result<Self, ToolBindingError> {
         let mut boundary = Self::new();
         for entry in &catalog.tools {
+            if !entry.manifest.declaration().controls.is_empty() {
+                continue;
+            }
             boundary.offer_bound_tool(
                 &entry.manifest,
                 entry.contract.input_schema.canonical(),

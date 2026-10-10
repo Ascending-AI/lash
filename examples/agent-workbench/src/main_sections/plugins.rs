@@ -444,12 +444,11 @@ impl AppState {
             crate::session_protocol::SessionProtocol::Rlm => spec.plugin(
                 lash::rlm::RLM_PROTOCOL_PLUGIN_ID,
                 lash::rlm::RlmCreateExtras {
-                    termination: Some(lash::rlm::RlmTermination::Natural {
-                        schema: Some(
-                            lash::schema::JsonSchema::admit(json!({ "type": "string" }))
-                                .map_err(serde::de::Error::custom)?,
-                        ),
-                    }),
+                    termination: Some(lash::rlm::TerminationMode::Natural),
+                    finish_schema: Some(
+                        lash::schema::JsonSchema::admit(json!({ "type": "string" }))
+                            .map_err(serde::de::Error::custom)?,
+                    ),
                     ..Default::default()
                 },
             )?,

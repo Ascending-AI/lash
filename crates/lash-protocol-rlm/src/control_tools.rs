@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use lash_core::{
-    ToolArgumentProjectionPolicy, ToolCall, ToolContract, ToolControl, ToolDefinition,
-    ToolManifest, ToolOutcome, ToolProvider,
+    ToolArgumentProjectionPolicy, ToolCall, ToolContract, ToolDefinition, ToolManifest,
+    ToolOutcome, ToolProvider, TurnControl, TurnControls,
 };
 use lash_vm_runtime::{ToolBinding, ToolDefinitionBindingExt};
 use serde_json::{Value, json};
@@ -10,8 +10,8 @@ use std::sync::Arc;
 use crate::projection::RlmSeed;
 
 pub(crate) struct RlmControlToolsProvider {
-    /// The dialect this session's model writes, so the `continue_as` doc shows
-    /// a call it can actually make.
+    /// The dialect this session's model writes, so the control tools' docs
+    /// show calls it can actually make.
     pub(crate) vocabulary: crate::dialect::DialectPromptVocabulary,
 }
 
@@ -19,6 +19,7 @@ pub(crate) struct RlmControlToolsProvider {
 impl ToolProvider for RlmControlToolsProvider {
     fn tool_manifests(&self) -> Vec<ToolManifest> {
         vec![
+            finish_tool_definition_for(self.vocabulary).manifest(),
             continue_as_tool_definition_for(self.vocabulary).manifest(),
             read_output_tool_definition().manifest(),
         ]
@@ -26,6 +27,9 @@ impl ToolProvider for RlmControlToolsProvider {
 
     fn resolve_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
         match name {
+            FINISH_TOOL_NAME => Some(Arc::new(
+                finish_tool_definition_for(self.vocabulary).contract(),
+            )),
             "continue_as" => Some(Arc::new(
                 continue_as_tool_definition_for(self.vocabulary).contract(),
             )),
@@ -38,11 +42,15 @@ impl ToolProvider for RlmControlToolsProvider {
         if call.name() == "read_output" {
             return read_output(call).await;
         }
-        let result = match call.name() {
-            "continue_as" => continue_as_switch_frame(call.args, call.context),
-            _ => return ToolOutcome::err_fmt(format_args!("Unknown tool: {}", call.name())).into(),
-        };
-        finalise_tool_result(result).into()
+        match call.name() {
+            // The value is the whole input: the turn ends with it.
+            FINISH_TOOL_NAME => ToolOutcome::finish(call.args.clone()).into(),
+            "continue_as" => match continue_as_switch_frame(call.args, call.context) {
+                Ok(control) => ToolOutcome::turn_control(control).into(),
+                Err(err) => ToolOutcome::err(json!(err)).into(),
+            },
+            _ => ToolOutcome::err_fmt(format_args!("Unknown tool: {}", call.name())).into(),
+        }
     }
 }
 
@@ -109,6 +117,54 @@ pub(crate) fn decode_output_archive(
         })
 }
 
+/// The name of Lash's finish control tool: what a turn it ended records as
+/// its finishing tool.
+pub const FINISH_TOOL_NAME: &str = "finish";
+
+/// The finish control tool's id. Its one input is the turn's answer, whole.
+pub(crate) const FINISH_TOOL_ID: &str = "tool:finish";
+
+/// The `finish` control tool as a session in `dialect` advertises it.
+pub fn finish_tool_definition(dialect: &dyn crate::dialect::DialectPrompts) -> ToolDefinition {
+    finish_tool_definition_for(dialect.prompt_vocabulary())
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "this module declares the tool schema and admission checks its invariant"
+)]
+pub(crate) fn finish_tool_definition_for(
+    vocabulary: crate::dialect::DialectPromptVocabulary,
+) -> ToolDefinition {
+    ToolDefinition::control(
+        FINISH_TOOL_ID,
+        FINISH_TOOL_NAME,
+        format!(
+            "End the turn with `value` as its answer. Nothing after the call runs: make it the last thing the {cell_noun} does, once all its other work has finished. It returns nothing. When the turn states a required output, `value` must match it; a value that does not fails and the turn goes on.",
+            cell_noun = vocabulary.cell_noun
+        ),
+        // The whole input is the answer: any JSON value.
+        json!({}),
+        TurnControls::finish(),
+    )
+    .expect("valid declared tool schema")
+    // No work of its own: the call is its control.
+    .with_execution(std::time::Duration::from_secs(30))
+    // Its body reads its argument and nothing else, so running it again
+    // is safe: a call a crash cut off runs again on the owner that resumes
+    // the cell, and one that timed out behind a lost owner is retried. The
+    // turn then ends on it rather than on a second model call. The body
+    // never fails on its own: what refuses a value is the turn's check of
+    // the settled call.
+    .with_execution_policy(lash_core::ExecutionPolicy::repeatable(
+        std::num::NonZeroU32::new(3).expect("three is non-zero"),
+        100,
+        1_000,
+    ))
+    .with_examples(vec![vocabulary.finish_call.into()])
+    .with_tool_binding(ToolBinding::new(["control"], FINISH_TOOL_NAME))
+}
+
 /// The `continue_as` control tool as a session in `dialect` advertises it.
 pub fn continue_as_tool_definition(dialect: &dyn crate::dialect::DialectPrompts) -> ToolDefinition {
     continue_as_tool_definition_for(dialect.prompt_vocabulary())
@@ -121,12 +177,12 @@ pub fn continue_as_tool_definition(dialect: &dyn crate::dialect::DialectPrompts)
 pub(crate) fn continue_as_tool_definition_for(
     vocabulary: crate::dialect::DialectPromptVocabulary,
 ) -> ToolDefinition {
-    ToolDefinition::raw(
+    ToolDefinition::control(
         "tool:continue_as",
         "continue_as",
-        format!("Switch to a fresh AgentFrame when context is stale or crowded. `task` states the goal and next steps; `seed` carries all needed state: nothing is inherited. Read-only seeds stay read-only. Terminal action: last in the {cell_noun}; do not finish or work afterward.", cell_noun = vocabulary.cell_noun),
+        format!("Switch to a fresh AgentFrame when context is stale or crowded. `task` states the goal and next steps; `seed` carries all needed state: nothing is inherited. Read-only seeds stay read-only. It ends the turn and returns nothing: nothing after the call runs, so make it the last thing the {cell_noun} does, once all its other work has finished.", cell_noun = vocabulary.cell_noun),
         continue_as_input_schema(),
-        continue_as_output_schema(),
+        TurnControls::switch_agent_frame(),
     ).expect("valid declared tool schemas")
     // One store read or write: a short body.
     .with_execution(std::time::Duration::from_secs(30))
@@ -135,30 +191,6 @@ pub(crate) fn continue_as_tool_definition_for(
     .with_argument_projection(ToolArgumentProjectionPolicy::preserve_projected_refs_in_field(
         "seed",
     ))
-}
-
-fn continue_as_output_schema() -> Value {
-    json!({
-        "type": "object",
-        "properties": {
-            "ok": { "type": "boolean" },
-            "frame_key": { "type": "string" },
-            "task": { "type": "string" },
-            "seed_keys": {
-                "type": "array",
-                "items": { "type": "string" }
-            },
-            "seed_count": { "type": "integer", "minimum": 0 }
-        },
-        "required": [
-            "ok",
-            "frame_key",
-            "task",
-            "seed_keys",
-            "seed_count"
-        ],
-        "additionalProperties": false
-    })
 }
 
 pub fn continue_as_input_schema() -> Value {
@@ -183,17 +215,9 @@ pub fn continue_as_input_schema() -> Value {
 fn continue_as_switch_frame(
     args: &Value,
     context: &lash_core::AttemptContext<'_>,
-) -> Result<ContinueAsResult, String> {
+) -> Result<TurnControl, String> {
     let task = required_string(args, "task")?;
     let seed = RlmSeed::from_tool_args(args).map_err(|err| format!("continue_as {err}"))?;
-    let mut seed_keys = seed
-        .globals
-        .keys()
-        .cloned()
-        .chain(seed.projected.entries.iter().map(|(name, _)| name.clone()))
-        .collect::<Vec<_>>();
-    seed_keys.sort();
-    let seed_count = seed_keys.len();
     let frame_key = lash_core::FrameKey::from_call_site(
         context
             .session_id()
@@ -205,19 +229,10 @@ fn continue_as_switch_frame(
     );
     let initial_nodes = crate::rlm_seed_initial_nodes(seed, context.fleet_format());
 
-    Ok(ContinueAsResult {
-        value: json!({
-            "ok": true,
-            "frame_key": frame_key.as_str(),
-            "task": task.clone(),
-            "seed_keys": seed_keys,
-            "seed_count": seed_count,
-        }),
-        control: ToolControl::SwitchAgentFrame {
-            frame_key,
-            initial_nodes,
-            task: Some(task),
-        },
+    Ok(TurnControl::SwitchAgentFrame {
+        frame_key,
+        initial_nodes,
+        task,
     })
 }
 
@@ -228,18 +243,6 @@ fn required_string(args: &Value, key: &str) -> Result<String, String> {
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned)
         .ok_or_else(|| format!("missing required parameter: {key}"))
-}
-
-struct ContinueAsResult {
-    value: Value,
-    control: ToolControl,
-}
-
-fn finalise_tool_result(result: Result<ContinueAsResult, String>) -> ToolOutcome {
-    match result {
-        Ok(result) => ToolOutcome::ok(result.value).with_control(result.control),
-        Err(err) => ToolOutcome::err(json!(err)),
-    }
 }
 
 #[cfg(test)]
@@ -258,7 +261,8 @@ mod tests {
     use lash_core::{
         SessionAppendNode, SessionCreateRequest, SessionPolicy, SessionSnapshot, ToolProvider,
     };
-    use lash_rlm_types::{RlmProtocolEvent, RlmTermination};
+    use lash_core::{ToolControl, TurnControl};
+    use lash_rlm_types::RlmProtocolEvent;
 
     fn llm_profile_spec(model: &str) -> Option<lash_core::LlmProfileConfig> {
         Some(lash_core::testing::test_llm_profile_config(
@@ -506,8 +510,9 @@ mod tests {
                 ));
                 snapshot.authority.plugin_config.insert(
                     crate::RLM_PROTOCOL_PLUGIN_ID,
-                    lash_core::ProtocolTurnOptions::typed(RlmTermination::FinishRequired {
-                        schema: Some(
+                    lash_core::ProtocolTurnOptions::typed(lash_rlm_types::RlmTurnOptions {
+                        termination: Some(lash_core::TerminationMode::TerminalRequired),
+                        finish_schema: Some(
                             lash_sansio::JsonSchema::admit(json!({
                                 "type": "object",
                                 "properties": { "answer": { "type": "string" } },
@@ -515,6 +520,7 @@ mod tests {
                             }))
                             .expect("valid finish schema"),
                         ),
+                        ..Default::default()
                     })
                     .expect("valid rlm turn options")
                     .payload,
@@ -536,25 +542,20 @@ mod tests {
         let result = run_continue_as(&provider, manager.clone(), &args).await;
 
         assert!(result.is_success(), "{:?}", result.value_for_projection());
-        let value = result.value_for_projection();
-        assert!(value.get("frame_key").and_then(Value::as_str).is_some());
-        assert_eq!(value.get("seed_keys"), Some(&json!(["query", "x"])));
-        assert_eq!(value.get("seed_count"), Some(&json!(2)));
-        assert!(value.get("projected_count").is_none());
-        assert!(value.get("global_count").is_none());
-        let Some(ToolControl::SwitchAgentFrame {
-            frame_key,
-            initial_nodes,
-            task,
+        // The switch is the call's whole result: it answers nothing.
+        assert_eq!(result.value_for_projection(), Value::Null);
+        let Some(ToolControl::Turn {
+            control:
+                TurnControl::SwitchAgentFrame {
+                    initial_nodes,
+                    task,
+                    ..
+                },
         }) = result.as_output().control.as_ref()
         else {
             panic!("expected frame switch control");
         };
-        assert_eq!(
-            value.get("frame_key").and_then(Value::as_str),
-            Some(frame_key.as_str())
-        );
-        assert_eq!(task.as_deref(), Some("finish from here"));
+        assert_eq!(task, "finish from here");
         assert_eq!(initial_nodes.len(), 1);
         let SessionAppendNode::ProtocolEvent {
             event: protocol_event,
@@ -575,8 +576,9 @@ mod tests {
     }
 
     fn frame_key(result: &ToolOutcome) -> &lash_core::FrameKey {
-        let Some(ToolControl::SwitchAgentFrame { frame_key, .. }) =
-            result.as_output().control.as_ref()
+        let Some(ToolControl::Turn {
+            control: TurnControl::SwitchAgentFrame { frame_key, .. },
+        }) = result.as_output().control.as_ref()
         else {
             panic!("expected frame switch control");
         };
@@ -674,14 +676,10 @@ mod tests {
         });
         let result = run_continue_as(&provider, manager.clone(), &args).await;
         assert!(result.is_success(), "{:?}", result.value_for_projection());
-        let value = result.value_for_projection();
-        assert_eq!(value.get("seed_keys"), Some(&json!(["glob", "proj"])));
-        assert_eq!(value.get("seed_count"), Some(&json!(2)));
-        assert!(value.get("projected_count").is_none());
-        assert!(value.get("global_count").is_none());
 
-        let Some(ToolControl::SwitchAgentFrame { initial_nodes, .. }) =
-            result.as_output().control.as_ref()
+        let Some(ToolControl::Turn {
+            control: TurnControl::SwitchAgentFrame { initial_nodes, .. },
+        }) = result.as_output().control.as_ref()
         else {
             panic!("expected frame switch control");
         };
@@ -746,8 +744,9 @@ mod tests {
         let result = run_continue_as(&provider, manager.clone(), &args).await;
 
         assert!(result.is_success(), "{:?}", result.value_for_projection());
-        let Some(ToolControl::SwitchAgentFrame { initial_nodes, .. }) =
-            result.as_output().control.as_ref()
+        let Some(ToolControl::Turn {
+            control: TurnControl::SwitchAgentFrame { initial_nodes, .. },
+        }) = result.as_output().control.as_ref()
         else {
             panic!("expected frame switch control");
         };

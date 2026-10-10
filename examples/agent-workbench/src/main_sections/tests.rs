@@ -266,7 +266,7 @@ async fn parallel_inbox_lists_complete_in_durable_workbench_turn() {
     let workbench = Workbench::builder(replying_provider(
         r#"<typescript>
 const boxes = await Promise.all([inbox.test.list({}), inbox.test2.list({})]);
-finish(JSON.stringify({ test: boxes[0], test2: boxes[1] }));
+await control.finish(JSON.stringify({ test: boxes[0], test2: boxes[1] }));
 </typescript>"#,
     ))
     .mail_world(mail_world)
@@ -289,7 +289,8 @@ finish(JSON.stringify({ test: boxes[0], test2: boxes[1] }));
     // A workbench chat session finishes with text (FIG-5156): the cell
     // finishes with both listings' JSON.
     let finished = output
-        .final_value()
+        .finished()
+        .map(|(_, value)| value)
         .and_then(Value::as_str)
         .unwrap_or_else(|| panic!("the turn finishes with text: {output:?}"));
     assert_eq!(
@@ -510,7 +511,7 @@ async fn next_observation(rx: &mut mpsc::Receiver<ObservationStreamItem>) -> Obs
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn event_stream_forwards_session_observation_live_replay() {
     let workbench = Workbench::replying(
-        "<typescript>\nfinish(\"observed through live replay\");\n</typescript>",
+        "<typescript>\nawait control.finish(\"observed through live replay\");\n</typescript>",
     )
     .await;
     let state = &workbench.state;
@@ -538,8 +539,7 @@ async fn event_stream_forwards_session_observation_live_replay() {
             ObservationStreamItem::Observation { event } => {
                 let value = serde_json::to_value(&event).expect("remote event json");
                 if value.pointer("/type").and_then(Value::as_str) == Some("turn_activity")
-                    && value.pointer("/activity/type").and_then(Value::as_str)
-                        == Some("final_value")
+                    && value.pointer("/activity/type").and_then(Value::as_str) == Some("finished")
                 {
                     saw_final_value_observation = true;
                 }
@@ -622,7 +622,7 @@ async fn event_stream_forwards_session_observation_live_replay() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn event_stream_forwards_session_observation_replay_gap() {
     let workbench = Workbench::builder(replying_provider(
-        "<typescript>\nfinish(\"gap source\");\n</typescript>",
+        "<typescript>\nawait control.finish(\"gap source\");\n</typescript>",
     ))
     .live_replay(Arc::new(lash::observe::InMemoryLiveReplayStore::new(
         lash::observe::InMemoryLiveReplayStoreConfig {
@@ -678,8 +678,10 @@ async fn event_stream_forwards_session_observation_replay_gap() {
 /// the recovery cursor it hands back (FIG-3162).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn state_snapshot_cursor_attaches_to_the_live_incarnation_without_a_gap() {
-    let workbench =
-        Workbench::replying("<typescript>\nfinish(\"snapshot cursor\");\n</typescript>").await;
+    let workbench = Workbench::replying(
+        "<typescript>\nawait control.finish(\"snapshot cursor\");\n</typescript>",
+    )
+    .await;
     let state = &workbench.state;
     let session_id = state.current_session_id();
     let session = state
@@ -857,7 +859,7 @@ async fn inbox_authority_resolves_for_any_account_name() {
             };
             async move {
                 Ok(text_response(&format!(
-                    "<typescript>\nconst result = await inbox.{account}.send({{ title: \"Hi\", text: \"Yo\" }});\nfinish(result.id);\n</typescript>"
+                    "<typescript>\nconst result = await inbox.{account}.send({{ title: \"Hi\", text: \"Yo\" }});\nawait control.finish(result.id);\n</typescript>"
                 )))
             }
         })
@@ -946,7 +948,10 @@ async fn inbox_authority_resolves_for_any_account_name() {
         .await
         .expect("the account turn completes")
         .expect("turn executes the account through its installed plugin revision");
-        assert_eq!(output.final_value(), Some(&json!(format!("{account}-1"))));
+        assert_eq!(
+            output.finished().map(|(_, value)| value),
+            Some(&json!(format!("{account}-1")))
+        );
         assert_eq!(
             mail_world
                 .inbox(account)

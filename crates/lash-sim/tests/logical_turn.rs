@@ -7,9 +7,9 @@ use async_trait::async_trait;
 use lash_core::facade_support::SessionGraphFacadeOps;
 use lash_core::{
     LlmOutputPart, LlmResponse, SessionAppendNode, SessionNodePayload, ToolAttemptOutcome,
-    ToolCall, ToolContract, ToolControl, ToolDefinition, ToolManifest, ToolOutcome, ToolProvider,
-    TurnInput, facade_support::TraceRecord, facade_support::TraceSink,
-    facade_support::TraceSinkError, facade_support::TurnStop,
+    ToolCall, ToolContract, ToolDefinition, ToolManifest, ToolOutcome, ToolProvider, TurnInput,
+    facade_support::TraceRecord, facade_support::TraceSink, facade_support::TraceSinkError,
+    facade_support::TurnStop,
 };
 use serde_json::{Value, json};
 
@@ -65,12 +65,12 @@ impl ToolProvider for SeedSwitchTool {
     async fn execute(&self, call: ToolCall<'_>) -> ToolAttemptOutcome {
         (async {
             assert_eq!(call.name(), "switch_frame");
-            ToolOutcome::ok(json!({"switched": true})).with_control(ToolControl::SwitchAgentFrame {
-                frame_key: lash_core::FrameKey::from_caller_material("sim-seeded-follow-frame")
+            ToolOutcome::switch_agent_frame(
+                lash_core::FrameKey::from_caller_material("sim-seeded-follow-frame")
                     .expect("non-empty caller material"),
-                initial_nodes: self.initial_nodes.clone(),
-                task: Some("run seeded follow-on".to_string()),
-            })
+                "run seeded follow-on".to_string(),
+                self.initial_nodes.clone(),
+            )
         })
         .await
         .into()
@@ -79,12 +79,12 @@ impl ToolProvider for SeedSwitchTool {
 
 #[expect(clippy::expect_used, reason = "this fixture declares valid schemas")]
 fn switch_tool_definition() -> ToolDefinition {
-    ToolDefinition::raw(
+    ToolDefinition::control(
         "tool:switch_frame",
         "switch_frame",
         "Switch to the seeded follow-on frame.",
         ToolDefinition::default_input_schema(),
-        json!({"type": "object"}),
+        lash_core::TurnControls::switch_agent_frame(),
     )
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120))
@@ -400,12 +400,12 @@ struct BoundedSwitchTools {
 impl BoundedSwitchTools {
     #[expect(clippy::expect_used, reason = "this fixture declares valid schemas")]
     fn definition(index: usize) -> ToolDefinition {
-        ToolDefinition::raw(
+        ToolDefinition::control(
             format!("tool:terminal_tool_{index}"),
             format!("terminal_tool_{index}"),
             "Switch to the next frame in the bounded chain.",
             ToolDefinition::default_input_schema(),
-            json!({"type": "object"}),
+            lash_core::TurnControls::switch_agent_frame(),
         )
         .expect("valid declared tool schemas")
         .with_execution(std::time::Duration::from_secs(120))
@@ -436,17 +436,15 @@ impl ToolProvider for BoundedSwitchTools {
                 .strip_prefix("terminal_tool_")
                 .and_then(|value| value.parse::<usize>().ok())
                 .expect("bounded switch tool name");
-            ToolOutcome::ok(json!({"switch": index})).with_control(ToolControl::SwitchAgentFrame {
-                frame_key: lash_core::FrameKey::from_caller_material(&format!(
-                    "bounded-frame-{index}"
-                ))
-                .expect("non-empty caller material"),
-                initial_nodes: vec![SessionAppendNode::plugin(
+            ToolOutcome::switch_agent_frame(
+                lash_core::FrameKey::from_caller_material(&format!("bounded-frame-{index}"))
+                    .expect("non-empty caller material"),
+                format!("continue bounded chain {index}"),
+                vec![SessionAppendNode::plugin(
                     "sim.bounded.seed",
                     json!({"index": index}),
                 )],
-                task: Some(format!("continue bounded chain {index}")),
-            })
+            )
         })
         .await
         .into()
@@ -729,7 +727,7 @@ await control.continue_as({
                         1 => {
                             r#"
 <typescript>
-finish({ baton: baton });
+await control.finish({ baton: baton });
 </typescript>
 "#
                         }
@@ -791,7 +789,8 @@ finish({ baton: baton });
         .expect("the follow-on answers");
     assert_eq!(
         terminal
-            .final_value()
+            .finished()
+            .map(|(_, value)| value)
             .and_then(|value| value.get("baton"))
             .and_then(Value::as_str),
         Some("rlm-sim-seed")
@@ -848,7 +847,7 @@ async fn a_persisted_data_member_stops_the_turn_without_a_final_value() {
                         r#"
 <typescript>
 const local_actions = { continue_as: "local data" };
-finish({ bound: local_actions.continue_as });
+await control.finish({ bound: local_actions.continue_as });
 </typescript>
 "#
                     } else {
@@ -902,7 +901,8 @@ await local_actions.continue_as({
         .expect("binding turn runs");
     assert_eq!(
         bound
-            .final_value()
+            .finished()
+            .map(|(_, value)| value)
             .and_then(|value| value.get("bound"))
             .and_then(Value::as_str),
         Some("local data")
@@ -923,7 +923,7 @@ await local_actions.continue_as({
         stopped.result.outcome
     );
     assert!(
-        stopped.final_value().is_none(),
+        stopped.finished().map(|(_, value)| value).is_none(),
         "a stopped turn must not report a final value"
     );
     let refusals = requests

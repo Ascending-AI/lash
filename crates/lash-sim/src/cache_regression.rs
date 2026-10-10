@@ -125,7 +125,7 @@ async fn captured_rlm_iterations() -> Vec<LlmRequest> {
     let responses = Arc::new(tokio::sync::Mutex::new(VecDeque::from([
         "<typescript>\nlet value = 1;\nconsole.log(value);\n</typescript>".to_string(),
         "<typescript>\nvalue = value + 1;\nconsole.log(value);\n</typescript>".to_string(),
-        "<typescript>\nfinish(value);\n</typescript>".to_string(),
+        "<typescript>\nawait control.finish(value);\n</typescript>".to_string(),
     ])));
     let provider = lash_core::testing::TestProvider::builder()
         .kind("cache-regression-rlm")

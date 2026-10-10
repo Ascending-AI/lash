@@ -115,27 +115,14 @@ pub(super) const RLM_CONTRACT_ROWS: &[FixedContractRow<TurnMachineContractExecut
         anchor: FixedContractAnchor::ProviderActor,
         execute: rlm_natural_allows_finish_value_execution,
     },
-    FixedContractRow {
-        semantic_oracle: "rlm.typed_schema_mismatch_repair_loop",
-        source_path: "crates/lash-protocol-rlm/tests/protocol_drivers/scenarios.rs",
-        source_scenario: "rlm_protocol_scenario_typed_schema_mismatch_loops_with_feedback",
-        anchor: FixedContractAnchor::ProviderActor,
-        execute: rlm_typed_schema_mismatch_repair_loop_execution,
-    },
-    FixedContractRow {
-        semantic_oracle: "rlm.typed_schema_any_of_mismatch",
-        source_path: "crates/lash-protocol-rlm/tests/protocol_drivers/scenarios.rs",
-        source_scenario: "rlm_protocol_scenario_typed_schema_mismatch_checks_any_of",
-        anchor: FixedContractAnchor::ProviderActor,
-        execute: rlm_typed_schema_any_of_mismatch_execution,
-    },
 ];
 
 fn rlm_natural_prose_finalizes_execution() -> Result<Value, FixedScriptRunnerError> {
     run_rlm_protocol_contract(
         "rlm natural prose finalizes",
         "hello",
-        RlmTermination::Natural { schema: None },
+        TerminationMode::Natural,
+        None,
         None,
         None,
         vec![
@@ -149,7 +136,8 @@ fn rlm_typed_prose_requires_finish_execution() -> Result<Value, FixedScriptRunne
     run_rlm_protocol_contract(
         "rlm typed prose requires finish",
         "hello",
-        RlmTermination::FinishRequired { schema: None },
+        TerminationMode::TerminalRequired,
+        None,
         None,
         None,
         vec![
@@ -163,7 +151,8 @@ fn rlm_finish_required_max_turn_stop_execution() -> Result<Value, FixedScriptRun
     run_rlm_protocol_contract(
         "rlm finish-required prose max-turn stop",
         "hello",
-        RlmTermination::FinishRequired { schema: None },
+        TerminationMode::TerminalRequired,
+        None,
         Some(1),
         None,
         vec![RlmContractStep::Llm(vec![rlm_text_part(
@@ -176,7 +165,8 @@ fn rlm_exec_error_max_turn_stop_execution() -> Result<Value, FixedScriptRunnerEr
     run_rlm_protocol_contract(
         "rlm finish-required exec error max-turn stop",
         "run bad code",
-        RlmTermination::FinishRequired { schema: None },
+        TerminationMode::TerminalRequired,
+        None,
         Some(1),
         None,
         vec![
@@ -195,24 +185,23 @@ fn rlm_typed_finish_emits_outcome_and_done_execution() -> Result<Value, FixedScr
     run_rlm_protocol_contract(
         "rlm typed finish emits outcome and done",
         "return typed data",
-        RlmTermination::FinishRequired {
-            schema: Some(
-                lash_sansio::JsonSchema::admit(json!({
-                    "type": "object",
-                    "properties": {
-                        "ok": { "type": "boolean" }
-                    },
-                    "required": ["ok"],
-                    "additionalProperties": false
-                }))
-                .expect("valid finish schema"),
-            ),
-        },
+        TerminationMode::TerminalRequired,
+        Some(
+            lash_sansio::JsonSchema::admit(json!({
+                "type": "object",
+                "properties": {
+                    "ok": { "type": "boolean" }
+                },
+                "required": ["ok"],
+                "additionalProperties": false
+            }))
+            .expect("valid finish schema"),
+        ),
         None,
         None,
         vec![
             RlmContractStep::Llm(vec![rlm_text_part(&rlm_typescript_block(
-                "finish({ ok: true });",
+                "await control.finish({ ok: true });",
             ))]),
             RlmContractStep::Exec(Box::new(rlm_exec_response(
                 &[],
@@ -228,7 +217,8 @@ fn rlm_finish_required_diagnostic_counts_execution() -> Result<Value, FixedScrip
     run_rlm_protocol_contract(
         "rlm finish-required diagnostic counts",
         "hello",
-        RlmTermination::FinishRequired { schema: None },
+        TerminationMode::TerminalRequired,
+        None,
         None,
         None,
         vec![RlmContractStep::Llm(vec![rlm_text_part("Hello there!")])],
@@ -239,7 +229,8 @@ fn rlm_natural_diagnostic_counts_execution() -> Result<Value, FixedScriptRunnerE
     run_rlm_protocol_contract(
         "rlm natural diagnostic counts",
         "hello",
-        RlmTermination::Natural { schema: None },
+        TerminationMode::Natural,
+        None,
         None,
         None,
         vec![RlmContractStep::Llm(vec![rlm_text_part("Hello there!")])],
@@ -250,7 +241,8 @@ fn rlm_cell_diagnostic_counts_execution() -> Result<Value, FixedScriptRunnerErro
     run_rlm_protocol_contract(
         "rlm cell diagnostic counts",
         "run some code",
-        RlmTermination::Natural { schema: None },
+        TerminationMode::Natural,
+        None,
         None,
         None,
         vec![
@@ -272,7 +264,8 @@ fn rlm_retired_marker_plain_lash_vm_text_execution() -> Result<Value, FixedScrip
     run_rlm_protocol_contract(
         "rlm retired marker plain Lash VM text",
         "run some code",
-        RlmTermination::Natural { schema: None },
+        TerminationMode::Natural,
+        None,
         None,
         None,
         vec![RlmContractStep::Llm(vec![rlm_text_part(
@@ -285,7 +278,8 @@ fn rlm_lash_vm_cell_exec_continues_execution() -> Result<Value, FixedScriptRunne
     run_rlm_protocol_contract(
         "rlm Lash VM cell exec continues",
         "run some code",
-        RlmTermination::Natural { schema: None },
+        TerminationMode::Natural,
+        None,
         None,
         None,
         vec![
@@ -304,7 +298,8 @@ fn rlm_streamed_lash_vm_cell_exec_persists_trajectory_execution()
     run_rlm_protocol_contract(
         "rlm streamed Lash VM cell exec persists trajectory",
         "stream and run some code",
-        RlmTermination::Natural { schema: None },
+        TerminationMode::Natural,
+        None,
         None,
         None,
         vec![
@@ -322,12 +317,13 @@ fn rlm_empty_options_natural_default_execution() -> Result<Value, FixedScriptRun
     run_rlm_protocol_contract(
         "rlm empty options natural default",
         "finish",
-        RlmTermination::Natural { schema: None },
+        TerminationMode::Natural,
+        None,
         None,
         Some(lash_core::ProtocolTurnOptions::empty()),
         vec![
             RlmContractStep::Llm(vec![rlm_text_part(&rlm_typescript_block(
-                "finish(\"done\");",
+                "await control.finish(\"done\");",
             ))]),
             RlmContractStep::Exec(Box::new(rlm_exec_response(&[], None, Some(json!("done"))))),
             RlmContractStep::Checkpoint,
@@ -339,7 +335,8 @@ fn rlm_exec_result_no_tool_call_replay_execution() -> Result<Value, FixedScriptR
     run_rlm_protocol_contract(
         "rlm exec result no tool-call replay",
         "run a tool",
-        RlmTermination::Natural { schema: None },
+        TerminationMode::Natural,
+        None,
         None,
         None,
         vec![
@@ -373,12 +370,13 @@ fn rlm_exec_tool_control_frame_switch_terminal_execution() -> Result<Value, Fixe
     run_rlm_protocol_contract(
         "rlm exec tool-control frame switch terminal",
         "run a custom frame-switch tool",
-        RlmTermination::Natural { schema: None },
+        TerminationMode::Natural,
+        None,
         None,
         None,
         vec![
             RlmContractStep::Llm(vec![rlm_text_part(&rlm_typescript_block(
-                "const x = await tools.custom_frame_switch({});",
+                "await tools.custom_frame_switch({});",
             ))]),
             RlmContractStep::Exec(Box::new(rlm_exec_response_with_tool_calls(
                 &[],
@@ -388,13 +386,11 @@ fn rlm_exec_tool_control_frame_switch_terminal_execution() -> Result<Value, Fixe
                     "custom-call-1",
                     "custom_frame_switch",
                     json!({}),
-                    lash_core::ToolCallOutput::success(json!({ "ok": true })).with_control(
-                        lash_core::ToolControl::SwitchAgentFrame {
-                            frame_key: lash_core::FrameKey::from_caller_material("next-frame")
-                                .expect("non-empty caller material"),
-                            initial_nodes,
-                            task: Some("continue".to_string()),
-                        },
+                    lash_core::ToolCallOutput::switch_agent_frame(
+                        lash_core::FrameKey::from_caller_material("next-frame")
+                            .expect("non-empty caller material"),
+                        "continue".to_string(),
+                        initial_nodes,
                     ),
                 )],
             ))),
@@ -407,7 +403,8 @@ fn rlm_exec_tool_control_fail_terminal_execution() -> Result<Value, FixedScriptR
     run_rlm_protocol_contract(
         "rlm exec tool-control fail terminal",
         "run a custom failure tool",
-        RlmTermination::Natural { schema: None },
+        TerminationMode::Natural,
+        None,
         None,
         None,
         vec![
@@ -442,12 +439,13 @@ fn rlm_natural_allows_finish_value_execution() -> Result<Value, FixedScriptRunne
     run_rlm_protocol_contract(
         "rlm natural allows finish value",
         "return typed data",
-        RlmTermination::Natural { schema: None },
+        TerminationMode::Natural,
+        None,
         None,
         None,
         vec![
             RlmContractStep::Llm(vec![rlm_text_part(&rlm_typescript_block(
-                "finish({ ok: true });",
+                "await control.finish({ ok: true });",
             ))]),
             RlmContractStep::Exec(Box::new(rlm_exec_response(
                 &[],
@@ -455,64 +453,6 @@ fn rlm_natural_allows_finish_value_execution() -> Result<Value, FixedScriptRunne
                 Some(json!({ "ok": true })),
             ))),
             RlmContractStep::Checkpoint,
-        ],
-    )
-}
-
-#[expect(clippy::expect_used, reason = "this fixture declares valid schemas")]
-fn rlm_typed_schema_mismatch_repair_loop_execution() -> Result<Value, FixedScriptRunnerError> {
-    run_rlm_protocol_contract(
-        "rlm typed schema mismatch repair loop",
-        "return typed data",
-        RlmTermination::FinishRequired {
-            schema: Some(
-                lash_sansio::JsonSchema::admit(json!({
-                    "type": "object",
-                    "properties": {
-                        "ok": { "type": "boolean" }
-                    },
-                    "required": ["ok"]
-                }))
-                .expect("valid finish schema"),
-            ),
-        },
-        None,
-        None,
-        vec![
-            RlmContractStep::Llm(vec![rlm_text_part(&rlm_typescript_block(
-                "finish({ missing: true });",
-            ))]),
-            RlmContractStep::Exec(Box::new(rlm_exec_response(
-                &[],
-                None,
-                Some(json!({ "missing": true })),
-            ))),
-            RlmContractStep::Checkpoint,
-        ],
-    )
-}
-
-#[expect(clippy::expect_used, reason = "this fixture declares valid schemas")]
-fn rlm_typed_schema_any_of_mismatch_execution() -> Result<Value, FixedScriptRunnerError> {
-    run_rlm_protocol_contract(
-        "rlm typed schema anyOf mismatch",
-        "return typed data",
-        RlmTermination::FinishRequired {
-            schema: Some(
-                lash_sansio::JsonSchema::admit(json!({
-                    "anyOf": [
-                        { "type": "string" },
-                        { "type": "integer" }
-                    ]
-                }))
-                .expect("valid finish schema"),
-            ),
-        },
-        None,
-        None,
-        vec![
-            RlmContractStep::Llm(vec![rlm_text_part(&rlm_typescript_block("finish(true);"))]),
-            RlmContractStep::Exec(Box::new(rlm_exec_response(&[], None, Some(json!(true))))),
         ],
     )
 }
@@ -584,19 +524,23 @@ impl RlmContractObserved {
 pub(super) fn run_rlm_protocol_contract(
     scenario_name: &'static str,
     user_message: &'static str,
-    termination: RlmTermination,
+    termination: TerminationMode,
+    finish_schema: Option<lash_sansio::JsonSchema>,
     max_turns: Option<usize>,
     protocol_turn_options: Option<lash_core::ProtocolTurnOptions>,
     steps: Vec<RlmContractStep>,
 ) -> Result<Value, FixedScriptRunnerError> {
+    let finish_schema_declared = finish_schema
+        .as_ref()
+        .map(|schema| schema.as_value().clone());
     let termination_declared = if protocol_turn_options.is_some() {
         json!({ "kind": "empty_protocol_turn_options" })
     } else {
-        serde_json::to_value(&termination)?
+        serde_json::to_value(termination)?
     };
     let mut config = match protocol_turn_options {
         Some(options) => rlm_contract_config_with_turn_options(options),
-        None => rlm_contract_config(termination),
+        None => rlm_contract_config(termination, finish_schema),
     }?;
     config.turn_budget = max_turns
         .map(lash_core::TurnBudget::bounded)
@@ -708,6 +652,7 @@ pub(super) fn run_rlm_protocol_contract(
         "scenario_name": scenario_name,
         "user_message": user_message,
         "termination": termination_declared,
+        "finish_schema": finish_schema_declared,
         "max_turns": max_turns,
         "initial_request_tools_empty": observed.initial_request_tools_empty,
         "llm_call_count": observed.llm_call_count,
@@ -728,11 +673,13 @@ pub(super) fn run_rlm_protocol_contract(
 }
 
 fn rlm_contract_config(
-    termination: RlmTermination,
+    termination: TerminationMode,
+    finish_schema: Option<lash_sansio::JsonSchema>,
 ) -> Result<lash_core::TurnMachineConfig, FixedScriptRunnerError> {
     rlm_contract_config_with_turn_options(lash_protocol_rlm::RlmRecordedConfig::for_testing(
         RlmTurnOptions {
             termination: Some(termination),
+            finish_schema,
             render: None,
         },
     ))
@@ -830,44 +777,33 @@ fn rlm_exec_response(
     error: Option<&str>,
     terminal_finish: Option<Value>,
 ) -> lash_core::ExecResponse {
-    lash_core::ExecResponse {
-        prints_retained: None,
-        prints: output
-            .iter()
-            .map(|value| lash_core::CellPrint {
-                text: (*value).to_string(),
-                value: serde_json::json!(value),
-                projection: Default::default(),
-            })
-            .collect(),
-        calls: Vec::new(),
-        tool_calls: Vec::new(),
-        printed_images: Vec::new(),
-        result: match (error, terminal_finish) {
-            (Some(message), _) => lash_core::CellOutcome::Failed(lash_core::CellFailure::new(
-                lash_core::CellFailureKind::Program,
-                message,
-            )),
-            (None, Some(value)) => lash_core::CellOutcome::Finished(value.into()),
-            (None, None) => lash_core::CellOutcome::Completed,
-        },
-        retained_finish_value: None,
-        degraded_bindings: Vec::new(),
-        bindings: Default::default(),
-        suspended: false,
-    }
+    rlm_exec_response_with_tool_calls(output, error, terminal_finish, Vec::new())
 }
 
 fn rlm_exec_response_with_tool_calls(
     output: &[&str],
     error: Option<&str>,
     terminal_finish: Option<Value>,
-    tool_calls: Vec<lash_core::ToolCallRecord>,
+    mut tool_calls: Vec<lash_core::ToolCallRecord>,
 ) -> lash_core::ExecResponse {
+    if error.is_none()
+        && let Some(value) = terminal_finish
+    {
+        tool_calls.push(rlm_tool_call_record(
+            "control-finish",
+            "finish",
+            value.clone(),
+            lash_core::ToolCallOutput::finish(value),
+        ));
+    }
     let calls = tool_calls
         .iter()
         .map(|record| lash_core::ExecutedCall {
-            operation: format!("tools.{}", record.tool),
+            operation: if record.tool == "finish" {
+                "control.finish".into()
+            } else {
+                format!("tools.{}", record.tool)
+            },
             outcome: if record.output.is_success() {
                 lash_core::ExecutedCallOutcome::Ok
             } else {
@@ -876,6 +812,31 @@ fn rlm_exec_response_with_tool_calls(
             call_id: Some(record.call_id.clone()),
         })
         .collect();
+    let turn_control = tool_calls
+        .iter()
+        .find_map(|record| match record.output.control.as_ref() {
+            Some(lash_core::ToolControl::Turn {
+                control: lash_core::TurnControl::Finish { value },
+            }) => Some(lash_core::CellOutcome::Controlled {
+                tool_name: record.tool.clone(),
+                call_id: record.call_id.clone(),
+                control: lash_core::CellControl::Finish {
+                    value: lash_core::ToolCallOutput::success_tool_value(value.clone())
+                        .value_for_projection()
+                        .into(),
+                },
+            }),
+            Some(lash_core::ToolControl::Turn {
+                control: lash_core::TurnControl::SwitchAgentFrame { frame_key, .. },
+            }) => Some(lash_core::CellOutcome::Controlled {
+                tool_name: record.tool.clone(),
+                call_id: record.call_id.clone(),
+                control: lash_core::CellControl::SwitchAgentFrame {
+                    frame_key: frame_key.clone(),
+                },
+            }),
+            _ => None,
+        });
     lash_core::ExecResponse {
         prints_retained: None,
         prints: output
@@ -889,13 +850,12 @@ fn rlm_exec_response_with_tool_calls(
         calls,
         tool_calls,
         printed_images: Vec::new(),
-        result: match (error, terminal_finish) {
-            (Some(message), _) => lash_core::CellOutcome::Failed(lash_core::CellFailure::new(
+        result: match error {
+            Some(message) => lash_core::CellOutcome::Failed(lash_core::CellFailure::new(
                 lash_core::CellFailureKind::Program,
                 message,
             )),
-            (None, Some(value)) => lash_core::CellOutcome::Finished(value.into()),
-            (None, None) => lash_core::CellOutcome::Completed,
+            None => turn_control.unwrap_or(lash_core::CellOutcome::Completed),
         },
         retained_finish_value: None,
         degraded_bindings: Vec::new(),

@@ -266,7 +266,7 @@ async fn session_bindings_are_carried_between_cells_and_across_a_reload() {
         &mut state,
         cell_context(&host, SESSION, TURN, "exec-code:1", tools.clone()),
         &services,
-        "rows.push({ n: 3 });\nfinish({ total, count: alias.length });",
+        "rows.push({ n: 3 });\nawait control.finish({ total, count: alias.length });",
     )
     .await;
     assert_eq!(
@@ -295,7 +295,7 @@ async fn session_bindings_are_carried_between_cells_and_across_a_reload() {
         &mut reloaded,
         cell_context(&host, SESSION, TURN, "exec-code:2", tools),
         &services,
-        "alias.push({ n: 4 });\nfinish(rows.length + total);",
+        "alias.push({ n: 4 });\nawait control.finish(rows.length + total);",
     )
     .await;
     assert_eq!(
@@ -315,7 +315,7 @@ async fn a_tool_named_by_a_reserved_word_is_called_as_a_member() {
         &mut typescript_state(),
         cell_context(&host, SESSION, TURN, "exec-code:0", tools.clone()),
         &typescript_services(None),
-        "finish(await echo.await({ text: \"member\" }));",
+        "await control.finish(await echo.await({ text: \"member\" }));",
     )
     .await;
     assert_eq!(finish_of(&response), serde_json::json!("member"));
@@ -362,7 +362,7 @@ async fn a_tool_loop_runs_each_call_once_and_records_it() {
         &mut typescript_state(),
         cell_context(&host, SESSION, TURN, "exec-code:0", tools.clone()),
         &typescript_services(None),
-        "const seen = [];\nfor (const word of [\"a\", \"b\", \"c\"]) {\n  seen.push(await echo.say({ text: word }));\n}\nfinish(seen);",
+        "const seen = [];\nfor (const word of [\"a\", \"b\", \"c\"]) {\n  seen.push(await echo.say({ text: word }));\n}\nawait control.finish(seen);",
     )
     .await;
     assert_eq!(finish_of(&response), serde_json::json!(["a", "b", "c"]));
@@ -373,9 +373,14 @@ async fn a_tool_loop_runs_each_call_once_and_records_it() {
             .iter()
             .map(|call| (call.operation.as_str(), call.outcome))
             .collect::<Vec<_>>(),
-        vec![("echo.say", lash_core::ExecutedCallOutcome::Ok); 3]
+        [
+            vec![("echo.say", lash_core::ExecutedCallOutcome::Ok); 3],
+            vec![("control.finish", lash_core::ExecutedCallOutcome::Ok)],
+        ]
+        .concat(),
+        "the three calls, then the control call that ended the cell"
     );
-    assert_eq!(response.tool_calls.len(), 3);
+    assert_eq!(response.tool_calls.len(), 4);
 }
 
 /// Runs `code` until the held tool call starts, then kills the node with
@@ -426,7 +431,7 @@ async fn a_cell_resumes_from_its_park_after_its_node_dies() {
         &mut host,
         &tools,
         &typescript_services(None),
-        "console.log(\"before\");\nconst first = await echo.say({ text: \"first\" });\nlet second = \"unset\";\ntry {\n  second = await echo.say({ text: \"held\" });\n} catch (error) {\n  second = \"interrupted\";\n}\nconsole.log(\"after\");\nfinish([first, second]);",
+        "console.log(\"before\");\nconst first = await echo.say({ text: \"first\" });\nlet second = \"unset\";\ntry {\n  second = await echo.say({ text: \"held\" });\n} catch (error) {\n  second = \"interrupted\";\n}\nconsole.log(\"after\");\nawait control.finish([first, second]);",
     )
     .await;
     assert_eq!(
@@ -455,7 +460,9 @@ async fn a_cell_resumes_from_its_park_after_its_node_dies() {
             .collect::<Vec<_>>(),
         vec![
             lash_core::ExecutedCallOutcome::Ok,
-            lash_core::ExecutedCallOutcome::Err
+            lash_core::ExecutedCallOutcome::Err,
+            // The control call that ended the cell.
+            lash_core::ExecutedCallOutcome::Ok
         ]
     );
 }
@@ -473,7 +480,7 @@ async fn a_deferred_tool_granted_to_a_cell_is_callable_after_a_restart() {
         &mut host,
         &tools,
         &typescript_services(Some(resolver.clone() as crate::SharedDeferredToolResolver)),
-        "const first = await web.fetch({ text: \"first\" });\ntry {\n  await web.fetch({ text: \"held\" });\n} catch (error) {\n  console.log(\"interrupted\");\n}\nconst third = await web.fetch({ text: \"third\" });\nfinish([first, third]);",
+        "const first = await web.fetch({ text: \"first\" });\ntry {\n  await web.fetch({ text: \"held\" });\n} catch (error) {\n  console.log(\"interrupted\");\n}\nconst third = await web.fetch({ text: \"third\" });\nawait control.finish([first, third]);",
     )
     .await;
     assert_eq!(finish_of(&response), serde_json::json!(["first", "third"]));
@@ -550,7 +557,7 @@ async fn a_cell_reports_the_bindings_its_committed_transition_changed() {
         &mut state,
         cell_context(&host, SESSION, TURN, "exec-code:3", tools),
         &services,
-        "finish(count);",
+        "await control.finish(count);",
     )
     .await;
     assert_eq!(

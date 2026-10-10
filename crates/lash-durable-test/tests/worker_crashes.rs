@@ -25,7 +25,7 @@ use lash_core::{ExecutionPolicy, ToolCall, ToolOutcome};
 use served::{Tier, World};
 
 const TOOL: &str = "count_call";
-const CELL: &str = "const first = await tools.count_call({}); finish({ first });";
+const CELL: &str = "const first = await tools.count_call({}); await control.finish({ first });";
 
 /// `count_call`'s body: it counts its runs and answers `counted`.
 struct Count {
@@ -128,7 +128,7 @@ fn model(
         .kind("worker-setup-crash")
         .complete(move |_request: LlmRequest| {
             let response = if warming.swap(false, Ordering::SeqCst) {
-                served::cell("finish(\"warm\");")
+                served::cell("await control.finish(\"warm\");")
             } else {
                 calls.fetch_add(1, Ordering::SeqCst);
                 killer.arm();
@@ -191,7 +191,10 @@ async fn setup_crash_case(tier: Tier, request: Request) {
     // killer. Session setup itself makes no kernel-worker checkout.
     let warm = world.session("worker-prewarm", served::spec(8)).await;
     let warmed = world.send(&warm, "warm the worker").await;
-    assert_eq!(warmed.final_value(), Some(&serde_json::json!("warm")));
+    assert_eq!(
+        warmed.finished().map(|(_, value)| value),
+        Some(&serde_json::json!("warm"))
+    );
     let session = world.session("worker-setup-crash", served::spec(8)).await;
     let output = world.send(&session, "count once").await;
 
@@ -226,7 +229,7 @@ async fn setup_crash_case(tier: Tier, request: Request) {
         output.result.errors
     );
     assert_eq!(
-        output.final_value(),
+        output.finished().map(|(_, value)| value),
         Some(&serde_json::json!({ "first": { "result": "counted" } }))
     );
     world.shutdown().await;

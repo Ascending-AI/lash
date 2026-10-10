@@ -356,6 +356,11 @@ pub enum Response<I = ()> {
 #[serde(deny_unknown_fields)]
 pub struct ExecutionEnvironmentSync {
     pub tool_specs: Arc<Vec<LlmToolSpec>>,
+    /// The tools of the surface whose call ends the turn, with the turn
+    /// controls each declares. A protocol orders a step's control call by
+    /// them, and a turn that must end through a control checks one can.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub turn_controls: std::collections::BTreeMap<String, crate::TurnControls>,
 }
 
 /// Lower a call's composed prompt onto `request`, which a projector rendered
@@ -436,10 +441,46 @@ impl<I> Response<I> {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, Serialize, serde::Deserialize)]
 pub enum CheckpointResumeAction {
     PrepareIteration,
     Finish(TurnOutcome),
+    /// A settled control call's candidate, decided here: accepted when the
+    /// checkpoint delivers nothing, and the turn ends with its outcome;
+    /// superseded when input arrives, and the turn goes on with
+    /// `superseded` appended before that input, so the model reads that
+    /// its control did not end the turn.
+    Complete {
+        candidate: Box<crate::CompletionCandidate>,
+        superseded: Vec<crate::Message>,
+    },
+}
+
+impl PartialEq for CheckpointResumeAction {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::PrepareIteration, Self::PrepareIteration) => true,
+            (Self::Finish(left), Self::Finish(right)) => left == right,
+            (
+                Self::Complete {
+                    candidate: left,
+                    superseded: left_messages,
+                },
+                Self::Complete {
+                    candidate: right,
+                    superseded: right_messages,
+                },
+            ) => {
+                left == right
+                    && left_messages.len() == right_messages.len()
+                    && left_messages
+                        .iter()
+                        .zip(right_messages)
+                        .all(|(left, right)| crate::same_message(left, right))
+            }
+            _ => false,
+        }
+    }
 }
 
 /// Work a turn hands the host and waits on: the one definition of each
@@ -473,6 +514,15 @@ pub enum PendingWork<M: TurnProtocol = UnitTurnProtocol> {
         /// response held no sugar, and then absent from the encoding.
         #[serde(default, skip_serializing_if = "ToolExpansionPlan::is_empty")]
         expansion: ToolExpansionPlan,
+        /// The step's control call, held back until `calls` settle: it runs
+        /// next when every one of them succeeded, and is refused before its
+        /// body runs when one did not (`ControlSiblingFailed`).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        held: Vec<PendingToolCall>,
+        /// For the held wave, the step's results that settled before it,
+        /// already folded: the driver reads them with the held call's.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        earlier: Vec<CompletedToolCall<M::IntentOutcome>>,
     },
     Exec {
         language: String,
@@ -483,6 +533,35 @@ pub enum PendingWork<M: TurnProtocol = UnitTurnProtocol> {
         checkpoint: CheckpointKind,
         on_empty: CheckpointResumeAction,
     },
+}
+
+impl<M: TurnProtocol> PendingWork<M> {
+    /// The step's tool round over `calls`, folded back by `expansion`.
+    pub fn tool_round(calls: Vec<PendingToolCall>, expansion: ToolExpansionPlan) -> Self {
+        Self::WaitingForToolResults {
+            calls,
+            settled: None,
+            expansion,
+            held: Vec::new(),
+            earlier: Vec::new(),
+        }
+    }
+
+    /// The step's tool round over `calls`, with its control call `held`
+    /// back until they settle (see [`PendingWork::WaitingForToolResults`]).
+    pub fn tool_round_holding(
+        calls: Vec<PendingToolCall>,
+        expansion: ToolExpansionPlan,
+        held: PendingToolCall,
+    ) -> Self {
+        Self::WaitingForToolResults {
+            calls,
+            settled: None,
+            expansion,
+            held: vec![held],
+            earlier: Vec::new(),
+        }
+    }
 }
 
 impl<M: TurnProtocol> Clone for PendingWork<M> {
@@ -500,10 +579,14 @@ impl<M: TurnProtocol> Clone for PendingWork<M> {
                 calls,
                 expansion,
                 settled,
+                held,
+                earlier,
             } => Self::WaitingForToolResults {
                 settled: settled.clone(),
                 calls: calls.clone(),
                 expansion: expansion.clone(),
+                held: held.clone(),
+                earlier: earlier.clone(),
             },
             Self::Exec {
                 language,
@@ -539,6 +622,7 @@ impl<M: TurnProtocol> PendingWork<M> {
                 calls,
                 expansion,
                 settled,
+                ..
             } => match settled {
                 None => Effect::ToolCalls {
                     id,
@@ -569,13 +653,13 @@ impl<M: TurnProtocol> PendingWork<M> {
     pub(super) fn answer(
         self,
         response: Response<M::IntentOutcome>,
-    ) -> Result<AnsweredWork<M>, Self> {
+    ) -> Result<AnsweredWork<M>, Box<Self>> {
         match self {
             Self::SyncExecutionEnvironment => match response {
                 Response::ExecutionEnvironmentSynced { result, .. } => {
                     Ok(AnsweredWork::ExecutionEnvironmentSynced { result })
                 }
-                _ => Err(Self::SyncExecutionEnvironment),
+                _ => Err(Box::new(Self::SyncExecutionEnvironment)),
             },
             Self::Llm {
                 request,
@@ -592,24 +676,31 @@ impl<M: TurnProtocol> PendingWork<M> {
                     result,
                     text_streamed,
                 }),
-                _ => Err(Self::Llm {
+                _ => Err(Box::new(Self::Llm {
                     request,
                     driver_state,
-                }),
+                })),
             },
             Self::WaitingForToolResults {
                 calls,
                 expansion,
                 settled,
+                held,
+                earlier,
             } => match response {
-                Response::ToolResults { results, .. } => {
-                    Ok(AnsweredWork::Tools { expansion, results })
-                }
-                _ => Err(Self::WaitingForToolResults {
+                Response::ToolResults { results, .. } => Ok(AnsweredWork::Tools {
+                    expansion,
+                    results,
+                    held,
+                    earlier,
+                }),
+                _ => Err(Box::new(Self::WaitingForToolResults {
                     calls,
                     expansion,
                     settled,
-                }),
+                    held,
+                    earlier,
+                })),
             },
             Self::Exec {
                 language,
@@ -620,11 +711,11 @@ impl<M: TurnProtocol> PendingWork<M> {
                     driver_state,
                     result,
                 }),
-                _ => Err(Self::Exec {
+                _ => Err(Box::new(Self::Exec {
                     language,
                     code,
                     driver_state,
-                }),
+                })),
             },
             Self::Checkpoint {
                 checkpoint,
@@ -635,10 +726,10 @@ impl<M: TurnProtocol> PendingWork<M> {
                     on_empty,
                     delivery,
                 }),
-                _ => Err(Self::Checkpoint {
+                _ => Err(Box::new(Self::Checkpoint {
                     checkpoint,
                     on_empty,
-                }),
+                })),
             },
         }
     }
@@ -660,6 +751,8 @@ pub(super) enum AnsweredWork<M: TurnProtocol = UnitTurnProtocol> {
     Tools {
         expansion: ToolExpansionPlan,
         results: Vec<CompletedToolCall<M::IntentOutcome>>,
+        held: Vec<PendingToolCall>,
+        earlier: Vec<CompletedToolCall<M::IntentOutcome>>,
     },
     Exec {
         driver_state: M::DriverState,
@@ -735,6 +828,21 @@ impl<'a, M: TurnProtocol> DriverContextView<'a, M> {
 
     pub fn protocol_iteration(&self) -> usize {
         self.protocol_iteration
+    }
+
+    /// Whether a call to the tool `name` ends the turn: the synced surface
+    /// declares a turn control for it.
+    pub fn ends_the_turn(&self, name: &str) -> bool {
+        self.environment.turn_controls.contains_key(name)
+    }
+
+    /// Whether a tool of the synced surface can end the turn with a value:
+    /// one declares [`TurnControlKind::Finish`](crate::TurnControlKind::Finish).
+    pub fn can_finish(&self) -> bool {
+        self.environment
+            .turn_controls
+            .values()
+            .any(|controls| controls.contains(crate::TurnControlKind::Finish))
     }
 
     /// The version this fleet's writers emit for the surface registered under

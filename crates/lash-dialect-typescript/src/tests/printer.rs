@@ -111,11 +111,12 @@ fn roundtrip(document: &k::Document, registry: &Arc<k::FunctionRegistry>, librar
     let environment = Environment {
         library,
         effects: &document.manifest.effects,
+        controls: &BTreeMap::new(),
         bindings: &bindings,
         functions: &std::collections::BTreeMap::new(),
     };
-    let lowered =
-        crate::lower(&source, &environment).unwrap_or_else(|error| panic!("{error}\n{source}"));
+    let lowered = crate::lower_kernel_text(&source, &environment)
+        .unwrap_or_else(|error| panic!("{error}\n{source}"));
     // Retaining the tree also retains sites, task interleaving and errors at
     // bounds. The law's oracle remains a run on the production machine.
     assert_eq!(lowered.document, *document, "{source}");
@@ -130,11 +131,16 @@ fn roundtrip(document: &k::Document, registry: &Arc<k::FunctionRegistry>, librar
             run(&lowered.document, registry, Target::Entry(entry.clone()))
         );
     }
+    // The worker's reusable parser lowers model cells, so it refuses
+    // kernel text exactly as `lower` does.
     let mut parser = crate::Parser::default();
     assert_eq!(
-        parser.lower(&source, &environment).unwrap().document,
-        *document
+        parser
+            .lower(&source, &environment)
+            .map(|lowered| lowered.document),
+        crate::lower(&source, &environment).map(|lowered| lowered.document),
     );
+    assert!(crate::lower(&source, &environment).is_err(), "{source}");
 }
 
 #[test]
@@ -347,10 +353,11 @@ fn reserved_operations_obey_the_kernel_statement_rule() {
     let environment = Environment {
         library,
         effects: &effects,
+        controls: &BTreeMap::new(),
         bindings: &bindings,
         functions: &std::collections::BTreeMap::new(),
     };
-    let lowered = crate::lower(
+    let lowered = crate::lower_kernel_text(
         "let x = k.add(k.int(\"1\"), k.float(\"2.0\")); k.finish(k.tuple(x, k.absent));",
         &environment,
     )
@@ -366,7 +373,10 @@ fn reserved_operations_obey_the_kernel_statement_rule() {
         "let k = k.int(\"1\");",
         "let k = 1;",
     ] {
-        assert!(crate::lower(source, &environment).is_err(), "{source}");
+        assert!(
+            crate::lower_kernel_text(source, &environment).is_err(),
+            "{source}"
+        );
     }
     let deep = "k.tuple(".repeat(300) + "null" + &")".repeat(300);
     assert!(crate::lower(&format!("let x = {deep};"), &environment).is_err());

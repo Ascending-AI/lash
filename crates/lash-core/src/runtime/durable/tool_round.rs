@@ -114,6 +114,10 @@ pub(super) struct ModelDone<'a> {
     pub(super) iteration: u32,
     /// The cell whose answer the turn has yet to record, if any.
     pub(super) answered_cell: &'a mut Option<AnsweredCell>,
+    /// The presentation of an earlier round of the same step, which the
+    /// turn has yet to commit: a held control call's round follows its
+    /// siblings' (FIG-5781).
+    pub(super) present: &'a mut Option<DomainWrite>,
 }
 
 /// Run the tool round of effect `id` over `calls` to its members' outcomes,
@@ -135,6 +139,7 @@ pub(super) async fn run(
         checkpoint,
         iteration,
         answered_cell,
+        present,
     } = done;
     let session = row.session.clone();
     let owner = OwnerKey::Turn(session.clone(), row.run.clone());
@@ -204,6 +209,9 @@ pub(super) async fn run(
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(exec)?;
             let refused = tools.refusal(&calls);
+            if let Some(present) = present.take() {
+                tx.write(present);
+            }
             record_answered_cell(cx, &mut tx, row, answered_cell)?;
             let written = super::phases::write_run_changes(&*drive, &mut tx, &session, &row.run);
             tx.write(DomainWrite::Turn(TurnWrite::Advance {

@@ -190,7 +190,7 @@ const hold_for_delete = async () => {
   return "unreachable";
 };
 const handle = await processes.start({ definition: hold_for_delete });
-finish(String(await handle));
+await control.finish(String(await handle));
 </typescript>"#,
     ))
     .trace_sink(Arc::clone(&trace) as Arc<dyn TraceSink>)

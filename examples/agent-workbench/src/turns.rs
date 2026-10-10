@@ -814,8 +814,7 @@ pub(crate) async fn record_turn_output_for_profile(
             "streamed_prose": streamed_prose,
             "outcome": &output.outcome,
             "errors": &output.errors,
-            "final_value": output.final_value().cloned(),
-            "tool_value": output.tool_value().map(|(tool_name, value)| {
+            "finished": output.finished().map(|(tool_name, value)| {
                 json!({
                     "tool_name": tool_name,
                     "value": value,

@@ -321,10 +321,8 @@ pub enum TurnEvent {
         call_id: crate::ToolCallId,
         outcome: crate::ToolIntentExecutionOutcome,
     },
-    FinalValue {
-        value: serde_json::Value,
-    },
-    ToolValue {
+    /// A declared Finish control ended the turn with `value`.
+    Finished {
         tool_name: String,
         value: serde_json::Value,
     },

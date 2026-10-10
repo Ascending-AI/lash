@@ -273,7 +273,7 @@ for (let i = 0; i < 3000; i++) {
   rows.push({ index: i, text: "a row the cell prints and finishes with" });
 }
 console.log(rows);
-finish({ rows });"#,
+await control.finish({ rows });"#,
             )]),
             mock_llm_profile_spec(),
         )
@@ -291,7 +291,8 @@ finish({ rows });"#,
     // The host is answered with the whole value: retention bounds history,
     // not the turn's answer.
     let value = output
-        .final_value()
+        .finished()
+        .map(|(_, value)| value)
         .cloned()
         .expect("the turn finishes with a value");
     assert_eq!(value["rows"].as_array().map(Vec::len), Some(3000));
@@ -359,11 +360,13 @@ fn collect_retained(
                 };
                 match key.as_str() {
                     "prints_retained" if !entry.is_null() => prints.push(decoded(entry)),
+                    // A cell `control.finish` ended holds the call's value.
                     "result"
-                        if entry["kind"] == "finished"
-                            && entry["value"]["retained"].is_object() =>
+                        if entry["kind"] == "controlled"
+                            && entry["value"]["control"]["type"] == "finish"
+                            && entry["value"]["control"]["value"]["retained"].is_object() =>
                     {
-                        finals.push(decoded(&entry["value"]["retained"]));
+                        finals.push(decoded(&entry["value"]["control"]["value"]["retained"]));
                     }
                     _ => collect_retained(entry, prints, finals),
                 }
@@ -438,7 +441,7 @@ for (let i = 0; i < 200; i++) {
 }
 "#,
                 ),
-                typescript_block("finish(200);"),
+                typescript_block("await control.finish(200);"),
             ]),
             mock_llm_profile_spec(),
         )
@@ -511,10 +514,10 @@ fn archive_reader_cell() -> &'static str {
 for (let i = 0; i < history.length; i++) {
   const step = history[i];
   if (step.kind === "lash_vm_step" && step.output_archive) {
-    finish(await control.read_output({ archive: step.output_archive.attachment }));
+    await control.finish(await control.read_output({ archive: step.output_archive.attachment }));
   }
 }
-finish("missing archive");
+await control.finish("missing archive");
 "#
 }
 
@@ -540,7 +543,7 @@ async fn step_archive_refetch_survives_cold_reopen_branch_and_continue_as_on_sql
             ..crate::DataRetention::standard()
         })
         .serve_test_llm_profile(queued_text_provider(vec![
-            typescript_block(r#"for (let i = 0; i < 200; i++) { console.log({index: i, text: "exact é🙂\nvalue", null: null, nested: [i, false]}); } finish(200);"#),
+            typescript_block(r#"for (let i = 0; i < 200; i++) { console.log({index: i, text: "exact é🙂\nvalue", null: null, nested: [i, false]}); } await control.finish(200);"#),
         ]), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let session = core
@@ -553,7 +556,10 @@ async fn step_archive_refetch_survives_cold_reopen_branch_and_continue_as_on_sql
         .send(TurnInput::text("archive the prints"))
         .output()
         .await?;
-    assert_eq!(output.final_value(), Some(&serde_json::json!(200)));
+    assert_eq!(
+        output.finished().map(|(_, value)| value),
+        Some(&serde_json::json!(200))
+    );
     let (_, window) = committed_frame(&backend, "archive-history").await;
     let mut archives = Vec::new();
     collect_retained(
@@ -600,7 +606,7 @@ for (let i = 0; i < history.length; i++) {
   }
 }
 "#),
-            typescript_block("finish(await control.read_output({ archive }));"),
+            typescript_block("await control.finish(await control.read_output({ archive }));"),
         ]), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     sweep_without_grace(&backend).await;
@@ -612,7 +618,10 @@ for (let i = 0; i < history.length; i++) {
         .send(TurnInput::text("read after cold reopen"))
         .output()
         .await?;
-    assert_eq!(cold.final_value(), Some(&serde_json::json!(expected)));
+    assert_eq!(
+        cold.finished().map(|(_, value)| value),
+        Some(&serde_json::json!(expected))
+    );
     core.fork_at(
         &SessionId::fixture("archive-history"),
         lash_core::Target::Revision(revision),
@@ -634,7 +643,10 @@ for (let i = 0; i < history.length; i++) {
         .send(TurnInput::text("read shared history on a branch"))
         .output()
         .await?;
-    assert_eq!(branched.final_value(), Some(&serde_json::json!(expected)));
+    assert_eq!(
+        branched.finished().map(|(_, value)| value),
+        Some(&serde_json::json!(expected))
+    );
     branch.close().await.expect("close branch runtime");
     // The switch answers its send; the frame's task runs next as its own
     // run (FIG-5232), reading the archive its seed carries.
@@ -653,7 +665,10 @@ for (let i = 0; i < history.length; i++) {
         ))
         .output()
         .await?;
-    assert_eq!(continued.final_value(), Some(&serde_json::json!(expected)));
+    assert_eq!(
+        continued.finished().map(|(_, value)| value),
+        Some(&serde_json::json!(expected))
+    );
     sweep_without_grace(&backend).await;
     let observations: Vec<lash_core::CellPrint> =
         serde_json::from_str(&stored_text(&backend, &archive.reference).await)

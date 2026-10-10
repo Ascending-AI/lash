@@ -564,7 +564,9 @@ pub(crate) fn validate_runtime_perf_turn(
                 text
             );
         }
-        TurnOutcome::Finished(lash::TurnFinish::FinalValue { value }) => {
+        TurnOutcome::Finished(lash::TurnFinish::Finished { tool_name, value })
+            if tool_name == "finish" =>
+        {
             if value.as_str() == Some(expected) {
                 return Ok(());
             }
@@ -575,7 +577,7 @@ pub(crate) fn validate_runtime_perf_turn(
                 value
             );
         }
-        TurnOutcome::Finished(lash::TurnFinish::ToolValue { tool_name, value }) => {
+        TurnOutcome::Finished(lash::TurnFinish::Finished { tool_name, value }) => {
             anyhow::bail!(
                 "runtime perf scenario {} turn {} finished with tool value from {}: {}",
                 scenario.name(),

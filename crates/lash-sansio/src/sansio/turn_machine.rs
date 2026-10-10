@@ -60,6 +60,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
             cumulative_usage: LlmUsage::default(),
             last_call_usage: None,
             environment: None,
+            completion_candidates: Vec::new(),
             observed_cancellation: None,
             resume_work: None,
             run_abort: None,
@@ -181,6 +182,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
                         calls,
                         settled,
                         expansion,
+                        ..
                     },
                 ..
             } => Some((calls, settled.as_ref(), expansion)),
@@ -265,6 +267,14 @@ impl<M: TurnProtocol> TurnMachine<M> {
         self.protocol_iteration
     }
 
+    /// The completion candidates this turn has decided, in decision order:
+    /// each one Accepted or Superseded, never Pending. A restored machine
+    /// holds the same list, so a superseded candidate is never decided
+    /// again.
+    pub fn completion_candidates(&self) -> &[crate::CompletionCandidate] {
+        &self.completion_candidates
+    }
+
     /// The configuration the machine was built with, the one its checkpoint
     /// restores under ([`Self::restore_from_checkpoint`]).
     pub fn into_config(self) -> TurnMachineConfig<M> {
@@ -326,6 +336,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
             cumulative_usage: self.cumulative_usage.clone(),
             last_call_usage: self.last_call_usage.clone(),
             environment: self.environment.clone(),
+            completion_candidates: self.completion_candidates.clone(),
         };
         SavedTurn {
             checkpoint,
@@ -393,6 +404,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
             cumulative_usage: checkpoint.cumulative_usage,
             last_call_usage: checkpoint.last_call_usage,
             environment: checkpoint.environment,
+            completion_candidates: checkpoint.completion_candidates,
             observed_cancellation: None,
             resume_work: None,
             run_abort: None,
@@ -763,9 +775,12 @@ impl<M: TurnProtocol> TurnMachine<M> {
                 result,
                 text_streamed,
             } => self.handle_llm_complete(id, request, driver_state, result, text_streamed)?,
-            AnsweredWork::Tools { expansion, results } => {
-                self.handle_tool_results(&expansion, results);
-            }
+            AnsweredWork::Tools {
+                expansion,
+                results,
+                held,
+                earlier,
+            } => self.handle_tool_results(&expansion, results, held, earlier),
             AnsweredWork::Exec {
                 driver_state,
                 result,
@@ -813,6 +828,21 @@ impl<M: TurnProtocol> TurnMachine<M> {
         delivery: CheckpointDelivery,
     ) {
         if !delivery.committed_user_messages.is_empty() {
+            if let CheckpointResumeAction::Complete {
+                mut candidate,
+                superseded,
+            } = on_empty
+            {
+                candidate.disposition = crate::CompletionDisposition::Superseded;
+                self.completion_candidates.push(*candidate);
+                // The notice is the turn's own output: it is recorded with
+                // the turn's events, so a reload reads it as the model did.
+                for message in superseded {
+                    self.append_event(SessionHistoryRecord::Conversation(
+                        crate::session_model::ConversationRecord::from_message(message),
+                    ));
+                }
+            }
             self.prompt_messages
                 .extend(delivery.committed_user_messages.clone());
             self.messages.extend(delivery.committed_user_messages);
@@ -843,6 +873,12 @@ impl<M: TurnProtocol> TurnMachine<M> {
                 self.state = MachineState::PrepareIteration;
             }
             CheckpointResumeAction::Finish(outcome) => self.finish(outcome),
+            CheckpointResumeAction::Complete { mut candidate, .. } => {
+                candidate.disposition = crate::CompletionDisposition::Accepted;
+                let outcome = candidate.outcome();
+                self.completion_candidates.push(*candidate);
+                self.finish(outcome);
+            }
         }
     }
 
@@ -1076,6 +1112,8 @@ impl<M: TurnProtocol> TurnMachine<M> {
         &mut self,
         expansion: &ToolExpansionPlan,
         completed: Vec<CompletedToolCall<M::IntentOutcome>>,
+        held: Vec<PendingToolCall>,
+        earlier: Vec<CompletedToolCall<M::IntentOutcome>>,
     ) {
         // Host panic evidence must not enter protocol expansion or repair.
         if let Some(stop) = completed
@@ -1098,6 +1136,32 @@ impl<M: TurnProtocol> TurnMachine<M> {
             completed
         } else {
             Arc::clone(&self.config.protocol_driver).fold_tool_results(expansion, completed)
+        };
+        // A held control call runs only once every sibling settled
+        // successfully; a sibling that failed or was cancelled refuses it
+        // before its body runs. Either way every result reaches the driver.
+        let mut completed = completed;
+        if !held.is_empty() {
+            if completed.iter().all(|outcome| outcome.output.is_success()) {
+                let mut earlier = earlier;
+                earlier.extend(completed);
+                self.start(PendingWork::WaitingForToolResults {
+                    calls: held,
+                    settled: None,
+                    expansion: ToolExpansionPlan::default(),
+                    held: Vec::new(),
+                    earlier,
+                });
+                return;
+            }
+            completed.extend(held.into_iter().map(sibling_failed));
+        }
+        let completed = if earlier.is_empty() {
+            completed
+        } else {
+            let mut all = earlier;
+            all.extend(completed);
+            all
         };
         for outcome in &completed {
             self.emit(SessionStreamEvent::ToolCall {
@@ -1142,5 +1206,30 @@ impl<M: TurnProtocol> TurnMachine<M> {
         });
         self.shift(|driver, ctx| driver.handle_exec_result(ctx, driver_state, result));
         self.finish_pending_run_abort();
+    }
+}
+
+/// The answer of a held control call refused because a sibling of its step
+/// failed or was cancelled: its body never ran.
+fn sibling_failed<I>(call: PendingToolCall) -> CompletedToolCall<I> {
+    let output = crate::ToolCallOutput::failure(
+        crate::ToolFailure::invalid_request(
+            "control_sibling_failed",
+            format!(
+                "`{}` was not called: another call of the same step failed, so the turn does not end on it",
+                call.tool_name
+            ),
+        )
+        .with_cause(crate::ToolFailureCause::ControlSiblingFailed),
+    );
+    CompletedToolCall {
+        model_return: crate::ModelToolReturn::from_output(call.tool_name.clone(), &output),
+        call_id: call.call_id,
+        provider_call_id: call.provider_call_id,
+        tool_name: call.tool_name,
+        args: call.args,
+        output,
+        intent_outcomes: Vec::new(),
+        replay: call.replay,
     }
 }

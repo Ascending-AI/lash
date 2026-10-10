@@ -26,9 +26,9 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use lash_core::ToolOutcome;
 use lash_core::facade_support::ProviderHandle;
 use lash_core::llm::types::{LlmRequest, LlmResponse};
-use lash_core::{ToolControl, ToolOutcome};
 use served::{Tier, WATCHDOG, World};
 
 /// The state a fresh frame's executor starts from.
@@ -297,14 +297,12 @@ struct SwitchFrame {
 #[async_trait::async_trait]
 impl lash::tools::StaticToolExecute for SwitchFrame {
     async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-        ToolOutcome::ok(serde_json::json!({ "ok": true }))
-            .with_control(ToolControl::SwitchAgentFrame {
-                frame_key: lash_core::FrameKey::from_caller_material("execution-state-frame")
-                    .unwrap(),
-                initial_nodes: Vec::new(),
-                task: Some(self.task.to_owned()),
-            })
-            .into()
+        ToolOutcome::switch_agent_frame(
+            lash_core::FrameKey::from_caller_material("execution-state-frame").unwrap(),
+            self.task.to_owned(),
+            Vec::new(),
+        )
+        .into()
     }
 }
 
@@ -329,12 +327,12 @@ async fn a_committed_frame_switch_clears_the_execution_state(tier: Tier) {
             }
         }
     });
-    let definition = lash_core::ToolDefinition::raw(
+    let definition = lash_core::ToolDefinition::control(
         "switch_frame",
         "switch_frame",
         "Switches the agent frame and hands the new frame a task.",
         serde_json::json!({ "type": "object", "additionalProperties": false, "properties": {} }),
-        serde_json::json!({ "type": "object" }),
+        lash_core::TurnControls::switch_agent_frame(),
     )
     .unwrap()
     .with_execution(std::time::Duration::from_secs(120));
@@ -376,15 +374,34 @@ struct RotatingTools {
 }
 
 fn rotating_definition(name: &str) -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
-        format!("tool:{name}"),
-        name,
-        "Exercises tool discovery across an agent frame rotation.",
-        lash_core::ToolDefinition::default_input_schema(),
-        serde_json::json!({ "type": "object", "additionalProperties": true }),
-    )
-    .unwrap()
-    .with_execution(std::time::Duration::from_secs(120))
+    let input = lash_core::ToolDefinition::default_input_schema();
+    let description = "Exercises tool discovery across an agent frame rotation.";
+    let draft = match name {
+        "rotate_surface" => lash_core::ToolDefinition::control(
+            format!("tool:{name}"),
+            name,
+            description,
+            input,
+            lash_core::TurnControls::switch_agent_frame(),
+        ),
+        "new_after_rotation" => lash_core::ToolDefinition::control(
+            format!("tool:{name}"),
+            name,
+            description,
+            input,
+            lash_core::TurnControls::finish(),
+        ),
+        _ => lash_core::ToolDefinition::raw(
+            format!("tool:{name}"),
+            name,
+            description,
+            input,
+            serde_json::json!({ "type": "object", "additionalProperties": true }),
+        ),
+    };
+    draft
+        .unwrap()
+        .with_execution(std::time::Duration::from_secs(120))
 }
 
 #[async_trait::async_trait]
@@ -411,21 +428,15 @@ impl lash_core::ToolProvider for RotatingTools {
         match call.name() {
             "rotate_surface" => {
                 self.rotated.store(true, Ordering::SeqCst);
-                ToolOutcome::ok(serde_json::json!({ "rotated": true })).with_control(
-                    ToolControl::SwitchAgentFrame {
-                        frame_key: lash_core::FrameKey::from_caller_material("rotated-surface")
-                            .unwrap(),
-                        initial_nodes: Vec::new(),
-                        task: Some(ROTATED_TASK.to_owned()),
-                    },
+                ToolOutcome::switch_agent_frame(
+                    lash_core::FrameKey::from_caller_material("rotated-surface").unwrap(),
+                    ROTATED_TASK.to_owned(),
+                    Vec::new(),
                 )
             }
-            "new_after_rotation" => ToolOutcome::ok(serde_json::json!({ "called": true }))
-                .with_control(ToolControl::Finish {
-                    value: lash_core::ToolValue::untrusted_json(serde_json::json!(
-                        "new tool executed"
-                    )),
-                }),
+            "new_after_rotation" => ToolOutcome::finish(lash_core::ToolValue::untrusted_json(
+                serde_json::json!("new tool executed"),
+            )),
             name => ToolOutcome::err_fmt(format_args!("`{name}` is not offered")),
         }
         .into()

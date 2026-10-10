@@ -356,7 +356,8 @@ pub(crate) fn harness_shim(include: &str) -> Option<String> {
 
 /// The program a test runs as: the harness (Test262's defined bindings, the
 /// async print handle for an `async` test, then each include), then the test
-/// bridged to the dialect, then, when `finish` is set, `finish(true)`.
+/// bridged to the dialect, then, when `finish` is set, the [`COMPLETED`]
+/// binding.
 ///
 /// # Panics
 ///
@@ -393,8 +394,12 @@ fn harness_files(test_metadata: &metadata::Metadata) -> Vec<&str> {
     harness
 }
 
-/// The test alone, bridged, then `finish(true)` when `finish` is set: the
-/// Script that runs after the harness.
+/// The binding a test script's last statement sets when `finish` is set:
+/// a run that holds it reached the end of its test.
+pub(crate) const COMPLETED: &str = "__test262Completed";
+
+/// The test alone, bridged, then the [`COMPLETED`] binding when `finish` is
+/// set: the Script that runs after the harness.
 pub(crate) fn test_script(path: &Path, test_metadata: &metadata::Metadata, finish: bool) -> String {
     let test = std::fs::read_to_string(path).expect("read vendored Test262 test");
     if test_metadata.flags.contains(&TestFlag::Raw) {
@@ -402,7 +407,7 @@ pub(crate) fn test_script(path: &Path, test_metadata: &metadata::Metadata, finis
     }
     let mut script = bridge(&test);
     if finish {
-        script.push_str("\nfinish(true);\n");
+        script.push_str(&format!("\nconst {COMPLETED} = true;\n"));
     }
     script
 }

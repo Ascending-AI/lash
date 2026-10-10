@@ -19,6 +19,8 @@ pub enum Request {
         dialect: String,
         source: String,
         effects: BTreeMap<EffectName, Signature>,
+        /// The turn controls each control-declaring effect declares.
+        controls: BTreeMap<EffectName, BTreeSet<lash_kernel_dialect::EffectControl>>,
         bindings: BTreeSet<Name>,
         /// The functions the session holds: the document declares the
         /// ones the source names.

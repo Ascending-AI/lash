@@ -3632,12 +3632,19 @@
     },
     "TraceTurnCompletionReason": {
       "description": "Why a [`TraceTurnOutcome::Completed`] turn finished.",
-      "enum": [
-        "assistant_message",
-        "final_value",
-        "tool_value"
-      ],
-      "type": "string"
+      "oneOf": [
+        {
+          "enum": [
+            "assistant_message"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "finished",
+          "description": "A declared Finish control ended the turn.",
+          "type": "string"
+        }
+      ]
     },
     "TraceTurnFailureReason": {
       "description": "Why a [`TraceTurnOutcome::Failed`] turn stopped. Mirrors the non-cancelled\n`TurnStop` reasons.",

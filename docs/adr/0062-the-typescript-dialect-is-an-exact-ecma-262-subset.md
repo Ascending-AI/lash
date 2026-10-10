@@ -86,8 +86,11 @@ declared work for runtime realization under ADR 0116.
 
 A process-body `return` runs every enclosing `finally` before the wrapper
 finishes the process with the value. An uncaught `throw` fails the process.
-Cell-only `finish` is rejected inside a process body, because an execution
-terminal cannot stand in for a function return that owes cleanups.
+A process body cannot end a session turn: its catalog offers no tool that
+declares a turn control (FIG-5781), so a process document that calls
+`control.finish` names an effect its boundary does not offer and is refused
+at admission. A function return owes its cleanups; no control call stands in
+for it.
 
 ### Errors
 
@@ -209,7 +212,12 @@ the selection requires implementing the admitted construct exactly.
 The Node session oracle runs ordered cells as successive classic Scripts in one
 realm. The Lash side runs each session live and with durable reloads between
 cells. Its cell mapping observes printed lines, termination and binding probes.
-`finish(value)` ends the cell; Script completion values are not observed.
+`await control.finish(value)` at the top level ends the cell (FIG-5781):
+nothing after the settled call runs, and the call must be awaited from the
+cell's top level. A control call anywhere else is refused at lowering
+(`TS_CONTROL_CALL_PLACEMENT`), and a top-level binding named after a tool
+namespace root (`control`, `tools`, ...) is refused as `TS_SHADOWS_BUILTIN`.
+Script completion values are not observed.
 Static unknown-binding diagnostics correspond to reference failures in probes.
 The classic-Script corpus contains no top-level-await cell.
 

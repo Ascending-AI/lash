@@ -206,8 +206,9 @@ async fn a_childs_request_states_only_the_hosts_configuration_and_the_call() {
     .expect("the RLM extras decode");
     assert!(matches!(
         rlm.termination,
-        Some(lash::rlm::RlmTermination::FinishRequired { schema: Some(_) })
+        Some(lash::rlm::TerminationMode::TerminalRequired)
     ));
+    assert_eq!(rlm.finish_schema, spawn.output_schema);
     assert!(spawn.output_schema.is_some());
 }
 

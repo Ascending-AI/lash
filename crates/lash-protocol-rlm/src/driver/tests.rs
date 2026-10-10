@@ -62,7 +62,11 @@ fn terminal_step_event(
             calls: Vec::new(),
             calls_omitted: 0,
             bindings: Default::default(),
-            result: lash_core::CellOutcome::Finished(final_output.into()),
+            result: lash_core::CellOutcome::finished_by(
+                crate::FINISH_TOOL_NAME,
+                lash_core::ToolCallId::fixture("finish-call"),
+                final_output,
+            ),
         })),
         lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
             crate::RLM_PROTOCOL_EVENT_VERSION

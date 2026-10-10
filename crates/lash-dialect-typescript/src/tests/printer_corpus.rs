@@ -70,11 +70,13 @@ fn every_admitted_conformance_document_preserves_observations_when_printed_and_l
                 let environment = Environment {
                     library: &library,
                     effects,
+                    controls: &std::collections::BTreeMap::new(),
                     bindings: &bindings,
                     functions: &std::collections::BTreeMap::new(),
                 };
                 let source = crate::print(&document).map_err(|e| e.to_string())?;
-                let lowered = crate::lower(&source, &environment).map_err(|e| e.to_string())?;
+                let lowered =
+                    crate::lower_kernel_text(&source, &environment).map_err(|e| e.to_string())?;
                 let mut clone = case.clone();
                 clone.document = print_document(&lowered.document);
                 let roundtrip = check_case(&mut runner, &clone).map_err(|e| e.to_string())?;

@@ -254,12 +254,13 @@ const from_host = host_config.label;"#,
   box.n = answer;
 }
 const fetched = "rebound";
-finish({ answer: answer, counter: counter, n: box.n, later: later, saved_reader: reader(), fetched: fetched, from_host: from_host, total: total, handle: typeof handle });"#,
+await control.finish({ answer: answer, counter: counter, n: box.n, later: later, saved_reader: reader(), fetched: fetched, from_host: from_host, total: total, handle: typeof handle });"#,
     )
     .await;
     served::assert_answered("cell 3", &third);
     let rendered = third
-        .final_value()
+        .finished()
+        .map(|(_, value)| value)
         .expect("cell 3 finishes the turn")
         .to_string();
     for expected in [
@@ -323,7 +324,7 @@ async fn rlm_message_append_keeps_the_committed_execution(tier: Tier) {
     let first = run_cell(
         &world,
         "fig2521-establish",
-        "let accumulated = \"COMMITTED\";\nfinish(accumulated);",
+        "let accumulated = \"COMMITTED\";\nawait control.finish(accumulated);",
     )
     .await;
     served::assert_answered("the establishing turn", &first);
@@ -369,10 +370,15 @@ async fn rlm_message_append_keeps_the_committed_execution(tier: Tier) {
         "a message-only append leaves the durable execution as committed"
     );
 
-    let after = run_cell(&world, "fig2521-after-message", "finish(accumulated);").await;
+    let after = run_cell(
+        &world,
+        "fig2521-after-message",
+        "await control.finish(accumulated);",
+    )
+    .await;
     served::assert_answered("the turn after the append", &after);
     assert_eq!(
-        after.final_value(),
+        after.finished().map(|(_, value)| value),
         Some(&serde_json::json!("COMMITTED")),
         "the next turn reads the committed global"
     );

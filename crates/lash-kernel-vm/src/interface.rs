@@ -237,6 +237,12 @@ pub struct Park {
     /// Every wait withdrawn since the last park. The embedder releases what
     /// it holds for each; a later outcome for one is dropped.
     pub withdrawn: Vec<WaitId>,
+    /// The tasks other than `main` that would make the run's end a
+    /// `TasksOutstanding` error if it ended now (`K-TASK-018`): one that has
+    /// not ended and was never a member of a list `join` that returned or
+    /// raised, and one that ended in an error nothing observed. An embedder
+    /// reads it to refuse an effect that would end the run.
+    pub outstanding: Vec<TaskIdentity>,
 }
 
 /// How a run ended.

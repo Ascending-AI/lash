@@ -29,7 +29,7 @@ async fn rlm_cell_answer_preserves_the_exact_string_without_presentation_policy(
                         request_text(&request)
                     ));
                     Ok(text_response(&typescript_block(&format!(
-                        "finish({});",
+                        "await control.finish({});",
                         serde_json::to_string(answer).expect("string encodes")
                     ))))
                 }
@@ -55,7 +55,10 @@ async fn rlm_cell_answer_preserves_the_exact_string_without_presentation_policy(
         .output()
         .await
         .expect("cell answers");
-    assert_eq!(result.final_value(), Some(&serde_json::json!(answer)));
+    assert_eq!(
+        result.finished().map(|(_, value)| value),
+        Some(&serde_json::json!(answer))
+    );
     {
         let prompts = seen.lock_recover();
         assert_eq!(prompts.len(), 1);
@@ -221,14 +224,13 @@ struct SwitchFrame;
 #[async_trait]
 impl crate::tools::StaticToolExecute for SwitchFrame {
     async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-        lash_core::ToolOutcome::ok(serde_json::json!({ "ok": true }))
-            .with_control(lash_core::ToolControl::SwitchAgentFrame {
-                frame_key: lash_core::FrameKey::from_caller_material("patched-frame")
-                    .expect("non-empty caller material"),
-                initial_nodes: Vec::new(),
-                task: Some(FRAME_TASK.to_owned()),
-            })
-            .into()
+        lash_core::ToolOutcome::turn_control(lash_core::TurnControl::SwitchAgentFrame {
+            frame_key: lash_core::FrameKey::from_caller_material("patched-frame")
+                .expect("non-empty caller material"),
+            initial_nodes: Vec::new(),
+            task: FRAME_TASK.to_owned(),
+        })
+        .into()
     }
 }
 
@@ -269,12 +271,12 @@ async fn a_native_model_patch_reaches_all_runtime_consumers() {
         })
         .build()
         .into_handle();
-    let definition = lash_core::ToolDefinition::raw(
+    let definition = lash_core::ToolDefinition::control(
         "switch_frame",
         "switch_frame",
         "Switches the agent frame.",
         serde_json::json!({ "type": "object", "additionalProperties": false, "properties": {} }),
-        serde_json::json!({ "type": "object" }),
+        lash_core::TurnControls::switch_agent_frame(),
     )
     .expect("switch_frame's schemas")
     .with_execution(std::time::Duration::from_secs(120));

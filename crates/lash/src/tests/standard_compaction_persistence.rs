@@ -858,14 +858,20 @@ async fn threshold_continue_as_extends_the_pre_switch_durable_leaf() -> Result<(
     let store_factory = sqlite_memory_store_set().await;
     let backend = lash_conformance::backend_over(store_factory.clone());
     let provider = standard_compaction_provider(vec![
-        response_with_usage(&typescript_block(r#"finish("primed");"#), 20_000),
+        response_with_usage(
+            &typescript_block(r#"await control.finish("primed");"#),
+            20_000,
+        ),
         response_with_usage(
             &typescript_block(
                 r#"await control.continue_as({ task: "finish from the new frame" });"#,
             ),
             1,
         ),
-        response_with_usage(&typescript_block(r#"finish("continued");"#), 1),
+        response_with_usage(
+            &typescript_block(r#"await control.finish("continued");"#),
+            1,
+        ),
     ]);
     let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
         .serve_test_llm_profile(
@@ -889,7 +895,10 @@ async fn threshold_continue_as_extends_the_pre_switch_durable_leaf() -> Result<(
         .id(crate::TurnId::parse("standard-compaction-rlm-first").expect("nonblank host identity"))
         .output()
         .await?;
-    assert_eq!(primed.final_value(), Some(&serde_json::json!("primed")));
+    assert_eq!(
+        primed.finished().map(|(_, value)| value),
+        Some(&serde_json::json!("primed"))
+    );
     let (durable_leaf_before_switch, max_generation_before_switch) =
         sqlite_head_and_max_generation(store_factory.as_ref(), &SessionId::from(session_id));
 
@@ -913,7 +922,7 @@ async fn threshold_continue_as_extends_the_pre_switch_durable_leaf() -> Result<(
         .output()
         .await?;
     assert_eq!(
-        continued.final_value(),
+        continued.finished().map(|(_, value)| value),
         Some(&serde_json::json!("continued"))
     );
 

@@ -89,6 +89,16 @@ impl RuntimeTurnDriver<'_> {
                     .turn_driver_preamble
                     .tool_specs
                     .clone(),
+                turn_controls: execution_environment
+                    .tool_definitions
+                    .iter()
+                    .map(crate::ToolDefinition::manifest)
+                    .filter(|manifest| !manifest.declaration().controls.is_empty())
+                    .map(|manifest| {
+                        let controls = manifest.declaration().controls.clone();
+                        (manifest.name, controls)
+                    })
+                    .collect(),
             },
             execution_environment.tool_definitions,
         ))

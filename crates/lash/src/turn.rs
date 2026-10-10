@@ -130,18 +130,11 @@ impl TurnReport {
         }
     }
 
-    pub fn final_value(&self) -> Option<&serde_json::Value> {
+    /// The tool and the value a declared Finish control ended the turn
+    /// with: `finish` for Lash's `control.finish`, or a host tool's name.
+    pub fn finished(&self) -> Option<(&str, &serde_json::Value)> {
         match &self.outcome {
-            TurnOutcome::Finished(lash_core::facade_support::TurnFinish::FinalValue { value }) => {
-                Some(value)
-            }
-            _ => None,
-        }
-    }
-
-    pub fn tool_value(&self) -> Option<(&str, &serde_json::Value)> {
-        match &self.outcome {
-            TurnOutcome::Finished(lash_core::facade_support::TurnFinish::ToolValue {
+            TurnOutcome::Finished(lash_core::facade_support::TurnFinish::Finished {
                 tool_name,
                 value,
             }) => Some((tool_name.as_str(), value)),
@@ -190,12 +183,9 @@ impl TurnOutput {
         self.result.assistant_message()
     }
 
-    pub fn final_value(&self) -> Option<&serde_json::Value> {
-        self.result.final_value()
-    }
-
-    pub fn tool_value(&self) -> Option<(&str, &serde_json::Value)> {
-        self.result.tool_value()
+    /// See [`TurnReport::finished`].
+    pub fn finished(&self) -> Option<(&str, &serde_json::Value)> {
+        self.result.finished()
     }
 
     pub fn is_success(&self) -> bool {

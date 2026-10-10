@@ -65,6 +65,8 @@ impl ProtocolDriverHandle for MidCallNoteDriver {
             ]),
             DriverAction::Start(PendingWork::WaitingForToolResults {
                 settled: None,
+                held: Vec::new(),
+                earlier: Vec::new(),
                 calls: vec![PendingToolCall {
                     call_id,
                     provider_call_id: None,

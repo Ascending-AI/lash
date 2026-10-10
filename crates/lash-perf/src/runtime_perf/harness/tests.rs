@@ -99,7 +99,17 @@ async fn large_print_fixture_finishes_with_projection_evidence() {
                 )
                 .await?;
             validate_runtime_perf_turn(RuntimePerfScenario::RlmLargePrint, 0, &turn)?;
-            assert_eq!(turn.tool_calls.len(), 1);
+            assert_eq!(
+                turn.tool_calls
+                    .iter()
+                    .map(|call| call.tool.as_str())
+                    .collect::<Vec<_>>(),
+                ["benchmark_echo", "finish"]
+            );
+            assert_eq!(
+                turn.tool_calls[1].args,
+                serde_json::json!("runtime perf benchmark ok")
+            );
             Ok(())
         }),
     )

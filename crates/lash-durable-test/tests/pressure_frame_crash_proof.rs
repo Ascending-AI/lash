@@ -170,24 +170,27 @@ impl Script {
         };
         match self {
             Self::Overflow if rendered.contains(NEXT) => text(request, FINAL),
-            Self::Globals { .. } if rendered.contains(NEXT) => {
-                text(request, &cell(&format!("finish(typeof {GLOBAL});")))
-            }
+            Self::Globals { .. } if rendered.contains(NEXT) => text(
+                request,
+                &cell(&format!("await control.finish(typeof {GLOBAL});")),
+            ),
             Self::Globals { pressure } => {
                 let set = text(
                     request,
-                    &cell(&format!("let {GLOBAL} = \"kept\";\nfinish(\"set\");")),
+                    &cell(&format!(
+                        "let {GLOBAL} = \"kept\";\nawait control.finish(\"set\");"
+                    )),
                 );
                 if pressure { over(set) } else { set }
             }
             Self::ContinueAs if rendered.contains(TASK) && !rendered.contains(NEXT) => {
-                text(request, &cell("finish(\"done\");"))
+                text(request, &cell("await control.finish(\"done\");"))
             }
             Self::ContinueAs if rendered.contains(NEXT) => over(text(
                 request,
                 &cell(&format!("await control.continue_as({{ task: {TASK:?} }});")),
             )),
-            Self::ContinueAs => over(text(request, &cell("finish(\"set\");"))),
+            Self::ContinueAs => over(text(request, &cell("await control.finish(\"set\");"))),
             Self::Overflow => LlmResponse {
                 terminal_reason: LlmTerminalReason::ContextOverflow,
                 terminal_diagnostic: Some("context window exceeded".to_owned()),
@@ -672,11 +675,11 @@ impl PressureFrame {
                 if matches!(
                     &end.cause,
                     RunTerminalCause::Committed {
-                        outcome: RunCommittedOutcome::Finished(lash_core::facade_support::TurnFinish::FinalValue {
-                            value,
+                        outcome: RunCommittedOutcome::Finished(lash_core::facade_support::TurnFinish::Finished {
+                            tool_name, value,
                         }),
                         ..
-                    } if value.as_str() == Some(expected)
+                    } if tool_name == "finish" && value.as_str() == Some(expected)
                 ) => {}
             other => violations.push(format!(
                 "the second turn's cell did not find the global's type {expected}: {other:?}; \
@@ -823,6 +826,9 @@ fn uncut_labels(script: Script) -> Vec<CommitLabel> {
             CommitLabel::TURN_ADMIT,
             CommitLabel::MODEL_START,
             CommitLabel::MODEL_DONE,
+            CommitLabel::CELL_SNAPSHOT_ADMIT,
+            CommitLabel::ROUND_OUTCOME,
+            CommitLabel::CELL_SNAPSHOT,
             CommitLabel::TURN_COMMIT,
             CommitLabel::TURN_ADMIT,
             CommitLabel::COMPLETION_START,
@@ -836,6 +842,9 @@ fn uncut_labels(script: Script) -> Vec<CommitLabel> {
             CommitLabel::TURN_ADMIT,
             CommitLabel::MODEL_START,
             CommitLabel::MODEL_DONE,
+            CommitLabel::CELL_SNAPSHOT_ADMIT,
+            CommitLabel::ROUND_OUTCOME,
+            CommitLabel::CELL_SNAPSHOT,
             CommitLabel::TURN_COMMIT,
             CommitLabel::SESSION_RELEASE,
         ]
@@ -1030,7 +1039,7 @@ impl PromptUsage {
                 let model = lash_core::testing::TestProvider::builder()
                     .kind("prompt-usage-scripted")
                     .complete(|_request: LlmRequest| async {
-                        let mut cell = served::cell("finish(\"done\");");
+                        let mut cell = served::cell("await control.finish(\"done\");");
                         cell.usage = lash_core::llm::types::LlmUsage {
                             input_tokens: PROMPT_TOKENS,
                             ..Default::default()

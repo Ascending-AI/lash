@@ -2,15 +2,28 @@
   "schema": "lash.provider-wire-script.v1",
   "name": "openai-compatible.chat-stop-consumed",
   "provider_kind": "openai-compatible",
-  "endpoint": { "method": "POST", "path": "/chat/completions" },
+  "endpoint": {
+    "method": "POST",
+    "path": "/chat/completions"
+  },
   "request_match": {
     "body": {
-      "stream": { "equals": true },
-      "stop": { "equals": ["</typescript>"] }
+      "stream": {
+        "equals": true
+      },
+      "stop": {
+        "equals": [
+          "</typescript>"
+        ]
+      }
     },
     "headers": {
-      "authorization": { "present": true },
-      "content-type": { "contains": "application/json" }
+      "content-type": {
+        "contains": "application/json"
+      },
+      "authorization": {
+        "present": true
+      }
     }
   },
   "timeline": [
@@ -18,20 +31,32 @@
       "at": 10,
       "event": "response_start",
       "status": 200,
-      "headers": [{ "name": "content-type", "value": "text/event-stream" }]
+      "headers": [
+        {
+          "name": "content-type",
+          "value": "text/event-stream"
+        }
+      ]
     },
     {
       "at": 20,
       "event": "sse",
-      "data": "{\"choices\":[{\"delta\":{\"content\":\"<typescript>\\nfinish(\\\"settled\\\");\\n\"}}]}"
+      "data": "{\"id\":\"matrix-response-1\",\"model\":\"matrix-served-model\",\"choices\":[{\"delta\":{\"content\":\"<typescript>\\nawait control.finish(\\\"settled\\\");\\n\"}}]}"
     },
     {
       "at": 21,
       "event": "sse",
-      "data": "{\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\",\"native_finish_reason\":\"stop_sequence\"}]}"
+      "data": "{\"id\":\"matrix-response-1\",\"model\":\"matrix-served-model\",\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\",\"native_finish_reason\":\"stop_sequence\"}],\"usage\":{\"prompt_tokens\":11,\"completion_tokens\":7,\"completion_tokens_details\":{\"reasoning_tokens\":0}}}"
     },
-    { "at": 22, "event": "sse", "data": "[DONE]" },
-    { "at": 23, "event": "end" }
+    {
+      "at": 22,
+      "event": "sse",
+      "data": "[DONE]"
+    },
+    {
+      "at": 23,
+      "event": "end"
+    }
   ],
   "expected_provider": {
     "variation": "stop_consumed",

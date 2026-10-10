@@ -82,9 +82,7 @@ pub(super) fn materialize_turn_reply(
             }
             text.clone()
         }
-        TurnFinish::FinalValue { value } | TurnFinish::ToolValue { value, .. } => {
-            render_value_reply(value, cuts.value_reply_max_chars)
-        }
+        TurnFinish::Finished { value, .. } => render_value_reply(value, cuts.value_reply_max_chars),
     };
     let id = message_id.to_string();
     let part_id = format!("{id}.p0");
@@ -367,7 +365,10 @@ mod tests {
     }
 
     fn final_value(value: serde_json::Value) -> TurnOutcome {
-        TurnOutcome::Finished(TurnFinish::FinalValue { value })
+        TurnOutcome::Finished(TurnFinish::Finished {
+            tool_name: "finish".to_string(),
+            value,
+        })
     }
 
     /// FIG-1493 §5.5: a turn that finished with a value commits the runtime's
@@ -403,7 +404,7 @@ mod tests {
 
         materialize(
             &mut state,
-            &TurnOutcome::Finished(TurnFinish::ToolValue {
+            &TurnOutcome::Finished(TurnFinish::Finished {
                 tool_name: "lookup".to_string(),
                 value: serde_json::json!({"rows": [1, 2]}),
             }),

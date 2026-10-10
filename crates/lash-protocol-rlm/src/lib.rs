@@ -36,7 +36,7 @@ pub use catalogue_preview::{
     catalogue_preview_entries_from_catalog_records, catalogue_preview_entries_from_manifests,
     catalogue_preview_entry_from_catalog_record, catalogue_preview_entry_from_manifest,
 };
-pub use control_tools::continue_as_tool_definition;
+pub use control_tools::{FINISH_TOOL_NAME, continue_as_tool_definition, finish_tool_definition};
 pub use deferred::{
     DeferredResolutionError, DeferredResolveContext, DeferredToolResolver,
     RecordedGrantInstallError, Resolution, SharedDeferredToolResolver, ToolGrant,
@@ -50,8 +50,8 @@ pub use driver::{RlmProjectorConfig, build_rlm_preamble};
 #[cfg(feature = "testing")]
 pub use executor::RlmCheckpointPerfFixture;
 pub use executor::{
-    RLM_SNAPSHOT_VERSION, RlmSnapshotError, TOOL_ARGUMENTS, TOOL_CALL_LIMIT, TOOL_FAILED,
-    UNKNOWN_EFFECT, cell_migration_refusal,
+    CONTROL_REFUSED, RLM_SNAPSHOT_VERSION, RlmSnapshotError, TOOL_ARGUMENTS, TOOL_CALL_LIMIT,
+    TOOL_FAILED, UNKNOWN_EFFECT, cell_migration_refusal,
 };
 /// The kernel's typed snapshot validation causes and fragment roots.
 pub mod snapshot {

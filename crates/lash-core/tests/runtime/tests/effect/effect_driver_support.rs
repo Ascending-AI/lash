@@ -220,7 +220,8 @@ impl lash_sansio::ProtocolDriverHandle<lash_core::HostTurnProtocol> for EffectCo
         }
         match result {
             Ok(response) => vec![lash_core::DriverAction::Finish(TurnOutcome::Finished(
-                TurnFinish::FinalValue {
+                TurnFinish::Finished {
+                    tool_name: "finish".to_string(),
                     value: serde_json::json!(
                         response
                             .prints

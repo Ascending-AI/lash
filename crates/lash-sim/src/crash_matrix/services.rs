@@ -301,11 +301,10 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for ScriptedProtocol {
                 replay: None,
             })
             .collect();
-        vec![DriverAction::Start(PendingWork::WaitingForToolResults {
-            calls: pending,
-            settled: None,
-            expansion: Default::default(),
-        })]
+        vec![DriverAction::Start(PendingWork::tool_round(
+            pending,
+            Default::default(),
+        ))]
     }
 
     fn handle_tool_results(
@@ -589,9 +588,7 @@ impl TurnDrive for SimDrive {
                 self.machine
                     .handle_response(Response::ExecutionEnvironmentSynced {
                         id,
-                        result: Ok(ExecutionEnvironmentSync {
-                            tool_specs: Arc::new(Vec::new()),
-                        }),
+                        result: Ok(ExecutionEnvironmentSync::default()),
                     });
             }
             Effect::Checkpoint { id, .. } => {

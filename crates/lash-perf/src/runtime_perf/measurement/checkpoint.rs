@@ -564,11 +564,10 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for CheckpointDriver {
                 },
                 driver_state: None,
             })],
-            Self::Tools => vec![DriverAction::Start(PendingWork::WaitingForToolResults {
-                settled: None,
-                calls: checkpoint_tool_calls(ctx.protocol_iteration()),
-                expansion: Default::default(),
-            })],
+            Self::Tools => vec![DriverAction::Start(PendingWork::tool_round(
+                checkpoint_tool_calls(ctx.protocol_iteration()),
+                Default::default(),
+            ))],
             Self::Exec => vec![DriverAction::Start(PendingWork::Exec {
                 language: "code".to_string(),
                 code: checkpoint_exec_code(ctx.protocol_iteration()),
@@ -622,7 +621,8 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for CheckpointDriver {
         _result: Result<ExecResponse, lash_core::ExecCodeFailure>,
     ) -> Vec<DriverAction> {
         vec![DriverAction::Finish(TurnOutcome::Finished(
-            TurnFinish::FinalValue {
+            TurnFinish::Finished {
+                tool_name: "finish".into(),
                 value: serde_json::json!("runtime perf benchmark ok"),
             },
         ))]
@@ -808,9 +808,15 @@ fn checkpoint_pending_exec(
             calls: Vec::new(),
             tool_calls: Vec::new(),
             printed_images: Vec::new(),
-            result: lash_core::CellOutcome::Finished(lash_core::OutputValue::Inline(
-                serde_json::json!("runtime perf benchmark ok"),
-            )),
+            result: lash_core::CellOutcome::Controlled {
+                tool_name: "finish".into(),
+                call_id: lash_core::ToolCallId::fixture("control-finish"),
+                control: lash_core::CellControl::Finish {
+                    value: lash_core::OutputValue::Inline(serde_json::json!(
+                        "runtime perf benchmark ok"
+                    )),
+                },
+            },
             retained_finish_value: None,
             degraded_bindings: Vec::new(),
             bindings: Default::default(),
@@ -904,7 +910,7 @@ const third = await processes.start({{ definition: benchmark_echo_process, args:
 const a = await first;
 await second;
 await third;
-finish(a.value);"#
+await control.finish(a.value);"#
     )
 }
 

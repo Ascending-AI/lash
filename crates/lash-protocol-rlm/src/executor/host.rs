@@ -41,6 +41,11 @@ use super::envelope::CellEnvelope;
 pub const TOOL_FAILED: &str = "tool_failed";
 /// The error kind of a tool call the session's `max_tool_calls` refused.
 pub const TOOL_CALL_LIMIT: &str = "tool_call_limit";
+/// The error kind of a control call refused before its body ran. Its `data`
+/// is the typed cause ([`lash_core::ToolFailureCause`]): made from a task the
+/// cell spawned, made while a task is outstanding, or made after the cell's
+/// one control attempt was spent.
+pub const CONTROL_REFUSED: &str = "control_refused";
 /// The error kind of a tool call whose arguments JSON cannot carry.
 pub const TOOL_ARGUMENTS: &str = "tool_arguments";
 /// The error kind of a `perform` of an effect the cell's host does not
@@ -55,6 +60,9 @@ pub(super) struct LedgerCall {
     pub call_id: lash_core::ToolCallId,
     /// The effect the cell performed, as its source names it.
     pub operation: String,
+    /// The call is to a tool that declares a turn control: the cell's one
+    /// control attempt, which `max_tool_calls` does not count.
+    pub control: bool,
     pub record: Option<lash_core::ToolCallRecord>,
 }
 
@@ -80,6 +88,24 @@ impl CellHostLedgers {
             .iter()
             .filter_map(|call| call.record.clone())
             .collect()
+    }
+
+    /// The control the cell's control call settled as, with the call it
+    /// came from: what a cell that ended on its control call is recorded
+    /// as. `None` when the call failed or its body gave no control.
+    pub(super) fn settled_control(
+        &self,
+    ) -> Option<(&lash_core::ToolCallRecord, &lash_core::TurnControl)> {
+        self.calls
+            .iter()
+            .filter(|call| call.control)
+            .find_map(|call| {
+                let record = call.record.as_ref()?;
+                if !record.output.is_success() {
+                    return None;
+                }
+                Some((record, record.output.as_turn_control()?))
+            })
     }
 
     /// The cell's `Calls:` entries: every call that settled, in admission
@@ -134,6 +160,30 @@ fn refused(kind: &str, message: impl Into<String>) -> ErrorDatum {
     }
 }
 
+/// The refusal of a control call, carrying its typed cause as data.
+fn control_refused(
+    effect: &lash_kernel_doc::EffectName,
+    cause: lash_core::ToolFailureCause,
+) -> ErrorDatum {
+    let message = match &cause {
+        lash_core::ToolFailureCause::ControlFromSpawnedTask => format!(
+            "`{effect}` ends the turn, so only the cell's main flow may call it: await it directly, not inside a concurrent task"
+        ),
+        lash_core::ToolFailureCause::ControlWithOutstandingTasks => format!(
+            "`{effect}` ends the turn, and a task this cell started is still running or failed unobserved: await every task before calling it"
+        ),
+        _ => format!("`{effect}` was refused: this cell already made its one turn-ending call"),
+    };
+    ErrorDatum {
+        kind: CONTROL_REFUSED.to_owned(),
+        message,
+        data: serde_json::to_string(&cause)
+            .ok()
+            .and_then(|json| datum_from_json(&json).ok())
+            .unwrap_or(Datum::Null),
+    }
+}
+
 impl CellHost<'_> {
     pub(super) fn ledgers(&self) -> CellHostLedgers {
         self.ledgers.lock_recover().clone()
@@ -152,6 +202,27 @@ impl CellHost<'_> {
                 format!("this session offers no `{}`", request.effect),
             )
         })?;
+        // Lash's finish tool takes the turn's answer whole, as a cell's
+        // value has always left it: a whole number is an integer, a value
+        // JSON has no form for keeps its kind, and no argument is `null`.
+        if effect.tool.as_str() == crate::control_tools::FINISH_TOOL_ID
+            && let [] | [_] = request.args.as_slice()
+        {
+            let answer = match request.args.first() {
+                None => serde_json::Value::Null,
+                Some(value) => self
+                    .entries
+                    .leaving(value)
+                    .map(|value| crate::cell_value::datum_json(&value))
+                    .map_err(|problem| {
+                        refused(
+                            TOOL_ARGUMENTS,
+                            format!("`{}` cannot take this value: {problem}", request.effect),
+                        )
+                    })?,
+            };
+            return Ok(self.invocation(request, call, effect.tool.clone(), answer));
+        }
         // A tool takes its input as one record (`HostBoundary::offer_tool`).
         let args = match request.args.as_slice() {
             [] => serde_json::Value::Object(serde_json::Map::new()),
@@ -181,7 +252,19 @@ impl CellHost<'_> {
                 ));
             }
         };
-        let mut invocation = ToolInvocation::new(call, effect.tool.clone(), args)
+        Ok(self.invocation(request, call, effect.tool.clone(), args))
+    }
+
+    /// The invocation of `tool` under `call`, with the grant a tool outside
+    /// the catalog runs under.
+    fn invocation(
+        &self,
+        request: &EffectRequest,
+        call: lash_core::ToolCallId,
+        tool: lash_core::ToolId,
+        args: serde_json::Value,
+    ) -> ToolInvocation {
+        let mut invocation = ToolInvocation::new(call, tool, args)
             .with_issuing_language_node_id(request.identity.site.to_string());
         if self
             .ctx
@@ -191,7 +274,7 @@ impl CellHost<'_> {
         {
             invocation = invocation.with_execution_grant(grant.clone());
         }
-        Ok(invocation)
+        invocation
     }
 }
 
@@ -218,15 +301,58 @@ impl KernelEffects for CellHost<'_> {
         &self,
         request: &EffectRequest,
         call: lash_core::ToolCallId,
+        outstanding: &[lash_kernel_doc::TaskIdentity],
     ) -> Result<Result<MemberDraft, ErrorDatum>, ParentFault> {
         let invocation = match self.tool_call(request, call) {
             Ok(invocation) => invocation,
             Err(refusal) => return Ok(Err(refusal)),
         };
+        // A call to a tool that declares a turn control ends the turn when
+        // it settles, so it is admitted only where the run can end on it:
+        // from `main`, with no task outstanding, and once per cell. The
+        // refusal comes before the body runs.
+        let control = self
+            .boundary
+            .effect(&request.effect)
+            .is_some_and(|effect| !effect.controls.is_empty());
+        // A cancelled call ends the cell whatever its program made of the
+        // error, and so does the turn's own cancel: nothing after either
+        // ends the turn in its place.
+        if control && (self.ledgers.lock_recover().call_cancelled || self.ctx.is_cancelled()) {
+            return Ok(Err(refused(
+                EFFECT_CANCELLED,
+                format!(
+                    "`{}` was not called: the turn was cancelled",
+                    request.effect
+                ),
+            )));
+        }
+        if control {
+            let cause = if request.identity.task != lash_kernel_doc::TaskIdentity::Main {
+                Some(lash_core::ToolFailureCause::ControlFromSpawnedTask)
+            } else if !outstanding.is_empty() {
+                Some(lash_core::ToolFailureCause::ControlWithOutstandingTasks)
+            } else if self
+                .ledgers
+                .lock_recover()
+                .calls
+                .iter()
+                .any(|call| call.control)
+            {
+                Some(lash_core::ToolFailureCause::ControlAttemptSpent)
+            } else {
+                None
+            };
+            if let Some(cause) = cause {
+                return Ok(Err(control_refused(&request.effect, cause)));
+            }
+        }
         {
             let mut ledgers = self.ledgers.lock_recover();
-            let counted = ledgers.calls.len();
-            if counted.saturating_add(1) > self.ctx.max_tool_calls().get() {
+            // The cell's one control attempt is not a call `max_tool_calls`
+            // counts: a cell at the limit can still end its turn.
+            let counted = ledgers.calls.iter().filter(|call| !call.control).count();
+            if !control && counted.saturating_add(1) > self.ctx.max_tool_calls().get() {
                 let exceeded = lash_core::ToolCallLimitExceeded {
                     scope: lash_core::ToolCallLimitScope::Cell,
                     limit: self.ctx.max_tool_calls(),
@@ -240,6 +366,7 @@ impl KernelEffects for CellHost<'_> {
             ledgers.calls.push(LedgerCall {
                 call_id: invocation.id.clone(),
                 operation: request.effect.to_string(),
+                control,
                 record: None,
             });
         }

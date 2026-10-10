@@ -609,8 +609,8 @@ fn output_then_failing_rlm_prose_provider(
                     1 => {
                         "retry observer single-copy marker\n<typescript>\nretry_missing_name;\n</typescript>"
                     }
-                    2 => "<typescript>\nfinish(\"provider retry succeeded\");\n</typescript>",
-                    _ => "<typescript>\nfinish(\"subsequent turn succeeded\");\n</typescript>",
+                    2 => "<typescript>\nawait control.finish(\"provider retry succeeded\");\n</typescript>",
+                    _ => "<typescript>\nawait control.finish(\"subsequent turn succeeded\");\n</typescript>",
                 };
                 stream.send(LlmStreamEvent::Block(StreamBlockEvent::Delta { kind: StreamBlockKind::AssistantText,block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0), text: text.to_string() }));
                 Ok(LlmResponse {
@@ -1379,24 +1379,25 @@ async fn snapshot_subscribe_has_only_two_histories_across_a_frame_switch() -> Re
                 &self,
                 call: lash_core::ToolCall<'_>,
             ) -> lash_core::ToolAttemptOutcome {
-                lash_core::ToolOutcome::ok(serde_json::json!({ "ok": true }))
-                    .with_control(lash_core::ToolControl::SwitchAgentFrame {
-                        frame_key: lash_core::FrameKey::from_call_site(
-                            call.context.session_id().expect("session"),
-                            call.context.agent_frame_id().expect("frame"),
-                            call.context.call_id(),
-                        ),
-                        initial_nodes: Vec::new(),
-                        task: Some("finish in a fresh frame".into()),
-                    })
-                    .into()
+                lash_core::ToolOutcome::turn_control(lash_core::TurnControl::SwitchAgentFrame {
+                    frame_key: lash_core::FrameKey::from_call_site(
+                        call.context.session_id().expect("session"),
+                        call.context.agent_frame_id().expect("frame"),
+                        call.context.call_id(),
+                    ),
+                    initial_nodes: Vec::new(),
+                    task: "finish in a fresh frame".into(),
+                })
+                .into()
             }
         }
-        let definition = lash_core::ToolDefinition::raw(
-            "switch_frame", "switch_frame", "Switch frames",
-            serde_json::json!({ "type": "object", "properties": {}, "additionalProperties": false }),
-            serde_json::json!({ "type": "object" }),
-        ).expect("tool schemas").with_execution(std::time::Duration::from_secs(120));
+        let definition = lash_core::ToolDefinition::control(
+        "switch_frame",
+        "switch_frame",
+        "Switch frames",
+        serde_json::json!({ "type": "object", "properties": {}, "additionalProperties": false }),
+        lash_core::TurnControls::switch_agent_frame(),
+    ).expect("tool schemas").with_execution(std::time::Duration::from_secs(120));
         let provider = crate::testing::TestProvider::builder()
             .kind("snapshot-frame-switch")
             .complete(|request| async move {

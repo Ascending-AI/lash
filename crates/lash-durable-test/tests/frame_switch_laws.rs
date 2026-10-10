@@ -17,7 +17,7 @@ use lash::persistence::{SessionHeadRef, WindowSelector};
 use lash::tools::{StaticToolExecute, StaticToolProvider};
 use lash::transcript::CommittedTurn;
 use lash_core::store::TurnCommitOutcome;
-use lash_core::{ToolCall, ToolControl, ToolOutcome};
+use lash_core::{ToolCall, ToolOutcome};
 use served::{Tier, WATCHDOG, World};
 
 const SWITCH_TOOL: &str = "switch_frame";
@@ -49,14 +49,12 @@ impl StaticToolExecute for SwitchFrame {
                 .await
                 .expect("the session queues the input");
         }
-        ToolOutcome::ok(serde_json::json!({ "ok": true }))
-            .with_control(ToolControl::SwitchAgentFrame {
-                frame_key: lash_core::FrameKey::from_caller_material(self.1)
-                    .expect("non-empty caller material"),
-                initial_nodes: Vec::new(),
-                task: Some(TASK.to_owned()),
-            })
-            .into()
+        ToolOutcome::switch_agent_frame(
+            lash_core::FrameKey::from_caller_material(self.1).expect("non-empty caller material"),
+            TASK.to_owned(),
+            Vec::new(),
+        )
+        .into()
     }
 }
 
@@ -67,12 +65,12 @@ async fn world(
     session: &'static str,
     sender: Arc<OnceLock<lash::LashCore>>,
 ) -> Option<World> {
-    let definition = lash_core::ToolDefinition::raw(
+    let definition = lash_core::ToolDefinition::control(
         SWITCH_TOOL,
         SWITCH_TOOL,
         "Switches the agent frame and hands the new frame a task.",
         serde_json::json!({ "type": "object", "additionalProperties": false, "properties": {} }),
-        serde_json::json!({ "type": "object" }),
+        lash_core::TurnControls::switch_agent_frame(),
     )
     .expect("switch_frame's schemas")
     .with_execution(std::time::Duration::from_secs(120));

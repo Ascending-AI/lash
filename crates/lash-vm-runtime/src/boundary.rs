@@ -12,6 +12,8 @@ pub struct HostEffect {
     pub tool: ToolId,
     /// The signature a document's manifest must state to perform it.
     pub signature: Signature,
+    /// The turn-ending controls the tool declares its result may be.
+    pub controls: lash_sansio::TurnControls,
 }
 
 /// Why a boundary could not be stated.
@@ -64,6 +66,7 @@ impl HostBoundary {
         tool: ToolId,
         input: &serde_json::Value,
         output: &serde_json::Value,
+        controls: lash_sansio::TurnControls,
     ) -> Result<(), BoundaryError> {
         self.offer(
             name,
@@ -77,6 +80,7 @@ impl HostBoundary {
                     }],
                     result: type_of_schema(output),
                 },
+                controls,
             },
         )
     }
@@ -96,6 +100,30 @@ impl HostBoundary {
         self.effects
             .iter()
             .map(|(name, effect)| (name.clone(), effect.signature.clone()))
+            .collect()
+    }
+
+    /// The controls each control-declaring effect declares, as a front end
+    /// lowers against them: an effect that declares none is absent.
+    pub fn controls(&self) -> BTreeMap<EffectName, BTreeSet<lash_kernel_dialect::EffectControl>> {
+        self.effects
+            .iter()
+            .filter(|(_, effect)| !effect.controls.is_empty())
+            .map(|(name, effect)| {
+                let controls = effect
+                    .controls
+                    .iter()
+                    .map(|kind| match kind {
+                        lash_sansio::TurnControlKind::Finish => {
+                            lash_kernel_dialect::EffectControl::Finish
+                        }
+                        lash_sansio::TurnControlKind::SwitchAgentFrame => {
+                            lash_kernel_dialect::EffectControl::SwitchAgentFrame
+                        }
+                    })
+                    .collect();
+                (name.clone(), controls)
+            })
             .collect()
     }
 
@@ -274,5 +302,43 @@ mod tests {
             Type::Any
         );
         assert_eq!(type_of_schema(&serde_json::json!({"oneOf": []})), Type::Any);
+    }
+
+    /// Law 11 (FIG-5781): a process cannot end a session turn, so the
+    /// boundary a process runs under offers none of its catalog's
+    /// turn-ending tools. A document that performs one names an effect
+    /// the boundary does not offer, and admission refuses it.
+    #[test]
+    fn a_process_boundary_offers_no_turn_ending_tool() {
+        use crate::{ToolBinding, ToolDefinitionBindingExt as _};
+        let ordinary = lash_core::ToolDefinition::raw(
+            "tool:lookup",
+            "lookup",
+            "Looks a value up.",
+            serde_json::json!({ "type": "object" }),
+            serde_json::json!({ "type": "object" }),
+        )
+        .expect("valid declared tool schemas")
+        .with_execution(std::time::Duration::from_secs(30))
+        .with_tool_binding(ToolBinding::new(["tools"], "lookup"));
+        let finish = lash_core::ToolDefinition::control(
+            "tool:finish",
+            "finish",
+            "Ends the turn.",
+            serde_json::json!({}),
+            lash_core::TurnControls::finish(),
+        )
+        .expect("valid declared tool schema")
+        .with_execution(std::time::Duration::from_secs(30))
+        .with_tool_binding(ToolBinding::new(["control"], "finish"));
+        let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![ordinary, finish]);
+
+        let offered = HostBoundary::of_catalog(&catalog)
+            .expect("the catalog's tools are bound")
+            .signatures();
+        assert_eq!(
+            offered.keys().map(EffectName::as_str).collect::<Vec<_>>(),
+            ["tools.lookup"]
+        );
     }
 }

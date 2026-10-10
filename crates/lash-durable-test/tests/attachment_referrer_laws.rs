@@ -694,7 +694,8 @@ fn started_process_id(output: &lash::TurnOutput) -> lash_core::ProcessId {
     serde_json::from_value(
         output
             .result
-            .final_value()
+            .finished()
+            .map(|(_, value)| value)
             .cloned()
             .expect("the cell finished with the process id"),
     )
@@ -707,7 +708,7 @@ fn start_process_cell(params: &str, body: &str, args: &str) -> Scripted {
     cell(format!(
         "const child = async ({params}) => {body};
 const handle = await processes.start({{ definition: child, args: {args} }});
-finish(handle.process_id);"
+await control.finish(handle.process_id);"
     ))
 }
 
@@ -779,9 +780,9 @@ async fn delivered_attachment_survives_prune_and_replay_start_input(tier: Tier) 
         vec![
             cell(format!(
                 "const started = await tools.start_turn_child({{ text: {put:?} }});
-finish(started);"
+await control.finish(started);"
             )),
-            cell("await tools.hold({});\nfinish(\"child done\");"),
+            cell("await tools.hold({});\nawait control.finish(\"child done\");"),
         ],
     )
     .await
@@ -1096,7 +1097,7 @@ async fn a_cancelled_child_keeps_its_puts_until_pruned(tier: Tier) {
     assert_eq!(law.referrers(&id).await, vec![record.clone()]);
 
     law.script(cell(format!(
-        "const cancelled = await processes.cancel({{ process_id: {:?} }});\nfinish(cancelled.status);",
+        "const cancelled = await processes.cancel({{ process_id: {:?} }});\nawait control.finish(cancelled.status);",
         engine.to_string()
     )));
     run(&session, lash::TurnInput::text("cancel the running child")).await;

@@ -1,6 +1,6 @@
 use lash_sansio::{
     CellFailure, CellFailureKind, CellOutcome, CellRecord, ExecutedCall, ExecutedCallOutcome,
-    OutputValue, RetainedOutput, SchemaShape, ShapeKind, TurnProtocol,
+    OutputValue, RetainedOutput, SchemaShape, ShapeKind, TerminationMode, TurnProtocol,
 };
 
 /// Read-only legacy protocol-owned assistant context paired with an RLM
@@ -317,7 +317,15 @@ mod rlm_step_serde_tests {
             }],
             calls_omitted: 2,
             bindings: Default::default(),
-            result: CellOutcome::Finished(serde_json::json!({"answer": 42}).into()),
+            result: finished(serde_json::json!({"answer": 42}).into()),
+        }
+    }
+
+    fn finished(value: super::OutputValue) -> CellOutcome {
+        CellOutcome::Controlled {
+            tool_name: "finish".to_string(),
+            call_id: lash_sansio::ToolCallId::fixture("finish"),
+            control: lash_sansio::CellControl::Finish { value },
         }
     }
 
@@ -353,7 +361,7 @@ mod rlm_step_serde_tests {
         let entry = CellRecord {
             prints_retained: Some(retained("[{\"value\": {\"rows\":[")),
             prints: Vec::new(),
-            result: CellOutcome::Finished(super::OutputValue::Retained(retained("{\"rows\":["))),
+            result: finished(super::OutputValue::Retained(retained("{\"rows\":["))),
             ..populated_entry()
         };
         let item = history(&entry);
@@ -380,12 +388,12 @@ mod rlm_step_serde_tests {
     fn a_null_finish_is_distinct_from_a_cell_that_ran_to_its_end() {
         for (result, expected) in [
             (
-                CellOutcome::Finished(serde_json::Value::Null.into()),
+                finished(serde_json::Value::Null.into()),
                 Some(serde_json::Value::Null),
             ),
             (CellOutcome::Completed, None),
             (
-                CellOutcome::Finished(serde_json::json!({"answer": 42}).into()),
+                finished(serde_json::json!({"answer": 42}).into()),
                 Some(serde_json::json!({"answer": 42})),
             ),
         ] {
@@ -451,8 +459,8 @@ mod rlm_step_serde_tests {
             }),
         ];
         for result in [
-            CellOutcome::Finished(serde_json::json!({"answer": 42}).into()),
-            CellOutcome::Finished(super::OutputValue::Retained(retained("{\"answer\""))),
+            finished(serde_json::json!({"answer": 42}).into()),
+            finished(super::OutputValue::Retained(retained("{\"answer\""))),
             CellOutcome::Failed(program_failure()),
             CellOutcome::Completed,
         ] {
@@ -581,48 +589,10 @@ pub struct RlmDiagnosticEvent {
     pub payload: serde_json::Value,
 }
 
-/// How an RLM turn may end, and what an explicit finish value must match.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum RlmTermination {
-    /// Prose alone never ends the turn: only `finish` does, with a value
-    /// matching `schema` when one is stated.
-    FinishRequired {
-        schema: Option<lash_sansio::JsonSchema>,
-    },
-    /// Prose ends the turn as the answer, and so does `finish`. A finish value
-    /// must match `schema` when one is stated; a mismatch fails the program
-    /// and asks the model to finish again (FIG-5104).
-    Natural {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        schema: Option<lash_sansio::JsonSchema>,
-    },
-}
-
-impl Default for RlmTermination {
-    fn default() -> Self {
-        Self::Natural { schema: None }
-    }
-}
-
-impl RlmTermination {
-    /// Whether a prose-only reply ends the turn as its answer.
-    pub fn prose_ends_turn(&self) -> bool {
-        matches!(self, Self::Natural { .. })
-    }
-
-    /// The schema an explicit finish value must match, if any.
-    pub fn finish_schema(&self) -> Option<&lash_sansio::JsonSchema> {
-        match self {
-            Self::FinishRequired { schema } | Self::Natural { schema } => schema.as_ref(),
-        }
-    }
-}
-
 /// RLM protocol session config. Natural turns finish with prose-only model
-/// responses or the RLM language's explicit `finish` operation. Programmatic
-/// turns can require an explicit finish value. Either termination can validate
-/// a finish value against a schema.
+/// responses or a declared control call (`control.finish`). Programmatic
+/// turns can require a control call ([`TerminationMode::TerminalRequired`]).
+/// Either mode can state the schema `control.finish` takes its value under.
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct RlmCreateExtras {
@@ -631,11 +601,15 @@ pub struct RlmCreateExtras {
     /// Session-wide termination requirement. Absence is the `Natural` default.
     ///
     /// Absence is a distinct statement from an explicit `Natural`: options that
-    /// say nothing about termination must leave a recorded `FinishRequired`
+    /// say nothing about termination must leave a recorded `TerminalRequired`
     /// alone, and only a value that is genuinely stated participates in the
     /// set-if-unset guard (ADR 0066).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub termination: Option<RlmTermination>,
+    pub termination: Option<TerminationMode>,
+    /// The schema `control.finish` takes its value under: the host's
+    /// final-answer schema. Absent, the value is any JSON value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finish_schema: Option<lash_sansio::JsonSchema>,
 }
 
 /// The RLM options a *single turn* may state again (FIG-1979).
@@ -653,7 +627,11 @@ pub struct RlmTurnOptions {
     /// Termination requirement for this turn. Absence is the `Natural`
     /// default, and leaves whatever the session recorded alone.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub termination: Option<RlmTermination>,
+    pub termination: Option<TerminationMode>,
+    /// The schema `control.finish` takes its value under for this turn.
+    /// Absence leaves whatever the session recorded alone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finish_schema: Option<lash_sansio::JsonSchema>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub render: Option<RlmRenderPatch>,
 }
@@ -675,8 +653,8 @@ pub struct RlmRenderPatch {
 
 impl RlmTurnOptions {
     /// The termination this bag means, resolving absence to the default.
-    pub fn effective_termination(&self) -> RlmTermination {
-        self.termination.clone().unwrap_or_default()
+    pub fn effective_termination(&self) -> TerminationMode {
+        self.termination.unwrap_or_default()
     }
 }
 
@@ -692,7 +670,8 @@ impl RlmTurnOptions {
 /// protocol turn options.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RlmSessionConfig {
-    pub termination: Option<RlmTermination>,
+    pub termination: Option<TerminationMode>,
+    pub finish_schema: Option<lash_sansio::JsonSchema>,
 }
 
 impl RlmSessionConfig {
@@ -701,20 +680,26 @@ impl RlmSessionConfig {
         Self::default()
     }
 
-    pub fn termination(mut self, termination: RlmTermination) -> Self {
+    pub fn termination(mut self, termination: TerminationMode) -> Self {
         self.termination = Some(termination);
         self
     }
 
+    pub fn finish_schema(mut self, schema: lash_sansio::JsonSchema) -> Self {
+        self.finish_schema = Some(schema);
+        self
+    }
+
     pub fn is_empty(&self) -> bool {
-        self.termination.is_none()
+        self.termination.is_none() && self.finish_schema.is_none()
     }
 }
 
 impl From<&RlmCreateExtras> for RlmSessionConfig {
     fn from(extras: &RlmCreateExtras) -> Self {
         Self {
-            termination: extras.termination.clone(),
+            termination: extras.termination,
+            finish_schema: extras.finish_schema.clone(),
         }
     }
 }
@@ -723,7 +708,8 @@ impl From<&RlmSessionConfig> for RlmCreateExtras {
     fn from(config: &RlmSessionConfig) -> Self {
         Self {
             render: None,
-            termination: config.termination.clone(),
+            termination: config.termination,
+            finish_schema: config.finish_schema.clone(),
         }
     }
 }
@@ -847,6 +833,6 @@ pub struct RlmTurnProtocol;
 impl TurnProtocol for RlmTurnProtocol {
     type IntentOutcome = ();
     type Event = RlmProtocolEvent;
-    type Termination = RlmTermination;
+    type Termination = TerminationMode;
     type DriverState = serde_json::Value;
 }

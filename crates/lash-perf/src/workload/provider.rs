@@ -117,7 +117,7 @@ impl Generator<'_> {
             if suffix.is_empty() {
                 let cell = cell_source(&plan, self.tool_word(id.actor, id.ordinal))?;
                 let body = cell
-                    .strip_suffix("finish({synthetic:true,operation:op});")
+                    .strip_suffix("await control.finish({synthetic:true,operation:op});")
                     .ok_or_else(|| anyhow::anyhow!("turn cell has no terminal"))?;
                 source.push_str(&format!(
                     "{{
@@ -135,7 +135,7 @@ impl Generator<'_> {
         }
         let operation = keys.last().ok_or_else(|| anyhow::anyhow!("no inputs"))?;
         source.push_str(&format!(
-            "finish({{synthetic:true,operation:{},operations:{}}});",
+            "await control.finish({{synthetic:true,operation:{},operations:{}}});",
             serde_json::to_string(operation)?,
             serde_json::to_string(keys)?
         ));
@@ -165,7 +165,7 @@ impl Generator<'_> {
             plan.operation.key()
         );
         let source = format!(
-            "finish({{synthetic:true,operation:{}}});",
+            "await control.finish({{synthetic:true,operation:{}}});",
             serde_json::to_string(&queued.idempotency_key)?
         );
         let text = format!("<typescript>\n{source}\n</typescript>");
@@ -205,9 +205,9 @@ impl Generator<'_> {
     /// with an explicit benchmark delay.
     pub fn process_body(&self, process: &ProcessPlan) -> String {
         if process.cancel {
-            "const body = async (key) => { await sleep(60000); return { key: key, synthetic: true }; };\nfinish(null);".into()
+            "const body = async (key) => { await sleep(60000); return { key: key, synthetic: true }; };\nawait control.finish(null);".into()
         } else {
-            "const body = async (key) => { return { key: key, synthetic: true }; };\nfinish(null);"
+            "const body = async (key) => { return { key: key, synthetic: true }; };\nawait control.finish(null);"
                 .into()
         }
     }
@@ -288,6 +288,6 @@ fn cell_source(plan: &TurnPlan, word: &str) -> Result<String> {
             }
         }
     }
-    code.push_str("finish({synthetic:true,operation:op});");
+    code.push_str("await control.finish({synthetic:true,operation:op});");
     Ok(code)
 }

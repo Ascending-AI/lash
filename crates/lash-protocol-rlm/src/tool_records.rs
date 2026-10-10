@@ -1,7 +1,7 @@
 //! Shared bounded transcript projection for the cell and native channels.
 use lash_core::{
     OmittedToolCalls, ToolCallOutcome, ToolCallOutput, ToolCallRecord, ToolControl, ToolFailure,
-    ToolValue,
+    ToolValue, TurnControl,
 };
 use std::collections::BTreeMap;
 
@@ -76,17 +76,17 @@ fn bounded_tool_call_output(
         }
     };
     let control = output.control.as_ref().map(|control| match control {
-        ToolControl::SwitchAgentFrame {
-            frame_key,
-            initial_nodes,
-            task,
-        } => ToolControl::SwitchAgentFrame {
-            frame_key: frame_key.clone(),
-            initial_nodes: initial_nodes.clone(),
-            task: task.clone(),
+        ToolControl::Turn {
+            control: control @ TurnControl::SwitchAgentFrame { .. },
+        } => ToolControl::Turn {
+            control: control.clone(),
         },
-        ToolControl::Finish { value } => ToolControl::Finish {
-            value: bounded_tool_value(value, config),
+        ToolControl::Turn {
+            control: TurnControl::Finish { value },
+        } => ToolControl::Turn {
+            control: TurnControl::Finish {
+                value: bounded_tool_value(value, config),
+            },
         },
         ToolControl::Fail { failure } => ToolControl::Fail {
             failure: bounded_tool_failure(failure, config),
@@ -178,7 +178,9 @@ fn omitted_bytes_marker(omitted_bytes: usize) -> ToolValue {
 fn tool_output_attachments(output: &ToolCallOutput) -> Vec<lash_core::AttachmentRef> {
     let mut attachments = output.attachments();
     match output.control.as_ref() {
-        Some(ToolControl::Finish { value }) => attachments.extend(value.attachments()),
+        Some(ToolControl::Turn {
+            control: TurnControl::Finish { value },
+        }) => attachments.extend(value.attachments()),
         Some(ToolControl::Fail { failure }) => attachments.extend(
             failure
                 .raw
@@ -186,7 +188,13 @@ fn tool_output_attachments(output: &ToolCallOutput) -> Vec<lash_core::Attachment
                 .map(ToolValue::attachments)
                 .unwrap_or_default(),
         ),
-        Some(ToolControl::SwitchAgentFrame { .. } | ToolControl::AbortRun { .. }) | None => {}
+        Some(
+            ToolControl::Turn {
+                control: TurnControl::SwitchAgentFrame { .. },
+            }
+            | ToolControl::AbortRun { .. },
+        )
+        | None => {}
     }
     attachments
 }

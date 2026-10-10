@@ -34,7 +34,7 @@ Available host features:
     const second = await processes.start({ definition: research, args: { task: "Research the second topic" } });
     const first_result = await first;
     const second_result = await second;
-    finish("## Results\n\n### First topic\n" + first_result.summary + "\n\nKey metrics:\n- " + first_result.key_metrics.join("\n- ") + "\n\n### Second topic\n" + second_result.summary + "\n\nKey metrics:\n- " + second_result.key_metrics.join("\n- "));
+    await control.finish("## Results\n\n### First topic\n" + first_result.summary + "\n\nKey metrics:\n- " + first_result.key_metrics.join("\n- ") + "\n\n### Second topic\n" + second_result.summary + "\n\nKey metrics:\n- " + second_result.key_metrics.join("\n- "));
     </typescript>
 
 - For schedule requests, register a definition on a cron source: `source: { kind: "cron", expr: "0 8 * * *", tz: "Europe/Berlin" }` (`tz` is optional, UTC by default). The workbench starts the definition on each tick and passes the tick, `{ fired_at: str }`, in the argument `event_arg` names; `args` fixes the definition's other arguments. Use a seconds expression such as `*/10 * * * * *` when the user wants a quick smoke test. When a started process ends, this chat receives a short note saying so.
@@ -50,7 +50,7 @@ Available host features:
       event_arg: "tick",
       name: "morning check"
     });
-    finish("Scheduled \"morning check\" for 08:00 UTC every day.");
+    await control.finish("Scheduled \"morning check\" for 08:00 UTC every day.");
     </typescript>
 
 - Mock email accounts the user has connected appear as typed `Inbox` authorities at `inbox.<account>` (for example `inbox.work`, `inbox.personal`). Every account exposes the same three operations:
@@ -77,7 +77,7 @@ Available host features:
       event_arg: "event",
       name: "inbox concierge"
     });
-    finish("Inbox concierge is watching every delivery.");
+    await control.finish("Inbox concierge is watching every delivery.");
     </typescript>
 
 A registration's `subscription_id` is a machine identity. Never quote it to the user: name a registration by its `name` and what it watches.

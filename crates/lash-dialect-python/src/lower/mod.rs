@@ -139,6 +139,9 @@ pub(crate) struct Lowerer<'a> {
     source: &'a str,
     library: &'a dyn Library,
     effects: &'a BTreeMap<EffectName, Signature>,
+    /// The effects whose call ends the turn: a control call ends `main`
+    /// when it settles, and is written only where it can.
+    controls: &'a BTreeMap<EffectName, BTreeSet<lash_kernel_dialect::EffectControl>>,
     performed: BTreeMap<EffectName, Signature>,
     used: BTreeMap<FunctionId, FunctionName>,
     private: BTreeSet<Name>,
@@ -159,22 +162,28 @@ pub(crate) struct Lowerer<'a> {
     entries: BTreeMap<Name, Signature>,
 }
 
-/// No module or restored session binding may mask the dialect's built-ins.
-pub(crate) fn check_binding_names<'a>(names: impl IntoIterator<Item = &'a str>) -> Lowering<()> {
+/// No module or restored session binding may mask the dialect's built-ins,
+/// nor a tool the environment offers (`control_finish`, ...): a binding of
+/// that name would hide the tool from every later cell.
+pub(crate) fn check_binding_names<'a>(
+    names: impl IntoIterator<Item = &'a str>,
+    effects: &BTreeMap<EffectName, lash_kernel_doc::Signature>,
+) -> Lowering<()> {
     for name in names {
-        if calls::is_builtin(name)
-            || crate::exceptions::is_builtin(name)
-            || name == lash_kernel_dialect::FINISH_NAME
-        {
-            let mut error = diagnostics::unplaced(
-                Code::ShadowsBuiltin,
-                format!("`{name}` is a built-in; a top-level binding cannot reuse its name"),
-            );
-            error.repairs.push(format!(
-                "rename `{name}` to `{name}_` and update its references"
-            ));
-            return Err(error);
-        }
+        let message = if calls::is_builtin(name) || crate::exceptions::is_builtin(name) {
+            format!("`{name}` is a built-in; a top-level binding cannot reuse its name")
+        } else if effects.keys().any(|effect| effect.as_str() == name) {
+            format!(
+                "`{name}` names one of the session's tools; a top-level binding cannot reuse its name"
+            )
+        } else {
+            continue;
+        };
+        let mut error = diagnostics::unplaced(Code::ShadowsBuiltin, message);
+        error.repairs.push(format!(
+            "rename `{name}` to `{name}_` and update its references"
+        ));
+        return Err(error);
     }
     Ok(())
 }
@@ -215,10 +224,13 @@ pub(crate) fn lower(
     // A `global` statement anywhere makes the name the module's, and an
     // earlier cell's bindings are the module's too.
     bindings.locals.extend(globals);
-    check_binding_names(bindings.locals.iter().map(String::as_str))?;
+    check_binding_names(
+        bindings.locals.iter().map(String::as_str),
+        environment.effects,
+    )?;
     for statement in &module.body {
         if let ast::Stmt::ClassDef(class) = statement {
-            check_binding_names([class.name.id.as_str()])?;
+            check_binding_names([class.name.id.as_str()], environment.effects)?;
         }
     }
     let declared: Vec<String> = bindings
@@ -237,6 +249,7 @@ pub(crate) fn lower(
         source,
         library: environment.library,
         effects: environment.effects,
+        controls: environment.controls,
         performed: BTreeMap::new(),
         used: BTreeMap::new(),
         private: BTreeSet::new(),
@@ -305,6 +318,7 @@ pub(crate) fn lower(
             environment.functions,
             &lowerer.saved_used,
             environment.effects,
+            environment.controls,
             &|function| catalog.definition(function).is_some(),
         ).map_err(|unusable| {
             let mut error = diagnostics::unplaced(Code::SavedFunctionUnusable, unusable.to_string());

@@ -16,7 +16,8 @@ compatibility or translate one transport's history into another.
 
 Native transport advertises one `execute_code` tool with exactly one required,
 nonempty string property `code` and no additional properties. Tool choice is
-auto. `finish` executes inside the program. More than one call executes nothing
+auto. `control.finish` is a declared control tool the program calls
+(FIG-5781). More than one call executes nothing
 and supplies repair text, consuming a stalled attempt. Unknown tools, invalid
 JSON, missing code, and extra properties receive their own repair decisions.
 Shared response assembly normalizes provider call ids under ADR 0117 before
@@ -41,19 +42,20 @@ Native parked-driver data uses its declared format guard and fleet read
 window. Durable formats follow ADRs 0106 and 0115; current version
 identities live in the format registry.
 
-A nonempty prose-only native response ends a Natural turn. FinishRequired
-requests `finish`. Empty or reasoning-only native responses produce a provider
+A nonempty prose-only native response ends a Natural turn. TerminalRequired
+requests `control.finish`, and a TerminalRequired turn whose tool surface
+declares no `Finish` is refused before its model is called (FIG-5781). Empty or reasoning-only native responses produce a provider
 error. Finish values, schema mismatch, and execution errors use the common cell
 adjudication contract. Completed code executions emit the shared cell-start and
 cell-end observations.
 
-A Natural termination may state a finish schema (FIG-5104)
-(`RlmTermination::Natural { schema }`, per send through
-`allow_prose_or_finish_schema` or session-wide through the recorded
-termination). Prose still ends the turn; a `finish` value is validated on both
-channels like a FinishRequired one, and a mismatch takes the same path: a
-Program cell failure carrying the mismatch, the schema-mismatch copy, and the
-loop continues. A text schema is the chat shape: the finalization copy says
+Either termination may state a finish schema (FIG-5104; since FIG-5781 the
+`finish_schema` field beside `TerminationMode`, per send through
+`RlmSendBuilderExt::finish_schema` or session-wide through the recorded
+config). It is `control.finish`'s input schema. Under Natural, prose still
+ends the turn. A `control.finish` value is validated on both channels, and a
+mismatch fails the cell as a Program failure carrying the mismatch; the model
+reads it and the loop continues. A text schema is the chat shape: the finalization copy says
 `finish` takes only the user-facing answer text, never a raw tool result, and
 that prose is preferred.
 

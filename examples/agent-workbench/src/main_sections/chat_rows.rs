@@ -1,8 +1,9 @@
 use super::*;
 use lash::SessionId;
 use lash::transcript::{
-    CellOutcome, CellRecord, EntryId, EntryProvenance, SuppressionReason, ToolResultBlock,
-    TranscriptBlock, TranscriptEntry, TranscriptItem, TranscriptMessage, TranscriptRole,
+    CellControl, CellOutcome, CellRecord, EntryId, EntryProvenance, SuppressionReason,
+    ToolResultBlock, TranscriptBlock, TranscriptEntry, TranscriptItem, TranscriptMessage,
+    TranscriptRole,
 };
 
 /// How the workbench lays out one committed transcript entry. Lash hands the
@@ -177,7 +178,11 @@ fn cell_row(cell: &CellRecord) -> ChatContent {
             .collect::<Vec<_>>()
             .join("\n"),
     };
-    if let CellOutcome::Finished(value) = &cell.result {
+    if let CellOutcome::Controlled {
+        control: CellControl::Finish { value },
+        ..
+    } = &cell.result
+    {
         let terminal = match value {
             lash::attachments::OutputValue::Inline(value) => {
                 serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string())

@@ -201,12 +201,14 @@ fn finalization(
     input: &PromptInput<'_>,
 ) -> Result<SectionText, PromptRenderError> {
     let termination = recorded(input)?
-        .map(|recorded| recorded.turn_options().effective_termination())
+        .map(|recorded| crate::rlm_support::RlmCompletion::from(recorded.turn_options()))
         .unwrap_or_default();
     let copy = match behaviour.channel {
-        RlmChannel::Cell => behaviour
-            .dialect
-            .finalization_copy(&termination, RlmChannel::Cell),
+        RlmChannel::Cell => behaviour.dialect.finalization_copy(
+            termination.mode,
+            termination.finish_schema(),
+            RlmChannel::Cell,
+        ),
         RlmChannel::NativeTool => {
             crate::native::prompt::finalization(&behaviour.dialect, &termination)
         }
@@ -222,7 +224,7 @@ fn required_output(
     input: &PromptInput<'_>,
 ) -> Result<SectionText, PromptRenderError> {
     let termination = recorded(input)?
-        .map(|recorded| recorded.turn_options().effective_termination())
+        .map(|recorded| crate::rlm_support::RlmCompletion::from(recorded.turn_options()))
         .unwrap_or_default();
     Ok(late_block(
         "REQUIRED OUTPUT",

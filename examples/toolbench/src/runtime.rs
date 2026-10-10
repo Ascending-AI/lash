@@ -154,7 +154,7 @@ async fn run_task_with_shutdown_witness(
             if channel == crate::ChannelSelection::Standard {
                 world.submissions().first().cloned()
             } else {
-                output.final_value().cloned()
+                output.finished().map(|(_, value)| value).cloned()
             },
             decisions,
             Some(format!("{:?}", output.result.outcome)),

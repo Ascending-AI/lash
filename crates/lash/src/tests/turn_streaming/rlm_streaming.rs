@@ -176,9 +176,8 @@ pub(super) async fn interleaved_standard_parts_keep_order_through_store_history_
 #[test]
 pub(super) fn rlm_streamed_lash_vm_cell_uses_captured_body_when_final_text_is_raw() -> Result<()> {
     run_async_test_on_stack_budget("rlm-streamed-cell-raw-final-test", || async {
-        const RAW_FINAL: &str = "Visible before cell.\n<typescript>\nconst payload = \"```markdown\\ninside\\n```\";\nfinish(\"streamed raw final ok\");\n</typescript>";
-        const EXPECTED_CODE: &str =
-            "const payload = \"```markdown\\ninside\\n```\";\nfinish(\"streamed raw final ok\");";
+        const RAW_FINAL: &str = "Visible before cell.\n<typescript>\nconst payload = \"```markdown\\ninside\\n```\";\nawait control.finish(\"streamed raw final ok\");\n</typescript>";
+        const EXPECTED_CODE: &str = "const payload = \"```markdown\\ninside\\n```\";\nawait control.finish(\"streamed raw final ok\");";
 
         let provider = crate::testing::TestProvider::builder()
             .kind("stream-raw-final-test")
@@ -192,7 +191,7 @@ pub(super) fn rlm_streamed_lash_vm_cell_uses_captured_body_when_final_text_is_ra
                     " cell.\n<type",
                     "script>\nconst payload = \"",
                     "```markdown\\ninside\\n",
-                    "```\";\nfinish(",
+                    "```\";\nawait control.finish(",
                     "\"streamed raw final ok\");\n</typescript>",
                 ] {
                     stream.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
@@ -235,10 +234,10 @@ pub(super) fn rlm_streamed_lash_vm_cell_uses_captured_body_when_final_text_is_ra
 
         assert!(matches!(
             result.outcome,
-            TurnOutcome::Finished(lash_core::facade_support::TurnFinish::FinalValue { .. })
+            TurnOutcome::Finished(lash_core::facade_support::TurnFinish::Finished { .. })
         ));
         assert_eq!(
-            result.final_value(),
+            result.finished().map(|(_, value)| value),
             Some(&serde_json::json!("streamed raw final ok"))
         );
 
@@ -271,9 +270,9 @@ pub(super) fn rlm_streamed_lash_vm_cell_uses_captured_body_when_final_text_is_ra
 
         let terminal_output = events
             .iter()
-            .find(|event| matches!(&event.event, TurnEvent::FinalValue { .. }))
+            .find(|event| matches!(&event.event, TurnEvent::Finished { .. }))
             .expect("terminal output");
-        let TurnEvent::FinalValue { value } = &terminal_output.event else {
+        let TurnEvent::Finished { value, .. } = &terminal_output.event else {
             unreachable!();
         };
         assert_eq!(value, &serde_json::json!("streamed raw final ok"));
@@ -300,7 +299,7 @@ pub(super) fn rlm_abort_drain_ignores_a_late_attempt_reset() -> Result<()> {
                 stream.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
                     kind: StreamBlockKind::AssistantText,
                     block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
-                    text: "<typescript>\nfinish(\"cell survived reset\");\n</typescript>\n"
+                    text: "<typescript>\nawait control.finish(\"cell survived reset\");\n</typescript>\n"
                         .to_string(),
                 }));
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -320,7 +319,7 @@ pub(super) fn rlm_abort_drain_ignores_a_late_attempt_reset() -> Result<()> {
         let result = session.send(TurnInput::text("finish")).output().await?;
 
         assert_eq!(
-            result.final_value(),
+            result.finished().map(|(_, value)| value),
             Some(&serde_json::json!("cell survived reset"))
         );
         Ok(())
@@ -359,7 +358,7 @@ pub(super) fn rlm_abort_drain_preserves_late_reasoning_replay_and_usage() -> Res
                 stream.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
                     kind: StreamBlockKind::AssistantText,
                     block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
-                    text: "<typescript>\nfinish(\"late events survived\");\n</typescript>\n"
+                    text: "<typescript>\nawait control.finish(\"late events survived\");\n</typescript>\n"
                         .to_string(),
                 }));
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -476,7 +475,7 @@ pub(super) fn rlm_abort_drain_deadline_proceeds_with_default_usage() -> Result<(
                     .send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
                         kind: StreamBlockKind::AssistantText,
                         block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
-                        text: "<typescript>\nfinish(\"deadline survived\");\n</typescript>\n"
+                        text: "<typescript>\nawait control.finish(\"deadline survived\");\n</typescript>\n"
                             .to_string(),
                     }));
                 std::future::pending::<std::result::Result<LlmResponse, LlmTransportError>>().await
@@ -494,7 +493,7 @@ pub(super) fn rlm_abort_drain_deadline_proceeds_with_default_usage() -> Result<(
         let result = session.send(TurnInput::text("finish")).output().await?;
 
         assert_eq!(
-            result.final_value(),
+            result.finished().map(|(_, value)| value),
             Some(&serde_json::json!("deadline survived"))
         );
         // FIG-2765: the deadline wins, so the attempt has no provider usage.
@@ -529,7 +528,8 @@ pub(super) fn rlm_turn_without_interruption_or_usage_preserves_absent_usage() ->
             .complete(|_request| async move {
                 Ok(LlmResponse {
                     parts: vec![lash_core::llm::types::LlmOutputPart::Text {
-                        text: "<typescript>\nfinish(\"quiet\");\n</typescript>\n".to_string(),
+                        text: "<typescript>\nawait control.finish(\"quiet\");\n</typescript>\n"
+                            .to_string(),
                         response_meta: None,
                     }],
                     terminal_reason: lash_core::LlmTerminalReason::Stop,
@@ -546,7 +546,10 @@ pub(super) fn rlm_turn_without_interruption_or_usage_preserves_absent_usage() ->
             .open()
             .await?;
         let result = session.send(TurnInput::text("finish")).output().await?;
-        assert_eq!(result.final_value(), Some(&serde_json::json!("quiet")));
+        assert_eq!(
+            result.finished().map(|(_, value)| value),
+            Some(&serde_json::json!("quiet"))
+        );
         let attempt = result
             .result
             .llm_calls
@@ -578,7 +581,7 @@ pub(super) async fn rlm_tool_calls_stream_from_live_exec_boundary_inner() -> Res
             .serve_test_llm_profile(
                 queued_text_provider(vec![typescript_block(
                     r#"const value = await tools.app_lookup({});
-finish("done");"#,
+await control.finish("done");"#,
                 )]),
                 mock_llm_profile_spec(),
             )
@@ -599,9 +602,10 @@ finish("done");"#,
 
     assert!(matches!(
         result.outcome,
-        TurnOutcome::Finished(lash_core::facade_support::TurnFinish::FinalValue { .. })
+        TurnOutcome::Finished(lash_core::facade_support::TurnFinish::Finished { .. })
     ));
-    assert_eq!(result.tool_calls.len(), 1);
+    // The lookup, then the cell's `control.finish`.
+    assert_eq!(result.tool_calls.len(), 2);
     assert_eq!(result.tool_calls[0].tool, "app_lookup");
     assert_eq!(result.tool_calls[0].args, serde_json::json!({}));
     assert_eq!(
@@ -627,7 +631,7 @@ finish("done");"#,
         .expect("code completed");
     let terminal_output = events
         .iter()
-        .position(|event| matches!(&event.event, TurnEvent::FinalValue { .. }))
+        .position(|event| matches!(&event.event, TurnEvent::Finished { .. }))
         .expect("terminal output");
     assert!(code_started < tool_started);
     assert!(tool_started < tool_completed);
@@ -699,7 +703,8 @@ finish("done");"#,
     assert_eq!(language, "typescript");
     assert!(!cell_outcome.is_failed());
     assert_eq!(Some(call_id), tool_call_ids.first());
-    assert_eq!(tool_call_ids.len(), 1);
+    // The lookup, then the cell's `control.finish`.
+    assert_eq!(tool_call_ids.len(), 2);
     assert_eq!(completed_graph_key, started_graph_key);
     // Task 4: the RLM tool call carries the enclosing block's graph_key for
     // structural containment.
@@ -731,7 +736,7 @@ finish("done");"#,
             .count(),
         read_view.messages().len()
     );
-    let TurnEvent::FinalValue { value } = &events[terminal_output].event else {
+    let TurnEvent::Finished { value, .. } = &events[terminal_output].event else {
         unreachable!();
     };
     assert_eq!(value, &serde_json::json!("done"));
@@ -752,7 +757,7 @@ try {
 } catch (error) {
   failure = error;
 }
-finish("recovered");"#,
+await control.finish("recovered");"#,
                     )]),
                     mock_llm_profile_spec(),
                 )
@@ -776,10 +781,14 @@ finish("recovered");"#,
 
         assert!(matches!(
             result.outcome,
-            TurnOutcome::Finished(lash_core::facade_support::TurnFinish::FinalValue { .. })
+            TurnOutcome::Finished(lash_core::facade_support::TurnFinish::Finished { .. })
         ));
-        assert_eq!(result.final_value(), Some(&serde_json::json!("recovered")));
-        assert_eq!(result.tool_calls.len(), 1);
+        assert_eq!(
+            result.finished().map(|(_, value)| value),
+            Some(&serde_json::json!("recovered"))
+        );
+        // The failed lookup, then the `control.finish` that recovered.
+        assert_eq!(result.tool_calls.len(), 2);
         assert_eq!(result.tool_calls[0].tool, "app_lookup");
         assert!(!result.tool_calls[0].output.is_success());
         Ok(())
@@ -802,7 +811,7 @@ pub(super) async fn rlm_code_block_aggregate_lists_every_collected_tool_call_inn
                 queued_text_provider(vec![typescript_block(
                     r#"const a = await tools.app_lookup({});
 const b = await tools.app_lookup({});
-finish("done");"#,
+await control.finish("done");"#,
                 )]),
                 mock_llm_profile_spec(),
             )
@@ -822,7 +831,7 @@ finish("done");"#,
         .await?;
     assert!(matches!(
         result.outcome,
-        TurnOutcome::Finished(lash_core::facade_support::TurnFinish::FinalValue { .. })
+        TurnOutcome::Finished(lash_core::facade_support::TurnFinish::Finished { .. })
     ));
     let events = events.snapshot().await;
 
@@ -835,7 +844,11 @@ finish("done");"#,
             _ => None,
         })
         .collect::<Vec<_>>();
-    assert_eq!(completed_ids.len(), 2, "expected two tool completions");
+    assert_eq!(
+        completed_ids.len(),
+        3,
+        "expected two tool completions and the `control.finish`"
+    );
 
     let tool_call_ids = events
         .iter()
@@ -884,7 +897,7 @@ pub(super) fn rlm_native_provider_tool_call_repairs_and_the_next_cell_finishes()
                 response_metadata: Default::default(),
                 ..LlmResponse::default()
             },
-            text_response(&typescript_block("finish(1);")),
+            text_response(&typescript_block("await control.finish(1);")),
         ])));
         let provider = crate::testing::TestProvider::builder()
             .kind("native-tool-call-under-rlm")
@@ -925,7 +938,8 @@ pub(super) fn rlm_native_provider_tool_call_repairs_and_the_next_cell_finishes()
 
         assert_eq!(
             turn.result.outcome,
-            TurnOutcome::Finished(lash_core::facade_support::TurnFinish::FinalValue {
+            TurnOutcome::Finished(lash_core::facade_support::TurnFinish::Finished {
+                tool_name: "finish".to_string(),
                 value: serde_json::json!(1)
             }),
             "the stray call is repaired and the next cell settles the turn"
@@ -993,7 +1007,7 @@ pub(super) async fn rlm_pending_host_tool_completion_resumes_lash_vm_await_inner
         explicit_ephemeral_facets(rlm_core_builder_over(sqlite_memory_store_backend().await))
             .serve_test_llm_profile(
                 queued_text_provider(vec![typescript_block(
-                    "const value = await tools.app_lookup({});\nfinish(value);",
+                    "const value = await tools.app_lookup({});\nawait control.finish(value);",
                 )]),
                 mock_llm_profile_spec(),
             )
@@ -1050,14 +1064,14 @@ pub(super) async fn rlm_pending_host_tool_completion_resumes_lash_vm_await_inner
     let result = turn.await.expect("turn task")?;
     assert!(matches!(
         result.outcome,
-        TurnOutcome::Finished(lash_core::facade_support::TurnFinish::FinalValue { .. })
+        TurnOutcome::Finished(lash_core::facade_support::TurnFinish::Finished { .. })
     ));
-    assert_eq!(result.final_value(), Some(&payload));
+    assert_eq!(result.finished().map(|(_, value)| value), Some(&payload));
     let events = events.snapshot().await;
     let terminal_output = events
         .iter()
         .find_map(|activity| match &activity.event {
-            TurnEvent::FinalValue { value } => Some(value),
+            TurnEvent::Finished { value, .. } => Some(value),
             _ => None,
         })
         .expect("terminal final value");
@@ -1087,7 +1101,7 @@ const lookup = async () => {
   };
 const handle = await processes.start({ definition: lookup });
 const result = await handle;
-finish(result);"#,
+await control.finish(result);"#,
     )]), mock_llm_profile_spec())
     .tools(Arc::new(PendingAppTools::new(key_tx)))
     // ADR 0095: `processes` is catalogue presence, so a scripted cell that
@@ -1150,14 +1164,14 @@ finish(result);"#,
     let result = turn.await.expect("turn task")?;
     assert!(matches!(
         result.outcome,
-        TurnOutcome::Finished(lash_core::facade_support::TurnFinish::FinalValue { .. })
+        TurnOutcome::Finished(lash_core::facade_support::TurnFinish::Finished { .. })
     ));
-    assert_eq!(result.final_value(), Some(&payload));
+    assert_eq!(result.finished().map(|(_, value)| value), Some(&payload));
     let events = events.snapshot().await;
     let terminal_output = events
         .iter()
         .find_map(|activity| match &activity.event {
-            TurnEvent::FinalValue { value } => Some(value),
+            TurnEvent::Finished { value, .. } => Some(value),
             _ => None,
         })
         .expect("terminal final value");
@@ -1182,7 +1196,7 @@ pub(super) async fn continue_as_observation_emits_frame_switch_then_commit_inner
                     typescript_block(
                         r#"await control.continue_as({ task: "finish in a fresh frame" });"#,
                     ),
-                    typescript_block(r#"finish("done after continue_as");"#),
+                    typescript_block(r#"await control.finish("done after continue_as");"#),
                 ]),
                 mock_llm_profile_spec(),
             )
@@ -1220,7 +1234,7 @@ pub(super) async fn continue_as_observation_emits_frame_switch_then_commit_inner
         .output()
         .await?;
     assert_eq!(
-        output.final_value(),
+        output.finished().map(|(_, value)| value),
         Some(&serde_json::json!("done after continue_as"))
     );
 

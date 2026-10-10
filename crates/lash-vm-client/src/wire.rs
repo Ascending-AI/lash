@@ -145,6 +145,7 @@ pub enum RequestWire {
 pub struct ParkWire {
     pub requests: Vec<RequestWire>,
     pub withdrawn: Vec<WaitId>,
+    pub outstanding: Vec<lash_kernel_doc::TaskIdentity>,
 }
 
 impl From<Park> for ParkWire {
@@ -170,6 +171,7 @@ impl From<Park> for ParkWire {
                 })
                 .collect(),
             withdrawn: park.withdrawn,
+            outstanding: park.outstanding,
         }
     }
 }
@@ -207,6 +209,7 @@ impl From<ParkWire> for Park {
                 })
                 .collect(),
             withdrawn: wire.withdrawn,
+            outstanding: wire.outstanding,
         }
     }
 }

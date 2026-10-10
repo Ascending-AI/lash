@@ -38,7 +38,7 @@ fn text(value: &str) -> Datum {
     Datum::Text(value.to_string())
 }
 
-/// `function f(params) { body } finish(f(args));`, with each parameter
+/// `function f(params) { body } await finish(f(args));`, with each parameter
 /// declared as written or as `any`.
 fn program(declared: bool, params: &[(&str, &str)], body: &str, args: &str) -> String {
     let params: Vec<String> = params
@@ -46,7 +46,7 @@ fn program(declared: bool, params: &[(&str, &str)], body: &str, args: &str) -> S
         .map(|(name, ty)| format!("{name}: {}", if declared { ty } else { "any" }))
         .collect();
     format!(
-        "function f({}) {{ {body} }} finish(f({args}));",
+        "function f({}) {{ {body} }} await finish(f({args}));",
         params.join(", ")
     )
 }

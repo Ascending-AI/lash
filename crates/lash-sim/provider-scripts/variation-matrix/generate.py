@@ -448,19 +448,19 @@ def matrix() -> dict[str, object]:
                     "kind": "not_applicable",
                     "reason": "Responses has no provider wire stop-sequence field",
                     "assertion": "refused_unsupported_stop",
-                    "recordings": [stream_for("openai.responses", "unsupported_stop", text='<typescript>\nfinish("settled");\n</typescript>\n')],
+                    "recordings": [stream_for("openai.responses", "unsupported_stop", text='<typescript>\nawait control.finish("settled");\n</typescript>\n')],
                 },
                 "codex.responses-sse": {
                     "kind": "not_applicable",
                     "reason": "Codex Responses has no provider wire stop-sequence field",
                     "assertion": "refused_unsupported_stop",
-                    "recordings": [stream_for("codex.responses-sse", "unsupported_stop", text='<typescript>\nfinish("settled");\n</typescript>\n')],
+                    "recordings": [stream_for("codex.responses-sse", "unsupported_stop", text='<typescript>\nawait control.finish("settled");\n</typescript>\n')],
                 },
                 "codex.responses-websocket": {
                     "kind": "not_applicable",
                     "reason": "Codex Responses WebSocket has no provider wire stop-sequence field",
                     "assertion": "refused_unsupported_stop",
-                    "recordings": [stream_for("codex.responses-websocket", "unsupported_stop", text='<typescript>\nfinish("settled");\n</typescript>\n')],
+                    "recordings": [stream_for("codex.responses-websocket", "unsupported_stop", text='<typescript>\nawait control.finish("settled");\n</typescript>\n')],
                 },
             },
         }
@@ -480,7 +480,7 @@ def matrix() -> dict[str, object]:
         "openai.chat-completions": {"kind": "provider_wire_scripts", "paths": ["../../variations/openai-compatible.chat-literal-present.json"]},
     }
     for dialect in DIALECTS[3:]:
-        literal_cells[dialect] = cell([stream_for(dialect, "literal_present", text='<typescript>\nfinish("settled");\n</typescript>\n')])
+        literal_cells[dialect] = cell([stream_for(dialect, "literal_present", text='<typescript>\nawait control.finish("settled");\n</typescript>\n')])
     rows.append(
         {
             "variation": "literal_present",
@@ -794,9 +794,56 @@ def matrix() -> dict[str, object]:
     }
 
 
+def write_stop_variations() -> None:
+    """Generate the six paired wire fixtures used by the stop-handling laws."""
+    providers = [
+        ("anthropic.messages", "anthropic", "/v1/messages", "stop_sequences"),
+        ("google.generate-content", "google_oauth", "/v1internal:streamGenerateContent", "request.generationConfig.stopSequences"),
+        ("openai-compatible.chat", "openai-compatible", "/chat/completions", "stop"),
+    ]
+    for dialect, provider, endpoint, stop_field in providers:
+        for literal in (False, True):
+            variation = "literal_present" if literal else "stop_consumed"
+            name = f"{dialect}-{variation.replace('_', '-')}"
+            text = '<typescript>\nawait control.finish("settled");\n'
+            if literal:
+                text += "</typescript>\n"
+            if provider == "anthropic":
+                reason = "end_turn" if literal else "stop_sequence"
+                events = anthropic(text=text, stop_reason=reason)
+            elif provider == "google_oauth":
+                reason = "STOP"
+                events = google(text=text)
+            else:
+                reason = "stop" if literal else "stop_sequence"
+                events = chat(text=text)
+                events[-2]["json"]["choices"][0]["native_finish_reason"] = reason
+            headers = {"content-type": {"contains": "application/json"}}
+            if provider == "anthropic":
+                headers.update({"x-api-key": {"present": True}, "anthropic-version": {"present": True}})
+            else:
+                headers["authorization"] = {"present": True}
+            body = {} if provider == "google_oauth" else {"stream": {"equals": True}}
+            body[stop_field] = {"present": False} if literal else {"equals": ["</typescript>"]}
+            timeline = [{"at": 10, "event": "response_start", "status": 200,
+                         "headers": [{"name": "content-type", "value": "text/event-stream"}]}]
+            timeline.extend({"at": 20 + index, "event": "sse",
+                             "data": event["raw"] if "raw" in event else json.dumps(event["json"], separators=(",", ":"))}
+                            for index, event in enumerate(events))
+            timeline.append({"at": 20 + len(events), "event": "end"})
+            fixture = {"schema": "lash.provider-wire-script.v1", "name": name,
+                       "provider_kind": provider, "endpoint": {"method": "POST", "path": endpoint},
+                       "request_match": {"body": body, "headers": headers}, "timeline": timeline,
+                       "expected_provider": {"variation": variation, "terminal_reason": "stop",
+                                             "provider_finish_reason": reason, "literal_present": literal}}
+            (ROOT.parent / "variations" / f"{name}.json").write_text(json.dumps(fixture, indent=2) + "\n")
+
+
 def main() -> None:
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
     OUTPUT.write_text(json.dumps(matrix(), indent=2, ensure_ascii=False) + "\n")
+    if "LASH_PROVIDER_MATRIX_OUTPUT" not in os.environ:
+        write_stop_variations()
 
 
 if __name__ == "__main__":

@@ -81,8 +81,7 @@ pub(super) fn outcome(
                     TurnFinish::AssistantMessage { .. } => {
                         TraceTurnCompletionReason::AssistantMessage
                     }
-                    TurnFinish::FinalValue { .. } => TraceTurnCompletionReason::FinalValue,
-                    TurnFinish::ToolValue { .. } => TraceTurnCompletionReason::ToolValue,
+                    TurnFinish::Finished { .. } => TraceTurnCompletionReason::Finished,
                 },
             },
             RunCommittedOutcome::AgentFrameSwitch { frame_key, .. } => {

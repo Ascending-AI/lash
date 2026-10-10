@@ -7,7 +7,7 @@ use crate::dialect::DialectPrompts;
 use crate::render::CodeRenderer;
 use lash_core::LlmUsage;
 use lash_render::{RenderNode, RenderParams, RenderValue, truncate_chars};
-use lash_rlm_types::{RlmTermination, RlmTurnOptions};
+use lash_rlm_types::RlmTurnOptions;
 use lash_sansio::{ExtraKeys, ObjectShape, SchemaShape, ShapeField, ShapeKind};
 use serde_json::Value as FlowValue;
 
@@ -26,10 +26,57 @@ pub(crate) fn decode_rlm_options(
         .map_err(|err| format!("invalid recorded RLM session config: {err}"))
 }
 
+/// How a turn may end, as its effective options state it: the mode, and the
+/// schema `control.finish` takes its value under.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct RlmCompletion {
+    pub mode: lash_core::TerminationMode,
+    pub finish_schema: Option<lash_core::JsonSchema>,
+}
+
+impl RlmCompletion {
+    /// Whether a prose-only reply ends the turn as its answer.
+    pub(crate) fn prose_ends_turn(&self) -> bool {
+        self.mode.prose_ends_turn()
+    }
+
+    /// The schema a finish value must match, if the turn states one.
+    pub(crate) fn finish_schema(&self) -> Option<&lash_core::JsonSchema> {
+        self.finish_schema.as_ref()
+    }
+}
+
+impl From<RlmTurnOptions> for RlmCompletion {
+    fn from(options: RlmTurnOptions) -> Self {
+        Self {
+            mode: options.effective_termination(),
+            finish_schema: options.finish_schema,
+        }
+    }
+}
+
 pub(crate) fn decode_rlm_termination_options(
     options: &lash_core::ProtocolTurnOptions,
-) -> Result<RlmTermination, String> {
-    decode_rlm_options(options).map(|options| options.effective_termination())
+) -> Result<RlmCompletion, String> {
+    decode_rlm_options(options).map(RlmCompletion::from)
+}
+
+/// A turn that only a control call ends needs a tool that can end it with
+/// a value: a TerminalRequired turn whose surface declares no
+/// [`Finish`](lash_core::TurnControlKind::Finish) is refused before its
+/// model is called, whether the session recorded the mode or the send
+/// stated it.
+pub(crate) fn finish_available(
+    termination: &RlmCompletion,
+    ctx: &lash_core::DriverContextView<'_>,
+) -> Result<(), String> {
+    if termination.prose_ends_turn() || ctx.can_finish() {
+        return Ok(());
+    }
+    Err(
+        "the turn requires a finish (TerminalRequired), but no tool it can call declares Finish: install `finish` or a tool that declares it"
+            .to_owned(),
+    )
 }
 
 /// Render the "Context Budget" line for the volatile turn-tail message.

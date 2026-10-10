@@ -1264,7 +1264,7 @@ function createWorkbenchTimeline({ list, footer, empty, hooks = {} }) {
     }
     const delta = event.type === "stream_block" && event.phase === "delta" ? event.kind : null;
     if (delta === "assistant_text") appendChunk(turnId, `reply:${turnId}`, "reply", event.text, event.correlation_id);
-    if (event.type === "final_value" || event.type === "tool_value") {
+    if (event.type === "finished") {
       appendChunk(turnId, `reply:${turnId}`, "reply", renderTerminalValue(event.value), null);
     }
     if (delta === "reasoning") {

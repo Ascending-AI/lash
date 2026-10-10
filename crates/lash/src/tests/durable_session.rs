@@ -1572,7 +1572,7 @@ async fn transcript_totally_projects_a_really_committed_rlm_trajectory() {
                             text: if call == 0 {
                                 "<typescript>console.log(\"committed corpus output\");</typescript>"
                             } else {
-                                "<typescript>finish(\"committed corpus reply\");</typescript>"
+                                "<typescript>await control.finish(\"committed corpus reply\");</typescript>"
                             }
                             .into(),
                             response_meta: None,
@@ -1657,7 +1657,7 @@ async fn an_rlm_cells_executed_calls_name_the_turns_tool_call_records_after_a_re
                     typescript_block(
                         "const first = await tools.app_lookup({});\n\
                          const second = await tools.app_lookup({});\n\
-                         finish(\"looked up twice\");",
+                         await control.finish(\"looked up twice\");",
                     ),
                 ),
                 mock_llm_profile_spec(),
@@ -1691,15 +1691,22 @@ async fn an_rlm_cells_executed_calls_name_the_turns_tool_call_records_after_a_re
             ..
         } = activity.event
         {
-            assert_eq!(name, "app_lookup");
-            assert_eq!(args, serde_json::json!({}));
+            // The cell's last call is its `control.finish`.
+            if name != "finish" {
+                assert_eq!(name, "app_lookup");
+                assert_eq!(args, serde_json::json!({}));
+            }
             assert!(output.is_success());
             if !record_ids.contains(&Some(call_id.clone())) {
                 record_ids.push(Some(call_id));
             }
         }
     }
-    assert_eq!(record_ids.len(), 2, "one record per host tool call");
+    assert_eq!(
+        record_ids.len(),
+        3,
+        "one record per call, the `control.finish` among them"
+    );
     drop(session);
     running.shutdown().await?;
 
@@ -1729,7 +1736,11 @@ async fn an_rlm_cells_executed_calls_name_the_turns_tool_call_records_after_a_re
         record_ids,
         "each executed call names its tool call record"
     );
-    for call in &cells[0].calls {
+    for call in cells[0]
+        .calls
+        .iter()
+        .filter(|call| call.operation != "control.finish")
+    {
         assert_eq!(call.operation, "tools.app_lookup");
         assert_eq!(call.outcome, crate::persistence::ExecutedCallOutcome::Ok);
     }
@@ -1753,7 +1764,7 @@ async fn a_settled_turns_cell_tool_records_are_the_streamed_ones_after_a_reopen(
                     typescript_block(
                         "const first = await tools.app_lookup({});\n\
                          const second = await tools.app_lookup({});\n\
-                         finish(\"looked up twice\");",
+                         await control.finish(\"looked up twice\");",
                     ),
                 ),
                 mock_llm_profile_spec(),
@@ -1793,7 +1804,11 @@ async fn a_settled_turns_cell_tool_records_are_the_streamed_ones_after_a_reopen(
             streamed.push((call_id, name, args, output.value_for_projection()));
         }
     }
-    assert_eq!(streamed.len(), 2, "the cell made two tool calls");
+    assert_eq!(
+        streamed.len(),
+        3,
+        "the cell made two tool calls and its `control.finish`"
+    );
     let recorded = |calls: &[lash_core::ToolCallRecord]| {
         calls
             .iter()
@@ -1948,7 +1963,7 @@ async fn a_cancelled_turn_reports_the_tool_calls_its_cell_completed_after_a_reop
 }
 
 /// The after-turn callbacks see the tool calls of a cell that ends the turn
-/// (FIG-5330): `finish(...)` in the cell is followed by no commit but the
+/// (FIG-5330): `await control.finish(...)` in the cell is followed by no commit but the
 /// turn's own, which records the cell's calls, and the report the callbacks
 /// read lists them.
 #[cfg(feature = "rlm")]
@@ -1979,7 +1994,7 @@ async fn the_after_turn_report_lists_the_tool_calls_of_the_cell_that_finished_th
                     "after-turn-cell-calls",
                     typescript_block(
                         "const found = await tools.app_lookup({});\n\
-                 finish(\"looked up\");",
+                 await control.finish(\"looked up\");",
                     ),
                 ),
                 mock_llm_profile_spec(),
@@ -1998,11 +2013,15 @@ async fn the_after_turn_report_lists_the_tool_calls_of_the_cell_that_finished_th
         .output()
         .await?
         .result;
-    assert_eq!(settled.tool_calls.len(), 1, "the cell made one tool call");
+    assert_eq!(
+        settled.tool_calls.len(),
+        2,
+        "the cell made one tool call and its `control.finish`"
+    );
     assert_eq!(
         *seen.lock().expect("the law's lock"),
-        vec![vec!["app_lookup".to_owned()]],
-        "the after-turn callbacks ran once, over the cell's call"
+        vec![vec!["app_lookup".to_owned(), "finish".to_owned()]],
+        "the after-turn callbacks ran once, over the cell's calls"
     );
     drop(session);
     core.shutdown().await?;
@@ -2011,8 +2030,9 @@ async fn the_after_turn_report_lists_the_tool_calls_of_the_cell_that_finished_th
 
 /// A cell's recorded round is bounded by the session's recorded RLM
 /// presentation (FIG-5330): with `max_tool_call_records` at one, a cell
-/// that makes two tool calls records one of them, and the settled turn's
-/// report accounts for the other as omitted, after a reopen too.
+/// that makes two tool calls and its `control.finish` records one of them,
+/// and the settled turn's report accounts for the other two as omitted,
+/// after a reopen too.
 #[cfg(feature = "rlm")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_cells_recorded_tool_calls_are_bounded_by_the_recorded_presentation() -> Result<()> {
@@ -2035,7 +2055,7 @@ async fn a_cells_recorded_tool_calls_are_bounded_by_the_recorded_presentation() 
                     typescript_block(
                         "const first = await tools.app_lookup({});\n\
                          const second = await tools.app_lookup({});\n\
-                         finish(\"looked up twice\");",
+                         await control.finish(\"looked up twice\");",
                     ),
                 ),
                 mock_llm_profile_spec(),
@@ -2044,7 +2064,7 @@ async fn a_cells_recorded_tool_calls_are_bounded_by_the_recorded_presentation() 
             .build(crate::testing::runtime_lease_owner())
     }
     let left_out = Some(lash_core::OmittedToolCalls {
-        count: 1,
+        count: 2,
         failures: 0,
         attachments: Vec::new(),
     });
@@ -2101,7 +2121,7 @@ async fn a_cells_assistant_context_and_record_read_back_from_the_transcript_afte
     use crate::transcript::{CellOutcome, TranscriptBlock, TranscriptItem, TranscriptRole};
     use lash_protocol_rlm::RlmChannel;
 
-    const PROGRAM: &str = "console.log(\"counted\");\nfinish(\"three\");";
+    const PROGRAM: &str = "console.log(\"counted\");\nawait control.finish(\"three\");";
     const PROSE: &str = "Counting first.";
 
     fn native_arguments() -> String {
@@ -2207,10 +2227,18 @@ async fn a_cells_assistant_context_and_record_read_back_from_the_transcript_afte
         // The record's prints and result are the executor's, unconverted.
         assert_eq!(cell.prints.len(), 1, "{name}: {cell:?}");
         assert_eq!(cell.prints[0].value, serde_json::json!("counted"));
-        assert_eq!(
-            cell.result,
-            CellOutcome::Finished(serde_json::json!("three").into()),
-            "{name}"
+        assert!(
+            matches!(
+                &cell.result,
+                CellOutcome::Controlled {
+                    tool_name,
+                    control: lash_core::CellControl::Finish { value },
+                    ..
+                } if tool_name == "finish"
+                    && *value == lash_core::OutputValue::from(serde_json::json!("three"))
+            ),
+            "{name}: {:?}",
+            cell.result
         );
         assert_eq!(
             (&cell.prints, &cell.prints_retained, &cell.result),
@@ -2256,5 +2284,62 @@ async fn a_cells_assistant_context_and_record_read_back_from_the_transcript_afte
         }
         reopened.shutdown().await?;
     }
+    Ok(())
+}
+
+/// Law 5 (FIG-5781): a cell's control call is not a call `max_tool_calls`
+/// counts. A session whose cells may make one tool call makes it, and the
+/// cell still ends the turn through `control.finish`.
+#[cfg(feature = "rlm")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_cell_at_its_tool_call_limit_can_still_finish() -> Result<()> {
+    let core =
+        explicit_ephemeral_facets(rlm_core_builder_over(sqlite_memory_store_backend().await))
+            .serve_test_llm_profile(
+                text_provider(
+                    "finish-at-the-limit",
+                    typescript_block(
+                        "const found = await tools.app_lookup({});\n\
+                         await control.finish(\"looked up once\");",
+                    ),
+                ),
+                mock_llm_profile_spec(),
+            )
+            .tools(Arc::new(AppTools))
+            .build(crate::testing::runtime_lease_owner())?;
+    let spec = crate::SessionSpec::new(
+        mock_llm_profile_spec().wire_model,
+        crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(1),
+    )
+    .no_progress_budget(crate::NoProgressBudget::bounded(12));
+    core.session(id("finish-at-the-limit"))
+        .create(crate::SessionCreation::root(
+            crate::plugins::SessionToolAccess::ambient(),
+            spec,
+        ))
+        .await?;
+    let session = core.session(id("finish-at-the-limit")).open().await?;
+    let settled = session
+        .send(crate::TurnInput::text("look up once"))
+        .output()
+        .await?
+        .result;
+    assert_eq!(
+        settled.finished(),
+        Some(("finish", &serde_json::json!("looked up once"))),
+        "{:?}",
+        settled.outcome
+    );
+    assert!(
+        settled
+            .tool_calls
+            .iter()
+            .all(|call| call.output.is_success()),
+        "{:?}",
+        settled.tool_calls
+    );
+    drop(session);
+    core.shutdown().await?;
     Ok(())
 }

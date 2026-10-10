@@ -163,6 +163,66 @@ impl ToolCallOutput {
         }
     }
 
+    /// A control call's result: the control alone, with no output.
+    pub fn turn_control(control: TurnControl) -> Self {
+        Self::success_tool_value(ToolValue::untrusted_json(Value::Null))
+            .with_control(ToolControl::Turn { control })
+    }
+
+    /// End the caller's turn with `value`. The tool must declare
+    /// [`TurnControlKind::Finish`](crate::TurnControlKind::Finish).
+    pub fn finish(value: impl Into<ToolValue>) -> Self {
+        Self::turn_control(TurnControl::Finish {
+            value: value.into(),
+        })
+    }
+
+    /// Switch the caller to a fresh agent frame. The tool must declare
+    /// [`TurnControlKind::SwitchAgentFrame`](crate::TurnControlKind::SwitchAgentFrame).
+    pub fn switch_agent_frame(
+        frame_key: crate::FrameKey,
+        task: impl Into<String>,
+        initial_nodes: Vec<crate::SessionAppendNode>,
+    ) -> Self {
+        Self::turn_control(TurnControl::SwitchAgentFrame {
+            frame_key,
+            initial_nodes,
+            task: task.into(),
+        })
+    }
+
+    /// The kind of turn control this result is, when it is one: what its
+    /// tool's declaration must name.
+    pub fn turn_control_kind(&self) -> Option<crate::TurnControlKind> {
+        self.as_turn_control().map(TurnControl::kind)
+    }
+
+    /// This result as a control call settles: a declared control is the
+    /// call's whole result, so whatever the body returned beside it is
+    /// discarded; and a call that did not succeed carries no turn control.
+    #[must_use]
+    pub fn settled(mut self) -> Self {
+        if self.as_turn_control().is_none() {
+            return self;
+        }
+        if self.is_success() {
+            self.outcome = ToolCallOutcome::Success(ToolValue::untrusted_json(Value::Null));
+            self.view = None;
+            self.projection_value = None;
+        } else {
+            self.control = None;
+        }
+        self
+    }
+
+    /// The turn control this result is, when it is one.
+    pub fn as_turn_control(&self) -> Option<&TurnControl> {
+        match &self.control {
+            Some(ToolControl::Turn { control }) => Some(control),
+            _ => None,
+        }
+    }
+
     pub fn with_control(mut self, control: ToolControl) -> Self {
         self.control = Some(control);
         self
@@ -406,6 +466,12 @@ fn tagged_attachment_json(source: &AttachmentRef) -> Value {
         serde_json::to_value(source).unwrap_or(Value::Null),
     );
     Value::Object(map)
+}
+
+impl From<Value> for ToolValue {
+    fn from(value: Value) -> Self {
+        Self::untrusted_json(value)
+    }
 }
 
 impl From<&str> for ToolValue {
@@ -767,16 +833,35 @@ fn project_raw_tool_value(mut value: Value, raw: Option<&ToolValue>) -> Value {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum ToolControl {
+pub enum TurnControl {
+    /// End the turn with `value`.
+    Finish { value: ToolValue },
+    /// End the turn by switching to a fresh agent frame that starts on
+    /// `task` with `initial_nodes`.
     SwitchAgentFrame {
         frame_key: crate::FrameKey,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         initial_nodes: Vec<crate::SessionAppendNode>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        task: Option<String>,
+        task: String,
     },
-    Finish {
-        value: ToolValue,
+}
+
+impl TurnControl {
+    pub fn kind(&self) -> crate::TurnControlKind {
+        match self {
+            Self::Finish { .. } => crate::TurnControlKind::Finish,
+            Self::SwitchAgentFrame { .. } => crate::TurnControlKind::SwitchAgentFrame,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ToolControl {
+    /// A turn-ending control the tool declared
+    /// ([`TurnControls`](crate::TurnControls)): the call's whole result.
+    Turn {
+        control: TurnControl,
     },
     Fail {
         failure: ToolFailure,

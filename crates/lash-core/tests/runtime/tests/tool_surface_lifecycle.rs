@@ -33,15 +33,26 @@ impl DynamicToolSpec {
     }
 
     fn definition(&self) -> lash_core::ToolDefinition {
-        lash_core::ToolDefinition::raw(
-            self.id,
-            self.name,
-            self.description,
-            lash_core::ToolDefinition::default_input_schema(),
-            json!({ "type": "object", "additionalProperties": true }),
-        )
-        .expect("valid declared tool schemas")
-        .with_execution(std::time::Duration::from_secs(120))
+        let draft = if self.finish_on_execute {
+            lash_core::ToolDefinition::control(
+                self.id,
+                self.name,
+                self.description,
+                lash_core::ToolDefinition::default_input_schema(),
+                lash_core::TurnControls::none().with(lash_core::TurnControlKind::Finish),
+            )
+        } else {
+            lash_core::ToolDefinition::raw(
+                self.id,
+                self.name,
+                self.description,
+                lash_core::ToolDefinition::default_input_schema(),
+                json!({ "type": "object", "additionalProperties": true }),
+            )
+        };
+        draft
+            .expect("valid declared tool schemas")
+            .with_execution(std::time::Duration::from_secs(120))
     }
 }
 
@@ -93,18 +104,16 @@ impl lash_core::ToolProvider for DynamicToolSurface {
                     call.name()
                 ));
             };
-            let result = lash_core::ToolOutcome::ok(json!({
+            if tool.finish_on_execute {
+                return lash_core::ToolOutcome::turn_control(lash_core::TurnControl::Finish {
+                    value: lash_core::ToolValue::untrusted_json(json!(tool.id)),
+                });
+            }
+            lash_core::ToolOutcome::ok(json!({
                 "id": tool.id,
                 "name": tool.name,
                 "description": tool.description,
-            }));
-            if tool.finish_on_execute {
-                result.with_control(lash_core::ToolControl::Finish {
-                    value: lash_core::ToolValue::untrusted_json(json!(tool.id)),
-                })
-            } else {
-                result
-            }
+            }))
         })
         .await
         .into()

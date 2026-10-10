@@ -206,7 +206,7 @@ impl lash::TurnActivitySink for TimingSink {
             })
             | lash_core::TurnEvent::StreamBlock(StreamBlockEvent::Started { .. })
             | lash_core::TurnEvent::ToolCallStarted { .. }
-            | lash_core::TurnEvent::FinalValue { .. } => {
+            | lash_core::TurnEvent::Finished { .. } => {
                 state.first_delta_ms.get_or_insert(now);
             }
             lash_core::TurnEvent::ModelRequestStarted { .. } => {

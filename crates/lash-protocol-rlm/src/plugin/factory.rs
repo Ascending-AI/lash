@@ -339,6 +339,7 @@ mod tests {
         RlmRecordedConfig {
             render: None,
             termination: None,
+            finish_schema: None,
             channel: Some(crate::RlmChannel::Cell),
             dialect: dialect.map(str::to_owned),
             behaviour: config.recorded_behaviour(),

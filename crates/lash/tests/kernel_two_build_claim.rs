@@ -472,7 +472,10 @@ fn cell_finishes(output: &lash::TurnOutput) -> Vec<serde_json::Value> {
                 .get("event")?
                 .get("RlmTrajectoryEntry")?
                 .get("result")
-                .filter(|result| result["kind"] == "finished")?
+                .filter(|result| result["kind"] == "controlled")?
+                .get("value")?
+                .get("control")
+                .filter(|control| control["type"] == "finish")?
                 .get("value")?
                 .get("inline")
                 .cloned(),
@@ -516,8 +519,8 @@ async fn a_session_cell_parked_by_build_n_is_claimed_migrated_and_resumed_by_bui
                     Build::N,
                     "build-n",
                     &[
-                        "function double(n: number) { return n * 2; }\nfinish('bound');",
-                        "await sleep(3000);\nfinish(double(21));",
+                        "function double(n: number) { return n * 2; }\nawait control.finish('bound');",
+                        "await sleep(3000);\nawait control.finish(double(21));",
                     ],
                 );
                 let opened = session(&old, SESSION).await;
@@ -576,7 +579,7 @@ async fn a_session_cell_parked_by_build_n_is_claimed_migrated_and_resumed_by_bui
         &stores,
         Build::NPlus1,
         "build-n-plus-1",
-        &["finish('after');"],
+        &["await control.finish('after');"],
     );
     let mut carried = None;
     for _ in 0..6000 {
@@ -666,7 +669,7 @@ async fn idle_session(
 }
 
 /// The binding turn of [`idle_session`].
-const BIND: &str = "function double(n: number) { return n * 2; }\nfinish('bound');";
+const BIND: &str = "function double(n: number) { return n * 2; }\nawait control.finish('bound');";
 
 /// FIG-5787: a process that waits on a long timer and a session that runs
 /// no turn are not claimed by build N+1 within its window, so they would
@@ -732,7 +735,7 @@ async fn an_idle_process_and_an_idle_session_are_swept_by_build_n_plus_1_and_rea
         &stores,
         Build::Closing,
         "build-closing",
-        &["finish(double(4));"],
+        &["await control.finish(double(4));"],
     );
     // The closing build reads the swept process: woken, its node claims
     // it, decodes its state and lets it wait for its timer again, where a
@@ -838,7 +841,7 @@ async fn the_closing_build_refuses_to_start_while_a_session_is_unmigrated_and_st
         &stores,
         Build::Closing,
         "build-closing",
-        &["finish(double(21));"],
+        &["await control.finish(double(21));"],
     );
     let read = tokio::time::timeout(
         Duration::from_secs(60),
@@ -885,7 +888,7 @@ async fn the_listing_names_a_refused_session_cell_with_its_reason() {
                     &stores,
                     Build::N,
                     "build-n",
-                    &["const nap = sleep(60000);\nawait nap;\nfinish('woke');"],
+                    &["const nap = sleep(60000);\nawait nap;\nawait control.finish('woke');"],
                 );
                 let opened = session(&old, SESSION).await;
                 tokio::spawn(async move {

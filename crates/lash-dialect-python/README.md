@@ -43,7 +43,8 @@ later cells copy the definition into their own documents. Captures must be
 data or other saved functions; a task capture prevents saving. Saved functions
 can seed a new session explicitly, and `await processes_start({"definition":
 work, "args": {"n": 21}})` starts one as a durable process when the host offers
-the process tools. `finish(value)` answers the turn through the kernel.
+the process tools. `await control_finish(value)`, awaited at the top level, answers the turn: it is a
+declared control tool, and nothing after it runs (FIG-5781).
 Built-in names, including the configured terminal name, cannot be
 reused by module bindings (`PY_SHADOWS_BUILTIN`); function locals and
 comprehension targets may shadow them. Renaming `len` to `len_`, for

@@ -129,20 +129,4 @@ pub const RLM_PROTOCOL_SCENARIO_CONTRACTS: &[ScenarioContractSpec] = &[
         required_sim_evidence: &["provider_turn"],
         oracle_id: "sim.oracle.scenario.rlm-contract.v1",
     },
-    ScenarioContractSpec {
-        suite: "rlm",
-        test_name: "rlm_protocol_scenario_typed_schema_mismatch_loops_with_feedback",
-        owned_invariant: "Typed schema mismatch loops with repair feedback.",
-        semantic_oracle: "rlm.typed_schema_mismatch_repair_loop",
-        required_sim_evidence: &["provider_mutation", "provider_turn"],
-        oracle_id: "sim.oracle.scenario.rlm-contract.v1",
-    },
-    ScenarioContractSpec {
-        suite: "rlm",
-        test_name: "rlm_protocol_scenario_typed_schema_mismatch_checks_any_of",
-        owned_invariant: "Typed schema validation checks anyOf mismatches.",
-        semantic_oracle: "rlm.typed_schema_any_of_mismatch",
-        required_sim_evidence: &["provider_mutation", "provider_turn"],
-        oracle_id: "sim.oracle.scenario.rlm-contract.v1",
-    },
 ];

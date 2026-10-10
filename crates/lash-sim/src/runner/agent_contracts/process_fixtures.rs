@@ -18,7 +18,7 @@ const definition = async () => {
 };
 const handle = await processes.start({ definition });
 const result = await handle;
-finish(result);
+await control.finish(result);
 </typescript>"#,
         ],
         &expected,
@@ -52,7 +52,7 @@ const parent = async () => {
 };
 const handle = await processes.start({ definition: parent });
 const result = await handle;
-finish(result);
+await control.finish(result);
 </typescript>"#,
         ],
         &expected,
@@ -81,10 +81,10 @@ const spawnChild = async () => {
 };
 const handle = await processes.start({ definition: spawnChild });
 const result = await handle;
-finish(result);
+await control.finish(result);
 </typescript>"#,
             r#"<typescript>
-finish({ len: chunk.length });
+await control.finish({ len: chunk.length });
 </typescript>"#,
         ],
         &expected,
@@ -107,7 +107,7 @@ pub(super) async fn agent_session_turn_process_child_execution()
 const child = async () => { return { child: 'done' }; };
 const handle = await processes.start({ definition: child });
 const result = await handle;
-finish(result);
+await control.finish(result);
 </typescript>"#,
         &expected,
     )
@@ -128,7 +128,7 @@ const left = await processes.start({ definition: child, args: { value: "left" } 
 const right = await processes.start({ definition: child, args: { value: "right" } });
 const leftValue = await left;
 const rightValue = await right;
-finish({ joined: [leftValue, rightValue] });
+await control.finish({ joined: [leftValue, rightValue] });
 </typescript>"#,
         &expected,
     )

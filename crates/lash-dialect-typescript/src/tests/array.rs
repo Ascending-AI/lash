@@ -65,6 +65,7 @@ fn drive(source: &str, expected: &[Vec<Datum>]) -> End {
     let environment = Environment {
         library: &kernel.library,
         effects: &super::machine::effects(),
+        controls: super::controls(),
         bindings: &BTreeSet::new(),
         functions: &std::collections::BTreeMap::new(),
     };
@@ -103,10 +104,15 @@ fn drive_document(
     )
     .unwrap();
     let mut asked = 0;
+    // The value the cell's `finish` call ended it with: the run's answer.
+    let mut finished_with = None;
     loop {
         match machine.run(&mut NoHost, u64::MAX).unwrap() {
-            Step::Ended(end) => {
+            Step::Ended(mut end) => {
                 assert_eq!(asked, expected.len(), "{source}");
+                if let (End::Finished(finished), Some(value)) = (&mut end, finished_with) {
+                    finished.result = value;
+                }
                 return end;
             }
             Step::Parked(park) => {
@@ -114,6 +120,13 @@ fn drive_document(
                     match request {
                         Request::Sleep(request) => {
                             machine.deliver(request.wait, Outcome::Elapsed).unwrap();
+                        }
+                        Request::Effect(effect) if effect.effect.as_str() == "finish" => {
+                            finished_with =
+                                Some(effect.args.first().cloned().unwrap_or(Datum::Null));
+                            machine
+                                .deliver(effect.wait, Outcome::Completed(Datum::Null))
+                                .unwrap();
                         }
                         Request::Effect(effect) => {
                             assert_eq!(effect.args, expected[asked], "{source}");
@@ -149,7 +162,7 @@ fn holes_length_and_canonical_index_keys_keep_array_identity() {
             && !(3 in a) && (4 in a) && !(5 in a) && a[1] === undefined
             && a['01'] === undefined && present === '2,4,';
         a.length = 3;
-        finish(before && alias === a && alias.length === 3 && !(4 in a));
+        await finish(before && alias === a && alias.length === 3 && !(4 in a));
     "#);
 }
 
@@ -165,7 +178,7 @@ fn callbacks_snapshot_length_but_read_live_properties() {
             return this.offset + value + (receiver === a ? 0 : 100);
         }, context);
         const sparse = [1, , 3].map(x => x * 2);
-        finish(indices === '012' && mapped.join(',') === '11,12,13'
+        await finish(indices === '012' && mapped.join(',') === '11,12,13'
             && sparse.length === 3 && !(1 in sparse) && sparse[2] === 6);
     "#);
 }
@@ -181,7 +194,7 @@ fn async_map_callbacks_start_concurrently_and_join() {
         });
         const started = order === '123';
         const result = await Promise.all(promises);
-        finish(started && result.join(',') === '2,4,6' && order === '123123');
+        await finish(started && result.join(',') === '2,4,6' && order === '123123');
     "#);
 }
 
@@ -197,7 +210,7 @@ fn sort_uses_utf16_stability_and_undefined_before_holes() {
         const records = [{key: 1, id: 'a'}, {key: 1, id: 'b'}, {key: 0, id: 'c'}];
         records.sort((x, y) => x.key - y.key);
         const equal = [2, 1].sort(() => NaN);
-        finish(ordered && alias === a && records.map(x => x.id).join('') === 'cab'
+        await finish(ordered && alias === a && records.map(x => x.id).join('') === 'cab'
             && equal.join(',') === '2,1');
     "#);
 }
@@ -213,7 +226,7 @@ fn mutation_preserves_holes_and_copy_methods_materialize_them() {
         const sparse = [1, , 3]; const reversed = sparse.toReversed();
         const changed = sparse.with(-2, 9);
         const sorted = sparse.toSorted();
-        finish(sparseRemoved && a.join(',') === 'x,1,1'
+        await finish(sparseRemoved && a.join(',') === 'x,1,1'
             && (1 in reversed) && reversed[1] === undefined && !(1 in sparse)
             && changed.join(',') === '1,9,3' && sorted[2] === undefined && (2 in sorted));
     "#);
@@ -230,7 +243,7 @@ fn iteration_is_live_and_spread_finishes_before_later_operands() {
         const iterator = a.values(); const first = iterator.next();
         a[1] = 2; const second = iterator.next();
         const values = [...iterator];
-        finish(visited === '1u34' && spread.length === 5 && spread[4] === 5
+        await finish(visited === '1u34' && spread.length === 5 && spread[4] === 5
             && (1 in spread) && first.value === 1 && second.value === 2
             && values.join(',') === '3,4,5');
     "#);
@@ -250,7 +263,7 @@ fn generic_receivers_bounds_search_and_reduce_follow_ecma_steps() {
         const holes = a.includes(undefined) && a.indexOf(undefined) === -1;
         const nans = [NaN].includes(NaN) && [NaN].indexOf(NaN) === -1;
         const bounds = a.slice(-2.9).join(',') === '3,4';
-        finish(sparse && holes && nans && bounds && reduced === 8 && reverse === '431');
+        await finish(sparse && holes && nans && bounds && reduced === 8 && reverse === '431');
     "#);
 }
 
@@ -269,7 +282,7 @@ fn from_maps_between_live_iterator_steps_and_flatten_skips_holes() {
         const flat = [1, , [2, , [3]]].flat(2);
         const flatMapped = [1, , 2].flatMap(x => [x, , x * 2]);
         const first = mapped.join(',') === '11,12,13' && snapshot.join(',') === '1';
-        finish(first && flat.join(',') === '1,2,3' && flatMapped.join(',') === '1,2,2,4');
+        await finish(first && flat.join(',') === '1,2,3' && flatMapped.join(',') === '1,2,2,4');
     "#);
 }
 
@@ -278,20 +291,20 @@ fn from_maps_between_live_iterator_steps_and_flatten_skips_holes() {
 #[test]
 fn invalid_lengths_raise_and_typed_sparse_reads_hide_holes() {
     for length in ["-1", "1.5", "Infinity", "4294967296"] {
-        let source = format!("const a = [1, , 3]; a.length = {length}; finish(true);");
+        let source = format!("const a = [1, , 3]; a.length = {length}; await finish(true);");
         assert!(
             matches!(run(&source), End::Error(lash_kernel_vm::RunError::Uncaught(Datum::Error(error))) if error.kind == "RangeError"),
             "{source}"
         );
     }
-    law("const a: number[] = [1, , 3]; finish(a[1] === undefined && a.length === 3);");
+    law("const a: number[] = [1, , 3]; await finish(a[1] === undefined && a.length === 3);");
 }
 
 /// The final result exposes JSON-shaped array slots, including nested aliases,
 /// while a boundary copy leaves the guest's sparse property presence intact.
 #[test]
 fn final_results_normalize_holes_without_mutating_guest_arrays() {
-    let end = run("const a = [1, , undefined]; const copied = [a, a]; finish(copied);");
+    let end = run("const a = [1, , undefined]; const copied = [a, a]; await finish(copied);");
     let row = Datum::List(vec![
         Datum::Float(lash_kernel_doc::Float::new(1.0)),
         Datum::Null,
@@ -318,7 +331,7 @@ fn tool_and_effect_arguments_normalize_nested_holes_on_copies() {
         r#"
         const a = [, 2]; const p = echo(a); await p;
         await echo({nested: a});
-        finish(!(0 in a) && a.length === 2 && a[1] === 2);
+        await finish(!(0 in a) && a.length === 2 && a[1] === 2);
     "#,
         &expected,
     );
@@ -352,10 +365,10 @@ fn regexp_match_arrays_keep_the_callback_receiver_and_write_refusal() {
     law(r#"
         const match = /a(.)/.exec('ab');
         const original = match.map((value, index, receiver) => receiver === match);
-        finish(Array.isArray(match) && original.every(value => value)
+        await finish(Array.isArray(match) && original.every(value => value)
             && match.length === 2 && match[1] === 'b');
     "#);
-    let end = run("const match = /a(.)/.exec('ab'); match.push('c'); finish(true);");
+    let end = run("const match = /a(.)/.exec('ab'); match.push('c'); await finish(true);");
     assert!(
         matches!(end, End::Error(lash_kernel_vm::RunError::Uncaught(Datum::Error(error))) if error.kind == "TS_ARRAY_LIKE_MATCH_UNSUPPORTED")
     );
@@ -366,7 +379,7 @@ fn regexp_match_arrays_keep_the_callback_receiver_and_write_refusal() {
 #[test]
 fn non_index_array_writes_keep_the_existing_typed_refusal() {
     for key in ["-1", "1.5", "4294967295", "'extra'"] {
-        let source = format!("const a = [1]; a[{key}] = 9; finish(true);");
+        let source = format!("const a = [1]; a[{key}] = 9; await finish(true);");
         assert!(
             matches!(run(&source), End::Error(lash_kernel_vm::RunError::Uncaught(Datum::Error(error))) if error.kind == "TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED"),
             "{source}"
@@ -378,13 +391,12 @@ fn non_index_array_writes_keep_the_existing_typed_refusal() {
 /// through the same array; it does not coerce a text into a number.
 #[test]
 fn typed_array_alias_writes_are_checked_at_the_typed_use() {
-    let source =
-        "const xs: number[] = [1, 2]; const alias: any = xs; alias[0] = 'a'; finish(xs[0] + 1);";
+    let source = "const xs: number[] = [1, 2]; const alias: any = xs; alias[0] = 'a'; await finish(xs[0] + 1);";
     assert!(
         matches!(run(source), End::Error(lash_kernel_vm::RunError::Uncaught(Datum::Error(error))) if error.kind == "type_error")
     );
     law(
-        "const xs: any = [1, 2]; const alias: any = xs; alias[0] = 'a'; finish(xs[0] + 1 === 'a1');",
+        "const xs: any = [1, 2]; const alias: any = xs; alias[0] = 'a'; await finish(xs[0] + 1 === 'a1');",
     );
 }
 
@@ -394,10 +406,10 @@ fn typed_array_alias_writes_are_checked_at_the_typed_use() {
 fn live_for_of_carries_declared_element_and_return_types() {
     let source = "type Price = number; interface Item { price: Price } function total(items: Item[]): number { let sum = 0; for (const item of items) { sum += item.price; } return sum; }";
     law(&format!(
-        "{source} finish(total([{{price: 2}}, {{price: 3}}]) * 2 === 10);"
+        "{source} await finish(total([{{price: 2}}, {{price: 3}}]) * 2 === 10);"
     ));
     assert!(
-        matches!(run(&format!("{source} finish(total([{{price: '2' as any}}]));")), End::Error(lash_kernel_vm::RunError::Uncaught(Datum::Error(error))) if error.kind == "type_error")
+        matches!(run(&format!("{source} await finish(total([{{price: '2' as any}}]));")), End::Error(lash_kernel_vm::RunError::Uncaught(Datum::Error(error))) if error.kind == "type_error")
     );
 }
 
@@ -406,7 +418,7 @@ fn live_for_of_carries_declared_element_and_return_types() {
 #[test]
 fn string_conversion_obeys_own_join_and_keeps_locale_refusal() {
     law(
-        "const a = {0: 1, length: 1, join: function() { return this[0] + 10; }}; finish(Array.prototype.toString.call(a) === 11 && Array.prototype.toString.call({length: 1}) === '[object Object]');",
+        "const a = {0: 1, length: 1, join: function() { return this[0] + 10; }}; await finish(Array.prototype.toString.call(a) === 11 && Array.prototype.toString.call({length: 1}) === '[object Object]');",
     );
     let lowered =
         super::lower("[1].toLocaleString();").expect_err("locale formatting remains refused");
@@ -427,7 +439,7 @@ fn huge_array_likes_are_refused_before_a_walk_and_to_spliced_reads_what_it_keeps
         "Array.prototype.toSpliced.call(huge, 0, 0)",
     ] {
         let source = format!(
-            "const huge: any = {{}}; huge[0] = 'x'; huge[4294967295] = 'y'; huge.length = 4294967296; {call}; finish(true);"
+            "const huge: any = {{}}; huge[0] = 'x'; huge[4294967295] = 'y'; huge.length = 4294967296; {call}; await finish(true);"
         );
         assert!(
             matches!(run(&source), End::Error(lash_kernel_vm::RunError::Uncaught(Datum::Error(error))) if error.kind == "RangeError"),
@@ -437,6 +449,6 @@ fn huge_array_likes_are_refused_before_a_walk_and_to_spliced_reads_what_it_keeps
     law(
         "const like = {'9007199254740989': 1, '9007199254740990': 2, '9007199254740992': 4, length: 2 ** 53 + 20};
         const kept = Array.prototype.toSpliced.call(like, 0, 2 ** 53 - 3, 'a');
-        finish(kept.length === 3 && kept[0] === 'a' && kept[1] === 1 && kept[2] === 2);",
+        await finish(kept.length === 3 && kept[0] === 'a' && kept[1] === 1 && kept[2] === 2);",
     );
 }

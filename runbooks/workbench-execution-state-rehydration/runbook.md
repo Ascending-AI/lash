@@ -31,7 +31,7 @@ committed *transcript* nodes return after a process replacement. Transcript surv
 not state survival: a session can render every past message while its bound variables are
 gone. This scenario targets the other half of the checkpoint and deliberately places a
 **no-new-binding turn** between the binding turn and the restart. RLM requires a
-terminating `finish`, so every successful turn executes code; "runs no code" is not a
+terminating `control.finish`, so every successful turn executes code; "runs no code" is not a
 satisfiable condition. The relevant distinction is whether that required code changed
 execution state.
 
@@ -46,7 +46,7 @@ the post-restart code ran — never on the assistant's ability to recall.
    answered correctly" is never sufficient on its own: the marker is also in committed
    history, so prose alone proves nothing about execution state.
 2. **The middle turn must create no new binding.** It will execute at least the required
-   `finish`. Gate on the `exec_code_started` source for that turn: it may read values and
+   `control.finish`. Gate on the `exec_code_started` source for that turn: it may read values and
    terminate, but it must contain no assignment, declaration, or mutation. A new binding
    makes the reference-only shape unproven, so retry once with a simpler prompt; a second
    mutation is a scenario-promptability finding → Abort/RCA.
@@ -189,14 +189,14 @@ screenshot the settled pair as `01-bound.png`.
 
 Submit a short conversational turn and explicitly require the agent to answer without
 declaring, assigning, or mutating any TypeScript variable. It must still terminate with
-`finish`. Poll until idle.
+`control.finish`. Poll until idle.
 
 Gate all of the following:
 
 - `/api/state.messages` gained exactly one further ordered user/assistant pair;
 - after the Phase-2 boundary, the turn has at least one `exec_code_started` record;
 - every such record contains no binding declaration, assignment, or mutation, and the
-  terminal record uses `finish`.
+  terminal record uses `control.finish`.
 
 Do not consult the timeline's code-block rows for this gate. If the source creates a
 binding, retry once with a simpler prompt; a second mutation is a promptability finding →
@@ -224,7 +224,7 @@ pre-restart row, counted before the restart, to render in its original order. Sc
 ## Phase 4 — Prove the variable returned before the model spoke
 
 Submit one turn instructing the agent to read the existing variable `fig636_marker` and
-call `finish(...)` with its value, to run exactly one TypeScript cell, and not to assign or redefine
+call `await control.finish(...)` with its value, to run exactly one TypeScript cell, and not to assign or redefine
 the variable. Poll until idle.
 
 From trace records written **after** the Phase 2 restart boundary, take the first
@@ -236,7 +236,7 @@ From trace records written **after** the Phase 2 restart boundary, take the firs
   than the model.
 - **Execution.** The first `exec_code_started` source after that request references
   `fig636_marker`, contains no assignment or declaration of that name, and terminates with
-  `finish`.
+  `control.finish`.
 - **Agreement.** The rendered assistant answer contains the exact marker and
   `/api/state.messages` matches the rendered transcript.
 

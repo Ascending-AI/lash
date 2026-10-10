@@ -183,8 +183,98 @@ async fn standard_runtime_text_part_reconciles_without_streaming_duplicate(tier:
     world.shutdown().await;
 }
 
+/// A tool that answers `control.finish`'s control without declaring it.
+struct UndeclaredFinish;
+
+impl UndeclaredFinish {
+    fn definition() -> lash_core::ToolDefinition {
+        lash_core::ToolDefinition::raw(
+            "tool:smuggle_finish",
+            "smuggle_finish",
+            "Answers with a turn control it does not declare.",
+            serde_json::json!({ "type": "object" }),
+            serde_json::json!({ "type": "object" }),
+        )
+        .expect("valid declared tool schemas")
+        .with_execution(std::time::Duration::from_secs(30))
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core::ToolProvider for UndeclaredFinish {
+    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+        vec![Self::definition().manifest()]
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+        (name == "smuggle_finish").then(|| Arc::new(Self::definition().contract()))
+    }
+
+    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        lash_core::ToolOutcome::turn_control(lash_core::TurnControl::Finish {
+            value: lash_core::ToolValue::untrusted_json(serde_json::json!("smuggled")),
+        })
+        .into()
+    }
+}
+
+/// Law 10 (FIG-5781): a tool whose result is a turn control it did not
+/// declare is refused at settlement with a typed failure, and the turn does
+/// not end on it: the model reads the failure and answers.
+async fn a_tool_answering_an_undeclared_control_is_refused_and_the_turn_goes_on(tier: Tier) {
+    let Some(world) = world(
+        tier,
+        vec![
+            answer(vec![tool_call(
+                "tool-1",
+                "smuggle_finish",
+                serde_json::json!({}),
+            )]),
+            answer(vec![text("answered after the refusal")]),
+        ],
+        Some(Arc::new(UndeclaredFinish)),
+    )
+    .await
+    else {
+        return;
+    };
+    let session = world.session("undeclared-control", served::spec(8)).await;
+    let output = world.send(&session, "smuggle a finish").await;
+
+    assert_eq!(output.finished(), None, "{:?}", output.result.outcome);
+    assert_eq!(output.result.tool_calls.len(), 1);
+    assert!(
+        matches!(
+            &output.result.tool_calls[0].output.outcome,
+            lash_core::ToolCallOutcome::Failure(failure)
+                if matches!(
+                    failure.cause.as_deref(),
+                    Some(lash_core::ToolFailureCause::Declaration {
+                        refusal: lash_core::DeclarationRefusal::UndeclaredControl {
+                            control: lash_core::TurnControlKind::Finish,
+                        },
+                    })
+                )
+        ),
+        "the undeclared control is refused: {:?}",
+        output.result.tool_calls[0]
+    );
+    assert!(
+        matches!(
+            &output.result.outcome,
+            lash_core::facade_support::TurnOutcome::Finished(
+                lash_core::facade_support::TurnFinish::AssistantMessage { text }
+            )
+                if text == "answered after the refusal"
+        ),
+        "{:?}",
+        output.result.outcome
+    );
+    world.shutdown().await;
+}
+
 /// A tool that finishes the turn with its value ends it with the first such
-/// value in declared order; every call of the round completes before the
+/// value in declared order; the second control is refused, and every call completes before the
 /// turn's value is published, and the committed reply is that value,
 /// marked as the turn's one reply.
 async fn standard_runtime_tool_control_finish_emits_terminal_output(tier: Tier) {
@@ -199,11 +289,15 @@ async fn standard_runtime_tool_control_finish_emits_terminal_output(tier: Tier) 
         ],
         Some(Arc::new(TerminalControlTool {
             controls: vec![
-                lash_core::ToolControl::Finish {
-                    value: lash_core::ToolValue::untrusted_json(serde_json::json!("first")),
+                lash_core::ToolControl::Turn {
+                    control: lash_core::TurnControl::Finish {
+                        value: lash_core::ToolValue::untrusted_json(serde_json::json!("first")),
+                    },
                 },
-                lash_core::ToolControl::Finish {
-                    value: lash_core::ToolValue::untrusted_json(serde_json::json!("second")),
+                lash_core::ToolControl::Turn {
+                    control: lash_core::TurnControl::Finish {
+                        value: lash_core::ToolValue::untrusted_json(serde_json::json!("second")),
+                    },
                 },
             ],
         })),
@@ -216,13 +310,30 @@ async fn standard_runtime_tool_control_finish_emits_terminal_output(tier: Tier) 
     let output = world.send(&session, "run terminal tools").await;
 
     assert_eq!(
-        output.tool_value(),
+        output.finished(),
         Some(("terminal_tool_0", &serde_json::json!("first"))),
         "outcome={:?} calls={:?}",
         output.result.outcome,
         output.result.tool_calls
     );
     assert_eq!(output.result.tool_calls.len(), 2);
+    // A refused call is reported before the step's executed calls, so the
+    // second control call is found by its tool.
+    let second_call = output
+        .result
+        .tool_calls
+        .iter()
+        .find(|call| call.tool == "terminal_tool_1")
+        .expect("the second control call is recorded");
+    assert!(
+        matches!(
+            &second_call.output.outcome,
+            lash_core::ToolCallOutcome::Failure(failure)
+                if matches!(failure.cause.as_deref(), Some(lash_core::ToolFailureCause::ControlAttemptSpent))
+        ),
+        "the second control call is refused: {second_call:?}"
+    );
+
     let position = |matches: &dyn Fn(&TurnEvent) -> bool| {
         output
             .activities
@@ -237,7 +348,7 @@ async fn standard_runtime_tool_control_finish_emits_terminal_output(tier: Tier) 
         matches!(event, TurnEvent::ToolCallCompleted { name, .. } if name == "terminal_tool_1")
     })
     .expect("the second call completed");
-    let terminal = position(&|event| matches!(event, TurnEvent::ToolValue { .. }))
+    let terminal = position(&|event| matches!(event, TurnEvent::Finished { .. }))
         .expect("the turn's value was published");
     assert!(
         first < terminal && second < terminal,
@@ -246,7 +357,7 @@ async fn standard_runtime_tool_control_finish_emits_terminal_output(tier: Tier) 
     );
     assert!(matches!(
         &output.activities[terminal].event,
-        TurnEvent::ToolValue { tool_name, value }
+        TurnEvent::Finished { tool_name, value }
             if tool_name == "terminal_tool_0" && *value == serde_json::json!("first")
     ));
     let view = output.result.state.read_view();
@@ -311,10 +422,10 @@ async fn standard_runtime_tool_control_fail_stops_without_terminal_output_event(
         output.result.tool_calls
     );
     assert!(
-        !output.activities.iter().any(|activity| matches!(
-            activity.event,
-            TurnEvent::FinalValue { .. } | TurnEvent::ToolValue { .. }
-        )),
+        !output
+            .activities
+            .iter()
+            .any(|activity| matches!(activity.event, TurnEvent::Finished { .. })),
         "{:?}",
         output.activities
     );
@@ -1156,6 +1267,7 @@ tiered_laws!(
     standard_runtime_recovers_streamed_text_when_final_response_is_empty,
     standard_runtime_text_part_reconciles_without_streaming_duplicate,
     standard_runtime_tool_control_finish_emits_terminal_output,
+    a_tool_answering_an_undeclared_control_is_refused_and_the_turn_goes_on,
     standard_runtime_tool_control_fail_stops_without_terminal_output_event,
     standard_runtime_executes_streamed_tool_call_when_final_response_is_empty,
     standard_runtime_preserves_part_boundaries_when_response_is_not_streamed,

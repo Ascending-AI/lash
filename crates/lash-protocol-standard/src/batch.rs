@@ -96,7 +96,13 @@ pub(crate) struct Expansion {
 
 /// Expands every `batch` call of `calls` into consecutive slots at the
 /// wrapper's position. Native calls take one slot each, in order.
-pub(crate) fn expand(calls: Vec<PendingToolCall>, max_members: NonZeroUsize) -> Expansion {
+/// A member naming a tool whose call ends the turn (`ends_the_turn`) is
+/// refused: a control call is the step's own call, never a member.
+pub(crate) fn expand(
+    calls: Vec<PendingToolCall>,
+    max_members: NonZeroUsize,
+    ends_the_turn: &dyn Fn(&str) -> bool,
+) -> Expansion {
     let mut expansion = Expansion::default();
     let mut source_position = 0_u32;
     for call in calls {
@@ -125,6 +131,17 @@ pub(crate) fn expand(calls: Vec<PendingToolCall>, max_members: NonZeroUsize) -> 
                     member_index,
                     tool: member.tool,
                     error: Value::String("`batch` cannot run inside `batch`".to_string()),
+                });
+                continue;
+            }
+            if ends_the_turn(&member.tool) {
+                rows.push(ExpandedRow::Refused {
+                    member_index,
+                    error: Value::String(format!(
+                        "`{}` ends the turn, so it cannot run inside `batch`; call it on its own",
+                        member.tool
+                    )),
+                    tool: member.tool,
                 });
                 continue;
             }

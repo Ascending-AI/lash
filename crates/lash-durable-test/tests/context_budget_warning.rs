@@ -53,7 +53,7 @@ fn model(requests: Arc<Mutex<Vec<String>>>) -> lash_core::facade_support::Provid
                 let call = seen.len();
                 seen.push(serde_json::to_string(&request).expect("the request renders"));
                 Ok(match call {
-                    0 => cell("finish(\"pressure\");", 120),
+                    0 => cell("await control.finish(\"pressure\");", 120),
                     1 => cell("console.log(\"warning observed\");", 8),
                     2 => cell(
                         &format!(
@@ -61,7 +61,7 @@ fn model(requests: Arc<Mutex<Vec<String>>>) -> lash_core::facade_support::Provid
                         ),
                         8,
                     ),
-                    3 => cell(&format!("finish(\"{BATON}\");"), 8),
+                    3 => cell(&format!("await control.finish(\"{BATON}\");"), 8),
                     call => panic!("unexpected model call {call}"),
                 })
             }

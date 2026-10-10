@@ -8,6 +8,7 @@ use lash_sansio::TurnId;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use crate::rlm_support::RlmCompletion;
 use lash_core::sansio::{
     CheckpointResumeAction, CompletedToolCall, PendingWork, ProtocolDriverHandle,
 };
@@ -21,7 +22,7 @@ use lash_core::{
     facade_support::TurnFinish, facade_support::TurnOutcome, facade_support::TurnStop,
     facade_support::append_assistant_text_part, facade_support::normalized_response_parts,
 };
-use lash_rlm_types::{RlmDiagnosticEvent, RlmProtocolEvent, RlmTermination};
+use lash_rlm_types::{RlmDiagnosticEvent, RlmProtocolEvent};
 use serde_json::Value;
 
 #[cfg(feature = "testing")]
@@ -39,9 +40,9 @@ use super::cell::{
 #[cfg(feature = "testing")]
 use super::finish::internal_assistant_prose_message;
 use super::finish::{
-    cell_context_message, finish_required_reminder_message, finish_schema_mismatch_message,
+    cell_context_message, finish_required_reminder_message,
     internal_assistant_prose_message_for_turn, invalid_cell_message, no_progress_stop_message,
-    output_limit_retry_message, validate_finish_value,
+    output_limit_retry_message,
 };
 use super::stall::{
     ExtractionCounts, ExtractionDiagnostic, LLM_EXTRACTION_PHASE, NO_PROGRESS_BUDGET_PHASE,
@@ -101,7 +102,7 @@ impl RlmDriver {
         attempt: &AttemptContext<'_>,
         extraction: Result<Option<CellExtraction>, CellExtractionError>,
         terminal_reason: LlmTerminalReason,
-        termination: &RlmTermination,
+        termination: &RlmCompletion,
         reply: ReplyProjections<'a>,
     ) -> ReplyClass<'a> {
         match extraction {
@@ -252,8 +253,13 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
     }
 
     fn prepare_protocol_iteration(&self, ctx: DriverContextView<'_>) -> Vec<DriverAction> {
-        if let Err(err) = decode_rlm_termination_options(ctx.termination()) {
-            return invalid_turn_options_actions(err);
+        match decode_rlm_termination_options(ctx.termination()) {
+            Err(err) => return invalid_turn_options_actions(err),
+            Ok(termination) => {
+                if let Err(err) = crate::rlm_support::finish_available(&termination, &ctx) {
+                    return invalid_turn_options_actions(err);
+                }
+            }
         }
         let request = match ctx.project_llm_request(false) {
             Ok(request) => request,
@@ -539,12 +545,11 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                 lash_core::driver_writer_version!(ctx, crate::RLM_PROTOCOL_EVENT_VERSION),
             )
         };
-        // The finish value itself: the turn's answer, also when history
-        // records only its retention (FIG-1643).
-        let mut finish_value = None;
+        // The control the cell's control call settled as, with the call's
+        // name: what the turn ends on when the cell ended on it.
+        let mut settled_control = None;
         match result {
             Ok(response) => {
-                finish_value = response.finish_value().cloned();
                 if !response.degraded_bindings.is_empty() {
                     actions.push(DriverAction::AppendEvents(vec![diagnostic_event(
                         lash_rlm_types::RlmDiagnosticPhase::ProjectionRehydration,
@@ -558,6 +563,13 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                     .tool_calls
                     .iter()
                     .find_map(terminal_outcome_from_tool_result);
+                if let CellOutcome::Controlled { call_id, .. } = &response.result {
+                    settled_control = response
+                        .tool_calls
+                        .iter()
+                        .find(|call| &call.call_id == call_id)
+                        .and_then(|call| call.output.as_turn_control().cloned());
+                }
                 let (host_records, omitted) = bounded_exec_tool_call_records(
                     &response.tool_calls,
                     &self.dialect.presentation(),
@@ -582,7 +594,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                 record.prints_retained = response.prints_retained;
                 record.result = response.result;
                 if let Some(outcome) = terminal_outcome {
-                    // A tool ended the turn: the cell's own finish never
+                    // A tool stopped the turn: the cell's own control never
                     // took effect, so it is not the cell's result.
                     if !record.result.is_failed() {
                         record.result = CellOutcome::Completed;
@@ -600,50 +612,68 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
             Err(failure) => record.result = CellOutcome::Failed(failure.into()),
         }
 
-        if let Some(finish_value) = finish_value {
-            // Typed-RLM: validate against the declared schema, under either
-            // termination (FIG-5104). If it fails, surface the error to the
-            // model and loop; otherwise fall through to the shared
-            // terminate-with-value path below.
+        if let (
+            CellOutcome::Controlled {
+                tool_name, call_id, ..
+            },
+            Some(control),
+        ) = (&record.result, settled_control)
+        {
             let termination = match decode_rlm_termination_options(ctx.termination()) {
                 Ok(termination) => termination,
                 Err(err) => return invalid_turn_options_actions(err),
             };
-            if let Some(schema) = termination.finish_schema()
-                && let Err(error_text) = validate_finish_value(&finish_value, schema)
-            {
-                // The program finished with a value its declared schema
-                // refuses: a defect in the program.
+            // The value `control.finish` took is the turn's answer, so it
+            // must be one the turn's required output admits. One that is not
+            // failed the call: the cell is recorded as failed on it, the
+            // model reads why, and the turn goes on.
+            if let Err(mismatch) = crate::protocol::finish::finish_value_admitted(
+                tool_name,
+                &control,
+                termination.finish_schema(),
+            ) {
                 record.result = CellOutcome::Failed(
                     lash_core::CellFailure::new(
                         lash_core::CellFailureKind::Program,
-                        error_text.to_string(),
+                        format!(
+                            "`{}` refused its value: {mismatch}",
+                            self.dialect.prompt_vocabulary().finish_call
+                        ),
                     )
-                    .with_value_mismatch(error_text),
+                    .with_value_mismatch(mismatch),
                 );
                 if let Err(err) = continue_or_stop_after_nonterminal(
                     &ctx,
                     &mut actions,
                     commit(record),
-                    vec![conversation_event(finish_schema_mismatch_message(
-                        self.dialect.as_ref(),
-                        rlm_message_id(ctx.turn_id(), ctx.protocol_iteration(), "schema_mismatch"),
-                    ))],
+                    Vec::new(),
                     AttemptProgress::Stalled,
                 ) {
                     return invalid_turn_options_actions(err);
                 }
                 return actions;
             }
-
+            let candidate = lash_core::CompletionCandidate::pending(
+                ctx.protocol_iteration(),
+                call_id.clone(),
+                tool_name.clone(),
+                control,
+            );
+            let superseded = crate::protocol::finish::completion_superseded_message(
+                rlm_message_id(
+                    ctx.turn_id(),
+                    ctx.protocol_iteration(),
+                    "completion_superseded",
+                ),
+                &candidate,
+            );
             actions.push(DriverAction::AppendEvents(commit(record)));
             actions.push(DriverAction::Start(PendingWork::Checkpoint {
                 checkpoint: CheckpointKind::BeforeCompletion,
-                on_empty: CheckpointResumeAction::Finish(TurnOutcome::Finished(
-                    TurnFinish::FinalValue {
-                        value: finish_value,
-                    },
-                )),
+                on_empty: CheckpointResumeAction::Complete {
+                    candidate: Box::new(candidate),
+                    superseded: vec![superseded],
+                },
             }));
             return actions;
         }
@@ -873,7 +903,7 @@ fn terminal_outcome_from_tool_result(record: &ToolCallRecord) -> Option<TurnOutc
     if !record.output.is_success() {
         return None;
     }
-    lash_core::turn_outcome_from_tool_control(&record.tool, record.output.control.as_ref()?)
+    lash_core::turn_stop_from_tool_control(&record.tool, record.output.control.as_ref()?)
 }
 
 fn tool_call_event(record: ToolCallRecord) -> SessionStreamEvent {
@@ -1037,7 +1067,7 @@ struct StallRetry<'a> {
     /// Fingerprint of the reply as received.
     fingerprint: &'a str,
     /// Decoded termination options, recorded in the diagnostic.
-    termination: &'a RlmTermination,
+    termination: &'a RlmCompletion,
     /// Raw assistant text, feeding the diagnostic's character counters.
     raw_text: &'a str,
     /// Reply reasoning, counted in the diagnostic and carried into the
@@ -1049,7 +1079,7 @@ fn llm_extraction_payload(
     turn_id: &TurnId,
     reply_fingerprint: &str,
     decision: &str,
-    termination: &RlmTermination,
+    termination: &RlmCompletion,
     counts: ExtractionCounts<'_>,
 ) -> Value {
     ExtractionDiagnostic::new(turn_id, reply_fingerprint, decision, termination, counts).payload()

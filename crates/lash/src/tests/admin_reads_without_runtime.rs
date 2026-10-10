@@ -63,7 +63,7 @@ fn rlm_core(backend: lash_core::Backend, tools: bool) -> Result<LashCore> {
     let builder = explicit_ephemeral_facets(rlm_core_builder_over(backend)).serve_test_llm_profile(
         text_provider(
             "admin-reads",
-            typescript_block("const kept_global = 41;\nfinish(kept_global + 1);"),
+            typescript_block("const kept_global = 41;\nawait control.finish(kept_global + 1);"),
         ),
         mock_llm_profile_spec(),
     );

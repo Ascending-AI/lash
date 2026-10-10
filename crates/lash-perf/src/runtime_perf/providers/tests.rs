@@ -184,7 +184,7 @@ fn ingress_admission_projection_profile_uses_latest_request_item_marker() {
     );
     assert_eq!(
         marked_profile.full_text,
-        typescript_block(r#"finish("runtime perf benchmark ok");"#)
+        typescript_block(r#"await control.finish("runtime perf benchmark ok");"#)
     );
 
     let mut historical_marker_request = marked_request;
@@ -230,7 +230,7 @@ fn delegated_child_task_routing_ignores_parent_spawn_history() {
         let child_profile = benchmark_stream_profile_for_request(scenario, &child);
         assert_eq!(
             child_profile.full_text,
-            typescript_block("finish({ len: chunk.length });")
+            typescript_block("await control.finish({ len: chunk.length });")
         );
 
         let mut parent = empty_request();

@@ -48,9 +48,22 @@ pub enum ToolFailureCause {
         source: crate::ValueMismatch,
     },
     /// The body's outcome is one its recorded declaration does not admit: a
-    /// Deferred without `may_defer`, or an undeclared intent kind. Nothing
+    /// Deferred without `may_defer`, an undeclared intent kind, or an
+    /// undeclared turn control. Nothing
     /// the outcome declared was realized.
     Declaration {
         refusal: crate::DeclarationRefusal,
     },
+    /// A control call made from a task the cell spawned. Only the cell's
+    /// main task ends the turn; the body did not run.
+    ControlFromSpawnedTask,
+    /// A control call made while a task the cell started is outstanding or
+    /// its result unobserved. The body did not run.
+    ControlWithOutstandingTasks,
+    /// The iteration's one control attempt is spent: an earlier control
+    /// call was already admitted. The body did not run.
+    ControlAttemptSpent,
+    /// A call beside this control call in its round failed or was
+    /// cancelled, so the turn does not end on it. The body did not run.
+    ControlSiblingFailed,
 }

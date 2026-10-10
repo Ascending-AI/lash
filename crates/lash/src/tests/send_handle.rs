@@ -809,7 +809,7 @@ async fn a_session_the_engine_opens_first_reopens_under_its_recorded_protocol() 
             .kind("engine-first-open")
             .complete(|_| async {
                 Ok(text_response(
-                    "<typescript>\nfinish(\"engine answered\");\n</typescript>",
+                    "<typescript>\nawait control.finish(\"engine answered\");\n</typescript>",
                 ))
             })
             .build()

@@ -10,10 +10,11 @@
 /// version_guard(items(LASH_RLM_STALL_REPLY_DOMAIN_VERSION, reply_fingerprint))
 const LASH_RLM_STALL_REPLY_DOMAIN_VERSION: &str = "lash-rlm-stall-reply/v2";
 
+use crate::rlm_support::RlmCompletion;
 use lash_core::llm::types::ProviderReasoningReplay;
 use lash_core::session_model::SessionHistoryRecord;
 use lash_core::{DriverAction, DriverContextView};
-use lash_rlm_types::{RlmProtocolEvent, RlmTermination};
+use lash_rlm_types::RlmProtocolEvent;
 use lash_sansio::TurnId;
 use serde::ser::{Serialize, SerializeMap, Serializer};
 use serde_json::Value;
@@ -204,7 +205,7 @@ impl<'a> ExtractionDiagnostic<'a> {
         turn_id: &'a TurnId,
         reply_fingerprint: &'a str,
         decision: &'a str,
-        termination: &RlmTermination,
+        termination: &RlmCompletion,
         counts: ExtractionCounts<'a>,
     ) -> Self {
         Self {
@@ -305,10 +306,10 @@ impl Serialize for ExtractionCounts<'_> {
     }
 }
 
-fn termination_diagnostic_name(termination: &RlmTermination) -> &'static str {
-    match termination {
-        RlmTermination::FinishRequired { .. } => "finish_required",
-        RlmTermination::Natural { .. } => "natural",
+fn termination_diagnostic_name(termination: &RlmCompletion) -> &'static str {
+    match termination.mode {
+        lash_core::TerminationMode::TerminalRequired => "terminal_required",
+        lash_core::TerminationMode::Natural => "natural",
     }
 }
 

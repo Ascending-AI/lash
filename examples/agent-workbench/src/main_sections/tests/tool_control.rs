@@ -17,15 +17,13 @@ impl lash::tools::StaticToolExecute for WorkbenchControlTools {
                         "the operator cancelled the workbench action",
                     )),
                 ),
-                "workbench_finish" => lash::tools::ToolOutcome::from_output(
-                    lash::tools::ToolCallOutput::success(json!({ "accepted": true })).with_control(
-                        lash::tools::ToolControl::Finish {
-                            value: lash::tools::ToolValue::untrusted_json(json!({
-                                "finished_by": "workbench_finish"
-                            })),
-                        },
-                    ),
-                ),
+                "workbench_finish" => {
+                    lash::tools::ToolOutcome::from_output(lash::tools::ToolCallOutput::finish(
+                        lash::tools::ToolValue::untrusted_json(json!({
+                            "finished_by": "workbench_finish"
+                        })),
+                    ))
+                }
                 "workbench_fail" => lash::tools::ToolOutcome::ok(json!({ "accepted": false }))
                     .with_control(lash::tools::ToolControl::Fail {
                         failure: lash::tools::ToolFailure::tool(
@@ -66,12 +64,12 @@ fn workbench_control_tools() -> Arc<dyn lash::tools::ToolProvider> {
             ["workbench_control"],
             "cancel",
         )),
-        lash::tools::ToolDefinition::raw(
+        lash::tools::ToolDefinition::control(
             "tool:workbench_finish",
             "workbench_finish",
             "Finish the turn directly from a workbench tool.",
             empty_input.clone(),
-            json!({ "type": "object" }),
+            lash::tools::TurnControls::finish(),
         )
         .expect("valid declared tool schemas")
         .with_execution(std::time::Duration::from_secs(120))
@@ -119,7 +117,7 @@ fn workbench_control_cell(source: &str) -> String {
 async fn workbench_tools_expose_typed_cancellation_and_turn_control() {
     let workbench = Workbench::builder(scripted_cells_provider(vec![
         workbench_control_cell(
-            "try {\n  await workbench_control.cancel({});\n} catch (error) {\n}\nfinish(\"cancellation observed\");",
+            "try {\n  await workbench_control.cancel({});\n} catch (error) {\n}\nawait control.finish(\"cancellation observed\");",
         ),
         workbench_control_cell("await workbench_control.finish({});"),
         workbench_control_cell("await workbench_control.fail({});"),
@@ -175,7 +173,7 @@ async fn workbench_tools_expose_typed_cancellation_and_turn_control() {
     assert!(
         matches!(
             &finished.outcome,
-            lash::TurnOutcome::Finished(lash::TurnFinish::ToolValue { tool_name, value })
+            lash::TurnOutcome::Finished(lash::TurnFinish::Finished { tool_name, value })
                 if tool_name == "workbench_finish"
                     && value == &json!({ "finished_by": "workbench_finish" })
         ),

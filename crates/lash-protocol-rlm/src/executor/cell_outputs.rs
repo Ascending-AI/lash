@@ -144,10 +144,13 @@ pub(super) async fn record_cell_outputs(
                 response.prints_retained = recorded.prints_retained;
                 // History records the retention in a too-long finish value's
                 // place; the value itself stays the turn's answer.
-                if let Some(retained) = recorded.finish_retained {
-                    response.result = lash_core::CellOutcome::Finished(
-                        lash_core::OutputValue::Retained(retained),
-                    );
+                if let Some(retained) = recorded.finish_retained
+                    && let lash_core::CellOutcome::Controlled {
+                        control: lash_core::CellControl::Finish { value },
+                        ..
+                    } = &mut response.result
+                {
+                    *value = lash_core::OutputValue::Retained(retained);
                     response.retained_finish_value = finish_value;
                 }
             }

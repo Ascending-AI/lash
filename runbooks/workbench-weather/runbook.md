@@ -24,16 +24,16 @@ evidence, source-backed values, and rendered answer shape rather than an exact s
 1. **Ask exactly the product question.** Submit only
    `What is the current weather in Utrecht, Netherlands?` Do not add source code, parsing
    advice, a preferred weather site, retry advice, or language hints. The path from
-   search result to parsed values to `finish` is what this scenario judges.
+   search result to parsed values to `control.finish` is what this scenario judges.
 2. **Validation-only authority.** The only agent tool operations permitted are
-   the Parallel web-search and web-fetch MCP tools. Any process, filesystem, command-execution, messaging,
+   the Parallel web-search and web-fetch MCP tools and `control.finish`. Any process, filesystem, command-execution, messaging,
    mutation, or other host-affecting operation is a FAIL and triggers Abort/RCA. Browser
    automation and read-only evidence collection by the runbook operator are not agent tool
    operations.
 3. **A settled UI is not a finished turn.** After Send, first require the rendered running
    state. Then poll for at most five minutes until the page is idle, `/api/state.active_turns`
    is empty, and the row's trace has exactly one `turn_completed` with
-   `outcome.status == "completed"` and `done_reason == "final_value"`. A timeout or any
+   `outcome.status == "completed"` and `done_reason == "finished"`. A timeout or any
    other terminal outcome is a FAIL.
 4. **Live evidence must support the answer.** Require at least one successful
    Parallel web-search or web-fetch call whose returned content names Utrecht and supplies the

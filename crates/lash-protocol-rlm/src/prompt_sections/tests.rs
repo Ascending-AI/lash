@@ -11,7 +11,7 @@ use lash_core::plugin::{PluginError, PluginRegistrar, SessionPlugin};
 use lash_core::prompt_sections::{
     PromptPlacement, PromptPlan, PromptSectionPlacement, PromptWrapKey,
 };
-use lash_rlm_types::{RlmTermination, RlmTurnOptions};
+use lash_rlm_types::RlmTurnOptions;
 use lash_vm_runtime::{ToolBinding, ToolDefinitionBindingExt};
 
 use super::testing::{Call, RlmSections, compose, compose_rlm};
@@ -143,10 +143,10 @@ Put one program after any commentary, between standalone `<typescript>` and `</t
 
 <typescript>
 const total = 1 + 2;
-finish(total);
+await control.finish(total);
 </typescript>
 
-Built-in names, including `finish`, cannot be reused by top-level bindings. Top-level bindings persist across executions as data. A function bound to a top-level name persists too, as a copy: what it reads from outside itself is frozen when its cell ends, so a later change to a top-level variable is not seen by it, and a change it makes to one is not kept. A pending promise does not outlive the cell that created it, nor does a function that holds one: a later cell that uses such a binding fails with `SESSION_BINDING_NOT_CARRIED`, so keep a promise's awaited result, not the promise. Return exactly the value and type the task asks for with `finish(value)`; do not finish an unexamined whole tool result. Putting an object into a string — with `+`, `` `${...}` `` or `String(...)` — gives the placeholder `[object Object]`, never its contents; read the value with `console.log(value)` or serialize it with `JSON.stringify(value)`.
+Built-in names cannot be reused by top-level bindings. Top-level bindings persist across executions as data. A function bound to a top-level name persists too, as a copy: what it reads from outside itself is frozen when its cell ends, so a later change to a top-level variable is not seen by it, and a change it makes to one is not kept. A pending promise does not outlive the cell that created it, nor does a function that holds one: a later cell that uses such a binding fails with `SESSION_BINDING_NOT_CARRIED`, so keep a promise's awaited result, not the promise. Return exactly the value and type the task asks for with `await control.finish(value)`; do not finish with an unexamined whole tool result. Putting an object into a string — with `+`, `` `${...}` `` or `String(...)` — gives the placeholder `[object Object]`, never its contents; read the value with `console.log(value)` or serialize it with `JSON.stringify(value)`.
 
 `Math`, `Date` (UTC), `String`, `Array`, `Object`, `JSON`, `Map`/`Set`, `RegExp` and `URL` are available; this is not Node or a browser, and classes, generators and `new Promise(...)` are not supported.
 
@@ -158,7 +158,7 @@ An `async` function starts running when it is called, and async callbacks run co
 
 ### Host API
 
-`console.log(value)` shows output in the next step; `finish(value)` ends the turn. A failed tool call throws; wrap it in `try`/`catch` to carry on.
+`console.log(value)` shows output in the next step. `await control.finish(value)` ends the turn with `value`: nothing after it runs, so await it directly, as the last thing the program does, after every other promise has been awaited. A failed tool call throws; wrap it in `try`/`catch` to carry on.
 
 `await sleep(ms)` pauses the program. For a timeout, race a call against a timer — `await Promise.race([call, sleep(ms)])` is `undefined` when the timer wins, and the losing call is cancelled."##;
 /// The declaration of the fixture binding.
@@ -298,7 +298,11 @@ fn a_section_with_nothing_to_say_renders_nothing() {
             "\n=== FINALIZATION ===\n\n{}",
             sections(&lash_core::ToolCatalog::default())
                 .dialect
-                .finalization_copy(&RlmTermination::default(), RlmChannel::Cell)
+                .finalization_copy(
+                    lash_core::TerminationMode::default(),
+                    None,
+                    RlmChannel::Cell
+                )
         )
     );
 }
@@ -350,9 +354,8 @@ fn the_required_output_section_renders_the_finish_contract() {
         RlmSections::typescript(),
         Call {
             options: RlmTurnOptions {
-                termination: Some(RlmTermination::FinishRequired {
-                    schema: Some(lash_sansio::JsonSchema::admit(schema).expect("valid schema")),
-                }),
+                termination: Some(lash_core::TerminationMode::TerminalRequired),
+                finish_schema: Some(lash_sansio::JsonSchema::admit(schema).expect("valid schema")),
                 render: None,
             },
             ..Call::default()
@@ -585,25 +588,27 @@ fn the_late_sections_keep_one_user_message_with_the_expected_tail() {
                 RlmTurnOptions::default()
             } else {
                 RlmTurnOptions {
-                    termination: Some(RlmTermination::Natural {
-                        schema: Some(
-                            lash_sansio::JsonSchema::admit(
-                                serde_json::json!({ "type": "integer" }),
-                            )
+                    termination: Some(lash_core::TerminationMode::Natural),
+                    finish_schema: Some(
+                        lash_sansio::JsonSchema::admit(serde_json::json!({ "type": "integer" }))
                             .expect("valid schema"),
-                        ),
-                    }),
+                    ),
                     render: None,
                 }
             };
             let termination = options.effective_termination();
-            let finalization = sections.dialect.finalization_copy(&termination, channel);
+            let completion = crate::rlm_support::RlmCompletion::from(options.clone());
+            let finalization = sections.dialect.finalization_copy(
+                termination,
+                options.finish_schema.as_ref(),
+                channel,
+            );
             let optional = if images {
                 String::new()
             } else {
                 format!(
                     "\n\n=== REQUIRED OUTPUT ===\n\n{}\n\n=== CONTEXT BUDGET ===\n\nTurn: 1 · Tokens: 10000 · frame switch threshold: 200000 (5%).",
-                    crate::driver::required_output_block(&sections.dialect, &termination)
+                    crate::driver::required_output_block(&sections.dialect, &completion)
                         .expect("required output")
                 )
             };

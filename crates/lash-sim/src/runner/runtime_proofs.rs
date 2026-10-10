@@ -190,7 +190,7 @@ pub(super) async fn run_live_turn_facts(
                 turn_result
                     .assistant_message()
                     .is_some_and(|message| !message.is_empty()),
-                usize::from(turn_result.final_value().is_some()),
+                usize::from(turn_result.finished().map(|(_, value)| value).is_some()),
             ),
             Err(_) => (true, false, 0),
         };
@@ -476,7 +476,7 @@ impl RuntimeProofRecordingEvents {
             .await
             .iter()
             .filter_map(|activity| match &activity.event {
-                lash::TurnEvent::FinalValue { value } => Some(value.clone()),
+                lash::TurnEvent::Finished { value, .. } => Some(value.clone()),
                 _ => None,
             })
             .collect()
@@ -578,12 +578,16 @@ pub(super) async fn prove_final_value_semantic_channel()
         .await?
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?
         .result;
-    let final_value = result.final_value().cloned().ok_or_else(|| {
-        FixedScriptRunnerError::Assertion(format!(
-            "final-value proof finished without TurnFinish::FinalValue: {:?}",
-            result.outcome
-        ))
-    })?;
+    let final_value = result
+        .finished()
+        .map(|(_, value)| value)
+        .cloned()
+        .ok_or_else(|| {
+            FixedScriptRunnerError::Assertion(format!(
+                "final-value proof finished without TurnFinish::Finished: {:?}",
+                result.outcome
+            ))
+        })?;
     let recorded = events.snapshot().await;
     let final_value_events = events.final_value_events().await;
     let assistant_prose_delta_count = events.assistant_prose_delta_count().await;
@@ -619,14 +623,14 @@ pub(super) async fn prove_final_value_semantic_channel()
         "final-value proof did not commit a marked assistant reply rendering the final value",
     )?;
     let semantic_ok = facts.passed()
-        && facts.outcome_kind == "final_value"
+        && facts.outcome_kind == "finished"
         && facts.semantic_value.as_ref() == Some(&final_value)
         && final_value_events.iter().any(|value| value == &final_value)
         && !facts.transcript_inference_required()
         && result.assistant_message().is_none();
     require(
         semantic_ok,
-        "final-value proof did not observe a semantic TurnOutcome and FinalValue event",
+        "final-value proof did not observe a semantic TurnOutcome and Finished event",
     )?;
     Ok(FinalValueSemanticProof {
         schema: "lash.sim.final-value-semantic-proof.v1",
@@ -639,19 +643,19 @@ pub(super) async fn prove_final_value_semantic_channel()
         facts,
         semantic_channel_invariant: runtime_final_value_semantic(
             semantic_ok,
-            "final value was read from TurnFinish::FinalValue and TurnEvent::FinalValue, not transcript prose",
+            "final value was read from TurnFinish::Finished and TurnEvent::Finished, not transcript prose",
         ),
     })
 }
 
 pub(super) fn rlm_final_value_provider() -> ProviderHandle {
-    const RAW_FINAL: &str = "Visible prose before semantic value.\n<typescript>\nfinish({ source: \"semantic-channel\", ok: true, count: 3 });\n</typescript>";
+    const RAW_FINAL: &str = "Visible prose before semantic value.\n<typescript>\nawait control.finish({ source: \"semantic-channel\", ok: true, count: 3 });\n</typescript>";
     // The chunks still split inside the open and close tags, which is the point
     // of the proof: the cell scanner has to stitch a tag across a chunk boundary.
     const CHUNKS: &[&str] = &[
         "Visible prose",
         " before semantic value.\n<type",
-        "script>\nfinish({ source: ",
+        "script>\nawait control.finish({ source: ",
         "\"semantic-channel\", ok: true, count: 3 });",
         "\n</typescript>",
     ];

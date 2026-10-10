@@ -8,14 +8,18 @@ fn step(id: &str, error: Option<&str>, terminal: bool) -> CellRecord {
     CellRecord {
         id: id.to_string(),
         language: "typescript".to_string(),
-        code: "finish 1".to_string(),
+        code: "await control.finish(1)".to_string(),
         prints: vec!["observed".to_string().into()],
         result: match (error, terminal) {
             (Some(message), _) => CellOutcome::Failed(lash_core::CellFailure::new(
                 lash_core::CellFailureKind::Program,
                 message,
             )),
-            (None, true) => CellOutcome::Finished(serde_json::json!(1).into()),
+            (None, true) => lash_core::CellOutcome::finished_by(
+                crate::FINISH_TOOL_NAME,
+                lash_core::ToolCallId::fixture("finish-call"),
+                serde_json::json!(1),
+            ),
             (None, false) => CellOutcome::Completed,
         },
         ..CellRecord::default()
@@ -249,8 +253,12 @@ fn a_refused_call_replays_as_its_pair_until_a_later_cell_supersedes_it() {
 #[test]
 fn reloaded_null_finish_remains_terminal_in_reconstructed_history() {
     let mut entry = step("null-finish", None, false);
-    entry.code = "finish(null)".into();
-    entry.result = CellOutcome::Finished(serde_json::Value::Null.into());
+    entry.code = "await control.finish(null)".into();
+    entry.result = lash_core::CellOutcome::finished_by(
+        crate::FINISH_TOOL_NAME,
+        lash_core::ToolCallId::fixture("finish-call"),
+        serde_json::Value::Null,
+    );
     let events = pair(entry);
     let mut reloaded =
         serde_json::from_str::<Vec<SessionHistoryRecord>>(&serde_json::to_string(&events).unwrap())

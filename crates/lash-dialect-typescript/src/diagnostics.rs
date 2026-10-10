@@ -52,6 +52,7 @@ pub enum DiagnosticCode {
     MissingInitializer,
     ReservedIdentifier,
     ShadowsBuiltin,
+    ControlCallPlacement,
     MutualRecursionUnsupported,
     DuplicateBinding,
     DuplicateNodeLabel,
@@ -130,6 +131,7 @@ impl DiagnosticCode {
         Self::MissingInitializer,
         Self::ReservedIdentifier,
         Self::ShadowsBuiltin,
+        Self::ControlCallPlacement,
         Self::MutualRecursionUnsupported,
         Self::DuplicateBinding,
         Self::DuplicateNodeLabel,
@@ -386,6 +388,7 @@ impl DiagnosticCode {
             | Self::ReturnOutsideFunction
             | Self::LoopControlOutsideLoop
             | Self::InvalidAst
+            | Self::ControlCallPlacement
             | Self::LinkError => CodeClassification::AlwaysDefect,
         }
     }
@@ -439,6 +442,7 @@ impl DiagnosticCode {
             Self::MissingInitializer => "TS_MISSING_INITIALIZER",
             Self::ReservedIdentifier => "TS_RESERVED_IDENTIFIER",
             Self::ShadowsBuiltin => "TS_SHADOWS_BUILTIN",
+            Self::ControlCallPlacement => "TS_CONTROL_CALL_PLACEMENT",
             Self::MutualRecursionUnsupported => "TS_MUTUAL_RECURSION_UNSUPPORTED",
             Self::DuplicateBinding => "TS_DUPLICATE_BINDING",
             Self::DuplicateNodeLabel => "TS_DUPLICATE_NODE_LABEL",

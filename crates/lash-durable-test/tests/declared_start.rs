@@ -205,7 +205,7 @@ impl Script {
                     .collect::<Vec<_>>()
                     .join(", ");
                 served::cell(&format!(
-                    "const replies = await Promise.all([{spawns}]);\nfinish(replies.join(\" | \"));"
+                    "const replies = await Promise.all([{spawns}]);\nawait control.finish(replies.join(\" | \"));"
                 ))
             }
             Producer::Probe(probe) => probe_step(0, probe),
@@ -258,7 +258,7 @@ impl Script {
             *self.child_saw.lock_recover() = seen;
         }
         if self.producer == Producer::PromiseAll {
-            served::cell(&format!("finish({:?});", child_reply(index)))
+            served::cell(&format!("await control.finish({:?});", child_reply(index)))
         } else {
             served::text(&request, &child_reply(index))
         }

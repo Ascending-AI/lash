@@ -351,7 +351,7 @@ mod tests {
 
     #[test]
     fn cells_keep_source_and_unicode_observations_with_explicit_truncation() {
-        let source = "const x = await kv.get({ key: \"project\" });\nfinish(x);";
+        let source = "const x = await kv.get({ key: \"project\" });\nawait control.finish(x);";
         let fields = execution_fields(
             &[
                 activity(TurnEvent::CodeBlockStarted {

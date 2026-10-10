@@ -66,13 +66,8 @@ pub fn activity_projection(event: &SessionStreamEvent) -> Option<TurnEvent> {
         }),
         SessionStreamEvent::Error(failure) => Some(TurnEvent::Error(failure.clone())),
         SessionStreamEvent::TurnOutcome {
-            outcome: crate::TurnOutcome::Finished(crate::TurnFinish::FinalValue { value }),
-        } => Some(TurnEvent::FinalValue {
-            value: value.clone(),
-        }),
-        SessionStreamEvent::TurnOutcome {
-            outcome: crate::TurnOutcome::Finished(crate::TurnFinish::ToolValue { tool_name, value }),
-        } => Some(TurnEvent::ToolValue {
+            outcome: crate::TurnOutcome::Finished(crate::TurnFinish::Finished { tool_name, value }),
+        } => Some(TurnEvent::Finished {
             tool_name: tool_name.clone(),
             value: value.clone(),
         }),

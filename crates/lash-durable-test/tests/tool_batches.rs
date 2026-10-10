@@ -509,7 +509,7 @@ impl Producer {
                 vec![served::response(parts)]
             }
             Self::PromiseAll | Self::PromiseAllSettled => vec![served::cell(&format!(
-                "finish({});",
+                "await control.finish({});",
                 aggregate(name, self.aggregate(), &leaves)
             ))],
         }
@@ -534,7 +534,7 @@ impl Producer {
                 Some(vec![step(head), step(tail)])
             }
             Self::PromiseAll | Self::PromiseAllSettled => Some(vec![served::cell(&format!(
-                "const first = {};\nconst rest = {};\nfinish([first, rest]);",
+                "const first = {};\nconst rest = {};\nawait control.finish([first, rest]);",
                 aggregate(name, self.aggregate(), head),
                 aggregate(name, self.aggregate(), tail),
             ))]),
@@ -572,7 +572,8 @@ fn replies(producer: Producer, output: &lash::TurnOutput) -> Vec<usize> {
     let mut replies = Vec::new();
     if producer.code() {
         let value = output
-            .final_value()
+            .finished()
+            .map(|(_, value)| value)
             .cloned()
             .or_else(|| {
                 output

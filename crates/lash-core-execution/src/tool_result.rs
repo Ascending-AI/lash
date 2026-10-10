@@ -350,6 +350,30 @@ impl ToolOutcome {
         Self::from_output(crate::ToolCallOutput::cancelled(cancellation))
     }
 
+    /// A control call's result: the declared turn control alone, with no output.
+    pub fn turn_control(control: crate::TurnControl) -> Self {
+        Self::from_output(crate::ToolCallOutput::turn_control(control))
+    }
+
+    /// Ends the caller's turn with `value`. The tool must declare the Finish control.
+    pub fn finish(value: impl Into<crate::ToolValue>) -> Self {
+        Self::from_output(crate::ToolCallOutput::finish(value))
+    }
+
+    /// Switches the caller to a fresh agent frame. The tool must declare the
+    /// SwitchAgentFrame control.
+    pub fn switch_agent_frame(
+        frame_key: crate::FrameKey,
+        task: impl Into<String>,
+        initial_nodes: Vec<crate::SessionAppendNode>,
+    ) -> Self {
+        Self::from_output(crate::ToolCallOutput::switch_agent_frame(
+            frame_key,
+            task,
+            initial_nodes,
+        ))
+    }
+
     /// Sets the control carried by a `ToolOutcome` for protocol and process-engine implementors
     /// while preparing or executing an authorized tool call.
     pub fn with_control(mut self, control: crate::ToolControl) -> Self {

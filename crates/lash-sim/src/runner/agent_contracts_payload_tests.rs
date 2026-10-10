@@ -129,7 +129,7 @@ const lookup = async () => {
 };
 const handle = await processes.start({ definition: lookup, label: "renamed display label" });
 const result = await handle;
-finish(result);
+await control.finish(result);
 </typescript>"#,
         ],
         &expected,

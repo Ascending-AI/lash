@@ -201,7 +201,7 @@ async fn a_cell_names_a_document_readable_while_it_runs_and_reports_its_calls_at
             vec![served::cell(
                 r#"
 const fetched = await web.fetch({ url: "only" });
-finish(fetched.url);
+await control.finish(fetched.url);
 "#,
             )],
         )
@@ -222,7 +222,39 @@ finish(fetched.url);
     };
     let emitted = emitted_sites(&events, &started.identity);
     let index = document.overlay_document();
-    assert_eq!(emitted.len(), 1, "the one fetch is one site: {emitted:?}");
+    assert_eq!(
+        emitted.len(),
+        2,
+        "fetch and finish each name a site: {emitted:?}"
+    );
+    assert_eq!(
+        output
+            .result
+            .tool_calls
+            .iter()
+            .map(|call| call.tool.as_str())
+            .collect::<Vec<_>>(),
+        ["web_fetch", "finish"]
+    );
+    for call in &output.result.tool_calls {
+        let sites = events
+            .iter()
+            .filter_map(|event| match &event.payload {
+                TraceLanguageExecutionPayload::Node {
+                    at,
+                    fact:
+                        lash::tracing::TraceNodeFact::Started {
+                            call_id: Some(call_id),
+                        },
+                } if event.identity == started.identity && call_id == &call.call_id => {
+                    Some(at.site.clone())
+                }
+                _ => None,
+            })
+            .collect::<BTreeSet<_>>();
+        assert_eq!(sites.len(), 1, "{} names one execution site", call.tool);
+        assert!(sites.is_subset(&emitted));
+    }
     assert!(
         emitted.iter().all(|site| index.contains(site)),
         "every site the cell reported is in its document"
@@ -251,7 +283,7 @@ const worker = async (url: string) => {
   return fetched.url;
 };
 const handle = await processes.start({ definition: worker, args: { url: "inner" } });
-finish(await processes.await({ handle }));
+await control.finish(await processes.await({ handle }));
 "#,
             )],
         )

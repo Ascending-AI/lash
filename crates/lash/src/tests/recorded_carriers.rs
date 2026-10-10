@@ -44,7 +44,7 @@ async fn rlm_core_at(path: &std::path::Path, budgets: crate::ExecutionBudgets) -
         .execution_budgets(budgets)
         .delta_coalescing(crate::DeltaCoalescing::recommended())
         .serve_test_llm_profile(
-            queued_text_provider(vec![typescript_block(r#"finish("done");"#)]),
+            queued_text_provider(vec![typescript_block(r#"await control.finish("done");"#)]),
             mock_llm_profile_spec(),
         )
         .build(crate::testing::runtime_lease_owner())

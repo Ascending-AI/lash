@@ -27,7 +27,7 @@ pub(crate) use carry::KernelCarry;
 pub use carry::cell_migration_refusal;
 pub(crate) use envelope::{check_cell_snapshot, snapshot_tool_calls};
 pub(crate) use host::site_label;
-pub use host::{TOOL_ARGUMENTS, TOOL_CALL_LIMIT, TOOL_FAILED, UNKNOWN_EFFECT};
+pub use host::{CONTROL_REFUSED, TOOL_ARGUMENTS, TOOL_CALL_LIMIT, TOOL_FAILED, UNKNOWN_EFFECT};
 pub use session::RlmExecutionState;
 pub use snapshot::{RLM_SNAPSHOT_VERSION, RlmSnapshotError};
 
@@ -310,6 +310,7 @@ async fn link_cell(
                 tool.manifest.id.clone(),
                 tool.contract.input_schema.canonical(),
                 tool.contract.output_schema.canonical(),
+                tool.manifest.declaration().controls.clone(),
             )
             .map_err(|error| surface(error.to_string()))?;
     }
@@ -352,6 +353,7 @@ async fn link_cell(
             dialect: state.dialect().to_owned(),
             source: code.to_owned(),
             effects: boundary.signatures(),
+            controls: boundary.controls(),
             bindings: names,
             functions: session.functions(),
         })
@@ -763,17 +765,41 @@ async fn run_cell(
                     bindings: left,
                     not_carried: finished.not_carried,
                     closures: finished.closures,
+                    controls: host.boundary.controls(),
                 });
-                // `main` that ran to its end without a `finish` answered
-                // nothing: the cell completed. A `finish` gave the turn its
-                // answer.
+                // A cell ends its turn only through a control call: the
+                // dialect ends `main` right after one settles, and the
+                // control is the settled call's, never the program's own
+                // value. `main` that ran to its end, or whose control call
+                // gave no control, answered nothing: the cell completed.
+                let _ = result;
+                let controlled = finished
+                    .finish
+                    .then(|| collected.settled_control())
+                    .flatten()
+                    .map(|(record, control)| lash_core::CellOutcome::Controlled {
+                        tool_name: record.tool.clone(),
+                        call_id: record.call_id.clone(),
+                        control: match control {
+                            lash_core::TurnControl::Finish { value } => {
+                                lash_core::CellControl::Finish {
+                                    value: lash_core::ToolCallOutput::success_tool_value(
+                                        value.clone(),
+                                    )
+                                    .value_for_projection()
+                                    .into(),
+                                }
+                            }
+                            lash_core::TurnControl::SwitchAgentFrame { frame_key, .. } => {
+                                lash_core::CellControl::SwitchAgentFrame {
+                                    frame_key: frame_key.clone(),
+                                }
+                            }
+                        },
+                    });
                 ExecResponse {
                     bindings: Box::new(bindings),
-                    ..respond(if finished.finish {
-                        lash_core::CellOutcome::Finished(datum_json(&result).into())
-                    } else {
-                        lash_core::CellOutcome::Completed
-                    })
+                    ..respond(controlled.unwrap_or(lash_core::CellOutcome::Completed))
                 }
             }
             End::Failed(reason) => failed(

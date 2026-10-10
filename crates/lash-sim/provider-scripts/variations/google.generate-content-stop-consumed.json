@@ -2,14 +2,25 @@
   "schema": "lash.provider-wire-script.v1",
   "name": "google.generate-content-stop-consumed",
   "provider_kind": "google_oauth",
-  "endpoint": { "method": "POST", "path": "/v1internal:streamGenerateContent" },
+  "endpoint": {
+    "method": "POST",
+    "path": "/v1internal:streamGenerateContent"
+  },
   "request_match": {
     "body": {
-      "request.generationConfig.stopSequences": { "equals": ["</typescript>"] }
+      "request.generationConfig.stopSequences": {
+        "equals": [
+          "</typescript>"
+        ]
+      }
     },
     "headers": {
-      "authorization": { "present": true },
-      "content-type": { "contains": "application/json" }
+      "content-type": {
+        "contains": "application/json"
+      },
+      "authorization": {
+        "present": true
+      }
     }
   },
   "timeline": [
@@ -17,19 +28,27 @@
       "at": 10,
       "event": "response_start",
       "status": 200,
-      "headers": [{ "name": "content-type", "value": "text/event-stream" }]
+      "headers": [
+        {
+          "name": "content-type",
+          "value": "text/event-stream"
+        }
+      ]
     },
     {
       "at": 20,
       "event": "sse",
-      "data": "{\"response\":{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"<typescript>\\nfinish(\\\"settled\\\");\\n\"}]}}],\"usageMetadata\":{\"promptTokenCount\":7,\"candidatesTokenCount\":6}}}"
+      "data": "{\"response\":{\"responseId\":\"matrix-response-1\",\"modelVersion\":\"matrix-served-model\",\"usageMetadata\":{\"promptTokenCount\":11,\"candidatesTokenCount\":7,\"thoughtsTokenCount\":0},\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"<typescript>\\nawait control.finish(\\\"settled\\\");\\n\"}]}}]}}"
     },
     {
       "at": 21,
       "event": "sse",
-      "data": "{\"response\":{\"candidates\":[{\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":7,\"candidatesTokenCount\":6}}}"
+      "data": "{\"response\":{\"responseId\":\"matrix-response-1\",\"modelVersion\":\"matrix-served-model\",\"usageMetadata\":{\"promptTokenCount\":11,\"candidatesTokenCount\":7,\"thoughtsTokenCount\":0},\"candidates\":[{\"finishReason\":\"STOP\"}]}}"
     },
-    { "at": 22, "event": "end" }
+    {
+      "at": 22,
+      "event": "end"
+    }
   ],
   "expected_provider": {
     "variation": "stop_consumed",

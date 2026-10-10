@@ -39,7 +39,7 @@ pub(super) fn registry() -> &'static Arc<FunctionRegistry> {
 /// The tools a cell may call: `echo(x)` answers `x` and `boom(x)` fails
 /// with an error of kind `boom` whose message is `x`.
 pub(crate) fn effects() -> BTreeMap<EffectName, Signature> {
-    ["echo", "boom"]
+    ["echo", "boom", "finish"]
         .into_iter()
         .map(|name| {
             let signature = Signature {
@@ -196,7 +196,8 @@ pub(crate) enum Ended {
     Raised(String),
 }
 
-/// Lowers `source` as a first cell and runs it to its end without a park.
+/// Lowers `source` as a first cell and runs it to its end, answering only
+/// `finish`: the value it ended with.
 pub(crate) fn end(source: &str) -> Ended {
     end_with_bindings(source, Bindings::default())
 }
@@ -204,12 +205,30 @@ pub(crate) fn end(source: &str) -> Ended {
 /// Runs a cell with kernel session data supplied by the law.
 pub(crate) fn end_with_bindings(source: &str, bindings: Bindings) -> Ended {
     let (mut machine, text) = start_with_bindings(source, bindings);
-    match machine.run(&mut Console::default(), u64::MAX) {
-        Ok(Step::Ended(End::Finished(finished))) => Ended::Finished(finished.result),
-        Ok(Step::Ended(End::Error(RunError::Uncaught(Datum::Error(error))))) => {
-            Ended::Raised(error.kind)
+    let mut finished_with = None;
+    loop {
+        match machine.run(&mut Console::default(), u64::MAX) {
+            Ok(Step::Parked(park)) if finished_with.is_none() => {
+                let [Request::Effect(effect)] = park.requests.as_slice() else {
+                    panic!("only `finish` is answered: {park:?}\n{text}");
+                };
+                assert_eq!(effect.effect.as_str(), "finish", "{text}");
+                finished_with = Some(effect.args.first().cloned().unwrap_or(Datum::Null));
+                machine
+                    .deliver(effect.wait, Outcome::Completed(Datum::Null))
+                    .unwrap_or_else(|error| panic!("{error}"));
+            }
+            Ok(Step::Ended(End::Finished(_))) => {
+                return Ended::Finished(
+                    finished_with
+                        .unwrap_or_else(|| panic!("the cell ended without `finish`\n{text}")),
+                );
+            }
+            Ok(Step::Ended(End::Error(RunError::Uncaught(Datum::Error(error))))) => {
+                return Ended::Raised(error.kind);
+            }
+            other => panic!("{other:?}\n{text}"),
         }
-        other => panic!("{other:?}\n{text}"),
     }
 }
 
@@ -268,6 +287,7 @@ fn start_with_bindings(source: &str, values: Bindings) -> (KernelMachine, String
     let environment = Environment {
         library,
         effects: &effects,
+        controls: super::controls(),
         bindings: &bindings,
         functions: &std::collections::BTreeMap::new(),
     };

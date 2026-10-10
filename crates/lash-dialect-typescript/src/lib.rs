@@ -40,12 +40,32 @@ pub fn lower(source: &str, environment: &Environment<'_>) -> Result<Lowered, Dia
             .bindings
             .iter()
             .map(lash_kernel_doc::Name::as_str),
+        environment.effects,
     )?;
-    if let Some(lowered) = intrinsics::lower(source, environment) {
-        return lowered;
-    }
     let program = adapter::parse(source)?;
     lower::lower(&program, source, environment)
+}
+
+/// Reads exact kernel text: the reserved source surface a printer writes
+/// ([`print`]), with kernel semantics and no dialect helper. It is a trusted
+/// host entry: kernel text can state forms no cell may write, `finish`
+/// among them, so nothing a model wrote is read through it. [`lower`] never
+/// selects it.
+///
+/// # Errors
+///
+/// The diagnostic of source that is not exact kernel text.
+pub fn lower_kernel_text(
+    source: &str,
+    environment: &Environment<'_>,
+) -> Result<Lowered, Diagnostic> {
+    intrinsics::lower(source, environment).unwrap_or_else(|| {
+        Err(Diagnostic::new(
+            DiagnosticCode::InvalidAst,
+            "the source is not exact kernel text",
+            None,
+        ))
+    })
 }
 
 /// Reads `source` as the dialect's syntax and lowers nothing: what a host
@@ -86,10 +106,8 @@ impl Parser {
                 .bindings
                 .iter()
                 .map(lash_kernel_doc::Name::as_str),
+            environment.effects,
         )?;
-        if let Some(lowered) = intrinsics::lower(source, environment) {
-            return lowered;
-        }
         let program = self.parser.parse(source)?;
         lower::lower(&program, source, environment)
     }

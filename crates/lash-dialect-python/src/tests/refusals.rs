@@ -160,6 +160,7 @@ fn a_missing_helper_is_named() {
     let environment = lash_kernel_dialect::Environment {
         library: &library,
         effects: &effects,
+        controls: &std::collections::BTreeMap::new(),
         bindings: &bindings,
         functions: &std::collections::BTreeMap::new(),
     };

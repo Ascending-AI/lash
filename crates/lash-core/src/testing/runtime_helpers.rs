@@ -1034,6 +1034,10 @@ impl crate::ToolProvider for EchoTool {
     }
 }
 
+/// Tools that each answer with one fixed control. A turn control
+/// ([`ToolControl::Turn`](crate::ToolControl::Turn)) is declared by its tool
+/// and is the call's whole result; a `Fail` or `AbortRun` control rides an
+/// ordinary result.
 pub struct TerminalControlTool {
     pub controls: Vec<crate::ToolControl>,
 }
@@ -1042,7 +1046,7 @@ pub struct TerminalControlTool {
 impl crate::ToolProvider for TerminalControlTool {
     fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
         (0..self.controls.len())
-            .map(|index| terminal_tool_definition(index).manifest())
+            .map(|index| self.definition(index).manifest())
             .collect()
     }
 
@@ -1050,7 +1054,7 @@ impl crate::ToolProvider for TerminalControlTool {
         name.strip_prefix("terminal_tool_")
             .and_then(|value| value.parse::<usize>().ok())
             .filter(|index| *index < self.controls.len())
-            .map(|index| Arc::new(terminal_tool_definition(index).contract()))
+            .map(|index| Arc::new(self.definition(index).contract()))
     }
 
     async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
@@ -1064,21 +1068,39 @@ impl TerminalControlTool {
             .strip_prefix("terminal_tool_")
             .and_then(|value| value.parse::<usize>().ok())
             .expect("known terminal test tool");
-        crate::ToolOutcome::ok(serde_json::json!({ "tool": name }))
-            .with_control(self.controls[index].clone())
+        match &self.controls[index] {
+            crate::ToolControl::Turn { control } => {
+                crate::ToolOutcome::turn_control(control.clone())
+            }
+            control => crate::ToolOutcome::ok(serde_json::json!({ "tool": name }))
+                .with_control(control.clone()),
+        }
     }
-}
 
-fn terminal_tool_definition(index: usize) -> crate::ToolDefinition {
-    crate::ToolDefinition::raw(
-        format!("tool:terminal_tool_{index}"),
-        format!("terminal_tool_{index}"),
-        "Return a terminal control result",
-        crate::ToolDefinition::default_input_schema(),
-        serde_json::json!({ "type": "object", "additionalProperties": true }),
-    )
-    .expect("valid declared tool schemas")
-    .with_execution(std::time::Duration::from_secs(120))
+    fn definition(&self, index: usize) -> crate::ToolDefinition {
+        let id = format!("tool:terminal_tool_{index}");
+        let name = format!("terminal_tool_{index}");
+        let description = "Return a terminal control result";
+        let input = crate::ToolDefinition::default_input_schema();
+        match &self.controls[index] {
+            crate::ToolControl::Turn { control } => crate::ToolDefinition::control(
+                id,
+                name,
+                description,
+                input,
+                crate::TurnControls::none().with(control.kind()),
+            ),
+            _ => crate::ToolDefinition::raw(
+                id,
+                name,
+                description,
+                input,
+                serde_json::json!({ "type": "object", "additionalProperties": true }),
+            ),
+        }
+        .expect("valid declared tool schemas")
+        .with_execution(std::time::Duration::from_secs(120))
+    }
 }
 
 /// Tool that sleeps for 10 seconds unless its future is aborted or the

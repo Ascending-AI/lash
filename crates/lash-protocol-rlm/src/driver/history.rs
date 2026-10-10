@@ -538,7 +538,13 @@ pub(crate) fn step_output_text(
             }
             out.push_str(&crate::feedback::render(failure, vocabulary.cell_noun));
         }
-        lash_core::CellOutcome::Finished(lash_core::OutputValue::Inline(final_output)) => {
+        lash_core::CellOutcome::Controlled {
+            control:
+                lash_core::CellControl::Finish {
+                    value: lash_core::OutputValue::Inline(final_output),
+                },
+            ..
+        } => {
             if !out.is_empty() {
                 out.push_str("\n\n");
             }
@@ -550,14 +556,24 @@ pub(crate) fn step_output_text(
         }
         // A final value too long for history is shown as its witness, never
         // expanded (FIG-1643).
-        lash_core::CellOutcome::Finished(lash_core::OutputValue::Retained(retained)) => {
+        lash_core::CellOutcome::Controlled {
+            control:
+                lash_core::CellControl::Finish {
+                    value: lash_core::OutputValue::Retained(retained),
+                },
+            ..
+        } => {
             if !out.is_empty() {
                 out.push_str("\n\n");
             }
             out.push_str("Final output:\n");
             out.push_str(&retained.witness);
         }
-        lash_core::CellOutcome::Completed => {}
+        lash_core::CellOutcome::Controlled {
+            control: lash_core::CellControl::SwitchAgentFrame { .. },
+            ..
+        }
+        | lash_core::CellOutcome::Completed => {}
     }
     if out.is_empty() {
         out.push_str("(no printed output)");

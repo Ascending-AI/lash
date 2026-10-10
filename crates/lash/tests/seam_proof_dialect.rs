@@ -38,7 +38,7 @@ const TYPESCRIPT_TEXT: &[&str] = &[
     "console.log",
     "await ",
     "Promise",
-    "finish(",
+    "await control.finish(",
     "const ",
     "=>",
     "HistoryItem",
@@ -278,7 +278,7 @@ async fn session(core: &LashCore, id: &str) -> lash::LashSession {
 }
 
 fn final_value(output: &TurnOutput) -> Option<serde_json::Value> {
-    output.final_value().cloned()
+    output.finished().map(|(_, value)| value).cloned()
 }
 
 fn assert_no_typescript(request: &str) {

@@ -455,11 +455,10 @@ impl ProtocolDriverHandle<crate::HostTurnProtocol> for TestDriver {
                 })),
             ]));
         }
-        actions.push(DriverAction::Start(PendingWork::WaitingForToolResults {
-            settled: None,
-            calls: pending_calls,
-            expansion: Default::default(),
-        }));
+        actions.push(DriverAction::Start(PendingWork::tool_round(
+            pending_calls,
+            Default::default(),
+        )));
         actions
     }
 
@@ -474,32 +473,24 @@ impl ProtocolDriverHandle<crate::HostTurnProtocol> for TestDriver {
         let mut actions = Vec::new();
         let mut result_parts = Vec::new();
         let mut terminal_outcome = None;
+        let mut candidate = None;
         for outcome in completed {
-            if terminal_outcome.is_none() && outcome.output.is_success() {
-                terminal_outcome = match outcome.output.control.as_ref() {
-                    Some(crate::ToolControl::SwitchAgentFrame {
-                        frame_key,
-                        initial_nodes,
-                        task: Some(task),
-                    }) if !task.trim().is_empty() => Some(TurnOutcome::AgentFrameSwitch {
-                        frame_key: frame_key.clone(),
-                        task: task.clone(),
-                        initial_nodes: initial_nodes.clone(),
-                    }),
-                    Some(crate::ToolControl::Finish { value }) => {
-                        Some(TurnOutcome::Finished(TurnFinish::ToolValue {
-                            tool_name: outcome.tool_name.clone(),
-                            value: crate::tool_value_for_projection(value),
-                        }))
+            if terminal_outcome.is_none() && candidate.is_none() && outcome.output.is_success() {
+                match outcome.output.control.as_ref() {
+                    Some(crate::ToolControl::Turn { control }) => {
+                        candidate = Some(crate::CompletionCandidate::pending(
+                            ctx.protocol_iteration(),
+                            outcome.call_id.clone(),
+                            outcome.tool_name.clone(),
+                            control.clone(),
+                        ));
                     }
-                    Some(crate::ToolControl::Fail { failure }) => {
-                        Some(TurnOutcome::Stopped(TurnStop::ToolError {
-                            tool_name: outcome.tool_name.clone(),
-                            value: crate::tool_failure_for_projection(failure),
-                        }))
+                    Some(control) => {
+                        terminal_outcome =
+                            crate::turn_stop_from_tool_control(&outcome.tool_name, control);
                     }
-                    _ => None,
-                };
+                    None => {}
+                }
             }
             result_parts.push(Part::tool_result(
                 String::new(),
@@ -535,6 +526,16 @@ impl ProtocolDriverHandle<crate::HostTurnProtocol> for TestDriver {
         }
         if let Some(outcome) = terminal_outcome {
             actions.push(DriverAction::Finish(outcome));
+            return actions;
+        }
+        if let Some(candidate) = candidate {
+            actions.push(DriverAction::Start(PendingWork::Checkpoint {
+                checkpoint: CheckpointKind::BeforeCompletion,
+                on_empty: CheckpointResumeAction::Complete {
+                    candidate: Box::new(candidate),
+                    superseded: Vec::new(),
+                },
+            }));
             return actions;
         }
         actions.push(DriverAction::AdvanceProtocolIteration);

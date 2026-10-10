@@ -169,11 +169,8 @@ fn outcome_entry(actor: Actor, outcome: &TurnOutcome) -> Entry {
             Entry::new(Kind::Outcome, actor, "turn.assistant_message")
                 .attr(Attr::text("text", text))
         }
-        TurnOutcome::Finished(TurnFinish::FinalValue { value }) => {
-            Entry::new(Kind::Outcome, actor, "turn.final_value").attr(Attr::json("value", value))
-        }
-        TurnOutcome::Finished(TurnFinish::ToolValue { tool_name, value }) => {
-            Entry::new(Kind::Outcome, actor, "turn.tool_value")
+        TurnOutcome::Finished(TurnFinish::Finished { tool_name, value }) => {
+            Entry::new(Kind::Outcome, actor, "turn.finished")
                 .attr(Attr::text("name", tool_name))
                 .attr(Attr::json("value", value))
         }

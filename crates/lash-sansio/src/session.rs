@@ -264,20 +264,38 @@ impl From<String> for CellPrint {
 }
 
 /// What an executed cell resolved to. One of three: a cell never carries a
-/// failure and a finish value at once, and a cell that finished with `null`
-/// is distinct from one that ran to its end without finishing.
+/// failure and a control at once, and a cell that finished with `null` is
+/// distinct from one that ran to its end without a control call.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", content = "value", rename_all = "snake_case")]
 pub enum CellOutcome {
-    /// The cell ran to its end without a finish value.
+    /// The cell ran to its end without a control call.
     #[default]
     Completed,
     /// The cell failed.
     Failed(CellFailure),
-    /// The cell finished its turn with this value: inline, or retained out
-    /// of history when its encoding was too long for it (FIG-1643).
-    #[serde(with = "finish_value")]
-    Finished(crate::OutputValue),
+    /// A declared control call ended the cell: the call of `tool_name`
+    /// recorded under `call_id`. The control stays in the record, because
+    /// call lists are bounded and pruned.
+    Controlled {
+        tool_name: String,
+        call_id: crate::ToolCallId,
+        control: CellControl,
+    },
+}
+
+/// The control that ended a cell, as history records it.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum CellControl {
+    /// The turn finished with this value: inline, or retained out of
+    /// history when its encoding was too long for it (FIG-1643).
+    Finish {
+        #[serde(with = "finish_value")]
+        value: crate::OutputValue,
+    },
+    /// The turn switched to the agent frame `frame_key` names.
+    SwitchAgentFrame { frame_key: crate::FrameKey },
 }
 
 impl CellOutcome {
@@ -285,7 +303,7 @@ impl CellOutcome {
     pub fn failure(&self) -> Option<&CellFailure> {
         match self {
             Self::Failed(failure) => Some(failure),
-            Self::Completed | Self::Finished(_) => None,
+            Self::Completed | Self::Controlled { .. } => None,
         }
     }
 
@@ -293,11 +311,30 @@ impl CellOutcome {
         matches!(self, Self::Failed(_))
     }
 
+    /// The outcome of a cell whose call `call_id` of `tool_name` ended the
+    /// turn with `value`.
+    pub fn finished_by(
+        tool_name: impl Into<String>,
+        call_id: crate::ToolCallId,
+        value: impl Into<crate::OutputValue>,
+    ) -> Self {
+        Self::Controlled {
+            tool_name: tool_name.into(),
+            call_id,
+            control: CellControl::Finish {
+                value: value.into(),
+            },
+        }
+    }
+
     /// The finish value as history records it, when the cell finished.
     pub fn finish(&self) -> Option<&crate::OutputValue> {
         match self {
-            Self::Finished(value) => Some(value),
-            Self::Completed | Self::Failed(_) => None,
+            Self::Controlled {
+                control: CellControl::Finish { value },
+                ..
+            } => Some(value),
+            Self::Controlled { .. } | Self::Completed | Self::Failed(_) => None,
         }
     }
 }
@@ -491,12 +528,10 @@ impl ExecResponse {
 
     /// The finish value itself, whether history keeps it inline or retained.
     pub fn finish_value(&self) -> Option<&serde_json::Value> {
-        match &self.result {
-            CellOutcome::Finished(crate::OutputValue::Inline(value)) => Some(value),
-            CellOutcome::Finished(crate::OutputValue::Retained(_)) => {
-                self.retained_finish_value.as_ref()
-            }
-            CellOutcome::Completed | CellOutcome::Failed(_) => None,
+        match self.result.finish() {
+            Some(crate::OutputValue::Inline(value)) => Some(value),
+            Some(crate::OutputValue::Retained(_)) => self.retained_finish_value.as_ref(),
+            None => None,
         }
     }
 }
@@ -540,10 +575,22 @@ mod tests {
         }
     }
 
+    fn controlled(control: CellControl) -> CellOutcome {
+        CellOutcome::Controlled {
+            tool_name: "finish".to_string(),
+            call_id: crate::ToolCallId::fixture("call-1"),
+            control,
+        }
+    }
+
+    fn finished(value: crate::OutputValue) -> CellOutcome {
+        controlled(CellControl::Finish { value })
+    }
+
     /// A cell record spells its result as one tagged value (FIG-5527): a
-    /// `null` finish, a retained finish, a typed failure and a cell that ran
-    /// to its end each read back as themselves, and a result carrying a
-    /// failure beside a finish value has no spelling.
+    /// `null` finish, a retained finish, a frame switch, a typed failure and
+    /// a cell that ran to its end each read back as themselves, and a result
+    /// carrying a failure beside a control has no spelling.
     #[test]
     fn a_cell_record_reads_back_each_result_as_itself() {
         let failure = CellFailure::from(ExecCodeFailure::new(
@@ -552,9 +599,16 @@ mod tests {
         ));
         for result in [
             CellOutcome::Completed,
-            CellOutcome::Finished(serde_json::Value::Null.into()),
-            CellOutcome::Finished(serde_json::json!({"answer": 42}).into()),
-            CellOutcome::Finished(crate::OutputValue::Retained(retained("{\"rows\":["))),
+            finished(serde_json::Value::Null.into()),
+            finished(serde_json::json!({"answer": 42}).into()),
+            finished(crate::OutputValue::Retained(retained("{\"rows\":["))),
+            controlled(CellControl::SwitchAgentFrame {
+                frame_key: crate::FrameKey::from_call_site(
+                    &crate::SessionId::from("session"),
+                    "lineage",
+                    &crate::ToolCallId::fixture("call-1"),
+                ),
+            }),
             CellOutcome::Failed(failure.clone()),
         ] {
             let record = CellRecord {
@@ -578,14 +632,23 @@ mod tests {
                 "exec_failure": "executor_unavailable",
             }})
         );
+        let call_id = crate::ToolCallId::fixture("call-1");
         assert_eq!(
-            serde_json::to_value(CellOutcome::Finished(serde_json::Value::Null.into()))
-                .expect("encode"),
-            serde_json::json!({"kind": "finished", "value": {"inline": null}})
+            serde_json::to_value(finished(serde_json::Value::Null.into())).expect("encode"),
+            serde_json::json!({"kind": "controlled", "value": {
+                "tool_name": "finish",
+                "call_id": call_id,
+                "control": {"type": "finish", "value": {"inline": null}},
+            }})
         );
         for malformed in [
-            serde_json::json!({"kind": "finished"}),
-            serde_json::json!({"kind": "finished", "value": {"inline": 1, "retained": null}}),
+            serde_json::json!({"kind": "controlled"}),
+            serde_json::json!({"kind": "finished", "value": {"inline": null}}),
+            serde_json::json!({"kind": "controlled", "value": {
+                "tool_name": "finish",
+                "call_id": "call-1",
+                "control": {"type": "finish", "value": {"inline": 1, "retained": null}},
+            }}),
             serde_json::json!({"kind": "running"}),
         ] {
             assert!(

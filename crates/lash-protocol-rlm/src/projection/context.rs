@@ -424,7 +424,11 @@ mod tests {
             calls: Vec::new(),
             calls_omitted: 0,
             bindings: Default::default(),
-            result: lash_core::CellOutcome::Finished(serde_json::json!({ "answer": 42 }).into()),
+            result: lash_core::CellOutcome::finished_by(
+                crate::FINISH_TOOL_NAME,
+                lash_core::ToolCallId::fixture("finish-call"),
+                serde_json::json!({ "answer": 42 }),
+            ),
         };
         let retained = CellRecord {
             language: "typescript".to_string(),
@@ -534,7 +538,11 @@ mod tests {
             calls: Vec::new(),
             calls_omitted: 0,
             bindings: Default::default(),
-            result: lash_core::CellOutcome::Finished(serde_json::json!("done").into()),
+            result: lash_core::CellOutcome::finished_by(
+                crate::FINISH_TOOL_NAME,
+                lash_core::ToolCallId::fixture("finish-call"),
+                serde_json::json!("done"),
+            ),
         };
         let events = [
             lash_core::SessionHistoryRecord::Conversation(

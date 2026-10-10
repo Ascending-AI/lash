@@ -160,11 +160,11 @@ impl DevProviderScenario {
   throw "deterministic durable process failure";
 };
 await processes.start({ definition: FIG425_deterministic_failure, args: { request: 1 } });
-finish("started deterministic failing process");"#,
+await control.finish("started deterministic failing process");"#,
             ),
-            (Self::ExecBlocked, 0) => {
-                cell("await sleep(600000);\nfinish(\"exec block unexpectedly returned\");")
-            }
+            (Self::ExecBlocked, 0) => cell(
+                "await sleep(600000);\nawait control.finish(\"exec block unexpectedly returned\");",
+            ),
             (Self::ExecBlocked, _) => finish_cell("\"session recovered after break glass\""),
             (Self::ToolValue, _) => cell("await workbench_surface.terminal({});"),
             (Self::TranscriptProjection, 0) => cell(
@@ -200,7 +200,7 @@ finish("started deterministic failing process");"#,
         (self == Self::ToolValue).then(|| {
             use lash::tools::ToolDefinitionBindingExt as _;
 
-            let definition = lash::tools::ToolDefinition::raw(
+            let definition = lash::tools::ToolDefinition::control(
                 "tool:workbench_tool_value",
                 "workbench_tool_value",
                 "Finish the deterministic workbench scenario with a typed tool value.",
@@ -209,7 +209,7 @@ finish("started deterministic failing process");"#,
                     "properties": {},
                     "additionalProperties": false
                 }),
-                serde_json::json!({ "type": "object" }),
+                lash::tools::TurnControls::finish(),
             )
             .expect("valid declared tool schemas")
             .with_execution(std::time::Duration::from_secs(120))
@@ -234,15 +234,12 @@ impl lash::tools::StaticToolExecute for DevToolValue {
         (async {
             debug_assert_eq!(call.name(), "workbench_tool_value");
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-            lash::tools::ToolOutcome::from_output(
-                lash::tools::ToolCallOutput::success(serde_json::json!({ "accepted": true }))
-                    .with_control(lash::tools::ToolControl::Finish {
-                        value: lash::tools::ToolValue::untrusted_json(serde_json::json!({
-                            "event_class": "tool_value",
-                            "marker": "FIG-1350 deterministic tool value"
-                        })),
-                    }),
-            )
+            lash::tools::ToolOutcome::from_output(lash::tools::ToolCallOutput::finish(
+                lash::tools::ToolValue::untrusted_json(serde_json::json!({
+                    "event_class": "tool_value",
+                    "marker": "FIG-1350 deterministic tool value"
+                })),
+            ))
         })
         .await
         .into()
@@ -425,7 +422,7 @@ fn cell(body: &str) -> String {
 
 /// The common shape: one cell that finishes with `value`.
 fn finish_cell(value: &str) -> String {
-    cell(&format!("finish({value});"))
+    cell(&format!("await control.finish({value});"))
 }
 
 fn streamed_response(request: &LlmRequest, text: &str) -> LlmResponse {
@@ -558,11 +555,11 @@ fn mcp_fixture_response(request: &LlmRequest) -> LlmResponse {
 const form = await workspace_stdio.elicit_confirmation({});
 const url = await workspace_stdio.elicit_via_url({});
 const roots = await workspace_stdio.list_host_roots({});
-finish(summary.summary);"#
+await control.finish(summary.summary);"#
     } else if prompt.contains("MCP-DETACHED") {
-        "finish(\"badge tool is detached\");"
+        "await control.finish(\"badge tool is detached\");"
     } else {
-        "const badge = await workspace_http.workspace_badge({}); finish(\"workspace badge came back\");"
+        "const badge = await workspace_http.workspace_badge({}); await control.finish(\"workspace badge came back\");"
     };
     streamed_response(request, &cell(body))
 }

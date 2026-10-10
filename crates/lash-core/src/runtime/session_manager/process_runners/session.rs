@@ -530,8 +530,9 @@ fn output_from_process_turn(
     }
 }
 
-/// The value a finished child answers under `FinalValue`: its final value, the
-/// value a terminal tool finished it with, or its unmodified assistant text.
+/// The value a finished child answers under `FinalValue`: the value a
+/// declared Finish control ended its turn with, or its unmodified assistant
+/// text.
 ///
 /// A child that switched agent frames or stopped has no final value, and says
 /// so as a typed failure rather than as an empty success.
@@ -539,8 +540,7 @@ fn final_value_of_turn(
     turn: &crate::AssembledTurn,
 ) -> Result<serde_json::Value, Box<crate::ToolFailure>> {
     match &turn.outcome {
-        crate::TurnOutcome::Finished(crate::TurnFinish::FinalValue { value })
-        | crate::TurnOutcome::Finished(crate::TurnFinish::ToolValue { value, .. }) => {
+        crate::TurnOutcome::Finished(crate::TurnFinish::Finished { value, .. }) => {
             Ok(value.clone())
         }
         crate::TurnOutcome::Finished(crate::TurnFinish::AssistantMessage { text }) => {

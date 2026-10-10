@@ -310,7 +310,7 @@ async fn a_facade_host_wraps_the_rlm_factory_and_its_stores(tier: Tier) {
     let contributed_engines = Arc::new(Mutex::new(Vec::new()));
     let core = core(
         backend.clone(),
-        vec![response("finish('wrapped');")],
+        vec![response("await control.finish('wrapped');")],
         &contributed_engines,
     );
     // The core installs a protocol's engines wherever it builds a runtime

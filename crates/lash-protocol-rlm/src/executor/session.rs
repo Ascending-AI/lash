@@ -104,6 +104,9 @@ pub(super) struct CellLeft<'a> {
     /// reach a closure and no task.
     pub not_carried: Vec<Name>,
     pub closures: Bindings,
+    /// The effects the cell was lowered against whose call ends the turn.
+    pub controls:
+        BTreeMap<lash_kernel_doc::EffectName, BTreeSet<lash_kernel_dialect::EffectControl>>,
 }
 
 impl SessionBindings {
@@ -172,6 +175,7 @@ impl SessionBindings {
                     closures: &cell.closures.variables,
                     closure_objects: &cell.closures.objects,
                     not_carried: &cell.not_carried,
+                    controls: &cell.controls,
                     annotations: cell.annotations,
                 },
                 &held,

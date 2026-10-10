@@ -90,7 +90,7 @@ fn a_structurally_malformed_wrapper_is_refused_whole() {
         serde_json::json!({ "tool_calls": [ { "tool": "  ", "parameters": {} } ] }),
         serde_json::json!({ "tool_calls": [ { "tool": "read", "parameters": {} }, 7 ] }),
     ] {
-        let expansion = expand(vec![call("w", BATCH_TOOL_NAME, args.clone())], max(64));
+        let expansion = expand_plain(vec![call("w", BATCH_TOOL_NAME, args.clone())], max(64));
         assert_eq!(expansion.refused.len(), 1, "{args}");
         assert!(expansion.calls.is_empty(), "{args}");
         assert!(expansion.plan.is_empty(), "{args}");
@@ -99,7 +99,7 @@ fn a_structurally_malformed_wrapper_is_refused_whole() {
 
 #[test]
 fn a_member_without_parameters_runs_with_an_empty_object() {
-    let expansion = expand(
+    let expansion = expand_plain(
         vec![call(
             "w",
             BATCH_TOOL_NAME,
@@ -112,7 +112,7 @@ fn a_member_without_parameters_runs_with_an_empty_object() {
 
 #[test]
 fn the_fold_answers_one_call_per_response_call_in_response_order() {
-    let expansion = expand(
+    let expansion = expand_plain(
         vec![
             call("native-a", "list", serde_json::json!({})),
             wrapper("w", &["read", "batch", "search"]),
@@ -188,7 +188,7 @@ fn the_fold_answers_one_call_per_response_call_in_response_order() {
 
 #[test]
 fn the_fold_carries_member_attachments_after_the_rows() {
-    let expansion = expand(vec![wrapper("w", &["read", "read"])], max(64));
+    let expansion = expand_plain(vec![wrapper("w", &["read", "read"])], max(64));
     let attachment = ModelToolReturnPart::Attachment(lash_core::AttachmentRef::new(
         lash_core::AttachmentId::parse(
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -252,4 +252,9 @@ fn batch_config_ceiling_is_refused_at_build() {
         },
         "batch is on by default at the ceiling"
     );
+}
+
+/// [`expand`] in a catalog where no tool ends the turn.
+fn expand_plain(calls: Vec<PendingToolCall>, max_members: NonZeroUsize) -> Expansion {
+    expand(calls, max_members, &|_| false)
 }

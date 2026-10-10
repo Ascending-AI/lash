@@ -300,8 +300,8 @@ async fn execute(
                 meter.operation("seeded.send.accept", plan.operation.key(), "ok", start);
                 let start = Instant::now();
                 let output = tokio::time::timeout(Duration::from_secs(120), handle.output()).await??;
-                ensure!(matches!(&output.result.outcome, lash::TurnOutcome::Finished(lash::TurnFinish::FinalValue { value })
-                    if value["operation"] == plan.operation.key()), "seeded cell did not finish: {:?}", output.result.outcome);
+                ensure!(matches!(&output.result.outcome, lash::TurnOutcome::Finished(lash::TurnFinish::Finished { tool_name, value })
+                    if tool_name == "finish" && value["operation"] == plan.operation.key()), "seeded cell did not finish: {:?}", output.result.outcome);
                 meter.operation("seeded.send.settle", plan.operation.key(), "ok", start);
                 // Queued plans are separate keyed sends; the sequential recipe
                 // does not claim to model their active-turn scheduling share.
@@ -309,8 +309,8 @@ async fn execute(
                     let start = Instant::now();
                     let output = session.send(lash::TurnInput::text(format!("seeded-operation:{}", queued.idempotency_key)))
                         .id(lash::TurnId::try_from(queued.idempotency_key.clone())?).output().await?;
-                    ensure!(matches!(&output.result.outcome, lash::TurnOutcome::Finished(lash::TurnFinish::FinalValue { value })
-                        if value["operation"] == queued.idempotency_key), "queued seeded input did not finish");
+                    ensure!(matches!(&output.result.outcome, lash::TurnOutcome::Finished(lash::TurnFinish::Finished { tool_name, value })
+                        if tool_name == "finish" && value["operation"] == queued.idempotency_key), "queued seeded input did not finish");
                     meter.operation("seeded.queued.settle", &queued.idempotency_key, "ok", start);
                 }
             }

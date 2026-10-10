@@ -8,7 +8,7 @@ expression: "serde_json::to_string_pretty(&request.messages).unwrap()"
     "blocks": [
       {
         "Text": {
-          "text": "<typescript>\nfinish(1);\n</typescript>",
+          "text": "<typescript>\nawait control.finish(1);\n</typescript>",
           "response_meta": null,
           "cache_breakpoint": false
         }

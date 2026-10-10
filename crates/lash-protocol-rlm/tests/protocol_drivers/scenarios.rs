@@ -94,7 +94,7 @@ fn rlm_protocol_property_response_cell_classification_is_part_order_invariant() 
 #[test]
 fn rlm_protocol_unclosed_cell_retries_in_natural_mode_without_journaling_markup() {
     RlmProtocolScenario::new("natural unclosed cell retry")
-        .termination(RlmTermination::Natural { schema: None })
+        .termination(lash_core::TerminationMode::Natural)
         .llm_response(vec![text_part(
             "Visible plan.\n<typescript>\nconsole.log(\"unfinished\");",
         )])
@@ -113,8 +113,10 @@ fn rlm_protocol_unclosed_cell_retries_in_natural_mode_without_journaling_markup(
 #[test]
 fn rlm_protocol_unclosed_cell_retries_in_finish_required_mode() {
     RlmProtocolScenario::new("finish-required unclosed cell retry")
-        .termination(RlmTermination::FinishRequired { schema: None })
-        .llm_response(vec![text_part("<typescript>\nfinish({ ok: true });")])
+        .termination(lash_core::TerminationMode::TerminalRequired)
+        .llm_response(vec![text_part(
+            "<typescript>\nawait control.finish({ ok: true });",
+        )])
         .checkpoint()
         .expect(RlmProtocolExpectations {
             checkpoints: vec![CheckpointKind::AfterWork],
@@ -150,8 +152,9 @@ fn rlm_protocol_scenario_natural_cell_at_budget_stops_without_another_provider_c
 
 #[test]
 fn rlm_protocol_scenario_plugin_stream_mask_splices_chunk_spanning_cell_for_reextraction() {
-    const CODE: &str = "const alpha = \"first\";\nconst beta = alpha + \" second\";\nfinish(beta);";
-    const RESPONSE: &str = "Visible prefix.\n<typescript>\nconst alpha = \"first\";\nconst beta = alpha + \" second\";\nfinish(beta);\n</typescript>";
+    const CODE: &str =
+        "const alpha = \"first\";\nconst beta = alpha + \" second\";\nawait control.finish(beta);";
+    const RESPONSE: &str = "Visible prefix.\n<typescript>\nconst alpha = \"first\";\nconst beta = alpha + \" second\";\nawait control.finish(beta);\n</typescript>";
 
     RlmProtocolScenario::new(PLUGIN_STREAM_MASK_CHUNK_SPANNING_REEXTRACTION.display_name)
         .user_message("run chunk-spanning streamed code")
@@ -163,13 +166,13 @@ fn rlm_protocol_scenario_plugin_stream_mask_splices_chunk_spanning_cell_for_reex
                 "Visible prefix.\n<type",
                 "script>\nconst alpha = \"fir",
                 "st\";\nconst beta = alpha + ",
-                "\" second\";\nfinish(be",
+                "\" second\";\nawait control.finish(be",
                 "ta);\n</type",
                 "script>",
-                "\n<typescript>\nfinish(\"must not be consumed\");\n</typescript>",
+                "\n<typescript>\nawait control.finish(\"must not be consumed\");\n</typescript>",
             ],
             vec![text_part(&format!(
-                "{RESPONSE}\n<typescript>\nfinish(\"must not be consumed\");\n</typescript>"
+                "{RESPONSE}\n<typescript>\nawait control.finish(\"must not be consumed\");\n</typescript>"
             ))],
         )
         .expect(RlmProtocolExpectations {
@@ -193,20 +196,19 @@ fn rlm_protocol_scenario_typed_schema_repair_survives_a_cell_checkpoint_boundary
     // carry in its checkpointed cell state is genuinely lost here.
     let run = RlmProtocolScenario::new(TYPED_SCHEMA_REPAIR_ACROSS_CELL_BOUNDARY.display_name)
         .user_message("return typed data")
-        .termination(RlmTermination::FinishRequired {
-            schema: Some(
-                lash_sansio::JsonSchema::admit(serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "ok": { "type": "boolean" }
-                    },
-                    "required": ["ok"]
-                }))
-                .expect("declared result schema"),
-            ),
-        })
+        .termination(lash_core::TerminationMode::TerminalRequired)
+        .finish_schema(
+            lash_sansio::JsonSchema::admit(serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "ok": { "type": "boolean" }
+                },
+                "required": ["ok"]
+            }))
+            .expect("declared result schema"),
+        )
         .llm_response(vec![text_part(&typescript_block(
-            "finish({ missing: true });",
+            "await control.finish({ missing: true });",
         ))])
         .checkpoint_round_trip()
         .exec_result(exec_response(
@@ -218,15 +220,17 @@ fn rlm_protocol_scenario_typed_schema_repair_survives_a_cell_checkpoint_boundary
         .expect(RlmProtocolExpectations {
             // The restored machine redrives the same pending cell, so the code is
             // observed twice — once before the boundary and once after it.
-            exec_codes: vec!["finish({ missing: true });", "finish({ missing: true });"],
+            exec_codes: vec!["await control.finish({ missing: true });", "await control.finish({ missing: true });"],
             checkpoints: vec![CheckpointKind::AfterWork],
             llm_call_count: Some(2),
-            system_message_contains: vec!["did not match the required output schema"],
             trajectory_last: Some(RlmTrajectoryExpectation {
-                code: "finish({ missing: true });",
+                code: "await control.finish({ missing: true });",
                 output: Vec::new(),
                 outcome: lash_core::CellOutcome::Failed(
-                    program_failure("\"ok\" is a required property").with_value_mismatch(
+                    program_failure(
+                        "`await control.finish(value)` refused its value: \"ok\" is a required property",
+                    )
+                    .with_value_mismatch(
                         lash_sansio::ValueMismatch {
                             instance_path: String::new(),
                             message: "\"ok\" is a required property".into(),
@@ -247,12 +251,13 @@ fn rlm_protocol_scenario_typed_schema_repair_survives_a_cell_checkpoint_boundary
     // reaching the model, and exactly one checkpoint before re-entry.
     insta::assert_snapshot!(run.transcript.render(), @r#"
     rlm          provider  model.request           messages=1 tools=0
-    rlm          observe   message.code            text="finish({ missing: true });"
+    rlm          observe   message.code            text="await control.finish({ missing: true });"
     rlm          exec      cell.start              lang="typescript"
     rlm          park      cell.checkpoint
     rlm          resume    cell.restore
     rlm          exec      cell.start              lang="typescript"
+    rlm          tool      tool.result             name="finish" outcome=success call=call-001
     rlm          commit    checkpoint.request      checkpoint=after_work
-    rlm          provider  model.request           messages=2 tools=0
+    rlm          provider  model.request           messages=1 tools=0
     "#);
 }

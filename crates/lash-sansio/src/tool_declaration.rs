@@ -1,9 +1,10 @@
 //! The author-facing tool declaration (K1, binding Q3).
 //!
-//! A tool declares exactly three capabilities on its [`ToolManifest`]:
+//! A tool declares exactly four capabilities on its [`ToolManifest`]:
 //! whether its body may return Deferred, which Lash intent kinds a Done
-//! result may declare, and whether the call is isolated — a process from its
-//! start, with no inline body. A manifest holds only a valid declaration
+//! result may declare, whether the call is isolated — a process from its
+//! start, with no inline body — and which turn-ending controls its result
+//! may be ([`TurnControls`]). A manifest holds only a valid declaration
 //! ([`ToolManifest::declared`](crate::ToolManifest::declared)): an invalid
 //! one, or an isolated one naming no process engine, is refused when its
 //! tool is registered, so no call is refused for it. Admission records the
@@ -27,7 +28,82 @@ use serde::{Deserialize, Serialize};
 
 use crate::ToolIntentKind;
 
-/// The author-facing tool declaration: exactly three capabilities.
+/// A way a tool's call may end its caller's turn.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum TurnControlKind {
+    /// The turn ends with the value the call carries.
+    Finish,
+    /// The turn ends by switching to a fresh agent frame.
+    SwitchAgentFrame,
+}
+
+impl TurnControlKind {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Finish => "finish",
+            Self::SwitchAgentFrame => "switch_agent_frame",
+        }
+    }
+}
+
+/// The turn-ending controls a tool declares its result may be. A tool that
+/// declares any has no output: a control is its call's whole result.
+#[derive(
+    Clone, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema,
+)]
+#[serde(transparent)]
+pub struct TurnControls(BTreeSet<TurnControlKind>);
+
+impl TurnControls {
+    /// No control: an ordinary tool.
+    #[must_use]
+    pub fn none() -> Self {
+        Self::default()
+    }
+
+    #[must_use]
+    pub fn finish() -> Self {
+        Self::none().with(TurnControlKind::Finish)
+    }
+
+    #[must_use]
+    pub fn switch_agent_frame() -> Self {
+        Self::none().with(TurnControlKind::SwitchAgentFrame)
+    }
+
+    #[must_use]
+    pub fn with(mut self, kind: TurnControlKind) -> Self {
+        self.0.insert(kind);
+        self
+    }
+
+    pub fn contains(&self, kind: TurnControlKind) -> bool {
+        self.0.contains(&kind)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = TurnControlKind> + '_ {
+        self.0.iter().copied()
+    }
+}
+
+/// The author-facing tool declaration: exactly four capabilities.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ToolDeclaration {
@@ -39,13 +115,21 @@ pub struct ToolDeclaration {
     /// The call runs as a process from its start, with no inline body. It is
     /// not spelled as an intent plus Deferred.
     pub isolated: bool,
+    /// The turn-ending controls the call's result may be. A call to a tool
+    /// that declares any is admitted only where it can end the turn, and a
+    /// result carrying a control the tool did not declare is refused.
+    pub controls: TurnControls,
 }
 
 /// The shape of a body's outcome, as a declaration checks it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OutcomeShape<'a> {
-    /// A Done result declaring `intents`.
-    Done { intents: &'a [ToolIntentKind] },
+    /// A Done result declaring `intents`, which is the turn control
+    /// `control` when it is one.
+    Done {
+        intents: &'a [ToolIntentKind],
+        control: Option<TurnControlKind>,
+    },
     /// A Deferred result parked on a source.
     Deferred,
 }
@@ -71,6 +155,8 @@ pub enum DeclarationRefusal {
     UndeclaredDeferral,
     #[error("a body declared intent kind `{}` it did not declare", kind.as_str())]
     UndeclaredIntent { kind: ToolIntentKind },
+    #[error("a body's result is the turn control `{}`, which it did not declare", control.as_str())]
+    UndeclaredControl { control: TurnControlKind },
     #[error("an isolated call produced an inline outcome")]
     InlineOutcomeFromIsolated,
 }
@@ -110,6 +196,13 @@ impl ToolDeclaration {
         self
     }
 
+    /// This declaration, also declaring `controls`.
+    #[must_use]
+    pub fn with_controls(mut self, controls: TurnControls) -> Self {
+        self.controls = controls;
+        self
+    }
+
     /// Check the declaration itself.
     ///
     /// # Errors
@@ -140,8 +233,8 @@ impl ToolDeclaration {
     ///
     /// # Errors
     ///
-    /// An undeclared Deferred or intent, or any inline outcome of an
-    /// isolated call.
+    /// An undeclared Deferred, intent or turn control, or any inline
+    /// outcome of an isolated call.
     pub fn admits(&self, outcome: OutcomeShape<'_>) -> Result<(), DeclarationRefusal> {
         if self.isolated {
             return Err(DeclarationRefusal::InlineOutcomeFromIsolated);
@@ -151,12 +244,17 @@ impl ToolDeclaration {
                 Err(DeclarationRefusal::UndeclaredDeferral)
             }
             OutcomeShape::Deferred => Ok(()),
-            OutcomeShape::Done { intents } => intents
-                .iter()
-                .find(|kind| !self.intents.contains(kind))
-                .map_or(Ok(()), |kind| {
-                    Err(DeclarationRefusal::UndeclaredIntent { kind: *kind })
-                }),
+            OutcomeShape::Done { intents, control } => {
+                if let Some(kind) = intents.iter().find(|kind| !self.intents.contains(kind)) {
+                    return Err(DeclarationRefusal::UndeclaredIntent { kind: *kind });
+                }
+                match control {
+                    Some(control) if !self.controls.contains(control) => {
+                        Err(DeclarationRefusal::UndeclaredControl { control })
+                    }
+                    _ => Ok(()),
+                }
+            }
         }
     }
 

@@ -108,21 +108,24 @@ async fn typescript_restored_process_handle_await_crosses_turn_boundary(tier: Ti
         vec![served::cell(
             "const worker = async () => { return \"done\"; };\n\
              const handle = await processes.start({ definition: worker });\n\
-             finish(\"started\");",
+             await control.finish(\"started\");",
         )],
     );
     world.script(
         "await-the-worker",
-        vec![served::cell("finish(await handle);")],
+        vec![served::cell("await control.finish(await handle);")],
     );
     let session = world.session("cross-turn-handle", served::spec(64)).await;
     let started = world.send(&session, "start-the-worker").await;
     served::assert_answered("the turn that starts the process", &started);
-    assert_eq!(started.final_value(), Some(&serde_json::json!("started")));
+    assert_eq!(
+        started.finished().map(|(_, value)| value),
+        Some(&serde_json::json!("started"))
+    );
     let awaited = world.send(&session, "await-the-worker").await;
     served::assert_answered("the next turn, which awaits the handle", &awaited);
     assert_eq!(
-        awaited.final_value(),
+        awaited.finished().map(|(_, value)| value),
         Some(&serde_json::json!("done")),
         "the next turn's cell awaits the process the first turn started"
     );
@@ -142,14 +145,15 @@ async fn typescript_cell_reads_process_handle_id_and_invokes_subsequent_operatio
          const handle = await processes.start({ definition: worker });\n\
          const processId = handle.process_id;\n\
          const status = await status_tool.inspect({ process_id: processId });\n\
-         finish({ id: processId, status: status });",
+         await control.finish({ id: processId, status: status });",
     );
     let output = world
         .run("handle-process-id", served::spec(64), vec![cell])
         .await;
     served::assert_answered("the turn that inspects its process", &output);
     let finish = output
-        .final_value()
+        .finished()
+        .map(|(_, value)| value)
         .expect("the cell finished with a value");
     let id = finish["id"].as_str().expect("the handle's id is a string");
     assert!(!id.is_empty(), "the handle's id is not empty");

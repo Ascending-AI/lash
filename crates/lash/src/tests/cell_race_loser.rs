@@ -101,7 +101,7 @@ async fn l06_race_loser_body_progresses_while_the_program_sleeps() -> Result<()>
         &format!(
             "const winner = await Promise.race([tools.{SLOW}({{}}), tools.{FAST}({{}})]);\n\
              await sleep({SLEEP_MS});\n\
-             finish(winner);"
+             await control.finish(winner);"
         ),
         Arc::new(tools.clone()),
     )?;
@@ -215,7 +215,7 @@ async fn closing_race(loser: Loser) -> Result<(bool, lash_core::ToolCallOutput)>
         sqlite_memory_store_backend().await,
         &format!(
             "const winner = await Promise.race([tools.{SLOW}({{}}), tools.{FAST}({{}})]);\n\
-             finish(winner);"
+             await control.finish(winner);"
         ),
         Arc::new(tools.clone()),
     )?;
@@ -383,7 +383,7 @@ async fn closing_in_backoff() -> Result<(Duration, usize, Option<lash_core::Tool
         sqlite_memory_store_backend().await,
         &format!(
             "const winner = await Promise.race([tools.{SLOW}({{}}), tools.{FAST}({{}})]);\n\
-             finish(winner);"
+             await control.finish(winner);"
         ),
         Arc::new(tools.clone()),
     )?;

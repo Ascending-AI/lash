@@ -233,7 +233,7 @@ async fn tool_completed_activity_is_canonical_while_model_observation_is_project
                     .serve_test_llm_profile(
                         queued_text_provider(vec![typescript_block(
                             r#"const value = await tools.app_lookup({});
-finish("done");"#,
+await control.finish("done");"#,
                         )]),
                         mock_llm_profile_spec(),
                     )
@@ -471,7 +471,9 @@ const object = { first: 1, second: 2 };
 await tools.app_lookup({});
 console.log("abcdefghijklmnopqrstuvwxyz");"#,
             )),
-            text_response(&typescript_block(r#"finish("complete-value");"#)),
+            text_response(&typescript_block(
+                r#"await control.finish("complete-value");"#,
+            )),
         ]);
     let cuts = crate::RuntimeOutputCuts {
         value_reply_max_chars: 3,
@@ -493,7 +495,7 @@ console.log("abcdefghijklmnopqrstuvwxyz");"#,
         .output()
         .await?;
     assert_eq!(
-        output.final_value(),
+        output.finished().map(|(_, value)| value),
         Some(&serde_json::json!("complete-value"))
     );
     {

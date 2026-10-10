@@ -33,6 +33,9 @@ const LASH_RLM_CELL_SEGMENT_CODE_DOMAIN_VERSION: &str = "lash-rlm-cell-segment-c
 pub(super) struct RecordedEffect {
     pub tool: lash_core::ToolId,
     pub signature: Signature,
+    /// The turn controls the tool declared when the cell was lowered: what
+    /// the cell's control admission reads at every park.
+    pub controls: lash_core::TurnControls,
 }
 
 /// What a cell is, recorded when it was lowered and the same at every park.
@@ -83,8 +86,15 @@ impl CellEnvelope {
             .signatures()
             .into_iter()
             .filter_map(|(name, signature)| {
-                let tool = boundary.effect(&name)?.tool.clone();
-                Some((name, RecordedEffect { tool, signature }))
+                let effect = boundary.effect(&name)?;
+                Some((
+                    name,
+                    RecordedEffect {
+                        tool: effect.tool.clone(),
+                        signature,
+                        controls: effect.controls.clone(),
+                    },
+                ))
             })
             .collect()
     }
@@ -99,6 +109,7 @@ impl CellEnvelope {
                     HostEffect {
                         tool: effect.tool.clone(),
                         signature: effect.signature.clone(),
+                        controls: effect.controls.clone(),
                     },
                 )
                 .map_err(|error| error.to_string())?;

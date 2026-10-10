@@ -60,8 +60,7 @@ turn_event_tags! {
     ToolCallStarted => "tool_call_started",
     ToolCallCompleted => "tool_call_completed",
     ToolIntentOutcome => "tool_intent_outcome",
-    FinalValue => "final_value",
-    ToolValue => "tool_value",
+    Finished => "finished",
     Usage => "usage",
     RetryStatus => "retry_status",
     PluginRuntime => "plugin_runtime",
@@ -284,7 +283,11 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
                 language: "python".to_string(),
                 prints: Vec::new(),
                 prints_retained: None,
-                result: lash_core::CellOutcome::Finished(json!(null).into()),
+                result: lash_core::CellOutcome::finished_by(
+                    "finish",
+                    lash_core::ToolCallId::fixture("call-1"),
+                    json!(null),
+                ),
                 duration_ms: 5,
                 tool_call_ids: vec![],
                 graph_key: None,
@@ -293,7 +296,11 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
                 "type": "code_block_completed",
                 "language": "python",
                 "prints": [],
-                "result": { "kind": "finished", "value": { "inline": null } },
+                "result": { "kind": "controlled", "value": {
+                    "tool_name": "finish",
+                    "call_id": lash_core::ToolCallId::fixture("call-1"),
+                    "control": { "type": "finish", "value": { "inline": null } },
+                } },
                 "duration_ms": 5,
                 "tool_call_ids": [],
             }),
@@ -444,19 +451,12 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
             }),
         ),
         (
-            "final_value",
-            TurnEvent::FinalValue {
-                value: json!({ "answer": 42 }),
-            },
-            json!({ "type": "final_value", "value": { "answer": 42 } }),
-        ),
-        (
-            "tool_value",
-            TurnEvent::ToolValue {
+            "finished",
+            TurnEvent::Finished {
                 tool_name: "calc".to_string(),
                 value: json!(3),
             },
-            json!({ "type": "tool_value", "tool_name": "calc", "value": 3 }),
+            json!({ "type": "finished", "tool_name": "calc", "value": 3 }),
         ),
         (
             "usage",

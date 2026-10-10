@@ -107,6 +107,7 @@ impl Embedding {
         dialect: &str,
         source: &str,
         effects: &BTreeMap<EffectName, Signature>,
+        controls: &BTreeMap<EffectName, BTreeSet<lash_kernel_dialect::EffectControl>>,
         bindings: &BTreeSet<Name>,
         functions: &BTreeMap<Name, lash_kernel_dialect::SavedFunction>,
     ) -> Option<Result<Lowered, Diagnostic>> {
@@ -116,6 +117,7 @@ impl Embedding {
             &Environment {
                 library: &self.library,
                 effects,
+                controls,
                 bindings,
                 functions,
             },

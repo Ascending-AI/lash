@@ -587,11 +587,8 @@ pub fn runtime_final_value_invariant_facts(
 ) -> RuntimeFinalValueInvariantFacts {
     let (outcome_kind, semantic_value) = match &result.outcome {
         lash_core::facade_support::TurnOutcome::Finished(
-            lash_core::facade_support::TurnFinish::FinalValue { value },
-        ) => ("final_value".to_string(), Some(value.clone())),
-        lash_core::facade_support::TurnOutcome::Finished(
-            lash_core::facade_support::TurnFinish::ToolValue { value, .. },
-        ) => ("tool_value".to_string(), Some(value.clone())),
+            lash_core::facade_support::TurnFinish::Finished { value, .. },
+        ) => ("finished".to_string(), Some(value.clone())),
         lash_core::facade_support::TurnOutcome::Finished(
             lash_core::facade_support::TurnFinish::AssistantMessage { .. },
         ) => ("assistant_message".to_string(), None),
@@ -602,12 +599,7 @@ pub fn runtime_final_value_invariant_facts(
     };
     let terminal_event_count = activities
         .iter()
-        .filter(|activity| {
-            matches!(
-                activity.event,
-                lash::TurnEvent::FinalValue { .. } | lash::TurnEvent::ToolValue { .. }
-            )
-        })
+        .filter(|activity| matches!(activity.event, lash::TurnEvent::Finished { .. }))
         .count();
     let assistant_prose_delta_count = activities
         .iter()
@@ -624,9 +616,7 @@ pub fn runtime_final_value_invariant_facts(
     let semantic_channel_observed = semantic_value.is_some()
         && terminal_event_count > 0
         && activities.iter().any(|activity| match &activity.event {
-            lash::TurnEvent::FinalValue { value } | lash::TurnEvent::ToolValue { value, .. } => {
-                Some(value) == semantic_value.as_ref()
-            }
+            lash::TurnEvent::Finished { value, .. } => Some(value) == semantic_value.as_ref(),
             _ => false,
         });
     RuntimeFinalValueInvariantFacts {
@@ -861,17 +851,17 @@ mod tests {
 
         let value = serde_json::json!({"answer": 42});
         let semantic = result(lash_core::facade_support::TurnOutcome::Finished(
-            lash_core::facade_support::TurnFinish::FinalValue {
+            lash_core::facade_support::TurnFinish::Finished {
+                tool_name: "finish".into(),
                 value: value.clone(),
             },
         ));
         let mismatched = runtime_final_value_invariant_facts(
             &semantic,
-            &[lash::TurnActivity::independent(
-                lash::TurnEvent::FinalValue {
-                    value: serde_json::json!({"answer": 41}),
-                },
-            )],
+            &[lash::TurnActivity::independent(lash::TurnEvent::Finished {
+                tool_name: "finish".into(),
+                value: serde_json::json!({"answer": 41}),
+            })],
         );
         assert!(!mismatched.passed());
         assert_eq!(mismatched.terminal_event_count, 1);
@@ -882,11 +872,10 @@ mod tests {
 
         let passed = runtime_final_value_invariant_facts(
             &semantic,
-            &[lash::TurnActivity::independent(
-                lash::TurnEvent::FinalValue {
-                    value: value.clone(),
-                },
-            )],
+            &[lash::TurnActivity::independent(lash::TurnEvent::Finished {
+                tool_name: "finish".into(),
+                value: value.clone(),
+            })],
         );
         assert!(passed.passed());
         assert_eq!(passed.semantic_value, Some(value));

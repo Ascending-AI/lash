@@ -222,12 +222,9 @@ pub struct DialectPromptVocabulary {
     /// The inspect form, ready to take a value expression.
     pub print_statement_prefix: &'static str,
     pub print_statement_suffix: &'static str,
-    /// The name of the form that ends the turn with a value.
-    pub finish_name: &'static str,
-    /// The finish form as the prompt spells it in prose.
-    pub finish_statement: &'static str,
-    /// The finish form for an intentional null result.
-    pub finish_null_statement: &'static str,
+    /// The `control.finish` control call, as a model would write it: the
+    /// tool's real call path in this dialect.
+    pub finish_call: &'static str,
     /// The continue-as control call, as a model would write it.
     pub continue_as_call: &'static str,
     /// A complete continue-as example for the tool doc.
@@ -449,8 +446,8 @@ impl SessionDialect {
         line
     }
 
-    /// The value a turn's `finish` must carry, as its type and the rows of the
-    /// fields that carry notes.
+    /// The value the turn's finish control call must carry, as its type and
+    /// the rows of the fields that carry notes.
     pub(crate) fn required_output_contract(&self, schema: &serde_json::Value) -> String {
         let shape = SchemaShape::from_json_schema_with_depth(
             schema,
@@ -467,32 +464,34 @@ impl SessionDialect {
 
     pub(crate) fn finalization_copy(
         &self,
-        termination: &lash_rlm_types::RlmTermination,
+        termination: lash_core::TerminationMode,
+        finish_schema: Option<&lash_core::JsonSchema>,
         channel: crate::plugin::RlmChannel,
     ) -> String {
         match termination {
-            lash_rlm_types::RlmTermination::FinishRequired { schema } => {
-                self.finish_required_finalization(schema.is_some(), channel)
+            lash_core::TerminationMode::TerminalRequired => {
+                self.finish_required_finalization(finish_schema.is_some(), channel)
             }
-            lash_rlm_types::RlmTermination::Natural { schema } => {
+            lash_core::TerminationMode::Natural => {
                 let step = match channel {
                     crate::plugin::RlmChannel::Cell => "in a block",
                     crate::plugin::RlmChannel::NativeTool => "in an `execute_code` call",
                 };
-                let finish = self.prompt_vocabulary().finish_statement;
+                let finish = self.prompt_vocabulary().finish_call;
                 // A model that reads "return a value" as "return what the
                 // tool gave back" ends a chat turn with a record nobody can
                 // read (FIG-5104), so every variant names prose as the answer
-                // and a tool result as the thing `finish` never passes on.
-                let finish_rule = match schema {
+                // and a tool result as the thing the finish call never
+                // passes on.
+                let finish_rule = match finish_schema {
                     None => format!(
                         "Prefer prose for the final answer. Call `{finish}` inside the program only when the answer is a value the program built for this request, never to hand back a tool's raw result."
                     ),
                     Some(schema) if schema_is_text(schema) => format!(
-                        "Prefer prose for the final answer. `{finish}` takes only the user-facing answer text as a string, never a raw tool result; any other value is refused and you must finish again."
+                        "Prefer prose for the final answer. `{finish}` takes only the user-facing answer text as a string, never a raw tool result; any other value fails the call and the turn goes on."
                     ),
                     Some(_) => format!(
-                        "Prefer prose for the final answer. `{finish}` takes only a value matching the REQUIRED OUTPUT contract, never a raw tool result; any other value is refused and you must finish again."
+                        "Prefer prose for the final answer. `{finish}` takes only a value matching the REQUIRED OUTPUT contract, never a raw tool result; any other value fails the call and the turn goes on."
                     ),
                 };
                 format!(
@@ -528,25 +527,16 @@ impl SessionDialect {
                 "inside the `code` argument of an `execute_code` call".to_string()
             }
         };
-        let finish = vocabulary.finish_statement;
+        let finish = vocabulary.finish_call;
         if requires_schema {
             format!(
-                "Call `{finish}` {place} when the task is complete, with a value matching the required output schema."
+                "Call `{finish}` {place} when the task is complete, with a value matching the required output schema. It ends the turn: make it the last thing the program does."
             )
         } else {
             format!(
-                "Call `{finish}` {place} when the task is complete. Use `{}` only when null is intentional.",
-                vocabulary.finish_null_statement
+                "Call `{finish}` {place} when the task is complete. It ends the turn: make it the last thing the program does."
             )
         }
-    }
-
-    pub(crate) fn finish_schema_mismatch_copy(&self) -> String {
-        let vocabulary = self.prompt_vocabulary();
-        format!(
-            "The `{}` value did not match the required output schema. Correct it and call `{}` again.",
-            vocabulary.finish_name, vocabulary.finish_statement
-        )
     }
 
     pub(crate) fn invalid_cell_retry_copy(&self, error_text: &str) -> String {
@@ -607,16 +597,14 @@ impl SessionDialect {
         let tags = vocabulary.cell_tags;
         let mut text = match channel {
             crate::plugin::RlmChannel::Cell => format!(
-                "Finish-required: prose alone never ends this turn. Every response, including the last, acts inside a paired `{open}...{close}` block. Do not call `{finish}` until the answer is in hand; the final response's block calls `{finish}` (`{finish_null}` only when null is the answer). Never announce an action without the block that performs it.",
+                "Finish-required: prose alone never ends this turn. Every response, including the last, acts inside a paired `{open}...{close}` block. Do not call `{finish}` until the answer is in hand; the final response's block calls `{finish}` as its last statement. Never announce an action without the block that performs it.",
                 open = tags.open,
                 close = tags.close,
-                finish = vocabulary.finish_statement,
-                finish_null = vocabulary.finish_null_statement,
+                finish = vocabulary.finish_call,
             ),
             crate::plugin::RlmChannel::NativeTool => format!(
-                "Finish-required: prose alone never ends this turn. Every response, including the last, acts inside the `code` argument of an `execute_code` call. Do not call `{finish}` until the answer is in hand; the final response's `execute_code` call runs `{finish}` (`{finish_null}` only when null is the answer). Never announce an action without the `execute_code` call that performs it.",
-                finish = vocabulary.finish_statement,
-                finish_null = vocabulary.finish_null_statement,
+                "Finish-required: prose alone never ends this turn. Every response, including the last, acts inside the `code` argument of an `execute_code` call. Do not call `{finish}` until the answer is in hand; the final response's `execute_code` call runs `{finish}` as its last statement. Never announce an action without the `execute_code` call that performs it.",
+                finish = vocabulary.finish_call,
             ),
         };
         if requires_schema {

@@ -10,7 +10,7 @@ use lash::process::{
     CausalRef, DeclaredProcessIdentity, Lifetime, ProcessInput, ProcessOriginator,
     ProcessStartDeclaration, SessionTurnOutcome,
 };
-use lash::rlm::{RLM_PROTOCOL_PLUGIN_ID, RlmCreateExtras, RlmSeed, RlmTermination};
+use lash::rlm::{RLM_PROTOCOL_PLUGIN_ID, RlmCreateExtras, RlmSeed, TerminationMode};
 use lash::schema::JsonSchema;
 use lash::tools::{
     AttemptContext, CancelHint, DeclaredStart, ExecutionOwner, ExecutionPolicy, PendingCompletion,
@@ -210,7 +210,7 @@ fn task_input(task: &str, output_schema: Option<&Value>) -> lash::TurnInput {
     if let Some(schema) = output_schema {
         let pretty = serde_json::to_string_pretty(schema).unwrap_or_else(|_| schema.to_string());
         text.push_str(&format!(
-            "\n\n## Required output\n\nWhen done, end the task with `finish(value)`. The value MUST match this JSON Schema exactly:\n\n```json\n{pretty}\n```"
+            "\n\n## Required output\n\nWhen done, end the task with `await control.finish(value)`. The value MUST match this JSON Schema exactly:\n\n```json\n{pretty}\n```"
         ));
     }
     lash::TurnInput::text(text)
@@ -241,9 +241,8 @@ impl SpawnAgent {
                 .insert_typed(
                     RLM_PROTOCOL_PLUGIN_ID,
                     RlmCreateExtras {
-                        termination: Some(RlmTermination::FinishRequired {
-                            schema: output_schema,
-                        }),
+                        termination: Some(TerminationMode::TerminalRequired),
+                        finish_schema: output_schema,
                         render: None,
                     },
                 )

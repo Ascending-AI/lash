@@ -158,7 +158,7 @@ impl DelegationPluginFactory {
         self
     }
 
-    /// Children run the RLM protocol: each must finish through `finish`,
+    /// Children run the RLM protocol: each must finish through `control.finish`,
     /// with a value of the call's `output` shape when it states one, written
     /// by the program. Only an RLM child accepts a `seed`.
     #[must_use]

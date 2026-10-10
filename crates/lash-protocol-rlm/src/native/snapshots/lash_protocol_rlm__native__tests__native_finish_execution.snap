@@ -10,7 +10,7 @@ expression: "serde_json::to_string_pretty(&request.messages).unwrap()"
         "ToolCall": {
           "call_id": "provider-id",
           "tool_name": "execute_code",
-          "input_json": "{\"code\":\"finish(1);\"}",
+          "input_json": "{\"code\":\"await control.finish(1);\"}",
           "replay": {
             "item_id": "opaque-item",
             "opaque": "signature"

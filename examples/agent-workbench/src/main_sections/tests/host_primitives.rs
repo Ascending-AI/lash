@@ -60,11 +60,11 @@ await workbench.register_trigger({
   event_arg: "event",
   name: "law watcher"
 });
-finish("registered");
+await control.finish("registered");
 </typescript>"#;
 
 /// A provider whose call `n` answers `cells[n]`, and every later call
-/// `finish("noted")`.
+/// `await control.finish("noted")`.
 fn cells_then_noted(cells: Vec<String>) -> ProviderHandle {
     let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     lash::testing::TestProvider::builder()
@@ -141,7 +141,7 @@ async fn an_approval_resolved_after_its_body_bound_across_a_restart_completes_on
     let commits = RecordedCommits::over(Arc::clone(&stores));
     let approvals = approvals::WorkbenchApprovals::in_memory().expect("open the approval ledger");
     let first = Workbench::builder(cells_then_noted(vec![
-        "<typescript>\nconst applied = await ops.apply_change({ target: \"db\", change: \"migrate\" });\nfinish(applied.status);\n</typescript>".to_string(),
+        "<typescript>\nconst applied = await ops.apply_change({ target: \"db\", change: \"migrate\" });\nawait control.finish(applied.status);\n</typescript>".to_string(),
     ]))
     .stores(Arc::clone(&commits.stores))
     .approvals(approvals.clone())
@@ -494,7 +494,7 @@ await workbench.register_trigger({
   event_arg: "event",
   name: "second watcher"
 });
-finish("registered");
+await control.finish("registered");
 </typescript>"#;
 
 /// The turn that registers a process on a cron source that ticks at every
@@ -509,7 +509,7 @@ await workbench.register_trigger({
   event_arg: "event",
   name: "law tick"
 });
-finish("registered");
+await control.finish("registered");
 </typescript>"#;
 
 /// The first even hour after [`START_MS`].
@@ -1029,7 +1029,7 @@ async fn a_decision_that_crashed_before_its_resolve_is_resolved_at_boot_by_the_p
     let commits = RecordedCommits::over(Arc::clone(&stores));
     let approvals = approvals::WorkbenchApprovals::in_memory().expect("open the approval ledger");
     let first = Workbench::builder(cells_then_noted(vec![
-        "<typescript>\nconst applied = await ops.apply_change({ target: \"db\", change: \"migrate\" });\nfinish(applied.status);\n</typescript>".to_string(),
+        "<typescript>\nconst applied = await ops.apply_change({ target: \"db\", change: \"migrate\" });\nawait control.finish(applied.status);\n</typescript>".to_string(),
     ]))
     .stores(Arc::clone(&commits.stores))
     .approvals(approvals.clone())

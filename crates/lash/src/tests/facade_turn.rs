@@ -152,14 +152,13 @@ struct SwitchFrame;
 #[async_trait::async_trait]
 impl crate::tools::StaticToolExecute for SwitchFrame {
     async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-        lash_core::ToolOutcome::ok(serde_json::json!({ "ok": true }))
-            .with_control(lash_core::ToolControl::SwitchAgentFrame {
-                frame_key: lash_core::FrameKey::from_caller_material("facade-frame-switch")
-                    .expect("non-empty caller material"),
-                initial_nodes: Vec::new(),
-                task: Some(TASK.to_owned()),
-            })
-            .into()
+        lash_core::ToolOutcome::turn_control(lash_core::TurnControl::SwitchAgentFrame {
+            frame_key: lash_core::FrameKey::from_caller_material("facade-frame-switch")
+                .expect("non-empty caller material"),
+            initial_nodes: Vec::new(),
+            task: TASK.to_owned(),
+        })
+        .into()
     }
 }
 
@@ -168,12 +167,12 @@ impl crate::tools::StaticToolExecute for SwitchFrame {
 /// and the session runs the task as its next turn, on the new frame.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_frame_switch_through_send_completes_and_its_follow_on_runs_next() {
-    let definition = lash_core::ToolDefinition::raw(
+    let definition = lash_core::ToolDefinition::control(
         "switch_frame",
         "switch_frame",
         "Switches the agent frame and hands the new frame a task.",
         serde_json::json!({ "type": "object", "additionalProperties": false, "properties": {} }),
-        serde_json::json!({ "type": "object" }),
+        lash_core::TurnControls::switch_agent_frame(),
     )
     .expect("switch_frame's schemas")
     .with_execution(std::time::Duration::from_secs(120));

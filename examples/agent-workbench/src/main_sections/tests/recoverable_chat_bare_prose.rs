@@ -126,8 +126,8 @@ async fn chat_finish_requires_text_session_wide_and_prose_still_ends_a_turn() {
 
     let (provider, calls) = counted_provider(|call| {
         text_response(match call {
-            0 => "<typescript>finish({temperature: 15});</typescript>",
-            1 => "<typescript>finish(\"It is 15 °C.\");</typescript>",
+            0 => "<typescript>await control.finish({temperature: 15});</typescript>",
+            1 => "<typescript>await control.finish(\"It is 15 °C.\");</typescript>",
             _ => "A prose follow-up.",
         })
     });
@@ -157,8 +157,9 @@ async fn chat_finish_requires_text_session_wide_and_prose_still_ends_a_turn() {
         .expect("chat states its termination session-wide");
     assert!(termination.prose_ends_turn());
     assert_eq!(
-        termination
-            .finish_schema()
+        recorded
+            .finish_schema
+            .as_ref()
             .expect("a text finish schema")
             .as_value(),
         &json!({"type": "string"})

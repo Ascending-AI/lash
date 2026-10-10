@@ -430,59 +430,45 @@ pub use lash_sansio::llm::types::{
 };
 pub use lash_sansio::{
     AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentTypeMetadata, Backoff, BatchId,
-    BindingChanges, BoundedRetry, CancelOrigin, CancelRequest, CellDefect, CellFailure,
-    CellFailureKind, CellOutcome, CellPrint, CellRecord, CheckpointDelivery, CheckpointKind,
-    CompactToolContract, DeclarationRefusal, DegradedBinding, ExecCodeFailure,
-    ExecCodeFailureReason, ExecResponse, ExecutedCall, ExecutedCallOutcome, ExecutionBudgets,
-    ExecutionBudgetsConfig, ExecutionBudgetsError, ExecutionLimit, ExecutionPolicy, FrameKey,
-    FrameKeyError, InputId, JsonSchema, LimitCause, LlmCallError, LlmUsage, MediaType, Message,
-    MessageOrigin, MessageRole, NodeId, OmittedToolCalls, OutcomeShape, OutputRetentionPolicy,
-    OutputValue, ParkBound, Part, PartKind, PluginMessage, PluginRuntimeEvent, ProjectionMode,
-    ProviderAttemptLimits, RegistrationRefused, RetainedOutput, SchemaAdmissionError,
-    SchemaContract, SchemaDialect, SchemaProjectionOverride, SchemaProjectionPolicy,
-    SessionAppendNode, TextProjectionMetadata, TokenUsageOverflow, ToolArgumentProjectionPolicy,
-    ToolBound, ToolBounds, ToolCallOutcome, ToolCallOutput, ToolCallRecord, ToolCancellation,
-    ToolCatalog, ToolCatalogBuildError, ToolCatalogEntry, ToolCheckConflict, ToolCheckPhase,
-    ToolCheckReply, ToolCheckVerdictKind, ToolContract, ToolControl, ToolDeclaration,
-    ToolDefinition, ToolDiscovery, ToolDraft, ToolFailure, ToolFailureCause, ToolFailureClass,
-    ToolFailureSource, ToolId, ToolIntentIdentity, ToolIntentKind, ToolManifest, ToolModule,
-    ToolOutputContract, ToolValue, ToolView, ToolViewBlock, ToolViewMeta, TurnId, TurnOutputSource,
-    ValueMismatch,
+    BindingChanges, BoundedRetry, CancelOrigin, CancelRequest, CellControl, CellDefect,
+    CellFailure, CellFailureKind, CellOutcome, CellPrint, CellRecord, CheckpointDelivery,
+    CheckpointKind, CompactToolContract, CompletionCandidate, CompletionDisposition,
+    DeclarationRefusal, DegradedBinding, ExecCodeFailure, ExecCodeFailureReason, ExecResponse,
+    ExecutedCall, ExecutedCallOutcome, ExecutionBudgets, ExecutionBudgetsConfig,
+    ExecutionBudgetsError, ExecutionLimit, ExecutionPolicy, FrameKey, FrameKeyError, InputId,
+    JsonSchema, LimitCause, LlmCallError, LlmUsage, MediaType, Message, MessageOrigin, MessageRole,
+    NodeId, OmittedToolCalls, OutcomeShape, OutputRetentionPolicy, OutputValue, ParkBound, Part,
+    PartKind, PluginMessage, PluginRuntimeEvent, ProjectionMode, ProviderAttemptLimits,
+    RegistrationRefused, RetainedOutput, SchemaAdmissionError, SchemaContract, SchemaDialect,
+    SchemaProjectionOverride, SchemaProjectionPolicy, SessionAppendNode, TerminationMode,
+    TextProjectionMetadata, TokenUsageOverflow, ToolArgumentProjectionPolicy, ToolBound,
+    ToolBounds, ToolCallOutcome, ToolCallOutput, ToolCallRecord, ToolCancellation, ToolCatalog,
+    ToolCatalogBuildError, ToolCatalogEntry, ToolCheckConflict, ToolCheckPhase, ToolCheckReply,
+    ToolCheckVerdictKind, ToolContract, ToolControl, ToolDeclaration, ToolDefinition,
+    ToolDiscovery, ToolDraft, ToolFailure, ToolFailureCause, ToolFailureClass, ToolFailureSource,
+    ToolId, ToolIntentIdentity, ToolIntentKind, ToolManifest, ToolModule, ToolOutputContract,
+    ToolValue, ToolView, ToolViewBlock, ToolViewMeta, TurnControl, TurnControlKind, TurnControls,
+    TurnId, TurnOutputSource, ValueMismatch,
 };
 pub use tool_provider::{ToolAttachmentClient, ToolDirectCompletionClient, ToolSessionLlmProfile};
-/// Project a successful tool control into its terminal turn outcome.
-///
-/// Agent-frame seeds are typed at their serde boundary, so a terminal outcome
-/// can never advertise nodes that the commit materializer would have to drop.
+/// The stop a tool control other than a declared turn control ends the turn
+/// with: a tool-requested failure, or a plugin's abort. A declared turn
+/// control ([`ToolControl::Turn`]) is no stop: it records a
+/// [`CompletionCandidate`](crate::CompletionCandidate) that BeforeCompletion
+/// decides.
 ///
 /// # Integrator class
 ///
 /// Protocol-engine implementors use this shared projection to preserve the
 /// host's terminal-outcome semantics.
-pub fn turn_outcome_from_tool_control(
-    tool_name: &str,
-    control: &ToolControl,
-) -> Option<TurnOutcome> {
+pub fn turn_stop_from_tool_control(tool_name: &str, control: &ToolControl) -> Option<TurnOutcome> {
     match control {
-        ToolControl::SwitchAgentFrame {
-            frame_key,
-            initial_nodes,
-            task: Some(task),
-        } if !task.trim().is_empty() => Some(TurnOutcome::AgentFrameSwitch {
-            frame_key: frame_key.clone(),
-            task: task.clone(),
-            initial_nodes: initial_nodes.clone(),
-        }),
-        ToolControl::Finish { value } => Some(TurnOutcome::Finished(TurnFinish::ToolValue {
-            tool_name: tool_name.to_string(),
-            value: tool_value_for_projection(value),
-        })),
+        ToolControl::Turn { .. } => None,
         ToolControl::Fail { failure } => Some(TurnOutcome::Stopped(TurnStop::ToolError {
             tool_name: tool_name.to_string(),
             value: tool_failure_for_projection(failure),
         })),
         ToolControl::AbortRun { .. } => Some(TurnOutcome::Stopped(TurnStop::PluginAbort)),
-        ToolControl::SwitchAgentFrame { .. } => None,
     }
 }
 

@@ -10,7 +10,7 @@ expression: "serde_json::to_string_pretty(&request.messages).unwrap()"
         "ToolCall": {
           "call_id": "provider-id",
           "tool_name": "execute_code",
-          "input_json": "{\"code\":\"finish(1);\"}",
+          "input_json": "{\"code\":\"await control.finish(1);\"}",
           "replay": {
             "item_id": "opaque-item",
             "opaque": "signature"
@@ -28,22 +28,10 @@ expression: "serde_json::to_string_pretty(&request.messages).unwrap()"
           "content": [
             {
               "type": "text",
-              "text": "1 is not of type \"string\"\n\nNext: the defect is in the program, not in what the runtime allows. Fix the cause named above, then send the corrected cell."
+              "text": "`await control.finish(value)` refused its value: 1 is not of type \"string\"\n\nNext: the defect is in the program, not in what the runtime allows. Fix the cause named above, then send the corrected cell."
             }
           ],
           "tool_name": "execute_code"
-        }
-      }
-    ]
-  },
-  {
-    "role": "System",
-    "blocks": [
-      {
-        "Text": {
-          "text": "The `finish` value did not match the required output schema. Correct it and call `finish(value)` again.",
-          "response_meta": null,
-          "cache_breakpoint": true
         }
       }
     ]

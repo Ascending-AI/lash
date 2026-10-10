@@ -140,6 +140,7 @@ pub fn rlm_session_config(
     Ok(recorded
         .map(|recorded| RlmSessionConfig {
             termination: recorded.termination,
+            finish_schema: recorded.finish_schema,
         })
         .unwrap_or_default())
 }
@@ -487,6 +488,7 @@ mod tests {
             serde_json::to_value(crate::RlmRecordedConfig {
                 render: None,
                 termination: None,
+                finish_schema: None,
                 channel: Some(crate::RlmChannel::Cell),
                 dialect: Some("typescript".to_string()),
                 behaviour: creating.recorded_behaviour(),

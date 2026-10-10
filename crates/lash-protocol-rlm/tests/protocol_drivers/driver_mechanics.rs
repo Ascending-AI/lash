@@ -1527,7 +1527,8 @@ fn complete_through_checkpoint(machine: &mut TurnMachine, effects: &[Effect]) ->
 
 fn finish_required_options() -> lash_core::ProtocolTurnOptions {
     recorded_namespace(RlmTurnOptions {
-        termination: Some(RlmTermination::FinishRequired { schema: None }),
+        termination: Some(lash_core::TerminationMode::TerminalRequired),
+        finish_schema: None,
         render: None,
     })
 }
@@ -1540,8 +1541,8 @@ fn finish_required_options() -> lash_core::ProtocolTurnOptions {
 fn a_one_line_cell_executes() {
     {
         let (reply, code) = (
-            "<typescript>finish(\"ok\");</typescript>",
-            "finish(\"ok\");",
+            "<typescript>await control.finish(\"ok\");</typescript>",
+            "await control.finish(\"ok\");",
         );
         let mut machine = TurnMachine::new(
             test_config(),
@@ -1622,7 +1623,7 @@ fn a_one_line_tag_mention_still_finishes_as_prose() {
 fn a_malformed_fence_is_answered_by_naming_the_rule() {
     {
         let (reply, open, close) = (
-            "<typescript >\nfinish(\"ok\");\n</typescript>",
+            "<typescript >\nawait control.finish(\"ok\");\n</typescript>",
             "<typescript>",
             "</typescript>",
         );
@@ -1750,7 +1751,7 @@ fn identical_replies_are_fingerprinted_and_run_to_the_hosts_budget() {
 /// exercises the iteration rather than asserting that `Default` is empty.
 #[test]
 fn a_repair_iteration_carries_no_accumulation_from_the_failed_one() {
-    let mut config = test_config_with_termination(RlmTermination::FinishRequired { schema: None });
+    let mut config = test_config_with_termination(lash_core::TerminationMode::TerminalRequired);
     config.turn_budget = lash_core::TurnBudget::bounded(8);
     let mut machine = TurnMachine::new(config, vec![user_message("run it")], Default::default(), 0);
 
@@ -1837,7 +1838,7 @@ fn a_repair_iteration_carries_no_accumulation_from_the_failed_one() {
 /// resend sends the admitted request (ADR 0133 §6).
 #[test]
 fn rlm_redrive_projects_identical_llm_envelope() {
-    let journaled_sync = sansio::ExecutionEnvironmentSync::default();
+    let journaled_sync = rlm_environment();
 
     let recorded = drive_rlm_to_second_llm_request(&journaled_sync);
     let redriven = drive_rlm_to_second_llm_request(&journaled_sync);
@@ -2068,4 +2069,56 @@ fn a_failed_cell_is_recorded_typed_and_its_guidance_is_rendered_at_projection() 
             && request.contains("Next: the defect is in the program"),
         "the projected prompt carries the failure and its guidance: {request}"
     );
+}
+
+/// Every effect the machine polls, with each sync answered by `environment`.
+fn drain_synced(
+    machine: &mut TurnMachine,
+    environment: &sansio::ExecutionEnvironmentSync,
+) -> Vec<Effect> {
+    let mut effects = Vec::new();
+    while let Some(effect) = machine.poll_effect() {
+        if let Effect::SyncExecutionEnvironment { id, .. } = effect {
+            machine.handle_response(Response::ExecutionEnvironmentSynced {
+                id,
+                result: Ok(environment.clone()),
+            });
+            continue;
+        }
+        effects.push(effect);
+    }
+    effects
+}
+
+/// Law 13 (FIG-5781): a turn only a control call ends needs a tool that
+/// ends it with a value. A TerminalRequired turn whose surface declares no
+/// `Finish` is refused as invalid turn options before its model is called;
+/// a Natural turn on the same surface runs.
+#[test]
+fn a_terminal_required_turn_without_a_finish_tool_is_refused_before_its_model_runs() {
+    let without_finish = sansio::ExecutionEnvironmentSync::default();
+    let mut required = TurnMachine::new(
+        test_config_with_termination(lash_core::TerminationMode::TerminalRequired),
+        vec![user_message("respond")],
+        Default::default(),
+        0,
+    );
+    let effects = drain_synced(&mut required, &without_finish);
+    assert!(find_llm_call(&effects).is_none(), "{effects:?}");
+    assert!(required.is_done());
+    // The refusal is the turn's runtime error, which names the cause.
+    let reported = format!("{effects:?}");
+    assert!(
+        reported.contains("no tool it can call declares Finish"),
+        "{reported}"
+    );
+
+    let mut natural = TurnMachine::new(
+        test_config_with_termination(lash_core::TerminationMode::Natural),
+        vec![user_message("respond")],
+        Default::default(),
+        0,
+    );
+    let effects = drain_synced(&mut natural, &without_finish);
+    assert!(find_llm_call(&effects).is_some(), "{effects:?}");
 }

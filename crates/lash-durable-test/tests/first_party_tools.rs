@@ -46,7 +46,7 @@ fn typescript_source_for(tool_name: &str) -> &'static str {
   inputs: { answer: "covered" },
   output: { answer: "str" }
 });
-finish(result);"#
+await control.finish(result);"#
         }
         other => panic!(
             "first-party tool `{other}` was registered without a production TypeScript fixture; add its caller path before merging"
@@ -158,7 +158,7 @@ async fn every_registered_first_party_tool_succeeds_from_a_production_cell(tier:
         .expect("the turn answers");
         served::assert_answered(&manifest.name, &output);
         assert_eq!(
-            output.final_value(),
+            output.finished().map(|(_, value)| value),
             Some(&serde_json::json!({ "answer": "covered" })),
             "the production cell answers {}'s result",
             manifest.name

@@ -10,6 +10,7 @@ use crate::Diagnostic;
 
 mod array;
 mod async_fn;
+mod controls;
 mod deviations;
 mod hoisting;
 mod language;
@@ -50,6 +51,21 @@ pub(crate) fn library() -> &'static NamedLibrary {
 /// Lowers a first cell and checks what every lowered document must hold:
 /// it is admitted, its annotations are its own, and it survives kernel
 /// text.
+/// The test host's turn-ending tool: `await finish(x)` ends the turn with `x`.
+/// The laws' cells end through it as a model's cells end through
+/// `control.finish`.
+pub(crate) fn controls()
+-> &'static BTreeMap<EffectName, BTreeSet<lash_kernel_dialect::EffectControl>> {
+    static CONTROLS: OnceLock<BTreeMap<EffectName, BTreeSet<lash_kernel_dialect::EffectControl>>> =
+        OnceLock::new();
+    CONTROLS.get_or_init(|| {
+        BTreeMap::from([(
+            EffectName::new("finish").expect("a tool's name"),
+            BTreeSet::from([lash_kernel_dialect::EffectControl::Finish]),
+        )])
+    })
+}
+
 pub(crate) fn lower(source: &str) -> Result<Lowered, Diagnostic> {
     lower_in_session(source, &[])
 }
@@ -73,6 +89,7 @@ fn lower_against(
     let environment = Environment {
         library: library(),
         effects,
+        controls: controls(),
         bindings: &bindings,
         functions: &std::collections::BTreeMap::new(),
     };

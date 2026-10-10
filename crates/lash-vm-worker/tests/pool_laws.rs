@@ -225,6 +225,7 @@ fn a_typescript_cell_lowered_in_the_worker_parks_and_resumes() {
             echo,
         )]
         .into(),
+        controls: Default::default(),
         bindings: Default::default(),
         functions: Default::default(),
     };

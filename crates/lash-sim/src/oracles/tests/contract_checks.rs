@@ -266,14 +266,7 @@ fn scenario_contract_generated_facts_fail_on_contract_specific_mutations() {
         .is_ok(),
         "positive fixture should prove RLM empty-options natural default facts"
     );
-    assert!(
-        scenario_contract_generated_facts_for_semantic(
-            "rlm.typed_schema_mismatch_repair_loop",
-            &events,
-        )
-        .is_ok(),
-        "positive fixture should prove RLM schema-mismatch repair facts"
-    );
+
     for contract in [
         "rlm.exec_error_max_turn_stop",
         "rlm.retired_marker_plain_lash_vm_text",
@@ -491,7 +484,7 @@ fn scenario_contract_generated_facts_fail_on_contract_specific_mutations() {
             execution
                 .pointer_mut("/result/termination/kind")
                 .expect("termination kind")
-                .clone_from(&json!("finish_required"));
+                .clone_from(&json!("terminal_required"));
         },
     );
     let err = scenario_contract_generated_facts_for_semantic(
@@ -877,25 +870,6 @@ fn scenario_contract_generated_facts_fail_on_contract_specific_mutations() {
     assert!(
         err.contains("fixed-source replay validation"),
         "unexpected Agent failed-child replay failure: {err}"
-    );
-
-    let mut no_schema_feedback = events.clone();
-    no_schema_feedback.retain(|event| {
-        event
-            .observed
-            .get("mutation")
-            .or_else(|| event.payload.get("mutation"))
-            .and_then(Value::as_str)
-            != Some("malformed_sse_chunk")
-    });
-    let err = scenario_contract_generated_facts_for_semantic(
-        "rlm.typed_schema_mismatch_repair_loop",
-        &no_schema_feedback,
-    )
-    .expect_err("RLM schema mismatch repair must require malformed provider feedback");
-    assert!(
-        err.contains("malformed_sse_chunk"),
-        "unexpected RLM schema-mismatch failure: {err}"
     );
 
     let mut no_lash_vm_continuation = events.clone();

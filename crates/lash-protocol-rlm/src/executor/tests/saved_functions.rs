@@ -4,6 +4,8 @@
 
 use std::sync::Arc;
 
+use lash_vm_runtime::ToolDefinitionBindingExt as _;
+
 use super::{
     CellTools, SESSION, TURN, finish_of, open_host, typescript_services, typescript_state,
 };
@@ -39,7 +41,7 @@ async fn a_function_a_cell_defines_is_called_two_cells_later() {
         &mut state,
         cell_context(&host, SESSION, TURN, "exec-code:2", tools),
         &services,
-        "finish(twice(base));",
+        "await control.finish(twice(base));",
     )
     .await;
     assert_eq!(
@@ -129,7 +131,7 @@ async fn a_saved_function_is_called_after_a_cold_restore() {
         &host,
         "exec-code:1",
         tools,
-        "finish(scale(14));",
+        "await control.finish(scale(14));",
     )
     .await;
     assert_eq!(finish_of(&called), serde_json::json!(42));
@@ -169,7 +171,7 @@ async fn a_new_session_created_with_a_saved_function_calls_it() {
         &host,
         "exec-code:1",
         tools,
-        "finish(greet(\"lash\"));",
+        "await control.finish(greet(\"lash\"));",
     )
     .await;
     assert_eq!(finish_of(&called), serde_json::json!("hello, lash"));
@@ -210,7 +212,7 @@ async fn a_saved_function_is_refused_where_a_tool_it_calls_is_missing() {
         &mut seeded,
         cell_context(&host, SESSION, TURN, "exec-code:1", Arc::new(NoTools)),
         &typescript_services(None),
-        "finish(await shout(\"b\"));",
+        "await control.finish(await shout(\"b\"));",
     )
     .await;
     let failure = refused.error().expect("the cell is refused");
@@ -253,7 +255,7 @@ async fn a_saved_function_keeps_the_captures_its_cell_left() {
         &host,
         "exec-code:2",
         tools,
-        "finish({ small: clamp(3), large: clamp(50), factor, top: limits.top });",
+        "await control.finish({ small: clamp(3), large: clamp(50), factor, top: limits.top });",
     )
     .await;
     assert_eq!(
@@ -308,11 +310,119 @@ async fn a_function_that_captures_a_task_is_not_carried_and_says_so() {
         &mut state,
         cell_context(&host, SESSION, TURN, "exec-code:1", tools),
         &typescript_services(None),
-        "finish(later());",
+        "await control.finish(later());",
     )
     .await;
     assert!(
         refused.error().is_some(),
         "`later` is not bound in a later cell"
     );
+}
+
+/// Offers `echo.say` as a tool that ends the turn: what a host declares
+/// after a function calling the ordinary `echo.say` was saved.
+struct EchoEndsTheTurn;
+
+impl EchoEndsTheTurn {
+    fn definition() -> lash_core::ToolDefinition {
+        lash_core::ToolDefinition::control(
+            "tool:echo",
+            "echo",
+            "Echo the text back, ending the turn",
+            lash_core::ToolDefinition::default_input_schema(),
+            lash_core::TurnControls::finish(),
+        )
+        .expect("valid declared tool schema")
+        .with_execution(std::time::Duration::from_secs(120))
+        .with_tool_binding(lash_vm_runtime::ToolBinding::new(["echo"], "say"))
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core::ToolProvider for EchoEndsTheTurn {
+    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+        vec![Self::definition().manifest()]
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+        (name == "echo" || name == "tool:echo").then(|| Arc::new(Self::definition().contract()))
+    }
+
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        lash_core::ToolOutcome::finish(call.args.clone()).into()
+    }
+}
+
+/// Law 12 (FIG-5781): a saved function pins what its effects declared. A
+/// session where an effect it calls now ends the turn refuses the call of
+/// the function, with the typed refusal, before anything runs.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_saved_function_is_refused_where_a_tool_it_calls_now_ends_the_turn() {
+    let host = open_host().await;
+    let tools = Arc::new(CellTools::default());
+    let mut source = typescript_state();
+    cell(
+        &mut source,
+        &host,
+        "exec-code:0",
+        tools.clone(),
+        "async function shout(text) { return await echo.say({ text }); }",
+    )
+    .await;
+    let mut seeded = typescript_state();
+    seeded
+        .seed_functions(
+            &source.saved_functions(),
+            &std::collections::BTreeSet::new(),
+        )
+        .await
+        .expect("create the session with the function");
+    let refused = run_cell(
+        &mut seeded,
+        cell_context(
+            &host,
+            SESSION,
+            TURN,
+            "exec-code:1",
+            Arc::new(EchoEndsTheTurn),
+        ),
+        &typescript_services(None),
+        "const said = await shout(\"b\");",
+    )
+    .await;
+    let failure = refused.error().expect("the cell is refused");
+    assert!(
+        failure.message.contains("TS_SAVED_FUNCTION_UNUSABLE")
+            && failure
+                .message
+                .contains("the saved function `shout` calls `echo.say`, which now ends the turn"),
+        "{}",
+        failure.message
+    );
+    assert!(refused.tool_calls.is_empty(), "nothing of the cell ran");
+}
+
+/// Law 12 (FIG-5781): a function cannot end the turn, so one that calls
+/// `control.finish` is refused before its cell runs, and the session keeps
+/// no such function.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_function_that_calls_control_finish_is_refused_and_never_saved() {
+    let host = open_host().await;
+    let tools = Arc::new(CellTools::default());
+    let mut state = typescript_state();
+    let refused = run_cell(
+        &mut state,
+        cell_context(&host, SESSION, TURN, "exec-code:0", tools.clone()),
+        &typescript_services(None),
+        "async function done(value) { await control.finish(value); }\nawait echo.say({ text: \"ran\" });",
+    )
+    .await;
+    let failure = refused.error().expect("the cell is refused");
+    assert!(
+        failure.message.contains("TS_CONTROL_CALL_PLACEMENT"),
+        "{}",
+        failure.message
+    );
+    assert!(tools.answered().is_empty(), "nothing of the cell ran");
+    assert!(!state.saved_functions().contains_key("done"));
 }

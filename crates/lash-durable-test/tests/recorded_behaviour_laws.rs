@@ -85,7 +85,7 @@ fn standard_answer(rendered: &str) -> String {
 fn rlm_answer(rendered: &str) -> String {
     if rendered.contains("continue_as") {
         format!(
-            "<typescript>\nlet i = 0;\nwhile (i < {LOOP_ITERATIONS}) {{ i = i + 1; }}\nfinish(\"ran \" + String(i));\n</typescript>"
+            "<typescript>\nlet i = 0;\nwhile (i < {LOOP_ITERATIONS}) {{ i = i + 1; }}\nawait control.finish(\"ran \" + String(i));\n</typescript>"
         )
     } else {
         LOST_ANSWER.to_owned()

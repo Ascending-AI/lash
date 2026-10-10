@@ -657,9 +657,23 @@ impl KernelMachine {
                 requests.push(pending.request.clone());
             }
         }
+        let outstanding = self
+            .tasks
+            .iter()
+            .skip(1)
+            .filter(|task| {
+                !task.passed
+                    && match &task.state {
+                        TaskState::Ended(_) => task.failed && !task.observed,
+                        _ => true,
+                    }
+            })
+            .map(|task| task.identity.clone())
+            .collect();
         Step::Parked(Park {
             requests,
             withdrawn: std::mem::take(&mut self.withdrawn),
+            outstanding,
         })
     }
 

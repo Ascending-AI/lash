@@ -143,7 +143,7 @@ fn cell() -> lash_core::llm::types::LlmResponse {
     served::cell(&format!(
         "{body}\n\
          const held = await processes.start({{ definition: body }});\n\
-         finish(await held);"
+         await control.finish(await held);"
     ))
 }
 
@@ -513,7 +513,7 @@ fn sleeping_cell() -> lash_core::llm::types::LlmResponse {
     served::cell(&format!(
         "{body}\n\
          await processes.start({{ definition: body }});\n\
-         finish(\"started\");"
+         await control.finish(\"started\");"
     ))
 }
 

@@ -60,7 +60,7 @@ obey the structural request):
 
 > In one TypeScript cell call `ops.apply_change` with target `demo-cluster` and
 > change `enable safe mode`, awaiting it so a failure propagates, then
-> `finish` the returned record. Do not merely explain the call.
+> `control.finish` the returned record. Do not merely explain the call.
 
 1. Poll until exactly one approval card renders. Save
    `01-approve-parked.png`, `01-approve-state.json`, and
@@ -79,7 +79,7 @@ Reset to a fresh session and submit:
 
 > In one TypeScript cell call `ops.apply_change` with target `demo-cluster` and
 > change `disable audit log`, catching the failure instead of letting it
-> propagate. Inspect the thrown error and `finish` a record carrying the code from
+> propagate. Inspect the thrown error and `control.finish` a record carrying the code from
 > `error.cause.code` and the message from `error.message`. Do not retry it.
 
 1. Gate on one matching approval across DOM, `/api/state`, and
@@ -99,7 +99,7 @@ Reset to a fresh session and submit:
 Reset to a fresh session and submit:
 
 > In one TypeScript cell call `ops.apply_change` with target `restart-demo` and
-> change `rotate workers`, awaiting it so a failure propagates, then `finish`
+> change `rotate workers`, awaiting it so a failure propagates, then `control.finish`
 > its status. Do not merely explain the call.
 
 1. Gate on one approval across all three host projections and record the

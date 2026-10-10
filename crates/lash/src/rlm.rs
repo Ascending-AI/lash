@@ -1,52 +1,41 @@
 use crate::support::{ProtocolTurnOptions, Result};
 
-/// The RLM termination setters on a [`send`](crate::LashSession::send).
+/// The RLM completion setters on a [`send`](crate::LashSession::send).
 #[cfg(feature = "rlm")]
 pub trait RlmSendBuilderExt: Sized {
-    /// Requires the RLM turn to finish through the finish tool.
+    /// Requires the RLM turn to end through a declared control call
+    /// (`control.finish`, `control.continue_as` or a host control tool):
+    /// prose alone never ends it.
     fn require_finish(self) -> Result<Self>;
-    /// Requires the RLM finish tool to produce a value matching the schema.
-    fn require_finish_schema(self, schema: serde_json::Value) -> Result<Self>;
-    /// Allows an RLM turn to return prose or invoke the finish tool.
+    /// Allows an RLM turn to end with prose or through a control call.
     fn allow_prose_or_finish(self) -> Result<Self>;
-    /// Allows an RLM turn to return prose or invoke the finish tool, with a
-    /// finish value that must match the schema. A mismatch fails the program
-    /// and asks the model to finish again; prose still ends the turn.
-    fn allow_prose_or_finish_schema(self, schema: serde_json::Value) -> Result<Self>;
+    /// States the schema `control.finish` takes its value under for this
+    /// turn: the host's final-answer schema. A value that does not match
+    /// fails that call, and the turn goes on.
+    fn finish_schema(self, schema: serde_json::Value) -> Result<Self>;
 }
 
 #[cfg(feature = "rlm")]
 impl RlmSendBuilderExt for crate::SendBuilder {
     fn require_finish(self) -> Result<Self> {
-        with_rlm_termination(
-            self,
-            lash_rlm_types::RlmTermination::FinishRequired { schema: None },
-        )
-    }
-
-    fn require_finish_schema(self, schema: serde_json::Value) -> Result<Self> {
-        with_rlm_termination(
-            self,
-            lash_rlm_types::RlmTermination::FinishRequired {
-                schema: Some(admit_finish_schema(schema)?),
-            },
-        )
+        with_rlm_options(self, |options| {
+            options.termination = Some(lash_core::TerminationMode::TerminalRequired);
+            Ok(())
+        })
     }
 
     fn allow_prose_or_finish(self) -> Result<Self> {
-        with_rlm_termination(
-            self,
-            lash_rlm_types::RlmTermination::Natural { schema: None },
-        )
+        with_rlm_options(self, |options| {
+            options.termination = Some(lash_core::TerminationMode::Natural);
+            Ok(())
+        })
     }
 
-    fn allow_prose_or_finish_schema(self, schema: serde_json::Value) -> Result<Self> {
-        with_rlm_termination(
-            self,
-            lash_rlm_types::RlmTermination::Natural {
-                schema: Some(admit_finish_schema(schema)?),
-            },
-        )
+    fn finish_schema(self, schema: serde_json::Value) -> Result<Self> {
+        with_rlm_options(self, |options| {
+            options.finish_schema = Some(admit_finish_schema(schema)?);
+            Ok(())
+        })
     }
 }
 
@@ -59,17 +48,24 @@ fn admit_finish_schema(schema: serde_json::Value) -> Result<lash_core::JsonSchem
     })
 }
 
-/// `builder` with `termination` recorded in its run spec's protocol turn
-/// options, over whatever options the builder already set.
+/// `builder` with `state` applied to the RLM run options its run spec
+/// already states. Options that are not the RLM owner's run options are an
+/// error here, before anything is sent.
 #[cfg(feature = "rlm")]
-fn with_rlm_termination(
+fn with_rlm_options(
     mut builder: crate::SendBuilder,
-    termination: lash_rlm_types::RlmTermination,
+    state: impl FnOnce(&mut lash_rlm_types::RlmTurnOptions) -> Result<()>,
 ) -> Result<crate::SendBuilder> {
-    builder.run_spec.overrides.protocol_turn_options = Some(rlm_termination_options(
-        builder.run_spec.overrides.protocol_turn_options.as_ref(),
-        termination,
-    )?);
+    let mut options = builder
+        .run_spec
+        .overrides
+        .protocol_turn_options
+        .as_ref()
+        .map(ProtocolTurnOptions::decode::<lash_rlm_types::RlmTurnOptions>)
+        .transpose()?
+        .unwrap_or_default();
+    state(&mut options)?;
+    builder.run_spec.overrides.protocol_turn_options = Some(ProtocolTurnOptions::typed(options)?);
     Ok(builder)
 }
 
@@ -145,6 +141,8 @@ impl RlmSessionExt for crate::LashSession {
 // RLM-specific Lash VM host vocabulary. The catalogue-preview, tool-binding,
 // and process-input names are single-homed under `lash::tools` and
 // `lash::process`; they are not re-exported here.
+/// How a session's turns may end.
+pub use lash_core::TerminationMode;
 /// Identifies the RLM protocol's durable output by its typed message origin.
 pub use lash_protocol_rlm::is_rlm_protocol_output;
 /// The initial nodes that bind a [`RlmSeed`] in a session being created: a
@@ -159,8 +157,8 @@ pub use lash_protocol_rlm::{
 /// The stable codes of the typed observations a cell's failure carries, and
 /// the error kinds a cell's program catches from a tool call.
 pub use lash_protocol_rlm::{
-    CELL_BOUND_EXCEEDED, CELL_DEADLOCK, CELL_TASKS_OUTSTANDING, SESSION_BINDING_NOT_CARRIED,
-    TOOL_ARGUMENTS, TOOL_CALL_LIMIT, TOOL_FAILED, UNKNOWN_EFFECT,
+    CELL_BOUND_EXCEEDED, CELL_DEADLOCK, CELL_TASKS_OUTSTANDING, CONTROL_REFUSED,
+    SESSION_BINDING_NOT_CARRIED, TOOL_ARGUMENTS, TOOL_CALL_LIMIT, TOOL_FAILED, UNKNOWN_EFFECT,
 };
 /// The code-mode dialect seam: a host selects the [`CellDialect`] its new
 /// sessions write where it constructs the RLM protocol, and installs any
@@ -178,6 +176,10 @@ pub use lash_protocol_rlm::{
 pub use lash_protocol_rlm::{
     ExtraKeys, ObjectShape, ProcessParamShape, ProcessShape, SchemaShape, ShapeConstraints,
     ShapeField, ShapeKind, ShapeRow,
+};
+/// Lash's two control tools, as a session advertises them.
+pub use lash_protocol_rlm::{
+    FINISH_TOOL_NAME, continue_as_tool_definition, finish_tool_definition,
 };
 /// Projection vocabulary: bind projected values to the active session via
 /// [`rlm_session_projection_extension`], a durable session extension the
@@ -206,29 +208,7 @@ pub use lash_rlm_types::{
     RlmAssistantContent, RlmDiagnosticEvent, RlmDiagnosticPhase, RlmGlobalsPatchPluginBody,
     RlmProtocolEvent,
 };
-pub use lash_rlm_types::{
-    RlmCreateExtras, RlmRenderPatch, RlmSessionConfig, RlmTermination, RlmTurnOptions,
-};
+pub use lash_rlm_types::{RlmCreateExtras, RlmRenderPatch, RlmSessionConfig, RlmTurnOptions};
 pub use lash_rlm_types::{RlmProjectedSeedEntry, RlmProjectedSeedSnapshot, RlmSeedPluginBody};
-
-/// `current`, the RLM run options a send already states, with their
-/// termination set to `termination`. Options that are not the RLM owner's
-/// run options are an error here, before anything is sent.
-#[cfg(feature = "rlm")]
-fn rlm_termination_options(
-    current: Option<&ProtocolTurnOptions>,
-    termination: lash_rlm_types::RlmTermination,
-) -> Result<ProtocolTurnOptions> {
-    let stated = current
-        .map(ProtocolTurnOptions::decode::<lash_rlm_types::RlmTurnOptions>)
-        .transpose()?
-        .unwrap_or_default();
-    Ok(ProtocolTurnOptions::typed(
-        lash_rlm_types::RlmTurnOptions {
-            termination: Some(termination),
-            ..stated
-        },
-    )?)
-}
 
 pub use lash_protocol_rlm::recorded_extraction_decisions;

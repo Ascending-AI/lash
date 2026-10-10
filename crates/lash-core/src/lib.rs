@@ -448,7 +448,7 @@ pub use attachments::{
     AttachmentRootSet, AttachmentStore, AttachmentStoreError, AttachmentStoreFailureClass,
     AttachmentStorePersistence, EmptyRootSetPolicy, StoredAttachment, StoredBlobRef,
 };
-pub use lash_core_execution::turn_outcome_from_tool_control;
+pub use lash_core_execution::turn_stop_from_tool_control;
 pub use lash_sansio::llm::attachment_delivery::ProviderFileScope;
 pub use lash_sansio::llm::types::{
     AttemptOutcome, AttemptRecord, AttemptUsageOutcome, ChargeSafetyDecision,
@@ -463,25 +463,26 @@ pub use lash_sansio::llm::types::{
 };
 pub use lash_sansio::{
     AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentTypeMetadata, Backoff, BatchId,
-    BindingChanges, BoundedRetry, CancelOrigin, CancelRequest, CellDefect, CellFailure,
-    CellFailureKind, CellOutcome, CellPrint, CellRecord, CheckpointDelivery, CheckpointKind,
-    CompactToolContract, DeclarationRefusal, DegradedBinding, ExecCodeFailure,
-    ExecCodeFailureReason, ExecResponse, ExecutedCall, ExecutedCallOutcome, ExecutionBudgets,
-    ExecutionBudgetsConfig, ExecutionBudgetsError, ExecutionLimit, ExecutionPolicy, FrameKey,
-    FrameKeyError, InputId, InternalPartKind, JsonSchema, LimitCause, LlmCallError, LlmUsage,
-    MediaType, Message, MessageOrigin, MessageRole, NodeId, OmittedToolCalls, OutcomeShape,
-    OutputRetentionPolicy, OutputValue, ParkBound, Part, PartKind, PluginMessage,
-    PluginRuntimeEvent, ProjectionMode, ProviderAttemptLimits, RegistrationRefused, RetainedOutput,
-    RunId, SchemaAdmissionError, SchemaContract, SchemaDialect, SchemaProjectionOverride,
-    SchemaProjectionPolicy, SessionAppendNode, TOOL_BINDING_KEY, TextProjectionMetadata,
+    BindingChanges, BoundedRetry, CancelOrigin, CancelRequest, CellControl, CellDefect,
+    CellFailure, CellFailureKind, CellOutcome, CellPrint, CellRecord, CheckpointDelivery,
+    CheckpointKind, CompactToolContract, CompletionCandidate, CompletionDisposition,
+    DeclarationRefusal, DegradedBinding, ExecCodeFailure, ExecCodeFailureReason, ExecResponse,
+    ExecutedCall, ExecutedCallOutcome, ExecutionBudgets, ExecutionBudgetsConfig,
+    ExecutionBudgetsError, ExecutionLimit, ExecutionPolicy, FrameKey, FrameKeyError, InputId,
+    InternalPartKind, JsonSchema, LimitCause, LlmCallError, LlmUsage, MediaType, Message,
+    MessageOrigin, MessageRole, NodeId, OmittedToolCalls, OutcomeShape, OutputRetentionPolicy,
+    OutputValue, ParkBound, Part, PartKind, PluginMessage, PluginRuntimeEvent, ProjectionMode,
+    ProviderAttemptLimits, RegistrationRefused, RetainedOutput, RunId, SchemaAdmissionError,
+    SchemaContract, SchemaDialect, SchemaProjectionOverride, SchemaProjectionPolicy,
+    SessionAppendNode, TOOL_BINDING_KEY, TerminationMode, TextProjectionMetadata,
     TokenUsageOverflow, ToolArgumentProjectionPolicy, ToolBinding, ToolBound, ToolBounds,
     ToolCallOutcome, ToolCallOutput, ToolCallRecord, ToolCancellation, ToolCatalog,
     ToolCatalogBuildError, ToolCatalogEntry, ToolCheckConflict, ToolCheckPhase, ToolCheckReply,
     ToolCheckVerdictKind, ToolContract, ToolControl, ToolDeclaration, ToolDefinition,
     ToolDefinitionBindingExt, ToolDiscovery, ToolDraft, ToolFailure, ToolFailureCause,
     ToolFailureClass, ToolFailureSource, ToolId, ToolIntentIdentity, ToolIntentKind, ToolManifest,
-    ToolModule, ToolOutputContract, ToolValue, ToolView, ToolViewBlock, ToolViewMeta, TurnId,
-    TurnOutputSource, TurnReply, ValueMismatch,
+    ToolModule, ToolOutputContract, ToolValue, ToolView, ToolViewBlock, ToolViewMeta, TurnControl,
+    TurnControlKind, TurnControls, TurnId, TurnOutputSource, TurnReply, ValueMismatch,
 };
 pub(crate) use lash_sansio::{
     BaseRenderCache, build_turn, messages_are_prompt_resume_safe, visible_response_parts,

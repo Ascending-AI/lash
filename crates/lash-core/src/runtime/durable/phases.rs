@@ -396,6 +396,7 @@ pub async fn run_phases(
                     checkpoint,
                     iteration: current,
                     answered_cell: &mut answered_cell,
+                    present: &mut carry,
                 };
                 match tool_round::run(cx, drive.as_mut(), &row, id, calls, done).await? {
                     RoundExit::Answered(present) => carry = present,

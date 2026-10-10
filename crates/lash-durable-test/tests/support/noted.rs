@@ -173,11 +173,7 @@ impl lash_sansio::ProtocolDriverHandle<lash_core::HostTurnProtocol> for NotedDri
                 message(id, MessageRole::Assistant, parts),
                 SessionHistoryRecord::Protocol(mid_call_note()),
             ]),
-            DriverAction::Start(PendingWork::WaitingForToolResults {
-                calls: pending,
-                settled: None,
-                expansion: Default::default(),
-            }),
+            DriverAction::Start(PendingWork::tool_round(pending, Default::default())),
         ]
     }
 

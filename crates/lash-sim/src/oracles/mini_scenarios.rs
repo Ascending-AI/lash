@@ -546,7 +546,7 @@ pub(super) fn scenario_evidence_satisfied(
                     .observed
                     .pointer("/contract_execution/result/runtime_final_value_facts/outcome_kind")
                     .and_then(Value::as_str)
-                    == Some("final_value")
+                    == Some("finished")
                 && event
                     .observed
                     .pointer(

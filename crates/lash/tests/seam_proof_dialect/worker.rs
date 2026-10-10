@@ -45,8 +45,18 @@ impl FrontEnd for SeamProofFrontEnd {
         {
             let statement = statement(line, index).ok_or_else(|| refusal(source, line))?;
             body.push_str(&statement.text);
+            if statement.effect.as_ref().is_some_and(|path| {
+                EffectName::new(path.as_str()).ok().is_some_and(|effect| {
+                    environment
+                        .controls
+                        .get(&effect)
+                        .is_some_and(|controls| !controls.is_empty())
+                })
+            }) {
+                body.push_str("  finish null\n");
+            }
             performed.extend(statement.effect);
-            private.push(statement.private);
+            private.extend(statement.private);
         }
         let text = format!("kernel 1\nnumbers float\n\nmain {{\n{body}}}\n");
         let mut document = parse_document(&text).map_err(|error| defect(error.to_string()))?;
@@ -83,19 +93,20 @@ impl FrontEnd for SeamProofFrontEnd {
 struct Statement {
     text: String,
     effect: Option<String>,
-    private: String,
+    private: Vec<String>,
 }
 
 fn statement(line: &str, index: usize) -> Option<Statement> {
     if let Some(value) = line.strip_prefix("give ") {
         let private = format!("{GIVEN}_{index}");
+        let control_result = format!("seam_control_{index}");
         return Some(Statement {
             text: format!(
-                "  let {private} = {}\n  finish {private}\n",
+                "  let {private} = {}\n  let {control_result} = perform control.finish({private}) as Any\n",
                 value_text(value.trim())?
             ),
-            effect: None,
-            private,
+            effect: Some("control.finish".to_owned()),
+            private: vec![private, control_result],
         });
     }
     let rest = line.strip_prefix("take ")?;
@@ -112,7 +123,7 @@ fn statement(line: &str, index: usize) -> Option<Statement> {
             "  let {private} = {input}\n  let {name} = perform {path}({private}) as Any\n"
         ),
         effect: Some(path.to_owned()),
-        private,
+        private: vec![private],
     })
 }
 

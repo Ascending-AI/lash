@@ -18,7 +18,7 @@ pub(crate) use lash_protocol_rlm::{RlmDriver, RlmProtocolPluginConfig, RlmProtoc
 /// one sans-io machine for one session.
 pub(crate) const RLM_TRANSCRIPT_ACTOR: &str = "rlm";
 use lash_core::CellRecord;
-pub(crate) use lash_rlm_types::{RlmProtocolEvent, RlmTermination, RlmTurnOptions};
+pub(crate) use lash_rlm_types::{RlmProtocolEvent, RlmTurnOptions};
 pub(crate) use lash_sansio::llm::types::{
     LlmContentBlock, LlmOutputPart, LlmRequest, LlmResponse, LlmRole,
 };
@@ -32,12 +32,24 @@ pub(crate) fn recorded_rlm_event(event: &lash_core::ProtocolEvent) -> Option<Rlm
 }
 
 pub(crate) fn test_config() -> TurnMachineConfig {
-    test_config_with_termination(RlmTermination::default())
+    test_config_with_termination(lash_core::TerminationMode::default())
 }
 
-pub(crate) fn test_config_with_termination(rlm_termination: RlmTermination) -> TurnMachineConfig {
+pub(crate) fn test_config_with_termination(
+    rlm_termination: lash_core::TerminationMode,
+) -> TurnMachineConfig {
+    test_config_with_ending(rlm_termination, None)
+}
+
+/// A config whose turns end under `termination`, with `control.finish`
+/// taking its value under `finish_schema`.
+pub(crate) fn test_config_with_ending(
+    termination: lash_core::TerminationMode,
+    finish_schema: Option<lash_sansio::JsonSchema>,
+) -> TurnMachineConfig {
     test_config_with_protocol_turn_options(recorded_namespace(RlmTurnOptions {
-        termination: Some(rlm_termination),
+        termination: Some(termination),
+        finish_schema,
         render: None,
     }))
 }
@@ -53,6 +65,7 @@ pub(crate) fn recorded_namespace(options: RlmTurnOptions) -> lash_core::Protocol
     lash_core::ProtocolTurnOptions::typed(lash_protocol_rlm::RlmRecordedConfig {
         render: options.render,
         termination: options.termination,
+        finish_schema: options.finish_schema,
         channel: Some(lash_protocol_rlm::RlmChannel::Cell),
         dialect: None,
         behaviour: lash_protocol_rlm::RlmProtocolPluginConfig::builder()
@@ -117,7 +130,7 @@ pub(crate) fn drain_effects(machine: &mut TurnMachine) -> Vec<Effect> {
             effects.push(effect);
             machine.handle_response(Response::ExecutionEnvironmentSynced {
                 id,
-                result: Ok(sansio::ExecutionEnvironmentSync::default()),
+                result: Ok(rlm_environment()),
             });
             continue;
         }
@@ -373,14 +386,26 @@ pub(crate) fn exec_response(
             })
             .collect(),
         calls: Vec::new(),
-        tool_calls: Vec::new(),
+        // A cell that `control.finish` ended holds that call's settled
+        // record: the cell's outcome is the call's control.
+        tool_calls: final_output
+            .iter()
+            .filter(|_| error.is_none())
+            .map(|value| lash_sansio::ToolCallRecord {
+                call_id: finish_call_id(),
+                provider_call_id: None,
+                tool: lash_protocol_rlm::FINISH_TOOL_NAME.to_string(),
+                args: value.clone(),
+                output: lash_sansio::ToolCallOutput::finish(value.clone()),
+            })
+            .collect(),
         printed_images: Vec::new(),
         result: match (error, final_output) {
             (Some(message), _) => lash_sansio::CellOutcome::Failed(lash_sansio::CellFailure::new(
                 lash_sansio::CellFailureKind::Program,
                 message,
             )),
-            (None, Some(value)) => lash_sansio::CellOutcome::Finished(value.into()),
+            (None, Some(value)) => finished(value),
             (None, None) => lash_sansio::CellOutcome::Completed,
         },
         retained_finish_value: None,
@@ -388,6 +413,33 @@ pub(crate) fn exec_response(
         bindings: Default::default(),
         suspended: false,
     }
+}
+
+/// The environment an RLM session syncs: its control tools, `finish`
+/// among them, are always installed.
+pub(crate) fn rlm_environment() -> sansio::ExecutionEnvironmentSync {
+    sansio::ExecutionEnvironmentSync {
+        turn_controls: [(
+            lash_protocol_rlm::FINISH_TOOL_NAME.to_string(),
+            lash_core::TurnControls::finish(),
+        )]
+        .into(),
+        ..sansio::ExecutionEnvironmentSync::default()
+    }
+}
+
+/// The call id of the scripted cells' `control.finish` call.
+pub(crate) fn finish_call_id() -> lash_sansio::ToolCallId {
+    lash_sansio::ToolCallId::fixture("finish-call")
+}
+
+/// The outcome of a cell `control.finish(value)` ended.
+pub(crate) fn finished(value: serde_json::Value) -> lash_sansio::CellOutcome {
+    lash_sansio::CellOutcome::finished_by(
+        lash_protocol_rlm::FINISH_TOOL_NAME,
+        finish_call_id(),
+        value,
+    )
 }
 
 /// The typed failure a trajectory entry records for a defect in the program.
@@ -443,7 +495,8 @@ pub(crate) fn rewrite_first_rlm_driver_state_owner(value: &mut serde_json::Value
 pub(crate) struct RlmProtocolScenario {
     pub(crate) name: &'static str,
     pub(crate) user_message: &'static str,
-    pub(crate) termination: RlmTermination,
+    pub(crate) termination: lash_core::TerminationMode,
+    pub(crate) finish_schema: Option<lash_sansio::JsonSchema>,
     pub(crate) max_turns: Option<usize>,
     pub(crate) plugin_factories: Vec<Arc<dyn PluginFactory>>,
     pub(crate) steps: Vec<RlmProtocolStep>,
@@ -455,7 +508,8 @@ impl RlmProtocolScenario {
         Self {
             name,
             user_message: "perform one step",
-            termination: RlmTermination::default(),
+            termination: lash_core::TerminationMode::default(),
+            finish_schema: None,
             max_turns: None,
             plugin_factories: Vec::new(),
             steps: Vec::new(),
@@ -468,8 +522,13 @@ impl RlmProtocolScenario {
         self
     }
 
-    pub(crate) fn termination(mut self, termination: RlmTermination) -> Self {
+    pub(crate) fn termination(mut self, termination: lash_core::TerminationMode) -> Self {
         self.termination = termination;
+        self
+    }
+
+    pub(crate) fn finish_schema(mut self, schema: lash_sansio::JsonSchema) -> Self {
+        self.finish_schema = Some(schema);
         self
     }
 
@@ -544,7 +603,7 @@ impl RlmProtocolScenario {
     )]
     pub(crate) fn run(self) -> RlmProtocolRun {
         let build_config = || {
-            let mut config = test_config_with_termination(self.termination.clone());
+            let mut config = test_config_with_ending(self.termination, self.finish_schema.clone());
             config.turn_budget = self
                 .max_turns
                 .map(lash_core::TurnBudget::bounded)

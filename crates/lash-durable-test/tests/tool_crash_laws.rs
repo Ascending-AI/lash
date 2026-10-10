@@ -219,7 +219,7 @@ impl Turn {
                     )
                 };
                 vec![served::cell(&format!(
-                    "const first = {};\nconst rest = {};\nfinish([first, rest]);",
+                    "const first = {};\nconst rest = {};\nawait control.finish([first, rest]);",
                     aggregate(leaves(0..LIMIT)),
                     aggregate(leaves(LIMIT..LIMIT + 1)),
                 ))]
@@ -259,7 +259,7 @@ impl Turn {
             Self::CellIdentity => vec![
                 served::cell(&format!("await {};", call("cell-one"))),
                 served::cell(&format!(
-                    "await {};\nfinish(await {});",
+                    "await {};\nawait control.finish(await {});",
                     call("cell-two-a"),
                     call("cell-two-b")
                 )),

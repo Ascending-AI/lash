@@ -78,8 +78,21 @@ impl Lowerer<'_> {
         if let ast::Expr::Call { callee, args, .. } = value
             && let Some(wait) = self.wait_of(callee)
         {
+            let control = self.control_call(&wait);
+            if control && !self.in_main() {
+                return Err(self.control_placement(&wait, span));
+            }
             let args = self.wait_arguments(&wait, args, span)?;
-            return self.wait_in_place(wait, args);
+            let result = self.wait_in_place(wait, args)?;
+            if control {
+                // The call settled, so the turn is over: nothing after it
+                // runs (`K-FORM-019`). The host reads the control from the
+                // settled call, never from this value.
+                self.emit(Stmt::Finish {
+                    value: Expr::Literal(Literal::Null),
+                });
+            }
+            return Ok(result);
         }
         let value = self.lower_expr(value)?;
         let awaited = self.invoke("ts.await", &[value], Ty::Unknown)?;
@@ -94,6 +107,9 @@ impl Lowerer<'_> {
         args: &[ast::CallArg],
         span: SourceSpan,
     ) -> Lowering<Operand> {
+        if self.control_call(&wait) {
+            return Err(self.control_placement(&wait, span));
+        }
         let args = self.wait_arguments(&wait, args, span)?;
         let this = self.fresh("this");
         let ignored = self.fresh("args");
@@ -109,6 +125,32 @@ impl Lowerer<'_> {
             &body,
             Atom::Literal(Literal::Absent),
             Atom::Literal(Literal::Absent),
+        )
+    }
+
+    /// Whether the wait is a call of an effect that ends the turn.
+    fn control_call(&self, wait: &Wait) -> bool {
+        matches!(wait, Wait::Effect(effect) if self.controls.contains_key(effect))
+    }
+
+    /// The refusal of a control call written where the turn cannot end on
+    /// it: not awaited where it stands, or inside a function. A promise or
+    /// a function's body runs as a task beside `main`, and only `main` ends
+    /// the turn.
+    fn control_placement(&self, wait: &Wait, span: SourceSpan) -> Diagnostic {
+        let name = match wait {
+            Wait::Effect(effect) => effect.to_string(),
+            Wait::Sleep => "sleep".to_string(),
+        };
+        Diagnostic::with_repair(
+            DiagnosticCode::ControlCallPlacement,
+            format!(
+                "`{name}` ends the turn, so it is awaited directly at the top level of the cell: not passed to `Promise.all`, kept as a promise, or called inside a function"
+            ),
+            format!(
+                "await everything else first, then write `await {name}(...)` as the last top-level statement; a function returns its value for the top level to pass on"
+            ),
+            Some(span),
         )
     }
 

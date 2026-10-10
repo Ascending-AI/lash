@@ -76,12 +76,12 @@ roles = {roles!r}
         self.assertIn("outputs cardinality changed: 1", self.errors())
 
     def test_registered_function_cannot_grow_a_second_selection(self):
-        self.write("crates/probe/src/main.rs", "fn probe(output: Output) { assert(output.assistant_message()); output.final_value(); }")
+        self.write("crates/probe/src/main.rs", "fn probe(output: Output) { assert(output.assistant_message()); output.finished().map(|(_, value)| value); }")
         self.registry('"crates/probe/src/main.rs#probe" = { reads = 0, outputs = 1, kind = "output-read", reason = "typed result assertion" }')
         self.assertIn("scrape counts changed", self.errors())
 
     def test_evidence_read_cannot_select_output(self):
-        self.write("crates/probe/src/main.rs", "fn probe(output: Output) { output.tool_value(); }")
+        self.write("crates/probe/src/main.rs", "fn probe(output: Output) { output.finished(); }")
         self.registry('"crates/probe/src/main.rs#probe" = { reads = 0, outputs = 1, kind = "evidence-read", reason = "effect evidence" }')
         self.assertIn("evidence-read cannot select", self.errors())
 
@@ -106,7 +106,7 @@ roles = {roles!r}
         self.assertIn("renderer marker missing", self.errors())
 
     def test_comments_and_literals_do_not_create_sites(self):
-        self.write("examples/host/src/render.rs", 'fn render() { let fixture = r###"value.final_value()"###; }\n// view.messages()\n/* view.message_tree() */')
+        self.write("examples/host/src/render.rs", 'fn render() { let fixture = r###"value.finished().map(|(_, value)| value)"###; }\n// view.messages()\n/* view.message_tree() */')
         self.assertEqual([], gate.check(self.root))
 
 

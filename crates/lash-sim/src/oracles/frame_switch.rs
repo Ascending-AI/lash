@@ -209,7 +209,7 @@ pub fn generated_suspend_resume(events: &[DeliveredBoundary]) -> OracleVerdict {
 /// turns are assistant-message turns, so the invariant asserts the dual of the
 /// proof: the assistant prose was NOT mis-projected as a semantic final value —
 /// `outcome_kind` is `assistant_message`, no `semantic_value` leaked, and no
-/// terminal FinalValue/ToolValue event was emitted. A turn that smuggled a
+/// terminal Finished event was emitted. A turn that smuggled a
 /// final value through transcript inference would fail.
 /// Reject a universally-quantified law that was evaluated over fewer
 /// observations than the workload declared.

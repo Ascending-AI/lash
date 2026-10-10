@@ -551,10 +551,12 @@ mod tests {
                     !state.execution_state_dirty(),
                     "an acknowledged idle session is clean"
                 );
-                let response =
-                    execute_cell(&state, cell("let persisted = 4815; finish(persisted);"))
-                        .await
-                        .expect("cell");
+                let response = execute_cell(
+                    &state,
+                    cell("let persisted = 4815; await control.finish(persisted);"),
+                )
+                .await
+                .expect("cell");
                 assert_eq!(
                     response.finish_value().cloned(),
                     Some(serde_json::json!(4815))
@@ -596,8 +598,13 @@ mod tests {
         request: lash_core::ExecRequest,
     ) -> Result<lash_core::ExecResponse, SessionError> {
         let handler = crate::testing::DurableHost::open(crate::testing::default_cell_scope()).await;
+        let (provider, catalog) = crate::testing::with_finish(Arc::new(crate::testing::NoTools));
         Box::pin(state.execute_code(
-            lash_core::testing::code_execution_context(handler.ports()),
+            lash_core::testing::code_execution_context_with_tool_provider_and_catalog(
+                handler.ports(),
+                provider,
+                catalog,
+            ),
             request,
         ))
         .await
@@ -687,8 +694,11 @@ mod tests {
         cell_id: &str,
     ) -> lash_core::RuntimeExecutionContext<'static> {
         let replay_key = format!("exec-code:{cell_id}");
-        lash_core::testing::code_execution_context_with_invocation(
+        let (provider, catalog) = crate::testing::with_finish(Arc::new(crate::testing::NoTools));
+        lash_core::testing::code_execution_context_with_tool_provider_catalog_and_invocation(
             handler.ports(),
+            provider,
+            catalog,
             lash_core::testing::exec_code_invocation(
                 "runtime-state-session",
                 "runtime-state-turn",
@@ -777,7 +787,7 @@ mod tests {
 
     /// The value `finish baton` yields on the state's live execution.
     async fn live_baton(state: &RlmRuntimeState) -> serde_json::Value {
-        let response = execute_cell(state, cell("finish(baton);"))
+        let response = execute_cell(state, cell("await control.finish(baton);"))
             .await
             .expect("the baton cell runs");
         state
@@ -937,7 +947,7 @@ mod tests {
                 let next = state
                     .execute_code(
                         admitted_context(&handler, "survivor"),
-                        cell("let survivor = 1;\nfinish(survivor);"),
+                        cell("let survivor = 1;\nawait control.finish(survivor);"),
                     )
                     .await
                     .expect("the session survives a cell cancelled mid-flight");
@@ -1017,7 +1027,7 @@ mod tests {
                 let total = state
                     .execute_code(
                         admitted_context(&handler, "total"),
-                        cell("finish(second_cell);"),
+                        cell("await control.finish(second_cell);"),
                     )
                     .await
                     .expect("execute code");
@@ -1187,10 +1197,12 @@ mod tests {
                     serde_json::json!("committed")
                 );
 
-                let mutated =
-                    execute_cell(&state, cell("let baton = \"uncommitted\";\nfinish(baton);"))
-                        .await
-                        .expect("the mutating cell runs");
+                let mutated = execute_cell(
+                    &state,
+                    cell("let baton = \"uncommitted\";\nawait control.finish(baton);"),
+                )
+                .await
+                .expect("the mutating cell runs");
                 assert_eq!(
                     mutated.finish_value().cloned(),
                     Some(serde_json::json!("uncommitted"))
@@ -1241,10 +1253,12 @@ mod tests {
                     .expect("capture")
                     .expect("the RLM executor always holds a snapshotable state");
 
-                let mutated =
-                    execute_cell(&state, cell("let baton = \"uncommitted\";\nfinish(baton);"))
-                        .await
-                        .expect("the mutating cell runs");
+                let mutated = execute_cell(
+                    &state,
+                    cell("let baton = \"uncommitted\";\nawait control.finish(baton);"),
+                )
+                .await
+                .expect("the mutating cell runs");
                 assert_eq!(
                     mutated.finish_value().cloned(),
                     Some(serde_json::json!("uncommitted"))

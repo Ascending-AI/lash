@@ -42,7 +42,6 @@ fn a_binding_never_assigned_stays_unbound_in_the_next_cell() {
 fn session_bindings_cannot_shadow_builtins() {
     for (name, source) in [
         ("len", "len = 1\n"),
-        ("finish", "finish = 1\n"),
         ("len", "len: int = 1\n"),
         ("len", "len, count = [1, 2]\n"),
         ("len", "def len():\n    return 1\n"),
@@ -94,13 +93,15 @@ fn restored_session_bindings_cannot_mask_builtins() {
     use lash_kernel_doc::Name;
     use std::collections::{BTreeMap, BTreeSet};
 
-    for name in ["len", "finish"] {
+    {
+        let name = "len";
         let bindings = BTreeSet::from([Name::new(name)]);
         let error = crate::lower(
             "1\n",
             &Environment {
                 library: machine::library(),
                 effects: &BTreeMap::new(),
+                controls: &BTreeMap::new(),
                 bindings: &bindings,
                 functions: &std::collections::BTreeMap::new(),
             },
@@ -112,11 +113,4 @@ fn restored_session_bindings_cannot_mask_builtins() {
             "{error}"
         );
     }
-}
-
-/// The configured terminal name remains callable in later cells.
-#[test]
-fn finish_binding_cannot_shadow_the_terminal() {
-    let error = machine::lower("finish = 1\n").expect_err("finish is reserved");
-    assert_eq!(error.code, "PY_SHADOWS_BUILTIN");
 }

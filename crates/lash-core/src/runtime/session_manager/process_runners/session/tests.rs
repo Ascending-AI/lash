@@ -432,15 +432,10 @@ fn child_final_value_keeps_typed_values_and_checks_the_schema() {
             .expect("declared result schema"),
         ),
     };
-    for finish in [
-        crate::TurnFinish::FinalValue {
-            value: value.clone(),
-        },
-        crate::TurnFinish::ToolValue {
-            tool_name: "finish".to_string(),
-            value: value.clone(),
-        },
-    ] {
+    for finish in [crate::TurnFinish::Finished {
+        tool_name: "finish".to_string(),
+        value: value.clone(),
+    }] {
         for result in [
             &crate::SessionTurnOutcome::FinalValue { schema: None },
             &typed,
@@ -458,7 +453,8 @@ fn child_final_value_keeps_typed_values_and_checks_the_schema() {
     ] {
         assert_eq!(
             project_turn(
-                finished_turn(crate::TurnFinish::FinalValue {
+                finished_turn(crate::TurnFinish::Finished {
+                    tool_name: "finish".to_string(),
                     value: value.clone()
                 }),
                 &crate::SessionTurnOutcome::FinalValue { schema: None }
@@ -468,7 +464,8 @@ fn child_final_value_keeps_typed_values_and_checks_the_schema() {
         );
     }
     let failure = projected_failure(project_turn(
-        finished_turn(crate::TurnFinish::FinalValue {
+        finished_turn(crate::TurnFinish::Finished {
+            tool_name: "finish".to_string(),
             value: serde_json::json!({ "answer": "forty-two" }),
         }),
         &typed,

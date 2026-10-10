@@ -1081,8 +1081,42 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
                 }
             }
         }
+        // The step's control call runs after its other calls, so it is held
+        // out of the round; a further one is refused on its own, as the
+        // step has one control attempt.
+        let mut held = None;
+        let mut ordinary = Vec::with_capacity(calls.len());
+        for call in calls {
+            if !ctx.ends_the_turn(&call.tool_name) {
+                ordinary.push(call);
+            } else if held.is_none() {
+                held = Some(call);
+            } else {
+                let output = lash_core::ToolCallOutput::failure(
+                    lash_core::ToolFailure::invalid_request(
+                        "control_attempt_spent",
+                        format!(
+                            "`{}` was not called: this step already makes its one turn-ending call",
+                            call.tool_name
+                        ),
+                    )
+                    .with_cause(lash_core::ToolFailureCause::ControlAttemptSpent),
+                );
+                refused.push(refused_tool_call_completion(
+                    call.call_id,
+                    call.provider_call_id,
+                    call.tool_name,
+                    call.args,
+                    output,
+                    call.replay,
+                ));
+            }
+        }
+        let calls = ordinary;
         let expansion = match self.batch {
-            BatchSugar::Enabled { max_members } => batch::expand(calls, max_members),
+            BatchSugar::Enabled { max_members } => {
+                batch::expand(calls, max_members, &|name| ctx.ends_the_turn(name))
+            }
             BatchSugar::Disabled => batch::Expansion {
                 calls,
                 ..batch::Expansion::default()
@@ -1104,7 +1138,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
             actions.push(DriverAction::ReportToolCalls {
                 completed: completed.clone(),
             });
-            if calls.is_empty() && expansion.plan.is_empty() {
+            if calls.is_empty() && expansion.plan.is_empty() && held.is_none() {
                 actions.extend(self.handle_tool_results(ctx, completed));
                 return actions;
             }
@@ -1125,10 +1159,13 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
                 },
             )]));
         }
-        actions.push(DriverAction::Start(PendingWork::WaitingForToolResults {
-            settled: None,
-            calls,
-            expansion: expansion.plan,
+        actions.push(DriverAction::Start(match held {
+            // A control call alone in its step has no sibling to wait on.
+            Some(control) if calls.is_empty() && expansion.plan.is_empty() => {
+                PendingWork::tool_round(vec![control], expansion.plan)
+            }
+            Some(control) => PendingWork::tool_round_holding(calls, expansion.plan, control),
+            None => PendingWork::tool_round(calls, expansion.plan),
         }));
         actions
     }
@@ -1149,12 +1186,27 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
         let mut actions = Vec::new();
         let mut result_parts = Vec::new();
         let mut terminal_outcome = None;
+        // The round's settled control call: the dispatcher admits at most
+        // one, after its siblings, so the first is the only one.
+        let mut candidate = None;
 
         for outcome in completed {
             if terminal_outcome.is_none() && outcome.output.is_success() {
-                terminal_outcome = outcome.output.control.as_ref().and_then(|control| {
-                    lash_core::turn_outcome_from_tool_control(&outcome.tool_name, control)
-                });
+                match outcome.output.control.as_ref() {
+                    Some(lash_core::ToolControl::Turn { control }) if candidate.is_none() => {
+                        candidate = Some(lash_core::CompletionCandidate::pending(
+                            ctx.protocol_iteration(),
+                            outcome.call_id.clone(),
+                            outcome.tool_name.clone(),
+                            control.clone(),
+                        ));
+                    }
+                    Some(control) => {
+                        terminal_outcome =
+                            lash_core::turn_stop_from_tool_control(&outcome.tool_name, control);
+                    }
+                    None => {}
+                }
             }
 
             result_parts.push(tool_result_part(outcome.call_id, outcome.model_return));
@@ -1177,6 +1229,29 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
 
         if let Some(outcome) = terminal_outcome {
             actions.push(DriverAction::Finish(outcome));
+            return actions;
+        }
+
+        // A settled control call does not end the turn here: its candidate
+        // is decided at BeforeCompletion, where arriving input supersedes
+        // it and the turn goes on.
+        if let Some(candidate) = candidate {
+            let superseded = completion_superseded_message(
+                standard_message_id(
+                    ctx.turn_id(),
+                    ctx.protocol_iteration(),
+                    "completion_superseded",
+                ),
+                ctx.turn_id(),
+                &candidate,
+            );
+            actions.push(DriverAction::Start(PendingWork::Checkpoint {
+                checkpoint: CheckpointKind::BeforeCompletion,
+                on_empty: CheckpointResumeAction::Complete {
+                    candidate: Box::new(candidate),
+                    superseded: vec![superseded],
+                },
+            }));
             return actions;
         }
 
@@ -1208,6 +1283,33 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
         _result: Result<lash_core::ExecResponse, lash_core::ExecCodeFailure>,
     ) -> Vec<DriverAction> {
         Vec::new()
+    }
+}
+
+/// What the model reads when input arrived at BeforeCompletion and its
+/// control call therefore did not end the turn.
+fn completion_superseded_message(
+    id: String,
+    turn_id: &TurnId,
+    candidate: &lash_core::CompletionCandidate,
+) -> Message {
+    let did = match candidate.control {
+        lash_core::TurnControl::Finish { .. } => "finish the turn",
+        lash_core::TurnControl::SwitchAgentFrame { .. } => "switch the agent frame",
+    };
+    Message {
+        id: id.clone(),
+        role: MessageRole::System,
+        parts: shared_parts(vec![Part::text(
+            format!("{id}.p0"),
+            format!(
+                "The `{}` call did not {did}: new input arrived before it took effect, so it was superseded and the turn goes on. Read the new input, and end the turn again when the work is complete.",
+                candidate.tool_name
+            ),
+            None,
+        )]),
+        origin: Some(standard_message_origin(turn_id)),
+        reply_marker: None,
     }
 }
 

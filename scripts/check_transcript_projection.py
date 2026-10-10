@@ -25,8 +25,8 @@ import tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
 READS = {"messages", "chronological_projection", "message_tree"}
-OUTPUTS = {"assistant_message", "final_value", "tool_value"}
-CALL = re.compile(r"(?:\.|\b(?:TurnOutput|TurnOutputReport)::)\s*(messages|chronological_projection|message_tree|assistant_message|final_value|tool_value)\s*\(")
+OUTPUTS = {"assistant_message", "finished"}
+CALL = re.compile(r"(?:\.|\b(?:TurnOutput|TurnOutputReport)::)\s*(messages|chronological_projection|message_tree|assistant_message|finished)\s*\(")
 RAW_STRING = re.compile(r'(?:br|r)(#+)?"')
 FUNCTION = re.compile(r"\bfn\s+([A-Za-z_]\w*)\s*(?:<|\()")
 # The decoded vocabulary every rendering surface handles: what a committed

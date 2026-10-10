@@ -8,4 +8,4 @@ const handle = await processes.start({
   definition: approval_process,
   args: { request: { id: "req-1" } }
 });
-finish(handle);
+await control.finish(handle);

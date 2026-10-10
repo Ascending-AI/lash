@@ -87,10 +87,39 @@ fn lower_with(
         &Environment {
             library: library(),
             effects,
+            controls: controls(),
             bindings,
             functions: &std::collections::BTreeMap::new(),
         },
     )
+}
+
+/// The laws' turn-ending tool: `control_finish(x)` ends the turn with `x`,
+/// where a law's host offers it.
+pub(crate) fn controls() -> &'static std::collections::BTreeMap<
+    lash_kernel_doc::EffectName,
+    std::collections::BTreeSet<lash_kernel_dialect::EffectControl>,
+> {
+    static CONTROLS: std::sync::OnceLock<
+        std::collections::BTreeMap<
+            lash_kernel_doc::EffectName,
+            std::collections::BTreeSet<lash_kernel_dialect::EffectControl>,
+        >,
+    > = std::sync::OnceLock::new();
+    CONTROLS.get_or_init(|| {
+        std::collections::BTreeMap::from([(
+            lash_kernel_doc::EffectName::new("control_finish").expect("a tool's name"),
+            std::collections::BTreeSet::from([lash_kernel_dialect::EffectControl::Finish]),
+        )])
+    })
+}
+
+/// Lowers `source` as a first cell whose host offers `effects`.
+pub(crate) fn lower_with_effects(
+    source: &str,
+    effects: &BTreeMap<EffectName, Signature>,
+) -> Result<Lowered, lash_kernel_dialect::Diagnostic> {
+    lower_with(source, effects, &BTreeSet::new())
 }
 
 /// Lowers `source` as a first cell.

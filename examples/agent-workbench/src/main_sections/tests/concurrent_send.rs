@@ -374,7 +374,7 @@ async fn a_panicked_turn_submission_cleans_up_and_publishes_failure() {
 async fn a_dropped_send_request_cannot_wedge_a_committed_turn() {
     let (gate, entered_rx) = TurnAdmissionGate::new("agent_workbench.api.turn.admission_committed");
     let workbench = Workbench::builder(replying_provider(
-        "<typescript>\nfinish(\"request completed\");\n</typescript>",
+        "<typescript>\nawait control.finish(\"request completed\");\n</typescript>",
     ))
     .trace_sink(Arc::clone(&gate) as Arc<dyn TraceSink>)
     .build()

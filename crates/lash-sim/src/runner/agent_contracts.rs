@@ -75,7 +75,7 @@ const seen = [];
 for (const item of pair) {
   seen.push(item);
 }
-finish({
+await control.finish({
   first: pair[0],
   tail: tail,
   seen: seen,
@@ -291,7 +291,7 @@ async fn agent_foreground_tool_call_round_trip_execution() -> Result<Value, Fixe
         vec![
             r#"<typescript>
 const value = await tools.app_lookup({});
-finish(value);
+await control.finish(value);
 </typescript>"#,
         ],
         &expected,
@@ -299,7 +299,7 @@ finish(value);
     )
     .await?;
     require(
-        result.get("tool_completed_count").and_then(Value::as_u64) == Some(1)
+        result.get("tool_completed_count").and_then(Value::as_u64) == Some(2)
             && result
                 .get("tool_completed_outputs")
                 .and_then(Value::as_array)
@@ -308,6 +308,15 @@ finish(value);
                 .any(|entry| {
                     entry.get("name").and_then(Value::as_str) == Some("app_lookup")
                         && entry.get("value") == Some(&expected)
+                })
+            && result
+                .get("tool_completed_outputs")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .any(|entry| {
+                    entry.get("name").and_then(Value::as_str) == Some("finish")
+                        && entry.get("value") == Some(&Value::Null)
                 }),
         "agent foreground tool execution did not record a concrete app_lookup completion",
     )?;
@@ -325,7 +334,7 @@ const result = await agents.spawn({
   seed: {},
   output: { reason: "str" }
 });
-finish(result);
+await control.finish(result);
 </typescript>"#,
             r#"<typescript>
 await task.fail({ reason: "child boom" });
@@ -520,12 +529,16 @@ async fn facade_final_value_execution_inner(
         .await?
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?
         .result;
-    let final_value = result.final_value().cloned().ok_or_else(|| {
-        FixedScriptRunnerError::Assertion(format!(
-            "{provider_kind} finished without TurnFinish::FinalValue: {:?}",
-            result.outcome
-        ))
-    })?;
+    let final_value = result
+        .finished()
+        .map(|(_, value)| value)
+        .cloned()
+        .ok_or_else(|| {
+            FixedScriptRunnerError::Assertion(format!(
+                "{provider_kind} finished without TurnFinish::Finished: {:?}",
+                result.outcome
+            ))
+        })?;
     require(
         final_value == expected_final_value,
         "facade final value execution produced an unexpected semantic value",
@@ -545,7 +558,7 @@ async fn facade_final_value_execution_inner(
     let facts = runtime_final_value_invariant_facts(&result, &recorded);
     require(
         facts.passed()
-            && facts.outcome_kind == "final_value"
+            && facts.outcome_kind == "finished"
             && facts.semantic_value.as_ref() == Some(&final_value)
             && final_value_events.iter().any(|value| value == &final_value)
             && result.assistant_message().is_none(),
@@ -558,7 +571,8 @@ async fn facade_final_value_execution_inner(
         "turn_index": result.state.turn_index,
         "done": true,
         "turn_outcome": {
-            "kind": "final_value",
+            "kind": "finished",
+            "tool_name": "finish",
         },
         "final_value": final_value,
         "no_final_message_event": result.assistant_message().is_none(),
@@ -686,10 +700,10 @@ const requestAnswer = async () => {
 };
 const handle = await processes.start({ definition: requestAnswer });
 const result = await handle;
-finish(result.answer);
+await control.finish(result.answer);
 </typescript>"#,
             r#"<typescript>
-finish({ recovered: true });
+await control.finish({ recovered: true });
 </typescript>"#,
         ],
         Some(registered_tools),
@@ -947,12 +961,16 @@ async fn agent_process_execution_result(
     extra: Option<(&'static str, Value)>,
     include_process_events: bool,
 ) -> Result<Value, FixedScriptRunnerError> {
-    let final_value = result.final_value().cloned().ok_or_else(|| {
-        FixedScriptRunnerError::Assertion(format!(
-            "{provider_kind} finished without TurnFinish::FinalValue: {:?}",
-            result.outcome
-        ))
-    })?;
+    let final_value = result
+        .finished()
+        .map(|(_, value)| value)
+        .cloned()
+        .ok_or_else(|| {
+            FixedScriptRunnerError::Assertion(format!(
+                "{provider_kind} finished without TurnFinish::Finished: {:?}",
+                result.outcome
+            ))
+        })?;
     require(
         final_value == *expected_final_value,
         "agent process execution produced an unexpected semantic value",
@@ -972,7 +990,7 @@ async fn agent_process_execution_result(
     let facts = runtime_final_value_invariant_facts(&result, &recorded);
     require(
         facts.passed()
-            && facts.outcome_kind == "final_value"
+            && facts.outcome_kind == "finished"
             && facts.semantic_value.as_ref() == Some(&final_value)
             && final_value_events.iter().any(|value| value == &final_value)
             && result.assistant_message().is_none(),
@@ -994,7 +1012,8 @@ async fn agent_process_execution_result(
         "turn_index": result.state.turn_index,
         "done": true,
         "turn_outcome": {
-            "kind": "final_value",
+            "kind": "finished",
+            "tool_name": "finish",
         },
         "final_value": final_value,
         "no_final_message_event": result.assistant_message().is_none(),
@@ -1348,14 +1367,14 @@ fn agent_failed_child_activity_facts(
             lash::TurnEvent::Error(ReportedFailure { message, .. }) => {
                 turn_error_messages.push(message.clone())
             }
-            lash::TurnEvent::FinalValue { .. } => final_value_event_count += 1,
+            lash::TurnEvent::Finished { .. } => final_value_event_count += 1,
             _ => {}
         }
     }
     let event_debug = format!("{events:#?}");
     json!({
         "turn_success": result.is_success(),
-        "final_value_present": result.final_value().is_some(),
+        "final_value_present": result.finished().map(|(_, value)| value).is_some(),
         "final_value_event_count": final_value_event_count,
         "failed_code_block_count": failed_code_block_errors.len(),
         "failed_code_block_errors": failed_code_block_errors,

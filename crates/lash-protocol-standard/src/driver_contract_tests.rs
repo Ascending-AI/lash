@@ -12,7 +12,7 @@ use super::*;
 use lash_core::sansio::{self, ChatContextProjector, Response};
 use lash_core::{
     Effect, Message, MessageRole, Part, ToolCallOutput, ToolControl, ToolFailure, ToolFailureClass,
-    ToolValue, TurnMachine, TurnMachineConfig,
+    ToolValue, TurnControl, TurnMachine, TurnMachineConfig,
 };
 
 fn machine_config(max_turns: Option<usize>) -> TurnMachineConfig {
@@ -65,15 +65,25 @@ fn machine(max_turns: Option<usize>) -> TurnMachine {
     )
 }
 
-/// Every ready effect, with each execution-environment sync answered by an
-/// empty environment on the way.
+/// Every ready effect, with each execution-environment sync answered on the
+/// way by an environment whose `finish` and `switch` end the turn.
 fn drain(machine: &mut TurnMachine) -> Vec<Effect> {
     let mut effects = Vec::new();
     while let Some(effect) = machine.poll_effect() {
         if let Effect::SyncExecutionEnvironment { id } = effect {
             machine.handle_response(sansio::Response::ExecutionEnvironmentSynced {
                 id,
-                result: Ok(sansio::ExecutionEnvironmentSync::default()),
+                result: Ok(sansio::ExecutionEnvironmentSync {
+                    turn_controls: [
+                        ("finish".to_string(), lash_core::TurnControls::finish()),
+                        (
+                            "switch".to_string(),
+                            lash_core::TurnControls::switch_agent_frame(),
+                        ),
+                    ]
+                    .into(),
+                    ..sansio::ExecutionEnvironmentSync::default()
+                }),
             });
             continue;
         }
@@ -328,8 +338,10 @@ fn a_failed_tool_outcome_control_is_not_taken_as_the_turn_outcome() {
         "probe_failed",
         "probe failed",
     ))
-    .with_control(ToolControl::Finish {
-        value: ToolValue::String("smuggled terminal value".to_string()),
+    .with_control(ToolControl::Turn {
+        control: TurnControl::Finish {
+            value: ToolValue::String("smuggled terminal value".to_string()),
+        },
     });
     assert!(!failed_with_control.is_success());
 
@@ -346,29 +358,250 @@ fn a_failed_tool_outcome_control_is_not_taken_as_the_turn_outcome() {
     assert_eq!(kind, CheckpointKind::AfterWork);
 }
 
+/// A settled control call does not end the turn where it settles: its
+/// candidate is decided at BeforeCompletion, and with no input there the
+/// turn finishes with the call's value (FIG-5781).
 #[test]
-fn a_successful_tool_outcome_control_finishes_the_turn() {
-    // The precondition for the test above: the same control on a *successful*
-    // outcome is the one the driver is supposed to take.
+fn a_settled_control_call_finishes_the_turn_at_before_completion() {
     let mut machine = machine(Some(4));
     let effects = drain(&mut machine);
-    let succeeded_with_control =
-        ToolCallOutput::success(serde_json::json!("ok")).with_control(ToolControl::Finish {
-            value: ToolValue::String("terminal value".to_string()),
-        });
-    assert!(succeeded_with_control.is_success());
-
-    let effects = one_tool_round(&mut machine, &effects, succeeded_with_control);
-
+    let effects = one_tool_round(
+        &mut machine,
+        &effects,
+        ToolCallOutput::finish(serde_json::json!("terminal value")),
+    );
+    assert_eq!(turn_outcomes(&effects), Vec::new(), "{effects:?}");
+    let (id, kind) = checkpoint(&effects)
+        .unwrap_or_else(|| panic!("expected a completion checkpoint, got {effects:?}"));
+    assert_eq!(kind, CheckpointKind::BeforeCompletion);
+    machine.handle_response(Response::Checkpoint {
+        id,
+        delivery: sansio::CheckpointDelivery::default(),
+    });
+    let effects = drain(&mut machine);
     assert_eq!(
         turn_outcomes(&effects),
-        vec![TurnOutcome::Finished(TurnFinish::ToolValue {
+        vec![TurnOutcome::Finished(TurnFinish::Finished {
             tool_name: "probe".to_string(),
             value: serde_json::json!("terminal value"),
         })],
-        "a successful outcome's control is the turn's finish value: {effects:?}"
+        "{effects:?}"
     );
     assert!(machine.is_done());
+}
+
+/// Law 6 (FIG-5781): input that arrives at BeforeCompletion supersedes the
+/// candidate. The turn goes on into a new iteration, the model reads that
+/// its finish was superseded, and a later finish ends the turn.
+#[test]
+fn input_at_before_completion_supersedes_the_finish_and_a_later_finish_ends_the_turn() {
+    let mut machine = machine(Some(4));
+    let effects = drain(&mut machine);
+    let effects = one_tool_round(
+        &mut machine,
+        &effects,
+        ToolCallOutput::finish(serde_json::json!("first")),
+    );
+    let (id, kind) = checkpoint(&effects).expect("a completion checkpoint");
+    assert_eq!(kind, CheckpointKind::BeforeCompletion);
+    machine.handle_response(Response::Checkpoint {
+        id,
+        delivery: sansio::CheckpointDelivery {
+            committed_user_messages: vec![Message {
+                id: "m1".to_string(),
+                role: MessageRole::User,
+                parts: vec![Part::text(
+                    "m1.p0".to_string(),
+                    "one more thing".to_string(),
+                    None,
+                )]
+                .into(),
+                origin: None,
+                reply_marker: None,
+            }],
+        },
+    });
+    let effects = drain(&mut machine);
+    assert_eq!(turn_outcomes(&effects), Vec::new(), "{effects:?}");
+    assert!(!machine.is_done());
+    let candidates = machine.completion_candidates();
+    assert_eq!(candidates.len(), 1);
+    assert_eq!(
+        candidates[0].disposition,
+        lash_core::CompletionDisposition::Superseded
+    );
+    let rendered = serde_json::to_string(&machine.events().iter().cloned().collect::<Vec<_>>())
+        .expect("events encode");
+    assert!(rendered.contains("superseded"), "{rendered}");
+
+    // The next model call is the new iteration's: it finishes again.
+    let effects = if checkpoint(&effects).is_some() {
+        let (id, _) = checkpoint(&effects).expect("checkpoint");
+        machine.handle_response(Response::Checkpoint {
+            id,
+            delivery: sansio::CheckpointDelivery::default(),
+        });
+        drain(&mut machine)
+    } else {
+        effects
+    };
+    let effects = one_tool_round(
+        &mut machine,
+        &effects,
+        ToolCallOutput::finish(serde_json::json!("second")),
+    );
+    let (id, kind) = checkpoint(&effects).expect("a second completion checkpoint");
+    assert_eq!(kind, CheckpointKind::BeforeCompletion);
+    machine.handle_response(Response::Checkpoint {
+        id,
+        delivery: sansio::CheckpointDelivery::default(),
+    });
+    let effects = drain(&mut machine);
+    assert_eq!(
+        turn_outcomes(&effects),
+        vec![TurnOutcome::Finished(TurnFinish::Finished {
+            tool_name: "probe".to_string(),
+            value: serde_json::json!("second"),
+        })]
+    );
+}
+
+/// A driver whose synced surface's `finish` and `switch` end the turn
+/// ([`drain`]).
+fn controlling_machine() -> TurnMachine {
+    machine_with(StandardDriver {
+        batch: BatchSugar::Enabled {
+            max_members: std::num::NonZeroUsize::new(8).expect("eight is non-zero"),
+        },
+        ..StandardDriver::default()
+    })
+}
+
+fn call(call_id: &str, tool_name: &str) -> LlmOutputPart {
+    LlmOutputPart::ToolCall {
+        call_id: call_id.to_string(),
+        tool_name: tool_name.to_string(),
+        input_json: "{}".to_string(),
+        replay: None,
+    }
+}
+
+fn answer(
+    machine: &mut TurnMachine,
+    id: sansio::EffectId,
+    calls: &[sansio::PendingToolCall],
+    output: impl Fn(&str) -> ToolCallOutput,
+) -> Vec<Effect> {
+    machine.handle_response(Response::ToolResults {
+        id,
+        results: calls
+            .iter()
+            .map(|call| completed_call(call, output(&call.tool_name)))
+            .collect(),
+    });
+    drain(machine)
+}
+
+fn reported_causes(machine: &TurnMachine) -> String {
+    serde_json::to_string(&machine.events().iter().cloned().collect::<Vec<_>>())
+        .expect("events encode")
+}
+
+/// Law 8 (FIG-5781): a step's one control call runs after its siblings
+/// settled, and a second control call of the step is refused on its own
+/// while the rest of the step runs.
+#[test]
+fn a_step_runs_its_control_call_after_its_siblings_and_refuses_a_second() {
+    let mut machine = controlling_machine();
+    let effects = drain(&mut machine);
+    let effects = respond(
+        &mut machine,
+        &effects,
+        vec![
+            call("call-1", "finish"),
+            call("call-2", "probe"),
+            call("call-3", "switch"),
+        ],
+    );
+    let (id, calls) = tool_calls(&effects).expect("the siblings' round");
+    let names: Vec<_> = calls.iter().map(|call| call.tool_name.as_str()).collect();
+    assert_eq!(names, ["probe"], "the control call waits for its sibling");
+    let effects = answer(&mut machine, id, &calls, |_| {
+        ToolCallOutput::success(serde_json::json!("ok"))
+    });
+    let (id, calls) = tool_calls(&effects).expect("the control call's round");
+    let names: Vec<_> = calls.iter().map(|call| call.tool_name.as_str()).collect();
+    assert_eq!(names, ["finish"]);
+    let effects = answer(&mut machine, id, &calls, |_| {
+        ToolCallOutput::finish(serde_json::json!("done"))
+    });
+    let (_, kind) = checkpoint(&effects).expect("a completion checkpoint");
+    assert_eq!(kind, CheckpointKind::BeforeCompletion);
+    let reported = reported_causes(&machine);
+    assert!(reported.contains("control_attempt_spent"), "{reported}");
+}
+
+/// Law 8 (FIG-5781): a sibling that failed refuses the step's control call
+/// before its body runs; every result is reported and the turn goes on.
+#[test]
+fn a_failed_sibling_refuses_the_control_call_before_it_runs() {
+    let mut machine = controlling_machine();
+    let effects = drain(&mut machine);
+    let effects = respond(
+        &mut machine,
+        &effects,
+        vec![call("call-1", "probe"), call("call-2", "finish")],
+    );
+    let (id, calls) = tool_calls(&effects).expect("the siblings' round");
+    assert_eq!(calls.len(), 1);
+    let effects = answer(&mut machine, id, &calls, |_| {
+        ToolCallOutput::failure(ToolFailure::tool(
+            ToolFailureClass::Execution,
+            "probe_failed",
+            "probe failed",
+        ))
+    });
+    assert!(
+        tool_calls(&effects).is_none(),
+        "the control call never runs"
+    );
+    assert_eq!(turn_outcomes(&effects), Vec::new());
+    let (_, kind) = checkpoint(&effects).expect("an after-work checkpoint");
+    assert_eq!(kind, CheckpointKind::AfterWork);
+    let reported = reported_causes(&machine);
+    assert_eq!(
+        reported.matches("\"kind\":\"ToolResult\"").count(),
+        2,
+        "both calls are reported: {reported}"
+    );
+    assert!(
+        reported.contains("another call of the same step failed"),
+        "{reported}"
+    );
+}
+
+/// Law 8 (FIG-5781): a control call is the step's own call, never a member
+/// of `batch`; the member is refused and the batch's other members run.
+#[test]
+fn a_batch_member_naming_a_control_tool_is_refused() {
+    let mut machine = controlling_machine();
+    let effects = drain(&mut machine);
+    let effects = respond(
+        &mut machine,
+        &effects,
+        vec![batch_call(
+            "call-b",
+            serde_json::json!([
+                { "tool": "probe", "parameters": {} },
+                { "tool": "finish", "parameters": { "value": 1 } }
+            ]),
+        )],
+    );
+    let (_, calls, plan) = tool_work(&effects);
+    let names: Vec<_> = calls.iter().map(|call| call.tool_name.as_str()).collect();
+    assert_eq!(names, ["probe"]);
+    let rows = serde_json::to_string(&plan).expect("plan encodes");
+    assert!(rows.contains("cannot run inside `batch`"), "{rows}");
 }
 
 #[test]

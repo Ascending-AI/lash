@@ -143,7 +143,8 @@ fn declarations_refuse_typed() {
     );
     assert_eq!(
         plain.admits(OutcomeShape::Done {
-            intents: &[ToolIntentKind::CancelProcess]
+            intents: &[ToolIntentKind::CancelProcess],
+            control: None,
         }),
         Err(DeclarationRefusal::UndeclaredIntent {
             kind: ToolIntentKind::CancelProcess
@@ -153,11 +154,13 @@ fn declarations_refuse_typed() {
         may_defer: true,
         intents: vec![ToolIntentKind::CancelProcess],
         isolated: false,
+        controls: lash_sansio::TurnControls::none(),
     };
     assert_eq!(deferring.admits(OutcomeShape::Deferred), Ok(()));
     assert_eq!(
         deferring.admits(OutcomeShape::Done {
-            intents: &[ToolIntentKind::CancelProcess]
+            intents: &[ToolIntentKind::CancelProcess],
+            control: None,
         }),
         Ok(())
     );
@@ -166,7 +169,10 @@ fn declarations_refuse_typed() {
         ..ToolDeclaration::default()
     };
     assert_eq!(
-        isolated.admits(OutcomeShape::Done { intents: &[] }),
+        isolated.admits(OutcomeShape::Done {
+            intents: &[],
+            control: None,
+        }),
         Err(DeclarationRefusal::InlineOutcomeFromIsolated)
     );
 }

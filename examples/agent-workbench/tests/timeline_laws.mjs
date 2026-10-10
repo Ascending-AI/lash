@@ -118,6 +118,28 @@ function serialize(node) {
 
 export const laws = [
   {
+    name: "a declared finish value renders once before and after commit",
+    async run(env) {
+      for (const toolName of ["finish", "submit"]) {
+        const time = clock();
+        const view = env.timeline(time);
+        const turn = `turn-finished-${toolName}`;
+        view.timeline.applyProductEvent(userInput(turn, "finish the task", time.now()));
+        view.timeline.applyObservation(activity(turn, { type: "finished", tool_name: toolName, value: "task done" }));
+        const reply = view.timeline.nodeOf(`reply:${turn}`);
+        env.assert.ok(reply, "the finished event renders the control's value immediately");
+        env.assert.equal(reply.querySelector(".msg-text").textContent.trim(), "task done");
+        view.timeline.applyObservation(committed(turn, [
+          row(`n-${turn}-user`, "user", turn, time.now(), { text: "finish the task" }),
+          row(`n-${turn}-reply`, "assistant_reply", turn, time.now(), { text: "task done" })
+        ]));
+        env.assert.equal(view.timeline.nodeOf(`reply:${turn}`), reply);
+        env.assert.equal(rowKeys(view.list).filter(key => key === `reply:${turn}`).length, 1);
+        env.assert.equal(reply.querySelector(".msg-text").textContent.trim(), "task done");
+      }
+    }
+  },
+  {
     name: "a turn's thinking, code and tools precede its reply without moving on settlement",
     async run(env) {
       const time = clock();

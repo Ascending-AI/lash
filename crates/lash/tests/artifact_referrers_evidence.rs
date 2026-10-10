@@ -120,18 +120,23 @@ fn last_cell_finish(output: &TurnOutput) -> Option<serde_json::Value> {
         .nodes
         .iter()
         .filter_map(|node| match &node.payload {
-            // The RLM event rides its format-stamped envelope (FIG-5028).
             lash_core::SessionNodePayload::Event {
                 event: lash_core::SessionHistoryRecord::Protocol(event),
-            } if event.plugin_id == "rlm_protocol" => event
-                .payload
-                .get("event")?
-                .get("RlmTrajectoryEntry")?
-                .get("result")
-                .filter(|result| result["kind"] == "finished")?
-                .get("value")?
-                .get("inline")
-                .cloned(),
+            } => {
+                let Some(lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(cell)) =
+                    lash_protocol_rlm::decode_rlm_protocol_event(event)
+                        .expect("recorded RLM protocol event decodes")
+                else {
+                    return None;
+                };
+                match cell.result {
+                    lash_core::CellOutcome::Controlled {
+                        control: lash_core::CellControl::Finish { value },
+                        ..
+                    } => value.inline().cloned(),
+                    _ => None,
+                }
+            }
             _ => None,
         })
         .next_back()
@@ -276,9 +281,9 @@ async fn cold_reopen_globals_across_turns(backend: Backend) {
     // A reopened core may use either provider handle for the same route.
     // Both handles therefore draw from the two-turn script in call order.
     let responses = Arc::new(Mutex::new(VecDeque::from(vec![
-        response("const saved = async () => 7; finish('bound');"),
+        response("const saved = async () => 7; await control.finish('bound');"),
         response(
-            "const run = await processes.start({ definition: saved }); finish(await processes.await({ handle: run }));",
+            "const run = await processes.start({ definition: saved }); await control.finish(await processes.await({ handle: run }));",
         ),
     ])));
     let first_core = rlm_core_with_queue(&fixture, Arc::clone(&responses));
@@ -352,13 +357,13 @@ async fn overwrite_retains_old_module_until_frame_end(backend: Backend) {
         &fixture,
         vec![
             response(
-                "let holder = new Map(); { const old = async () => 11; holder.set('saved', old); } finish('first');",
+                "let holder = new Map(); { const old = async () => 11; holder.set('saved', old); } await control.finish('first');",
             ),
             response(
-                "{ const newer = async () => 22; holder.set('saved', newer); } finish('second');",
+                "{ const newer = async () => 22; holder.set('saved', newer); } await control.finish('second');",
             ),
             response("await control.continue_as({ task: 'new frame' });"),
-            response("finish('new frame');"),
+            response("await control.finish('new frame');"),
         ],
     );
     let session = created_session(&core, "artifact-referrers-overwrite")
@@ -412,14 +417,14 @@ async fn continue_as_carries_only_seeded_definition(backend: Backend) {
     let core = rlm_core(
         &fixture,
         vec![
-            response("const carried = async () => 11; finish('carried bound');"),
-            response("const dropped = async () => 22; finish('dropped bound');"),
+            response("const carried = async () => 11; await control.finish('carried bound');"),
+            response("const dropped = async () => 22; await control.finish('dropped bound');"),
             response("await control.continue_as({ task: 'use seed', seed: { carried } });"),
             response(
-                "const run = await processes.start({ definition: carried }); finish(await processes.await({ handle: run }));",
+                "const run = await processes.start({ definition: carried }); await control.finish(await processes.await({ handle: run }));",
             ),
             response(
-                "const run = await processes.start({ definition: carried }); finish(await processes.await({ handle: run }));",
+                "const run = await processes.start({ definition: carried }); await control.finish(await processes.await({ handle: run }));",
             ),
         ],
     );
@@ -529,9 +534,9 @@ impl lash_core::plugin::ContextPressureHook for SeedingPressureHook {
 async fn a_pressure_seed_carries_its_module_into_the_new_frame(backend: Backend) {
     let fixture = Fixture::new(backend).await;
     let session_id = "artifact-referrers-pressure-seed";
-    let run_carried = "const run = await processes.start({ definition: carried }); finish(await processes.await({ handle: run }));";
+    let run_carried = "const run = await processes.start({ definition: carried }); await control.finish(await processes.await({ handle: run }));";
     let responses = Arc::new(Mutex::new(VecDeque::from(vec![
-        response("const carried = async () => 13; finish(carried);"),
+        response("const carried = async () => 13; await control.finish(carried);"),
         response(run_carried),
         response(run_carried),
     ])));
@@ -618,7 +623,7 @@ async fn first_turn_continue_as_fences_its_initial_frame(backend: Backend) {
             response(
                 "const old = async () => 5; await control.continue_as({ task: 'next frame' });",
             ),
-            response("finish('next frame');"),
+            response("await control.finish('next frame');"),
         ],
     );
     let session = created_session(&core, "artifact-referrers-first-switch")
@@ -677,11 +682,11 @@ async fn carried_definition_id_retains_the_closure_across_frame_switch(backend: 
     let core = rlm_core(
         &fixture,
         vec![
-            response("const made = async () => 31; finish(made);"),
+            response("const made = async () => 31; await control.finish(made);"),
             response(
                 "await control.continue_as({ task: 'carry id', seed: { kept_id: made.id } });",
             ),
-            response("finish(kept_id);"),
+            response("await control.finish(kept_id);"),
         ],
     );
     let session = created_session(&core, "definition-id-carry")
@@ -759,9 +764,9 @@ async fn uncarried_frame_switch_loses_an_uncarried_definition(backend: Backend) 
     let core = rlm_core(
         &fixture,
         vec![
-            response("const made = async () => 31; finish(made);"),
+            response("const made = async () => 31; await control.finish(made);"),
             response("await control.continue_as({ task: 'no carry' });"),
-            response("finish('switched');"),
+            response("await control.finish('switched');"),
         ],
     );
     let session = created_session(&core, "definition-id-no-carry")
@@ -811,9 +816,9 @@ async fn host_pin_keeps_a_definition_across_an_uncarried_switch(backend: Backend
     let core = rlm_core(
         &fixture,
         vec![
-            response("const made = async () => 31; finish(made);"),
+            response("const made = async () => 31; await control.finish(made);"),
             response("await control.continue_as({ task: 'host keeps id' });"),
-            response("finish('switched');"),
+            response("await control.finish('switched');"),
         ],
     );
     let session = created_session(&core, "definition-id-host-pin")
@@ -901,7 +906,7 @@ async fn host_pin_keeps_a_definition_across_an_uncarried_switch(backend: Backend
 const CREATED_SOURCE: &str = "async () => 40 + 2";
 
 fn create_definition_cell(binding: &str) -> String {
-    format!("const {binding} = {CREATED_SOURCE}; finish('created');")
+    format!("const {binding} = {CREATED_SOURCE}; await control.finish('created');")
 }
 
 /// FIG-3116: the definition of a process a cell wrote is an RLM value like
@@ -913,7 +918,7 @@ async fn created_definition_survives_cold_reopen_and_starts_by_value(backend: Ba
     let responses = Arc::new(Mutex::new(VecDeque::from(vec![
         response(&create_definition_cell("made")),
         response(
-            "const run = await processes.start({ definition: made }); finish(await processes.await({ handle: run }));",
+            "const run = await processes.start({ definition: made }); await control.finish(await processes.await({ handle: run }));",
         ),
     ])));
     let first_core = rlm_core_with_queue(&fixture, Arc::clone(&responses));
@@ -1037,8 +1042,8 @@ async fn a_saved_function_started_as_a_process_finishes_after_its_session_is_del
     backend: Backend,
 ) {
     saved_function_process(backend, lash_protocol_rlm::CellDialect::typescript(),
-        "const factor = 2;\nasync function work(n: number) { await sleep(1500); return n * factor; }\nfinish('bound');",
-        "const run = await processes.start({ definition: work, args: { n: 21 } }); finish(run);",
+        "const factor = 2;\nasync function work(n: number) { await sleep(1500); return n * factor; }\nawait control.finish('bound');",
+        "const run = await processes.start({ definition: work, args: { n: 21 } }); await control.finish(run);",
         serde_json::json!(42.0)).await;
 }
 
@@ -1046,8 +1051,8 @@ async fn a_saved_function_started_as_a_process_finishes_after_its_session_is_del
 /// its detached process finishes after the originating session is deleted.
 async fn a_python_saved_function_process_outlives_its_session(backend: Backend) {
     saved_function_process(backend, lash_protocol_rlm::CellDialect::python(),
-        "import asyncio\nfactor = 2\nasync def work(n: int = 21) -> int:\n    await asyncio.sleep(1.5)\n    return n * factor\nfinish('bound')",
-        "run = await processes_start({'definition': work, 'args': {}})\nfinish(run)",
+        "import asyncio\nfactor = 2\nasync def work(n: int = 21) -> int:\n    await asyncio.sleep(1.5)\n    return n * factor\nawait control_finish('bound')",
+        "run = await processes_start({'definition': work, 'args': {}})\nawait control_finish(run)",
         serde_json::json!(42)).await;
 }
 

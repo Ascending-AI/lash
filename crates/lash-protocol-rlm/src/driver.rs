@@ -2,6 +2,7 @@ pub(crate) mod history;
 
 use std::sync::Arc;
 
+use crate::rlm_support::RlmCompletion;
 #[cfg(any(test, feature = "testing"))]
 use lash_core::llm::types::{LlmContentBlock, LlmMessage};
 use lash_core::llm::types::{LlmRequestScope, LlmToolChoice};
@@ -9,7 +10,6 @@ use lash_core::sansio::ContextProjector;
 use lash_core::{
     LlmRequest, ProjectorContext, ProtocolBuildInput, TurnDriverConfig, TurnDriverPreamble,
 };
-use lash_rlm_types::RlmTermination;
 
 use crate::dialect::SessionDialect;
 #[cfg(test)]
@@ -140,7 +140,7 @@ impl ContextProjector<lash_core::HostTurnProtocol> for RlmContextProjector {
 /// either termination that states one.
 pub(crate) fn required_output_block(
     dialect: &SessionDialect,
-    termination: &RlmTermination,
+    termination: &RlmCompletion,
 ) -> Option<String> {
     termination
         .finish_schema()

@@ -360,7 +360,7 @@ holding the reasoning and the prose; the runtime then adds no terminal message
 because the answer is already the transcript's last one. The projection admits
 that last plugin-authored prose message as the turn's reply — and only that one,
 so the protocol's mid-turn prose stays out of the chat (FIG-1406). A turn that
-finishes with a terminal value — `finish`, which
+finishes with a terminal value — `control.finish`, which
 `require_finish` forces on the send path — has no runtime-committed assistant
 message, so the workbench commits the reply it renders. Either way a completed
 turn leaves exactly one committed assistant copy.
@@ -462,7 +462,7 @@ const triage = async (box: Inbox) => {
 
 const work = await processes.start({ definition: triage, args: { box: inbox.work } });
 const personal = await processes.start({ definition: triage, args: { box: inbox.personal } });
-finish(await Promise.all([work, personal]));
+await control.finish(await Promise.all([work, personal]));
 </typescript>
 ```
 
@@ -541,7 +541,7 @@ await workbench.register_trigger({
   event_arg: "event",
   name: "inbox concierge"
 });
-finish("Inbox concierge is watching every delivery.");
+await control.finish("Inbox concierge is watching every delivery.");
 </typescript>
 ```
 

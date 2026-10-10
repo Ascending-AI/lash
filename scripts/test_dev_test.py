@@ -834,7 +834,7 @@ class DevTestTests(unittest.TestCase):
         (outcomes / "built-ins.tsv").write_text("# rows\n")
         vendored = self.root / "crates/lash-typescript/tests/test262/test/language/statements"
         vendored.mkdir(parents=True)
-        (vendored / "for.js").write_text("finish(true);\n")
+        (vendored / "for.js").write_text("await control.finish(true);\n")
         self.env["LASH_QUICK"] = "1"
         commands = json.loads(self.invoke("--dry-run").stdout)["commands"]
         test_commands = [c for c in commands if c[:2] == ["kiln", "test"]]

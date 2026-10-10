@@ -41,7 +41,7 @@ fn expression_side_effects_follow_node_order() {
             })
             .collect();
         let program = format!(
-            "let order = ''; const m = {{{}}}; const o = {{id(value) {{ return value; }}, n: 0}}; {source} finish(order);",
+            "let order = ''; const m = {{{}}}; const o = {{id(value) {{ return value; }}, n: 0}}; {source} await finish(order);",
             methods.join(",")
         );
         assert_eq!(
@@ -76,7 +76,6 @@ set x = invoke ts.add(t2, t4)"
 fn session_bindings_cannot_shadow_builtins() {
     for (name, source) in [
         ("URL", "const URL = 'https://example.com';"),
-        ("finish", "const finish = 1;"),
         ("Math", "let Math = 1;"),
         ("Array", "var Array = 1;"),
         ("URL", "const { URL } = { URL: 1 };"),
@@ -120,7 +119,8 @@ fn nested_scope_builtin_shadowing_stays_local() {
 /// Old state, forked state and host seeds all supply the same environment.
 #[test]
 fn restored_session_bindings_cannot_mask_builtins() {
-    for name in ["URL", "finish"] {
+    {
+        let name = "URL";
         let error =
             super::lower_in_session("1;", &[name]).expect_err("reject an old reserved binding");
         assert_eq!(error.code.as_str(), "TS_SHADOWS_BUILTIN");
@@ -134,6 +134,7 @@ fn restored_session_bindings_cannot_mask_builtins() {
             library: super::library(),
             bindings: &bindings,
             effects: &effects,
+            controls: &BTreeMap::new(),
             functions: &BTreeMap::new(),
         };
         let error = crate::Parser::default()
@@ -141,11 +142,4 @@ fn restored_session_bindings_cannot_mask_builtins() {
             .expect_err("the worker's reusable parser also checks restored names");
         assert_eq!(error.code.as_str(), "TS_SHADOWS_BUILTIN");
     }
-}
-
-/// The configured terminal name remains callable in later cells.
-#[test]
-fn finish_binding_cannot_shadow_the_terminal() {
-    let error = super::lower("const finish = 1;").expect_err("finish is reserved");
-    assert_eq!(error.code.as_str(), "TS_SHADOWS_BUILTIN");
 }

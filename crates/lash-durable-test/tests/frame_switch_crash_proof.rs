@@ -42,7 +42,7 @@ use lash::tools::{StaticToolExecute, StaticToolProvider};
 use lash_core::facade_support::ProviderHandle;
 use lash_core::llm::types::{LlmRequest, LlmResponse, LlmStreamEvent, StreamBlockIdentity};
 use lash_core::runtime::durable::session::SessionActivation;
-use lash_core::{LlmOutputPart, ToolCall, ToolControl, ToolOutcome};
+use lash_core::{LlmOutputPart, ToolCall, ToolOutcome};
 use lash_core_execution::{Backend, BackendParts, NoProjectionProviders, StoreSet};
 use lash_core_store::store::{RunCommittedOutcome, RunTerminalCause, RunTerminalKind};
 use lash_durable::runner::Activation;
@@ -84,24 +84,23 @@ struct SwitchFrame;
 #[async_trait::async_trait]
 impl StaticToolExecute for SwitchFrame {
     async fn execute(&self, _call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-        ToolOutcome::ok(serde_json::json!({ "ok": true }))
-            .with_control(ToolControl::SwitchAgentFrame {
-                frame_key: lash_core::FrameKey::from_caller_material("frame-switch-law")
-                    .expect("non-empty caller material"),
-                initial_nodes: Vec::new(),
-                task: Some(TASK.to_owned()),
-            })
-            .into()
+        ToolOutcome::switch_agent_frame(
+            lash_core::FrameKey::from_caller_material("frame-switch-law")
+                .expect("non-empty caller material"),
+            TASK.to_owned(),
+            Vec::new(),
+        )
+        .into()
     }
 }
 
 fn switch_frame() -> Arc<dyn lash_core::ToolProvider> {
-    let definition = lash_core::ToolDefinition::raw(
+    let definition = lash_core::ToolDefinition::control(
         TOOL,
         TOOL,
         "Switches the agent frame and hands the new frame a task.",
         serde_json::json!({ "type": "object", "additionalProperties": false, "properties": {} }),
-        serde_json::json!({ "type": "object" }),
+        lash_core::TurnControls::switch_agent_frame(),
     )
     .expect("switch_frame's schemas")
     .with_execution(std::time::Duration::from_secs(120));

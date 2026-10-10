@@ -66,13 +66,13 @@ async fn one_slot_cell_that_starts_and_awaits_a_process_completes(tier: Tier) {
             vec![served::cell(
                 "const worker = async () => { return \"done\"; };\n\
                  const handle = await processes.start({ definition: worker });\n\
-                 finish(await processes.await({ handle }));",
+                 await control.finish(await processes.await({ handle }));",
             )],
         )
         .await;
     served::assert_answered("the cell that awaits its process on one slot", &output);
     assert_eq!(
-        output.final_value(),
+        output.finished().map(|(_, value)| value),
         Some(&serde_json::json!("done")),
         "the cell resumes with the awaited body's terminal"
     );

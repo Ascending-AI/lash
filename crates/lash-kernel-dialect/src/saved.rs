@@ -86,6 +86,12 @@ pub enum NotSaved {
     /// The function calls another by name that was itself not saved.
     #[error("its function uses `{function}`, which is not a saved function")]
     Needs { function: Name },
+    /// The function performs an effect whose call ends the turn. Only a
+    /// cell's `main` ends its turn, so no function is kept that would.
+    #[error(
+        "its function calls `{effect}`, which ends the turn; return the value and call `{effect}` from the cell's top level"
+    )]
+    PerformsControl { effect: EffectName },
     /// The session's dialect declares no saved function in a later cell.
     #[error("it holds a function, and this session's dialect keeps none between cells")]
     Dialect,
@@ -130,6 +136,10 @@ pub struct Left<'a> {
     /// Every binding that was not carried, those that reach a task among
     /// them.
     pub not_carried: &'a [Name],
+    /// The effects whose call ends the turn
+    /// ([`crate::Environment::controls`]), as the cell was lowered against
+    /// them.
+    pub controls: &'a BTreeMap<EffectName, BTreeSet<crate::EffectControl>>,
     /// The document's annotations, which state what each function's
     /// source wrote of it ([`WRITTEN`]).
     pub annotations: Option<&'a Annotations>,
@@ -259,6 +269,15 @@ fn save_closure(
     } = frozen;
 
     let mut document = Document::new(left.document.manifest.numbers, Vec::new());
+    if let Some(effect) = reads
+        .effects
+        .iter()
+        .find(|effect| left.controls.contains_key(*effect))
+    {
+        return Err(NotSaved::PerformsControl {
+            effect: effect.clone(),
+        });
+    }
     for effect in &reads.effects {
         let signature = left
             .document
@@ -781,6 +800,13 @@ pub enum Unusable {
         "the saved function `{function}` calls `{effect}` under a signature this session does not offer it under"
     )]
     EffectSignature { function: Name, effect: EffectName },
+    /// The effect's call now ends the turn. A saved function was kept
+    /// because none of its effects did (`NotSaved::PerformsControl`), so
+    /// what the effect declares has changed since.
+    #[error(
+        "the saved function `{function}` calls `{effect}`, which now ends the turn; a function cannot end it"
+    )]
+    EffectControls { function: Name, effect: EffectName },
     /// It calls a library function the environment has not installed.
     #[error(
         "the saved function `{function}` needs the library function `{library}`, which is not installed"
@@ -899,8 +925,8 @@ pub fn closure_of<'a>(
 
 /// Declares `roots`, and every saved function they use, in `document`, and
 /// adds what they require to its manifest. `effects` are the effects the
-/// environment offers and `installed` says whether it holds a library
-/// function.
+/// environment offers, `controls` the ones among them whose call ends the
+/// turn, and `installed` says whether it holds a library function.
 ///
 /// # Errors
 ///
@@ -910,6 +936,7 @@ pub fn install(
     functions: &BTreeMap<Name, SavedFunction>,
     roots: &BTreeSet<Name>,
     effects: &BTreeMap<EffectName, Signature>,
+    controls: &BTreeMap<EffectName, BTreeSet<crate::EffectControl>>,
     installed: &dyn Fn(&FunctionId) -> bool,
 ) -> Result<(), Unusable> {
     for (name, function) in closure_of(functions, roots)? {
@@ -918,6 +945,14 @@ pub fn install(
             return Err(unusable(|function| Unusable::Numbers { function }));
         }
         for (effect, signature) in &function.document.manifest.effects {
+            // A tool that now ends the turn also answers nothing, so its
+            // signature changed too: the control is the cause named.
+            if effects.contains_key(effect) && controls.contains_key(effect) {
+                return Err(Unusable::EffectControls {
+                    function: name,
+                    effect: effect.clone(),
+                });
+            }
             match effects.get(effect) {
                 None => {
                     return Err(Unusable::EffectMissing {

@@ -826,7 +826,7 @@ mod tests {
             lash::observe::InMemoryLiveReplayStoreConfig::standard(),
         ));
         let workbench = Workbench::builder(crate::tests::replying_provider(
-            "<typescript>let answer = 42; finish(answer);</typescript>",
+            "<typescript>let answer = 42; await control.finish(answer);</typescript>",
         ))
         .live_replay(replay.clone())
         .build()

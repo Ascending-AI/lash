@@ -305,11 +305,13 @@ async fn dispatch_prepared_tool_attempt_launch<'run>(
                 .iter()
                 .map(crate::ToolIntent::kind)
                 .collect();
-            match declaration.admits(crate::OutcomeShape::Done { intents: &kinds }) {
-                Ok(()) => {
-                    let (output, state) = result.into_parts();
-                    (ToolOutcome::from_output(output), intents, state)
-                }
+            let (output, state) = result.into_parts();
+            let output = output.settled();
+            match declaration.admits(crate::OutcomeShape::Done {
+                intents: &kinds,
+                control: output.turn_control_kind(),
+            }) {
+                Ok(()) => (ToolOutcome::from_output(output), intents, state),
                 // An undeclared intent is refused with the whole outcome, before
                 // the attempt is recorded: nothing it declared is realized.
                 Err(refusal) => (

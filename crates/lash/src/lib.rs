@@ -404,9 +404,6 @@ pub mod tools {
     /// Typed cancellation evidence constructed by tool implementors; pass it to
     /// [`ToolCallOutput::cancelled`] when a tool stops without completing.
     pub use lash_core::ToolCancellation;
-    /// Turn flow control constructed by tool implementors; attach it with
-    /// [`ToolCallOutput::with_control`] or [`ToolOutcome::with_control`].
-    pub use lash_core::ToolControl;
     /// Source and owning plugin identity of tools registered with
     /// [`crate::LashCoreBuilder::tools`]. Use it in deferred grants for those tools.
     pub use lash_core::facade_support::PLUGIN_TOOL_SOURCE_ID;
@@ -427,7 +424,7 @@ pub mod tools {
         ToolPrepareCall, ToolPrepareContext, ToolProvider, ToolRegistry, ToolSessionLlmProfile,
         ToolValue, ToolView, ToolViewBlock, ToolViewMeta, derive_tool_intent_identity,
         facade_support::ReconfigureError, facade_support::ToolSourceHandle,
-        facade_support::ToolStateFacadeOps, turn_outcome_from_tool_control,
+        facade_support::ToolStateFacadeOps, turn_stop_from_tool_control,
     };
     /// Per-call execution contract carried by [`ToolDefinition::with_execution_policy`].
     pub use lash_core::{Backoff, BoundedRetry, ExecutionPolicy, LimitCause};
@@ -451,6 +448,9 @@ pub mod tools {
     /// is lash's internal projection — hosts never read or write it, and which
     /// dialect executes a bound tool is decided inside lash.
     pub use lash_core::{TOOL_BINDING_KEY, ToolBinding, ToolDefinitionBindingExt};
+    /// Turn flow control constructed by tool implementors; attach it with
+    /// [`ToolCallOutput::with_control`] or [`ToolOutcome::with_control`].
+    pub use lash_core::{ToolControl, TurnControl, TurnControlKind, TurnControls};
     pub use lash_core::{
         ToolId, ToolState, facade_support::SupersededToolIdentity,
         facade_support::ToolMembershipUpdate, facade_support::ToolRestoreReport,
@@ -821,9 +821,10 @@ pub mod plugins {
     pub use lash_core_worker::execution::runtime::ProcessExecutionEnvLoadError;
     pub use lash_protocol_standard::BatchSugar;
     pub use lash_sansio::{
-        AttachmentMaterializationNotice, CheckpointResumeAction, DegradedBinding, DriverAction,
-        DriverContextView, EffectId, ExpandedRow, ExpandedWrapper, ModelToolCalls, ModelToolReturn,
-        PendingWork, ProjectorContext, ResponseToolCalls, SessionStreamEvent, StreamMessageKind,
+        AttachmentMaterializationNotice, CheckpointResumeAction, CompletionCandidate,
+        CompletionDisposition, DegradedBinding, DriverAction, DriverContextView, EffectId,
+        ExpandedRow, ExpandedWrapper, ModelToolCalls, ModelToolReturn, PendingWork,
+        ProjectorContext, ResponseToolCalls, SessionStreamEvent, StreamMessageKind,
         ToolCatalogBuildError, ToolContractResolver, ToolExpansionPlan, TurnMachineConfig,
         TurnProtocol, UndecodableDriverState, UnitTurnProtocol, WriterFormats,
     };
@@ -1543,7 +1544,7 @@ pub mod transcript {
     /// One executed code cell: the record its protocol committed, which a
     /// [`TranscriptItem::Cell`] returns, a code executor's response reports
     /// the prints and result of, and a completion activity carries.
-    pub use lash_core::{BindingChanges, CellOutcome, CellPrint, CellRecord};
+    pub use lash_core::{BindingChanges, CellControl, CellOutcome, CellPrint, CellRecord};
 }
 
 /// Presentation cuts for runtime value replies and raw transcript errors.
