@@ -8,7 +8,7 @@
 //! (what a session created). The session-scoped
 //! [`SessionProcessAdmin`](crate::admin::SessionProcessAdmin) is thin sugar over
 //! this surface pre-filtered by a session's observer edge; it lives in `admin` because it
-//! wraps a [`SessionAdmin`](crate::admin::SessionAdmin).
+//! owns its session scope and runtime access.
 
 use crate::support::{Arc, EmbedError, LashCore, Result};
 use lash_core::ActorContext;

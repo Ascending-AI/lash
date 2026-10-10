@@ -1,6 +1,9 @@
 //! Keyed plugin commands, queries and task-run submission.
 
-use super::*;
+use super::host_commands::{SubmittedCommand, unsettled_command_error};
+use super::{AdminContext, AdminMutation, SessionCommandAdmin};
+use crate::support::{EmbedError, LashRuntime, Result, SessionError};
+use lash_sansio::SessionId;
 
 /// A task's decoded operation failure or a facade refusal. The complete
 /// failure envelope retains classification, provenance and unknown data.
@@ -30,7 +33,7 @@ impl<Error> From<PluginTaskResultError<Error>> for EmbedError {
 
 #[derive(Clone)]
 pub struct PluginOperations {
-    pub(crate) control: SessionAdmin,
+    pub(crate) context: AdminContext,
 }
 
 impl PluginOperations {
@@ -56,22 +59,23 @@ impl PluginOperations {
         args: serde_json::Value,
         idempotency_key: impl Into<String>,
     ) -> Result<crate::RunHandle> {
-        let receipt = self
-            .control
-            .submit_session_command(
-                lash_core::facade_support::SessionCommand::RunPluginTask {
-                    name: name.into(),
-                    args,
-                },
-                idempotency_key,
-            )
-            .await?;
+        let receipt = SessionCommandAdmin {
+            context: self.context.clone(),
+        }
+        .submit(
+            lash_core::facade_support::SessionCommand::RunPluginTask {
+                name: name.into(),
+                args,
+            },
+            idempotency_key,
+        )
+        .await?;
         let operation = lash_core::tool_run::OperationRun {
             session_id: receipt.session_id,
             operation_id: receipt.batch_id.to_string(),
         };
         Ok(crate::send::run(
-            self.control.target.clone(),
+            self.context.target.clone(),
             operation.run_id(),
         ))
     }
@@ -90,8 +94,7 @@ impl PluginOperations {
         args: Op::Args,
     ) -> Result<Op::Output> {
         let (_plugin_id, output) = self
-            .control
-            .query_plugin_raw(Op::NAME, encode_plugin_args::<Op>(args)?)
+            .query_raw(Op::NAME, encode_plugin_args::<Op>(args)?)
             .await?;
         decode_plugin_output::<Op>(output)
     }
@@ -102,7 +105,12 @@ impl PluginOperations {
         name: &str,
         args: serde_json::Value,
     ) -> Result<(String, serde_json::Value)> {
-        self.control.query_plugin_raw(name, args).await
+        let observation = self.context.runtime.observe();
+        let session_id = SessionId::from(observation.session_id());
+        observation
+            .query_plugin(name, args, Some(session_id))
+            .await
+            .map_err(Into::into)
     }
 
     pub async fn run_command<Op: lash_core::facade_support::PluginCommand>(
@@ -110,10 +118,10 @@ impl PluginOperations {
         args: Op::Args,
         idempotency_key: impl Into<String>,
     ) -> Result<AdminMutation<lash_core::facade_support::PluginOperationReceipt<Op::Output>>> {
-        let receipt = Box::pin(self.control.run_plugin_command(
+        let receipt = Box::pin(self.run_command_raw(
             Op::NAME,
             encode_plugin_args::<Op>(args)?,
-            idempotency_key.into(),
+            idempotency_key,
         ))
         .await?;
         receipt.try_map(|receipt| {
@@ -132,11 +140,138 @@ impl PluginOperations {
         idempotency_key: impl Into<String>,
     ) -> Result<AdminMutation<lash_core::facade_support::PluginOperationReceipt<serde_json::Value>>>
     {
-        Box::pin(
-            self.control
-                .run_plugin_command(name, args, idempotency_key.into()),
-        )
-        .await
+        let idempotency_key = idempotency_key.into();
+        let session_id = SessionId::from(self.context.runtime.observe().session_id());
+        let submitted = self
+            .context
+            .with_writer(async |runtime: &mut LashRuntime| {
+                if runtime.is_store_backed() {
+                    let command = lash_core::facade_support::SessionCommand::RunPluginCommand {
+                        name: name.to_string(),
+                        args,
+                    };
+                    return Box::pin(runtime.submit_session_command(command, idempotency_key))
+                        .await
+                        .map(SubmittedCommand::Queued)
+                        .map_err(EmbedError::Runtime);
+                }
+                let receipt = runtime
+                    .run_storeless_plugin_command(name, args, Some(session_id.clone()))
+                    .await;
+                receipt.map(SubmittedCommand::Applied).map_err(Into::into)
+            })
+            .await?;
+        let receipt = match submitted {
+            SubmittedCommand::Applied(receipt) => receipt,
+            SubmittedCommand::Queued(receipt) => {
+                match Box::pin(
+                    SessionCommandAdmin {
+                        context: self.context.clone(),
+                    }
+                    .status(receipt),
+                )
+                .await?
+                {
+                    lash_core::runtime::SessionCommandSettlement::Applied {
+                        outcome:
+                            lash_core::runtime::SessionCommandOutcome::PluginOperation {
+                                outcome:
+                                    lash_core::runtime::PluginOperationCommandOutcome::Completed {
+                                        plugin_id,
+                                        output,
+                                        events,
+                                        pending_turn_inputs,
+                                    },
+                            },
+                        ..
+                    } => lash_core::facade_support::PluginOperationReceipt {
+                        output,
+                        events: events
+                            .into_iter()
+                            .map(|value| lash_core::facade_support::PluginOwned {
+                                plugin_id: plugin_id.clone(),
+                                value,
+                            })
+                            .collect(),
+                        pending_turn_inputs,
+                    },
+                    lash_core::runtime::SessionCommandSettlement::Applied {
+                        outcome:
+                            lash_core::runtime::SessionCommandOutcome::PluginOperation {
+                                outcome:
+                                    lash_core::runtime::PluginOperationCommandOutcome::Failed {
+                                        failure,
+                                    },
+                            },
+                        ..
+                    } => {
+                        return Err(EmbedError::Control(
+                            lash_core::facade_support::PluginOperationInvokeError::Failed(failure),
+                        ));
+                    }
+                    lash_core::runtime::SessionCommandSettlement::Applied {
+                        outcome:
+                            lash_core::runtime::SessionCommandOutcome::PluginOperation {
+                                outcome:
+                                    lash_core::runtime::PluginOperationCommandOutcome::Refused {
+                                        refusal,
+                                    },
+                            },
+                        ..
+                    } => return Err(EmbedError::Runtime(refusal.into())),
+                    lash_core::runtime::SessionCommandSettlement::Applied {
+                        receipt,
+                        outcome:
+                            lash_core::runtime::SessionCommandOutcome::PluginOperation {
+                                outcome:
+                                    lash_core::runtime::PluginOperationCommandOutcome::Cancelled,
+                            },
+                    } => {
+                        return Err(EmbedError::Session(SessionError::SessionCommandCancelled(
+                            receipt,
+                        )));
+                    }
+                    lash_core::runtime::SessionCommandSettlement::Pending(receipt) => {
+                        return Ok(AdminMutation::Pending(receipt));
+                    }
+                    settlement => return Err(unsettled_command_error(settlement)),
+                }
+            }
+        };
+        self.record_plugin_operation_observations(&receipt.events, &receipt.pending_turn_inputs)
+            .await;
+        Ok(AdminMutation::Applied(receipt))
+    }
+
+    async fn record_plugin_operation_observations(
+        &self,
+        events: &[lash_core::facade_support::PluginOwned<lash_core::PluginRuntimeEvent>],
+        pending_turn_inputs: &[lash_core::PendingTurnInput],
+    ) {
+        for owned in events {
+            self.context
+                .runtime
+                .record_turn_activity(
+                    None,
+                    lash_core::TurnActivity::independent(lash_core::TurnEvent::PluginRuntime {
+                        plugin_id: owned.plugin_id.clone(),
+                        event: owned.value.clone(),
+                    }),
+                )
+                .await;
+        }
+        if !pending_turn_inputs.is_empty() {
+            self.context
+                .runtime
+                .record_queue_changed(
+                    lash_core::SessionQueueEventKind::Enqueued,
+                    pending_turn_inputs
+                        .iter()
+                        .map(|input| input.input_id.to_string())
+                        .collect(),
+                )
+                .await;
+        }
     }
 }
 

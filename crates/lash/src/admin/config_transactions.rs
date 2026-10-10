@@ -9,7 +9,8 @@
 //! was admitted with and the next run executes under the transaction's. A
 //! storeless session resolves and publishes it directly under the writer.
 
-use super::*;
+use super::{AdminContext, SessionCommandAdmin, host_commands};
+use crate::support::{EmbedError, LashRuntime, Result, SessionError};
 use host_commands::SubmittedCommand;
 
 /// What a config transaction is written against: the caller's stable id for
@@ -64,13 +65,19 @@ impl ConfigSettlement {
     }
 }
 
+#[derive(Clone)]
+/// Facade handle for session config administration.
+pub struct SessionConfigAdmin {
+    pub(super) context: AdminContext,
+}
+
 impl SessionConfigAdmin {
     /// The session's config revision: what a transaction written now is
     /// written against. It is read from the durable head's metadata, which
     /// is what the shift judges the transaction against, so it never waits
     /// behind a run that holds the session's runtime.
     pub async fn revision(&self) -> Result<u64> {
-        let context = self.control.target.context().await?;
+        let context = self.context.target.context().await?;
         let head = context
             .parts
             .store
@@ -88,7 +95,7 @@ impl SessionConfigAdmin {
     /// describes. Discovery only: an owner can still refuse arguments its
     /// schema admits.
     pub async fn commands(&self) -> Result<lash_core::ConfigCommandCatalog> {
-        self.control
+        self.context
             .with_writer(async |runtime: &mut LashRuntime| {
                 runtime.reload_invalidated_resident_session_state().await?;
                 runtime
@@ -123,7 +130,7 @@ impl SessionConfigAdmin {
         transaction: lash_core::ConfigTransaction,
     ) -> Result<ConfigSettlement> {
         let submitted = self
-            .control
+            .context
             .with_writer(async |runtime: &mut LashRuntime| {
                 if runtime.is_store_backed() {
                     return Box::pin(runtime.submit_config_transaction(
@@ -157,7 +164,14 @@ impl SessionConfigAdmin {
         &self,
         receipt: lash_core::runtime::SessionCommandReceipt,
     ) -> Result<ConfigSettlement> {
-        match Box::pin(self.control.await_command_settlement(receipt)).await? {
+        match Box::pin(
+            SessionCommandAdmin {
+                context: self.context.clone(),
+            }
+            .settle(receipt),
+        )
+        .await?
+        {
             lash_core::runtime::SessionCommandSettlement::Applied {
                 outcome: lash_core::runtime::SessionCommandOutcome::ConfigTransaction { outcome },
                 ..

@@ -1146,7 +1146,7 @@
     "transcript::tests::transcript_discriminates_missing_checkpoint_component_bodies": 51
   },
   "//crates/lash:lash__unit_test": {
-    "admin::injected_message_tests::mixed_parts_injection_preserves_order_and_attachments": 1,
+    "admin::injection::injected_message_tests::mixed_parts_injection_preserves_order_and_attachments": 1,
     "core::capacity_laws::facade_evidence_cuts_bound_attempts_failures_and_divergences": 68,
     "core::capacity_laws::facade_fetch_horizon_is_recorded_for_cold_resends": 14619,
     "core::capacity_laws::facade_held_observation_capacity_limits_the_live_suffix": 63,

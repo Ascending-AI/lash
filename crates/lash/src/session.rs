@@ -986,11 +986,17 @@ impl LashSession {
     }
 
     pub fn admin(&self) -> SessionAdmin {
-        SessionAdmin {
+        let context = crate::admin::AdminContext {
             target: crate::send::SendTarget::Live(self.clone()),
             runtime: self.runtime.clone(),
-            process_work: Arc::clone(self.binding.process().port()),
-            observation_work_limits: self.binding.observation_work_limits(),
+        };
+        SessionAdmin {
+            processes: crate::admin::SessionProcessAdmin {
+                context: context.clone(),
+                process_work: Arc::clone(self.binding.process().port()),
+                observation_work_limits: self.binding.observation_work_limits(),
+            },
+            context,
         }
     }
 
@@ -1001,12 +1007,12 @@ impl LashSession {
     /// [`SessionProcessAdmin::await_output`]. It lives on the session surface
     /// because it refreshes the session graph, not the global process registry.
     pub async fn refresh_background_graph(&self) -> Result<()> {
-        self.admin().refresh_background_graph().await
+        self.admin().state().refresh_background_graph().await
     }
 
     pub fn plugin_operations(&self) -> PluginOperations {
         PluginOperations {
-            control: self.admin(),
+            context: self.admin().context,
         }
     }
 

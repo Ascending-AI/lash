@@ -3,14 +3,15 @@
 //! preview of how the plan resolves for a call. A preview is unadmitted: it
 //! composes no text and records nothing.
 
-use super::*;
+use super::AdminContext;
+use crate::support::{EmbedError, LashRuntime, Result};
 use lash_core::plugin::prompt::{OfferedTools, PromptCatalog};
 use lash_core::prompt_sections::{PromptPlan, PromptPlanError, PromptPurpose, ResolvedPromptPlan};
 
 #[derive(Clone)]
 /// Facade handle for a session's prompt sections.
 pub struct SessionPromptAdmin {
-    pub(super) control: SessionAdmin,
+    pub(super) context: AdminContext,
 }
 
 impl SessionPromptAdmin {
@@ -22,7 +23,7 @@ impl SessionPromptAdmin {
         run: &crate::TurnId,
         call: u32,
     ) -> Result<Option<crate::prompt::LoadedPromptSnapshot>> {
-        let context = self.control.target.context().await?;
+        let context = self.context.target.context().await?;
         let key = crate::prompt::PromptCallKey {
             session: context.parts.session_id,
             call: crate::prompt::ModelCallId::Turn {
@@ -43,7 +44,7 @@ impl SessionPromptAdmin {
     /// executes under. A plan is changed only by
     /// [`SetPromptPlan`](crate::config::SetPromptPlan).
     pub async fn plan(&self) -> Result<PromptPlan> {
-        let context = self.control.target.context().await?;
+        let context = self.context.target.context().await?;
         let head = context
             .parts
             .store
@@ -59,7 +60,7 @@ impl SessionPromptAdmin {
     /// The sections, section families and wrappers the session's installed
     /// plugins register, in registration order.
     pub async fn catalog(&self) -> Result<PromptCatalog> {
-        self.control
+        self.context
             .with_writer(async |runtime: &mut LashRuntime| {
                 runtime.reload_invalidated_resident_session_state().await?;
                 runtime.prompt_catalog().map_err(EmbedError::Runtime)

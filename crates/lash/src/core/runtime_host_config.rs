@@ -508,7 +508,7 @@ mod pacing_laws {
                 .observer_pacing,
             pacing
         );
-        assert_eq!(live.admin().target.observer_pacing(), pacing);
+        assert_eq!(live.admin().context.target.observer_pacing(), pacing);
         assert_eq!(
             pacing.follow.next(pacing.follow.initial()),
             Duration::from_millis(74)
