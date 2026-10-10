@@ -128,14 +128,18 @@ fn integer_arg(
     args: &[Value],
     index: usize,
 ) -> Result<std::borrow::Cow<'_, num_bigint::BigInt>, NativeError> {
+    Ok(integer_value(args, index)?.as_bigint())
+}
+
+fn integer_value(args: &[Value], index: usize) -> Result<&lash_kernel_doc::Integer, NativeError> {
     match arg(args, index)? {
-        Value::Int(integer) => Ok(integer.as_bigint()),
+        Value::Int(integer) => Ok(integer),
         _ => Err(raise("type_error", "expected integer")),
     }
 }
 
 fn count_arg(args: &[Value], index: usize) -> Result<usize, NativeError> {
-    integer_arg(args, index)?.to_usize().ok_or_else(|| {
+    integer_value(args, index)?.to_usize().ok_or_else(|| {
         raise(
             "number_range",
             "expected a nonnegative machine-sized integer",

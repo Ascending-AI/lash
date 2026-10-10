@@ -1,11 +1,12 @@
-use lash_kernel_doc::{NativeCall, NativeError, NativeHeap, Object, Type, Value};
-use num_bigint::BigInt;
+use std::ops::ControlFlow;
+
+use lash_kernel_doc::{Element, Integer, NativeCall, NativeError, NativeHeap, Object, Type, Value};
 use num_traits::ToPrimitive;
 use unicode_normalization::UnicodeNormalization;
 
 use super::{
-    Function, count_arg, definition, int, integer_arg, ordering, raise, reserve_list, sequence,
-    sequence_type, text_arg, text_buffer,
+    Function, arg, count_arg, definition, int, integer_value, ordering, raise, reserve_list,
+    sequence, sequence_type, text_arg, text_buffer,
 };
 
 pub(super) fn functions() -> Vec<Function> {
@@ -246,30 +247,23 @@ fn normalize(call: NativeCall<'_>) -> Result<Value, NativeError> {
     Ok(Value::text(output))
 }
 
-/// Negative positions count from the end; slice positions are clamped.
-pub(super) fn position(index: &BigInt, len: usize) -> usize {
-    let index = if index < &BigInt::from(0) {
-        index + BigInt::from(len)
-    } else {
-        index.clone()
-    };
-    if index < BigInt::from(0) {
-        0
-    } else {
-        index.to_usize().unwrap_or(usize::MAX).min(len)
-    }
+/// A distance from the selected end. A magnitude beyond machine size can
+/// only be out of range, or clamp to that end's opposite boundary.
+fn distance(index: &Integer) -> usize {
+    index
+        .to_i128()
+        .and_then(|i| usize::try_from(i.unsigned_abs()).ok())
+        .unwrap_or(usize::MAX)
 }
 
-fn element_position(index: &BigInt, len: usize) -> Result<usize, NativeError> {
-    let index = if index < &BigInt::from(0) {
-        index + BigInt::from(len)
+/// Negative positions count from the end; slice positions are clamped.
+pub(super) fn position(index: &Integer, len: usize) -> usize {
+    let distance = distance(index);
+    if index.is_negative() {
+        len.saturating_sub(distance)
     } else {
-        index.clone()
-    };
-    index
-        .to_usize()
-        .filter(|i| *i < len)
-        .ok_or_else(|| raise("index_out_of_range", "text index is out of range"))
+        distance.min(len)
+    }
 }
 
 fn len(call: NativeCall<'_>) -> Result<Value, NativeError> {
@@ -281,43 +275,80 @@ fn utf16_len(call: NativeCall<'_>) -> Result<Value, NativeError> {
 
 fn get(call: NativeCall<'_>) -> Result<Value, NativeError> {
     let text = text_arg(call.args, 0)?;
-    let index = element_position(&*integer_arg(call.args, 1)?, text.chars().count())?;
-    text.chars()
-        .nth(index)
+    let index = integer_value(call.args, 1)?;
+    let mut chars = text.chars();
+    let found = if index.is_negative() {
+        chars.nth_back(distance(index) - 1)
+    } else {
+        chars.nth(distance(index))
+    };
+    found
         .map(|c| Value::text(c.to_string()))
         .ok_or_else(|| raise("index_out_of_range", "text index is out of range"))
 }
 
 fn utf16_get(call: NativeCall<'_>) -> Result<Value, NativeError> {
     let text = text_arg(call.args, 0)?;
-    let index = element_position(&*integer_arg(call.args, 1)?, text.encode_utf16().count())?;
-    text.encode_utf16()
-        .nth(index)
+    let index = integer_value(call.args, 1)?;
+    let found = if index.is_negative() {
+        let mut remaining = distance(index) - 1;
+        text.chars().rev().find_map(|c| {
+            let width = c.len_utf16();
+            if remaining < width {
+                let mut units = [0; 2];
+                Some(c.encode_utf16(&mut units)[width - remaining - 1])
+            } else {
+                remaining -= width;
+                None
+            }
+        })
+    } else {
+        text.encode_utf16().nth(distance(index))
+    };
+    found
         .map(int)
         .ok_or_else(|| raise("index_out_of_range", "text index is out of range"))
 }
 
-fn byte_at_point(text: &str, position: usize) -> usize {
-    text.char_indices()
-        .nth(position)
-        .map_or(text.len(), |(byte, _)| byte)
+/// Advances monotonically to a boundary from one end, without first counting
+/// the whole text. `walked > target` means the target splits a UTF-16 pair.
+/// Exhaustion clamps to the opposite end. Two bounds from the same end share
+/// this cursor; mixed bounds each traverse only the end they address.
+struct Boundaries<I> {
+    chars: I,
+    walked: usize,
+    byte: usize,
+    units: bool,
+    backwards: bool,
 }
 
-fn byte_at_unit(text: &str, position: usize) -> Result<usize, NativeError> {
-    let mut unit = 0;
-    for (byte, c) in text.char_indices() {
-        if unit == position {
-            return Ok(byte);
+impl<I: Iterator<Item = (usize, char)>> Boundaries<I> {
+    fn at(&mut self, target: usize) -> usize {
+        while self.walked < target {
+            let Some((byte, c)) = self.chars.next() else {
+                break;
+            };
+            self.walked += if self.units { c.len_utf16() } else { 1 };
+            self.byte = if self.backwards {
+                byte
+            } else {
+                byte + c.len_utf8()
+            };
         }
-        unit += c.len_utf16();
-        if unit > position {
-            return Err(raise(
+        self.byte
+    }
+
+    fn slice_at(&mut self, target: usize) -> Result<usize, NativeError> {
+        let byte = self.at(target);
+        if self.walked > target {
+            Err(raise(
                 "text_boundary",
                 "UTF-16 slice splits a surrogate pair",
-            ));
+            ))
+        } else {
+            Ok(byte)
         }
     }
-    Ok(text.len())
 }
 
 fn slice(call: NativeCall<'_>) -> Result<Value, NativeError> {
@@ -329,17 +360,36 @@ fn utf16_slice(call: NativeCall<'_>) -> Result<Value, NativeError> {
 
 fn slice_by(call: NativeCall<'_>, units: bool) -> Result<Value, NativeError> {
     let text = text_arg(call.args, 0)?;
-    let len = if units {
-        text.encode_utf16().count()
-    } else {
-        text.chars().count()
+    let start = integer_value(call.args, 1)?;
+    let end = integer_value(call.args, 2)?;
+    let mut front = Boundaries {
+        chars: text.char_indices(),
+        walked: 0,
+        byte: 0,
+        units,
+        backwards: false,
     };
-    let start = position(&*integer_arg(call.args, 1)?, len);
-    let end = position(&*integer_arg(call.args, 2)?, len);
-    let (start, end) = if units {
-        (byte_at_unit(text, start)?, byte_at_unit(text, end)?)
-    } else {
-        (byte_at_point(text, start), byte_at_point(text, end))
+    let mut back = Boundaries {
+        chars: text.char_indices().rev(),
+        walked: 0,
+        byte: text.len(),
+        units,
+        backwards: true,
+    };
+    let (a, b) = (distance(start), distance(end));
+    let (start, end) = match (start.is_negative(), end.is_negative()) {
+        (false, false) if a <= b => (front.slice_at(a)?, front.slice_at(b)?),
+        (false, false) => {
+            let end = front.slice_at(b)?;
+            (front.slice_at(a)?, end)
+        }
+        (true, true) if a <= b => (back.slice_at(a)?, back.slice_at(b)?),
+        (true, true) => {
+            let end = back.slice_at(b)?;
+            (back.slice_at(a)?, end)
+        }
+        (false, true) => (front.slice_at(a)?, back.slice_at(b)?),
+        (true, false) => (back.slice_at(a)?, front.slice_at(b)?),
     };
     Ok(Value::text(if start > end {
         ""
@@ -349,27 +399,65 @@ fn slice_by(call: NativeCall<'_>, units: bool) -> Result<Value, NativeError> {
 }
 
 fn find(call: NativeCall<'_>) -> Result<Value, NativeError> {
-    let text = text_arg(call.args, 0)?;
-    let needle = text_arg(call.args, 1)?;
-    let start = position(&*integer_arg(call.args, 2)?, text.chars().count());
-    let suffix = &text[byte_at_point(text, start)..];
-    Ok(suffix.find(needle).map_or_else(
-        || int(-1),
-        |byte| int(start + suffix[..byte].chars().count()),
-    ))
+    find_by(call, false)
 }
 
 fn utf16_find(call: NativeCall<'_>) -> Result<Value, NativeError> {
-    let text: Vec<_> = text_arg(call.args, 0)?.encode_utf16().collect();
-    let needle: Vec<_> = text_arg(call.args, 1)?.encode_utf16().collect();
-    let start = position(&*integer_arg(call.args, 2)?, text.len());
+    find_by(call, true)
+}
+
+fn find_by(call: NativeCall<'_>, units: bool) -> Result<Value, NativeError> {
+    let text = text_arg(call.args, 0)?;
+    let needle = text_arg(call.args, 1)?;
+    let start = integer_value(call.args, 2)?;
+    let target = distance(start);
+    let count = |text: &str| {
+        if units {
+            text.encode_utf16().count()
+        } else {
+            text.chars().count()
+        }
+    };
+    let (byte, offset) = if start.is_negative() {
+        let mut back = Boundaries {
+            chars: text.char_indices().rev(),
+            walked: 0,
+            byte: text.len(),
+            units,
+            backwards: true,
+        };
+        let mut byte = back.at(target);
+        let split = back.walked > target;
+        // A valid text needle starts at a scalar boundary. An empty needle
+        // can still be found between the units of a surrogate pair.
+        let offset = count(&text[..byte]) + usize::from(split);
+        if split && !needle.is_empty() {
+            byte += text[byte..].chars().next().map_or(0, char::len_utf8);
+        }
+        (byte, offset + usize::from(split && !needle.is_empty()))
+    } else {
+        let mut front = Boundaries {
+            chars: text.char_indices(),
+            walked: 0,
+            byte: 0,
+            units,
+            backwards: false,
+        };
+        let byte = front.at(target);
+        let offset = if front.walked > target && needle.is_empty() {
+            target
+        } else {
+            front.walked
+        };
+        (byte, offset)
+    };
     if needle.is_empty() {
-        return Ok(int(start));
+        return Ok(int(offset));
     }
-    Ok(text[start..]
-        .windows(needle.len())
-        .position(|window| window == needle)
-        .map_or_else(|| int(-1), |i| int(start + i)))
+    let suffix = &text[byte..];
+    Ok(suffix
+        .find(needle)
+        .map_or_else(|| int(-1), |byte| int(offset + count(&suffix[..byte]))))
 }
 
 fn compare(call: NativeCall<'_>) -> Result<Value, NativeError> {
@@ -441,34 +529,51 @@ fn pieces<'a>(text: &'a str, separator: &'a str) -> impl Iterator<Item = &'a str
 }
 
 fn join(call: NativeCall<'_>) -> Result<Value, NativeError> {
-    let items = sequence(&call, 0)?;
-    let items: Result<Vec<_>, _> = items
-        .iter()
-        .map(|v| match v {
-            Value::Text(s) => Ok(s.as_ref()),
-            _ => Err(raise("type_error", "join requires text members")),
-        })
-        .collect();
-    let items = items?;
+    let Value::List(id) = arg(call.args, 0)? else {
+        return Err(raise("type_error", "expected list"));
+    };
+    let len = call.heap.len(*id);
+    if len != 0 && call.heap.list_get(*id, 0).is_none() {
+        return Err(raise("type_error", "invalid list"));
+    }
+    let mut count = 0usize;
+    let mut bytes = Some(0usize);
+    let mut error = None;
+    call.heap.visit(*id, &mut |element| {
+        let Element::Item(Value::Text(text)) = element else {
+            error = Some(raise("type_error", "join requires text members"));
+            return ControlFlow::Break(());
+        };
+        count += 1;
+        bytes = bytes.and_then(|bytes| bytes.checked_add(text.len()));
+        ControlFlow::Continue(())
+    });
+    if let Some(error) = error {
+        return Err(error);
+    }
+    if count != len {
+        return Err(raise("type_error", "invalid list"));
+    }
     let separator = text_arg(call.args, 1)?;
-    // The separators are a product of two sizes: the member count and the
-    // separator's length.
+    // Validate every member and the separator before checking size or
+    // reserving the output, preserving the call's error order.
     let size = separator
         .len()
-        .checked_mul(items.len().saturating_sub(1))
-        .and_then(|separators| {
-            items
-                .iter()
-                .try_fold(separators, |size, item| size.checked_add(item.len()))
-        })
+        .checked_mul(count.saturating_sub(1))
+        .and_then(|separators| bytes.and_then(|bytes| separators.checked_add(bytes)))
         .ok_or(NativeError::Memory)?;
     let mut out = text_buffer(call.heap, size)?;
-    for (index, item) in items.iter().enumerate() {
-        if index != 0 {
-            out.push_str(separator);
+    let mut first = true;
+    call.heap.visit(*id, &mut |element| {
+        if let Element::Item(Value::Text(text)) = element {
+            if !first {
+                out.push_str(separator);
+            }
+            first = false;
+            out.push_str(text);
         }
-        out.push_str(item);
-    }
+        ControlFlow::Continue(())
+    });
     Ok(Value::text(out))
 }
 

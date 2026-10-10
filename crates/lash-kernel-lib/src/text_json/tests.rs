@@ -166,6 +166,30 @@ fn k_val_007_astral_length_and_index_have_distinct_addressing() {
         error_kind(call(&mut Heap::default(), "text.get", &[text, int(3)])),
         "index_out_of_range"
     );
+    // K-LTXT-001: negative addressing applies to each selected sequence,
+    // and arbitrary-precision indexes never wrap into that sequence.
+    for (name, expected) in [
+        ("text.get", vec![s("a"), s("😀"), s("z")]),
+        (
+            "text.utf16_get",
+            vec![int(97), int(0xd83d), int(0xde00), int(122)],
+        ),
+    ] {
+        for (index, value) in expected.iter().enumerate() {
+            for index in [int(index), int(index as i64 - expected.len() as i64)] {
+                assert_eq!(
+                    call(&mut Heap::default(), name, &[s("a😀z"), index]).unwrap(),
+                    *value
+                );
+            }
+        }
+        for index in [i128::MIN, i128::MAX] {
+            assert_eq!(
+                error_kind(call(&mut Heap::default(), name, &[s("a😀z"), int(index)])),
+                "index_out_of_range"
+            );
+        }
+    }
 }
 
 #[test]
@@ -197,6 +221,57 @@ fn k_val_007_utf16_slice_refuses_split_pair_boundaries() {
         call(&mut heap, "text.slice", &[s("abc"), int(2), int(1)]).unwrap(),
         s("")
     );
+    // K-LTXT-002 validates both normalized boundaries, even when they
+    // address different ends or describe an empty/reversed interval.
+    for text in ["", "abc", "😀a😀", "a😀z"] {
+        let units: Vec<_> = text.encode_utf16().collect();
+        let normalize = |index: i32| {
+            (if index < 0 {
+                index + units.len() as i32
+            } else {
+                index
+            })
+            .clamp(0, units.len() as i32) as usize
+        };
+        for start in -7..=7 {
+            for end in -7..=7 {
+                let (a, b) = (normalize(start), normalize(end));
+                let result = call(
+                    &mut heap,
+                    "text.utf16_slice",
+                    &[s(text), int(start), int(end)],
+                );
+                if String::from_utf16(&units[..a]).is_err()
+                    || String::from_utf16(&units[..b]).is_err()
+                {
+                    assert_eq!(
+                        error_kind(result),
+                        "text_boundary",
+                        "{text:?}[{start}:{end}]"
+                    );
+                } else {
+                    let expected = if a > b {
+                        String::new()
+                    } else {
+                        String::from_utf16(&units[a..b]).unwrap()
+                    };
+                    assert_eq!(result.unwrap(), s(&expected), "{text:?}[{start}:{end}]");
+                }
+            }
+        }
+    }
+    let enormous = num_bigint::BigInt::from(i128::MAX) + 1u8;
+    for name in ["text.slice", "text.utf16_slice"] {
+        assert_eq!(
+            call(
+                &mut heap,
+                name,
+                &[s("a😀z"), int(-&enormous), int(enormous.clone())]
+            )
+            .unwrap(),
+            s("a😀z")
+        );
+    }
 }
 
 #[test]
@@ -222,6 +297,32 @@ fn k_ltxt_003_search_reports_the_selected_address_space() {
         call(&mut heap, "text.utf16_find", &[s("😀z"), s(""), int(99)]).unwrap(),
         int(3)
     );
+    // K-LTXT-003 allows a UTF-16 start inside a pair without manufacturing
+    // surrogate text, in either relative addressing direction.
+    for start in [1, -2] {
+        assert_eq!(
+            call(&mut heap, "text.utf16_find", &[s("😀z"), s(""), int(start)]).unwrap(),
+            int(1)
+        );
+        assert_eq!(
+            call(
+                &mut heap,
+                "text.utf16_find",
+                &[s("😀z"), s("z"), int(start)]
+            )
+            .unwrap(),
+            int(2)
+        );
+        assert_eq!(
+            call(
+                &mut heap,
+                "text.utf16_find",
+                &[s("😀z"), s("😀"), int(start)]
+            )
+            .unwrap(),
+            int(-1)
+        );
+    }
 }
 
 #[test]
@@ -276,6 +377,16 @@ fn k_ltxt_005_literal_split_join_replace_and_concat() {
     assert_eq!(
         call(&mut heap, "text.replace", &[s("😀a"), s(""), s("-")]).unwrap(),
         s("-😀-a-")
+    );
+    let empty = list(&mut heap, vec![]);
+    assert_eq!(
+        call(&mut heap, "text.join", &[empty, s("|")]).unwrap(),
+        s("")
+    );
+    let wrong = list(&mut heap, vec![s("a"), int(1)]);
+    assert_eq!(
+        error_kind(call(&mut heap, "text.join", &[wrong, s("|")])),
+        "type_error"
     );
 }
 

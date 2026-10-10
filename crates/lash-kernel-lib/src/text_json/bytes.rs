@@ -3,7 +3,7 @@ use num_traits::ToPrimitive;
 
 use super::text::position;
 use super::{
-    Function, arg, definition, integer_arg, ordering, raise, sequence, sequence_type, text_arg,
+    Function, arg, definition, integer_value, ordering, raise, sequence, sequence_type, text_arg,
 };
 
 pub(super) fn functions() -> Vec<Function> {
@@ -80,8 +80,8 @@ fn from_octets(call: NativeCall<'_>) -> Result<Value, NativeError> {
 
 fn slice(call: NativeCall<'_>) -> Result<Value, NativeError> {
     let bytes = bytes_arg(call.args, 0)?;
-    let start = position(&*integer_arg(call.args, 1)?, bytes.len());
-    let end = position(&*integer_arg(call.args, 2)?, bytes.len());
+    let start = position(integer_value(call.args, 1)?, bytes.len());
+    let end = position(integer_value(call.args, 2)?, bytes.len());
     Ok(Value::Bytes(Bytes::new(if start > end {
         Vec::new()
     } else {
