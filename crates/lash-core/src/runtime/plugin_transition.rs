@@ -128,12 +128,14 @@ impl crate::runtime::LashRuntime {
     /// A deferred session supplies no driver or renderer until this activation.
     ///
     /// Every run, store-backed or not, records the transition from its
-    /// head's namespaces to the admitted plugin set before any capability is
-    /// built: a namespace the head does not record takes its factory's
-    /// initial values, so readiness sees what the session's first commit
-    /// records (FIG-5324). A build that does not serve the head's recorded
-    /// admission is refused typed when the session materializes (ADR 0132
-    /// §4), and a refusal there keeps its typed plugin cause.
+    /// head's namespaces to the plugin set this build admits before any
+    /// capability is built: a namespace the head does not record takes its
+    /// factory's initial values, so readiness sees what the session's first
+    /// commit records (FIG-5324). A run admits the build that runs it, as a
+    /// process segment does, never the set its head's view recorded: a
+    /// namespace this build does not serve stays byte-for-byte, and a tool
+    /// it owned is lost under the run's tool-source policy (FIG-5897). A
+    /// build refusal keeps its typed plugin cause.
     async fn materialize_run_session(
         &mut self,
         scoped_effect_controller: &crate::ActorContext,
@@ -145,8 +147,12 @@ impl crate::runtime::LashRuntime {
         let plugin_error =
             |error| crate::RuntimeEffectControllerError::from(error).into_runtime_error();
         let plugins = &self.services.plugins;
-        let target = match plugins.plugin_admission() {
-            Some(admission) => admission,
+        let target = match &self.services.store {
+            Some(store) => plugins
+                .host()
+                .admit_plugins(store.store().as_ref())
+                .await
+                .map_err(crate::runtime::runtime_error_from_store_commit)?,
             None => crate::runtime::plugin_transition::native_plugin_admission(plugins.host())
                 .map_err(plugin_error)?,
         };

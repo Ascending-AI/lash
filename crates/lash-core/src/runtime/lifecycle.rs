@@ -246,7 +246,9 @@ impl LashRuntime {
         // An open adopts the plugin view its head records as published, and
         // builds no capabilities (FIG-4857, ADR 0119): its session's next run
         // builds them, under that run's tool-source policy, and meets a build
-        // refusal typed as its cause (FIG-5324).
+        // refusal typed as its cause (FIG-5324). The head's own config stays
+        // the session's: the view holds the config of the run that recorded
+        // it, which a later config transaction supersedes (FIG-5897).
         if let Some(bytes) = state.plugin_admission_snapshot() {
             match services.plugins.adopt_native_view(
                 &bytes,
@@ -259,8 +261,6 @@ impl LashRuntime {
                 Ok(()) | Err(crate::PluginError::Format(_)) => {}
                 Err(error) => return Err(error.into()),
             }
-            state.authority.plugin_config =
-                (*services.plugins.admitted_plugin_config().config).clone();
         }
         let resident_session = ResidentSessionContinuity::fresh();
         let turn_phase_probe = host
