@@ -16,6 +16,9 @@ pub struct Environment<'a> {
     /// The effects the host supplies, with the signature each is performed
     /// under.
     pub effects: &'a BTreeMap<EffectName, Signature>,
+    /// Tool namespace roots from the host's catalog, before dialect name
+    /// rendering. Python's flattened effect names cannot recover these.
+    pub tool_roots: &'a BTreeSet<Name>,
     /// The turn-ending controls each effect declares its result may be
     /// ([`EffectControl`]): the effects named here are control calls. An
     /// effect that declares none is absent. A front end ends `main` right

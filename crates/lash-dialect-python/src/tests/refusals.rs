@@ -161,6 +161,7 @@ fn a_missing_helper_is_named() {
         library: &library,
         effects: &effects,
         controls: &std::collections::BTreeMap::new(),
+        tool_roots: &std::collections::BTreeSet::new(),
         bindings: &bindings,
         functions: &std::collections::BTreeMap::new(),
     };

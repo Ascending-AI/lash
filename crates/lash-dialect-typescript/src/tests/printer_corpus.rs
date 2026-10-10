@@ -71,6 +71,7 @@ fn every_admitted_conformance_document_preserves_observations_when_printed_and_l
                     library: &library,
                     effects,
                     controls: &std::collections::BTreeMap::new(),
+                    tool_roots: &std::collections::BTreeSet::new(),
                     bindings: &bindings,
                     functions: &std::collections::BTreeMap::new(),
                 };

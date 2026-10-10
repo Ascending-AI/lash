@@ -163,16 +163,19 @@ pub(crate) struct Lowerer<'a> {
 }
 
 /// No module or restored session binding may mask the dialect's built-ins,
-/// nor a tool the environment offers (`control_finish`, ...): a binding of
-/// that name would hide the tool from every later cell.
+/// nor a tool name or catalog namespace root (`control_finish`, `control`,
+/// ...). Roots are carried separately because flattened names are ambiguous.
 pub(crate) fn check_binding_names<'a>(
     names: impl IntoIterator<Item = &'a str>,
     effects: &BTreeMap<EffectName, lash_kernel_doc::Signature>,
+    tool_roots: &BTreeSet<Name>,
 ) -> Lowering<()> {
     for name in names {
         let message = if calls::is_builtin(name) || crate::exceptions::is_builtin(name) {
             format!("`{name}` is a built-in; a top-level binding cannot reuse its name")
-        } else if effects.keys().any(|effect| effect.as_str() == name) {
+        } else if tool_roots.contains(&Name::new(name))
+            || effects.keys().any(|effect| effect.as_str() == name)
+        {
             format!(
                 "`{name}` names one of the session's tools; a top-level binding cannot reuse its name"
             )
@@ -227,10 +230,15 @@ pub(crate) fn lower(
     check_binding_names(
         bindings.locals.iter().map(String::as_str),
         environment.effects,
+        environment.tool_roots,
     )?;
     for statement in &module.body {
         if let ast::Stmt::ClassDef(class) = statement {
-            check_binding_names([class.name.id.as_str()], environment.effects)?;
+            check_binding_names(
+                [class.name.id.as_str()],
+                environment.effects,
+                environment.tool_roots,
+            )?;
         }
     }
     let declared: Vec<String> = bindings

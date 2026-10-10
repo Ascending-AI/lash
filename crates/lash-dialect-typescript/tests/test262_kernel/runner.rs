@@ -304,6 +304,7 @@ fn lower(source: &str) -> Result<Lowered, lash_dialect_typescript::Diagnostic> {
     let effects = finish_effect();
     let bindings = BTreeSet::new();
     let environment = Environment {
+        tool_roots: &std::collections::BTreeSet::new(),
         library: library(),
         effects: &effects,
         controls: finish_control(),
@@ -497,6 +498,7 @@ pub(crate) fn printing_relowers(relative: &str) -> bool {
     .map(Name::new)
     .collect();
     let environment = Environment {
+        tool_roots: &std::collections::BTreeSet::new(),
         library: library(),
         effects: &effects,
         controls: finish_control(),

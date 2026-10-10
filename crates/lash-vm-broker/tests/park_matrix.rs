@@ -791,7 +791,7 @@ async fn admissions(
         };
         let call = identities.child_call_id(park, index as u64);
         let draft = host
-            .admit(&request, call, &[])
+            .admit(&request, call, &[], &[])
             .await
             .map_err(|fault| fault.to_string())?
             .map_err(|refusal| refusal.message)?;
@@ -927,6 +927,7 @@ impl KernelEffects for LawHost {
         request: &EffectRequest,
         call: ToolCallId,
         _outstanding: &[lash_kernel_doc::TaskIdentity],
+        _live: &[lash_kernel_doc::TaskIdentity],
     ) -> Result<Result<MemberDraft, ErrorDatum>, ParentFault> {
         let now = self
             .store

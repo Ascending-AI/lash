@@ -85,6 +85,7 @@ fn lower_with(
     crate::lower(
         source,
         &Environment {
+            tool_roots: &std::collections::BTreeSet::new(),
             library: library(),
             effects,
             controls: controls(),

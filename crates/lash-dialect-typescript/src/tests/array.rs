@@ -63,6 +63,7 @@ fn run(source: &str) -> End {
 fn drive(source: &str, expected: &[Vec<Datum>]) -> End {
     let kernel = kernel();
     let environment = Environment {
+        tool_roots: &std::collections::BTreeSet::new(),
         library: &kernel.library,
         effects: &super::machine::effects(),
         controls: super::controls(),

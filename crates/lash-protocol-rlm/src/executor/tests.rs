@@ -31,6 +31,82 @@ fn typescript_services(resolver: Option<crate::SharedDeferredToolResolver>) -> s
     )
 }
 
+/// A deterministic race: fast waits until slow is live, and slow settles
+/// only when the cell explicitly releases it.
+#[derive(Default)]
+struct ControlRaceTools {
+    entered: tokio::sync::Notify,
+    release: tokio::sync::Notify,
+}
+
+#[async_trait::async_trait]
+impl lash_core::ToolProvider for ControlRaceTools {
+    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+        ["slow", "fast", "release"]
+            .map(|name| definition(name, name, "tools", name).manifest())
+            .into()
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+        ["slow", "fast", "release"]
+            .contains(&name)
+            .then(|| Arc::new(definition(name, name, "tools", name).contract()))
+    }
+
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        match call.name() {
+            "slow" => {
+                self.entered.notify_one();
+                self.release.notified().await;
+            }
+            "fast" => self.entered.notified().await,
+            "release" => self.release.notify_one(),
+            name => panic!("unexpected race tool {name}"),
+        }
+        lash_core::ToolOutcome::ok(serde_json::json!(call.name())).into()
+    }
+}
+
+/// FIG-5803 / DESIGN v3 §3: a passed race loser still running blocks a
+/// control, with its typed cause; observing its settlement admits a control.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_live_race_loser_blocks_control_until_it_settles() {
+    let host = open_host().await;
+    let mut state = typescript_state();
+    let response = run_cell(
+        &mut state,
+        cell_context(
+            &host,
+            SESSION,
+            TURN,
+            "exec-code:0",
+            Arc::new(ControlRaceTools::default()),
+        ),
+        &typescript_services(None),
+        r#"let refusal = null;
+const slow = tools.slow({});
+const winner = await Promise.race([slow, tools.fast({})]);
+try { await control.finish(winner); }
+catch (error) { refusal = error; }
+await tools.release({});
+await slow;
+await control.finish(winner);"#,
+    )
+    .await;
+    assert!(response.error().is_none(), "{:?}", response.error());
+    let bindings: std::collections::BTreeMap<_, _> = state
+        .bound_variable_values(&std::collections::BTreeSet::new())
+        .into_iter()
+        .collect();
+    let refusal = &bindings["refusal"];
+    assert_eq!(refusal["kind"], "control_refused", "{refusal}");
+    assert_eq!(
+        refusal["data"]["kind"], "control_with_outstanding_tasks",
+        "{refusal}"
+    );
+    assert_eq!(finish_of(&response), serde_json::json!("fast"));
+}
+
 /// FIG-5764: a corrupt fragment refuses the whole restore, and the host's
 /// error retains the typed hash mismatch and the binding it names.
 #[tokio::test]

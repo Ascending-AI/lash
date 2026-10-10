@@ -238,6 +238,7 @@ fn promise_instanceof_preserves_its_operand_through_printing() {
         library: super::library(),
         effects: &std::collections::BTreeMap::new(),
         controls: &std::collections::BTreeMap::new(),
+        tool_roots: &std::collections::BTreeSet::new(),
         bindings: &std::collections::BTreeSet::new(),
         functions: &std::collections::BTreeMap::new(),
     };

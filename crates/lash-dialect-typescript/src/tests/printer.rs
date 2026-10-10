@@ -112,6 +112,7 @@ fn roundtrip(document: &k::Document, registry: &Arc<k::FunctionRegistry>, librar
         library,
         effects: &document.manifest.effects,
         controls: &BTreeMap::new(),
+        tool_roots: &std::collections::BTreeSet::new(),
         bindings: &bindings,
         functions: &std::collections::BTreeMap::new(),
     };
@@ -354,6 +355,7 @@ fn reserved_operations_obey_the_kernel_statement_rule() {
         library,
         effects: &effects,
         controls: &BTreeMap::new(),
+        tool_roots: &std::collections::BTreeSet::new(),
         bindings: &bindings,
         functions: &std::collections::BTreeMap::new(),
     };

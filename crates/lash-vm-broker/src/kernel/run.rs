@@ -48,12 +48,15 @@ pub trait KernelEffects: Send + Sync {
     /// error, which the guest may catch, and nothing is dispatched.
     /// `outstanding` names the tasks that would make the run's end an
     /// error at this park ([`Park::outstanding`](lash_kernel_vm::Park)):
-    /// what a parent reads to refuse an effect that ends the run.
+    /// `live` also names passed list-join members that have not ended
+    /// ([`Park::live`](lash_kernel_vm::Park)). A turn-ending effect must
+    /// have neither outstanding nor live sibling tasks.
     async fn admit(
         &self,
         request: &EffectRequest,
         call: lash_sansio::ToolCallId,
         outstanding: &[lash_kernel_doc::TaskIdentity],
+        live: &[lash_kernel_doc::TaskIdentity],
     ) -> Result<Result<MemberDraft, ErrorDatum>, ParentFault>;
 
     /// The outcome the `perform` admitted as `effect` is answered with for
@@ -433,6 +436,7 @@ impl KernelBroker<'_> {
                 .filter(|request| !park.withdrawn.contains(&wait_of(request)))
                 .collect();
             let outstanding = park.outstanding;
+            let live = park.live;
             for wait in park.withdrawn {
                 ledger.withdraw(wait);
             }
@@ -444,7 +448,9 @@ impl KernelBroker<'_> {
                 return self.ended(&document, ledger, end, saved).await;
             }
             if !requests.is_empty() {
-                let admit = self.admissions(&ledger, requests, &outstanding).await?;
+                let admit = self
+                    .admissions(&ledger, requests, &outstanding, &live)
+                    .await?;
                 let committed = self
                     .store
                     .commit_park(ParkSave {
@@ -522,6 +528,7 @@ impl KernelBroker<'_> {
         ledger: &EffectLedger,
         requests: Vec<Request>,
         outstanding: &[lash_kernel_doc::TaskIdentity],
+        live: &[lash_kernel_doc::TaskIdentity],
     ) -> Result<Vec<EffectAdmission>, KernelFailure> {
         let park = ledger.next_park();
         let mut now = None::<DurableInstant>;
@@ -531,7 +538,11 @@ impl KernelBroker<'_> {
             admit.push(match request {
                 Request::Effect(request) => {
                     let call = self.identities.child_call_id(park, executions);
-                    let how = match self.effects.admit(&request, call, outstanding).await? {
+                    let how = match self
+                        .effects
+                        .admit(&request, call, outstanding, live)
+                        .await?
+                    {
                         Ok(draft) => {
                             executions += 1;
                             AdmitAs::Execution(Box::new(draft))

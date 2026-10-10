@@ -36,6 +36,7 @@ fn lower_against_control(source: &str) -> Result<Lowered, Diagnostic> {
             library: super::library(),
             effects: &effects,
             controls: &controls,
+            tool_roots: &std::collections::BTreeSet::new(),
             bindings: &BTreeSet::new(),
             functions: &BTreeMap::new(),
         },
@@ -127,6 +128,7 @@ fn model_cells_cannot_reach_the_kernel_finish() {
         library: super::library(),
         effects: &BTreeMap::new(),
         controls: &BTreeMap::new(),
+        tool_roots: &std::collections::BTreeSet::new(),
         bindings: &BTreeSet::new(),
         functions: &BTreeMap::new(),
     };

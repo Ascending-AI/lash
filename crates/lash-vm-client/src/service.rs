@@ -19,6 +19,8 @@ pub enum Request {
         dialect: String,
         source: String,
         effects: BTreeMap<EffectName, Signature>,
+        /// Namespace roots from the catalog, before flattening tool names.
+        tool_roots: BTreeSet<Name>,
         /// The turn controls each control-declaring effect declares.
         controls: BTreeMap<EffectName, BTreeSet<lash_kernel_dialect::EffectControl>>,
         bindings: BTreeSet<Name>,

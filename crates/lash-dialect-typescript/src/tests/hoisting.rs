@@ -135,6 +135,7 @@ fn restored_session_bindings_cannot_mask_builtins() {
             bindings: &bindings,
             effects: &effects,
             controls: &BTreeMap::new(),
+            tool_roots: &std::collections::BTreeSet::new(),
             functions: &BTreeMap::new(),
         };
         let error = crate::Parser::default()

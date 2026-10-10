@@ -20,11 +20,21 @@ pub(crate) fn perform(
             dialect,
             source,
             effects,
+            tool_roots,
             controls,
             bindings,
             functions,
         } => match embedding.lower(
-            &dialect, &source, &effects, &controls, &bindings, &functions,
+            &dialect,
+            &source,
+            &lash_kernel_dialect::Environment {
+                library: embedding.library(),
+                effects: &effects,
+                tool_roots: &tool_roots,
+                controls: &controls,
+                bindings: &bindings,
+                functions: &functions,
+            },
         ) {
             None => Response::UnknownDialect { dialect },
             Some(Ok(lowered)) => Response::Lowered {

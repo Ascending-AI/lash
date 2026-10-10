@@ -80,7 +80,7 @@ fn race_core(
     .with_worker_service(untimed_fixture_workers());
     explicit_ephemeral_facets(LashCore::rlm_builder(backend, factory))
         .serve_test_llm_profile(
-            queued_text_provider(vec![typescript_block(source)]),
+            queued_text_provider(vec![typescript_block(source), "The race settled.".into()]),
             mock_llm_profile_spec(),
         )
         .tools(tools)
@@ -202,9 +202,8 @@ impl ToolProvider for ClosingTools {
     }
 }
 
-/// A turn whose cell races `slow` against `fast` and finishes with the
-/// winner: whether the loser's body settled, and the loser's recorded
-/// completion.
+/// A turn whose cell races `slow` against `fast` and naturally ends its
+/// cell: whether the loser's body settled, and its recorded completion.
 async fn closing_race(loser: Loser) -> Result<(bool, lash_core::ToolCallOutput)> {
     let tools = ClosingTools {
         loser,
@@ -215,7 +214,7 @@ async fn closing_race(loser: Loser) -> Result<(bool, lash_core::ToolCallOutput)>
         sqlite_memory_store_backend().await,
         &format!(
             "const winner = await Promise.race([tools.{SLOW}({{}}), tools.{FAST}({{}})]);\n\
-             await control.finish(winner);"
+             console.log(winner);"
         ),
         Arc::new(tools.clone()),
     )?;
@@ -375,7 +374,7 @@ impl ToolProvider for BackoffTools {
 }
 
 /// A turn whose cell races a `slow` loser in its retry backoff against
-/// `fast` and finishes with the winner: how long it took to answer, the
+/// `fast` and naturally ends its cell: how long it took to answer, the
 /// loser's attempts, and its recorded completion, if any.
 async fn closing_in_backoff() -> Result<(Duration, usize, Option<lash_core::ToolCallOutput>)> {
     let tools = BackoffTools::default();
@@ -383,7 +382,7 @@ async fn closing_in_backoff() -> Result<(Duration, usize, Option<lash_core::Tool
         sqlite_memory_store_backend().await,
         &format!(
             "const winner = await Promise.race([tools.{SLOW}({{}}), tools.{FAST}({{}})]);\n\
-             await control.finish(winner);"
+             console.log(winner);"
         ),
         Arc::new(tools.clone()),
     )?;

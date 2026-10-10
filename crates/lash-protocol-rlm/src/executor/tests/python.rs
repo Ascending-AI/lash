@@ -11,6 +11,53 @@ fn python_services() -> super::super::CellServices {
     cell_services(&CellDialect::python(), python_workers(), None)
 }
 
+/// FIG-5803 / FIG-5779: Python reserves catalog namespace roots as well
+/// as the complete callable names, before source or restored state can bind them.
+#[tokio::test(flavor = "multi_thread")]
+async fn catalog_namespace_roots_cannot_be_shadowed() {
+    let host = open_host().await;
+    let tools = Arc::new(CellTools::default());
+    let services = python_services();
+    for (key, name) in [
+        ("exec-code:0", "control"),
+        ("exec-code:1", "echo"),
+        ("exec-code:2", "echo_say"),
+    ] {
+        let response = run_cell(
+            &mut state(),
+            cell_context(&host, SESSION, TURN, key, tools.clone()),
+            &services,
+            &format!("{name} = 1"),
+        )
+        .await;
+        let error = response.error().expect("a tool name cannot be bound");
+        assert!(error.message.contains("PY_SHADOWS_BUILTIN"), "{error:?}");
+        assert!(error.message.contains(name), "{error:?}");
+        assert!(error.message.contains(&format!("{name}_")), "{error:?}");
+    }
+    let mut restored = state();
+    restored
+        .patch_globals(
+            &lash_rlm_types::RlmGlobalsPatchPluginBody {
+                set_default: serde_json::Map::from_iter([("control".into(), serde_json::json!(1))]),
+            },
+            &std::collections::BTreeSet::new(),
+        )
+        .await
+        .expect("restore a binding from before the namespace was offered");
+    let response = run_cell(
+        &mut restored,
+        cell_context(&host, SESSION, TURN, "exec-code:3", tools),
+        &services,
+        "print(1)",
+    )
+    .await;
+    let error = response
+        .error()
+        .expect("a restored root cannot mask the catalog");
+    assert!(error.message.contains("PY_SHADOWS_BUILTIN"), "{error:?}");
+}
+
 /// FIG-5763 / K-SES-003 / ADR 0132 NR-2: failures preserve their typed
 /// causes, bounds name library definitions, and interrupted Once calls
 /// name admitted work and warn about its outside effects, also in Python.

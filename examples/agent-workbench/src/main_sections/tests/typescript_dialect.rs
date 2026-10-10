@@ -155,10 +155,14 @@ fn the_workbench_typescript_tutorials_lower() {
             .lower(
                 "typescript",
                 program,
-                &effects,
-                &controls,
-                &Default::default(),
-                &Default::default(),
+                &lash::dialect::Environment {
+                    library: embedding.library(),
+                    effects: &effects,
+                    tool_roots: &Default::default(),
+                    controls: &controls,
+                    bindings: &Default::default(),
+                    functions: &Default::default(),
+                },
             )
             .expect("the TypeScript dialect is installed")
     };

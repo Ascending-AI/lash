@@ -8,15 +8,13 @@
 //! embedding's TypeScript helpers are defined once, when the crate is built
 //! (`build.rs`); a worker registers them as built (FIG-5796).
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use lash_kernel_dialect::{
     Diagnostic, Environment, FrontEnd, Library, Lowered, NamedLibrary, Package, Printer,
 };
-use lash_kernel_doc::{
-    Document, EffectName, FunctionDefinition, FunctionRegistry, Name, Signature, ValidatedFunctions,
-};
+use lash_kernel_doc::{Document, FunctionDefinition, FunctionRegistry, ValidatedFunctions};
 use lash_vm_client::WorkerTuning;
 
 /// Why a worker could not assemble what it runs. The worker refuses to
@@ -96,8 +94,8 @@ impl Embedding {
     }
 
     /// Lowers `source` as the installed dialect `dialect` does for a cell:
-    /// against this embedding's library, the effects a host offers, the
-    /// session bindings in scope and the functions the session holds.
+    /// against `environment`'s library, offered effects and namespace roots,
+    /// session bindings and saved functions.
     /// `None` when no such dialect is installed.
     ///
     /// A host calls it to learn whether text it shows or stores lowers,
@@ -106,22 +104,10 @@ impl Embedding {
         &self,
         dialect: &str,
         source: &str,
-        effects: &BTreeMap<EffectName, Signature>,
-        controls: &BTreeMap<EffectName, BTreeSet<lash_kernel_dialect::EffectControl>>,
-        bindings: &BTreeSet<Name>,
-        functions: &BTreeMap<Name, lash_kernel_dialect::SavedFunction>,
+        environment: &Environment<'_>,
     ) -> Option<Result<Lowered, Diagnostic>> {
         let package = self.dialects.get(dialect)?;
-        Some(package.front_end.lower(
-            source,
-            &Environment {
-                library: &self.library,
-                effects,
-                controls,
-                bindings,
-                functions,
-            },
-        ))
+        Some(package.front_end.lower(source, environment))
     }
 }
 

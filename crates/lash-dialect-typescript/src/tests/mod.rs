@@ -88,6 +88,7 @@ fn lower_against(
 ) -> Result<Lowered, Diagnostic> {
     let bindings: BTreeSet<_> = bindings.iter().map(|name| (*name).into()).collect();
     let environment = Environment {
+        tool_roots: &std::collections::BTreeSet::new(),
         library: library(),
         effects,
         controls: controls(),

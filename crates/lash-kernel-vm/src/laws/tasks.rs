@@ -577,7 +577,20 @@ main {{
   return other
 }}"#
     ));
-    let end = embedder.run_to_end(&["b", "a"]);
+    embedder.run();
+    embedder.deliver("b");
+    let Step::Parked(park) = embedder.run() else {
+        panic!("the race loser still waits on its effect");
+    };
+    assert!(
+        park.outstanding.is_empty(),
+        "K-TASK-018 exempts passed members"
+    );
+    assert_eq!(
+        park.live,
+        [spawned(TaskIdentity::Main, main_site([0, 0]), 0)]
+    );
+    let end = embedder.run_to_end(&["a"]);
     assert_eq!(result(end), text("a"));
     assert!(embedder.withdrawn.is_empty());
     assert_eq!(

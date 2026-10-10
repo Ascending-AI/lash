@@ -43,6 +43,7 @@ pub fn lower(source: &str, environment: &Environment<'_>) -> Result<Lowered, Dia
             .iter()
             .map(lash_kernel_doc::Name::as_str),
         environment.effects,
+        environment.tool_roots,
     )?;
     if source.len() > MAX_SOURCE_BYTES {
         return Err(diagnostics::unplaced(

@@ -285,6 +285,7 @@ fn start_with_bindings(source: &str, values: Bindings) -> (KernelMachine, String
     let effects = effects();
     let bindings = values.variables.keys().cloned().collect::<BTreeSet<_>>();
     let environment = Environment {
+        tool_roots: &std::collections::BTreeSet::new(),
         library,
         effects: &effects,
         controls: super::controls(),

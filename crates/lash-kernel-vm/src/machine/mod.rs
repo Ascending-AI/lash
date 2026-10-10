@@ -670,10 +670,18 @@ impl KernelMachine {
             })
             .map(|task| task.identity.clone())
             .collect();
+        let live = self
+            .tasks
+            .iter()
+            .skip(1)
+            .filter(|task| !matches!(task.state, TaskState::Ended(_)))
+            .map(|task| task.identity.clone())
+            .collect();
         Step::Parked(Park {
             requests,
             withdrawn: std::mem::take(&mut self.withdrawn),
             outstanding,
+            live,
         })
     }
 

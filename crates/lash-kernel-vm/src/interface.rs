@@ -241,8 +241,12 @@ pub struct Park {
     /// `TasksOutstanding` error if it ended now (`K-TASK-018`): one that has
     /// not ended and was never a member of a list `join` that returned or
     /// raised, and one that ended in an error nothing observed. An embedder
-    /// reads it to refuse an effect that would end the run.
+    /// can inspect the kernel's end condition independently of live tasks.
     pub outstanding: Vec<TaskIdentity>,
+    /// Every task other than `main` that has not ended, including passed
+    /// list-join members (`K-TASK-018` exempts those from `outstanding`).
+    /// A turn control must wait for these tasks to settle too.
+    pub live: Vec<TaskIdentity>,
 }
 
 /// How a run ended.

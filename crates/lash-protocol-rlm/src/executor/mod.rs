@@ -296,10 +296,14 @@ async fn link_cell(
     // Each catalog tool is an effect, under the name a cell of this
     // dialect calls it by.
     let mut boundary = HostBoundary::new();
+    let mut tool_roots = BTreeSet::new();
     for tool in &ctx.tool_catalog().tools {
         let surface = |error: String| host_failure(format!("invalid host tool surface: {error}"));
         let binding = lash_vm_runtime::required_tool_executable(&tool.manifest)
             .map_err(|error| surface(error.to_string()))?;
+        if let Some(root) = binding.module_path.first() {
+            tool_roots.insert(Name::new(root));
+        }
         let path = services
             .prompts
             .tool_call_path(&binding)
@@ -353,6 +357,7 @@ async fn link_cell(
             dialect: state.dialect().to_owned(),
             source: code.to_owned(),
             effects: boundary.signatures(),
+            tool_roots,
             controls: boundary.controls(),
             bindings: names,
             functions: session.functions(),
