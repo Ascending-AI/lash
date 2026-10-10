@@ -1,10 +1,4 @@
 # actionlint configuration, shared by the pre-commit hook and CI's Lint job
 # (https://github.com/rhysd/actionlint/blob/main/docs/config.md).
 
-paths:
-  .github/workflows/ci.yml:
-    ignore:
-      # `services.<id>.command` is outside the documented workflow schema, but
-      # GitHub accepts the file (this exact job runs green on main), so it is
-      # not the file-rejection class this gate exists to catch.
-      - 'unexpected key "command" for "services" section'
+paths: {}
