@@ -311,7 +311,7 @@ pub struct KernelMachine {
     session: BTreeMap<Name, Value>,
     session_cell: bool,
     /// What the statement being run holds outside any variable.
-    pins: Vec<Value>,
+    pins: Pins,
     fresh: Vec<ObjectId>,
     charging: bool,
     charged: u64,
@@ -332,6 +332,43 @@ impl std::fmt::Debug for KernelMachine {
             .field("charged", &self.charged)
             .field("ended", &self.ended)
             .finish_non_exhaustive()
+    }
+}
+
+/// What the statement being run holds outside any variable: each value
+/// that names an object or a task, which a collection keeps, and the bytes
+/// of the values that name nothing, which it only counts.
+#[derive(Default)]
+struct Pins {
+    values: Vec<Value>,
+    bytes: u64,
+}
+
+impl Pins {
+    /// Holds `value`, of `bytes` bytes.
+    fn hold(&mut self, value: &Value, bytes: u64) {
+        if matches!(
+            value,
+            Value::Null
+                | Value::Absent
+                | Value::Bool(_)
+                | Value::Int(_)
+                | Value::Float(_)
+                | Value::Text(_)
+                | Value::Bytes(_)
+                | Value::Timestamp(_)
+                | Value::Function(_)
+                | Value::Handle(_)
+        ) {
+            self.bytes = self.bytes.saturating_add(bytes);
+        } else {
+            self.values.push(value.clone());
+        }
+    }
+
+    fn clear(&mut self) {
+        self.values.clear();
+        self.bytes = 0;
     }
 }
 
@@ -438,8 +475,9 @@ impl KernelMachine {
 
     /// Keeps a value the statement made live until the statement ends.
     fn pin(&mut self, value: &Value) -> Result<(), Halt> {
-        self.pins.push(value.clone());
-        self.reserve(value_bytes(value))
+        let bytes = value_bytes(value);
+        self.pins.hold(value, bytes);
+        self.reserve(bytes)
     }
 
     /// Frees every object the run cannot reach, and the result of every
@@ -491,7 +529,8 @@ impl KernelMachine {
             join.members.iter().for_each(|member| roots.task(*member));
         }
         self.session.values().for_each(|value| roots.value(value));
-        self.pins.iter().for_each(|value| roots.value(value));
+        self.pins.values.iter().for_each(|value| roots.value(value));
+        roots.bytes = roots.bytes.saturating_add(self.pins.bytes);
         if let Some(Ok(value) | Err(value)) = &self.inline_result {
             roots.value(value);
         }

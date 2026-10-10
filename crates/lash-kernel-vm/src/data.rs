@@ -58,11 +58,10 @@ pub(crate) fn size(heap: &Heap, value: &Value) -> u64 {
     extent.saturating_add(1)
 }
 
-/// A value's size with everything it holds, a heap object counted the
-/// first time it is reached (`K-CHG-005`).
-pub(crate) fn deep_size(heap: &Heap, value: &Value) -> u64 {
-    // A value that holds nothing is its own size: most measured values are.
-    if !matches!(
+/// Whether a value holds no other value, so that its deep size is its
+/// size (`K-CHG-005`).
+pub(crate) fn holds_nothing(value: &Value) -> bool {
+    !matches!(
         value,
         Value::List(_)
             | Value::Map(_)
@@ -70,7 +69,32 @@ pub(crate) fn deep_size(heap: &Heap, value: &Value) -> u64 {
             | Value::Record(_)
             | Value::Tuple(_)
             | Value::Error(_)
-    ) {
+    )
+}
+
+/// Whether a value's size is 1 whatever it holds: it has no extent
+/// (`K-CHG-004`).
+pub(crate) fn size_one(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::Null
+            | Value::Absent
+            | Value::Bool(_)
+            | Value::Float(_)
+            | Value::Timestamp(_)
+            | Value::Closure(_)
+            | Value::Task(_)
+            | Value::Function(_)
+            | Value::Handle(_)
+            | Value::Ref(_)
+    )
+}
+
+/// A value's size with everything it holds, a heap object counted the
+/// first time it is reached (`K-CHG-005`).
+pub(crate) fn deep_size(heap: &Heap, value: &Value) -> u64 {
+    // A value that holds nothing is its own size: most measured values are.
+    if holds_nothing(value) {
         return size(heap, value);
     }
     let mut total = 0u64;
@@ -156,9 +180,13 @@ fn measure(
 /// The sizes of the immutable values nested in a value, down to the heap
 /// objects it holds, each of which counts 1 (`K-CHG-005`).
 pub(crate) fn nested_size(heap: &Heap, value: &Value) -> u64 {
+    // The value in hand is not pushed, nor is a member that holds no
+    // immutable value, so measuring a flat tuple, or a value that is
+    // neither a tuple nor an error, allocates nothing.
     let mut total = 0u64;
-    let mut pending = vec![value];
-    while let Some(value) = pending.pop() {
+    let mut next = Some(value);
+    let mut pending = Vec::new();
+    while let Some(value) = next.take().or_else(|| pending.pop()) {
         let held = match value {
             Value::Tuple(members) => &members[..],
             Value::Error(error) => std::slice::from_ref(&error.data),
@@ -167,10 +195,17 @@ pub(crate) fn nested_size(heap: &Heap, value: &Value) -> u64 {
         for member in held {
             let size = match member {
                 Value::List(_) | Value::Map(_) | Value::Set(_) | Value::Record(_) => 1,
+                Value::Tuple(_) | Value::Error(_) => {
+                    if next.is_none() {
+                        next = Some(member);
+                    } else {
+                        pending.push(member);
+                    }
+                    size(heap, member)
+                }
                 _ => size(heap, member),
             };
             total = total.saturating_add(size);
-            pending.push(member);
         }
     }
     total

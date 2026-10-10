@@ -15,9 +15,10 @@
 //! the one every document that lists it runs, and the one a parked run
 //! that pins it resumes in.
 //!
-//! A [`Layout`] permutes the tables and the frame slots. No value, effect
-//! identity or charge may depend on it; the laws compile one document under
-//! several layouts and compare the runs.
+//! A [`Layout`] permutes the tables and the frame slots, and chooses
+//! whether a native implementation's fast path answers the calls it can. No
+//! value, effect identity or charge may depend on it; the laws compile one
+//! document under several layouts and compare the runs.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -33,12 +34,13 @@ use crate::functions::{MachineFunction, machine_function};
 
 mod formula;
 
-pub(crate) use formula::{Plan, Source};
+pub(crate) use formula::{Charge, Fast, Plan, Source};
 
 /// How the executable is laid out. Layout `0` is the natural order; any
 /// other value permutes the code, block, statement and library tables and
-/// each frame's slots. It exists for tests: every layout runs a document
-/// the same way.
+/// each frame's slots, and an odd one also calls every native
+/// implementation through its general call, never its fast path. It exists
+/// for tests: every layout runs a document the same way.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Layout(pub u64);
 
@@ -144,8 +146,9 @@ impl PreparedLibrary {
     /// Compiles every library body in `registry` laid out as `layout`
     /// says. Every body gets a code, even one whose calls a native
     /// implementation runs: a parked run inside such a body resumes there
-    /// (`K-MACH-008`).
-    pub(crate) fn with_layout(registry: Arc<FunctionRegistry>, layout: Layout) -> Self {
+    /// (`K-MACH-008`). A test prepares its other layout once, and starts
+    /// each run in it with [`crate::KernelMachine::start_with_layout`].
+    pub fn with_layout(registry: Arc<FunctionRegistry>, layout: Layout) -> Self {
         let mut shuffler = Shuffler(layout.0);
         let mut library: Vec<(FunctionId, &doc::RegisteredFunction)> = registry
             .iter()
@@ -213,12 +216,19 @@ impl PreparedLibrary {
                     .guard
                     .as_ref()
                     .map(|guard| Plan::new(&guard.limit, params));
+                // A guarded call counts its work, which only the general
+                // call does; an odd layout takes the general call always.
+                let fast = (matches!(run, LibRun::Native(_))
+                    && limit.is_none()
+                    && layout.0.is_multiple_of(2))
+                .then(|| Fast::new(&definition.charge, params, &charge));
                 Lib {
                     id: *function,
                     arity: params.len(),
                     native: definition.has_native(),
                     charge,
                     limit,
+                    fast,
                     definition,
                     run,
                 }
@@ -417,6 +427,10 @@ pub(crate) struct Lib {
     /// The definition's charge formula, and its guard's limit.
     pub(crate) charge: Plan,
     pub(crate) limit: Option<Plan>,
+    /// For a native implementation with no guard, the charge of the calls
+    /// its fast path answers ([`NativeFunction::fast`]); nothing when every
+    /// call goes through the implementation's general call.
+    pub(crate) fast: Option<Fast>,
 }
 
 pub(crate) enum LibRun {

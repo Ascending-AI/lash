@@ -2,8 +2,8 @@ use std::ops::ControlFlow;
 use std::sync::Arc;
 
 use lash_kernel_doc::{
-    Element, FunctionDefinition, Integer, NativeCall, NativeError, NativeFunction, Object,
-    ObjectId, Value, parse_definition,
+    Element, FunctionDefinition, Integer, NativeCall, NativeError, NativeFunction, NativeHeap,
+    Object, ObjectId, Value, parse_definition,
 };
 use num_bigint::BigInt;
 use num_traits::{FromPrimitive, ToPrimitive};
@@ -272,7 +272,7 @@ pub(super) fn functions() -> Result<Vec<NativeDefinition>, CollectionError> {
     for (name, function, result, error) in [
         (
             "collection.unordered",
-            unordered as fn(NativeCall<'_>) -> Result<Value, NativeError>,
+            unordered as fn(&[Value]) -> Result<Value, NativeError>,
             "Number",
             "unordered",
         ),
@@ -287,7 +287,7 @@ pub(super) fn functions() -> Result<Vec<NativeDefinition>, CollectionError> {
     for (signature, function, charge) in [
         (
             "bool.not(x: Bool) -> Bool",
-            bool_not as fn(NativeCall<'_>) -> Result<Value, NativeError>,
+            bool_not as fn(&[Value]) -> Result<Value, NativeError>,
             "1",
         ),
         (
@@ -309,29 +309,34 @@ pub(super) fn functions() -> Result<Vec<NativeDefinition>, CollectionError> {
     }
     Ok(functions)
 }
-struct Aux(fn(NativeCall<'_>) -> Result<Value, NativeError>);
+/// A function of its arguments alone.
+struct Aux(fn(&[Value]) -> Result<Value, NativeError>);
 impl NativeFunction for Aux {
     fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
-        (self.0)(call)
+        (self.0)(call.args)
+    }
+
+    fn fast(&self, args: &[Value], _heap: &dyn NativeHeap) -> Option<Value> {
+        (self.0)(args).ok()
     }
 }
-fn bool_not(call: NativeCall<'_>) -> Result<Value, NativeError> {
-    match arg(&call, 0)? {
+fn bool_not(args: &[Value]) -> Result<Value, NativeError> {
+    match nth(args, 0)? {
         Value::Bool(flag) => Ok(Value::Bool(!flag)),
         _ => Err(raise("type_error", "bool.not requires a bool")),
     }
 }
-fn error_new(call: NativeCall<'_>) -> Result<Value, NativeError> {
-    let kind = field(arg(&call, 0)?)?.to_owned();
-    let message = field(arg(&call, 1)?)?.to_owned();
+fn error_new(args: &[Value]) -> Result<Value, NativeError> {
+    let kind = field(nth(args, 0)?)?.to_owned();
+    let message = field(nth(args, 1)?)?.to_owned();
     Ok(Value::Error(Arc::new(lash_kernel_doc::ErrorValue {
         kind,
         message,
-        data: call.args.get(2).cloned().unwrap_or(Value::Absent),
+        data: args.get(2).cloned().unwrap_or(Value::Absent),
     })))
 }
-fn function_check(call: NativeCall<'_>) -> Result<Value, NativeError> {
-    match arg(&call, 0)? {
+fn function_check(args: &[Value]) -> Result<Value, NativeError> {
+    match nth(args, 0)? {
         value @ (Value::Closure(_) | Value::Function(_)) => Ok(value.clone()),
         _ => Err(raise(
             "type_error",
@@ -340,14 +345,14 @@ fn function_check(call: NativeCall<'_>) -> Result<Value, NativeError> {
     }
 }
 
-fn unordered(_: NativeCall<'_>) -> Result<Value, NativeError> {
+fn unordered(_: &[Value]) -> Result<Value, NativeError> {
     Err(raise("unordered", "a sort comparator returned NaN"))
 }
-fn zero_step(_: NativeCall<'_>) -> Result<Value, NativeError> {
+fn zero_step(_: &[Value]) -> Result<Value, NativeError> {
     Err(raise("zero_step", "a range step must be nonzero"))
 }
-fn int_check(call: NativeCall<'_>) -> Result<Value, NativeError> {
-    match arg(&call, 0)? {
+fn int_check(args: &[Value]) -> Result<Value, NativeError> {
+    match nth(args, 0)? {
         Value::Int(n) => Ok(Value::Int(n.clone())),
         _ => Err(raise("type_error", "range arguments must be integers")),
     }
@@ -364,8 +369,10 @@ fn object(kind: Kind, value: &Value) -> Result<Option<ObjectId>, NativeError> {
     }
 }
 fn arg<'a>(call: &NativeCall<'a>, index: usize) -> Result<&'a Value, NativeError> {
-    call.args
-        .get(index)
+    nth(call.args, index)
+}
+fn nth(args: &[Value], index: usize) -> Result<&Value, NativeError> {
+    args.get(index)
         .ok_or_else(|| raise("arity", "missing collection argument"))
 }
 fn integer(value: &Value) -> Result<Integer, NativeError> {
@@ -568,6 +575,9 @@ fn allocate(kind: Kind, object: Object, call: &mut NativeCall<'_>) -> Result<Val
 }
 impl NativeFunction for Native {
     fn call(&self, mut call: NativeCall<'_>) -> Result<Value, NativeError> {
+        if let Some(result) = self.read(call.args, &*call.heap) {
+            return result;
+        }
         let xs = arg(&call, 0)?.clone();
         let id = object(self.kind, &xs)?;
         let length = match &xs {
@@ -575,8 +585,13 @@ impl NativeFunction for Native {
             _ => id.map_or(0, |id| call.heap.len(id)),
         };
         match self.op {
-            Op::Len => Ok(int(length)),
-            Op::Check => Ok(xs),
+            Op::Len
+            | Op::Check
+            | Op::InsertIndex
+            | Op::Get
+            | Op::At
+            | Op::Contains
+            | Op::IndexOf => unreachable!("an operation that only reads was read above"),
             Op::Copy => match xs {
                 Value::Tuple(_) => Ok(xs),
                 _ => {
@@ -585,86 +600,6 @@ impl NativeFunction for Native {
                 }
             },
             Op::DeepCopy => copy::deep(&xs, call.heap),
-            Op::InsertIndex => {
-                let n = integer(arg(&call, 1)?)?;
-                if n.to_usize().is_none_or(|n| n > length) {
-                    return Err(raise(
-                        "index_out_of_range",
-                        "insert position is outside the collection",
-                    ));
-                }
-                Ok(Value::Int(n))
-            }
-            Op::Get | Op::At => match xs {
-                Value::List(id) => {
-                    let index = integer(arg(&call, 1)?)?;
-                    if matches!(self.op, Op::Get) && index.is_negative() {
-                        return Err(raise(
-                            "index_out_of_range",
-                            "get requires a nonnegative index",
-                        ));
-                    }
-                    let i = position(&index, length, false)?;
-                    call.heap
-                        .list_get(id, i)
-                        .ok_or_else(|| raise("index_out_of_range", "missing list element"))
-                }
-                Value::Tuple(items) => {
-                    let index = integer(arg(&call, 1)?)?;
-                    if matches!(self.op, Op::Get) && index.is_negative() {
-                        return Err(raise(
-                            "index_out_of_range",
-                            "get requires a nonnegative index",
-                        ));
-                    }
-                    Ok(items[position(&index, length, false)?].clone())
-                }
-                Value::Map(id) => {
-                    let k = arg(&call, 1)?;
-                    key(k, 0)?;
-                    call.heap
-                        .map_get(id, k)
-                        .ok_or_else(|| raise("key_missing", "map has no such key"))
-                }
-                Value::Record(id) => Ok(call
-                    .heap
-                    .record_get(id, field(arg(&call, 1)?)?)
-                    .unwrap_or(Value::Absent)),
-                _ => Err(raise("type_error", "collection has no get")),
-            },
-            Op::Contains | Op::IndexOf => {
-                let value = arg(&call, 1)?.clone();
-                let found = match xs {
-                    Value::Map(id) => {
-                        key(&value, 0)?;
-                        Some(call.heap.map_get(id, &value).is_some())
-                    }
-                    Value::Set(id) => {
-                        key(&value, 0)?;
-                        Some(call.heap.set_contains(id, &value))
-                    }
-                    Value::Record(id) => Some(call.heap.record_get(id, field(&value)?).is_some()),
-                    _ => None,
-                };
-                if let Some(found) = found {
-                    return Ok(Value::Bool(found));
-                }
-                let mut found = None;
-                let mut index = 0;
-                visit_sequence(&xs, call.heap, &mut |item| {
-                    if crate::equal(item, &value, call.heap) {
-                        found = Some(index);
-                        ControlFlow::Break(())
-                    } else {
-                        index += 1;
-                        ControlFlow::Continue(())
-                    }
-                });
-                Ok(match self.op {
-                    Op::IndexOf => found.map_or(Value::Int(Integer::from(-1)), int),
-                    _ => Value::Bool(found.is_some()),
-                })
-            }
             Op::Slice | Op::Concat => {
                 let items = if matches!(self.op, Op::Concat) {
                     let other = arg(&call, 1)?;
@@ -742,6 +677,113 @@ impl NativeFunction for Native {
                 }
                 allocate(Kind::Record, Object::Record(fields), &mut call)
             }
+        }
+    }
+
+    fn fast(&self, args: &[Value], heap: &dyn NativeHeap) -> Option<Value> {
+        self.read(args, heap)?.ok()
+    }
+}
+
+impl Native {
+    /// The call of an operation that only reads the heap: it allocates and
+    /// reserves nothing. `None` for an operation that does.
+    fn read(&self, args: &[Value], heap: &dyn NativeHeap) -> Option<Result<Value, NativeError>> {
+        matches!(
+            self.op,
+            Op::Len | Op::Check | Op::InsertIndex | Op::Get | Op::At | Op::Contains | Op::IndexOf
+        )
+        .then(|| self.reading(args, heap))
+    }
+
+    fn reading(&self, args: &[Value], heap: &dyn NativeHeap) -> Result<Value, NativeError> {
+        let xs = nth(args, 0)?;
+        let id = object(self.kind, xs)?;
+        let length = match xs {
+            Value::Tuple(items) => items.len(),
+            _ => id.map_or(0, |id| heap.len(id)),
+        };
+        match self.op {
+            Op::Len => Ok(int(length)),
+            Op::Check => Ok(xs.clone()),
+            Op::InsertIndex => {
+                let n = integer(nth(args, 1)?)?;
+                if n.to_usize().is_none_or(|n| n > length) {
+                    return Err(raise(
+                        "index_out_of_range",
+                        "insert position is outside the collection",
+                    ));
+                }
+                Ok(Value::Int(n))
+            }
+            Op::Get | Op::At => match xs {
+                Value::List(id) => {
+                    let index = integer(nth(args, 1)?)?;
+                    if matches!(self.op, Op::Get) && index.is_negative() {
+                        return Err(raise(
+                            "index_out_of_range",
+                            "get requires a nonnegative index",
+                        ));
+                    }
+                    let i = position(&index, length, false)?;
+                    heap.list_get(*id, i)
+                        .ok_or_else(|| raise("index_out_of_range", "missing list element"))
+                }
+                Value::Tuple(items) => {
+                    let index = integer(nth(args, 1)?)?;
+                    if matches!(self.op, Op::Get) && index.is_negative() {
+                        return Err(raise(
+                            "index_out_of_range",
+                            "get requires a nonnegative index",
+                        ));
+                    }
+                    Ok(items[position(&index, length, false)?].clone())
+                }
+                Value::Map(id) => {
+                    let k = nth(args, 1)?;
+                    key(k, 0)?;
+                    heap.map_get(*id, k)
+                        .ok_or_else(|| raise("key_missing", "map has no such key"))
+                }
+                Value::Record(id) => Ok(heap
+                    .record_get(*id, field(nth(args, 1)?)?)
+                    .unwrap_or(Value::Absent)),
+                _ => Err(raise("type_error", "collection has no get")),
+            },
+            Op::Contains | Op::IndexOf => {
+                let value = nth(args, 1)?;
+                let found = match xs {
+                    Value::Map(id) => {
+                        key(value, 0)?;
+                        Some(heap.map_get(*id, value).is_some())
+                    }
+                    Value::Set(id) => {
+                        key(value, 0)?;
+                        Some(heap.set_contains(*id, value))
+                    }
+                    Value::Record(id) => Some(heap.record_get(*id, field(value)?).is_some()),
+                    _ => None,
+                };
+                if let Some(found) = found {
+                    return Ok(Value::Bool(found));
+                }
+                let mut found = None;
+                let mut index = 0;
+                visit_sequence(xs, heap, &mut |item| {
+                    if crate::equal(item, value, heap) {
+                        found = Some(index);
+                        ControlFlow::Break(())
+                    } else {
+                        index += 1;
+                        ControlFlow::Continue(())
+                    }
+                });
+                Ok(match self.op {
+                    Op::IndexOf => found.map_or(Value::Int(Integer::from(-1)), int),
+                    _ => Value::Bool(found.is_some()),
+                })
+            }
+            _ => unreachable!("only an operation that reads is read"),
         }
     }
 }

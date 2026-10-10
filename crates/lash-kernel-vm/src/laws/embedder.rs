@@ -8,8 +8,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use lash_kernel_doc::{
     Datum, Document, ErrorDatum, ErrorValue, FunctionId, FunctionRegistry, Handle, Integer,
-    NativeCall, NativeError, NativeFunction, NumberToken, Object, Site, Timestamp, Unit, Value,
-    parse_definition, parse_document,
+    NativeCall, NativeError, NativeFunction, NativeHeap, NumberToken, Object, Site, Timestamp,
+    Unit, Value, parse_definition, parse_document,
 };
 use lash_kernel_state::{Baseline, ParkedRun};
 use num_traits::ToPrimitive;
@@ -33,47 +33,55 @@ fn type_error(message: &str) -> NativeError {
     NativeError::Raised(ErrorValue::new("type_error", message))
 }
 
-struct Add;
-impl NativeFunction for Add {
-    fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
-        match call.args {
-            [Value::Int(a), Value::Int(b)] => {
-                Ok(Value::Int(Integer::new(&*a.as_bigint() + &*b.as_bigint())))
+/// A native that answers every call of its fast path ([`NativeFunction::fast`])
+/// as its general call does: every layout but an odd one takes the fast path.
+macro_rules! fast {
+    ($native:ident, |$args:ident, $heap:ident| $body:expr) => {
+        impl $native {
+            fn answer($args: &[Value], $heap: &dyn NativeHeap) -> Result<Value, NativeError> {
+                $body
             }
-            _ => Err(type_error("num.add takes two integers")),
         }
-    }
+        impl NativeFunction for $native {
+            fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
+                Self::answer(call.args, &*call.heap)
+            }
+
+            fn fast(&self, args: &[Value], heap: &dyn NativeHeap) -> Option<Value> {
+                Self::answer(args, heap).ok()
+            }
+        }
+    };
 }
+
+struct Add;
+fast!(Add, |args, _heap| match args {
+    [Value::Int(a), Value::Int(b)] => {
+        Ok(Value::Int(Integer::new(&*a.as_bigint() + &*b.as_bigint())))
+    }
+    _ => Err(type_error("num.add takes two integers")),
+});
 
 struct Less;
-impl NativeFunction for Less {
-    fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
-        match call.args {
-            [Value::Int(a), Value::Int(b)] => Ok(Value::Bool(a < b)),
-            _ => Err(type_error("num.lt takes two integers")),
-        }
-    }
-}
+fast!(Less, |args, _heap| match args {
+    [Value::Int(a), Value::Int(b)] => Ok(Value::Bool(a < b)),
+    _ => Err(type_error("num.lt takes two integers")),
+});
 
 struct Concat;
-impl NativeFunction for Concat {
-    fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
-        match call.args {
-            [Value::Text(a), Value::Text(b)] => Ok(Value::text(format!("{a}{b}"))),
-            _ => Err(type_error("text.concat takes two texts")),
-        }
-    }
-}
+fast!(Concat, |args, _heap| match args {
+    [Value::Text(a), Value::Text(b)] => Ok(Value::text(format!("{a}{b}"))),
+    _ => Err(type_error("text.concat takes two texts")),
+});
 
 struct Len;
-impl NativeFunction for Len {
-    fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
-        match call.args.first().and_then(Value::object) {
-            Some(object) => Ok(Value::Int(Integer::from(call.heap.len(object) as i64))),
-            None => Err(type_error("list.len takes a collection")),
-        }
+fast!(
+    Len,
+    |args, heap| match args.first().and_then(Value::object) {
+        Some(object) => Ok(Value::Int(Integer::from(heap.len(object) as i64))),
+        None => Err(type_error("list.len takes a collection")),
     }
-}
+);
 
 /// Spends one unit of its guard per step.
 struct Spin;
@@ -122,14 +130,13 @@ impl NativeFunction for Repeat {
 }
 
 struct Ref;
-impl NativeFunction for Ref {
-    fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
-        match call.args.first().and_then(Value::object) {
-            Some(object) => Ok(Value::Ref(lash_kernel_doc::Identity::Object(object))),
-            None => Err(type_error("ident.ref takes an object")),
-        }
+fast!(
+    Ref,
+    |args, _heap| match args.first().and_then(Value::object) {
+        Some(object) => Ok(Value::Ref(lash_kernel_doc::Identity::Object(object))),
+        None => Err(type_error("ident.ref takes an object")),
     }
-}
+);
 
 struct Twice;
 impl NativeFunction for Twice {

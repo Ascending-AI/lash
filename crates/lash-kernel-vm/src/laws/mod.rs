@@ -4,6 +4,7 @@
 
 mod bounds;
 mod embedder;
+mod fast;
 mod forms;
 mod layout;
 mod parked;

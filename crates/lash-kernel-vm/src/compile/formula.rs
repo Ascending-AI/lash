@@ -2,6 +2,9 @@
 //! argument it names, and the formula a postfix program (`K-CHG-003`).
 
 use lash_kernel_doc as doc;
+use lash_kernel_doc::Value;
+
+use crate::data::{holds_nothing, size_one};
 
 /// What a formula's operand measures: an argument by its position, the
 /// result, or a parameter the function does not have, which measures 0.
@@ -247,5 +250,97 @@ impl Plan {
             top += 1;
         }
         stack.first().copied().unwrap_or(0)
+    }
+}
+
+/// A native function's charge formula prepared for the calls its fast path
+/// answers (`K-CHG-003`). It is derived from the formula when the library is
+/// prepared, so it charges what the formula charges whatever the formula
+/// says: for values that hold nothing a deep size is a size and a nested
+/// size 0, and a formula that measures only values of size 1 is a constant.
+pub(crate) struct Fast {
+    /// The formula as it computes for values that hold nothing
+    /// ([`doc::Formula::shallow`]).
+    shallow: Plan,
+    /// What `shallow` computes when every value it measures has size 1; for
+    /// a formula that measures a magnitude, nothing.
+    unit: Option<u64>,
+    /// The values the formula measures by deep size: `shallow` holds when
+    /// none of them holds another value.
+    deep: Box<[Source]>,
+    /// The values the formula measures by nested size: `shallow` holds when
+    /// none of them is a tuple or an error.
+    nested: Box<[Source]>,
+}
+
+/// How a call the fast path answered is charged: an amount known when the
+/// library was prepared, or a plan to compute over the call's values.
+pub(crate) enum Charge<'p> {
+    Units(u64),
+    Plan(&'p Plan),
+}
+
+impl Fast {
+    pub(crate) fn new(formula: &doc::Formula, params: &[doc::Param], charge: &Plan) -> Self {
+        let shallow = Plan::new(&formula.shallow(), params);
+        let unit = shallow
+            .measurements
+            .iter()
+            .all(|(_, measure)| *measure == doc::Measure::Size)
+            .then(|| shallow.evaluate(|_, _| 1));
+        let measured = |kind: doc::Measure| -> Box<[Source]> {
+            charge
+                .measurements
+                .iter()
+                .filter(|(_, measure)| *measure == kind)
+                .map(|(source, _)| *source)
+                .collect()
+        };
+        Self {
+            unit,
+            deep: measured(doc::Measure::DeepSize),
+            nested: measured(doc::Measure::NestedSize),
+            shallow,
+        }
+    }
+
+    /// How to charge a call with `args` that returned `result`: what
+    /// `charge`, the plan this was derived from, computes for them.
+    pub(crate) fn charge<'p>(
+        &'p self,
+        charge: &'p Plan,
+        args: &[Value],
+        result: &Value,
+    ) -> Charge<'p> {
+        let value = |source: &Source| match *source {
+            Source::Arg(index) => args.get(index),
+            Source::Result => Some(result),
+            Source::Nothing => None,
+        };
+        if self
+            .deep
+            .iter()
+            .filter_map(value)
+            .any(|value| !holds_nothing(value))
+            || self
+                .nested
+                .iter()
+                .filter_map(value)
+                .any(|value| matches!(value, Value::Tuple(_) | Value::Error(_)))
+        {
+            return Charge::Plan(charge);
+        }
+        match self.unit {
+            Some(unit)
+                if self
+                    .shallow
+                    .measurements
+                    .iter()
+                    .all(|(source, _)| value(source).is_some_and(size_one)) =>
+            {
+                Charge::Units(unit)
+            }
+            _ => Charge::Plan(&self.shallow),
+        }
     }
 }

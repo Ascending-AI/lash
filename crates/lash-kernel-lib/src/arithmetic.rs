@@ -48,11 +48,26 @@ pub(crate) fn binary(
     counter: &mut WorkCounter,
     heap: &mut dyn NativeHeap,
 ) -> Result<Value, NativeError> {
+    match (plain(op, a, b)?, a, b) {
+        (Some(result), _, _) => Ok(result),
+        (None, Value::Int(a), Value::Int(b)) => Ok(Value::Int(Integer::new(integer_pow(
+            &a.as_bigint(),
+            &b.as_bigint(),
+            counter,
+            heap,
+        )?))),
+        (None, _, _) => unreachable!("only an integer power counts its work"),
+    }
+}
+
+/// [`binary`] for every operation but an integer power past the 64-bit
+/// word, which counts its work and reserves its room: `None` for that one.
+pub(crate) fn plain(op: Binary, a: &Value, b: &Value) -> Result<Option<Value>, NativeError> {
     if let (Value::Int(a), Value::Int(b)) = (a, b) {
         if let (Some(a), Some(b)) = (a.to_i64(), b.to_i64())
             && let Some(result) = in_word(op, a, b)
         {
-            return Ok(Value::Int(Integer::from(result)));
+            return Ok(Some(Value::Int(Integer::from(result))));
         }
         let (a, b) = (a.as_bigint(), b.as_bigint());
         let (a, b) = (&*a, &*b);
@@ -61,7 +76,7 @@ pub(crate) fn binary(
             Binary::Sub => a - b,
             Binary::Mul => a * b,
             Binary::Div => {
-                return ratio_to_float(a, b).map(|value| Value::Float(Float::new(value)));
+                return ratio_to_float(a, b).map(|value| Some(Value::Float(Float::new(value))));
             }
             Binary::DivFloor | Binary::DivTrunc | Binary::RemFloor | Binary::RemTrunc => {
                 if b.is_zero() {
@@ -82,18 +97,18 @@ pub(crate) fn binary(
                     r
                 }
             }
-            Binary::Pow => integer_pow(a, b, counter, heap)?,
+            Binary::Pow => return Ok(None),
             Binary::Min => a.min(b).clone(),
             Binary::Max => a.max(b).clone(),
         };
-        return Ok(Value::Int(Integer::new(result)));
+        return Ok(Some(Value::Int(Integer::new(result))));
     }
     if matches!(op, Binary::Min | Binary::Max) {
         let order = number_cmp(a, b)?;
         // Min/max propagate NaN and otherwise return an original operand.
         // Opposite floating zeros choose -0 for min and +0 for max.
         if order.is_none() {
-            return Ok(Value::Float(Float::new(f64::NAN)));
+            return Ok(Some(Value::Float(Float::new(f64::NAN))));
         }
         if let (Value::Float(a), Value::Float(b)) = (a, b)
             && a.get() == 0.0
@@ -104,9 +119,13 @@ pub(crate) fn binary(
             } else {
                 a.get().is_sign_negative() && b.get().is_sign_negative()
             };
-            return Ok(Value::Float(Float::new(if negative { -0.0 } else { 0.0 })));
+            return Ok(Some(Value::Float(Float::new(if negative {
+                -0.0
+            } else {
+                0.0
+            }))));
         }
-        return Ok(
+        return Ok(Some(
             if matches!(
                 (op, order),
                 (Binary::Min, Some(Ordering::Greater)) | (Binary::Max, Some(Ordering::Less))
@@ -115,7 +134,7 @@ pub(crate) fn binary(
             } else {
                 a.clone()
             },
-        );
+        ));
     }
     let a = as_float(a)?;
     let b = as_float(b)?;
@@ -137,7 +156,7 @@ pub(crate) fn binary(
         Binary::Pow => libm::pow(a, b),
         Binary::Min | Binary::Max => unreachable!("min/max returned before float arithmetic"),
     };
-    Ok(Value::Float(Float::new(result)))
+    Ok(Some(Value::Float(Float::new(result))))
 }
 
 fn floor_remainder(a: f64, b: f64) -> f64 {

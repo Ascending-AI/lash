@@ -2,7 +2,7 @@
 //! errors and charges are created beside the operation that implements them.
 
 use std::cmp::Ordering;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use lash_kernel_doc::{
     ErrorValue, Float, Formula, FunctionDefinition, FunctionRegistry, Guard, Identity,
@@ -425,10 +425,45 @@ pub fn register_numbers(registry: &mut FunctionRegistry) -> Result<(), RegistryE
 
 impl NativeFunction for NumericFunction {
     fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
-        if call.args.len() != self.params.len() {
+        self.admit(call.args)?;
+        if let Some(result) = self.plain(call.args, &*call.heap)? {
+            return Ok(result);
+        }
+        let a = &call.args[0];
+        match self.operation {
+            Operation::Binary(op) => {
+                arithmetic::binary(op, a, &call.args[1], call.counter, call.heap)
+            }
+            Operation::ToText => match a {
+                Value::Int(value) => integer_text(call.heap, value, 10),
+                _ => unreachable!("only an integer's digits are reserved"),
+            },
+            Operation::IntText => {
+                let radix = radix(&call.args[1])?;
+                if let Value::Int(value) = a {
+                    integer_text(call.heap, value, radix)
+                } else {
+                    Err(raised("type_error", "expected an integer"))
+                }
+            }
+            _ => unreachable!("only an integer power counts its work or digits reserve room"),
+        }
+    }
+
+    fn fast(&self, args: &[Value], heap: &dyn NativeHeap) -> Option<Value> {
+        self.admit(args).ok()?;
+        self.plain(args, heap).ok()?
+    }
+}
+
+impl NumericFunction {
+    /// What every call checks first: the arity, each argument's kind and
+    /// the operation's domain.
+    fn admit(&self, args: &[Value]) -> Result<(), NativeError> {
+        if args.len() != self.params.len() {
             return Err(raised("arity", "wrong number of arguments"));
         }
-        for (arg, ty) in call.args.iter().zip(&self.params) {
+        for (arg, ty) in args.iter().zip(&self.params) {
             let accepted = match ty {
                 Type::Any => true,
                 Type::Int => matches!(arg, Value::Int(_)),
@@ -444,25 +479,31 @@ impl NativeFunction for NumericFunction {
         if !matches!(
             self.operation,
             Operation::IntText | Operation::IntParse | Operation::FloatParse
-        ) && !call.args.iter().all(|arg| self.domain.accepts(arg))
+        ) && !args.iter().all(|arg| self.domain.accepts(arg))
         {
             return Err(raised(
                 "type_error",
                 "argument is outside the function's domain",
             ));
         }
-        let a = &call.args[0];
-        match self.operation {
-            Operation::Binary(op) => {
-                arithmetic::binary(op, a, &call.args[1], call.counter, call.heap)
-            }
-            Operation::Unary(op) => arithmetic::unary(op, a),
-            Operation::Math(op) => op.call(call.args),
-            Operation::Eq => Ok(Value::Bool(equal(a, &call.args[1], call.heap))),
-            Operation::Same => Ok(Value::Bool(same(a, &call.args[1]))),
+        Ok(())
+    }
+
+    /// The call of admitted arguments, for every operation but two kinds:
+    /// an integer power past the 64-bit word, which counts its work and
+    /// reserves its room, and an integer's text, which reserves its digits.
+    /// `None` for those. It only reads the heap.
+    fn plain(&self, args: &[Value], heap: &dyn NativeHeap) -> Result<Option<Value>, NativeError> {
+        let a = &args[0];
+        Ok(Some(match self.operation {
+            Operation::Binary(op) => return arithmetic::plain(op, a, &args[1]),
+            Operation::Unary(op) => arithmetic::unary(op, a)?,
+            Operation::Math(op) => op.call(args)?,
+            Operation::Eq => Value::Bool(equal(a, &args[1], heap)),
+            Operation::Same => Value::Bool(same(a, &args[1])),
             Operation::Lt | Operation::Le | Operation::Gt | Operation::Ge | Operation::Compare => {
-                let order = compare(a, &call.args[1], call.heap)?;
-                Ok(match self.operation {
+                let order = compare(a, &args[1], heap)?;
+                match self.operation {
                     Operation::Compare => Value::Int(Integer::from(match order {
                         Some(Ordering::Less) => -1,
                         Some(Ordering::Equal) => 0,
@@ -475,91 +516,95 @@ impl NativeFunction for NumericFunction {
                     }
                     Operation::Gt => Value::Bool(order == Some(Ordering::Greater)),
                     _ => Value::Bool(matches!(order, Some(Ordering::Greater | Ordering::Equal))),
-                })
+                }
             }
-            Operation::Kind => Ok(Value::text(match a.kind() {
-                ValueKind::Null => "null",
-                ValueKind::Absent => "absent",
-                ValueKind::Bool => "bool",
-                ValueKind::Int => "integer",
-                ValueKind::Float => "float",
-                ValueKind::Text => "text",
-                ValueKind::Bytes => "bytes",
-                ValueKind::Timestamp => "timestamp",
-                ValueKind::Tuple => "tuple",
-                ValueKind::List => "list",
-                ValueKind::Map => "map",
-                ValueKind::Set => "set",
-                ValueKind::Record => "record",
-                ValueKind::Closure => "closure",
-                ValueKind::Error => "error",
-                ValueKind::Task => "task",
-                ValueKind::Function => "function",
-                ValueKind::Handle => "handle",
-                ValueKind::Ref => "ref",
-            })),
-            Operation::Ref => {
-                let identity =
-                    match a {
-                        Value::Task(id) => Identity::Task(*id),
-                        _ => Identity::Object(a.object().ok_or_else(|| {
-                            raised("type_error", "ref requires an object or task")
-                        })?),
-                    };
-                Ok(Value::Ref(identity))
-            }
+            Operation::Kind => kind_name(a.kind()),
+            Operation::Ref => Value::Ref(match a {
+                Value::Task(id) => Identity::Task(*id),
+                _ => Identity::Object(
+                    a.object()
+                        .ok_or_else(|| raised("type_error", "ref requires an object or task"))?,
+                ),
+            }),
             Operation::ToFloat => match a {
-                Value::Int(value) => integer_to_float(value).map(Value::Float),
-                Value::Float(_) => Ok(a.clone()),
-                _ => Err(raised("type_error", "expected a number")),
+                Value::Int(value) => Value::Float(integer_to_float(value)?),
+                Value::Float(_) => a.clone(),
+                _ => return Err(raised("type_error", "expected a number")),
             },
             Operation::ToInt => match a {
-                Value::Float(value) => float_to_integer(*value).map(Value::Int),
-                Value::Int(_) => Ok(a.clone()),
-                _ => Err(raised("type_error", "expected a number")),
+                Value::Float(value) => Value::Int(float_to_integer(*value)?),
+                Value::Int(_) => a.clone(),
+                _ => return Err(raised("type_error", "expected a number")),
             },
             Operation::ToText => match a {
-                Value::Int(value) => integer_text(call.heap, value, 10),
-                Value::Float(value) => Ok(Value::text(value.to_string())),
-                _ => Err(raised("type_error", "expected a number")),
+                // Its digits are reserved before they are written.
+                Value::Int(_) => return Ok(None),
+                Value::Float(value) => Value::text(value.to_string()),
+                _ => return Err(raised("type_error", "expected a number")),
             },
             Operation::IntText => {
-                let radix = radix(&call.args[1])?;
-                if let Value::Int(value) = a {
-                    integer_text(call.heap, value, radix)
-                } else {
-                    Err(raised("type_error", "expected an integer"))
-                }
+                // Its digits are reserved before they are written.
+                return Ok(None);
             }
             Operation::IntParse => {
-                let radix = radix(&call.args[1])?;
-                if let Value::Text(text) = a {
-                    let digits = text.strip_prefix(['+', '-']).unwrap_or(text);
-                    if digits.is_empty()
-                        || !digits.bytes().all(|byte| {
-                            byte.is_ascii_alphanumeric() && (byte as char).is_digit(radix)
-                        })
-                    {
-                        return Err(raised(
-                            "number_parse",
-                            "expected signed radix digits without whitespace or separators",
-                        ));
-                    }
-                    BigInt::parse_bytes(text.as_bytes(), radix)
-                        .map(|value| Value::Int(Integer::new(value)))
-                        .ok_or_else(|| raised("number_parse", "invalid integer text"))
-                } else {
-                    Err(raised("type_error", "expected text"))
+                let radix = radix(&args[1])?;
+                let Value::Text(text) = a else {
+                    return Err(raised("type_error", "expected text"));
+                };
+                let digits = text.strip_prefix(['+', '-']).unwrap_or(text);
+                if digits.is_empty()
+                    || !digits
+                        .bytes()
+                        .all(|byte| byte.is_ascii_alphanumeric() && (byte as char).is_digit(radix))
+                {
+                    return Err(raised(
+                        "number_parse",
+                        "expected signed radix digits without whitespace or separators",
+                    ));
                 }
+                BigInt::parse_bytes(text.as_bytes(), radix)
+                    .map(|value| Value::Int(Integer::new(value)))
+                    .ok_or_else(|| raised("number_parse", "invalid integer text"))?
             }
             Operation::FloatParse => {
-                if let Value::Text(text) = a {
-                    parse_float(text).map(|value| Value::Float(Float::new(value)))
-                } else {
-                    Err(raised("type_error", "expected text"))
-                }
+                let Value::Text(text) = a else {
+                    return Err(raised("type_error", "expected text"));
+                };
+                Value::Float(Float::new(parse_float(text)?))
             }
-        }
+        }))
+    }
+}
+
+/// A kind's name, as `kind` answers it. Each name is made once and shared
+/// by every call that answers it.
+fn kind_name(kind: ValueKind) -> Value {
+    macro_rules! shared {
+        ($name:literal) => {{
+            static NAME: LazyLock<Arc<str>> = LazyLock::new(|| Arc::from($name));
+            Value::Text(Arc::clone(&NAME))
+        }};
+    }
+    match kind {
+        ValueKind::Null => shared!("null"),
+        ValueKind::Absent => shared!("absent"),
+        ValueKind::Bool => shared!("bool"),
+        ValueKind::Int => shared!("integer"),
+        ValueKind::Float => shared!("float"),
+        ValueKind::Text => shared!("text"),
+        ValueKind::Bytes => shared!("bytes"),
+        ValueKind::Timestamp => shared!("timestamp"),
+        ValueKind::Tuple => shared!("tuple"),
+        ValueKind::List => shared!("list"),
+        ValueKind::Map => shared!("map"),
+        ValueKind::Set => shared!("set"),
+        ValueKind::Record => shared!("record"),
+        ValueKind::Closure => shared!("closure"),
+        ValueKind::Error => shared!("error"),
+        ValueKind::Task => shared!("task"),
+        ValueKind::Function => shared!("function"),
+        ValueKind::Handle => shared!("handle"),
+        ValueKind::Ref => shared!("ref"),
     }
 }
 

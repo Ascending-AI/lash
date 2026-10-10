@@ -12,7 +12,7 @@ use super::exec::Call;
 use super::{
     Eval, Halt, Interrupt, KernelMachine, MAX_INLINE_DEPTH, TaskState, bound, fault, raise,
 };
-use crate::compile::{Executable, Expr, LibId, LibRun, Member};
+use crate::compile::{Charge, Executable, Expr, LibId, LibRun, Member};
 use crate::functions::MachineFunction;
 use crate::heap::{ClosureObj, Key, MAX_VALUE_DEPTH, NativeView, Obj, Table, within_depth};
 use crate::interface::{Bound, Host};
@@ -333,6 +333,34 @@ impl KernelMachine {
                 Ok(Value::List(self.alloc(Obj::List(unfinished))?))
             }
             LibRun::Native(native) => {
+                if let Some(fast) = &function.fast {
+                    let view = NativeView {
+                        heap: &mut self.heap,
+                        bound: self.bounds.memory,
+                        reserved: 0,
+                    };
+                    // A result too deep to keep is the general call's to
+                    // raise.
+                    if let Some(value) = native
+                        .fast(&self.storage.args[base..], &view)
+                        .filter(|value| within_depth(value, MAX_VALUE_DEPTH))
+                    {
+                        // What the general call does with its result: keep
+                        // it, then charge the formula.
+                        self.pin(&value)?;
+                        let units = if self.charging && function.native {
+                            let args = &self.storage.args[base..];
+                            match fast.charge(&function.charge, args, &value) {
+                                Charge::Units(units) => units,
+                                Charge::Plan(plan) => self.formula(plan, args, Some(&value)),
+                            }
+                        } else {
+                            0
+                        };
+                        self.charge_call(exe, lib, units)?;
+                        return Ok(Some(value));
+                    }
+                }
                 let limit = function
                     .limit
                     .as_ref()

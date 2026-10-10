@@ -202,7 +202,7 @@ impl KernelMachine {
                 // A value on its way out is in no variable: the frames it
                 // leaves take theirs with them.
                 Completion::Return(value) | Completion::Throw(value) => {
-                    self.pins.push(value.clone());
+                    self.pins.hold(value, value_bytes(value));
                 }
                 Completion::Break | Completion::Continue => {}
             }

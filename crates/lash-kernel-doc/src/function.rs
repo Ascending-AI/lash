@@ -135,6 +135,23 @@ pub enum Measure {
 }
 
 impl Formula {
+    /// The formula as it computes when the operands it measures hold no
+    /// other value: a deep size is then the operand's size, and a nested
+    /// size 0 (`K-CHG-005`). A machine derives it once, and charges a call
+    /// whose measured values hold nothing by it without walking them.
+    pub fn shallow(&self) -> Self {
+        let all = |terms: &[Self]| terms.iter().map(Self::shallow).collect();
+        match self {
+            Self::DeepSize(operand) => Self::Size(operand.clone()),
+            Self::NestedSize(_) => Self::Constant(0),
+            Self::Sum(terms) => Self::Sum(all(terms)),
+            Self::Product(terms) => Self::Product(all(terms)),
+            Self::Max(terms) => Self::Max(all(terms)),
+            Self::Min(terms) => Self::Min(all(terms)),
+            Self::Constant(_) | Self::Size(_) | Self::Magnitude(_) => self.clone(),
+        }
+    }
+
     /// Computes the amount, asking `measure` for each operand.
     pub fn evaluate(&self, measure: &mut dyn FnMut(&Operand, Measure) -> u64) -> u64 {
         match self {

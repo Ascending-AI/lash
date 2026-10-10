@@ -156,6 +156,16 @@ pub struct NativeCall<'a> {
 /// arguments and reserved first; what is reserved is the bound's to refuse.
 pub trait NativeFunction: Send + Sync {
     fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError>;
+
+    /// The call's result when the function computes it from its arguments
+    /// and a read of the heap alone: it counts no work, reserves no room
+    /// and allocates no object. `None` when the call needs more than that,
+    /// or raises; the machine then makes [`NativeFunction::call`]. A value
+    /// it gives is the value `call` returns for the same arguments and
+    /// heap, so a machine may take either path (`K-LIB-006`).
+    fn fast(&self, _args: &[Value], _heap: &dyn NativeHeap) -> Option<Value> {
+        None
+    }
 }
 
 /// Where a library function's definition is looked up by identity.

@@ -800,7 +800,7 @@ pub(in crate::machine) fn import(
         withdrawn_ever: run.withdrawn,
         session,
         session_cell,
-        pins: Vec::new(),
+        pins: Default::default(),
         fresh: Vec::new(),
         charging: true,
         charged: run.charged,

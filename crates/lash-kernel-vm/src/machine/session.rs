@@ -63,7 +63,7 @@ pub(super) fn start(
         withdrawn_ever: BTreeSet::new(),
         session: BTreeMap::new(),
         session_cell: matches!(start.target, Target::Main),
-        pins: Vec::new(),
+        pins: Default::default(),
         fresh: Vec::new(),
         charging: true,
         charged: 0,
