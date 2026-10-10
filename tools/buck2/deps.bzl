@@ -947,7 +947,16 @@ PACKAGE_DEPS = {
         }
     },
     "lash-internal-vm-worker": {
-        "build": {},
+        "build": {
+            "lash_dialect_typescript": "//crates/lash-dialect-typescript:lash-dialect-typescript",
+            "lash_ext_date_ecma": "//crates/lash-ext-date-ecma:lash-ext-date-ecma",
+            "lash_ext_regex_ecma": "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma",
+            "lash_ext_url_whatwg": "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg",
+            "lash_kernel_dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect",
+            "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
+            "lash_kernel_lib": "//crates/lash-kernel-lib:lash-kernel-lib",
+            "lash_kernel_vm": "//crates/lash-kernel-vm:lash-kernel-vm"
+        },
         "dev": {
             "lash_vm_worker": "//crates/lash-vm-worker:lash-vm-worker",
             "rmp_serde": "//third-party/rust:p0284",

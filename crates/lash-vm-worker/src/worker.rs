@@ -402,8 +402,9 @@ impl<'embedding, const MEASURE: bool> Server<'embedding, MEASURE> {
     }
     /// A machine for the run: one that has executed nothing, or one rebuilt
     /// from the parked state. The document is validated and compiled against
-    /// the registry this worker assembled when it started; nothing is loaded
-    /// from the document.
+    /// the registry this worker assembled when it started, with each function
+    /// redeclared for the document's kernel version when that is a
+    /// successor's; nothing is loaded from the document.
     fn start(&mut self, start: Start) -> Result<Hosted, PoolError> {
         self.wire = None;
         self.codec.check_payload(&start.document.0)?;
@@ -424,9 +425,14 @@ impl<'embedding, const MEASURE: bool> Server<'embedding, MEASURE> {
             .map_err(|error| undecodable(RunInput::Document, &error))?
             .to_string();
         let kernel = document.manifest.kernel;
+        let registry = self.embedding.registry_for(kernel).map_err(|error| {
+            PoolError::breach(ProtocolBreach::Machine {
+                detail: Detail::new(error),
+            })
+        })?;
         let program = Program {
             document: Arc::new(document),
-            registry: Arc::clone(&self.embedding.registry),
+            registry: Arc::clone(registry),
         };
         let bounds = Bounds {
             charge: start.bounds.charge,

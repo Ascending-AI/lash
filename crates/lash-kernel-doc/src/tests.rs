@@ -5,9 +5,9 @@ use std::collections::BTreeMap;
 
 use crate::{
     Action, Atom, Callee, Document, Expr, Float, Formula, FunctionDefinition, FunctionId,
-    Implementation, InvalidReason, Literal, MAX_NESTING_DEPTH, Name, Node, NumberPolicy,
-    ParseErrorReason, StatementForm, Stmt, parse_definition, parse_document, print_definition,
-    print_document, validate_document,
+    FunctionRegistry, Implementation, InvalidReason, Literal, MAX_NESTING_DEPTH, Name, Node,
+    NumberPolicy, ParseErrorReason, RegistryError, StatementForm, Stmt, ValidatedFunctions,
+    parse_definition, parse_document, print_definition, print_document, validate_document,
 };
 
 /// A definition named `name` taking one `Any`: native when `native`, with a
@@ -631,4 +631,36 @@ fn a_native_function_takes_no_function_and_its_body_cannot_wait() {
 fn a_formula_saturates() {
     let formula = Formula::Product(vec![Formula::Constant(u64::MAX), Formula::Constant(2)]);
     assert_eq!(formula.evaluate(&mut |_, _| 0), u64::MAX);
+}
+
+/// Functions validated against a registry's contents join, without being
+/// validated again, only a registry holding exactly those contents, under
+/// the identities validation gave them (FIG-5796).
+#[test]
+fn validated_functions_join_only_the_registry_they_were_validated_against() {
+    let holding = |name: &str| {
+        let mut registry = FunctionRegistry::new();
+        registry.register(definition(name, false), None).unwrap();
+        registry
+    };
+    let mut built = holding("helper.base");
+    let validated = built
+        .validate_functions(vec![definition("helper.joined", false)])
+        .unwrap();
+    let validated = ValidatedFunctions::from_json(&validated.to_json().unwrap()).unwrap();
+    let mut same = holding("helper.base");
+    same.register_validated(validated.clone()).unwrap();
+    assert!(
+        same.iter()
+            .map(|(id, _)| id)
+            .eq(built.iter().map(|(id, _)| id))
+    );
+    for mut other in [holding("helper.other"), FunctionRegistry::new()] {
+        let held = other.len();
+        assert!(matches!(
+            other.register_validated(validated.clone()),
+            Err(RegistryError::OtherBasis { .. })
+        ));
+        assert_eq!(other.len(), held, "nothing joins another registry");
+    }
 }

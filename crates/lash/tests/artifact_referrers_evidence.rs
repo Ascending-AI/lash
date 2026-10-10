@@ -236,7 +236,9 @@ fn rlm_core_in_dialect(
             python_process_embedding(&lash::vm::WorkerTuning::default()).expect("Python embedding");
         factory
             .with_worker_service(python_process_workers())
-            .with_worker_functions(Arc::clone(embedding.registry()))
+            .with_worker_functions(Arc::clone(
+                embedding.registry().expect("every version's functions"),
+            ))
     } else {
         factory
     };

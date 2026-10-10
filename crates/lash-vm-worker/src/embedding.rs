@@ -4,7 +4,9 @@
 //! A document names every function it uses by content identity and carries
 //! none of them (kernel spec §9 rule 2), so the registry is fixed before the
 //! first document arrives: the kernel library, the machine's own functions,
-//! each extension crate's, and each dialect's helpers.
+//! each extension crate's, and each dialect's helpers. The standard
+//! embedding's TypeScript helpers are defined once, when the crate is built
+//! (`build.rs`); a worker registers them as built (FIG-5796).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -12,7 +14,9 @@ use std::sync::{Arc, Mutex, OnceLock};
 use lash_kernel_dialect::{
     Diagnostic, Environment, FrontEnd, Library, Lowered, NamedLibrary, Package, Printer,
 };
-use lash_kernel_doc::{Document, EffectName, FunctionRegistry, Name, Signature};
+use lash_kernel_doc::{
+    Document, EffectName, FunctionDefinition, FunctionRegistry, Name, Signature, ValidatedFunctions,
+};
 use lash_vm_client::WorkerTuning;
 
 /// Why a worker could not assemble what it runs. The worker refuses to
@@ -29,7 +33,13 @@ pub enum EmbedError {
 
 /// Everything a worker registered at startup.
 pub struct Embedding {
-    pub(crate) registry: Arc<FunctionRegistry>,
+    /// The functions as registered, each written for the kernel version
+    /// the dialects lower to.
+    written: Arc<FunctionRegistry>,
+    /// `written` and each function redeclared for every successor version
+    /// the build interprets, made when first asked for: a worker that runs
+    /// no successor's document never redeclares (FIG-5796).
+    interpreted: OnceLock<Arc<FunctionRegistry>>,
     pub(crate) library: NamedLibrary,
     pub(crate) dialects: BTreeMap<String, Package>,
 }
@@ -41,9 +51,48 @@ impl Embedding {
         &self.library
     }
 
-    /// The registry a machine runs documents against.
-    pub fn registry(&self) -> &Arc<FunctionRegistry> {
-        &self.registry
+    /// The registry a machine runs documents against: each function once
+    /// for every kernel version this build interprets. A build that also
+    /// interprets the successor of the version the dialects write holds
+    /// every function redeclared for it, by identity, from the first call.
+    ///
+    /// # Errors
+    ///
+    /// [`EmbedError::Registry`] when a function cannot be redeclared: a
+    /// defect of the build.
+    pub fn registry(&self) -> Result<&Arc<FunctionRegistry>, EmbedError> {
+        if let Some(registry) = self.interpreted.get() {
+            return Ok(registry);
+        }
+        let mut registry = FunctionRegistry::clone(&self.written);
+        let mut redeclared = false;
+        for version in lash_kernel_doc::KernelVersion::ALL {
+            if let Some(migration) = lash_kernel_migrate::migration_from(*version) {
+                lash_kernel_migrate::migrate_registry(&mut registry, migration)
+                    .map_err(|error| EmbedError::Registry(error.to_string()))?;
+                redeclared = true;
+            }
+        }
+        let registry = if redeclared {
+            Arc::new(registry)
+        } else {
+            Arc::clone(&self.written)
+        };
+        Ok(self.interpreted.get_or_init(|| registry))
+    }
+
+    /// The registry a machine runs a document written for kernel version
+    /// `kernel` against: the functions as registered when the dialects
+    /// write that version, and [`Embedding::registry`] otherwise.
+    ///
+    /// # Errors
+    ///
+    /// [`Embedding::registry`]'s.
+    pub(crate) fn registry_for(&self, kernel: u32) -> Result<&Arc<FunctionRegistry>, EmbedError> {
+        if kernel == lash_kernel_doc::KERNEL_VERSION {
+            return Ok(&self.written);
+        }
+        self.registry()
     }
 
     /// Lowers `source` as the installed dialect `dialect` does for a cell:
@@ -88,12 +137,7 @@ impl Embedder {
     /// [`EmbedError::Registry`].
     pub fn kernel() -> Result<Self, EmbedError> {
         let mut registry = FunctionRegistry::new();
-        let refused = |error: &dyn std::fmt::Display| EmbedError::Registry(error.to_string());
-        lash_kernel_lib::register_numbers(&mut registry).map_err(|error| refused(&error))?;
-        lash_kernel_lib::register_text_json(&mut registry).map_err(|error| refused(&error))?;
-        lash_kernel_vm::register_machine_functions(&mut registry)
-            .map_err(|error| refused(&error))?;
-        lash_kernel_lib::register_collections(&mut registry).map_err(|error| refused(&error))?;
+        crate::library::register_kernel(&mut registry).map_err(EmbedError::Registry)?;
         Ok(Self {
             registry,
             dialects: BTreeMap::new(),
@@ -145,45 +189,40 @@ impl Embedder {
     /// [`EmbedError::Registry`].
     pub fn finish(self) -> Result<Embedding, EmbedError> {
         // The names a front end resolves are those of the version it
-        // writes. A build that also interprets that version's successor
-        // holds every function redeclared for it too, by identity.
-        let library = self.library()?;
-        let mut registry = self.registry;
-        for version in lash_kernel_doc::KernelVersion::ALL {
-            if let Some(migration) = lash_kernel_migrate::migration_from(*version) {
-                lash_kernel_migrate::migrate_registry(&mut registry, migration)
-                    .map_err(|error| EmbedError::Registry(error.to_string()))?;
-            }
-        }
+        // writes. A successor's functions are redeclared when a document
+        // of it first runs (`Embedding::registry`).
         Ok(Embedding {
-            library,
-            registry: Arc::new(registry),
+            library: self.library()?,
+            written: Arc::new(self.registry),
+            interpreted: OnceLock::new(),
             dialects: self.dialects,
         })
     }
 }
 
-/// How many compiled patterns the regular-expression extension keeps.
-const CACHED_PATTERNS: usize = 256;
+/// The TypeScript helpers as the build defined them against the kernel
+/// library and lash's extensions, validated in a registry holding exactly
+/// those (`build.rs`).
+const TYPESCRIPT_HELPERS: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/typescript_helpers.json"));
 
-/// The embedding lash ships: the kernel library, the ECMAScript
-/// regular-expression extension and the TypeScript dialect.
+/// The embedding lash ships: the kernel library, lash's extensions and the
+/// TypeScript dialect, whose helpers it registers as the build defined
+/// them. A worker that starts defines none.
 ///
 /// # Errors
 ///
 /// [`EmbedError`].
 pub fn standard(tuning: &WorkerTuning) -> Result<Embedding, EmbedError> {
     let mut embedder = Embedder::kernel()?;
-    lash_ext_regex_ecma::register(
-        embedder.registry(),
-        &Arc::new(lash_ext_regex_ecma::Engine::new(CACHED_PATTERNS)),
-    )
-    .map_err(|error| EmbedError::Registry(error.to_string()))?;
-    lash_ext_date_ecma::register(embedder.registry())
+    crate::library::register_extensions(embedder.registry()).map_err(EmbedError::Registry)?;
+    let helpers = ValidatedFunctions::from_json(TYPESCRIPT_HELPERS)
         .map_err(|error| EmbedError::Registry(error.to_string()))?;
-    lash_ext_url_whatwg::register(embedder.registry())
+    embedder
+        .registry()
+        .register_validated(helpers)
         .map_err(|error| EmbedError::Registry(error.to_string()))?;
-    embedder.install(typescript(&embedder.library()?, tuning)?)?;
+    embedder.install(typescript_package(tuning, Vec::new()))?;
     embedder.finish()
 }
 
@@ -200,7 +239,7 @@ pub fn standard_functions() -> Result<Arc<FunctionRegistry>, EmbedError> {
     if let Some(functions) = FUNCTIONS.get() {
         return Ok(Arc::clone(functions));
     }
-    let functions = Arc::clone(standard(&WorkerTuning::standard())?.registry());
+    let functions = Arc::clone(standard(&WorkerTuning::standard())?.registry()?);
     Ok(Arc::clone(FUNCTIONS.get_or_init(|| functions)))
 }
 
@@ -210,6 +249,8 @@ pub fn standard_functions() -> Result<Arc<FunctionRegistry>, EmbedError> {
 ///
 /// [`EmbedError::Dialect`] when a helper names a function `library` lacks.
 pub fn typescript(library: &NamedLibrary, tuning: &WorkerTuning) -> Result<Package, EmbedError> {
+    #[cfg(test)]
+    tests::HELPER_DEFINITIONS.with(|defined| defined.set(defined.get() + 1));
     let mut library = library.clone();
     let functions = lash_dialect_typescript::define_helpers(&mut library).map_err(|error| {
         EmbedError::Dialect {
@@ -217,7 +258,12 @@ pub fn typescript(library: &NamedLibrary, tuning: &WorkerTuning) -> Result<Packa
             message: error.to_string(),
         }
     })?;
-    Ok(Package {
+    Ok(typescript_package(tuning, functions))
+}
+
+/// The TypeScript dialect with `functions` as its helpers.
+fn typescript_package(tuning: &WorkerTuning, functions: Vec<FunctionDefinition>) -> Package {
+    Package {
         dialect: TYPESCRIPT.to_owned(),
         front_end: Box::new(TypeScript {
             parser: Mutex::new(lash_dialect_typescript::Parser::with_stack(
@@ -229,7 +275,7 @@ pub fn typescript(library: &NamedLibrary, tuning: &WorkerTuning) -> Result<Packa
         }),
         printer: Some(Box::new(TypeScriptPrinter)),
         functions,
-    })
+    }
 }
 
 const TYPESCRIPT: &str = "typescript";
@@ -262,16 +308,67 @@ impl Printer for TypeScriptPrinter {
 mod tests {
     use super::*;
 
+    thread_local! {
+        /// How many times this thread defined the TypeScript helpers.
+        pub(super) static HELPER_DEFINITIONS: std::cell::Cell<usize> =
+            const { std::cell::Cell::new(0) };
+    }
+
+    /// A worker's startup defines no helper: the standard embedding
+    /// registers the TypeScript helpers as the build defined them, so a
+    /// worker reads no helper source and validates and identifies no helper
+    /// before it is ready (FIG-5796).
+    #[test]
+    fn assembling_the_standard_embedding_defines_no_helper() {
+        let defined = HELPER_DEFINITIONS.with(std::cell::Cell::get);
+        let embedding = standard(&WorkerTuning::standard()).expect("the standard embedding");
+        assert!(embedding.dialects.contains_key("typescript"));
+        assert_eq!(
+            HELPER_DEFINITIONS.with(std::cell::Cell::get),
+            defined,
+            "the standard embedding defined the TypeScript helpers"
+        );
+    }
+
+    /// The helpers the build defined are the ones the TypeScript dialect
+    /// defines against the kernel library and lash's extensions, in order
+    /// and under the same identities: a worker holds exactly the functions
+    /// it would have defined itself.
+    #[test]
+    fn the_built_helpers_are_the_ones_the_dialect_defines() {
+        let mut registry = FunctionRegistry::new();
+        crate::library::register_kernel(&mut registry).expect("the kernel library");
+        crate::library::register_extensions(&mut registry).expect("lash's extensions");
+        let mut library = NamedLibrary::from_registry(&registry).expect("the library");
+        let defined: Vec<_> = lash_dialect_typescript::define_helpers(&mut library)
+            .expect("the TypeScript helpers")
+            .into_iter()
+            .map(|definition| (definition.identity().expect("an identity"), definition))
+            .collect();
+        let built = ValidatedFunctions::from_json(TYPESCRIPT_HELPERS).expect("the built helpers");
+        let built: Vec<_> = built
+            .iter()
+            .map(|(function, definition)| (*function, definition.clone()))
+            .collect();
+        assert_eq!(built.len(), defined.len(), "the same number of helpers");
+        assert!(
+            built == defined,
+            "the built helpers differ from the defined ones"
+        );
+    }
+
     /// Target 5: the worker registers every function before a document
     /// arrives, and a document resolves against nothing else. The standard
     /// embedding holds the kernel library, the machine's functions, the
     /// regular-expression extension and the TypeScript dialect's helpers,
     /// each under one name, once for every kernel version the build
     /// interprets: a build that interprets a version's successor holds each
-    /// function redeclared for it too (FIG-5793).
+    /// function redeclared for it too (FIG-5793), from when a document of
+    /// the successor first needs them (FIG-5796).
     #[test]
     fn the_standard_embedding_registers_every_function_at_startup() {
         let embedding = standard(&WorkerTuning::standard()).expect("the standard embedding");
+        let registry = embedding.registry().expect("every version's functions");
         let names: Vec<String> = embedding
             .library()
             .iter()
@@ -294,8 +391,7 @@ mod tests {
         let mut library = names.clone();
         library.sort();
         for version in lash_kernel_doc::KernelVersion::ALL {
-            let mut held: Vec<String> = embedding
-                .registry()
+            let mut held: Vec<String> = registry
                 .iter()
                 .filter(|(_, function)| function.definition.kernel == version.number())
                 .map(|(_, function)| function.definition.name.to_string())
@@ -307,7 +403,7 @@ mod tests {
             );
         }
         assert_eq!(
-            embedding.registry().iter().count(),
+            registry.iter().count(),
             names.len() * lash_kernel_doc::KernelVersion::ALL.len(),
             "every registered function is of a version the build interprets"
         );
@@ -324,8 +420,42 @@ mod tests {
         let embedding = standard(&WorkerTuning::standard()).expect("the standard embedding");
         assert_eq!(
             first.iter().count(),
-            embedding.registry().iter().count(),
+            embedding
+                .registry()
+                .expect("every version's functions")
+                .iter()
+                .count(),
             "the registry a worker assembles"
+        );
+    }
+
+    /// A worker that starts redeclares nothing for a successor version: a
+    /// document written in the version the dialects lower runs against the
+    /// functions as registered, and the successor's are redeclared when one
+    /// of its documents first needs them (FIG-5796).
+    #[cfg(feature = "synthetic-next")]
+    #[test]
+    fn a_successor_is_redeclared_when_a_document_of_it_first_needs_it() {
+        let embedding = standard(&WorkerTuning::standard()).expect("the standard embedding");
+        let written = embedding
+            .registry_for(lash_kernel_doc::KERNEL_VERSION)
+            .expect("the functions as registered");
+        assert!(Arc::ptr_eq(written, &embedding.written));
+        assert!(
+            embedding.interpreted.get().is_none(),
+            "nothing is redeclared before a successor's document runs"
+        );
+        let next = embedding
+            .registry_for(lash_kernel_doc::KernelVersion::SyntheticNext.number())
+            .expect("the successor's functions");
+        assert!(Arc::ptr_eq(
+            next,
+            embedding.registry().expect("every version's functions")
+        ));
+        assert_eq!(
+            next.len(),
+            2 * written.len(),
+            "each function once per version"
         );
     }
 }

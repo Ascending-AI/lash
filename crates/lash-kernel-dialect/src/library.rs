@@ -41,11 +41,12 @@ impl NamedLibrary {
         Self::default()
     }
 
-    /// Every function of a registry, by the name its definition carries.
+    /// Every function of a registry, by the name its definition carries,
+    /// under the identity the registry holds it by.
     pub fn from_registry(registry: &FunctionRegistry) -> Result<Self, LibraryError> {
         let mut library = Self::new();
-        for (_, registered) in registry.iter() {
-            library.insert(Arc::clone(&registered.definition))?;
+        for (function, registered) in registry.iter() {
+            library.insert_identified(*function, Arc::clone(&registered.definition))?;
         }
         Ok(library)
     }
@@ -57,6 +58,14 @@ impl NamedLibrary {
     ) -> Result<FunctionId, LibraryError> {
         let definition = definition.into();
         let function = definition.identity()?;
+        self.insert_identified(function, definition)
+    }
+
+    fn insert_identified(
+        &mut self,
+        function: FunctionId,
+        definition: Arc<FunctionDefinition>,
+    ) -> Result<FunctionId, LibraryError> {
         if let Some(taken) = self.by_name.get(&definition.name) {
             return Err(LibraryError::NameTaken {
                 name: definition.name.clone(),

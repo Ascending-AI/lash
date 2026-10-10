@@ -20,8 +20,7 @@ fn config(mode: &str) -> PoolConfig {
     if !mode.is_empty() {
         entry.args.push(mode.into());
     }
-    // The shipped watchdog: it also bounds a worker's startup, which
-    // assembles the whole standard library before the worker is ready.
+    // The shipped watchdog: it also bounds a worker's startup.
     let mut config = PoolConfig::standard(entry);
     config.max_workers = 1;
     config

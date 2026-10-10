@@ -9,7 +9,10 @@ use std::fmt;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 
+use serde::{Deserialize, Serialize};
+
 use crate::canonical::EncodeError;
+use crate::document::DecodeError;
 use crate::function::FunctionDefinition;
 use crate::name::{FunctionId, FunctionName};
 use crate::validate::{Invalid, validate_definition};
@@ -196,6 +199,12 @@ pub enum RegistryError {
         name: FunctionName,
         function: FunctionId,
     },
+    /// Validated functions were offered to a registry that does not hold
+    /// exactly the functions they were validated against.
+    #[error(
+        "the functions were validated against {validated} other functions; this registry holds {held}"
+    )]
+    OtherBasis { validated: usize, held: usize },
 }
 
 /// The library functions an embedder runs with: each definition by
@@ -248,6 +257,75 @@ impl FunctionRegistry {
         Ok(function)
     }
 
+    /// Registers `definitions` in order, none with a native
+    /// implementation, and returns them as validated against what the
+    /// registry held before the first.
+    ///
+    /// # Errors
+    ///
+    /// The first definition [`FunctionRegistry::register`] refuses.
+    pub fn validate_functions(
+        &mut self,
+        definitions: Vec<FunctionDefinition>,
+    ) -> Result<ValidatedFunctions, RegistryError> {
+        let basis = self.functions.keys().copied().collect();
+        let mut functions = Vec::with_capacity(definitions.len());
+        for definition in definitions {
+            let function = self.register(definition.clone(), None)?;
+            functions.push(ValidatedFunction {
+                function,
+                definition,
+            });
+        }
+        Ok(ValidatedFunctions { basis, functions })
+    }
+
+    /// Registers functions [`FunctionRegistry::validate_functions`]
+    /// validated against exactly the functions this registry holds, without
+    /// validating or identifying them again: validation and identity are
+    /// functions of a definition and the registry it joins.
+    ///
+    /// The functions are trusted as given, so they must be a build's own
+    /// work, as a worker takes the helpers its build assembled; a document
+    /// or anything else from outside the build is registered with
+    /// [`FunctionRegistry::register`].
+    ///
+    /// # Errors
+    ///
+    /// [`RegistryError::OtherBasis`] when the registry holds other
+    /// functions, and [`RegistryError::AlreadyRegistered`].
+    pub fn register_validated(
+        &mut self,
+        validated: ValidatedFunctions,
+    ) -> Result<(), RegistryError> {
+        if !self.functions.keys().eq(validated.basis.iter()) {
+            return Err(RegistryError::OtherBasis {
+                validated: validated.basis.len(),
+                held: self.functions.len(),
+            });
+        }
+        for ValidatedFunction {
+            function,
+            definition,
+        } in validated.functions
+        {
+            if self.functions.contains_key(&function) {
+                return Err(RegistryError::AlreadyRegistered {
+                    name: definition.name,
+                    function,
+                });
+            }
+            self.functions.insert(
+                function,
+                RegisteredFunction {
+                    definition: Arc::new(definition),
+                    native: None,
+                },
+            );
+        }
+        Ok(())
+    }
+
     pub fn get(&self, function: &FunctionId) -> Option<&RegisteredFunction> {
         self.functions.get(function)
     }
@@ -264,6 +342,68 @@ impl FunctionRegistry {
     pub fn is_empty(&self) -> bool {
         self.functions.is_empty()
     }
+}
+
+/// Functions validated against the contents of a registry, for another
+/// registry holding exactly those contents to take without validating them
+/// again ([`FunctionRegistry::register_validated`]).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ValidatedFunctions {
+    /// Every function the registry held when they were validated.
+    basis: Vec<FunctionId>,
+    /// The functions in the order they were registered, each with its
+    /// identity.
+    functions: Vec<ValidatedFunction>,
+}
+
+impl ValidatedFunctions {
+    /// Each function's identity and definition, in the order they were
+    /// registered.
+    pub fn iter(&self) -> impl Iterator<Item = (&FunctionId, &FunctionDefinition)> {
+        self.functions
+            .iter()
+            .map(|validated| (&validated.function, &validated.definition))
+    }
+
+    /// The JSON a build keeps them as. It is read back only by
+    /// [`ValidatedFunctions::from_json`] in the same build, so it is the
+    /// derived encoding, not a stored spelling.
+    ///
+    /// # Errors
+    ///
+    /// [`EncodeError`], which no definition raises.
+    pub fn to_json(&self) -> Result<Vec<u8>, EncodeError> {
+        serde_json::to_vec(self).map_err(|error| EncodeError {
+            message: error.to_string(),
+        })
+    }
+
+    /// Reads what [`ValidatedFunctions::to_json`] wrote. A body nests as
+    /// deep as its definition does.
+    ///
+    /// # Errors
+    ///
+    /// [`DecodeError::Invalid`].
+    pub fn from_json(json: &[u8]) -> Result<Self, DecodeError> {
+        let mut decoder = serde_json::Deserializer::from_slice(json);
+        decoder.disable_recursion_limit();
+        let invalid = |error: serde_json::Error| DecodeError::Invalid {
+            message: error.to_string(),
+            line: error.line(),
+            column: error.column(),
+        };
+        let validated = Self::deserialize(&mut decoder).map_err(invalid)?;
+        decoder.end().map_err(invalid)?;
+        Ok(validated)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ValidatedFunction {
+    function: FunctionId,
+    definition: FunctionDefinition,
 }
 
 impl FunctionCatalog for FunctionRegistry {

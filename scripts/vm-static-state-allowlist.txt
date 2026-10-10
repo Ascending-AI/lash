@@ -15,3 +15,4 @@ crates/lash-typescript/src/workflow_graph/printer.rs::<module>::PROGRAM_PRINT_CO
 crates/lash-vm-runtime/src/lib_tests.rs::<module>::HELD_STORE_SETS  # test module fixture keeping stores alive; never compiled into a worker
 crates/lash-vm-runtime/src/process.rs::<module>::SEGMENT_BOUNDARY_DECLINED_TOTAL  # parent-side operator telemetry count of declined segment boundaries; a count, never guest-readable
 crates/lash-vm-runtime/src/process.rs::<module>::EXECUTION_BOUND_EXHAUSTION_LOUD  # test/testing-feature assertion toggle; never set by guest code
+crates/lash-vm-worker/src/embedding.rs::<module>::HELPER_DEFINITIONS  # cfg(test) thread-local count of TypeScript helper definitions; never compiled into a worker

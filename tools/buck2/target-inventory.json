@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 0,
   "cargo_package_count": 67,
-  "cargo_target_count": 210,
+  "cargo_target_count": 211,
   "facade_production_check_targets": [
     "//crates/lash-core-effect:lash-core-effect__fv_969a08f2[check]",
     "//crates/lash-core-effect:lash-core-effect__fv_d3926888[check]",
@@ -49887,7 +49887,7 @@
       "//crates/lash:lash__fv_e00a87d0"
     ]
   },
-  "generated_label_count": 287,
+  "generated_label_count": 289,
   "main_test_exclusions": {
     "//crates/lash-s3-store:lash-s3-store__unit_test": "requires an external service or credentials"
   },
@@ -54942,6 +54942,22 @@
       ],
       "targets": [
         {
+          "build_label": "//crates/lash-vm-worker:build_script",
+          "clippy_exempt": "the run action has no compile subtargets; its build.rs compile is linted as :build_script__build",
+          "kind": "custom-build",
+          "label": "//crates/lash-vm-worker:build_script"
+        },
+        {
+          "build_label": "//crates/lash-vm-worker:build_script__build",
+          "check_label": "//crates/lash-vm-worker:build_script__build[check]",
+          "clippy_label": "//crates/lash-vm-worker:build_script__build__clippy[clippy.txt]",
+          "kind": "custom-build-compile",
+          "label": "//crates/lash-vm-worker:build_script__build",
+          "tags": [
+            "manual"
+          ]
+        },
+        {
           "build_label": "//crates/lash-vm-worker:lash-vm-worker[static]",
           "cargo": "lash_vm_worker",
           "check_label": "//crates/lash-vm-worker:lash-vm-worker[check]",
@@ -56691,6 +56707,8 @@
     "//crates/lash-vm-protocol:lash-vm-protocol__unit_test",
     "//crates/lash-vm-runtime:lash-vm-runtime[static]",
     "//crates/lash-vm-runtime:lash-vm-runtime__unit_test",
+    "//crates/lash-vm-worker:build_script",
+    "//crates/lash-vm-worker:build_script__build",
     "//crates/lash-vm-worker:lash-vm-worker[static]",
     "//crates/lash-vm-worker:lash-vm-worker-fixture__bin",
     "//crates/lash-vm-worker:lash-vm-worker__bin",
@@ -57022,6 +57040,7 @@
     "//crates/lash-vm-runtime:lash-vm-runtime[check]",
     "//crates/lash-vm-runtime:lash-vm-runtime__fv_9253b483[check]",
     "//crates/lash-vm-runtime:lash-vm-runtime__unit_test[check]",
+    "//crates/lash-vm-worker:build_script__build[check]",
     "//crates/lash-vm-worker:lash-vm-worker-fixture__bin[check]",
     "//crates/lash-vm-worker:lash-vm-worker[check]",
     "//crates/lash-vm-worker:lash-vm-worker__bin[check]",
@@ -57313,6 +57332,7 @@
     "//crates/lash-vm-protocol:lash-vm-protocol__unit_test__clippy[clippy.txt]",
     "//crates/lash-vm-runtime:lash-vm-runtime__clippy[clippy.txt]",
     "//crates/lash-vm-runtime:lash-vm-runtime__unit_test__clippy[clippy.txt]",
+    "//crates/lash-vm-worker:build_script__build__clippy[clippy.txt]",
     "//crates/lash-vm-worker:lash-vm-worker__clippy[clippy.txt]",
     "//crates/lash-vm-worker:lash-vm-worker-fixture__bin__clippy[clippy.txt]",
     "//crates/lash-vm-worker:lash-vm-worker__bin__clippy[clippy.txt]",
@@ -57601,6 +57621,7 @@
     "//crates/lash-vm-protocol:lash-vm-protocol__unit_test",
     "//crates/lash-vm-runtime:lash-vm-runtime",
     "//crates/lash-vm-runtime:lash-vm-runtime__unit_test",
+    "//crates/lash-vm-worker:build_script__build",
     "//crates/lash-vm-worker:lash-vm-worker",
     "//crates/lash-vm-worker:lash-vm-worker-fixture__bin",
     "//crates/lash-vm-worker:lash-vm-worker__bin",
@@ -57890,6 +57911,8 @@
     "//crates/lash-vm-protocol:lash-vm-protocol__unit_test",
     "//crates/lash-vm-runtime:lash-vm-runtime",
     "//crates/lash-vm-runtime:lash-vm-runtime__unit_test",
+    "//crates/lash-vm-worker:build_script",
+    "//crates/lash-vm-worker:build_script__build",
     "//crates/lash-vm-worker:lash-vm-worker",
     "//crates/lash-vm-worker:lash-vm-worker-fixture__bin",
     "//crates/lash-vm-worker:lash-vm-worker__bin",
