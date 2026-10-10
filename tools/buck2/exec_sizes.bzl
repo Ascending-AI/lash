@@ -357,6 +357,7 @@ TEST_RUN_REQUESTS = {
     "//crates/lash-kernel-doc:lash-kernel-doc__unit_test": {"cpu_count": 2, "memory_kb": 524288},
     "//crates/lash-kernel-edit:kernel_edit_schema_generator__bin__unit_test": {"cpu_count": 2, "memory_kb": 524288},
     "//crates/lash-kernel-edit:lash-kernel-edit__unit_test": {"cpu_count": 2, "memory_kb": 524288},
+    "//crates/lash-kernel-exec:lash-kernel-exec__unit_test": {"cpu_count": 2, "memory_kb": 524288},
     "//crates/lash-kernel-lib:lash-kernel-lib__unit_test": {"cpu_count": 2, "memory_kb": 524288},
     "//crates/lash-kernel-migrate:lash-kernel-migrate__unit_test": {"cpu_count": 2, "memory_kb": 524288},
     "//crates/lash-kernel-state:lash-kernel-state__unit_test": {"cpu_count": 2, "memory_kb": 524288},

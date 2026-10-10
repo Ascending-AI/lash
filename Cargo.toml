@@ -52,6 +52,7 @@ members = [
     "crates/lash-kernel-dialect",
     "crates/lash-kernel-doc",
     "crates/lash-kernel-edit",
+    "crates/lash-kernel-exec",
     "crates/lash-kernel-lib",
     "crates/lash-kernel-migrate",
     "crates/lash-kernel-state",
@@ -332,6 +333,7 @@ lash-kernel-check = { path = "crates/lash-kernel-check", version = "=0.0.0-dev" 
 lash-kernel-dialect = { path = "crates/lash-kernel-dialect", version = "=0.0.0-dev" }
 lash-kernel-doc = { path = "crates/lash-kernel-doc", version = "=0.0.0-dev" }
 lash-kernel-edit = { path = "crates/lash-kernel-edit", version = "=0.0.0-dev" }
+lash-kernel-exec = { path = "crates/lash-kernel-exec", version = "=0.0.0-dev" }
 lash-kernel-lib = { path = "crates/lash-kernel-lib", version = "=0.0.0-dev" }
 lash-kernel-migrate = { path = "crates/lash-kernel-migrate", version = "=0.0.0-dev" }
 lash-kernel-state = { path = "crates/lash-kernel-state", version = "=0.0.0-dev" }

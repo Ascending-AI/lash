@@ -1072,6 +1072,15 @@ PACKAGE_DEPS = {
             "thiserror": "//third-party/rust:p0372"
         }
     },
+    "lash-kernel-exec": {
+        "build": {},
+        "dev": {},
+        "normal": {
+            "blake3": "//third-party/rust:p0031",
+            "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
+            "thiserror": "//third-party/rust:p0372"
+        }
+    },
     "lash-kernel-lib": {
         "build": {},
         "dev": {
