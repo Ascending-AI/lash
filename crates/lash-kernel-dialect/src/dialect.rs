@@ -30,8 +30,33 @@ pub struct Environment<'a> {
     /// The functions the session holds, by the binding each is called
     /// through. A front end declares the ones the source names in the
     /// document it lowers ([`crate::install`]); every name here is also one
-    /// of `bindings`.
+    /// of `bindings`. Two bindings of one function map to it alike: the
+    /// binding is the function's [`crate::SavedFunction::name`], or an
+    /// alias of the binding that is.
     pub functions: &'a BTreeMap<Name, crate::SavedFunction>,
+}
+
+/// What a dialect's function value is, which is how a session keeps one
+/// between cells ([`crate::save`]) and makes it again in a later one
+/// ([`crate::SavedFunction::value`]).
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum FunctionValues {
+    /// The closure, or the reference to a declared function, itself.
+    Bare,
+    /// A token: a tuple whose first member is `tag` and that holds the
+    /// closure, or the reference, among constant data about the function.
+    Token { tag: String },
+}
+
+impl FunctionValues {
+    /// The tag of the token a function value is held in, if it is.
+    pub fn tag(&self) -> Option<&str> {
+        match self {
+            Self::Bare => None,
+            Self::Token { tag } => Some(tag),
+        }
+    }
 }
 
 /// A way an effect's call may end its caller's turn: what the host's tool
@@ -80,6 +105,10 @@ pub struct Package {
     pub front_end: Box<dyn FrontEnd>,
     /// Absent until the dialect ships its printer.
     pub printer: Option<Box<dyn Printer>>,
+    /// What the dialect's function values are, where a session of it keeps
+    /// the functions a cell binds for later cells; `None` for a dialect
+    /// whose sessions keep none ([`crate::NotSaved::Dialect`]).
+    pub function_values: Option<FunctionValues>,
     /// The helpers and extension functions the front end emits calls to,
     /// each after every function its body calls, so an embedder registers
     /// them in this order.

@@ -23,11 +23,13 @@ mod source;
 mod tests;
 
 pub use diagnostic::{Diagnostic, DiagnosticKind, Span};
-pub use dialect::{EffectControl, Environment, FrontEnd, Lowered, Package, Printer};
+pub use dialect::{
+    EffectControl, Environment, FrontEnd, FunctionValues, Lowered, Package, Printer,
+};
 pub use library::{Library, LibraryError, NamedLibrary};
 pub use saved::{
-    CaptureRefusal, Left, NotSaved, SavedFunction, Unusable, WRITTEN, Written, closure_of,
-    function_reference, install, save, token_of,
+    CaptureRefusal, Constant, Kept, Left, NotSaved, SavedFunction, Token, Unusable, WRITTEN,
+    Written, closure_of, function_reference, install, save, token_of,
 };
 pub use source::{SourceError, define_functions};
 

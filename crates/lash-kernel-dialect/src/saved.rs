@@ -20,12 +20,14 @@ use lash_kernel_doc::{
 };
 use serde::{Deserialize, Serialize};
 
+use crate::FunctionValues;
+
 /// A function a session holds as a value of its own.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SavedFunction {
     /// The name `document` declares the function under: the binding it was
-    /// saved from.
+    /// saved from, the first by name of those that held it.
     pub name: Name,
     /// The function's code: a document that declares it and nothing else,
     /// with an empty `main`. Its manifest is what the function requires of
@@ -43,12 +45,141 @@ pub struct SavedFunction {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub written: Option<Written>,
     /// The token the binding held the function in, where its dialect holds
-    /// a function with data about it ([`Left::function_tag`]), as it stood
-    /// when its cell ended: frozen, with the function a reference to
-    /// `name`. A cell that uses the function binds its name to this
-    /// ([`SavedFunction::value`]).
+    /// a function with data about it ([`FunctionValues::Token`]), as it
+    /// stood when its cell ended. A cell that uses the function binds its
+    /// name to this ([`SavedFunction::value`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub token: Option<Datum>,
+    pub token: Option<Token>,
+}
+
+/// A dialect's function token around a saved function, frozen: a tuple of
+/// `tag`, the members `before`, the function, and the members `after`. The
+/// function is structural: it is always the one the token is saved with,
+/// and every other member is constant data about it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Token {
+    pub tag: String,
+    pub before: Vec<Constant>,
+    pub after: Vec<Constant>,
+}
+
+impl Token {
+    /// The token around `value`'s one function member, `value` being a
+    /// tuple whose first member is `tag`, with every other member frozen
+    /// from `objects`; `None` when it is no such token or a member is not
+    /// constant data.
+    fn frozen(
+        value: &Value,
+        tag: &str,
+        objects: &BTreeMap<ObjectId, Object>,
+        named: &BTreeMap<ObjectId, Name>,
+        callable: impl Fn(&Value) -> bool,
+    ) -> Option<Self> {
+        let Value::Tuple(members) = value else {
+            return None;
+        };
+        let (first, rest) = members.split_first()?;
+        if !matches!(first, Value::Text(first) if &**first == tag) {
+            return None;
+        }
+        let mut at = rest
+            .iter()
+            .enumerate()
+            .filter(|(_, member)| callable(member))
+            .map(|(at, _)| at);
+        let (Some(at), None) = (at.next(), at.next()) else {
+            return None;
+        };
+        let each = |members: &[Value]| {
+            members
+                .iter()
+                .map(|member| {
+                    let datum = freeze(member, objects, named, &mut Vec::new()).ok()?;
+                    Constant::try_from(datum).ok()
+                })
+                .collect::<Option<Vec<_>>>()
+        };
+        Some(Self {
+            tag: tag.to_owned(),
+            before: each(&rest[..at])?,
+            after: each(&rest[at + 1..])?,
+        })
+    }
+
+    /// The token as a constant expression around `function`.
+    fn expr(&self, function: Expr) -> Expr {
+        let mut members = Vec::with_capacity(self.before.len() + self.after.len() + 2);
+        members.push(Expr::Literal(Literal::Text(self.tag.clone())));
+        members.extend(self.before.iter().map(Constant::expr));
+        members.push(function);
+        members.extend(self.after.iter().map(Constant::expr));
+        Expr::Tuple(members)
+    }
+}
+
+/// Data a cell writes as a constant expression: a datum that holds no
+/// function reference, undecoded number, timestamp, error or handle.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "Datum", into = "Datum")]
+pub struct Constant(Datum);
+
+impl TryFrom<Datum> for Constant {
+    type Error = &'static str;
+
+    fn try_from(datum: Datum) -> Result<Self, Self::Error> {
+        fn constant(datum: &Datum) -> bool {
+            match datum {
+                Datum::Null
+                | Datum::Absent
+                | Datum::Bool(_)
+                | Datum::Int(_)
+                | Datum::Float(_)
+                | Datum::Text(_)
+                | Datum::Bytes(_) => true,
+                Datum::Tuple(items) | Datum::List(items) | Datum::Set(items) => {
+                    items.iter().all(constant)
+                }
+                Datum::Map(entries) => entries
+                    .iter()
+                    .all(|(key, value)| constant(key) && constant(value)),
+                Datum::Record(fields) => fields.iter().all(|(_, value)| constant(value)),
+                Datum::Number(_)
+                | Datum::Timestamp(_)
+                | Datum::Error(_)
+                | Datum::Function(_)
+                | Datum::Handle(_) => false,
+            }
+        }
+        if constant(&datum) {
+            Ok(Self(datum))
+        } else {
+            Err("a token's data about its function is constant data, without a function")
+        }
+    }
+}
+
+impl From<Constant> for Datum {
+    fn from(constant: Constant) -> Self {
+        constant.0
+    }
+}
+
+impl Constant {
+    fn expr(&self) -> Expr {
+        // Construction admits only data `constant` writes.
+        constant(&self.0).unwrap_or(Expr::Literal(Literal::Absent))
+    }
+}
+
+/// A function a cell left, saved once however many of its bindings held
+/// it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Kept {
+    pub function: SavedFunction,
+    /// The other bindings that held the function, besides the one it is
+    /// declared under ([`SavedFunction::name`]).
+    pub aliases: BTreeSet<Name>,
 }
 
 /// A saved function as its dialect wrote it.
@@ -93,6 +224,10 @@ pub enum NotSaved {
     /// The function calls another by name that was itself not saved.
     #[error("its function uses `{function}`, which is not a saved function")]
     Needs { function: Name },
+    /// The token the binding held its function in holds data about it that
+    /// is not constant ([`Constant`]).
+    #[error("its function's value holds data about the function that is no constant")]
+    Token,
     /// The function performs an effect whose call ends the turn. Only a
     /// cell's `main` ends its turn, so no function is kept that would.
     #[error(
@@ -150,12 +285,9 @@ pub struct Left<'a> {
     /// The document's annotations, which state what each function's
     /// source wrote of it ([`WRITTEN`]).
     pub annotations: Option<&'a Annotations>,
-    /// The tag of the token the session's dialect holds a function value
-    /// in: a tuple whose first member is the tag and whose members hold
-    /// one closure, the rest data about the function. A binding that holds
-    /// one is saved as the closure, with the token. `None` for a dialect
-    /// whose function values are closures.
-    pub function_tag: Option<&'a str>,
+    /// What the session's dialect holds a function value in. A binding
+    /// that holds a token is saved as the closure it holds, with the token.
+    pub values: &'a FunctionValues,
 }
 
 /// The closure a dialect's function token holds, and its position: `value`
@@ -189,13 +321,12 @@ fn closure_held(value: &Value, tag: Option<&str>) -> Option<ObjectId> {
 }
 
 /// The saved function a binding's value refers to: a reference to a
-/// declared function, or a dialect's function token around one (`tag` as
-/// [`Left::function_tag`]).
-pub fn function_reference<'v>(value: &'v Value, tag: Option<&str>) -> Option<&'v Name> {
+/// declared function, or a dialect's function token around one.
+pub fn function_reference<'v>(value: &'v Value, values: &FunctionValues) -> Option<&'v Name> {
     match value {
         Value::Function(name) => Some(name),
         Value::Tuple(members) => {
-            let tag = tag?;
+            let tag = values.tag()?;
             if !matches!(members.first(), Some(Value::Text(first)) if &**first == tag) {
                 return None;
             }
@@ -210,23 +341,17 @@ pub fn function_reference<'v>(value: &'v Value, tag: Option<&str>) -> Option<&'v
     }
 }
 
-/// A dialect's function token around a reference to `name`, frozen as data
-/// with `name` in place of the reference, or `None` for a bare reference or
-/// a token holding something that has no constant.
-pub fn token_of(value: &Value, objects: &BTreeMap<ObjectId, Object>, name: &Name) -> Option<Datum> {
-    let Value::Tuple(members) = value else {
-        return None;
-    };
-    let named = BTreeMap::new();
-    let members = members
-        .iter()
-        .map(|member| match member {
-            Value::Function(_) => Ok(Datum::Function(name.clone())),
-            _ => freeze(member, objects, &named, &mut Vec::new()),
-        })
-        .collect::<Result<Vec<_>, _>>()
-        .ok()?;
-    Some(Datum::Tuple(members))
+/// A dialect's function token around a reference to a saved function,
+/// frozen ([`Token`]), or `None` for a bare reference or a token holding
+/// something that is no constant.
+pub fn token_of(
+    value: &Value,
+    objects: &BTreeMap<ObjectId, Object>,
+    values: &FunctionValues,
+) -> Option<Token> {
+    Token::frozen(value, values.tag()?, objects, &BTreeMap::new(), |member| {
+        matches!(member, Value::Function(_))
+    })
 }
 
 /// The annotation key under which a dialect states, on the statement that
@@ -267,53 +392,73 @@ fn written(annotations: &Annotations, site: &Site) -> Option<Written> {
     })
 }
 
-/// Saves every binding of `left.closures` that is a function whose
-/// captures are data or other saved functions, and says of each other one
-/// why it was not saved. `held` names the functions the session already
-/// holds, which a capture may name.
+/// Saves every function of `left.closures` whose captures are data or
+/// other saved functions, once however many bindings hold it, and says of
+/// each other binding why it was not saved. `held` names the functions the
+/// session already holds, which a capture may name.
 pub fn save(
     left: Left<'_>,
     held: &BTreeSet<Name>,
-) -> (BTreeMap<Name, SavedFunction>, BTreeMap<Name, NotSaved>) {
+) -> (BTreeMap<Name, Kept>, BTreeMap<Name, NotSaved>) {
+    let tag = left.values.tag();
     // A closure a binding holds directly, or in its dialect's function
-    // token, is known by that binding's name.
+    // token, is known by the first binding by name that holds it.
     let mut named: BTreeMap<ObjectId, Name> = BTreeMap::new();
     for (name, value) in left.closures {
-        if let Some(id) = closure_held(value, left.function_tag) {
+        if let Some(id) = closure_held(value, tag) {
             named.entry(id).or_insert_with(|| name.clone());
         }
     }
-    let mut saved = BTreeMap::new();
+    let mut saved: BTreeMap<Name, Kept> = BTreeMap::new();
     let mut refused = BTreeMap::new();
+    let mut aliases: BTreeMap<Name, BTreeSet<Name>> = BTreeMap::new();
     for name in left.not_carried {
-        match left.closures.get(name) {
-            None => {
-                refused.insert(name.clone(), NotSaved::Task);
-            }
-            Some(value) => match closure_held(value, left.function_tag) {
-                Some(id) => match save_closure(&left, name, id, &named) {
-                    Ok(mut function) => match frozen_token(&left, value, name, &named) {
-                        Ok(token) => {
-                            function.token = token;
-                            saved.insert(name.clone(), function);
-                        }
-                        Err(why) => {
-                            refused.insert(name.clone(), why);
-                        }
+        let Some(value) = left.closures.get(name) else {
+            refused.insert(name.clone(), NotSaved::Task);
+            continue;
+        };
+        let Some((id, known)) = closure_held(value, tag).and_then(|id| Some((id, named.get(&id)?)))
+        else {
+            refused.insert(name.clone(), NotSaved::FunctionInData);
+            continue;
+        };
+        // Another binding of the function is the one it is saved under.
+        if known != name {
+            aliases
+                .entry(known.clone())
+                .or_default()
+                .insert(name.clone());
+            continue;
+        }
+        let kept = save_closure(&left, name, id, &named).and_then(|mut function| {
+            function.token = frozen_token(&left, value, &named)?;
+            Ok(function)
+        });
+        match kept {
+            Ok(function) => {
+                saved.insert(
+                    name.clone(),
+                    Kept {
+                        function,
+                        aliases: BTreeSet::new(),
                     },
-                    Err(why) => {
-                        refused.insert(name.clone(), why);
-                    }
-                },
-                None => {
-                    refused.insert(name.clone(), NotSaved::FunctionInData);
-                }
-            },
+                );
+            }
+            Err(why) => {
+                refused.insert(name.clone(), why);
+            }
+        }
+    }
+    for (name, names) in aliases {
+        if let Some(kept) = saved.get_mut(&name) {
+            kept.aliases = names;
+        } else if let Some(why) = refused.get(&name).cloned() {
+            refused.extend(names.into_iter().map(|alias| (alias, why.clone())));
         }
     }
     // A function that names one that was not saved is not saved either.
     loop {
-        let missing = saved.iter().find_map(|(name, function)| {
+        let missing = saved.iter().find_map(|(name, Kept { function, .. })| {
             function
                 .needs()
                 .into_iter()
@@ -323,7 +468,7 @@ pub fn save(
                         && left
                             .carried
                             .get(needed)
-                            .and_then(|value| function_reference(value, left.function_tag))
+                            .and_then(|value| function_reference(value, left.values))
                             == Some(needed);
                     !saved.contains_key(needed) && !still_held
                 })
@@ -332,40 +477,39 @@ pub fn save(
         let Some((name, function)) = missing else {
             break;
         };
-        saved.remove(&name);
+        if let Some(kept) = saved.remove(&name) {
+            for alias in kept.aliases {
+                refused.insert(
+                    alias,
+                    NotSaved::Needs {
+                        function: function.clone(),
+                    },
+                );
+            }
+        }
         refused.insert(name, NotSaved::Needs { function });
     }
     (saved, refused)
 }
 
-/// The token a binding held its function in, frozen with the function as a
-/// reference to the binding's `name`; `None` for a bare closure.
+/// The token a binding held its function in, frozen; `None` for a bare
+/// closure.
 fn frozen_token(
     left: &Left<'_>,
     value: &Value,
-    name: &Name,
     named: &BTreeMap<ObjectId, Name>,
-) -> Result<Option<Datum>, NotSaved> {
-    let (Some((_, at)), Value::Tuple(members)) = (token_closure(value, left.function_tag), value)
-    else {
+) -> Result<Option<Token>, NotSaved> {
+    let Some(tag) = left.values.tag() else {
         return Ok(None);
     };
-    let members = members
-        .iter()
-        .enumerate()
-        .map(|(index, member)| {
-            if index == at {
-                return Ok(Datum::Function(name.clone()));
-            }
-            freeze(member, left.closure_objects, named, &mut Vec::new()).map_err(|why| {
-                NotSaved::Capture {
-                    name: name.clone(),
-                    why,
-                }
-            })
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(Some(Datum::Tuple(members)))
+    if token_closure(value, Some(tag)).is_none() {
+        return Ok(None);
+    }
+    Token::frozen(value, tag, left.closure_objects, named, |member| {
+        matches!(member, Value::Closure(_))
+    })
+    .map(Some)
+    .ok_or(NotSaved::Token)
 }
 
 fn save_closure(
@@ -573,7 +717,7 @@ impl<'a> Frozen<'a> {
             };
             // A closure no binding names is frozen with the function that
             // holds it.
-            if let Some(helper) = closure_held(value, left.function_tag)
+            if let Some(helper) = closure_held(value, left.values.tag())
                 && !self.named.contains_key(&helper)
             {
                 match self.bound.get(free) {
@@ -584,7 +728,7 @@ impl<'a> Frozen<'a> {
                 let Some(Object::Closure(inner)) = left.closure_objects.get(&helper) else {
                     return Err(unreadable("a captured closure is missing"));
                 };
-                let token = match (token_closure(value, left.function_tag), value) {
+                let token = match (token_closure(value, left.values.tag()), value) {
                     (Some((_, at)), Value::Tuple(members)) => {
                         let mut constants = Vec::with_capacity(members.len());
                         for (index, member) in members.iter().enumerate() {
@@ -994,6 +1138,10 @@ pub enum Unusable {
         "the saved function `{function}` holds a capture `{capture}` no constant is written for"
     )]
     Capture { function: Name, capture: Name },
+    /// It was held in a function value this dialect does not make: a token
+    /// in a dialect whose function values are bare, or one of another tag.
+    #[error("the saved function `{function}` is held in a value this dialect does not make")]
+    Token { function: Name },
 }
 
 impl SavedFunction {
@@ -1055,26 +1203,21 @@ impl SavedFunction {
         if let Some(definition) = renamed.document.functions.remove(&self.name) {
             renamed.document.functions.insert(name.clone(), definition);
         }
-        if let Some(Datum::Tuple(members)) = &mut renamed.token {
-            for member in members {
-                if *member == Datum::Function(self.name.clone()) {
-                    *member = Datum::Function(name.clone());
-                }
-            }
-        }
         renamed.name = name.clone();
         renamed
     }
 
-    /// What a cell that uses the function binds its name to: the token its
-    /// dialect held it in, as a constant. `None` where the reference to its
-    /// declaration is its value.
+    /// What a cell that uses the function binds each of its names to: the
+    /// token its dialect held it in, around the reference to its
+    /// declaration. `None` where that reference is its value.
     pub fn value(&self) -> Option<Expr> {
-        self.token.as_ref().and_then(constant)
+        let function = Expr::Literal(Literal::Function(self.name.clone()));
+        self.token.as_ref().map(|token| token.expr(function))
     }
 }
 
-/// `roots` and every saved function they use by name, each once.
+/// The functions `roots` are bindings of, and every saved function they
+/// use by name, each once, by the name it is declared under.
 ///
 /// # Errors
 ///
@@ -1096,21 +1239,26 @@ pub fn closure_of<'a>(
             function: by.clone(),
             needs: name.clone(),
         })?;
+        if used.contains_key(&function.name) {
+            continue;
+        }
         pending.extend(
             function
                 .needs()
                 .into_iter()
-                .map(|needed| (name.clone(), needed)),
+                .map(|needed| (function.name.clone(), needed)),
         );
-        used.insert(name, function);
+        used.insert(function.name.clone(), function);
     }
     Ok(used)
 }
 
-/// Declares `roots`, and every saved function they use, in `document`, and
-/// adds what they require to its manifest. `effects` are the effects the
-/// environment offers, `controls` the ones among them whose call ends the
-/// turn, and `installed` says whether it holds a library function.
+/// Declares the functions `roots` are bindings of, and every saved
+/// function they use, in `document`, and adds what they require to its
+/// manifest. `values` are what the dialect's function values are,
+/// `effects` the effects the environment offers, `controls` the ones among
+/// them whose call ends the turn, and `installed` says whether it holds a
+/// library function.
 ///
 /// # Errors
 ///
@@ -1119,12 +1267,21 @@ pub fn install(
     document: &mut Document,
     functions: &BTreeMap<Name, SavedFunction>,
     roots: &BTreeSet<Name>,
+    values: &FunctionValues,
     effects: &BTreeMap<EffectName, Signature>,
     controls: &BTreeMap<EffectName, BTreeSet<crate::EffectControl>>,
     installed: &dyn Fn(&FunctionId) -> bool,
 ) -> Result<(), Unusable> {
     for (name, function) in closure_of(functions, roots)? {
         let unusable = |unusable: fn(Name) -> Unusable| unusable(name.clone());
+        if function
+            .token
+            .as_ref()
+            .map(|token| token.tag.as_str())
+            .is_some_and(|tag| values.tag() != Some(tag))
+        {
+            return Err(unusable(|function| Unusable::Token { function }));
+        }
         if function.document.manifest.numbers != document.manifest.numbers {
             return Err(unusable(|function| Unusable::Numbers { function }));
         }

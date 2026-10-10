@@ -91,6 +91,93 @@ async fn a_saved_function_keeps_its_name_and_length_across_cells() {
     );
 }
 
+/// Two bindings of one function are one function in every later cell
+/// (FIG-5826), on this node and after a cold restore: aliases made in the
+/// function's own cell and in a later one stay `===`, and a property
+/// deleted through one is gone through all.
+#[tokio::test(flavor = "multi_thread")]
+async fn aliases_of_a_saved_function_stay_one_function_across_cells() {
+    let host = open_host().await;
+    let tools = Arc::new(CellTools::default());
+    let mut state = typescript_state();
+    cell(
+        &mut state,
+        &host,
+        "exec-code:0",
+        tools.clone(),
+        "function f(a: number) { return a; }\nconst g = f;",
+    )
+    .await;
+    cell(
+        &mut state,
+        &host,
+        "exec-code:1",
+        tools.clone(),
+        "const h = f;\ndelete (g as any).length;",
+    )
+    .await;
+    let fleet = lash_core::FleetFormat::current();
+    state
+        .snapshot_execution_state(fleet)
+        .await
+        .expect("capture the session's state");
+    state.acknowledge_execution_state_capture();
+    let saved = state
+        .hydrated_execution_state(fleet)
+        .await
+        .expect("the saved session state");
+    drop(state);
+    let mut state = typescript_state();
+    state
+        .restore_execution_state(&saved, fleet)
+        .await
+        .expect("load the session's state");
+    let read = cell(
+        &mut state,
+        &host,
+        "exec-code:2",
+        tools,
+        "await control.finish({ fg: f === g, fh: f === h, f: f.length, g: g.length, h: h.length });",
+    )
+    .await;
+    assert_eq!(
+        finish_of(&read),
+        serde_json::json!({ "fg": true, "fh": true, "f": 0, "g": 0, "h": 0 }),
+        "every alias is the one function, deletion included"
+    );
+}
+
+/// A saved function is a `Map` key and a `Set` member in a later cell
+/// (FIG-5826), under any of its aliases, and a key read back is the
+/// function.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_saved_function_is_a_map_key_and_set_member_in_a_later_cell() {
+    let host = open_host().await;
+    let tools = Arc::new(CellTools::default());
+    let mut state = typescript_state();
+    cell(
+        &mut state,
+        &host,
+        "exec-code:0",
+        tools.clone(),
+        "function f() { return 1; }\nconst g = f;",
+    )
+    .await;
+    let keyed = cell(
+        &mut state,
+        &host,
+        "exec-code:1",
+        tools,
+        "const m = new Map([[f, \"x\"]]);\nconst s = new Set([f]);\nconst key = [...m.keys()][0];\nawait control.finish({ get: m.get(g), has: s.has(g), size: m.size, called: key(), same: key === f });",
+    )
+    .await;
+    assert_eq!(
+        finish_of(&keyed),
+        serde_json::json!({ "get": "x", "has": true, "size": 1, "called": 1, "same": true }),
+        "the function keys the map and the set, and comes back out as itself"
+    );
+}
+
 /// One cell of `state`, which must complete.
 async fn cell(
     state: &mut super::RlmExecutionState,

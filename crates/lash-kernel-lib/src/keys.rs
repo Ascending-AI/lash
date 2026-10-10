@@ -43,6 +43,7 @@ fn validate(value: &Value) -> Result<(), NativeError> {
             | Value::Text(_)
             | Value::Bytes(_)
             | Value::Timestamp(_)
+            | Value::Function(_)
             | Value::Ref(_) => {}
             Value::Tuple(values) => pending.extend(values.iter()),
             _ => {
@@ -157,6 +158,10 @@ fn hash_value<H: Hasher>(value: &Value, state: &mut H) {
         Value::Ref(value) => {
             6u8.hash(state);
             value.hash(state);
+        }
+        Value::Function(name) => {
+            8u8.hash(state);
+            name.hash(state);
         }
         // The constructor proves these variants are unreachable.
         _ => {}

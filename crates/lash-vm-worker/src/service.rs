@@ -43,6 +43,10 @@ pub(crate) fn perform(
                 Some(Ok(lowered)) => Response::Lowered {
                     document: encoded(lowered.document.to_json())?,
                     annotations: encoded(lowered.annotations.to_json())?,
+                    function_values: embedding
+                        .dialects
+                        .get(&dialect)
+                        .and_then(|package| package.function_values.clone()),
                 },
                 Some(Err(diagnostic)) => Response::DialectRefused(refusal(diagnostic)),
             },

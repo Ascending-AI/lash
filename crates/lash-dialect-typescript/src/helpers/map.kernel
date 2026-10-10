@@ -55,11 +55,14 @@ body {
   if same(k, "tuple") {
     if same(value, ()) {} else {
       # A function's token holds the closure that calls it, which is keyed
-      # as the object it is, and so is the deleted record of one the
-      # program made.
+      # as the object it is, or the reference to the declared function a
+      # saved one is, which is a key itself; the deleted record of one the
+      # program made is keyed as the object it is.
       if same(value[0], "ts.function") {
-        if same(value[1], "") { return ("ts.function", "", value[2], value[3], ref(value[4]), ref(value[5])) }
-        return ("ts.function", value[1], value[2], value[3], ref(value[4]))
+        let callable = value[4]
+        if same(kind(callable), "function") {} else { set callable = ref(callable) }
+        if same(value[1], "") { return ("ts.function", "", value[2], value[3], callable, ref(value[5])) }
+        return ("ts.function", value[1], value[2], value[3], callable)
       }
     }
   }
@@ -77,8 +80,10 @@ body {
     if same(key[0], "error") { return error.new(key[2], key[3], deref(key[1])) }
     if same(key[0], "undefined") { return absent }
     if same(key[0], "ts.function") {
-      if same(key[1], "") { return ("ts.function", "", key[2], key[3], deref(key[4]), deref(key[5])) }
-      return ("ts.function", key[1], key[2], key[3], deref(key[4]))
+      let callable = key[4]
+      if same(kind(callable), "ref") { set callable = deref(callable) }
+      if same(key[1], "") { return ("ts.function", "", key[2], key[3], callable, deref(key[5])) }
+      return ("ts.function", key[1], key[2], key[3], callable)
     }
     # A built-in object's token is its own key.
     return key

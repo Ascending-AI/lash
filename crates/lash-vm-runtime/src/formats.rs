@@ -71,10 +71,10 @@ const _: () = assert!(KERNEL_PARKED_STATE_VERSION == KernelVersion::NEWEST.numbe
 
 /// A saved function: a function a session keeps between cells, as its code
 /// (a kernel document that declares it) and the captures frozen with it.
-/// The RLM session snapshot holds one per binding, and a session is created
-/// with them as an input. Its document states the kernel version it was
-/// written in, and the kernel migration rewrites each stored one, alone,
-/// when its session is restored or seeded.
+/// The RLM session snapshot holds one per function, with the bindings that
+/// hold it, and a session is created with them as an input. Its document
+/// states the kernel version it was written in, and the kernel migration
+/// rewrites each stored one, alone, when its session is restored or seeded.
 ///
 /// A saved function is declared in the document of each cell that uses it,
 /// so it is held in the version this build's dialects lower a cell in. The

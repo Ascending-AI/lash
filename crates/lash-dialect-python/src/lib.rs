@@ -81,6 +81,7 @@ pub fn package(functions: Vec<lash_kernel_doc::FunctionDefinition>) -> Package {
         dialect: DIALECT.to_string(),
         front_end: Box::new(Python),
         printer: None,
+        function_values: Some(lash_kernel_dialect::FunctionValues::Bare),
         functions,
     }
 }

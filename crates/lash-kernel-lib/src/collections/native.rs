@@ -411,6 +411,7 @@ fn key(value: &Value, depth: usize) -> Result<(), NativeError> {
         | Value::Text(_)
         | Value::Bytes(_)
         | Value::Timestamp(_)
+        | Value::Function(_)
         | Value::Ref(_) => Ok(()),
         Value::Tuple(items) => {
             for item in items.iter() {

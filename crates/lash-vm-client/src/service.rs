@@ -63,6 +63,10 @@ pub enum Response {
         /// Its annotations' JSON encoding.
         #[serde(with = "serde_bytes")]
         annotations: Vec<u8>,
+        /// What the dialect's function values are, where its sessions keep
+        /// the functions a cell binds for later cells
+        /// ([`lash_kernel_dialect::Package::function_values`]).
+        function_values: Option<lash_kernel_dialect::FunctionValues>,
     },
     Printed {
         source: String,

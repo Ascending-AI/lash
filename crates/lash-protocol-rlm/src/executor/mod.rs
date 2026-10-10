@@ -373,11 +373,12 @@ async fn link_cell(
             helpers,
         })
         .await;
-    let (document, annotations) = match lowered {
+    let (document, annotations, function_values) = match lowered {
         Ok(Response::Lowered {
             document,
             annotations,
-        }) => (document, annotations),
+            function_values,
+        }) => (document, annotations, function_values),
         Ok(Response::DialectRefused(refusal)) => {
             let observation = CellObservation::of_refusal(refusal);
             emit_step_trace(ctx, Err(&observation.code()));
@@ -420,6 +421,7 @@ async fn link_cell(
         dialect: state.dialect().to_owned(),
         document: text(document, "document")?,
         annotations: text(annotations, "annotations")?,
+        function_values,
         effects: CellEnvelope::record_effects(&boundary),
         grants,
         projected: projected.keys().cloned().collect(),
@@ -802,6 +804,7 @@ async fn run_cell(
                     not_carried: finished.not_carried,
                     closures: finished.closures,
                     controls: host.boundary.controls(),
+                    function_values: host.envelope.function_values.as_ref(),
                 });
                 // A cell ends its turn only through a control call: the
                 // dialect ends `main` right after one settles, and the

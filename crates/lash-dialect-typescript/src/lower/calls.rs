@@ -348,7 +348,7 @@ impl Lowerer<'_> {
                 })?;
                 let call = self.emit_closure(vec![this, args], body);
                 vec![
-                    text("ts.function"),
+                    text(crate::FUNCTION_TAG),
                     text(path),
                     text(crate::builtins::function_name(path)),
                     Expr::Literal(Literal::Float(lash_kernel_doc::Float::new(f64::from(

@@ -415,6 +415,7 @@ fn typescript_package(tuning: &WorkerTuning, functions: Vec<FunctionDefinition>)
             )),
         }),
         printer: Some(Box::new(TypeScriptPrinter)),
+        function_values: Some(lash_dialect_typescript::function_values()),
         functions,
     }
 }

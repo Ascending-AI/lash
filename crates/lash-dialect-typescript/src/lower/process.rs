@@ -124,11 +124,11 @@ impl Lowerer<'_> {
     /// entry calls the function as a cell would, and waits for what it
     /// returns.
     pub(super) fn lower_saved_process(&mut self, name: &Name) -> Lowering<Operand> {
-        let Some(Signature { params, result }) = self
-            .saved
-            .get(name)
-            .and_then(|saved| saved.written.as_ref())
-            .and_then(|written| written.start.clone())
+        let Some((declared, Signature { params, result })) =
+            self.saved.get(name).and_then(|saved| {
+                let start = saved.written.as_ref()?.start.clone()?;
+                Some((saved.name.clone(), start))
+            })
         else {
             unreachable!("`saved_process` answered for a function a host may start");
         };
@@ -151,7 +151,7 @@ impl Lowerer<'_> {
             Stmt::Let {
                 name: returned.clone(),
                 value: lash_kernel_doc::Rhs::Action(Action::Call {
-                    callee: Callee::Declared(name.clone()),
+                    callee: Callee::Declared(declared),
                     args: vec![Atom::Literal(Literal::Absent), Atom::Variable(args)],
                 }),
             },

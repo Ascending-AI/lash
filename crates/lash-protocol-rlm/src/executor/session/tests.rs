@@ -108,6 +108,64 @@ async fn bindings_recorded_in_another_dialect_are_refused() {
     );
 }
 
+/// A saved function's token holds the function itself and constant data
+/// about it, and nothing else (FIG-5826): a seed whose token is a bare
+/// datum, or names a function in place of the one it saves, is refused.
+#[tokio::test]
+async fn a_seeded_token_that_is_no_callable_wrapper_is_refused() {
+    let none = BTreeSet::new();
+    for token in [
+        serde_json::json!({ "int": "7" }),
+        serde_json::json!({ "tuple": [{ "text": "ts.function" }, { "function": "other" }] }),
+    ] {
+        let mut function = saved("f", lash_kernel_doc::KERNEL_VERSION);
+        function["token"] = token.clone();
+        let functions = [("f".to_string(), function)].into_iter().collect();
+        let error = RlmExecutionState::new("typescript", NumberPolicy::Float)
+            .seed_functions(&functions, &none)
+            .await
+            .expect_err("the token is refused");
+        assert!(
+            error.to_string().contains("is not a saved function"),
+            "{token}: {error}"
+        );
+    }
+}
+
+/// What a session keeps of a function a cell bound is what the cell's
+/// dialect declared its function values are, never the dialect's name
+/// (FIG-5826): a cell whose dialect declared none keeps no function, and
+/// says so of the binding, in a session recorded as TypeScript.
+#[test]
+fn a_cell_whose_dialect_declares_no_function_values_keeps_no_function() {
+    let document = lash_kernel_doc::Document::new(NumberPolicy::Float, Vec::new());
+    let name = lash_kernel_doc::Name::new("f");
+    let mut bindings = super::SessionBindings::default();
+    let changes = bindings.settle(super::CellLeft {
+        document: &document,
+        identity: lash_kernel_doc::DocumentId::from_bytes([0; 32]),
+        annotations: None,
+        bindings: lash_kernel_vm::Bindings::default(),
+        not_carried: vec![name.clone()],
+        closures: lash_kernel_vm::Bindings {
+            variables: [(
+                name.clone(),
+                lash_kernel_doc::Value::Closure(lash_kernel_doc::ObjectId(0)),
+            )]
+            .into(),
+            objects: Default::default(),
+        },
+        controls: Default::default(),
+        function_values: None,
+    });
+    assert_eq!(changes.not_carried, ["f"]);
+    assert_eq!(
+        bindings.not_carried().get(&name),
+        Some(&lash_kernel_dialect::NotSaved::Dialect)
+    );
+    assert!(bindings.held_functions().is_empty());
+}
+
 /// A saved function whose code is `return 1`, written for kernel version
 /// `kernel`.
 fn saved(name: &str, kernel: u32) -> serde_json::Value {

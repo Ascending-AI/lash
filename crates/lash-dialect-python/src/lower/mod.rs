@@ -325,6 +325,7 @@ pub(crate) fn lower(
             &mut document,
             environment.functions,
             &lowerer.saved_used,
+            &lash_kernel_dialect::FunctionValues::Bare,
             environment.effects,
             environment.controls,
             &|function| catalog.definition(function).is_some(),

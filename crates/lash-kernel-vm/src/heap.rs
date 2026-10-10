@@ -11,7 +11,7 @@ use std::ops::ControlFlow;
 use std::sync::Arc;
 
 use lash_kernel_doc::{
-    Bytes, Element, ErrorValue, Identity, Integer, NativeError, NativeHeap, Object, ObjectId,
+    Bytes, Element, ErrorValue, Identity, Integer, Name, NativeError, NativeHeap, Object, ObjectId,
     TaskId, Value,
 };
 use num_bigint::BigInt;
@@ -45,6 +45,7 @@ pub(crate) enum Key {
     Bytes(Bytes),
     Timestamp(Integer),
     Ref(Identity),
+    Function(Name),
     Tuple(Vec<Key>),
 }
 
@@ -70,6 +71,7 @@ impl Key {
             Value::Bytes(bytes) => Self::Bytes(bytes.clone()),
             Value::Timestamp(timestamp) => Self::Timestamp(timestamp.nanoseconds.clone()),
             Value::Ref(identity) => Self::Ref(*identity),
+            Value::Function(name) => Self::Function(name.clone()),
             Value::Tuple(members) => {
                 Self::Tuple(members.iter().map(Self::of).collect::<Option<_>>()?)
             }

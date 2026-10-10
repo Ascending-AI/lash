@@ -204,27 +204,48 @@
       }
     },
     {
-      "name": "map refuses key &f",
-      "document": "kernel 1\nnumbers by_spelling\nfn f() { return null }\nmain { let x = &f  try { print map{x: 1} } catch e { finish e.kind } finish null }\n",
+      "name": "a function reference is a legal key, one per function it names",
+      "document": "kernel 1\nnumbers by_spelling\nfn f() { return null }\nfn g() { return null }\nmain { let x = &f let y = &f let z = &g let m = map{x: 1, z: 3} set m[y] = 2 finish m }\n",
       "expected": {
         "prints": [],
         "trace": [],
         "end": {
           "finished": {
-            "text": "invalid_key"
+            "map": [
+              [
+                {
+                  "function": "f"
+                },
+                {
+                  "int": "2"
+                }
+              ],
+              [
+                {
+                  "function": "g"
+                },
+                {
+                  "int": "3"
+                }
+              ]
+            ]
           }
         }
       }
     },
     {
-      "name": "set refuses member &f",
-      "document": "kernel 1\nnumbers by_spelling\nfn f() { return null }\nmain { let x = &f  try { print set{x} } catch e { finish e.kind } finish null }\n",
+      "name": "a set holds a function reference once",
+      "document": "kernel 1\nnumbers by_spelling\nfn f() { return null }\nmain { let x = &f let y = &f let s = set{x, y} finish s }\n",
       "expected": {
         "prints": [],
         "trace": [],
         "end": {
           "finished": {
-            "text": "invalid_key"
+            "set": [
+              {
+                "function": "f"
+              }
+            ]
           }
         }
       }

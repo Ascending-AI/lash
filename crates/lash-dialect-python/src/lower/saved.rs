@@ -112,6 +112,10 @@ impl Lowerer<'_> {
     }
 
     fn saved_process(&mut self, name: &Name, signature: Signature) -> Operand {
+        let declared = self
+            .saved
+            .get(name)
+            .map_or_else(|| name.clone(), |saved| saved.name.clone());
         let entry = self.fresh(&format!("{name}_process"));
         let returned = self.temp();
         self.saved_used.insert(name.clone());
@@ -127,7 +131,7 @@ impl Lowerer<'_> {
                     Stmt::Let {
                         name: returned.clone(),
                         value: Rhs::Action(Action::Call {
-                            callee: Callee::Declared(name.clone()),
+                            callee: Callee::Declared(declared),
                             args: signature
                                 .params
                                 .iter()

@@ -6,7 +6,7 @@ testing false
 
 # [serde (deny_unknown_fields)] struct DialectRefusal { code : String , message : String , span : Option < (usize , usize) > , unsupported : bool , repairs : Vec < String > , }
 
-# [serde (rename_all = "snake_case" , deny_unknown_fields)] enum Response { Lowered { # [serde (with = "serde_bytes")] document : Vec < u8 > , # [serde (with = "serde_bytes")] annotations : Vec < u8 > , } , Printed { source : String , } , DialectRefused (DialectRefusal) , UnknownDialect { dialect : String , } , HelperReleaseNotHeld { release : u32 , } }
+# [serde (rename_all = "snake_case" , deny_unknown_fields)] enum Response { Lowered { # [serde (with = "serde_bytes")] document : Vec < u8 > , # [serde (with = "serde_bytes")] annotations : Vec < u8 > , function_values : Option < lash_kernel_dialect :: FunctionValues > , } , Printed { source : String , } , DialectRefused (DialectRefusal) , UnknownDialect { dialect : String , } , HelperReleaseNotHeld { release : u32 , } }
 
 # [serde (deny_unknown_fields)] struct StartWire { entry : Option < Name > , args : Vec < Datum > , variables : BTreeMap < Name , Value > , objects : Vec < (ObjectId , Object) > , }
 

@@ -78,7 +78,7 @@ Rules whose cases need a running machine are pinned by the conformance corpus (`
 
 ## Keys (`K-KEY`)
 
-- **K-KEY-001.** A map key or a set member is a legal key: null, a bool, an integer, a float, a text, bytes, a timestamp, a ref, or a tuple whose members are all legal keys. Any other value used as a key raises `invalid_key`. A heap object is used as a key through its ref (`K-KEY-004`).
+- **K-KEY-001.** A map key or a set member is a legal key: null, a bool, an integer, a float, a text, bytes, a timestamp, a function reference, a ref, or a tuple whose members are all legal keys. Any other value used as a key raises `invalid_key`. A heap object is used as a key through its ref (`K-KEY-004`).
 - **K-KEY-002.** Two keys are the same key when they are `eq`, except that NaN is the same key as NaN, also inside a tuple. So integer 1 and float `1.0` are one key, `-0.0` and `0.0` are one key, and `true` and 1 are two.
 - **K-KEY-003.** Writing under a key a map already holds replaces the value and keeps the entry's first key and its position. After `m[1] = "a"` and `m[1.0] = "b"`, the map has one entry whose key is the integer 1. Adding a member a set already holds changes nothing.
 - **K-KEY-004.** `ref(x)` takes the identity of a list, map, set, record, closure or task handle, and raises `type_error` for any other kind. `deref(r)` gives the object or task handle back. A ref keeps what it names alive.

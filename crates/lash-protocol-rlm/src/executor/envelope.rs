@@ -52,6 +52,9 @@ pub(super) struct CellEnvelope {
     /// The document's annotations, as JSON: where each statement came from
     /// in the source.
     pub annotations: String,
+    /// What the dialect's function values are, where its sessions keep the
+    /// functions a cell binds ([`lash_kernel_dialect::Package::function_values`]).
+    pub function_values: Option<lash_kernel_dialect::FunctionValues>,
     /// The effects the document was lowered against.
     pub effects: BTreeMap<EffectName, RecordedEffect>,
     /// The grants the cell's deferred resolutions recorded.

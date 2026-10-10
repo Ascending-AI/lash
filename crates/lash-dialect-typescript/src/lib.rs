@@ -27,7 +27,21 @@ pub use diagnostics::{CodeClassification, Diagnostic, DiagnosticCode, Diagnostic
 pub use package::define_helpers;
 pub use printer::print;
 
-use lash_kernel_dialect::{Environment, FrontEnd, Lowered};
+use lash_kernel_dialect::{Environment, FrontEnd, FunctionValues, Lowered};
+
+/// The tag of the token a TypeScript function value is: a tuple of the tag,
+/// the built-in's path, its name and length, the closure that calls it and,
+/// for one the program made, the record of what it deleted of itself
+/// (`lower/functions.rs`).
+pub(crate) const FUNCTION_TAG: &str = "ts.function";
+
+/// What a TypeScript function value is, as the dialect's package declares
+/// it ([`lash_kernel_dialect::Package::function_values`]).
+pub fn function_values() -> FunctionValues {
+    FunctionValues::Token {
+        tag: FUNCTION_TAG.to_owned(),
+    }
+}
 
 /// Lowers TypeScript source to a kernel document.
 ///

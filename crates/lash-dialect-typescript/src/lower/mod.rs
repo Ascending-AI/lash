@@ -393,16 +393,26 @@ pub(crate) fn lower(
     lowerer.pop_scope();
     let mut main = std::mem::take(&mut lowerer.buf);
     // A saved function the cell uses is the token it was saved in, which
-    // the session starts as a reference to its declaration.
+    // the session starts as a reference to its declaration: made once, and
+    // bound to each of its names the cell uses, so they stay one function.
+    let mut made: BTreeMap<&Name, &Name> = BTreeMap::new();
     let remade: Vec<(Stmt, Note)> = lowerer
         .saved_used
         .iter()
         .filter_map(|name| {
-            let token = environment.functions.get(name)?.value()?;
+            let function = environment.functions.get(name)?;
+            let value = match made.get(&function.name) {
+                Some(first) => Expr::Variable((*first).clone()),
+                None => {
+                    let token = function.value()?;
+                    made.insert(&function.name, name);
+                    token
+                }
+            };
             Some((
                 Stmt::Assign {
                     place: Place::Variable(name.clone()),
-                    value: Rhs::Expr(token),
+                    value: Rhs::Expr(value),
                 },
                 Note::default(),
             ))
@@ -425,6 +435,7 @@ pub(crate) fn lower(
             &mut document,
             environment.functions,
             &lowerer.saved_used,
+            &crate::function_values(),
             environment.effects,
             environment.controls,
             &|function| catalog.definition(function).is_some(),

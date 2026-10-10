@@ -69,7 +69,7 @@ impl Lowerer<'_> {
         let length = Float::new(length as f64);
         let text = |value: &str| Expr::Literal(Literal::Text(value.to_owned()));
         let token = Expr::Tuple(vec![
-            text("ts.function"),
+            text(crate::FUNCTION_TAG),
             text(""),
             text(function.name.as_deref().unwrap_or_default()),
             Expr::Literal(Literal::Float(length)),

@@ -702,7 +702,6 @@ fn k_key_001_only_immutable_keys_and_refs_are_admitted() {
         Value::Record(ObjectId(1)),
         Value::Closure(ObjectId(1)),
         Value::Task(TaskId(1)),
-        Value::Function(Name::new("f")),
         Value::Handle(Arc::new(Handle {
             kind: "h".into(),
             id: "1".into(),
@@ -711,6 +710,12 @@ fn k_key_001_only_immutable_keys_and_refs_are_admitted() {
     ] {
         assert_eq!(error_kind(Key::new(value).unwrap_err()), "invalid_key");
     }
+    // A function reference is data, compared by the function it names.
+    let function = || Value::Function(Name::new("f"));
+    assert_eq!(
+        Key::new(tuple(vec![function()])).unwrap(),
+        Key::new(tuple(vec![function()])).unwrap()
+    );
 }
 #[test]
 fn k_key_002_equal_numbers_nan_and_mixed_tuples_are_one_key() {
