@@ -113,6 +113,17 @@ the baseline needs a new definition identity (`K-VER-002`).
   sets, errors, functions, closures, tasks, handles and refs raise `not_data`,
   anywhere in the graph. NaN and infinities raise `json_number`; non-text map
   keys raise `json_key`. No omission, coercion or host-resource read occurs.
+
+`json.render_parts(value, verbatim_kinds, verbatim_field)` uses the same
+strict traversal and returns a flat list of escaped text fragments and raw
+finite numbers. A caller supplies number spelling and joins the fragments.
+Inside a container whose kind is in the text set, or a record whose named
+field holds text, numbers retain their kernel spelling in text fragments.
+The selection is inherited by descendants. Depth, cycle, key and data
+checks retain the strict writer's order. Text buffers and each fragment
+slot are reserved before allocation; the charge uses the standard native
+argument/result deep-size formula.
+
 - **K-LJSON-005.** Stringify copies shared objects each time and refuses an
   active-path cycle with `cycle`. Shared acyclic graphs are allowed.
 - **K-LJSON-006.** Native `json.parse(text, numbers, policy)` makes the number

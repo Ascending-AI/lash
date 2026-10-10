@@ -418,6 +418,9 @@ pub fn parse_json(
 struct Out<'a> {
     text: String,
     heap: &'a mut dyn NativeHeap,
+    parts: Vec<Value>,
+    verbatim_kinds: u8,
+    verbatim_field: String,
 }
 
 impl Out<'_> {
@@ -430,12 +433,51 @@ impl Out<'_> {
     fn quote(&mut self, text: &str) -> Result<(), NativeError> {
         self.push(&serde_json::to_string(text).map_err(|_| syntax())?)
     }
+
+    fn flush(&mut self) -> Result<(), NativeError> {
+        if !self.text.is_empty() {
+            self.heap.reserve(1, 0)?;
+            self.parts.push(Value::text(std::mem::take(&mut self.text)));
+        }
+        Ok(())
+    }
+
+    fn number(
+        &mut self,
+        value: &Value,
+        raw: bool,
+        spelling: impl FnOnce() -> String,
+    ) -> Result<(), NativeError> {
+        if raw {
+            self.flush()?;
+            self.heap.reserve(1, 0)?;
+            self.parts.push(value.clone());
+            Ok(())
+        } else {
+            self.push(&spelling())
+        }
+    }
+
+    fn raw_numbers(&self, kind: &str, inherited: bool) -> bool {
+        inherited && self.verbatim_kinds & kind_bit(kind) == 0
+    }
+}
+
+fn kind_bit(kind: &str) -> u8 {
+    match kind {
+        "list" => 1,
+        "tuple" => 2,
+        "record" => 4,
+        "map" => 8,
+        _ => 0,
+    }
 }
 
 fn write(
     value: &Value,
     active: &mut BTreeSet<ObjectId>,
     depth: usize,
+    raw_numbers: bool,
     out: &mut Out<'_>,
 ) -> Result<(), NativeError> {
     if depth > MAX_NESTING_DEPTH {
@@ -444,10 +486,15 @@ fn write(
     match value {
         Value::Null => out.push("null")?,
         Value::Bool(value) => out.push(if *value { "true" } else { "false" })?,
-        Value::Int(integer) => out.push(&integer.to_string())?,
-        Value::Float(float) if float.get().is_finite() => out.push(&float.to_string())?,
+        Value::Int(integer) => out.number(value, raw_numbers, || integer.to_string())?,
+        Value::Float(float) if float.get().is_finite() => {
+            out.number(value, raw_numbers, || float.to_string())?;
+        }
         Value::Text(text) => out.quote(text)?,
-        Value::Tuple(items) => write_array(items, active, depth, out)?,
+        Value::Tuple(items) => {
+            let raw_numbers = out.raw_numbers("tuple", raw_numbers);
+            write_array(items, active, depth, raw_numbers, out)?;
+        }
         Value::List(id) | Value::Map(id) | Value::Record(id) => {
             if !active.insert(*id) {
                 return Err(raise("cycle", "cyclic value cannot be JSON"));
@@ -483,8 +530,17 @@ fn write(
                 return Err(error);
             }
             if matches!(value, Value::List(_)) {
-                write_array(&items, active, depth, out)?;
+                let raw_numbers = out.raw_numbers("list", raw_numbers);
+                write_array(&items, active, depth, raw_numbers, out)?;
             } else {
+                let raw_numbers = if matches!(value, Value::Map(_)) {
+                    out.raw_numbers("map", raw_numbers)
+                } else {
+                    out.raw_numbers("record", raw_numbers)
+                        && !fields.iter().any(|(name, value)| {
+                            *name == out.verbatim_field && matches!(value, Value::Text(_))
+                        })
+                };
                 out.push("{")?;
                 for (index, (name, value)) in fields.iter().enumerate() {
                     if index != 0 {
@@ -492,7 +548,7 @@ fn write(
                     }
                     out.quote(name)?;
                     out.push(":")?;
-                    write(value, active, depth + 1, out)?;
+                    write(value, active, depth + 1, raw_numbers, out)?;
                 }
                 out.push("}")?;
             }
@@ -508,6 +564,7 @@ fn write_array(
     items: &[Value],
     active: &mut BTreeSet<ObjectId>,
     depth: usize,
+    raw_numbers: bool,
     out: &mut Out<'_>,
 ) -> Result<(), NativeError> {
     out.push("[")?;
@@ -515,7 +572,7 @@ fn write_array(
         if index != 0 {
             out.push(",")?;
         }
-        write(value, active, depth + 1, out)?;
+        write(value, active, depth + 1, raw_numbers, out)?;
     }
     out.push("]")
 }
@@ -533,8 +590,11 @@ pub fn stringify_json(value: &Value, heap: &mut dyn NativeHeap) -> Result<String
     let mut out = Out {
         text: String::new(),
         heap,
+        parts: Vec::new(),
+        verbatim_kinds: 0,
+        verbatim_field: String::new(),
     };
-    write(value, &mut BTreeSet::new(), 0, &mut out)?;
+    write(value, &mut BTreeSet::new(), 0, false, &mut out)?;
     Ok(out.text)
 }
 
@@ -563,6 +623,17 @@ pub(super) fn functions() -> Vec<Function> {
             Type::Text,
             &["json_number", "json_key", "json_depth"],
             stringify,
+        ),
+        definition(
+            "json.render_parts",
+            &[
+                ("value", Type::Any),
+                ("verbatim_kinds", Type::Set(Box::new(Type::Text))),
+                ("verbatim_field", Type::Text),
+            ],
+            Type::List(Box::new(Type::Union(vec![Type::Text, Type::Number]))),
+            &["json_number", "json_key", "json_depth"],
+            render_parts,
         ),
     ]
 }
@@ -616,4 +687,36 @@ fn decode_with_numbers(
 
 fn stringify(call: NativeCall<'_>) -> Result<Value, NativeError> {
     stringify_json(arg(call.args, 0)?, call.heap).map(Value::text)
+}
+
+fn render_parts(call: NativeCall<'_>) -> Result<Value, NativeError> {
+    let Some(Value::Set(kinds)) = call.args.get(1) else {
+        return Err(raise("type_error", "JSON verbatim kinds must be a set"));
+    };
+    let mut verbatim_kinds = 0;
+    let mut invalid = false;
+    call.heap.visit(*kinds, &mut |element| {
+        if let Element::Item(Value::Text(name)) = element {
+            verbatim_kinds |= kind_bit(name);
+            ControlFlow::Continue(())
+        } else {
+            invalid = true;
+            ControlFlow::Break(())
+        }
+    });
+    if invalid {
+        return Err(raise("type_error", "JSON verbatim kinds must be text"));
+    }
+    let verbatim_field = text_arg(call.args, 2)?.to_owned();
+    let mut out = Out {
+        text: String::new(),
+        heap: call.heap,
+        parts: Vec::new(),
+        verbatim_kinds,
+        verbatim_field,
+    };
+    write(arg(call.args, 0)?, &mut BTreeSet::new(), 0, true, &mut out)?;
+    out.flush()?;
+    let parts = std::mem::take(&mut out.parts);
+    Ok(Value::List(out.heap.allocate(Object::List(parts))?))
 }

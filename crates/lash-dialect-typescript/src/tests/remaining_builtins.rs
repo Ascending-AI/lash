@@ -223,3 +223,34 @@ fn json_sparse_slots_are_undefined_to_replacers_and_null_through_indirect_calls(
         bindings,
     );
 }
+
+/// K-LJSON-004/005 and the console dialect rule: strict data, insertion
+/// order, guest number spelling, shared subgraphs and atomic printing.
+#[test]
+fn console_json_is_strict_and_keeps_guest_spelling_and_print_order() {
+    let recorded = machine::run(
+        r#"
+        const shared = {n: -0, fraction: 1.25, small: 1e-7, big: 1e21};
+        const holes = [, undefined, 2];
+        console.log({z: shared, a: shared, holes: holes, quoted: '"\n'});
+        console.log({nested: {brand: "opaque", n: 2}});
+        console.log({brand: 2, n: 3});
+        let first = "";
+        try { console.log("unprinted", {a: undefined, b: NaN}); } catch (error) { first = error.name; }
+        let second = "";
+        try { console.log({a: NaN, b: undefined}); } catch (error) { second = error.name; }
+        console.log(first, second, !(0 in holes), holes[1] === undefined);
+        "#,
+        &[],
+    );
+    assert_eq!(recorded.end, "ok");
+    assert_eq!(
+        recorded.lines(),
+        [
+            r#"{"z":{"n":0,"fraction":1.25,"small":1e-7,"big":1e+21},"a":{"n":0,"fraction":1.25,"small":1e-7,"big":1e+21},"holes":[null,null,2],"quoted":"\"\n"}"#,
+            r#"{"nested":{"brand":"opaque","n":2.0}}"#,
+            r#"{"brand":2,"n":3}"#,
+            "not_data json_number true true",
+        ]
+    );
+}

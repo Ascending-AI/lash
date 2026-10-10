@@ -813,6 +813,95 @@ fn k_ljson_005_cycles_are_refused_but_sharing_is_copied() {
     );
 }
 
+/// K-LJSON-004/005 and K-CHG-003: fragments keep strict validation, verbatim
+/// subtree spelling, whole-call charge and reservations for their flat result.
+#[test]
+fn k_ljson_004_render_parts_validate_and_account_the_flat_result() {
+    let mut heap = Heap::default();
+    let kinds = Value::Set(heap.allocate(Object::Set(vec![])).unwrap());
+    let value = list(&mut heap, vec![s("x"), int(2)]);
+    let args = [value, kinds.clone(), s("")];
+    let result = call(&mut heap, "json.render_parts", &args).unwrap();
+    assert_eq!(items(&heap, result), vec![s(r#"["x","#), int(2), s("]")]);
+    assert_eq!(heap.1.reserved, 60); // Three value slots and two text/buffer pairs.
+    let mut registry = FunctionRegistry::new();
+    register_text_json(&mut registry).unwrap();
+    let (_, function) = registry
+        .iter()
+        .find(|(_, function)| function.definition.name.as_str() == "json.render_parts")
+        .unwrap();
+    assert_eq!(
+        function
+            .definition
+            .charge
+            .evaluate(&mut |operand, _| match operand {
+                lash_kernel_doc::Operand::Result => 14,
+                lash_kernel_doc::Operand::Param(name) => match name.as_str() {
+                    "value" => 7,
+                    "verbatim_kinds" | "verbatim_field" => 1,
+                    _ => unreachable!(),
+                },
+            }),
+        24
+    );
+    heap.1 = Room::of(59);
+    assert!(matches!(
+        call(&mut heap, "json.render_parts", &args),
+        Err(NativeError::Memory)
+    ));
+    heap.1 = Room::default();
+    let opaque = Value::Record(
+        heap.allocate(Object::Record(vec![
+            ("brand".into(), s("opaque")),
+            ("n".into(), Value::Float(Float::new(2.0))),
+        ]))
+        .unwrap(),
+    );
+    let result = call(
+        &mut heap,
+        "json.render_parts",
+        &[opaque, kinds.clone(), s("brand")],
+    )
+    .unwrap();
+    assert_eq!(
+        items(&heap, result),
+        vec![s(r#"{"brand":"opaque","n":2.0}"#)]
+    );
+    let map = Value::Map(
+        heap.allocate(Object::Map(vec![(int(1), Value::Absent)]))
+            .unwrap(),
+    );
+    assert_eq!(
+        error_kind(call(
+            &mut heap,
+            "json.render_parts",
+            &[map, kinds.clone(), s("")]
+        )),
+        "json_key"
+    );
+    for bad in [Value::Absent, Value::Float(Float::new(f64::NAN))] {
+        let expected = error_kind(stringify_json(&bad, &mut heap));
+        assert_eq!(
+            error_kind(call(
+                &mut heap,
+                "json.render_parts",
+                &[bad, kinds.clone(), s("")]
+            )),
+            expected
+        );
+    }
+    let id = heap.allocate(Object::List(vec![])).unwrap();
+    heap.0.insert(id, Object::List(vec![Value::List(id)]));
+    assert_eq!(
+        error_kind(call(
+            &mut heap,
+            "json.render_parts",
+            &[Value::List(id), kinds, s("")]
+        )),
+        "cycle"
+    );
+}
+
 #[test]
 fn k_ljson_006_native_parse_applies_explicit_number_kind_recursively() {
     let mut heap = Heap::default();

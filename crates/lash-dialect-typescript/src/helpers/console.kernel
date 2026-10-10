@@ -2,58 +2,30 @@ use ts.boundary
 use same
 use text.join
 use list.len
-use json.stringify
-use record.keys
+use json.render_parts
+use kind
+use ts.number.to_string
 use ts.console.json
 use ts.receiver
 use ts.to_string
 
-# Console's compact JSON uses the guest number spelling. The kernel JSON
-# codec preserves Int/Float spellings, so only scalar JSON escaping is
-# shared; structured values have already passed its cycle/data checks.
+# Strict JSON is visited once by the neutral codec. Text fragments are
+# already escaped; numeric fragments keep their value for guest spelling.
+# Maps, tuples and records marked by a text brand retain kernel spelling.
 function ts.console.json(value: Any) -> Text
 kernel 1
-errors "type_error"
+errors "type_error", "cycle", "json_number", "json_key", "json_depth", "not_data"
 charge sum(8, deep(value), size(result))
 body {
-  # Every value writes its fragments to `out`, which is joined once: the
-  # text is copied once whatever its depth.
+  let verbatim = set{"map", "tuple"}
+  let parts = json.render_parts(value, verbatim, "brand")
   let out = []
-  let convert = absent
-  set convert = fn(item) {
-    let k = invoke ts.receiver(item)
-    if same(k, "number") {
-      let spelled = invoke ts.to_string(item)
+  for part in parts {
+    if same(kind(part), "text") { set out[list.len(out)] = part } else {
+      let spelled = invoke ts.number.to_string(part)
       set out[list.len(out)] = spelled
-      return null
     }
-    if same(k, "list") {
-      set out[list.len(out)] = "["
-      let first = true
-      for member in item {
-        if first { set first = false } else { set out[list.len(out)] = "," }
-        do apply convert(member)
-      }
-      set out[list.len(out)] = "]"
-      return null
-    }
-    if same(k, "record") {
-      set out[list.len(out)] = "{"
-      let first = true
-      for name in record.keys(item) {
-        if first { set first = false } else { set out[list.len(out)] = "," }
-        set out[list.len(out)] = json.stringify(name)
-        set out[list.len(out)] = ":"
-        let member = item[name]
-        do apply convert(member)
-      }
-      set out[list.len(out)] = "}"
-      return null
-    }
-    set out[list.len(out)] = json.stringify(item)
-    return null
   }
-  do apply convert(value)
   return text.join(out, "")
 }
 
@@ -74,7 +46,6 @@ body {
     }
     if structured {
       let copied = invoke ts.boundary(item)
-      let checked = json.stringify(copied)
       let piece = invoke ts.console.json(copied)
       set pieces[list.len(pieces)] = piece
     } else {

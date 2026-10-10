@@ -428,6 +428,50 @@ fn json_encoding_of_boundary_arrays_uses_null_for_sparse_slots() {
     );
 }
 
+/// K-LJSON-001/005: an opaque subtree inherits both the current depth and
+/// the active ancestors of console's strict renderer.
+#[test]
+fn console_subtrees_keep_depth_and_cycle_failure_order() {
+    let kernel = kernel();
+    let uses = kernel
+        .library
+        .iter()
+        .map(|(name, id)| format!("use {name} = @{id}\n"))
+        .collect::<String>();
+    let text = format!(
+        r#"kernel 1
+numbers float
+{uses}
+main {{
+  let leaf = map{{"n": 2.0}}
+  let value = leaf
+  let i = 0
+  while num.lt(i, 63) {{ set value = [value] set i = num.add(i, 1) }}
+  let accepted = invoke ts.console.json(value)
+  let overflow = [value]
+  let depth = ""
+  try {{ let ignored = invoke ts.console.json(overflow) }} catch invalid {{ set depth = invalid.kind }}
+  let root = {{}}
+  let opaque = map{{"root": root}}
+  set root.opaque = opaque
+  let cycle = ""
+  try {{ let ignored = invoke ts.console.json(root) }} catch invalid {{ set cycle = invalid.kind }}
+  finish [accepted, depth, cycle]
+}}
+"#
+    );
+    let document = lash_kernel_doc::parse_document(&text).unwrap();
+    let end = drive_document(document, &[], &text);
+    assert!(
+        matches!(&end, End::Finished(finished) if finished.result == Datum::List(vec![
+            Datum::Text(format!("{}{}{}", "[".repeat(63), r#"{"n":2.0}"#, "]".repeat(63))),
+            Datum::Text("json_depth".into()),
+            Datum::Text("cycle".into()),
+        ])),
+        "{end:?}"
+    );
+}
+
 /// A RegExp result is an array with extra own properties: Array callbacks
 /// receive the original result, and today's match-write refusal stays typed.
 #[test]
