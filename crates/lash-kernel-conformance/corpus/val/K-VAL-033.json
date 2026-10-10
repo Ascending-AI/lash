@@ -1,0 +1,95 @@
+{
+  "rule": "K-VAL-033",
+  "cases": [
+    {
+      "name": "all ordered predicates are false with NaN on either side",
+      "document": "kernel 1\nnumbers by_spelling\nuse gt = @2a2deaaf97b77fe2c69fb34c7a1f2b78e2eee019dbe5b6399a7dcf85977b3568\nuse ge = @9cf86d966494dd132fad5d585679d8ea86f726f9901b1cb27318731a44a4e44d\nuse le = @9f4fc336157e5e0f9ecf00cd12129c7cee4d6986e0e49fabee543c55e1820c2d\nuse lt = @aa1c2bd01c227cabc0158e2ca5039894f4ba41c234f66d27c0503174a6df1ec1\nmain {  finish [lt(nan, 0), lt(0, nan), lt(nan, nan), le(nan, 0), le(0, nan), le(nan, nan), gt(nan, 0), gt(0, nan), gt(nan, nan), ge(nan, 0), ge(0, nan), ge(nan, nan)] }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "list": [
+              {
+                "bool": false
+              },
+              {
+                "bool": false
+              },
+              {
+                "bool": false
+              },
+              {
+                "bool": false
+              },
+              {
+                "bool": false
+              },
+              {
+                "bool": false
+              },
+              {
+                "bool": false
+              },
+              {
+                "bool": false
+              },
+              {
+                "bool": false
+              },
+              {
+                "bool": false
+              },
+              {
+                "bool": false
+              },
+              {
+                "bool": false
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "three way comparison refuses NaN",
+      "document": "kernel 1\nnumbers by_spelling\nuse compare = @0e53c62151487bcea62cb8db985915d52c96f7c519eab3c26afd8d598b8b585b\nmain {  try { print compare(nan, 0) } catch e { finish e.kind } finish null }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "text": "unordered"
+          }
+        }
+      }
+    },
+    {
+      "name": "sort refuses an unordered comparator and leaves its input unchanged",
+      "document": "kernel 1\nnumbers by_spelling\nuse list.len = @2af47738c9957502745b3ba75ddaff3325cf093a5eee2059159363b7674fcc03\nuse list.clear = @82dbfe0f9556940516028b4973e9bef00ec5abbc2e48321e54e03578a26a924d\nuse num.add = @89dab30320e88b6dd6d2b76b50b27939aae8808a0b90bd32e67a52365d7276d5\nuse collection.function_check = @949d6dbcda876ed611e162dfb3fa30e697ae6d4bb5aadc6b643900966f4700e3\nuse collection.unordered = @a90937f976de792adddb65ad6b4b229761f57c677f83024581a1b51b73cd9c64\nuse list.check = @ab49024d011df2191948750c37a933471b8e59b3e850fc81949dba5dcae3250d\nuse num.lt = @ac0b950f8ebc42c5f047ac562c5cc1c1d60cf50bd87a5b94d5d5fc387f5d5c50\nuse list.sort = @b3c9e8fe85d886db18d16ba3147d32ed91bd268e17d22e92d5bd16d06d0a3ed3\nuse num.sub = @ed03e86c49c7091b0b451c2cb6ca69ad315eaf1bbad1fa7da140d278d2e24ab8\nuse eq = @f537bb3edf9746f3847d63ebb49e6f4f440f52d258e658ed3e1f57336dba4a25\nuse list.copy = @febc3d0b1353e857a075d9c5498af8880957dad8ea4c156acfe3c2a1729269f1\nmain { let xs = [2, 1] let cmp = fn(a, b) { return nan } try { do invoke list.sort(xs, cmp) } catch e { finish [e.kind, xs] } finish null }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "list": [
+              {
+                "text": "unordered"
+              },
+              {
+                "list": [
+                  {
+                    "int": "2"
+                  },
+                  {
+                    "int": "1"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

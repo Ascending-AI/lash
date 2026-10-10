@@ -1,0 +1,437 @@
+{
+  "rule": "K-EFF-006",
+  "cases": [
+    {
+      "name": "float Number decodes 9007199254740993",
+      "document": "kernel 1\nnumbers float\neffect source() -> Any\nmain { let value = perform source() as Number finish value }\n",
+      "expected": {
+        "prints": [],
+        "trace": [
+          {
+            "effect": {
+              "effect": "source",
+              "args": [],
+              "result": "number"
+            }
+          }
+        ],
+        "end": {
+          "finished": {
+            "float": "9007199254740992.0"
+          }
+        }
+      },
+      "environment": {
+        "resume": true,
+        "deliveries": [
+          [
+            {
+              "request": 0,
+              "outcome": {
+                "completed": {
+                  "number": "9007199254740993"
+                }
+              }
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "float Number decodes 1.0",
+      "document": "kernel 1\nnumbers float\neffect source() -> Any\nmain { let value = perform source() as Number finish value }\n",
+      "expected": {
+        "prints": [],
+        "trace": [
+          {
+            "effect": {
+              "effect": "source",
+              "args": [],
+              "result": "number"
+            }
+          }
+        ],
+        "end": {
+          "finished": {
+            "float": "1.0"
+          }
+        }
+      },
+      "environment": {
+        "resume": true,
+        "deliveries": [
+          [
+            {
+              "request": 0,
+              "outcome": {
+                "completed": {
+                  "number": "1.0"
+                }
+              }
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "float Number decodes 1e3",
+      "document": "kernel 1\nnumbers float\neffect source() -> Any\nmain { let value = perform source() as Number finish value }\n",
+      "expected": {
+        "prints": [],
+        "trace": [
+          {
+            "effect": {
+              "effect": "source",
+              "args": [],
+              "result": "number"
+            }
+          }
+        ],
+        "end": {
+          "finished": {
+            "float": "1000.0"
+          }
+        }
+      },
+      "environment": {
+        "resume": true,
+        "deliveries": [
+          [
+            {
+              "request": 0,
+              "outcome": {
+                "completed": {
+                  "number": "1e3"
+                }
+              }
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "float Any decodes 9007199254740993",
+      "document": "kernel 1\nnumbers float\neffect source() -> Any\nmain { let value = perform source() as Any finish value }\n",
+      "expected": {
+        "prints": [],
+        "trace": [
+          {
+            "effect": {
+              "effect": "source",
+              "args": [],
+              "result": "any"
+            }
+          }
+        ],
+        "end": {
+          "finished": {
+            "float": "9007199254740992.0"
+          }
+        }
+      },
+      "environment": {
+        "resume": true,
+        "deliveries": [
+          [
+            {
+              "request": 0,
+              "outcome": {
+                "completed": {
+                  "number": "9007199254740993"
+                }
+              }
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "float Any decodes 1.0",
+      "document": "kernel 1\nnumbers float\neffect source() -> Any\nmain { let value = perform source() as Any finish value }\n",
+      "expected": {
+        "prints": [],
+        "trace": [
+          {
+            "effect": {
+              "effect": "source",
+              "args": [],
+              "result": "any"
+            }
+          }
+        ],
+        "end": {
+          "finished": {
+            "float": "1.0"
+          }
+        }
+      },
+      "environment": {
+        "resume": true,
+        "deliveries": [
+          [
+            {
+              "request": 0,
+              "outcome": {
+                "completed": {
+                  "number": "1.0"
+                }
+              }
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "float Any decodes 1e3",
+      "document": "kernel 1\nnumbers float\neffect source() -> Any\nmain { let value = perform source() as Any finish value }\n",
+      "expected": {
+        "prints": [],
+        "trace": [
+          {
+            "effect": {
+              "effect": "source",
+              "args": [],
+              "result": "any"
+            }
+          }
+        ],
+        "end": {
+          "finished": {
+            "float": "1000.0"
+          }
+        }
+      },
+      "environment": {
+        "resume": true,
+        "deliveries": [
+          [
+            {
+              "request": 0,
+              "outcome": {
+                "completed": {
+                  "number": "1e3"
+                }
+              }
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "by_spelling Number decodes 9007199254740993",
+      "document": "kernel 1\nnumbers by_spelling\neffect source() -> Any\nmain { let value = perform source() as Number finish value }\n",
+      "expected": {
+        "prints": [],
+        "trace": [
+          {
+            "effect": {
+              "effect": "source",
+              "args": [],
+              "result": "number"
+            }
+          }
+        ],
+        "end": {
+          "finished": {
+            "int": "9007199254740993"
+          }
+        }
+      },
+      "environment": {
+        "resume": true,
+        "deliveries": [
+          [
+            {
+              "request": 0,
+              "outcome": {
+                "completed": {
+                  "number": "9007199254740993"
+                }
+              }
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "by_spelling Number decodes 1.0",
+      "document": "kernel 1\nnumbers by_spelling\neffect source() -> Any\nmain { let value = perform source() as Number finish value }\n",
+      "expected": {
+        "prints": [],
+        "trace": [
+          {
+            "effect": {
+              "effect": "source",
+              "args": [],
+              "result": "number"
+            }
+          }
+        ],
+        "end": {
+          "finished": {
+            "float": "1.0"
+          }
+        }
+      },
+      "environment": {
+        "resume": true,
+        "deliveries": [
+          [
+            {
+              "request": 0,
+              "outcome": {
+                "completed": {
+                  "number": "1.0"
+                }
+              }
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "by_spelling Number decodes 1e3",
+      "document": "kernel 1\nnumbers by_spelling\neffect source() -> Any\nmain { let value = perform source() as Number finish value }\n",
+      "expected": {
+        "prints": [],
+        "trace": [
+          {
+            "effect": {
+              "effect": "source",
+              "args": [],
+              "result": "number"
+            }
+          }
+        ],
+        "end": {
+          "finished": {
+            "float": "1000.0"
+          }
+        }
+      },
+      "environment": {
+        "resume": true,
+        "deliveries": [
+          [
+            {
+              "request": 0,
+              "outcome": {
+                "completed": {
+                  "number": "1e3"
+                }
+              }
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "by_spelling Any decodes 9007199254740993",
+      "document": "kernel 1\nnumbers by_spelling\neffect source() -> Any\nmain { let value = perform source() as Any finish value }\n",
+      "expected": {
+        "prints": [],
+        "trace": [
+          {
+            "effect": {
+              "effect": "source",
+              "args": [],
+              "result": "any"
+            }
+          }
+        ],
+        "end": {
+          "finished": {
+            "int": "9007199254740993"
+          }
+        }
+      },
+      "environment": {
+        "resume": true,
+        "deliveries": [
+          [
+            {
+              "request": 0,
+              "outcome": {
+                "completed": {
+                  "number": "9007199254740993"
+                }
+              }
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "by_spelling Any decodes 1.0",
+      "document": "kernel 1\nnumbers by_spelling\neffect source() -> Any\nmain { let value = perform source() as Any finish value }\n",
+      "expected": {
+        "prints": [],
+        "trace": [
+          {
+            "effect": {
+              "effect": "source",
+              "args": [],
+              "result": "any"
+            }
+          }
+        ],
+        "end": {
+          "finished": {
+            "float": "1.0"
+          }
+        }
+      },
+      "environment": {
+        "resume": true,
+        "deliveries": [
+          [
+            {
+              "request": 0,
+              "outcome": {
+                "completed": {
+                  "number": "1.0"
+                }
+              }
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "by_spelling Any decodes 1e3",
+      "document": "kernel 1\nnumbers by_spelling\neffect source() -> Any\nmain { let value = perform source() as Any finish value }\n",
+      "expected": {
+        "prints": [],
+        "trace": [
+          {
+            "effect": {
+              "effect": "source",
+              "args": [],
+              "result": "any"
+            }
+          }
+        ],
+        "end": {
+          "finished": {
+            "float": "1000.0"
+          }
+        }
+      },
+      "environment": {
+        "resume": true,
+        "deliveries": [
+          [
+            {
+              "request": 0,
+              "outcome": {
+                "completed": {
+                  "number": "1e3"
+                }
+              }
+            }
+          ]
+        ]
+      }
+    }
+  ]
+}

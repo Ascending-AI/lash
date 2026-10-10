@@ -41,3 +41,4 @@ thiserror.workspace = true
 [dev-dependencies]
 kernel-embedder = { path = "../../examples/kernel-embedder" }
 lash-kernel-lib = { path = "../lash-kernel-lib" }
+lash-ext-regex-ecma = { path = "../lash-ext-regex-ecma" }

@@ -1,0 +1,31 @@
+{
+  "rule": "K-VAL-030",
+  "cases": [
+    {
+      "name": "scalar ordering differs from UTF16 ordering for astral text",
+      "document": "kernel 1\nnumbers by_spelling\nuse compare = @0e53c62151487bcea62cb8db985915d52c96f7c519eab3c26afd8d598b8b585b\nuse text.utf16_compare = @15c6510d0d30f3e63bcfbf687087316bb27e25a2cbe3a90938d99ef2bdb867f8\nuse text.compare = @d04d5c71719a06095b691eecfbf7927af5a47f6841866452d4a6c4e493c46dc5\nmain {  finish [compare(\"𐀀\", \"\"), text.compare(\"𐀀\", \"\"), text.utf16_compare(\"𐀀\", \"\"), compare(\"a\", \"aa\")] }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "list": [
+              {
+                "int": "1"
+              },
+              {
+                "int": "1"
+              },
+              {
+                "int": "-1"
+              },
+              {
+                "int": "-1"
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

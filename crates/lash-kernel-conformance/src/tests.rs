@@ -52,6 +52,14 @@ fn run_rule(rule: &str, text: &str) {
     assert_eq!(shard.rule, rule);
     let mut registry = lash_kernel_doc::FunctionRegistry::new();
     lash_kernel_vm::register_machine_functions(&mut registry).expect("register kernel functions");
+    lash_kernel_lib::register_numbers(&mut registry).expect("register numeric natives");
+    lash_kernel_lib::register_text_json(&mut registry).expect("register text and JSON natives");
+    lash_kernel_lib::register_collections(&mut registry).expect("register collection functions");
+    lash_ext_regex_ecma::register(
+        &mut registry,
+        &std::sync::Arc::new(lash_ext_regex_ecma::Engine::new(4)),
+    )
+    .expect("register regex natives");
     run_shard(&shard, registry);
 }
 

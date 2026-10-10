@@ -1,0 +1,28 @@
+{
+  "rule": "K-VAL-017",
+  "cases": [
+    {
+      "name": "ref is immutable identity and survives replacing its binding",
+      "document": "kernel 1\nnumbers by_spelling\nuse ref = @153e944ca1091d91e3ca964a3f8eba0e8ace1517880176d10fab14781a6cd663\nuse same = @4b53af9910fbabcb85c7d85f4aa35b8993d52b14d553e6d7b39696bbeb329df9\nuse deref = @de72f688caa0a0a18d9b16f9d8c09f1eb7f541d481e6c5abbe1731c8deb0c42b\nuse eq = @f537bb3edf9746f3847d63ebb49e6f4f440f52d258e658ed3e1f57336dba4a25\nmain { let a = [] let r = ref(a) let b = deref(r) set a = [] finish [same(b, deref(r)), eq(r, ref(b)), eq(r, ref(a))] }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "list": [
+              {
+                "bool": true
+              },
+              {
+                "bool": true
+              },
+              {
+                "bool": false
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

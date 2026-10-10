@@ -1,0 +1,31 @@
+{
+  "rule": "K-NUM-002",
+  "cases": [
+    {
+      "name": "binary64 rounds ties to even and retains signed zero",
+      "document": "kernel 1\nnumbers by_spelling\nuse mul = @3262358baaf57e850452cb7c4e73d49f2659d940b8a1b4bbf36ac75a442e327a\nuse add = @4f6c490dbe79a55eb2012d5b3f04e6915666dc4b5af14b8d9d1142eabfe1b773\nuse sub = @c27cdb3e7e1eaf81192a11fe66a2cb68096d6fc2859c61efb0357be5ce843668\nmain {  finish [add(9007199254740992.0, 1.0), add(9007199254740994.0, 1.0), mul(-0.0, 2.0), sub(0.1, 0.2)] }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "list": [
+              {
+                "float": "9007199254740992.0"
+              },
+              {
+                "float": "9007199254740996.0"
+              },
+              {
+                "float": "-0.0"
+              },
+              {
+                "float": "-0.1"
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

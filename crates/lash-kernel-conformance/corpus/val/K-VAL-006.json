@@ -1,0 +1,63 @@
+{
+  "rule": "K-VAL-006",
+  "cases": [
+    {
+      "name": "text holds scalars and empty text",
+      "document": "kernel 1\nnumbers by_spelling\nuse text.from_utf16_units = @393343160a5dda8248d7c93524754111a3c3fb49a293b0f9099f4b499df358de\nuse text.len = @b66f4b89cffe6636459db57eae646b19497ac8d5ce2dadd5fa80edf2c607b14a\nuse text.from_code_points = @e834b2d932248e7c512e2920764878b56a534e25febe9c6c4bc3de9d2bf3fb1a\nmain {  finish [text.len(\"\"), text.from_code_points([128512]), text.from_utf16_units([55357, 56832])] }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "list": [
+              {
+                "int": "0"
+              },
+              {
+                "text": "😀"
+              },
+              {
+                "text": "😀"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "scalar construction refuses a surrogate",
+      "document": "kernel 1\nnumbers by_spelling\nuse text.from_code_points = @e834b2d932248e7c512e2920764878b56a534e25febe9c6c4bc3de9d2bf3fb1a\nmain {  try { print text.from_code_points([55296]) } catch e { finish e.kind } finish null }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "text": "invalid_scalar"
+          }
+        }
+      }
+    },
+    {
+      "name": "UTF16 construction refuses an unpaired surrogate",
+      "document": "kernel 1\nnumbers by_spelling\nuse text.from_utf16_units = @393343160a5dda8248d7c93524754111a3c3fb49a293b0f9099f4b499df358de\nmain {  try { print text.from_utf16_units([55296]) } catch e { finish e.kind } finish null }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "text": "invalid_utf16"
+          }
+        }
+      }
+    },
+    {
+      "name": "kernel text refuses a lone surrogate literal",
+      "document": "kernel 1\nnumbers by_spelling\nmain { finish \"\\ud800\" }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": "refused"
+      }
+    }
+  ]
+}

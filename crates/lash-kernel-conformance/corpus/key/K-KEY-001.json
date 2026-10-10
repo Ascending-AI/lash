@@ -1,0 +1,312 @@
+{
+  "rule": "K-KEY-001",
+  "cases": [
+    {
+      "name": "all immutable key kinds and nested tuples are legal",
+      "document": "kernel 1\nnumbers by_spelling\nuse map.len = @01ff13637210dc3961b07aed1e03072219444eefd4683c2def4e3a8d553fbb36\nuse ref = @153e944ca1091d91e3ca964a3f8eba0e8ace1517880176d10fab14781a6cd663\nmain { let xs = [] let r = ref(xs) let m = map{null: 0, true: 1, 2: 2, 3.5: 3, \"x\": 4, b\"00ff\": 5, clock: 6, r: 7, (null, (true, 2,),): 8} finish map.len(m) }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "int": "9"
+          }
+        }
+      },
+      "environment": {
+        "host": [
+          {
+            "clock": "9"
+          }
+        ]
+      }
+    },
+    {
+      "name": "map refuses key absent",
+      "document": "kernel 1\nnumbers by_spelling\nmain { let x = absent  try { print map{x: 1} } catch e { finish e.kind } finish null }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "text": "invalid_key"
+          }
+        }
+      }
+    },
+    {
+      "name": "set refuses member absent",
+      "document": "kernel 1\nnumbers by_spelling\nmain { let x = absent  try { print set{x} } catch e { finish e.kind } finish null }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "text": "invalid_key"
+          }
+        }
+      }
+    },
+    {
+      "name": "map refuses key []",
+      "document": "kernel 1\nnumbers by_spelling\nmain { let x = []  try { print map{x: 1} } catch e { finish e.kind } finish null }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "text": "invalid_key"
+          }
+        }
+      }
+    },
+    {
+      "name": "set refuses member []",
+      "document": "kernel 1\nnumbers by_spelling\nmain { let x = []  try { print set{x} } catch e { finish e.kind } finish null }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "text": "invalid_key"
+          }
+        }
+      }
+    },
+    {
+      "name": "map refuses key map{}",
+      "document": "kernel 1\nnumbers by_spelling\nmain { let x = map{}  try { print map{x: 1} } catch e { finish e.kind } finish null }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "text": "invalid_key"
+          }
+        }
+      }
+    },
+    {
+      "name": "set refuses member map{}",
+      "document": "kernel 1\nnumbers by_spelling\nmain { let x = map{}  try { print set{x} } catch e { finish e.kind } finish null }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "text": "invalid_key"
+          }
+        }
+      }
+    },
+    {
+      "name": "map refuses key set{}",
+      "document": "kernel 1\nnumbers by_spelling\nmain { let x = set{}  try { print map{x: 1} } catch e { finish e.kind } finish null }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "text": "invalid_key"
+          }
+        }
+      }
+    },
+    {
+      "name": "set refuses member set{}",
+      "document": "kernel 1\nnumbers by_spelling\nmain { let x = set{}  try { print set{x} } catch e { finish e.kind } finish null }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "text": "invalid_key"
+          }
+        }
+      }
+    },
+    {
+      "name": "map refuses key {}",
+      "document": "kernel 1\nnumbers by_spelling\nmain { let x = {}  try { print map{x: 1} } catch e { finish e.kind } finish null }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "text": "invalid_key"
+          }
+        }
+      }
+    },
+    {
+      "name": "set refuses member {}",
+      "document": "kernel 1\nnumbers by_spelling\nmain { let x = {}  try { print set{x} } catch e { finish e.kind } finish null }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "text": "invalid_key"
+          }
+        }
+      }
+    },
+    {
+      "name": "map refuses key fn() { return null }",
+      "document": "kernel 1\nnumbers by_spelling\nmain { let x = fn() { return null }  try { print map{x: 1} } catch e { finish e.kind } finish null }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "text": "invalid_key"
+          }
+        }
+      }
+    },
+    {
+      "name": "set refuses member fn() { return null }",
+      "document": "kernel 1\nnumbers by_spelling\nmain { let x = fn() { return null }  try { print set{x} } catch e { finish e.kind } finish null }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "text": "invalid_key"
+          }
+        }
+      }
+    },
+    {
+      "name": "map refuses key error.new(\"x\", \"y\")",
+      "document": "kernel 1\nnumbers by_spelling\nuse error.new = @964a1a401df1dda6b8ac84bb4f769be97a5552602a639575641964c9b83e3c4a\nmain { let x = error.new(\"x\", \"y\")  try { print map{x: 1} } catch e { finish e.kind } finish null }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "text": "invalid_key"
+          }
+        }
+      }
+    },
+    {
+      "name": "set refuses member error.new(\"x\", \"y\")",
+      "document": "kernel 1\nnumbers by_spelling\nuse error.new = @964a1a401df1dda6b8ac84bb4f769be97a5552602a639575641964c9b83e3c4a\nmain { let x = error.new(\"x\", \"y\")  try { print set{x} } catch e { finish e.kind } finish null }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "text": "invalid_key"
+          }
+        }
+      }
+    },
+    {
+      "name": "map refuses key &f",
+      "document": "kernel 1\nnumbers by_spelling\nfn f() { return null }\nmain { let x = &f  try { print map{x: 1} } catch e { finish e.kind } finish null }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "text": "invalid_key"
+          }
+        }
+      }
+    },
+    {
+      "name": "set refuses member &f",
+      "document": "kernel 1\nnumbers by_spelling\nfn f() { return null }\nmain { let x = &f  try { print set{x} } catch e { finish e.kind } finish null }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "text": "invalid_key"
+          }
+        }
+      }
+    },
+    {
+      "name": "map refuses key (1, absent,)",
+      "document": "kernel 1\nnumbers by_spelling\nmain { let x = (1, absent,)  try { print map{x: 1} } catch e { finish e.kind } finish null }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "text": "invalid_key"
+          }
+        }
+      }
+    },
+    {
+      "name": "set refuses member (1, absent,)",
+      "document": "kernel 1\nnumbers by_spelling\nmain { let x = (1, absent,)  try { print set{x} } catch e { finish e.kind } finish null }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "text": "invalid_key"
+          }
+        }
+      }
+    },
+    {
+      "name": "a task handle must be used through its ref as a key",
+      "document": "kernel 1\nnumbers by_spelling\nfn f() { return null } main { let t = spawn call f() try { print map{t: 1} } catch e { finish e.kind } finish null }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "text": "invalid_key"
+          }
+        }
+      }
+    },
+    {
+      "name": "host handles are not legal keys",
+      "document": "kernel 1\nnumbers by_spelling\neffect resource() -> Handle(\"db\")\nmain { let h = perform resource() as Handle(\"db\") try { print set{h} } catch e { finish e.kind } finish null }\n",
+      "expected": {
+        "prints": [],
+        "trace": [
+          {
+            "effect": {
+              "effect": "resource",
+              "args": [],
+              "result": {
+                "handle": "db"
+              }
+            }
+          }
+        ],
+        "end": {
+          "finished": {
+            "text": "invalid_key"
+          }
+        }
+      },
+      "environment": {
+        "deliveries": [
+          [
+            {
+              "request": 0,
+              "outcome": {
+                "completed": {
+                  "handle": {
+                    "kind": "db",
+                    "id": "x"
+                  }
+                }
+              }
+            }
+          ]
+        ]
+      }
+    }
+  ]
+}

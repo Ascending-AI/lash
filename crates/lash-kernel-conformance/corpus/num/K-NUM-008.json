@@ -1,0 +1,83 @@
+{
+  "rule": "K-NUM-008",
+  "cases": [
+    {
+      "name": "arithmetic refuses true",
+      "document": "kernel 1\nnumbers by_spelling\nuse add = @4f6c490dbe79a55eb2012d5b3f04e6915666dc4b5af14b8d9d1142eabfe1b773\nmain { let x = 1 set x = true try { print add(x, 1) } catch e { finish e.kind } finish null }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "text": "type_error"
+          }
+        }
+      }
+    },
+    {
+      "name": "numeric ordering refuses true",
+      "document": "kernel 1\nnumbers by_spelling\nuse num.lt = @ac0b950f8ebc42c5f047ac562c5cc1c1d60cf50bd87a5b94d5d5fc387f5d5c50\nmain { let x = 1 set x = true try { print num.lt(x, 1) } catch e { finish e.kind } finish null }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "text": "type_error"
+          }
+        }
+      }
+    },
+    {
+      "name": "arithmetic refuses \"1\"",
+      "document": "kernel 1\nnumbers by_spelling\nuse add = @4f6c490dbe79a55eb2012d5b3f04e6915666dc4b5af14b8d9d1142eabfe1b773\nmain { let x = 1 set x = \"1\" try { print add(x, 1) } catch e { finish e.kind } finish null }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "text": "type_error"
+          }
+        }
+      }
+    },
+    {
+      "name": "numeric ordering refuses \"1\"",
+      "document": "kernel 1\nnumbers by_spelling\nuse num.lt = @ac0b950f8ebc42c5f047ac562c5cc1c1d60cf50bd87a5b94d5d5fc387f5d5c50\nmain { let x = 1 set x = \"1\" try { print num.lt(x, 1) } catch e { finish e.kind } finish null }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "text": "type_error"
+          }
+        }
+      }
+    },
+    {
+      "name": "arithmetic refuses null",
+      "document": "kernel 1\nnumbers by_spelling\nuse add = @4f6c490dbe79a55eb2012d5b3f04e6915666dc4b5af14b8d9d1142eabfe1b773\nmain { let x = 1 set x = null try { print add(x, 1) } catch e { finish e.kind } finish null }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "text": "type_error"
+          }
+        }
+      }
+    },
+    {
+      "name": "numeric ordering refuses null",
+      "document": "kernel 1\nnumbers by_spelling\nuse num.lt = @ac0b950f8ebc42c5f047ac562c5cc1c1d60cf50bd87a5b94d5d5fc387f5d5c50\nmain { let x = 1 set x = null try { print num.lt(x, 1) } catch e { finish e.kind } finish null }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "text": "type_error"
+          }
+        }
+      }
+    }
+  ]
+}

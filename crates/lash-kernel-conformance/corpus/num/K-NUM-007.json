@@ -1,0 +1,49 @@
+{
+  "rule": "K-NUM-007",
+  "cases": [
+    {
+      "name": "floating floor and truncation use their distinct sign rules",
+      "document": "kernel 1\nnumbers by_spelling\nuse div_trunc = @14bed014672e47e0f025a2598bcfd4d7530594753d17b5c120103db0133488a5\nuse rem_trunc = @418efa003407974409069fc77475df673eaba2ba7aec7068c5cfff03d1433c8d\nuse div_floor = @83306b3a20d5564088f2e56e2d21b058034fced15dbf22df0bd3f74017159d8d\nuse rem_floor = @f07a0fa6b2f34d777f8b4d3646e615b575368a349026da774dab08d2d555e672\nmain {  finish [div_trunc(-7.0, 3.0), rem_trunc(-7.0, 3.0), div_floor(-7.0, 3.0), rem_floor(-7.0, 3.0), rem_floor(6.0, -3.0), rem_trunc(-6.0, 3.0), div_floor(1.0, 0.0), div_trunc(1.0, 0.0), rem_floor(1.0, 0.0), rem_trunc(1.0, 0.0)] }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "list": [
+              {
+                "float": "-2.0"
+              },
+              {
+                "float": "-1.0"
+              },
+              {
+                "float": "-3.0"
+              },
+              {
+                "float": "2.0"
+              },
+              {
+                "float": "-0.0"
+              },
+              {
+                "float": "-0.0"
+              },
+              {
+                "float": "inf"
+              },
+              {
+                "float": "inf"
+              },
+              {
+                "float": "nan"
+              },
+              {
+                "float": "nan"
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,58 @@
+{
+  "rule": "K-VAL-031",
+  "cases": [
+    {
+      "name": "float text uses the canonical shortest round trip and threshold layout",
+      "document": "kernel 1\nnumbers by_spelling\nuse float.to_text = @d3bd6883206ac6ae6eccd75351460d531a39b730f5b59edcbce62f7fea0afb7e\nmain {  finish [float.to_text(nan), float.to_text(inf), float.to_text(-inf), float.to_text(0.0), float.to_text(-0.0), float.to_text(1.0), float.to_text(0.1), float.to_text(0.0001), float.to_text(9.999e-5), float.to_text(1000000000000000.0), float.to_text(1e16), float.to_text(1.5e300), float.to_text(5e-324)] }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "list": [
+              {
+                "text": "nan"
+              },
+              {
+                "text": "inf"
+              },
+              {
+                "text": "-inf"
+              },
+              {
+                "text": "0.0"
+              },
+              {
+                "text": "-0.0"
+              },
+              {
+                "text": "1.0"
+              },
+              {
+                "text": "0.1"
+              },
+              {
+                "text": "0.0001"
+              },
+              {
+                "text": "9.999e-5"
+              },
+              {
+                "text": "1000000000000000.0"
+              },
+              {
+                "text": "1e16"
+              },
+              {
+                "text": "1.5e300"
+              },
+              {
+                "text": "5e-324"
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

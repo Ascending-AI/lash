@@ -1,0 +1,165 @@
+{
+  "rule": "K-VAL-025",
+  "cases": [
+    {
+      "name": "errors function references closures tasks and refs have their written equality",
+      "document": "kernel 1\nnumbers by_spelling\nuse ref = @153e944ca1091d91e3ca964a3f8eba0e8ace1517880176d10fab14781a6cd663\nuse error.new = @964a1a401df1dda6b8ac84bb4f769be97a5552602a639575641964c9b83e3c4a\nuse eq = @f537bb3edf9746f3847d63ebb49e6f4f440f52d258e658ed3e1f57336dba4a25\nfn f() { return null } fn g() { return null } main { let c = fn() { return null } let d = fn() { return null } let t = spawn call f() let u = spawn call f() let a = [] let b = [] finish [eq(error.new(\"k\", \"m\", [1]), error.new(\"k\", \"m\", [1.0])), eq(error.new(\"k\", \"m\"), error.new(\"k\", \"n\")), eq(&f, &f), eq(&f, &g), eq(c, c), eq(c, d), eq(t, t), eq(t, u), eq(ref(a), ref(a)), eq(ref(a), ref(b))] }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "list": [
+              {
+                "bool": true
+              },
+              {
+                "bool": false
+              },
+              {
+                "bool": true
+              },
+              {
+                "bool": false
+              },
+              {
+                "bool": true
+              },
+              {
+                "bool": false
+              },
+              {
+                "bool": true
+              },
+              {
+                "bool": false
+              },
+              {
+                "bool": true
+              },
+              {
+                "bool": false
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "host handles compare both kind and identifier",
+      "document": "kernel 1\nnumbers by_spelling\neffect resource() -> Any\nuse eq = @f537bb3edf9746f3847d63ebb49e6f4f440f52d258e658ed3e1f57336dba4a25\nmain { let a = perform resource() as Handle(\"a\") let b = perform resource() as Handle(\"a\") let c = perform resource() as Handle(\"b\") let d = perform resource() as Handle(\"a\") finish [eq(a, b), eq(a, c), eq(a, d)] }\n",
+      "expected": {
+        "prints": [],
+        "trace": [
+          {
+            "effect": {
+              "effect": "resource",
+              "args": [],
+              "result": {
+                "handle": "a"
+              }
+            }
+          },
+          {
+            "effect": {
+              "effect": "resource",
+              "args": [],
+              "result": {
+                "handle": "a"
+              }
+            }
+          },
+          {
+            "effect": {
+              "effect": "resource",
+              "args": [],
+              "result": {
+                "handle": "b"
+              }
+            }
+          },
+          {
+            "effect": {
+              "effect": "resource",
+              "args": [],
+              "result": {
+                "handle": "a"
+              }
+            }
+          }
+        ],
+        "end": {
+          "finished": {
+            "list": [
+              {
+                "bool": true
+              },
+              {
+                "bool": false
+              },
+              {
+                "bool": false
+              }
+            ]
+          }
+        }
+      },
+      "environment": {
+        "deliveries": [
+          [
+            {
+              "request": 0,
+              "outcome": {
+                "completed": {
+                  "handle": {
+                    "kind": "a",
+                    "id": "x"
+                  }
+                }
+              }
+            }
+          ],
+          [
+            {
+              "request": 1,
+              "outcome": {
+                "completed": {
+                  "handle": {
+                    "kind": "a",
+                    "id": "x"
+                  }
+                }
+              }
+            }
+          ],
+          [
+            {
+              "request": 2,
+              "outcome": {
+                "completed": {
+                  "handle": {
+                    "kind": "b",
+                    "id": "x"
+                  }
+                }
+              }
+            }
+          ],
+          [
+            {
+              "request": 3,
+              "outcome": {
+                "completed": {
+                  "handle": {
+                    "kind": "a",
+                    "id": "y"
+                  }
+                }
+              }
+            }
+          ]
+        ]
+      }
+    }
+  ]
+}

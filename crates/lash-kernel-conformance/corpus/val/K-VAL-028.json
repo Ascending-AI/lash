@@ -1,0 +1,66 @@
+{
+  "rule": "K-VAL-028",
+  "cases": [
+    {
+      "name": "normalized numeric and tuple keys preserve observable insertion order",
+      "document": "kernel 1\nnumbers by_spelling\nmain { let m = map{1: \"a\", -0.0: \"zero\", nan: \"nan\", (nan, 2,): \"tuple\", true: \"bool\"} set m[1.0] = \"b\" set m[0] = \"z\" set m[nan] = \"n\" set m[(nan, 2.0,)] = \"t\" finish m }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "map": [
+              [
+                {
+                  "int": "1"
+                },
+                {
+                  "text": "b"
+                }
+              ],
+              [
+                {
+                  "float": "-0.0"
+                },
+                {
+                  "text": "z"
+                }
+              ],
+              [
+                {
+                  "float": "nan"
+                },
+                {
+                  "text": "n"
+                }
+              ],
+              [
+                {
+                  "tuple": [
+                    {
+                      "float": "nan"
+                    },
+                    {
+                      "int": "2"
+                    }
+                  ]
+                },
+                {
+                  "text": "t"
+                }
+              ],
+              [
+                {
+                  "bool": true
+                },
+                {
+                  "text": "bool"
+                }
+              ]
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

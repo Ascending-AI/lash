@@ -1,0 +1,57 @@
+{
+  "rule": "K-NUM-006",
+  "cases": [
+    {
+      "name": "integer trunc quotient and remainder sign",
+      "document": "kernel 1\nnumbers by_spelling\nuse div_trunc = @14bed014672e47e0f025a2598bcfd4d7530594753d17b5c120103db0133488a5\nuse rem_trunc = @418efa003407974409069fc77475df673eaba2ba7aec7068c5cfff03d1433c8d\nmain {  finish [div_trunc(-7, 3), rem_trunc(-7, 3), div_trunc(7, -3), rem_trunc(7, -3)] }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "list": [
+              {
+                "int": "-2"
+              },
+              {
+                "int": "-1"
+              },
+              {
+                "int": "-2"
+              },
+              {
+                "int": "1"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "div trunc integer zero divisor",
+      "document": "kernel 1\nnumbers by_spelling\nuse div_trunc = @14bed014672e47e0f025a2598bcfd4d7530594753d17b5c120103db0133488a5\nmain {  try { print div_trunc(1, 0) } catch e { finish e.kind } finish null }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "text": "division_by_zero"
+          }
+        }
+      }
+    },
+    {
+      "name": "rem trunc integer zero divisor",
+      "document": "kernel 1\nnumbers by_spelling\nuse rem_trunc = @418efa003407974409069fc77475df673eaba2ba7aec7068c5cfff03d1433c8d\nmain {  try { print rem_trunc(1, 0) } catch e { finish e.kind } finish null }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "text": "division_by_zero"
+          }
+        }
+      }
+    }
+  ]
+}

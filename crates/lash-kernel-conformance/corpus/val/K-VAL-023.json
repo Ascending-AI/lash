@@ -1,0 +1,31 @@
+{
+  "rule": "K-VAL-023",
+  "cases": [
+    {
+      "name": "tuple equality compares length order and every member",
+      "document": "kernel 1\nnumbers by_spelling\nuse eq = @f537bb3edf9746f3847d63ebb49e6f4f440f52d258e658ed3e1f57336dba4a25\nmain { let x = (nan,) finish [eq((1, \"x\",), (1.0, \"x\",)), eq((1,), (1, 2,)), eq((1, 2,), (2, 1,)), eq(x, x)] }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "list": [
+              {
+                "bool": true
+              },
+              {
+                "bool": false
+              },
+              {
+                "bool": false
+              },
+              {
+                "bool": false
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

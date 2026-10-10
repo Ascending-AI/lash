@@ -1,0 +1,40 @@
+{
+  "rule": "K-VAL-021",
+  "cases": [
+    {
+      "name": "numbers compare mathematically without integer rounding",
+      "document": "kernel 1\nnumbers by_spelling\nuse eq = @f537bb3edf9746f3847d63ebb49e6f4f440f52d258e658ed3e1f57336dba4a25\nmain {  finish [eq(9007199254740993, 9007199254740992.0), eq(9007199254740992, 9007199254740992.0), eq(-0.0, 0.0), eq(nan, nan), eq(inf, inf), eq(179769313486231590772930519078902473361797697894230657273430081157732675805500963132708477322407536021120113879871393357658789768814416622492847430639474124377767893424865485276302219601246094119453082952085005768838150682342462881473913110540827237163350510684586298239947245938479716304835356329624224137216, inf), eq(-inf, -inf)] }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "list": [
+              {
+                "bool": false
+              },
+              {
+                "bool": true
+              },
+              {
+                "bool": true
+              },
+              {
+                "bool": false
+              },
+              {
+                "bool": true
+              },
+              {
+                "bool": false
+              },
+              {
+                "bool": true
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

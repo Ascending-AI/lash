@@ -1,0 +1,42 @@
+{
+  "rule": "K-LIB-007",
+  "cases": [
+    {
+      "name": "native shallow copy allocates a result without changing its argument",
+      "document": "kernel 1\nnumbers by_spelling\nuse same = @4b53af9910fbabcb85c7d85f4aa35b8993d52b14d553e6d7b39696bbeb329df9\nuse list.copy = @febc3d0b1353e857a075d9c5498af8880957dad8ea4c156acfe3c2a1729269f1\nmain { let xs = [1, 2] let ys = list.copy(xs) set ys[0] = 9 finish [xs, ys, same(xs, ys)] }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "list": [
+              {
+                "list": [
+                  {
+                    "int": "1"
+                  },
+                  {
+                    "int": "2"
+                  }
+                ]
+              },
+              {
+                "list": [
+                  {
+                    "int": "9"
+                  },
+                  {
+                    "int": "2"
+                  }
+                ]
+              },
+              {
+                "bool": false
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

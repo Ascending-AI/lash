@@ -2775,6 +2775,7 @@ name = "lash-kernel-conformance"
 version = "0.0.0-dev"
 dependencies = [
  "kernel-embedder",
+ "lash-ext-regex-ecma",
  "lash-kernel-check",
  "lash-kernel-dialect",
  "lash-kernel-doc",

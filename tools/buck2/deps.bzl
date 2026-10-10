@@ -994,6 +994,7 @@ PACKAGE_DEPS = {
         "build": {},
         "dev": {
             "kernel_embedder": "//examples/kernel-embedder:kernel-embedder",
+            "lash_ext_regex_ecma": "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma",
             "lash_kernel_lib": "//crates/lash-kernel-lib:lash-kernel-lib"
         },
         "normal": {

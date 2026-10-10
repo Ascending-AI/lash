@@ -30,6 +30,11 @@ fn k_chg_002() {
 }
 
 #[test]
+fn k_chg_007() {
+    super::run_rule("K-CHG-007", include_str!("../corpus/chg/K-CHG-007.json"));
+}
+
+#[test]
 fn k_chg_008() {
     super::run_rule("K-CHG-008", include_str!("../corpus/chg/K-CHG-008.json"));
 }
@@ -87,6 +92,21 @@ fn k_eff_003() {
 #[test]
 fn k_eff_004() {
     super::run_rule("K-EFF-004", include_str!("../corpus/eff/K-EFF-004.json"));
+}
+
+#[test]
+fn k_eff_005() {
+    super::run_rule("K-EFF-005", include_str!("../corpus/eff/K-EFF-005.json"));
+}
+
+#[test]
+fn k_eff_006() {
+    super::run_rule("K-EFF-006", include_str!("../corpus/eff/K-EFF-006.json"));
+}
+
+#[test]
+fn k_eff_007() {
+    super::run_rule("K-EFF-007", include_str!("../corpus/eff/K-EFF-007.json"));
 }
 
 #[test]
@@ -187,6 +207,11 @@ fn k_fn_005() {
 #[test]
 fn k_fn_006() {
     super::run_rule("K-FN-006", include_str!("../corpus/fn/K-FN-006.json"));
+}
+
+#[test]
+fn k_fn_007() {
+    super::run_rule("K-FN-007", include_str!("../corpus/fn/K-FN-007.json"));
 }
 
 #[test]
@@ -325,6 +350,11 @@ fn k_iter_004() {
 }
 
 #[test]
+fn k_key_001() {
+    super::run_rule("K-KEY-001", include_str!("../corpus/key/K-KEY-001.json"));
+}
+
+#[test]
 fn k_key_003() {
     super::run_rule("K-KEY-003", include_str!("../corpus/key/K-KEY-003.json"));
 }
@@ -332,6 +362,16 @@ fn k_key_003() {
 #[test]
 fn k_key_005() {
     super::run_rule("K-KEY-005", include_str!("../corpus/key/K-KEY-005.json"));
+}
+
+#[test]
+fn k_lib_007() {
+    super::run_rule("K-LIB-007", include_str!("../corpus/lib/K-LIB-007.json"));
+}
+
+#[test]
+fn k_lib_008() {
+    super::run_rule("K-LIB-008", include_str!("../corpus/lib/K-LIB-008.json"));
 }
 
 #[test]
@@ -362,6 +402,46 @@ fn k_mach_007() {
 #[test]
 fn k_mach_008() {
     super::run_rule("K-MACH-008", include_str!("../corpus/mach/K-MACH-008.json"));
+}
+
+#[test]
+fn k_num_001() {
+    super::run_rule("K-NUM-001", include_str!("../corpus/num/K-NUM-001.json"));
+}
+
+#[test]
+fn k_num_002() {
+    super::run_rule("K-NUM-002", include_str!("../corpus/num/K-NUM-002.json"));
+}
+
+#[test]
+fn k_num_003() {
+    super::run_rule("K-NUM-003", include_str!("../corpus/num/K-NUM-003.json"));
+}
+
+#[test]
+fn k_num_004() {
+    super::run_rule("K-NUM-004", include_str!("../corpus/num/K-NUM-004.json"));
+}
+
+#[test]
+fn k_num_005() {
+    super::run_rule("K-NUM-005", include_str!("../corpus/num/K-NUM-005.json"));
+}
+
+#[test]
+fn k_num_006() {
+    super::run_rule("K-NUM-006", include_str!("../corpus/num/K-NUM-006.json"));
+}
+
+#[test]
+fn k_num_007() {
+    super::run_rule("K-NUM-007", include_str!("../corpus/num/K-NUM-007.json"));
+}
+
+#[test]
+fn k_num_008() {
+    super::run_rule("K-NUM-008", include_str!("../corpus/num/K-NUM-008.json"));
 }
 
 #[test]
@@ -530,6 +610,21 @@ fn k_val_005() {
 }
 
 #[test]
+fn k_val_006() {
+    super::run_rule("K-VAL-006", include_str!("../corpus/val/K-VAL-006.json"));
+}
+
+#[test]
+fn k_val_007() {
+    super::run_rule("K-VAL-007", include_str!("../corpus/val/K-VAL-007.json"));
+}
+
+#[test]
+fn k_val_008() {
+    super::run_rule("K-VAL-008", include_str!("../corpus/val/K-VAL-008.json"));
+}
+
+#[test]
 fn k_val_009() {
     super::run_rule("K-VAL-009", include_str!("../corpus/val/K-VAL-009.json"));
 }
@@ -570,8 +665,73 @@ fn k_val_016() {
 }
 
 #[test]
+fn k_val_017() {
+    super::run_rule("K-VAL-017", include_str!("../corpus/val/K-VAL-017.json"));
+}
+
+#[test]
+fn k_val_020() {
+    super::run_rule("K-VAL-020", include_str!("../corpus/val/K-VAL-020.json"));
+}
+
+#[test]
+fn k_val_021() {
+    super::run_rule("K-VAL-021", include_str!("../corpus/val/K-VAL-021.json"));
+}
+
+#[test]
+fn k_val_022() {
+    super::run_rule("K-VAL-022", include_str!("../corpus/val/K-VAL-022.json"));
+}
+
+#[test]
+fn k_val_023() {
+    super::run_rule("K-VAL-023", include_str!("../corpus/val/K-VAL-023.json"));
+}
+
+#[test]
+fn k_val_024() {
+    super::run_rule("K-VAL-024", include_str!("../corpus/val/K-VAL-024.json"));
+}
+
+#[test]
+fn k_val_025() {
+    super::run_rule("K-VAL-025", include_str!("../corpus/val/K-VAL-025.json"));
+}
+
+#[test]
+fn k_val_027() {
+    super::run_rule("K-VAL-027", include_str!("../corpus/val/K-VAL-027.json"));
+}
+
+#[test]
+fn k_val_028() {
+    super::run_rule("K-VAL-028", include_str!("../corpus/val/K-VAL-028.json"));
+}
+
+#[test]
+fn k_val_029() {
+    super::run_rule("K-VAL-029", include_str!("../corpus/val/K-VAL-029.json"));
+}
+
+#[test]
+fn k_val_030() {
+    super::run_rule("K-VAL-030", include_str!("../corpus/val/K-VAL-030.json"));
+}
+
+#[test]
+fn k_val_031() {
+    super::run_rule("K-VAL-031", include_str!("../corpus/val/K-VAL-031.json"));
+}
+
+#[test]
 fn k_val_032() {
     super::run_rule("K-VAL-032", include_str!("../corpus/val/K-VAL-032.json"));
+}
+
+#[test]
+fn k_val_033() {
+    super::run_rule("K-VAL-033", include_str!("../corpus/val/K-VAL-033.json"));
 }
 
 #[test]

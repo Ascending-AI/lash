@@ -1,0 +1,31 @@
+{
+  "rule": "K-NUM-001",
+  "cases": [
+    {
+      "name": "integer add subtract multiply and negate are exact",
+      "document": "kernel 1\nnumbers by_spelling\nuse mul = @3262358baaf57e850452cb7c4e73d49f2659d940b8a1b4bbf36ac75a442e327a\nuse add = @4f6c490dbe79a55eb2012d5b3f04e6915666dc4b5af14b8d9d1142eabfe1b773\nuse neg = @89cf83afba2684947e9cf44c3cc125a29ae489c4b5e064af1f60b48e51b03c97\nuse sub = @c27cdb3e7e1eaf81192a11fe66a2cb68096d6fc2859c61efb0357be5ce843668\nmain {  finish [add(1208925819614629174706176, 1), sub(1208925819614629174706176, 1), mul(1208925819614629174706176, 1208925819614629174706176), neg(1208925819614629174706176)] }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "list": [
+              {
+                "int": "1208925819614629174706177"
+              },
+              {
+                "int": "1208925819614629174706175"
+              },
+              {
+                "int": "1461501637330902918203684832716283019655932542976"
+              },
+              {
+                "int": "-1208925819614629174706176"
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

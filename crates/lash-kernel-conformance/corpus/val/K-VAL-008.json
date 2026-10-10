@@ -1,0 +1,61 @@
+{
+  "rule": "K-VAL-008",
+  "cases": [
+    {
+      "name": "byte slicing and concatenation preserve immutable octets",
+      "document": "kernel 1\nnumbers by_spelling\nuse bytes.slice = @6fe09bebb68b68d03e3602273ec3ce592cc6ce0f7c2789ff9fdc1195db8073b9\nuse bytes.concat = @aacadcf76173cb2a8db3e57851bacc3e37429fe0f49aee57a169a5db43feaa99\nmain { let x = b\"00ff80\" finish [bytes.slice(x, 1, 3), bytes.concat(x, b\"01\"), x] }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "list": [
+              {
+                "bytes": "ff80"
+              },
+              {
+                "bytes": "00ff8001"
+              },
+              {
+                "bytes": "00ff80"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "byte construction refuses a nonoctet",
+      "document": "kernel 1\nnumbers by_spelling\nuse bytes.from_octets = @a677fcb6830dea0b329311fd94e6842f93a93eafebbe9152441f7d25a99390a0\nmain {  try { print bytes.from_octets([256]) } catch e { finish e.kind } finish null }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "text": "number_range"
+          }
+        }
+      }
+    },
+    {
+      "name": "writing an octet into bytes raises without mutation",
+      "document": "kernel 1\nnumbers by_spelling\nmain { let x = b\"00ff\" try { set x[0] = 1 } catch e { finish [e.kind, x] } finish null }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "list": [
+              {
+                "text": "type_error"
+              },
+              {
+                "bytes": "00ff"
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

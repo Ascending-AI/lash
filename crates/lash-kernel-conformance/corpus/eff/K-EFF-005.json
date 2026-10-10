@@ -1,0 +1,149 @@
+{
+  "rule": "K-EFF-005",
+  "cases": [
+    {
+      "name": "Int decodes 1.0 exactly",
+      "document": "kernel 1\nnumbers by_spelling\neffect source() -> Any\nmain { let value = perform source() as Int finish value }\n",
+      "expected": {
+        "prints": [],
+        "trace": [
+          {
+            "effect": {
+              "effect": "source",
+              "args": [],
+              "result": "int"
+            }
+          }
+        ],
+        "end": {
+          "finished": {
+            "int": "1"
+          }
+        }
+      },
+      "environment": {
+        "resume": true,
+        "deliveries": [
+          [
+            {
+              "request": 0,
+              "outcome": {
+                "completed": {
+                  "number": "1.0"
+                }
+              }
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "Int decodes 1e3 exactly",
+      "document": "kernel 1\nnumbers by_spelling\neffect source() -> Any\nmain { let value = perform source() as Int finish value }\n",
+      "expected": {
+        "prints": [],
+        "trace": [
+          {
+            "effect": {
+              "effect": "source",
+              "args": [],
+              "result": "int"
+            }
+          }
+        ],
+        "end": {
+          "finished": {
+            "int": "1000"
+          }
+        }
+      },
+      "environment": {
+        "resume": true,
+        "deliveries": [
+          [
+            {
+              "request": 0,
+              "outcome": {
+                "completed": {
+                  "number": "1e3"
+                }
+              }
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "Int decodes 18446744073709551617e2 exactly",
+      "document": "kernel 1\nnumbers by_spelling\neffect source() -> Any\nmain { let value = perform source() as Int finish value }\n",
+      "expected": {
+        "prints": [],
+        "trace": [
+          {
+            "effect": {
+              "effect": "source",
+              "args": [],
+              "result": "int"
+            }
+          }
+        ],
+        "end": {
+          "finished": {
+            "int": "1844674407370955161700"
+          }
+        }
+      },
+      "environment": {
+        "resume": true,
+        "deliveries": [
+          [
+            {
+              "request": 0,
+              "outcome": {
+                "completed": {
+                  "number": "18446744073709551617e2"
+                }
+              }
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "Float rounds original integer token ties to even",
+      "document": "kernel 1\nnumbers by_spelling\neffect source() -> Any\nmain { let value = perform source() as Float finish value }\n",
+      "expected": {
+        "prints": [],
+        "trace": [
+          {
+            "effect": {
+              "effect": "source",
+              "args": [],
+              "result": "float"
+            }
+          }
+        ],
+        "end": {
+          "finished": {
+            "float": "9007199254740992.0"
+          }
+        }
+      },
+      "environment": {
+        "resume": true,
+        "deliveries": [
+          [
+            {
+              "request": 0,
+              "outcome": {
+                "completed": {
+                  "number": "9007199254740993"
+                }
+              }
+            }
+          ]
+        ]
+      }
+    }
+  ]
+}

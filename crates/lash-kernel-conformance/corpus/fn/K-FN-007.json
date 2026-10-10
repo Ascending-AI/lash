@@ -1,0 +1,60 @@
+{
+  "rule": "K-FN-007",
+  "cases": [
+    {
+      "name": "num.add checks dynamic wrong-kind operand",
+      "document": "kernel 1\nnumbers by_spelling\nuse num.add = @89dab30320e88b6dd6d2b76b50b27939aae8808a0b90bd32e67a52365d7276d5\nmain { let x = null set x = \"1\" try { print num.add(x, x) } catch e { finish e.kind } finish null }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "text": "type_error"
+          }
+        }
+      }
+    },
+    {
+      "name": "int.add checks dynamic wrong-kind operand",
+      "document": "kernel 1\nnumbers by_spelling\nuse int.add = @e0fd352fb1d4eb1e887d063fba3e8b2b6b503ab2caab41c1f00903ba8e7affda\nmain { let x = null set x = 1.0 try { print int.add(x, x) } catch e { finish e.kind } finish null }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "text": "type_error"
+          }
+        }
+      }
+    },
+    {
+      "name": "float.add checks dynamic wrong-kind operand",
+      "document": "kernel 1\nnumbers by_spelling\nuse float.add = @52933fe234e57c0faf210aa00c8a6f984c17dcd2d53410af78647a9890a0ed3e\nmain { let x = null set x = 1 try { print float.add(x, x) } catch e { finish e.kind } finish null }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "text": "type_error"
+          }
+        }
+      }
+    },
+    {
+      "name": "optional absent is handed to library unchanged",
+      "document": "kernel 1\nnumbers by_spelling\nuse error.new = @964a1a401df1dda6b8ac84bb4f769be97a5552602a639575641964c9b83e3c4a\nmain { let a = error.new(\"kind\", \"message\") let b = error.new(\"kind\", \"message\", absent) finish [a.data, b.data] }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "list": [
+              "absent",
+              "absent"
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

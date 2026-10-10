@@ -1,0 +1,230 @@
+{
+  "rule": "K-VAL-029",
+  "cases": [
+    {
+      "name": "order is exact lexicographic and prefix first",
+      "document": "kernel 1\nnumbers by_spelling\nuse compare = @0e53c62151487bcea62cb8db985915d52c96f7c519eab3c26afd8d598b8b585b\nmain { let a = clock let b = clock finish [compare(9007199254740993, 9007199254740992.0), compare(b\"ff\", b\"ff00\"), compare(false, true), compare((1, 2,), (1, 3,)), compare([1], [1, 0]), compare(a, b)] }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "list": [
+              {
+                "int": "1"
+              },
+              {
+                "int": "-1"
+              },
+              {
+                "int": "-1"
+              },
+              {
+                "int": "-1"
+              },
+              {
+                "int": "-1"
+              },
+              {
+                "int": "-1"
+              }
+            ]
+          }
+        }
+      },
+      "environment": {
+        "host": [
+          {
+            "clock": "1"
+          },
+          {
+            "clock": "2"
+          }
+        ]
+      }
+    },
+    {
+      "name": "unordered kind null",
+      "document": "kernel 1\nnumbers by_spelling\nuse compare = @0e53c62151487bcea62cb8db985915d52c96f7c519eab3c26afd8d598b8b585b\nmain { let x = null try { print compare(x, x) } catch e { finish e.kind } finish null }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "text": "type_error"
+          }
+        }
+      }
+    },
+    {
+      "name": "unordered kind absent",
+      "document": "kernel 1\nnumbers by_spelling\nuse compare = @0e53c62151487bcea62cb8db985915d52c96f7c519eab3c26afd8d598b8b585b\nmain { let x = absent try { print compare(x, x) } catch e { finish e.kind } finish null }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "text": "type_error"
+          }
+        }
+      }
+    },
+    {
+      "name": "unordered kind map{}",
+      "document": "kernel 1\nnumbers by_spelling\nuse compare = @0e53c62151487bcea62cb8db985915d52c96f7c519eab3c26afd8d598b8b585b\nmain { let x = map{} try { print compare(x, x) } catch e { finish e.kind } finish null }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "text": "type_error"
+          }
+        }
+      }
+    },
+    {
+      "name": "unordered kind set{}",
+      "document": "kernel 1\nnumbers by_spelling\nuse compare = @0e53c62151487bcea62cb8db985915d52c96f7c519eab3c26afd8d598b8b585b\nmain { let x = set{} try { print compare(x, x) } catch e { finish e.kind } finish null }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "text": "type_error"
+          }
+        }
+      }
+    },
+    {
+      "name": "unordered kind {}",
+      "document": "kernel 1\nnumbers by_spelling\nuse compare = @0e53c62151487bcea62cb8db985915d52c96f7c519eab3c26afd8d598b8b585b\nmain { let x = {} try { print compare(x, x) } catch e { finish e.kind } finish null }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "text": "type_error"
+          }
+        }
+      }
+    },
+    {
+      "name": "unordered kind fn() { return null }",
+      "document": "kernel 1\nnumbers by_spelling\nuse compare = @0e53c62151487bcea62cb8db985915d52c96f7c519eab3c26afd8d598b8b585b\nmain { let x = fn() { return null } try { print compare(x, x) } catch e { finish e.kind } finish null }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "text": "type_error"
+          }
+        }
+      }
+    },
+    {
+      "name": "unordered kind error.new(\"k\", \"m\")",
+      "document": "kernel 1\nnumbers by_spelling\nuse compare = @0e53c62151487bcea62cb8db985915d52c96f7c519eab3c26afd8d598b8b585b\nuse error.new = @964a1a401df1dda6b8ac84bb4f769be97a5552602a639575641964c9b83e3c4a\nmain { let x = error.new(\"k\", \"m\") try { print compare(x, x) } catch e { finish e.kind } finish null }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "text": "type_error"
+          }
+        }
+      }
+    },
+    {
+      "name": "unordered kind ref([])",
+      "document": "kernel 1\nnumbers by_spelling\nuse compare = @0e53c62151487bcea62cb8db985915d52c96f7c519eab3c26afd8d598b8b585b\nuse ref = @153e944ca1091d91e3ca964a3f8eba0e8ace1517880176d10fab14781a6cd663\nmain { let x = ref([]) try { print compare(x, x) } catch e { finish e.kind } finish null }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "text": "type_error"
+          }
+        }
+      }
+    },
+    {
+      "name": "unordered kind &f",
+      "document": "kernel 1\nnumbers by_spelling\nuse compare = @0e53c62151487bcea62cb8db985915d52c96f7c519eab3c26afd8d598b8b585b\nfn f() { return null }\nmain { let x = &f try { print compare(x, x) } catch e { finish e.kind } finish null }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "text": "type_error"
+          }
+        }
+      }
+    },
+    {
+      "name": "order refuses mixed sequence kinds",
+      "document": "kernel 1\nnumbers by_spelling\nuse compare = @0e53c62151487bcea62cb8db985915d52c96f7c519eab3c26afd8d598b8b585b\nmain {  try { print compare((1,), [1]) } catch e { finish e.kind } finish null }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "text": "type_error"
+          }
+        }
+      }
+    },
+    {
+      "name": "task handles have no order",
+      "document": "kernel 1\nnumbers by_spelling\nuse compare = @0e53c62151487bcea62cb8db985915d52c96f7c519eab3c26afd8d598b8b585b\nfn f() { return null } main { let t = spawn call f() try { print compare(t, t) } catch e { finish e.kind } finish null }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "text": "type_error"
+          }
+        }
+      }
+    },
+    {
+      "name": "host handles have no order",
+      "document": "kernel 1\nnumbers by_spelling\neffect resource() -> Handle(\"db\")\nuse compare = @0e53c62151487bcea62cb8db985915d52c96f7c519eab3c26afd8d598b8b585b\nmain { let h = perform resource() as Handle(\"db\") try { print compare(h, h) } catch e { finish e.kind } finish null }\n",
+      "expected": {
+        "prints": [],
+        "trace": [
+          {
+            "effect": {
+              "effect": "resource",
+              "args": [],
+              "result": {
+                "handle": "db"
+              }
+            }
+          }
+        ],
+        "end": {
+          "finished": {
+            "text": "type_error"
+          }
+        }
+      },
+      "environment": {
+        "deliveries": [
+          [
+            {
+              "request": 0,
+              "outcome": {
+                "completed": {
+                  "handle": {
+                    "kind": "db",
+                    "id": "x"
+                  }
+                }
+              }
+            }
+          ]
+        ]
+      }
+    }
+  ]
+}

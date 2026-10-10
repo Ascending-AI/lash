@@ -1,0 +1,66 @@
+{
+  "rule": "K-VAL-027",
+  "cases": [
+    {
+      "name": "same compares object identity and immutable representation",
+      "document": "kernel 1\nnumbers by_spelling\nuse same = @4b53af9910fbabcb85c7d85f4aa35b8993d52b14d553e6d7b39696bbeb329df9\nmain { let a = [1] let b = [1] finish [same(a, a), same(a, b), same(1, 1.0), same(-0.0, 0.0), same(nan, nan), same((nan, a,), (nan, a,)), same((nan, a,), (nan, b,))] }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "list": [
+              {
+                "bool": true
+              },
+              {
+                "bool": false
+              },
+              {
+                "bool": false
+              },
+              {
+                "bool": false
+              },
+              {
+                "bool": true
+              },
+              {
+                "bool": true
+              },
+              {
+                "bool": false
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "same uses closure and task identity",
+      "document": "kernel 1\nnumbers by_spelling\nuse same = @4b53af9910fbabcb85c7d85f4aa35b8993d52b14d553e6d7b39696bbeb329df9\nfn f() { return null } main { let c = fn() { return null } let d = fn() { return null } let t = spawn call f() let u = spawn call f() finish [same(c, c), same(c, d), same(t, t), same(t, u)] }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "list": [
+              {
+                "bool": true
+              },
+              {
+                "bool": false
+              },
+              {
+                "bool": true
+              },
+              {
+                "bool": false
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

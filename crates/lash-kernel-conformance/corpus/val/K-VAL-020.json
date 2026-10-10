@@ -1,0 +1,34 @@
+{
+  "rule": "K-VAL-020",
+  "cases": [
+    {
+      "name": "equality accepts distinct kinds without coercing",
+      "document": "kernel 1\nnumbers by_spelling\nuse eq = @f537bb3edf9746f3847d63ebb49e6f4f440f52d258e658ed3e1f57336dba4a25\nmain {  finish [eq(null, absent), eq(true, 1), eq((1,), [1]), eq(1, 1.0), eq({}, map{})] }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "list": [
+              {
+                "bool": false
+              },
+              {
+                "bool": false
+              },
+              {
+                "bool": false
+              },
+              {
+                "bool": true
+              },
+              {
+                "bool": false
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

@@ -43,7 +43,9 @@ delivered in its written order before the next run. A delivery is
 `dropped: true` expects a withdrawn wait's outcome to be dropped.
 
 The adapter admits the document with `lash-kernel-check` before starting the
-machine. By default the scripted host provides the manifest's effect
+machine. Per-rule machine laws register the numeric, text/JSON and collection
+libraries and the ECMAScript regex extension, so their kernel documents run
+through the same adapter as the core forms. By default the scripted host provides the manifest's effect
 signatures. `effects` supplies an explicit catalogue for admission cases;
 an empty object provides no effects.
 

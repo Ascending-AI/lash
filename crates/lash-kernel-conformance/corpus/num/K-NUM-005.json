@@ -1,0 +1,57 @@
+{
+  "rule": "K-NUM-005",
+  "cases": [
+    {
+      "name": "integer floor quotient and remainder sign",
+      "document": "kernel 1\nnumbers by_spelling\nuse div_floor = @83306b3a20d5564088f2e56e2d21b058034fced15dbf22df0bd3f74017159d8d\nuse rem_floor = @f07a0fa6b2f34d777f8b4d3646e615b575368a349026da774dab08d2d555e672\nmain {  finish [div_floor(-7, 3), rem_floor(-7, 3), div_floor(7, -3), rem_floor(7, -3)] }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "list": [
+              {
+                "int": "-3"
+              },
+              {
+                "int": "2"
+              },
+              {
+                "int": "-3"
+              },
+              {
+                "int": "-2"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "div floor integer zero divisor",
+      "document": "kernel 1\nnumbers by_spelling\nuse div_floor = @83306b3a20d5564088f2e56e2d21b058034fced15dbf22df0bd3f74017159d8d\nmain {  try { print div_floor(1, 0) } catch e { finish e.kind } finish null }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "text": "division_by_zero"
+          }
+        }
+      }
+    },
+    {
+      "name": "rem floor integer zero divisor",
+      "document": "kernel 1\nnumbers by_spelling\nuse rem_floor = @f07a0fa6b2f34d777f8b4d3646e615b575368a349026da774dab08d2d555e672\nmain {  try { print rem_floor(1, 0) } catch e { finish e.kind } finish null }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "text": "division_by_zero"
+          }
+        }
+      }
+    }
+  ]
+}

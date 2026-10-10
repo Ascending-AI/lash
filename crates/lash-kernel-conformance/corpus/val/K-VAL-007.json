@@ -1,0 +1,50 @@
+{
+  "rule": "K-VAL-007",
+  "cases": [
+    {
+      "name": "scalar and UTF16 positions address the same astral character differently",
+      "document": "kernel 1\nnumbers by_spelling\nuse text.utf16_len = @0ab8890e98fd70cf14e795cde85189a9575f955aae05d972e0ec6e22f77c0942\nuse text.len = @b66f4b89cffe6636459db57eae646b19497ac8d5ce2dadd5fa80edf2c607b14a\nuse text.get = @b8bd55e5290609b8cac9374d52e5d3d12749ee890a8ae7f3c884478fbdc9f72c\nuse text.utf16_slice = @c5122544b5fe555fed7c1c724d948c1ec55dd6e1e4cea2d2ed64bcad6cabcd34\nuse text.utf16_get = @c6e4f893a9d4cdccb5327a96351d64cb5b66019aeaf1c65bf364b6835f47794d\nmain {  finish [text.len(\"a😀z\"), text.utf16_len(\"a😀z\"), text.get(\"a😀z\", 1), text.utf16_get(\"a😀z\", 1), text.utf16_get(\"a😀z\", 2), text.utf16_slice(\"a😀z\", 1, 3)] }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "list": [
+              {
+                "int": "3"
+              },
+              {
+                "int": "4"
+              },
+              {
+                "text": "😀"
+              },
+              {
+                "int": "55357"
+              },
+              {
+                "int": "56832"
+              },
+              {
+                "text": "😀"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "UTF16 slice cannot split the pair",
+      "document": "kernel 1\nnumbers by_spelling\nuse text.utf16_slice = @c5122544b5fe555fed7c1c724d948c1ec55dd6e1e4cea2d2ed64bcad6cabcd34\nmain {  try { print text.utf16_slice(\"a😀z\", 1, 2) } catch e { finish e.kind } finish null }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "text": "text_boundary"
+          }
+        }
+      }
+    }
+  ]
+}
