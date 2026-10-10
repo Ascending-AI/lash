@@ -50,7 +50,8 @@ use serde::de::DeserializeOwned;
 use tokio_util::sync::CancellationToken;
 
 use super::ledger::{
-    AdmittedEffect, EffectLedger, ParkedCheckpoint, PendingEffect, RecordedEnd, Standing,
+    AdmittedEffect, CheckpointPhase, EffectLedger, ParkedCheckpoint, PendingEffect, RecordedEnd,
+    Standing,
 };
 use super::value::datum_from_json;
 use crate::effects::MemberDraft;
@@ -249,6 +250,11 @@ fn final_output<'a>(
     }
 }
 
+enum SavePhase<P> {
+    Parked(P),
+    Ended(RecordedEnd),
+}
+
 fn encode<P: Serialize>(checkpoint: &ParkedCheckpoint<P>) -> Result<String, QuietPointRefusal> {
     serde_json::to_string(checkpoint).map_err(refused)
 }
@@ -272,14 +278,15 @@ impl DurableSnapshotStore {
             host,
             with,
         } = save;
-        let checkpoint = ParkedCheckpoint {
-            state: Some(state),
+        self.commit_checkpoint(
+            &document,
             ledger,
+            SavePhase::Parked(state),
             host,
-            end: None,
-        };
-        self.commit_checkpoint(&document, checkpoint, admit, with)
-            .await
+            admit,
+            with,
+        )
+        .await
     }
 
     /// Commit a run's end: every execution still open is cancelled and
@@ -292,36 +299,37 @@ impl DurableSnapshotStore {
         &self,
         save: EndSave,
     ) -> Result<Saved<P>, QuietPointRefusal> {
-        let checkpoint = ParkedCheckpoint {
-            state: None,
-            ledger: save.ledger,
-            host: save.host,
-            end: Some(save.end),
-        };
-        self.commit_checkpoint(&save.document, checkpoint, Vec::new(), save.with)
-            .await
+        self.commit_checkpoint(
+            &save.document,
+            save.ledger,
+            SavePhase::Ended(save.end),
+            save.host,
+            Vec::new(),
+            save.with,
+        )
+        .await
     }
 
     async fn commit_checkpoint<P: Serialize>(
         &self,
         document: &DocumentId,
-        mut checkpoint: ParkedCheckpoint<P>,
+        mut ledger: EffectLedger,
+        phase: SavePhase<P>,
+        host: Option<EncodedPayload>,
         admit: Vec<EffectAdmission>,
         with: Vec<DomainWrite>,
     ) -> Result<Saved<P>, QuietPointRefusal> {
         let mut members = self.members.lock().await;
-        if checkpoint.end.is_some() {
-            if checkpoint.ledger.executions().next().is_some() {
+        if matches!(phase, SavePhase::Ended(_)) {
+            if ledger.executions().next().is_some() {
                 members.close().await.map_err(refused)?;
             }
-            checkpoint.ledger.close();
+            ledger.close();
         }
         // A released execution whose outcome committed is no longer open.
-        if !checkpoint.ledger.released().is_empty() {
+        if !ledger.released().is_empty() {
             let folded = members.fold().await.map_err(refused)?;
-            checkpoint
-                .ledger
-                .drop_released(|admitted| final_output(&folded, &self.exec, admitted).is_some());
+            ledger.drop_released(|admitted| final_output(&folded, &self.exec, admitted).is_some());
         }
         let mut drafts = Vec::new();
         let mut executions = Vec::new();
@@ -368,7 +376,7 @@ impl DurableSnapshotStore {
         }
         let mut admitted: Vec<AdmittedExecution> = Vec::new();
         if !drafts.is_empty() {
-            let park = checkpoint.ledger.take_park();
+            let park = ledger.take_park();
             admitted = round::admit_round(
                 &mut tx,
                 &waits::wait_scope(&self.cx).map_err(refused)?,
@@ -398,7 +406,7 @@ impl DurableSnapshotStore {
                 effect,
                 standing,
             };
-            if !checkpoint.ledger.stand(identity.clone(), entry) {
+            if !ledger.stand(identity.clone(), entry) {
                 return Err(refused(format!(
                     "the run already stands on effect {identity:?}"
                 )));
@@ -409,7 +417,7 @@ impl DurableSnapshotStore {
         // members changed commits with the prune as the turn's run
         // namespaces (FIG-5301): a pruned outcome is never the only copy of
         // a value.
-        let oldest = checkpoint.ledger.oldest_reachable();
+        let oldest = ledger.oldest_reachable();
         let changes = match (&self.exec, members.bodies()) {
             (ExecKey::Cell(session, run, _), Some(bodies)) if oldest > 0 => {
                 Some((session.clone(), run.clone(), bodies.run_changes(), bodies))
@@ -436,6 +444,13 @@ impl DurableSnapshotStore {
                 before: RunSeq(oldest),
             }));
         }
+        let checkpoint = ParkedCheckpoint {
+            phase: match phase {
+                SavePhase::Parked(state) => CheckpointPhase::Parked { state, ledger },
+                SavePhase::Ended(end) => CheckpointPhase::Ended { end },
+            },
+            host,
+        };
         tx.write(DomainWrite::Snapshot(SnapshotWrite::Put {
             exec: self.exec.clone(),
             expected,

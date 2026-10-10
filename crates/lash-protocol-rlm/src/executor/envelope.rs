@@ -17,7 +17,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use lash_core::RuntimeExecutionContext;
 use lash_kernel_doc::{Datum, Document, EffectName, Signature};
-use lash_vm_broker::kernel::ParkedCheckpoint;
+use lash_vm_broker::kernel::{CheckpointPhase, ParkedCheckpoint};
 use lash_vm_protocol::OpaqueVmState;
 use lash_vm_runtime::{HostBoundary, HostEffect};
 
@@ -190,7 +190,7 @@ pub(crate) fn check_cell_snapshot(snapshot: &str) -> Result<(), String> {
         envelope.cell.document()?;
         envelope.cell.boundary()?;
     }
-    if let Some(state) = &checkpoint.state {
+    if let CheckpointPhase::Parked { state, .. } = &checkpoint.phase {
         let reads = lash_vm_client::kernel_reads();
         if !reads.contains(state.kernel()) {
             return Err(
@@ -234,23 +234,28 @@ pub(super) async fn resumed_cell(
     if state.cell.code != CellEnvelope::code_digest(code) {
         return Err("the checkpoint under this cell's execution holds other source".to_owned());
     }
+    let (open_calls, open_sites) = match &checkpoint.phase {
+        CheckpointPhase::Parked { ledger, .. } => (
+            ledger
+                .executions()
+                .map(|effect| effect.request.clone())
+                .collect(),
+            ledger
+                .pending()
+                .filter_map(|(identity, pending)| match &pending.standing {
+                    lash_vm_broker::kernel::Standing::Admitted(effect) => {
+                        Some((effect.call.clone(), identity.clone()))
+                    }
+                    _ => None,
+                })
+                .collect(),
+        ),
+        CheckpointPhase::Ended { .. } => (Vec::new(), std::collections::BTreeMap::new()),
+    };
     Ok(Some(ResumedCell {
         state,
-        open_calls: checkpoint
-            .ledger
-            .executions()
-            .map(|effect| effect.request.clone())
-            .collect(),
-        open_sites: checkpoint
-            .ledger
-            .pending()
-            .filter_map(|(identity, pending)| match &pending.standing {
-                lash_vm_broker::kernel::Standing::Admitted(effect) => {
-                    Some((effect.call.clone(), identity.clone()))
-                }
-                _ => None,
-            })
-            .collect(),
+        open_calls,
+        open_sites,
     }))
 }
 

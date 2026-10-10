@@ -39,7 +39,7 @@ fn sealed(stated: u32) -> OpaqueVmState {
             charged: 0,
             objects_allocated: 0,
             waits_issued: 0,
-            ready: Vec::new(),
+            ready: lash_kernel_state::ReadyQueue::default(),
             withdrawn: BTreeSet::new(),
             unreported: Vec::new(),
         },

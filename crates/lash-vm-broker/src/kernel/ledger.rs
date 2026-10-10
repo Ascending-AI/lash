@@ -490,13 +490,17 @@ impl RecordedEnd {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ParkedCheckpoint<P> {
-    /// The machine's parked state; none once the run ended.
-    pub state: Option<P>,
-    pub ledger: EffectLedger,
+    pub phase: CheckpointPhase<P>,
     /// The host's own state for the run at this save, opaque to the broker.
     pub host: Option<EncodedPayload>,
-    /// How the run ended, once it ended.
-    pub end: Option<RecordedEnd>,
+}
+
+/// Only a parked run owns a machine and its live effect ledger.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum CheckpointPhase<P> {
+    Parked { state: P, ledger: EffectLedger },
+    Ended { end: RecordedEnd },
 }
 
 #[cfg(test)]
@@ -520,6 +524,40 @@ mod tests {
         );
         let restored: RecordedEnd = serde_json::from_value(stored).expect("the end decodes");
         assert_eq!(restored.into_end(), end);
+    }
+
+    /// V10: a checkpoint owns exactly one live or terminal phase.
+    #[test]
+    fn a_checkpoint_has_exactly_one_phase() {
+        let ledger = serde_json::to_value(EffectLedger::new()).expect("ledger encodes");
+        let end = serde_json::to_value(RecordedEnd::Failed {
+            reason: Datum::Null,
+        })
+        .expect("end encodes");
+        let parked = serde_json::json!({"parked": {"state": true, "ledger": ledger}});
+        let ended = serde_json::json!({"ended": {"end": end}});
+        for phase in [&parked, &ended] {
+            let encoded = serde_json::json!({"phase": phase, "host": null});
+            let decoded: ParkedCheckpoint<bool> =
+                serde_json::from_value(encoded.clone()).expect("one phase decodes");
+            assert_eq!(
+                serde_json::to_value(decoded).expect("phase encodes"),
+                encoded
+            );
+        }
+        let mut both = parked.clone();
+        both["ended"] = ended["ended"].clone();
+        let mut terminal_ledger = ended;
+        terminal_ledger["ended"]["ledger"] = ledger;
+        for phase in [
+            serde_json::json!({}),
+            serde_json::json!({"parked": {}}),
+            both,
+            terminal_ledger,
+        ] {
+            let invalid = serde_json::json!({"phase": phase, "host": null});
+            assert!(serde_json::from_value::<ParkedCheckpoint<bool>>(invalid).is_err());
+        }
     }
 
     fn identity(occurrence: u64) -> EffectIdentity {

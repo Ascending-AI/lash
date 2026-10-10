@@ -296,7 +296,7 @@ fn committed(case: &Case) {
     let committed = machine.export().unwrap();
     assert!(matches!(&committed.tasks[0].handle.state,
         lash_kernel_state::TaskState::Performing(wait)
-        if wait.state == lash_kernel_state::PerformState::Committed(lash_kernel_state::Outcome::Completed(int(7)))
+        if matches!(&wait.request, lash_kernel_state::Request::Effect { state: lash_kernel_state::PerformState::Committed(lash_kernel_state::EffectOutcome::Completed(datum)), .. } if *datum == int(7))
     ));
     let mut restored =
         KernelMachine::import(written.clone(), case.environment.bounds.into(), committed).unwrap();

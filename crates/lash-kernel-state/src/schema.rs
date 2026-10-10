@@ -82,8 +82,8 @@ pub struct Run {
     /// How many waits the run has issued: the number its next wait takes.
     pub waits_issued: u64,
     /// The tasks that are ready, in the order they run (`K-TASK-003`).
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub ready: Vec<TaskId>,
+    #[serde(default, skip_serializing_if = "ReadyQueue::is_empty")]
+    pub ready: ReadyQueue,
     /// Every wait the run withdrew after handing it out. An outcome that
     /// arrives for one is dropped (`K-MACH-004`).
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
@@ -164,7 +164,6 @@ pub enum Incoming {
 pub struct Perform {
     pub wait: WaitId,
     pub request: Request,
-    pub state: PerformState,
 }
 
 /// What a wait asked for.
@@ -176,10 +175,12 @@ pub enum Request {
         effect: EffectName,
         /// The arguments, copied out of the run (`K-EFF-002`).
         args: Vec<Datum>,
+        state: PerformState<EffectOutcome>,
     },
     Sleep {
         identity: EffectIdentity,
         duration: Pause,
+        state: PerformState<SleepOutcome>,
     },
 }
 
@@ -211,7 +212,7 @@ impl Pause {
 /// How far a wait has come.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub enum PerformState {
+pub enum PerformState<O> {
     /// Requested since the last park. The embedder has not seen it: the
     /// next park hands it out.
     Requested,
@@ -220,15 +221,21 @@ pub enum PerformState {
     Admitted,
     /// Its outcome is committed and delivered, and the task has not yet
     /// run with it.
-    Committed(Outcome),
+    Committed(O),
 }
 
 /// How a wait ended.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub enum Outcome {
+pub enum EffectOutcome {
     Completed(Datum),
     Failed(ErrorDatum),
+}
+
+/// The only outcome a sleep can receive.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SleepOutcome {
     Elapsed,
 }
 
@@ -422,4 +429,58 @@ pub struct Fragment {
 pub struct Owned {
     pub id: ObjectId,
     pub object: Object,
+}
+
+/// A FIFO with one occurrence of each task; restore checks its membership
+/// against the run's runnable tasks.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "Vec<TaskId>", into = "Vec<TaskId>")]
+pub struct ReadyQueue(Vec<TaskId>);
+
+impl TryFrom<Vec<TaskId>> for ReadyQueue {
+    type Error = &'static str;
+
+    fn try_from(ready: Vec<TaskId>) -> Result<Self, Self::Error> {
+        if ready.iter().collect::<BTreeSet<_>>().len() != ready.len() {
+            return Err("the ready queue contains duplicate tasks");
+        }
+        Ok(Self(ready))
+    }
+}
+
+impl From<ReadyQueue> for Vec<TaskId> {
+    fn from(ready: ReadyQueue) -> Self {
+        ready.0
+    }
+}
+
+impl std::ops::Deref for ReadyQueue {
+    type Target = [TaskId];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl ReadyQueue {
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// Reverse the scheduling order without changing membership.
+    pub fn reverse(&mut self) {
+        self.0.reverse();
+    }
+}
+
+impl JsonSchema for ReadyQueue {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "ReadyQueue".into()
+    }
+
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        let mut schema = generator.subschema_for::<Vec<TaskId>>();
+        schema.insert("uniqueItems".to_owned(), true.into());
+        schema
+    }
 }

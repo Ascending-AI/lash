@@ -20,8 +20,8 @@ pub mod store;
 pub mod value;
 
 pub use ledger::{
-    AdmittedEffect, EffectLedger, LedgerRefusal, ParkedCheckpoint, PendingEffect, RecordedBound,
-    RecordedEnd, Standing,
+    AdmittedEffect, CheckpointPhase, EffectLedger, LedgerRefusal, ParkedCheckpoint, PendingEffect,
+    RecordedBound, RecordedEnd, Standing,
 };
 pub use run::{
     DrivenMachine, InProcess, InProcessMachine, KernelBroker, KernelCeilings, KernelEffects,

@@ -12,6 +12,13 @@
       "description": "A variable, parameter or declared-function name.\n\nAny text is a name; the kernel gives none of them meaning. Structural\nvalidation refuses the empty name.",
       "type": "string"
     },
+    "ReadyQueue": {
+      "items": {
+        "$ref": "#/$defs/TaskId"
+      },
+      "type": "array",
+      "uniqueItems": true
+    },
     "Root": {
       "description": "A root of the saved state: what one fragment is of.",
       "oneOf": [
@@ -134,11 +141,8 @@
           "type": "integer"
         },
         "ready": {
-          "description": "The tasks that are ready, in the order they run (`K-TASK-003`).",
-          "items": {
-            "$ref": "#/$defs/TaskId"
-          },
-          "type": "array"
+          "$ref": "#/$defs/ReadyQueue",
+          "description": "The tasks that are ready, in the order they run (`K-TASK-003`)."
         },
         "unreported": {
           "description": "The withdrawn waits the next park reports (`K-MACH-003`), in the\norder they were withdrawn.",

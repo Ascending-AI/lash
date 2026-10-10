@@ -399,11 +399,14 @@ impl KernelBroker<'_> {
         {
             Some((_, checkpoint)) => {
                 saved = true;
-                if let Some(end) = checkpoint.end {
-                    return Ok(KernelEnd::Ended(end.into_end()));
+                match checkpoint.phase {
+                    super::CheckpointPhase::Ended { end } => {
+                        return Ok(KernelEnd::Ended(end.into_end()));
+                    }
+                    super::CheckpointPhase::Parked { state, ledger } => {
+                        (machines.resume(state).await?, ledger)
+                    }
                 }
-                let state = checkpoint.state.ok_or(KernelFailure::EmptyCheckpoint)?;
-                (machines.resume(state).await?, checkpoint.ledger)
             }
             None => (machines.start().await?, EffectLedger::new()),
         };
@@ -463,8 +466,15 @@ impl KernelBroker<'_> {
                     })
                     .await?;
                 saved = true;
-                ledger = committed.checkpoint.ledger;
-                resting = committed.checkpoint.state;
+                let super::CheckpointPhase::Parked {
+                    state,
+                    ledger: saved_ledger,
+                } = committed.checkpoint.phase
+                else {
+                    return Err(KernelFailure::EmptyCheckpoint);
+                };
+                ledger = saved_ledger;
+                resting = Some(state);
             }
             if ledger.pending().next().is_none() {
                 return Err(KernelFailure::Stalled);

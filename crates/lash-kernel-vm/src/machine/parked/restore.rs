@@ -423,6 +423,7 @@ fn request_of(
                 identity,
                 effect,
                 args,
+                ..
             },
             Some(ActionKind::Perform { result, .. }),
         ) => Ok(Request::Effect(EffectRequest {
@@ -432,15 +433,18 @@ fn request_of(
             args: args.clone(),
             result: result.clone(),
         })),
-        (state::Request::Sleep { identity, duration }, Some(ActionKind::Sleep(_))) => {
-            Ok(Request::Sleep(SleepRequest {
-                wait,
-                identity: identity.clone(),
-                duration: duration
-                    .duration()
-                    .ok_or_else(|| malformed("a sleep's nanoseconds reach a second"))?,
-            }))
-        }
+        (
+            state::Request::Sleep {
+                identity, duration, ..
+            },
+            Some(ActionKind::Sleep(_)),
+        ) => Ok(Request::Sleep(SleepRequest {
+            wait,
+            identity: identity.clone(),
+            duration: duration
+                .duration()
+                .ok_or_else(|| malformed("a sleep's nanoseconds reach a second"))?,
+        })),
         _ => Err(malformed(format!(
             "wait {} is not at a `perform` or a `sleep` of its kind",
             wait.0
@@ -583,33 +587,48 @@ pub(in crate::machine) fn import(
                     return Err(malformed("a wait's number is one the run has not issued"));
                 }
                 let request = request_of(&exe, frames.last(), perform.wait, &perform.request)?;
-                let sleep = matches!(request, Request::Sleep(_));
+                let (requested, admitted, outcome) = match &perform.request {
+                    state::Request::Effect { state, .. } => (
+                        matches!(state, state::PerformState::Requested),
+                        matches!(state, state::PerformState::Admitted),
+                        match state {
+                            state::PerformState::Committed(state::EffectOutcome::Completed(
+                                datum,
+                            )) => Some(Outcome::Completed(datum.clone())),
+                            state::PerformState::Committed(state::EffectOutcome::Failed(error)) => {
+                                Some(Outcome::Failed(error.clone()))
+                            }
+                            _ => None,
+                        },
+                    ),
+                    state::Request::Sleep { state, .. } => (
+                        matches!(state, state::PerformState::Requested),
+                        matches!(state, state::PerformState::Admitted),
+                        matches!(
+                            state,
+                            state::PerformState::Committed(state::SleepOutcome::Elapsed)
+                        )
+                        .then_some(Outcome::Elapsed),
+                    ),
+                };
                 let pending = |handed_out| PendingWait {
                     task: id,
                     request: request.clone(),
                     handed_out,
                 };
-                let held = match &perform.state {
-                    state::PerformState::Requested => {
-                        requests.push(perform.wait);
-                        waits.insert(perform.wait, pending(false))
-                    }
-                    state::PerformState::Admitted => waits.insert(perform.wait, pending(true)),
-                    state::PerformState::Committed(_) => None,
+                let held = if requested {
+                    requests.push(perform.wait);
+                    waits.insert(perform.wait, pending(false))
+                } else if admitted {
+                    waits.insert(perform.wait, pending(true))
+                } else {
+                    None
                 };
                 if held.is_some() {
                     return Err(malformed("two tasks are in one wait"));
                 }
-                match &perform.state {
-                    state::PerformState::Committed(outcome) => {
-                        let outcome = match outcome {
-                            state::Outcome::Completed(datum) => Outcome::Completed(datum.clone()),
-                            state::Outcome::Failed(error) => Outcome::Failed(error.clone()),
-                            state::Outcome::Elapsed => Outcome::Elapsed,
-                        };
-                        if sleep != matches!(outcome, Outcome::Elapsed) {
-                            return Err(malformed("a wait holds an outcome it cannot have"));
-                        }
+                match outcome {
+                    Some(outcome) => {
                         let answered = Answered {
                             wait: perform.wait,
                             request,
@@ -734,7 +753,9 @@ pub(in crate::machine) fn import(
     }
 
     let ready: VecDeque<TaskId> = run.ready.iter().copied().collect();
-    if ready.len() != ready_tasks.len() || !ready.iter().all(|task| ready_tasks.contains(task)) {
+    if ready.len() != ready_tasks.len()
+        || ready.iter().copied().collect::<BTreeSet<_>>() != ready_tasks
+    {
         return Err(malformed("the ready queue is not the tasks that are ready"));
     }
     if !run

@@ -92,7 +92,7 @@ fn requested(step: RunStep) -> (u64, Datum) {
         panic!("the run parks: {step:?}")
     };
     let park: ParkWire = wire::decode(PayloadKind::Park, &park).expect("park");
-    let park = lash_kernel_vm::Park::from(park);
+    let park = lash_kernel_vm::Park::try_from(park).expect("canonical park");
     let [Request::Effect(request)] = &park.requests[..] else {
         panic!("one effect: {park:?}")
     };

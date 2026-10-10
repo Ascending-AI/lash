@@ -120,6 +120,29 @@ impl From<StartWire> for Start {
     }
 }
 
+/// Canonical nanoseconds within one second, checked at payload admission.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "u32", into = "u32")]
+pub struct SubsecondNanos(u32);
+
+impl TryFrom<u32> for SubsecondNanos {
+    type Error = &'static str;
+
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
+        if value < 1_000_000_000 {
+            Ok(Self(value))
+        } else {
+            Err("sleep nanoseconds must be below one second")
+        }
+    }
+}
+
+impl From<SubsecondNanos> for u32 {
+    fn from(value: SubsecondNanos) -> Self {
+        value.0
+    }
+}
+
 /// One wait a park requests ([`Request`]).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
@@ -135,7 +158,7 @@ pub enum RequestWire {
         wait: WaitId,
         identity: EffectIdentity,
         seconds: u64,
-        nanoseconds: u32,
+        nanoseconds: SubsecondNanos,
     },
 }
 
@@ -167,7 +190,7 @@ impl From<Park> for ParkWire {
                         wait: sleep.wait,
                         identity: sleep.identity,
                         seconds: sleep.duration.as_secs(),
-                        nanoseconds: sleep.duration.subsec_nanos(),
+                        nanoseconds: SubsecondNanos(sleep.duration.subsec_nanos()),
                     },
                 })
                 .collect(),
@@ -178,9 +201,11 @@ impl From<Park> for ParkWire {
     }
 }
 
-impl From<ParkWire> for Park {
-    fn from(wire: ParkWire) -> Self {
-        Self {
+impl TryFrom<ParkWire> for Park {
+    type Error = PoolError;
+
+    fn try_from(wire: ParkWire) -> Result<Self, Self::Error> {
+        Ok(Self {
             requests: wire
                 .requests
                 .into_iter()
@@ -191,29 +216,33 @@ impl From<ParkWire> for Park {
                         effect,
                         args,
                         result,
-                    } => Request::Effect(EffectRequest {
+                    } => Ok(Request::Effect(EffectRequest {
                         wait,
                         identity,
                         effect,
                         args,
                         result,
-                    }),
+                    })),
                     RequestWire::Sleep {
                         wait,
                         identity,
                         seconds,
                         nanoseconds,
-                    } => Request::Sleep(SleepRequest {
+                    } => Ok(Request::Sleep(SleepRequest {
                         wait,
                         identity,
-                        duration: Duration::new(seconds, nanoseconds),
-                    }),
+                        duration: Duration::from_secs(seconds)
+                            .checked_add(Duration::from_nanos(u64::from(nanoseconds.0)))
+                            .ok_or_else(|| {
+                                PoolError::payload(PayloadKind::Park, "sleep duration overflows")
+                            })?,
+                    })),
                 })
-                .collect(),
+                .collect::<Result<_, PoolError>>()?,
             withdrawn: wire.withdrawn,
             outstanding: wire.outstanding,
             live: wire.live,
-        }
+        })
     }
 }
 
@@ -263,3 +292,32 @@ pub struct ProjectionRead {
 
 /// Kernel data, or the error the read raises in the guest.
 pub type ProjectionAnswer = Result<Datum, ErrorDatum>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// V11: decoding refuses normalization and overflow before park conversion.
+    #[test]
+    fn park_payloads_refuse_noncanonical_sleep_durations() {
+        let identity = serde_json::json!({"task": "main", "site": {"unit": "main", "path": [0, 0]}, "occurrence": 0, "loops": []});
+        for seconds in [0, u64::MAX] {
+            for nanoseconds in [0, 999_999_999, 1_000_000_000, u32::MAX] {
+                let json = serde_json::json!({"requests": [{"sleep": {"wait": 0, "identity": identity, "seconds": seconds, "nanoseconds": nanoseconds}}], "withdrawn": [], "outstanding": [], "live": []});
+                let payload = encode(PayloadKind::Park, &json).unwrap();
+                let decoded = decode::<ParkWire>(PayloadKind::Park, &payload);
+                if nanoseconds < 1_000_000_000 {
+                    let park = Park::try_from(decoded.unwrap()).unwrap();
+                    let Request::Sleep(sleep) = &park.requests[0] else {
+                        panic!("sleep")
+                    };
+                    assert_eq!(sleep.duration.as_secs(), seconds);
+                    assert_eq!(sleep.duration.subsec_nanos(), nanoseconds);
+                } else {
+                    assert!(decoded.is_err());
+                    assert!(SubsecondNanos::try_from(nanoseconds).is_err());
+                }
+            }
+        }
+    }
+}

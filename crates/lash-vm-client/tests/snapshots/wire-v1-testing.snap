@@ -10,7 +10,9 @@ testing true
 
 # [serde (deny_unknown_fields)] struct StartWire { entry : Option < Name > , args : Vec < Datum > , variables : BTreeMap < Name , Value > , objects : Vec < (ObjectId , Object) > , }
 
-# [serde (rename_all = "snake_case" , deny_unknown_fields)] enum RequestWire { Effect { wait : WaitId , identity : EffectIdentity , effect : EffectName , args : Vec < Datum > , result : Type , } , Sleep { wait : WaitId , identity : EffectIdentity , seconds : u64 , nanoseconds : u32 , } }
+# [serde (try_from = "u32" , into = "u32")] struct SubsecondNanos (u32) ;
+
+# [serde (rename_all = "snake_case" , deny_unknown_fields)] enum RequestWire { Effect { wait : WaitId , identity : EffectIdentity , effect : EffectName , args : Vec < Datum > , result : Type , } , Sleep { wait : WaitId , identity : EffectIdentity , seconds : u64 , nanoseconds : SubsecondNanos , } }
 
 # [serde (deny_unknown_fields)] struct ParkWire { requests : Vec < RequestWire > , withdrawn : Vec < WaitId > , outstanding : Vec < lash_kernel_doc :: TaskIdentity > , live : Vec < lash_kernel_doc :: TaskIdentity > , }
 

@@ -16,11 +16,11 @@ The laws in `crates/lash-kernel-vm/src/laws/parked.rs` hold the table: `every_sa
 
 | Part | Fields |
 | --- | --- |
-| `Run` | `kernel`, `document`, `functions` (what the run pins); `charged`; `objects_allocated`; `waits_issued`; `ready`; `withdrawn`; `unreported` |
+| `Run` | `kernel`, `document`, `functions` (what the run pins); `charged`; `objects_allocated`; `waits_issued`; `ready` (each runnable task once, in FIFO order); `withdrawn`; `unreported` |
 | session | each binding's name and value |
 | `Task` (a handle) | `identity`; `state`; `joiners`; `observed`; `passed`; `failed`; `occurrences` |
 | `TaskState` | `ready`; `resuming` with a value, a raise or the task joined; `performing` with the wait; `joining` a handle; `joining_many` with `mode`, `members`; `ended` with the result or the error |
-| `Perform` (a wait) | `wait`; `request` (effect name, arguments and identity, or a sleep's identity and duration); `state`: `requested`, `admitted`, or `committed` with the outcome |
+| `Perform` (a wait) | `wait`; `request` (effect name, arguments and identity, or a sleep's identity and duration); each request owns its `state`: `requested`, `admitted`, or `committed` with an effect completion/failure or a sleep elapsed outcome |
 | `Call` | `statement`; `bindings` (name, declaring node, value or shared cell); `loops` (site, iterations started, position); `finally` (site, how it was entered) |
 | `Held` | `iterated` (what each `for` iterates); `departing` (the value each `finally` leaves with); `arguments` (of a library call) |
 | objects | each live object: list, map, set, record, closure (its expression's site and the cells it shares), shared variable |

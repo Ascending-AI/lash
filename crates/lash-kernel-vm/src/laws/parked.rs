@@ -10,8 +10,8 @@ use lash_kernel_doc::{
     Datum, EffectName, Integer, Name, Object, ObjectId, TaskIdentity, Unit, Value, parse_definition,
 };
 use lash_kernel_state::{
-    Baseline, Ended, Entered, Fragment, Incoming, Outcome as SavedOutcome, ParkedRun, PerformState,
-    Request as SavedRequest, Root, RootState, SavedFragment, TaskState, WaitId,
+    Baseline, EffectOutcome as SavedOutcome, Ended, Entered, Fragment, Incoming, ParkedRun,
+    PerformState, Request as SavedRequest, Root, RootState, SavedFragment, TaskState, WaitId,
 };
 
 use super::embedder::{Embedder, ROOMY, Setup, label};
@@ -435,7 +435,10 @@ fn perform_of(parked: &mut ParkedRun, task: usize) -> &mut lash_kernel_state::Pe
 }
 
 fn requested(parked: &mut ParkedRun) {
-    perform_of(parked, 1).state = PerformState::Requested;
+    let SavedRequest::Effect { state, .. } = &mut perform_of(parked, 1).request else {
+        panic!("effect")
+    };
+    *state = PerformState::Requested;
 }
 
 fn list_join_of(parked: &mut ParkedRun, task: usize) -> &mut lash_kernel_state::ListJoin {
@@ -509,7 +512,10 @@ fn rows() -> Vec<Row> {
             },
             ..Row::new("a wait's committed outcome", WORKERS, |parked| {
                 let outcome = SavedOutcome::Completed(Datum::Text("other".to_string()));
-                perform_of(parked, 1).state = PerformState::Committed(outcome);
+                let SavedRequest::Effect { state, .. } = &mut perform_of(parked, 1).request else {
+                    panic!("effect")
+                };
+                *state = PerformState::Committed(outcome);
             })
         },
         Row {
@@ -943,4 +949,30 @@ fn one_write_on_a_large_heap_rewrites_one_fragment() {
     let parts = stored.iter().map(|(root, bytes)| (root, bytes.as_slice()));
     let (loaded, _) = ParkedRun::load(&second.header, parts).unwrap();
     assert_eq!(loaded, embedder.machine.export().unwrap());
+}
+
+/// V06 / K-TASK-003: the restored FIFO contains every runnable task once.
+#[test]
+fn a_ready_queue_is_an_exact_permutation_of_runnable_tasks() {
+    let mut embedder = Embedder::new(WORKERS);
+    first_park(&mut embedder);
+    embedder.deliver("a");
+    embedder.deliver("b");
+    let parked = embedder.machine.export().unwrap();
+    assert_eq!(parked.run.ready.len(), 2);
+    let mut duplicate = serde_json::to_value(&parked).unwrap();
+    duplicate["run"]["ready"][1] = duplicate["run"]["ready"][0].clone();
+    assert!(serde_json::from_value::<ParkedRun>(duplicate).is_err());
+    assert!(lash_kernel_state::ReadyQueue::try_from(vec![parked.run.ready[0]; 2]).is_err());
+    for ready in [vec![parked.run.ready[0]], vec![]] {
+        let mut changed = parked.clone();
+        changed.run.ready = ready.try_into().unwrap();
+        assert!(matches!(
+            embedder.resumed(changed).map(|_| ()),
+            Err(ImportError::Malformed { .. })
+        ));
+    }
+    let mut reversed = parked;
+    reversed.run.ready.reverse();
+    assert!(embedder.resumed(reversed).is_ok());
 }

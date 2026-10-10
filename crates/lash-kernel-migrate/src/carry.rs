@@ -13,8 +13,8 @@ use lash_kernel_doc::{
     Site, SpawnIdentity, TaskIdentity, Unit, Value,
 };
 use lash_kernel_state::{
-    Bound, Ended, Held, Incoming, Outcome, ParkedCall, ParkedRun, PerformState, Request, Task,
-    TaskState,
+    Bound, EffectOutcome, Ended, Held, Incoming, ParkedCall, ParkedRun, PerformState, Request,
+    Task, TaskState,
 };
 
 use crate::migration::{ParkedRefusal, Rewritten};
@@ -257,19 +257,21 @@ impl Carry<'_> {
             TaskState::Resuming(Incoming::Joined(_)) => Ok(()),
             TaskState::Resuming(Incoming::Value(value) | Incoming::Raise(value))
             | TaskState::Ended(Ended::Returned(value) | Ended::Raised(value)) => self.value(value),
-            TaskState::Performing(perform) => {
-                match &mut perform.request {
-                    Request::Effect { identity, .. } | Request::Sleep { identity, .. } => {
-                        self.effect(identity)?;
+            TaskState::Performing(perform) => match &mut perform.request {
+                Request::Effect {
+                    identity, state, ..
+                } => {
+                    self.effect(identity)?;
+                    match state {
+                        PerformState::Requested | PerformState::Admitted => Ok(()),
+                        PerformState::Committed(EffectOutcome::Completed(datum)) => {
+                            self.datum(datum)
+                        }
+                        PerformState::Committed(EffectOutcome::Failed(error)) => self.error(error),
                     }
                 }
-                match &mut perform.state {
-                    PerformState::Requested | PerformState::Admitted => Ok(()),
-                    PerformState::Committed(Outcome::Completed(datum)) => self.datum(datum),
-                    PerformState::Committed(Outcome::Failed(error)) => self.error(error),
-                    PerformState::Committed(Outcome::Elapsed) => Ok(()),
-                }
-            }
+                Request::Sleep { identity, .. } => self.effect(identity),
+            },
         }
     }
 

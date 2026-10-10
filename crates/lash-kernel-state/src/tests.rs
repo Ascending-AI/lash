@@ -25,7 +25,7 @@ fn parked() -> ParkedRun {
             charged: 3,
             objects_allocated: 9,
             waits_issued: 0,
-            ready: vec![TaskId::MAIN],
+            ready: vec![TaskId::MAIN].try_into().unwrap(),
             withdrawn: BTreeSet::new(),
             unreported: Vec::new(),
         },
@@ -176,4 +176,34 @@ fn a_load_refuses_parts_this_writer_would_not_have_written() {
             supported: KERNEL_VERSION,
         })
     );
+}
+
+/// V22: an effect cannot elapse, and a sleep cannot complete or fail.
+#[test]
+fn a_stored_wait_admits_only_outcomes_of_its_request_kind() {
+    let identity = serde_json::json!({"task": "main", "site": {"unit": "main", "path": [0, 0]}, "occurrence": 0, "loops": []});
+    let effect =
+        serde_json::json!({"effect": {"identity": identity, "effect": "echo", "args": []}});
+    let sleep = serde_json::json!({"sleep": {"identity": identity, "duration": {"seconds": 0, "nanoseconds": 0}}});
+    let states = [
+        serde_json::json!("requested"),
+        serde_json::json!("admitted"),
+        serde_json::json!({"committed": {"completed": "null"}}),
+        serde_json::json!({"committed": {"failed": {"kind": "bug", "message": "bug", "data": "null"}}}),
+        serde_json::json!({"committed": "elapsed"}),
+    ];
+    for (kind, request) in [("effect", effect), ("sleep", sleep)] {
+        for (index, state) in states.iter().enumerate() {
+            let mut request = request.clone();
+            request[kind]["state"] = state.clone();
+            let encoded = serde_json::json!({"wait": 0, "request": request});
+            let valid =
+                index < 2 || (kind == "effect" && index < 4) || (kind == "sleep" && index == 4);
+            assert_eq!(
+                serde_json::from_value::<crate::Perform>(encoded).is_ok(),
+                valid,
+                "{kind}: {state}"
+            );
+        }
+    }
 }

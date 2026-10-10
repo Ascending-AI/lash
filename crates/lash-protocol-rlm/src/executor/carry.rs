@@ -16,7 +16,7 @@ use std::collections::BTreeSet;
 
 use lash_kernel_dialect::SavedFunction;
 use lash_kernel_doc::{Annotations, FunctionId, FunctionRegistry, KERNEL_VERSION, KernelVersion};
-use lash_vm_protocol::{EncodedPayload, OpaqueVmState};
+use lash_vm_protocol::EncodedPayload;
 use lash_vm_runtime::{
     KernelMigrationRefusal, migrate_run, migrate_saved_function, plan_migration,
 };
@@ -113,17 +113,19 @@ impl KernelCarry {
         let Some(plan) = plan_migration(&base, self.library()?.as_ref())? else {
             return Ok(None);
         };
-        if let Some(parked) = &checkpoint.state {
-            let carried: OpaqueVmState = migrate_run(parked, &base, &plan)?;
-            checkpoint.state = Some(carried);
+        if let lash_vm_broker::kernel::CheckpointPhase::Parked {
+            state: parked,
+            ledger,
+        } = &mut checkpoint.phase
+        {
+            *parked = migrate_run(parked, &base, &plan)?;
+            *ledger = ledger
+                .identified(|identity| plan.rewritten.effect_identity(&base, identity))
+                .map_err(|refusal| KernelMigrationRefusal::Parked {
+                    document: plan.from,
+                    refusal,
+                })?;
         }
-        checkpoint.ledger = checkpoint
-            .ledger
-            .identified(|identity| plan.rewritten.effect_identity(&base, identity))
-            .map_err(|refusal| KernelMigrationRefusal::Parked {
-                document: plan.from,
-                refusal,
-            })?;
         envelope.cell.document = plan
             .rewritten
             .document

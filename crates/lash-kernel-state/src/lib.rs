@@ -28,7 +28,7 @@ mod tests;
 
 pub use fragments::{Baseline, LoadError, Objects, SaveError, Saved, SavedFragment, save};
 pub use schema::{
-    Binding, Bound, Call, Ended, Entered, Finally, Fragment, Header, Held, Incoming, ListJoin,
-    Loop, Occurrence, Outcome, Owned, ParkedCall, ParkedRun, ParkedTask, Pause, Perform,
-    PerformState, Request, Root, RootState, Run, Task, TaskState, WaitId,
+    Binding, Bound, Call, EffectOutcome, Ended, Entered, Finally, Fragment, Header, Held, Incoming,
+    ListJoin, Loop, Occurrence, Owned, ParkedCall, ParkedRun, ParkedTask, Pause, Perform,
+    PerformState, ReadyQueue, Request, Root, RootState, Run, SleepOutcome, Task, TaskState, WaitId,
 };

@@ -155,7 +155,9 @@ impl KernelMachine {
                 .current
                 .into_iter()
                 .chain(self.ready.iter().copied())
-                .collect(),
+                .collect::<Vec<_>>()
+                .try_into()
+                .map_err(fault)?,
             withdrawn: self.withdrawn_ever.clone(),
             unreported: self.withdrawn.clone(),
         };
@@ -177,12 +179,7 @@ impl KernelMachine {
                     .ok_or_else(|| fault("a task waits on a request the machine does not hold"))?;
                 state::TaskState::Performing(Box::new(state::Perform {
                     wait: *wait,
-                    request: request_data(&pending.request),
-                    state: if pending.handed_out {
-                        state::PerformState::Admitted
-                    } else {
-                        state::PerformState::Requested
-                    },
+                    request: request_data(&pending.request, pending.handed_out, None)?,
                 }))
             }
             (TaskState::Waiting(Wait::Join(joined)), _) => state::TaskState::Joining(*joined),
@@ -209,12 +206,7 @@ impl KernelMachine {
             (TaskState::Ready, Some(Incoming::Outcome(answered))) => {
                 state::TaskState::Performing(Box::new(state::Perform {
                     wait: answered.wait,
-                    request: request_data(&answered.request),
-                    state: state::PerformState::Committed(match &answered.outcome {
-                        Outcome::Completed(datum) => state::Outcome::Completed(datum.clone()),
-                        Outcome::Failed(error) => state::Outcome::Failed(error.clone()),
-                        Outcome::Elapsed => state::Outcome::Elapsed,
-                    }),
+                    request: request_data(&answered.request, true, Some(&answered.outcome))?,
                 }))
             }
         };
@@ -381,18 +373,47 @@ impl KernelMachine {
     }
 }
 
-fn request_data(request: &Request) -> state::Request {
-    match request {
+fn request_data(
+    request: &Request,
+    admitted: bool,
+    outcome: Option<&Outcome>,
+) -> Result<state::Request, ExportError> {
+    let pending = || {
+        if admitted {
+            state::PerformState::Admitted
+        } else {
+            state::PerformState::Requested
+        }
+    };
+    Ok(match request {
         Request::Effect(effect) => state::Request::Effect {
             identity: effect.identity.clone(),
             effect: effect.effect.clone(),
             args: effect.args.clone(),
+            state: match outcome {
+                None => pending(),
+                Some(Outcome::Completed(datum)) => {
+                    state::PerformState::Committed(state::EffectOutcome::Completed(datum.clone()))
+                }
+                Some(Outcome::Failed(error)) => {
+                    state::PerformState::Committed(state::EffectOutcome::Failed(error.clone()))
+                }
+                Some(Outcome::Elapsed) => return Err(fault("an effect cannot elapse")),
+            },
         },
         Request::Sleep(sleep) => state::Request::Sleep {
             identity: sleep.identity.clone(),
             duration: sleep.duration.into(),
+            state: match outcome {
+                None if admitted => state::PerformState::Admitted,
+                None => state::PerformState::Requested,
+                Some(Outcome::Elapsed) => {
+                    state::PerformState::Committed(state::SleepOutcome::Elapsed)
+                }
+                Some(_) => return Err(fault("a sleep cannot complete or fail")),
+            },
         },
-    }
+    })
 }
 
 pub(in crate::machine) fn export(machine: &mut KernelMachine) -> Result<ParkedRun, ExportError> {

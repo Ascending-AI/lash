@@ -386,16 +386,11 @@ impl Scenario for ParkScenario {
             Ok(Some(row)) => {
                 match serde_json::from_str::<ParkedCheckpoint<ParkedRun>>(&row.snapshot_ref) {
                     Ok(checkpoint) => {
-                        if checkpoint.end.is_none()
-                            || checkpoint.state.is_some()
-                            || checkpoint.ledger.pending().next().is_some()
-                            || !checkpoint.ledger.released().is_empty()
-                            || checkpoint.ledger.next_park() != 2
-                        {
-                            violations.push(format!(
-                                "P5: the last checkpoint's ledger disagrees with its ended run: {:?}",
-                                checkpoint.ledger
-                            ));
+                        if !matches!(
+                            checkpoint.phase,
+                            lash_vm_broker::kernel::CheckpointPhase::Ended { .. }
+                        ) {
+                            violations.push("P5: the last checkpoint is not ended".to_owned());
                         }
                     }
                     Err(error) => {
@@ -563,9 +558,15 @@ async fn two_orders(
         })
         .await
         .map_err(|error| refused(&error))?;
-    let saved = committed.checkpoint;
+    let lash_vm_broker::kernel::CheckpointPhase::Parked {
+        state,
+        ledger: saved_ledger,
+    } = committed.checkpoint.phase
+    else {
+        return Err("a park saves its state".into());
+    };
     // Every outcome of the park, as the records hold them.
-    let mut waiting = saved.ledger.clone();
+    let mut waiting = saved_ledger.clone();
     let mut settled: Vec<Settled> = Vec::new();
     while waiting.pending().next().is_some() {
         let Driven::Answered(more) = store
@@ -604,14 +605,11 @@ async fn two_orders(
             ));
         }
     }
-    let Some(state) = saved.state.clone() else {
-        return Err("a park saves its state".into());
-    };
     let mut parked = Vec::new();
     for order in [[0_usize, 1, 2], [2, 1, 0]] {
         let mut machine = KernelMachine::import(program.clone(), bounds(), state.clone())
             .map_err(|error| refused(&error))?;
-        let mut ledger = saved.ledger.clone();
+        let mut ledger = saved_ledger.clone();
         for index in order {
             let outcome = settled[index].clone();
             machine
@@ -750,10 +748,8 @@ impl MemberBodies for LawBodies {
                     Ok(Some(row)) => {
                         serde_json::from_str::<ParkedCheckpoint<ParkedRun>>(&row.snapshot_ref)
                             .is_ok_and(|checkpoint| {
-                                checkpoint
-                                    .ledger
-                                    .executions()
-                                    .any(|admitted| admitted.operation == operation)
+                                matches!(checkpoint.phase, lash_vm_broker::kernel::CheckpointPhase::Parked { ledger, .. }
+                                    if ledger.executions().any(|admitted| admitted.operation == operation))
                             })
                     }
                     _ => false,

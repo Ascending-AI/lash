@@ -1611,15 +1611,17 @@ fn image_cell() -> lash_durable::domain::ExecKey {
 fn with_a_stale_continuation(snapshot: &str) -> String {
     let mut stale: serde_json::Value =
         serde_json::from_str(snapshot).expect("the image's cell snapshot is JSON");
-    let parked: lash_vm_protocol::OpaqueVmState = serde_json::from_value(stale["state"].clone())
-        .expect("the image's cell stopped on a parked kernel run");
-    stale["state"] = serde_json::to_value(lash_vm_protocol::OpaqueVmState::seal(
-        parked.owner().clone(),
-        u32::MAX,
-        parked.document().to_owned(),
-        parked.bytes().to_vec(),
-    ))
-    .expect("the stale parked run encodes");
+    let parked: lash_vm_protocol::OpaqueVmState =
+        serde_json::from_value(stale["phase"]["parked"]["state"].clone())
+            .expect("the image's cell stopped on a parked kernel run");
+    stale["phase"]["parked"]["state"] =
+        serde_json::to_value(lash_vm_protocol::OpaqueVmState::seal(
+            parked.owner().clone(),
+            u32::MAX,
+            parked.document().to_owned(),
+            parked.bytes().to_vec(),
+        ))
+        .expect("the stale parked run encodes");
     stale.to_string()
 }
 
@@ -1630,18 +1632,20 @@ fn with_a_stale_continuation(snapshot: &str) -> String {
 fn with_bytes_of_another_kernel_version(snapshot: &str) -> String {
     let mut stale: serde_json::Value =
         serde_json::from_str(snapshot).expect("the image's cell snapshot is JSON");
-    let parked: lash_vm_protocol::OpaqueVmState = serde_json::from_value(stale["state"].clone())
-        .expect("the image's cell stopped on a parked kernel run");
+    let parked: lash_vm_protocol::OpaqueVmState =
+        serde_json::from_value(stale["phase"]["parked"]["state"].clone())
+            .expect("the image's cell stopped on a parked kernel run");
     let mut run: serde_json::Value =
         serde_json::from_slice(parked.bytes()).expect("the parked run is JSON");
     run["run"]["kernel"] = (parked.kernel() + 1).into();
-    stale["state"] = serde_json::to_value(lash_vm_protocol::OpaqueVmState::seal(
-        parked.owner().clone(),
-        parked.kernel(),
-        parked.document().to_owned(),
-        serde_json::to_vec(&run).expect("the parked run encodes"),
-    ))
-    .expect("the stale parked run encodes");
+    stale["phase"]["parked"]["state"] =
+        serde_json::to_value(lash_vm_protocol::OpaqueVmState::seal(
+            parked.owner().clone(),
+            parked.kernel(),
+            parked.document().to_owned(),
+            serde_json::to_vec(&run).expect("the parked run encodes"),
+        ))
+        .expect("the stale parked run encodes");
     stale.to_string()
 }
 

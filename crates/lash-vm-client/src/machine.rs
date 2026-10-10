@@ -276,7 +276,7 @@ impl DrivenMachine for RemoteMachine {
                 }
                 RunStep::Parked { park, .. } => {
                     let park: ParkWire = wire::decode(PayloadKind::Park, &park).map_err(worker)?;
-                    return Ok(Step::Parked(park.into()));
+                    return Ok(Step::Parked(park.try_into().map_err(worker)?));
                 }
                 RunStep::Slice { .. } => return Ok(Step::Slice),
                 RunStep::Ended { end, .. } => {

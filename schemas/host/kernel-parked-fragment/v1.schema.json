@@ -382,6 +382,35 @@
       ],
       "type": "object"
     },
+    "EffectOutcome": {
+      "description": "How a wait ended.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "completed": {
+              "$ref": "#/$defs/Datum"
+            }
+          },
+          "required": [
+            "completed"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "failed": {
+              "$ref": "#/$defs/ErrorDatum"
+            }
+          },
+          "required": [
+            "failed"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "Ended": {
       "description": "How a task ended.",
       "oneOf": [
@@ -855,41 +884,6 @@
       ],
       "type": "object"
     },
-    "Outcome": {
-      "description": "How a wait ended.",
-      "oneOf": [
-        {
-          "enum": [
-            "elapsed"
-          ],
-          "type": "string"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "completed": {
-              "$ref": "#/$defs/Datum"
-            }
-          },
-          "required": [
-            "completed"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "failed": {
-              "$ref": "#/$defs/ErrorDatum"
-            }
-          },
-          "required": [
-            "failed"
-          ],
-          "type": "object"
-        }
-      ]
-    },
     "Owned": {
       "additionalProperties": false,
       "properties": {
@@ -935,17 +929,13 @@
         "request": {
           "$ref": "#/$defs/Request"
         },
-        "state": {
-          "$ref": "#/$defs/PerformState"
-        },
         "wait": {
           "$ref": "#/$defs/WaitId"
         }
       },
       "required": [
         "wait",
-        "request",
-        "state"
+        "request"
       ],
       "type": "object"
     },
@@ -967,7 +957,35 @@
           "description": "Its outcome is committed and delivered, and the task has not yet\nrun with it.",
           "properties": {
             "committed": {
-              "$ref": "#/$defs/Outcome"
+              "$ref": "#/$defs/EffectOutcome"
+            }
+          },
+          "required": [
+            "committed"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "PerformState2": {
+      "description": "How far a wait has come.",
+      "oneOf": [
+        {
+          "const": "requested",
+          "description": "Requested since the last park. The embedder has not seen it: the\nnext park hands it out.",
+          "type": "string"
+        },
+        {
+          "const": "admitted",
+          "description": "Handed out at a park, which the embedder admitted with the state\nit saved (`K-TASK-024`). Its outcome has not been delivered.",
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Its outcome is committed and delivered, and the task has not yet\nrun with it.",
+          "properties": {
+            "committed": {
+              "$ref": "#/$defs/SleepOutcome"
             }
           },
           "required": [
@@ -1002,12 +1020,16 @@
                 },
                 "identity": {
                   "$ref": "#/$defs/EffectIdentity"
+                },
+                "state": {
+                  "$ref": "#/$defs/PerformState"
                 }
               },
               "required": [
                 "identity",
                 "effect",
-                "args"
+                "args",
+                "state"
               ],
               "type": "object"
             }
@@ -1028,11 +1050,15 @@
                 },
                 "identity": {
                   "$ref": "#/$defs/EffectIdentity"
+                },
+                "state": {
+                  "$ref": "#/$defs/PerformState2"
                 }
               },
               "required": [
                 "identity",
-                "duration"
+                "duration",
+                "state"
               ],
               "type": "object"
             }
@@ -1117,6 +1143,13 @@
         "unit"
       ],
       "type": "object"
+    },
+    "SleepOutcome": {
+      "description": "The only outcome a sleep can receive.",
+      "enum": [
+        "elapsed"
+      ],
+      "type": "string"
     },
     "SpawnIdentity": {
       "additionalProperties": false,
