@@ -6,7 +6,7 @@
 //! transfer, prune, and abandon-request every process, with the two distinct
 //! scope filters — `observed_by` (what a session may address) and `originated_by`
 //! (what a session created). The session-scoped
-//! [`SessionProcessAdmin`](crate::admin::SessionProcessAdmin) is thin sugar over
+//! [`SessionProcessAdmin`](crate::process::SessionProcessAdmin) is thin sugar over
 //! this surface pre-filtered by a session's observer edge; it lives in `admin` because it
 //! owns its session scope and runtime access.
 
@@ -629,7 +629,7 @@ impl Processes {
 
     /// Cancel every live process: running, or waiting on a call, a key, a
     /// sleep or another process. A host-wide lever; for a
-    /// session-scoped stop use [`SessionProcessAdmin::cancel_all`](crate::admin::SessionProcessAdmin::cancel_all).
+    /// session-scoped stop use [`SessionProcessAdmin::cancel_all`](crate::process::SessionProcessAdmin::cancel_all).
     pub async fn cancel_all(
         &self,
         scoped_effect_controller: ActorContext,

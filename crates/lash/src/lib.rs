@@ -103,10 +103,10 @@ mod process_lifecycle;
 /// [`ConfigTransaction`]: an ordered list of typed commands of any owners,
 /// written against the config revision the caller read under a stable
 /// [`ConfigWrite::id`], applied with
-/// [`SessionConfigAdmin::apply`](crate::admin::SessionConfigAdmin::apply). It
+/// [`SessionConfigAdmin::apply`](crate::config::SessionConfigAdmin::apply). It
 /// applies all or nothing, with one revision step, and settles as a
 /// [`ConfigTransactionOutcome`]: applied, stale, or refused by an owner.
-/// [`SessionConfigAdmin::commands`](crate::admin::SessionConfigAdmin::commands)
+/// [`SessionConfigAdmin::commands`](crate::config::SessionConfigAdmin::commands)
 /// lists every command the installed owners register.
 ///
 /// The core owner's commands are here; a protocol's are in its module
@@ -114,8 +114,9 @@ mod process_lifecycle;
 /// keyed sections (ADR 0133): plugins register them, and the host orders and
 /// places them with [`SetPromptPlan`].
 pub mod config {
-    pub use crate::admin::SessionConfigAdmin;
-    pub use crate::admin::config_transactions::{ConfigSettlement, ConfigWrite};
+    pub use crate::admin::config_transactions::{
+        ConfigSettlement, ConfigWrite, SessionConfigAdmin,
+    };
     /// The owner of the core configuration the commands below change.
     pub use lash_core::CoreConfigOwner;
     pub use lash_core::plugin::config::core::{
@@ -196,10 +197,9 @@ pub mod usage;
 #[cfg(feature = "codemode")]
 pub mod workflow;
 
-pub use crate::admin::{
-    AdminMutation, AdvancedToolAdmin, Completions, SessionCommandAdmin, SessionCommandWithdrawal,
-    ToolAdmin,
-};
+pub use crate::admin::host_commands::{SessionCommandAdmin, SessionCommandWithdrawal};
+pub use crate::admin::tool_state::{AdvancedToolAdmin, ToolAdmin};
+pub use crate::admin::{AdminMutation, Completions};
 pub use crate::core::{
     DeploymentDrainStatus, LashCore, LashCoreBuilder, NodeDrainError, NodeDrainReport,
     SessionDeleteCompletion, SessionDeletion,
@@ -1158,7 +1158,7 @@ pub mod process {
     pub use lash_core_store::effect_opener::EffectOpenerError;
     pub use lash_sansio::HandleTarget;
 
-    pub use crate::admin::SessionProcessAdmin;
+    pub use crate::admin::process_admin::SessionProcessAdmin;
     pub use crate::artifacts::{HostArtifactPin, HostArtifacts, ProcessDefinitions};
     pub use crate::process_admin::Processes;
     pub use crate::process_feed::{

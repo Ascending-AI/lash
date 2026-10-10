@@ -107,14 +107,14 @@ fn last_user_text(request: &LlmRequest) -> String {
         .unwrap_or_default()
 }
 
-/// Test convenience over [`SessionConfigAdmin`](crate::admin::SessionConfigAdmin):
+/// Test convenience over [`SessionConfigAdmin`](crate::config::SessionConfigAdmin):
 /// apply a config transaction against the session's current config revision,
 /// under a fresh id, and require it to apply.
 pub(crate) trait ConfigureExt {
     async fn configure(&self, transaction: crate::config::ConfigTransaction) -> Result<()>;
 }
 
-impl ConfigureExt for crate::admin::SessionConfigAdmin {
+impl ConfigureExt for crate::config::SessionConfigAdmin {
     async fn configure(&self, transaction: crate::config::ConfigTransaction) -> Result<()> {
         let revision = self.revision().await?;
         let write = crate::config::ConfigWrite::new(

@@ -54,7 +54,7 @@ struct Kept {
 /// Apply `transaction` through `config` against the session's current
 /// revision; it applies.
 async fn apply(
-    config: &lash::admin::SessionConfigAdmin,
+    config: &lash::config::SessionConfigAdmin,
     id: &str,
     transaction: lash::config::ConfigTransaction,
 ) {

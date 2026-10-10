@@ -1,10 +1,11 @@
-error[E0624]: method `tool_state` is private
+error[E0599]: no method named `tool_state` found for struct `SessionAdmin` in the current scope
  --> tests/ui/session_admin_flat_methods_are_not_public.rs:2:21
   |
 2 |     let _ = control.tool_state().await;
-  |                     ^^^^^^^^^^ private method
+  |                     ^^^^^^^^^^
   |
- ::: src/admin/tool_state.rs
+help: there is a method `state` with a similar name
   |
-  |     pub(super) async fn tool_state(&self) -> Result<SessionToolState> {
-  |     ----------------------------------------------------------------- private method defined here
+2 -     let _ = control.tool_state().await;
+2 +     let _ = control.state().await;
+  |

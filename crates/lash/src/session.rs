@@ -26,7 +26,7 @@ use lash_core::{SessionObservationEvent, facade_support::LiveReplayGap};
 /// the core's, configured by the plugin config it recorded at creation
 /// (FIG-4396). It is stated once, in the [`SessionCreation`] passed to
 /// [`create`](Self::create), and changed afterwards only through a config
-/// transaction ([`SessionConfigAdmin::apply`](crate::admin::SessionConfigAdmin::apply)).
+/// transaction ([`SessionConfigAdmin::apply`](crate::config::SessionConfigAdmin::apply)).
 pub struct SessionBuilder {
     pub(crate) core: LashCore,
     pub(crate) session_id: SessionId,
@@ -130,7 +130,7 @@ impl SessionBuilder {
     ///
     /// The session runs with the config it recorded at creation, as recorded,
     /// and the open writes nothing (FIG-4099). Change a session's config with
-    /// a config transaction ([`SessionConfigAdmin::apply`](crate::admin::SessionConfigAdmin::apply)).
+    /// a config transaction ([`SessionConfigAdmin::apply`](crate::config::SessionConfigAdmin::apply)).
     pub async fn open(self) -> Result<LashSession> {
         let resolved = self.existing_store().await?;
         self.reconcile_process_observer_intents(Some(&resolved.store))
@@ -991,7 +991,7 @@ impl LashSession {
             runtime: self.runtime.clone(),
         };
         SessionAdmin {
-            processes: crate::admin::SessionProcessAdmin {
+            processes: crate::process::SessionProcessAdmin {
                 context: context.clone(),
                 process_work: Arc::clone(self.binding.process().port()),
                 observation_work_limits: self.binding.observation_work_limits(),
