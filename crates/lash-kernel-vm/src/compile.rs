@@ -29,6 +29,7 @@ use lash_kernel_doc::{
     Document, FunctionDefinition, FunctionId, FunctionRegistry, JoinMode, Name, NativeFunction,
     Site, Type, Unit, Value,
 };
+use lash_kernel_exec::{BoundaryKind, StepEdge};
 
 use crate::functions::{MachineFunction, machine_function};
 
@@ -83,6 +84,8 @@ struct Tables {
     codes: Vec<Code>,
     blocks: Vec<Block>,
     stmts: Vec<Stmt>,
+    /// Each statement's step edge, by statement.
+    edges: Vec<StepEdge>,
     /// Each function body by its site, and each block by its own: how a
     /// parked run's coordinates find their place in this layout.
     code_at: BTreeMap<Site, CodeId>,
@@ -330,6 +333,18 @@ impl Executable {
     )]
     pub(crate) fn stmt(&self, id: StmtId) -> &Stmt {
         self.get_stmt(id).expect("a statement of this executable")
+    }
+
+    /// Statement `id`, and where its step leaves its frame when it
+    /// completes in its own block.
+    pub(crate) fn stmt_edge(&self, id: StmtId) -> (&Stmt, StepEdge) {
+        let library = &self.library.0.tables;
+        let index = id.0 as usize;
+        let (tables, at) = match index.checked_sub(library.stmts.len()) {
+            None => (library, index),
+            Some(own) => (&self.own, own),
+        };
+        (&tables.stmts[at], tables.edges[at])
     }
 
     pub(crate) fn lib(&self, id: LibId) -> &Lib {
@@ -771,14 +786,78 @@ impl<'a> Compiler<'a> {
             .enumerate()
             .map(|(index, block)| (block.site.clone(), BlockId(base.blocks + index as u32)))
             .collect();
+        let edges = step_edges(&codes, &self.blocks, &self.stmts, base);
         Tables {
             codes,
             blocks: self.blocks,
             stmts: self.stmts,
+            edges,
             code_at,
             block_at,
         }
     }
+}
+
+/// The step edge of a statement that is not the last of its block: the
+/// next statement starts the next step.
+const ON: StepEdge = StepEdge {
+    leaves: 0,
+    next: BoundaryKind::StatementStart,
+};
+
+/// The step edge of the last statement of a function's, a loop's or a
+/// `try`'s block: the block's end is a step of its own.
+const TO_END: StepEdge = StepEdge {
+    leaves: 0,
+    next: BoundaryKind::BlockEnd,
+};
+
+/// Each statement's step edge, by statement: where the statement's step
+/// leaves its frame when it completes in its own block. Only an `if` arm
+/// sits right inside another block of its frame, so only the step of an
+/// arm's last statement leaves blocks: the arm, and whatever the step of
+/// the `if` itself leaves.
+fn step_edges(codes: &[Code], blocks: &[Block], stmts: &[Stmt], base: Base) -> Vec<StepEdge> {
+    let mut edges = vec![ON; stmts.len()];
+    // A block, and the edge of its last statement.
+    let mut pending: Vec<(BlockId, StepEdge)> =
+        codes.iter().map(|code| (code.body, TO_END)).collect();
+    while let Some((block, last)) = pending.pop() {
+        let ids = &blocks[(block.0 - base.blocks) as usize].stmts;
+        for (index, id) in ids.iter().enumerate() {
+            let edge = if index + 1 == ids.len() { last } else { ON };
+            let at = (id.0 - base.stmts) as usize;
+            edges[at] = edge;
+            match &stmts[at] {
+                Stmt::If {
+                    then_block,
+                    else_block,
+                    ..
+                } => {
+                    let arm = StepEdge {
+                        leaves: edge.leaves + 1,
+                        next: edge.next,
+                    };
+                    pending.extend([(*then_block, arm), (*else_block, arm)]);
+                }
+                Stmt::For { body, .. } | Stmt::While { body, .. } => {
+                    pending.push((*body, TO_END));
+                }
+                Stmt::Try {
+                    body,
+                    catch,
+                    finally,
+                    ..
+                } => {
+                    pending.push((*body, TO_END));
+                    pending.extend(catch.map(|(_, block)| (block, TO_END)));
+                    pending.extend(finally.map(|block| (block, TO_END)));
+                }
+                _ => {}
+            }
+        }
+    }
+    edges
 }
 
 impl Compiler<'_> {

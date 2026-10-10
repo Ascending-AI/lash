@@ -71,7 +71,9 @@ pub(super) fn start(
         live_tasks: 1,
         inline_depth: 0,
         inline_result: None,
+        regs: Vec::new(),
         storage: Storage::default(),
+        steps: Default::default(),
         end: None,
         ended: false,
         program,
@@ -125,11 +127,11 @@ pub(super) fn start(
             (*code, args)
         }
     };
-    machine.storage.args = args;
+    machine.regs = args;
     machine
         .push_frame(TaskId::MAIN, &exe, super::exec::Call::new(code, 0))
         .map_err(|interrupt| arguments(describe("the start", interrupt)))?;
-    machine.storage.args.clear();
+    machine.regs.clear();
     Ok(machine)
 }
 

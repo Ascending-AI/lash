@@ -4,40 +4,54 @@ use std::sync::Arc;
 
 use lash_kernel_doc::{Measure, ObjectId, TaskId, Value};
 
+use super::ops::{Flow, Reg};
 use super::{
-    Completion, Control, Cursor, Eval, Frame, FrameStorage, Halt, Incoming, Interrupt,
-    KernelMachine, LibraryCall, SlotState, TaskState, TryPhase, bound, fault, raise,
+    Completion, Control, Eval, Frame, FrameStorage, Halt, Incoming, Interrupt, KernelMachine,
+    LibraryCall, SlotState, TaskState, TryPhase, bound, fault, raise,
 };
 use crate::compile::{
     BlockId, CodeId, Executable, LibId, Local, Member, Place, Plan, Rhs, Source, Stmt, StmtId,
     Target, Var,
 };
 use crate::data::{Decoder, copy_out, deep_size, magnitude, nested_size, size};
-use crate::heap::{Key, Obj, value_bytes};
+use crate::heap::{Obj, value_bytes};
 use crate::interface::{Bound, Host, Outcome};
+
+/// How a statement's run ends.
+enum Ran {
+    /// In its own block: its step edge is next.
+    Done,
+    /// Having entered a block, a loop, a `try` or a frame, or waiting: the
+    /// step ends where the statement left the task.
+    Step,
+    /// Departing: a `break`, a `continue` or a `return`.
+    Depart(Completion),
+}
 
 /// A function about to run in a new frame.
 pub(super) struct Call<'a> {
     pub(super) code: CodeId,
-    /// Where the call's arguments start on the argument stack; they run to
-    /// its top.
-    pub(super) args: usize,
+    /// The register the call's arguments start at; they run to the top.
+    pub(super) args: Reg,
     /// The cells of the variables a closure shares, in its code's order.
     pub(super) captures: &'a [ObjectId],
     /// The library function the code is the body of.
     pub(super) library: Option<LibId>,
     /// The call sits inside an expression and runs to its end there.
     pub(super) inline: bool,
+    /// The statement of the caller's frame that waits in the call.
+    pub(super) awaited_by: Option<StmtId>,
 }
 
 impl<'a> Call<'a> {
-    pub(super) fn new(code: CodeId, args: usize) -> Self {
+    pub(super) fn new(code: CodeId, args: Reg) -> Self {
         Self {
             code,
             args,
             captures: &[],
             library: None,
             inline: false,
+            awaited_by: None,
         }
     }
 
@@ -53,6 +67,11 @@ impl<'a> Call<'a> {
 
     pub(super) fn inline(mut self) -> Self {
         self.inline = true;
+        self
+    }
+
+    pub(super) fn awaited_by(mut self, stmt: Option<StmtId>) -> Self {
+        self.awaited_by = stmt;
         self
     }
 }
@@ -76,15 +95,24 @@ impl KernelMachine {
             Some(Control::Block { block, next }) => {
                 let stmts = &exe.block(*block).stmts;
                 match stmts.get(*next) {
-                    Some(stmt) => {
+                    Some(&id) => {
                         *next += 1;
-                        let last = *next == stmts.len();
+                        let last = self.steps.verify && *next == stmts.len();
                         self.charge(1)?;
-                        let completion = self.exec(task, host, exe, *stmt)?;
-                        if last && matches!(completion, Completion::Normal) {
-                            self.leave_ended_blocks(task, exe);
+                        let (stmt, edge) = exe.stmt_edge(id);
+                        match self.exec(task, host, exe, id, stmt)? {
+                            Ran::Done => {
+                                self.take_edge(task, exe, edge)?;
+                                Ok(Completion::Normal)
+                            }
+                            Ran::Step => {
+                                if last {
+                                    self.verify_no_edge(task, exe)?;
+                                }
+                                Ok(Completion::Normal)
+                            }
+                            Ran::Depart(completion) => Ok(completion),
                         }
-                        Ok(completion)
                     }
                     None => {
                         self.pop_control(task, exe)?;
@@ -109,38 +137,7 @@ impl KernelMachine {
         Ok(())
     }
 
-    /// Leaves the blocks that the statement just completed was the last
-    /// of, while each is inside another block of the same frame: leaving
-    /// such a block ends its variables and runs and charges nothing, so the
-    /// statement's step takes it rather than a step of its own. A frame
-    /// that waits in a statement, or whose block is a loop's or a `try`'s,
-    /// is left as it is.
-    pub(super) fn leave_ended_blocks(&mut self, task: TaskId, exe: &Executable) {
-        let Some(frame) = self
-            .tasks
-            .get_mut(task.0 as usize)
-            .and_then(|task| task.frames.last_mut())
-        else {
-            return;
-        };
-        if frame.awaiting.is_some() {
-            return;
-        }
-        while let [.., Control::Block { .. }, Control::Block { block, next }] =
-            frame.control.as_slice()
-        {
-            let block = exe.block(*block);
-            if *next < block.stmts.len() {
-                break;
-            }
-            for at in &block.declares {
-                frame.slots[*at as usize] = SlotState::Empty;
-            }
-            frame.control.pop();
-        }
-    }
-
-    fn push_block(&mut self, task: TaskId, block: BlockId) -> Result<(), Halt> {
+    pub(super) fn push_block(&mut self, task: TaskId, block: BlockId) -> Result<(), Halt> {
         self.frame(task)?
             .control
             .push(Control::Block { block, next: 0 });
@@ -240,7 +237,7 @@ impl KernelMachine {
                     }
                     Completion::Continue => {
                         departure = match self.next_iteration(task, host, exe) {
-                            Ok(()) => Completion::Normal,
+                            Ok(_) => Completion::Normal,
                             Err(Interrupt::Raise(value)) => Completion::Throw(value),
                             Err(Interrupt::Halt(halt)) => return Err(halt),
                         };
@@ -308,10 +305,12 @@ impl KernelMachine {
         Ok(match result {
             Ok(value) => {
                 // The value is in no variable until the statement binds it.
-                self.pin(&value)?;
-                match self.finish_action(task, host, exe, value) {
-                    Ok(()) => {
-                        self.leave_ended_blocks(task, exe);
+                let r = self.regs.len();
+                self.regs.push(value);
+                self.pin(r)?;
+                match self.finish_action(task, host, exe, r) {
+                    Ok(stmt) => {
+                        self.take_edge_of(task, exe, stmt)?;
                         None
                     }
                     Err(Interrupt::Raise(value)) => Some(Completion::Throw(value)),
@@ -395,8 +394,8 @@ impl KernelMachine {
 
     /// Pushes a frame that runs `code` with the call's arguments bound to
     /// its parameters, in order; a parameter with no argument is absent
-    /// (`K-FN-004`). The arguments are moved out of the argument stack,
-    /// and the caller takes what is left there off.
+    /// (`K-FN-004`). The arguments are moved out of their registers, and
+    /// the caller takes what is left there off.
     pub(super) fn push_frame(
         &mut self,
         task: TaskId,
@@ -409,9 +408,10 @@ impl KernelMachine {
             captures,
             library,
             inline,
+            awaited_by,
         } = call;
         let code = exe.code(code_id);
-        let given = self.storage.args.len() - base;
+        let given = self.regs.len() - base;
         if given > code.params.len() {
             return raise(
                 "arity",
@@ -448,7 +448,7 @@ impl KernelMachine {
                 // Only a native implementation's formula, charged when the
                 // call ends, reads them (`K-CHG-007`).
                 if exe.lib(lib).native {
-                    args.extend_from_slice(&self.storage.args[base..]);
+                    args.extend_from_slice(&self.regs[base..]);
                 }
                 LibraryCall { lib, args }
             }),
@@ -457,11 +457,13 @@ impl KernelMachine {
         for (capture, cell) in code.captures.iter().zip(captures) {
             frame.slots[capture.inner_at as usize] = SlotState::Cell(*cell);
         }
+        if let Some(stmt) = awaited_by {
+            self.frame(task)?.awaiting = Some(stmt);
+        }
         self.task(task)?.frames.push(frame);
         for (index, param) in code.params.iter().enumerate() {
             let value = self
-                .storage
-                .args
+                .regs
                 .get_mut(base + index)
                 .map_or(Value::Absent, |arg| std::mem::replace(arg, Value::Absent));
             self.bind(task, *param, value)?;
@@ -578,25 +580,26 @@ impl KernelMachine {
         host: &mut dyn Host,
         exe: &Executable,
         id: StmtId,
-    ) -> Eval<Completion> {
-        let stmt = exe.stmt(id);
+        stmt: &Stmt,
+    ) -> Eval<Ran> {
+        let out = self.regs.len();
         match stmt {
             Stmt::Let { value, .. } | Stmt::Assign { value, .. } => match value {
                 // A value at once completes the statement, which no action
                 // holds open.
                 Rhs::Expr(expr) => {
-                    let value = self.eval(task, host, exe, expr)?;
-                    self.complete_stmt(task, host, exe, stmt, value)?;
+                    self.eval(task, host, exe, expr)?;
+                    self.complete_stmt(task, host, exe, stmt, out)?;
                 }
-                Rhs::Action(action) => {
-                    if let Some(value) = self.act(task, exe, id, action)? {
-                        self.frame(task)?.awaiting = Some(id);
-                        self.finish_action(task, host, exe, value)?;
-                    }
-                }
+                Rhs::Action(action) => match self.act(task, exe, id, action, out)? {
+                    Flow::Done => self.complete_stmt(task, host, exe, stmt, out)?,
+                    Flow::Step => return Ok(Ran::Step),
+                },
             },
             Stmt::Do(action) => {
-                self.act(task, exe, id, action)?;
+                if self.act(task, exe, id, action, out)? == Flow::Step {
+                    return Ok(Ran::Step);
+                }
             }
             Stmt::Remove(member) => self.remove(task, host, exe, member)?,
             Stmt::If {
@@ -604,7 +607,7 @@ impl KernelMachine {
                 then_block,
                 else_block,
             } => {
-                let block = match self.eval(task, host, exe, condition)? {
+                let block = match self.eval_value(task, host, exe, condition)? {
                     Value::Bool(true) => *then_block,
                     Value::Bool(false) => *else_block,
                     _ => return raise("type_error", "an `if` condition must be a bool"),
@@ -612,44 +615,30 @@ impl KernelMachine {
                 // An empty block would end as soon as it began.
                 if !exe.block(block).stmts.is_empty() {
                     self.push_block(task, block)?;
+                    return Ok(Ran::Step);
                 }
             }
             Stmt::For { iterable, .. } => {
-                let cursor = match self.eval(task, host, exe, iterable)? {
-                    Value::List(id) => Cursor::List(id, 0),
-                    Value::Tuple(items) => Cursor::Tuple(items, 0),
-                    Value::Map(id) | Value::Set(id) => Cursor::Table(id, None),
-                    _ => {
-                        return raise(
-                            "type_error",
-                            "`for` iterates a list, a tuple, a map or a set",
-                        );
-                    }
-                };
-                self.frame(task)?.control.push(Control::For {
-                    stmt: id,
-                    cursor,
-                    started: 0,
-                });
-                self.next_iteration(task, host, exe)?;
+                self.eval(task, host, exe, iterable)?;
+                return Ok(ran(self.for_start(task, host, exe, id, out)?));
             }
             Stmt::While { .. } => {
                 self.frame(task)?.control.push(Control::While {
                     stmt: id,
                     started: 0,
                 });
-                self.next_iteration(task, host, exe)?;
+                return Ok(ran(self.next_iteration(task, host, exe)?));
             }
-            Stmt::Break => return Ok(Completion::Break),
-            Stmt::Continue => return Ok(Completion::Continue),
+            Stmt::Break => return Ok(Ran::Depart(Completion::Break)),
+            Stmt::Continue => return Ok(Ran::Depart(Completion::Continue)),
             Stmt::Return(value) => {
-                let value = self.eval(task, host, exe, value)?;
+                let value = self.eval_value(task, host, exe, value)?;
                 if task == TaskId::MAIN && self.task(task)?.frames.len() == 1 {
                     // The run's result leaves the run (`K-EFF-002`): a value
                     // that cannot is refused here, where a `catch` sees it.
                     self.copy_out(&value)?;
                 }
-                return Ok(Completion::Return(value));
+                return Ok(Ran::Depart(Completion::Return(value)));
             }
             Stmt::Try { body, .. } => {
                 self.frame(task)?.control.push(Control::Try {
@@ -657,26 +646,27 @@ impl KernelMachine {
                     phase: TryPhase::Body,
                 });
                 self.push_block(task, *body)?;
+                return Ok(Ran::Step);
             }
             Stmt::Throw(value) => {
-                let value = self.eval(task, host, exe, value)?;
+                let value = self.eval_value(task, host, exe, value)?;
                 return Err(Interrupt::Raise(value));
             }
             Stmt::Print(value) => {
-                let value = self.eval(task, host, exe, value)?;
+                let value = self.eval_value(task, host, exe, value)?;
                 let datum = self.copy_out(&value)?;
                 host.print(&datum);
             }
             Stmt::Finish(value) => {
-                let value = self.eval(task, host, exe, value)?;
+                let value = self.eval_value(task, host, exe, value)?;
                 return Err(Halt::Finish(self.copy_out(&value)?).into());
             }
             Stmt::Fail(value) => {
-                let value = self.eval(task, host, exe, value)?;
+                let value = self.eval_value(task, host, exe, value)?;
                 return Err(Halt::Fail(self.copy_out(&value)?).into());
             }
         }
-        Ok(Completion::Normal)
+        Ok(Ran::Done)
     }
 
     /// Copies a value out of the run, charging its deep size
@@ -684,93 +674,6 @@ impl KernelMachine {
     pub(super) fn copy_out(&mut self, value: &Value) -> Eval<lash_kernel_doc::Datum> {
         self.charge(deep_size(&self.heap, value))?;
         Ok(copy_out(&self.heap, value)?)
-    }
-
-    /// Tests the innermost loop's continuation and starts its next
-    /// iteration or ends it (`K-ITER-002`, `K-ITER-003`, `K-FORM-013`).
-    fn next_iteration(&mut self, task: TaskId, host: &mut dyn Host, exe: &Executable) -> Eval<()> {
-        self.charge(self.costs.loop_test)?;
-        // Borrowed by field, so that the loop's position can be read
-        // against the heap.
-        let Some(frame) = self
-            .tasks
-            .get_mut(task.0 as usize)
-            .and_then(|task| task.frames.last_mut())
-        else {
-            return Err(fault("a running task has no frame").into());
-        };
-        match frame.control.last_mut() {
-            Some(Control::For {
-                stmt,
-                cursor,
-                started,
-            }) => {
-                let Stmt::For { binding, body, .. } = exe.stmt(*stmt) else {
-                    return Err(fault("a `for` loop is not at a `for`").into());
-                };
-                let element = match cursor {
-                    Cursor::List(list, position) => {
-                        let element = self
-                            .heap
-                            .list(*list)
-                            .and_then(|items| items.get(*position))
-                            .cloned();
-                        *position += usize::from(element.is_some());
-                        element
-                    }
-                    Cursor::Tuple(items, position) => {
-                        let element = items.get(*position).cloned();
-                        *position += usize::from(element.is_some());
-                        element
-                    }
-                    Cursor::Table(table, last) => {
-                        let next = self
-                            .heap
-                            .table(*table)
-                            .and_then(|table| table.after(*last))
-                            .map(|(sequence, key)| (sequence, key.clone()));
-                        next.map(|(sequence, key)| {
-                            *last = Some(sequence);
-                            key
-                        })
-                    }
-                };
-                match element {
-                    Some(element) => {
-                        *started += 1;
-                        self.push_block(task, *body)?;
-                        self.bind(task, *binding, element)?;
-                    }
-                    None => {
-                        frame.control.pop();
-                    }
-                }
-            }
-            Some(Control::While { stmt, .. }) => {
-                let Stmt::While {
-                    condition, body, ..
-                } = exe.stmt(*stmt)
-                else {
-                    return Err(fault("a `while` loop is not at a `while`").into());
-                };
-                match self.eval(task, host, exe, condition)? {
-                    Value::Bool(true) => {
-                        if let Some(Control::While { started, .. }) =
-                            self.frame(task)?.control.last_mut()
-                        {
-                            *started += 1;
-                        }
-                        self.push_block(task, *body)?;
-                    }
-                    Value::Bool(false) => {
-                        self.frame(task)?.control.pop();
-                    }
-                    _ => return raise("type_error", "a `while` condition must be a bool"),
-                }
-            }
-            _ => return Err(fault("no loop is innermost").into()),
-        }
-        Ok(())
     }
 
     /// What a task's pending statement resumes with (`K-TASK-009`,
@@ -868,43 +771,53 @@ impl KernelMachine {
     }
 
     /// Completes the statement the top frame waits in with the value its
-    /// action yielded: binds it, writes it, or drops it (`K-EVAL-003`).
+    /// action yielded, in `value`: binds it, writes it, or drops it
+    /// (`K-EVAL-003`). Gives the statement.
     pub(super) fn finish_action(
         &mut self,
         task: TaskId,
         host: &mut dyn Host,
         exe: &Executable,
-        value: Value,
-    ) -> Eval<()> {
+        value: Reg,
+    ) -> Eval<StmtId> {
         let Some(stmt) = self.frame(task)?.awaiting.take() else {
             return Err(fault("a value arrived at no statement").into());
         };
-        self.complete_stmt(task, host, exe, exe.stmt(stmt), value)
+        self.complete_stmt(task, host, exe, exe.stmt(stmt), value)?;
+        Ok(stmt)
     }
 
-    /// Completes a statement with the value of its right-hand side.
+    /// Completes a statement with the value of its right-hand side, in
+    /// `value`.
     fn complete_stmt(
         &mut self,
         task: TaskId,
         host: &mut dyn Host,
         exe: &Executable,
         stmt: &Stmt,
-        value: Value,
+        value: Reg,
     ) -> Eval<()> {
         match stmt {
             Stmt::Let {
                 target: Target::Slot(slot),
                 ..
-            } => self.bind(task, *slot, value)?,
+            } => {
+                let value = self.take_top(value);
+                self.bind(task, *slot, value)?;
+            }
             Stmt::Let {
                 target: Target::Session(name),
                 ..
             } => {
+                let value = self.take_top(value);
                 self.reserve(value_bytes(&value))?;
                 self.session.insert(name.clone(), value);
             }
             Stmt::Assign { place, .. } => match place {
-                Place::Var(var) => self.write_var(task, exe, var, value)?,
+                Place::Var(var) => {
+                    let value = self.take_top(value);
+                    self.write_var(task, exe, var, value)?;
+                }
                 Place::Member(member) => self.write_member(task, host, exe, member, value)?,
             },
             _ => {}
@@ -920,95 +833,21 @@ impl KernelMachine {
         host: &mut dyn Host,
         exe: &Executable,
         member: &Member,
-        value: Value,
+        value: Reg,
     ) -> Eval<()> {
-        self.pin(&value)?;
+        self.pin(value)?;
+        let target = self.regs.len();
         match member {
-            Member::Field(target, field) => {
-                let Value::Record(record) = self.eval(task, host, exe, target)? else {
-                    return raise("type_error", "only a record has fields to assign");
-                };
-                self.write_record_field(record, field, value)?;
+            Member::Field(target_expr, field) => {
+                self.eval(task, host, exe, target_expr)?;
+                self.write_field(target, field, value)
             }
-            Member::Index(target, index) => {
-                let target = self.eval(task, host, exe, target)?;
-                let index = self.eval(task, host, exe, index)?;
-                match target {
-                    Value::List(list) => {
-                        let length = self.heap.list(list).map_or(0, Vec::len);
-                        let position =
-                            super::eval::position(&index)?.filter(|position| *position <= length);
-                        let Some(position) = position else {
-                            return raise(
-                                "index_out_of_range",
-                                format!("a list of {length} is assigned at 0 to {length}"),
-                            );
-                        };
-                        self.reserve(value_bytes(&value))?;
-                        if let Some(Obj::List(items)) = self.heap.get_mut(list) {
-                            match items.get_mut(position) {
-                                Some(held) => *held = value,
-                                None => items.push(value),
-                            }
-                        }
-                    }
-                    Value::Record(record) => {
-                        let Value::Text(field) = index else {
-                            return raise("type_error", "a record index must be text");
-                        };
-                        self.write_record_field(record, &field, value)?;
-                    }
-                    Value::Map(map) => {
-                        let key = super::eval::key(&index)?;
-                        self.reserve(value_bytes(&value).saturating_add(value_bytes(&index)))?;
-                        if let Some(Obj::Map(table)) = self.heap.get_mut(map) {
-                            table.insert(key, index, value);
-                        }
-                    }
-                    Value::Set(set) => {
-                        let key = super::eval::key(&index)?;
-                        let Value::Bool(member) = value else {
-                            return raise(
-                                "type_error",
-                                "a set's member is assigned `true` to add it or `false` to remove it",
-                            );
-                        };
-                        self.reserve(value_bytes(&index))?;
-                        if let Some(Obj::Set(table)) = self.heap.get_mut(set) {
-                            if member {
-                                table.insert(key, index, Value::Null);
-                            } else {
-                                table.remove(&key);
-                            }
-                        }
-                    }
-                    _ => {
-                        return raise(
-                            "type_error",
-                            "only a list, a record, a map or a set is assigned by index",
-                        );
-                    }
-                }
+            Member::Index(target_expr, index) => {
+                self.eval(task, host, exe, target_expr)?;
+                self.eval(task, host, exe, index)?;
+                self.write_index(target, target + 1, value)
             }
         }
-        Ok(())
-    }
-
-    /// Field and text-index assignment share a record's insertion order.
-    fn write_record_field(
-        &mut self,
-        record: lash_kernel_doc::ObjectId,
-        field: &str,
-        value: Value,
-    ) -> Eval<()> {
-        self.reserve(value_bytes(&value).saturating_add(field.len() as u64))?;
-        if let Some(Obj::Record(fields)) = self.heap.get_mut(record) {
-            match fields.iter_mut().find(|(name, _)| name == field) {
-                Some(held) => held.1 = value,
-                None => fields.push((field.to_string(), value)),
-            }
-        }
-        Ok(())
     }
 
     /// `remove` (`K-FORM-007`).
@@ -1019,56 +858,26 @@ impl KernelMachine {
         exe: &Executable,
         member: &Member,
     ) -> Eval<()> {
+        let target = self.regs.len();
         match member {
-            Member::Field(target, field) => {
-                let Value::Record(record) = self.eval(task, host, exe, target)? else {
-                    return raise("type_error", "only a record has fields to remove");
-                };
-                if let Some(Obj::Record(fields)) = self.heap.get_mut(record) {
-                    fields.retain(|(name, _)| name != field);
-                }
+            Member::Field(target_expr, field) => {
+                self.eval(task, host, exe, target_expr)?;
+                self.remove_field(target, field)
             }
-            Member::Index(target, index) => {
-                let target = self.eval(task, host, exe, target)?;
-                let index = self.eval(task, host, exe, index)?;
-                match target {
-                    Value::List(list) => {
-                        let length = self.heap.list(list).map_or(0, Vec::len);
-                        let position =
-                            super::eval::position(&index)?.filter(|position| *position < length);
-                        let Some(position) = position else {
-                            return raise(
-                                "index_out_of_range",
-                                format!("a list of {length} has no element there to remove"),
-                            );
-                        };
-                        if let Some(Obj::List(items)) = self.heap.get_mut(list) {
-                            items.remove(position);
-                        }
-                    }
-                    Value::Record(record) => {
-                        let Value::Text(field) = index else {
-                            return raise("type_error", "a record index must be text");
-                        };
-                        if let Some(Obj::Record(fields)) = self.heap.get_mut(record) {
-                            fields.retain(|(name, _)| name != field.as_ref());
-                        }
-                    }
-                    Value::Map(table) | Value::Set(table) => {
-                        let key: Key = super::eval::key(&index)?;
-                        if let Some(Obj::Map(table) | Obj::Set(table)) = self.heap.get_mut(table) {
-                            table.remove(&key);
-                        }
-                    }
-                    _ => {
-                        return raise(
-                            "type_error",
-                            "only a list, a record, a map or a set has an index to remove",
-                        );
-                    }
-                }
+            Member::Index(target_expr, index) => {
+                self.eval(task, host, exe, target_expr)?;
+                self.eval(task, host, exe, index)?;
+                self.remove_index(target, target + 1)
             }
         }
-        Ok(())
+    }
+}
+
+/// How a statement that ran an operation ends: in its block, or where the
+/// operation left the task.
+fn ran(flow: Flow) -> Ran {
+    match flow {
+        Flow::Done => Ran::Done,
+        Flow::Step => Ran::Step,
     }
 }

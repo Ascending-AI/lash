@@ -1,8 +1,8 @@
 //! Hand-lowered Kir functions for building and testing tiers before
 //! lowering exists.
 //!
-//! Each [`Fixture`] is one kernel function, its source, its Kir and its
-//! baseline maps, and passes [`crate::verify_function`]. Together they
+//! Each [`Fixture`] is one kernel function, its source and its Kir, and
+//! passes [`crate::verify_function`]. Together they
 //! reach every terminator, a loop of each kind, an action with a
 //! continuation, exception edges and every `finally` departure kind a
 //! straight body can take. Charge anchors follow the interpreter's event
@@ -19,7 +19,6 @@ use crate::kir::{
     KBlock, KBlockIx, KLoop, KTry, KirFunction, LibIx, LocalRef, LoopIx, LoopKind, Op, OpOrigin,
     OpRange, Origin, Reg, RegRange, Scope, ScopeIx, SlotInfo, StmtIx, TryIx, VarRef,
 };
-use crate::maps::{FrameMap, baseline_maps};
 use crate::sem::ChargeEvent;
 
 /// The placeholder identity of `num.lt` in the fixtures.
@@ -39,8 +38,6 @@ pub struct Fixture {
     /// The kernel source the Kir lowers.
     pub source: &'static str,
     pub function: KirFunction,
-    /// One baseline map per Boundary.
-    pub maps: Vec<FrameMap>,
 }
 
 /// Every fixture.
@@ -729,12 +726,10 @@ impl Builder {
         self.f.ops = self.ops.into();
         self.f.blocks = self.blocks.into();
         self.f.origins = self.origins.into();
-        let maps = baseline_maps(&self.f);
         Fixture {
             name,
             source,
             function: self.f,
-            maps,
         }
     }
 }

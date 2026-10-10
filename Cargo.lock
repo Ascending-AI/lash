@@ -1994,6 +1994,7 @@ dependencies = [
 name = "lash-dialect-typescript"
 version = "0.0.0-dev"
 dependencies = [
+ "arbitrary",
  "lash-ext-date-ecma",
  "lash-ext-regex-ecma",
  "lash-ext-url-whatwg",
@@ -2868,7 +2869,6 @@ dependencies = [
 name = "lash-kernel-exec"
 version = "0.0.0-dev"
 dependencies = [
- "blake3",
  "lash-kernel-doc",
  "thiserror",
 ]
@@ -2915,6 +2915,7 @@ name = "lash-kernel-vm"
 version = "0.0.0-dev"
 dependencies = [
  "lash-kernel-doc",
+ "lash-kernel-exec",
  "lash-kernel-state",
  "num-bigint",
  "num-traits",

@@ -808,7 +808,9 @@ pub(in crate::machine) fn import(
         live_tasks: u32::try_from(live_tasks).unwrap_or(u32::MAX),
         inline_depth: 0,
         inline_result: None,
+        regs: Vec::new(),
         storage: Storage::default(),
+        steps: Default::default(),
         end: None,
         ended: false,
     };

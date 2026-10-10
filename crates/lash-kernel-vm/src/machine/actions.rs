@@ -11,13 +11,12 @@ use lash_kernel_doc::{
 use num_traits::ToPrimitive;
 
 use super::exec::Call;
+use super::ops::{Entry, Flow, Reg, Status};
 use super::{
     Control, Eval, Halt, Incoming, Interrupt, Joiner, KernelMachine, ListJoin, PendingWait, Task,
     TaskState, Wait, bound, error, fault, raise,
 };
-use crate::compile::{
-    Action, ActionKind, Atom, Callee, CodeId, Executable, LibId, LibRun, Stmt, StmtId,
-};
+use crate::compile::{Action, ActionKind, Atom, Callee, CodeId, Executable, LibId, Stmt, StmtId};
 use crate::heap::Obj;
 use crate::interface::{Bound, EffectRequest, Request, SleepRequest, WaitId};
 
@@ -32,34 +31,28 @@ fn cancelled() -> Value {
 }
 
 impl KernelMachine {
-    /// Starts an action. `Some` is the value of one that completed at
-    /// once; `None` is one the task now waits in, or a call whose frame
-    /// now runs.
+    /// Action dispatch: starts the action of statement `stmt`, its
+    /// arguments read into the registers from `out`. `Done` is one that
+    /// completed at once, its value in `out`; `Step` is one the task now
+    /// waits in, or a call whose frame now runs.
     pub(super) fn act(
         &mut self,
         task: TaskId,
         exe: &Executable,
         stmt: StmtId,
         action: &Action,
-    ) -> Eval<Option<Value>> {
+        out: Reg,
+    ) -> Status {
         match &action.kind {
             ActionKind::Call { callee, args } => {
                 let target = self.callee(task, exe, callee)?;
-                let base = self.storage.args.len();
-                let called = self
-                    .push_atoms(task, exe, args)
-                    .and_then(|()| self.call(task, exe, stmt, target, base));
-                self.storage.args.truncate(base);
-                called
+                self.push_atoms(task, exe, args)?;
+                self.call(task, exe, stmt, target, out)
             }
             ActionKind::Spawn { callee, args } => {
                 let target = self.callee(task, exe, callee)?;
-                let base = self.storage.args.len();
-                let spawned = self
-                    .push_atoms(task, exe, args)
-                    .and_then(|()| self.spawn(task, exe, stmt, &action.site, target, base));
-                self.storage.args.truncate(base);
-                spawned
+                self.push_atoms(task, exe, args)?;
+                self.spawn(task, exe, stmt, &action.site, target, out)
             }
             ActionKind::Perform {
                 effect,
@@ -83,7 +76,7 @@ impl KernelMachine {
                         result: result.clone(),
                     }),
                 );
-                Ok(None)
+                Ok(Flow::Step)
             }
             ActionKind::Sleep(duration) => {
                 let duration = match self.atom(task, exe, duration)? {
@@ -111,7 +104,7 @@ impl KernelMachine {
                         duration,
                     }),
                 );
-                Ok(None)
+                Ok(Flow::Step)
             }
             ActionKind::Join(handle) => {
                 let Value::Task(joined) = self.atom(task, exe, handle)? else {
@@ -121,11 +114,13 @@ impl KernelMachine {
                     return raise("join_self", "a task cannot join its own handle");
                 }
                 if matches!(self.task(joined)?.state, TaskState::Ended(_)) {
-                    return self.join_result(joined).map(Some);
+                    let value = self.join_result(joined)?;
+                    self.put(out, value);
+                    return Ok(Flow::Done);
                 }
                 self.task(joined)?.joiners.push(Joiner::Single(task));
                 self.suspend(task, stmt, Wait::Join(joined))?;
-                Ok(None)
+                Ok(Flow::Step)
             }
             ActionKind::JoinMany(mode, handles) => {
                 let members: Vec<Value> = match self.atom(task, exe, handles)? {
@@ -163,7 +158,8 @@ impl KernelMachine {
                 match self.decide(*mode, &tasks, None)? {
                     Some(decision) => {
                         self.pass(&tasks)?;
-                        decision.map(Some).map_err(Interrupt::Raise)
+                        self.put(out, decision.map_err(Interrupt::Raise)?);
+                        Ok(Flow::Done)
                     }
                     None => {
                         let order = self.next_join;
@@ -184,7 +180,7 @@ impl KernelMachine {
                             },
                         );
                         self.suspend(task, stmt, Wait::JoinMany(order))?;
-                        Ok(None)
+                        Ok(Flow::Step)
                     }
                 }
             }
@@ -194,7 +190,7 @@ impl KernelMachine {
                 self.frame(task)?.awaiting = Some(stmt);
                 self.ready.push_back(task);
                 self.current = None;
-                Ok(None)
+                Ok(Flow::Step)
             }
             ActionKind::Cancel(handle) => {
                 let Value::Task(target) = self.atom(task, exe, handle)? else {
@@ -204,7 +200,8 @@ impl KernelMachine {
                     return Err(Interrupt::Raise(cancelled()));
                 }
                 self.cancel(target)?;
-                Ok(Some(Value::Null))
+                self.put(out, Value::Null);
+                Ok(Flow::Done)
             }
         }
     }
@@ -217,46 +214,40 @@ impl KernelMachine {
         }
     }
 
-    /// A call action, its arguments the argument stack from `base`. The
-    /// caller takes them off. The statement waits in the call only when the
-    /// call runs in a frame of its own: one that completed at once has
-    /// left its statement behind (`K-MACH-007`).
+    /// A call action, its arguments the registers from `args`, its value
+    /// in `args` when it completes at once. The statement waits in the call
+    /// only when the call runs in a frame of its own: one that completed at
+    /// once has left its statement behind (`K-MACH-007`).
     fn call(
         &mut self,
         task: TaskId,
         exe: &Executable,
         stmt: StmtId,
         target: Target,
-        base: usize,
-    ) -> Eval<Option<Value>> {
-        let (code, captures, library) = match target {
-            Target::Code(code, captures) => (code, captures, None),
-            Target::Library(lib) => match self.call_library(task, exe, lib, base)? {
-                Some(value) => return Ok(Some(value)),
-                None => {
-                    let LibRun::Body(code) = &exe.lib(lib).run else {
-                        return Err(fault("a function with no body was run as one").into());
-                    };
-                    (*code, Vec::new(), Some(lib))
-                }
-            },
-        };
-        self.frame(task)?.awaiting = Some(stmt);
-        let call = Call::new(code, base).sharing(&captures);
-        let call = match library {
-            Some(lib) => call.of_library(lib),
-            None => call,
-        };
-        self.push_frame(task, exe, call)?;
-        Ok(None)
+        args: Reg,
+    ) -> Status {
+        match target {
+            Target::Code(code, captures) => {
+                let call = Call::new(code, args)
+                    .sharing(&captures)
+                    .awaited_by(Some(stmt));
+                self.push_frame(task, exe, call)?;
+                Ok(Flow::Step)
+            }
+            Target::Library(lib) => {
+                let flow = self.call_lib(task, exe, lib, args, args, Entry::Frame(Some(stmt)))?;
+                self.cut(args + 1);
+                Ok(flow)
+            }
+        }
     }
 
-    /// Reads an action's atoms onto the argument stack, left to right
+    /// Reads an action's atoms into the next registers, left to right
     /// (`K-EVAL-004`).
     fn push_atoms(&mut self, task: TaskId, exe: &Executable, atoms: &[Atom]) -> Eval<()> {
         for atom in atoms {
             let value = self.atom(task, exe, atom)?;
-            self.storage.args.push(value);
+            self.regs.push(value);
         }
         Ok(())
     }
@@ -368,7 +359,8 @@ impl KernelMachine {
 
     /// `spawn`: the new task runs at once, and the spawning task goes on
     /// when it first waits or ends, before any other ready task
-    /// (`K-TASK-002`). Its arguments are the argument stack from `base`.
+    /// (`K-TASK-002`). Its arguments are the registers from `args`; the new
+    /// task's handle is in `args` when the spawning task goes on at once.
     fn spawn(
         &mut self,
         task: TaskId,
@@ -376,10 +368,10 @@ impl KernelMachine {
         stmt: StmtId,
         site: &Site,
         target: Target,
-        base: usize,
-    ) -> Eval<Option<Value>> {
+        args: Reg,
+    ) -> Status {
         if let Target::Code(code, _) = &target
-            && self.storage.args.len() - base > exe.code(*code).params.len()
+            && self.regs.len() - args > exe.code(*code).params.len()
         {
             return raise(
                 "arity",
@@ -411,30 +403,25 @@ impl KernelMachine {
         self.live_tasks += 1;
         let handle = Value::Task(child);
         let started = match target {
-            Target::Code(code, captures) => {
-                self.push_frame(child, exe, Call::new(code, base).sharing(&captures))
-            }
-            Target::Library(lib) => match self.call_library(child, exe, lib, base) {
-                // A function with no frame has run to its end already.
-                Ok(Some(value)) => {
-                    self.end_task(child, Ok(value))?;
-                    return Ok(Some(handle));
-                }
-                Ok(None) => match &exe.lib(lib).run {
-                    LibRun::Body(code) => {
-                        self.push_frame(child, exe, Call::new(*code, base).of_library(lib))
-                    }
-                    _ => Err(fault("a function with no body was run as one").into()),
-                },
-                Err(interrupt) => Err(interrupt),
-            },
+            Target::Code(code, captures) => self
+                .push_frame(child, exe, Call::new(code, args).sharing(&captures))
+                .map(|()| Flow::Step),
+            Target::Library(lib) => self.call_lib(child, exe, lib, args, args, Entry::Frame(None)),
         };
         match started {
-            Ok(()) => {}
+            Ok(Flow::Step) => {}
+            // A function with no frame has run to its end already.
+            Ok(Flow::Done) => {
+                let value = self.take(args);
+                self.end_task(child, Ok(value))?;
+                self.put(args, handle);
+                return Ok(Flow::Done);
+            }
             // What the new task raises before it has a frame is its error.
             Err(Interrupt::Raise(value)) => {
                 self.end_task(child, Err(value))?;
-                return Ok(Some(handle));
+                self.put(args, handle);
+                return Ok(Flow::Done);
             }
             Err(halt) => return Err(halt),
         }
@@ -443,7 +430,7 @@ impl KernelMachine {
         self.frame(task)?.awaiting = Some(stmt);
         self.ready.push_front(task);
         self.current = Some(child);
-        Ok(None)
+        Ok(Flow::Step)
     }
 
     /// Marks tasks as members of a list `join` that has returned or

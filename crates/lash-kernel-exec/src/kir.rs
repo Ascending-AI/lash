@@ -9,8 +9,7 @@
 //!
 //! Kir is a private derivative of the durable document: it is derived
 //! deterministically, never serialized into a parked run, and changing its
-//! shape changes no identity (only the artifact key, through
-//! [`crate::EXEC_ABI_DIGEST`]).
+//! shape changes no identity.
 
 use lash_kernel_doc::{EffectName, FunctionId, JoinMode, Name, Site, Type, Unit, Value};
 
@@ -269,9 +268,8 @@ pub struct KirFunction {
 }
 
 /// One kernel operation. `Op` names semantic operations, not machine
-/// instructions: each has one meaning, written once against
-/// [`crate::Sem`], and [`crate::SEMANTICS`] states its charge events and
-/// runtime calls.
+/// instructions: each has one meaning, the machine's, and
+/// [`crate::SEMANTICS`] states its charge events.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Op {
     /// A statement starts: its unit of charge (`K-CHG-002`), the step's
@@ -530,7 +528,7 @@ pub enum OpKind {
 }
 
 impl OpKind {
-    /// Every kind, in declaration order: the order the ABI digest hashes.
+    /// Every kind, in declaration order: the order [`crate::SEMANTICS`] states them in.
     pub const ALL: &'static [Self] = &[
         Self::Stmt,
         Self::Step,

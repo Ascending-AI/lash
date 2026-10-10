@@ -8,8 +8,10 @@
 mod actions;
 mod eval;
 mod exec;
+mod ops;
 mod parked;
 mod session;
+mod steps;
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::Arc;
@@ -22,7 +24,7 @@ use lash_kernel_state::{Baseline, ParkedRun, Saved};
 use crate::Layout;
 use crate::compile::{BlockId, CodeId, Executable, LibId, StmtId};
 use crate::data::{Raised, copy_out};
-use crate::heap::{Heap, Obj, object_bytes, refs, value_bytes};
+use crate::heap::{Heap, refs, value_bytes};
 use crate::interface::{
     Bound, BoundExceeded, Bounds, DeliverError, Delivered, End, ExportError, Host, ImportError,
     Machine, MachineError, Meters, Outcome, Park, Program, Request, RunError, Start, StartError,
@@ -185,10 +187,6 @@ struct FrameStorage {
 /// nothing of its own.
 #[derive(Debug, Default)]
 struct Storage {
-    /// The arguments of the calls being made, innermost last. A call's
-    /// arguments are evaluated onto it, its function reads them there, and
-    /// the call takes them off when it returns.
-    args: Vec<Value>,
     frames: Vec<FrameStorage>,
 }
 
@@ -320,7 +318,12 @@ pub struct KernelMachine {
     live_tasks: u32,
     inline_depth: u32,
     inline_result: Option<Result<Value, Value>>,
+    /// The registers: the values of the expressions being evaluated and
+    /// the arguments of the calls being made, innermost last. Nothing holds
+    /// one past the step that wrote it.
+    regs: Vec<Value>,
     storage: Storage,
+    steps: steps::StepCheck,
     end: Option<End>,
     ended: bool,
 }
@@ -345,6 +348,15 @@ struct Pins {
 }
 
 impl Pins {
+    /// Holds `value` until the statement ends, and gives the bytes to
+    /// reserve for it.
+    #[inline(always)]
+    fn pin(&mut self, value: &Value) -> u64 {
+        let bytes = value_bytes(value);
+        self.hold(value, bytes);
+        bytes
+    }
+
     /// Holds `value`, of `bytes` bytes.
     fn hold(&mut self, value: &Value, bytes: u64) {
         if matches!(
@@ -428,6 +440,21 @@ impl KernelMachine {
         parked::save(self, since)
     }
 
+    /// Has the run check, at the end of every statement's step, the step
+    /// structure the executable states (the blocks the step leaves and the
+    /// Boundary it ends at) against the one its frame shows, derived as
+    /// the machine once derived it at run time. A run where the two
+    /// disagree ends with a fault; the check changes nothing else a run
+    /// does. Laws use it.
+    pub fn verify_step_structure(&mut self) {
+        self.steps.verify = true;
+    }
+
+    /// How many statement ends the step-structure check has passed.
+    pub fn verified_steps(&self) -> u64 {
+        self.steps.verified
+    }
+
     fn task(&mut self, task: TaskId) -> Result<&mut Task, Halt> {
         self.tasks
             .get_mut(task.0 as usize)
@@ -439,45 +466,6 @@ impl KernelMachine {
             .frames
             .last_mut()
             .ok_or_else(|| fault("a running task has no frame"))
-    }
-
-    fn charge(&mut self, units: u64) -> Result<(), Halt> {
-        if self.charging {
-            self.charged = self.charged.saturating_add(units);
-            if self.charged > self.bounds.charge {
-                return Err(bound(Bound::Charge, self.bounds.charge));
-            }
-        }
-        Ok(())
-    }
-
-    /// Accounts `bytes` more memory, collecting first when the heap is due
-    /// and ending the run when what is live does not leave room.
-    fn reserve(&mut self, bytes: u64) -> Result<(), Halt> {
-        if self.heap.memory.saturating_add(bytes) > self.heap.collect_at {
-            self.collect();
-            if self.heap.memory.saturating_add(bytes) > self.bounds.memory {
-                return Err(bound(Bound::Memory, self.bounds.memory));
-            }
-        }
-        self.heap.memory = self.heap.memory.saturating_add(bytes);
-        Ok(())
-    }
-
-    /// Allocates an object and keeps it live until the statement ends.
-    fn alloc(&mut self, object: Obj) -> Result<ObjectId, Halt> {
-        let bytes = object_bytes(&object);
-        let id = self.heap.insert(object);
-        self.fresh.push(id);
-        self.reserve(bytes)?;
-        Ok(id)
-    }
-
-    /// Keeps a value the statement made live until the statement ends.
-    fn pin(&mut self, value: &Value) -> Result<(), Halt> {
-        let bytes = value_bytes(value);
-        self.pins.hold(value, bytes);
-        self.reserve(bytes)
     }
 
     /// Frees every object the run cannot reach, and the result of every
@@ -563,21 +551,21 @@ impl KernelMachine {
     fn step(&mut self, task: TaskId, host: &mut dyn Host, exe: &Executable) -> Result<(), Halt> {
         self.pins.clear();
         self.fresh.clear();
+        if !self.regs.is_empty() {
+            self.regs.clear();
+        }
         let outcome = match self.task(task)?.incoming.take() {
             Some(incoming) => {
                 self.refresh_charging(task, exe);
-                match self.resume(task, exe, incoming) {
-                    Ok(value) => {
-                        // The value is in no variable until the statement
-                        // binds it.
-                        self.pin(&value)?;
-                        self.finish_action(task, host, exe, value).map(|()| {
-                            self.leave_ended_blocks(task, exe);
-                            Completion::Normal
-                        })
-                    }
-                    Err(interrupt) => Err(interrupt),
-                }
+                self.resume(task, exe, incoming).and_then(|value| {
+                    // The value is in no variable until the statement binds
+                    // it.
+                    self.regs.push(value);
+                    self.pin(0)?;
+                    let stmt = self.finish_action(task, host, exe, 0)?;
+                    self.take_edge_of(task, exe, stmt)?;
+                    Ok(Completion::Normal)
+                })
             }
             None => self.advance(task, host, exe),
         };

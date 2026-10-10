@@ -118,6 +118,7 @@ PACKAGE_DEPS = {
     "lash-dialect-typescript": {
         "build": {},
         "dev": {
+            "arbitrary": "//third-party/rust:p0012",
             "lash_ext_date_ecma": "//crates/lash-ext-date-ecma:lash-ext-date-ecma",
             "lash_ext_url_whatwg": "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg",
             "lash_kernel_check": "//crates/lash-kernel-check:lash-kernel-check",
@@ -1077,7 +1078,6 @@ PACKAGE_DEPS = {
         "build": {},
         "dev": {},
         "normal": {
-            "blake3": "//third-party/rust:p0032",
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
             "thiserror": "//third-party/rust:p0373"
         }
@@ -1128,6 +1128,7 @@ PACKAGE_DEPS = {
         },
         "normal": {
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
+            "lash_kernel_exec": "//crates/lash-kernel-exec:lash-kernel-exec",
             "lash_kernel_state": "//crates/lash-kernel-state:lash-kernel-state",
             "num_bigint": "//third-party/rust:p0212",
             "num_traits": "//third-party/rust:p0218",

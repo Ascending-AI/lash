@@ -1,20 +1,16 @@
 //! The coverage invariants, checked before any tier runs Kir.
 //!
 //! - [`verify_semantics`]: the semantics table states every op exactly
-//!   once, every runtime function of the table is reached by some op, and
-//!   every dynamic charge event has an op that emits it.
-//! - [`verify_function`]: a [`KirFunction`] is well formed, every cycle of
-//!   its CFG passes through a Boundary (so the slice test and the watchdog
-//!   are reached on every loop), and every Boundary, each a saveable exit,
-//!   has exactly one [`FrameMap`].
+//!   once, and every dynamic charge event has an op that emits it.
+//! - [`verify_function`]: a [`KirFunction`] is well formed, and every cycle
+//!   of its CFG passes through a Boundary (so the slice test is reached on
+//!   every loop).
 
-use crate::abi::RtFn;
-use crate::boundary::{BoundaryKind, CtlStatic, TryPhaseStatic};
+use crate::boundary::{BoundaryKind, CtlStatic};
 use crate::kir::{
     ActionIx, ActionKind, BoundaryIx, CalleeRef, Departure, FieldListIx, KBlockIx, KirFunction,
     LocalRef, LoopIx, LoopKind, Op, OpKind, Operand, ScopeIx, SlotAt, StmtIx, TryIx, VarRef,
 };
-use crate::maps::{DepartLoc, FrameMap, Loc, LoopLoc};
 use crate::sem::{ChargeEvent, OpSpec};
 
 /// Why a semantics table does not cover the ops and the runtime table.
@@ -24,13 +20,11 @@ pub enum CoverageError {
     MissingOp(OpKind),
     #[error("entry {at} of the semantics states op {op:?} out of order or twice")]
     Misplaced { at: usize, op: OpKind },
-    #[error("no op's semantics calls runtime function {0:?}")]
-    UnreachedRtFn(RtFn),
     #[error("no op's semantics emits dynamic charge event {0:?}")]
     UnemittedEvent(ChargeEvent),
 }
 
-/// Checks a semantics table against [`OpKind::ALL`], [`RtFn::ALL`] and
+/// Checks a semantics table against [`OpKind::ALL`] and
 /// [`ChargeEvent::ALL`].
 pub fn verify_semantics(specs: &[OpSpec]) -> Result<(), CoverageError> {
     for (at, op) in OpKind::ALL.iter().enumerate() {
@@ -47,12 +41,6 @@ pub fn verify_semantics(specs: &[OpSpec]) -> Result<(), CoverageError> {
             at: OpKind::ALL.len(),
             op: extra.op,
         });
-    }
-    if let Some(f) = RtFn::ALL
-        .iter()
-        .find(|f| !specs.iter().any(|spec| spec.calls.contains(f)))
-    {
-        return Err(CoverageError::UnreachedRtFn(*f));
     }
     if let Some(event) = ChargeEvent::ALL
         .iter()
@@ -76,10 +64,9 @@ pub enum At {
     Scope(ScopeIx),
     Param(u32),
     FieldList(FieldListIx),
-    Map(BoundaryIx),
 }
 
-/// Why a [`KirFunction`] or its maps are rejected.
+/// Why a [`KirFunction`] is rejected.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum KirError {
     #[error("the function has no blocks")]
@@ -98,8 +85,6 @@ pub enum KirError {
     StmtOutOfRange { at: At, stmt: StmtIx },
     #[error("scope {scope:?} declares slot {slot:?}, past the frame")]
     ScopeSlot { scope: ScopeIx, slot: SlotAt },
-    #[error("the map of boundary {boundary:?} names slot {slot:?}, past the frame")]
-    MapSlot { boundary: BoundaryIx, slot: SlotAt },
     #[error("{at:?} names local {local:?}, whose sharing disagrees with its slot")]
     LocalShared { at: At, local: LocalRef },
     #[error("op {0} has operands of the wrong count")]
@@ -120,16 +105,10 @@ pub enum KirError {
     ExceptionTarget(KBlockIx),
     #[error("a cycle through block {0:?} passes through no Boundary")]
     UncoveredCycle(KBlockIx),
-    #[error("map {at} is not in strictly increasing Boundary order")]
-    MapOrder { at: usize },
-    #[error("boundary {0:?} is a saveable exit with no map")]
-    MissingMap(BoundaryIx),
-    #[error("the map of boundary {0:?} names a loop or finally its control recipe does not hold")]
-    MapControl(BoundaryIx),
 }
 
-/// Checks a function and its maps (see the module documentation).
-pub fn verify_function(f: &KirFunction, maps: &[FrameMap]) -> Result<(), KirError> {
+/// Checks a function (see the module documentation).
+pub fn verify_function(f: &KirFunction) -> Result<(), KirError> {
     blocks(f)?;
     tables(f)?;
     for (at, op) in f.ops.iter().enumerate() {
@@ -147,8 +126,7 @@ pub fn verify_function(f: &KirFunction, maps: &[FrameMap]) -> Result<(), KirErro
     }
     boundaries(f)?;
     exception_targets(f)?;
-    cycles(f)?;
-    frame_maps(f, maps)
+    cycles(f)
 }
 
 fn blocks(f: &KirFunction) -> Result<(), KirError> {
@@ -437,72 +415,6 @@ fn cycles(f: &KirFunction) -> Result<(), KirError> {
                     marks[to.ix()] = Mark::Open;
                     stack.push((to, edges(f, to), 0));
                 }
-            }
-        }
-    }
-    Ok(())
-}
-
-fn frame_maps(f: &KirFunction, maps: &[FrameMap]) -> Result<(), KirError> {
-    for (at, pair) in maps.windows(2).enumerate() {
-        if pair[0].boundary >= pair[1].boundary {
-            return Err(KirError::MapOrder { at: at + 1 });
-        }
-    }
-    for (ix, _) in f.boundaries.iter().enumerate() {
-        let b = BoundaryIx(ix as u32);
-        if maps.get(ix).map(|map| map.boundary) != Some(b) {
-            return Err(KirError::MissingMap(b));
-        }
-    }
-    if let Some(extra) = maps.get(f.boundaries.len()) {
-        return Err(KirError::OutOfRange {
-            at: At::Map(extra.boundary),
-            operand: Operand::Boundary(extra.boundary),
-        });
-    }
-    for map in maps {
-        let b = map.boundary;
-        let at = At::Map(b);
-        let loc = |loc: Loc| match loc {
-            Loc::Reg(reg) => check(f, at, Operand::Reg(reg)),
-            Loc::Const(c) => check(f, at, Operand::Const(c)),
-            Loc::Canonical | Loc::Spill(_) | Loc::Empty => Ok(()),
-        };
-        for (slot, value) in &map.slots {
-            if slot.ix() >= f.slots.len() {
-                return Err(KirError::MapSlot {
-                    boundary: b,
-                    slot: *slot,
-                });
-            }
-            loc(*value)?;
-        }
-        let shape = &f.boundaries[b.ix()].shape.frames;
-        for (lp, state) in &map.loops {
-            let held = shape.iter().any(|ctl| {
-                matches!(*ctl, CtlStatic::For { lp: held } | CtlStatic::While { lp: held } if held == *lp)
-            });
-            if !held {
-                return Err(KirError::MapControl(b));
-            }
-            if let LoopLoc::Regs { position, started } = *state {
-                loc(position)?;
-                loc(started)?;
-            }
-        }
-        for (t, departure) in &map.finally {
-            let held = shape.iter().any(|ctl| {
-                *ctl == CtlStatic::Try {
-                    t: *t,
-                    phase: TryPhaseStatic::Finally,
-                }
-            });
-            if !held {
-                return Err(KirError::MapControl(b));
-            }
-            if let DepartLoc::Return(value) | DepartLoc::Throw(value) = *departure {
-                loc(value)?;
             }
         }
     }
