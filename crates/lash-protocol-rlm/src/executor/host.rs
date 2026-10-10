@@ -136,6 +136,11 @@ pub(super) struct CellHost<'run> {
     /// The grants the session's deferred resolutions recorded, for a tool
     /// outside the catalog.
     pub grants: BTreeMap<lash_core::ToolId, ToolExecutionGrant>,
+    /// Lash's finish tool under the turn's finish schema, when the turn
+    /// states one: what a `control.finish` call is admitted under, so its
+    /// input validation refuses a value the turn's required output does not
+    /// admit ([`crate::control_tools::turn_finish_binding`]).
+    pub finish: Option<lash_core::ToolDefinition>,
     /// The cell's admitted calls, by call: what their bodies run.
     pub members: Arc<CellMembers>,
     pub opener: lash_core::EffectOpener,
@@ -221,7 +226,13 @@ impl CellHost<'_> {
                         )
                     })?,
             };
-            return Ok(self.invocation(request, call, effect.tool.clone(), answer));
+            let invocation = self.invocation(request, call, effect.tool.clone(), answer);
+            // The call is admitted under the turn's finish contract, pinned
+            // with it: every owner validates it the same way.
+            return Ok(match &self.finish {
+                Some(finish) => invocation.with_recorded_binding(finish.clone()),
+                None => invocation,
+            });
         }
         // A tool takes its input as one record (`HostBoundary::offer_tool`).
         let args = match request.args.as_slice() {

@@ -129,6 +129,17 @@ fn cause<T: Serialize>(kind: &str, value: &T) -> HookCause {
         payload: serde_json::to_value(value).unwrap_or(serde_json::Value::Null),
     }
 }
+/// The failure of a call whose outcome its tool's declaration refuses.
+fn declaration_refused(refusal: crate::DeclarationRefusal) -> ToolCallOutput {
+    ToolCallOutput::failure(
+        crate::ToolFailure::runtime(
+            crate::ToolFailureClass::Internal,
+            "tool_outcome_not_declared",
+            refusal.to_string(),
+        )
+        .with_cause(crate::ToolFailureCause::Declaration { refusal }),
+    )
+}
 
 impl<'run> ProductionToolHandlers<'run> {
     pub(crate) fn new(
@@ -282,8 +293,13 @@ impl<'run> ProductionToolHandlers<'run> {
             .plugins
             .transform_tool_result(&hook, occurrence, &view, &Arc::new(original))
             .await;
+        // The call settles as its admitted declaration says, after every
+        // transform: a control call's result stays its control alone.
         let final_output = match transformed {
-            Ok(candidate) => candidate.into_output(control),
+            Ok(candidate) => candidate
+                .into_output(control)
+                .settled(prepared.input.definition.manifest.declaration())
+                .unwrap_or_else(declaration_refused),
             Err(failure) => ToolCallOutput::failure(*failure),
         };
         let outcome = retry::normalized_outcome(
@@ -703,16 +719,10 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                     })
                     .err();
                 if let Some(refusal) = refusal {
-                    let failure = crate::ToolFailure::runtime(
-                        crate::ToolFailureClass::Internal,
-                        "tool_outcome_not_declared",
-                        refusal.to_string(),
-                    )
-                    .with_cause(crate::ToolFailureCause::Declaration { refusal });
                     let capture = self
                         .capture_output(
                             prepared,
-                            ToolCallOutput::failure(failure),
+                            declaration_refused(refusal),
                             crate::plugin::ToolHookOccurrence::Attempt {
                                 attempt: attempt.attempt,
                             },
@@ -817,14 +827,10 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
             }
             crate::ToolAttemptOutcome::Done { result, intents } => {
                 let (output, mut commands) = result.into_parts();
-                let mut output = output.settled();
                 let mut intents = intents;
-                if let Err(refusal) =
-                    prepared
-                        .input
-                        .definition
-                        .manifest
-                        .declaration()
+                let declaration = prepared.input.definition.manifest.declaration();
+                let admitted = output.settled(declaration).and_then(|output| {
+                    declaration
                         .admits(OutcomeShape::Done {
                             intents: &intents
                                 .intents
@@ -833,18 +839,18 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                                 .collect::<Vec<_>>(),
                             control: output.turn_control_kind(),
                         })
-                {
-                    output = ToolCallOutput::failure(
-                        crate::ToolFailure::runtime(
-                            crate::ToolFailureClass::Internal,
-                            "tool_outcome_not_declared",
-                            refusal.to_string(),
-                        )
-                        .with_cause(crate::ToolFailureCause::Declaration { refusal }),
-                    );
-                    commands = Default::default();
-                    intents = Default::default();
-                }
+                        .map(|()| output)
+                });
+                let output = match admitted {
+                    Ok(output) => output,
+                    // Nothing an outcome its declaration refuses declared is
+                    // realized.
+                    Err(refusal) => {
+                        commands = Default::default();
+                        intents = Default::default();
+                        declaration_refused(refusal)
+                    }
+                };
                 let captured = self
                     .capture_output(
                         prepared,

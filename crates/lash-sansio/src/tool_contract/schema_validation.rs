@@ -63,6 +63,27 @@ mod tests {
         }
     }
 
+    /// A refused value names every violation, so the caller can fix them
+    /// all at once: what `control.finish` reports for a value its turn's
+    /// finish schema refuses (FIG-5802).
+    #[test]
+    fn a_refused_value_names_every_violation() {
+        let schema = JsonSchema::admit(serde_json::json!({
+            "type": "object",
+            "properties": {
+                "email": { "type": "string", "format": "email" },
+                "count": { "type": "integer" }
+            }
+        }))
+        .expect("valid declared payload schema");
+        let error = schema
+            .validate(&serde_json::json!({ "email": "invalid", "count": "invalid" }))
+            .expect_err("both fields are refused");
+        assert!(error.message.contains("email"), "{error}");
+        assert!(error.message.contains("integer"), "{error}");
+        assert!(error.message.contains("; "), "{error}");
+    }
+
     #[test]
     fn international_formats_remain_assertions() {
         for (format, valid, invalid) in [

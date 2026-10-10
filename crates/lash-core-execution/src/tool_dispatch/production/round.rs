@@ -410,16 +410,25 @@ pub(super) fn member_body(
     })
 }
 
-/// The final answer of the member `call`, parked as `parked`, once one of
-/// its waits ended with `resolution`: a pure function of the resolution and
-/// the parked call its `Waiting` outcome recorded. Runs no body.
+/// The final answer of the member `call`, a call of a tool admitted under
+/// `declaration`, parked as `parked`, once one of its waits ended with
+/// `resolution`: a pure function of the resolution and the parked call its
+/// `Waiting` outcome recorded, settled as the declaration says. Runs no
+/// body.
 pub(super) fn resolved_member(
     owner: &crate::EffectOpener,
     call: &crate::sansio::PendingToolCall,
+    declaration: Option<&crate::ToolDeclaration>,
     parked: &Material<CompletionSource>,
     resolution: Resolution,
 ) -> SettledOutput {
     let output = parked_call_output(parked, resolution);
+    let output = match declaration {
+        Some(declaration) => output
+            .settled(declaration)
+            .unwrap_or_else(super::declaration_refused),
+        None => output,
+    };
     let parked = serde_json::from_str::<ParkedCall>(parked.payload()).ok();
     let mut completed = answered(call, output);
     // The launch receipt is the call's host-facing intent outcome; the
@@ -783,11 +792,17 @@ impl RoundTools for ProductionRoundTools {
     fn resolved(
         &self,
         call: &crate::sansio::PendingToolCall,
-        _execution: &AdmittedExecution,
+        execution: &AdmittedExecution,
         parked: &Material<CompletionSource>,
         resolution: Resolution,
     ) -> SettledOutput {
-        resolved_member(&self.owner, call, parked, resolution)
+        let catalog = self.context.tool_catalog();
+        let declaration = catalog
+            .tools
+            .iter()
+            .find(|tool| tool.manifest.id == *execution.draft().tool())
+            .map(|tool| tool.manifest.declaration());
+        resolved_member(&self.owner, call, declaration, parked, resolution)
     }
 
     fn present<'a>(

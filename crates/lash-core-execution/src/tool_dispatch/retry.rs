@@ -202,6 +202,13 @@ pub(crate) async fn settle_completed_pending_tool_call(
     )
     .await;
     let tool_name = prepared.tool_name().to_string();
+    let result =
+        match super::preparation::resolve_callable_manifest_by_id(context, prepared.tool_id()) {
+            Some(manifest) => {
+                super::atomic_attempt::settled_outcome(result, manifest.declaration(), &tool_name)
+            }
+            None => result,
+        };
     let args = prepared.args().clone();
     let mut outcome = normalized_outcome(context, ids, tool_name, args, result).await;
     let mut attempts = attempts;

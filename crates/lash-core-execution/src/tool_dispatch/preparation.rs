@@ -260,6 +260,8 @@ async fn prepare_authorized_tool_call_with_context(
                 crate::ToolOutcome::from_output(candidate.into_output(None)),
             )
             .await;
+            let result =
+                super::atomic_attempt::settled_outcome(result, manifest.declaration(), &tool_name);
             completed_preparation(normalized_outcome(context, &ids, tool_name, args, result).await)
         }
         crate::plugin::BeforeSelection::Terminal(output) => {

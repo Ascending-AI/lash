@@ -168,6 +168,22 @@ impl<'grant> AttemptAuthority<'grant> {
 /// The failure an outcome its admitted declaration does not admit answers
 /// with. Typed by its [`crate::DeclarationRefusal`], so a host can tell an
 /// authoring defect from a tool's own failure.
+/// `result` settled as a call under `declaration`, after every result
+/// transform: a control call's result stays its control alone.
+pub(super) fn settled_outcome(
+    result: ToolOutcome,
+    declaration: &crate::ToolDeclaration,
+    tool_name: &str,
+) -> ToolOutcome {
+    match result.into_done_output() {
+        Ok(output) => match output.settled(declaration) {
+            Ok(output) => ToolOutcome::from_output(output),
+            Err(refusal) => declaration_refused(tool_name, refusal),
+        },
+        Err(pending) => ToolOutcome::pending(pending),
+    }
+}
+
 fn declaration_refused(tool_name: &str, refusal: crate::DeclarationRefusal) -> ToolOutcome {
     ToolOutcome::failure(
         crate::ToolFailure::runtime(
@@ -306,12 +322,16 @@ async fn dispatch_prepared_tool_attempt_launch<'run>(
                 .map(crate::ToolIntent::kind)
                 .collect();
             let (output, state) = result.into_parts();
-            let output = output.settled();
-            match declaration.admits(crate::OutcomeShape::Done {
-                intents: &kinds,
-                control: output.turn_control_kind(),
-            }) {
-                Ok(()) => (ToolOutcome::from_output(output), intents, state),
+            let admitted = output.settled(&declaration).and_then(|output| {
+                declaration
+                    .admits(crate::OutcomeShape::Done {
+                        intents: &kinds,
+                        control: output.turn_control_kind(),
+                    })
+                    .map(|()| output)
+            });
+            match admitted {
+                Ok(output) => (ToolOutcome::from_output(output), intents, state),
                 // An undeclared intent is refused with the whole outcome, before
                 // the attempt is recorded: nothing it declared is realized.
                 Err(refusal) => (
@@ -359,6 +379,7 @@ async fn dispatch_prepared_tool_attempt_launch<'run>(
         result,
     ))
     .await;
+    let result = settled_outcome(result, &declaration, &tool_name);
     let result = carry_body_state(context, state, result);
 
     let mut outcome = normalized_outcome(context, &ids, tool_name, args, result).await;

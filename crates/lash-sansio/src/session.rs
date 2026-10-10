@@ -93,8 +93,6 @@ pub struct CellFailure {
     pub exec_failure: Option<ExecCodeFailureReason>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub schema_admission: Option<Box<crate::SchemaAdmissionError>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub value_mismatch: Option<Box<crate::ValueMismatch>>,
     /// The rule of a session's cells the program broke, when that is why
     /// the cell failed, kept typed through the plugin and host result.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -129,18 +127,12 @@ impl CellFailure {
             tool_call_limit: None,
             exec_failure: None,
             schema_admission: None,
-            value_mismatch: None,
             defect: None,
         }
     }
 
     pub fn with_defect(mut self, defect: CellDefect) -> Self {
         self.defect = Some(defect);
-        self
-    }
-
-    pub fn with_value_mismatch(mut self, source: crate::ValueMismatch) -> Self {
-        self.value_mismatch = Some(Box::new(source));
         self
     }
 

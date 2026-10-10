@@ -197,22 +197,36 @@ impl ToolCallOutput {
         self.as_turn_control().map(TurnControl::kind)
     }
 
-    /// This result as a control call settles: a declared control is the
-    /// call's whole result, so whatever the body returned beside it is
-    /// discarded; and a call that did not succeed carries no turn control.
-    #[must_use]
-    pub fn settled(mut self) -> Self {
-        if self.as_turn_control().is_none() {
-            return self;
+    /// This result as a call under `declaration` settles. A call that did
+    /// not succeed stays the failure it is and carries no turn control. A
+    /// tool that declares a turn control has no output: its success is null,
+    /// whatever its body or a result transform put beside the control.
+    ///
+    /// # Errors
+    ///
+    /// [`DeclarationRefusal::UndeclaredOutput`](crate::DeclarationRefusal::UndeclaredOutput):
+    /// a tool that declares a turn control succeeded with a value and no
+    /// control.
+    pub fn settled(
+        mut self,
+        declaration: &crate::ToolDeclaration,
+    ) -> Result<Self, crate::DeclarationRefusal> {
+        let ToolCallOutcome::Success(value) = &self.outcome else {
+            if self.as_turn_control().is_some() {
+                self.control = None;
+            }
+            return Ok(self);
+        };
+        if declaration.controls.is_empty() {
+            return Ok(self);
         }
-        if self.is_success() {
-            self.outcome = ToolCallOutcome::Success(ToolValue::untrusted_json(Value::Null));
-            self.view = None;
-            self.projection_value = None;
-        } else {
-            self.control = None;
+        if self.as_turn_control().is_none() && !value.to_json_value().is_null() {
+            return Err(crate::DeclarationRefusal::UndeclaredOutput);
         }
-        self
+        self.outcome = ToolCallOutcome::Success(ToolValue::untrusted_json(Value::Null));
+        self.view = None;
+        self.projection_value = None;
+        Ok(self)
     }
 
     /// The turn control this result is, when it is one.

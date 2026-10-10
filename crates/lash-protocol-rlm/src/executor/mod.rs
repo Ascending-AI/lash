@@ -634,6 +634,21 @@ async fn run_cell(
             lash_core::CellFailure::new(lash_core::CellFailureKind::Host, message),
         );
     }
+    // A `control.finish` call takes its value under the turn's finish
+    // schema, which its admission pins with the call.
+    let finish = match crate::control_tools::turn_finish_binding(
+        &ctx.tool_catalog(),
+        &ctx.protocol_turn_options(),
+    ) {
+        Ok(finish) => finish,
+        Err(message) => {
+            return exec_setup_failure_or_stop(
+                state,
+                &ctx,
+                lash_core::CellFailure::new(lash_core::CellFailureKind::Host, message),
+            );
+        }
+    };
     let host = CellHost {
         entries,
         trace,
@@ -641,6 +656,7 @@ async fn run_cell(
         ctx: ctx.clone(),
         boundary,
         grants: envelope.grants.clone(),
+        finish,
         members,
         opener: identities.opener().clone(),
         prints: Arc::clone(&prints),

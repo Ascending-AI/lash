@@ -46,8 +46,9 @@ pub struct CellCall {
     /// The grant a deferred resolution pinned, for a tool outside the
     /// catalog.
     pub execution_grant: Option<Box<crate::ToolExecutionGrant>>,
-    /// The binding the cell recorded for a tool that has since drifted
-    /// (FIG-3587).
+    /// The binding the cell pinned for the call: one it recorded for a
+    /// tool that has since drifted (FIG-3587), or the turn's own contract
+    /// of a tool the turn narrows.
     pub recorded_binding: Option<Box<crate::ToolDefinition>>,
     /// The language node that issued it, for traces.
     pub issuing_language_node_id: Option<String>,
@@ -204,7 +205,17 @@ impl CellTools {
         parked: &Material<CompletionSource>,
         resolution: Resolution,
     ) -> SettledOutput {
-        resolved_member(&self.owner, &call.pending(), parked, resolution)
+        let definition = ProductionToolHandlers::new(self.context.clone(), None)
+            .leaf_definition(&call.invocation());
+        resolved_member(
+            &self.owner,
+            &call.pending(),
+            definition
+                .as_ref()
+                .map(|definition| definition.manifest.declaration()),
+            parked,
+            resolution,
+        )
     }
 
     /// The final answer `output` that `call`'s park resolved to as

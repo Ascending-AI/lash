@@ -17,8 +17,10 @@ pub struct ToolInvocation {
     /// Original native request correlation and replay data, when supplied.
     pub pending: Option<Box<crate::sansio::PendingToolCall>>,
     pub execution_grant: Option<Box<crate::ToolExecutionGrant>>,
-    /// The binding a replayed code cell recorded for this call when the live
-    /// tool has since drifted (FIG-3587). Never part of the call's identity.
+    /// The binding a code cell pinned for this call: the one a replayed
+    /// cell recorded when the live tool has since drifted (FIG-3587), or the
+    /// turn's own contract of a tool the turn narrows. Never part of the
+    /// call's identity.
     pub recorded_binding: Option<Box<crate::ToolDefinition>>,
     pub child_execution_trace_hook: Option<crate::ToolChildExecutionTraceHook>,
     pub issuing_language_node_id: Option<String>,
@@ -57,7 +59,7 @@ impl ToolInvocation {
         self
     }
 
-    /// Authorizes this call under a code cell's recorded binding (FIG-3587).
+    /// Authorizes this call under a binding its code cell pinned.
     pub fn with_recorded_binding(mut self, binding: crate::ToolDefinition) -> Self {
         self.recorded_binding = Some(Box::new(binding));
         self

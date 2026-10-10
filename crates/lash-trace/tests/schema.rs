@@ -1003,13 +1003,10 @@ fn content_bearing_events() -> Vec<TraceEvent> {
             output_chars: 14,
             observation_count: 1,
             observation_projections: Vec::new(),
-            error: Some(lash_trace::CellFailure {
-                value_mismatch: Some(Box::new(lash_sansio::ValueMismatch {
-                    instance_path: "/text".to_string(),
-                    message: CONTENT.to_string(),
-                })),
-                ..lash_trace::CellFailure::new(lash_trace::CellFailureKind::Program, CONTENT)
-            }),
+            error: Some(lash_trace::CellFailure::new(
+                lash_trace::CellFailureKind::Program,
+                CONTENT,
+            )),
             terminal_finish: Some(json!(CONTENT)),
             tool_calls: vec![TraceExecToolCall {
                 call_id: lash_sansio::ToolCallId::fixture("call-1"),

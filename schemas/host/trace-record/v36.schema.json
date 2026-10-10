@@ -216,16 +216,6 @@
           ],
           "description": "The session's `max_tool_calls` refusal, when that is why the cell\nfailed (FIG-4546), kept typed through the plugin and host result."
         },
-        "value_mismatch": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ValueMismatch"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
         "worker_limit": {
           "anyOf": [
             {
@@ -3779,21 +3769,6 @@
           "type": "object"
         }
       ]
-    },
-    "ValueMismatch": {
-      "properties": {
-        "instance_path": {
-          "type": "string"
-        },
-        "message": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "instance_path",
-        "message"
-      ],
-      "type": "object"
     },
     "WorkerFrameKind": {
       "description": "The worker message an encoder refused, without its guest data.",

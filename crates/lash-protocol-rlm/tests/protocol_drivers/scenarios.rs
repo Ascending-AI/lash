@@ -14,11 +14,6 @@ const PLUGIN_STREAM_MASK_CHUNK_SPANNING_REEXTRACTION: RlmProtocolScenarioCoverag
         display_name: "plugin stream mask splices a chunk-spanning cell for re-extraction",
     };
 
-const TYPED_SCHEMA_REPAIR_ACROSS_CELL_BOUNDARY: RlmProtocolScenarioCoverage =
-    RlmProtocolScenarioCoverage {
-        display_name: "typed schema repair survives a cell checkpoint boundary",
-    };
-
 #[test]
 fn rlm_protocol_property_response_cell_classification_is_part_order_invariant() {
     fn assert_case(
@@ -186,78 +181,4 @@ fn rlm_protocol_scenario_plugin_stream_mask_splices_chunk_spanning_cell_for_reex
             ..RlmProtocolExpectations::default()
         })
         .run();
-}
-
-#[test]
-fn rlm_protocol_scenario_typed_schema_repair_survives_a_cell_checkpoint_boundary() {
-    // The boundary is real: `checkpoint_round_trip` serializes the machine's
-    // `TurnCheckpoint` while the `finish` cell is still pending, deserializes it,
-    // and continues on the restored machine. Anything the RLM driver failed to
-    // carry in its checkpointed cell state is genuinely lost here.
-    let run = RlmProtocolScenario::new(TYPED_SCHEMA_REPAIR_ACROSS_CELL_BOUNDARY.display_name)
-        .user_message("return typed data")
-        .termination(lash_core::TerminationMode::TerminalRequired)
-        .finish_schema(
-            lash_sansio::JsonSchema::admit(serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "ok": { "type": "boolean" }
-                },
-                "required": ["ok"]
-            }))
-            .expect("declared result schema"),
-        )
-        .llm_response(vec![text_part(&typescript_block(
-            "await control.finish({ missing: true });",
-        ))])
-        .checkpoint_round_trip()
-        .exec_result(exec_response(
-            &[],
-            None,
-            Some(serde_json::json!({ "missing": true })),
-        ))
-        .checkpoint()
-        .expect(RlmProtocolExpectations {
-            // The restored machine redrives the same pending cell, so the code is
-            // observed twice — once before the boundary and once after it.
-            exec_codes: vec!["await control.finish({ missing: true });", "await control.finish({ missing: true });"],
-            checkpoints: vec![CheckpointKind::AfterWork],
-            llm_call_count: Some(2),
-            trajectory_last: Some(RlmTrajectoryExpectation {
-                code: "await control.finish({ missing: true });",
-                output: Vec::new(),
-                outcome: lash_core::CellOutcome::Failed(
-                    program_failure(
-                        "`await control.finish(value)` refused its value: \"ok\" is a required property",
-                    )
-                    .with_value_mismatch(
-                        lash_sansio::ValueMismatch {
-                            instance_path: String::new(),
-                            message: "\"ok\" is a required property".into(),
-                        },
-                    ),
-                ),
-            }),
-            ..RlmProtocolExpectations::default()
-        })
-        .run();
-    assert_eq!(
-        run.round_trips, 1,
-        "the scenario must have crossed exactly one real checkpoint boundary"
-    );
-
-    // Expect test: the reviewable artifact is the ordering across the durable
-    // boundary — the pending cell redriven after restore, the repair message
-    // reaching the model, and exactly one checkpoint before re-entry.
-    insta::assert_snapshot!(run.transcript.render(), @r#"
-    rlm          provider  model.request           messages=1 tools=0
-    rlm          observe   message.code            text="await control.finish({ missing: true });"
-    rlm          exec      cell.start              lang="typescript"
-    rlm          park      cell.checkpoint
-    rlm          resume    cell.restore
-    rlm          exec      cell.start              lang="typescript"
-    rlm          tool      tool.result             name="finish" outcome=success call=call-001
-    rlm          commit    checkpoint.request      checkpoint=after_work
-    rlm          provider  model.request           messages=1 tools=0
-    "#);
 }

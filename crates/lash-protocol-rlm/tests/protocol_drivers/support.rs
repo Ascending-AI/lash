@@ -9,7 +9,7 @@ pub(crate) use lash_core::plugin::{
     AssistantStreamFinishReason, AssistantStreamTransform, PluginFactory, PluginSession,
 };
 pub(crate) use lash_core::sansio::{self, ChatContextProjector, ProtocolDriverHandle, Response};
-pub(crate) use lash_core::testing::behavior_transcript::{Actor, Entry, Kind, Transcript};
+pub(crate) use lash_core::testing::behavior_transcript::Transcript;
 pub(crate) use lash_core::testing::sansio_transcript::record_effects;
 pub(crate) use lash_core::{Effect, TurnMachine, TurnMachineConfig};
 pub(crate) use lash_protocol_rlm::{RlmDriver, RlmProtocolPluginConfig, RlmProtocolPluginFactory};
@@ -35,21 +35,13 @@ pub(crate) fn test_config() -> TurnMachineConfig {
     test_config_with_termination(lash_core::TerminationMode::default())
 }
 
+/// A config whose turns end under `termination`.
 pub(crate) fn test_config_with_termination(
-    rlm_termination: lash_core::TerminationMode,
-) -> TurnMachineConfig {
-    test_config_with_ending(rlm_termination, None)
-}
-
-/// A config whose turns end under `termination`, with `control.finish`
-/// taking its value under `finish_schema`.
-pub(crate) fn test_config_with_ending(
     termination: lash_core::TerminationMode,
-    finish_schema: Option<lash_sansio::JsonSchema>,
 ) -> TurnMachineConfig {
     test_config_with_protocol_turn_options(recorded_namespace(RlmTurnOptions {
         termination: Some(termination),
-        finish_schema,
+        finish_schema: None,
         render: None,
     }))
 }
@@ -496,7 +488,6 @@ pub(crate) struct RlmProtocolScenario {
     pub(crate) name: &'static str,
     pub(crate) user_message: &'static str,
     pub(crate) termination: lash_core::TerminationMode,
-    pub(crate) finish_schema: Option<lash_sansio::JsonSchema>,
     pub(crate) max_turns: Option<usize>,
     pub(crate) plugin_factories: Vec<Arc<dyn PluginFactory>>,
     pub(crate) steps: Vec<RlmProtocolStep>,
@@ -509,7 +500,6 @@ impl RlmProtocolScenario {
             name,
             user_message: "perform one step",
             termination: lash_core::TerminationMode::default(),
-            finish_schema: None,
             max_turns: None,
             plugin_factories: Vec::new(),
             steps: Vec::new(),
@@ -524,11 +514,6 @@ impl RlmProtocolScenario {
 
     pub(crate) fn termination(mut self, termination: lash_core::TerminationMode) -> Self {
         self.termination = termination;
-        self
-    }
-
-    pub(crate) fn finish_schema(mut self, schema: lash_sansio::JsonSchema) -> Self {
-        self.finish_schema = Some(schema);
         self
     }
 
@@ -581,36 +566,17 @@ impl RlmProtocolScenario {
         self
     }
 
-    /// Cross a real durable cell boundary: serialize the machine's
-    /// `TurnCheckpoint`, deserialize it, and continue on the restored machine.
-    ///
-    /// This is the only step that replaces the machine under test, so anything
-    /// the driver failed to carry in its checkpointed state is lost for real
-    /// rather than by simulation.
-    pub(crate) fn checkpoint_round_trip(mut self) -> Self {
-        self.steps.push(RlmProtocolStep::CheckpointRoundTrip);
-        self
-    }
-
     pub(crate) fn expect(mut self, expectations: RlmProtocolExpectations) -> Self {
         self.expectations = expectations;
         self
     }
 
-    #[expect(
-        clippy::expect_used,
-        reason = "test support: scenarios shift supported checkpoints, non-empty frame key material and crate-owned entries; failure is the scenario under test"
-    )]
     pub(crate) fn run(self) -> RlmProtocolRun {
-        let build_config = || {
-            let mut config = test_config_with_ending(self.termination, self.finish_schema.clone());
-            config.turn_budget = self
-                .max_turns
-                .map(lash_core::TurnBudget::bounded)
-                .unwrap_or(lash_core::TurnBudget::Unbounded);
-            config
-        };
-        let config = build_config();
+        let mut config = test_config_with_termination(self.termination);
+        config.turn_budget = self
+            .max_turns
+            .map(lash_core::TurnBudget::bounded)
+            .unwrap_or(lash_core::TurnBudget::Unbounded);
         let plugin_session = if self.plugin_factories.is_empty() {
             None
         } else {
@@ -707,23 +673,6 @@ impl RlmProtocolScenario {
                         delivery: sansio::CheckpointDelivery::default(),
                     });
                 }
-                RlmProtocolStep::CheckpointRoundTrip => {
-                    observed.transcript.record(Entry::new(
-                        Kind::Park,
-                        Actor::session(RLM_TRANSCRIPT_ACTOR),
-                        "cell.checkpoint",
-                    ));
-                    let checkpoint = roundtrip_turn_checkpoint(machine.checkpoint());
-                    machine =
-                        TurnMachine::restore_from_checkpoint(build_config(), checkpoint, None)
-                            .expect("supported checkpoint");
-                    observed.round_trips += 1;
-                    observed.transcript.record(Entry::new(
-                        Kind::Resume,
-                        Actor::session(RLM_TRANSCRIPT_ACTOR),
-                        "cell.restore",
-                    ));
-                }
             }
 
             effects = drain_effects(&mut machine);
@@ -756,7 +705,6 @@ pub(crate) enum RlmProtocolStep {
     },
     ExecResult(Box<lash_sansio::ExecResponse>),
     Checkpoint,
-    CheckpointRoundTrip,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -1041,8 +989,6 @@ pub(crate) struct RlmProtocolRun {
     /// Behavior transcript built from the machine's own effect stream, in drain
     /// order. See `lash_core::testing::sansio_transcript`.
     pub(crate) transcript: Transcript,
-    /// Real `TurnCheckpoint` serialize/deserialize/restore round trips performed.
-    pub(crate) round_trips: usize,
     pub(crate) initial_request: Option<LlmRequest>,
     pub(crate) llm_requests: Vec<LlmRequest>,
     pub(crate) exec_codes: Vec<String>,

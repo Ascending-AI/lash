@@ -619,40 +619,6 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
             Some(control),
         ) = (&record.result, settled_control)
         {
-            let termination = match decode_rlm_termination_options(ctx.termination()) {
-                Ok(termination) => termination,
-                Err(err) => return invalid_turn_options_actions(err),
-            };
-            // The value `control.finish` took is the turn's answer, so it
-            // must be one the turn's required output admits. One that is not
-            // failed the call: the cell is recorded as failed on it, the
-            // model reads why, and the turn goes on.
-            if let Err(mismatch) = crate::protocol::finish::finish_value_admitted(
-                tool_name,
-                &control,
-                termination.finish_schema(),
-            ) {
-                record.result = CellOutcome::Failed(
-                    lash_core::CellFailure::new(
-                        lash_core::CellFailureKind::Program,
-                        format!(
-                            "`{}` refused its value: {mismatch}",
-                            self.dialect.prompt_vocabulary().finish_call
-                        ),
-                    )
-                    .with_value_mismatch(mismatch),
-                );
-                if let Err(err) = continue_or_stop_after_nonterminal(
-                    &ctx,
-                    &mut actions,
-                    commit(record),
-                    Vec::new(),
-                    AttemptProgress::Stalled,
-                ) {
-                    return invalid_turn_options_actions(err);
-                }
-                return actions;
-            }
             let candidate = lash_core::CompletionCandidate::pending(
                 ctx.protocol_iteration(),
                 call_id.clone(),

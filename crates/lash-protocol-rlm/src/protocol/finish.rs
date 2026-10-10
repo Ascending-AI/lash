@@ -2,7 +2,6 @@ use crate::dialect::SessionDialect;
 use lash_core::facade_support::reasoning_part;
 use lash_core::session_model::{Message, MessageRole, Part, shared_parts};
 use lash_sansio::TurnId;
-use serde_json::Value;
 
 use crate::driver_state::RlmReasoningPart;
 
@@ -202,35 +201,6 @@ pub(super) fn output_limit_retry_message(
     }
 }
 
-pub(crate) fn validate_finish_value(
-    value: &Value,
-    schema: &lash_sansio::JsonSchema,
-) -> Result<(), lash_sansio::ValueMismatch> {
-    schema.validate(value)
-}
-
-/// Whether the value Lash's finish tool took is one the turn's required
-/// output admits. A host tool's Finish is checked by that tool's own input
-/// contract, and a frame switch carries no answer.
-pub(crate) fn finish_value_admitted(
-    tool_name: &str,
-    control: &lash_core::TurnControl,
-    schema: Option<&lash_sansio::JsonSchema>,
-) -> Result<(), lash_sansio::ValueMismatch> {
-    match (control, schema) {
-        (lash_core::TurnControl::Finish { value }, Some(schema))
-            if tool_name == crate::control_tools::FINISH_TOOL_NAME =>
-        {
-            validate_finish_value(
-                &lash_core::ToolCallOutput::success_tool_value(value.clone())
-                    .value_for_projection(),
-                schema,
-            )
-        }
-        _ => Ok(()),
-    }
-}
-
 /// The transcript record left behind when a turn exhausts its no-progress
 /// budget.
 ///
@@ -254,48 +224,5 @@ pub(super) fn no_progress_stop_message(id: String, attempts: usize) -> Message {
             transient: false,
         }),
         reply_marker: None,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::validate_finish_value;
-    use serde_json::json;
-
-    #[test]
-    fn finish_validation_keeps_formats_and_all_errors() {
-        let schema = lash_sansio::JsonSchema::admit(json!({
-            "type": "object",
-            "properties": {
-                "email": { "type": "string", "format": "email" },
-                "count": { "type": "integer" }
-            }
-        }))
-        .expect("valid finish schema");
-        assert!(
-            validate_finish_value(&json!({ "email": "sam@example.com", "count": 1 }), &schema)
-                .is_ok()
-        );
-        let error =
-            validate_finish_value(&json!({ "email": "invalid", "count": "invalid" }), &schema)
-                .unwrap_err();
-        assert!(error.message.contains("email"), "{error}");
-        assert!(error.message.contains("integer"), "{error}");
-        assert!(error.message.contains("; "), "{error}");
-    }
-
-    #[test]
-    fn finish_validation_honors_draft202012() {
-        let schema = lash_sansio::JsonSchema::admit(json!({
-            "$schema": "https://json-schema.org/draft/2020-12/schema",
-            "type": "array",
-            "prefixItems": [{ "type": "string", "format": "email" }],
-            "items": false
-        }))
-        .expect("valid finish schema");
-        assert!(validate_finish_value(&json!(["sam@example.com"]), &schema).is_ok());
-        assert!(validate_finish_value(&json!([42]), &schema).is_err());
-        assert!(validate_finish_value(&json!(["invalid"]), &schema).is_err());
-        assert!(validate_finish_value(&json!(["sam@example.com", "extra"]), &schema).is_err());
     }
 }

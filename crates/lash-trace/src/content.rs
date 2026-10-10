@@ -216,10 +216,6 @@ impl TraceEvent {
                 output.clear();
                 if let Some(failure) = error {
                     failure.message.clear();
-                    // Validator text quotes the value or schema it refused.
-                    if let Some(mismatch) = &mut failure.value_mismatch {
-                        mismatch.message.clear();
-                    }
                     if let Some(admission) = failure.schema_admission.as_deref_mut() {
                         match admission {
                             lash_sansio::SchemaAdmissionError::Compilation { message, .. } => {

@@ -124,6 +124,38 @@ pub const FINISH_TOOL_NAME: &str = "finish";
 /// The finish control tool's id. Its one input is the turn's answer, whole.
 pub(crate) const FINISH_TOOL_ID: &str = "tool:finish";
 
+/// Lash's finish tool as `catalog` offers it, taking its value under the
+/// finish schema the turn's `options` state: the binding a cell admits a
+/// `control.finish` call under, so the call's own input validation refuses
+/// a value the turn's required output does not admit. `None` when the turn
+/// states no schema or the catalog offers no finish.
+///
+/// # Errors
+///
+/// Options that are not the RLM namespace's.
+pub(crate) fn turn_finish_binding(
+    catalog: &lash_core::ToolCatalog,
+    options: &lash_core::ProtocolTurnOptions,
+) -> Result<Option<ToolDefinition>, String> {
+    let Some(schema) = crate::rlm_support::decode_rlm_termination_options(options)?.finish_schema
+    else {
+        return Ok(None);
+    };
+    let Some(finish) = catalog
+        .tools
+        .iter()
+        .find(|tool| tool.manifest.id.as_str() == FINISH_TOOL_ID)
+    else {
+        return Ok(None);
+    };
+    let mut contract = finish.contract.as_ref().clone();
+    contract.input_schema = lash_core::SchemaContract::new(schema);
+    Ok(Some(ToolDefinition::from_parts(
+        finish.manifest.clone(),
+        contract,
+    )))
+}
+
 /// The `finish` control tool as a session in `dialect` advertises it.
 pub fn finish_tool_definition(dialect: &dyn crate::dialect::DialectPrompts) -> ToolDefinition {
     finish_tool_definition_for(dialect.prompt_vocabulary())
@@ -143,7 +175,9 @@ pub(crate) fn finish_tool_definition_for(
             "End the turn with `value` as its answer. Nothing after the call runs: make it the last thing the {cell_noun} does, once all its other work has finished. It returns nothing. When the turn states a required output, `value` must match it; a value that does not fails and the turn goes on.",
             cell_noun = vocabulary.cell_noun
         ),
-        // The whole input is the answer: any JSON value.
+        // The whole input is the answer: any JSON value, unless the turn
+        // states a finish schema, which a cell's call is admitted under
+        // instead (`turn_finish_binding`).
         json!({}),
         TurnControls::finish(),
     )
@@ -154,8 +188,8 @@ pub(crate) fn finish_tool_definition_for(
     // is safe: a call a crash cut off runs again on the owner that resumes
     // the cell, and one that timed out behind a lost owner is retried. The
     // turn then ends on it rather than on a second model call. The body
-    // never fails on its own: what refuses a value is the turn's check of
-    // the settled call.
+    // never fails on its own: what refuses a value is the call's input
+    // validation under the turn's finish schema.
     .with_execution_policy(lash_core::ExecutionPolicy::repeatable(
         std::num::NonZeroU32::new(3).expect("three is non-zero"),
         100,

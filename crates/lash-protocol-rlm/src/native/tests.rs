@@ -272,8 +272,6 @@ fn run(
             "<typescript>\nawait control.finish(1);\n</typescript>",
         )],
     };
-    let attempted_finish =
-        matches!(&exec, Some(Ok(response)) if response.finish_value().cloned().is_some());
     let mut effects = reply(&mut machine, &initial, parts);
     if let Some(result) = exec {
         let id = effects
@@ -356,11 +354,7 @@ fn run(
                         .iter()
                         .any(|step: &lash_core::CellRecord| { step.result.is_failed() })
                     {
-                        if attempted_finish {
-                            "schema_mismatch"
-                        } else {
-                            "error"
-                        }
+                        "error"
                     } else {
                         "execution"
                     }
@@ -1863,145 +1857,6 @@ fn natural_text_schema() -> Ending {
         lash_core::TerminationMode::Natural,
         serde_json::json!({"type": "string"}),
     )
-}
-
-/// Replies to the pending model call with one program that finishes, answers
-/// its execution with `value` as the terminal finish, and settles every
-/// checkpoint that follows.
-fn finish_with(
-    machine: &mut TurnMachine,
-    pending: &[Effect],
-    native: bool,
-    code: &str,
-    value: serde_json::Value,
-) -> Vec<Effect> {
-    let parts = if native {
-        vec![call(
-            "finish",
-            "execute_code",
-            &serde_json::json!({ "code": code }).to_string(),
-        )]
-    } else {
-        vec![text(&format!("<typescript>\n{code}\n</typescript>"))]
-    };
-    let effects = reply(machine, pending, parts);
-    let id = effects
-        .iter()
-        .find_map(|effect| match effect {
-            Effect::ExecCode { id, .. } => Some(*id),
-            _ => None,
-        })
-        .expect("the program executes");
-    machine.handle_response(Response::ExecResult {
-        id,
-        result: Ok(response(Some(value))),
-    });
-    let mut effects = drain(machine);
-    while let Some(id) = effects.iter().find_map(|effect| match effect {
-        Effect::Checkpoint { id, .. } => Some(*id),
-        _ => None,
-    }) {
-        machine.handle_response(Response::Checkpoint {
-            id,
-            delivery: Default::default(),
-        });
-        effects = drain(machine);
-    }
-    effects
-}
-
-fn turn_outcome(effects: &[Effect]) -> Option<&lash_core::facade_support::TurnOutcome> {
-    effects.iter().find_map(|effect| match effect {
-        Effect::Emit(lash_core::session_model::SessionStreamEvent::TurnOutcome { outcome }) => {
-            Some(outcome)
-        }
-        _ => None,
-    })
-}
-
-/// FIG-5104, FIG-5781: a Natural turn with a text finish schema refuses
-/// `control.finish(<tool record>)` as a failed call carrying the value
-/// mismatch, so the turn goes on and the model reads why, and then ends with
-/// the text it finishes with. Both channels adjudicate it alike.
-#[test]
-fn a_natural_text_schema_refuses_a_record_finish_and_accepts_text() {
-    for native in [false, true] {
-        let mut machine = TurnMachine::new(
-            config(native, natural_text_schema()),
-            Vec::new(),
-            Default::default(),
-            0,
-        );
-        let initial = drain(&mut machine);
-        let refused = finish_with(
-            &mut machine,
-            &initial,
-            native,
-            "await control.finish(await tools.order_lookup({ id: 7 }));",
-            serde_json::json!({ "id": 7, "status": "shipped" }),
-        );
-        assert_eq!(turn_outcome(&refused), None, "native={native}: {refused:?}");
-        let retry = refused
-            .iter()
-            .find_map(|effect| match effect {
-                Effect::LlmCall { request, .. } => Some(request),
-                _ => None,
-            })
-            .unwrap_or_else(|| panic!("native={native}: the model is asked again: {refused:?}"));
-        let rendered = serde_json::to_string(&retry.messages).expect("messages serialize");
-        assert!(
-            rendered.contains("`await control.finish(value)` refused its value"),
-            "native={native}: the retry says the call was refused and why: {rendered}"
-        );
-
-        let finished = finish_with(
-            &mut machine,
-            &refused,
-            native,
-            r#"await control.finish("Order 7 has shipped.");"#,
-            serde_json::json!("Order 7 has shipped."),
-        );
-        assert_eq!(
-            turn_outcome(&finished),
-            Some(&lash_core::facade_support::TurnOutcome::Finished(
-                lash_core::facade_support::TurnFinish::Finished {
-                    tool_name: crate::FINISH_TOOL_NAME.to_string(),
-                    value: serde_json::json!("Order 7 has shipped."),
-                }
-            )),
-            "native={native}"
-        );
-        let steps: Vec<_> = machine
-            .events()
-            .iter()
-            .filter_map(|record| {
-                let lash_core::SessionHistoryRecord::Protocol(event) = record else {
-                    return None;
-                };
-                match crate::projection::decode_rlm_protocol_event(event)
-                    .expect("valid history fixture")
-                {
-                    Some(RlmProtocolEvent::RlmTrajectoryEntry(step)) => Some(step.result),
-                    _ => None,
-                }
-            })
-            .collect();
-        let [refusal, accepted] = steps.as_slice() else {
-            panic!("native={native}: two trajectory steps: {steps:?}");
-        };
-        let lash_core::CellOutcome::Failed(failure) = refusal else {
-            panic!("native={native}: the record finish fails its cell: {refusal:?}");
-        };
-        assert_eq!(failure.kind, lash_core::CellFailureKind::Program);
-        assert!(failure.value_mismatch.is_some(), "native={native}");
-        assert_eq!(
-            accepted.finish(),
-            Some(&lash_core::OutputValue::Inline(serde_json::json!(
-                "Order 7 has shipped."
-            ))),
-            "native={native}"
-        );
-    }
 }
 
 /// FIG-5104: a finish schema on a Natural turn leaves prose the answer. A

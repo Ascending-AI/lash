@@ -157,6 +157,12 @@ pub enum DeclarationRefusal {
     UndeclaredIntent { kind: ToolIntentKind },
     #[error("a body's result is the turn control `{}`, which it did not declare", control.as_str())]
     UndeclaredControl { control: TurnControlKind },
+    /// A tool that declares a turn control has no output: its result is
+    /// the control alone, so a value without one breaks the declaration.
+    #[error(
+        "a tool that declares a turn control answered a value; its result is its control alone"
+    )]
+    UndeclaredOutput,
     #[error("an isolated call produced an inline outcome")]
     InlineOutcomeFromIsolated,
 }

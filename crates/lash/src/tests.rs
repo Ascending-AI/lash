@@ -408,6 +408,7 @@ mod assistant_hook_faults;
 #[cfg(feature = "rlm")]
 mod cell_race_loser;
 mod config_transactions;
+mod control_settlement;
 mod core_session_builder;
 mod crashed_create_drain;
 mod cross_core_process_changes;

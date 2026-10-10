@@ -560,6 +560,18 @@ impl<'run> RuntimeExecutionContext<'run> {
         self.execution_env_spec.policy.max_tool_calls
     }
 
+    /// The protocol turn options the execution runs under: the protocol
+    /// plugin's namespace of the configuration it was admitted under, a
+    /// run's own options applied. For a turn's cell they are the options
+    /// its driver reads as the turn's termination.
+    #[must_use]
+    pub fn protocol_turn_options(&self) -> crate::ProtocolTurnOptions {
+        self.execution_env_spec
+            .plugin_config
+            .config
+            .protocol_turn_options()
+    }
+
     pub fn with_execution_env_spec(
         mut self,
         execution_env_spec: crate::ProcessExecutionEnvSpec,
