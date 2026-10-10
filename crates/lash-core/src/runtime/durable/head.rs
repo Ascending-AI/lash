@@ -24,7 +24,7 @@ use lash_durable::{ActorKey, Epoch};
 
 use super::session::{TurnCommit, TurnDone, TurnError};
 use crate::runtime::{RuntimeSessionState, TurnBoundary};
-use crate::store::{SessionHeadRef, SessionStore, WindowSelector};
+use crate::store::{SessionHeadRef, SessionStore, StoreError, WindowSelector};
 use crate::{ActorContext, Backend, Clock, CommitBudget, SessionId, TurnId, TurnOutcome};
 
 /// The committed window a session's turn starts from.
@@ -52,9 +52,9 @@ impl SessionHead {
     ///
     /// # Errors
     ///
-    /// [`TurnError::Exec`] when the session is not in the store; the
-    /// terminal `SessionCreationUnrecorded` [`TurnError::Runtime`] when it
-    /// has no head; the store's refusal.
+    /// [`TurnError::Runtime`]: the terminal `SessionCreationUnrecorded`
+    /// when the session has no head, or the store's own typed refusal
+    /// ([`refused`]), terminal when no pass would clear it.
     pub async fn load(backend: &Backend, session: &SessionId) -> Result<Self, TurnError> {
         let store = session_store(backend, session).await?;
         let state = load_state(&store, session, WindowSelector::Current).await?;
@@ -229,23 +229,27 @@ pub(crate) async fn session_store(
     session: &SessionId,
 ) -> Result<SessionStore, TurnError> {
     let catalog = backend.session_store_factory();
-    match catalog
-        .lookup_session(session)
-        .await
-        .map_err(|error| TurnError::Exec(error.to_string()))?
-    {
+    match catalog.lookup_session(session).await.map_err(refused)? {
         crate::store::SessionLookup::Live(_) => {
             let runtime: Arc<dyn crate::store::RuntimeStore> = catalog;
-            SessionStore::new(runtime, session.clone())
-                .map_err(|error| TurnError::Exec(error.to_string()))
+            SessionStore::new(runtime, session.clone()).map_err(refused)
         }
-        crate::store::SessionLookup::Deleted => {
-            Err(TurnError::Exec(format!("session {session} was deleted")))
-        }
-        crate::store::SessionLookup::Absent => {
-            Err(TurnError::Exec(format!("session {session} does not exist")))
-        }
+        crate::store::SessionLookup::Deleted => Err(refused(StoreError::SessionDeleted {
+            session_id: session.clone(),
+        })),
+        crate::store::SessionLookup::Absent => Err(refused(StoreError::SessionNotFound {
+            session_id: session.clone(),
+        })),
     }
+}
+
+/// The store's `error` as the open's typed refusal: its own code and cause,
+/// so a refusal no pass would clear (a fenced writer, an unsupported or
+/// newer generation, a foreign window, corrupt stored data) answers the run
+/// it blocks, and a transient fault fails the pass for the next one to
+/// retry (FIG-4597, FIG-5358).
+fn refused(error: StoreError) -> TurnError {
+    TurnError::Runtime(error.runtime_error())
 }
 
 /// The window `pin` names in `session`'s store ([`SessionHead::window`]),
@@ -296,7 +300,7 @@ pub(crate) async fn load_state(
     let current = matches!(selector, WindowSelector::Current);
     let loaded = crate::store::load_session_window_state(store, selector)
         .await
-        .map_err(|error| TurnError::Exec(error.to_string()))?
+        .map_err(refused)?
         .ok_or_else(|| {
             // A catalog row no create committed a head for recorded no
             // config: its turn is refused for good, never run on defaults
@@ -310,11 +314,5 @@ pub(crate) async fn load_state(
                 TurnError::Exec(format!("session {session} has no head"))
             }
         })?;
-    if loaded.state.session_id != *session {
-        return Err(TurnError::Exec(format!(
-            "session {session}'s store holds session {}",
-            loaded.state.session_id
-        )));
-    }
     Ok(loaded.state)
 }

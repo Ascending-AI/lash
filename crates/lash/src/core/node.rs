@@ -169,6 +169,14 @@ impl SessionRuntimes for CoreRuntimes {
         match self.0.session(session.clone()).open_runtime().await {
             Ok(runtime) => Ok(runtime),
             Err(crate::EmbedError::Runtime(error)) => Err(TurnError::Runtime(error)),
+            // The store's refusal keeps its code and cause, so one no pass
+            // would clear answers the run it blocks (FIG-5358).
+            Err(
+                crate::EmbedError::Store(error)
+                | crate::EmbedError::Session(lash_core::SessionError::Store {
+                    source: error, ..
+                }),
+            ) => Err(TurnError::Runtime(error.runtime_error())),
             Err(error) => Err(TurnError::Exec(format!(
                 "session {session} did not open: {error}"
             ))),

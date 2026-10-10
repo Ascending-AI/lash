@@ -338,6 +338,8 @@ fn store_failure(error: StoreError) -> DurableError {
     let kind = match &error {
         StoreError::Contended => StoreFailureKind::Contended,
         StoreError::WriterFenced { .. } => StoreFailureKind::WriterRetired,
+        // Bytes a write's own read cannot decode never clear by themselves.
+        StoreError::StoredDataCorrupt { .. } => StoreFailureKind::Corrupt,
         _ => StoreFailureKind::Unavailable,
     };
     DurableError::Store(StoreFailure {

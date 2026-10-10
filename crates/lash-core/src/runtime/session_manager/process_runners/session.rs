@@ -36,15 +36,14 @@ impl RuntimeSessionServices {
             // A recorded request this deployment cannot initialize fails
             // deterministically: no pass can run it, so the refusal is a
             // terminal failure, not an error another pass retries forever.
+            // The store's own refusal keeps its code, as a session's open
+            // answers its sender with it (FIG-5358).
             Err(session_init::SessionTurnInitError::Refused { source }) => Ok(
                 lash_core_execution::runtime::actor::process::SessionTurnMail::Refused(
-                    crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::failure(
-                        crate::ToolFailure::tool(
-                            crate::ToolFailureClass::Execution,
-                            "process_session_turn_refused",
-                            source.to_string(),
-                        ),
-                    )),
+                    match session_init::store_refusal(&source) {
+                        Some(refusal) => refused_output(refusal.code.as_str(), refusal.message),
+                        None => refused_output("process_session_turn_refused", source.to_string()),
+                    },
                 ),
             ),
             Err(session_init::SessionTurnInitError::Create { session_id, source }) => {
@@ -116,6 +115,26 @@ impl RuntimeSessionServices {
         create_request: crate::SessionCreateRequest,
         result: &crate::SessionTurnOutcome,
     ) -> Result<crate::ProcessOutcome, crate::PluginError> {
+        // The store's refusal of the child's committed end is met again by
+        // every pass: the process ends with it (FIG-5358).
+        match self
+            .child_turn_outcome(process_id, create_request, result)
+            .await
+        {
+            Err(error) => match session_init::store_refusal(&error) {
+                Some(refusal) => Ok(refused_output(refusal.code.as_str(), refusal.message)),
+                None => Err(error),
+            },
+            outcome => outcome,
+        }
+    }
+
+    async fn child_turn_outcome(
+        &self,
+        process_id: &crate::ProcessId,
+        create_request: crate::SessionCreateRequest,
+        result: &crate::SessionTurnOutcome,
+    ) -> Result<crate::ProcessOutcome, crate::PluginError> {
         let session_id = self
             .child_create_request(process_id, create_request)
             .session_id
@@ -140,14 +159,10 @@ impl RuntimeSessionServices {
             crate::store::RunTerminalCause::Cancelled { evidence } => {
                 crate::TurnOutcome::Stopped(crate::TurnStop::Cancelled { evidence })
             }
+            // The child run's refusal answers its process under its own
+            // code, as it answers the run's inputs (FIG-5358).
             crate::store::RunTerminalCause::Refused { refusal } => {
-                return Ok(crate::ProcessAwaitOutput::from_tool_output(
-                    crate::ToolCallOutput::failure(crate::ToolFailure::tool(
-                        crate::ToolFailureClass::Execution,
-                        "process_session_turn_refused",
-                        format!("{}: {}", refusal.code, refusal.message),
-                    )),
-                ));
+                return Ok(refused_output(refusal.code.as_str(), refusal.message));
             }
             other => {
                 return Err(crate::PluginError::Session(format!(
@@ -581,6 +596,13 @@ fn checked_final_value(
             .with_cause(crate::ToolFailureCause::ValueMismatch { source: error }),
         )
     })
+}
+
+/// A session-turn process's refused end, failed under `code`.
+fn refused_output(code: &str, message: String) -> crate::ProcessAwaitOutput {
+    crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::failure(
+        crate::ToolFailure::tool(crate::ToolFailureClass::Execution, code, message),
+    ))
 }
 
 #[cfg(test)]

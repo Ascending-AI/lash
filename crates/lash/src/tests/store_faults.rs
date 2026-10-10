@@ -276,7 +276,6 @@ async fn a_send_to_a_deleted_session_is_answered_deleted() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "FIG-5358: a terminal store refusal met by the open parks the session actor and leaves the sender waiting"]
 async fn a_send_to_a_catalog_row_with_no_head_is_answered_creation_unrecorded() -> Result<()> {
     const ID: &str = "row-with-no-head";
     let stores = stores_over(Storage::Memory).await;
@@ -433,7 +432,6 @@ async fn a_send_whose_open_meets_a_refusing_catalog_is_answered(
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "FIG-5358: a terminal store refusal met by the open parks the session actor and leaves the sender waiting"]
 async fn a_send_whose_open_meets_a_typed_store_refusal_is_answered_with_it() -> Result<()> {
     let error =
         a_send_whose_open_meets_a_refusing_catalog_is_answered(CatalogRefusal::WriterFenced)
@@ -455,7 +453,6 @@ async fn a_send_whose_open_meets_a_typed_store_refusal_is_answered_with_it() -> 
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "FIG-5358: a terminal store refusal met by the open parks the session actor and leaves the sender waiting"]
 async fn a_send_whose_open_meets_an_untyped_store_refusal_is_answered_naming_it() -> Result<()> {
     let error =
         a_send_whose_open_meets_a_refusing_catalog_is_answered(CatalogRefusal::Unsupported).await?;
@@ -1325,12 +1322,14 @@ mod sweep {
             "the refusal names the corrupt record: {error:?}"
         );
         assert!(error.is_terminal() && !error.is_retryable(), "{error:?}");
+        // The version reads clean; the window read is the one that meets
+        // the corrupt head, and nothing reads either again.
         assert_eq!(
             (
                 script.calls(StoreOp::read_session_state_version) - version_reads,
                 script.calls(StoreOp::load_session_window) - window_reads,
             ),
-            (1, 0),
+            (1, 1),
             "corrupt stored data is not read again"
         );
         let _ = serving.shutdown().await;
@@ -1420,29 +1419,21 @@ mod sweep {
                 async fn single_and_batch_admission_transient_fault_cells() { sweep($storage, Scenario::Admission, RECOVERED).await; }
                 #[tokio::test(flavor = "multi_thread", worker_threads = 4)] $(#[$ignore])?
                 async fn committed_child_reopen_transient_fault_cells() { sweep($storage, Scenario::Child, RECOVERED).await; }
-                #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-                #[ignore = "FIG-5358: a permanent or corrupt cell parks the session actor and leaves the sender waiting"]
+                #[tokio::test(flavor = "multi_thread", worker_threads = 4)] $(#[$ignore])?
                 async fn open_and_send_fault_cells() { sweep($storage, Scenario::Open, EVERY).await; }
-                #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-                #[ignore = "FIG-5358: a permanent or corrupt cell parks the session actor and leaves the sender waiting"]
+                #[tokio::test(flavor = "multi_thread", worker_threads = 4)] $(#[$ignore])?
                 async fn runtime_assembly_fault_cells() { sweep($storage, Scenario::Assembly, EVERY).await; }
-                #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-                #[ignore = "FIG-5358: a permanent or corrupt cell parks the session actor and leaves the sender waiting"]
+                #[tokio::test(flavor = "multi_thread", worker_threads = 4)] $(#[$ignore])?
                 async fn single_and_batch_admission_fault_cells() { sweep($storage, Scenario::Admission, EVERY).await; }
-                #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-                #[ignore = "FIG-5358: a permanent or corrupt cell parks the session actor and leaves the sender waiting"]
+                #[tokio::test(flavor = "multi_thread", worker_threads = 4)] $(#[$ignore])?
                 async fn committed_child_reopen_fault_cells() { sweep($storage, Scenario::Child, EVERY).await; }
-                #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-                #[ignore = "FIG-5358: a terminal store refusal met by the open parks the session actor and leaves the sender waiting"]
+                #[tokio::test(flavor = "multi_thread", worker_threads = 4)] $(#[$ignore])?
                 async fn wrong_session_refusal_reaches_the_sender() { foreign_window_is_refused($storage).await; }
-                #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-                #[ignore = "FIG-5358: a terminal store refusal met by the open parks the session actor and leaves the sender waiting"]
+                #[tokio::test(flavor = "multi_thread", worker_threads = 4)] $(#[$ignore])?
                 async fn unsupported_generation_refusal_reaches_the_sender() { unsupported_generation_is_refused($storage).await; }
-                #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-                #[ignore = "FIG-5358: a terminal store refusal met by the open parks the session actor and leaves the sender waiting"]
+                #[tokio::test(flavor = "multi_thread", worker_threads = 4)] $(#[$ignore])?
                 async fn an_undecodable_head_is_refused_corrupt_and_not_retried() { undecodable_head_is_refused_corrupt($storage).await; }
-                #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-                #[ignore = "FIG-5358: a terminal store refusal met by the open parks the session actor and leaves the process waiting"]
+                #[tokio::test(flavor = "multi_thread", worker_threads = 4)] $(#[$ignore])?
                 async fn a_committed_child_outside_the_window_ends_its_process_typed() { committed_child_outside_the_window_ends_its_process($storage).await; }
             }
         };

@@ -331,6 +331,24 @@ fn reasoning_refused(error: &crate::PluginError) -> bool {
     )
 }
 
+/// The store's own refusal of the recorded session, typed under its own
+/// code, when `error` is one: a generation outside this worker's window, a
+/// fenced writer, a foreign view, or bytes it cannot decode. Every pass
+/// meets it again, so the session turn ends with it (FIG-5358).
+pub(in crate::runtime::session_manager) fn store_refusal(
+    error: &crate::PluginError,
+) -> Option<crate::RuntimeError> {
+    matches!(
+        error,
+        crate::PluginError::StoreRefusal(_) | crate::PluginError::StoredDataCorrupt { .. }
+    )
+    .then(|| {
+        error
+            .clone()
+            .into_turn_failure(crate::RuntimeErrorCode::StoreRefused)
+    })
+}
+
 /// Whether `error` is the creation refusal [`resolve_child_facts`] mints.
 pub(in crate::runtime::session_manager) fn session_config_refused(
     error: &crate::PluginError,
@@ -896,6 +914,7 @@ impl RuntimeSessionServices {
             if session_catalog_lookup_unsupported(&source)
                 || session_config_refused(&source)
                 || reasoning_refused(&source)
+                || store_refusal(&source).is_some()
             {
                 return SessionTurnInitError::Refused {
                     source: Box::new(source),
@@ -924,14 +943,20 @@ impl RuntimeSessionServices {
             .store()
             .enqueue_pending_turn_input(draft)
             .await
-            .map_err(|error| SessionTurnInitError::Create {
-                session_id: Some(session_id.clone()),
-                source: Box::new(crate::PluginError::of_store_error(
+            .map_err(|error| {
+                let source = Box::new(crate::PluginError::of_store_error(
                     format_args!(
                         "failed to mail the turn of process `{process_id}` to its child session `{session_id}`"
                     ),
                     error,
-                )),
+                ));
+                if store_refusal(&source).is_some() {
+                    return SessionTurnInitError::Refused { source };
+                }
+                SessionTurnInitError::Create {
+                    session_id: Some(session_id.clone()),
+                    source,
+                }
             })?;
         Ok(session_id)
     }

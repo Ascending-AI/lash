@@ -201,13 +201,23 @@ async fn composed_inputs(
             batching.input_admission(cx, session).await?
     {
         // The policy weighs each input's payload and age, which the mailbox
-        // does not carry: the session's pending rows do.
-        let mut pending = cx
+        // does not carry: the session's pending rows do. Rows the store
+        // refuses for good leave nothing to weigh: the head runs alone, as
+        // with no policy, and a refusal of the session itself meets its
+        // turn's open, which answers the run with it (FIG-5358).
+        let pending = match cx
             .backend()
             .session_store_factory()
             .list_pending_turn_inputs(session)
             .await
-            .map_err(undecodable)?
+        {
+            Err(error) if error.runtime_error().is_terminal() => {
+                return AdmittedInputIds::new(ids)
+                    .map_err(|error| SessionMailError::Undecodable(error.to_string()));
+            }
+            pending => pending.map_err(undecodable)?,
+        };
+        let mut pending = pending
             .into_iter()
             .map(|read| (read.input.input_id.clone(), read.input))
             .collect::<std::collections::BTreeMap<_, _>>();

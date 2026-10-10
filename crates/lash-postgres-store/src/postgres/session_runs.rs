@@ -115,13 +115,16 @@ pub(crate) async fn run_terminal_conn(
 }
 
 /// Capture the current bounded window in the terminal writer's transaction.
-/// Its hydrated components keep report reads independent of later GC.
+/// Its hydrated components keep report reads independent of later GC. A
+/// window the store cannot decode is captured as none: the run still ends,
+/// under a cause that names the corruption when it is why the run ended
+/// (FIG-5358).
 pub(crate) async fn terminal_window_json(
     conn: &mut PgConnection,
     session: &SessionId,
     chunk_size: usize,
 ) -> Result<Option<String>, StoreError> {
-    super::runtime_persistence::history::window_conn(
+    match super::runtime_persistence::history::window_conn(
         conn,
         session,
         lash_core_execution::store::WindowSelector::Current,
@@ -130,7 +133,11 @@ pub(crate) async fn terminal_window_json(
         #[cfg(any(test, feature = "testing"))]
         None,
     )
-    .await?
+    .await
+    {
+        Err(StoreError::StoredDataCorrupt { .. }) => Ok(None),
+        read => read,
+    }?
     .map(|window| {
         serde_json::to_string(&window).map_err(|error| StoreError::StoredDataCorrupt {
             record_kind: "RunTerminalWindow",

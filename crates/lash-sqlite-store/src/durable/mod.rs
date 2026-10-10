@@ -393,6 +393,8 @@ fn store_failure(error: rusqlite::Error) -> DurableError {
     let kind = match &error {
         StoreError::Contended => StoreFailureKind::Contended,
         StoreError::WriterFenced { .. } => StoreFailureKind::WriterRetired,
+        // Bytes a write's own read cannot decode never clear by themselves.
+        StoreError::StoredDataCorrupt { .. } => StoreFailureKind::Corrupt,
         _ => kind,
     };
     DurableError::Store(StoreFailure {
