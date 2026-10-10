@@ -2281,6 +2281,7 @@ dependencies = [
  "lash-internal-vm-runtime",
  "lash-kernel-vm",
  "lash-runtime",
+ "rusqlite",
  "serde_json",
  "sqlx",
  "tempfile",

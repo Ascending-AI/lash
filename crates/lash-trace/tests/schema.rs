@@ -261,7 +261,7 @@ fn event_samples() -> Vec<TraceEvent> {
         },
         TraceEvent::DomainCompleted {
             completion: lash_trace::TraceDomainCompletion::new(
-                lash_trace::TraceDomainOperation::Process,
+                lash_trace::TraceDomainSubject::Process {},
                 1,
                 lash_trace::TraceDomainStatus::Completed,
             ),

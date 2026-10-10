@@ -774,12 +774,13 @@ impl ToolIntentIngress {
                     lash_trace::TraceTransitionKind::Terminal,
                     0,
                     || {
-                        let mut completion = lash_trace::TraceDomainCompletion::new(
-                            lash_trace::TraceDomainOperation::ToolIntent,
+                        let completion = lash_trace::TraceDomainCompletion::new(
+                            lash_trace::TraceDomainSubject::ToolIntent {
+                                kind: receipt.record.kind(),
+                            },
                             scope.started_at_ms,
                             status,
                         );
-                        completion.intent_kind = Some(receipt.record.kind().as_str().to_string());
                         (
                             lash_trace::TraceContext::default(),
                             lash_trace::TraceEvent::DomainCompleted { completion },

@@ -67,12 +67,42 @@ pub(super) struct CellEnvelope {
 /// A cell's envelope at a park, as the activation that resumes the cell
 /// reads it.
 #[derive(serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, try_from = "CellSegmentStateWire")]
 pub(super) struct CellSegmentState {
     pub cell: CellEnvelope,
     pub prints: Vec<Datum>,
     pub host: CellHostLedgers,
     pub started_process_ids: Vec<lash_core::ProcessId>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CellSegmentStateWire {
+    cell: CellEnvelope,
+    prints: Vec<Datum>,
+    host: CellHostLedgers,
+    started_process_ids: Vec<lash_core::ProcessId>,
+}
+
+impl TryFrom<CellSegmentStateWire> for CellSegmentState {
+    type Error = String;
+
+    fn try_from(wire: CellSegmentStateWire) -> Result<Self, Self::Error> {
+        for call in &wire.host.calls {
+            if !wire.cell.effects.contains_key(&call.operation) {
+                return Err(format!(
+                    "the cell ledger names an unrecorded effect: {}",
+                    call.operation
+                ));
+            }
+        }
+        Ok(Self {
+            cell: wire.cell,
+            prints: wire.prints,
+            host: wire.host,
+            started_process_ids: wire.started_process_ids,
+        })
+    }
 }
 
 impl CellEnvelope {

@@ -169,7 +169,7 @@ pub struct RoundView {
     run: RunSeq,
     members: Vec<RoundMember>,
     cursor: Arc<RunCursor>,
-    presented: Option<Vec<ToolCallId>>,
+    presented: bool,
     /// Whether an owner recorded that it exported the trace admissions the
     /// admission retained.
     trace_exported: bool,
@@ -196,8 +196,13 @@ impl RoundView {
 
     /// The presented calls, once its presentation is recorded.
     #[must_use]
-    pub fn presented(&self) -> Option<&[ToolCallId]> {
-        self.presented.as_deref()
+    pub fn presented(&self) -> Option<Vec<ToolCallId>> {
+        self.presented.then(|| {
+            self.members
+                .iter()
+                .map(|member| member.call().clone())
+                .collect()
+        })
     }
 
     /// The traced scopes whose admission exports the admission still owes:
@@ -370,7 +375,7 @@ fn fold_run(
             ordinal: ADMIT_ORDINAL,
             reason: reason.to_owned(),
         })?;
-    let mut presented = None;
+    let mut presented = false;
     let mut trace_exported = false;
     for row in &records[1..] {
         match row.kind {
@@ -475,11 +480,18 @@ fn fold_run(
                 };
             }
             RunRecordKind::Present => {
-                let present: PresentBody = decode(row)?;
-                if presented.is_some() {
+                let _: PresentBody = decode(row)?;
+                if presented
+                    || row.call.is_some()
+                    || members.iter().any(|member| {
+                        member
+                            .as_ref()
+                            .is_none_or(|member| member.outcome().is_none())
+                    })
+                {
                     return Err(out_of_order(row));
                 }
-                presented = Some(present.calls);
+                presented = true;
             }
             // A coordinator decision is the tool round's to fold; the
             // primitive's recoveries do not depend on it.

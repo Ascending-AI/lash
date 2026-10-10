@@ -16,7 +16,7 @@ pub use lash_trace::{
     AttemptObservation, DurableTraceScope, EmissionPermit, EmissionSource, InvalidTraceCarrier,
     InvalidTraceLinks, TraceAdmissionCandidate, TraceAnchor, TraceAttemptId,
     TraceAttemptObservation, TraceCandidateOutcome, TraceCarrier, TraceCause,
-    TraceDomainCompletion, TraceDomainOperation, TraceDomainProjector, TraceDomainStatus,
+    TraceDomainCompletion, TraceDomainProjector, TraceDomainStatus, TraceDomainSubject,
     TraceEventKind, TraceHostOperation, TraceLinks, TraceRecordIdentity, TraceScopeAdmission,
     TraceScopeFactory, TraceScopeId, TraceScopeKind, TraceScopeOffer, TraceScopeOwner,
     TraceToolOwner, TraceTransitionKind, UntracedScopes, W3cSpanId, W3cTraceFlags, W3cTraceId,

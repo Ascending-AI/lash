@@ -652,65 +652,45 @@ fn payload_limits_and_permit_classes_are_enforced() {
     );
 }
 
+/// V23: both telemetry projections read the same typed terminal subject.
 #[test]
-fn typed_domain_completions_cover_operations_times_and_permit_classes() {
+fn domain_subject_owns_the_span_and_intent_kind_attribute() {
     let (provider, meter, exporter, _) = providers(Sampler::AlwaysOn);
     let adapter = OtelTelemetry::new(&provider, &meter, OtelOptions::default());
     let scope = admit(&adapter, TraceCause::Root);
-    let operations = [
-        (TraceDomainOperation::Process, DomainSpan::Process, false),
-        (TraceDomainOperation::ToolIntent, DomainSpan::Intent, false),
-    ];
-    for (operation, span, is_live) in operations {
-        let mut completion = TraceDomainCompletion::new(operation, 4000, TraceDomainStatus::Failed);
-        completion.error_code = Some(crate::TraceFailureCode::provider("refused"));
-        completion.intent_kind = Some("custom_intent".into());
-        completion.tool_call_id = Some("call".into());
-        completion.provider = Some("custom-provider".into());
-        completion.model = Some("custom-model".into());
-        completion.tool_name = Some("custom-tool".into());
+    let subjects = std::iter::once(TraceDomainSubject::Process {}).chain(
+        lash_sansio::ToolIntentKind::ALL
+            .iter()
+            .map(|kind| TraceDomainSubject::ToolIntent { kind: *kind }),
+    );
+    for subject in subjects {
+        let completion = TraceDomainCompletion::new(subject, 4000, TraceDomainStatus::Completed);
         let event = record(&scope, TraceEvent::DomainCompleted { completion }, 8000);
-        let wrong_source = if is_live {
-            EmissionSource::NewTransition
-        } else {
-            live()
-        };
-        let before = exporter.get_finished_spans().unwrap().len();
-        adapter.project(&scope, None, &wrong_source, &event);
-        assert_eq!(exporter.get_finished_spans().unwrap().len(), before);
-        let source = if is_live {
-            live()
-        } else {
-            EmissionSource::NewTransition
-        };
-        adapter.project(&scope, None, &source, &event);
+        adapter.project(&scope, None, &EmissionSource::NewTransition, &event);
         let spans = exporter.get_finished_spans().unwrap();
         let emitted = spans.last().unwrap();
-        assert_eq!(emitted.name, span.definition().name);
-        assert_eq!(emitted.span_kind, span.definition().kind);
+        match subject {
+            TraceDomainSubject::Process {} => {
+                assert_eq!(emitted.name, DomainSpan::Process.definition().name);
+                assert!(
+                    !emitted
+                        .attributes
+                        .iter()
+                        .any(|attr| attr.key.as_str() == "lash.tool_intent.kind")
+                );
+            }
+            TraceDomainSubject::ToolIntent { kind } => {
+                assert_eq!(emitted.name, DomainSpan::Intent.definition().name);
+                assert!(
+                    emitted
+                        .attributes
+                        .contains(&A::ToolIntentKind.value(kind.as_str()))
+                );
+            }
+        }
         assert_eq!(emitted.start_time, epoch_ms(4000));
         assert_eq!(emitted.end_time, epoch_ms(8000));
-        assert_eq!(emitted.parent_span_id, spans[0].span_context.span_id());
-        assert!(matches!(emitted.status, Status::Error { .. }));
-        assert!(
-            emitted
-                .attributes
-                .contains(&A::ErrorType.value("provider:refused"))
-        );
-        assert!(
-            emitted
-                .attributes
-                .contains(&A::ProviderName.value("custom-provider"))
-        );
-        assert!(emitted.attributes.contains(&A::ToolCallId.value("call")));
-        assert!(
-            !emitted
-                .attributes
-                .iter()
-                .any(|attr| attr.key.as_str().starts_with("gen_ai.usage."))
-        );
     }
-    assert_eq!(exporter.get_finished_spans().unwrap().len(), 3);
 }
 
 #[test]

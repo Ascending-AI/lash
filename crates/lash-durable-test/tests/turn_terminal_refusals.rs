@@ -20,6 +20,107 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use served::{Tier, World};
 
+/// V07: a run is wholly open or wholly terminal on every SQL substrate.
+async fn run_terminal_columns_have_one_presence_state(tier: Tier) {
+    let dir = tempfile::tempdir().unwrap();
+    let sqlite = match tier {
+        Tier::SqliteMemory => Some(rusqlite::Connection::open_in_memory().unwrap()),
+        Tier::SqliteFile => Some(rusqlite::Connection::open(dir.path().join("runs.db")).unwrap()),
+        Tier::Postgres => None,
+    };
+    let postgres = if tier == Tier::Postgres {
+        let url = lash_postgres_store::testing::required_database_url();
+        let database = lash_postgres_store::testing::IsolatedDatabase::create(&url).await;
+        let pool = sqlx::PgPool::connect(database.url()).await.unwrap();
+        Some((database, pool))
+    } else {
+        None
+    };
+    if let Some(conn) = &sqlite {
+        conn.execute_batch(lash_sqlite_store::testing::database_table_ddl(
+            "session_runs",
+        ))
+        .unwrap();
+    }
+    for bits in 0..8 {
+        let kind = if bits & 4 != 0 { "'answered'" } else { "NULL" };
+        let cause = if bits & 2 != 0 {
+            "'{\"cause\":\"commands_applied\"}'"
+        } else {
+            "NULL"
+        };
+        let time = if bits & 1 != 0 { "1" } else { "NULL" };
+        let table = if sqlite.is_some() {
+            "session_runs"
+        } else {
+            "lash_session_runs"
+        };
+        let sql = format!(
+            "INSERT INTO {table} (session_id, run, terminal_kind, terminal_cause_json, terminal_at_ms) VALUES ('s', '{bits}', {kind}, {cause}, {time})"
+        );
+        let admitted = if let Some(conn) = &sqlite {
+            conn.execute(&sql, []).is_ok()
+        } else {
+            sqlx::query(&sql)
+                .execute(&postgres.as_ref().unwrap().1)
+                .await
+                .is_ok()
+        };
+        assert_eq!(
+            admitted,
+            bits == 0 || bits == 7,
+            "{tier:?} presence bits {bits:03b}"
+        );
+    }
+    if let Some((database, pool)) = postgres {
+        use lash_core_execution::store::RunStore as _;
+        let storage = lash_postgres_store::testing::connect(database.url())
+            .await
+            .unwrap();
+        // Corrupt rows bypass the DDL deliberately; the reader must still
+        // refuse partial terminals and a kind that disagrees with its cause.
+        sqlx::raw_sql("ALTER TABLE lash_session_runs DROP CONSTRAINT ck_session_runs_terminal, DROP CONSTRAINT ck_session_runs_terminal_kind; DELETE FROM lash_session_runs")
+            .execute(&pool).await.unwrap();
+        let session = lash_sansio::SessionId::try_from("s".to_owned()).unwrap();
+        let run = lash_sansio::TurnId::try_from("r".to_owned()).unwrap();
+        for bits in 0..8 {
+            sqlx::query("DELETE FROM lash_session_runs")
+                .execute(&pool)
+                .await
+                .unwrap();
+            sqlx::query("INSERT INTO lash_session_runs (session_id, run, terminal_kind, terminal_cause_json, terminal_at_ms) VALUES ('s', 'r', $1, $2, $3)")
+                .bind((bits & 4 != 0).then_some("answered"))
+                .bind((bits & 2 != 0).then_some(r#"{"cause":"commands_applied"}"#))
+                .bind((bits & 1 != 0).then_some(1_i64)).execute(&pool).await.unwrap();
+            let decoded = storage.store().run_terminal(&session, &run).await;
+            if bits == 0 {
+                assert!(decoded.unwrap().is_none());
+            } else if bits == 7 {
+                assert!(decoded.unwrap().is_some());
+            } else {
+                assert!(
+                    matches!(
+                        decoded,
+                        Err(lash_core_execution::StoreError::StoredDataCorrupt { .. })
+                    ),
+                    "Postgres presence bits {bits:03b}: {decoded:?}"
+                );
+            }
+        }
+        sqlx::query("UPDATE lash_session_runs SET terminal_kind = 'failed'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(matches!(
+            storage.store().run_terminal(&session, &run).await,
+            Err(lash_core_execution::StoreError::StoredDataCorrupt { .. })
+        ));
+        drop(storage);
+        pool.close().await;
+        drop(database);
+    }
+}
+
 /// Long enough for a refused run to end, far short of a session that
 /// retries its pass until it parks.
 const ENDS_WITHIN: std::time::Duration = std::time::Duration::from_secs(60);
@@ -208,6 +309,7 @@ async fn the_send_after_a_refused_run_executes_a_new_run(tier: Tier) {
 }
 
 tiered_laws!(
+    run_terminal_columns_have_one_presence_state,
     the_send_after_a_refused_run_executes_a_new_run,
     an_after_turn_refusal_ends_the_run_with_its_typed_refusal,
     a_minted_after_turn_refusal_ends_the_run_with_its_typed_refusal,

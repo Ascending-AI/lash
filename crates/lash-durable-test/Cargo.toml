@@ -44,6 +44,7 @@ lash-sqlite-store = { workspace = true, features = ["testing"] }
 lash-vm-client = { workspace = true }
 lash-vm-protocol = { workspace = true }
 serde_json = { workspace = true }
+rusqlite = { version = "0.37", features = ["bundled"] }
 sqlx = { workspace = true, features = ["postgres", "runtime-tokio-rustls"] }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }

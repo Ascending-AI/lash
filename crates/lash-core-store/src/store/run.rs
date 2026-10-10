@@ -383,8 +383,8 @@ impl RunEndOutcome {
 }
 
 /// The stored form of a run's terminal: the columns a backend writes.
-/// `kind` is a projection of the cause for SQL to select on; no reader
-/// decodes it.
+/// `kind` is a projection of the cause for SQL to select on; readers
+/// check it against the decoded cause.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StoredRunTerminal {
     pub kind: &'static str,

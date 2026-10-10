@@ -773,7 +773,7 @@ async fn run_cell(
         };
         // A cancelled tool call ends the cell, whatever its program made of the
         // error; so does the turn's own cancel.
-        if collected.call_cancelled || ctx.is_cancelled() || matches!(end, End::Cancelled) {
+        if collected.call_cancelled() || ctx.is_cancelled() || matches!(end, End::Cancelled) {
             state.rollback_code_execution();
             return failed(
                 lash_core::CellFailureKind::Host,
@@ -828,7 +828,7 @@ async fn run_cell(
                 let _ = result;
                 let controlled = finished
                     .finish
-                    .then(|| collected.settled_control())
+                    .then(|| collected.settled_control(&host.boundary))
                     .flatten()
                     .map(|(record, control)| lash_core::CellOutcome::Controlled {
                         tool_name: record.tool.clone(),

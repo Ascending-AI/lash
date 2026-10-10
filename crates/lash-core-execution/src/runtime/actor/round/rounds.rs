@@ -124,9 +124,7 @@ pub fn presentation(round: &AdmittedRound, fold: &RunFold) -> (Presentation, Opt
             view.cursor().take(),
             RunRecordKind::Present,
             None,
-            encode(&PresentBody {
-                calls: entries.iter().map(|(call, _)| call.clone()).collect(),
-            }),
+            encode(&PresentBody {}),
         )
     });
     (Presentation::of(entries), record)

@@ -57,13 +57,43 @@ pub const UNKNOWN_EFFECT: &str = "unknown_effect";
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct LedgerCall {
-    pub call_id: lash_core::ToolCallId,
     /// The effect the cell performed, as its source names it.
-    pub operation: String,
-    /// The call is to a tool that declares a turn control: the cell's one
-    /// control attempt, which `max_tool_calls` does not count.
-    pub control: bool,
-    pub record: Option<lash_core::ToolCallRecord>,
+    pub operation: lash_kernel_doc::EffectName,
+    pub state: LedgerCallState,
+}
+
+/// The call identity belongs to its pending admission or completed record.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
+pub(super) enum LedgerCallState {
+    Pending {
+        call_id: lash_core::ToolCallId,
+    },
+    Completed {
+        record: Box<lash_core::ToolCallRecord>,
+    },
+}
+
+impl LedgerCall {
+    fn call_id(&self) -> &lash_core::ToolCallId {
+        match &self.state {
+            LedgerCallState::Pending { call_id } => call_id,
+            LedgerCallState::Completed { record } => &record.call_id,
+        }
+    }
+
+    fn record(&self) -> Option<&lash_core::ToolCallRecord> {
+        match &self.state {
+            LedgerCallState::Pending { .. } => None,
+            LedgerCallState::Completed { record } => Some(record),
+        }
+    }
+
+    fn control(&self, boundary: &HostBoundary) -> bool {
+        boundary
+            .effect(&self.operation)
+            .is_some_and(|effect| !effect.controls.is_empty())
+    }
 }
 
 /// What the host holds of a cell beside its prints.
@@ -75,9 +105,6 @@ pub(super) struct CellHostLedgers {
     pub calls: Vec<LedgerCall>,
     /// The `max_tool_calls` refusal the cell met, if it met one.
     pub tool_call_limit: Option<lash_core::ToolCallLimitExceeded>,
-    /// A tool call of the cell was cancelled: the cell is over, whatever
-    /// its program made of the error.
-    pub call_cancelled: bool,
 }
 
 impl CellHostLedgers {
@@ -86,7 +113,7 @@ impl CellHostLedgers {
     pub(super) fn tool_call_records(&self) -> Vec<lash_core::ToolCallRecord> {
         self.calls
             .iter()
-            .filter_map(|call| call.record.clone())
+            .filter_map(|call| call.record().cloned())
             .collect()
     }
 
@@ -95,12 +122,13 @@ impl CellHostLedgers {
     /// as. `None` when the call failed or its body gave no control.
     pub(super) fn settled_control(
         &self,
+        boundary: &HostBoundary,
     ) -> Option<(&lash_core::ToolCallRecord, &lash_core::TurnControl)> {
         self.calls
             .iter()
-            .filter(|call| call.control)
+            .filter(|call| call.control(boundary))
             .find_map(|call| {
-                let record = call.record.as_ref()?;
+                let record = call.record()?;
                 if !record.output.is_success() {
                     return None;
                 }
@@ -114,9 +142,9 @@ impl CellHostLedgers {
         self.calls
             .iter()
             .filter_map(|call| {
-                let record = call.record.as_ref()?;
+                let record = call.record()?;
                 Some(lash_core::ExecutedCall {
-                    operation: call.operation.clone(),
+                    operation: call.operation.to_string(),
                     outcome: if record.output.is_success() {
                         lash_core::ExecutedCallOutcome::Ok
                     } else {
@@ -126,6 +154,19 @@ impl CellHostLedgers {
                 })
             })
             .collect()
+    }
+
+    /// Cancellation is the completed call's outcome, retained across parks.
+    pub(super) fn call_cancelled(&self) -> bool {
+        self.calls
+            .iter()
+            .filter_map(LedgerCall::record)
+            .any(|record| {
+                matches!(
+                    record.output.outcome,
+                    lash_core::ToolCallOutcome::Cancelled(_)
+                )
+            })
     }
 }
 
@@ -330,7 +371,7 @@ impl KernelEffects for CellHost<'_> {
         // A cancelled call ends the cell whatever its program made of the
         // error, and so does the turn's own cancel: nothing after either
         // ends the turn in its place.
-        if control && (self.ledgers.lock_recover().call_cancelled || self.ctx.is_cancelled()) {
+        if control && (self.ledgers.lock_recover().call_cancelled() || self.ctx.is_cancelled()) {
             return Ok(Err(refused(
                 EFFECT_CANCELLED,
                 format!(
@@ -349,7 +390,7 @@ impl KernelEffects for CellHost<'_> {
                 .lock_recover()
                 .calls
                 .iter()
-                .any(|call| call.control)
+                .any(|call| call.control(&self.boundary))
             {
                 Some(lash_core::ToolFailureCause::ControlAttemptSpent)
             } else {
@@ -363,7 +404,11 @@ impl KernelEffects for CellHost<'_> {
             let mut ledgers = self.ledgers.lock_recover();
             // The cell's one control attempt is not a call `max_tool_calls`
             // counts: a cell at the limit can still end its turn.
-            let counted = ledgers.calls.iter().filter(|call| !call.control).count();
+            let counted = ledgers
+                .calls
+                .iter()
+                .filter(|call| !call.control(&self.boundary))
+                .count();
             if !control && counted.saturating_add(1) > self.ctx.max_tool_calls().get() {
                 let exceeded = lash_core::ToolCallLimitExceeded {
                     scope: lash_core::ToolCallLimitScope::Cell,
@@ -376,10 +421,10 @@ impl KernelEffects for CellHost<'_> {
                 return Ok(Err(refused(TOOL_CALL_LIMIT, exceeded.to_string())));
             }
             ledgers.calls.push(LedgerCall {
-                call_id: invocation.id.clone(),
-                operation: request.effect.to_string(),
-                control,
-                record: None,
+                operation: request.effect.clone(),
+                state: LedgerCallState::Pending {
+                    call_id: invocation.id.clone(),
+                },
             });
         }
         let now_ms = self
@@ -454,7 +499,6 @@ impl KernelEffects for CellHost<'_> {
                 data: datum_from_json(&failure.to_json_value().to_string()).unwrap_or(Datum::Null),
             }),
             lash_core::ToolCallOutcome::Cancelled(cancelled) => {
-                self.ledgers.lock_recover().call_cancelled = true;
                 Outcome::Failed(refused(EFFECT_CANCELLED, cancelled.message.clone()))
             }
         };
@@ -463,10 +507,12 @@ impl KernelEffects for CellHost<'_> {
             if let Some(call) = ledgers
                 .calls
                 .iter_mut()
-                .find(|call| &call.call_id == member.id())
-                && call.record.is_none()
+                .find(|call| call.call_id() == member.id())
+                && call.record().is_none()
             {
-                call.record = Some(record);
+                call.state = LedgerCallState::Completed {
+                    record: Box::new(record),
+                };
             }
         }
         Some(outcome)
@@ -477,7 +523,7 @@ impl KernelEffects for CellHost<'_> {
             .lock_recover()
             .calls
             .iter()
-            .filter_map(|call| call.record.as_ref())
+            .filter_map(LedgerCall::record)
             .any(|call| call.output.tool_panic_stop().is_some())
     }
 

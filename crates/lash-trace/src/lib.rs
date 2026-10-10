@@ -52,7 +52,7 @@ mod workflow_overlay;
 pub use content::{CONTENT_POLICY_OMISSION, TelemetryContent};
 pub use content_block::{TraceContentBlock, TraceToolResultBlock};
 pub use domain::{
-    TraceAttemptObservation, TraceDomainCompletion, TraceDomainOperation, TraceDomainStatus,
+    TraceAttemptObservation, TraceDomainCompletion, TraceDomainStatus, TraceDomainSubject,
     TraceRuntimeStreamEvent, TraceRuntimeStreamPayload,
 };
 pub use event::{TraceEvent, TraceEventKind};

@@ -1224,7 +1224,7 @@ fn mixed_laws(
         return vec!["the round was never admitted".to_owned()];
     };
     let view = fold.round(run).unwrap();
-    if view.presented() != Some(calls.as_slice()) {
+    if view.presented() != Some(calls.to_vec()) {
         violations.push(format!(
             "the presentation {:?} is not the declared order {calls:?}",
             view.presented()
@@ -1327,7 +1327,7 @@ fn pending_laws(
         return vec!["the round was never admitted".to_owned()];
     };
     let view = fold.round(run).unwrap();
-    if view.presented() != Some(calls.as_slice()) {
+    if view.presented() != Some(calls.to_vec()) {
         violations.push(format!(
             "the presentation {:?} is not the declared order {calls:?}",
             view.presented()

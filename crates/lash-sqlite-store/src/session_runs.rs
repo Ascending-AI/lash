@@ -58,7 +58,7 @@ fn sql_i64(field: &str, value: u64) -> Result<i64, StoreError> {
 
 /// The stored terminal-evidence row: serialized cause, head revision and
 /// the terminal instant, all unset until the run goes terminal.
-type TerminalRow = (Option<String>, Option<i64>, Option<i64>);
+type TerminalRow = (Option<String>, Option<i64>, Option<i64>, Option<String>);
 
 /// The terminal evidence of `run` in `session_id`, read on `conn`.
 pub(crate) fn run_terminal_conn(
@@ -70,11 +70,11 @@ pub(crate) fn run_terminal_conn(
         .query_row(
             session_runs_sql().runs.select_terminal.sql(),
             params![session_id.as_str(), run.as_str()],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
         )
         .optional()
         .map_err(sqlite_error)?;
-    let Some((cause_json, head_revision, at_ms)) = row else {
+    let Some((cause_json, head_revision, at_ms, kind)) = row else {
         let deleted = conn
             .query_row(
                 crate::session_sql::session_sql()
@@ -93,10 +93,17 @@ pub(crate) fn run_terminal_conn(
         return Ok(close_session_intent_conn(conn, session_id)?
             .and_then(|intent| intent.session_deleted_terminal(run)));
     };
-    let (Some(cause_json), Some(at_ms)) = (cause_json, at_ms) else {
-        return Ok(None);
+    let (cause_json, at_ms, kind) = match (cause_json, at_ms, kind) {
+        (None, None, None) if head_revision.is_none() => return Ok(None),
+        (Some(cause), Some(at), Some(kind)) => (cause, at, kind),
+        _ => {
+            return Err(stored_data_corrupt(
+                "RunTerminal",
+                "partial terminal evidence",
+            ));
+        }
     };
-    RunTerminal::from_stored(
+    let terminal = RunTerminal::from_stored(
         session_id.clone(),
         run.clone(),
         &cause_json,
@@ -104,8 +111,14 @@ pub(crate) fn run_terminal_conn(
             .map(|revision| stored_u64("RunTerminal", revision))
             .transpose()?,
         stored_u64("RunTerminal", at_ms)?,
-    )
-    .map(Some)
+    )?;
+    if terminal.kind().as_str() != kind {
+        return Err(stored_data_corrupt(
+            "RunTerminal",
+            "terminal kind disagrees with cause",
+        ));
+    }
+    Ok(Some(terminal))
 }
 
 /// Capture the current bounded window in the terminal writer's transaction.

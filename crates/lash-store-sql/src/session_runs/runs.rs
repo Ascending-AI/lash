@@ -23,9 +23,10 @@ crate::statements! {
              WHERE session_id = ?1 AND admission_json IS NOT NULL
                AND terminal_kind IS NULL";
 
-        /// The terminal evidence of run `?2` of session `?1`: all three
-        /// columns NULL while the run has none.
-        select_terminal = "SELECT terminal_cause_json, terminal_head_revision, terminal_at_ms
+        /// The terminal evidence of run `?2` of session `?1`: every
+        /// column NULL while the run has none. The decoder checks the
+        /// indexed kind against the decoded cause.
+        select_terminal = "SELECT terminal_cause_json, terminal_head_revision, terminal_at_ms, terminal_kind
              FROM session_runs
              WHERE session_id = ?1 AND run = ?2";
 

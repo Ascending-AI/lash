@@ -232,7 +232,7 @@ impl super::activation::ProcessActivation {
                     lash_trace::TraceContext::default(),
                     lash_trace::TraceEvent::DomainCompleted {
                         completion: lash_trace::TraceDomainCompletion::new(
-                            lash_trace::TraceDomainOperation::Process,
+                            lash_trace::TraceDomainSubject::Process {},
                             started_at_ms,
                             status,
                         ),

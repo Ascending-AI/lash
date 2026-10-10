@@ -366,7 +366,7 @@ async fn a_submitted_tool_intent_exports_one_span_for_its_settlement() -> Result
             matches!(
                 &record.event,
                 lash_trace::TraceEvent::DomainCompleted { completion }
-                    if completion.operation == lash_trace::TraceDomainOperation::ToolIntent
+                    if matches!(completion.subject, lash_trace::TraceDomainSubject::ToolIntent { .. })
             )
         })
         .collect();
@@ -443,7 +443,7 @@ async fn an_ended_process_exports_one_lash_process_span() -> Result<()> {
             matches!(
                 &record.event,
                 lash_trace::TraceEvent::DomainCompleted { completion }
-                    if completion.operation == lash_trace::TraceDomainOperation::Process
+                    if completion.subject == lash_trace::TraceDomainSubject::Process {}
             )
         })
         .collect();

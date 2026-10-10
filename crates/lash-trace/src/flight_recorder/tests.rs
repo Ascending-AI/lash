@@ -166,7 +166,7 @@ fn failed_operation_triggers_a_snapshot() {
         },
         TraceEvent::DomainCompleted {
             completion: crate::TraceDomainCompletion::new(
-                crate::TraceDomainOperation::Process,
+                crate::TraceDomainSubject::Process {},
                 1000,
                 TraceDomainStatus::Failed,
             ),

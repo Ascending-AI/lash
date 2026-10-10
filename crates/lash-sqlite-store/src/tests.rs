@@ -1003,3 +1003,38 @@ async fn a_commit_sqlite_refuses_is_a_storage_failure_that_leaves_nothing_behind
         "the committed admission is complete"
     );
 }
+/// V07: even a corrupt stored row cannot be read as a conflicting status.
+#[test]
+fn partial_run_terminals_are_corruption_at_decode() {
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    conn.execute_batch(crate::schema_fragments::SESSION_RUNS_TABLES)
+        .unwrap();
+    conn.pragma_update(None, "ignore_check_constraints", true)
+        .unwrap();
+    let session = SessionId::try_from("s".to_owned()).unwrap();
+    let run = lash_sansio::TurnId::try_from("r".to_owned()).unwrap();
+    for bits in 0..8 {
+        conn.execute("DELETE FROM session_runs", []).unwrap();
+        conn.execute(
+            "INSERT INTO session_runs (session_id, run, terminal_kind, terminal_cause_json, terminal_at_ms) VALUES ('s', 'r', ?1, ?2, ?3)",
+            rusqlite::params![(bits & 4 != 0).then_some("answered"), (bits & 2 != 0).then_some(r#"{"cause":"commands_applied"}"#), (bits & 1 != 0).then_some(1_i64)],
+        ).unwrap();
+        let decoded = crate::session_runs::run_terminal_conn(&conn, &session, &run);
+        if bits == 0 {
+            assert!(decoded.unwrap().is_none());
+        } else if bits == 7 {
+            assert!(decoded.unwrap().is_some());
+        } else {
+            assert!(
+                matches!(decoded, Err(StoreError::StoredDataCorrupt { .. })),
+                "presence bits {bits:03b}: {decoded:?}"
+            );
+        }
+    }
+    conn.execute("UPDATE session_runs SET terminal_kind = 'failed'", [])
+        .unwrap();
+    assert!(matches!(
+        crate::session_runs::run_terminal_conn(&conn, &session, &run),
+        Err(StoreError::StoredDataCorrupt { .. })
+    ));
+}

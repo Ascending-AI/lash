@@ -741,7 +741,7 @@ fn round_laws(
         ));
     }
     let declared: Vec<ToolCallId> = members.iter().map(|member| member.call.clone()).collect();
-    if view.presented() != Some(declared.as_slice()) {
+    if view.presented() != Some(declared.to_vec()) {
         violations.push(format!(
             "the presentation {:?} is not the declared order {declared:?}",
             view.presented()

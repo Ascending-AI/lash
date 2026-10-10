@@ -31,11 +31,11 @@ pub struct TraceAttemptObservation {
 
 /// The durable domain operation a [`TraceEvent::DomainCompleted`] ends.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "snake_case")]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 #[non_exhaustive]
-pub enum TraceDomainOperation {
-    Process,
-    ToolIntent,
+pub enum TraceDomainSubject {
+    Process {},
+    ToolIntent { kind: lash_sansio::ToolIntentKind },
 }
 
 /// How a durable domain operation ended.
@@ -51,7 +51,7 @@ pub enum TraceDomainStatus {
 /// The terminal of one durable domain operation.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TraceDomainCompletion {
-    pub operation: TraceDomainOperation,
+    pub subject: TraceDomainSubject,
     /// Wall-clock epoch milliseconds the operation's scope retained as its
     /// start.
     pub started_at_ms: u64,
@@ -65,9 +65,6 @@ pub struct TraceDomainCompletion {
     pub tool_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_call_id: Option<String>,
-    /// The typed kind of a tool intent.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub intent_kind: Option<String>,
     /// The typed failure code of a failed operation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error_code: Option<TraceFailureCode>,
@@ -76,20 +73,15 @@ pub struct TraceDomainCompletion {
 }
 
 impl TraceDomainCompletion {
-    pub fn new(
-        operation: TraceDomainOperation,
-        started_at_ms: u64,
-        status: TraceDomainStatus,
-    ) -> Self {
+    pub fn new(subject: TraceDomainSubject, started_at_ms: u64, status: TraceDomainStatus) -> Self {
         Self {
-            operation,
+            subject,
             started_at_ms,
             status,
             provider: None,
             model: None,
             tool_name: None,
             tool_call_id: None,
-            intent_kind: None,
             error_code: None,
             usage: None,
         }

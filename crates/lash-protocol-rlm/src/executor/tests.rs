@@ -4,6 +4,90 @@
 
 mod python;
 
+/// V14: a parked call cannot override its boundary's control fact or copy
+/// a cancellation fact independently of its completed outcome.
+#[test]
+fn cell_ledger_refuses_copied_control_and_cancellation_facts() {
+    let host = serde_json::json!({
+        "calls": [{"call_id": lash_core::ToolCallId::fixture("call"), "operation": "tools.work", "control": true, "record": null}],
+        "tool_call_limit": null, "call_cancelled": true
+    });
+    assert!(serde_json::from_value::<super::host::CellHostLedgers>(host).is_err());
+}
+
+/// V14: completion owns identity and cancellation; the recorded boundary
+/// owns control, including after encoding and restoring the envelope.
+#[test]
+fn cell_ledger_derives_completed_facts_from_their_owners() {
+    use super::host::{CellHostLedgers, LedgerCall, LedgerCallState};
+    let record = lash_core::ToolCallRecord {
+        call_id: lash_core::ToolCallId::fixture("call"),
+        provider_call_id: None,
+        tool: "work".to_owned(),
+        args: serde_json::Value::Null,
+        output: lash_core::ToolCallOutput::cancelled(lash_core::ToolCancellation::runtime(
+            "cancelled",
+        )),
+    };
+    let call = LedgerCall {
+        operation: lash_kernel_doc::EffectName::new("tools.work").unwrap(),
+        state: LedgerCallState::Completed {
+            record: Box::new(record.clone()),
+        },
+    };
+    let host = CellHostLedgers {
+        calls: vec![call],
+        tool_call_limit: None,
+    };
+    let mut state = serde_json::json!({
+        "cell": {"code": "code", "dialect": "typescript", "document": "{}", "annotations": "{}",
+            "effects": {"tools.work": {"tool": "work", "signature": {"params": [], "result": "null"}, "controls": []}},
+            "grants": {}, "projected": []},
+        "prints": [], "host": host, "started_process_ids": []
+    });
+    let mut restored: super::envelope::CellSegmentState =
+        serde_json::from_value(state.clone()).unwrap();
+    assert!(restored.host.call_cancelled());
+    assert_eq!(restored.host.tool_call_records()[0].call_id, record.call_id);
+    let bytes = restored.encode().unwrap();
+    assert_eq!(
+        String::from_utf8(bytes)
+            .unwrap()
+            .matches(record.call_id.as_str())
+            .count(),
+        1
+    );
+    state["cell"]["effects"] = serde_json::json!({});
+    assert!(serde_json::from_value::<super::envelope::CellSegmentState>(state).is_err());
+    restored.host.calls[0].state = LedgerCallState::Completed {
+        record: Box::new(lash_core::ToolCallRecord {
+            output: lash_core::ToolCallOutput::finish(lash_core::ToolValue::untrusted_json(
+                serde_json::Value::Null,
+            )),
+            ..record
+        }),
+    };
+    assert!(!restored.host.call_cancelled());
+    assert!(
+        restored
+            .host
+            .settled_control(&restored.cell.boundary().unwrap())
+            .is_none()
+    );
+    restored
+        .cell
+        .effects
+        .get_mut(&lash_kernel_doc::EffectName::new("tools.work").unwrap())
+        .unwrap()
+        .controls = lash_core::TurnControls::finish();
+    assert!(
+        restored
+            .host
+            .settled_control(&restored.cell.boundary().unwrap())
+            .is_some()
+    );
+}
+
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 

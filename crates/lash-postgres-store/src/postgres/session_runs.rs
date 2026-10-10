@@ -85,10 +85,18 @@ pub(crate) async fn run_terminal_conn(
     let cause_json: Option<String> = row.try_get(0).map_err(store_sqlx_error)?;
     let head_revision: Option<i64> = row.try_get(1).map_err(store_sqlx_error)?;
     let at_ms: Option<i64> = row.try_get(2).map_err(store_sqlx_error)?;
-    let (Some(cause_json), Some(at_ms)) = (cause_json, at_ms) else {
-        return Ok(None);
+    let kind: Option<String> = row.try_get(3).map_err(store_sqlx_error)?;
+    let (cause_json, at_ms, kind) = match (cause_json, at_ms, kind) {
+        (None, None, None) if head_revision.is_none() => return Ok(None),
+        (Some(cause), Some(at), Some(kind)) => (cause, at, kind),
+        _ => {
+            return Err(StoreError::StoredDataCorrupt {
+                record_kind: "RunTerminal",
+                message: "partial terminal evidence".to_owned(),
+            });
+        }
     };
-    RunTerminal::from_stored(
+    let terminal = RunTerminal::from_stored(
         session_id.clone(),
         run.clone(),
         &cause_json,
@@ -96,8 +104,14 @@ pub(crate) async fn run_terminal_conn(
             .map(|revision| u64_from_sql("RunTerminal", "terminal_head_revision", revision))
             .transpose()?,
         u64_from_sql("RunTerminal", "terminal_at_ms", at_ms)?,
-    )
-    .map(Some)
+    )?;
+    if terminal.kind().as_str() != kind {
+        return Err(StoreError::StoredDataCorrupt {
+            record_kind: "RunTerminal",
+            message: "terminal kind disagrees with cause".to_owned(),
+        });
+    }
+    Ok(Some(terminal))
 }
 
 /// Capture the current bounded window in the terminal writer's transaction.

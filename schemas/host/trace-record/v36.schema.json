@@ -1793,6 +1793,16 @@
       ],
       "type": "string"
     },
+    "ToolIntentKind": {
+      "description": "Literal command kind of one recorded declaration.\n\nGenerated from [`tool_intent_variants!`]; never hand-edited.",
+      "enum": [
+        "start_process",
+        "cancel_process",
+        "get_definition",
+        "publish_definition"
+      ],
+      "type": "string"
+    },
     "TraceAgentFrameSwitch": {
       "properties": {
         "frame_key": {
@@ -2138,21 +2148,11 @@
           ],
           "description": "The typed failure code of a failed operation."
         },
-        "intent_kind": {
-          "description": "The typed kind of a tool intent.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "model": {
           "type": [
             "string",
             "null"
           ]
-        },
-        "operation": {
-          "$ref": "#/$defs/TraceDomainOperation"
         },
         "provider": {
           "description": "The provider the operation's work was served by, when it has one.",
@@ -2169,6 +2169,9 @@
         },
         "status": {
           "$ref": "#/$defs/TraceDomainStatus"
+        },
+        "subject": {
+          "$ref": "#/$defs/TraceDomainSubject"
         },
         "tool_call_id": {
           "type": [
@@ -2194,19 +2197,11 @@
         }
       },
       "required": [
-        "operation",
+        "subject",
         "started_at_ms",
         "status"
       ],
       "type": "object"
-    },
-    "TraceDomainOperation": {
-      "description": "The durable domain operation a [`TraceEvent::DomainCompleted`] ends.",
-      "enum": [
-        "process",
-        "tool_intent"
-      ],
-      "type": "string"
     },
     "TraceDomainStatus": {
       "description": "How a durable domain operation ended.",
@@ -2216,6 +2211,41 @@
         "cancelled"
       ],
       "type": "string"
+    },
+    "TraceDomainSubject": {
+      "description": "The durable domain operation a [`TraceEvent::DomainCompleted`] ends.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "process",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "$ref": "#/$defs/ToolIntentKind"
+            },
+            "type": {
+              "const": "tool_intent",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "kind"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "TraceEffectEnvelopeDiffEntry": {
       "properties": {

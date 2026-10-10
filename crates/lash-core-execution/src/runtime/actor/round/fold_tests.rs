@@ -22,6 +22,58 @@ use crate::{ToolCallId, ToolId};
 
 const RUN: RunSeq = RunSeq(1);
 
+/// V24: a presentation cannot precede any admitted member's settlement.
+#[test]
+fn presentation_before_all_members_settle_is_refused() {
+    let mut tx = opened();
+    admitted(&mut tx, vec![draft("a", "once", ExecutionPolicy::Once)]);
+    let mut records = rows(&tx);
+    records.push(RunRecordRow {
+        owner: owner(),
+        run: RUN,
+        ordinal: Ordinal(2),
+        kind: lash_durable::domain::RunRecordKind::Present,
+        call: None,
+        record_json: "{}".to_owned(),
+        written_epoch: Epoch(1),
+    });
+    assert!(fold(&records, &PolicyView::default(), &PinnedWaits::default()).is_err());
+}
+
+/// V24: the marker derives every presented call from ordered admission.
+#[test]
+fn a_presentation_marker_derives_its_members_in_admission_order() {
+    let mut tx = opened();
+    let members = admitted(
+        &mut tx,
+        vec![
+            draft("a", "once", ExecutionPolicy::Once),
+            draft("b", "once", ExecutionPolicy::Once),
+        ],
+    );
+    for member in members.iter().rev() {
+        settle(&mut tx, member, SettledOutput::Interrupted, Vec::new()).unwrap();
+    }
+    let mut records = rows(&tx);
+    records.push(RunRecordRow {
+        owner: owner(),
+        run: RUN,
+        ordinal: Ordinal(records.len() as u64),
+        kind: lash_durable::domain::RunRecordKind::Present,
+        call: None,
+        record_json: "{}".to_owned(),
+        written_epoch: Epoch(1),
+    });
+    let folded = fold(&records, &PolicyView::default(), &PinnedWaits::default()).unwrap();
+    assert_eq!(
+        folded.round(RUN).unwrap().presented(),
+        Some(vec![ToolCallId::fixture("a"), ToolCallId::fixture("b")])
+    );
+    records.last_mut().unwrap().record_json =
+        serde_json::json!({"calls": [ToolCallId::fixture("b")]}).to_string();
+    assert!(fold(&records, &PolicyView::default(), &PinnedWaits::default()).is_err());
+}
+
 fn owner() -> OwnerKey {
     OwnerKey::Turn(
         SessionId::try_from("s".to_owned()).unwrap(),

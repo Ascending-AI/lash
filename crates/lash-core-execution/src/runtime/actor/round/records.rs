@@ -160,12 +160,10 @@ pub(super) struct RetryBody {
     pub(super) due_at_ms: i64,
 }
 
-/// A `present` record's body: the calls presented, in declared order.
+/// A `present` record's marker: admitted membership owns the call order.
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct PresentBody {
-    pub(super) calls: Vec<ToolCallId>,
-}
+pub(super) struct PresentBody {}
 
 /// A `decide` record's body: a decision of the round's coordinator, which
 /// no member's recovery depends on.

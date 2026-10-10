@@ -20,7 +20,7 @@ use crate::telemetry::{
     UntracedScopes, W3cSpanId, W3cTraceFlags, W3cTraceId, W3cTraceState,
 };
 use crate::{
-    TraceContext, TraceDomainOperation, TraceDomainStatus, TraceEvent, TraceRecord,
+    TraceContext, TraceDomainStatus, TraceDomainSubject, TraceEvent, TraceRecord,
     TraceRetryAttemptDetail, TraceToolAttemptOutcome, TraceTurnOutcome,
 };
 
@@ -694,9 +694,9 @@ impl<'a> Projection<'a> {
                 projection.ended_at_ms = observation.ended_at_ms;
             }
             TraceEvent::DomainCompleted { completion } => {
-                projection.span = match completion.operation {
-                    TraceDomainOperation::Process => DomainSpan::Process,
-                    TraceDomainOperation::ToolIntent => DomainSpan::Intent,
+                projection.span = match completion.subject {
+                    TraceDomainSubject::Process {} => DomainSpan::Process,
+                    TraceDomainSubject::ToolIntent { .. } => DomainSpan::Intent,
                 };
                 projection.started_at_ms = Some(completion.started_at_ms);
                 projection.provider = completion.provider.as_deref();
@@ -783,8 +783,8 @@ impl<'a> Projection<'a> {
                     TraceDomainStatus::Failed => "failed",
                     TraceDomainStatus::Cancelled => "cancelled",
                 }));
-                if let Some(kind) = &completion.intent_kind {
-                    out.push(A::ToolIntentKind.value(kind.clone()));
+                if let TraceDomainSubject::ToolIntent { kind } = completion.subject {
+                    out.push(A::ToolIntentKind.value(kind.as_str()));
                 }
                 if let Some(id) = &completion.tool_call_id {
                     out.push(A::ToolCallId.value(id.clone()));

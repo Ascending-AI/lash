@@ -9,6 +9,27 @@
 #![allow(clippy::disallowed_methods)]
 
 use super::*;
+/// V23: an intent completion must name its closed, typed intent kind.
+#[test]
+fn domain_completion_refuses_an_untyped_intent_subject() {
+    let completion = serde_json::json!({
+        "operation": "tool_intent", "started_at_ms": 0, "status": "completed"
+    });
+    assert!(serde_json::from_value::<TraceDomainCompletion>(completion).is_err());
+    for subject in [
+        serde_json::json!({"type": "tool_intent"}),
+        serde_json::json!({"type": "tool_intent", "kind": "custom_intent"}),
+        serde_json::json!({"type": "process", "kind": "start_process"}),
+    ] {
+        assert!(
+            serde_json::from_value::<TraceDomainCompletion>(serde_json::json!({
+                "subject": subject, "started_at_ms": 0, "status": "completed"
+            }))
+            .is_err()
+        );
+    }
+}
+
 use lash_sansio::llm::types::{AttemptOutcome, AttemptRecord, ProtocolPosition};
 
 /// A sink that fails every call, standing in for a closed stderr.
@@ -320,7 +341,7 @@ fn trace_reader_preserves_attempt_and_domain_completions() {
             TraceContext::default(),
             TraceEvent::DomainCompleted {
                 completion: TraceDomainCompletion::new(
-                    TraceDomainOperation::Process,
+                    TraceDomainSubject::Process {},
                     1,
                     TraceDomainStatus::Completed,
                 ),

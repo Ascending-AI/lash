@@ -426,6 +426,7 @@ PACKAGE_DEPS = {
             "lash_vm_client": "//crates/lash-vm-client:lash-vm-client",
             "lash_vm_protocol": "//crates/lash-vm-protocol:lash-vm-protocol",
             "lash_vm_runtime": "//crates/lash-vm-runtime:lash-vm-runtime",
+            "rusqlite": "//third-party/rust:p0290",
             "serde_json": "//third-party/rust:p0319",
             "sqlx": "//third-party/rust:p0339",
             "tempfile": "//third-party/rust:p0369",
