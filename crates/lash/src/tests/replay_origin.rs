@@ -187,7 +187,6 @@ async fn caller_shaped_completion_preserves_drop_sideband_without_provider_trace
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "FIG-5334: a stopped turn's report carries no typed failure"]
 async fn caller_shaped_failure_preserves_drop_sideband_and_original_error() -> Result<()> {
     let provider = crate::testing::TestProvider::builder()
         .kind("mock")
@@ -213,7 +212,6 @@ async fn caller_shaped_failure_preserves_drop_sideband_and_original_error() -> R
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "FIG-5334: a stopped turn's report carries no typed failure"]
 async fn caller_shaped_protocol_abort_rejects_foreign_stream_and_emits_drop() -> Result<()> {
     let provider = crate::testing::TestProvider::builder()
         .kind("mock")
@@ -265,7 +263,6 @@ async fn caller_shaped_protocol_abort_rejects_foreign_stream_and_emits_drop() ->
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "FIG-5334: a cancelled model call has no llm_calls record"]
 async fn caller_shaped_cancellation_preserves_drop_sideband_without_provider_trace() -> Result<()> {
     let started = Arc::new(tokio::sync::Notify::new());
     let provider_started = Arc::clone(&started);
@@ -316,7 +313,6 @@ async fn caller_shaped_cancellation_preserves_drop_sideband_without_provider_tra
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "FIG-5334: a stopped turn's report carries no typed failure"]
 async fn confirm2_protocol_abort_conflict_retains_a_racing_provider_failure() -> Result<()> {
     let provider = crate::testing::TestProvider::builder()
         .kind("mock")

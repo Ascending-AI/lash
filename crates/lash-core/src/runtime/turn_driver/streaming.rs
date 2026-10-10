@@ -345,16 +345,40 @@ impl RuntimeTurnDriver<'_> {
                     llm_task.abort();
                     let _ = (&mut llm_task).await;
                     llm_task_abort.disarm();
-                    let failure = crate::llm::transport::LlmTransportError::new("cancelled")
-                        .with_kind(crate::ProviderFailureKind::Unknown)
-                        .with_lash_code(TurnFailureCode::Cancelled)
-                        .with_terminal_reason(crate::LlmTerminalReason::Cancelled)
-                        .with_retry_verdict(
-                            crate::llm::transport::TransportRetryVerdict::NotRetryable,
-                        );
+                    let stop_error = self
+                        .model_stop_error
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .clone();
+                    let failure = match stop_error {
+                        Some(error) => {
+                            let mut failure =
+                                crate::llm::transport::LlmTransportError::new(error.message)
+                                    .with_kind(error.kind)
+                                    .with_terminal_reason(error.terminal_reason)
+                                    .with_retry_verdict(
+                                        crate::llm::transport::TransportRetryVerdict::NotRetryable,
+                                    );
+                            failure.code = error.code;
+                            failure
+                        }
+                        None => crate::llm::transport::LlmTransportError::new("cancelled")
+                            .with_kind(crate::ProviderFailureKind::Unknown)
+                            .with_lash_code(TurnFailureCode::Cancelled)
+                            .with_terminal_reason(crate::LlmTerminalReason::Cancelled)
+                            .with_retry_verdict(
+                                crate::llm::transport::TransportRetryVerdict::NotRetryable,
+                            ),
+                    };
+                    let outcome = if failure.terminal_reason == crate::LlmTerminalReason::Cancelled
+                    {
+                        crate::AttemptOutcome::Aborted
+                    } else {
+                        crate::AttemptOutcome::Interrupted
+                    };
                     call_record = Some(completion_sideband.terminal_call_record(
                         call_id.clone(),
-                        crate::AttemptOutcome::Aborted,
+                        outcome,
                         &failure,
                         true,
                         observed_stream_protocol_position(
@@ -546,6 +570,12 @@ impl RuntimeTurnDriver<'_> {
                             ));
                         }
                     };
+                    // Retain the provider's sealed facts before validating the
+                    // queued stream: validation may reject a completed call.
+                    call_record = Some(match &result {
+                        Ok(completion) => completion.call_record.clone(),
+                        Err(failure) => (*failure.call_record).clone(),
+                    });
                     if let Err(err) = self
                         .drain_provider_stream_queue(
                             &mut host_forwarder,
@@ -591,6 +621,44 @@ impl RuntimeTurnDriver<'_> {
                 }
             }
         };
+
+        // A stream or hook failure may stop the body before the provider
+        // returns. Stop that task before reading its sideband, preserving a
+        // raced completion or sealing the interrupted attempt beside every
+        // attempt already sealed. This is independent of trace observation.
+        if let Err(error) = &result
+            && call_record.is_none()
+        {
+            llm_task.abort();
+            let terminal = (&mut llm_task).await;
+            llm_task_abort.disarm();
+            call_record = Some(match terminal {
+                Ok(Ok(completion)) => completion.call_record,
+                Ok(Err(failure)) => *failure.call_record,
+                Err(_) => {
+                    let mut failure =
+                        crate::llm::transport::LlmTransportError::new(error.message.clone())
+                            .with_kind(error.kind)
+                            .with_terminal_reason(error.terminal_reason)
+                            .with_retry_verdict(
+                                crate::llm::transport::TransportRetryVerdict::NotRetryable,
+                            );
+                    failure.code = error.code.clone();
+                    failure.partial_response = error.partial_response.clone();
+                    completion_sideband.terminal_call_record(
+                        call_id.clone(),
+                        crate::AttemptOutcome::Interrupted,
+                        &failure,
+                        true,
+                        observed_stream_protocol_position(
+                            text_streamed,
+                            &stream_accumulator,
+                            &stream_evidence,
+                        ),
+                    )
+                }
+            });
+        }
 
         let mut result = result;
         if let Some(conflict) = completion_sideband.origin_conflict() {

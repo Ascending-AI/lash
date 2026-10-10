@@ -216,7 +216,7 @@ pub async fn run_phases(
                         match admitted_send(cx, &session, &run, pin.call).await? {
                             Ok(admitted) => (Some(pin), request, admitted, None),
                             Err(unavailable) => {
-                                settle_unsent(drive.as_mut(), id, unavailable);
+                                drive.model_unsent(id, unavailable);
                                 continue;
                             }
                         }
@@ -249,7 +249,7 @@ pub async fn run_phases(
                                             TurnError::Runtime(error.into_runtime_error())
                                         })?
                                 {
-                                    settle_unsent(drive.as_mut(), id, refused);
+                                    drive.model_unsent(id, refused);
                                     continue;
                                 }
                                 if !drive.machine().admit_request(id, Arc::clone(&request)) {
@@ -274,7 +274,7 @@ pub async fn run_phases(
                                 (None, request, admitted, Some(record))
                             }
                             PreparedCall::Unsent(refused) => {
-                                settle_unsent(drive.as_mut(), id, refused);
+                                drive.model_unsent(id, refused);
                                 continue;
                             }
                             PreparedCall::Ended => continue,
@@ -658,19 +658,4 @@ async fn admitted_send(
             key.call
         )))),
     }
-}
-
-/// Hand `drive`'s machine the settlement of a model call it never sent.
-pub(super) fn settle_unsent(
-    drive: &mut dyn TurnDrive,
-    id: crate::EffectId,
-    error: crate::LlmCallError,
-) {
-    drive
-        .machine()
-        .handle_response(crate::Response::LlmComplete {
-            id,
-            result: Err(error),
-            text_streamed: false,
-        });
 }

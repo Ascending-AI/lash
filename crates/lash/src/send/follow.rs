@@ -756,14 +756,7 @@ async fn finish_settled(
     // The terminal is durable. Preserve the sealed calls this follower
     // actually observed beside their activities; unavailable history stays a
     // reported gap. Retain duplicates and contradictions for validation.
-    let llm_calls = activities
-        .iter()
-        .filter_map(|activity| match &activity.event {
-            TurnEvent::ModelCallRecorded { record } => Some(record.clone()),
-            _ => None,
-        })
-        .collect();
-    let result = durable_report(ctx, &run, outcome, acceptance, llm_calls).await?;
+    let result = durable_report(ctx, &run, outcome, acceptance, &activities).await?;
     Ok(SendOutcome::Settled {
         run,
         output: Box::new(TurnOutput { result, activities }),
@@ -778,8 +771,42 @@ pub(super) async fn durable_report(
     run: &TurnId,
     outcome: TurnOutcome,
     acceptance: Option<TurnInputAcceptanceReceipt>,
-    llm_calls: Vec<LlmCallRecord>,
+    activities: &[TurnActivity],
 ) -> Result<TurnReport> {
+    let llm_calls: Vec<LlmCallRecord> = activities
+        .iter()
+        .filter_map(|activity| match &activity.event {
+            TurnEvent::ModelCallRecorded { record } => Some(record.clone()),
+            _ => None,
+        })
+        .collect();
+    let errors = activities
+        .iter()
+        .filter_map(|activity| match &activity.event {
+            TurnEvent::Error(failure) => {
+                let envelope = failure.envelope.as_ref();
+                Some(crate::turn::TurnIssue {
+                    plugin_failures: Vec::new(),
+                    severity: crate::turn::TurnIssueSeverity::Blocking,
+                    kind: envelope.map_or_else(
+                        || lash_core::TurnFailureKind::Unknown("unknown".to_string()),
+                        |error| error.kind.clone(),
+                    ),
+                    code: envelope.and_then(|error| error.code.clone()),
+                    terminal_reason: envelope.and_then(|error| error.terminal_reason),
+                    message: envelope.map_or_else(
+                        || failure.message.clone(),
+                        |error| error.user_message.clone(),
+                    ),
+                    raw: envelope.and_then(|error| error.raw.clone()),
+                    retryable: envelope.and_then(|error| error.retryable),
+                    provider_failure_kind: envelope.and_then(|error| error.provider_failure_kind),
+                })
+            }
+            _ => None,
+        })
+        .collect();
+
     let usage = llm_calls
         .iter()
         .flat_map(|call| &call.attempts)
@@ -830,7 +857,7 @@ pub(super) async fn durable_report(
         tool_calls,
         omitted,
         execution: Default::default(),
-        errors: Vec::new(),
+        errors,
         acceptance,
         cancel_input_outcome: Default::default(),
         source: ReportSource::Durable,

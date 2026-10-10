@@ -186,7 +186,7 @@ pub(super) async fn send(
 ) -> Result<bool, TurnError> {
     let (pin, limit, resent) = match start {
         ModelStart::Expired { pin } => {
-            super::phases::settle_unsent(drive, id, timed_out(pin));
+            drive.model_unsent(id, timed_out(pin));
             return Ok(true);
         }
         ModelStart::Send { pin, limit, resent } => (pin, *limit, *resent),
@@ -197,8 +197,9 @@ pub(super) async fn send(
     cx.note_due(DueSource::ModelDeadline, pin.deadline);
     let now = cx.durable_now().await?;
     let remaining = Duration::from_millis(millis(pin.deadline).saturating_sub(millis(now)));
-    let expired = {
+    {
         let cancel = tokio_util::sync::CancellationToken::new();
+        let stop_error = std::sync::Arc::new(std::sync::Mutex::new(None));
         let call = drive.model_call(
             cx,
             id,
@@ -208,6 +209,7 @@ pub(super) async fn send(
                 ordinal: pin.attempt,
                 limit,
                 cancel: cancel.clone(),
+                stop_error: std::sync::Arc::clone(&stop_error),
             },
         );
         tokio::pin!(call);
@@ -218,9 +220,17 @@ pub(super) async fn send(
                 biased;
                 answered = &mut call => {
                     answered?;
-                    break false;
+                    break;
                 }
-                () = &mut expiry => break true,
+                () = &mut expiry => {
+                    // Stop the dispatched call with its typed deadline cause,
+                    // retaining its sealed attempts before settling the turn.
+                    *stop_error.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) =
+                        Some(timed_out(pin));
+                    cancel.cancel();
+                    call.await?;
+                    break;
+                }
                 () = cx.wait_for_mail() => {
                     if super::turn_cancel::immediate(cx).await? {
                         cancel.cancel();
@@ -235,9 +245,6 @@ pub(super) async fn send(
         }
     };
     cx.clear_due(DueSource::ModelDeadline);
-    if expired {
-        super::phases::settle_unsent(drive, id, timed_out(pin));
-    }
     Ok(true)
 }
 

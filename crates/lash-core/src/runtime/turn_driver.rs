@@ -71,6 +71,8 @@ pub(super) struct RuntimeTurnDriver<'a> {
     /// Cooperative cancellation for the tool bodies this turn's cells start:
     /// fired when an accepted `Immediate` cancel stops a running cell.
     pub(super) children_stop: CancellationToken,
+    /// A live model call's typed deadline stop, shared with its effect body.
+    pub(super) model_stop_error: Arc<std::sync::Mutex<Option<crate::LlmCallError>>>,
     /// The turn-scope observation cursor: every host-facing emission the
     /// driver makes outside an effect body sequences under the turn scope's
     /// journal key, so no two emissions share an identity (ADR 0105 §1). An

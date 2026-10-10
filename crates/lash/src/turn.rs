@@ -48,7 +48,8 @@ pub struct TurnReport {
     pub omitted: Option<crate::OmittedToolCalls>,
     /// Execution metadata collected for the turn.
     pub execution: TurnExecutionMetrics,
-    /// Errors captured while settling the turn.
+    /// Typed errors this follower observed while settling the turn. An
+    /// observation gap can leave this list incomplete, as with `llm_calls`.
     pub errors: Vec<TurnIssue>,
     /// Durable acceptance identity of the input this turn was executed from.
     ///
@@ -85,8 +86,8 @@ pub enum ReportSource {
     /// Tool records are read from the run's recorded calls. Model calls retain
     /// the sealed records this follower observed, and usage sums the reported
     /// usage of their attempts. Unavailable history is reported as gaps, so
-    /// the model-call ledger and its usage sum can be incomplete. Execution
-    /// metrics are left at their default values.
+    /// the model-call ledger, its usage sum and observed errors can be
+    /// incomplete. Execution metrics are left at their default values.
     Durable,
 }
 

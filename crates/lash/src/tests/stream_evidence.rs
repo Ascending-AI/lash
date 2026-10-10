@@ -138,7 +138,6 @@ async fn custom_provider_can_establish_a_no_summary_response_before_execution_ev
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "FIG-5334: a stopped turn's report carries no typed failure"]
 async fn attempt_reset_clears_response_establishment_before_later_evidence() -> Result<()> {
     let (report, activities) = streamed_turn(
         "response-establishment-attempt-reset",
@@ -178,6 +177,12 @@ async fn attempt_reset_clears_response_establishment_before_later_evidence() -> 
         "the turn stops on evidence before its response started: {:?} {activities:?}",
         report.errors
     );
+    assert_eq!(
+        report.llm_calls.len(),
+        1,
+        "the rejected stream keeps its call record"
+    );
+    assert!(!report.llm_calls[0].attempts.is_empty());
     Ok(())
 }
 

@@ -540,6 +540,14 @@ impl TurnDrive for L3Drive {
         &mut self.machine
     }
 
+    fn model_unsent(&mut self, id: EffectId, error: lash_core::LlmCallError) {
+        self.machine.handle_response(Response::LlmComplete {
+            id,
+            result: Err(error),
+            text_streamed: false,
+        });
+    }
+
     async fn local(&mut self, _cx: &ActorContext, effect: Effect) -> Result<(), TurnError> {
         match effect {
             Effect::SyncExecutionEnvironment { id } => {
@@ -621,6 +629,7 @@ impl TurnDrive for L3Drive {
         let ModelCallAttempt {
             ordinal: attempt,
             cancel,
+            stop_error,
             ..
         } = attempt;
         let rendered = serde_json::to_string(&*request).expect("a request encodes");
@@ -752,6 +761,10 @@ impl TurnDrive for L3Drive {
             if mode == TurnCancelMode::Immediate {
                 // The stream never ends on its own: only the cancel stops it.
                 cancel.cancelled().await;
+                let failure = stop_error.lock_recover().clone();
+                if let Some(error) = failure {
+                    self.model_unsent(id, error);
+                }
                 return Ok(());
             }
             // Outlive at least one wake of the owner's cancel watch before
@@ -765,6 +778,10 @@ impl TurnDrive for L3Drive {
             // The stream never ends on its own: only the cancel stops it.
             Mode::CancelAtAdmission => {
                 cancel.cancelled().await;
+                let failure = stop_error.lock_recover().clone();
+                if let Some(error) = failure {
+                    self.model_unsent(id, error);
+                }
                 return Ok(());
             }
             // While its turn runs, the host withdraws the queued input,

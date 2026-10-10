@@ -2,6 +2,23 @@ use super::*;
 use crate::runtime::durable::session::CellExit;
 
 impl RuntimeTurnDriver<'_> {
+    pub(super) fn record_model_call(
+        &mut self,
+        observer: &TurnObserver,
+        record: crate::LlmCallRecord,
+    ) {
+        self.turn_observations.observe(
+            observer,
+            crate::engine::ObservedEvent::Activity {
+                correlation_id: Some(TurnActivityId::new(record.call_id.0.clone())),
+                event: TurnEvent::ModelCallRecorded {
+                    record: record.clone(),
+                },
+            },
+        );
+        self.llm_calls.push(record);
+    }
+
     fn handle_machine_response(
         &self,
         machine: &mut TurnMachine,
@@ -137,16 +154,7 @@ impl RuntimeTurnDriver<'_> {
             }
         }
         if let Some(call_record) = call_record {
-            self.turn_observations.observe(
-                event_tx,
-                crate::engine::ObservedEvent::Activity {
-                    correlation_id: Some(TurnActivityId::new(call_record.call_id.0.clone())),
-                    event: TurnEvent::ModelCallRecorded {
-                        record: call_record.clone(),
-                    },
-                },
-            );
-            self.llm_calls.push(call_record);
+            self.record_model_call(event_tx, call_record);
         }
         // Phase 2 of the staged boundary runs only once the paid attempt is
         // journaled and on the ledger, so a failing derivation can never take

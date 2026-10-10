@@ -574,6 +574,14 @@ impl TurnDrive for SimDrive {
         &mut self.machine
     }
 
+    fn model_unsent(&mut self, id: EffectId, error: lash_core::LlmCallError) {
+        self.machine.handle_response(Response::LlmComplete {
+            id,
+            result: Err(error),
+            text_streamed: false,
+        });
+    }
+
     fn tools(&mut self) -> Result<Arc<dyn RoundTools>, TurnError> {
         Ok(Arc::new(Catalog {
             services: self.services.clone(),

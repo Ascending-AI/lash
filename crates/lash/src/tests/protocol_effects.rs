@@ -203,7 +203,6 @@ async fn start_exec_without_code_executor_stops_as_runtime_error() -> Result<()>
 
 /// The failure the driver reported is the turn's error in its report.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "FIG-5334: a turn's report through send() carries no errors"]
 async fn the_driver_s_reported_exec_failure_is_the_turn_s_error() -> Result<()> {
     let (output, _) = a_turn_without_a_code_executor().await?;
     let reported = output

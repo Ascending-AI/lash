@@ -925,3 +925,219 @@ mod facade_settings {
         assert_eq!(server.await.unwrap().len(), 2);
     }
 }
+
+/// Stream validation stops the active attempt while retaining every attempt
+/// the provider already sealed, without needing provider trace observation.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn stream_validation_failure_keeps_the_sealed_attempts_and_the_interrupted_call() {
+    let attempts = Arc::new(AtomicUsize::new(0));
+    let provider_attempts = Arc::clone(&attempts);
+    let model = crate::testing::TestProvider::builder()
+        .kind("mock")
+        .requires_streaming(true)
+        .complete(move |request| {
+            let ordinal = provider_attempts.fetch_add(1, Ordering::SeqCst);
+            async move {
+                assert!(request.provider_trace.is_none());
+                if ordinal == 0 {
+                    return Err(LlmTransportError::new("retry before validation")
+                        .with_kind(lash_core::ProviderFailureKind::Transport)
+                        .with_code(lash_core::FailureCode::provider("first_attempt"))
+                        .with_retry_verdict(TransportRetryVerdict::RetryableTransient));
+                }
+                request
+                    .stream_events
+                    .expect("streaming sender")
+                    .send(LlmStreamEvent::Evidence(lash_core::LlmStreamEvidence {
+                        execution_evidence: Some(lash_core::ExecutionEvidence {
+                            provider_response_id: Some("unestablished-response".to_string()),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    }));
+                std::future::pending::<std::result::Result<LlmResponse, LlmTransportError>>().await
+            }
+        })
+        .options(reliability(2))
+        .build()
+        .into_handle();
+    let core = core_over(sqlite_memory_store_backend().await, model);
+    let session = created(&core, "stream-validation-keeps-attempts").await;
+    let output = session
+        .send(TurnInput::text("validate the stream"))
+        .output()
+        .await
+        .expect("validation settles the turn");
+    let [call] = output.result.llm_calls.as_slice() else {
+        panic!(
+            "the interrupted call is recorded: {:?}",
+            output.result.llm_calls
+        );
+    };
+    assert_eq!(attempts.load(Ordering::SeqCst), 2);
+    assert_eq!(call.attempts.len(), 2);
+    assert_eq!(call.attempts[0].ordinal, 1);
+    assert_eq!(
+        call.attempts[0].error.as_ref().expect("first failure").code,
+        Some(lash_core::FailureCode::provider("first_attempt"))
+    );
+    let interrupted = &call.attempts[1];
+    assert_eq!(interrupted.ordinal, 2);
+    assert_eq!(interrupted.outcome, lash_core::AttemptOutcome::Interrupted);
+    assert_eq!(
+        interrupted.error.as_ref().expect("validation failure").code,
+        Some(lash_core::TurnFailureCode::StreamEvidenceBeforeResponseStart.into())
+    );
+    assert!(output.result.errors.iter().any(|issue| issue.code
+        == Some(lash_core::TurnFailureCode::StreamEvidenceBeforeResponseStart.into())));
+}
+
+#[derive(Clone, Debug, Default)]
+struct RefusedLower(crate::testing::TestProvider);
+
+#[async_trait]
+impl lash_core::provider::Provider for RefusedLower {
+    fn kind(&self) -> &'static str {
+        "mock"
+    }
+    fn route_identity(&self, model: &str) -> lash_core::ProviderRouteIdentity {
+        self.0.route_identity(model)
+    }
+    fn options(&self) -> lash_core::provider::ProviderOptions {
+        self.0.options()
+    }
+    fn set_options(&mut self, options: lash_core::provider::ProviderOptions) {
+        self.0.set_options(options);
+    }
+    fn serialize_config(&self) -> serde_json::Value {
+        self.0.serialize_config()
+    }
+    async fn lower(
+        &mut self,
+        _request: &LlmRequest,
+    ) -> std::result::Result<lash_sansio::llm::types::RecordedRequestTemplate, LlmTransportError>
+    {
+        Err(LlmTransportError::new("request cannot be lowered")
+            .with_kind(lash_core::ProviderFailureKind::Validation)
+            .with_code(lash_core::FailureCode::provider("lower_refused")))
+    }
+    async fn send(
+        &mut self,
+        _body: &lash_sansio::llm::types::LiveRequestBody,
+        _context: lash_sansio::llm::types::ResponseContext,
+    ) -> std::result::Result<LlmResponse, LlmTransportError> {
+        panic!("an unsent call never reaches the provider");
+    }
+    fn clone_boxed(&self) -> Box<dyn lash_core::provider::Provider> {
+        Box::new(self.clone())
+    }
+}
+
+/// A refused preparation is still a failed logical model call; its record
+/// says no response was received and no send consumed the retry budget.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_unsent_model_call_reports_its_failure_without_a_dispatched_attempt() {
+    let model = ProviderHandle::new(lash_core::provider::ProviderComponents::new(Box::new(
+        RefusedLower::default(),
+    )));
+    let core = core_over(sqlite_memory_store_backend().await, model);
+    let session = created(&core, "unsent-call-report").await;
+    let output = session
+        .send(TurnInput::text("prepare the call"))
+        .output()
+        .await
+        .expect("the refused preparation settles the turn");
+    let [call] = output.result.llm_calls.as_slice() else {
+        panic!("the unsent call is recorded: {:?}", output.result.llm_calls);
+    };
+    let [attempt] = call.attempts.as_slice() else {
+        panic!("one unsent attempt");
+    };
+    assert_eq!(attempt.outcome, lash_core::AttemptOutcome::Failed);
+    assert_eq!(
+        attempt.protocol_position,
+        lash_core::ProtocolPosition::NoResponse
+    );
+    assert!(!attempt.retry_budget_consumed);
+    assert_eq!(
+        attempt.error.as_ref().expect("lower refusal").code,
+        Some(lash_core::FailureCode::provider("lower_refused"))
+    );
+    assert!(
+        output
+            .result
+            .errors
+            .iter()
+            .any(|issue| issue.code == Some(lash_core::FailureCode::provider("lower_refused")))
+    );
+}
+
+/// Expiring a dispatched call preserves its interrupted attempt and observed
+/// response position instead of recording it as a call that was never sent.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_live_model_deadline_reports_the_interrupted_attempt_and_its_typed_failure() {
+    let model = crate::testing::TestProvider::builder()
+        .kind("mock")
+        .requires_streaming(true)
+        .complete(|request| async move {
+            request
+                .stream_events
+                .expect("streaming sender")
+                .send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
+                    kind: StreamBlockKind::AssistantText,
+                    block: StreamBlockIdentity::new("text:0", 0),
+                    text: "partial before deadline".to_string(),
+                }));
+            std::future::pending::<std::result::Result<LlmResponse, LlmTransportError>>().await
+        })
+        .build()
+        .into_handle();
+    let budgets = crate::ExecutionBudgets::new(crate::ExecutionBudgetsConfig {
+        model_total: std::time::Duration::from_secs(2),
+        provider: crate::ProviderAttemptLimits::new(
+            std::time::Duration::from_secs(2),
+            std::time::Duration::from_secs(2),
+            std::time::Duration::from_secs(2),
+            1,
+        )
+        .expect("provider limits fit the model total"),
+        ..crate::ExecutionBudgetsConfig::recommended()
+    })
+    .expect("valid budgets");
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        sqlite_memory_store_backend().await,
+    ))
+    .execution_budgets(budgets)
+    .serve_test_llm_profile(model, mock_llm_profile_spec())
+    .build(crate::testing::runtime_lease_owner())
+    .expect("standard core");
+    let session = created(&core, "live-model-deadline-report").await;
+    let output = session
+        .send(TurnInput::text("expire the call"))
+        .output()
+        .await
+        .expect("the deadline settles the turn");
+    let [call] = output.result.llm_calls.as_slice() else {
+        panic!("one interrupted call");
+    };
+    let [attempt] = call.attempts.as_slice() else {
+        panic!("one interrupted attempt");
+    };
+    assert_eq!(attempt.outcome, lash_core::AttemptOutcome::Interrupted);
+    assert!(attempt.retry_budget_consumed);
+    assert_eq!(
+        attempt.protocol_position,
+        lash_core::ProtocolPosition::OutputStarted
+    );
+    assert_eq!(
+        attempt.error.as_ref().expect("timeout failure").code,
+        Some(lash_core::TurnFailureCode::ModelTotalExceeded.into())
+    );
+    assert!(
+        output
+            .result
+            .errors
+            .iter()
+            .any(|issue| issue.code == Some(lash_core::TurnFailureCode::ModelTotalExceeded.into()))
+    );
+}

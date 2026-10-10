@@ -475,6 +475,14 @@ impl TurnDrive for BenchDrive {
         &mut self.machine
     }
 
+    fn model_unsent(&mut self, id: EffectId, error: lash_core::LlmCallError) {
+        self.machine.handle_response(Response::LlmComplete {
+            id,
+            result: Err(error),
+            text_streamed: false,
+        });
+    }
+
     async fn local(&mut self, _cx: &ActorContext, effect: Effect) -> Result<(), TurnError> {
         match effect {
             Effect::SyncExecutionEnvironment { id } => {
@@ -529,6 +537,7 @@ impl TurnDrive for BenchDrive {
         let ModelCallAttempt {
             ordinal: attempt,
             cancel,
+            stop_error,
             ..
         } = attempt;
         self.services.recorder.model_call(&self.session);
@@ -542,6 +551,10 @@ impl TurnDrive for BenchDrive {
         {
             let _ = reached.send(());
             cancel.cancelled().await;
+            let failure = stop_error.lock_recover().clone();
+            if let Some(error) = failure {
+                self.model_unsent(id, error);
+            }
             return Ok(());
         }
         let parts = if rounds_done < script.rounds {

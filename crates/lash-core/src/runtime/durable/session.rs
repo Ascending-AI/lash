@@ -234,6 +234,9 @@ pub struct ModelCallAttempt {
     pub limit: crate::ExecutionLimit,
     /// Stop the live call and retain its sealed attempts before returning.
     pub cancel: tokio_util::sync::CancellationToken,
+    /// The typed deadline failure, set before cancelling a live attempt.
+    /// When cancelled, `None` means the turn's host requested cancellation.
+    pub stop_error: std::sync::Arc<std::sync::Mutex<Option<crate::LlmCallError>>>,
 }
 
 /// One turn an owner runs: its machine and the in-memory work around it. The
@@ -244,6 +247,10 @@ pub struct ModelCallAttempt {
 pub trait TurnDrive: Send {
     /// The turn's machine.
     fn machine(&mut self) -> &mut TurnMachine;
+
+    /// Settle a logical model call with no response from a send on this
+    /// activation. Record its unsent failure before answering the machine.
+    fn model_unsent(&mut self, id: EffectId, error: crate::LlmCallError);
 
     /// Answer an effect that commits nothing of its own: an emit, progress,
     /// a log, a plugin checkpoint, an environment sync or a tool report.

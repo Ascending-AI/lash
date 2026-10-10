@@ -340,6 +340,35 @@ impl TurnDrive for RuntimeDrive {
         &mut self.machine
     }
 
+    fn model_unsent(&mut self, id: crate::EffectId, error: crate::LlmCallError) {
+        let mut failure = crate::llm::transport::LlmTransportError::new(error.message.clone())
+            .with_kind(error.kind)
+            .with_terminal_reason(error.terminal_reason)
+            .with_retry_verdict(crate::llm::transport::TransportRetryVerdict::NotRetryable);
+        failure.code = error.code.clone();
+        failure.partial_response = error.partial_response.clone();
+        let call_id = crate::LlmCallId(format!(
+            "{}:turn:{}:llm:{}",
+            self.driver.session_id,
+            self.driver.turn_id,
+            self.machine.protocol_iteration(),
+        ));
+        let record = crate::provider::synthetic_terminal_call_record(
+            call_id,
+            crate::AttemptOutcome::Failed,
+            &failure,
+            false,
+            crate::ProtocolPosition::NoResponse,
+            Vec::new(),
+        );
+        self.driver.record_model_call(&self.observer, record);
+        self.machine.handle_response(Response::LlmComplete {
+            id,
+            result: Err(error),
+            text_streamed: false,
+        });
+    }
+
     async fn local(&mut self, _cx: &ActorContext, effect: Effect) -> Result<(), TurnError> {
         let driver = &mut self.driver;
         let machine = &mut self.machine;
@@ -403,8 +432,10 @@ impl TurnDrive for RuntimeDrive {
         let ModelCallAttempt {
             ordinal: attempt,
             cancel,
+            stop_error,
             ..
         } = attempt;
+        self.driver.model_stop_error = Arc::clone(&stop_error);
         self.driver
             .protocol_reply
             .mark_model_call(self.machine.messages().iter());
@@ -427,7 +458,12 @@ impl TurnDrive for RuntimeDrive {
             }
         }
         .map_err(runtime);
-        if cancel.is_cancelled() {
+        if cancel.is_cancelled()
+            && stop_error
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .is_none()
+        {
             // Publish the sealed model call before the turn's cancel terminal:
             // dropping this drive otherwise aborts its live publisher.
             self.observer.close();

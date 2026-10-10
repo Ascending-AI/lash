@@ -334,6 +334,7 @@ impl LashRuntime {
             protocol_reply: Default::default(),
             opener_state: crate::session::OpenerState::default(),
             children_stop: CancellationToken::new(),
+            model_stop_error: Default::default(),
             turn_observations: turn_observation_cursor(&controller, run, "shift"),
             trace: self.host.core.tracing.turn_execution(&controller),
             admitted_body: None,
