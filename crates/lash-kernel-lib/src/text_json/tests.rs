@@ -1780,3 +1780,97 @@ fn a_refused_json_tree_still_reports_the_texts_own_error() {
     );
     assert_eq!(error_kind(result), "json_depth");
 }
+
+/// K-LJSON-007: classification charges only the nodes and key comparisons
+/// it reaches, and allocates nothing even when the remaining room is zero.
+#[test]
+fn classification_prices_the_actual_walk_and_stops_at_the_first_refusal() {
+    let mut heap = Heap::default();
+    let plain = list(
+        &mut heap,
+        vec![Value::Null, Value::Bool(true), s("large leaf")],
+    );
+    let refused = list(&mut heap, vec![Value::Absent, plain.clone()]);
+    let oversized = list(&mut heap, vec![Value::Null; 128]);
+    let enormous = list(&mut heap, vec![Value::Null; 100_000]);
+    let enormous_record = Value::Record(
+        heap.allocate(Object::Record(
+            (0..100_000)
+                .map(|n| (format!("k{n}"), Value::Null))
+                .collect(),
+        ))
+        .unwrap(),
+    );
+    let field = Value::Record(
+        heap.allocate(Object::Record(vec![("a".into(), Value::Null)]))
+            .unwrap(),
+    );
+    let hook = Value::Record(
+        heap.allocate(Object::Record(vec![("toJSON".into(), Value::Null)]))
+            .unwrap(),
+    );
+    let objects = heap.0.len();
+    heap.1 = Room::of(0);
+    let mut registry = FunctionRegistry::new();
+    register_text_json(&mut registry).unwrap();
+    let (_, function) = registry
+        .iter()
+        .find(|(_, f)| f.definition.name.as_str() == "json.classify")
+        .unwrap();
+    for (value, encoded) in [
+        (Value::Null, 3),
+        (plain, 9),
+        (refused, 4),
+        (oversized, 2),
+        (enormous, 2),
+        (enormous_record, 2),
+        (field, 21),
+        (hook, 16),
+    ] {
+        let result = call(
+            &mut heap,
+            "json.classify",
+            &[
+                value,
+                Value::Int(lash_kernel_doc::Integer::from(128)),
+                Value::Int(lash_kernel_doc::Integer::from(8)),
+                Value::Tuple(vec![s("toJSON"), s("brand")].into()),
+                s("0"),
+                s(":"),
+            ],
+        )
+        .unwrap();
+        assert_eq!(result, int(encoded));
+        let charge = function
+            .definition
+            .charge
+            .evaluate(&mut |operand, measure| {
+                assert_eq!(*operand, lash_kernel_doc::Operand::Result);
+                assert_eq!(measure, lash_kernel_doc::Measure::Magnitude);
+                encoded as u64
+            });
+        assert_eq!(charge, 1 + encoded as u64);
+        assert_eq!(heap.0.len(), objects);
+        assert_eq!(heap.1.reserved, 0);
+    }
+    // Field names and key order are supplied policy, not kernel constants.
+    let mut heap = Heap::default();
+    let branded = Value::Record(
+        heap.allocate(Object::Record(vec![("brand".into(), Value::Null)]))
+            .unwrap(),
+    );
+    let result = call(
+        &mut heap,
+        "json.classify",
+        &[
+            branded,
+            int(128),
+            int(8),
+            Value::Tuple(vec![s("deny"), s("ban")].into()),
+            s("z"),
+            s("zz"),
+        ],
+    )
+    .unwrap();
+    assert_eq!(result, int(27));
+}

@@ -132,6 +132,21 @@ argument/result deep-size formula.
   `float`, used only for `number`. Arrays are lists and objects are records.
   The Rust entry point accepts structured `Type` for effect-site signatures.
 
+- **K-LJSON-007.** `json.classify(value, visits, depth, excluded, key_from,
+  key_until)` admits only null, bool, text, integers, finite floats, lists and
+  records, with no excluded own field or key in the lexical interval
+  `[key_from, key_until)`. `excluded` is a pair of text field names supplied
+  by the dialect. Visits are 1..128 and container depth is 1..64; out-of-range
+  bounds raise `number_range`. A container's length is checked before its
+  members are read; shared values count at every occurrence and cycles reach
+  a bound. The walk stops at the first refusal and borrows values, with no
+  allocation or reservation. The returned integer is `2 * work + admitted`,
+  where work counts one per node reached and `1 + min(key bytes, policy bytes)`
+  per field-name comparison made. Its low bit is the verdict. Charge is
+  `1 + magnitude(result)`, bounding the actual walk without pricing or reading
+  the unvisited input. Key/value contents irrelevant to classification are
+  not scanned. Resource-bound errors during rendering remain the renderer's.
+
 ## Neutral formatting
 
 - **K-LFMT-001.** `format.fixed(number, precision)` writes exactly precision

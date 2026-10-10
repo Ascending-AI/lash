@@ -15,6 +15,69 @@ use lash_kernel_vm::{
 
 use super::machine;
 
+const KERNEL_GUARD: &str = r#"
+function ts.test.json.plain(value: Any) -> Bool
+kernel 1
+charge 1
+body {
+  let k = kind(value)
+  if same(k, "text") { return true }
+  if same(k, "float") { return num.is_finite(value) }
+  if same(k, "bool") { return true }
+  if same(k, "null") { return true }
+  let container = same(k, "record")
+  if same(k, "list") { set container = true }
+  if container {} else { return same(k, "integer") }
+  # The containers to read, breadth first, with the depth of their members.
+  # The counts are floats, which compare more cheaply than integers.
+  let containers = [value]
+  let depths = [2.0]
+  let visits = 1.0
+  let next = 0.0
+  while num.lt(next, list.len(containers)) {
+    let items = containers[next]
+    let depth = depths[next]
+    set next = num.add(next, 1.0)
+    if same(kind(items), "record") {
+      if num.lt(128.0, num.add(visits, record.len(items))) { return false }
+      if record.contains(items, "toJSON") { return false }
+      if record.contains(items, "brand") { return false }
+      for key in record.keys(items) {
+        if same(text.compare(key, ":"), -1) {
+          if same(text.compare(key, "0"), -1) {} else { return false }
+        }
+      }
+      set items = record.values(items)
+    } else {
+      if num.lt(128.0, num.add(visits, list.len(items))) { return false }
+    }
+    set visits = num.add(visits, list.len(items))
+    for item in items {
+      let k = kind(item)
+      if same(k, "text") { continue }
+      if same(k, "float") {
+        if num.is_finite(item) { continue }
+        return false
+      }
+      if same(k, "bool") { continue }
+      if same(k, "null") { continue }
+      let container = same(k, "record")
+      if same(k, "list") { set container = true }
+      if container {
+        if num.lt(8.0, depth) { return false }
+        set containers[list.len(containers)] = item
+        set depths[list.len(depths)] = num.add(depth, 1.0)
+        continue
+      }
+      if same(k, "integer") { continue }
+      return false
+    }
+  }
+  return true
+}
+
+"#;
+
 const BOUNDS: Bounds = Bounds {
     charge: 50_000_000,
     memory: 256 << 20,
@@ -30,6 +93,7 @@ const BOUNDS: Bounds = Bounds {
 const ENTRIES: &str = r#"
 entry fast(v: Any, mode: Int, tail: List(Any)) -> Any
 entry walk(v: Any, mode: Int, tail: List(Any)) -> Any
+entry kernel_admits(v: Any, mode: Int, tail: List(Any)) -> Any
 entry admits(v: Any, mode: Int, tail: List(Any)) -> Any
 entry draw(v: Any, mode: Int, tail: List(Any)) -> Any
 entry idle(v: Any, mode: Int, tail: List(Any)) -> Any
@@ -62,6 +126,12 @@ fn admits(v, mode, tail) {
   let out = invoke ts.json.plain(x)
   return out
 }
+fn kernel_admits(v, mode, tail) {
+  let x = call build(v, mode)
+  let args = list.concat([x], tail)
+  let out = invoke ts.test.json.plain(x)
+  return out
+}
 fn draw(v, mode, tail) {
   let x = call build(v, mode)
   let args = list.concat([x], tail)
@@ -74,19 +144,43 @@ fn idle(v, mode, tail) {
   let out = null
   return out
 }
+fn quick(x) { return x }
 main { }
 "#;
 
 fn program() -> &'static Program {
     static PROGRAM: std::sync::OnceLock<Program> = std::sync::OnceLock::new();
     PROGRAM.get_or_init(|| {
-        let registry = machine::registry();
+        let mut registry = machine::registry().as_ref().clone();
+        let mut library = lash_kernel_dialect::NamedLibrary::from_registry(&registry).unwrap();
+        let mut oracle = String::new();
+        for name in [
+            "kind",
+            "same",
+            "num.is_finite",
+            "list.len",
+            "num.lt",
+            "num.add",
+            "record.len",
+            "record.contains",
+            "record.keys",
+            "record.values",
+            "text.compare",
+        ] {
+            oracle.push_str(&format!("use {name}\n"));
+        }
+        oracle.push_str(KERNEL_GUARD);
+        for definition in lash_kernel_dialect::define_functions(&oracle, &mut library).unwrap() {
+            registry.register(definition, None).unwrap();
+        }
+        let registry = Arc::new(registry);
         let names = [
             "eq",
             "list.concat",
             "ts.json.stringify",
             "ts.json.stringify_generic",
             "ts.json.plain",
+            "ts.test.json.plain",
             "ts.console.json",
         ];
         let mut text = String::from("kernel 1\nnumbers float\n");
@@ -103,7 +197,7 @@ fn program() -> &'static Program {
             lash_kernel_check::requirements(&document, registry.as_ref()).functions;
         Program {
             document: Arc::new(document),
-            library: machine::prepared().clone(),
+            library: lash_kernel_vm::PreparedLibrary::new(registry),
         }
     })
 }
@@ -111,6 +205,7 @@ fn program() -> &'static Program {
 #[derive(Default)]
 struct Console {
     lines: Vec<String>,
+    data: Vec<Datum>,
 }
 
 impl Host for Console {
@@ -134,6 +229,7 @@ impl Host for Console {
 
     fn print(&mut self, value: &Datum) {
         self.lines.push(format!("{value:?}"));
+        self.data.push(value.clone());
     }
 
     fn cancel_requested(&mut self) -> bool {
@@ -421,6 +517,7 @@ fn edges() -> Vec<Datum> {
 fn cases() -> Vec<Case> {
     let mut bits = Bits(0x5873_0000_0000_0001);
     let mut values = edges();
+    values.extend(smith_values());
     for round in 0..160 {
         let mut budget = 40;
         let odds = if round % 2 == 0 { 0 } else { 12 };
@@ -458,6 +555,26 @@ fn cases() -> Vec<Case> {
 /// space are absent, and whether the call raised.
 #[test]
 fn plain_json_matches_the_generic_walk_and_costs_its_guard_and_one_path() {
+    for (source, code) in [
+        (
+            r"JSON.stringify('\ud800')",
+            crate::DiagnosticCode::LoneSurrogateLiteralUnsupported,
+        ),
+        (
+            "JSON.stringify({get value() { return 1; }})",
+            crate::DiagnosticCode::AccessorUnsupported,
+        ),
+        (
+            "JSON.stringify({__proto__: {toJSON() { return 1; }}, value: 2})",
+            crate::DiagnosticCode::PrototypeMutationUnsupported,
+        ),
+        (
+            "Object.prototype.toJSON = function() { return 1; }; JSON.stringify({value: 2})",
+            crate::DiagnosticCode::PrototypeMutationUnsupported,
+        ),
+    ] {
+        assert_eq!(super::lower(source).unwrap_err().code, code, "{source}");
+    }
     let mut admitted_costs: BTreeMap<(Vec<bool>, bool), u64> = BTreeMap::new();
     let mut refused_costs: BTreeMap<(Vec<bool>, bool), u64> = BTreeMap::new();
     let (mut admitted, mut refused) = (0, 0);
@@ -470,6 +587,7 @@ fn plain_json_matches_the_generic_walk_and_costs_its_guard_and_one_path() {
             "{case:?}"
         );
         let guard = run("admits", &case);
+        assert_eq!(guard.end, run("kernel_admits", &case).end, "{case:?}");
         let none = run("idle", &case);
         let replacer_or_space = case.tail.iter().any(|arg| *arg != Datum::Absent);
         let expected = !replacer_or_space && plain(&case);
@@ -511,66 +629,62 @@ fn plain_json_matches_the_generic_walk_and_costs_its_guard_and_one_path() {
     assert!(admitted > 400 && refused > 400, "{admitted} {refused}");
 }
 
-/// The guard's work is bounded whatever the input: a container longer than
-/// what is left of the 128 values is refused on its length, before any of
-/// its members is read, and an admitted value costs at most a fixed charge
-/// for each value it holds and two for each byte of its keys.
-#[test]
-fn the_plain_json_guard_is_bounded_by_its_budget_not_its_input() {
-    let guard_cost = |value: Datum| {
-        let case = Case {
-            value,
-            mode: 0,
-            tail: Vec::new(),
-        };
-        run("admits", &case).charged - run("idle", &case).charged
-    };
-    let list = |count: usize| Datum::List((0..count).map(|n| float(n as f64)).collect());
-    let record = |count: usize| {
-        Datum::Record(
-            (0..count)
-                .map(|n| (format!("key{n}"), Datum::Null))
-                .collect(),
-        )
-    };
-    assert_eq!(guard_cost(list(129)), guard_cost(list(100_000)));
-    assert_eq!(guard_cost(record(129)), guard_cost(record(100_000)));
-    let mut worst = 0;
-    for case in cases()
-        .into_iter()
-        .filter(|case| case.mode == 0 && plain(case))
-    {
-        let (mut containers, mut values, mut key_bytes) = (0u64, 0u64, 0u64);
-        count(&case.value, &mut containers, &mut values, &mut key_bytes);
-        let cost = guard_cost(case.value.clone());
-        assert!(
-            cost <= 400 + 300 * containers + 100 * values + 2 * key_bytes,
-            "{cost} {containers} {values} {key_bytes} {case:?}"
-        );
-        worst = worst.max(cost.saturating_sub(400 + 300 * containers + 2 * key_bytes) / values);
-    }
-    println!(
-        "plain json guard: worst charge per value beyond the fixed, container and key charges={worst}"
-    );
-}
+/// Use SC8's real program generator and collect the data it prints, including
+/// mutated lists/records, sets, maps and effect results, rather than replacing
+/// that grammar with a second random-value generator.
+fn smith_values() -> Vec<Datum> {
+    use arbitrary::{Arbitrary, Unstructured};
+    use lash_kernel_conformance::smith::Smith;
+    use lash_kernel_doc::Value;
+    use lash_kernel_vm::{Outcome, Request};
 
-/// The containers, values and record-key bytes of a start value.
-fn count(value: &Datum, containers: &mut u64, values: &mut u64, key_bytes: &mut u64) {
-    *values += 1;
-    match value {
-        Datum::List(items) => {
-            *containers += 1;
-            for item in items {
-                count(item, containers, values, key_bytes);
+    let mut values = Vec::new();
+    for seed in 0..64u64 {
+        let mut bits = Bits(seed + 1);
+        let bytes: Vec<u8> = (0..512).map(|_| bits.next() as u8).collect();
+        let smith = Smith::arbitrary(&mut Unstructured::new(&bytes)).unwrap();
+        let mut bindings = Bindings::default();
+        bindings.variables.insert(
+            Name::new("projection"),
+            Value::Handle(Arc::new(Handle {
+                kind: "smith".into(),
+                id: "projection".into(),
+            })),
+        );
+        let start = Start {
+            target: Target::Main,
+            args: Vec::new(),
+            bindings,
+        };
+        let program = Program {
+            document: Arc::new(smith.document),
+            library: machine::prepared().clone(),
+        };
+        let mut machine = KernelMachine::start(program, BOUNDS, start).unwrap();
+        let mut console = Console::default();
+        loop {
+            match machine.run(&mut console, u64::MAX).unwrap() {
+                Step::Parked(park) => {
+                    for request in park.requests {
+                        let (wait, outcome) = match request {
+                            Request::Sleep(sleep) => (sleep.wait, Outcome::Elapsed),
+                            Request::Effect(effect) => {
+                                (effect.wait, Outcome::Completed(effect.args[0].clone()))
+                            }
+                        };
+                        machine.deliver(wait, outcome).unwrap();
+                    }
+                }
+                Step::Ended(_) => break,
+                Step::Slice => unreachable!(),
             }
         }
-        Datum::Record(fields) => {
-            *containers += 1;
-            for (key, item) in fields {
-                *key_bytes += key.len() as u64;
-                count(item, containers, values, key_bytes);
-            }
-        }
-        _ => {}
+        values.extend(console.data);
     }
+    assert!(values.len() > 64);
+    println!(
+        "SC8 classifier inputs: {} prints from 64 generated programs",
+        values.len()
+    );
+    values
 }

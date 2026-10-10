@@ -1,6 +1,7 @@
 //! Text, bytes, JSON and neutral number formatting (`docs/kernel/library-text-json.md`).
 
 mod bytes;
+mod classify;
 mod format;
 mod json;
 mod text;
@@ -40,11 +41,14 @@ impl NativeFunction for Native {
 ///
 /// Definitions charge one plus the deep sizes of their arguments and result;
 /// `format.decimal_parts` adds 64 units for bounded binary64 conversion.
+/// `json.classify` instead charges one plus the work encoded in its result,
+/// so an early refusal never prices the unvisited input.
 /// Unicode-dependent names include the pinned Unicode data version.
 pub fn text_json() -> Vec<Function> {
     let mut functions = text::functions();
     functions.extend(bytes::functions());
     functions.extend(json::functions());
+    functions.extend(classify::functions());
     functions.extend(format::functions());
     functions
 }
