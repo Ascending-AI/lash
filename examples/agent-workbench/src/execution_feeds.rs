@@ -825,8 +825,10 @@ mod tests {
         let replay = Arc::new(lash::observe::InMemoryLiveReplayStore::new(
             lash::observe::InMemoryLiveReplayStoreConfig::standard(),
         ));
+        // Chat's finish schema requires text, so this cell must finish with
+        // text before the law can attach to its completed execution.
         let workbench = Workbench::builder(crate::tests::replying_provider(
-            "<typescript>let answer = 42; await control.finish(answer);</typescript>",
+            r#"<typescript>let answer = "42"; await control.finish(answer);</typescript>"#,
         ))
         .live_replay(replay.clone())
         .build()
