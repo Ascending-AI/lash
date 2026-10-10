@@ -243,43 +243,25 @@ impl CellHost<'_> {
                 format!("this session offers no `{}`", request.effect),
             )
         })?;
-        // A tool takes its input as one record (`HostBoundary::offer_tool`).
-        let args = match request.args.as_slice() {
-            [] => serde_json::Value::Object(serde_json::Map::new()),
-            [input] => self
-                .entries
-                .leaving(input)
-                .and_then(|input| datum_to_json(&input).map_err(|error| error.to_string()))
-                .and_then(|text| serde_json::from_str(&text).map_err(|error| error.to_string()))
-                .map(crate::projection::plain_json_for_transport)
-                // A finish value leaves the cell as a cell's value always
-                // has: a whole number is an integer, in either dialect.
-                .map(|args| match effect.controls.finish_declaration() {
-                    Some(_) => crate::cell_value::whole_numbers_as_integers(args),
-                    // An attachment the cell read from history or a tool
-                    // reaches the tool as the attachment it is.
-                    None => crate::cell_value::attachments_as_written(args),
-                })
-                .map_err(|problem| {
-                    refused(
-                        TOOL_ARGUMENTS,
-                        format!(
-                            "`{}` takes JSON arguments, and these are not JSON: {problem}",
-                            request.effect
-                        ),
-                    )
-                })?,
-            more => {
-                return Err(refused(
-                    TOOL_ARGUMENTS,
-                    format!(
-                        "`{}` takes one input record and is performed with {} arguments",
-                        request.effect,
-                        more.len()
-                    ),
-                ));
-            }
+        let projection = CellArgs {
+            entries: &self.entries,
+            finish: effect.controls.finish_declaration().is_some(),
         };
+        let args = projection.args(&request.args).map_err(|refusal| {
+            refused(
+                TOOL_ARGUMENTS,
+                match refusal {
+                    ArgsRefusal::NotJson(problem) => format!(
+                        "`{}` takes JSON arguments, and these are not JSON: {problem}",
+                        request.effect
+                    ),
+                    ArgsRefusal::Arity(count) => format!(
+                        "`{}` takes one input record and is performed with {count} arguments",
+                        request.effect
+                    ),
+                },
+            )
+        })?;
         Ok(self.invocation(request, call, effect.tool.clone(), args))
     }
 
@@ -303,6 +285,64 @@ impl CellHost<'_> {
             invocation = invocation.with_execution_grant(grant.clone());
         }
         invocation
+    }
+}
+
+/// Why a cell's arguments make no tool call.
+enum ArgsRefusal {
+    NotJson(String),
+    Arity(usize),
+}
+
+/// How a cell's arguments become a tool call's JSON: the guest's one input
+/// record, leaving the cell as a cell's value always has. A finish value's
+/// whole numbers are integers, in either dialect; any other call's
+/// attachments reach the tool as the attachments they are. A frozen request
+/// holds the guest's arguments under this projection's identity, never the
+/// JSON it makes (FIG-5887 §3).
+pub(super) struct CellArgs<'h> {
+    pub entries: &'h super::processes::CellEntries,
+    pub finish: bool,
+}
+
+impl CellArgs<'_> {
+    fn args(&self, args: &[Datum]) -> Result<serde_json::Value, ArgsRefusal> {
+        // A tool takes its input as one record (`HostBoundary::offer_tool`).
+        match args {
+            [] => Ok(serde_json::Value::Object(serde_json::Map::new())),
+            [input] => self
+                .entries
+                .leaving(input)
+                .and_then(|input| datum_to_json(&input).map_err(|error| error.to_string()))
+                .and_then(|text| serde_json::from_str(&text).map_err(|error| error.to_string()))
+                .map(crate::projection::plain_json_for_transport)
+                .map(|args| {
+                    if self.finish {
+                        crate::cell_value::whole_numbers_as_integers(args)
+                    } else {
+                        crate::cell_value::attachments_as_written(args)
+                    }
+                })
+                .map_err(ArgsRefusal::NotJson),
+            more => Err(ArgsRefusal::Arity(more.len())),
+        }
+    }
+}
+
+impl lash_vm_broker::kernel::graph::ArgumentProjection for CellArgs<'_> {
+    fn id(&self) -> &str {
+        if self.finish {
+            "lash-cell-args/finish/v1"
+        } else {
+            "lash-cell-args/v1"
+        }
+    }
+
+    fn project(&self, args: &[Datum]) -> Result<serde_json::Value, String> {
+        self.args(args).map_err(|refusal| match refusal {
+            ArgsRefusal::NotJson(problem) => problem,
+            ArgsRefusal::Arity(count) => format!("{count} arguments, not one input record"),
+        })
     }
 }
 

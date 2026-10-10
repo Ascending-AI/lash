@@ -14,6 +14,8 @@
 //! - [`value`]: effect values as JSON text, every number carried as
 //!   written.
 
+#[doc(hidden)]
+pub mod graph;
 pub mod ledger;
 pub mod run;
 pub mod store;

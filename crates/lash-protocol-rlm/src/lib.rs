@@ -13,6 +13,14 @@ mod driver;
 mod driver_state;
 pub use driver_state::RLM_DRIVER_STATE_VERSION;
 mod executor;
+/// A cell host's checkpoint graph nodes (FIG-5887): the call summary, events,
+/// host root, envelope and end. The integrator wires them into the cell's
+/// park and end commits.
+#[doc(hidden)]
+pub mod host_graph {
+    pub use crate::executor::envelope::{CellEnvelope, EffectTable, RecordedEffect};
+    pub use crate::executor::host_graph::*;
+}
 mod feedback;
 mod native;
 mod plugin;

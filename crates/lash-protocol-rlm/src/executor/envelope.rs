@@ -30,7 +30,7 @@ const LASH_CODEMODE_CELL_SEGMENT_CODE_DOMAIN_VERSION: &str = "lash-codemode-cell
 /// One effect the cell was lowered against.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct RecordedEffect {
+pub struct RecordedEffect {
     pub tool: lash_core::ToolId,
     pub signature: Signature,
     /// The turn controls the tool declared when the cell was lowered: what
@@ -41,7 +41,7 @@ pub(super) struct RecordedEffect {
 /// What a cell is, recorded when it was lowered and the same at every park.
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct CellEnvelope {
+pub struct CellEnvelope {
     /// The digest of the cell's source: a parked run under the cell's
     /// execution holds this source's state.
     pub code: String,
@@ -295,4 +295,228 @@ pub(super) async fn resumed_cell(
 impl lash_core::store::DurableRecord for CellSegmentState {
     const SURFACE: lash_core::store::SurfaceFormat =
         lash_core::surface_format!(crate::executor::CODEMODE_SNAPSHOT_VERSION);
+}
+
+// --- The envelope as checkpoint graph nodes (FIG-5887 §3) -------------------
+
+use lash_core_store::checkpoint_graph::{
+    GraphDecoder, GraphRefusal, GraphStaging, NodeId, NodeKind, TokenCodec, TokenError,
+    TokenReader, TokenWriter,
+};
+use lash_vm_broker::round_graph::{decode_opt_tree, decode_tree, encode_opt_tree, encode_tree};
+
+fn graph_invalid(kind: NodeKind, reason: impl std::fmt::Display) -> GraphRefusal {
+    GraphRefusal::InvalidBody {
+        kind: kind.0,
+        reason: reason.to_string(),
+    }
+}
+
+/// Kind 12: the effects a cell was lowered against, each with its tool,
+/// signature and declared controls; the grants its deferred resolutions
+/// recorded; and its projected binding names. All sorted.
+#[derive(Clone, Debug, PartialEq)]
+pub struct EffectTable {
+    pub effects: BTreeMap<EffectName, RecordedEffect>,
+    pub grants: BTreeMap<lash_core::ToolId, lash_core::ToolExecutionGrant>,
+    pub projected: BTreeSet<String>,
+}
+
+impl TokenCodec for EffectTable {
+    fn encode(&self, out: &mut TokenWriter) {
+        out.seq(3);
+        out.map(self.effects.len() as u64);
+        for (name, effect) in &self.effects {
+            name.encode(out);
+            out.seq(3);
+            out.text(effect.tool.as_str());
+            effect.signature.encode(out);
+            encode_tree(&effect.controls, out);
+        }
+        out.map(self.grants.len() as u64);
+        for (tool, grant) in &self.grants {
+            out.text(tool.as_str());
+            encode_tree(grant, out);
+        }
+        out.seq(self.projected.len() as u64);
+        for name in &self.projected {
+            out.text(name);
+        }
+    }
+
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        let unsorted = || {
+            TokenError::NonCanonical(
+                lash_core_store::checkpoint_graph::CanonicalFault::UnsortedOrDuplicateKey,
+            )
+        };
+        input.expect_struct(3)?;
+        let mut effects = BTreeMap::new();
+        for _ in 0..input.map()? {
+            let name = EffectName::decode(input)?;
+            input.expect_struct(3)?;
+            let effect = RecordedEffect {
+                tool: lash_core::ToolId::new(input.text()?),
+                signature: Signature::decode(input)?,
+                controls: decode_tree(input)?,
+            };
+            if effects
+                .last_key_value()
+                .is_some_and(|(last, _)| last >= &name)
+            {
+                return Err(unsorted());
+            }
+            effects.insert(name, effect);
+        }
+        let mut grants = BTreeMap::new();
+        for _ in 0..input.map()? {
+            let tool = lash_core::ToolId::new(input.text()?);
+            let grant = decode_tree(input)?;
+            if grants
+                .last_key_value()
+                .is_some_and(|(last, _)| last >= &tool)
+            {
+                return Err(unsorted());
+            }
+            grants.insert(tool, grant);
+        }
+        let mut projected = BTreeSet::new();
+        for _ in 0..input.seq()? {
+            let name = input.text()?.to_owned();
+            if projected.last().is_some_and(|last: &String| last >= &name) {
+                return Err(unsorted());
+            }
+            projected.insert(name);
+        }
+        Ok(Self {
+            effects,
+            grants,
+            projected,
+        })
+    }
+}
+
+/// Kind 15: what a cell is, staged once when it is lowered and named by
+/// every park's root: no park copies it.
+struct EnvelopeBody {
+    code: String,
+    dialect: String,
+    document_id: lash_kernel_doc::DocumentId,
+    document: NodeId,
+    annotations: NodeId,
+    function_values: Option<lash_kernel_dialect::FunctionValues>,
+    effects: NodeId,
+    release: NodeId,
+}
+
+impl TokenCodec for EnvelopeBody {
+    fn encode(&self, out: &mut TokenWriter) {
+        out.seq(8);
+        out.text(&self.code);
+        out.text(&self.dialect);
+        self.document_id.encode(out);
+        self.document.encode(out);
+        self.annotations.encode(out);
+        encode_opt_tree(self.function_values.as_ref(), out);
+        self.effects.encode(out);
+        self.release.encode(out);
+    }
+
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        input.expect_struct(8)?;
+        Ok(Self {
+            code: input.text()?.to_owned(),
+            dialect: input.text()?.to_owned(),
+            document_id: lash_kernel_doc::DocumentId::decode(input)?,
+            document: NodeId::decode(input)?,
+            annotations: NodeId::decode(input)?,
+            function_values: decode_opt_tree(input)?,
+            effects: NodeId::decode(input)?,
+            release: NodeId::decode(input)?,
+        })
+    }
+}
+
+impl CellEnvelope {
+    /// Stages the cell's envelope under the exact helper release `release`
+    /// (a ReleaseManifest), its document and annotations as typed nodes,
+    /// and returns the envelope's node.
+    ///
+    /// # Errors
+    ///
+    /// [`GraphRefusal::InvalidBody`] for a document or annotations that do
+    /// not decode, or any refusal of the staging area.
+    pub fn stage(
+        &self,
+        staging: &mut GraphStaging,
+        release: NodeId,
+    ) -> Result<NodeId, GraphRefusal> {
+        let document = self
+            .document()
+            .map_err(|error| graph_invalid(NodeKind::DOCUMENT, error))?;
+        let annotations = lash_kernel_doc::Annotations::from_json(&self.annotations)
+            .map_err(|error| graph_invalid(NodeKind::ANNOTATIONS, error))?;
+        let document_id = document
+            .identity()
+            .map_err(|error| graph_invalid(NodeKind::DOCUMENT, error))?;
+        let body = EnvelopeBody {
+            code: self.code.clone(),
+            dialect: self.dialect.clone(),
+            document_id,
+            document: staging.encode_value(NodeKind::DOCUMENT, &document)?,
+            annotations: staging.encode_value(NodeKind::ANNOTATIONS, &annotations)?,
+            function_values: self.function_values.clone(),
+            effects: staging.encode_value(
+                NodeKind::EFFECT_TABLE,
+                &EffectTable {
+                    effects: self.effects.clone(),
+                    grants: self.grants.clone(),
+                    projected: self.projected.clone(),
+                },
+            )?,
+            release,
+        };
+        staging.encode_value(NodeKind::CELL_ENVELOPE, &body)
+    }
+
+    /// Reads envelope `id` back, with the release manifest it pins,
+    /// checking every child's kind and that the document is the one its
+    /// semantic identity names.
+    ///
+    /// # Errors
+    ///
+    /// Any refusal of a node read, [`GraphRefusal::WrongChildKind`], or
+    /// [`GraphRefusal::InvalidBody`] for a document of another identity.
+    pub fn load(
+        decoder: &mut GraphDecoder<'_>,
+        id: NodeId,
+    ) -> Result<(Self, NodeId), GraphRefusal> {
+        let body: EnvelopeBody = decoder.decode(id, NodeKind::CELL_ENVELOPE)?;
+        decoder.child_kind(id, body.release, &[NodeKind::RELEASE_MANIFEST])?;
+        let document: Document = decoder.decode(body.document, NodeKind::DOCUMENT)?;
+        if document.identity().ok() != Some(body.document_id) {
+            return Err(graph_invalid(
+                NodeKind::CELL_ENVELOPE,
+                "the document is not the one its identity names",
+            ));
+        }
+        let annotations: lash_kernel_doc::Annotations =
+            decoder.decode(body.annotations, NodeKind::ANNOTATIONS)?;
+        let table: EffectTable = decoder.decode(body.effects, NodeKind::EFFECT_TABLE)?;
+        let envelope = Self {
+            code: body.code,
+            dialect: body.dialect,
+            document: document
+                .to_json()
+                .map_err(|error| graph_invalid(NodeKind::DOCUMENT, error))?,
+            annotations: annotations
+                .to_json()
+                .map_err(|error| graph_invalid(NodeKind::ANNOTATIONS, error))?,
+            function_values: body.function_values,
+            effects: table.effects,
+            grants: table.grants,
+            projected: table.projected,
+        };
+        Ok((envelope, body.release))
+    }
 }

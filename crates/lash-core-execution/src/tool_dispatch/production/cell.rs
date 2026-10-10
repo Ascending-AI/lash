@@ -33,6 +33,7 @@ use super::round::{
     present_resolved, resolved_member,
 };
 use super::*;
+use crate::runtime::actor::round::graph::{decode_opt_tree, encode_opt_tree};
 use crate::runtime::actor::round::{
     AdmittedExecution, Discharge, Material, MemberBodies, MemberBody, MemberPin, PolicyView,
     Presented, SettledOutput,
@@ -40,6 +41,7 @@ use crate::runtime::actor::round::{
 use crate::runtime::actor::waits::Resolution;
 use crate::session::tool_execution::{ToolInvocation, ToolInvocationReply};
 use crate::tool_run::CompletionSource;
+use lash_core_store::checkpoint_graph::{TokenCodec, TokenError, TokenReader, TokenWriter};
 
 /// One tool call a cell makes, as its admitted member's request carries
 /// it: everything its body is built from again, on any owner.
@@ -115,6 +117,42 @@ impl CellCall {
     /// The request is not a cell's call.
     pub fn decode(request: &[u8]) -> Result<Self, String> {
         serde_json::from_slice(request).map_err(|error| error.to_string())
+    }
+}
+
+impl CellCall {
+    /// Writes what the call is dispatched as beside its arguments and its
+    /// identity: its tool, grant, recorded binding and issuing language
+    /// node. A frozen request holds this once, with the guest's own
+    /// arguments, never their tool JSON (FIG-5887 §3).
+    pub fn encode_dispatch(&self, out: &mut TokenWriter) {
+        out.seq(4);
+        out.text(self.tool_id.as_str());
+        encode_opt_tree(self.execution_grant.as_deref(), out);
+        encode_opt_tree(self.recorded_binding.as_deref(), out);
+        self.issuing_language_node_id.encode(out);
+    }
+
+    /// Reads what [`encode_dispatch`](Self::encode_dispatch) wrote, as the
+    /// call `id` with `args`, its arguments' tool projection.
+    ///
+    /// # Errors
+    ///
+    /// Any other spelling.
+    pub fn decode_dispatch(
+        input: &mut TokenReader<'_>,
+        id: crate::ToolCallId,
+        args: serde_json::Value,
+    ) -> Result<Self, TokenError> {
+        input.expect_struct(4)?;
+        Ok(Self {
+            id,
+            tool_id: crate::ToolId::new(input.text()?),
+            args,
+            execution_grant: decode_opt_tree(input)?.map(Box::new),
+            recorded_binding: decode_opt_tree(input)?.map(Box::new),
+            issuing_language_node_id: Option::decode(input)?,
+        })
     }
 }
 

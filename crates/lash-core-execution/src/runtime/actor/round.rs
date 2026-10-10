@@ -88,6 +88,8 @@ mod context;
 mod fold;
 #[cfg(test)]
 mod fold_tests;
+#[doc(hidden)]
+pub mod graph;
 pub mod lifecycle;
 mod output;
 mod parked;

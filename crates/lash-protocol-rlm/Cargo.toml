@@ -41,6 +41,8 @@ lash-kernel-state = { workspace = true }
 lash-trace = { workspace = true }
 lash-sansio = { workspace = true }
 lash-core = { workspace = true }
+# The checkpoint graph a cell's host state is written to (FIG-5887).
+lash-core-store = { workspace = true }
 lash-vm-runtime = { workspace = true }
 lash-rlm-types = { workspace = true }
 lash-render = { workspace = true }

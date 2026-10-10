@@ -1227,6 +1227,10 @@ fn format_cancellation_message(cancellation: &ToolCancellation) -> String {
 #[path = "tool_output/attachment_adoption.rs"]
 mod attachment_adoption;
 
+#[doc(hidden)]
+#[path = "tool_output/graph.rs"]
+pub mod graph;
+
 #[cfg(test)]
 mod tests {
     use super::*;
