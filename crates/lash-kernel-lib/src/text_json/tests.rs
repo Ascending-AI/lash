@@ -1199,9 +1199,23 @@ fn load(heap: &mut Heap, datum: &lash_kernel_doc::Datum) -> Value {
         Datum::Float(value) => Value::Float(*value),
         Datum::Text(value) => Value::text(value.as_str()),
         Datum::Bytes(value) => Value::Bytes(value.clone()),
+        Datum::Tuple(values) => {
+            Value::Tuple(values.iter().map(|value| load(heap, value)).collect())
+        }
         Datum::List(values) => {
             let values = values.iter().map(|value| load(heap, value)).collect();
             list(heap, values)
+        }
+        Datum::Set(values) => {
+            let values = values.iter().map(|value| load(heap, value)).collect();
+            Value::Set(heap.allocate(Object::Set(values)).unwrap())
+        }
+        Datum::Record(fields) => {
+            let fields = fields
+                .iter()
+                .map(|(name, value)| (name.clone(), load(heap, value)))
+                .collect();
+            Value::Record(heap.allocate(Object::Record(fields)).unwrap())
         }
         Datum::Handle(value) => Value::Handle(std::sync::Arc::new(value.clone())),
         _ => panic!("unsupported native corpus input"),
@@ -1225,6 +1239,17 @@ fn dump(heap: &Heap, value: &Value) -> lash_kernel_doc::Datum {
                 .map(|i| dump(heap, &heap.list_get(*id, i).unwrap()))
                 .collect(),
         ),
+        Value::Set(id) => {
+            let mut values = Vec::new();
+            heap.visit(*id, &mut |element| {
+                let Element::Item(value) = element else {
+                    panic!("set item");
+                };
+                values.push(dump(heap, value));
+                ControlFlow::Continue(())
+            });
+            Datum::Set(values)
+        }
         Value::Record(id) => {
             let mut fields = Vec::new();
             heap.visit(*id, &mut |element| {
@@ -1246,7 +1271,7 @@ fn deep(datum: &lash_kernel_doc::Datum) -> u64 {
         Datum::Int(integer) => 1 + integer.bits().div_ceil(64),
         Datum::Text(text) => 1 + u64::try_from(text.len()).unwrap(),
         Datum::Bytes(bytes) => 1 + u64::try_from(bytes.as_slice().len()).unwrap(),
-        Datum::Tuple(items) | Datum::List(items) => {
+        Datum::Tuple(items) | Datum::List(items) | Datum::Set(items) => {
             1 + u64::try_from(items.len()).unwrap() + items.iter().map(deep).sum::<u64>()
         }
         Datum::Record(fields) => {
@@ -1259,7 +1284,8 @@ fn deep(datum: &lash_kernel_doc::Datum) -> u64 {
 
 #[test]
 fn k_lib_006_native_corpus_pins_results_charges_and_determinism() {
-    use lash_kernel_doc::{Datum, ErrorDatum, Integer, Operand};
+    use lash_kernel_doc::{Datum, ErrorDatum, Integer, Measure, Operand};
+    use num_traits::ToPrimitive;
     let t = |s: &str| Datum::Text(s.to_owned());
     let i = |n: i64| Datum::Int(Integer::from(n));
     let b = |bytes: &[u8]| Datum::Bytes(Bytes::new(bytes.to_vec()));
@@ -1518,6 +1544,68 @@ fn k_lib_006_native_corpus_pins_results_charges_and_determinism() {
             Err("not_data"),
         ),
         (
+            "K-LJSON-004",
+            "json.render_parts".to_owned(),
+            vec![
+                Datum::List(vec![t("x"), i(2), Datum::List(vec![f(2.5), Datum::Null])]),
+                Datum::Set(vec![]),
+                t(""),
+            ],
+            Ok(Datum::List(vec![
+                t(r#"["x","#),
+                i(2),
+                t(",["),
+                f(2.5),
+                t(",null]]"),
+            ])),
+        ),
+        (
+            "K-LJSON-004",
+            "json.render_parts".to_owned(),
+            vec![
+                Datum::List(vec![f(2.0), Datum::List(vec![i(3)])]),
+                Datum::Set(vec![t("list")]),
+                t(""),
+            ],
+            Ok(Datum::List(vec![t("[2.0,[3]]")])),
+        ),
+        // One record node, four two-unit comparisons, one list node and
+        // two scalar nodes: work = 12, encoded admission = 2 * 12 + 1.
+        (
+            "K-LJSON-007",
+            "json.classify".to_owned(),
+            vec![
+                Datum::Record(vec![(
+                    "a".into(),
+                    Datum::List(vec![Datum::Null, Datum::Bool(true)]),
+                )]),
+                i(128),
+                i(8),
+                Datum::Tuple(vec![t("toJSON"), t("brand")]),
+                t("0"),
+                t(":"),
+            ],
+            Ok(i(25)),
+        ),
+        // The first excluded field refuses before its value or any later
+        // field is read: work = 1 + (1 + 6), encoded refusal = 2 * 8.
+        (
+            "K-LJSON-007",
+            "json.classify".to_owned(),
+            vec![
+                Datum::Record(vec![
+                    ("toJSON".into(), Datum::List(vec![i(7), i(8)])),
+                    ("later".into(), Datum::List(vec![Datum::Null; 8])),
+                ]),
+                i(128),
+                i(8),
+                Datum::Tuple(vec![t("toJSON"), t("brand")]),
+                t("0"),
+                t(":"),
+            ],
+            Ok(i(16)),
+        ),
+        (
             "K-LFMT-003",
             "format.decimal_parts".to_owned(),
             vec![f(-0.125)],
@@ -1567,6 +1655,10 @@ fn k_lib_006_native_corpus_pins_results_charges_and_determinism() {
     let mut exercised = std::collections::BTreeSet::new();
     let mut shards: BTreeMap<&str, Vec<serde_json::Value>> = BTreeMap::new();
     for (ordinal, (rule, name, args, expected)) in cases.into_iter().enumerate() {
+        let result_magnitude = match &expected {
+            Ok(Datum::Int(value)) => value.to_u64().unwrap_or(0),
+            _ => 0,
+        };
         let (id, registered) = registry
             .iter()
             .find(|(_, f)| f.definition.name.as_str() == name)
@@ -1600,10 +1692,11 @@ fn k_lib_006_native_corpus_pins_results_charges_and_determinism() {
         let charged = registered
             .definition
             .charge
-            .evaluate(&mut |operand, _| match operand {
-                Operand::Result => result_size,
+            .evaluate(&mut |operand, measure| match (operand, measure) {
+                (Operand::Result, Measure::Magnitude) => result_magnitude,
+                (Operand::Result, Measure::DeepSize) => result_size,
                 // An omitted optional argument measures nothing.
-                Operand::Param(name) => registered
+                (Operand::Param(name), Measure::DeepSize) => registered
                     .definition
                     .signature
                     .params
@@ -1611,15 +1704,20 @@ fn k_lib_006_native_corpus_pins_results_charges_and_determinism() {
                     .position(|p| p.name == *name)
                     .and_then(|index| args.get(index))
                     .map_or(0, deep),
+                _ => panic!("unexpected native corpus measure: {operand:?} {measure:?}"),
             });
         assert_eq!(
             charged,
-            (if name == "format.decimal_parts" {
-                65
+            if name == "json.classify" {
+                1 + result_magnitude
             } else {
-                1
-            }) + args.iter().map(deep).sum::<u64>()
-                + result_size
+                (if name == "format.decimal_parts" {
+                    65
+                } else {
+                    1
+                }) + args.iter().map(deep).sum::<u64>()
+                    + result_size
+            }
         );
         assert_eq!(counter.spent(), 0);
         // A second call on the same implementation and heap must agree, and
