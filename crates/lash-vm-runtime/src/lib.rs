@@ -13,6 +13,7 @@ mod boundary;
 mod formats;
 mod host;
 mod process;
+mod process_plugin;
 mod projection;
 
 pub use binding::{
@@ -62,3 +63,4 @@ pub use process::{
     survey_kernel_processes, with_definitions,
 };
 pub use process::{RetiredHelpers, retained_earlier_helpers};
+pub use process_plugin::KernelProcessPluginFactory;

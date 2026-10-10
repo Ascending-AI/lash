@@ -15,7 +15,7 @@ workspace = true
 anyhow = { workspace = true }
 axum = "0.8"
 chrono = { workspace = true }
-lash = { workspace = true, features = ["rlm", "typescript", "sqlite"] }
+lash = { workspace = true, features = ["codemode", "typescript", "sqlite"] }
 reqwest = { workspace = true, features = ["json", "rustls"] }
 thiserror = { workspace = true }
 serde = { workspace = true, features = ["derive"] }

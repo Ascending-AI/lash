@@ -163,14 +163,16 @@ fn builder_over(backend: lash::Backend, bodies: &std::path::Path) -> Result<lash
         .append(true)
         .open(bodies)
         .with_context(|| format!("open {}", bodies.display()))?;
-    let config = lash::rlm::RlmProtocolPluginConfig::builder()
-        .instruction_limit(lash::rlm::InstructionBound::standard())
-        .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
-        .channel(lash::rlm::RlmChannel::Cell)
-        .build();
-    let factory =
-        lash::rlm::RlmProtocolPluginFactory::new(config, lash::rlm::CellDialect::typescript());
-    Ok(LashCore::rlm_builder(backend, factory)
+    let workers = lash::vm::WorkerService::default();
+    let bounds = lash::vm::RunBounds {
+        charge: 1_000_000,
+        memory: 64 * 1024 * 1024,
+        ..workers.config().run_bounds
+    };
+    Ok(LashCore::standard_builder(backend)
+        .plugin(Arc::new(lash::vm::KernelProcessPluginFactory::new(
+            workers, bounds,
+        )))
         .tools(Arc::new(lash::tools::StaticToolProvider::new(
             tool_definitions(),
             Tools {
@@ -515,8 +517,12 @@ async fn start_run(State(host): State<Host>, Json(request): Json<StartRun>) -> A
         .map_err(api_error)?
         .with_context(|| format!("no definition {}", request.definition))
         .map_err(api_error)?;
+    let environment = host
+        .core
+        .resolve_process_environment(environment())
+        .map_err(api_error)?;
     let env_ref = artifacts
-        .publish_process_env(&host.pin, &environment())
+        .publish_process_env(&host.pin, &environment)
         .await
         .map_err(api_error)?;
     let receipt = host

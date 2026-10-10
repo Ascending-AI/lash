@@ -35,7 +35,7 @@ pub struct HostArtifacts {
     engines: ProcessEngineRegistry,
     /// The core these stores belong to: what resolves the tool catalogue a
     /// workflow is admitted against.
-    #[cfg(feature = "rlm")]
+    #[cfg(feature = "codemode")]
     core: crate::LashCore,
 }
 
@@ -59,7 +59,7 @@ impl HostArtifacts {
             clock,
             definition_ports,
             engines: core.host_process_engines.clone(),
-            #[cfg(feature = "rlm")]
+            #[cfg(feature = "codemode")]
             core: core.clone(),
         }
     }
@@ -142,7 +142,7 @@ impl HostArtifacts {
     /// catalogue offers, in the kernel's type grammar, and the library
     /// functions the workers hold. `None` when no engine of this core
     /// reads workflow documents.
-    #[cfg(feature = "rlm")]
+    #[cfg(feature = "codemode")]
     pub async fn workflow_environment(
         &self,
         environment: &ProcessExecutionEnvSpec,
@@ -178,7 +178,7 @@ impl HostArtifacts {
     /// unchanged document is the definition it was read from. A refused
     /// document publishes nothing. A released pin is refused. Processes
     /// already started keep the document they were admitted under.
-    #[cfg(feature = "rlm")]
+    #[cfg(feature = "codemode")]
     pub async fn publish_workflow(
         &self,
         pin: &HostArtifactPin,
@@ -231,7 +231,7 @@ impl HostArtifacts {
     /// Read the definition `id` names as its workflow: its identity and
     /// signature and its document entered at its entry, or the typed reason
     /// there is none. This acquires no lasting pin.
-    #[cfg(feature = "rlm")]
+    #[cfg(feature = "codemode")]
     pub async fn definition_graph(
         &self,
         id: &ProcessDefinitionId,
@@ -264,7 +264,7 @@ impl HostArtifacts {
     /// body as much as a process's definition. An execution's start and a
     /// process's observation snapshot carry the reference. This acquires no
     /// lasting pin.
-    #[cfg(feature = "rlm")]
+    #[cfg(feature = "codemode")]
     pub async fn execution_document(
         &self,
         reference: &crate::workflow::WorkflowDocumentRef,

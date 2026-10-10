@@ -240,6 +240,8 @@ commands = [
 [[lane]]
 name = "runtime-features"
 features = [
+  "lash-runtime/codemode:on",
+  "lash-runtime/codemode:off",
   "lash-runtime/rlm:on",
   "lash-runtime/rlm:off",
   "lash-runtime/testing:on",
@@ -272,6 +274,8 @@ commands = [
   # CI compiles both through //:feature_lane_compile.
   ["cargo", "check", "-p", "lash-runtime", "--lib", "--locked"],
   ["cargo", "check", "-p", "lash-runtime", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-runtime", "--lib", "--no-default-features", "--features", "codemode", "--locked"],
+  ["cargo", "check", "-p", "lash-runtime", "--all-targets", "--no-default-features", "--features", "codemode", "--locked"],
   ["cargo", "check", "-p", "lash-runtime", "--lib", "--no-default-features", "--features", "rlm", "--locked"],
   ["cargo", "check", "-p", "lash-runtime", "--lib", "--no-default-features", "--features", "testing", "--locked"],
   ["cargo", "check", "-p", "lash-runtime", "--tests", "--no-default-features", "--features", "testing", "--locked"],
@@ -297,8 +301,9 @@ commands = [
   ["cargo", "check", "-p", "lash-runtime", "--all-targets", "--no-default-features", "--features", "mcp", "--locked"],
   ["cargo", "check", "-p", "lash-runtime", "--all-targets", "--no-default-features", "--features", "typescript", "--locked"],
   ["cargo", "check", "-p", "lash-runtime", "--all-targets", "--no-default-features", "--features", "http-transport", "--locked"],
-  # The worker embedding (FIG-5812): `rlm` hosts link no dialect; `worker`
+  # The worker embedding: `codemode` hosts link no dialect; `worker`
   # adds the single-binary host's worker entry and what a worker registers.
+  ["cargo", "check", "-p", "lash-runtime", "--lib", "--no-default-features", "--features", "worker", "--locked"],
   ["cargo", "check", "-p", "lash-runtime", "--all-targets", "--no-default-features", "--features", "worker", "--locked"],
   # The figments facade request (FIG-4423): `rlm,testing` in one resolution,
   # which compiles the `lash-seam-proof-worker` bin too. It links no worker;

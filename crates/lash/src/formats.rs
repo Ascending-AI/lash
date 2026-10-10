@@ -43,9 +43,9 @@
 //!
 //! # Feature gating is honest, not incidental
 //!
-//! The Lash VM and RLM formats exist only when the `rlm` feature is on,
-//! because the crates that define them are optional dependencies. A build
-//! without the feature writes none of its formats, so
+//! Kernel formats require `codemode`; REPL formats additionally require `rlm`.
+//! The crates defining them are optional dependencies. A build writes only
+//! the formats its enabled features provide, so
 //! [`durable_formats`] does not list them. Module artifacts are different: their durable surface and
 //! semantic identity are owned by non-optional `lash-sansio`, so the format is
 //! listed in every build even when the optional verifier is absent.
@@ -73,7 +73,7 @@ pub use lash_protocol_rlm::{
     RLM_DRIVER_STATE_VERSION, RLM_PROTOCOL_EVENT_VERSION, RLM_SNAPSHOT_VERSION,
 };
 pub use lash_sansio::TURN_CHECKPOINT_SCHEMA_VERSION;
-#[cfg(feature = "rlm")]
+#[cfg(feature = "codemode")]
 pub use lash_vm_runtime::{
     KERNEL_DOCUMENT_SCHEMA_VERSION, KERNEL_HELPER_RELEASE, KERNEL_PARKED_STATE_VERSION,
     KERNEL_SAVED_FUNCTION_VERSION, LASH_KERNEL_VERSION,
@@ -430,7 +430,7 @@ pub fn durable_formats() -> impl Iterator<Item = DurableFormatEntry> {
             constant: "RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION",
             probe: FormatProbe::Comparable,
         },
-        #[cfg(feature = "rlm")]
+        #[cfg(feature = "codemode")]
         DurableFormatEntry {
             format: DurableFormat::KernelDocument,
             version: FormatVersion::Counter(KERNEL_DOCUMENT_SCHEMA_VERSION),
@@ -438,7 +438,7 @@ pub fn durable_formats() -> impl Iterator<Item = DurableFormatEntry> {
             constant: "KERNEL_DOCUMENT_SCHEMA_VERSION",
             probe: FormatProbe::Comparable,
         },
-        #[cfg(feature = "rlm")]
+        #[cfg(feature = "codemode")]
         DurableFormatEntry {
             format: DurableFormat::KernelParkedState,
             version: FormatVersion::Counter(KERNEL_PARKED_STATE_VERSION),
@@ -446,7 +446,7 @@ pub fn durable_formats() -> impl Iterator<Item = DurableFormatEntry> {
             constant: "KERNEL_PARKED_STATE_VERSION",
             probe: FormatProbe::Comparable,
         },
-        #[cfg(feature = "rlm")]
+        #[cfg(feature = "codemode")]
         DurableFormatEntry {
             format: DurableFormat::KernelSavedFunction,
             version: FormatVersion::Counter(KERNEL_SAVED_FUNCTION_VERSION),
@@ -470,7 +470,7 @@ pub fn durable_formats() -> impl Iterator<Item = DurableFormatEntry> {
             constant: "RLM_DRIVER_STATE_VERSION",
             probe: FormatProbe::Comparable,
         },
-        #[cfg(feature = "rlm")]
+        #[cfg(feature = "codemode")]
         DurableFormatEntry {
             format: DurableFormat::KernelVersion,
             version: FormatVersion::Counter(LASH_KERNEL_VERSION),
@@ -493,33 +493,33 @@ fn engine_durable_formats() -> impl Iterator<Item = DurableFormatEntry> {
 /// The manifest row for one format, when this build carries it.
 ///
 /// `None` means the format is not part of this build — the Lash VM and RLM
-/// rows are absent without the `rlm` feature — which is a different answer from
+/// rows require `codemode` and `rlm`, respectively. Absence differs from
 /// "version zero" and is reported as such.
 pub fn durable_format(format: DurableFormat) -> Option<DurableFormatEntry> {
     durable_formats().find(|entry| entry.format == format)
 }
 
 /// The durable formats actor state holds beyond the runtime core's own
-/// (ADR 0106 §1): with `rlm`, the parked kernel run a code cell or a
-/// process body resumes from, and the RLM snapshot
-/// envelope a cell's snapshot data is. [`DurableBackendBuilder`] adds them to
-/// every actor kind's format set, beside the turn checkpoint, run records,
+/// (ADR 0106 §1): with `codemode`, the parked kernel run a process body
+/// resumes from; with `rlm`, also the snapshot envelope a REPL cell uses.
+/// [`DurableBackendBuilder`] adds them to every actor kind's format set,
+/// beside the turn checkpoint, run records,
 /// wait rows, outcome materials and engine states the core declares.
 ///
 /// [`DurableBackendBuilder`]: crate::durable::DurableBackendBuilder
 pub fn actor_state_surfaces() -> Vec<lash_core::durable_port::FormatSurface> {
-    #[cfg(feature = "rlm")]
+    #[cfg(feature = "codemode")]
     {
         kernel_actor_state_surfaces(KERNEL_PARKED_STATE_VERSION, KERNEL_HELPER_RELEASE)
     }
-    #[cfg(not(feature = "rlm"))]
+    #[cfg(not(feature = "codemode"))]
     {
         Vec::new()
     }
 }
 
 /// [`actor_state_surfaces`] as the previous build declared them, for the
-/// formats this build carries forward from it (ADR 0106 §1): with `rlm`,
+/// formats this build carries forward from it (ADR 0106 §1): with `codemode`,
 /// when this build also interprets the kernel version before its own, the
 /// parked kernel run of that version, written against the helper release
 /// before this build's when this build retains one (FIG-5799). A process
@@ -527,7 +527,7 @@ pub fn actor_state_surfaces() -> Vec<lash_core::durable_port::FormatSurface> {
 /// node of this build claims it to migrate it. Empty when this build
 /// interprets one kernel version.
 pub fn previous_actor_state_surfaces() -> Vec<lash_core::durable_port::FormatSurface> {
-    #[cfg(feature = "rlm")]
+    #[cfg(feature = "codemode")]
     {
         lash_vm_runtime::previous_kernel_version()
             .map(|kernel| {
@@ -538,7 +538,7 @@ pub fn previous_actor_state_surfaces() -> Vec<lash_core::durable_port::FormatSur
             })
             .unwrap_or_default()
     }
-    #[cfg(not(feature = "rlm"))]
+    #[cfg(not(feature = "codemode"))]
     {
         Vec::new()
     }
@@ -547,13 +547,13 @@ pub fn previous_actor_state_surfaces() -> Vec<lash_core::durable_port::FormatSur
 /// The format surface that states which helper release an actor's cells
 /// and processes were written against (FIG-5799). A set without it is
 /// helper release 1's, the 1.0 baseline's.
-#[cfg(feature = "rlm")]
+#[cfg(feature = "codemode")]
 pub const KERNEL_HELPERS_SURFACE: &str = "kernel-helpers";
 
 /// [`actor_state_surfaces`] as a build that parks kernel runs under kernel
 /// version `kernel`, written against helper release `helpers`, declares
 /// them.
-#[cfg(feature = "rlm")]
+#[cfg(feature = "codemode")]
 pub fn kernel_actor_state_surfaces(
     kernel: u32,
     helpers: u32,
@@ -562,6 +562,7 @@ pub fn kernel_actor_state_surfaces(
     let mut surfaces = vec![
         FormatSurface::new("kernel-parked-state", kernel),
         FormatSurface::new("kernel-saved-function", KERNEL_SAVED_FUNCTION_VERSION),
+        #[cfg(feature = "rlm")]
         FormatSurface::new("rlm-snapshot", RLM_SNAPSHOT_VERSION),
     ];
     if helpers > 1 {
@@ -572,7 +573,7 @@ pub fn kernel_actor_state_surfaces(
 
 /// The newest helper release before this build's own that it retains:
 /// what the build before it wrote against, when that build wrote another.
-#[cfg(feature = "rlm")]
+#[cfg(feature = "codemode")]
 pub fn previous_helper_release() -> Option<u32> {
     lash_vm_runtime::RETAINED_HELPER_RELEASES
         .iter()
@@ -586,7 +587,7 @@ pub fn previous_helper_release() -> Option<u32> {
 ///
 /// # Errors
 /// The shipped helper release declarations or artifacts do not validate.
-#[cfg(feature = "rlm")]
+#[cfg(feature = "codemode")]
 pub fn earlier_helper_releases() -> Result<Vec<u32>, crate::vm::LibraryError> {
     Ok(lash_vm_runtime::standard_helper_releases()?
         .into_iter()
@@ -596,7 +597,7 @@ pub fn earlier_helper_releases() -> Result<Vec<u32>, crate::vm::LibraryError> {
 }
 
 /// The helper release a set holding `surfaces` was written against.
-#[cfg(feature = "rlm")]
+#[cfg(feature = "codemode")]
 pub fn helper_release_of(surfaces: &[lash_core::durable_port::FormatSurface]) -> u32 {
     surfaces
         .iter()

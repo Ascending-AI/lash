@@ -177,6 +177,10 @@ pub enum EmbedError {
     ConfigSubmit(lash_core::ConfigSubmitError),
     #[error("runtime plugin/control error: {0}")]
     Plugin(#[from] lash_core::PluginError),
+    /// The protocol refused the renderer a new process environment captures.
+    #[cfg(feature = "codemode")]
+    #[error(transparent)]
+    ProcessRender(#[from] lash_core::RenderFault),
     #[error("failed to encode protocol turn options: {0}")]
     ProtocolTurnOptions(#[from] serde_json::Error),
     #[error("failed to decode protocol turn options: {0}")]
@@ -347,6 +351,8 @@ impl EmbedError {
     /// [`TurnIssue::retryable`](crate::turn::TurnIssue) instead.
     pub fn is_retryable(&self) -> bool {
         match self {
+            #[cfg(feature = "codemode")]
+            Self::ProcessRender(_) => false,
             Self::Runtime(err) => err.is_retryable(),
             Self::Control(err) => err.is_retryable(),
             Self::Plugin(err) | Self::Session(SessionError::Plugin(err)) => err.is_retryable(),
@@ -429,6 +435,8 @@ impl EmbedError {
     ///   structured causes.
     pub fn is_terminal(&self) -> bool {
         match self {
+            #[cfg(feature = "codemode")]
+            Self::ProcessRender(_) => true,
             Self::MissingProtocolPlugin
             | Self::PluginBackendMismatch { .. }
             | Self::PluginDeclaration(_)

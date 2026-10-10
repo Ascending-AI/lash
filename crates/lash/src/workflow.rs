@@ -1,3 +1,5 @@
+//! Code mode (`codemode`) edits and runs workflows without the RLM REPL protocol.
+//!
 //! A process's code as a document a host reads, edits and publishes.
 //!
 //! A process is an entry function of an admitted **kernel document**

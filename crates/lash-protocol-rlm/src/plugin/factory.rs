@@ -141,10 +141,10 @@ impl RlmProtocolPluginFactory {
 
     /// The bounds a new process's run is held to: the deployment's
     /// instruction and memory bounds over the worker pool's own.
-    fn process_bounds(&self) -> lash_kernel_vm::Bounds {
+    fn process_bounds(&self) -> lash_vm_client::RunBounds {
         let pool = self.workers.config().run_bounds;
         let bounds = self.config.execution_bounds();
-        lash_kernel_vm::Bounds {
+        lash_vm_client::RunBounds {
             charge: bounds
                 .instruction_limit
                 .limit()
@@ -275,38 +275,25 @@ impl PluginFactory for RlmProtocolPluginFactory {
         &self,
         ctx: &lash_core::plugin::ProcessEngineContributionContext<'_>,
     ) -> Result<Vec<lash_core::ProcessEngineRegistration>, PluginError> {
-        let documents = lash_vm_runtime::KernelDocuments::new(ctx.backend().module_artifacts());
-        let engine = match &self.worker_functions {
-            Some(functions) => lash_vm_runtime::KernelProcessEngine::with_functions(
-                documents,
-                Arc::clone(functions),
-                self.workers.clone(),
-                self.process_bounds(),
-            ),
-            None => lash_vm_runtime::KernelProcessEngine::new(
-                documents,
-                self.workers.clone(),
-                self.process_bounds(),
-            )
-            .map_err(|error| PluginError::Registration(error.to_string()))?,
-        }
-        .with_trace_runtime(ctx.trace_runtime().clone());
+        let factory = lash_vm_runtime::KernelProcessPluginFactory::new(
+            self.workers.clone(),
+            self.process_bounds(),
+        );
+        let factory = match &self.worker_functions {
+            Some(functions) => factory.with_functions(Arc::clone(functions)),
+            None => factory,
+        };
         #[cfg(feature = "synthetic-next")]
-        let engine = match self.kernel_writes {
-            Some(writes) => engine.writing(writes),
-            None => engine,
+        let factory = match self.kernel_writes {
+            Some(writes) => factory.writing_kernel(writes),
+            None => factory,
         };
-        let engine = if self.adopting_helpers {
-            engine.adopting_helpers(
-                lash_vm_runtime::retained_earlier_helpers()
-                    .map_err(|error| PluginError::Registration(error.to_string()))?,
-            )
+        let factory = if self.adopting_helpers {
+            factory.adopting_helpers()
         } else {
-            engine
+            factory
         };
-        Ok(vec![lash_vm_runtime::kernel_process_engine_registration(
-            engine,
-        )])
+        factory.process_engine_contributions(ctx)
     }
 
     /// The session's plugin runs under the behaviour the session recorded:

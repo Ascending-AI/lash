@@ -60,7 +60,7 @@ impl lash_core::plugin::PluginDefinition for UndocumentedEngineFactory {
 #[tokio::test]
 async fn an_engine_without_a_document_provider_reads_unsupported() {
     let backend = sqlite_memory_store_backend().await;
-    let core = explicit_ephemeral_facets(rlm_core_builder_over(backend))
+    let core = standard_core_builder_over(backend)
         .plugin(Arc::new(UndocumentedEngineFactory))
         .build(crate::testing::runtime_lease_owner())
         .expect("the core builds");

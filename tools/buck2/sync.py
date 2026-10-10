@@ -27,6 +27,7 @@ from collections import defaultdict
 import action_sizes_from_log
 import bootstrap_store
 import clippy_policy
+import feature_variants
 import generate_model
 
 
@@ -1216,12 +1217,19 @@ export_file(
             + repr(sorted(empty_feature_ui_harnesses))
         )
     empty_feature_ui_harness = next(iter(empty_feature_ui_harnesses))
+    rlm_features = feature_variants.resolve_request(
+        feature_variants.Workspace.from_metadata(canonical),
+        "lash-runtime",
+        default_features=False,
+        requested=["rlm"],
+        with_dev=True,
+    ).sorted_features()["lash-runtime"]
     rlm_ui_harnesses = {
         unit["label"]
         for unit in payload["feature_lane_units"]
         if unit["package"] == "lash-runtime"
         and unit["kind"] == "test"
-        and unit["features"] == ["rlm"]
+        and unit["features"] == rlm_features
         and ":ui__test__fv_" in unit["label"]
     }
     if len(rlm_ui_harnesses) != 1:

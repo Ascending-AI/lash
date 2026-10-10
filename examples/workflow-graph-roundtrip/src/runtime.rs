@@ -114,7 +114,7 @@ pub(crate) async fn publish(
 ) -> Result<Publication, RunError> {
     let pin = HostArtifactPin::mint();
     let artifacts = core.host_artifacts();
-    let environment = environment();
+    let environment = core.resolve_process_environment(environment())?;
     let result = async {
         match artifacts
             .publish_workflow(&pin, draft, entry, &environment)
@@ -538,15 +538,16 @@ impl WorkflowHost {
 
 pub fn core(backend: lash::Backend) -> lash::Result<WorkflowHost> {
     let tools = Arc::new(crate::display::HostTools::default());
-    let config = lash::rlm::RlmProtocolPluginConfig::builder()
-        .instruction_limit(lash::rlm::InstructionBound::standard())
-        .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
-        .channel(lash::rlm::RlmChannel::Cell)
-        .build();
-
-    let factory =
-        lash::rlm::RlmProtocolPluginFactory::new(config, lash::rlm::CellDialect::typescript());
-    let core = LashCore::rlm_builder(backend, factory)
+    let workers = lash::vm::WorkerService::default();
+    let bounds = lash::vm::RunBounds {
+        charge: 1_000_000,
+        memory: 64 * 1024 * 1024,
+        ..workers.config().run_bounds
+    };
+    let core = LashCore::standard_builder(backend)
+        .plugin(Arc::new(lash::vm::KernelProcessPluginFactory::new(
+            workers, bounds,
+        )))
         .tools(Arc::new(lash::tools::StaticToolProvider::new(
             crate::display::tool_definitions(),
             tools.as_ref().clone(),

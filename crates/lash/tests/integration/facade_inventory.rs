@@ -196,7 +196,22 @@ mod rlm_host_wrapping_inventory {
     use lash::vm::ToolBindingError as _;
 }
 
-// --- `rlm`: the Lash VM protocol, runtime and language surface ---
+// --- `codemode`: workflow documents, kernel processes and host boundaries ---
+
+#[cfg(feature = "codemode")]
+mod codemode_inventory {
+    use lash::dialect::Package as _;
+    use lash::formats::KERNEL_DOCUMENT_SCHEMA_VERSION as _;
+    use lash::process::KernelProcessDefinition as _;
+    use lash::tools::LlmToolsPluginFactory as _;
+    use lash::vm::HostBoundary as _;
+    use lash::vm::KernelProcessPluginFactory as _;
+    use lash::vm::WorkerService as _;
+    use lash::workflow::WorkflowDocument as _;
+    use lash::workflow::WorkflowEnvironment as _;
+}
+
+// --- `rlm`: the persistent REPL protocol on top of code mode ---
 
 #[cfg(feature = "rlm")]
 mod rlm_inventory {

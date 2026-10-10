@@ -164,9 +164,9 @@ pub mod render {
     #[cfg(feature = "rlm")]
     pub use lash_render::*;
 }
-#[cfg(feature = "rlm")]
+#[cfg(feature = "codemode")]
 mod helper_releases;
-#[cfg(feature = "rlm")]
+#[cfg(feature = "codemode")]
 mod kernel_migration;
 #[cfg(feature = "rlm")]
 /// RLM-specific turn-builder extensions.
@@ -174,8 +174,8 @@ pub mod rlm;
 /// Reusable contracts for agent scenarios.
 #[cfg(feature = "testing")]
 pub mod scenario_contracts;
-#[cfg(feature = "rlm")]
-/// Integration with the Lash VM execution substrate.
+#[cfg(feature = "codemode")]
+/// Code mode: kernel execution, worker pools and host boundaries (`codemode`).
 pub mod vm;
 /// Standard-lock poison recovery traits for application code.
 pub mod sync {
@@ -192,7 +192,8 @@ mod tool_intent_ingress;
 /// Turn builders, streams, activities, and output types.
 pub mod turn;
 pub mod usage;
-#[cfg(feature = "rlm")]
+/// Edit, publish and observe kernel workflows (`codemode`).
+#[cfg(feature = "codemode")]
 pub mod workflow;
 
 pub use crate::admin::{
@@ -393,7 +394,7 @@ pub mod observe {
 /// [`AttemptContext::attempt_number`](crate::tools::AttemptContext::attempt_number)
 /// counts the runs apart from it.
 pub mod tools {
-    #[cfg(feature = "rlm")]
+    #[cfg(feature = "codemode")]
     pub use lash_llm_tools::LlmToolsPluginFactory;
     pub use lash_sansio::ToolPresentationConfig;
     // The vocabulary this module's signatures name (the facade-completeness rule).
@@ -490,7 +491,7 @@ pub mod tools {
     /// facade complete as the crate grows; where it overlaps the explicit
     /// `rlm` re-exports above, those name the same items.
     pub use lash_tool_support::*;
-    #[cfg(feature = "rlm")]
+    #[cfg(feature = "codemode")]
     pub use lash_vm_runtime::{
         ToolBindingResolutionExt, ToolManifestBindingExt, required_tool_binding,
     };
@@ -1225,7 +1226,7 @@ pub mod process {
         ProcessReplaySubscribeOutcome, ProcessReplaySubscription, ProcessSequence,
         RetainedProcessView, StepBodyStartedObservation,
     };
-    #[cfg(feature = "rlm")]
+    #[cfg(feature = "codemode")]
     pub use lash_vm_runtime::{KernelProcessDefinition, KernelProcessInput, LASH_VM_ENGINE_KIND};
 }
 
@@ -1433,7 +1434,7 @@ pub mod process_controls {
 /// The dialect seam of the kernel: what a worker installs for a language
 /// (its front end, printer and helper functions), the library a front end
 /// names functions through, and the diagnostics both answer.
-#[cfg(any(feature = "rlm", feature = "typescript"))]
+#[cfg(feature = "codemode")]
 pub mod dialect {
     pub use lash_kernel_dialect::*;
 }

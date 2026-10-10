@@ -20,10 +20,10 @@ use std::sync::Arc;
 use lash_core::durable_port::{ActorKey, CommitLabel, DurableError, MailRefusal, MailTx};
 use lash_core::formats::BuildFormats;
 use lash_kernel_doc::FunctionRegistry;
-use lash_vm_runtime::{
-    KernelMigrationSurvey, KernelMigrationSurveyError, LASH_VM_ENGINE_KIND, RefusedKernelCell,
-    UnmigratedKernelSession,
-};
+use lash_vm_runtime::{KernelMigrationSurvey, KernelMigrationSurveyError, LASH_VM_ENGINE_KIND};
+
+#[cfg(feature = "rlm")]
+use lash_vm_runtime::{RefusedKernelCell, UnmigratedKernelSession};
 
 /// The operator command that carries every process and session still in the
 /// previous kernel version forward: what a build that retires that version
@@ -87,38 +87,42 @@ pub async fn survey_kernel_migration(
     functions: &Arc<FunctionRegistry>,
 ) -> Result<KernelMigrationSurvey, KernelMigrationSurveyError> {
     let mut survey = lash_vm_runtime::survey_kernel_processes(backend, functions).await?;
-    let earlier = earlier_kernel_formats();
-    let reads = backend.durable();
-    let sessions = match &earlier {
-        Some(earlier) => actors_in(backend, earlier.session()).await?,
-        None => Vec::new(),
-    };
-    for actor in sessions {
-        let Ok(session) = lash_core::SessionId::parse(actor.id()) else {
-            continue;
+    #[cfg(feature = "rlm")]
+    {
+        let earlier = earlier_kernel_formats();
+        let reads = backend.durable();
+        let sessions = match &earlier {
+            Some(earlier) => actors_in(backend, earlier.session()).await?,
+            None => Vec::new(),
         };
-        let mut refused = Vec::new();
-        if let Some(turn) = reads.turn(&session).await? {
-            for cell in reads.cell_snapshots(&session, &turn.run).await? {
-                let lash_core::durable_port::domain::ExecKey::Cell(_, _, id) = &cell.exec else {
-                    continue;
-                };
-                if let Some(refusal) = lash_protocol_rlm::cell_migration_refusal(
-                    &cell.snapshot_ref,
-                    Arc::clone(functions),
-                ) {
-                    refused.push(RefusedKernelCell {
-                        turn: turn.run.clone(),
-                        cell: id.as_str().to_owned(),
-                        refusal,
-                    });
+        for actor in sessions {
+            let Ok(session) = lash_core::SessionId::parse(actor.id()) else {
+                continue;
+            };
+            let mut refused = Vec::new();
+            if let Some(turn) = reads.turn(&session).await? {
+                for cell in reads.cell_snapshots(&session, &turn.run).await? {
+                    let lash_core::durable_port::domain::ExecKey::Cell(_, _, id) = &cell.exec
+                    else {
+                        continue;
+                    };
+                    if let Some(refusal) = lash_protocol_rlm::cell_migration_refusal(
+                        &cell.snapshot_ref,
+                        Arc::clone(functions),
+                    ) {
+                        refused.push(RefusedKernelCell {
+                            turn: turn.run.clone(),
+                            cell: id.as_str().to_owned(),
+                            refusal,
+                        });
+                    }
                 }
             }
+            survey.unmigrated += 1;
+            survey
+                .sessions
+                .push(UnmigratedKernelSession { session, refused });
         }
-        survey.unmigrated += 1;
-        survey
-            .sessions
-            .push(UnmigratedKernelSession { session, refused });
     }
     // What still pins a helper release before this build's own, which a
     // later build may stop retaining (FIG-5799).

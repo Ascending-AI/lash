@@ -25,7 +25,10 @@
 
 use std::sync::Arc;
 
-use lash_core::durable_port::{DurableError, FormatSet, StoreFailure, StoreFailureKind};
+#[cfg(feature = "rlm")]
+use lash_core::durable_port::FormatSet;
+use lash_core::durable_port::{DurableError, StoreFailure, StoreFailureKind};
+#[cfg(feature = "rlm")]
 use lash_core::formats::BuildFormats;
 use lash_kernel_doc::FunctionRegistry;
 use lash_vm_runtime::{
@@ -33,6 +36,7 @@ use lash_vm_runtime::{
 };
 
 /// How many actors one listing page reads.
+#[cfg(feature = "rlm")]
 const PAGE: usize = 100;
 
 /// The functions a build stops holding when it stops retaining helper
@@ -70,27 +74,39 @@ pub(crate) async fn survey_helper_dependents(
         return Ok((Vec::new(), Vec::new()));
     }
     let processes = lash_vm_runtime::survey_helper_processes(backend, functions, retired).await?;
-    let mut sessions = Vec::new();
-    let mut seen = std::collections::BTreeSet::new();
-    for set in session_sets(backend, release) {
-        for actor in actors_in(backend, &set).await? {
-            let Ok(session) = lash_core::SessionId::parse(actor.id()) else {
-                continue;
-            };
-            if !seen.insert(session.clone()) {
-                continue;
-            }
-            if let Some(dependent) = helper_session(backend, functions, retired, session).await? {
-                sessions.push(dependent);
+    #[cfg(not(feature = "rlm"))]
+    let sessions = {
+        let _ = release;
+        Vec::new()
+    };
+    #[cfg(feature = "rlm")]
+    let sessions = {
+        let mut sessions = Vec::new();
+        let mut seen = std::collections::BTreeSet::new();
+        for set in session_sets(backend, release) {
+            for actor in actors_in(backend, &set).await? {
+                let Ok(session) = lash_core::SessionId::parse(actor.id()) else {
+                    continue;
+                };
+                if !seen.insert(session.clone()) {
+                    continue;
+                }
+                if let Some(dependent) =
+                    helper_session(backend, functions, retired, session).await?
+                {
+                    sessions.push(dependent);
+                }
             }
         }
-    }
+        sessions
+    };
     Ok((processes, sessions))
 }
 
 /// Every session set a session written against `release` may be in: each
 /// this build decodes, and the release's own under each kernel version the
 /// build interprets.
+#[cfg(feature = "rlm")]
 fn session_sets(backend: &crate::Backend, release: u32) -> Vec<FormatSet> {
     let mut sets = backend.formats().session_decodes();
     let kernels = [
@@ -112,6 +128,7 @@ fn session_sets(backend: &crate::Backend, release: u32) -> Vec<FormatSet> {
 }
 
 /// Every actor that has not ended whose state is in `set`.
+#[cfg(feature = "rlm")]
 async fn actors_in(
     backend: &crate::Backend,
     set: &FormatSet,
@@ -132,6 +149,7 @@ async fn actors_in(
 
 /// `session`, when a cell its open turn stopped in or a function it saved
 /// reaches a function of `retired`.
+#[cfg(feature = "rlm")]
 async fn helper_session(
     backend: &crate::Backend,
     functions: &Arc<FunctionRegistry>,
@@ -254,16 +272,19 @@ pub(crate) fn retiring(
 /// its own, once every live node that serves the sessions of a build of an
 /// earlier release it retains also decodes its sets; until then, the
 /// newest such release they all hold (ADR 0106 §2).
+#[cfg(feature = "rlm")]
 pub(crate) struct FleetHelperWrites {
     backend: crate::Backend,
 }
 
+#[cfg(feature = "rlm")]
 impl FleetHelperWrites {
     pub(crate) fn new(backend: crate::Backend) -> Self {
         Self { backend }
     }
 }
 
+#[cfg(feature = "rlm")]
 fn fleet_helper_release(
     candidates: &[(u32, FormatSet)],
     carried: &[FormatSet],
@@ -284,6 +305,7 @@ fn fleet_helper_release(
         .map(|(release, _)| *release)
 }
 
+#[cfg(feature = "rlm")]
 fn helpers_unavailable(message: impl Into<String>) -> lash_core::RuntimeEffectControllerError {
     lash_core::RuntimeEffectControllerError::new(
         lash_core::RuntimeErrorCode::RunDefinitionUnavailable,
@@ -292,6 +314,7 @@ fn helpers_unavailable(message: impl Into<String>) -> lash_core::RuntimeEffectCo
     .retryable_uncommitted_derivation()
 }
 
+#[cfg(feature = "rlm")]
 #[async_trait::async_trait]
 impl lash_protocol_rlm::HelperReleaseGate for FleetHelperWrites {
     async fn writable(&self) -> Result<u32, lash_core::RuntimeEffectControllerError> {
@@ -323,7 +346,7 @@ impl lash_protocol_rlm::HelperReleaseGate for FleetHelperWrites {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "rlm"))]
 mod tests {
     use super::*;
 

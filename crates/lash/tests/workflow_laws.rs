@@ -136,15 +136,16 @@ async fn core() -> lash::LashCore {
 async fn core_over(stores: Arc<lash_sqlite_store::SqliteStoreSet>, boot: &str) -> lash::LashCore {
     lash_core::testing::process_execution_env_fixture(stores.process_env_store().as_ref()).await;
     let backend = lash_conformance::backend_over(stores);
-    let factory = lash::rlm::RlmProtocolPluginFactory::new(
-        lash::rlm::RlmProtocolPluginConfig::builder()
-            .channel(lash::rlm::RlmChannel::Cell)
-            .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
-            .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
-            .build(),
-        lash::rlm::CellDialect::typescript(),
-    );
-    lash::LashCore::rlm_builder(backend, factory)
+    let workers = lash::vm::WorkerService::default();
+    let bounds = lash::vm::RunBounds {
+        charge: 1_000_000,
+        memory: 64 * 1024 * 1024,
+        ..workers.config().run_bounds
+    };
+    lash::LashCore::standard_builder(backend)
+        .plugin(Arc::new(lash::vm::KernelProcessPluginFactory::new(
+            workers, bounds,
+        )))
         .tools(echo_tool())
         .plugin(Arc::new(
             lash::process_controls::SessionProcessAdminPluginFactory::new(
@@ -338,7 +339,12 @@ async fn a_document_is_published_read_edited_in_a_try_region_republished_and_run
     // The first definition is immutable: a process of it runs the document
     // it was admitted with, beside a process of the edited one.
     let env_ref = artifacts
-        .publish_process_env(&pin, &environment)
+        .publish_process_env(
+            &pin,
+            &core
+                .resolve_process_environment(environment.clone())
+                .expect("the process renderer resolves"),
+        )
         .await
         .expect("publish the process environment");
     let kept = start(&core, &env_ref, &first.definition, "first", "operator").await;
@@ -412,7 +418,12 @@ async fn a_fan_out_overlay_holds_one_row_for_each_elements_effect() {
     };
 
     let env_ref = artifacts
-        .publish_process_env(&pin, &environment)
+        .publish_process_env(
+            &pin,
+            &core
+                .resolve_process_environment(environment.clone())
+                .expect("the process renderer resolves"),
+        )
         .await
         .expect("publish the process environment");
     let args = serde_json::json!({"a": "x", "b": "y", "c": "z"});
@@ -535,7 +546,12 @@ async fn a_process_starts_another_entry_of_its_document_by_function_reference_an
             .expect("the publication answers"),
     );
     let env_ref = artifacts
-        .publish_process_env(&pin, &environment)
+        .publish_process_env(
+            &pin,
+            &core
+                .resolve_process_environment(environment.clone())
+                .expect("the process renderer resolves"),
+        )
         .await
         .expect("publish the process environment");
     let mut args = serde_json::Map::new();
@@ -585,7 +601,12 @@ async fn a_process_parked_in_its_inner_loop_resumes_on_another_node_and_finishes
             .expect("the publication answers"),
     );
     let env_ref = artifacts
-        .publish_process_env(&pin, &environment)
+        .publish_process_env(
+            &pin,
+            &first
+                .resolve_process_environment(environment.clone())
+                .expect("the process renderer resolves"),
+        )
         .await
         .expect("publish the process environment");
     let process = start(

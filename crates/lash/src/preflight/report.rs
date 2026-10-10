@@ -627,7 +627,7 @@ impl FormatTally {
         *self.found.entry(version).or_default() += 1;
     }
 
-    #[cfg(feature = "rlm")]
+    #[cfg(feature = "codemode")]
     pub(super) fn identity_match(&mut self) {
         self.scanned += 1;
     }
@@ -635,7 +635,7 @@ impl FormatTally {
     /// Record an item this build refuses for a reason no version integer
     /// expresses — the identity-only case.
     ///
-    #[cfg(feature = "rlm")]
+    #[cfg(feature = "codemode")]
     pub(super) fn refuse_without_version(&mut self) {
         self.scanned += 1;
         self.refused_without_version += 1;

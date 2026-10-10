@@ -483,5 +483,6 @@ mod turn_cancel_modes;
 mod turn_cancel_waits;
 mod turn_checkpoints;
 mod turn_streaming;
+#[cfg(feature = "codemode")]
 mod workflow_reads;
 mod writer_fence;

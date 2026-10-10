@@ -67,7 +67,8 @@ tracing = { workspace = true }
 
 [features]
 default = []
-rlm = [
+# Workflow editing, publication and kernel process execution, without a REPL.
+codemode = [
     "dep:lash-vm-client",
     "dep:lash-vm-runtime",
     "dep:lash-kernel-doc",
@@ -75,16 +76,17 @@ rlm = [
     "dep:lash-kernel-edit",
     "dep:lash-kernel-dialect",
     "dep:lash-llm-tools",
-    "dep:lash-protocol-rlm",
-    "dep:lash-render",
-    "dep:lash-rlm-types",
     "lash-plugin-mcp?/lash-vm",
 ]
+# The persistent REPL protocol on top of code mode. Rendering is protocol-owned;
+# LLM tools are usable by workflow processes as well as REPL cells.
+rlm = ["codemode", "dep:lash-protocol-rlm", "dep:lash-rlm-types", "dep:lash-render"]
+
 # The worker embedding (`lash::vm::worker_entry` and what a worker
 # registers): a single-binary host is its own worker, so it links the
 # kernel library, lash's extensions and the TypeScript dialect. A host that
 # runs the shipped worker executable leaves it off and links no dialect.
-worker = ["rlm", "dep:lash-vm-worker"]
+worker = ["codemode", "dep:lash-vm-worker"]
 
 # Host-wired extension features (ADR 0079 section 1). Each gates one
 # `lash::<name>` module that re-exports the matching internal crate's
@@ -96,7 +98,7 @@ openai = ["dep:lash-provider-openai", "dep:lash-llm-transport"]
 anthropic = ["dep:lash-provider-anthropic", "dep:lash-llm-transport"]
 google = ["dep:lash-provider-google", "dep:lash-llm-transport"]
 mcp = ["dep:lash-plugin-mcp"]
-typescript = ["dep:lash-dialect-typescript", "dep:lash-kernel-dialect", "lash-vm-runtime?/typescript"]
+typescript = ["codemode", "dep:lash-dialect-typescript", "lash-vm-runtime/typescript"]
 http-transport = ["dep:lash-http-transport"]
 # Exposes `lash::testing` (e.g. `TestProvider`) for embedder integration tests.
 # The durable-backend certification laws are not part of the facade: a host

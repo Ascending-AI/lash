@@ -451,13 +451,36 @@ impl LashCore {
         crate::artifacts::HostArtifacts::new(self)
     }
 
+    /// Resolve the protocol's result rendering before a host publishes a
+    /// process environment. The published environment retains this decision,
+    /// so deferred results resume under the same renderer as inline results.
+    #[cfg(feature = "codemode")]
+    pub fn resolve_process_environment(
+        &self,
+        mut environment: lash_core::ProcessExecutionEnvSpec,
+    ) -> Result<lash_core::ProcessExecutionEnvSpec> {
+        let plugins = self.process_plugins(&environment)?;
+        environment.render = plugins
+            .protocol_driver()
+            .resolve_render(&environment.plugin_config.config.protocol_turn_options())?;
+        Ok(environment)
+    }
+
     /// The tool catalogue a process created under `environment` resolves:
     /// its own plugin session's tools, built as its runtime builds them.
-    #[cfg(feature = "rlm")]
+    #[cfg(feature = "codemode")]
     pub(crate) fn process_tool_catalog(
         &self,
         environment: &lash_core::ProcessExecutionEnvSpec,
     ) -> Result<Arc<lash_core::ToolCatalog>> {
+        Ok(self.process_plugins(environment)?.resolved_tool_catalog()?)
+    }
+
+    #[cfg(feature = "codemode")]
+    fn process_plugins(
+        &self,
+        environment: &lash_core::ProcessExecutionEnvSpec,
+    ) -> Result<Arc<lash_core::plugin::PluginSession>> {
         let plugin_host = build_plugin_host(
             self.protocol_factory.as_ref(),
             self.plugin_factories.as_ref(),
@@ -473,7 +496,7 @@ impl LashCore {
             ),
         )?;
         plugins.materialize()?;
-        Ok(plugins.resolved_tool_catalog()?)
+        Ok(plugins)
     }
 
     /// Check start arguments against a retained definition's authoritative signature.

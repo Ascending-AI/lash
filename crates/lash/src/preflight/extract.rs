@@ -42,7 +42,7 @@ pub(super) enum Extraction {
     /// so a mismatch is a decided refusal that no integer describes.
     ///
     /// Available when this build carries the optional Lash VM verifier.
-    #[cfg(feature = "rlm")]
+    #[cfg(feature = "codemode")]
     IdentityMismatch {
         /// Which format the identity belongs to.
         format: DurableFormat,
@@ -52,7 +52,7 @@ pub(super) enum Extraction {
     /// The stored identity was successfully verified. Identity-only formats
     /// have no found version integer to report, so this increments the scan
     /// count without inventing one.
-    #[cfg(feature = "rlm")]
+    #[cfg(feature = "codemode")]
     IdentityMatch { format: DurableFormat },
 }
 
@@ -184,7 +184,7 @@ fn started_process(payload: Payload<'_>) -> Vec<Extraction> {
     start_generation(&record, stamp).into_iter().collect()
 }
 
-#[cfg(feature = "rlm")]
+#[cfg(feature = "codemode")]
 fn start_generation(record: &serde_json::Value, stamp: Option<&str>) -> Option<Extraction> {
     let format = DurableFormat::KernelVersion;
     let input = record.get("input")?;
@@ -220,7 +220,7 @@ fn start_generation(record: &serde_json::Value, stamp: Option<&str>) -> Option<E
 }
 
 /// A build without the language cannot recompute a start stamp.
-#[cfg(not(feature = "rlm"))]
+#[cfg(not(feature = "codemode"))]
 fn start_generation(_record: &serde_json::Value, _stamp: Option<&str>) -> Option<Extraction> {
     None
 }
@@ -432,7 +432,7 @@ mod tests {
     /// the generation this build runs its input as: a matching stamp is
     /// readable, a foreign or missing stamp is a decided refusal, and a
     /// process that has not started yields nothing.
-    #[cfg(feature = "rlm")]
+    #[cfg(feature = "codemode")]
     #[tokio::test]
     async fn a_started_process_is_judged_by_its_start_stamp() {
         let input = lash_vm_runtime::KernelProcessInput {

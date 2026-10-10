@@ -379,7 +379,7 @@ impl Walk {
                         .or_default()
                         .undecodable(reason, self.max_undecodable_reasons);
                 }
-                #[cfg(feature = "rlm")]
+                #[cfg(feature = "codemode")]
                 Extraction::IdentityMismatch { format, detail } => {
                     self.tallies
                         .entry(format)
@@ -397,7 +397,7 @@ impl Walk {
                         detail: format!("{}: {detail}", owner(item)),
                     });
                 }
-                #[cfg(feature = "rlm")]
+                #[cfg(feature = "codemode")]
                 Extraction::IdentityMatch { format } => {
                     self.tallies.entry(format).or_default().identity_match();
                 }

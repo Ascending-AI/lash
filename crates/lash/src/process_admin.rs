@@ -520,7 +520,7 @@ impl Processes {
     /// The read names the definition through the process's own recorded
     /// input, so it answers for as long as the row is retained, on any core
     /// over the same stores.
-    #[cfg(feature = "rlm")]
+    #[cfg(feature = "codemode")]
     pub async fn graph(&self, process_id: &ProcessId) -> Result<crate::workflow::WorkflowRead> {
         use crate::workflow::{WorkflowRead, WorkflowUnavailable};
         let Some(process) = self.get(process_id).await? else {

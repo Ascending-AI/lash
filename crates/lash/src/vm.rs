@@ -1,3 +1,6 @@
+//! Install [`KernelProcessPluginFactory`] beside the session protocol to edit
+//! and execute workflows. The RLM protocol contributes this engine itself.
+//!
 //! Hosting the kernel machine: the worker pool, the worker's entry and what
 //! it registers, and the host boundary a document runs against.
 //!
@@ -35,7 +38,7 @@ pub use lash_vm_client::{
     Deadlines as WorkerDeadlines, PoolConfig as WorkerPoolConfig, WorkerEntry, WorkerTuning,
 };
 /// A helper release a worker retains beside its own functions (FIG-5799).
-pub use lash_vm_runtime::HelperReleaseIndex;
+pub use lash_vm_runtime::{HelperReleaseIndex, KernelProcessPluginFactory};
 /// What a worker registers when it starts: the kernel library, extension
 /// functions and the dialects it lowers and prints.
 #[cfg(feature = "worker")]
@@ -47,7 +50,7 @@ pub use lash_vm_worker::{
 
 /// The host boundary in the kernel type grammar, the providers that answer
 /// projection reads with kernel data, and how a tool is named in guest code.
-#[cfg(feature = "rlm")]
+#[cfg(feature = "codemode")]
 pub use lash_vm_runtime::{
     BoundaryError, HostBoundary, HostEffect, ProjectionCatalog, ProjectionProvider,
     ProjectionRefusal, ToolBindingError, required_tool_executable, type_of_schema,
@@ -59,7 +62,7 @@ pub use lash_vm_runtime::{
 /// kernel-migration list` prints, over the library a host's workers hold;
 /// and the sweep `lashctl kernel-migration run` makes before the window
 /// closes (FIG-5787).
-#[cfg(feature = "rlm")]
+#[cfg(feature = "codemode")]
 pub use crate::kernel_migration::{
     KERNEL_MIGRATION_SWEEP, KernelMigrationSweep, survey_kernel_migration, sweep_kernel_migration,
 };
@@ -72,12 +75,12 @@ pub use lash_vm_client::{
     RunMeters, RunRefusal, SequenceFault, SupervisorEvidence, TransportSequence, VmOwner,
     WorkerDeploymentFault, WorkerLimit,
 };
-#[cfg(feature = "rlm")]
+#[cfg(feature = "codemode")]
 pub use lash_vm_client::{StateDigest, StateExpectation};
 /// Why lash's shipped library did not assemble: a defect of the build.
-#[cfg(feature = "rlm")]
+#[cfg(feature = "codemode")]
 pub use lash_vm_runtime::LibraryError;
-#[cfg(feature = "rlm")]
+#[cfg(feature = "codemode")]
 pub use lash_vm_runtime::{
     DocumentRefusal as KernelDocumentRefusal, DocumentStoreError as KernelDocumentStoreError,
     KernelMigrationRefusal, KernelMigrationSurvey, KernelMigrationSurveyError,
@@ -86,5 +89,5 @@ pub use lash_vm_runtime::{
 };
 /// What still pins a helper release before this build's own, and why a
 /// node that adopts would not adopt a process off it (FIG-5799).
-#[cfg(feature = "rlm")]
+#[cfg(feature = "codemode")]
 pub use lash_vm_runtime::{HelperAdoptionRefusal, HelperDependentProcess, HelperDependentSession};
