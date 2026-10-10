@@ -1,10 +1,10 @@
 //! Functions as closures of the dialect's calling convention,
 //! `fn(this, args)`.
 
-use lash_kernel_doc::{Expr, Float, Literal, Stmt};
+use lash_kernel_doc::{Expr, Float, Literal, Place, Stmt};
 
 use super::patterns::Mode;
-use super::{BindingKind, FunctionFrame, Lowerer, Lowering, Operand, Ty};
+use super::{BindingKind, Buf, FunctionFrame, Lowerer, Lowering, Operand, Ty};
 use crate::adapter as ast;
 
 impl Lowerer<'_> {
@@ -204,17 +204,30 @@ impl Lowerer<'_> {
             .count();
         #[expect(clippy::cast_precision_loss, reason = "a function's parameter count")]
         let count = Operand::number(positional as f64);
-        let padded = if positional == 0 {
+        let supplied = if positional == 0 {
             args.clone()
         } else {
-            self.invoke("ts.pad", &[args.clone(), count.clone()], Ty::Unknown)?
+            // Most calls already supply every position. Only a short list
+            // needs a copy with undefined slots; retain the original args for
+            // rest and the independent strict arguments object.
+            let slot = self.temp();
+            self.bind(slot.clone(), args.clone());
+            let length = self.native("list.len", vec![args.expr()])?;
+            let missing = self.native("num.lt", vec![length, count.expr()])?;
+            let fill = self.block(|this| {
+                let padded = this.invoke("ts.pad", &[args.clone(), count.clone()], Ty::Unknown)?;
+                this.store(Place::Variable(slot.clone()), padded);
+                Ok(())
+            })?;
+            self.emit_if(missing, fill, Buf::default());
+            Operand::variable(slot, Ty::Unknown)
         };
         for (index, param) in params.iter().enumerate() {
             let value = match param {
                 ast::Pattern::Rest(_) => {
                     self.invoke("ts.rest", &[args.clone(), count.clone()], Ty::Unknown)?
                 }
-                _ => self.let_expr(Self::element(&padded, index), Ty::Unknown),
+                _ => self.let_expr(Self::element(&supplied, index), Ty::Unknown),
             };
             self.destructure(param, value, Mode::Local)?;
         }

@@ -10,7 +10,7 @@ use super::{lower_against, lower_in_session, main_text};
 
 /// The statements of `source`'s lowered `main` that compute something: a
 /// direct kernel call or a helper call, without the binding's name. A
-/// function's calling convention (its closure, its token and its padded
+/// function's calling convention (its closure, its token and its positional
 /// arguments) is not one.
 fn operations(source: &str) -> Vec<String> {
     main_text(source)
@@ -58,14 +58,18 @@ fn declared_types_choose_the_kernel_function() {
     }
     // The second operation of a chain takes the first one's result as the
     // float it is.
-    assert_eq!(
-        operations("function f(a: number, b: number) { return a * b / 2; }")[1],
-        "num.div(t4, 2.0)"
-    );
+    let chain = operations("function f(a: number, b: number) { return a * b / 2; }");
+    assert!(chain[1].starts_with("num.div("), "{chain:?}");
+    assert!(!chain[1].contains("num.to_float("), "{chain:?}");
     // A property read keeps JavaScript's meaning; what it gives is believed.
-    assert_eq!(
-        operations("function f(o: { n: number }) { return o.n + 1; }"),
-        ["invoke ts.read(o, \"n\")", "num.add(num.to_float(t3), 1.0)"]
+    let property = operations("function f(o: { n: number }) { return o.n + 1; }");
+    assert_eq!(property[0], "invoke ts.read(o, \"n\")");
+    assert!(
+        property
+            .last()
+            .unwrap()
+            .starts_with("num.add(num.to_float("),
+        "{property:?}"
     );
 }
 
@@ -152,21 +156,20 @@ fn a_test_narrows_a_binding_nothing_assigns() {
     );
     // A union loses the member a test excludes, and an `if` that always
     // leaves narrows what follows it.
-    assert_eq!(
-        operations(
-            "function f(x: number | undefined, y?: number, z: number | null = null) { \
+    let union = operations(
+        "function f(x: number | undefined, y?: number, z: number | null = null) { \
              if (x === undefined) { return 0; } \
              if (y == null || z === null) { return 1; } \
-             return x + y + z; }"
-        )
-        .iter()
-        .rev()
-        .take(2)
-        .collect::<Vec<_>>(),
-        [
-            "num.add(t10, num.to_float(z))",
-            "num.add(num.to_float(x), num.to_float(y))"
-        ]
+             return x + y + z; }",
+    );
+    assert_eq!(
+        union[union.len() - 2],
+        "num.add(num.to_float(x), num.to_float(y))"
+    );
+    assert!(union.last().unwrap().starts_with("num.add("), "{union:?}");
+    assert!(
+        union.last().unwrap().ends_with(", num.to_float(z))"),
+        "{union:?}"
     );
     assert_eq!(
         operations(

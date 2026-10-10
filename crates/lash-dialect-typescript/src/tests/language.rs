@@ -5,33 +5,6 @@ use lash_kernel_doc::Name;
 use super::{lower, lower_in_session, main_text};
 use crate::DiagnosticCode;
 
-/// Function declarations exist from their block's start and reach each
-/// other whatever their order: the one declared later is a variable the
-/// earlier one's closure already shares.
-#[test]
-fn function_declarations_are_hoisted_and_mutually_reachable() {
-    let text = main_text(
-        "even(2); function even(n) { return n === 0 || odd(n - 1); } \
-         function odd(n) { return n !== 0 && even(n - 1); }",
-    );
-    assert!(
-        text.starts_with("let odd = absent\nlet t10 = fn("),
-        "{text}"
-    );
-    assert!(
-        text.contains("\nlet even = (\"ts.function\", \"\", \"even\", 1.0, t10, {})\n"),
-        "{text}"
-    );
-    assert!(
-        text.contains("\nset odd = (\"ts.function\", \"\", \"odd\", 1.0, t21, {})\n"),
-        "{text}"
-    );
-    assert!(
-        text.ends_with("let t24 = even[4.0]\ndo apply t24(absent, t23)"),
-        "{text}"
-    );
-}
-
 /// A function that ends without `return` gives `undefined`; the kernel's
 /// own default is null.
 #[test]
@@ -225,6 +198,71 @@ fn strict_arguments_have_object_brand_and_restricted_callee() {
             "function f(a) { const args = arguments; args.length = 4294967296; let poisoned = false; try { args.callee; } catch(e) { poisoned = e.name === 'TypeError'; } const lexical = () => arguments; const independent = args[0] === a; args[0] = 8; const unmapped = a === 3; const huge = args.length === 4294967296; delete args.length; args.length = 'small'; return !Array.isArray(args) && poisoned && independent && unmapped && huge && args.length === 'small' && lexical() === args; } await finish(f(3));"
         ),
         Ended::Finished(lash_kernel_doc::Datum::Bool(true))
+    );
+}
+
+/// ECMA-262 FunctionDeclarationInstantiation: missing positions are undefined,
+/// defaults run left to right only for undefined, rest is fresh, and strict
+/// arguments retain the supplied length and values after the call returns.
+#[test]
+fn parameters_preserve_defaults_rest_and_escaping_arguments() {
+    use super::machine::{Ended, end};
+    assert_eq!(
+        end(r#"
+            let order = '';
+            const hoisted = even(4);
+            function even(n) { return n === 0 || odd(n - 1); }
+            function odd(n) { return n !== 0 && even(n - 1); }
+            function mark(name, value) { order += name; return value; }
+            function f(a = mark('a', 1), b = mark('b', a + 1), c, ...rest) {
+                return {a, b, c, rest, args: arguments, lexical: () => arguments};
+            }
+            const missing = f();
+            const supplied = f(null, undefined, 3, 4, 5);
+            supplied.rest[0] = 8; supplied.args[0] = 9;
+            const again = f(7, 8);
+            let correct = hoisted && order === 'abb' && missing.a === 1 && missing.b === 2;
+            correct &&= missing.c === undefined && missing.rest.length === 0 && missing.args.length === 0;
+            correct &&= missing.lexical() === missing.args && supplied.a === null && supplied.b === 1;
+            correct &&= supplied.c === 3 && supplied.rest[0] === 8 && supplied.args[3] === 4;
+            correct &&= supplied.args.length === 5 && supplied.lexical() === supplied.args;
+            correct &&= again.a === 7 && again.b === 8 && again.args[0] === 7 && again.args !== supplied.args;
+            await finish(correct);
+            "#),
+        Ended::Finished(lash_kernel_doc::Datum::Bool(true)),
+    );
+}
+
+/// K-ITER-004: string iteration yields Unicode code points, and a guest
+/// iterator keeps its next side effects and stops at break without prefetch.
+#[test]
+fn for_of_preserves_unicode_and_custom_next_order() {
+    use super::machine::{Ended, end};
+    let resumed = super::machine::run(
+        "for (const point of 'a😀z') { const value = await echo(point); console.log(value); }",
+        &[],
+    );
+    assert_eq!(resumed.end, "ok");
+    assert_eq!(resumed.lines(), ["a", "😀", "z"]);
+    assert_eq!(
+        end(r#"
+            let parts = []; for (const point of 'a😀é') parts.push(point);
+            let calls = 0;
+            const iterator = {brand: 'ts.iterator', next() {
+                calls++; return {done: calls > 3, value: calls};
+            }};
+            let sum = 0;
+            for (const value of iterator) { sum += value; if (value === 2) break; }
+            const remaining = iterator.next();
+            const match = /(.)(x)?/.exec('a'); let matched = [];
+            for (const value of match) matched.push(value);
+            let correct = parts.length === 4 && parts[0] === 'a' && parts[1] === '😀';
+            correct &&= parts[2] === 'e' && parts[3] === '́' && sum === 3;
+            correct &&= calls === 3 && remaining.value === 3 && matched.length === 3;
+            correct &&= matched[0] === 'a' && matched[1] === 'a' && matched[2] === undefined;
+            await finish(correct);
+            "#),
+        Ended::Finished(lash_kernel_doc::Datum::Bool(true)),
     );
 }
 

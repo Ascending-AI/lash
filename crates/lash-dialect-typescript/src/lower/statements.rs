@@ -532,8 +532,8 @@ impl Lowerer<'_> {
                     this.emit_for(item, subject.expr(), list_body);
                     Ok(())
                 })?;
-                let branded =
-                    self.block(|this| this.lower_for_of_iterator(pattern, kind, subject, body))?;
+                let branded = self
+                    .block(|this| this.lower_for_of_iterator(pattern, kind, subject, None, body))?;
                 self.emit_if(list.expr(), live, branded);
                 return Ok(());
             }
@@ -588,8 +588,9 @@ impl Lowerer<'_> {
                 this.emit_for(key, subject.expr(), body);
                 Ok(())
             })?;
-            let array =
-                self.block(|this| this.lower_for_of_iterator(pattern, kind, subject, body))?;
+            let array = self.block(|this| {
+                this.lower_for_of_iterator(pattern, kind, subject, Some(receiver), body)
+            })?;
             self.emit_if(collection.expr(), live, array);
             return Ok(());
         }
@@ -610,6 +611,45 @@ impl Lowerer<'_> {
     }
 
     fn lower_for_of_iterator(
+        &mut self,
+        pattern: &ast::Pattern,
+        kind: Option<VarKind>,
+        subject: Operand,
+        receiver: Option<Operand>,
+        body: &ast::Stmt,
+    ) -> Lowering<()> {
+        let receiver = match receiver {
+            Some(receiver) => receiver,
+            None => self.invoke("ts.receiver", std::slice::from_ref(&subject), Ty::Text)?,
+        };
+        let text = self.same(receiver.expr(), Operand::text("text").expr())?;
+        let text = self.let_expr(text, Ty::Bool);
+        let builtin = self.short_circuit(ast::LogicalOp::Or, text, |this| {
+            let matched = this.same(receiver.expr(), Operand::text("brand:regex.match").expr())?;
+            Ok(this.let_expr(matched, Ty::Bool))
+        })?;
+        let direct = self.block(|this| {
+            // Text is immutable and ts.iterate already splits it into Unicode
+            // code points. A regex match retains its actual backing list.
+            // Neither needs an iterator object or a guest next() call.
+            let items = this.invoke("ts.iterate", std::slice::from_ref(&subject), Ty::Unknown)?;
+            let item = this.temp();
+            let raw = Operand::variable(item.clone(), Ty::Unknown);
+            let body = this.loop_block(Vec::new(), |this| {
+                let value = this.element_value(&raw)?;
+                this.destructure(pattern, value, mode_of(kind))?;
+                this.lower_statement(body)
+            })?;
+            this.emit_for(item, items.expr(), body);
+            Ok(())
+        })?;
+        let custom =
+            self.block(|this| this.lower_for_of_custom_iterator(pattern, kind, subject, body))?;
+        self.emit_if(builtin.expr(), direct, custom);
+        Ok(())
+    }
+
+    fn lower_for_of_custom_iterator(
         &mut self,
         pattern: &ast::Pattern,
         kind: Option<VarKind>,
