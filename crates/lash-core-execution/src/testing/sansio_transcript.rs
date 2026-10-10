@@ -84,8 +84,7 @@ fn record_effect<M: TurnProtocol>(transcript: &mut Transcript, actor: &str, effe
             );
         }
         Effect::Emit(event) => record_stream_event(transcript, actor, event),
-        Effect::AwaitToolResults { .. }
-        | Effect::SyncExecutionEnvironment { .. }
+        Effect::SyncExecutionEnvironment { .. }
         | Effect::Log { .. }
         | Effect::Progress { .. }
         | Effect::Done { .. } => {}

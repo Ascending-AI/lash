@@ -63,18 +63,16 @@ impl ProtocolDriverHandle for MidCallNoteDriver {
                 }),
                 note(),
             ]),
-            DriverAction::Start(PendingWork::WaitingForToolResults {
-                settled: None,
-                control: None,
-                calls: vec![PendingToolCall {
+            DriverAction::Start(PendingWork::tool_round(
+                vec![PendingToolCall {
                     call_id,
                     provider_call_id: None,
                     tool_name: TOOL.to_string(),
                     args: serde_json::json!({}),
                     replay: None,
                 }],
-                expansion: ToolExpansionPlan::default(),
-            }),
+                ToolExpansionPlan::default(),
+            )),
         ]
     }
 

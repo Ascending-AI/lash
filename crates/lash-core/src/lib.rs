@@ -437,9 +437,9 @@ pub mod sansio {
     pub use lash_sansio::sansio::{
         ChatContextProjector, CheckpointDelivery, CheckpointResumeAction, ContextProjector,
         EffectId, ExecutionEnvironmentSync, ExecutionEnvironmentSyncFailure,
-        ExecutionEnvironmentSyncFailureKind, ExpandedRow, ExpandedWrapper, HeldControl,
-        LlmCallError, ModelToolCalls, PendingToolCall, PendingWork, ProtocolDriverHandle,
-        ResponseToolCalls, SyncedEnvironment, ToolExpansionPlan, TurnMachine, place_prompt,
+        ExecutionEnvironmentSyncFailureKind, ExpandedRow, ExpandedWrapper, LlmCallError,
+        ModelToolCalls, PendingToolCall, PendingWork, ProtocolDriverHandle, ResponseToolCalls,
+        SyncedEnvironment, ToolExpansionPlan, ToolWave, TurnMachine, place_prompt,
     };
 }
 
@@ -466,8 +466,8 @@ pub use lash_sansio::{
     BindingChanges, BoundedRetry, CancelOrigin, CancelRequest, CellControl, CellDefect,
     CellFailure, CellFailureKind, CellOutcome, CellPrint, CellRecord, CheckpointDelivery,
     CheckpointKind, CompactToolContract, CompletionCandidate, CompletionDisposition,
-    DeclarationRefusal, DegradedBinding, ExecCodeFailure, ExecCodeFailureReason, ExecResponse,
-    ExecutedCall, ExecutedCallOutcome, ExecutionBudgets, ExecutionBudgetsConfig,
+    DecidedCompletion, DeclarationRefusal, DegradedBinding, ExecCodeFailure, ExecCodeFailureReason,
+    ExecResponse, ExecutedCall, ExecutedCallOutcome, ExecutionBudgets, ExecutionBudgetsConfig,
     ExecutionBudgetsError, ExecutionLimit, ExecutionPolicy, FinishDeclaration, FrameKey,
     FrameKeyError, InputId, InternalPartKind, JsonSchema, LimitCause, LlmCallError, LlmUsage,
     MediaType, Message, MessageOrigin, MessageRole, NodeId, OmittedToolCalls, OutcomeShape,

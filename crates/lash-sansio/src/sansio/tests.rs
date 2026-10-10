@@ -836,10 +836,8 @@ impl ProtocolDriverHandle for ToolBatchDriver {
         _calls: &crate::ResponseToolCalls,
         _text_streamed: bool,
     ) -> Vec<DriverAction> {
-        vec![DriverAction::Start(PendingWork::WaitingForToolResults {
-            settled: None,
-            control: None,
-            calls: vec![
+        vec![DriverAction::Start(PendingWork::tool_round(
+            vec![
                 PendingToolCall {
                     call_id: crate::ToolCallId::fixture("call-read"),
                     provider_call_id: None,
@@ -858,9 +856,16 @@ impl ProtocolDriverHandle for ToolBatchDriver {
                         ..ProviderReplayMeta::default()
                     }),
                 },
+                PendingToolCall {
+                    call_id: crate::ToolCallId::fixture("call-slow"),
+                    provider_call_id: None,
+                    tool_name: "slow_tool".to_string(),
+                    args: serde_json::json!({}),
+                    replay: None,
+                },
             ],
-            expansion: ToolExpansionPlan::default(),
-        })]
+            ToolExpansionPlan::default(),
+        ))]
     }
 
     fn handle_tool_results(
@@ -1721,7 +1726,7 @@ fn turn_checkpoint_pins_the_waiting_state_encoding() {
         || Arc::new(ToolBatchDriver),
         tool_calls,
         serde_json::json!({"Waiting": {"effect_id": 3, "work": {"kind": "work", "work": {"WaitingForToolResults": {
-            "calls": serde_json::to_value(calls).expect("calls json"),
+            "wave": {"wave": "round", "calls": serde_json::to_value(calls).expect("calls json")},
         }}}}}),
     );
 

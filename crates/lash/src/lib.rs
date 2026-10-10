@@ -830,11 +830,11 @@ pub mod plugins {
     pub use lash_protocol_standard::BatchSugar;
     pub use lash_sansio::{
         AttachmentMaterializationNotice, CheckpointResumeAction, CompletionCandidate,
-        CompletionDisposition, DegradedBinding, DriverAction, DriverContextView, EffectId,
-        ExpandedRow, ExpandedWrapper, HeldControl, ModelToolCalls, ModelToolReturn, PendingWork,
+        CompletionDisposition, DecidedCompletion, DegradedBinding, DriverAction, DriverContextView,
+        EffectId, ExpandedRow, ExpandedWrapper, ModelToolCalls, ModelToolReturn, PendingWork,
         ProjectorContext, ResponseToolCalls, SessionStreamEvent, StreamMessageKind,
-        ToolCatalogBuildError, ToolContractResolver, ToolExpansionPlan, TurnMachineConfig,
-        TurnProtocol, UndecodableDriverState, UnitTurnProtocol, WriterFormats,
+        ToolCatalogBuildError, ToolContractResolver, ToolExpansionPlan, ToolWave,
+        TurnMachineConfig, TurnProtocol, UndecodableDriverState, UnitTurnProtocol, WriterFormats,
     };
     /// The protocol-generic forms [`TurnDriverConfig`] and
     /// [`TurnDriverPreamble`] specialize to the host's turn protocol.

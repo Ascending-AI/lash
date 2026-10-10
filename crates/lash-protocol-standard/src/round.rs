@@ -47,15 +47,28 @@ pub(crate) struct RoundRules<'a> {
 /// A planned round.
 #[derive(Default)]
 pub(crate) struct RoundPlan {
-    /// The ordinary slots, in slot order.
+    /// The ordinary slots, in slot order: every one when the step makes no
+    /// control call, else the ones before it.
     pub(crate) calls: Vec<PendingToolCall>,
     /// How the slots, the control call's among them, fold back into the
     /// response's calls.
     pub(crate) plan: ToolExpansionPlan,
-    /// The control call and the flat slot it answers at.
-    pub(crate) control: Option<(u32, PendingToolCall)>,
+    /// The control call and the ordinary slots after it, in slot order.
+    pub(crate) control: Option<(PendingToolCall, Vec<PendingToolCall>)>,
     /// Calls refused before dispatch, in response order.
     pub(crate) refused: Vec<(PendingToolCall, ToolCallOutput)>,
+}
+
+impl RoundPlan {
+    /// Dispatch `call` at the next slot: the step's control call when
+    /// `control`, an ordinary slot before or after it otherwise.
+    fn dispatch(&mut self, call: PendingToolCall, control: bool) {
+        match &mut self.control {
+            Some((_, after)) => after.push(call),
+            None if control => self.control = Some((call, Vec::new())),
+            None => self.calls.push(call),
+        }
+    }
 }
 
 /// A dispatched call of the response, before slots are numbered.
@@ -162,11 +175,7 @@ pub(crate) fn plan_round(calls: Vec<ResponseCall>, rules: &RoundRules<'_>) -> Ro
                 round.refused.push((call, output));
             }
             Entry::Call { call, control } => {
-                if control {
-                    round.control = Some((slot, call));
-                } else {
-                    round.calls.push(call);
-                }
+                round.dispatch(call, control);
                 slot += 1;
                 source_position += 1;
             }
@@ -205,11 +214,7 @@ pub(crate) fn plan_round(calls: Vec<ResponseCall>, rules: &RoundRules<'_>) -> Ro
                                 args: parameters,
                                 replay: None,
                             };
-                            if control {
-                                round.control = Some((slot, member));
-                            } else {
-                                round.calls.push(member);
-                            }
+                            round.dispatch(member, control);
                             slot += 1;
                         }
                         Member::Refused { index, tool, error } => {

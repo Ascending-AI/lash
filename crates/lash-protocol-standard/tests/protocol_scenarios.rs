@@ -951,18 +951,16 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for ThirdPartyDriver {
                 },
                 driver_state: None,
             },
-            PublicWork::Tool => PendingWork::WaitingForToolResults {
-                settled: None,
-                control: None,
-                calls: vec![PendingToolCall {
+            PublicWork::Tool => PendingWork::tool_round(
+                vec![PendingToolCall {
                     call_id: lash_core::ToolCallId::fixture("third-party-call"),
                     provider_call_id: Some("provider-call".into()),
                     tool_name: "external_tool".into(),
                     args: serde_json::json!({"argument": 17}),
                     replay: None,
                 }],
-                expansion: Default::default(),
-            },
+                Default::default(),
+            ),
             PublicWork::Code => PendingWork::Exec {
                 language: "typescript".into(),
                 code: "finish(17)".into(),

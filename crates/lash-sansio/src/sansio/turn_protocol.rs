@@ -171,10 +171,6 @@ pub enum Effect<M: TurnProtocol = UnitTurnProtocol> {
         #[serde(default, skip_serializing_if = "ToolExpansionPlan::is_empty")]
         expansion: ToolExpansionPlan,
     },
-    AwaitToolResults {
-        id: EffectId,
-        state: serde_json::Value,
-    },
     ExecCode {
         id: EffectId,
         language: String,
@@ -239,10 +235,6 @@ impl<M: TurnProtocol> Clone for Effect<M> {
                 id: *id,
                 calls: calls.clone(),
                 expansion: expansion.clone(),
-            },
-            Self::AwaitToolResults { id, state } => Self::AwaitToolResults {
-                id: *id,
-                state: state.clone(),
             },
             Self::ReportToolCalls { id, completed } => Self::ReportToolCalls {
                 id: *id,
@@ -329,7 +321,8 @@ pub enum Response<I = ()> {
         /// so the driver should skip emitting text-delta stream blocks.
         text_streamed: bool,
     },
-    /// Native tool results.
+    /// Native tool results: one per call the tool wave dispatched, in its
+    /// order.
     ToolResults {
         id: EffectId,
         results: Vec<CompletedToolCall<I>>,
@@ -505,19 +498,13 @@ pub enum PendingWork<M: TurnProtocol = UnitTurnProtocol> {
         driver_state: Option<M::DriverState>,
     },
     WaitingForToolResults {
-        /// The flat executable slots of the step's one tool group.
-        calls: Vec<PendingToolCall>,
-        /// Settled dispatch state owned by the runtime; present only after every dispatch ended.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        settled: Option<serde_json::Value>,
+        /// The wave of the step's one tool group the host runs now, which
+        /// owns every call it dispatches.
+        wave: Box<ToolWave<M::IntentOutcome>>,
         /// How the slots fold back into the response's calls. Empty when the
         /// response held no sugar, and then absent from the encoding.
         #[serde(default, skip_serializing_if = "ToolExpansionPlan::is_empty")]
         expansion: ToolExpansionPlan,
-        /// The step's control call and the wave the round is in, when the
-        /// step makes one.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        control: Option<Box<HeldControl<M::IntentOutcome>>>,
     },
     Exec {
         language: String,
@@ -530,69 +517,96 @@ pub enum PendingWork<M: TurnProtocol = UnitTurnProtocol> {
     },
 }
 
-/// A step's control call (DESIGN §3): it takes flat slot `slot` of the
-/// step's tool group, but runs alone, after the group's other slots settle.
+/// The wave of a step's tool group (DESIGN §3) the host runs: the flat
+/// slots it dispatches, in slot order, and the slots it holds back. A step's
+/// control call runs alone, after the group's other slots settle, and
+/// answers between the slots before and after it.
 #[derive(Clone, Debug, Serialize, serde::Deserialize)]
 #[serde(
     tag = "wave",
     rename_all = "snake_case",
+    deny_unknown_fields,
     bound(serialize = "I: Serialize", deserialize = "I: serde::Deserialize<'de>")
 )]
-pub enum HeldControl<I = ()> {
-    /// The other slots run while the control call waits. It runs next when
-    /// every one of them succeeded, and is refused before its body runs
-    /// when one failed or was cancelled (`ControlSiblingFailed`).
-    Waiting { slot: u32, call: PendingToolCall },
-    /// The control call runs. `siblings` are the other slots' results,
-    /// unfolded and in slot order; its own joins them at `slot`.
-    Running {
-        slot: u32,
-        siblings: Vec<CompletedToolCall<I>>,
+pub enum ToolWave<I = ()> {
+    /// A step without a control call: every slot runs.
+    Round { calls: Vec<PendingToolCall> },
+    /// The slots around the control call run while it waits. It runs next
+    /// when every one of them succeeded, and is refused before its body
+    /// runs when one failed or was cancelled (`ControlSiblingFailed`).
+    Siblings {
+        before: Vec<PendingToolCall>,
+        control: PendingToolCall,
+        after: Vec<PendingToolCall>,
     },
+    /// The control call runs, its siblings' results around it.
+    Control {
+        before: Vec<CompletedToolCall<I>>,
+        control: PendingToolCall,
+        after: Vec<CompletedToolCall<I>>,
+    },
+}
+
+impl<I> ToolWave<I> {
+    /// The calls the host runs in this wave, in slot order.
+    pub fn dispatched(&self) -> Vec<PendingToolCall> {
+        self.calls().into_iter().cloned().collect()
+    }
+
+    fn calls(&self) -> Vec<&PendingToolCall> {
+        match self {
+            Self::Round { calls } => calls.iter().collect(),
+            Self::Siblings { before, after, .. } => before.iter().chain(after).collect(),
+            Self::Control { control, .. } => vec![control],
+        }
+    }
+
+    /// Whether `results` answer exactly the calls this wave dispatched, one
+    /// each, in slot order.
+    fn answered_by(&self, results: &[CompletedToolCall<I>]) -> bool {
+        let calls = self.calls();
+        calls.len() == results.len()
+            && calls
+                .iter()
+                .zip(results)
+                .all(|(call, result)| call.call_id == result.call_id)
+    }
 }
 
 impl<M: TurnProtocol> PendingWork<M> {
     /// The step's tool round over `calls`, folded back by `expansion`.
     pub fn tool_round(calls: Vec<PendingToolCall>, expansion: ToolExpansionPlan) -> Self {
         Self::WaitingForToolResults {
-            calls,
-            settled: None,
+            wave: Box::new(ToolWave::Round { calls }),
             expansion,
-            control: None,
         }
     }
 
-    /// The step's tool round over `calls` and its `control` call, which
-    /// takes flat slot `slot` and runs once `calls` settled (see
-    /// [`HeldControl`]). With no other call it runs at once.
+    /// The step's tool round with its `control` call between the slots
+    /// `before` and `after` it, which run first (see [`ToolWave`]). With no
+    /// other slot it runs at once.
     pub fn tool_round_with_control(
-        calls: Vec<PendingToolCall>,
-        expansion: ToolExpansionPlan,
-        slot: u32,
+        before: Vec<PendingToolCall>,
         control: PendingToolCall,
+        after: Vec<PendingToolCall>,
+        expansion: ToolExpansionPlan,
     ) -> Self {
-        let (calls, control) = if calls.is_empty() {
-            (
-                vec![control],
-                HeldControl::Running {
-                    slot,
-                    siblings: Vec::new(),
-                },
-            )
+        let wave = if before.is_empty() && after.is_empty() {
+            ToolWave::Control {
+                before: Vec::new(),
+                control,
+                after: Vec::new(),
+            }
         } else {
-            (
-                calls,
-                HeldControl::Waiting {
-                    slot,
-                    call: control,
-                },
-            )
+            ToolWave::Siblings {
+                before,
+                control,
+                after,
+            }
         };
         Self::WaitingForToolResults {
-            calls,
-            settled: None,
+            wave: Box::new(wave),
             expansion,
-            control: Some(Box::new(control)),
         }
     }
 }
@@ -608,16 +622,9 @@ impl<M: TurnProtocol> Clone for PendingWork<M> {
                 request: Arc::clone(request),
                 driver_state: driver_state.clone(),
             },
-            Self::WaitingForToolResults {
-                calls,
-                expansion,
-                settled,
-                control,
-            } => Self::WaitingForToolResults {
-                settled: settled.clone(),
-                calls: calls.clone(),
+            Self::WaitingForToolResults { wave, expansion } => Self::WaitingForToolResults {
+                wave: wave.clone(),
                 expansion: expansion.clone(),
-                control: control.clone(),
             },
             Self::Exec {
                 language,
@@ -649,21 +656,10 @@ impl<M: TurnProtocol> PendingWork<M> {
                 id,
                 request: Arc::clone(request),
             },
-            Self::WaitingForToolResults {
-                calls,
-                expansion,
-                settled,
-                ..
-            } => match settled {
-                None => Effect::ToolCalls {
-                    id,
-                    calls: calls.clone(),
-                    expansion: expansion.clone(),
-                },
-                Some(state) => Effect::AwaitToolResults {
-                    id,
-                    state: state.clone(),
-                },
+            Self::WaitingForToolResults { wave, expansion } => Effect::ToolCalls {
+                id,
+                calls: wave.dispatched(),
+                expansion: expansion.clone(),
             },
             Self::Exec { language, code, .. } => Effect::ExecCode {
                 id,
@@ -678,7 +674,9 @@ impl<M: TurnProtocol> PendingWork<M> {
     }
 
     /// Pair this work with `response` when it is the kind of answer the work
-    /// waits for, or hand the work back unchanged when it is not. Exhaustive
+    /// waits for, or hand the work back unchanged when it is not: a tool
+    /// wave's answer is one result per dispatched call, by its identity, in
+    /// slot order. Exhaustive
     /// over the work on purpose: a new kind of work must say which response
     /// answers it before the machine compiles.
     pub(super) fn answer(
@@ -712,23 +710,15 @@ impl<M: TurnProtocol> PendingWork<M> {
                     driver_state,
                 })),
             },
-            Self::WaitingForToolResults {
-                calls,
-                expansion,
-                settled,
-                control,
-            } => match response {
-                Response::ToolResults { results, .. } => Ok(AnsweredWork::Tools {
-                    expansion,
-                    results,
-                    control,
-                }),
-                _ => Err(Box::new(Self::WaitingForToolResults {
-                    calls,
-                    expansion,
-                    settled,
-                    control,
-                })),
+            Self::WaitingForToolResults { wave, expansion } => match response {
+                Response::ToolResults { results, .. } if wave.answered_by(&results) => {
+                    Ok(AnsweredWork::Tools {
+                        wave,
+                        expansion,
+                        results,
+                    })
+                }
+                _ => Err(Box::new(Self::WaitingForToolResults { wave, expansion })),
             },
             Self::Exec {
                 language,
@@ -777,9 +767,9 @@ pub(super) enum AnsweredWork<M: TurnProtocol = UnitTurnProtocol> {
         text_streamed: bool,
     },
     Tools {
+        wave: Box<ToolWave<M::IntentOutcome>>,
         expansion: ToolExpansionPlan,
         results: Vec<CompletedToolCall<M::IntentOutcome>>,
-        control: Option<Box<HeldControl<M::IntentOutcome>>>,
     },
     Exec {
         driver_state: M::DriverState,

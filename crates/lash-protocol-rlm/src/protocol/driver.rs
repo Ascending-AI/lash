@@ -621,7 +621,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
             Some(control),
         ) = (&record.result, settled_control)
         {
-            let candidate = lash_core::CompletionCandidate::pending(
+            let candidate = lash_core::CompletionCandidate::new(
                 ctx.protocol_iteration(),
                 call_id.clone(),
                 tool_name.clone(),

@@ -282,8 +282,9 @@ pub struct TurnCheckpoint<M: TurnProtocol = UnitTurnProtocol> {
     /// The environment the machine last synced, and the iteration it was
     /// synced for. `None` only before the protocol-start sync is answered.
     pub(super) environment: Option<SyncedEnvironment>,
-    /// The turn's decided completion candidates, in decision order.
-    pub(super) completion_candidates: Vec<crate::CompletionCandidate>,
+    /// The turn's decided completion candidates, in decision order: content,
+    /// as the history records are, since each holds its control.
+    pub(super) decided_completions: CheckpointContentRef,
 }
 
 /// A progress boundary that delivered protocol records: how many messages
@@ -638,7 +639,7 @@ pub struct TurnMachine<M: TurnProtocol = UnitTurnProtocol> {
     /// machine then finishes instead of starting further work.
     pub(super) run_abort: Option<RunAbort>,
     /// The turn's decided completion candidates, in decision order.
-    pub(super) completion_candidates: Vec<crate::CompletionCandidate>,
+    pub(super) decided_completions: Vec<crate::DecidedCompletion>,
 }
 
 /// The Run control a tool result carried: the namespaced code and message

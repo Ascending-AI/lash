@@ -611,12 +611,12 @@ impl TerminationMode {
     }
 }
 
-/// What became of a [`CompletionCandidate`].
+/// How BeforeCompletion decided a [`CompletionCandidate`]. An undecided
+/// candidate is the one its completion checkpoint holds
+/// (`CheckpointResumeAction::Complete`), never a disposition.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CompletionDisposition {
-    /// The control settled; the turn has not passed BeforeCompletion.
-    Pending,
     /// Nothing arrived at BeforeCompletion: the turn ended or switched.
     Accepted,
     /// Input arrived at BeforeCompletion: the turn went on, and the
@@ -637,12 +637,19 @@ pub struct CompletionCandidate {
     pub call_id: crate::ToolCallId,
     pub tool_name: String,
     pub control: crate::TurnControl,
+}
+
+/// A completion candidate and how BeforeCompletion decided it.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DecidedCompletion {
+    pub candidate: CompletionCandidate,
     pub disposition: CompletionDisposition,
 }
 
 impl CompletionCandidate {
     /// The candidate a settled control call records.
-    pub fn pending(
+    pub fn new(
         iteration: usize,
         call_id: crate::ToolCallId,
         tool_name: impl Into<String>,
@@ -653,7 +660,6 @@ impl CompletionCandidate {
             call_id,
             tool_name: tool_name.into(),
             control,
-            disposition: CompletionDisposition::Pending,
         }
     }
 

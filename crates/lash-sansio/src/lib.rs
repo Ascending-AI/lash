@@ -85,11 +85,11 @@ pub use run_aggregate::RunAggregateWakePolicy;
 pub use sansio::{
     ChatContextProjector, CheckpointContentRef, CheckpointDelivery, CheckpointResumeAction,
     CompletedToolCall, ContextProjector, DriverAction, DriverContextView, Effect, EffectId,
-    ExpandedRow, ExpandedWrapper, HeldControl, LlmCallError, ModelToolCalls, PendingToolCall,
-    PendingWork, ProjectorContext, ProtocolDriverHandle, Response, ResponseToolCalls, SavedTurn,
-    TURN_CHECKPOINT_SCHEMA_VERSION, ToolExpansionPlan, TurnCheckpoint, TurnCheckpointContent,
-    TurnCheckpointRestoreError, TurnMachine, TurnMachineConfig, TurnProtocol, TurnWindow,
-    TurnWindowPin, UndecodableDriverState, UnitTurnProtocol,
+    ExpandedRow, ExpandedWrapper, LlmCallError, ModelToolCalls, PendingToolCall, PendingWork,
+    ProjectorContext, ProtocolDriverHandle, Response, ResponseToolCalls, SavedTurn,
+    TURN_CHECKPOINT_SCHEMA_VERSION, ToolExpansionPlan, ToolWave, TurnCheckpoint,
+    TurnCheckpointContent, TurnCheckpointRestoreError, TurnMachine, TurnMachineConfig,
+    TurnProtocol, TurnWindow, TurnWindowPin, UndecodableDriverState, UnitTurnProtocol,
 };
 pub use schema_contract::{
     OmissionNullPath, OmissionNullPathSegment, ProjectionMode, ProviderSchemaCapabilities,
@@ -105,12 +105,12 @@ pub use session::{
 pub use session_model::message::{MessageOrigin, TurnOutputSource, TurnReply, same_message};
 pub use session_model::{
     AcceptedInjectedTurnInput, BaseRenderCache, CompletionCandidate, CompletionDisposition,
-    ConversationRecord, ErrorEnvelope, FailureCode, HostNamespace, InternalPartKind,
-    InvalidNamespace, LlmUsage, MaxToolCalls, Message, MessageRole, MessageSequence, Namespace,
-    NoProgressBudget, Part, PartAttachment, PartKind, ProtocolEvent, RenderedPrompt,
-    ReportedFailure, RetryProgress, SessionAppendNode, SessionHistoryRecord, SessionStreamEvent,
-    StoredDataCorruption, StreamMessageKind, TerminationMode, TokenUsageOverflow,
-    ToolCallLimitExceeded, ToolCallLimitScope, TurnBudget, TurnCancelMode,
+    ConversationRecord, DecidedCompletion, ErrorEnvelope, FailureCode, HostNamespace,
+    InternalPartKind, InvalidNamespace, LlmUsage, MaxToolCalls, Message, MessageRole,
+    MessageSequence, Namespace, NoProgressBudget, Part, PartAttachment, PartKind, ProtocolEvent,
+    RenderedPrompt, ReportedFailure, RetryProgress, SessionAppendNode, SessionHistoryRecord,
+    SessionStreamEvent, StoredDataCorruption, StreamMessageKind, TerminationMode,
+    TokenUsageOverflow, ToolCallLimitExceeded, ToolCallLimitScope, TurnBudget, TurnCancelMode,
     TurnCancelUndeliveredInputPolicy, TurnCancellationEvidence, TurnFailureCode, TurnFailureKind,
     TurnFinish, TurnOutcome, TurnStop, messages_are_prompt_resume_safe, same_history_record,
     shared_parts,

@@ -512,6 +512,59 @@ fn a_failed_sibling_refuses_the_control_call_before_it_runs() {
     );
 }
 
+/// The tool calls an answered round reported, by name, in slot order.
+fn reported_calls(effects: &[Effect]) -> Vec<String> {
+    effects
+        .iter()
+        .filter_map(|effect| match effect {
+            Effect::Emit(SessionStreamEvent::ToolCall { name, .. }) => Some(name.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// FIG-5831: a tool wave owns the calls it dispatched. An answer that is not
+/// one result per dispatched call, by identity and in slot order, answers
+/// nothing; the held control call's result then joins between the slots
+/// before and after it.
+#[test]
+fn a_tool_wave_takes_only_the_answer_to_the_calls_it_dispatched() {
+    let mut machine = controlling_machine();
+    let effects = drain(&mut machine);
+    let effects = respond(
+        &mut machine,
+        &effects,
+        vec![
+            call("call-1", "probe"),
+            call("call-2", "finish"),
+            call("call-3", "lookup"),
+        ],
+    );
+    let (id, calls) = tool_calls(&effects).expect("the siblings' round");
+    let names: Vec<_> = calls.iter().map(|call| call.tool_name.as_str()).collect();
+    assert_eq!(names, ["probe", "lookup"]);
+    let ok = |_: &str| ToolCallOutput::success(serde_json::json!("ok"));
+    for wrong in [
+        vec![calls[0].clone()],
+        vec![calls[1].clone(), calls[0].clone()],
+    ] {
+        let effects = answer(&mut machine, id, &wrong, ok);
+        assert!(effects.is_empty(), "{effects:?}");
+    }
+    let effects = answer(&mut machine, id, &calls, ok);
+    let (id, control) = tool_calls(&effects).expect("the control call's round");
+    let names: Vec<_> = control.iter().map(|call| call.tool_name.as_str()).collect();
+    assert_eq!(names, ["finish"]);
+    let finished = |_: &str| ToolCallOutput::finish(serde_json::json!("done"));
+    let doubled = [control[0].clone(), calls[0].clone()];
+    let effects = answer(&mut machine, id, &doubled, finished);
+    assert!(effects.is_empty(), "{effects:?}");
+    let effects = answer(&mut machine, id, &control, finished);
+    assert_eq!(reported_calls(&effects), ["probe", "finish", "lookup"]);
+    let (_, kind) = checkpoint(&effects).expect("a completion checkpoint");
+    assert_eq!(kind, CheckpointKind::BeforeCompletion);
+}
+
 fn raw_call(call_id: &str, tool_name: &str, input_json: &str) -> LlmOutputPart {
     LlmOutputPart::ToolCall {
         call_id: call_id.to_string(),
@@ -661,9 +714,9 @@ fn a_control_member_inside_a_batch_finishes_with_its_identity() {
         })],
         "{effects:?}"
     );
-    let candidates = machine.completion_candidates();
-    assert_eq!(candidates.len(), 1);
-    assert_eq!(candidates[0].call_id, wrapper.child(1));
+    let decided = machine.decided_completions();
+    assert_eq!(decided.len(), 1);
+    assert_eq!(decided[0].candidate.call_id, wrapper.child(1));
     let reported = reported_causes(&machine);
     assert_eq!(
         reported.matches("\"kind\":\"ToolResult\"").count(),

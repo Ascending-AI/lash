@@ -478,7 +478,7 @@ impl ProtocolDriverHandle<crate::HostTurnProtocol> for TestDriver {
             if terminal_outcome.is_none() && candidate.is_none() && outcome.output.is_success() {
                 match outcome.output.control.as_ref() {
                     Some(crate::ToolControl::Turn { control }) => {
-                        candidate = Some(crate::CompletionCandidate::pending(
+                        candidate = Some(crate::CompletionCandidate::new(
                             ctx.protocol_iteration(),
                             outcome.call_id.clone(),
                             outcome.tool_name.clone(),

@@ -1145,8 +1145,8 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
             )]));
         }
         actions.push(DriverAction::Start(match round.control {
-            Some((slot, control)) => {
-                PendingWork::tool_round_with_control(calls, round.plan, slot, control)
+            Some((control, after)) => {
+                PendingWork::tool_round_with_control(calls, control, after, round.plan)
             }
             None => PendingWork::tool_round(calls, round.plan),
         }));
@@ -1190,7 +1190,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
                             }
                             _ => (outcome.call_id.clone(), outcome.tool_name.clone()),
                         };
-                        candidate = Some(lash_core::CompletionCandidate::pending(
+                        candidate = Some(lash_core::CompletionCandidate::new(
                             ctx.protocol_iteration(),
                             call_id,
                             tool_name,

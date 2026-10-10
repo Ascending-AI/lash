@@ -76,16 +76,14 @@ impl ProtocolDriverHandle for ExpandingDriver {
         _calls: &ResponseToolCalls,
         _text_streamed: bool,
     ) -> Vec<DriverAction> {
-        vec![DriverAction::Start(PendingWork::WaitingForToolResults {
-            settled: None,
-            control: None,
-            calls: vec![
+        vec![DriverAction::Start(PendingWork::tool_round(
+            vec![
                 slot_call(tc("native"), "list"),
                 slot_call(tc("wrapper").child(0), "read"),
                 slot_call(tc("wrapper").child(2), "search"),
             ],
-            expansion: plan(),
-        })]
+            plan(),
+        ))]
     }
 
     fn fold_tool_results(

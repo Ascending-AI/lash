@@ -344,3 +344,121 @@ fn a_windowed_checkpoint_refuses_any_window_but_its_own() {
         );
     }
 }
+
+/// What each finish call of [`FinishingDriver`] carries.
+const FINISH_VALUE: &str = "the finish value a superseded candidate keeps";
+
+/// Settles a finish call on every model reply and hands its candidate to
+/// BeforeCompletion.
+struct FinishingDriver;
+
+impl ProtocolDriverHandle for FinishingDriver {
+    fn prepare_protocol_iteration(&self, ctx: DriverContextView<'_>) -> Vec<DriverAction> {
+        vec![DriverAction::Start(PendingWork::Llm {
+            request: ctx
+                .project_llm_request(false)
+                .expect("fixture history projects"),
+            driver_state: None,
+        })]
+    }
+
+    fn handle_llm_success(
+        &self,
+        ctx: DriverContextView<'_>,
+        _request: Arc<LlmRequest>,
+        _driver_state: Option<serde_json::Value>,
+        _llm_response: LlmResponse,
+        _calls: &crate::ResponseToolCalls,
+        _text_streamed: bool,
+    ) -> Vec<DriverAction> {
+        let iteration = ctx.protocol_iteration();
+        vec![DriverAction::Start(PendingWork::Checkpoint {
+            checkpoint: CheckpointKind::BeforeCompletion,
+            on_empty: CheckpointResumeAction::Complete {
+                candidate: Box::new(crate::CompletionCandidate::new(
+                    iteration,
+                    crate::ToolCallId::fixture(&format!("finish-{iteration}")),
+                    "finish",
+                    crate::TurnControl::Finish {
+                        value: crate::ToolValue::String(FINISH_VALUE.repeat(64)),
+                        value_schema: None,
+                    },
+                )),
+                superseded: Vec::new(),
+            },
+        })]
+    }
+
+    fn handle_tool_results(
+        &self,
+        _ctx: DriverContextView<'_>,
+        _completed: Vec<CompletedToolCall>,
+    ) -> Vec<DriverAction> {
+        Vec::new()
+    }
+
+    fn handle_exec_result(
+        &self,
+        _ctx: DriverContextView<'_>,
+        _driver_state: serde_json::Value,
+        _result: Result<crate::ExecResponse, crate::ExecCodeFailure>,
+    ) -> Vec<DriverAction> {
+        Vec::new()
+    }
+}
+
+/// FIG-5831: a decided completion candidate keeps its control, which grows
+/// with what the call carried, and a turn decides one at every
+/// BeforeCompletion that input supersedes. The checkpoint names its decided
+/// history by digest, as it names the turn's records, so the body holds no
+/// decided candidate however many the turn superseded, and a restored
+/// machine holds the same history in the same order.
+#[test]
+fn decided_completion_candidates_are_checkpoint_content_not_body() {
+    let mut machine = TurnMachine::new(
+        test_config(Arc::new(FinishingDriver)),
+        vec![user_message("finish")],
+        crate::AppendVec::new(),
+        0,
+    );
+    let mut effects = drain_effects(&mut machine);
+    for _ in 0..3 {
+        let llm_id = *find_llm_call(&effects).expect("the model call").0;
+        machine.handle_response(Response::LlmComplete {
+            id: llm_id,
+            text_streamed: false,
+            result: Ok(LlmResponse::default()),
+        });
+        let (id, kind) =
+            find_checkpoint(&drain_effects(&mut machine)).expect("the completion checkpoint");
+        assert_eq!(kind, CheckpointKind::BeforeCompletion);
+        machine.handle_response(Response::Checkpoint {
+            id,
+            delivery: CheckpointDelivery {
+                committed_user_messages: vec![user_message("go on")],
+            },
+        });
+        effects = drain_effects(&mut machine);
+    }
+    let decided = machine.decided_completions().to_vec();
+    assert_eq!(
+        decided.len(),
+        3,
+        "each BeforeCompletion decided its candidate"
+    );
+
+    let saved = machine.checkpoint();
+    let body = serde_json::to_string(&saved.checkpoint).expect("checkpoint body");
+    assert!(
+        !body.contains(FINISH_VALUE),
+        "the body holds a decided candidate's control: {} bytes",
+        body.len()
+    );
+    let restored = TurnMachine::restore_from_checkpoint(
+        test_config(Arc::new(FinishingDriver)),
+        roundtrip_checkpoint(saved),
+        None,
+    )
+    .expect("the checkpoint restores");
+    assert_eq!(restored.decided_completions(), decided.as_slice());
+}

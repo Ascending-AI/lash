@@ -60,7 +60,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
             cumulative_usage: LlmUsage::default(),
             last_call_usage: None,
             environment: None,
-            completion_candidates: Vec::new(),
+            decided_completions: Vec::new(),
             observed_cancellation: None,
             resume_work: None,
             run_abort: None,
@@ -149,47 +149,6 @@ impl<M: TurnProtocol> TurnMachine<M> {
         }
     }
 
-    pub fn settle_tool_dispatch(&mut self, state: serde_json::Value) -> bool {
-        match &mut self.state {
-            MachineState::Waiting {
-                work: PendingWork::WaitingForToolResults { calls, settled, .. },
-                delivery,
-                ..
-            } => {
-                calls.clear();
-                *settled = Some(state);
-                *delivery = EffectDeliveryStatus::Pending;
-                true
-            }
-            _ => false,
-        }
-    }
-
-    /// The tool round the machine waits on, if that is what it waits on: its
-    /// calls while the runtime has not admitted them, its settled dispatch
-    /// state once it has, and how its slots fold back into the response.
-    pub fn waiting_tool_round(
-        &self,
-    ) -> Option<(
-        &[PendingToolCall],
-        Option<&serde_json::Value>,
-        &crate::sansio::ToolExpansionPlan,
-    )> {
-        match &self.state {
-            MachineState::Waiting {
-                work:
-                    PendingWork::WaitingForToolResults {
-                        calls,
-                        settled,
-                        expansion,
-                        ..
-                    },
-                ..
-            } => Some((calls, settled.as_ref(), expansion)),
-            _ => None,
-        }
-    }
-
     /// Record the cancellation request the host has observed for this turn.
     /// The first observation wins; later ones are ignored.
     pub fn record_cancellation_evidence(&mut self, evidence: crate::TurnCancellationEvidence) {
@@ -267,12 +226,11 @@ impl<M: TurnProtocol> TurnMachine<M> {
         self.protocol_iteration
     }
 
-    /// The completion candidates this turn has decided, in decision order:
-    /// each one Accepted or Superseded, never Pending. A restored machine
-    /// holds the same list, so a superseded candidate is never decided
-    /// again.
-    pub fn completion_candidates(&self) -> &[crate::CompletionCandidate] {
-        &self.completion_candidates
+    /// The completion candidates this turn has decided, in decision order.
+    /// A restored machine holds the same list, so a superseded candidate is
+    /// never decided again.
+    pub fn decided_completions(&self) -> &[crate::DecidedCompletion] {
+        &self.decided_completions
     }
 
     /// Whether the machine waits on a checkpoint that decides a settled
@@ -353,7 +311,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
             cumulative_usage: self.cumulative_usage.clone(),
             last_call_usage: self.last_call_usage.clone(),
             environment: self.environment.clone(),
-            completion_candidates: self.completion_candidates.clone(),
+            decided_completions: content.put_sequence(&self.decided_completions),
         };
         SavedTurn {
             checkpoint,
@@ -421,7 +379,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
             cumulative_usage: checkpoint.cumulative_usage,
             last_call_usage: checkpoint.last_call_usage,
             environment: checkpoint.environment,
-            completion_candidates: checkpoint.completion_candidates,
+            decided_completions: content.sequence(&checkpoint.decided_completions)?,
             observed_cancellation: None,
             resume_work: None,
             run_abort: None,
@@ -793,10 +751,10 @@ impl<M: TurnProtocol> TurnMachine<M> {
                 text_streamed,
             } => self.handle_llm_complete(id, request, driver_state, result, text_streamed)?,
             AnsweredWork::Tools {
+                wave,
                 expansion,
                 results,
-                control,
-            } => self.handle_tool_results(expansion, results, control),
+            } => self.handle_tool_results(wave, expansion, results),
             AnsweredWork::Exec {
                 driver_state,
                 result,
@@ -845,12 +803,14 @@ impl<M: TurnProtocol> TurnMachine<M> {
     ) {
         if !delivery.committed_user_messages.is_empty() {
             if let CheckpointResumeAction::Complete {
-                mut candidate,
+                candidate,
                 superseded,
             } = on_empty
             {
-                candidate.disposition = crate::CompletionDisposition::Superseded;
-                self.completion_candidates.push(*candidate);
+                self.decided_completions.push(crate::DecidedCompletion {
+                    candidate: *candidate,
+                    disposition: crate::CompletionDisposition::Superseded,
+                });
                 // The notice is the turn's own output: it is recorded with
                 // the turn's events, so a reload reads it as the model did.
                 for message in superseded {
@@ -889,10 +849,12 @@ impl<M: TurnProtocol> TurnMachine<M> {
                 self.state = MachineState::PrepareIteration;
             }
             CheckpointResumeAction::Finish(outcome) => self.finish(outcome),
-            CheckpointResumeAction::Complete { mut candidate, .. } => {
-                candidate.disposition = crate::CompletionDisposition::Accepted;
+            CheckpointResumeAction::Complete { candidate, .. } => {
                 let outcome = candidate.outcome();
-                self.completion_candidates.push(*candidate);
+                self.decided_completions.push(crate::DecidedCompletion {
+                    candidate: *candidate,
+                    disposition: crate::CompletionDisposition::Accepted,
+                });
                 self.finish(outcome);
             }
         }
@@ -1126,23 +1088,24 @@ impl<M: TurnProtocol> TurnMachine<M> {
 
     fn handle_tool_results(
         &mut self,
+        wave: Box<crate::sansio::ToolWave<M::IntentOutcome>>,
         expansion: ToolExpansionPlan,
-        completed: Vec<CompletedToolCall<M::IntentOutcome>>,
-        control: Option<Box<crate::sansio::HeldControl<M::IntentOutcome>>>,
+        results: Vec<CompletedToolCall<M::IntentOutcome>>,
     ) {
-        // A control call that ran answers at its own slot, among the
-        // results of the slots that settled before it.
-        let (completed, waiting) = match control.map(|control| *control) {
-            None => (completed, None),
-            Some(crate::sansio::HeldControl::Running { slot, siblings }) => (
-                completed
-                    .into_iter()
-                    .fold(siblings, |all, outcome| at_slot(all, slot, outcome)),
-                None,
-            ),
-            Some(crate::sansio::HeldControl::Waiting { slot, call }) => {
-                (completed, Some((slot, call)))
+        // A control call that ran answers between its siblings' results; one
+        // that waits is placed once its siblings' results are judged.
+        let (completed, held) = match *wave {
+            crate::sansio::ToolWave::Round { .. } => (results, None),
+            crate::sansio::ToolWave::Control {
+                mut before, after, ..
+            } => {
+                before.extend(results);
+                before.extend(after);
+                (before, None)
             }
+            crate::sansio::ToolWave::Siblings {
+                before, control, ..
+            } => (results, Some((before.len(), control))),
         };
         // Host panic evidence must not enter protocol expansion or repair.
         if let Some(stop) = completed
@@ -1165,22 +1128,29 @@ impl<M: TurnProtocol> TurnMachine<M> {
         // settled successfully, judged on the slots' own results before any
         // folding; a slot that failed or was cancelled refuses it before
         // its body runs. Either way it answers at its own slot.
-        let completed = match waiting {
+        let completed = match held {
             None => completed,
-            Some((slot, call)) => {
-                if completed.iter().all(|outcome| outcome.output.is_success()) {
+            Some((at, control)) => {
+                let mut before = completed;
+                let after = before.split_off(at);
+                if before
+                    .iter()
+                    .chain(&after)
+                    .all(|outcome| outcome.output.is_success())
+                {
                     self.start(PendingWork::WaitingForToolResults {
-                        calls: vec![call],
-                        settled: None,
+                        wave: Box::new(crate::sansio::ToolWave::Control {
+                            before,
+                            control,
+                            after,
+                        }),
                         expansion,
-                        control: Some(Box::new(crate::sansio::HeldControl::Running {
-                            slot,
-                            siblings: completed,
-                        })),
                     });
                     return;
                 }
-                at_slot(completed, slot, sibling_failed(call))
+                before.push(sibling_failed(control));
+                before.extend(after);
+                before
             }
         };
         let completed = if expansion.is_empty() {
@@ -1232,17 +1202,6 @@ impl<M: TurnProtocol> TurnMachine<M> {
         self.shift(|driver, ctx| driver.handle_exec_result(ctx, driver_state, result));
         self.finish_pending_run_abort();
     }
-}
-
-/// `slots` with `outcome` answering flat slot `slot` among them.
-fn at_slot<I>(
-    mut slots: Vec<CompletedToolCall<I>>,
-    slot: u32,
-    outcome: CompletedToolCall<I>,
-) -> Vec<CompletedToolCall<I>> {
-    let at = usize::try_from(slot).unwrap_or(usize::MAX).min(slots.len());
-    slots.insert(at, outcome);
-    slots
 }
 
 /// The answer of a held control call refused because a sibling of its step

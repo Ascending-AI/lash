@@ -441,12 +441,6 @@ pub async fn run_phases(
                     .local(cx, Effect::ReportToolCalls { id, completed })
                     .await?;
             }
-            Effect::AwaitToolResults { .. } => {
-                return Err(TurnError::Exec(
-                    "a durable turn's checkpoint keeps its round's calls; no dispatch state settles them"
-                        .to_owned(),
-                ));
-            }
             Effect::Done {
                 messages,
                 event_delta,
@@ -546,10 +540,10 @@ pub async fn run_phases(
 /// candidate kept it from the call's settlement.
 fn accepted_finish_value_schema(machine: &crate::TurnMachine) -> Option<crate::JsonSchema> {
     machine
-        .completion_candidates()
+        .decided_completions()
         .iter()
-        .find(|candidate| candidate.disposition == crate::CompletionDisposition::Accepted)
-        .and_then(|candidate| match &candidate.control {
+        .find(|decided| decided.disposition == crate::CompletionDisposition::Accepted)
+        .and_then(|decided| match &decided.candidate.control {
             crate::TurnControl::Finish { value_schema, .. } => value_schema.clone(),
             crate::TurnControl::SwitchAgentFrame { .. } => None,
         })
