@@ -1781,11 +1781,11 @@ laws = [
   "a_resubmitted_transaction_reuses_its_receipt_and_refuses_changed_content",
   "config_submission_refuses_what_no_owner_registers",
   "a_set_turn_budget_survives_park_and_reload",
-  "every_applied_config_transaction_emits_a_lifecycle_event",
+  "cold_config_changes_coalesce_until_the_next_successful_plugin_build_on_sqlite_memory",
 ]
 disposition = "port"
 status = "ported"
-note = "FIG-5311: command_enqueue_preserves_typed_session_state_version_refusal and config_submission_refuses_what_no_owner_registers run here; a_resubmitted_transaction_reuses_its_receipt_and_refuses_changed_content and every_applied_config_transaction_emits_a_lifecycle_event run through the facade on its node in crates/lash/src/tests/config_transactions.rs (the latter #[ignore]d red: FIG-5317, the durable session actor applies a transaction without building its plugins); a_set_turn_budget_survives_park_and_reload is covered by crates/lash/src/tests/recorded_execution_controls.rs::a_recorded_budget_bounds_every_run_after_an_engine_restart_on_sqlite (a commanded budget bounds every run after a restart)"
+note = "FIG-5311: command_enqueue_preserves_typed_session_state_version_refusal and config_submission_refuses_what_no_owner_registers run here; a_resubmitted_transaction_reuses_its_receipt_and_refuses_changed_content runs through the facade on its node in crates/lash/src/tests/config_transactions.rs; FIG-5317 deletes every_applied_config_transaction_emits_a_lifecycle_event because ruling 222777 supersedes per-transaction notification with coalesced eventual delivery, covered by crates/lash-durable-test/tests/config_change_observer_laws.rs::cold_config_changes_coalesce_until_the_next_successful_plugin_build_on_sqlite_memory (the latest revision and transition reach observers after a successful build) and sqlite_memory::a_committed_config_transaction_reaches_its_observers_once (post-commit policy visibility and no stale-write delivery); a_set_turn_budget_survives_park_and_reload is covered by crates/lash/src/tests/recorded_execution_controls.rs::a_recorded_budget_bounds_every_run_after_an_engine_restart_on_sqlite (a commanded budget bounds every run after a restart)"
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/turns/drain_and_recovery.rs"
