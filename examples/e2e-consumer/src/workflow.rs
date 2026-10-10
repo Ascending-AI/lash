@@ -987,9 +987,35 @@ mod tests {
     fn bodies(path: &std::path::Path) -> Vec<Value> {
         std::fs::read_to_string(path)
             .expect("the body ledger reads")
-            .lines()
+            // The writer can still be appending the last record. Its newline
+            // publishes the complete line; the next read picks up a fragment.
+            .split_inclusive('\n')
+            .filter(|line| line.ends_with('\n'))
             .map(|line| serde_json::from_str(line).expect("a ledger line"))
             .collect()
+    }
+
+    /// FIG-5854: a concurrent ledger read sees only newline-terminated
+    /// records; an append's trailing fragment becomes visible when complete.
+    #[test]
+    fn a_body_ledger_read_waits_for_the_append_newline() {
+        let directory = tempfile::tempdir().expect("a body ledger directory");
+        let path = directory.path().join("bodies.jsonl");
+        let mut file = std::fs::File::create(&path).expect("create the ledger");
+        let first = json!({"entry": "first"});
+        let second = json!({"entry": "second"});
+        let partial = b"{\"entry\":\"first\"}\n{\"entry\":\"sec";
+        file.write_all(partial).expect("append a partial record");
+        println!(
+            "actual ledger snapshot: {:?}; expected completed snapshot: {:?}",
+            std::str::from_utf8(partial).expect("UTF-8 ledger"),
+            "{\"entry\":\"first\"}\n{\"entry\":\"second\"}\n"
+        );
+        assert_eq!(bodies(&path), vec![first.clone()]);
+        file.write_all(b"ond\"}").expect("complete the JSON value");
+        assert_eq!(bodies(&path), vec![first.clone()]);
+        file.write_all(b"\n").expect("publish the record's newline");
+        assert_eq!(bodies(&path), vec![first, second]);
     }
 
     /// Run `definition` over the order to its end, approving each review as
