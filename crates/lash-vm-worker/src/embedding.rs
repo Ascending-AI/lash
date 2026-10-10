@@ -30,7 +30,7 @@ use lash_vm_library::{HELPER_RELEASE, HelperReleaseIndex};
 
 /// Why a worker could not assemble what it runs. The worker refuses to
 /// start: it is a defect of the build, never of a document.
-#[derive(Debug, thiserror::Error)]
+#[derive(Clone, Debug, thiserror::Error)]
 pub enum EmbedError {
     #[error("the function registry refused a definition: {0}")]
     Registry(String),
@@ -44,6 +44,13 @@ pub enum EmbedError {
     HelperReleaseNotHeld { release: u32 },
 }
 
+fn cached<T>(
+    slot: &OnceLock<Result<T, EmbedError>>,
+    init: impl FnOnce() -> Result<T, EmbedError>,
+) -> Result<&T, EmbedError> {
+    slot.get_or_init(init).as_ref().map_err(Clone::clone)
+}
+
 /// Everything a worker registered at startup.
 pub struct Embedding {
     /// The functions as registered, each written for the kernel version
@@ -52,7 +59,7 @@ pub struct Embedding {
     /// `written` and each function redeclared for every successor version
     /// the build interprets, made when first asked for: a worker that runs
     /// no successor's document never redeclares (FIG-5796).
-    interpreted: OnceLock<Arc<FunctionRegistry>>,
+    interpreted: OnceLock<Result<Arc<FunctionRegistry>, EmbedError>>,
     /// `written` and `interpreted` with every library body compiled, once
     /// for all the runs of the worker, made when a document first runs
     /// against each.
@@ -64,7 +71,10 @@ pub struct Embedding {
     writes: u32,
     /// The released helper sets the embedding holds, each with the names a
     /// writer of it resolves against, made when first asked for.
-    releases: Vec<(HelperReleaseIndex, OnceLock<NamedLibrary>)>,
+    releases: Vec<(
+        HelperReleaseIndex,
+        OnceLock<Result<NamedLibrary, EmbedError>>,
+    )>,
 }
 
 impl Embedding {
@@ -102,13 +112,10 @@ impl Embedding {
             .iter()
             .find(|(index, _)| index.ordinal == release)
             .ok_or(EmbedError::HelperReleaseNotHeld { release })?;
-        if let Some(library) = library.get() {
-            return Ok(library);
-        }
-        let named =
+        cached(library, || {
             NamedLibrary::resolving(&self.written, |function| index.writes.contains(function))
-                .map_err(|error| EmbedError::Registry(error.to_string()))?;
-        Ok(library.get_or_init(|| named))
+                .map_err(|error| EmbedError::Registry(error.to_string()))
+        })
     }
 
     /// The registry a machine runs documents against: each function once
@@ -121,24 +128,21 @@ impl Embedding {
     /// [`EmbedError::Registry`] when a function cannot be redeclared: a
     /// defect of the build.
     pub fn registry(&self) -> Result<&Arc<FunctionRegistry>, EmbedError> {
-        if let Some(registry) = self.interpreted.get() {
-            return Ok(registry);
-        }
-        let mut registry = FunctionRegistry::clone(&self.written);
-        let mut redeclared = false;
-        for version in lash_kernel_doc::KernelVersion::ALL {
-            if let Some(migration) = lash_kernel_migrate::migration_from(*version) {
+        cached(&self.interpreted, || {
+            let migrations: Vec<_> = lash_kernel_doc::KernelVersion::ALL
+                .iter()
+                .filter_map(|version| lash_kernel_migrate::migration_from(*version))
+                .collect();
+            if migrations.is_empty() {
+                return Ok(Arc::clone(&self.written));
+            }
+            let mut registry = FunctionRegistry::clone(&self.written);
+            for migration in migrations {
                 lash_kernel_migrate::migrate_registry(&mut registry, migration)
                     .map_err(|error| EmbedError::Registry(error.to_string()))?;
-                redeclared = true;
             }
-        }
-        let registry = if redeclared {
-            Arc::new(registry)
-        } else {
-            Arc::clone(&self.written)
-        };
-        Ok(self.interpreted.get_or_init(|| registry))
+            Ok(Arc::new(registry))
+        })
     }
 
     /// The registry a machine runs a document written for kernel version
@@ -454,6 +458,51 @@ mod tests {
         /// How many times this thread defined the TypeScript helpers.
         pub(super) static HELPER_DEFINITIONS: std::cell::Cell<usize> =
             const { std::cell::Cell::new(0) };
+    }
+
+    /// V25: a fixed assembly failure is initialized once, just like a successful catalog.
+    #[test]
+    fn worker_catalog_initialization_retains_a_build_failure() {
+        let mut embedding = standard(&WorkerTuning::standard()).expect("the standard embedding");
+        let mut writes = BTreeSet::new();
+        // An invalid released name table is a fixed build defect: resolving
+        // it must fail once and leave that failure in the release's slot.
+        for result in [1, 2] {
+            let definition = lash_kernel_doc::parse_definition(&format!(
+                "function helper() -> Int\nkernel 1\ncharge 1\nbody {{ return {result} }}\n"
+            ))
+            .expect("a helper");
+            writes.insert(
+                Arc::make_mut(&mut embedding.written)
+                    .register(definition, None)
+                    .expect("distinct identities"),
+            );
+        }
+        embedding.releases.push((
+            HelperReleaseIndex {
+                release: "invalid-names".into(),
+                ordinal: 99,
+                functions: writes.clone(),
+                writes,
+            },
+            OnceLock::new(),
+        ));
+        for _ in 0..2 {
+            assert!(matches!(
+                embedding.library_for(99),
+                Err(EmbedError::Registry(_))
+            ));
+            assert!(
+                embedding
+                    .releases
+                    .last()
+                    .expect("the release")
+                    .1
+                    .get()
+                    .is_some(),
+                "a fixed name-resolution failure is retained inside the slot"
+            );
+        }
     }
 
     /// A worker's startup defines no helper: the standard embedding

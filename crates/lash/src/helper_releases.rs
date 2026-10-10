@@ -184,17 +184,22 @@ async fn helper_session(
 /// A build's node does not start while an unfinished actor still pins a
 /// function of the helper release the build no longer retains.
 struct HelperRetirement {
-    release: u32,
+    releases: Vec<lash_vm_runtime::HelperReleaseIndex>,
+    previous: Option<Arc<dyn lash_core::RetirementCheck>>,
 }
 
 #[async_trait::async_trait]
 impl lash_core::RetirementCheck for HelperRetirement {
     fn retired(&self) -> String {
-        let name = lash_vm_runtime::RETAINED_HELPER_RELEASES
+        let mut names = self
+            .releases
             .iter()
-            .find(|(_, ordinal)| *ordinal == self.release)
-            .map_or_else(|| self.release.to_string(), |(name, _)| (*name).to_owned());
-        format!("helper release {name}")
+            .map(|release| format!("helper release {}", release.release))
+            .collect::<Vec<_>>();
+        if let Some(previous) = &self.previous {
+            names.push(previous.retired());
+        }
+        names.join(", ")
     }
 
     fn command(&self) -> String {
@@ -202,31 +207,46 @@ impl lash_core::RetirementCheck for HelperRetirement {
     }
 
     async fn dependents(&self, backend: &lash_core::Backend) -> Result<u64, DurableError> {
-        let surveyed = async {
-            let functions = lash_vm_runtime::standard_functions().map_err(|error| {
-                KernelMigrationSurveyError::State(DurableError::Store(StoreFailure {
-                    kind: StoreFailureKind::Corrupt,
-                    message: error.to_string(),
-                }))
-            })?;
-            let retired = retired_helpers(self.release)?;
-            survey_helper_dependents(backend, &functions, self.release, &retired).await
-        };
-        let (processes, sessions) = surveyed.await.map_err(|error| match error {
-            KernelMigrationSurveyError::State(error) => error,
-            other => DurableError::Store(StoreFailure {
-                kind: StoreFailureKind::Unavailable,
-                message: other.to_string(),
-            }),
+        let functions = lash_vm_runtime::helper_survey_functions().map_err(|error| {
+            DurableError::Store(StoreFailure {
+                kind: StoreFailureKind::Corrupt,
+                message: error.to_string(),
+            })
         })?;
-        Ok(u64::try_from(processes.len() + sessions.len()).unwrap_or(u64::MAX))
+        let mut count = 0u64;
+        for release in &self.releases {
+            let surveyed = async {
+                let retired = retired_helpers(release.ordinal)?;
+                survey_helper_dependents(backend, &functions, release.ordinal, &retired).await
+            }
+            .await
+            .map_err(|error| match error {
+                KernelMigrationSurveyError::State(error) => error,
+                other => DurableError::Store(StoreFailure {
+                    kind: StoreFailureKind::Unavailable,
+                    message: other.to_string(),
+                }),
+            })?;
+            count = count.saturating_add(
+                u64::try_from(surveyed.0.len() + surveyed.1.len()).unwrap_or(u64::MAX),
+            );
+        }
+        if let Some(previous) = &self.previous {
+            count = count.saturating_add(previous.dependents(backend).await?);
+        }
+        Ok(count)
     }
 }
 
-/// `backend`, no longer retaining helper release `release`: its node does
-/// not start while an unfinished actor still depends on it.
-pub(crate) fn retiring(backend: &crate::Backend, release: u32) -> crate::Backend {
-    backend.with_retirement(Arc::new(HelperRetirement { release }))
+/// Installs every declared retirement on ordinary startup, preserving any kernel check.
+pub(crate) fn retiring(
+    backend: &crate::Backend,
+    releases: Vec<lash_vm_runtime::HelperReleaseIndex>,
+) -> crate::Backend {
+    backend.with_retirement(Arc::new(HelperRetirement {
+        releases,
+        previous: backend.retirement().cloned(),
+    }))
 }
 
 /// The helper release a node of `backend`'s build writes a cell against:
@@ -243,34 +263,75 @@ impl FleetHelperWrites {
     }
 }
 
+fn fleet_helper_release(
+    candidates: &[(u32, FormatSet)],
+    carried: &[FormatSet],
+    live: &[Vec<FormatSet>],
+) -> Option<u32> {
+    // A carried turn can reach its first new cell without a snapshot. Nodes
+    // serving those sets participate even if they decode no lowering candidate.
+    let serving: Vec<_> = live
+        .iter()
+        .filter(|decodes| {
+            candidates.iter().any(|(_, set)| decodes.contains(set))
+                || carried.iter().any(|set| decodes.contains(set))
+        })
+        .collect();
+    candidates
+        .iter()
+        .find(|(_, set)| serving.iter().all(|decodes| decodes.contains(set)))
+        .map(|(release, _)| *release)
+}
+
+fn helpers_unavailable(message: impl Into<String>) -> lash_core::RuntimeEffectControllerError {
+    lash_core::RuntimeEffectControllerError::new(
+        lash_core::RuntimeErrorCode::RunDefinitionUnavailable,
+        message,
+    )
+    .retryable_uncommitted_derivation()
+}
+
 #[async_trait::async_trait]
 impl lash_protocol_rlm::HelperReleaseGate for FleetHelperWrites {
-    async fn writable(&self) -> u32 {
+    async fn writable(&self) -> Result<u32, lash_core::RuntimeEffectControllerError> {
         let formats = self.backend.formats();
         let own = crate::formats::helper_release_of(self.backend.surfaces());
-        let decoded = formats.decoded_sessions();
-        if decoded.is_empty() {
-            return own;
-        }
         let mut candidates = vec![(own, formats.session().clone())];
         candidates.extend(
-            decoded
+            formats
+                .decoded_sessions()
                 .into_iter()
                 .map(|(surfaces, set)| (crate::formats::helper_release_of(surfaces), set)),
         );
-        // A fleet that does not answer is held to the oldest release.
-        let oldest = candidates.last().map_or(own, |(release, _)| *release);
-        let Ok(live) = self.backend.durable().live_decodes().await else {
-            return oldest;
-        };
-        let sets: Vec<FormatSet> = candidates.iter().map(|(_, set)| set.clone()).collect();
-        lash_core::durable_port::fleet_writable(&sets, &live)
-            .and_then(|chosen| {
-                candidates
-                    .iter()
-                    .find(|(_, set)| set == chosen)
-                    .map(|(release, _)| *release)
-            })
-            .unwrap_or(oldest)
+        let live = self
+            .backend
+            .durable()
+            .live_decodes()
+            .await
+            .map_err(|error| {
+                tracing::warn!(?candidates, carried = ?formats.carried_sessions(), ?error, "helper fleet survey unavailable; lowering deferred");
+                helpers_unavailable(format!("helper fleet survey unavailable: {error}"))
+            })?;
+        let chosen = fleet_helper_release(&candidates, formats.carried_sessions(), &live);
+        tracing::info!(?candidates, carried = ?formats.carried_sessions(), ?live, ?chosen, "helper release fleet gate");
+        chosen.ok_or_else(|| {
+            helpers_unavailable(
+                "no helper release is readable by every live node serving these sessions",
+            )
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// V19: an old-only node still co-serves a carried turn, even when it decodes no lowering candidate.
+    #[test]
+    fn a_carried_turn_defers_helpers_no_co_serving_node_can_read() {
+        let new = FormatSet::new("session:kernel-parked-state@2,kernel-helpers@2");
+        let old = FormatSet::new("session:kernel-parked-state@1");
+        let live = vec![vec![new.clone(), old.clone()], vec![old.clone()]];
+        assert_eq!(fleet_helper_release(&[(2, new)], &[old], &live), None);
     }
 }

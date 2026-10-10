@@ -45,14 +45,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let releases = lash_vm_library::helper_releases()?;
     let fingerprints = probe::fingerprints(&registry);
     let building = releases.last().ok_or("no helper release")?;
-    let frozen = release::freeze(
-        &building.release,
-        building.ordinal,
-        Some(building),
-        &registry,
-        &fingerprints,
-    );
-    std::fs::write(out.join("helper_release.rs"), frozen.source()?)?;
+    let frozen = if building.sealed {
+        building.clone()
+    } else {
+        release::refreeze(
+            building,
+            releases.iter().rev().nth(1),
+            &registry,
+            &fingerprints,
+        )?
+    };
+    std::fs::write(
+        out.join("helper_release.json"),
+        serde_json::to_vec(&frozen)?,
+    )?;
     let kept = release::keep(&releases, &registry, &fingerprints)?;
     let retained = registry.validate_functions(kept.retained)?;
     std::fs::write(out.join("retained_functions.json"), retained.to_json()?)?;

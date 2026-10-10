@@ -176,7 +176,9 @@ impl DurableBackendBuilder {
         #[cfg(feature = "rlm")]
         let retired = self.retired_kernel_version();
         #[cfg(feature = "rlm")]
-        let retired_helpers = self.retired_helper_release();
+        let retired_helpers = self
+            .retired_helper_releases()
+            .map_err(helper_catalog_error)?;
         let surfaces = self.surfaces();
         let backend = Backend::assemble(BackendParts {
             #[cfg(feature = "rlm")]
@@ -201,17 +203,22 @@ impl DurableBackendBuilder {
                 .map_or(crate::formats::KERNEL_PARKED_STATE_VERSION, |surface| {
                     surface.version
                 });
-            for release in crate::formats::earlier_helper_releases().into_iter().rev() {
-                if release < own && Some(release) != retired_helpers {
+            for release in crate::formats::earlier_helper_releases()
+                .map_err(helper_catalog_error)?
+                .into_iter()
+                .rev()
+            {
+                if release < own
+                    && !retired_helpers
+                        .iter()
+                        .any(|retired| retired.ordinal == release)
+                {
                     backend = backend.decoding(&crate::formats::kernel_actor_state_surfaces(
                         kernel, release,
                     ));
                 }
             }
-            match retired_helpers {
-                Some(release) => crate::helper_releases::retiring(&backend, release),
-                None => backend,
-            }
+            backend
         };
         // A build that retires the kernel version before its own does not
         // decode what that version's build wrote, and its node does not
@@ -220,6 +227,12 @@ impl DurableBackendBuilder {
         let backend = match retired {
             Some(kernel) => crate::kernel_migration::retiring(&backend, kernel),
             None => backend,
+        };
+        #[cfg(feature = "rlm")]
+        let backend = if retired_helpers.is_empty() {
+            backend
+        } else {
+            crate::helper_releases::retiring(&backend, retired_helpers)
         };
         Ok(backend)
     }
@@ -245,12 +258,22 @@ impl DurableBackendBuilder {
     /// The helper release this build no longer retains, whose dependents
     /// its node does not start over.
     #[cfg(feature = "rlm")]
-    fn retired_helper_release(&self) -> Option<u32> {
+    fn retired_helper_releases(
+        &self,
+    ) -> Result<Vec<lash_vm_runtime::HelperReleaseIndex>, crate::vm::LibraryError> {
+        let mut retired = lash_vm_runtime::retiring_helper_releases()?;
         #[cfg(feature = "synthetic-next")]
         if self.helpers == SyntheticHelpers::Closing {
-            return crate::formats::previous_helper_release();
+            let previous = crate::formats::previous_helper_release();
+            retired.extend(
+                lash_vm_runtime::standard_helper_releases()?
+                    .into_iter()
+                    .filter(|release| Some(release.ordinal) == previous),
+            );
         }
-        None
+        retired.sort_by_key(|release| release.ordinal);
+        retired.dedup_by_key(|release| release.ordinal);
+        Ok(retired)
     }
 
     /// The kernel version this build no longer interprets, whose window is
@@ -262,6 +285,13 @@ impl DurableBackendBuilder {
             return lash_vm_runtime::previous_kernel_version();
         }
         crate::kernel_migration::retired_kernel_version()
+    }
+}
+
+#[cfg(feature = "rlm")]
+fn helper_catalog_error(error: crate::vm::LibraryError) -> DurableBuildError {
+    DurableBuildError::HelperReleaseCatalog {
+        message: error.to_string(),
     }
 }
 

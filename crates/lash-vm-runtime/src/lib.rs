@@ -32,8 +32,8 @@ pub use lash_kernel_migrate::{DocumentRefusal, ParkedRefusal};
 /// The helper releases lash's shipped worker retains beside its own
 /// functions (FIG-5799).
 pub use lash_vm_library::{
-    HelperReleaseIndex, RETAINED_HELPER_RELEASES, standard_helper_releases,
-    standard_retired_helpers,
+    HelperReleaseIndex, RETAINED_HELPER_RELEASES, helper_survey_functions,
+    retiring_helper_releases, standard_helper_releases, standard_retired_helpers,
 };
 /// The library functions lash's shipped worker holds: what a kernel
 /// document is linked, admitted and migrated against when the host

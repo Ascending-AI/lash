@@ -574,19 +574,25 @@ pub fn kernel_actor_state_surfaces(
 /// what the build before it wrote against, when that build wrote another.
 #[cfg(feature = "rlm")]
 pub fn previous_helper_release() -> Option<u32> {
-    earlier_helper_releases().last().copied()
+    lash_vm_runtime::RETAINED_HELPER_RELEASES
+        .iter()
+        .map(|(_, ordinal)| *ordinal)
+        .rfind(|ordinal| *ordinal < KERNEL_HELPER_RELEASE)
 }
 
 /// Every helper release before this build's own that it retains, oldest
 /// first: a node of this build reads what a build of one wrote as written
 /// (FIG-5799).
+///
+/// # Errors
+/// The shipped helper release declarations or artifacts do not validate.
 #[cfg(feature = "rlm")]
-pub fn earlier_helper_releases() -> Vec<u32> {
-    lash_vm_runtime::RETAINED_HELPER_RELEASES
-        .iter()
-        .map(|(_, ordinal)| *ordinal)
+pub fn earlier_helper_releases() -> Result<Vec<u32>, crate::vm::LibraryError> {
+    Ok(lash_vm_runtime::standard_helper_releases()?
+        .into_iter()
+        .map(|release| release.ordinal)
         .filter(|ordinal| *ordinal < KERNEL_HELPER_RELEASE)
-        .collect()
+        .collect())
 }
 
 /// The helper release a set holding `surfaces` was written against.

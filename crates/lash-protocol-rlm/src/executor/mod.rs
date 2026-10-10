@@ -229,6 +229,8 @@ enum Refused {
     Cell(Box<lash_core::CellFailure>),
     /// A nested effect of the cell's setup failed: recorded for the turn.
     Nested(Box<lash_core::RuntimeEffectControllerError>),
+    /// The fleet cannot yet supply definitions every co-serving node reads.
+    Helpers(Box<lash_core::RuntimeEffectControllerError>),
     /// A worker fault.
     Worker(Box<lash_vm_client::PoolError>),
 }
@@ -357,7 +359,10 @@ async fn link_cell(
     // A cell is written against the newest helper release every live node
     // holds (FIG-5799).
     let helpers = match &services.helpers {
-        Some(gate) => gate.writable().await,
+        Some(gate) => gate
+            .writable()
+            .await
+            .map_err(|error| Refused::Helpers(Box::new(error)))?,
         None => lash_vm_runtime::KERNEL_HELPER_RELEASE,
     };
     let lowered = services
@@ -530,6 +535,15 @@ async fn run_cell(
         Err(Refused::Nested(error)) => {
             let message = error.to_string();
             ctx.record_nested_runtime_effect_error(*error);
+            return exec_setup_failure_or_stop(
+                state,
+                &ctx,
+                lash_core::CellFailure::new(lash_core::CellFailureKind::Host, message),
+            );
+        }
+        Err(Refused::Helpers(error)) => {
+            let message = error.to_string();
+            ctx.record_nested_effect_error(*error);
             return exec_setup_failure_or_stop(
                 state,
                 &ctx,

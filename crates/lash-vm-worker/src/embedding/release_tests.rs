@@ -54,37 +54,79 @@ fn sealed_helper_freezes_keep_runnable_functions() {
     let current = helper_registry(2);
     let fingerprints = Default::default();
     let mut previous = release::freeze("1.0", 1, None, &old, &fingerprints);
-    previous.sealed = true;
-    let frozen = release::freeze("2.0", 2, Some(&previous), &current, &fingerprints);
+    previous.seal().expect("seal the shipped release");
+    let building = release::freeze("2.0", 2, None, &current, &fingerprints);
+    let frozen = release::refreeze(&building, Some(&previous), &current, &fingerprints)
+        .expect("the new release");
+    assert_eq!(
+        frozen.file_name().expect("the destination"),
+        "helpers_2_0.rs"
+    );
     assert_eq!(frozen.functions.len(), 2, "the sealed helper remains held");
     assert_eq!(frozen.writes.len(), 1, "only the current helper is named");
-    let kept = release::keep(&[previous], &current, &fingerprints)
+    let kept = release::keep(&[previous, frozen], &current, &fingerprints)
         .expect("the sealed helper remains runnable");
     assert_eq!(kept.retained.len(), 1);
     assert!(kept.divergence.is_empty());
 }
 
+/// V17: regeneration cannot turn a shipped tail back into an unsealed baseline.
+#[test]
+fn a_sealed_tail_requires_a_new_release_before_regeneration() {
+    let registry = helper_registry(1);
+    let fingerprints = Default::default();
+    let mut sealed = release::freeze("1.0", 1, None, &registry, &fingerprints);
+    sealed.seal().expect("seal the baseline");
+    assert!(
+        sealed.seal().is_err(),
+        "sealing is explicit and happens once"
+    );
+    assert!(release::refreeze(&sealed, None, &registry, &fingerprints).is_err());
+}
+
+/// V17: a sealed building release cannot silently write changed helpers.
+#[test]
+fn a_sealed_building_release_rejects_changed_writes() {
+    let old = helper_registry(1);
+    let current = helper_registry(2);
+    let fingerprints = Default::default();
+    let mut sealed = release::freeze("1.0", 1, None, &old, &fingerprints);
+    sealed.sealed = true;
+    assert!(release::keep(&[sealed], &current, &fingerprints).is_err());
+}
+
 /// The helper release the tree builds, frozen for the tree as it stands
 /// (`build.rs`): the source `lash-vm-library`'s `src/generated/` keeps it in.
-const FROZEN: &str = include_str!(concat!(env!("OUT_DIR"), "/helper_release.rs"));
+const FROZEN: &str = include_str!(concat!(env!("OUT_DIR"), "/helper_release.json"));
 
 /// Where the release the tree builds and the build part (`build.rs`).
 const DIVERGENCE: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/helper_release_divergence.json"));
 
-/// Freezes the helper release the tree builds for the tree as it stands:
-/// it writes the build's functions and keeps every function of its earlier
-/// freeze the build can still run (FIG-5799).
+/// Regenerates an unsealed baseline; LASH_SEAL=1 explicitly seals it at the cut.
 #[test]
-#[ignore = "regenerates crates/lash-vm-library/src/generated/helpers_1_0.rs"]
+#[ignore = "regenerates the building helper release artifact"]
 fn regenerate_helper_release() {
     assert_eq!(std::env::var("LASH_REGENERATE").as_deref(), Ok("1"));
+    let mut frozen = lash_vm_library::helper_releases()
+        .expect("releases")
+        .pop()
+        .expect("building release");
+    assert!(
+        !frozen.sealed,
+        "a sealed release cannot be regenerated; declare a new release"
+    );
+    frozen = lash_vm_library::HelperRelease::decode(FROZEN).expect("the frozen release");
+    if std::env::var("LASH_SEAL").as_deref() == Ok("1") {
+        frozen.seal().expect("seal once");
+    }
     let workspace =
         std::env::var_os("BUILD_WORKSPACE_DIRECTORY").expect("the regeneration workspace");
     std::fs::write(
         std::path::Path::new(&workspace)
-            .join("crates/lash-vm-library/src/generated/helpers_1_0.rs"),
-        FROZEN,
+            .join("crates/lash-vm-library/src/generated")
+            .join(frozen.file_name().expect("a release file name")),
+        frozen.source().expect("the release source"),
     )
     .expect("the release is written");
 }

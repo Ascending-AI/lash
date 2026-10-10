@@ -11,8 +11,10 @@
 /// The helper release a cell lowered now is written against.
 #[async_trait::async_trait]
 pub trait HelperReleaseGate: Send + Sync {
-    /// The newest helper release every live node of the fleet holds.
-    async fn writable(&self) -> u32;
+    /// The newest helper release every live node serving these sessions holds.
+    /// A typed retryable error defers lowering when none is fleet-readable or
+    /// when the live capability survey is unavailable.
+    async fn writable(&self) -> Result<u32, lash_core::RuntimeEffectControllerError>;
 }
 
 /// A gate that always answers one release: a host that stands in for a
@@ -23,7 +25,7 @@ pub(crate) struct WritingRelease(pub(crate) u32);
 #[cfg(feature = "synthetic-next")]
 #[async_trait::async_trait]
 impl HelperReleaseGate for WritingRelease {
-    async fn writable(&self) -> u32 {
-        self.0
+    async fn writable(&self) -> Result<u32, lash_core::RuntimeEffectControllerError> {
+        Ok(self.0)
     }
 }

@@ -122,11 +122,20 @@ pub async fn survey_kernel_migration(
     }
     // What still pins a helper release before this build's own, which a
     // later build may stop retaining (FIG-5799).
-    for release in crate::formats::earlier_helper_releases() {
+    for release in surveyed_helper_releases()? {
         let retired = crate::helper_releases::retired_helpers(release)?;
-        let (processes, sessions) =
-            crate::helper_releases::survey_helper_dependents(backend, functions, release, &retired)
-                .await?;
+        let functions = lash_vm_runtime::helper_survey_functions().map_err(|error| {
+            KernelMigrationSurveyError::State(DurableError::Store(
+                lash_core::durable_port::StoreFailure {
+                    kind: lash_core::durable_port::StoreFailureKind::Corrupt,
+                    message: error.to_string(),
+                },
+            ))
+        })?;
+        let (processes, sessions) = crate::helper_releases::survey_helper_dependents(
+            backend, &functions, release, &retired,
+        )
+        .await?;
         survey.helper_processes.extend(processes);
         survey.helper_sessions.extend(sessions);
     }
@@ -210,9 +219,9 @@ async fn wake_helper_dependents(backend: &crate::Backend) -> Result<usize, Durab
         }),
     };
     let mut woken = 0;
-    for release in crate::formats::earlier_helper_releases() {
+    for release in surveyed_helper_releases().map_err(unavailable)? {
         let retired = crate::helper_releases::retired_helpers(release).map_err(unavailable)?;
-        let functions = lash_vm_runtime::standard_functions().map_err(|error| {
+        let functions = lash_vm_runtime::helper_survey_functions().map_err(|error| {
             unavailable(KernelMigrationSurveyError::State(DurableError::Store(
                 lash_core::durable_port::StoreFailure {
                     kind: lash_core::durable_port::StoreFailureKind::Corrupt,
@@ -262,4 +271,28 @@ pub(crate) fn retiring(backend: &crate::Backend, kernel: u32) -> crate::Backend 
         ),
         KERNEL_MIGRATION_SWEEP,
     )
+}
+
+/// Retained and removed releases participate in the same operator sweep.
+fn surveyed_helper_releases() -> Result<Vec<u32>, KernelMigrationSurveyError> {
+    let mut releases = crate::formats::earlier_helper_releases().map_err(|error| {
+        KernelMigrationSurveyError::State(DurableError::Store(
+            lash_core::durable_port::StoreFailure {
+                kind: lash_core::durable_port::StoreFailureKind::Corrupt,
+                message: error.to_string(),
+            },
+        ))
+    })?;
+    let retiring = lash_vm_runtime::retiring_helper_releases().map_err(|error| {
+        KernelMigrationSurveyError::State(DurableError::Store(
+            lash_core::durable_port::StoreFailure {
+                kind: lash_core::durable_port::StoreFailureKind::Corrupt,
+                message: error.to_string(),
+            },
+        ))
+    })?;
+    releases.extend(retiring.into_iter().map(|release| release.ordinal));
+    releases.sort_unstable();
+    releases.dedup();
+    Ok(releases)
 }

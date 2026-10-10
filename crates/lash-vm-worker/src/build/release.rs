@@ -44,7 +44,7 @@ pub(crate) fn keep(
 ) -> Result<Kept, String> {
     let mut kept = Kept::default();
     let mut held: BTreeSet<FunctionId> = registry.iter().map(|(function, _)| *function).collect();
-    for release in releases {
+    for (position, release) in releases.iter().enumerate() {
         let mut differs = |message: String| {
             let message = format!("helper release {}: {message}", release.release);
             if release.sealed {
@@ -118,14 +118,14 @@ pub(crate) fn keep(
             held.insert(function);
             kept.retained.push(released.definition.clone());
         }
-        if !release.sealed {
+        if position + 1 == releases.len() {
             let own: BTreeSet<FunctionId> =
                 registry.iter().map(|(function, _)| *function).collect();
             let added = own.difference(&release.writes).count();
             let dropped = release.writes.difference(&own).count();
             if added + dropped > 0 {
                 differs(format!(
-                    "the build's functions are not the ones the release writes \
+                    "the building release must name a new release if sealed; the build's functions are not the ones the release writes \
                      ({added} not in it, {dropped} of it not built); freeze it again: {FREEZE}"
                 ))?;
             }
@@ -206,4 +206,26 @@ fn list(
         definition: FunctionDefinition::clone(&registered.definition),
         fingerprint: fingerprints.get(&function).cloned(),
     });
+}
+
+/// Regenerates the building release, never a release that has shipped.
+pub(crate) fn refreeze(
+    building: &HelperRelease,
+    previous: Option<&HelperRelease>,
+    registry: &FunctionRegistry,
+    fingerprints: &BTreeMap<FunctionId, String>,
+) -> Result<HelperRelease, String> {
+    if building.sealed {
+        return Err(format!(
+            "helper release {} is sealed; declare a new release before regenerating",
+            building.release
+        ));
+    }
+    Ok(freeze(
+        &building.release,
+        building.ordinal,
+        previous,
+        registry,
+        fingerprints,
+    ))
 }

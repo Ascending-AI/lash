@@ -126,6 +126,33 @@ impl HelperRelease {
         ))
     }
 
+    /// Seals the unshipped baseline once, fixing its exact artifact at the cut.
+    ///
+    /// # Errors
+    /// A release that has already shipped cannot be sealed again.
+    pub fn seal(&mut self) -> Result<(), String> {
+        if self.sealed {
+            return Err(format!("helper release {} is already sealed", self.release));
+        }
+        self.sealed = true;
+        Ok(())
+    }
+
+    /// The generated artifact's file name, derived from this release's identity.
+    ///
+    /// # Errors
+    /// A release name that is not dot-separated ASCII alphanumeric components.
+    pub fn file_name(&self) -> Result<String, String> {
+        if self
+            .release
+            .split('.')
+            .any(|part| part.is_empty() || !part.bytes().all(|b| b.is_ascii_alphanumeric()))
+        {
+            return Err("invalid helper release file name".into());
+        }
+        Ok(format!("helpers_{}.rs", self.release.replace('.', "_")))
+    }
+
     /// What a build keeps of the release.
     pub fn index(&self) -> HelperReleaseIndex {
         HelperReleaseIndex {

@@ -62,6 +62,9 @@ pub enum DurableBuildError {
         /// The type.
         projection: String,
     },
+    /// The shipped helper release catalog or its retirement declaration is invalid.
+    #[error("invalid helper release catalog: {message}")]
+    HelperReleaseCatalog { message: String },
     /// The substrate parameters break a rule.
     #[error("invalid durable configuration: {0}")]
     InvalidConfig(#[from] DurableConfigError),

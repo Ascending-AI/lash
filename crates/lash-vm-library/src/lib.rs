@@ -43,6 +43,11 @@ pub const RETAINED_HELPER_RELEASES: &[(&str, u32)] = &[("1.0", 1)];
 /// [`RETAINED_HELPER_RELEASES`].
 const RELEASES: &[&str] = &[helpers_1_0::RELEASE];
 
+/// Artifacts removed from the runnable union, kept for the startup retirement
+/// survey. Moving an artifact here declares retirement; it never expires by time.
+/// The retained declarations above must remove the same release.
+const RETIRING_RELEASES: &[&str] = &[];
+
 /// Why the shipped library could not be assembled: a defect of the build,
 /// never of a document.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -67,9 +72,23 @@ impl LibraryError {
 /// A release that does not decode, or that is not the one
 /// [`RETAINED_HELPER_RELEASES`] names in its place.
 pub fn helper_releases() -> Result<Vec<HelperRelease>, LibraryError> {
-    RELEASES
+    decode_releases(RELEASES, RETAINED_HELPER_RELEASES)
+}
+
+fn decode_releases(
+    texts: &[&str],
+    declarations: &[(&str, u32)],
+) -> Result<Vec<HelperRelease>, LibraryError> {
+    if texts.len() != declarations.len() {
+        return Err(LibraryError::new(format!(
+            "{} helper release declarations have {} artifacts",
+            declarations.len(),
+            texts.len()
+        )));
+    }
+    texts
         .iter()
-        .zip(RETAINED_HELPER_RELEASES)
+        .zip(declarations)
         .map(|(text, (name, ordinal))| {
             let release = HelperRelease::decode(text).map_err(LibraryError::new)?;
             if release.release != *name || release.ordinal != *ordinal {
@@ -110,15 +129,14 @@ pub fn changed_helpers(
 
 /// The shipped library as a parent holds it, assembled once in a process.
 struct Standard {
-    /// Every function of every retained release, each written for the
-    /// kernel version the dialects lower to.
-    written: Arc<FunctionRegistry>,
-    /// `written` and each function redeclared for every successor version
-    /// the build interprets.
+    /// Every retained function and its redeclarations for each successor
+    /// version the build interprets.
     interpreted: Arc<FunctionRegistry>,
     /// What the build's own release resolves each name to.
     names: BTreeMap<FunctionName, FunctionId>,
     releases: Vec<HelperReleaseIndex>,
+    retiring: Vec<HelperRelease>,
+    surveyed: Arc<FunctionRegistry>,
 }
 
 fn standard() -> Result<&'static Standard, LibraryError> {
@@ -137,7 +155,13 @@ fn standard_in(
 }
 
 fn assemble() -> Result<Standard, LibraryError> {
-    let releases = helper_releases()?;
+    assemble_releases(helper_releases()?, retiring_releases()?)
+}
+
+fn assemble_releases(
+    releases: Vec<HelperRelease>,
+    retiring: Vec<HelperRelease>,
+) -> Result<Standard, LibraryError> {
     let building = releases
         .last()
         .ok_or_else(|| LibraryError::new("no helper release is retained"))?;
@@ -192,15 +216,70 @@ fn assemble() -> Result<Standard, LibraryError> {
         }
     }
     let written = Arc::new(written);
+    let interpreted = if redeclared {
+        Arc::new(interpreted)
+    } else {
+        Arc::clone(&written)
+    };
+    let surveyed = if retiring.is_empty() {
+        Arc::clone(&interpreted)
+    } else {
+        let mut surveyed = FunctionRegistry::clone(&interpreted);
+        let mut retired_ordinals = BTreeSet::new();
+        let mut retired_names = BTreeSet::new();
+        for release in &retiring {
+            if !retired_ordinals.insert(release.ordinal) || !retired_names.insert(&release.release)
+            {
+                return Err(LibraryError::new(
+                    "a retiring helper release is declared twice",
+                ));
+            }
+            if releases
+                .iter()
+                .any(|kept| kept.ordinal == release.ordinal || kept.release == release.release)
+            {
+                return Err(LibraryError::new(
+                    "a helper release cannot be retained and retiring",
+                ));
+            }
+            if release.ordinal >= building.ordinal {
+                return Err(LibraryError::new(
+                    "a retiring helper release must precede the building release",
+                ));
+            }
+            let index = release.index();
+            if !index.writes.is_subset(&index.functions) {
+                return Err(LibraryError::new(
+                    "a retiring release writes a function it does not hold",
+                ));
+            }
+            for released in &release.functions {
+                if released.definition.identity().map_err(LibraryError::new)? != released.function {
+                    return Err(LibraryError::new(
+                        "a retiring helper identity differs from its definition",
+                    ));
+                }
+                if surveyed.get(&released.function).is_none() {
+                    surveyed
+                        .register(released.definition.clone(), None)
+                        .map_err(LibraryError::new)?;
+                }
+            }
+        }
+        for version in lash_kernel_doc::KernelVersion::ALL {
+            if let Some(migration) = lash_kernel_migrate::migration_from(*version) {
+                lash_kernel_migrate::migrate_registry(&mut surveyed, migration)
+                    .map_err(LibraryError::new)?;
+            }
+        }
+        Arc::new(surveyed)
+    };
     Ok(Standard {
-        interpreted: if redeclared {
-            Arc::new(interpreted)
-        } else {
-            Arc::clone(&written)
-        },
-        written,
+        interpreted,
         names,
         releases: releases.iter().map(HelperRelease::index).collect(),
+        retiring,
+        surveyed,
     })
 }
 
@@ -228,13 +307,42 @@ pub fn standard_helper_releases() -> Result<Vec<HelperReleaseIndex>, LibraryErro
     Ok(standard()?.releases.clone())
 }
 
+fn retiring_releases() -> Result<Vec<HelperRelease>, LibraryError> {
+    RETIRING_RELEASES
+        .iter()
+        .map(|text| HelperRelease::decode(text).map_err(LibraryError::new))
+        .collect()
+}
+
+/// Releases explicitly removed from the runnable union, whose identity indexes
+/// remain available until every dependent has ended or been adopted.
+///
+/// # Errors
+/// [`LibraryError`] when a declaration or artifact is invalid.
+pub fn retiring_helper_releases() -> Result<Vec<HelperReleaseIndex>, LibraryError> {
+    Ok(standard()?
+        .retiring
+        .iter()
+        .map(HelperRelease::index)
+        .collect())
+}
+
+/// The declaration catalog used only to survey retirement: includes removed
+/// definitions for transitive reachability, without making them runnable.
+///
+/// # Errors
+/// [`LibraryError`].
+pub fn helper_survey_functions() -> Result<Arc<FunctionRegistry>, LibraryError> {
+    Ok(Arc::clone(&standard()?.surveyed))
+}
+
 /// The functions a build of the standard embedding would stop holding were
 /// it to stop retaining helper release `release`, each with its
 /// counterpart: the function of the same name and kernel version the
 /// embedding writes, when it has one (FIG-5799). A function no newer
 /// retained release holds and the embedding does not write is listed, and
 /// so is each function a kernel version this build interprets redeclares it
-/// as. Empty when the embedding retains no such release.
+/// as. An unknown release is a build error, never an empty survey.
 ///
 /// # Errors
 ///
@@ -242,14 +350,22 @@ pub fn standard_helper_releases() -> Result<Vec<HelperReleaseIndex>, LibraryErro
 pub fn standard_retired_helpers(
     release: u32,
 ) -> Result<BTreeMap<FunctionId, Option<FunctionId>>, LibraryError> {
-    let standard = standard()?;
-    let Some(retired) = standard
+    retired_helpers_in(standard()?, release)
+}
+
+fn retired_helpers_in(
+    standard: &Standard,
+    release: u32,
+) -> Result<BTreeMap<FunctionId, Option<FunctionId>>, LibraryError> {
+    let retired = standard
         .releases
         .iter()
+        .cloned()
+        .chain(standard.retiring.iter().map(HelperRelease::index))
         .find(|index| index.ordinal == release)
-    else {
-        return Ok(BTreeMap::new());
-    };
+        .ok_or_else(|| {
+            LibraryError::new(format!("helper release {release} has no retirement index"))
+        })?;
     let mut kept: BTreeSet<FunctionId> = standard.names.values().copied().collect();
     for newer in standard
         .releases
@@ -264,7 +380,7 @@ pub fn standard_retired_helpers(
         .filter(|function| !kept.contains(function))
         .map(|function| {
             let counterpart = standard
-                .written
+                .surveyed
                 .get(function)
                 .and_then(|registered| standard.names.get(&registered.definition.name).copied());
             (*function, counterpart)
@@ -276,7 +392,7 @@ pub fn standard_retired_helpers(
             continue;
         };
         let redeclared = |functions: Vec<FunctionId>| {
-            lash_kernel_migrate::redeclare(migration.definition, functions, &*standard.interpreted)
+            lash_kernel_migrate::redeclare(migration.definition, functions, &*standard.surveyed)
                 .map(|all| {
                     all.into_iter()
                         .map(|function| (function.from, function.to))
@@ -312,6 +428,59 @@ mod tests {
     use std::sync::mpsc;
     use std::time::Duration;
 
+    /// V18: every advertised release has a corresponding artifact; zip must not discard it.
+    #[test]
+    fn a_declared_helper_release_cannot_lack_its_artifact() {
+        assert!(decode_releases(&[], &[("1.0", 1)]).is_err());
+        assert!(decode_releases(&[helpers_1_0::RELEASE], &[]).is_err());
+    }
+
+    /// V09: removal from the runnable union must not erase the retirement survey's identities.
+    #[test]
+    fn a_removed_helper_release_keeps_its_retirement_index() {
+        let release = |result, ordinal| {
+            let definition = lash_kernel_doc::parse_definition(&format!(
+                "function helper() -> Int\nkernel 1\ncharge 1\nbody {{ return {result} }}\n"
+            ))
+            .expect("a helper");
+            let function = definition.identity().expect("identity");
+            HelperRelease {
+                release: format!("{ordinal}.0"),
+                ordinal,
+                sealed: true,
+                writes: BTreeSet::from([function]),
+                functions: vec![ReleasedFunction {
+                    function,
+                    definition,
+                    fingerprint: None,
+                }],
+            }
+        };
+        let removed = release(1, 1);
+        let current = release(2, 2);
+        let old = removed.functions[0].function;
+        let new = current.functions[0].function;
+        let standard = assemble_releases(vec![current], vec![removed]).expect("the build");
+        assert!(
+            standard.interpreted.get(&old).is_none(),
+            "retired is not runnable"
+        );
+        assert!(
+            standard.surveyed.get(&old).is_some(),
+            "the survey holds removed definitions"
+        );
+        assert!(
+            retired_helpers_in(&standard, 99).is_err(),
+            "unknown is not an empty survey"
+        );
+        assert_eq!(
+            retired_helpers_in(&standard, 1)
+                .expect("the survey")
+                .get(&old),
+            Some(&Some(new))
+        );
+    }
+
     /// FIG-5821: concurrent cold readers assemble the shipped library once,
     /// rather than each allocating the entire frozen helper catalog.
     #[test]
@@ -325,10 +494,11 @@ mod tests {
         let empty = || {
             let functions = Arc::new(FunctionRegistry::declarations());
             Standard {
-                written: Arc::clone(&functions),
                 interpreted: functions,
                 names: BTreeMap::new(),
                 releases: Vec::new(),
+                retiring: Vec::new(),
+                surveyed: Arc::new(FunctionRegistry::declarations()),
             }
         };
         std::thread::scope(|threads| {
