@@ -29,9 +29,6 @@ pub(super) use trace::protocol_step_trace_event;
 pub(super) struct RuntimeTurnDriver<'a> {
     pub(super) session: Session,
     pub(super) policy: RuntimeSessionPolicy,
-    /// The turn's committed content, recorded in program order from the
-    /// machine's emissions and the driver's own terminal events.
-    pub(super) recorded_assembly: RecordedTurnAssembly,
     /// The tool calls of the cell that last answered the machine, as the
     /// code executor's bound keeps them, until the turn's next commit takes
     /// them (FIG-5330).

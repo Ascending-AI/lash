@@ -473,15 +473,37 @@ impl CodeExecutorPlugin for CodeModeCodeExecutor {
             .map_err(|refusal| refusal.to_string()))
     }
 
-    /// A session's cells publish no module artifacts: a frame switch has
-    /// none to carry.
+    fn history_attachments(
+        &self,
+        record: &lash_core::ProtocolEvent,
+    ) -> Result<Vec<lash_core::AttachmentId>, SessionError> {
+        let Some(RlmProtocolEvent::RlmTrajectoryEntry(cell)) =
+            decode_rlm_protocol_event(record).map_err(history_corruption)?
+        else {
+            return Ok(Vec::new());
+        };
+        Ok(cell
+            .prints_retained
+            .iter()
+            .map(|retained| &retained.reference)
+            .chain(&cell.images)
+            .chain(
+                cell.result
+                    .finish()
+                    .and_then(lash_core::OutputValue::retained)
+                    .map(|retained| &retained.reference),
+            )
+            .map(|reference| reference.id.clone())
+            .collect())
+    }
+
     async fn frame_switch_carries(
         &self,
         _ctx: ProtocolSessionContext<'_>,
         _successor: &lash_core::FrameNodeId,
-        _initial_nodes: &[lash_core::SessionAppendNode],
+        initial_nodes: &[lash_core::SessionAppendNode],
     ) -> Result<Vec<lash_core::ArtifactName>, SessionError> {
-        Ok(Vec::new())
+        frame_switch_carries(initial_nodes)
     }
 
     fn executable_generation(&self) -> Option<lash_core::ExecutableGeneration> {
@@ -538,6 +560,66 @@ impl CodeExecutorPlugin for CodeModeCodeExecutor {
         outcome: lash_core::plugin::CodeExecutionOutcome,
     ) -> Result<(), SessionError> {
         self.state.settle_code_execution(outcome).await
+    }
+}
+
+/// The definitions a frame switch carries (ADR 0113 §3.1): every process
+/// definition a value in the switch's seed and globals events names, by its
+/// tagged id. A cell's definitions are held by its frame; only these survive
+/// into the successor frame, with the document each one runs.
+fn frame_switch_carries(
+    nodes: &[lash_core::SessionAppendNode],
+) -> Result<Vec<lash_core::ArtifactName>, SessionError> {
+    let mut definitions = BTreeSet::new();
+    for node in nodes {
+        let lash_core::SessionAppendNode::ProtocolEvent { event, .. } = node else {
+            continue;
+        };
+        let values = match decode_rlm_protocol_event(event).map_err(history_corruption)? {
+            Some(RlmProtocolEvent::RlmSeed(seed)) => serde_json::to_value(&seed),
+            Some(RlmProtocolEvent::RlmGlobalsPatch(patch)) => serde_json::to_value(&patch),
+            _ => continue,
+        };
+        // Both bodies are JSON maps, so encoding them cannot fail; a body
+        // that did would carry nothing.
+        if let Ok(values) = values {
+            collect_definition_ids(&values, &mut definitions);
+        }
+    }
+    Ok(definitions
+        .into_iter()
+        .map(|id| lash_core::ArtifactName {
+            store: lash_core::ArtifactStoreId::ProcessDefinition,
+            artifact_ref: id.to_string(),
+        })
+        .collect())
+}
+
+/// Every tagged process definition id in `value`: a definition as a cell
+/// hands it out holds its id, and a cell can hand out the id alone.
+fn collect_definition_ids(
+    value: &serde_json::Value,
+    ids: &mut BTreeSet<lash_core::ProcessDefinitionId>,
+) {
+    match value {
+        serde_json::Value::Object(fields) => {
+            match lash_core::ProcessDefinitionId::from_tagged_json(value) {
+                Ok(id) => {
+                    ids.insert(id);
+                }
+                Err(_) => {
+                    for field in fields.values() {
+                        collect_definition_ids(field, ids);
+                    }
+                }
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                collect_definition_ids(item, ids);
+            }
+        }
+        _ => {}
     }
 }
 

@@ -4,7 +4,10 @@
 //! built here and written by the phase runner inside the session owner's
 //! fenced transaction.
 
-use super::execution_state::{ExecutionStateUpdate, capture_execution_state_update};
+use super::execution_state::{
+    ExecutionStateUpdate, capture_execution_state_update, committed_frame_transition,
+    derive_seed_carries,
+};
 use super::materialize::materialize_turn_reply;
 use super::{TurnBoundary, derive_commit_node_ids, execution_state_capture_error};
 use crate::plugin::{AfterTurnDecisions, PluginSession, StagedPluginState};
@@ -75,6 +78,27 @@ impl TurnBoundary {
         after_turn: Option<&AfterTurnDecisions>,
     ) -> Result<RuntimeCommit, StoreError> {
         self.record_outcome_frame_switch(outcome)?;
+        let mut session = session;
+        // A switch leaves the frame the turn ran on and carries what its seed
+        // names into the frame it opens, in this commit (ADR 0113 §3.1).
+        let switch = match outcome {
+            TurnOutcome::AgentFrameSwitch {
+                frame_key,
+                initial_nodes,
+                ..
+            } => {
+                let state = self.state();
+                let successor =
+                    crate::session_graph::frame_node_id(&state.session_id, frame_key.as_str());
+                let ended = state.current_frame_node_id.clone();
+                let carries =
+                    derive_seed_carries(session.as_deref_mut(), &successor, initial_nodes)
+                        .await
+                        .map_err(execution_state_capture_error)?;
+                Some((ended, carries))
+            }
+            _ => None,
+        };
         let cancelled = matches!(
             outcome,
             TurnOutcome::Stopped(crate::TurnStop::Cancelled { .. })
@@ -106,6 +130,8 @@ impl TurnBoundary {
         let operation = self.final_operation();
         let commit_budget = self.commit_budget;
         let output_cuts = self.output_cuts;
+        let committing = self.operation_scope.clone();
+        let definition_engines = self.definition_engines.clone();
         let state = self.final_state_mut();
         if let Some(plugins) = plugins.as_deref() {
             let captured = match after_turn {
@@ -156,9 +182,19 @@ impl TurnBoundary {
                 record_ordinal += 1;
             }
         }
-        let attachments = committed_attachment_ids(state);
         let mut graph = state.pending_graph_commit();
-        derive_commit_node_ids(state, &mut graph, &operation)?;
+        let executor = plugins.as_deref().and_then(PluginSession::code_executor);
+        let attachments = committed_attachment_ids(state, executor.as_deref(), &graph)
+            .map_err(execution_state_capture_error)?;
+        let derived = derive_commit_node_ids(state, &mut graph, &operation)?;
+        let frame_transition = match switch {
+            Some((ended, carries)) => {
+                let ended = ended.map(|ended| derived_frame(ended, &derived));
+                let appended: Vec<_> = derived.into_iter().map(|(_, node)| node).collect();
+                committed_frame_transition(state, ended, carries, &committing, &appended)?
+            }
+            None => None,
+        };
         let mut commit = RuntimeCommit::persisted_state_with_graph_commit_and_operation_and_budget(
             state,
             graph,
@@ -167,17 +203,49 @@ impl TurnBoundary {
             fleet_format,
         )?
         .with_committed_attachments(attachments);
+        crate::runtime::frame_definition_carry::prepare(
+            &definition_engines,
+            frame_transition.as_ref(),
+        )
+        .await?;
+        commit.frame_transition = frame_transition;
         commit.failure_evidence = failure_evidence.to_vec();
         commit.outcome = Some(crate::store::TurnCommitOutcome::from_terminal(outcome));
         Ok(commit)
     }
 }
 
-/// Every stored attachment the committed transcript names, a tool result's
-/// blocks and its retained outputs included: the commit holds each on the
-/// session, so what the turn wrote outlives its upload's staging referrer
-/// (ADR 0124 §4).
-fn committed_attachment_ids(state: &crate::RuntimeSessionState) -> Vec<crate::AttachmentId> {
+/// `frame` as this commit names it: a frame opened since the last commit is
+/// appended under its derived id.
+#[expect(
+    clippy::expect_used,
+    reason = "derived graph node identities are non-empty"
+)]
+fn derived_frame(
+    frame: crate::FrameNodeId,
+    derived: &[(crate::NodeId, crate::NodeId)],
+) -> crate::FrameNodeId {
+    derived
+        .iter()
+        .find(|(draft, _)| draft.as_str() == frame.as_str())
+        .map_or(frame, |(_, node)| {
+            crate::FrameNodeId::new(node.clone())
+                .expect("derived graph node identities are non-empty")
+        })
+}
+
+/// Every stored attachment the committed history names: a tool result's
+/// blocks and retained outputs in the transcript, and what the protocol
+/// records the commit appends reference, a cell's retained outputs among
+/// them. The commit holds each on the session, so what the turn wrote
+/// outlives its upload's staging referrer (ADR 0124 §4). The records are the
+/// ones the commit writes, so a turn resumed from its checkpoint names the
+/// same attachments as an uncut one.
+fn committed_attachment_ids(
+    state: &crate::RuntimeSessionState,
+    executor: Option<&dyn crate::plugin::CodeExecutorPlugin>,
+    graph: &crate::store::GraphAppend,
+) -> Result<Vec<crate::AttachmentId>, crate::SessionError> {
     let mut ids = std::collections::BTreeSet::new();
     for message in &state.read_model().messages {
         for part in message.parts.iter() {
@@ -188,5 +256,15 @@ fn committed_attachment_ids(state: &crate::RuntimeSessionState) -> Vec<crate::At
             );
         }
     }
-    ids.into_iter().collect()
+    if let Some(executor) = executor {
+        for node in graph.nodes() {
+            if let crate::SessionNodePayload::Event {
+                event: crate::SessionHistoryRecord::Protocol(record),
+            } = &node.payload
+            {
+                ids.extend(executor.history_attachments(record)?);
+            }
+        }
+    }
+    Ok(ids.into_iter().collect())
 }

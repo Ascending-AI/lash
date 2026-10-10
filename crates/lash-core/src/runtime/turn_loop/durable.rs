@@ -266,7 +266,6 @@ impl LashRuntime {
                 .map_err(RuntimeEffectControllerError::into_runtime_error)?,
             );
         }
-        let recorded_assembly = RecordedTurnAssembly::new();
         emit_session_events(observer, std::mem::take(&mut prepared.events));
         self.state.last_prompt_usage = previous_prompt_usage;
         let mut turn_pipeline = TurnBoundary::from_state_with_graph_appends(
@@ -315,7 +314,6 @@ impl LashRuntime {
             session,
             policy: resolved_turn_policy,
             prelude,
-            recorded_assembly,
             answered_cell_calls: Default::default(),
             host: self.host.clone(),
             turn_id: run.clone(),

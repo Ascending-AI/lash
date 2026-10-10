@@ -1183,26 +1183,6 @@ macro_rules! tiered {
     )*};
 }
 
-/// [`tiered!`] for laws a known bug keeps red: both legs are ignored, the
-/// SQLite leg naming the bug's ticket.
-macro_rules! tiered_ignored {
-    ($reason:literal: $($law:ident),* $(,)?) => {$(
-        mod $law {
-            #[tokio::test]
-            #[ignore = $reason]
-            async fn sqlite() {
-                super::$law(super::Backend::Sqlite).await;
-            }
-
-            #[tokio::test]
-            #[ignore = "requires PostgreSQL; select inside a pg16 gate"]
-            async fn postgres() {
-                super::$law(super::Backend::Postgres).await;
-            }
-        }
-    )*};
-}
-
 tiered!(
     wait_edges_waits_for_condition_past_former_deadline,
     cold_reopen_globals_across_turns,
@@ -1213,17 +1193,9 @@ tiered!(
     created_definition_survives_cold_reopen_and_starts_by_value,
     created_definition_is_reclaimed_after_session_deletion,
     a_saved_function_started_as_a_process_finishes_after_its_session_is_deleted,
-    a_python_saved_function_process_outlives_its_session
-);
-
-tiered_ignored!(
-    "FIG-5354: a durable turn's frame switch carries none of its seed's modules":
+    a_python_saved_function_process_outlives_its_session,
     continue_as_carries_only_seeded_definition,
     carried_definition_id_retains_the_closure_across_frame_switch,
-);
-
-tiered_ignored!(
-    "FIG-5327: context-pressure compaction opens no frame on a durable turn":
     a_pressure_seed_carries_its_module_into_the_new_frame,
 );
 

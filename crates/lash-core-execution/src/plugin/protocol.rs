@@ -338,6 +338,19 @@ pub trait CodeExecutorPlugin: Send + Sync {
         Ok(ExecutionStateCapture::default())
     }
 
+    /// The attachments `record`, a protocol record of this executor's
+    /// session, references: a cell's retained outputs among them. A turn's
+    /// commit reads them from the records it commits and holds each on the
+    /// session, so what its history names outlives the upload that staged it
+    /// (ADR 0124 §4), resumed or not. An executor whose records reference no
+    /// attachment answers none.
+    fn history_attachments(
+        &self,
+        _record: &crate::ProtocolEvent,
+    ) -> Result<Vec<crate::AttachmentId>, crate::SessionError> {
+        Ok(Vec::new())
+    }
+
     /// The artifacts a `continue_as` carries into the successor frame
     /// (ADR 0113 §3.1): every artifact the seed values in `initial_nodes`
     /// reference. The switching turn's final commit carries them onto the

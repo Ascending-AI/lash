@@ -3,8 +3,8 @@
 //!
 //! These types are crate-internal — sibling modules (`turn_driver.rs`,
 //! `tests.rs`) import them via `use super::*` in `mod.rs`. A turn's committed
-//! content is assembled elsewhere, from recorded state
-//! (`turn_boundary::recorded_assembly`).
+//! content is assembled elsewhere, from its recorded history
+//! (`turn_boundary::durable_commit`).
 
 /// version_surface = "coexist"
 /// version_guard(items(LASH_PROVIDER_CALL_CORRELATION_DOMAIN_VERSION, repair_tool_call_ids))

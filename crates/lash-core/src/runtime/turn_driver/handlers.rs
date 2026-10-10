@@ -506,7 +506,6 @@ impl RuntimeTurnDriver<'_> {
             .saturating_duration_since(cell_started)
             .as_millis() as u64;
         if let Ok(output) = &result {
-            self.recorded_assembly.note_code_outputs(output);
             self.answered_cell_calls = self.bounded_cell_calls(output.tool_calls.clone());
         }
         match &result {

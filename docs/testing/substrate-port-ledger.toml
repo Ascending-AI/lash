@@ -9672,7 +9672,7 @@ laws = [
 ]
 disposition = "port"
 status = "ported"
-note = "FIG-5312 ported in place on SQLite memory; the _on_postgres legs are #[ignore] for the PostgreSQL gate; step_archive_refetch_survives_cold_reopen_branch_and_continue_as_on_sqlite is #[ignore] FIG-5318 (a durable turn's commit roots no attachment its history references)"
+note = "FIG-5312 ported in place on SQLite memory; the _on_postgres legs are #[ignore] for the PostgreSQL gate; FIG-5318 runs step_archive_refetch_survives_cold_reopen_branch_and_continue_as_on_sqlite unignored (the turn commit roots the attachments its committed records reference)"
 
 [[row]]
 path = "crates/lash/src/tests/plugin_generation.rs"
@@ -10572,7 +10572,7 @@ laws = [
 ]
 disposition = "port"
 status = "ported"
-note = "FIG-5312 ported the file onto the core's own node (SQLite memory; PostgreSQL legs #[ignore] for the PostgreSQL gate); stored_module_refusals_preserve_causes_and_terminal_semantics starts a real Lash VM process on the node, and the double's server-stats check went with the double. #[ignore] FIG-5354 (a frame switch carries no seed modules): continue_as_carries_only_seeded_definition, carried_definition_id_retains_the_closure_across_frame_switch; #[ignore] FIG-5327: a_pressure_seed_carries_its_module_into_the_new_frame"
+note = "FIG-5312 ported the file onto the core's own node (SQLite memory; PostgreSQL legs #[ignore] for the PostgreSQL gate); stored_module_refusals_preserve_causes_and_terminal_semantics starts a real Lash VM process on the node, and the double's server-stats check went with the double. FIG-5354 runs continue_as_carries_only_seeded_definition, carried_definition_id_retains_the_closure_across_frame_switch and a_pressure_seed_carries_its_module_into_the_new_frame unignored (a frame switch carries its seed's definitions)"
 
 [[row]]
 path = "crates/lash/tests/artifact_referrers_evidence/fixture.rs"

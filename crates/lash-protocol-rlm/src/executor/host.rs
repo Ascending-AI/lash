@@ -256,7 +256,9 @@ impl CellHost<'_> {
                 // has: a whole number is an integer, in either dialect.
                 .map(|args| match effect.controls.finish_declaration() {
                     Some(_) => crate::cell_value::whole_numbers_as_integers(args),
-                    None => args,
+                    // An attachment the cell read from history or a tool
+                    // reaches the tool as the attachment it is.
+                    None => crate::cell_value::attachments_as_written(args),
                 })
                 .map_err(|problem| {
                     refused(

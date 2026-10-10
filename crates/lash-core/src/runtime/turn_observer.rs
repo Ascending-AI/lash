@@ -4,8 +4,7 @@
 //! synchronous hand-off onto the turn's observation queue that never waits and
 //! never wakes the shift. What reaches the host sinks, and when, cannot change
 //! anything the shift decides or commits: commit content comes from the
-//! driver's recorded state ([`RecordedTurnAssembly`](super::RecordedTurnAssembly)),
-//! never from this stream.
+//! turn's recorded history, never from this stream.
 //!
 //! # The host contract
 //!

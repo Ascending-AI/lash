@@ -15,8 +15,6 @@ pub(in crate::runtime) use execution_state::{
     derive_seed_carries,
 };
 mod durable_commit;
-mod recorded_assembly;
-pub use recorded_assembly::RecordedTurnAssembly;
 
 /// Derive the stable ids of the nodes `graph` appends under `operation`, and
 /// rename them in `state`, its current frame among them.

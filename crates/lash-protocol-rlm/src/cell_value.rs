@@ -123,6 +123,38 @@ pub(crate) fn whole_numbers_as_integers(value: Json) -> Json {
     }
 }
 
+/// `value` with every attachment it names spelled as the host wrote it. A
+/// dialect whose numbers are floats hands an attachment's sizes back as
+/// whole floats, and a record with a float size names no attachment; any
+/// other record keeps its numbers as the cell spelled them.
+pub(crate) fn attachments_as_written(value: Json) -> Json {
+    match value {
+        // A tagged attachment is a record of two fields: its tag and its
+        // reference.
+        Json::Object(entries) if entries.len() == 2 => {
+            let whole = whole_numbers_as_integers(Json::Object(entries.clone()));
+            match serde_json::from_value::<lash_core::ToolValue>(whole.clone()) {
+                Ok(lash_core::ToolValue::Attachment(_)) => whole,
+                _ => attachment_fields_as_written(entries),
+            }
+        }
+        Json::Object(entries) => attachment_fields_as_written(entries),
+        Json::Array(values) => {
+            Json::Array(values.into_iter().map(attachments_as_written).collect())
+        }
+        other => other,
+    }
+}
+
+fn attachment_fields_as_written(entries: Map<String, Json>) -> Json {
+    Json::Object(
+        entries
+            .into_iter()
+            .map(|(key, value)| (key, attachments_as_written(value)))
+            .collect(),
+    )
+}
+
 /// A value copied out of a run, as JSON. Total: see the module docs.
 pub(crate) fn datum_json(value: &Datum) -> Json {
     match value {

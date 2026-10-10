@@ -43,6 +43,12 @@
 //! A protocol record appended while a tool call is unanswered is committed
 //! with the turn, uncut and resumed alike (FIG-5588): the **Noted** protocol
 //! is a tool round whose driver appends one beside the model's call.
+//!
+//! A turn's commit holds on the session every attachment its committed
+//! history references, wherever the turn was cut (FIG-5318): the
+//! **Archived** protocol is the code turn whose cell prints past the
+//! deployment's inline limit, so its prints are one archive that only its
+//! committed cell record names.
 
 // Test code: the PostgreSQL leg reads its database URL from the environment.
 #![allow(clippy::disallowed_methods, clippy::expect_used, clippy::unwrap_used)]
@@ -92,6 +98,16 @@ const MODEL: &str = "v0-model";
 /// The cell the model writes: one `Once` host operation, then a printout of
 /// what it answered.
 const CELL: &str = "<typescript>\nconst written = await tools.ext_write({ x: 7 });\nconsole.log(written);\n</typescript>";
+/// The cell [`Protocol::Archived`]'s model writes: [`CELL`]'s operation and
+/// printout, then prints past [`ARCHIVE_RETENTION`]'s inline limit.
+const ARCHIVED_CELL: &str = "<typescript>\nconst written = await tools.ext_write({ x: 7 });\nconsole.log(written);\nfor (let i = 0; i < 64; i++) { console.log('archived print ' + i + ' of the cell output'); }\n</typescript>";
+/// The output retention [`Protocol::Archived`]'s deployment runs under: its
+/// cell's prints exceed the inline limit, and the witness keeps the
+/// operation's answer.
+const ARCHIVE_RETENTION: lash_core::OutputRetentionPolicy = lash_core::OutputRetentionPolicy {
+    inline_limit_bytes: 1024,
+    witness_bytes: 512,
+};
 /// What marks the operation's answer in the transcript.
 const WROTE: &str = "wrote";
 /// What the final answer starts with.
@@ -122,6 +138,9 @@ enum Protocol {
     /// [`Protocol::Noted`] over two tool rounds: two progress boundaries
     /// that each carry a protocol record.
     NotedTwice,
+    /// [`Protocol::Code`] whose cell's prints are retained out of history
+    /// as one archive.
+    Archived,
 }
 
 impl Protocol {
@@ -129,7 +148,7 @@ impl Protocol {
     /// answers in prose.
     fn rounds(self) -> usize {
         match self {
-            Self::Code | Self::Tools | Self::Noted => 1,
+            Self::Code | Self::Tools | Self::Noted | Self::Archived => 1,
             Self::NotedTwice => 2,
         }
     }
@@ -229,6 +248,7 @@ fn model(protocol: Protocol, seen: Arc<Mutex<Seen>>) -> ProviderHandle {
                         text(&request, &format!("{FINAL}{told}"))
                     }
                     (false, Protocol::Code) => text(&request, CELL),
+                    (false, Protocol::Archived) => text(&request, ARCHIVED_CELL),
                     (false, Protocol::Tools | Protocol::Noted | Protocol::NotedTwice) => {
                         LlmResponse {
                             parts: vec![LlmOutputPart::ToolCall {
@@ -287,7 +307,7 @@ fn core(
     seen: &Arc<Mutex<Seen>>,
 ) -> lash::LashCore {
     let builder = match protocol {
-        Protocol::Code => lash::LashCore::rlm_builder(
+        Protocol::Code | Protocol::Archived => lash::LashCore::rlm_builder(
             backend.clone(),
             lash::rlm::RlmProtocolPluginFactory::new(
                 lash::rlm::RlmProtocolPluginConfig::builder()
@@ -306,7 +326,16 @@ fn core(
     builder
         .serve_sessions(false)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .data_retention(lash::DataRetention::standard())
+        .data_retention(match protocol {
+            Protocol::Archived => lash::DataRetention {
+                attachments: lash::persistence::AttachmentPolicy {
+                    output_retention: ARCHIVE_RETENTION,
+                    ..lash::persistence::AttachmentPolicy::standard()
+                },
+                ..lash::DataRetention::standard()
+            },
+            _ => lash::DataRetention::standard(),
+        })
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())
@@ -645,8 +674,11 @@ impl V0 {
                 counts.vm_programs
             ));
         }
-        if self.protocol == Protocol::Code && programs == 0 {
+        if matches!(self.protocol, Protocol::Code | Protocol::Archived) && programs == 0 {
             violations.push("the turn's cell never ran".to_owned());
+        }
+        if self.protocol == Protocol::Archived {
+            violations.extend(self.archive_laws(completed).await);
         }
         if counts.outcome_lookups.values().sum::<usize>() != 0 {
             violations.push("P4: an outcome was looked up for re-running code".to_owned());
@@ -682,6 +714,65 @@ impl V0 {
             violations.extend(zombie_laws(cut, &trace));
         }
         violations
+    }
+}
+
+impl V0 {
+    /// FIG-5318: the turn's commit held on the session every print archive
+    /// its committed history names. A cell whose operation `completed`
+    /// printed past the inline limit, so its record names one; a cell
+    /// whose operation was interrupted printed nothing.
+    async fn archive_laws(&self, completed: bool) -> Vec<String> {
+        let history =
+            serde_json::to_value(self.committed_history().await).expect("the history encodes");
+        let mut archives = Vec::new();
+        retained_prints(&history, &mut archives);
+        let mut violations = Vec::new();
+        if completed && archives.len() != 1 {
+            violations.push(format!(
+                "the completed cell's committed record names {} print archives, not one",
+                archives.len()
+            ));
+        }
+        for archive in &archives {
+            let referrers = self
+                .backend()
+                .attachment_referrers()
+                .attachment_referrers(archive)
+                .await
+                .expect("read the archive's referrers");
+            if !referrers.iter().any(|referrer| {
+                matches!(referrer, lash_core::ArtifactReferrer::Session(id) if id.as_str() == SESSION)
+            }) {
+                violations.push(format!(
+                    "the turn's commit did not hold its cell's archive on the session: {referrers:?}"
+                ));
+            }
+        }
+        violations
+    }
+}
+
+/// The attachment of every print archive `value` holds.
+fn retained_prints(value: &serde_json::Value, found: &mut Vec<lash_core::AttachmentId>) {
+    match value {
+        serde_json::Value::Object(fields) => {
+            for (key, value) in fields {
+                if key == "prints_retained" && !value.is_null() {
+                    let retained: lash_core::RetainedOutput =
+                        serde_json::from_value(value.clone()).expect("a print archive decodes");
+                    found.push(retained.reference.id);
+                } else {
+                    retained_prints(value, found);
+                }
+            }
+        }
+        serde_json::Value::Array(values) => {
+            for value in values {
+                retained_prints(value, found);
+            }
+        }
+        _ => {}
     }
 }
 
@@ -790,7 +881,7 @@ async fn prove(protocol: Protocol, dialect: Dialect, postgres_url: Option<String
 /// The owner commits of the uncut turn, in order.
 fn uncut_labels(protocol: Protocol) -> Vec<CommitLabel> {
     match protocol {
-        Protocol::Code => vec![
+        Protocol::Code | Protocol::Archived => vec![
             CommitLabel::TURN_ADMIT,
             CommitLabel::MODEL_START,
             CommitLabel::MODEL_DONE,
@@ -847,6 +938,14 @@ async fn a_once_operation_in_a_cell_killed_after_its_work_resumes_without_replay
         return;
     };
     prove(Protocol::Code, Dialect::Postgres, Some(url)).await;
+}
+
+/// The archived code turn on SQLite in memory: every cell of the matrix
+/// holds P1 to P7, and the committed cell's print archive is held on the
+/// session (FIG-5318).
+#[tokio::test]
+async fn a_cell_archive_is_held_on_its_session_wherever_its_turn_was_cut_on_sqlite_memory() {
+    prove(Protocol::Archived, Dialect::SqliteMemory, None).await;
 }
 
 /// The tool turn on SQLite in memory: every cell of the matrix holds P1 to

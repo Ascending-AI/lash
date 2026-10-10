@@ -523,15 +523,15 @@ await control.finish("missing archive");
 
 #[cfg(feature = "rlm")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "FIG-5318: a durable turn's commit roots no attachment its history references"]
 async fn step_archive_refetch_survives_cold_reopen_branch_and_continue_as_on_sqlite() -> Result<()>
 {
     let backend = sqlite_memory_store_backend().await;
+    // Each print is the console's text of the object the cell logged.
     let expected: Vec<serde_json::Value> = (0..200)
         .map(|i| {
-            serde_json::json!({
-                "index": i, "text": "exact é🙂\nvalue", "null": null, "nested": [i, false],
-            })
+            serde_json::Value::String(format!(
+                r#"{{"index":{i},"text":"exact é🙂\nvalue","null":null,"nested":[{i},false]}}"#
+            ))
         })
         .collect();
     let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
