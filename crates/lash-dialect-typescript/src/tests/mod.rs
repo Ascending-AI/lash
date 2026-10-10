@@ -14,6 +14,7 @@ mod builtin_values;
 mod controls;
 mod deviations;
 mod hoisting;
+mod json;
 mod language;
 mod machine;
 mod package;

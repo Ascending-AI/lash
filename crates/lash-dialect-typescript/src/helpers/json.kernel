@@ -1,5 +1,6 @@
 # JavaScript json behavior, expressed in kernel code.
 use ts.callable
+use ts.console.json
 use date.ecma.format
 use eq
 use error.new
@@ -17,9 +18,14 @@ use num.max
 use num.min
 use num.sub
 use num.trunc
+use record.contains
+use record.keys
+use record.len
+use record.values
 use ref
 use same
 use set.contains
+use text.compare
 use text.concat
 use text.ends_with
 use text.join
@@ -29,7 +35,9 @@ use text.utf16_slice
 use ts.delete
 use ts.get
 use ts.json.parse
+use ts.json.plain
 use ts.json.stringify
+use ts.json.stringify_generic
 use ts.keys
 use ts.number.to_string
 use ts.object.own_keys
@@ -78,7 +86,9 @@ let text = invoke ts.to_string(builtin_arg_0)
   return value
 }
 
-function ts.json.stringify(this: Any, args: List(Any)) -> Any
+# JSON.stringify's own walk: every hook, replacer, gap and kind JSON
+# writes, value by value.
+function ts.json.stringify_generic(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
@@ -207,4 +217,106 @@ body {
   let wrote = apply serialize(holder, "", "")
   if wrote { return text.join(out, "") }
   return absent
+}
+
+# Whether JSON.stringify writes `value` as the console's JSON render does:
+# a list, a record or a scalar whose containers hold only lists, records,
+# null, bools, text and finite numbers. A record with a `toJSON` or a
+# `brand` field, or with a key that begins with a digit (an index key, which
+# JSON writes before the others), is not plain. Neither is a value with more
+# than 128 values in all, counting each place a shared one is held, or with
+# containers more than eight deep, so a cycle is not plain either. A
+# container's size is compared with what is left of the 128 before any of
+# its members is read, so the guard costs at most a fixed charge, one for
+# each container and one for each value it reads, and twice its keys'
+# bytes, whatever the value's size.
+function ts.json.plain(value: Any) -> Bool
+kernel 1
+charge 1
+body {
+  let k = kind(value)
+  if same(k, "text") { return true }
+  if same(k, "float") { return num.is_finite(value) }
+  if same(k, "bool") { return true }
+  if same(k, "null") { return true }
+  let container = same(k, "record")
+  if same(k, "list") { set container = true }
+  if container {} else { return same(k, "integer") }
+  # The containers to read, breadth first, with the depth of their members.
+  # The counts are floats, which compare more cheaply than integers.
+  let containers = [value]
+  let depths = [2.0]
+  let visits = 1.0
+  let next = 0.0
+  while num.lt(next, list.len(containers)) {
+    let items = containers[next]
+    let depth = depths[next]
+    set next = num.add(next, 1.0)
+    if same(kind(items), "record") {
+      if num.lt(128.0, num.add(visits, record.len(items))) { return false }
+      if record.contains(items, "toJSON") { return false }
+      if record.contains(items, "brand") { return false }
+      for key in record.keys(items) {
+        if same(text.compare(key, ":"), -1) {
+          if same(text.compare(key, "0"), -1) {} else { return false }
+        }
+      }
+      set items = record.values(items)
+    } else {
+      if num.lt(128.0, num.add(visits, list.len(items))) { return false }
+    }
+    set visits = num.add(visits, list.len(items))
+    for item in items {
+      let k = kind(item)
+      if same(k, "text") { continue }
+      if same(k, "float") {
+        if num.is_finite(item) { continue }
+        return false
+      }
+      if same(k, "bool") { continue }
+      if same(k, "null") { continue }
+      let container = same(k, "record")
+      if same(k, "list") { set container = true }
+      if container {
+        if num.lt(8.0, depth) { return false }
+        set containers[list.len(containers)] = item
+        set depths[list.len(depths)] = num.add(depth, 1.0)
+        continue
+      }
+      if same(k, "integer") { continue }
+      return false
+    }
+  }
+  return true
+}
+
+# JSON.stringify(value, replacer, space). Plain data (`ts.json.plain`) with
+# no replacer and no space is written by the console's one native pass;
+# anything else takes the generic walk, which writes the same text for
+# plain data. The common call, with the value alone, is not padded.
+function ts.json.stringify(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let value = absent
+  let bare = same(list.len(args), 1)
+  if bare { set value = args[0] } else {
+    let padded = invoke ts.pad(args, 3)
+    if same(padded[1], absent) {
+      if same(padded[2], absent) {
+        set value = padded[0]
+        set bare = true
+      }
+    }
+  }
+  if bare {
+    let plain = invoke ts.json.plain(value)
+    if plain {
+      let text = invoke ts.console.json(value)
+      return text
+    }
+  }
+  let text = invoke ts.json.stringify_generic(this, args)
+  return text
 }
