@@ -3,9 +3,7 @@
 //!
 //! The table is exempt from retention by design (FIG-754 / FIG-748): a session
 //! id is used once (ADR 0049), and the row is what makes a re-bind of a
-//! deleted id refusable forever. Graph reclaim does not read it: a tombstoned
-//! node is reclaimable once no live session meta row owns it (FIG-1519), so
-//! this table is kept for the admission fence, not as a reclaim frontier.
+//! deleted id refusable forever.
 //!
 //! Every statement over this table forks. The two existence probes differ —
 //! SQLite reads a row and asks whether one came back, PostgreSQL asks

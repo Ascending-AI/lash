@@ -8,8 +8,7 @@ classes and counts in separate fields, rather than interpolating them into prose
 A fact has one owning Lash type and stable identity. Activity, diagnostics and
 telemetry project that fact; they do not supply decisions. Protocol, provider and
 plugin details belong in extra fields or additional diagnostic records. Do not
-create parallel reporting types, presentation shapes or wire DTOs. Hosts own
-event routing and scheduling ([ADR 0137](../adr/0137-the-host-owns-events-routing-and-scheduling.md)).
+create parallel reporting types, presentation shapes, wire DTOs or core signals.
 Process lifecycle uses `ProcessLifecycleFact`; custom extensions remain explicitly
 namespaced and raw vendor evidence remains raw.
 

@@ -25,7 +25,6 @@ use list.len
 use list.copy
 use list.slice
 use list.sort
-use list.index_of_range
 use ts.require_object_coercible
 use ts.get
 use ts.set
@@ -61,11 +60,8 @@ use ts.array.concat
 use ts.array.fill
 use ts.array.copyWithin
 use ts.array.indexOf
-use ts.array.generic_indexOf
 use ts.array.lastIndexOf
-use ts.array.generic_lastIndexOf
 use ts.array.includes
-use ts.array.generic_includes
 use ts.array.map
 use ts.array.filter
 use ts.array.forEach
@@ -78,7 +74,6 @@ use ts.array.findLastIndex
 use ts.array.reduce
 use ts.array.reduceRight
 use ts.array.join
-use ts.array.generic_join
 use ts.array.toString
 use ts.array.toLocaleString
 use ts.array.reverse
@@ -98,9 +93,6 @@ use ts.array.values
 use ts.array.entries
 use ts.array.iterator
 use ts.array.from
-use ts.array.primitive
-use ts.array.searchable
-use ts.array.search
 
 function ts.array.match_length(this: Any) -> Number
 kernel 1
@@ -450,77 +442,7 @@ body {
   return this
 }
 
-# Admission never converts a value or calls guest code. JS primitive numbers
-# are Floats; Int and nonempty Tuple are kernel values, not JS primitives.
-function ts.array.primitive(value: Any) -> Bool
-kernel 1
-charge 1
-body {
-  let tag = kind(value)
-  if same(tag, "float") { return true }
-  if same(tag, "text") { return true }
-  if same(tag, "bool") { return true }
-  if same(value, absent) { return true }
-  return same(value, null)
-}
-
-function ts.array.searchable(this: Any, args: List(Any)) -> Bool
-kernel 1
-charge 1
-body {
-  if same(kind(this), "list") {} else { return false }
-  let search = invoke ts.array.argument(args, 0)
-  let primitive = invoke ts.array.primitive(search)
-  if primitive {} else { return false }
-  let input = invoke ts.array.argument(args, 1)
-  if same(input, absent) {} else {
-    if same(kind(input), "float") {} else { return false }
-  }
-  let index = 0
-  while num.lt(index, list.len(this)) {
-    let value = this[index]
-    if same(value, ()) {} else {
-      let primitive = invoke ts.array.primitive(value)
-      if primitive {} else { return false }
-    }
-    set index = num.add(index, 1)
-  }
-  return true
-}
-
-# TypeScript chooses range normalization, NaN equivalence and hole handling;
-# the native only searches a range with kernel equality.
-function ts.array.search(this: List(Any), args: List(Any), reverse: Bool, includes: Bool) -> Any
-kernel 1
-charge 1
-body {
-  let length = num.to_float(list.len(this))
-  let search = invoke ts.array.argument(args, 0)
-  let input = invoke ts.array.argument(args, 1)
-  let from = invoke ts.array.integer(input)
-  if reverse {
-    if num.lt(list.len(args), 2) { set from = num.sub(length, 1) }
-  }
-  if num.lt(from, 0) { set from = num.add(length, from) }
-  let start = num.min(length, num.max(0, from))
-  let end = length
-  if reverse {
-    set start = 0.0
-    set end = num.min(length, num.max(0, num.add(from, 1)))
-  }
-  let found = list.index_of_range(this, search, start, end, reverse, includes)
-  if includes {
-    if num.le(0, found) { return true }
-    if same(search, absent) {
-      # includes observes holes as undefined; strict searches skip them.
-      set found = list.index_of_range(this, (), start, end, false, false)
-    }
-    return num.le(0, found)
-  }
-  return num.to_float(found)
-}
-
-function ts.array.generic_indexOf(this: Any, args: List(Any)) -> Any
+function ts.array.indexOf(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
 charge 8
@@ -558,21 +480,7 @@ body {
   return -1.0
 }
 
-function ts.array.indexOf(this: Any, args: List(Any)) -> Any
-kernel 1
-errors "type_error", "RangeError"
-charge 8
-body {
-  let admitted = invoke ts.array.searchable(this, args)
-  if admitted {
-    let output = invoke ts.array.search(this, args, false, false)
-    return output
-  }
-  let output = invoke ts.array.generic_indexOf(this, args)
-  return output
-}
-
-function ts.array.generic_lastIndexOf(this: Any, args: List(Any)) -> Any
+function ts.array.lastIndexOf(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
 charge 8
@@ -598,21 +506,7 @@ body {
   return -1.0
 }
 
-function ts.array.lastIndexOf(this: Any, args: List(Any)) -> Any
-kernel 1
-errors "type_error", "RangeError"
-charge 8
-body {
-  let admitted = invoke ts.array.searchable(this, args)
-  if admitted {
-    let output = invoke ts.array.search(this, args, true, false)
-    return output
-  }
-  let output = invoke ts.array.generic_lastIndexOf(this, args)
-  return output
-}
-
-function ts.array.generic_includes(this: Any, args: List(Any)) -> Any
+function ts.array.includes(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
 charge 8
@@ -643,20 +537,6 @@ body {
     set index = num.add(index, 1.0)
   }
   return false
-}
-
-function ts.array.includes(this: Any, args: List(Any)) -> Any
-kernel 1
-errors "type_error", "RangeError"
-charge 8
-body {
-  let admitted = invoke ts.array.searchable(this, args)
-  if admitted {
-    let output = invoke ts.array.search(this, args, false, true)
-    return output
-  }
-  let output = invoke ts.array.generic_includes(this, args)
-  return output
 }
 
 function ts.array.map(this: Any, args: List(Any)) -> Any
@@ -967,7 +847,7 @@ body {
   throw error.new("type_error", "Reduce of empty array with no initial value", null)
 }
 
-function ts.array.generic_join(this: Any, args: List(Any)) -> Any
+function ts.array.join(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
 charge 8
@@ -987,32 +867,6 @@ body {
     set index = num.add(index, 1)
   }
   return text.join(pieces, separator)
-}
-
-function ts.array.join(this: Any, args: List(Any)) -> Any
-kernel 1
-errors "type_error", "RangeError"
-charge 8
-body {
-  if same(kind(this), "list") {
-    let input = invoke ts.array.argument(args, 0)
-    let separator = ","
-    let admitted = true
-    if same(input, absent) {} else {
-      if same(kind(input), "text") { set separator = input }
-      else { set admitted = false }
-    }
-    let index = 0
-    while admitted {
-      if num.lt(index, list.len(this)) {} else { break }
-      let value = this[index]
-      if same(kind(value), "text") {} else { set admitted = false }
-      set index = num.add(index, 1)
-    }
-    if admitted { return text.join(this, separator) }
-  }
-  let output = invoke ts.array.generic_join(this, args)
-  return output
 }
 
 function ts.array.toString(this: Any, args: List(Any)) -> Any

@@ -1425,8 +1425,7 @@ tiered!(a_recorded_llm_profile_whose_key_left_the_catalog_fails_typed_and_never_
 tiered!(a_recorded_model_whose_key_serves_another_wire_model_is_refused_typed);
 tiered!(an_unknown_key_is_refused_before_anything_changes);
 tiered!(
-    a_session_turn_start_retried_after_the_host_changed_what_it_passes_keeps_its_retained_start,
-    ignore = "FIG-5369: a host's later start through the core's effect host is refused ArtifactReferrerEnded"
+    a_session_turn_start_retried_after_the_host_changed_what_it_passes_keeps_its_retained_start
 );
 tiered!(an_unsupported_reasoning_selection_is_refused_where_it_is_stated);
 tiered!(a_replay_after_the_key_left_the_catalog_completes_with_zero_resolver_calls);

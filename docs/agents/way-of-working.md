@@ -8,27 +8,6 @@ These files are repo-internal process guidance.
 law targets, service recipes, upgrade tier and retirement commits. Consult it
 before writing acceptance criteria against a backend or host.
 
-## Source authority
-
-Read in this order: **code on main**, then **current kernel and spec
-contracts**, then **DECISIONS and ADRs in force**. An unmerged branch describes
-proposed behaviour. Report disagreements with both code and document evidence;
-resolve them at the owning source without weakening its checks.
-
-| Concern | Owning source |
-| --- | --- |
-| Implemented behaviour, API and executable laws | Code and tests on main, including the facade's public signatures |
-| Kernel meaning, library rules and parked state | [Kernel semantics](../kernel/semantics.md), the rule documents in `docs/kernel/`, and [kernel design](../kernel/design.md) for architecture |
-| Host integration and boundary contracts | [Durable hosting](../operations/durable-hosting.md) and the current contract for the affected seam, read against its implementation |
-| Architectural choices and rulings | The owning ticket's `DECISIONS.md`, when supplied, and accepted ADRs in `docs/adr/`, for the concerns still in force |
-| Vocabulary and validation targets | [CONTEXT.md](../../CONTEXT.md) and [test-backends.md](test-backends.md) |
-
-A superseded ADR must mark its status and link its replacement; it never
-governs current work. Follow that replacement. An amendment replaces only the
-concerns it names. Use **code mode** for generic kernel execution of cells,
-documents, workflows and process bodies; reserve **REPL** for the RLM protocol's
-persistent interaction across cells.
-
 ## The model in one paragraph
 
 Planning, tracking, and everything in-flight live in **Linear** (team `figments`, project `lash`; issues keyed `FIG-<n>`). The repo holds only **durable, code-facing artifacts**: decisions (`docs/adr/`), vocabulary (root `CONTEXT.md`), and agent-driven runbooks (`runbooks/`). The test for "belongs in the repo": *an agent needs it while touching code, at HEAD, offline.* Anything narrative, exploratory, or transient (research reports, plans, decision debates, status) belongs on a Linear issue, not in a repo file.
@@ -82,8 +61,7 @@ A **runbook** is an **agent-driven test scenario**: QA performed by an agent aga
 
 - **Numbering:** next number = highest existing + 1. Check first: `ls docs/adr/ | sort -V | tail -3`. Every four-digit ADR prefix must be unique; nothing enforces that any more (the docs lint that rejected duplicates went with the doc site in FIG-2364), so the `ls` check above is the only guard. An ADR is cited by full filename when a reference needs the slug. Never mint a duplicate.
 - **Shape:** one decision per ADR, filename `NNNN-kebab-case-title.md`, status/context/decision/consequences.
-- **Status:** mark a superseded decision and link its replacement. Read only the concerns still in force, following the source authority above.
-- **Conflicts:** if your output contradicts an ADR still in force, surface it explicitly ("Contradicts ADR-NNNN … worth reopening because …") rather than silently overriding; see [domain.md](domain.md).
+- **Conflicts:** if your output contradicts an ADR, surface it explicitly ("Contradicts ADR-NNNN … worth reopening because …") rather than silently overriding; see [domain.md](domain.md).
 
 ## Facade API surface
 

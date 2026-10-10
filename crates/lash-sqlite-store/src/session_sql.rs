@@ -366,21 +366,17 @@ lash_store_sql::statements! {
         delete_tombstoned_for_session = "DELETE FROM graph_nodes
                      WHERE session_id = ?1 AND tombstoned = 1";
 
-        /// Drop every tombstoned row owned by session `?1` or by no live
-        /// session.
+        /// Drop every tombstoned row owned by session `?1` or by a session
+        /// that is already deleted.
         ///
         /// A node can be tombstoned after its owner is gone, and no
-        /// session-scoped vacuum could ever reach it again. A live session's
-        /// meta row exists before its first node commits and is deleted only
-        /// with the session, so an owner without one is gone (FIG-1519); the
-        /// deleted set stays the admission fence and is not read here. Live
-        /// sessions' rows stay resident for their own vacuum, so this is not a
-        /// catalog-wide sweep.
-        delete_tombstoned_reclaimable = "DELETE FROM graph_nodes AS node
-                 WHERE node.tombstoned = 1
-                   AND (node.session_id = ?1
-                        OR NOT EXISTS (SELECT 1 FROM session_meta AS meta
-                                       WHERE meta.session_id = node.session_id))";
+        /// session-scoped vacuum could ever reach it again: the owning id is
+        /// permanently unbindable. Live sessions' rows stay resident for their
+        /// own vacuum, so this is not a catalog-wide sweep.
+        delete_tombstoned_reclaimable = "DELETE FROM graph_nodes
+                 WHERE tombstoned = 1
+                   AND (session_id = ?1
+                        OR session_id IN (SELECT session_id FROM deleted_sessions))";
     }
 }
 

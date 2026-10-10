@@ -420,6 +420,15 @@ struct Law {
 
 impl Law {
     async fn new(tier: Tier, scripted: Vec<Scripted>) -> Option<Self> {
+        Self::layered(tier, scripted, |stores| stores).await
+    }
+
+    /// [`Self::new`] over `layer` of the tier's store set.
+    async fn layered(
+        tier: Tier,
+        scripted: Vec<Scripted>,
+        layer: impl FnOnce(Arc<dyn StoreSet>) -> Arc<dyn StoreSet>,
+    ) -> Option<Self> {
         let now = u64::try_from(
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -429,7 +438,7 @@ impl Law {
         .expect("the epoch fits");
         let clock = Arc::new(lash_core::testing::TestClock::new(now));
         let (stores, keep) = stores(tier, Arc::clone(&clock) as Arc<dyn lash_core::Clock>).await?;
-        let backend = served::backend(stores);
+        let backend = served::backend(layer(stores));
         let queue: Responses = Arc::new(Mutex::new(scripted.into()));
         let witness = Witness::new();
         let core = Self::core(&backend, &queue, &witness, "first-build");
@@ -1123,7 +1132,263 @@ async fn a_cancelled_child_keeps_its_puts_until_pruned(tier: Tier) {
     law.shutdown().await;
 }
 
+tokio::task_local! {
+    /// Set while the law's host start runs: what tells the starter's own
+    /// adoption from the cleanup relay's hold of the same record.
+    static STARTER: ();
+}
+
+/// The store set's attachment referrers, except that the host starter's
+/// adoption of its start input, its acquisition under the process record it
+/// just registered, meets `fault`: the cut between a start's registration
+/// and its adoption (ADR 0113 §3.3). Every other acquisition, the cleanup
+/// relay's included, reaches the store as it is.
+struct AdoptionCut {
+    inner: Arc<dyn lash_core::AttachmentReferrers>,
+    fault: lash_durable_test::Fault,
+    /// A permit once the adoption met its fault.
+    reached: Arc<tokio::sync::Semaphore>,
+}
+
+#[async_trait::async_trait]
+impl lash_core::AttachmentReferrers for AdoptionCut {
+    async fn begin_attachment_write(
+        &self,
+        write: &lash_core::store::AttachmentWrite,
+    ) -> Result<lash_core::store::AttachmentWriteFence, lash_core::StoreError> {
+        self.inner.begin_attachment_write(write).await
+    }
+
+    async fn complete_attachment_write(
+        &self,
+        write: &lash_core::store::AttachmentWrite,
+        permit: lash_core::store::AttachmentWritePermit,
+    ) -> Result<(), lash_core::StoreError> {
+        self.inner.complete_attachment_write(write, permit).await
+    }
+
+    async fn abort_attachment_write(
+        &self,
+        write: &lash_core::store::AttachmentWrite,
+        permit: lash_core::store::AttachmentWritePermit,
+    ) -> Result<(), lash_core::StoreError> {
+        self.inner.abort_attachment_write(write, permit).await
+    }
+
+    async fn acquire_attachment_refs(
+        &self,
+        claim: &lash_core::ReferrerClaim,
+        ids: &[AttachmentId],
+    ) -> Result<(), lash_core::StoreError> {
+        if !matches!(claim.referrer(), ArtifactReferrer::ProcessRecord(_))
+            || STARTER.try_with(|()| ()).is_err()
+        {
+            return self.inner.acquire_attachment_refs(claim, ids).await;
+        }
+        if self.fault.commits() {
+            self.inner.acquire_attachment_refs(claim, ids).await?;
+        }
+        self.reached.add_permits(1);
+        if self.fault.kills() {
+            // The starter's node is gone: its call never returns.
+            std::future::pending::<()>().await;
+        }
+        Err(lash_core::StoreError::Contended)
+    }
+
+    async fn forget_attachment_ref(
+        &self,
+        referrer: &ArtifactReferrer,
+        id: &AttachmentId,
+    ) -> Result<(), lash_core::StoreError> {
+        self.inner.forget_attachment_ref(referrer, id).await
+    }
+
+    async fn end_attachment_referrer(
+        &self,
+        referrer: &ArtifactReferrer,
+    ) -> Result<(), lash_core::StoreError> {
+        self.inner.end_attachment_referrer(referrer).await
+    }
+
+    async fn session_referrer_state(
+        &self,
+        id: &lash_core::SessionId,
+    ) -> Result<lash_core::store::SessionReferrerState, lash_core::StoreError> {
+        self.inner.session_referrer_state(id).await
+    }
+
+    async fn attachment_referrers(
+        &self,
+        id: &AttachmentId,
+    ) -> Result<Vec<ArtifactReferrer>, lash_core::StoreError> {
+        self.inner.attachment_referrers(id).await
+    }
+}
+
+/// A host's detached SessionTurn start under host key `key`, whose child
+/// turn reads `input`.
+fn host_start(key: &str, input: lash_core::AttachmentRef) -> lash_core::ProcessStartRequest {
+    lash_core::ProcessStartRequest::new(
+        lash_core::ProcessInput::SessionTurn {
+            definition_key: "law-host-start-input:v1".to_owned(),
+            create_request: Box::new(
+                lash_core::SessionCreateRequest::root(
+                    lash::plugins::SessionToolAccess::ambient(),
+                    lash_core::SessionStartPoint::Empty,
+                    lash_core::PluginOptions::default(),
+                )
+                .with_spec(&served::spec(1024))
+                .expect("a root spec states its model and turn budget"),
+            ),
+            turn_input: Box::new(
+                lash::TurnInput::text("read the host upload").with_attachment(input),
+            ),
+            result: lash_core::SessionTurnOutcome::Turn,
+        },
+        lash_core::ProcessOriginator::host(),
+        lash_core::Lifetime::Detached,
+    )
+    .with_host_start_key(key)
+}
+
+/// FIG-5388 (ADR 0113 §3.3, ADR 0124 §4): a host start stages its uploaded
+/// input under `StartInput(key, starter)` before it registers, and adopts
+/// it onto the process record after. The law cuts a real start between the
+/// two: the starter's adoption write meets each fault a host call's
+/// unfenced store write can meet. It fails before the store (the host is
+/// answered a failure and gives up), the starter dies before it, the write
+/// lands and the starter dies, or the write lands and the host is answered
+/// a failure. (A paused, zombie or delayed write is an actor's commit under
+/// an epoch fence, and a lost wake a mailbox write's; the adoption is
+/// neither.) No node serves the start. The upload then expires, and the
+/// cleanup relay and a collecting sweep run: the input's only referrer is
+/// the process record, the staging referrer has ended, and its bytes are
+/// kept. Another build then takes the process over, and its turn reads the
+/// input.
+async fn a_host_start_cut_between_registration_and_adoption_keeps_its_uploaded_input(tier: Tier) {
+    use lash_durable_test::Fault;
+    for fault in [
+        Fault::FailBefore,
+        Fault::Abort,
+        Fault::CommitThenAbort,
+        Fault::AckHidden,
+    ] {
+        let reached = Arc::new(tokio::sync::Semaphore::new(0));
+        let Some(law) = Law::layered(tier, vec![text("noted")], |stores| {
+            lash_core::testing::runtime_helpers::LayeredStores::over(stores)
+                .map_attachment_referrers(|inner| -> Arc<dyn lash_core::AttachmentReferrers> {
+                    Arc::new(AdoptionCut {
+                        inner,
+                        fault,
+                        reached: Arc::clone(&reached),
+                    })
+                })
+                .into_store_set()
+        })
+        .await
+        else {
+            return;
+        };
+        let session_id = "cut-start-input-session";
+        let _session = law.session(session_id).await;
+        let uploads = upload_store(&law, session_id, 1000);
+        let bytes = format!("{fault}: the host's uploaded start input");
+        let input = host_put(&uploads, &bytes).await;
+        law.core
+            .drain()
+            .await
+            .expect("the starting core's node drains");
+
+        let request = host_start(&format!("cut-start-input-{fault}"), input.clone());
+        let start_key = request.start_key().cloned().expect("a host start key");
+        let core = law.core.clone();
+        let starter = tokio::spawn(STARTER.scope((), async move {
+            core.processes().start(request, core.effect_host()).await
+        }));
+        tokio::time::timeout(SETTLE, reached.acquire())
+            .await
+            .unwrap_or_else(|_| panic!("{fault}: the start never reached its adoption"))
+            .expect("the cut semaphore stays open")
+            .forget();
+        if fault.kills() {
+            starter.abort();
+        } else {
+            let answered = starter.await.expect("the start task joins");
+            assert!(
+                answered.is_err(),
+                "{fault}: the host is answered the adoption's failure: {answered:?}"
+            );
+        }
+        let record = law
+            .backend
+            .process_registry()
+            .get_process_by_start_key(&start_key)
+            .await
+            .expect("read the start key")
+            .unwrap_or_else(|| panic!("{fault}: the start registered before the cut"));
+        assert_eq!(record.input.stored_attachment_ids(), vec![input.id.clone()]);
+
+        law.clock.advance(1001);
+        law.relay_lead.store(
+            lash_core::runtime::obligations::relay::RelayPolicy::default().max_backoff_ms,
+            Ordering::SeqCst,
+        );
+        let held = law
+            .wait_referrers(&input.id, "the process record alone", |found| {
+                found == [ArtifactReferrer::ProcessRecord(record.id.clone())]
+            })
+            .await;
+        let staging = lash_core::ReferrerClaim::guarded(lash_core::ReferrerGuard::StartInput {
+            start_key: start_key.clone(),
+            starter: lash_core::runtime::start_operation_journal(&start_key)
+                .expect("the start's own journal"),
+        });
+        let late = law
+            .backend
+            .attachment_referrers()
+            .acquire_attachment_refs(&staging, std::slice::from_ref(&input.id))
+            .await;
+        assert!(
+            matches!(
+                late,
+                Err(lash_core::StoreError::ArtifactReferrerEnded { .. })
+            ),
+            "{fault}: the start's input staging ended: {late:?}"
+        );
+        let report = law.sweep().await;
+        assert!(
+            law.blob_present(&input.id).await,
+            "{fault}: the process record keeps the input past its upload: {held:?} {report:?}"
+        );
+
+        let serving = Law::core(&law.backend, &law.queue, &law.witness, "second-build");
+        tokio::time::timeout(SETTLE, serving.processes().await_output(&record.id))
+            .await
+            .unwrap_or_else(|_| panic!("{fault}: the taken-over process never ended"))
+            .expect("read the process terminal");
+        let terminal = law.record(&record.id).await;
+        assert_eq!(
+            terminal.status(),
+            lash_core::ProcessStatus::Completed,
+            "{fault}: the taken-over turn reads its input: {terminal:?}"
+        );
+        assert_eq!(
+            law.backend
+                .attachment_store()
+                .get(&input.id, 32 * 1024)
+                .await
+                .expect("the input reads back")
+                .bytes,
+            bytes.into_bytes()
+        );
+        serving.shutdown().await.expect("the core shuts down");
+        law.shutdown().await;
+    }
+}
+
 tiered_laws!(
+    a_host_start_cut_between_registration_and_adoption_keeps_its_uploaded_input,
     engine_and_session_turn_create_only_real_sessions,
     delivered_attachment_survives_prune_and_replay_start_input,
     process_referrer_cleanup_is_complete_without_sessions,

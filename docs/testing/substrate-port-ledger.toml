@@ -1781,11 +1781,11 @@ laws = [
   "a_resubmitted_transaction_reuses_its_receipt_and_refuses_changed_content",
   "config_submission_refuses_what_no_owner_registers",
   "a_set_turn_budget_survives_park_and_reload",
-  "cold_config_changes_coalesce_until_the_next_successful_plugin_build_on_sqlite_memory",
+  "every_applied_config_transaction_emits_a_lifecycle_event",
 ]
 disposition = "port"
 status = "ported"
-note = "FIG-5311: command_enqueue_preserves_typed_session_state_version_refusal and config_submission_refuses_what_no_owner_registers run here; a_resubmitted_transaction_reuses_its_receipt_and_refuses_changed_content runs through the facade on its node in crates/lash/src/tests/config_transactions.rs; FIG-5317 deletes every_applied_config_transaction_emits_a_lifecycle_event because ruling 222777 supersedes per-transaction notification with coalesced eventual delivery, covered by crates/lash-durable-test/tests/config_change_observer_laws.rs::cold_config_changes_coalesce_until_the_next_successful_plugin_build_on_sqlite_memory (the latest revision and transition reach observers after a successful build) and sqlite_memory::a_committed_config_transaction_reaches_its_observers_once (post-commit policy visibility and no stale-write delivery); a_set_turn_budget_survives_park_and_reload is covered by crates/lash/src/tests/recorded_execution_controls.rs::a_recorded_budget_bounds_every_run_after_an_engine_restart_on_sqlite (a commanded budget bounds every run after a restart)"
+note = "FIG-5311: command_enqueue_preserves_typed_session_state_version_refusal and config_submission_refuses_what_no_owner_registers run here; a_resubmitted_transaction_reuses_its_receipt_and_refuses_changed_content and every_applied_config_transaction_emits_a_lifecycle_event run through the facade on its node in crates/lash/src/tests/config_transactions.rs (the latter #[ignore]d red: FIG-5317, the durable session actor applies a transaction without building its plugins); a_set_turn_budget_survives_park_and_reload is covered by crates/lash/src/tests/recorded_execution_controls.rs::a_recorded_budget_bounds_every_run_after_an_engine_restart_on_sqlite (a commanded budget bounds every run after a restart)"
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/turns/drain_and_recovery.rs"
@@ -10708,7 +10708,7 @@ laws = [
 ]
 disposition = "port"
 status = "ported"
-note = "FIG-5311: written through the core's process API on SQLite memory in crates/lash/src/tests/process_start_input.rs: a_host_uploaded_start_input_is_held_by_its_registered_process (the record names the input, and the process record is its referrer beside the upload's expiring edge) and an_unavailable_host_uploaded_start_input_is_refused_before_registration (nothing registers). The crash legs, host_uploaded_start_input_survives_registration_crash and _survives_starter_abandonment, are owed as a cut law on FIG-5388: their Restate registry hold point and killed invocation are deleted (5ad9641f9e, FIG-5190), the staging guard they lean on is proved at the store by crates/lash-conformance/src/conformance/attachment_referrers.rs::upload_staging_identities_are_distinct_guarded_and_fenced_independently and ::attachment_root_sources_partition_start_inputs, and nothing yet cuts a real start between registration and adoption"
+note = "FIG-5311: written through the core's process API on SQLite memory in crates/lash/src/tests/process_start_input.rs: a_host_uploaded_start_input_is_held_by_its_registered_process (the record names the input, and the process record is its referrer beside the upload's expiring edge) and an_unavailable_host_uploaded_start_input_is_refused_before_registration (nothing registers). The crash legs, host_uploaded_start_input_survives_registration_crash and _survives_starter_abandonment, are ported by FIG-5388 as crates/lash-durable-test/tests/attachment_referrer_laws.rs::a_host_start_cut_between_registration_and_adoption_keeps_its_uploaded_input: a real host start is cut between its registration and its adoption under fail-before, abort, commit-then-abort and ack-hidden, its upload expires, cleanup and a sweep run, and another build's takeover reads the input the process record holds"
 
 [[row]]
 path = "crates/lash/tests/integration/mcp_catalog.rs"
@@ -10786,7 +10786,7 @@ laws = [
 ]
 disposition = "port"
 status = "ported"
-note = "ported by FIG-5307 onto the durable node: each law runs on SQLite memory and file (PostgreSQL needs a server); the always_replay variants are subject-deleted with the replaying engine; a_host_process_start_refuses_unsupported_inherited_reasoning_before_recording is subject-deleted: a session-turn start inherits no reasoning (ADR 0134, FIG-5296); ignored on their tickets: a_session_turn_start_retried_after_the_host_changed_what_it_passes_keeps_its_retained_start (FIG-5369), an_unjournaled_bind_fault_seals_nothing_and_recovers_after_the_park (FIG-5367), a_tool_is_not_run_past_a_bind_fault_of_its_direct_completion (FIG-5368), a_completion_before_a_bind_fault_is_retried_only_while_unrecorded (FIG-5368, FIG-5367)"
+note = "ported by FIG-5307 onto the durable node: each law runs on SQLite memory and file (PostgreSQL needs a server); the always_replay variants are subject-deleted with the replaying engine; a_host_process_start_refuses_unsupported_inherited_reasoning_before_recording is subject-deleted: a session-turn start inherits no reasoning (ADR 0134, FIG-5296); a_session_turn_start_retried_after_the_host_changed_what_it_passes_keeps_its_retained_start runs: each host start stages under its own start operation (FIG-5369); ignored on their tickets: an_unjournaled_bind_fault_seals_nothing_and_recovers_after_the_park (FIG-5367), a_tool_is_not_run_past_a_bind_fault_of_its_direct_completion (FIG-5368), a_completion_before_a_bind_fault_is_retried_only_while_unrecorded (FIG-5368, FIG-5367)"
 
 [[row]]
 path = "crates/lash/tests/llm_profiles/session_turn_starts.rs"
@@ -10800,7 +10800,7 @@ laws = [
 ]
 disposition = "port"
 status = "ported"
-note = "ported by FIG-5307 with crates/lash/tests/llm_profiles.rs: a host's session-turn start goes through core.processes().start on the core's effect host; unstated_session_turn_start went with the subject-deleted inherited-reasoning law; the retained-start law is ignored on FIG-5369 (the effect host's shared detached referrer ends)"
+note = "ported by FIG-5307 with crates/lash/tests/llm_profiles.rs: a host's session-turn start goes through core.processes().start on the core's effect host; unstated_session_turn_start went with the subject-deleted inherited-reasoning law; the retained-start law runs: a host start stages under its own start operation, never under the effect host's shared scope (FIG-5369)"
 
 [[row]]
 path = "crates/lash/tests/replay_after_advance/harness.rs"
@@ -19600,7 +19600,7 @@ laws = [
 disposition = "replaced-by:crates/lash-sim/src/runner/tests.rs::generated_sim_search_mode_keeps_summary_lean_and_labels_shards"
 status = "deleted"
 owed = "generated-sim search mode keeps its summary lean and labels every shard"
-note = "FIG-5350: live on the durable SimEngine restored by FIG-5359; every shard-owned seed is reached, trace and content oracles pass, and search mode retains only its lean summary and no passing-seed packages"
+note = "FIG-5311: restored as written; #[ignore]d red on FIG-5350: run_generated_workload refuses every workload, since the generated runtime world went with Restate (5ad9641f9e, FIG-5190) and FIG-5184 rebuilt only the crash matrix and chaos soak"
 
 [[row]]
 path = "crates/lash-sim/src/runner/tests.rs"
@@ -19615,7 +19615,7 @@ laws = [
 disposition = "replaced-by:crates/lash-sim/src/runner/tests.rs::generated_sim_profile_writes_trace_replay_and_provider_artifacts"
 status = "deleted"
 owed = "a generated-sim profile run writes its trace, replay and provider artifacts"
-note = "FIG-5350: live on the durable SimEngine restored by FIG-5359; every seed is reached and writes trace, replay and provider artifacts with passing oracles. The host-owned trigger fixture and host-owned OAuth exclusion expectations are subject-deleted under D-HOSTEVENTS and D-HOSTCREDENTIALS"
+note = "FIG-5311: restored as written; #[ignore]d red on FIG-5350: run_generated_workload refuses every workload, since the generated runtime world went with Restate (5ad9641f9e, FIG-5190) and FIG-5184 rebuilt only the crash matrix and chaos soak"
 
 [[row]]
 path = "crates/lash-sim/src/runner/generated_profiles.rs"

@@ -1,6 +1,5 @@
 //! Postgres proof that a session delete reclaims tombstoned graph nodes whose
-//! owning session is gone: deleted earlier, or never recorded in the deleted
-//! set at all.
+//! owning session was deleted earlier.
 //!
 //! This lives in its own test target rather than the conformance suite: the
 //! reclaim law is asserted through raw catalog reads, and the conformance file is
@@ -19,69 +18,6 @@ async fn storage() -> Option<(IsolatedDatabase, PostgresStorage)> {
         .await
         .expect("connect postgres");
     Some((database, storage))
-}
-
-fn policy() -> lash_core_execution::SessionPolicy {
-    lash_core_execution::SessionPolicy::new(
-        lash_core_execution::TurnBudget::Unbounded,
-        lash_core_execution::MaxToolCalls::new(1024),
-        lash_core::NoProgressBudget::bounded(12),
-    )
-}
-
-async fn resident_node_ids(pool: &sqlx::PgPool) -> Vec<String> {
-    sqlx::query_scalar::<_, String>("SELECT node_id FROM lash_graph_nodes ORDER BY node_id")
-        .fetch_all(pool)
-        .await
-        .expect("probe resident graph nodes")
-}
-
-async fn resident_tombstoned_node_ids(pool: &sqlx::PgPool) -> Vec<String> {
-    sqlx::query_scalar::<_, String>(
-        "SELECT node_id FROM lash_graph_nodes WHERE tombstoned ORDER BY node_id",
-    )
-    .fetch_all(pool)
-    .await
-    .expect("probe tombstoned graph nodes")
-}
-
-async fn commit_single_root_node(
-    factory: &(impl SessionCatalogStore + lash_core_execution::SessionCommitStore),
-    session_id: &SessionId,
-    policy: &lash_core_execution::SessionPolicy,
-) -> String {
-    factory
-        .admit_session(&lash_core_execution::SessionStoreCreateRequest {
-            owning_process_id: None,
-            pending_observer_intents: Vec::new(),
-            session_id: session_id.clone(),
-            relation: lash_core_execution::SessionRelation::Root,
-            config: lash_core_execution::PersistedSessionConfig::from_policy(
-                &policy.clone(),
-                lash_core_execution::SessionToolAccess::ambient(),
-            ),
-            head: lash_core_execution::SessionCreationHead::Config,
-            retention: lash_core_execution::Retention::UntilGc,
-        })
-        .await
-        .expect("create store");
-    let mut state = lash_core_execution::RuntimeSessionState {
-        session_id: SessionId::fixture(session_id.to_string()),
-        ..lash_core_execution::RuntimeSessionState::ambient_fixture(policy.clone())
-    };
-    state.ensure_agent_frame_initialized();
-    let leaf = state
-        .session_graph
-        .leaf_node_id
-        .clone()
-        .expect("root leaf node id");
-    factory
-        .commit_runtime_state(
-            lash_core_execution::store::RuntimeCommit::persisted_state_for_test(&state),
-        )
-        .await
-        .expect("commit root node");
-    leaf.to_string()
 }
 
 /// Both orphaning flows for tombstoned graph nodes, on the Postgres backend:
@@ -103,7 +39,66 @@ async fn postgres_delete_reclaims_tombstones_orphaned_by_earlier_delete_when_con
     };
     let pool = storage.pool().clone();
     let factory = storage.session_store_factory();
-    let policy = policy();
+    let policy = lash_core_execution::SessionPolicy::new(
+        lash_core_execution::TurnBudget::Unbounded,
+        lash_core_execution::MaxToolCalls::new(1024),
+        lash_core::NoProgressBudget::bounded(12),
+    );
+
+    async fn resident_node_ids(pool: &sqlx::PgPool) -> Vec<String> {
+        sqlx::query_scalar::<_, String>("SELECT node_id FROM lash_graph_nodes ORDER BY node_id")
+            .fetch_all(pool)
+            .await
+            .expect("probe resident graph nodes")
+    }
+
+    async fn resident_tombstoned_node_ids(pool: &sqlx::PgPool) -> Vec<String> {
+        sqlx::query_scalar::<_, String>(
+            "SELECT node_id FROM lash_graph_nodes WHERE tombstoned ORDER BY node_id",
+        )
+        .fetch_all(pool)
+        .await
+        .expect("probe tombstoned graph nodes")
+    }
+
+    async fn commit_single_root_node(
+        factory: &(impl SessionCatalogStore + lash_core_execution::SessionCommitStore),
+        session_id: &SessionId,
+        policy: &lash_core_execution::SessionPolicy,
+    ) -> String {
+        factory
+            .admit_session(&lash_core_execution::SessionStoreCreateRequest {
+                owning_process_id: None,
+                pending_observer_intents: Vec::new(),
+                session_id: session_id.clone(),
+                relation: lash_core_execution::SessionRelation::Root,
+                config: lash_core_execution::PersistedSessionConfig::from_policy(
+                    &policy.clone(),
+                    lash_core_execution::SessionToolAccess::ambient(),
+                ),
+                head: lash_core_execution::SessionCreationHead::Config,
+                retention: lash_core_execution::Retention::UntilGc,
+            })
+            .await
+            .expect("create store");
+        let mut state = lash_core_execution::RuntimeSessionState {
+            session_id: SessionId::fixture(session_id.to_string()),
+            ..lash_core_execution::RuntimeSessionState::ambient_fixture(policy.clone())
+        };
+        state.ensure_agent_frame_initialized();
+        let leaf = state
+            .session_graph
+            .leaf_node_id
+            .clone()
+            .expect("root leaf node id");
+        factory
+            .commit_runtime_state(
+                lash_core_execution::store::RuntimeCommit::persisted_state_for_test(&state),
+            )
+            .await
+            .expect("commit root node");
+        leaf.to_string()
+    }
 
     // Flow 1: a pin held at the owning session's delete. The pin is deleted
     // with its session, so the delete reclaims the pinned leaf itself.
@@ -209,58 +204,5 @@ async fn postgres_delete_reclaims_tombstones_orphaned_by_earlier_delete_when_con
     assert!(
         resident.is_empty(),
         "every orphaned row must be physically gone, not just hidden, got {resident:?}"
-    );
-}
-
-/// A delete reclaims exactly the tombstoned rows that have no live owner
-/// (FIG-1519): residue stranded under an id the deleted set never recorded
-/// drains, while a live session's tombstones stay resident for its own vacuum.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_delete_reclaims_tombstones_with_no_live_owner_when_configured() {
-    let Some((_database, storage)) = storage().await else {
-        eprintln!(
-            "skipping Postgres ownerless-tombstone reclaim conformance: \
-             LASH_POSTGRES_DATABASE_URL is not set"
-        );
-        return;
-    };
-    let pool = storage.pool().clone();
-    let factory = storage.session_store_factory();
-    let policy = policy();
-    commit_single_root_node(&factory, &SessionId::from("live-owner"), &policy).await;
-    commit_single_root_node(&factory, &SessionId::from("deleted-now"), &policy).await;
-    for (owner, node_id) in [
-        ("live-owner", "live-owner-tombstone"),
-        ("stranded-owner", "stranded-tombstone"),
-    ] {
-        sqlx::query(
-            "INSERT INTO lash_graph_nodes
-                 (session_id, node_id, parent_node_id, generation, frame_node_id,
-                  body_bytes, node_json, tombstoned)
-             VALUES ($1, $2, NULL, 99, $2, 2, '{}', TRUE)",
-        )
-        .bind(owner)
-        .bind(node_id)
-        .execute(&pool)
-        .await
-        .expect("seed a tombstoned row");
-    }
-    let recorded = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(SELECT 1 FROM lash_deleted_sessions WHERE session_id = 'stranded-owner')",
-    )
-    .fetch_one(&pool)
-    .await
-    .expect("probe the deleted set");
-    assert!(!recorded, "the stranded owner is outside the deleted set");
-
-    factory
-        .delete_session(&SessionId::from("deleted-now"))
-        .await
-        .expect("delete an unrelated session");
-
-    assert_eq!(
-        resident_tombstoned_node_ids(&pool).await,
-        vec!["live-owner-tombstone".to_string()],
-        "the delete drains the ownerless tombstone and leaves the live owner's to its vacuum"
     );
 }

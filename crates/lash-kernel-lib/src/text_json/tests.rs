@@ -10,9 +10,6 @@ use lash_kernel_doc::{
 use super::{decode_number, int, parse_json, register_text_json, stringify_json};
 use crate::tests::Room;
 
-#[path = "trim_tests.rs"]
-mod trim_set;
-
 #[derive(Default)]
 struct Heap(BTreeMap<ObjectId, Object>, Room);
 
@@ -1206,10 +1203,6 @@ fn load(heap: &mut Heap, datum: &lash_kernel_doc::Datum) -> Value {
             let values = values.iter().map(|value| load(heap, value)).collect();
             list(heap, values)
         }
-        Datum::Set(values) => {
-            let values = values.iter().map(|value| load(heap, value)).collect();
-            Value::Set(heap.allocate(Object::Set(values)).unwrap())
-        }
         Datum::Handle(value) => Value::Handle(std::sync::Arc::new(value.clone())),
         _ => panic!("unsupported native corpus input"),
     }
@@ -1232,17 +1225,6 @@ fn dump(heap: &Heap, value: &Value) -> lash_kernel_doc::Datum {
                 .map(|i| dump(heap, &heap.list_get(*id, i).unwrap()))
                 .collect(),
         ),
-        Value::Set(id) => {
-            let mut values = Vec::new();
-            heap.visit(*id, &mut |element| {
-                let Element::Item(value) = element else {
-                    panic!("set member");
-                };
-                values.push(dump(heap, value));
-                ControlFlow::Continue(())
-            });
-            Datum::Set(values)
-        }
         Value::Record(id) => {
             let mut fields = Vec::new();
             heap.visit(*id, &mut |element| {
@@ -1580,18 +1562,6 @@ fn k_lib_006_native_corpus_pins_results_charges_and_determinism() {
     ] {
         cases.push(("K-LTXT-006", unicode(name), vec![t(input)], Ok(t(expected))));
     }
-    cases.push((
-        "K-LJSON-004",
-        "json.render_parts".to_owned(),
-        vec![Datum::List(vec![t("x"), i(2)]), Datum::Set(vec![]), t("")],
-        Ok(Datum::List(vec![t("[\"x\","), i(2), t("]")])),
-    ));
-    cases.push((
-        "K-LTXT-011",
-        "text.trim_set".to_owned(),
-        vec![t("aa😀aaa"), t("a"), Datum::Bool(true), Datum::Bool(true)],
-        Ok(t("😀")),
-    ));
     let mut registry = FunctionRegistry::new();
     register_text_json(&mut registry).unwrap();
     let mut exercised = std::collections::BTreeSet::new();
@@ -1642,17 +1612,15 @@ fn k_lib_006_native_corpus_pins_results_charges_and_determinism() {
                     .and_then(|index| args.get(index))
                     .map_or(0, deep),
             });
-        let expected_charge = if name == "text.trim_set" {
-            8 + (1 + deep(&args[0])) * (1 + deep(&args[1])) + result_size
-        } else {
+        assert_eq!(
+            charged,
             (if name == "format.decimal_parts" {
                 65
             } else {
                 1
             }) + args.iter().map(deep).sum::<u64>()
                 + result_size
-        };
-        assert_eq!(charged, expected_charge);
+        );
         assert_eq!(counter.spent(), 0);
         // A second call on the same implementation and heap must agree, and
         // neither call may change any input object (K-LIB-006, K-LIB-007).

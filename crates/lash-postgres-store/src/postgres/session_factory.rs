@@ -1012,10 +1012,12 @@ pub(crate) async fn delete_session_tx(
         crate::runtime_persistence::retire_unreachable_ancestry_tx(tx, &node_id).await?;
     }
     // Delete-time reclaim covers this session's tombstoned rows plus any
-    // tombstoned row with no live owner. A node can be tombstoned *after* its
-    // owner is gone (ancestry retired at a fork child's delete or collection),
-    // and no session-scoped vacuum could ever reach it. Live sessions' rows
-    // stay resident for their own vacuum, so this is not a catalog-wide sweep.
+    // tombstoned row owned by an already-deleted session. A node can be
+    // tombstoned *after* its owner is gone (ancestry retired at a fork child's
+    // delete or collection), and no
+    // session-scoped vacuum could ever reach it: the owning id is permanently
+    // unbindable. Live sessions' rows stay resident for their own vacuum, so
+    // this is not a catalog-wide sweep.
     sqlx::query(
         session_sql()
             .graph_postgres

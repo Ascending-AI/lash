@@ -1,4 +1,4 @@
-//! External authorship proof. The only production dependency is lash.
+//! External authorship proof. The manifest has exactly one dependency, lash.
 #![allow(unused_imports, unused_variables, dead_code)]
 
 use lash::attachments::*;
@@ -27,7 +27,6 @@ struct Integrator {
     registry: Arc<dyn ProcessRegistry>,
 }
 mod storage;
-pub mod stores;
 
 #[lash::async_trait]
 impl ToolProvider for Integrator {

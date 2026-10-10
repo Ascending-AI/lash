@@ -39,8 +39,7 @@ impl NativeFunction for Native {
 /// The native text, bytes, JSON and format definitions, ready to register.
 ///
 /// Definitions charge one plus the deep sizes of their arguments and result;
-/// `format.decimal_parts` adds 64 units for bounded binary64 conversion;
-/// `text.trim_set` bounds its membership scan with an input/set size product.
+/// `format.decimal_parts` adds 64 units for bounded binary64 conversion.
 /// Unicode-dependent names include the pinned Unicode data version.
 pub fn text_json() -> Vec<Function> {
     let mut functions = text::functions();

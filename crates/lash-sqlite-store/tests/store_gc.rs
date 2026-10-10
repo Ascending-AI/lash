@@ -839,62 +839,6 @@ async fn sqlite_delete_reclaims_fork_ancestry_orphaned_by_earlier_owner_delete()
     );
 }
 
-/// A delete reclaims exactly the tombstoned rows that have no live owner
-/// (FIG-1519). A live session's meta row exists before its first graph node
-/// commits and goes only with the delete that records its id, so a missing
-/// owner is the reclaim frontier: residue stranded under an id the deleted set
-/// never recorded drains, while a live session's tombstones stay resident for
-/// its own vacuum.
-#[tokio::test]
-async fn sqlite_delete_reclaims_tombstones_with_no_live_owner() {
-    let root = unique_temp_dir("ownerless-tombstones");
-    let factory = std::sync::Arc::new(
-        SqliteStore::open(
-            &catalog_uri(&root),
-            lash_sqlite_store::SqliteSynchronous::Normal,
-        )
-        .await
-        .expect("open catalog"),
-    );
-    drop(commit_single_root_node(&factory, &SessionId::from("live-owner")).await);
-    drop(commit_single_root_node(&factory, &SessionId::from("deleted-now")).await);
-    {
-        let conn = rusqlite::Connection::open(catalog_uri(&root)).expect("open catalog");
-        for (owner, node_id) in [
-            ("live-owner", "live-owner-tombstone"),
-            ("stranded-owner", "stranded-tombstone"),
-        ] {
-            conn.execute(
-                "INSERT INTO graph_nodes
-                     (session_id, node_id, parent_node_id, generation, frame_node_id,
-                      body_bytes, node_json, tombstoned)
-                 VALUES (?1, ?2, NULL, 99, ?2, 2, '{}', 1)",
-                rusqlite::params![owner, node_id],
-            )
-            .expect("seed a tombstoned row");
-        }
-        let recorded: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM deleted_sessions WHERE session_id = 'stranded-owner'",
-                [],
-                |row| row.get(0),
-            )
-            .expect("probe the deleted set");
-        assert_eq!(recorded, 0, "the stranded owner is outside the deleted set");
-    }
-
-    factory
-        .delete_session(&SessionId::from("deleted-now"))
-        .await
-        .expect("delete an unrelated session");
-
-    assert_eq!(
-        resident_tombstoned_node_ids(&root),
-        vec!["live-owner-tombstone".to_string()],
-        "the delete drains the ownerless tombstone and leaves the live owner's to its vacuum"
-    );
-}
-
 fn unique_temp_dir(name: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!(
         "lash-sqlite-store-{name}-{}-{}",

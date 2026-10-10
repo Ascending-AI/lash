@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 0,
   "cargo_package_count": 70,
-  "cargo_target_count": 214,
+  "cargo_target_count": 213,
   "facade_production_check_targets": [
     "//crates/lash-core-effect:lash-core-effect__fv_969a08f2[check]",
     "//crates/lash-core-effect:lash-core-effect__fv_d3926888[check]",
@@ -51599,7 +51599,7 @@
       "//crates/lash:lash__fv_fd5c919d"
     ]
   },
-  "generated_label_count": 295,
+  "generated_label_count": 294,
   "main_test_exclusions": {
     "//crates/lash-s3-store:lash-s3-store__unit_test": "requires an external service or credentials"
   },
@@ -52140,7 +52140,6 @@
     "//examples/delegation:delegation__unit_test",
     "//examples/e2e-consumer:e2e-consumer__unit_test",
     "//examples/e2e-consumer:otlp_export__test",
-    "//examples/integrator-contract:conformance__test",
     "//examples/integrator-contract:integrator-contract__unit_test",
     "//examples/kernel-embedder:kernel-embedder__unit_test",
     "//examples/toolbench:toolbench__unit_test",
@@ -52690,7 +52689,6 @@
     "//examples/delegation:delegation__unit_test",
     "//examples/e2e-consumer:e2e-consumer__unit_test",
     "//examples/e2e-consumer:otlp_export__test",
-    "//examples/integrator-contract:conformance__test",
     "//examples/integrator-contract:integrator-contract__unit_test",
     "//examples/kernel-embedder:kernel-embedder__unit_test",
     "//examples/toolbench:toolbench__unit_test",
@@ -57409,10 +57407,7 @@
     {
       "declared_features": [],
       "dependencies": [
-        "lash-internal-conformance",
-        "lash-internal-sqlite-store",
-        "lash-runtime",
-        "tokio"
+        "lash-runtime"
       ],
       "doc": "//examples/integrator-contract:integrator-contract__doc",
       "manifest": "examples/integrator-contract/Cargo.toml",
@@ -57435,15 +57430,6 @@
           "clippy_label": "//examples/integrator-contract:integrator-contract__unit_test__clippy[clippy.txt]",
           "kind": "unit-test",
           "label": "//examples/integrator-contract:integrator-contract__unit_test",
-          "tags": []
-        },
-        {
-          "build_label": "//examples/integrator-contract:conformance__test",
-          "cargo": "conformance",
-          "check_label": "//examples/integrator-contract:conformance__test[check]",
-          "clippy_label": "//examples/integrator-contract:conformance__test__clippy[clippy.txt]",
-          "kind": "test",
-          "label": "//examples/integrator-contract:conformance__test",
           "tags": []
         }
       ],
@@ -58340,7 +58326,6 @@
     "//examples/delegation:delegation__unit_test": 300,
     "//examples/e2e-consumer:e2e-consumer__unit_test": 300,
     "//examples/e2e-consumer:otlp_export__test": 300,
-    "//examples/integrator-contract:conformance__test": 300,
     "//examples/integrator-contract:integrator-contract__unit_test": 300,
     "//examples/kernel-embedder:kernel-embedder__unit_test": 300,
     "//examples/toolbench:toolbench__unit_test": 300,
@@ -58629,7 +58614,6 @@
     "//examples/e2e-consumer:e2e-consumer",
     "//examples/e2e-consumer:e2e-consumer__unit_test",
     "//examples/e2e-consumer:otlp_export__test",
-    "//examples/integrator-contract:conformance__test",
     "//examples/integrator-contract:integrator-contract[static]",
     "//examples/integrator-contract:integrator-contract__unit_test",
     "//examples/kernel-embedder:kernel-embedder[static]",
@@ -58970,7 +58954,6 @@
     "//examples/e2e-consumer:e2e-consumer[check]",
     "//examples/e2e-consumer:e2e-consumer__unit_test[check]",
     "//examples/e2e-consumer:otlp_export__test[check]",
-    "//examples/integrator-contract:conformance__test[check]",
     "//examples/integrator-contract:integrator-contract[check]",
     "//examples/integrator-contract:integrator-contract__unit_test[check]",
     "//examples/kernel-embedder:kernel-embedder[check]",
@@ -59265,7 +59248,6 @@
     "//examples/e2e-consumer:e2e-consumer__clippy[clippy.txt]",
     "//examples/e2e-consumer:e2e-consumer__unit_test__clippy[clippy.txt]",
     "//examples/e2e-consumer:otlp_export__test__clippy[clippy.txt]",
-    "//examples/integrator-contract:conformance__test__clippy[clippy.txt]",
     "//examples/integrator-contract:integrator-contract__clippy[clippy.txt]",
     "//examples/integrator-contract:integrator-contract__unit_test__clippy[clippy.txt]",
     "//examples/kernel-embedder:kernel-embedder__clippy[clippy.txt]",
@@ -59560,7 +59542,6 @@
     "//examples/e2e-consumer:e2e-consumer",
     "//examples/e2e-consumer:e2e-consumer__unit_test",
     "//examples/e2e-consumer:otlp_export__test",
-    "//examples/integrator-contract:conformance__test",
     "//examples/integrator-contract:integrator-contract",
     "//examples/integrator-contract:integrator-contract__unit_test",
     "//examples/kernel-embedder:kernel-embedder",
@@ -59857,7 +59838,6 @@
     "//examples/e2e-consumer:e2e-consumer",
     "//examples/e2e-consumer:e2e-consumer__unit_test",
     "//examples/e2e-consumer:otlp_export__test",
-    "//examples/integrator-contract:conformance__test",
     "//examples/integrator-contract:integrator-contract",
     "//examples/integrator-contract:integrator-contract__unit_test",
     "//examples/kernel-embedder:kernel-embedder",
@@ -60212,7 +60192,6 @@
     "//examples/delegation:delegation__unit_test",
     "//examples/e2e-consumer:e2e-consumer__unit_test",
     "//examples/e2e-consumer:otlp_export__test",
-    "//examples/integrator-contract:conformance__test",
     "//examples/integrator-contract:integrator-contract__unit_test",
     "//examples/kernel-embedder:kernel-embedder__unit_test",
     "//examples/toolbench:toolbench__unit_test",
@@ -60411,7 +60390,6 @@
     "//examples/delegation:delegation__unit_test",
     "//examples/e2e-consumer:e2e-consumer__unit_test",
     "//examples/e2e-consumer:otlp_export__test",
-    "//examples/integrator-contract:conformance__test",
     "//examples/integrator-contract:integrator-contract__unit_test",
     "//examples/kernel-embedder:kernel-embedder__unit_test",
     "//examples/toolbench:toolbench__unit_test",
@@ -60568,7 +60546,6 @@
     "//examples/delegation:delegation__unit_test",
     "//examples/e2e-consumer:e2e-consumer__unit_test",
     "//examples/e2e-consumer:otlp_export__test",
-    "//examples/integrator-contract:conformance__test",
     "//examples/integrator-contract:integrator-contract__unit_test",
     "//examples/kernel-embedder:kernel-embedder__unit_test",
     "//examples/toolbench:toolbench__unit_test",
@@ -60806,7 +60783,6 @@
     "//examples/delegation:delegation__unit_test",
     "//examples/e2e-consumer:e2e-consumer__unit_test",
     "//examples/e2e-consumer:otlp_export__test",
-    "//examples/integrator-contract:conformance__test",
     "//examples/integrator-contract:integrator-contract__unit_test",
     "//examples/kernel-embedder:kernel-embedder__unit_test",
     "//examples/toolbench:toolbench__unit_test",
@@ -61011,7 +60987,6 @@
     "//examples/delegation:delegation__unit_test",
     "//examples/e2e-consumer:e2e-consumer__unit_test",
     "//examples/e2e-consumer:otlp_export__test",
-    "//examples/integrator-contract:conformance__test",
     "//examples/integrator-contract:integrator-contract__unit_test",
     "//examples/kernel-embedder:kernel-embedder__unit_test",
     "//examples/toolbench:toolbench__unit_test",

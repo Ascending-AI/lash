@@ -1,8 +1,7 @@
 //! The session config-change laws (FIG-5333, FIG-5397): a config
 //! transaction a host commands on a durable session reaches the plugins
-//! that observe session config changes after its commit. Transactions still
-//! apply when plugins cannot build; owed changes coalesce to the latest
-//! transition until a successful build (FIG-5317). A node lost between
+//! that observe session config changes, once, after its commit; it still
+//! applies when the session's plugins cannot build; and a node lost between
 //! its commit and its delivery leaves the change owed, so the session's next
 //! plugin build delivers it.
 //!
@@ -317,75 +316,6 @@ async fn a_config_transaction_applies_when_the_sessions_plugins_cannot_build(tie
         None,
         "the turn's commit retires it"
     );
-    world.shutdown().await;
-}
-
-/// Cold-session config changes coalesce to the latest committed transition
-/// (FIG-5317, ruling 222777). Every transaction applies while plugins cannot
-/// build; the first successful build observes only the final change, under
-/// its own revision and with the committed policy already served. Delivery
-/// retires the obligation, so a later turn does not announce it again.
-#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-async fn cold_config_changes_coalesce_until_the_next_successful_plugin_build_on_sqlite_memory() {
-    let observer = Observer::default();
-    let world = world(Tier::SqliteMemory, &observer)
-        .await
-        .expect("the SQLite memory world opens");
-    let name = "config-changes-coalesced";
-    let durable = world.session(name, served::spec(BEFORE)).await;
-    let session = open(&world, name).await;
-    let base = revision(&session).await;
-    observer.failing.store(true, Ordering::SeqCst);
-
-    let mut previous = BEFORE;
-    for (index, current) in [AFTER, AFTER + 8, AFTER + 16].into_iter().enumerate() {
-        let revision = base + index as u64 + 1;
-        let outcome = set_limit(
-            &session,
-            &format!("change-unbuilt-{index}"),
-            revision - 1,
-            current,
-        )
-        .await;
-        assert!(
-            matches!(outcome, ConfigTransactionOutcome::Applied { .. }),
-            "{outcome:?}"
-        );
-        assert_eq!(session.policy_snapshot().max_tool_calls.get(), current);
-        assert_eq!(observer.seen(), Vec::new(), "failed builds deliver nothing");
-        assert_eq!(
-            owed(&world.backend, name).await.map(|owed| (
-                owed.revision,
-                owed.previous.max_tool_calls.get(),
-                owed.current.max_tool_calls.get(),
-            )),
-            Some((revision, previous, current)),
-            "each committed change supersedes the one still owed"
-        );
-        previous = current;
-    }
-
-    observer.failing.store(false, Ordering::SeqCst);
-    world.send(&durable, "once the cold plugins build").await;
-    let latest = vec![Seen {
-        session: name.to_owned(),
-        revision: base + 3,
-        previous: AFTER + 8,
-        current: AFTER + 16,
-        served: AFTER + 16,
-    }];
-    assert_eq!(
-        observer.seen(),
-        latest,
-        "one delivery of the latest committed transition"
-    );
-    assert_eq!(
-        owed(&world.backend, name).await,
-        None,
-        "the successful turn retires the coalesced change"
-    );
-    world.send(&durable, "after the coalesced delivery").await;
-    assert_eq!(observer.seen(), latest, "a later build does not redeliver");
     world.shutdown().await;
 }
 

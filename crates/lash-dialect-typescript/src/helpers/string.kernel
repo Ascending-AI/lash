@@ -493,10 +493,6 @@ kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
 charge sum(8, deep(result))
 body {
-  if same(kind(this), "text") {
-    let output = invoke ts.string.trim_value(this, true, true)
-    return output
-  }
   let text = invoke ts.string.receiver(this)
   let output = invoke ts.string.trim_value(text, true, true)
   return output
@@ -507,10 +503,6 @@ kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
 charge sum(8, deep(result))
 body {
-  if same(kind(this), "text") {
-    let output = invoke ts.string.trim_value(this, true, false)
-    return output
-  }
   let text = invoke ts.string.receiver(this)
   let output = invoke ts.string.trim_value(text, true, false)
   return output
@@ -521,10 +513,6 @@ kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
 charge sum(8, deep(result))
 body {
-  if same(kind(this), "text") {
-    let output = invoke ts.string.trim_value(this, false, true)
-    return output
-  }
   let text = invoke ts.string.receiver(this)
   let output = invoke ts.string.trim_value(text, false, true)
   return output

@@ -1,9 +1,6 @@
 use std::ops::ControlFlow;
 
-use lash_kernel_doc::{
-    Element, Formula, Integer, Name, NativeCall, NativeError, NativeHeap, Object, Operand, Type,
-    Value,
-};
+use lash_kernel_doc::{Element, Integer, NativeCall, NativeError, NativeHeap, Object, Type, Value};
 use num_traits::ToPrimitive;
 use unicode_normalization::UnicodeNormalization;
 
@@ -160,31 +157,6 @@ pub(super) fn functions() -> Vec<Function> {
             native,
         ));
     }
-    let (mut trim_definition, native) = definition(
-        "text.trim_set",
-        &[
-            ("text", Type::Text),
-            ("characters", Type::Text),
-            ("leading", Type::Bool),
-            ("trailing", Type::Bool),
-        ],
-        Type::Text,
-        &[],
-        trim_set,
-    );
-    // Membership searches the caller's set for each boundary scalar. Two
-    // stopped scans together probe at most B + 1 scalars, including a middle
-    // scalar twice. Charge decoding, set bytes searched and output copying.
-    let size = |name| Formula::Size(Operand::Param(Name::new(name)));
-    trim_definition.charge = Formula::Sum(vec![
-        Formula::Constant(8),
-        Formula::Product(vec![
-            Formula::Sum(vec![Formula::Constant(1), size("text")]),
-            Formula::Sum(vec![Formula::Constant(1), size("characters")]),
-        ]),
-        Formula::Size(Operand::Result),
-    ]);
-    functions.push((trim_definition, native));
     let (major, minor, patch) = char::UNICODE_VERSION;
     for (name, native) in [
         (
@@ -243,38 +215,6 @@ pub(super) fn functions() -> Vec<Function> {
         ));
     }
     functions
-}
-
-fn trim_set(call: NativeCall<'_>) -> Result<Value, NativeError> {
-    let text = text_arg(call.args, 0)?;
-    let characters = text_arg(call.args, 1)?;
-    let Value::Bool(leading) = arg(call.args, 2)? else {
-        return Err(raise("type_error", "expected boolean"));
-    };
-    let Value::Bool(trailing) = arg(call.args, 3)? else {
-        return Err(raise("type_error", "expected boolean"));
-    };
-    let mut remaining = text.chars();
-    if *leading {
-        while let Some(character) = remaining.clone().next() {
-            if !characters.contains(character) {
-                break;
-            }
-            remaining.next();
-        }
-    }
-    if *trailing {
-        while let Some(character) = remaining.clone().next_back() {
-            if !characters.contains(character) {
-                break;
-            }
-            remaining.next_back();
-        }
-    }
-    let trimmed = remaining.as_str();
-    let mut output = text_buffer(call.heap, trimmed.len())?;
-    output.push_str(trimmed);
-    Ok(Value::text(output))
 }
 
 fn normalize(call: NativeCall<'_>) -> Result<Value, NativeError> {

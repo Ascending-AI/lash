@@ -374,14 +374,13 @@ lash_store_sql::statements! {
 
         delete_tombstoned_for_session = "DELETE FROM graph_nodes WHERE session_id = ?1 AND tombstoned = TRUE";
 
-        /// Drop every tombstoned row owned by session `?1` or by no live
-        /// session. See the SQLite twin for why the reclaim reaches past the
-        /// named session and why a missing meta row means the owner is gone.
-        delete_tombstoned_reclaimable = "DELETE FROM graph_nodes AS node
-         WHERE node.tombstoned = TRUE
-           AND (node.session_id = ?1
-                OR NOT EXISTS (SELECT 1 FROM session_meta AS meta
-                               WHERE meta.session_id = node.session_id))";
+        /// Drop every tombstoned row owned by session `?1` or by a session
+        /// that is already deleted. See the SQLite twin for why the reclaim
+        /// reaches past the named session.
+        delete_tombstoned_reclaimable = "DELETE FROM graph_nodes
+         WHERE tombstoned = TRUE
+           AND (session_id = ?1
+                OR session_id IN (SELECT session_id FROM deleted_sessions))";
     }
 }
 

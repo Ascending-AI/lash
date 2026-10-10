@@ -4,7 +4,7 @@ These native definitions live in `lash-kernel-lib::text_json` and are installed
 with `register_text_json`. They perform no I/O, invoke no callbacks and mutate
 no existing object (`K-LIB-006`, `K-LIB-007`). All arguments are required. Wrong
 arity raises `arity`; wrong operand or collection-member kinds raise
-`type_error`; nothing coerces. Except for `text.trim_set` and the bounded conversion in `format.decimal_parts`, each definition charges **1 plus the deep size
+`type_error`; nothing coerces. Except for the bounded conversion in `format.decimal_parts`, each definition charges **1 plus the deep size
 of every argument plus the deep size of the result**, in the units of
 `K-CHG-004` and `K-CHG-005`. No function here uses a cache or a work guard.
 
@@ -71,15 +71,6 @@ the baseline needs a new definition identity (`K-VER-002`).
   `normalization_form`. Temporary decomposition and output storage are reserved
   against the native memory bound before normalization starts. The dialect
   supplies ECMAScript coercion and maps an invalid form to `RangeError`.
-
-- **K-LTXT-011.** `text.trim_set(text, characters, leading, trailing)` removes
-  boundary scalars belonging to the caller-supplied text set at the selected
-  ends. An empty set or two false flags leaves the contents unchanged. It
-  does no coercion and applies no language-specific whitespace policy.
-  It charges `8 + (1 + size(text)) * (1 + size(characters)) + size(result)`:
-  two boundary scans probe at most input bytes plus one scalars, each searching
-  the set's bytes, then copy the result. Result buffer and text storage are
-  reserved before allocation. All boundaries are scalar boundaries.
 
 ## Bytes
 

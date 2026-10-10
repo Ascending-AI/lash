@@ -58,27 +58,6 @@ lash_rust_unit_test(
     version = "0.0.0-dev",
 )
 
-lash_rust_integration_test(
-    name = "conformance__test",
-    crate_features = [],
-    crate_name = "conformance",
-    crate_root = "tests/conformance.rs",
-    declared_features = [],
-    exec_properties = sized_exec_properties("integrator-contract", "conformance", "//examples/integrator-contract:conformance__test"),
-    extra_compile_data = [],
-    extra_data = [
-        "//crates/lash-vm-worker:lash-vm-worker__bin",
-    ],
-    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
-    library = ":integrator-contract",
-    library_crate_name = "integrator_contract",
-    manifest_dir = "examples/integrator-contract",
-    package_name = "integrator-contract",
-    rustc_env = {},
-    tags = [],
-    version = "0.0.0-dev",
-)
-
 filegroup(
     name = "rust_sources",
     srcs = glob(["**/*.rs"]),
