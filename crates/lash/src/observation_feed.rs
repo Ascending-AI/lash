@@ -3,19 +3,23 @@
 //!
 //! A feed's snapshot is the durable head, paired with a cursor bound to its
 //! revision ([`ObservableSession::snapshot`](crate::ObservableSession::snapshot)).
-//! Its tail is the session's live replay after that cursor. The durable head
-//! is the authority a cursor is judged against: a cursor behind it is
-//! continued only when the replay carries a `Committed` event bridging to
-//! it, and every gap's replacement snapshot is the durable head, never a
-//! resident projection that may trail a commit another process made.
+//! The cursor stands at the head's commit in the live replay, so every event
+//! the replay orders after that commit is news to the snapshot's holder and
+//! replays (FIG-5322). Its tail is the session's live replay after that
+//! cursor. The durable head is the authority a cursor is judged against: a
+//! cursor behind it is continued only when the replay carries a `Committed`
+//! event bridging to it, and every gap's replacement snapshot is the durable
+//! head, never a resident projection that may trail a commit another
+//! process made.
 //!
 //! A `Committed` event carries the commit's entries delta, not the session's
-//! read view: the feed delivers it only to a consumer that holds the
-//! revision the delta extends, and rebuilds from the durable head when the
-//! consumer holds any other. An `AgentFrameSwitched` names the commit that
-//! made the switch, and the feed leaves it out for a consumer that holds
-//! that commit: a snapshot taken between a commit and its publication
-//! already stands on the frame.
+//! read view: a replay or a stream delivers it only to a consumer that holds
+//! the revision the delta extends, leaves it out for one that already holds
+//! the commit (FIG-5387), and rebuilds from the durable head when the
+//! consumer holds any other revision. An `AgentFrameSwitched` names the
+//! commit that made the switch, and the feed leaves it out for a consumer
+//! that holds that commit: a snapshot taken between a commit and its
+//! publication already stands on the frame and holds the commit.
 //!
 //! Delivery is at least once, and every event carries a redelivery identity
 //! ([`SessionObservationEventId`]). A stream drops an identity it already
@@ -104,16 +108,23 @@ impl FeedSource {
         )
     }
 
-    /// The durable head with a cursor bound to its revision.
-    ///
-    /// The resident runtime answers when it holds the head: its cursor sits
-    /// right after its own last publication, so the activity a run in this
-    /// process published since replays. A resident that trails is brought
-    /// to the head first, unless a run holds it; the store answers then.
+    /// The durable head with a cursor at its commit in the live replay
+    /// ([`commit_cursor`](Self::commit_cursor)).
     pub(crate) async fn snapshot(&self) -> Result<SessionObservation> {
+        let (revision, read_view) = self.head_view().await?;
+        Ok(SessionObservation {
+            cursor: self.commit_cursor(revision).await,
+            read_view,
+        })
+    }
+
+    /// The durable head's revision and read view. The resident runtime
+    /// answers when it holds the head; a resident that trails is brought to
+    /// the head first, unless a run holds it, and the store answers then.
+    async fn head_view(&self) -> Result<(SessionRevision, SessionReadView)> {
         let revision = self.durable_revision().await?;
-        if let Some(observation) = self.resident_at(revision) {
-            return Ok(observation);
+        if let Some(head) = self.resident_at(revision) {
+            return Ok(head);
         }
         let writer = self.resident.writer();
         if let Ok(mut resident) = writer.try_lock() {
@@ -126,17 +137,86 @@ impl FeedSource {
                 ),
             }
             drop(resident);
-            if let Some(observation) = self.resident_at(revision) {
-                return Ok(observation);
+            if let Some(head) = self.resident_at(revision) {
+                return Ok(head);
             }
         }
         match self.durable_head().await? {
-            Some((revision, read_view)) => Ok(SessionObservation {
-                cursor: self.live_replay.current_cursor(&self.session_id, revision),
-                read_view,
-            }),
-            None => Ok(self.resident.observe().session_observation()),
+            Some(head) => Ok(head),
+            None => {
+                let observation = self.resident.observe();
+                Ok((
+                    observation.session_revision(),
+                    observation.read_view.clone(),
+                ))
+            }
         }
+    }
+
+    /// Where a holder of the durable head at `revision` stands in the live
+    /// replay: at the head's commit, so every event the replay orders after
+    /// it replays, and none before it does.
+    ///
+    /// The replay's retained window is read from its start, up to the first
+    /// event stamped past `revision`:
+    /// - the window holds the head's `Committed`: the cursor is that event's;
+    /// - the commit is still to come, because this node is publishing it or
+    ///   the window holds an earlier commit and not this one: the cursor is
+    ///   the window's end, and the commit's publication, when it lands, is a
+    ///   redelivery the holder is not handed;
+    /// - otherwise retention trimmed the commit, so everything retained came
+    ///   after it: the cursor is the window's start.
+    ///
+    /// A store that cannot name its window's start
+    /// ([`LiveReplayStore::earliest_cursor`]) answers its head there, and
+    /// the cursor is that head.
+    async fn commit_cursor(&self, revision: SessionRevision) -> SessionCursor {
+        let session_id = &self.session_id;
+        let publishing = self.published_heads.window(session_id, revision).is_open();
+        let start = self.live_replay.earliest_cursor(session_id, revision);
+        let Ok(LiveReplayOutcome::Replayed(events)) =
+            self.live_replay.replay_after_cursor(&start).await
+        else {
+            return self.live_replay.current_cursor(session_id, revision);
+        };
+        let mut end = None;
+        let mut earlier_commit = false;
+        for event in &events {
+            if event.revision() > revision {
+                break;
+            }
+            if matches!(
+                event.payload,
+                SessionObservationEventPayload::Committed { .. }
+            ) {
+                if event.revision() == revision {
+                    return self.at_revision(&event.cursor, revision).unwrap_or(start);
+                }
+                earlier_commit = true;
+            }
+            end = Some(&event.cursor);
+        }
+        match end {
+            Some(end) if publishing || earlier_commit => {
+                self.at_revision(end, revision).unwrap_or(start)
+            }
+            _ => start,
+        }
+    }
+
+    /// `cursor`'s live position, bound to `revision`.
+    fn at_revision(
+        &self,
+        cursor: &SessionCursor,
+        revision: SessionRevision,
+    ) -> Option<SessionCursor> {
+        let at = cursor.parse_for_session(&self.session_id).ok()?;
+        Some(SessionCursor::new(
+            at.replay_incarnation_id,
+            &self.session_id,
+            revision,
+            at.live_position,
+        ))
     }
 
     /// Attach to the durable head and replay all retained provisional
@@ -148,9 +228,14 @@ impl FeedSource {
         Ok(observation)
     }
 
-    fn resident_at(&self, revision: SessionRevision) -> Option<SessionObservation> {
+    fn resident_at(&self, revision: SessionRevision) -> Option<(SessionRevision, SessionReadView)> {
         let observation = self.resident.observe();
-        (observation.session_revision() >= revision).then(|| observation.session_observation())
+        (observation.session_revision() >= revision).then(|| {
+            (
+                observation.session_revision(),
+                observation.read_view.clone(),
+            )
+        })
     }
 
     /// The revision `cursor` names, refused when it is malformed or names
@@ -164,7 +249,10 @@ impl FeedSource {
 
     /// The live replay after `cursor`, judged against the durable head: a
     /// cursor past the head, or behind it without a replayed `Committed`
-    /// bridging to it, is a gap rebuilt from the head.
+    /// bridging to it, is a gap rebuilt from the head. The replay is then
+    /// judged as a stream judges it ([`judge`]): a commit the cursor's
+    /// revision already holds is left out, and one that extends another
+    /// revision is a gap.
     pub(crate) async fn resume(&self, cursor: &SessionCursor) -> Result<SessionResume> {
         let live_replay = &self.live_replay;
         let replayed = self
@@ -179,13 +267,38 @@ impl FeedSource {
                 |events, durable| events.iter().any(|event| bridges(event, durable)),
             )
             .await?;
-        match replayed {
-            Ok(events) => Ok(SessionResume::Replayed { events }),
-            Err(reason) => {
-                let (observation, gap) = self.gap(cursor, reason).await?;
-                Ok(SessionResume::Gap { observation, gap })
+        let reason = match replayed {
+            Ok(events) => match self.held_suffix(cursor, events)? {
+                Some(events) => return Ok(SessionResume::Replayed { events }),
+                None => LiveReplayGapReason::Unavailable,
+            },
+            Err(reason) => reason,
+        };
+        let (observation, gap) = self.gap(cursor, reason).await?;
+        Ok(SessionResume::Gap { observation, gap })
+    }
+
+    /// What of `events`, replayed after `cursor`, reaches the consumer that
+    /// holds `cursor`'s revision; `None` when a commit diverged from it.
+    fn held_suffix(
+        &self,
+        cursor: &SessionCursor,
+        events: Vec<Arc<SessionObservationEvent>>,
+    ) -> Result<Option<Vec<Arc<SessionObservationEvent>>>> {
+        let mut held = self.requested_revision(cursor)?;
+        let mut delivered = Vec::with_capacity(events.len());
+        for event in events {
+            match judge(&event, held) {
+                Judged::Redelivered => {}
+                Judged::Diverged => return Ok(None),
+                Judged::Commit(revision) => {
+                    held = revision;
+                    delivered.push(event);
+                }
+                Judged::Other => delivered.push(event),
             }
         }
+        Ok(Some(delivered))
     }
 
     /// A live replay subscription after `cursor`, judged against the
@@ -262,8 +375,8 @@ impl FeedSource {
         }
     }
 
-    /// A gap from `requested`: the durable head, and the cursor a reader
-    /// continues from.
+    /// A gap from `requested`: the durable head, and the cursor at its
+    /// commit a reader continues from.
     async fn gap(
         &self,
         requested: &SessionCursor,
@@ -271,61 +384,50 @@ impl FeedSource {
     ) -> Result<(SessionObservation, LiveReplayGap)> {
         let snapshot = self.snapshot().await?;
         let latest_revision = self.requested_revision(&snapshot.cursor)?;
-        let latest_cursor = self
-            .fresh_cursor(requested, snapshot.cursor, latest_revision)
-            .await;
-        Ok((
-            SessionObservation {
-                read_view: snapshot.read_view,
-                cursor: latest_cursor.clone(),
-            },
-            LiveReplayGap {
-                session_id: self.session_id.clone(),
-                requested_cursor: requested.clone(),
-                latest_cursor,
-                latest_revision,
-                reason,
-            },
-        ))
-    }
-
-    /// The cursor a gap continues from: the earlier of the snapshot's and
-    /// the live replay's current one at the snapshot's revision, leaving out
-    /// the position that gapped and any the live replay cannot continue.
-    /// A snapshot's cursor can trail a discontinuity it never saw (a
-    /// resident runtime's, behind another process's activity and an
-    /// invalidation after it); continuing from it would gap again. The
-    /// current cursor is the fallback: it starts the live replay's fresh
-    /// continuity.
-    async fn fresh_cursor(
-        &self,
-        requested: &SessionCursor,
-        snapshot: SessionCursor,
-        revision: SessionRevision,
-    ) -> SessionCursor {
-        let session_id = &self.session_id;
-        let current = self.live_replay.current_cursor(session_id, revision);
-        let position =
-            |cursor: &SessionCursor| Some(cursor.parse_for_session(session_id).ok()?.live_position);
-        let (Some(gapped), Some(at_snapshot), Some(at_current)) =
-            (position(requested), position(&snapshot), position(&current))
-        else {
-            return snapshot;
+        let gap = LiveReplayGap {
+            session_id: self.session_id.clone(),
+            requested_cursor: requested.clone(),
+            latest_cursor: snapshot.cursor.clone(),
+            latest_revision,
+            reason,
         };
-        let mut candidates = [(at_snapshot, &snapshot), (at_current, &current)];
-        candidates.sort_by_key(|(position, _)| *position);
-        for (position, candidate) in candidates {
-            if position == gapped {
-                continue;
-            }
-            if matches!(
-                self.live_replay.replay_after_cursor(candidate).await,
-                Ok(LiveReplayOutcome::Replayed(_))
-            ) {
-                return candidate.clone();
+        Ok((snapshot, gap))
+    }
+}
+
+/// What a consumer that holds one revision does with one live event.
+enum Judged {
+    /// A commit extending the held revision: the consumer now holds this one.
+    Commit(SessionRevision),
+    /// Any event that is not a commit or a commit's frame switch.
+    Other,
+    /// A commit the consumer holds, or that commit's frame switch.
+    Redelivered,
+    /// A commit whose entries extend a revision the consumer does not hold.
+    Diverged,
+}
+
+/// Judge `event` for a consumer that holds `held`: a `Committed` at or below
+/// it is a redelivery, and so is the frame switch of a commit at or below
+/// it; a `Committed` whose delta extends a revision other than `held`
+/// diverged from the consumer.
+fn judge(event: &SessionObservationEvent, held: SessionRevision) -> Judged {
+    match &event.payload {
+        SessionObservationEventPayload::AgentFrameSwitched {
+            commit: Some(commit),
+            ..
+        } if *commit <= held => Judged::Redelivered,
+        SessionObservationEventPayload::Committed { base_revision, .. } => {
+            let revision = event.revision();
+            if revision <= held {
+                Judged::Redelivered
+            } else if *base_revision != held {
+                Judged::Diverged
+            } else {
+                Judged::Commit(revision)
             }
         }
-        current.clone()
+        _ => Judged::Other,
     }
 }
 
@@ -635,36 +737,26 @@ impl FeedState {
         SessionObservationStreamItem::Gap { observation, gap }
     }
 
-    /// Deliver one live event. A `Committed` at or below the revision the
-    /// consumer holds is a redelivery, and so is the frame switch of a
-    /// commit at or below it; a `Committed` whose delta extends a revision
-    /// the consumer does not hold diverged from it.
+    /// Deliver one live event to the consumer, as [`judge`] judges it for
+    /// the revision the consumer holds.
     fn deliver(&mut self, event: Arc<SessionObservationEvent>) -> Delivery {
         let delivered = self.delivered.unwrap_or(SessionRevision::new(0));
-        if let SessionObservationEventPayload::AgentFrameSwitched {
-            commit: Some(commit),
-            ..
-        } = &event.payload
-            && *commit <= delivered
-        {
-            self.advance_past(&event, delivered);
-            return Delivery::Skipped;
-        }
-        if let SessionObservationEventPayload::Committed { base_revision, .. } = &event.payload {
-            let revision = event.revision();
-            if revision <= delivered {
+        match judge(&event, delivered) {
+            Judged::Redelivered => {
                 self.advance_past(&event, delivered);
-                return Delivery::Skipped;
+                Delivery::Skipped
             }
-            if *base_revision != delivered {
-                return Delivery::Diverged;
+            Judged::Diverged => Delivery::Diverged,
+            Judged::Commit(revision) => {
+                self.delivered = Some(revision);
+                self.cursor = event.cursor.clone();
+                Delivery::Item(SessionObservationStreamItem::Event(event))
             }
-            self.delivered = Some(revision);
-            self.cursor = event.cursor.clone();
-            return Delivery::Item(SessionObservationStreamItem::Event(event));
+            Judged::Other => {
+                self.advance_past(&event, delivered);
+                Delivery::Item(SessionObservationStreamItem::Event(event))
+            }
         }
-        self.advance_past(&event, delivered);
-        Delivery::Item(SessionObservationStreamItem::Event(event))
     }
 
     /// Move the feed's cursor to a delivered or skipped event's position,

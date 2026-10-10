@@ -119,6 +119,12 @@ pub struct PublicationWindow<S, R> {
 }
 
 impl<S: Clone + Eq + Hash, R: Copy + Ord> PublicationWindow<S, R> {
+    /// Whether a publication behind the head was in flight when the window
+    /// was taken: the head's commit may still be on its way to the replay.
+    pub fn is_open(&self) -> bool {
+        self.open
+    }
+
     /// Close the window of a head the replay does not bridge to. `true`
     /// once every publication that was in flight behind the head was
     /// attempted, whatever its result: the reader judges again from a new

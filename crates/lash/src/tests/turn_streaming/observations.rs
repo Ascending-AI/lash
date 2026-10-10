@@ -105,14 +105,14 @@ async fn store_wide_invalidation_resnapshots_every_session_feed() -> Result<()> 
 /// so a law that reads the replay after a send waits for its publication.
 struct PublishedCommits {
     inner: Arc<dyn lash_core::LiveReplayStore>,
-    commits: tokio::sync::watch::Sender<usize>,
+    commits: tokio::sync::watch::Sender<(usize, lash_core::SessionRevision)>,
 }
 
 impl std::fmt::Debug for PublishedCommits {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("PublishedCommits")
-            .field("commits", &*self.commits.borrow())
+            .field("commits", &self.commits.borrow().0)
             .finish_non_exhaustive()
     }
 }
@@ -121,7 +121,7 @@ impl PublishedCommits {
     fn over(inner: Arc<dyn lash_core::LiveReplayStore>) -> Arc<Self> {
         Arc::new(Self {
             inner,
-            commits: tokio::sync::watch::channel(0).0,
+            commits: tokio::sync::watch::channel((0, lash_core::SessionRevision::new(0))).0,
         })
     }
 
@@ -133,16 +133,18 @@ impl PublishedCommits {
         ))
     }
 
-    /// Wait until `count` commits carrying rows were published.
-    async fn published(&self, count: usize) {
+    /// Wait until `count` commits carrying rows were published, and
+    /// answer the newest one's revision.
+    async fn published(&self, count: usize) -> lash_core::SessionRevision {
         let mut commits = self.commits.subscribe();
         tokio::time::timeout(
             std::time::Duration::from_secs(60),
-            commits.wait_for(|published| *published >= count),
+            commits.wait_for(|(published, _)| *published >= count),
         )
         .await
         .expect("the commit reaches the live replay")
-        .expect("the store outlives the wait");
+        .expect("the store outlives the wait")
+        .1
     }
 }
 
@@ -168,7 +170,12 @@ impl lash_core::LiveReplayStore for PublishedCommits {
             })
             .count();
         let published = self.inner.publish(session_id, revision, events).await?;
-        self.commits.send_modify(|count| *count += commits);
+        if commits > 0 {
+            self.commits.send_modify(|(count, newest)| {
+                *count += commits;
+                *newest = (*newest).max(revision);
+            });
+        }
         Ok(published)
     }
 
@@ -193,6 +200,14 @@ impl lash_core::LiveReplayStore for PublishedCommits {
         revision: lash_core::SessionRevision,
     ) -> lash_core::SessionCursor {
         self.inner.current_cursor(session_id, revision)
+    }
+
+    fn earliest_cursor(
+        &self,
+        session_id: &SessionId,
+        revision: lash_core::SessionRevision,
+    ) -> lash_core::SessionCursor {
+        self.inner.earliest_cursor(session_id, revision)
     }
 
     async fn invalidate_all(&self) -> std::result::Result<(), lash_core::LiveReplayStoreError> {
@@ -973,8 +988,13 @@ async fn session_observation_envelopes_scope_activity_and_commit_to_the_turn() -
     Ok(())
 }
 
+/// A gap's replacement cursor sits at the durable head's commit in the
+/// replay order (FIG-5322): an event published after that commit is news
+/// to a consumer that rebuilt from the head, even when retention trimmed
+/// the commit itself and the session's resident runtime reaches the head
+/// only after the event. The turn runs through a Durable Session, so the
+/// open session's resident is behind the head until the gap's snapshot.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "FIG-5322: under load the gap's replacement cursor answers another gap instead of the unseen auxiliary event"]
 async fn trimmed_gap_replacement_cursor_preserves_unseen_auxiliary_event() -> Result<()> {
     let live = PublishedCommits::over(Arc::new(
         lash_core::facade_support::InMemoryLiveReplayStore::new(
@@ -985,11 +1005,10 @@ async fn trimmed_gap_replacement_cursor_preserves_unseen_auxiliary_event() -> Re
         ),
     ));
     let core = core_publishing_to(Arc::clone(&live)).await?;
+    let session_id =
+        crate::SessionId::parse("trimmed-gap-unseen-auxiliary-event").expect("nonblank identity");
     let session = core
-        .session(
-            crate::SessionId::parse("trimmed-gap-unseen-auxiliary-event")
-                .expect("nonblank host identity"),
-        )
+        .session(session_id.clone())
         .created()
         .await
         .open()
@@ -1001,24 +1020,27 @@ async fn trimmed_gap_replacement_cursor_preserves_unseen_auxiliary_event() -> Re
         .expect("durable snapshot")
         .cursor;
 
-    session
+    core.session(session_id.clone())
+        .durable()
+        .await?
         .send(TurnInput::text("install replacement projection"))
         .output()
         .await?;
-    live.published(1).await;
-    let installed_projection = session
-        .observe()
-        .snapshot()
-        .await
-        .expect("durable snapshot");
-    session
-        .observe()
-        .runtime
-        .record_queue_changed(
-            lash_core::SessionQueueEventKind::Enqueued,
-            vec!["unseen-batch".to_string()],
-        )
-        .await;
+    let head = live.published(1).await;
+    lash_core::LiveReplayStore::publish(
+        live.as_ref(),
+        &session_id,
+        head,
+        vec![lash_core::LiveReplayEventDraft::new(
+            None::<lash_core::TurnId>,
+            lash_core::SessionObservationEventPayload::QueueChanged {
+                kind: lash_core::SessionQueueEventKind::Enqueued,
+                batch_ids: vec!["unseen-batch".to_string()],
+            },
+        )],
+    )
+    .await
+    .expect("the auxiliary event is published");
 
     let SessionResume::Gap { gap, .. } =
         session.observe().resume_from_cursor(&stale_cursor).await?
@@ -1027,16 +1049,8 @@ async fn trimmed_gap_replacement_cursor_preserves_unseen_auxiliary_event() -> Re
     };
     assert_eq!(gap.reason, lash_core::LiveReplayGapReason::Trimmed);
     assert_eq!(
-        gap.latest_cursor
-            .parse_for_session(&session.session_id())
-            .expect("the gap's cursor names its session")
-            .revision,
-        installed_projection
-            .cursor
-            .parse_for_session(&session.session_id())
-            .expect("the projection's cursor names its session")
-            .revision,
-        "the replacement is the projection's durable head"
+        gap.latest_revision, head,
+        "the replacement is the durable head"
     );
 
     let SessionResume::Replayed { events } = session
@@ -1046,13 +1060,115 @@ async fn trimmed_gap_replacement_cursor_preserves_unseen_auxiliary_event() -> Re
     else {
         panic!("the replacement cursor must retain a replayable auxiliary suffix");
     };
-    assert_eq!(events.len(), 1);
+    assert_eq!(events.len(), 1, "{events:?}");
     assert!(matches!(
         &events[0].payload,
         lash_core::SessionObservationEventPayload::QueueChanged { kind, batch_ids }
             if *kind == lash_core::SessionQueueEventKind::Enqueued
                 && batch_ids == &["unseen-batch"]
     ));
+    Ok(())
+}
+
+/// A resume from a snapshot taken between a turn's commit and its
+/// publication never hands back that commit (FIG-5387): the snapshot
+/// already holds it, so the commit's later publication is a redelivery.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn snapshot_resume_never_replays_a_commit_the_snapshot_holds() -> Result<()> {
+    let replay_store = Arc::new(PausedCommitReplayStore::at(
+        PublicationBoundary::BeforePublish,
+    ));
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        sqlite_memory_store_backend().await,
+    ))
+    .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
+    .live_replay_store(replay_store.clone())
+    .build(crate::testing::runtime_lease_owner())?;
+    let session_id = SessionId::fixture("snapshot-resume-held-commit");
+    let session = core
+        .session(session_id.clone())
+        .created()
+        .await
+        .open()
+        .await?;
+    let before = session
+        .observe()
+        .snapshot()
+        .await
+        .expect("durable snapshot");
+    let turn_session = session.clone();
+    let turn = tokio::spawn(async move {
+        turn_session
+            .send(TurnInput::text("held by the snapshot"))
+            .output()
+            .await
+    });
+
+    replay_store.wait_for_commit_append().await;
+    let snapshot = session
+        .observe()
+        .snapshot()
+        .await
+        .expect("durable snapshot");
+    let held = snapshot
+        .cursor
+        .parse_for_session(&session_id)
+        .expect("the snapshot's cursor names its session")
+        .revision;
+    assert!(
+        held > before
+            .cursor
+            .parse_for_session(&session_id)
+            .expect("the first cursor names its session")
+            .revision,
+        "the snapshot is the durable head, which commits before it publishes"
+    );
+    replay_store.release_commit_install();
+    turn.await.expect("join publishing turn")?;
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            if let lash_core::LiveReplayOutcome::Replayed(events) =
+                lash_core::LiveReplayStore::replay_after_cursor(
+                    replay_store.as_ref(),
+                    &before.cursor,
+                )
+                .await
+                .expect("replay")
+                && events.iter().any(|event| {
+                    matches!(
+                        event.payload,
+                        lash_core::SessionObservationEventPayload::Committed { .. }
+                    )
+                })
+            {
+                return;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the turn's commit reaches the live replay");
+
+    let SessionResume::Replayed { events } = session
+        .observe()
+        .resume_from_cursor(&snapshot.cursor)
+        .await?
+    else {
+        panic!("the snapshot's cursor continues");
+    };
+    let held_commits = events
+        .iter()
+        .filter(|event| {
+            matches!(
+                event.payload,
+                lash_core::SessionObservationEventPayload::Committed { .. }
+            ) && event.revision() <= held
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        held_commits.is_empty(),
+        "a resume replayed commits the snapshot holds: {held_commits:?}"
+    );
     Ok(())
 }
 
@@ -1131,6 +1247,14 @@ impl lash_core::LiveReplayStore for FailingAppendReplayStore {
         revision: lash_core::SessionRevision,
     ) -> lash_core::SessionCursor {
         self.inner.current_cursor(session_id, revision)
+    }
+
+    fn earliest_cursor(
+        &self,
+        session_id: &SessionId,
+        revision: lash_core::SessionRevision,
+    ) -> lash_core::SessionCursor {
+        self.inner.earliest_cursor(session_id, revision)
     }
 
     async fn invalidate_all(&self) -> std::result::Result<(), lash_core::LiveReplayStoreError> {
@@ -1737,6 +1861,14 @@ impl lash_core::LiveReplayStore for PausedCommitReplayStore {
         self.inner.current_cursor(session_id, revision)
     }
 
+    fn earliest_cursor(
+        &self,
+        session_id: &SessionId,
+        revision: lash_core::SessionRevision,
+    ) -> lash_core::SessionCursor {
+        self.inner.earliest_cursor(session_id, revision)
+    }
+
     async fn invalidate_all(&self) -> std::result::Result<(), lash_core::LiveReplayStoreError> {
         self.inner.invalidate_all().await
     }
@@ -2137,6 +2269,17 @@ async fn subscriber_lag_with_trimmed_suffix_forces_gap_then_continues() -> Resul
             ..
         }
     ));
+    let retained = tokio::time::timeout(std::time::Duration::from_secs(1), stream.next())
+        .await
+        .expect("the retained suffix replays")
+        .expect("lag recovery stream remains open")?;
+    let crate::observe::SessionObservationStreamItem::Event(retained) = retained else {
+        panic!("the gap's cursor must keep the retained activity past the head");
+    };
+    assert_eq!(
+        observation_assistant_delta(&retained).as_deref(),
+        Some("lag three")
+    );
 
     session
         .observe()

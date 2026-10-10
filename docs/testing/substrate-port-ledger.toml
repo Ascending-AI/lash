@@ -16442,7 +16442,7 @@ laws = [
 disposition = "replaced-by:crates/lash/src/tests/durable_session.rs::committed_row_deltas_transport_each_new_node_once"
 status = "deleted"
 owed = "committed row deltas transport each new node once"
-note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift; ignored on FIG-5387 (under load a resume from a snapshot's cursor replays a commit the snapshot already holds)"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift; FIG-5322 made a resume leave out the commits its cursor's revision holds, and the law runs again"
 
 [[row]]
 path = "crates/lash/src/tests/durable_session.rs"
@@ -16780,7 +16780,7 @@ laws = [
 disposition = "replaced-by:crates/lash/src/tests/turn_streaming/observations.rs::trimmed_gap_replacement_cursor_preserves_unseen_auxiliary_event"
 status = "deleted"
 owed = "trimmed gap replacement cursor preserves unseen auxiliary event"
-note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift; ignored on FIG-5322 (under load the gap's replacement cursor answers another gap)"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift; FIG-5322 pinned the replacement cursor at the head's commit in the replay and made the law deterministic: the turn runs through a Durable Session, so the open session's resident reaches the head only in the gap's snapshot"
 
 [[row]]
 path = "crates/lash/src/tests/turn_streaming/observations.rs"

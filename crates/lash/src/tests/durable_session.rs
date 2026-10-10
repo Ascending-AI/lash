@@ -1468,7 +1468,6 @@ async fn transcript_totally_projects_really_committed_nodes_in_source_order() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "FIG-5387: under load a resume from a snapshot's cursor replays a commit the snapshot already holds"]
 async fn committed_row_deltas_transport_each_new_node_once() {
     let core = core_serving(sqlite_memory_store_backend().await, true);
     create(&core, "transcript-deltas").await;
