@@ -1,9 +1,11 @@
 //! Deep copies preserve sharing, refuse cycles, and keep opaque identities.
 use std::collections::{BTreeMap, BTreeSet};
+use std::ops::ControlFlow;
 
-use lash_kernel_doc::{ErrorValue, NativeError, NativeHeap, Object, ObjectId, Value};
+use lash_kernel_doc::{Element, ErrorValue, NativeError, NativeHeap, Object, ObjectId, Value};
 
 use super::{native::snapshot, raise};
+use crate::numbers::KIND_NAMES;
 
 pub(super) fn deep(value: &Value, heap: &mut dyn NativeHeap) -> Result<Value, NativeError> {
     Copy {
@@ -83,4 +85,78 @@ impl Copy<'_> {
         self.copied.insert(id, copied.clone());
         Ok(copied)
     }
+}
+
+/// Whether neither `value` nor anything a deep copy of it reads has a kind
+/// `refused` marks, no collection holds itself and nothing nests more
+/// than a deep copy takes. It reads what [`deep`] reads, in its order, at
+/// its depths and each collection once, so [`deep`] copies a value it
+/// passes without raising. Each collection it reads reserves its place
+/// in what was read.
+pub(super) fn holds_none(
+    value: &Value,
+    refused: &[bool; KIND_NAMES.len()],
+    heap: &mut dyn NativeHeap,
+) -> Result<bool, NativeError> {
+    enum Visit {
+        Value(Value, usize),
+        Leave(ObjectId),
+    }
+    let mut active = BTreeSet::new();
+    let mut read = BTreeSet::new();
+    let mut pending = vec![Visit::Value(value.clone(), 0)];
+    while let Some(visit) = pending.pop() {
+        let (value, depth) = match visit {
+            Visit::Value(value, depth) => (value, depth),
+            Visit::Leave(id) => {
+                active.remove(&id);
+                read.insert(id);
+                continue;
+            }
+        };
+        if depth > 128 || refused[value.kind() as usize] {
+            return Ok(false);
+        }
+        // The members, in the order a copy reads them, are pushed in
+        // reverse so the first is read first.
+        let from = pending.len();
+        match &value {
+            Value::Tuple(items) => pending.extend(
+                items
+                    .iter()
+                    .map(|item| Visit::Value(item.clone(), depth + 1)),
+            ),
+            Value::Error(error) => pending.push(Visit::Value(error.data.clone(), depth + 1)),
+            Value::List(id) | Value::Map(id) | Value::Set(id) | Value::Record(id) => {
+                if active.contains(id) {
+                    return Ok(false);
+                }
+                if read.contains(id) {
+                    continue;
+                }
+                heap.reserve(1, 0)?;
+                active.insert(*id);
+                pending.push(Visit::Leave(*id));
+                let from = pending.len();
+                heap.visit(*id, &mut |element| {
+                    match element {
+                        Element::Item(item) => pending.push(Visit::Value(item.clone(), depth + 1)),
+                        Element::Entry { key, value } => {
+                            pending.push(Visit::Value(key.clone(), depth + 1));
+                            pending.push(Visit::Value(value.clone(), depth + 1));
+                        }
+                        Element::Field { value, .. } => {
+                            pending.push(Visit::Value(value.clone(), depth + 1));
+                        }
+                    }
+                    ControlFlow::Continue(())
+                });
+                pending[from..].reverse();
+                continue;
+            }
+            _ => {}
+        }
+        pending[from..].reverse();
+    }
+    Ok(true)
 }

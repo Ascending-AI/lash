@@ -54,6 +54,7 @@ use record.copy_deep
 use map.copy_deep
 use set.contains
 use set.copy_deep
+use collection.holds_none
 use map.values
 use record.values
 use ts.boundary
@@ -109,16 +110,20 @@ kernel 1
 charge 3
 body {
   let k = kind(value)
-  # The kinds most receivers have come first.
+  # The kinds most receivers have come first: a string's and an array's
+  # methods, then an object's.
+  if same(k, "text") {
+    return k
+  }
+  if same(k, "list") {
+    return k
+  }
   if same(k, "record") {
     let brand = value.brand
     if same(brand, absent) { return k }
     if same(kind(brand), "text") {
       return text.concat("brand:", brand)
     }
-    return k
-  }
-  if same(k, "list") {
     return k
   }
   if same(k, "float") {
@@ -1587,11 +1592,15 @@ body {
   return rest
 }
 
-# Guest arrays cross a host boundary as plain data. Copy first: replacing
-# absent slots must never fill the guest's holes or change any guest alias.
-# Each container of the copy is then visited once, without recursion: a
-# hole or absent array slot becomes null, a function or built-in token
-# anywhere is refused, and only a container is visited further.
+# Guest arrays cross a host boundary as plain data. A value that holds no
+# hole, no absent and no tuple anywhere a deep copy reads, no cycle and
+# nothing deeper than a copy takes, is what the copy and walk below would
+# give: it crosses as it is, read once by a native pass. Anything else is
+# copied first: replacing absent slots must never fill the guest's holes
+# or change any guest alias. Each container of the copy is then visited
+# once, without recursion: a hole or absent array slot becomes null, a
+# function or built-in token anywhere is refused, and only a container is
+# visited further.
 function ts.boundary(value: Any) -> Any
 kernel 1
 errors "cyclic_value", "too_deep", "type_error", "not_data"
@@ -1607,6 +1616,7 @@ body {
     return value
   }
   if same(k, "set") { return set.copy_deep(value) }
+  if collection.holds_none(value, set{"absent", "tuple"}) { return value }
   let copied = value
   if same(k, "list") { set copied = list.copy_deep(value) } else {
     if same(k, "record") { set copied = record.copy_deep(value) } else {

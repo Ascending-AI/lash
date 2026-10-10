@@ -15,6 +15,7 @@ mod controls;
 mod deviations;
 mod guarded_text;
 mod hoisting;
+mod hot_helpers;
 mod json;
 mod language;
 mod machine;

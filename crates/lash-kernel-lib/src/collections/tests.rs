@@ -301,6 +301,131 @@ fn k_col_007_copies_preserve_sharing_and_refuse_cycles() {
         "cyclic_value"
     );
 }
+/// `K-COL-016`: `holds_none` reads what a deep copy reads, at its depths
+/// and each collection once: a value it passes copies without raising, and
+/// a cycle or one level past the copy's 128 fails it, also where the order
+/// a shared collection is first reached decides its depth. A refused kind
+/// anywhere a copy reads fails it. Its charge counts each collection once,
+/// so 2^60 paths to one list cost a few hundred units.
+#[test]
+fn k_col_016_holds_none_reads_what_a_deep_copy_reads() {
+    let verdict = |build: &str, kinds: &str| {
+        let source = format!(
+            "fn nest(n) {{ let d = \"leaf\" let i = 0 while num.lt(i, n) {{ set d = [d] set i = num.add(i, 1) }} return d }} \
+             main {{ let x = absent {build} let held = [x] let passed = collection.holds_none(held, {kinds}) \
+             let copied = \"copied\" try {{ let c = list.copy_deep(held) }} catch e {{ set copied = e.kind }} \
+             return (passed, copied) }}"
+        );
+        match result(&source) {
+            Datum::Tuple(pair) => match &pair[..] {
+                [Datum::Bool(passed), Datum::Text(copied)] => (*passed, copied.clone()),
+                other => panic!("{other:?}"),
+            },
+            other => panic!("{other:?}"),
+        }
+    };
+    let plain = "set{\"absent\", \"tuple\"}";
+    for (build, kinds, expected) in [
+        (
+            "set x = {a: [1, 2.5, \"t\", null, true], b: map{\"k\": [1]}}",
+            plain,
+            (true, "copied"),
+        ),
+        ("set x = [1, absent]", plain, (false, "copied")),
+        ("set x = {a: absent}", "set{}", (true, "copied")),
+        (
+            "set x = [(1, absent)]",
+            "set{\"absent\"}",
+            (false, "copied"),
+        ),
+        (
+            "set x = [error.new(\"k\", \"m\", [()])]",
+            "set{\"tuple\"}",
+            (false, "copied"),
+        ),
+        (
+            "set x = map{(1, ()): 1}",
+            "set{\"tuple\"}",
+            (false, "copied"),
+        ),
+        ("set x = set{(), 1}", "set{\"tuple\"}", (false, "copied")),
+        ("set x = {f: fn() {}}", plain, (true, "copied")),
+        (
+            "set x = {f: fn() {}}",
+            "set{\"closure\"}",
+            (false, "copied"),
+        ),
+        ("set x = [] set x[0] = x", plain, (false, "cyclic_value")),
+        (
+            "let r = {} set r.self = [r] set x = r",
+            "set{}",
+            (false, "cyclic_value"),
+        ),
+        ("set x = call nest(127)", plain, (true, "copied")),
+        ("set x = call nest(128)", plain, (false, "too_deep")),
+        (
+            "let d = call nest(126) set x = {a: d, b: [[d]]}",
+            plain,
+            (true, "copied"),
+        ),
+        (
+            "let d = call nest(126) set x = {b: [[d]], a: d}",
+            plain,
+            (false, "too_deep"),
+        ),
+    ] {
+        let (passed, copied) = verdict(build, kinds);
+        assert_eq!((passed, copied.as_str()), expected, "{build} {kinds}");
+    }
+    assert_eq!(
+        error("return collection.holds_none(1, set{\"number\"})"),
+        "type_error"
+    );
+    assert_eq!(
+        error("return collection.holds_none(1, [\"tuple\"])"),
+        "type_error"
+    );
+    let charged = |answer: &str| {
+        let shared = format!(
+            "main {{ let d = [1] let i = 0 while num.lt(i, 60) {{ set d = [d, d] set i = num.add(i, 1) }} \
+             let kinds = set{{\"tuple\"}} return {answer} }}"
+        );
+        let mut machine = machine(&shared);
+        let Step::Ended(End::Finished(done)) =
+            machine.run(&mut World::default(), u64::MAX).unwrap()
+        else {
+            panic!("{shared}")
+        };
+        assert_eq!(done.result, Datum::Bool(true));
+        machine.meters().charged
+    };
+    // 1 + size(kinds) + 61 lists of sizes 3 and 2 and their one integer.
+    let held = charged("collection.holds_none(d, kinds)") - charged("true");
+    assert!(held < 200, "charged {held}");
+    // Each collection it reads takes its place out of what the memory
+    // bound leaves first: with no room left it refuses.
+    use lash_kernel_doc::{NativeCall, NativeError, NativeHeap, Object, Value, WorkCounter};
+    let registry = registry();
+    let (_, function) = registry
+        .iter()
+        .find(|(_, f)| f.definition.name.as_str() == "collection.holds_none")
+        .unwrap();
+    let mut heap = crate::tests::Heap::default();
+    let value = Value::List(heap.allocate(Object::List(vec![Value::Null])).unwrap());
+    let kinds = Value::Set(
+        heap.allocate(Object::Set(vec![Value::text("tuple")]))
+            .unwrap(),
+    );
+    heap.1 = crate::tests::Room::of(0);
+    assert_eq!(
+        function.native.as_ref().unwrap().call(NativeCall {
+            args: &[value, kinds],
+            heap: &mut heap,
+            counter: &mut WorkCounter::new(None),
+        }),
+        Err(NativeError::Memory)
+    );
+}
 #[test]
 fn k_col_008_mutations_preserve_object_identity_and_order() {
     assert_eq!(

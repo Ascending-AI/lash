@@ -18,6 +18,7 @@
 
 use ts.callable
 use same
+use kind
 use eq
 use error.new
 use list.len
@@ -36,13 +37,14 @@ use ts.promise.then
 use ts.promise.members
 use ts.promise.decided
 
-# Whether a value is a promise. `instanceof Promise` asks this too.
+# Whether a value is a promise, a record branded "Promise", read without
+# spelling its receiver. `instanceof Promise` asks this too.
 function ts.promise.is(value: Any) -> Bool
 kernel 1
 charge 4
 body {
-  let k = invoke ts.receiver(value)
-  return same(k, "brand:Promise")
+  if same(kind(value), "record") { return same(value.brand, "Promise") }
+  return false
 }
 
 # A promise no task settles yet. The statement that follows spawns its task

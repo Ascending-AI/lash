@@ -90,3 +90,12 @@ and the dialects:
   with text kind/message and the data given, or absent when omitted. It rejects
   non-text kind/message. Its charge covers text sizes and the result's own size;
   it preserves guest identities in data until a boundary copies them.
+- **K-COL-016.** `collection.holds_none(value, kinds)` answers whether a deep
+  copy of the value (`K-COL-007`) would read no value of a kind the set
+  `kinds` names (`kind`'s names; another member raises `type_error`) and
+  would copy without raising. It reads what `copy_deep` reads, in its order
+  and at its depths, each collection once: tuple members, an error's data,
+  list items, map keys and values, set members and record field values. A
+  cycle or a value nested past 128 levels answers false. It reserves one
+  value of room for each collection it reads, and is charged
+  `1 + size(kinds) + deep(value)`.

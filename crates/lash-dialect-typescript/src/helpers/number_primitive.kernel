@@ -271,15 +271,16 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
-  if num.is_nan(value) { return "NaN" }
-  if eq(value, inf) { return "Infinity" }
-  if eq(value, -inf) { return "-Infinity" }
-  if eq(value, 0) { return "0" }
   # Every integer below 2^53 is a float exactly, so its shortest digits
-  # are its decimal digits.
+  # are its decimal digits, and either zero's are "0". The most numbers
+  # are such integers, so they are asked first; NaN is not integral and
+  # the infinities are not below 2^53.
   if eq(num.floor(value), value) {
     if num.lt(num.abs(value), 9007199254740992.0) { return int.to_text(num.to_int(value), 10) }
   }
+  if num.is_nan(value) { return "NaN" }
+  if eq(value, inf) { return "Infinity" }
+  if eq(value, -inf) { return "-Infinity" }
   let parts = invoke ts.number.parts(value)
   let digits = parts[0]
   let point = num.add(text.len(digits), parts[1])

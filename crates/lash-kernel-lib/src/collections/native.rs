@@ -9,6 +9,7 @@ use num_bigint::BigInt;
 use num_traits::{FromPrimitive, ToPrimitive};
 
 use super::{CollectionError, copy, raise};
+use crate::numbers::KIND_NAMES;
 
 type NativeDefinition = (FunctionDefinition, Arc<dyn NativeFunction>);
 
@@ -307,7 +308,42 @@ pub(super) fn functions() -> Result<Vec<NativeDefinition>, CollectionError> {
         .map_err(CollectionError::Parse)?;
         functions.push((definition, Arc::new(Aux(function)) as _));
     }
+    let definition = parse_definition(
+        "function collection.holds_none(value: Any, kinds: Set(Text)) -> Bool\nkernel 1\n\
+         errors \"type_error\"\ncharge sum(1, size(kinds), deep(value))\nnative\n",
+    )
+    .map_err(CollectionError::Parse)?;
+    functions.push((definition, Arc::new(HoldsNone) as _));
     Ok(functions)
+}
+/// `collection.holds_none(value, kinds)`: whether a deep copy of `value`
+/// would read no value whose kind `kinds` names, and copy without raising.
+struct HoldsNone;
+impl NativeFunction for HoldsNone {
+    fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
+        let Value::Set(kinds) = arg(&call, 1)? else {
+            return Err(raise("type_error", "kinds must be a set of kind names"));
+        };
+        let mut refused = [false; KIND_NAMES.len()];
+        let mut unknown = false;
+        call.heap.visit(*kinds, &mut |element| {
+            let named = match element {
+                Element::Item(Value::Text(name)) => {
+                    KIND_NAMES.iter().position(|(_, kind)| *kind == &**name)
+                }
+                _ => None,
+            };
+            match named {
+                Some(index) => refused[index] = true,
+                None => unknown = true,
+            }
+            ControlFlow::Continue(())
+        });
+        if unknown {
+            return Err(raise("type_error", "kinds must be a set of kind names"));
+        }
+        copy::holds_none(arg(&call, 0)?, &refused, call.heap).map(Value::Bool)
+    }
 }
 /// A function of its arguments alone.
 struct Aux(fn(&[Value]) -> Result<Value, NativeError>);

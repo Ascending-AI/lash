@@ -576,36 +576,44 @@ impl NumericFunction {
     }
 }
 
+/// Every kind with the name `kind` answers for it, in the order of
+/// [`ValueKind`]'s variants.
+pub(crate) const KIND_NAMES: [(ValueKind, &str); 19] = [
+    (ValueKind::Null, "null"),
+    (ValueKind::Absent, "absent"),
+    (ValueKind::Bool, "bool"),
+    (ValueKind::Int, "integer"),
+    (ValueKind::Float, "float"),
+    (ValueKind::Text, "text"),
+    (ValueKind::Bytes, "bytes"),
+    (ValueKind::Timestamp, "timestamp"),
+    (ValueKind::Tuple, "tuple"),
+    (ValueKind::List, "list"),
+    (ValueKind::Map, "map"),
+    (ValueKind::Set, "set"),
+    (ValueKind::Record, "record"),
+    (ValueKind::Closure, "closure"),
+    (ValueKind::Error, "error"),
+    (ValueKind::Task, "task"),
+    (ValueKind::Function, "function"),
+    (ValueKind::Handle, "handle"),
+    (ValueKind::Ref, "ref"),
+];
+
+const _: () = {
+    let mut index = 0;
+    while index < KIND_NAMES.len() {
+        assert!(KIND_NAMES[index].0 as usize == index);
+        index += 1;
+    }
+};
+
 /// A kind's name, as `kind` answers it. Each name is made once and shared
 /// by every call that answers it.
 fn kind_name(kind: ValueKind) -> Value {
-    macro_rules! shared {
-        ($name:literal) => {{
-            static NAME: LazyLock<Arc<str>> = LazyLock::new(|| Arc::from($name));
-            Value::Text(Arc::clone(&NAME))
-        }};
-    }
-    match kind {
-        ValueKind::Null => shared!("null"),
-        ValueKind::Absent => shared!("absent"),
-        ValueKind::Bool => shared!("bool"),
-        ValueKind::Int => shared!("integer"),
-        ValueKind::Float => shared!("float"),
-        ValueKind::Text => shared!("text"),
-        ValueKind::Bytes => shared!("bytes"),
-        ValueKind::Timestamp => shared!("timestamp"),
-        ValueKind::Tuple => shared!("tuple"),
-        ValueKind::List => shared!("list"),
-        ValueKind::Map => shared!("map"),
-        ValueKind::Set => shared!("set"),
-        ValueKind::Record => shared!("record"),
-        ValueKind::Closure => shared!("closure"),
-        ValueKind::Error => shared!("error"),
-        ValueKind::Task => shared!("task"),
-        ValueKind::Function => shared!("function"),
-        ValueKind::Handle => shared!("handle"),
-        ValueKind::Ref => shared!("ref"),
-    }
+    static NAMES: LazyLock<[Arc<str>; 19]> =
+        LazyLock::new(|| KIND_NAMES.map(|(_, name)| Arc::from(name)));
+    Value::Text(Arc::clone(&NAMES[kind as usize]))
 }
 
 /// An integer's digits in `radix`, a text that can be eight times the
