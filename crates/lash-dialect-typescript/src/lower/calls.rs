@@ -812,6 +812,16 @@ impl Lowerer<'_> {
                 };
                 return self.invoke(function, &[receiver, arguments], Ty::Unknown);
             }
+            // A call proven to be given plain data is the console's one
+            // native pass, without the guard `ts.json.stringify` would run
+            // first (FIG-5863 spike, `types/plain.rs`).
+            if path == "JSON.stringify"
+                && let [ast::CallArg::Value(value)] = args
+                && self.plain.proves((span.start, span.end))
+            {
+                let value = self.lower_expr(value)?;
+                return self.invoke("ts.console.json", &[value], Ty::Text);
+            }
             if let Some(function) = self.table.functions.get(path.as_str()).copied() {
                 let args = self.arguments(args)?;
                 let receiver = if path.starts_with("String.prototype.") {

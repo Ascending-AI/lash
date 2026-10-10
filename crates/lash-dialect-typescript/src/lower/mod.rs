@@ -280,6 +280,8 @@ pub(crate) struct Lowerer<'a> {
     used: BTreeMap<FunctionId, FunctionName>,
     private: BTreeSet<Name>,
     facts: Facts,
+    /// The `JSON.stringify` calls proven to be given plain data.
+    plain: crate::types::plain::Plain,
     /// What tests have shown of names, innermost last, for the code being
     /// lowered now.
     narrowed: Vec<(String, Ty)>,
@@ -378,6 +380,7 @@ pub(crate) fn lower(
         used: BTreeMap::new(),
         private: BTreeSet::new(),
         facts: Facts::analyse(program, environment.bindings),
+        plain: crate::types::plain::Plain::analyse(program, environment.bindings),
         assigned: &program.assigned,
         narrowed: Vec::new(),
         declared: BTreeMap::new(),

@@ -31,6 +31,7 @@ use crate::adapter::{BinaryOp, TypeAnnotation, TypeShape, UnaryOp};
 
 mod facts;
 mod narrow;
+pub(crate) mod plain;
 
 pub(crate) use facts::Facts;
 pub(crate) use narrow::{Narrowing, narrow};

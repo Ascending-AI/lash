@@ -410,6 +410,44 @@ impl KernelMachine {
             library,
             inline,
         } = call;
+        // A residual variant whose guards the inputs pass runs instead
+        // (FIG-5863 spike).
+        let variants = exe.variants(code_id);
+        if exe.profiles_variants() {
+            for variant in variants {
+                if variant.admits(
+                    self.storage.args.get(base..).unwrap_or(&[]),
+                    captures,
+                    &self.heap,
+                ) {
+                    variant
+                        .hits
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
+            }
+        }
+        let variants = if exe.profiles_variants() {
+            &[]
+        } else {
+            variants
+        };
+        let code_id = match variants.iter().find(|variant| {
+            variant.admits(
+                self.storage.args.get(base..).unwrap_or(&[]),
+                captures,
+                &self.heap,
+            )
+        }) {
+            Some(variant) => {
+                if exe.counts_variants() {
+                    variant
+                        .hits
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
+                variant.code
+            }
+            None => code_id,
+        };
         let code = exe.code(code_id);
         let given = self.storage.args.len() - base;
         if given > code.params.len() {

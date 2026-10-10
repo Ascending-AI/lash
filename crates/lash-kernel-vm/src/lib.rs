@@ -31,6 +31,10 @@ mod machine;
 #[cfg(test)]
 mod laws;
 
+pub use compile::pe::{
+    CodeReport as PeCodeReport, Options as PeOptions, Selection as PeSelection,
+    VariantReport as PeVariantReport,
+};
 pub use compile::{Layout, PreparedLibrary};
 pub use functions::{MachineFunctions, register_machine_functions};
 pub use machine::KernelMachine;

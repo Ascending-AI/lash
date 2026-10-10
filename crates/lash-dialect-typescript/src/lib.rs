@@ -26,6 +26,23 @@ pub use builtins::{Receiver, Row};
 pub use diagnostics::{CodeClassification, Diagnostic, DiagnosticCode, DiagnosticKind, SourceSpan};
 pub use package::define_helpers;
 pub use printer::print;
+pub use types::plain::set_proving as set_plain_json_proof;
+
+/// How many `JSON.stringify` calls a source makes, and how many of them the
+/// compile-time plain-data proof covers (FIG-5863 spike). `session` names
+/// the bindings earlier cells left.
+///
+/// # Errors
+///
+/// The diagnostic of source outside the dialect's syntax.
+pub fn plain_json_census(
+    source: &str,
+    session: &std::collections::BTreeSet<lash_kernel_doc::Name>,
+) -> Result<(usize, usize, Vec<String>), Diagnostic> {
+    let program = adapter::parse(source)?;
+    let plain = types::plain::Plain::analyse(&program, session);
+    Ok((plain.calls, plain.proven(), plain.forms))
+}
 
 use lash_kernel_dialect::{Environment, FrontEnd, FunctionValues, Lowered};
 

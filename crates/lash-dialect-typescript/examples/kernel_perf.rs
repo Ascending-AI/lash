@@ -668,6 +668,13 @@ fn registry() -> Arc<FunctionRegistry> {
     reason = "benchmark entry point: it reads its arguments, its program files and its one switch, and reports on stdout"
 )]
 fn main() {
+    if std::env::args()
+        .nth(1)
+        .is_some_and(|mode| mode.starts_with("pe-"))
+    {
+        pe::main();
+        return;
+    }
     let mut args = std::env::args().skip(1);
     let cap: u32 = args
         .next()
@@ -787,3 +794,7 @@ fn main() {
         );
     }
 }
+
+/// The partial-evaluation spike's modes (FIG-5863).
+#[path = "kernel_perf/pe.rs"]
+mod pe;
