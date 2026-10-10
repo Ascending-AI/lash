@@ -23,6 +23,7 @@ workspace = true
 lash-kernel-doc = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+thiserror = { workspace = true }
 
 [build-dependencies]
 blake3 = { workspace = true }

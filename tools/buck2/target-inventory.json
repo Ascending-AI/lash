@@ -57474,7 +57474,8 @@
         "lash-kernel-lib",
         "lash-kernel-vm",
         "serde",
-        "serde_json"
+        "serde_json",
+        "thiserror"
       ],
       "doc": "//crates/lash-vm-releases:lash-vm-releases__doc",
       "manifest": "crates/lash-vm-releases/Cargo.toml",

@@ -950,7 +950,8 @@ PACKAGE_DEPS = {
         "normal": {
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
             "serde": "//third-party/rust:p0315",
-            "serde_json": "//third-party/rust:p0320"
+            "serde_json": "//third-party/rust:p0320",
+            "thiserror": "//third-party/rust:p0373"
         }
     },
     "lash-internal-vm-runtime": {

@@ -1,0 +1,248 @@
+//! PC-EXACT, codec half: the kernel's values, forms and definitions read
+//! back exactly from their one binary spelling.
+
+use std::sync::Arc;
+
+use num_bigint::BigInt;
+
+use super::*;
+use crate::graph_tokens::{CanonicalFault, decode_body, encode_body};
+use crate::tests::{catalog, every_form_corpus};
+use crate::{Annotations, Label, NodeAnnotation, parse_document};
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+fn round_trip<T: TokenCodec + PartialEq + std::fmt::Debug>(value: &T) -> Vec<u8> {
+    let bytes = encode_body(value);
+    let back: T = decode_body(&bytes).unwrap_or_else(|error| panic!("{error}: {value:?}"));
+    assert_eq!(&back, value);
+    assert_eq!(encode_body(&back), bytes, "re-encoding changed the bytes");
+    bytes
+}
+
+/// An integer is always the arbitrary-integer token, minimal at every width:
+/// the i64 edges and the first values past them read back as the same
+/// integer whichever representation holds it.
+#[test]
+fn integers_take_one_spelling_at_every_width_boundary() {
+    let cases: Vec<(Integer, &str)> = vec![
+        (Integer::from(0), "050000"),
+        (Integer::from(-1), "05010101"),
+        (Integer::from(255), "050001ff"),
+        (Integer::from(256), "0500020001"),
+        (Integer::from(i64::MAX), "050008ffffffffffffff7f"),
+        (Integer::from(i64::MIN), "0501080000000000000080"),
+        (
+            Integer::new(BigInt::from(i64::MAX) + 1),
+            "0500080000000000000080",
+        ),
+        (
+            Integer::new(BigInt::from(i64::MIN) - 1),
+            "0501080100000000000080",
+        ),
+        (
+            Integer::new(BigInt::from(u64::MAX) + 1),
+            "050009000000000000000001",
+        ),
+    ];
+    for (integer, spelling) in cases {
+        assert_eq!(hex(&round_trip(&integer)), spelling, "{integer}");
+    }
+    // A big decode of an i64-range magnitude is the small integer.
+    let decoded: Integer = decode_body(&[0x05, 0x01, 0x08, 0, 0, 0, 0, 0, 0, 0, 0x80]).unwrap();
+    assert_eq!(decoded, Integer::from(i64::MIN));
+    assert_eq!(decoded.to_string(), i64::MIN.to_string());
+}
+
+/// A float is its bits: signed zero survives, every NaN is the canonical
+/// one, and another NaN's bits are refused rather than repaired.
+#[test]
+fn floats_keep_signed_zero_and_refuse_a_second_nan() {
+    let positive = round_trip(&Value::Float(Float::new(0.0)));
+    let negative = round_trip(&Value::Float(Float::new(-0.0)));
+    assert_ne!(positive, negative);
+    let nan = round_trip(&Datum::Float(Float::new(f64::from_bits(
+        0x7ff0_0000_0000_0001,
+    ))));
+    assert_eq!(hex(&nan), "0c040106000000000000f87f");
+    for infinity in [f64::INFINITY, f64::NEG_INFINITY, f64::MIN_POSITIVE, 1e300] {
+        round_trip(&Datum::Float(Float::new(infinity)));
+    }
+    let other_nan = hex(&nan).replace("f87f", "f8ff");
+    let bytes: Vec<u8> = (0..other_nan.len())
+        .step_by(2)
+        .map(|index| u8::from_str_radix(&other_nan[index..index + 2], 16).unwrap())
+        .collect();
+    assert_eq!(
+        decode_body::<Datum>(&bytes),
+        Err(TokenError::NonCanonical(CanonicalFault::InvalidNaN))
+    );
+}
+
+/// The pinned FIG-5887 §2 discriminants: each Value and Datum variant is the
+/// sum number the design fixes, whatever the Rust declaration order.
+#[test]
+fn value_and_datum_variants_carry_their_pinned_numbers() {
+    let values = [
+        Value::Null,
+        Value::Absent,
+        Value::Bool(true),
+        Value::Int(Integer::from(7)),
+        Value::Float(Float::new(1.5)),
+        Value::text("t"),
+        Value::Bytes(Bytes::new(vec![1, 2])),
+        Value::Timestamp(Timestamp {
+            nanoseconds: Integer::from(-3),
+        }),
+        Value::Tuple(Arc::from(vec![Value::Null, Value::List(ObjectId(4))])),
+        Value::List(ObjectId(1)),
+        Value::Map(ObjectId(2)),
+        Value::Set(ObjectId(3)),
+        Value::Record(ObjectId(4)),
+        Value::Closure(ObjectId(5)),
+        Value::Error(Arc::new(ErrorValue::new("boom", "it broke"))),
+        Value::Task(TaskId(6)),
+        Value::Function(Name::new("f")),
+        Value::Handle(Arc::new(Handle {
+            kind: "file".into(),
+            id: "x".into(),
+        })),
+        Value::Ref(Identity::Task(TaskId(2))),
+    ];
+    for (number, value) in values.iter().enumerate() {
+        let bytes = round_trip(value);
+        assert_eq!(&bytes[..2], &[0x0c, number as u8], "{value:?}");
+    }
+    let data = [
+        Datum::Null,
+        Datum::Absent,
+        Datum::Bool(false),
+        Datum::Int(Integer::from(1)),
+        Datum::Float(Float::new(2.0)),
+        Datum::Number(NumberToken::new("1.50e3").unwrap()),
+        Datum::Text("x".into()),
+        Datum::Bytes(Bytes::new(vec![])),
+        Datum::Timestamp(Timestamp {
+            nanoseconds: Integer::from(0),
+        }),
+        Datum::Tuple(vec![Datum::Null]),
+        Datum::List(vec![]),
+        Datum::Map(vec![
+            (Datum::Text("b".into()), Datum::Null),
+            (Datum::Text("a".into()), Datum::Null),
+        ]),
+        Datum::Set(vec![
+            Datum::Int(Integer::from(2)),
+            Datum::Int(Integer::from(1)),
+        ]),
+        Datum::Record(vec![("z".into(), Datum::Null), ("a".into(), Datum::Absent)]),
+        Datum::Error(Box::new(ErrorDatum {
+            kind: "k".into(),
+            message: "m".into(),
+            data: Datum::Null,
+        })),
+        Datum::Function(Name::new("g")),
+        Datum::Handle(Handle {
+            kind: "k".into(),
+            id: "i".into(),
+        }),
+    ];
+    for (number, datum) in data.iter().enumerate() {
+        let bytes = round_trip(datum);
+        assert_eq!(&bytes[..2], &[0x0c, number as u8], "{datum:?}");
+    }
+    // A number token keeps its exact lexical spelling.
+    let token = encode_body(&Datum::Number(NumberToken::new("1.50e3").unwrap()));
+    assert!(token.ends_with(b"1.50e3"));
+}
+
+/// Every form, literal and type of the corpus, and every catalog definition,
+/// reads back exactly; insertion-ordered guest maps keep their order.
+#[test]
+fn documents_and_definitions_read_back_exactly() {
+    for text in every_form_corpus() {
+        let document = parse_document(&text).unwrap();
+        round_trip(&document);
+    }
+    for definition in catalog().0.values() {
+        round_trip(definition);
+    }
+    let object = Object::Map(vec![
+        (Value::text("b"), Value::Int(Integer::from(1))),
+        (Value::text("a"), Value::Map(ObjectId(9))),
+    ]);
+    round_trip(&object);
+    let mut data = std::collections::BTreeMap::new();
+    data.insert(
+        "span".to_owned(),
+        serde_json::json!({"z": [1, -2, 2.5, null, true, "s"], "a": {}}),
+    );
+    let annotations = Annotations {
+        document: DocumentId::from_bytes([7; 32]),
+        dialect: Some("typescript".into()),
+        source: Some("let x = 1".into()),
+        nodes: vec![NodeAnnotation {
+            site: Site::new(Unit::Main, vec![0, 1]),
+            label: Some(Label {
+                title: "t".into(),
+                description: None,
+            }),
+            data,
+        }],
+    };
+    round_trip(&annotations);
+}
+
+/// A sorted map or set read in another order, or with a repeated key, is
+/// refused: it is not the one spelling.
+#[test]
+fn an_unsorted_or_repeated_key_is_refused() {
+    let mut out = TokenWriter::new();
+    out.seq(2);
+    Name::new("b").encode(&mut out);
+    Name::new("a").encode(&mut out);
+    assert_eq!(
+        decode_body::<BTreeSet<Name>>(out.as_bytes()),
+        Err(TokenError::NonCanonical(
+            CanonicalFault::UnsortedOrDuplicateKey
+        ))
+    );
+    let mut out = TokenWriter::new();
+    out.map(2);
+    for _ in 0..2 {
+        Name::new("a").encode(&mut out);
+        Value::Null.encode(&mut out);
+    }
+    assert_eq!(
+        decode_body::<BTreeMap<Name, Value>>(out.as_bytes()),
+        Err(TokenError::NonCanonical(
+            CanonicalFault::UnsortedOrDuplicateKey
+        ))
+    );
+}
+
+/// Nesting past the bound is a typed limit refusal, not a stack overflow.
+#[test]
+fn nesting_past_the_decode_bound_is_refused() {
+    let depth = MAX_DECODE_DEPTH as usize + 1;
+    let mut out = TokenWriter::new();
+    for _ in 0..depth {
+        out.sum(9, 1);
+        out.seq(1);
+    }
+    out.sum(0, 0);
+    assert!(matches!(
+        decode_body::<Datum>(out.as_bytes()),
+        Err(TokenError::Limit {
+            dimension: DecodeDimension::Depth,
+            ..
+        })
+    ));
+    let mut nested = Datum::Null;
+    for _ in 0..depth - 2 {
+        nested = Datum::Tuple(vec![nested]);
+    }
+    round_trip(&nested);
+}

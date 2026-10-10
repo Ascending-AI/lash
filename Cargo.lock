@@ -2746,6 +2746,7 @@ dependencies = [
  "lash-kernel-vm",
  "serde",
  "serde_json",
+ "thiserror",
 ]
 
 [[package]]

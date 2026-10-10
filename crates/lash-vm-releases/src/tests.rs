@@ -298,3 +298,119 @@ fn the_sealed_source_keeps_the_releases_it_is_given() {
 fn json(value: &impl serde::Serialize) -> Result<String, String> {
     serde_json::to_string(value).map_err(|error| error.to_string())
 }
+
+/// Stages nodes in memory: each distinct body is one reference.
+#[derive(Default)]
+struct Staged(std::collections::BTreeMap<(u32, Vec<u8>), lash_kernel_doc::graph_tokens::ChildRef>);
+
+impl Staged {
+    fn stage(
+        &mut self,
+        kind: u32,
+        body: &[u8],
+    ) -> Result<lash_kernel_doc::graph_tokens::ChildRef, std::convert::Infallible> {
+        let next = self.0.len();
+        Ok(*self.0.entry((kind, body.to_vec())).or_insert_with(|| {
+            let mut digest = [0_u8; 32];
+            digest[..8].copy_from_slice(&(next as u64).to_le_bytes());
+            lash_kernel_doc::graph_tokens::ChildRef(digest)
+        }))
+    }
+}
+
+fn released(definition: lash_kernel_doc::FunctionDefinition, native: bool) -> ReleasedFunction {
+    ReleasedFunction {
+        function: definition.identity().expect("an identity"),
+        definition,
+        fingerprint: native.then(|| "f".repeat(64)),
+    }
+}
+
+fn one_release(result: i64) -> HelperRelease {
+    let native = lash_kernel_doc::parse_definition(
+        "function num.neg(x: Int) -> Int\nkernel 1\ncharge 1\nnative\n",
+    )
+    .expect("a native definition");
+    let functions = vec![released(native, true), released(helper(result), false)];
+    HelperRelease {
+        release: "1.0".into(),
+        ordinal: 1,
+        sealed: false,
+        writes: functions.iter().map(|held| held.function).collect(),
+        functions,
+    }
+}
+
+/// FIG-5887 §9: a run resumes only on the exact manifest it pinned. A
+/// release rebuilt under the same name and ordinal with one helper changed
+/// is another manifest, and finding the name again does not repair it.
+#[test]
+fn a_run_resumes_only_on_the_exact_release_manifest_it_pinned() {
+    let mut staged = Staged::default();
+    let (_, pinned) =
+        stage_release(&one_release(1), &mut |kind, body| staged.stage(kind, body)).unwrap();
+    let held = HeldReleases {
+        retained: vec![one_release(2)],
+        retiring: Vec::new(),
+    };
+    let manifests = HeldManifests::stage(&held, |kind, body| staged.stage(kind, body)).unwrap();
+    let current = manifests.current().expect("the release the tree builds");
+    assert_ne!(pinned, current);
+    let required = std::collections::BTreeSet::new();
+    assert_eq!(
+        manifests.admit(&pinned, &required, |_| Some(true)),
+        Err(ReleaseRefusal::ReleaseMismatch { pinned })
+    );
+    let manifest = manifests
+        .admit(&current, &required, |_| Some(true))
+        .expect("the exact manifest admits");
+    assert_eq!((manifest.release.as_str(), manifest.ordinal), ("1.0", 1));
+    // The manifest reads back from its one spelling.
+    let body = lash_kernel_doc::graph_tokens::encode_body(manifest);
+    assert_eq!(
+        &lash_kernel_doc::graph_tokens::decode_body::<ReleaseManifest>(&body).unwrap(),
+        manifest
+    );
+}
+
+/// FIG-5887 §9: holding a definition is not holding the function. A worker
+/// without the native implementation the manifest records, or without a
+/// function the run calls, refuses resume.
+#[test]
+fn a_missing_native_or_helper_refuses_resume() {
+    let release = one_release(1);
+    let native = release.functions[0].function;
+    let body = release.functions[1].function;
+    let mut staged = Staged::default();
+    let manifests = HeldManifests::stage(
+        &HeldReleases {
+            retained: vec![release],
+            retiring: Vec::new(),
+        },
+        |kind, body| staged.stage(kind, body),
+    )
+    .unwrap();
+    let pinned = manifests.current().unwrap();
+    let required: std::collections::BTreeSet<_> = [native, body].into();
+    assert_eq!(
+        manifests.admit(&pinned, &required, |function| Some(*function != native)),
+        Err(ReleaseRefusal::MissingNative { function: native })
+    );
+    assert_eq!(
+        manifests.admit(&pinned, &required, |function| {
+            (*function != body).then_some(true)
+        }),
+        Err(ReleaseRefusal::MissingHelper { function: body })
+    );
+    let stranger = helper(9).identity().unwrap();
+    assert_eq!(
+        manifests.admit(&pinned, &[stranger].into(), |_| Some(true)),
+        Err(ReleaseRefusal::MissingHelper { function: stranger })
+    );
+    // A body-only helper needs no native.
+    assert!(
+        manifests
+            .admit(&pinned, &required, |function| Some(*function == native))
+            .is_ok()
+    );
+}

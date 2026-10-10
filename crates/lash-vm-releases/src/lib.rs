@@ -15,9 +15,14 @@
 //! edits workflows links neither (FIG-5812).
 
 mod declared;
+mod manifest;
 mod releases;
 
 pub use declared::{RETAINED_HELPER_RELEASES, RETIRING_HELPER_RELEASES};
+pub use manifest::{
+    HELPER_DEFINITION_KIND, HeldManifests, ManifestFunction, RELEASE_MANIFEST_KIND,
+    ReleaseManifest, ReleaseRefusal, stage_held_release, stage_release,
+};
 pub use releases::{HeldReleases, HelperRelease, HelperReleaseIndex, ReleasedFunction};
 
 /// The generator that seals the release the tree builds, and keeps every
