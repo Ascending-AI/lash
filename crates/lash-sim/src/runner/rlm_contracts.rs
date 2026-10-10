@@ -730,7 +730,16 @@ fn drain_rlm_contract_effects(machine: &mut lash_core::TurnMachine) -> Vec<lash_
             effects.push(effect);
             machine.handle_response(lash_core::sansio::Response::ExecutionEnvironmentSynced {
                 id,
-                result: Ok(lash_core::sansio::ExecutionEnvironmentSync::default()),
+                // RLM sessions install control.finish before the driver
+                // validates TerminalRequired and requests the model.
+                result: Ok(lash_core::sansio::ExecutionEnvironmentSync {
+                    turn_controls: [(
+                        lash_protocol_rlm::FINISH_TOOL_NAME.to_string(),
+                        lash_core::TurnControls::finish(),
+                    )]
+                    .into(),
+                    ..lash_core::sansio::ExecutionEnvironmentSync::default()
+                }),
             });
             continue;
         }
