@@ -1280,7 +1280,9 @@ async fn a_completion_before_a_bind_fault_is_retried_only_while_unrecorded(tier:
 }
 
 /// Retrying a lost acceptance answers the original submission, even when
-/// the host retired its model key after the run settled (FIG-5762).
+/// the host retired its model key after the run settled or the session
+/// began closing; a new submission still meets every admission check
+/// (FIG-5762, FIG-5871).
 async fn a_send_retry_after_its_model_key_left_the_catalog_returns_its_receipt(tier: Tier) {
     let double = double(tier).await.expect("the store tier is available");
     let route = Route::new("accepted once");
@@ -1342,6 +1344,15 @@ async fn a_send_retry_after_its_model_key_left_the_catalog_returns_its_receipt(t
         .await
         .expect("a closing session still answers its retained submission");
     assert_eq!(closing_retry.receipt(), &receipt);
+    let fresh_while_closing = session
+        .send(TurnInput::text("new while closing"))
+        .await
+        .err()
+        .expect("a closing session refuses a new submission");
+    assert!(
+        matches!(fresh_while_closing, lash::EmbedError::Runtime(error)
+        if error.code == lash::runtime::RuntimeErrorCode::SessionDeleted)
+    );
 }
 
 // ---- registration -----------------------------------------------------------
