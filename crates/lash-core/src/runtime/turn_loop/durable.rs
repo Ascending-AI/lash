@@ -254,6 +254,7 @@ impl LashRuntime {
         let mut prepared = crate::PluginSession::apply_before_turn(before_turn.clone());
         turn_graph_appends
             .apply_session_contributions(&self.state.session_id, &plugins, &prepared.session)
+            .await
             .map_err(|err| err.into_turn_failure(RuntimeErrorCode::PluginPrepareTurn))?;
         if plugins.has_before_turn_hooks() {
             prelude.before_turn = Some(

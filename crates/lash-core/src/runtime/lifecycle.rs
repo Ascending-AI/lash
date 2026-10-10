@@ -321,7 +321,7 @@ impl LashRuntime {
             // persisted generation rebuilds. A changed live surface bumps once
             // to make the next commit capture it.
             //
-            // It never refuses: a turn run decided `ToolSourcePolicy::Require`
+            // Unresolved ids never refuse: a turn run decided `ToolSourcePolicy::Require`
             // before it built this session (FIG-5134).
             let registry = session.plugins().tool_registry();
             tool_restore_report = Some(crate::runtime::tool_restore::install_persisted_tool_state(
@@ -334,6 +334,15 @@ impl LashRuntime {
                 ),
             )?);
         }
+        let catalog = session.resolved_tool_catalog()?;
+        session
+            .plugins()
+            .protocol_session()
+            .validate_tool_catalog(
+                &catalog,
+                Some(&crate::plugin::ProtocolSessionRestoreView::new(state)),
+            )
+            .await?;
         session.refresh_tool_catalog().await?;
         let protocol_session = Arc::clone(session.plugins().protocol_session());
         let session_id = state.session_id.clone();

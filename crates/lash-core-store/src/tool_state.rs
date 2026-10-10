@@ -323,6 +323,11 @@ pub mod facade_ops {
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum ReconfigureError {
+    /// FIG-5824: membership cannot introduce a root that hides a session name.
+    #[error(
+        "tool namespace `{root}` conflicts with top-level binding `{binding}`; rename `{binding}` to `{binding}_` before offering these tools"
+    )]
+    ToolNamespaceCollision { root: String, binding: String },
     #[error("validation error: {0}")]
     Validation(String),
     #[error("unknown tool source: {0}")]

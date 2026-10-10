@@ -168,3 +168,16 @@ fn tool_namespace_roots_are_not_guessed_from_underscores() {
     crate::lower("team = 1\nteam_ops_ = 2", &environment)
         .expect("neither an inferred prefix nor the suggested repair is reserved");
 }
+
+/// FIG-5824: control remains reserved without any offered control tools.
+#[test]
+fn control_is_reserved_without_control_tools() {
+    let error = machine::lower("control = 1\n").expect_err("control is reserved");
+    assert_eq!(error.code, "PY_SHADOWS_BUILTIN");
+    assert!(
+        error
+            .repairs
+            .iter()
+            .any(|repair| repair.contains("control_"))
+    );
+}

@@ -684,6 +684,31 @@ impl Session {
         self.pin_tool_surface_inner(tool_access)
     }
 
+    /// Admit a request surface without publishing a colliding live advertisement.
+    pub async fn admit_tool_surface(
+        &self,
+        tool_access: &crate::SessionToolAccess,
+    ) -> Result<ToolCatalogHandle, crate::PluginError> {
+        let registry = self.plugins().tool_registry();
+        let (revision, preview) = registry.preview_reconfiguration();
+        let pinned = preview.pin_session_surface().map_err(|error| {
+            crate::PluginError::Session(format!("failed to pin session tool surface: {error}"))
+        })?;
+        let surface = self.build_tool_catalog_entry(Arc::new(pinned), tool_access.clone())?;
+        self.plugins()
+            .protocol_session()
+            .validate_tool_catalog(&surface.tool_catalog(), None)
+            .await?;
+        registry
+            .publish_reconfiguration(revision, &preview)
+            .map_err(|error| {
+                crate::PluginError::Session(format!(
+                    "failed to publish session tool surface: {error}"
+                ))
+            })?;
+        Ok(surface)
+    }
+
     fn pin_tool_surface_inner(
         &self,
         tool_access: &crate::SessionToolAccess,
@@ -828,14 +853,34 @@ impl Session {
         *self.tool_catalog_cache.lock_recover() = None;
     }
 
+    /// Validate membership and provider changes against the live execution
+    /// before the registry or offered catalog changes (FIG-5824).
+    pub async fn validate_tool_registry(
+        &self,
+        registry: Arc<crate::ToolRegistry>,
+    ) -> Result<(), crate::PluginError> {
+        let catalog = self.plugins().resolve_live_tool_catalog(
+            registry as Arc<dyn ToolProvider>,
+            self.plugins().tool_access(),
+        )?;
+        self.plugins()
+            .protocol_session()
+            .validate_tool_catalog(&catalog, None)
+            .await
+    }
+
     pub async fn refresh_tool_catalog(&mut self) -> Result<(), SessionError> {
-        self.tool_registry = self
-            .services
-            .plugins
-            .tool_registry()
-            .pin_session_surface()
-            .map(Arc::new)
+        let registry = self.services.plugins.tool_registry();
+        let (revision, preview) = registry.preview_reconfiguration();
+        let pinned =
+            Arc::new(preview.pin_session_surface().map_err(|err| {
+                SessionError::Protocol(format!("tool reconfigure failed: {err}"))
+            })?);
+        self.validate_tool_registry(Arc::clone(&pinned)).await?;
+        registry
+            .publish_reconfiguration(revision, &preview)
             .map_err(|err| SessionError::Protocol(format!("tool reconfigure failed: {err}")))?;
+        self.tool_registry = pinned;
         *self.tool_catalog_cache.lock_recover() = None;
         Ok(())
     }

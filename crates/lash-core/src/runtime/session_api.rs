@@ -962,8 +962,27 @@ impl LashRuntime {
                 | crate::SessionCommand::RunPluginCommand { .. }
                 | crate::SessionCommand::RunPluginTask { .. }
                 | crate::SessionCommand::CompactContext { .. }]
-        ) {
-            Box::pin(self.materialize_command_session(effect_controller)).await?;
+        ) && let Err(error) = Box::pin(self.materialize_command_session(effect_controller)).await
+        {
+            if matches!(error.run_shape_refusal(), Some(crate::RunShapeRefusal::Owner { refusal })
+                    if matches!(refusal.owner_refusal::<crate::CoreConfigRefusal>(), Some(crate::CoreConfigRefusal::ToolNamespaceCollision { .. })))
+            {
+                let committed = Box::pin(self.commit_host_command(
+                    effect_controller,
+                    &completion,
+                    None,
+                    None,
+                    |_, _| crate::runtime::SessionCommandOutcome::Failed {
+                        refusal: error.into(),
+                    },
+                ))
+                .await?;
+                return Ok(!matches!(
+                    committed,
+                    super::host_commands::CommandCommit::Withdrawn
+                ));
+            }
+            return Err(error);
         }
         // Compaction and host commands apply alone, under their own scope,
         // in the commit that settles them (FIG-4201, FIG-4202).
@@ -1112,12 +1131,18 @@ impl LashRuntime {
         for command in commands {
             match command {
                 crate::SessionCommand::RefreshToolCatalog { .. } => {
-                    self.refresh_session_tool_catalog().await.map_err(|err| {
-                        RuntimeError::new(
-                            crate::RuntimeErrorCode::SessionCommandRefreshTools,
-                            err.to_string(),
-                        )
-                    })?;
+                    self.refresh_session_tool_catalog()
+                        .await
+                        .map_err(|err| match err {
+                            SessionError::Plugin(error) => {
+                                crate::RuntimeEffectControllerError::from(error)
+                                    .into_runtime_error()
+                            }
+                            err => RuntimeError::new(
+                                crate::RuntimeErrorCode::SessionCommandRefreshTools,
+                                err.to_string(),
+                            ),
+                        })?;
                 }
                 // The session's command lane applies a persisted command that
                 // settles with an outcome before this point; only a storeless

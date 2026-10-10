@@ -505,6 +505,35 @@ impl PluginHost {
         if session.is_materialized() {
             return Ok(());
         }
+        self.prepare_session_capabilities(session)?;
+        self.register_session(&session.owner, session)?;
+        for plugin in &session.capabilities().plugins {
+            let state =
+                PluginStateView::bind(&session.owner, plugin.id(), Arc::clone(&session.state));
+            let probe = state.retention_probe();
+            plugin.session_ready(SessionReadyContext {
+                tracing: self.trace_runtime.clone(),
+                trace: None,
+                owner: session.owner.clone(),
+                host: self.plugin_view(),
+                state,
+            })?;
+            if Arc::strong_count(&probe) > 1 {
+                session
+                    .retains_state
+                    .store(true, std::sync::atomic::Ordering::SeqCst);
+            }
+        }
+        session
+            .materialized
+            .store(true, std::sync::atomic::Ordering::Release);
+        Ok(())
+    }
+
+    fn prepare_session_capabilities(
+        &self,
+        session: &Arc<PluginSession>,
+    ) -> Result<(), PluginError> {
         if session.capabilities.get().is_none() {
             let authority = session.live_authority();
             let snapshot = session.capture_state();
@@ -548,28 +577,30 @@ impl PluginHost {
                     session_extensions,
                 });
         }
-        self.register_session(&session.owner, session)?;
-        for plugin in &session.capabilities().plugins {
-            let state =
-                PluginStateView::bind(&session.owner, plugin.id(), Arc::clone(&session.state));
-            let probe = state.retention_probe();
-            plugin.session_ready(SessionReadyContext {
-                tracing: self.trace_runtime.clone(),
-                trace: None,
-                owner: session.owner.clone(),
-                host: self.plugin_view(),
-                state,
-            })?;
-            if Arc::strong_count(&probe) > 1 {
-                session
-                    .retains_state
-                    .store(true, std::sync::atomic::Ordering::SeqCst);
+        Ok(())
+    }
+
+    /// Build and validate a candidate catalog without registering a session,
+    /// restoring its execution, or announcing a plugin installation. A
+    /// refused config therefore publishes no capabilities (FIG-5824).
+    pub async fn validate_session_tool_catalog(
+        &self,
+        request: PluginSessionRequest<'_>,
+        state: &super::ProtocolSessionRestoreView,
+        live: Option<&Arc<dyn super::ProtocolSessionPlugin>>,
+    ) -> Result<(), PluginError> {
+        let preview = self.defer_session(request)?;
+        self.prepare_session_capabilities(&preview)?;
+        let catalog = preview.resolved_tool_catalog()?;
+        match live {
+            Some(live) => live.validate_tool_catalog(&catalog, None).await,
+            None => {
+                preview
+                    .protocol_session()
+                    .validate_tool_catalog(&catalog, Some(state))
+                    .await
             }
         }
-        session
-            .materialized
-            .store(true, std::sync::atomic::Ordering::Release);
-        Ok(())
     }
 
     /// The prompt sections, families and wrappers the installed plugins

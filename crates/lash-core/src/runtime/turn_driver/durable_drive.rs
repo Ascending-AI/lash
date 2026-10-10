@@ -172,7 +172,7 @@ impl RuntimeDrive {
         }
         // The tool surface a sync before the checkpoint recorded: pinned
         // again from the session's live registry.
-        driver.reinstall_tool_surface()?;
+        driver.reinstall_tool_surface().await?;
         if let Some(crate::Effect::ExecCode { id, .. }) = &pending {
             check_cell_snapshot(cx, &driver, &machine, *id).await?;
         }
@@ -907,10 +907,14 @@ impl RuntimeTurnDriver<'static> {
     }
 
     /// Pin the session's live tool surface again, as the turn's sync did.
-    fn reinstall_tool_surface(&mut self) -> Result<(), TurnError> {
+    async fn reinstall_tool_surface(&mut self) -> Result<(), TurnError> {
         let surface = self
             .prepare_execution_environment()
-            .map_err(|error| TurnError::Exec(format!("the tool surface did not pin: {error}")))?;
+            .await
+            .map_err(|error| match error {
+                crate::PluginError::Runtime(error) => TurnError::Runtime(error),
+                error => TurnError::Exec(format!("the tool surface did not pin: {error}")),
+            })?;
         let authority = &self.turn_pipeline.state().authority;
         self.session
             .install_recorded_tool_surface(&authority.tool_access, &surface.tool_definitions)

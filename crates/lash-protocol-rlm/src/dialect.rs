@@ -730,6 +730,15 @@ impl DialectSession {
         Ok(response)
     }
 
+    pub(crate) fn session_names(&self) -> BTreeSet<String> {
+        self.state
+            .bindings()
+            .names()
+            .into_iter()
+            .map(|name| name.to_string())
+            .collect()
+    }
+
     pub(crate) fn execution_state_dirty(&self) -> bool {
         self.state.execution_state_dirty()
     }

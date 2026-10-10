@@ -136,6 +136,7 @@ impl RuntimeTurnDriver<'static> {
         self.turn_pipeline
             .graph_appends()
             .apply_session_contributions(&self.session_id, &plugins, &session)
+            .await
             .map_err(|error| error.into_turn_failure(RuntimeErrorCode::PluginFinalizeTurn))?;
         for decision in &mut decided.decisions {
             crate::runtime::session_manager::emit_session_events(

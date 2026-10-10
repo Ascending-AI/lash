@@ -72,6 +72,36 @@ impl ToolRegistry {
         )
     }
 
+    /// Stage a session catalog change away from the live registry. The
+    /// revision fences publication after protocol validation (FIG-5824).
+    pub fn preview_reconfiguration(&self) -> (u64, Self) {
+        let inner = self.inner.read_recover().clone();
+        (
+            inner.write_revision,
+            Self {
+                inner: Arc::new(RwLock::new(inner)),
+            },
+        )
+    }
+
+    /// Publish a validated preview only while its source registry is unchanged.
+    pub fn publish_reconfiguration(
+        &self,
+        revision: u64,
+        preview: &Self,
+    ) -> Result<(), ReconfigureError> {
+        let candidate = preview.inner.read_recover().clone();
+        let mut inner = self.inner.write_recover();
+        if inner.write_revision != revision {
+            return Err(ReconfigureError::Validation(
+                "the tool registry changed during catalog validation".to_string(),
+            ));
+        }
+        inner.commit()?;
+        inner.state = candidate.state;
+        Ok(())
+    }
+
     pub fn apply_state(&self, next: ToolState) -> Result<u64, ReconfigureError> {
         loop {
             let (write_revision, current_generation, sources) = {

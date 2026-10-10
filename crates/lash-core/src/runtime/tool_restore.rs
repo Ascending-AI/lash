@@ -100,7 +100,7 @@ pub(crate) fn install_persisted_tool_state(
 
 /// Deliver the report to the host: warn only for capability loss, and emit the
 /// full three-way classification as trace evidence on every install.
-fn deliver(report: &ToolRestoreReport, context: &ToolRestoreContext<'_>) {
+pub(super) fn deliver(report: &ToolRestoreReport, context: &ToolRestoreContext<'_>) {
     if report.has_lost_members() {
         tracing::warn!(
             session_id = %context.session_id,

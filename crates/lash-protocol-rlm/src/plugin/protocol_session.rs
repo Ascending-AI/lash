@@ -85,6 +85,16 @@ impl RlmProtocolSession {
 
 #[async_trait::async_trait]
 impl ProtocolSessionPlugin for RlmProtocolSession {
+    async fn validate_tool_catalog(
+        &self,
+        catalog: &lash_core::ToolCatalog,
+        state: Option<&lash_core::plugin::ProtocolSessionRestoreView>,
+    ) -> Result<(), PluginError> {
+        self.runtime_state
+            .validate_tool_catalog(catalog, state)
+            .await
+    }
+
     async fn initialize_session(
         &self,
         _ctx: ProtocolSessionContext<'_>,

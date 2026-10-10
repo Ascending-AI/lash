@@ -17,11 +17,6 @@ impl LashRuntime {
                 "runtime session not available".to_string(),
             ));
         };
-        session
-            .plugins()
-            .tool_registry()
-            .refresh_sources()
-            .map_err(|err| SessionError::Protocol(format!("tool refresh failed: {err}")))?;
         session.refresh_tool_catalog().await?;
         self.stamp_live_plugin_state()
             .map_err(|error| SessionError::Plugin(crate::PluginError::Runtime(error)))?;
@@ -39,10 +34,16 @@ impl LashRuntime {
                 "runtime session not available".to_string(),
             ));
         };
-        let generation = session
-            .plugins()
-            .tool_registry()
+        let registry = session.plugins().tool_registry();
+        let (revision, preview) = registry.preview_reconfiguration();
+        let generation = preview
             .apply_state(snapshot)
+            .map_err(|err| SessionError::Protocol(format!("tool reconfigure failed: {err}")))?;
+        session
+            .validate_tool_registry(std::sync::Arc::new(preview.clone()))
+            .await?;
+        registry
+            .publish_reconfiguration(revision, &preview)
             .map_err(|err| SessionError::Protocol(format!("tool reconfigure failed: {err}")))?;
         session.refresh_tool_catalog().await?;
         self.stamp_live_plugin_state()
@@ -75,7 +76,7 @@ impl LashRuntime {
     /// (kept as non-members, rebound when their source returns) and are listed
     /// in the returned [`crate::ToolRestoreReport`].
     ///
-    /// It never refuses: the host's
+    /// Unresolved ids never refuse: the host's
     /// [`ToolSourcePolicy`](crate::ToolSourcePolicy) applies to a turn run,
     /// not to a restore the host asked for. A lost member comes
     /// back in the report, which is also kept for
@@ -94,19 +95,77 @@ impl LashRuntime {
             ));
         };
         let registry = session.plugins().tool_registry();
-        let report = crate::runtime::tool_restore::install_persisted_tool_state(
-            registry.as_ref(),
-            snapshot,
-            crate::runtime::tool_restore::ToolRestoreContext::new(
+        let (revision, preview) = registry.preview_reconfiguration();
+        let report = preview
+            .restore_state(snapshot)
+            .map_err(|err| SessionError::Protocol(format!("tool restore failed: {err}")))?;
+        session
+            .validate_tool_registry(std::sync::Arc::new(preview.clone()))
+            .await?;
+        registry
+            .publish_reconfiguration(revision, &preview)
+            .map_err(|err| SessionError::Protocol(format!("tool restore failed: {err}")))?;
+        crate::runtime::tool_restore::deliver(
+            &report,
+            &crate::runtime::tool_restore::ToolRestoreContext::new(
                 &session_id,
                 crate::runtime::ToolRestoreSite::HostRestore,
                 &tracing,
             ),
-        )?;
+        );
         session.refresh_tool_catalog().await?;
         self.tool_restore_report = Some(report.clone());
         self.stamp_live_plugin_state()
             .map_err(|error| SessionError::Plugin(crate::PluginError::Runtime(error)))?;
         Ok(report)
+    }
+}
+
+/// Judge a proposed catalog over the boundary's committed bindings without
+/// materializing or registering a live session. Config commands can still
+/// repair a session whose old plugin configuration cannot build.
+pub(super) async fn validate_config_tool_catalog(
+    host: &crate::PluginHost,
+    state: &crate::RuntimeSessionState,
+    config: &crate::PersistedSessionConfig,
+    live: Option<&std::sync::Arc<dyn crate::plugin::ProtocolSessionPlugin>>,
+) -> Result<(), crate::PluginError> {
+    let authority = crate::plugin::SessionAuthorityContext {
+        tool_access: config.tool_access.clone(),
+        plugin_config: crate::AdmittedPluginConfig::new(
+            config.plugin_config.clone(),
+            config.config_revision,
+        ),
+    };
+    let mut request = match state.plugin_state() {
+        Some(snapshot) => crate::plugin::PluginSessionRequest::rematerialization(
+            state.session_id.clone(),
+            snapshot,
+            authority,
+        ),
+        None => crate::plugin::PluginSessionRequest::creation(state.session_id.clone(), authority),
+    };
+    request.tool_snapshot = state.tool_state_snapshot().cloned();
+    host.validate_session_tool_catalog(
+        request,
+        &crate::plugin::ProtocolSessionRestoreView::new(state),
+        live,
+    )
+    .await
+}
+
+/// Return a namespace collision's config refusal without losing its type
+/// at a plugin boundary. Other failures remain infrastructure failures.
+pub(super) fn catalog_config_refusal(error: &crate::PluginError) -> Option<crate::ConfigRefusal> {
+    if let crate::PluginError::Runtime(error) = error
+        && let Some(crate::RunShapeRefusal::Owner { refusal }) = error.run_shape_refusal()
+        && matches!(
+            refusal.owner_refusal::<crate::CoreConfigRefusal>(),
+            Some(crate::CoreConfigRefusal::ToolNamespaceCollision { .. })
+        )
+    {
+        Some(refusal.clone())
+    } else {
+        None
     }
 }

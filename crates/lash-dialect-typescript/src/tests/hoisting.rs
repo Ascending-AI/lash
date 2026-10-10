@@ -146,3 +146,16 @@ fn restored_session_bindings_cannot_mask_builtins() {
         assert_eq!(error.code.as_str(), "TS_SHADOWS_BUILTIN");
     }
 }
+
+/// FIG-5824: control remains reserved without any offered control tools.
+#[test]
+fn control_is_reserved_without_control_tools() {
+    let error = super::lower("const control = 1;").expect_err("control is reserved");
+    assert_eq!(error.code.as_str(), "TS_SHADOWS_BUILTIN");
+    assert!(
+        error
+            .suggestions
+            .iter()
+            .any(|repair| repair.contains("control_"))
+    );
+}

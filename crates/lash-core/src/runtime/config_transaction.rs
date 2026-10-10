@@ -184,7 +184,7 @@ impl LashRuntime {
         let registry = self.config_registry()?;
         // A storeless runtime has no fleet record: each plugin writes its
         // native format.
-        let resolution = registry
+        let mut resolution = registry
             .resolve(
                 &base,
                 &record,
@@ -196,6 +196,33 @@ impl LashRuntime {
                 crate::RuntimeEffectControllerError::from(corrupt.into_store_error())
                     .into_runtime_error()
             })?;
+        let mut candidate = base.clone();
+        if matches!(
+            resolution.publish(&mut candidate),
+            crate::ConfigTransactionOutcome::Applied { .. }
+        ) && (candidate.tool_access != base.tool_access
+            || candidate.plugin_config != base.plugin_config)
+            && let Err(error) = super::config_ops::validate_config_tool_catalog(
+                self.services.plugins.host(),
+                &self.state,
+                &candidate,
+                self.session
+                    .as_ref()
+                    .map(|session| session.plugins().protocol_session()),
+            )
+            .await
+        {
+            match super::config_ops::catalog_config_refusal(&error) {
+                Some(refusal) => {
+                    resolution.result = crate::ConfigResolutionDecision::Refused { refusal }
+                }
+                None => {
+                    return Err(crate::RuntimeEffectControllerError::from(error)
+                        .into_runtime_error()
+                        .into());
+                }
+            }
+        }
         let outcome = publish_config_resolution(&resolution, &mut next);
         if matches!(outcome, crate::ConfigTransactionOutcome::Applied { .. }) {
             self.install_resident_state(next)
@@ -416,6 +443,8 @@ impl LashRuntime {
             format!("config-transaction:{}", transaction.id),
         );
         let runner = ResolveConfigTransactionRunner {
+            catalog_host: self.services.plugins.host().clone(),
+            state: self.state.clone(),
             registry,
             prompts: self.prompt_catalog()?,
             plugin_host: self
@@ -476,6 +505,8 @@ fn publish_config_resolution(
 /// records the result. None of it enters the envelope, which names only the
 /// session and the transaction.
 struct ResolveConfigTransactionRunner {
+    catalog_host: crate::PluginHost,
+    state: crate::RuntimeSessionState,
     registry: Arc<crate::ConfigRegistry>,
     prompts: crate::plugin::prompt::PromptCatalog,
     /// The plugins whose writer formats the step chooses from the fleet
@@ -543,6 +574,27 @@ impl RuntimeEffectLocalRunner for ResolveConfigTransactionRunner {
             candidate.apply_namespace_updates(namespaces);
             let native = host.decode_config(&candidate)?;
             *namespaces = native.namespaces().clone();
+        }
+        let mut candidate = self.base.clone();
+        if matches!(
+            resolution.publish(&mut candidate),
+            crate::ConfigTransactionOutcome::Applied { .. }
+        ) && (candidate.tool_access != self.base.tool_access
+            || candidate.plugin_config != self.base.plugin_config)
+            && let Err(error) = super::config_ops::validate_config_tool_catalog(
+                &self.catalog_host,
+                &self.state,
+                &candidate,
+                None,
+            )
+            .await
+        {
+            match super::config_ops::catalog_config_refusal(&error) {
+                Some(refusal) => {
+                    resolution.result = crate::ConfigResolutionDecision::Refused { refusal }
+                }
+                None => return Err(error.into()),
+            }
         }
         Ok(crate::RuntimeEffectOutcome::ResolveConfigTransaction {
             resolution: Box::new(resolution),

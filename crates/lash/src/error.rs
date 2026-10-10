@@ -463,7 +463,8 @@ impl EmbedError {
             Self::Plugin(err) | Self::Session(SessionError::Plugin(err)) => err.is_terminal(),
             Self::Reconfigure(
                 lash_core::facade_support::ReconfigureError::Validation(_)
-                | lash_core::facade_support::ReconfigureError::UnknownSource(_),
+                | lash_core::facade_support::ReconfigureError::UnknownSource(_)
+                | lash_core::facade_support::ReconfigureError::ToolNamespaceCollision { .. },
             ) => true,
             Self::Reconfigure(
                 lash_core::facade_support::ReconfigureError::GenerationMismatch { .. },

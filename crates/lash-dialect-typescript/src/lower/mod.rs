@@ -315,9 +315,10 @@ pub(crate) fn check_binding_names<'a>(
                 None,
             ));
         }
-        if effects
-            .keys()
-            .any(|effect| effect.as_str().split('.').next() == Some(name))
+        if name == "control"
+            || effects
+                .keys()
+                .any(|effect| effect.as_str().split('.').next() == Some(name))
         {
             return Err(Diagnostic::with_repair(
                 DiagnosticCode::ShadowsBuiltin,

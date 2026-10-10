@@ -173,7 +173,8 @@ pub(crate) fn check_binding_names<'a>(
     for name in names {
         let message = if calls::is_builtin(name) || crate::exceptions::is_builtin(name) {
             format!("`{name}` is a built-in; a top-level binding cannot reuse its name")
-        } else if tool_roots.contains(&Name::new(name))
+        } else if name == "control"
+            || tool_roots.contains(&Name::new(name))
             || effects.keys().any(|effect| effect.as_str() == name)
         {
             format!(

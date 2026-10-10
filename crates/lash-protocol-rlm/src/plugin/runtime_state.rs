@@ -55,6 +55,72 @@ impl RlmRuntimeState {
         )))
     }
 
+    /// Both ordinary bindings and saved functions occupy the session's
+    /// top-level namespace. Projected seed names occupy it too.
+    pub(crate) async fn validate_tool_catalog(
+        &self,
+        catalog: &lash_core::ToolCatalog,
+        state: Option<&lash_core::plugin::ProtocolSessionRestoreView>,
+    ) -> Result<(), lash_core::PluginError> {
+        let mut names = if let Some(state) = state {
+            let snapshot = state.execution_state.as_ref().map_err(|error| {
+                lash_core::PluginError::Session(format!("cannot read session bindings: {error}"))
+            })?;
+            let mut names = snapshot
+                .as_ref()
+                .map(crate::executor::RlmExecutionState::persisted_binding_names)
+                .transpose()
+                .map_err(|error| lash_core::PluginError::Session(error.to_string()))?
+                .unwrap_or_default();
+            for event in &state.active_events {
+                if let SessionHistoryRecord::Protocol(event) = event
+                    && let Some(event) = decode_rlm_protocol_event(event)
+                        .map_err(|error| lash_core::PluginError::Session(error.to_string()))?
+                {
+                    match event {
+                        RlmProtocolEvent::RlmGlobalsPatch(patch) => {
+                            names.extend(patch.set_default.keys().cloned())
+                        }
+                        RlmProtocolEvent::RlmSeed(seed) => {
+                            names.extend(seed.globals.keys().chain(seed.functions.keys()).cloned());
+                            names.extend(seed.projected.entries.into_iter().map(|(name, _)| name));
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            names
+        } else {
+            self.execution.lock().await.session_names()
+        };
+        if state.is_none() {
+            names.extend(self.protected_projected_binding_names().await);
+        }
+        for tool in &catalog.tools {
+            let binding = lash_vm_runtime::required_tool_executable(&tool.manifest)
+                .map_err(|error| lash_core::PluginError::Session(error.to_string()))?;
+            if let Some(root) = binding.module_path.first()
+                && names.contains(root)
+            {
+                let refusal = lash_core::ConfigRefusal::by_owner(
+                    lash_core::CORE_CONFIG_OWNER,
+                    lash_core::RefusalSite::Candidate,
+                    &lash_core::CoreConfigRefusal::ToolNamespaceCollision {
+                        root: root.clone(),
+                        binding: root.clone(),
+                    },
+                );
+                return Err(lash_core::PluginError::Runtime(
+                    lash_core::RuntimeEffectControllerError::run_shape_refused(
+                        lash_core::RunShapeRefusal::Owner { refusal },
+                    )
+                    .into_runtime_error(),
+                ));
+            }
+        }
+        Ok(())
+    }
+
     /// The declaration of the session's read-only variables, as its system
     /// prompt renders it.
     #[cfg(test)]

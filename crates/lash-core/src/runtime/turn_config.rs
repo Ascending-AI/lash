@@ -91,6 +91,11 @@ impl LashRuntime {
             .as_ref()
             .and_then(|session| session.plugins().host().config_registry().ok());
         let runner = ResolveTurnConfigRunner {
+            state: self.state.clone(),
+            protocol_session: self
+                .session
+                .as_ref()
+                .map(|session| std::sync::Arc::clone(session.plugins().protocol_session())),
             plugin_host: self.services.plugins.host().clone(),
             run: run.clone(),
             snapshot: crate::store::persisted_session_config_from_state(&self.state),
@@ -176,6 +181,8 @@ fn run_resolve_fault(
 /// run's spec against the snapshot captured at the funnel and records the
 /// result. None of it enters the envelope, which names only the run.
 struct ResolveTurnConfigRunner {
+    state: crate::RuntimeSessionState,
+    protocol_session: Option<std::sync::Arc<dyn crate::plugin::ProtocolSessionPlugin>>,
     plugin_host: crate::PluginHost,
     run: TurnId,
     snapshot: PersistedSessionConfig,
@@ -319,6 +326,16 @@ impl RuntimeEffectLocalRunner for ResolveTurnConfigRunner {
             registry
                 .validate_derived(resolved.base(), resolved.config())
                 .map_err(config_fault)?;
+        }
+        if resolved.has_override() {
+            super::config_ops::validate_config_tool_catalog(
+                &self.plugin_host,
+                &self.state,
+                resolved.config(),
+                self.protocol_session.as_ref(),
+            )
+            .await
+            .map_err(RuntimeEffectControllerError::from)?;
         }
         if let Some(driver) = self.protocol_driver {
             let namespace = resolved.config().plugin_config.protocol_turn_options();

@@ -189,7 +189,7 @@ impl TurnGraphAppendDraft {
     /// Apply accepted callback output only after the owning step acknowledges.
     /// Stage the whole batch before changing the registry or graph. Reapplying
     /// an unchanged membership keeps its generation, including after a checkpoint.
-    pub(in crate::runtime) fn apply_session_contributions(
+    pub(in crate::runtime) async fn apply_session_contributions(
         &self,
         session_id: &SessionId,
         plugins: &crate::PluginSession,
@@ -216,6 +216,23 @@ impl TurnGraphAppendDraft {
                     .map_err(|err| crate::PluginError::Session(err.to_string()))?;
             }
         }
+        let preview = if changed {
+            let (revision, preview) = registry.preview_reconfiguration();
+            preview
+                .apply_state(tools)
+                .map_err(|err| crate::PluginError::Session(err.to_string()))?;
+            let catalog = plugins.resolve_live_tool_catalog(
+                Arc::new(preview.clone()) as Arc<dyn crate::ToolProvider>,
+                plugins.tool_access(),
+            )?;
+            plugins
+                .protocol_session()
+                .validate_tool_catalog(&catalog, None)
+                .await?;
+            Some((revision, preview))
+        } else {
+            None
+        };
         let mut inner = self.inner.lock_recover();
         let mut staged = inner.clone();
         for contribution in contributions {
@@ -223,9 +240,9 @@ impl TurnGraphAppendDraft {
                 Self::record_append(&mut staged, session_id, append)?;
             }
         }
-        if changed {
+        if let Some((revision, preview)) = preview {
             registry
-                .apply_state(tools)
+                .publish_reconfiguration(revision, &preview)
                 .map_err(|err| crate::PluginError::Session(err.to_string()))?;
         }
         *inner = staged;

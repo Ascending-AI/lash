@@ -26,6 +26,18 @@ use crate::{
 /// plugin can poke at to the capabilities any protocol reasonably needs.
 #[async_trait::async_trait]
 pub trait ProtocolSessionPlugin: Send + Sync {
+    /// Refuse a candidate tool surface before it is published (FIG-5824).
+    /// `state` supplies committed bindings for a capability preview that has
+    /// not restored a live session; otherwise inspect the live execution.
+    /// Validation changes neither bindings nor the offered surface.
+    async fn validate_tool_catalog(
+        &self,
+        _catalog: &crate::ToolCatalog,
+        _state: Option<&ProtocolSessionRestoreView>,
+    ) -> Result<(), crate::PluginError> {
+        Ok(())
+    }
+
     async fn initialize_session(
         &self,
         _ctx: ProtocolSessionContext<'_>,

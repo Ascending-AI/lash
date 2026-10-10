@@ -793,6 +793,24 @@ impl RlmExecutionState {
         &self.bindings
     }
 
+    /// Names alone suffice for catalog admission: binding leaves need not
+    /// be decoded or loaded just to check namespace collisions (FIG-5824).
+    pub(crate) fn persisted_binding_names(
+        state: &HydratedExecutionState,
+    ) -> Result<BTreeSet<String>, RlmSnapshotError> {
+        let root: RlmSnapshotRoot = serde_json::from_slice(&state.root).map_err(|error| {
+            RlmSnapshotError::FormatMismatch {
+                details: error.to_string(),
+            }
+        })?;
+        Ok(root
+            .bindings
+            .keys()
+            .chain(root.functions.keys())
+            .cloned()
+            .collect())
+    }
+
     /// Takes what a finished cell left (see [`SessionBindings::settle`]).
     pub(super) fn settle_cell(&mut self, cell: CellLeft<'_>) -> lash_core::BindingChanges {
         self.capture_dirty = true;

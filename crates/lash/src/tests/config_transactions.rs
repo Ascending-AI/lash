@@ -224,3 +224,308 @@ async fn every_applied_config_transaction_emits_a_lifecycle_event() -> Result<()
     core.shutdown().await?;
     Ok(())
 }
+
+#[cfg(feature = "rlm")]
+struct DataTool;
+
+#[cfg(feature = "rlm")]
+fn data_definition() -> lash_core::ToolDefinition {
+    use lash_core::ToolDefinitionBindingExt as _;
+    lash_core::ToolDefinition::raw(
+        "tool:read-data",
+        "read_data",
+        "Read data",
+        serde_json::json!({"type":"object"}),
+        serde_json::json!({}),
+    )
+    .expect("valid schemas")
+    .with_execution(std::time::Duration::from_secs(30))
+    .with_tool_binding(lash_core::ToolBinding::new(["data"], "read"))
+}
+
+#[cfg(feature = "rlm")]
+#[async_trait]
+impl ToolProvider for DataTool {
+    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+        vec![data_definition().manifest()]
+    }
+    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+        (name == "read_data").then(|| Arc::new(data_definition().contract()))
+    }
+    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        lash_core::ToolOutcome::ok(serde_json::json!(1)).into()
+    }
+}
+
+#[cfg(feature = "rlm")]
+async fn namespace_collision_law(per_run: bool) -> Result<()> {
+    for (index, (bind, read)) in [
+        ("const data = 41;", "data + 1"),
+        ("function data() { return 41; }", "data() + 1"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let cells = Arc::new(StdMutex::new(std::collections::VecDeque::from([
+            typescript_block(&format!("{bind} await control.finish(0);")),
+            typescript_block(&format!("await control.finish({read});")),
+        ])));
+        let provider = crate::testing::TestProvider::builder()
+            .kind("namespace-collision")
+            .complete(move |_request| {
+                let text = cells
+                    .lock_recover()
+                    .pop_front()
+                    .expect("only accepted runs call the model");
+                async move { Ok(text_response(&text)) }
+            })
+            .build()
+            .into_handle();
+        let core =
+            explicit_ephemeral_facets(rlm_core_builder_over(sqlite_memory_store_backend().await))
+                .serve_test_llm_profile(provider, mock_llm_profile_spec())
+                .tools(Arc::new(DataTool))
+                .build(crate::testing::runtime_lease_owner())?;
+        let id =
+            SessionId::parse(format!("namespace-collision-{per_run}-{index}")).expect("session id");
+        let hidden = lash_core::SessionToolAccess::ambient()
+            .with_hidden_tools(["read_data"])
+            .expect("valid tool name");
+        let session = core
+            .session(id)
+            .create(crate::SessionCreation::root(hidden, mock_session_spec()))
+            .await?;
+        let session = core.session(session.session_id().clone()).open().await?;
+        session
+            .send(crate::TurnInput::text("bind data"))
+            .output()
+            .await?;
+        if per_run {
+            let outcome = session
+                .send(crate::TurnInput::text("offer data"))
+                .tool_access(lash_core::SessionToolAccess::ambient())
+                .await?
+                .outcome()
+                .await?;
+            let crate::SendOutcome::Refused { refusal, .. } = outcome else {
+                panic!("collision must refuse the run");
+            };
+            let Some(lash_core::RunShapeRefusal::Owner { refusal }) = refusal.run_shape_refusal()
+            else {
+                panic!("the run retains the typed catalog refusal: {refusal:?}");
+            };
+            assert_namespace_collision(refusal);
+        } else {
+            let config = session.admin().config();
+            let revision = config.revision().await?;
+            let outcome = config
+                .apply(
+                    crate::config::ConfigWrite::new("offer-data", revision),
+                    crate::config::ConfigTransaction::of(crate::config::SetToolAccess {
+                        access: lash_core::SessionToolAccess::ambient(),
+                    }),
+                )
+                .await?
+                .await_outcome(&config)
+                .await?;
+            let crate::config::ConfigTransactionOutcome::Refused { refusal } = outcome else {
+                panic!("collision must refuse the transaction: {outcome:?}");
+            };
+            assert_namespace_collision(&refusal);
+            assert_eq!(config.revision().await?, revision);
+        }
+        let report = session
+            .send(crate::TurnInput::text("read the unchanged binding"))
+            .output()
+            .await?;
+        assert!(
+            matches!(report.result.outcome,
+            crate::TurnOutcome::Finished(crate::TurnFinish::Finished { value, .. }) if value == serde_json::json!(42)),
+            "the refused tools leave the binding usable"
+        );
+        drop(session);
+        core.shutdown().await?;
+    }
+    Ok(())
+}
+
+/// FIG-5824: an offered namespace cannot displace a binding or saved function.
+#[cfg(feature = "rlm")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn tool_configuration_refuses_an_existing_namespace_binding() -> Result<()> {
+    namespace_collision_law(false).await
+}
+
+/// FIG-5824: per-run authority obeys the same admission rule as sticky config.
+#[cfg(feature = "rlm")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn per_run_tool_access_refuses_an_existing_namespace_binding() -> Result<()> {
+    namespace_collision_law(true).await
+}
+
+#[cfg(feature = "rlm")]
+fn assert_namespace_collision(refusal: &lash_core::ConfigRefusal) {
+    assert!(
+        matches!(refusal.owner_refusal::<lash_core::CoreConfigRefusal>(),
+        Some(lash_core::CoreConfigRefusal::ToolNamespaceCollision { root, binding })
+            if root == "data" && binding == "data"),
+        "{refusal:?}"
+    );
+}
+
+#[cfg(feature = "rlm")]
+struct ChangingDataTool(Arc<std::sync::atomic::AtomicBool>);
+
+#[cfg(feature = "rlm")]
+#[async_trait]
+impl ToolProvider for ChangingDataTool {
+    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+        if self.0.load(Ordering::SeqCst) {
+            DataTool.tool_manifests()
+        } else {
+            Vec::new()
+        }
+    }
+    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+        DataTool.resolve_contract(name)
+    }
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        DataTool.execute(call).await
+    }
+}
+
+#[cfg(feature = "rlm")]
+async fn namespace_installation_law(provider_refresh: bool) -> Result<()> {
+    let visible = Arc::new(std::sync::atomic::AtomicBool::new(!provider_refresh));
+    let mut source = vec![];
+    if !provider_refresh {
+        source.push(typescript_block("await control.finish(0);"));
+    }
+    source.extend([
+        typescript_block("const data = 41; await control.finish(0);"),
+        typescript_block("await control.finish(data + 1);"),
+    ]);
+    let cells = Arc::new(StdMutex::new(std::collections::VecDeque::from(source)));
+    let provider = crate::testing::TestProvider::builder()
+        .kind("namespace-installation")
+        .complete(move |_| {
+            let text = cells
+                .lock_recover()
+                .pop_front()
+                .expect("only accepted runs call the model");
+            async move { Ok(text_response(&text)) }
+        })
+        .build()
+        .into_handle();
+    let core =
+        explicit_ephemeral_facets(rlm_core_builder_over(sqlite_memory_store_backend().await))
+            .serve_test_llm_profile(provider, mock_llm_profile_spec())
+            .tools(Arc::new(ChangingDataTool(Arc::clone(&visible))))
+            .build(crate::testing::runtime_lease_owner())?;
+    let id =
+        SessionId::parse(format!("namespace-installation-{provider_refresh}")).expect("session id");
+    core.session(id.clone())
+        .create(crate::SessionCreation::root(
+            lash_core::SessionToolAccess::ambient(),
+            mock_session_spec(),
+        ))
+        .await?;
+    let session = core.session(id).open().await?;
+    if !provider_refresh {
+        session
+            .send(crate::TurnInput::text("record the tools"))
+            .output()
+            .await?;
+        session
+            .admin()
+            .tools()
+            .set_membership("tool:read-data", false, "hide-data")
+            .await?
+            .settle_with(
+                &session.admin().commands(),
+                crate::testing::admin_fixture_outcome,
+            )
+            .await?;
+    }
+    session
+        .send(crate::TurnInput::text("bind data"))
+        .output()
+        .await?;
+    let generation = session
+        .admin()
+        .tools()
+        .state()
+        .await?
+        .recorded()
+        .expect("recorded tools")
+        .generation;
+    let commands = session.admin().commands();
+    if provider_refresh {
+        visible.store(true, Ordering::SeqCst);
+        let receipt = commands
+            .refresh_tool_catalog("offer data", "offer-data")
+            .await?;
+        let lash_core::runtime::SessionCommandSettlement::Applied {
+            outcome: lash_core::runtime::SessionCommandOutcome::Failed { refusal },
+            ..
+        } = commands.settle(receipt).await?
+        else {
+            panic!("the invalid provider installation settles refused");
+        };
+        let refusal = lash_core::RuntimeError::from(refusal);
+        let Some(lash_core::RunShapeRefusal::Owner { refusal }) = refusal.run_shape_refusal()
+        else {
+            panic!("the command retains the typed collision: {refusal:?}");
+        };
+        assert_namespace_collision(refusal);
+        // The provider belongs to the host: withdraw its rejected advertisement.
+        visible.store(false, Ordering::SeqCst);
+    } else {
+        let mutation = session
+            .admin()
+            .tools()
+            .set_membership("tool:read-data", true, "offer-data")
+            .await?;
+        let error = mutation
+            .settle_with(&commands, crate::testing::admin_fixture_outcome)
+            .await
+            .expect_err("the membership addition conflicts with data");
+        assert!(matches!(error, crate::EmbedError::Reconfigure(
+            crate::tools::ReconfigureError::ToolNamespaceCollision { root, binding }
+        ) if root == "data" && binding == "data"));
+    }
+    assert_eq!(
+        session
+            .admin()
+            .tools()
+            .state()
+            .await?
+            .recorded()
+            .expect("recorded tools")
+            .generation,
+        generation
+    );
+    let report = session
+        .send(crate::TurnInput::text("read data"))
+        .output()
+        .await?;
+    assert!(matches!(report.result.outcome,
+        crate::TurnOutcome::Finished(crate::TurnFinish::Finished { value, .. }) if value == serde_json::json!(42)));
+    drop(session);
+    core.shutdown().await?;
+    Ok(())
+}
+
+/// FIG-5824: adding a previously absent provider namespace refuses at installation.
+#[cfg(feature = "rlm")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn provider_installation_refuses_an_existing_namespace_binding() -> Result<()> {
+    namespace_installation_law(true).await
+}
+
+/// FIG-5824: re-enabling a curated tool cannot displace a persisted binding.
+#[cfg(feature = "rlm")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn tool_membership_refuses_an_existing_namespace_binding() -> Result<()> {
+    namespace_installation_law(false).await
+}

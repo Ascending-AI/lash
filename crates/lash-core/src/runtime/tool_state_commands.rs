@@ -50,8 +50,13 @@ impl LashRuntime {
             .await?;
         let next = match change {
             ToolStateChange::Restore { state } => {
-                let report = Box::pin(self.restore_tool_state(state)).await?;
-                return Ok(ToolStateChangeOutcome::Restored { report });
+                return match Box::pin(self.restore_tool_state(state)).await {
+                    Ok(report) => Ok(ToolStateChangeOutcome::Restored { report }),
+                    Err(error) => match collision_error(&error) {
+                        Some(error) => Ok(ToolStateChangeOutcome::Refused { error }),
+                        None => Err(error),
+                    },
+                };
             }
             ToolStateChange::Apply { state } => state,
             ToolStateChange::SetMembership { updates } => {
@@ -69,13 +74,41 @@ impl LashRuntime {
                 "runtime session not available".to_string(),
             ));
         };
-        let generation = match session.plugins().tool_registry().apply_state(next) {
+        let registry = session.plugins().tool_registry();
+        let (revision, preview) = registry.preview_reconfiguration();
+        let generation = match preview.apply_state(next) {
             Ok(generation) => generation,
             Err(error) => return Ok(ToolStateChangeOutcome::Refused { error }),
         };
+        if let Err(error) = session
+            .validate_tool_registry(std::sync::Arc::new(preview.clone()))
+            .await
+        {
+            let error = SessionError::Plugin(error);
+            return match collision_error(&error) {
+                Some(error) => Ok(ToolStateChangeOutcome::Refused { error }),
+                None => Err(error),
+            };
+        }
+        if let Err(error) = registry.publish_reconfiguration(revision, &preview) {
+            return Ok(ToolStateChangeOutcome::Refused { error });
+        }
         session.refresh_tool_catalog().await?;
         self.stamp_live_plugin_state()
             .map_err(|error| SessionError::Plugin(crate::PluginError::Runtime(error)))?;
         Ok(ToolStateChangeOutcome::Applied { generation })
+    }
+}
+
+fn collision_error(error: &SessionError) -> Option<crate::ReconfigureError> {
+    let SessionError::Plugin(error) = error else {
+        return None;
+    };
+    let refusal = super::config_ops::catalog_config_refusal(error)?;
+    match refusal.owner_refusal::<crate::CoreConfigRefusal>()? {
+        crate::CoreConfigRefusal::ToolNamespaceCollision { root, binding } => {
+            Some(crate::ReconfigureError::ToolNamespaceCollision { root, binding })
+        }
+        _ => None,
     }
 }

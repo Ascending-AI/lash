@@ -166,16 +166,22 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                 // not the sync's outcome: the step stays unrecorded and the
                 // turn aborts, so a redrive rebuilds it rather than replaying
                 // the fault as a failed turn.
-                let (result, tool_surface) = match runner.driver.refresh_execution_environment() {
-                    Ok((sync, tool_surface)) => (Ok(sync), tool_surface),
-                    Err(super::tool_catalog::SyncFailure::Recorded(failure)) => {
-                        (Err(failure), Vec::new())
-                    }
-                    Err(super::tool_catalog::SyncFailure::Live(error)) => {
-                        return Err(RuntimeEffectControllerError::from(error)
-                            .retryable_uncommitted_derivation());
-                    }
-                };
+                let (result, tool_surface) =
+                    match runner.driver.refresh_execution_environment().await {
+                        Ok((sync, tool_surface)) => (Ok(sync), tool_surface),
+                        Err(super::tool_catalog::SyncFailure::Recorded(failure)) => {
+                            (Err(failure), Vec::new())
+                        }
+                        Err(super::tool_catalog::SyncFailure::Live(error)) => {
+                            let terminal = error.is_terminal();
+                            let error = RuntimeEffectControllerError::from(error);
+                            return Err(if terminal {
+                                error
+                            } else {
+                                error.retryable_uncommitted_derivation()
+                            });
+                        }
+                    };
                 let mut prelude = runner.driver.prelude.clone();
                 prelude.history = runner.messages.clone();
                 prelude.context.messages = runner.prompt_messages.clone();

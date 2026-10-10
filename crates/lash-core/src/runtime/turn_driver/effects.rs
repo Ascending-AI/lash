@@ -251,6 +251,7 @@ impl RuntimeTurnDriver<'_> {
                 self.session.plugins(),
                 &session_contributions,
             )
+            .await
             .map_err(|err| {
                 RuntimeEffectControllerError::from(
                     err.into_turn_failure(RuntimeErrorCode::PluginCheckpoint),

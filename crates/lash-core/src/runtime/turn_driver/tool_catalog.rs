@@ -71,7 +71,7 @@ impl RuntimeTurnDriver<'_> {
     /// installs the surface the sync recorded. It composes no prompt: each
     /// model call composes its own at admission (ADR 0133 §6), over the
     /// surface installed here.
-    pub(in crate::runtime) fn refresh_execution_environment(
+    pub(in crate::runtime) async fn refresh_execution_environment(
         &self,
     ) -> Result<
         (
@@ -80,9 +80,15 @@ impl RuntimeTurnDriver<'_> {
         ),
         SyncFailure,
     > {
-        let execution_environment = self
-            .prepare_execution_environment()
-            .map_err(|error| SyncFailure::of_plugin_error(SyncFailureKind::ToolSurface, error))?;
+        let execution_environment =
+            self.prepare_execution_environment()
+                .await
+                .map_err(|error| match error {
+                    PluginError::Runtime(error) if error.run_shape_refusal().is_some() => {
+                        SyncFailure::Live(error)
+                    }
+                    error => SyncFailure::of_plugin_error(SyncFailureKind::ToolSurface, error),
+                })?;
         Ok((
             crate::sansio::ExecutionEnvironmentSync {
                 tool_specs: execution_environment
@@ -104,13 +110,14 @@ impl RuntimeTurnDriver<'_> {
         ))
     }
 
-    pub(super) fn prepare_execution_environment(
+    pub(super) async fn prepare_execution_environment(
         &self,
     ) -> Result<PreparedExecutionEnvironment, PluginError> {
         let state = self.turn_pipeline.state();
         let tool_surface = self
             .session
-            .pin_tool_surface(&state.authority.tool_access)?;
+            .admit_tool_surface(&state.authority.tool_access)
+            .await?;
         Ok(PreparedExecutionEnvironment {
             tool_definitions: tool_surface.definitions(),
             turn_driver_preamble: tool_surface.preamble(),
