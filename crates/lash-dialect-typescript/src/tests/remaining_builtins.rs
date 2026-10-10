@@ -71,10 +71,15 @@ fn function_call_apply_and_bind_preserve_receiver_and_argument_prefix() {
     );
 }
 
+/// ECMA-262 OrdinaryOwnPropertyKeys: canonical array indexes precede other
+/// strings, which retain insertion order, in each enumeration consumer.
 #[test]
 fn object_enumeration_orders_integer_names_before_insertion_order() {
     agrees(
         "let invalidEntry = false; try { Object.fromEntries([1]); } catch (e) { invalidEntry = e.name === 'TypeError'; } const o = {b: 1}; o['10'] = 10; o['2'] = 2; o.a = 3; const names = Object.keys(o); const v = Object.values(o); const e = Object.entries(o); const r = Object.fromEntries(e); const shadow = {toString: () => 'own'}; const read = shadow.toString; await finish(invalidEntry && names[0] === '2' && names[1] === '10' && names[2] === 'b' && names[3] === 'a' && v[0] === 2 && r.a === 3 && Object.hasOwn(r, 'b') && r.hasOwnProperty('a') && r.toString() === '[object Object]' && shadow.toString() === 'own' && read() === 'own' && Object.is(NaN, NaN) && !Object.is(-0, 0));",
+    );
+    agrees(
+        r#"const o = {}; o.b = 'b'; o['4294967295'] = 'max'; o['10'] = 'ten'; o['01'] = 'leading'; o['2'] = 'two'; o['-0'] = 'negative'; o['1e0'] = 'exponent'; o['4294967294'] = 'last'; o['0'] = 'zero'; o[''] = 'empty'; o.a = 'a'; const names = ['0', '2', '10', '4294967294', 'b', '4294967295', '01', '-0', '1e0', '', 'a']; const values = ['zero', 'two', 'ten', 'last', 'b', 'max', 'leading', 'negative', 'exponent', 'empty', 'a']; const keys = Object.keys(o); const entries = Object.entries(o); let ordered = true; for (let i = 0; i < names.length; i++) { if (keys[i] !== names[i] || entries[i][0] !== names[i] || entries[i][1] !== values[i]) ordered = false; } await finish(ordered && keys.length === names.length && JSON.stringify(Object.values(o)) === JSON.stringify(values) && JSON.stringify(o) === '{"0":"zero","2":"two","10":"ten","4294967294":"last","b":"b","4294967295":"max","01":"leading","-0":"negative","1e0":"exponent","":"empty","a":"a"}');"#,
     );
 }
 
@@ -84,6 +89,9 @@ fn object_enumeration_orders_integer_names_before_insertion_order() {
 fn object_prototype_methods_keep_coercion_enumerability_and_receiver() {
     agrees(
         "let coerced = false; let rejected = false; const key = {toString() { coerced = true; return 'x'; }}; try { Object.prototype.propertyIsEnumerable.call(null, key); } catch (e) { rejected = e.name === 'TypeError'; } function getArgs() { return arguments; } const argumentObject = getArgs(1); const a = [1, , 3]; const o = {x: 1, toString() { return this.x; }}; let prototypeRejected = false; try { Object.prototype.isPrototypeOf.call(null, {}); } catch (e) { prototypeRejected = e.name === 'TypeError'; } await finish(argumentObject.propertyIsEnumerable('0') && !argumentObject.propertyIsEnumerable('length') && !argumentObject.propertyIsEnumerable('callee') && coerced && rejected && a.propertyIsEnumerable('0') && !a.propertyIsEnumerable('1') && !a.propertyIsEnumerable('length') && o.toLocaleString() === 1 && Object.prototype.isPrototypeOf.call(null, 1) === false && prototypeRejected);",
+    );
+    agrees(
+        "function getArgs() { arguments.extra = 4; return arguments; } const args = getArgs(1, 2); const sparse = [1, , 3]; await finish(JSON.stringify(Object.keys(args)) === '[\"0\",\"1\",\"extra\"]' && JSON.stringify(Object.values(args)) === '[1,2,4]' && JSON.stringify(Object.keys(sparse)) === '[\"0\",\"2\"]' && JSON.stringify(Object.values(sparse)) === '[1,3]');",
     );
 }
 
@@ -165,6 +173,9 @@ fn errors_keep_class_cause_message_and_aliases_as_kernel_data() {
 fn error_instance_own_slots_keep_presence_attributes_and_deletion() {
     agrees(
         "const cause = {}; const e = new Error('bad', {cause}); const a = new AggregateError([]); const empty = new Error(); let rejected; try { await Promise.any([Promise.reject(7)]); } catch (error) { rejected = error; } let noMembers; try { await Promise.any([]); } catch (error) { noMembers = error; } e.extra = 3; let own = Object.hasOwn(e, 'cause'); let present = 'cause' in e; let inherited = 'name' in e; let named = Object.hasOwn(e, 'name'); const keys = Object.keys(e); e.cause = 4; delete e.message; delete e.cause; await finish(own && present && inherited && !named && keys.length === 1 && keys[0] === 'extra' && !Object.hasOwn(e, 'message') && !Object.hasOwn(e, 'cause') && e.message === '' && !Object.hasOwn(empty, 'message') && Object.hasOwn(a, 'errors') && !a.propertyIsEnumerable('errors') && rejected.errors[0] === 7 && Object.hasOwn(rejected, 'message') && noMembers.errors.length === 0 && !noMembers.propertyIsEnumerable('message'));",
+    );
+    agrees(
+        r#"const e = new Error('hidden', {cause: 5}); e.b = 'b'; e['10'] = 'ten'; e['01'] = 'leading'; e['2'] = 'two'; e['4294967295'] = 'max'; e['-0'] = 'negative'; e['1e0'] = 'exponent'; e['4294967294'] = 'last'; e['0'] = 'zero'; e.a = 'a'; await finish(JSON.stringify(Object.keys(e)) === '["0","2","10","4294967294","b","01","4294967295","-0","1e0","a"]' && JSON.stringify(Object.values(e)) === '["zero","two","ten","last","b","leading","max","negative","exponent","a"]' && JSON.stringify(Object.entries(e)[0]) === '["0","zero"]');"#,
     );
 }
 

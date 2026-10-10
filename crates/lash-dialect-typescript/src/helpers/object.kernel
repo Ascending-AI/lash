@@ -7,7 +7,6 @@ use error.new
 use list.len
 use num.add
 use num.div
-use num.floor
 use num.is_nan
 use num.le
 use num.lt
@@ -20,8 +19,7 @@ use ts.has_own
 use ts.is_nullish
 use ts.iterate
 use ts.keys
-use ts.number.parse
-use ts.number.to_string
+use ts.list_index
 use ts.object.assign
 use ts.object.convert
 use ts.object.create
@@ -65,28 +63,28 @@ kernel 1
 charge sum(16, product(size(target), size(target)))
 body {
   let keys = invoke ts.keys(target)
+  # ts.keys already orders record, list and text keys, including arguments
+  # hidden fields and array holes. Only error properties arrive unsorted.
+  if same(kind(target), "error") {} else { return keys }
   let indices = []
+  let index_values = []
   let others = []
   for key in keys {
-    let number = invoke ts.number.parse(key)
-    let spelling = invoke ts.number.to_string(number)
-    let index = false
-    if same(spelling, key) {
-      if num.le(0, number) { if num.lt(number, 4294967295.0) { if eq(number, num.floor(number)) { set index = true } } }
-    }
-    if index {
+    # Classify once, rejecting nondigit names before numeric conversion.
+    let number = invoke ts.list_index(key, 4294967295.0)
+    if num.le(0, number) {
       let position = list.len(indices)
       set indices[position] = key
+      set index_values[position] = number
       while num.lt(0, position) {
         let previous = num.sub(position, 1)
-        let builtin_arg_0 = indices[previous]
-let previous_number = invoke ts.number.parse(builtin_arg_0)
-        if num.lt(number, previous_number) {
-          set indices[position] = indices[previous]
-          set indices[previous] = key
-          set position = previous
-        } else { break }
+        if num.le(index_values[previous], number) { break }
+        set indices[position] = indices[previous]
+        set index_values[position] = index_values[previous]
+        set position = previous
       }
+      set indices[position] = key
+      set index_values[position] = number
     } else { set others[list.len(others)] = key }
   }
   for key in others { set indices[list.len(indices)] = key }
