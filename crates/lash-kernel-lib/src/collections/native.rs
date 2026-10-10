@@ -363,27 +363,51 @@ fn object(kind: Kind, value: &Value) -> Result<Option<ObjectId>, NativeError> {
         _ => Err(raise("type_error", "collection has the wrong kind")),
     }
 }
-fn arg<'a>(call: &'a NativeCall<'_>, index: usize) -> Result<&'a Value, NativeError> {
+fn arg<'a>(call: &NativeCall<'a>, index: usize) -> Result<&'a Value, NativeError> {
     call.args
         .get(index)
         .ok_or_else(|| raise("arity", "missing collection argument"))
 }
-fn integer(value: &Value) -> Result<BigInt, NativeError> {
+fn integer(value: &Value) -> Result<Integer, NativeError> {
     match value {
-        Value::Int(n) => Ok(n.as_bigint().into_owned()),
+        Value::Int(n) => Ok(n.clone()),
         Value::Float(n) if n.get().is_finite() && n.get().fract() == 0.0 => {
-            BigInt::from_f64(n.get())
-                .ok_or_else(|| raise("index_out_of_range", "index must be integral"))
+            if let Some(n) = n.get().to_i64() {
+                Ok(Integer::from(n))
+            } else {
+                BigInt::from_f64(n.get())
+                    .map(Integer::new)
+                    .ok_or_else(|| raise("index_out_of_range", "index must be integral"))
+            }
         }
         Value::Float(_) => Err(raise("index_out_of_range", "index must be integral")),
         _ => Err(raise("type_error", "index must be a number")),
     }
 }
 fn int(n: usize) -> Value {
-    Value::Int(Integer::new(BigInt::from(n)))
+    Value::Int(match i64::try_from(n) {
+        Ok(n) => Integer::from(n),
+        Err(_) => Integer::new(BigInt::from(n)),
+    })
 }
-fn position(value: &Value, length: usize, clamp: bool) -> Result<usize, NativeError> {
-    let mut n = integer(value)?;
+fn position(value: &Integer, length: usize, clamp: bool) -> Result<usize, NativeError> {
+    if let Some(mut n) = value.to_i128() {
+        let length = length as i128;
+        if n < 0 {
+            n += length;
+        }
+        if clamp {
+            n = n.max(0).min(length);
+        } else if n < 0 || n >= length {
+            return Err(raise(
+                "index_out_of_range",
+                "index is outside the collection",
+            ));
+        }
+        return usize::try_from(n)
+            .map_err(|_| raise("index_out_of_range", "index is outside the collection"));
+    }
+    let mut n = value.as_bigint().into_owned();
     let length = BigInt::from(length);
     if n < BigInt::from(0) {
         n += &length;
@@ -458,17 +482,78 @@ pub(super) fn snapshot(
         _ => Err(raise("type_error", "expected a collection")),
     }
 }
-fn members(
+fn visit_sequence(
     value: &Value,
     heap: &dyn lash_kernel_doc::NativeHeap,
-) -> Result<Vec<Value>, NativeError> {
+    visitor: &mut dyn FnMut(&Value) -> ControlFlow<()>,
+) {
     match value {
-        Value::Tuple(items) => Ok(items.to_vec()),
-        Value::List(_) => match snapshot(value, heap)? {
-            Object::List(items) => Ok(items),
+        Value::Tuple(items) => {
+            let _ = items.iter().try_for_each(visitor);
+        }
+        Value::List(id) => heap.visit(*id, &mut |element| match element {
+            Element::Item(item) => visitor(item),
             _ => unreachable!(),
-        },
-        _ => Err(raise("type_error", "expected a list or tuple")),
+        }),
+        _ => unreachable!(),
+    }
+}
+fn append_range(
+    value: &Value,
+    heap: &dyn lash_kernel_doc::NativeHeap,
+    start: usize,
+    end: usize,
+    items: &mut Vec<Value>,
+) {
+    if start >= end {
+        return;
+    }
+    if let Value::Tuple(source) = value {
+        items.extend_from_slice(&source[start..end]);
+        return;
+    }
+    let mut index = 0;
+    visit_sequence(value, heap, &mut |item| {
+        if index >= start {
+            items.push(item.clone());
+        }
+        index += 1;
+        if index == end {
+            ControlFlow::Break(())
+        } else {
+            ControlFlow::Continue(())
+        }
+    });
+}
+fn result_items(
+    heap: &mut dyn lash_kernel_doc::NativeHeap,
+    count: usize,
+    values_per_item: u64,
+) -> Result<Vec<Value>, NativeError> {
+    heap.reserve((count as u64).saturating_mul(values_per_item), 0)?;
+    let mut items = Vec::new();
+    items
+        .try_reserve_exact(count)
+        .map_err(|_| NativeError::Memory)?;
+    Ok(items)
+}
+fn view_item(op: Op, kind: Kind, index: usize, element: Element<'_>) -> Value {
+    let key = || match element {
+        Element::Item(item) if matches!(kind, Kind::Set) => item.clone(),
+        Element::Item(_) => int(index),
+        Element::Entry { key, .. } => key.clone(),
+        Element::Field { name, .. } => Value::text(name),
+    };
+    let value = || match element {
+        Element::Item(item)
+        | Element::Entry { value: item, .. }
+        | Element::Field { value: item, .. } => item.clone(),
+    };
+    match op {
+        Op::Keys => key(),
+        Op::Values => value(),
+        Op::Entries => Value::Tuple(vec![key(), value()].into()),
+        _ => unreachable!(),
     }
 }
 fn allocate(kind: Kind, object: Object, call: &mut NativeCall<'_>) -> Result<Value, NativeError> {
@@ -502,37 +587,37 @@ impl NativeFunction for Native {
             Op::DeepCopy => copy::deep(&xs, call.heap),
             Op::InsertIndex => {
                 let n = integer(arg(&call, 1)?)?;
-                if n < BigInt::from(0) || n > BigInt::from(length) {
+                if n.to_usize().is_none_or(|n| n > length) {
                     return Err(raise(
                         "index_out_of_range",
                         "insert position is outside the collection",
                     ));
                 }
-                Ok(Value::Int(Integer::new(n)))
+                Ok(Value::Int(n))
             }
             Op::Get | Op::At => match xs {
                 Value::List(id) => {
-                    let index = arg(&call, 1)?;
-                    if matches!(self.op, Op::Get) && integer(index)? < BigInt::from(0) {
+                    let index = integer(arg(&call, 1)?)?;
+                    if matches!(self.op, Op::Get) && index.is_negative() {
                         return Err(raise(
                             "index_out_of_range",
                             "get requires a nonnegative index",
                         ));
                     }
-                    let i = position(index, length, false)?;
+                    let i = position(&index, length, false)?;
                     call.heap
                         .list_get(id, i)
                         .ok_or_else(|| raise("index_out_of_range", "missing list element"))
                 }
                 Value::Tuple(items) => {
-                    let index = arg(&call, 1)?;
-                    if matches!(self.op, Op::Get) && integer(index)? < BigInt::from(0) {
+                    let index = integer(arg(&call, 1)?)?;
+                    if matches!(self.op, Op::Get) && index.is_negative() {
                         return Err(raise(
                             "index_out_of_range",
                             "get requires a nonnegative index",
                         ));
                     }
-                    Ok(items[position(index, length, false)?].clone())
+                    Ok(items[position(&index, length, false)?].clone())
                 }
                 Value::Map(id) => {
                     let k = arg(&call, 1)?;
@@ -564,63 +649,78 @@ impl NativeFunction for Native {
                 if let Some(found) = found {
                     return Ok(Value::Bool(found));
                 }
-                for (i, item) in members(&xs, call.heap)?.into_iter().enumerate() {
-                    if crate::equal(&item, &value, call.heap) {
-                        return Ok(match self.op {
-                            Op::IndexOf => int(i),
-                            _ => Value::Bool(true),
-                        });
+                let mut found = None;
+                let mut index = 0;
+                visit_sequence(&xs, call.heap, &mut |item| {
+                    if crate::equal(item, &value, call.heap) {
+                        found = Some(index);
+                        ControlFlow::Break(())
+                    } else {
+                        index += 1;
+                        ControlFlow::Continue(())
                     }
-                }
+                });
                 Ok(match self.op {
-                    Op::IndexOf => Value::Int(Integer::from(-1)),
-                    _ => Value::Bool(false),
+                    Op::IndexOf => found.map_or(Value::Int(Integer::from(-1)), int),
+                    _ => Value::Bool(found.is_some()),
                 })
             }
             Op::Slice | Op::Concat => {
-                let mut items = members(&xs, call.heap)?;
-                if matches!(self.op, Op::Concat) {
+                let items = if matches!(self.op, Op::Concat) {
                     let other = arg(&call, 1)?;
-                    object(self.kind, other)?;
-                    items.extend(members(other, call.heap)?);
+                    let other_id = object(self.kind, other)?;
+                    let other_length = match other {
+                        Value::Tuple(items) => items.len(),
+                        _ => other_id.map_or(0, |id| call.heap.len(id)),
+                    };
+                    let count = length
+                        .checked_add(other_length)
+                        .ok_or(NativeError::Memory)?;
+                    let mut items = result_items(call.heap, count, 1)?;
+                    append_range(&xs, call.heap, 0, length, &mut items);
+                    append_range(other, call.heap, 0, other_length, &mut items);
+                    items
                 } else {
-                    let start = position(arg(&call, 1)?, length, true)?;
+                    let start = position(&integer(arg(&call, 1)?)?, length, true)?;
                     let end = match call.args.get(2) {
                         Some(Value::Absent) | None => length,
-                        Some(end) => position(end, length, true)?,
-                    };
-                    items = items[start..end.max(start)].to_vec();
-                }
+                        Some(end) => position(&integer(end)?, length, true)?,
+                    }
+                    .max(start);
+                    let mut items = result_items(call.heap, end - start, 1)?;
+                    append_range(&xs, call.heap, start, end, &mut items);
+                    items
+                };
                 match self.kind {
                     Kind::Tuple => Ok(Value::Tuple(items.into())),
                     _ => allocate(Kind::List, Object::List(items), &mut call),
                 }
             }
             Op::Keys | Op::Values | Op::Entries => {
-                let pairs: Vec<(Value, Value)> = match &xs {
-                    Value::List(_) | Value::Tuple(_) => members(&xs, call.heap)?
-                        .into_iter()
-                        .enumerate()
-                        .map(|(i, x)| (int(i), x))
-                        .collect(),
-                    _ => match snapshot(&xs, call.heap)? {
-                        Object::Map(entries) => entries,
-                        Object::Set(items) => items.into_iter().map(|x| (x.clone(), x)).collect(),
-                        Object::Record(fields) => fields
-                            .into_iter()
-                            .map(|(name, x)| (Value::text(name), x))
-                            .collect(),
+                let mut items = result_items(
+                    call.heap,
+                    length,
+                    if matches!(self.op, Op::Entries) { 3 } else { 1 },
+                )?;
+                if matches!(self.op, Op::Keys) && matches!(self.kind, Kind::List | Kind::Tuple) {
+                    items.extend((0..length).map(int));
+                } else {
+                    let mut visit = |element: Element<'_>| {
+                        items.push(view_item(self.op, self.kind, items.len(), element));
+                        ControlFlow::Continue(())
+                    };
+                    match &xs {
+                        Value::Tuple(source) => {
+                            let _ = source
+                                .iter()
+                                .try_for_each(|item| visit(Element::Item(item)));
+                        }
+                        Value::List(id) | Value::Map(id) | Value::Set(id) | Value::Record(id) => {
+                            call.heap.visit(*id, &mut visit);
+                        }
                         _ => unreachable!(),
-                    },
-                };
-                let items = pairs
-                    .into_iter()
-                    .map(|(key, value)| match self.op {
-                        Op::Keys => key,
-                        Op::Values => value,
-                        _ => Value::Tuple(vec![key, value].into()),
-                    })
-                    .collect();
+                    }
+                }
                 allocate(Kind::List, Object::List(items), &mut call)
             }
             Op::With | Op::Without => {

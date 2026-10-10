@@ -156,6 +156,17 @@ fn k_col_002_get_is_strict_and_at_counts_from_the_end() {
     }
     assert_eq!(error("return list.get([1], true)"), "type_error");
     assert_eq!(error("return list.get((1,), 0)"), "type_error");
+    for index in [
+        "-170141183460469231731687303715884105728",
+        "9223372036854775808.0",
+        "1e100",
+    ] {
+        assert_eq!(
+            error(&format!("return tuple.at((1,), {index})")),
+            "index_out_of_range"
+        );
+    }
+    assert_eq!(body("return tuple.get((3,), -0.0)"), int(3));
 }
 #[test]
 fn k_col_003_slices_translate_clamp_and_never_coerce() {
@@ -172,6 +183,19 @@ fn k_col_003_slices_translate_clamp_and_never_coerce() {
     );
     assert_eq!(error("return list.slice([1], 0.5)"), "index_out_of_range");
     assert_eq!(error("return list.slice([1], null)"), "type_error");
+    assert_eq!(
+        body("return list.slice([1, 2], -999999999999999999999999999999999999999999, 1e100)"),
+        list(&[1, 2])
+    );
+    assert_eq!(
+        body(
+            "let inner = [1] let xs = [inner, 2] let out = list.slice(xs, 0, 1) set out[0][0] = 3 set out[1] = 4 return (xs, out)"
+        ),
+        tuple(vec![
+            Datum::List(vec![list(&[3]), int(2)]),
+            Datum::List(vec![list(&[3]), int(4)])
+        ])
+    );
 }
 #[test]
 fn k_col_004_concat_preserves_kind_and_order() {
@@ -199,6 +223,12 @@ fn k_col_005_membership_and_missing_values_are_distinct() {
     );
     assert_eq!(error("return map.get(map{}, 0)"), "key_missing");
     assert_eq!(error("return set.contains(set{}, [])"), "invalid_key");
+    assert_eq!(
+        body(
+            "return (list.contains([[1]], [1.0]), tuple.index_of((1, 2, 1), 1.0), tuple.contains((), 1))"
+        ),
+        tuple(vec![Datum::Bool(true), int(0), Datum::Bool(false)])
+    );
 }
 #[test]
 fn k_col_006_views_follow_insertion_order() {
@@ -220,6 +250,35 @@ fn k_col_006_views_follow_insertion_order() {
             list(&[4, 5])
         ])
     );
+    for (kind, source, keys, values) in [
+        ("list", "[4, 5]", list(&[0, 1]), list(&[4, 5])),
+        ("tuple", "(4, 5)", list(&[0, 1]), list(&[4, 5])),
+        ("map", "map{2: 4, 1: 3}", list(&[2, 1]), list(&[4, 3])),
+        ("set", "set{2, 1}", list(&[2, 1]), list(&[2, 1])),
+        (
+            "record",
+            "{b: 2, a: 1}",
+            Datum::List(vec![text("b"), text("a")]),
+            list(&[2, 1]),
+        ),
+    ] {
+        let (Datum::List(k), Datum::List(v)) = (&keys, &values) else {
+            unreachable!()
+        };
+        let entries = Datum::List(
+            k.iter()
+                .zip(v)
+                .map(|(k, v)| tuple(vec![k.clone(), v.clone()]))
+                .collect(),
+        );
+        assert_eq!(
+            body(&format!(
+                "let xs = {source} return ({kind}.keys(xs), {kind}.values(xs), {kind}.entries(xs))"
+            )),
+            tuple(vec![keys, values, entries]),
+            "{kind}"
+        );
+    }
 }
 #[test]
 fn k_col_007_copies_preserve_sharing_and_refuse_cycles() {
@@ -604,6 +663,42 @@ fn k_col_014_native_charges_count_the_sizes_and_are_repeatable() {
         });
         assert_eq!(charge, 9);
         assert_ne!(xs, result);
+    }
+}
+
+#[test]
+fn k_bnd_003_collection_expansion_reserves_before_building_results() {
+    // K-BND-003 and NativeHeap::reserve: reserve an expanded result first,
+    // including immutable tuples that do not go through heap allocation.
+    use lash_kernel_doc::{NativeCall, NativeError, NativeHeap, Object, Value, WorkCounter};
+
+    let registry = registry();
+    for name in ["tuple.concat", "list.concat", "list.entries"] {
+        let mut heap = crate::tests::Heap::default();
+        let xs = if name == "tuple.concat" {
+            Value::Tuple(vec![Value::Null].into())
+        } else {
+            Value::List(heap.allocate(Object::List(vec![Value::Null])).unwrap())
+        };
+        heap.1 = crate::tests::Room::of(0);
+        let (_, function) = registry
+            .iter()
+            .find(|(_, f)| f.definition.name.as_str() == name)
+            .unwrap();
+        let args = [xs.clone(), xs];
+        assert_eq!(
+            function.native.as_ref().unwrap().call(NativeCall {
+                args: if name == "list.entries" {
+                    &args[..1]
+                } else {
+                    &args
+                },
+                heap: &mut heap,
+                counter: &mut WorkCounter::new(None),
+            }),
+            Err(NativeError::Memory),
+            "{name} must refuse before constructing the result"
+        );
     }
 }
 
