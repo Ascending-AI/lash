@@ -105,6 +105,49 @@ fn undecodable(what: &str, detail: impl std::fmt::Display) -> DurableError {
     })
 }
 
+/// Record the inputs this stop affects at the terminal transaction's
+/// boundary, after its head commit settled delivered inputs. A drop binds
+/// them for `settle_held`; deferral keeps their original ingress position.
+pub(super) async fn cancel_inputs(
+    tx: &mut PgConnection,
+    session: &SessionId,
+    run: &TurnId,
+    disposition: lash_core_execution::TurnCancelUndeliveredInputPolicy,
+) -> Result<lash_core_execution::TurnCancelInputOutcome, DurableError> {
+    let rows = sqlx::query(SQL.session_mail.cancel_inputs.sql())
+        .bind(session.as_str())
+        .fetch_all(crate::observed_sql::executor(&mut *tx))
+        .await
+        .map_err(sqlx_failure)?;
+    let mut outcome = lash_core_execution::TurnCancelInputOutcome::default();
+    for row in &rows {
+        let Some(affected) =
+            lash_core_execution::store_backend_support::turn_cancel::affected_input(
+                run,
+                disposition,
+                get(row, 0)?,
+                &get::<String>(row, 1)?,
+                &get::<String>(row, 2)?,
+            )
+            .map_err(|error| undecodable("cancelled input", error))?
+        else {
+            continue;
+        };
+        if disposition == lash_core_execution::TurnCancelUndeliveredInputPolicy::Drop {
+            admit(
+                &mut *tx,
+                session,
+                run,
+                std::slice::from_ref(&affected.input_id),
+                &[],
+            )
+            .await?;
+        }
+        outcome.affected_inputs.push(affected);
+    }
+    Ok(outcome)
+}
+
 /// Session `session`'s standing: `(live, closing)`.
 pub(super) async fn standing(
     tx: &mut PgConnection,

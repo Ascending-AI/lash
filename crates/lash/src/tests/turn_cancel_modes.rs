@@ -539,10 +539,32 @@ async fn undelivered_input_settles_by(
         let steer = session
             .send(TurnInput::text("unsent steer"))
             .ingress(crate::persistence::TurnInputIngress::active_turn(
-                run,
+                run.clone(),
                 Default::default(),
             ))
             .await?;
+        let extra = if matches!(witness, Witness::Report) {
+            Some(
+                session
+                    .send(TurnInput::text("second unsent steer"))
+                    .ingress(crate::persistence::TurnInputIngress::active_turn(
+                        run.clone(),
+                        Default::default(),
+                    ))
+                    .await?,
+            )
+        } else {
+            None
+        };
+        let queued = if matches!(witness, Witness::Report) {
+            Some(
+                session
+                    .send(TurnInput::text("queued behind the cancelled run"))
+                    .await?,
+            )
+        } else {
+            None
+        };
         let requested = outcome(handle.cancel().mode(mode).undelivered(disposition).await?);
         assert!(
             matches!(requested, TurnCancelOutcome::Requested(_)),
@@ -563,17 +585,52 @@ async fn undelivered_input_settles_by(
         );
         match (witness, disposition) {
             (Witness::Report, _) => {
-                let affected: Vec<_> = output
-                    .result
-                    .cancel_input_outcome
-                    .affected_inputs
-                    .iter()
-                    .map(|affected| (affected.input_id.clone(), affected.disposition))
-                    .collect();
+                let extra = extra.expect("the report witness sends two addressed inputs");
+                let affected = output.result.cancel_input_outcome.clone();
                 assert_eq!(
-                    affected,
-                    vec![(steer.input_id().clone(), disposition)],
-                    "{mode:?}/{disposition:?}: the disposition applies to the undelivered active-turn input"
+                    affected.affected_inputs,
+                    vec![
+                        lash_core::TurnCancelAffectedInput {
+                            input_id: steer.input_id().clone(),
+                            payload: TurnInput::text("unsent steer"),
+                            disposition,
+                        },
+                        lash_core::TurnCancelAffectedInput {
+                            input_id: extra.input_id().clone(),
+                            payload: TurnInput::text("second unsent steer"),
+                            disposition,
+                        },
+                    ],
+                    "{mode:?}/{disposition:?}: only undelivered addressed inputs, in ingress order"
+                );
+                if disposition == TurnCancelUndeliveredInputPolicy::Defer {
+                    for handle in [steer, extra] {
+                        tokio::time::timeout(ENDS_WITHIN, handle.output())
+                            .await
+                            .expect("the deferred input runs")?;
+                    }
+                }
+                tokio::time::timeout(ENDS_WITHIN, queued.expect("queued input").output())
+                    .await
+                    .expect("the unrelated queued input runs")?;
+                // Input sent after the stop can still address this ended
+                // turn, but it was never affected by its cancellation.
+                tokio::time::timeout(
+                    ENDS_WITHIN,
+                    session
+                        .send(TurnInput::text("addressed after the stop"))
+                        .ingress(crate::persistence::TurnInputIngress::active_turn(
+                            run.clone(),
+                            Default::default(),
+                        ))
+                        .output(),
+                )
+                .await
+                .expect("the late input runs")?;
+                let reread = session.attach_id(run).output().await?;
+                assert_eq!(
+                    reread.result.cancel_input_outcome, affected,
+                    "a fresh follower reads the stop's facts after input lifecycles changed"
                 );
             }
             (Witness::Settlement, TurnCancelUndeliveredInputPolicy::Defer) => {
@@ -625,7 +682,6 @@ async fn a_drop_cancel_never_delivers_the_turn_s_undelivered_input() -> Result<(
 /// A cancelled run's report names the undelivered active-turn input its
 /// disposition applied to, for either disposition in either mode.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "FIG-5321: a durable cancelled run's report names no affected input"]
 async fn a_cancelled_run_reports_the_undelivered_input_its_disposition_applied_to() -> Result<()> {
     for disposition in [
         TurnCancelUndeliveredInputPolicy::Defer,

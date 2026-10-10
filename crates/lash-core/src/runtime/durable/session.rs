@@ -552,7 +552,10 @@ impl TurnDone {
 pub fn cancelled_cause(
     evidence: crate::runtime::TurnCancellationEvidence,
 ) -> crate::store::RunTerminalCause {
-    crate::store::RunTerminalCause::Cancelled { evidence }
+    crate::store::RunTerminalCause::Cancelled {
+        evidence,
+        input_outcome: Default::default(),
+    }
 }
 
 /// What `turn.commit` writes for a finished turn: the session head's next

@@ -145,9 +145,9 @@ pub(super) async fn resolve_run(parts: &SendParts, run: &TurnId) -> Result<Resol
                 outcome: TurnOutcome::from(outcome.clone()),
             });
         }
-        // A cancel the session actor honoured before the turn committed: the
-        // run answers with its cancellation, and the head did not move.
-        Some(RunTerminalCause::Cancelled { evidence }) => {
+        // A cancel the session actor honoured: the run answers with its
+        // cancellation whether or not its stop published a head.
+        Some(RunTerminalCause::Cancelled { evidence, .. }) => {
             return Ok(Resolution::Settled {
                 run: run.clone(),
                 outcome: TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled {
@@ -227,7 +227,7 @@ pub(super) async fn resolve_run(parts: &SendParts, run: &TurnId) -> Result<Resol
                 outcome: TurnOutcome::from(outcome),
             });
         }
-        Some(RunTerminalCause::Cancelled { evidence }) => {
+        Some(RunTerminalCause::Cancelled { evidence, .. }) => {
             return Ok(Resolution::Settled {
                 run: run.clone(),
                 outcome: TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled {

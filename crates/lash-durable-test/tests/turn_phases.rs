@@ -2430,6 +2430,7 @@ async fn each_turn_terminal_reads_back(dialect: Dialect, postgres_url: Option<St
             "cancelled",
             RunTerminalCause::Cancelled {
                 evidence: evidence.clone(),
+                input_outcome: Default::default(),
             },
             Some(TurnStop::Cancelled { evidence }),
         ),

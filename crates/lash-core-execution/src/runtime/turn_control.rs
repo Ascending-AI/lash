@@ -392,7 +392,7 @@ fn terminal_of(address: &TurnAddress, ended: &TurnEnd) -> Result<TurnTerminal, R
     };
     let stop = match &ended.cause {
         crate::store::RunTerminalCause::Committed { outcome, .. } => outcome.stop().cloned(),
-        crate::store::RunTerminalCause::Cancelled { evidence } => Some(TurnStop::Cancelled {
+        crate::store::RunTerminalCause::Cancelled { evidence, .. } => Some(TurnStop::Cancelled {
             evidence: evidence.clone(),
         }),
         other => {

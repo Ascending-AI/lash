@@ -156,7 +156,7 @@ impl RuntimeSessionServices {
             crate::store::RunTerminalCause::Committed { outcome, .. } => {
                 crate::TurnOutcome::from(outcome)
             }
-            crate::store::RunTerminalCause::Cancelled { evidence } => {
+            crate::store::RunTerminalCause::Cancelled { evidence, .. } => {
                 crate::TurnOutcome::Stopped(crate::TurnStop::Cancelled { evidence })
             }
             // The child run's refusal answers its process under its own

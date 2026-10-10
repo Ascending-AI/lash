@@ -171,6 +171,20 @@ pub(super) async fn apply(
             cause,
             head_revision,
         } => {
+            let mut cause = cause.as_ref().clone();
+            if let RunTerminalCause::Cancelled {
+                evidence,
+                input_outcome,
+            } = &mut cause
+            {
+                *input_outcome = super::session_mail::cancel_inputs(
+                    &mut *tx,
+                    session,
+                    run,
+                    evidence.undelivered,
+                )
+                .await?;
+            }
             let window = super::super::session_runs::terminal_window_json(
                 &mut *tx,
                 session,

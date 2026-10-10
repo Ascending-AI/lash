@@ -419,7 +419,6 @@ async fn assert_session_turn_cancel_disposition(
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "FIG-5321: the durable send report drops the cancel's affected inputs"]
 async fn send_cancel_defaults_to_deferring_undelivered_active_input() -> Result<()> {
     assert_session_turn_cancel_disposition(
         &SessionId::from("session-cancel-legacy-defer"),

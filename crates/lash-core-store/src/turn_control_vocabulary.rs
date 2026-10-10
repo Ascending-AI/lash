@@ -50,8 +50,8 @@ impl PartialEq for TurnCancelAffectedInput {
     }
 }
 impl Eq for TurnCancelAffectedInput {}
-/// Durable outcome accumulated on a turn-cancel request: the affected-item
-/// record of ADR 0101 §10. Every host input the cancel left undelivered is
+/// Durable outcome recorded with a cancelled run's terminal: the affected-item
+/// record of ADR 0101 §10. Every addressed host input the cancel left undelivered is
 /// listed, in the order the cancel settled it.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TurnCancelInputOutcome {

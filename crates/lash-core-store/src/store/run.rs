@@ -187,10 +187,14 @@ pub enum RunTerminalCause {
         outcome: RunCommittedOutcome,
     },
     /// The session actor honoured a cancel request before the run's turn
-    /// committed (ADR 0132 §3): the run ends with the request's evidence and
-    /// the session head does not move.
+    /// committed (ADR 0132 §3): the cancellation transaction records the
+    /// request's evidence and the undelivered inputs it affected, beside
+    /// the stop's session-head commit when the turn has state to publish.
     Cancelled {
         evidence: lash_sansio::TurnCancellationEvidence,
+        /// Store-derived facts, selected and disposed in the terminal
+        /// transaction, in session ingress order.
+        input_outcome: crate::TurnCancelInputOutcome,
     },
     /// An operator cancelled the parked run (its control intent).
     OperatorCancelled { intent: ControlIntentId },

@@ -229,6 +229,54 @@ pub(super) fn settle_held(
     Ok(())
 }
 
+/// Record the inputs this stop affects at the terminal transaction's
+/// boundary, after its head commit settled delivered inputs. A drop binds
+/// them for `settle_held`; deferral keeps their original ingress position.
+pub(super) fn cancel_inputs(
+    tx: &Connection,
+    session: &SessionId,
+    run: &TurnId,
+    disposition: lash_core_execution::TurnCancelUndeliveredInputPolicy,
+) -> Answer<lash_core_execution::TurnCancelInputOutcome> {
+    let rows = tx
+        .prepare_cached(SQL.session_mail.cancel_inputs.sql())?
+        .query_map([session.as_str()], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut outcome = lash_core_execution::TurnCancelInputOutcome::default();
+    for (input, payload, ingress) in rows {
+        let affected = match lash_core_execution::store_backend_support::turn_cancel::affected_input(
+            run,
+            disposition,
+            input,
+            &payload,
+            &ingress,
+        ) {
+            Ok(Some(affected)) => affected,
+            Ok(None) => continue,
+            Err(error) => return Ok(Err(undecodable("cancelled input", error))),
+        };
+        if disposition == lash_core_execution::TurnCancelUndeliveredInputPolicy::Drop
+            && let Err(error) = admit(
+                tx,
+                session,
+                run,
+                std::slice::from_ref(&affected.input_id),
+                &[],
+            )?
+        {
+            return Ok(Err(error));
+        }
+        outcome.affected_inputs.push(affected);
+    }
+    Ok(Ok(outcome))
+}
+
 /// Withdraw the input session `session` would admit as run `run`, while it
 /// is still open and unbound session mail: into its `cancelled` tombstone at
 /// `now_ms`, so no run ever takes it (FIG-5262). `None` when no open input

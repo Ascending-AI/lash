@@ -848,6 +848,19 @@ pub(super) async fn durable_report(
         )
         .await
         .map_err(EmbedError::Durable)?;
+    let cancel_input_outcome = match ctx
+        .parts
+        .store
+        .run_terminal(run)
+        .await
+        .map_err(EmbedError::Store)?
+    {
+        Some(lash_core::store::RunTerminal {
+            cause: lash_core::store::RunTerminalCause::Cancelled { input_outcome, .. },
+            ..
+        }) => input_outcome,
+        _ => Default::default(),
+    };
     Ok(TurnReport {
         state,
         outcome,
@@ -859,7 +872,7 @@ pub(super) async fn durable_report(
         execution: Default::default(),
         errors,
         acceptance,
-        cancel_input_outcome: Default::default(),
+        cancel_input_outcome,
         source: ReportSource::Durable,
     })
 }

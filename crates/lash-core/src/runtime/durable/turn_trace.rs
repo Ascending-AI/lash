@@ -110,7 +110,7 @@ pub(super) fn outcome(
                 TurnStop::ToolError { .. } => failed(TraceTurnFailureReason::ToolError),
             },
         },
-        RunTerminalCause::Cancelled { evidence } => cancelled(evidence),
+        RunTerminalCause::Cancelled { evidence, .. } => cancelled(evidence),
         RunTerminalCause::Refused { .. } => failed(TraceTurnFailureReason::RuntimeError),
         RunTerminalCause::OperatorCancelled { .. }
         | RunTerminalCause::Forked { .. }

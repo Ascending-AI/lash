@@ -228,6 +228,22 @@ pub(super) fn apply(
             cause,
             head_revision,
         } => {
+            let mut cause = cause.as_ref().clone();
+            if let RunTerminalCause::Cancelled {
+                evidence,
+                input_outcome,
+            } = &mut cause
+            {
+                *input_outcome = match super::session_mail::cancel_inputs(
+                    tx,
+                    session,
+                    run,
+                    evidence.undelivered,
+                )? {
+                    Ok(outcome) => outcome,
+                    Err(error) => return Ok(Err(error)),
+                };
+            }
             let stored = match cause.to_stored() {
                 Ok(stored) => stored,
                 Err(error) => return Ok(Err(encoding(&error))),

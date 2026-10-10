@@ -40,9 +40,7 @@
 
 use std::future::Future;
 
-use lash_durable::domain::{
-    DomainWrite, OwnerKey, RunSeq, SessionCommitWrite, SessionMailWrite, TurnWrite,
-};
+use lash_durable::domain::{DomainWrite, OwnerKey, RunSeq, SessionCommitWrite, TurnWrite};
 use lash_durable::{CommitLabel, DurableError};
 
 use super::head::HeadCache;
@@ -209,8 +207,9 @@ async fn stopped_cell(
 /// applications); its unanswered tail is dropped. It also settles a tool
 /// round's unfinished members `Cancelled`, records the tool calls of the
 /// cell the turn answered or stopped on (FIG-5330), and, for a `Drop`
-/// request, cancels the input addressed to the turn that it never delivered
-/// ([`dropped_inputs`]). It starts no work.
+/// request, cancels the input addressed to the turn that it never delivered.
+/// The terminal writer selects these inputs inside its transaction and records
+/// their dispositions with the terminal, including `Defer`. It starts no work.
 ///
 /// A stop whose head commit the session refuses for good, or whose commit
 /// cannot be built, still ends the turn: its terminal commits without the
@@ -262,7 +261,6 @@ async fn end(
     super::tool_round::cancel_open_round(cx, &mut tx, current.unwrap_or(row)).await?;
     let mut drive = None;
     let mut head_revision = None;
-    let mut delivered = Vec::new();
     if let Some(StoppedTurn {
         drive: mut stopped,
         present,
@@ -283,11 +281,6 @@ async fn end(
         {
             tx.write(bind);
         }
-        delivered = stopped
-            .delivered_inputs()
-            .iter()
-            .flat_map(crate::AdmittedTurnInputs::input_ids)
-            .collect();
         head_revision = Some(commit.expected_head.saturating_add(1));
         tx.write(DomainWrite::SessionCommit(SessionCommitWrite {
             session: row.session.clone(),
@@ -295,9 +288,6 @@ async fn end(
             commit_json: commit.commit_json,
         }));
         drive = Some(stopped);
-    }
-    if let Some(dropped) = dropped_inputs(cx, row, request, &delivered).await? {
-        tx.write(dropped);
     }
     tx.write(DomainWrite::Turn(TurnWrite::Terminal {
         session: row.session.clone(),
@@ -382,37 +372,4 @@ async fn stop_commit(
             }
         }
     }
-}
-
-/// The open input addressed to `row`'s turn that it never delivered, which a
-/// `Drop` request settles with the turn's stop (ADR 0039, FIG-5365): bound
-/// to the run, so the terminal settles it `Cancelled` with what else the run
-/// still holds and no later turn ever takes it. `delivered` is what the
-/// stop's commit settles as applied. A `Defer` request leaves it open: an
-/// ended turn's addressed input is next-turn input by rule.
-async fn dropped_inputs(
-    cx: &ActorContext,
-    row: &TurnRow,
-    request: &TurnCancelRequest,
-    delivered: &[crate::InputId],
-) -> Result<Option<DomainWrite>, TurnError> {
-    if request.undelivered != crate::TurnCancelUndeliveredInputPolicy::Drop {
-        return Ok(None);
-    }
-    let mailbox = cx.backend().durable().session_mailbox(&row.session).await?;
-    let inputs = mailbox
-        .inputs
-        .into_iter()
-        .filter(|input| input.active_turn.as_ref() == Some(&row.run))
-        .map(|input| input.input)
-        .filter(|input| !delivered.contains(input))
-        .collect::<Vec<_>>();
-    Ok((!inputs.is_empty()).then(|| {
-        DomainWrite::SessionMail(SessionMailWrite::Admit {
-            session: row.session.clone(),
-            run: row.run.clone(),
-            inputs,
-            batches: Vec::new(),
-        })
-    }))
 }

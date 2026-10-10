@@ -338,8 +338,13 @@ addressed to that turn. `Defer` is the default and writes nothing; `Drop`
 records cancellation. Once the turn's run has terminal evidence, the run's
 terminal write has already applied the disposition, and a later teardown of
 that turn reaches no input. Other held input is released.
-`TurnCancelInputOutcome` records the affected
-inputs and their disposition. Host withdrawal may remove undelivered generic
+`RunTerminalCause::Cancelled` retains the `TurnCancelInputOutcome`: the
+terminal writer selects undelivered addressed inputs after the head commit
+settles delivered inputs, applies the policy and records their ids, payloads
+and dispositions in ingress order in the same transaction. `Defer` leaves
+the input rows open while retaining these terminal facts. A later delivery,
+withdrawal or newly submitted input cannot change the cancelled run's report.
+Host withdrawal may remove undelivered generic
 queued work; host event records remain under the host's retention policy.
 
 Dropping an observation handle cancels nothing.

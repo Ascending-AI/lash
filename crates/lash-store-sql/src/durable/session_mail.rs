@@ -34,6 +34,14 @@ crate::statements! {
                AND state IN ('deferred_next_turn', 'pending_active')
              ORDER BY enqueue_seq";
 
+        /// The unbound active-turn inputs the cancellation transaction may
+        /// affect, in ingress order. The owner decodes each immutable address
+        /// before applying the cancelled run's disposition.
+        cancel_inputs = "SELECT input_id, input_json, ingress_json
+             FROM pending_turn_inputs
+             WHERE session_id = ?1 AND admitted_run IS NULL AND state = 'pending_active'
+             ORDER BY enqueue_seq";
+
         /// Session `?1`'s open, unbound queued work batches, in ingress
         /// order, each with whether a host requested its entered operation
         /// run's cancel.
