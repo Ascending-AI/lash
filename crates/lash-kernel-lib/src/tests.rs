@@ -793,6 +793,30 @@ fn n_pow_reserves_each_product_before_it_multiplies() {
     };
     assert!(heap.1.reserved >= power.bits().div_ceil(8));
 }
+/// `K-BND-001`, `K-LIB-007`: an integer's digits can be eight times its
+/// bytes (radix 2). They are reserved before they are written: a room they
+/// do not fit refuses the call, and a room they fit is asked for at least
+/// the text.
+#[test]
+fn an_integer_reserves_its_digits_before_it_writes_them() {
+    let integer = big(BigInt::one() << 16_000u32);
+    for (name, args) in [
+        ("int.to_text", vec![integer.clone(), int(2)]),
+        ("num.to_text", vec![integer]),
+    ] {
+        let mut heap = Heap(BTreeMap::new(), Room::of(4 << 10));
+        assert_eq!(
+            invoke_heap(name, &args, &mut heap),
+            Err(NativeError::Memory),
+            "{name}"
+        );
+        let mut heap = Heap::default();
+        let Ok(Value::Text(text)) = invoke_heap(name, &args, &mut heap) else {
+            panic!("{name} fits a roomy heap");
+        };
+        assert!(heap.1.reserved >= text.len() as u64, "{name}");
+    }
+}
 #[test]
 fn n_abs_neg_and_min_max_preserve_pinned_zero_and_nan_edges() {
     assert_eq!(invoke("float.abs", &[float(-0.0)]).unwrap(), float(0.0));

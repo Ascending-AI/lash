@@ -120,11 +120,12 @@ pub trait NativeHeap {
     /// [`NativeError::Memory`]; the function returns it and allocates
     /// nothing.
     ///
-    /// A function whose result or temporary can outgrow its arguments (it
-    /// follows a count, a product of two sizes or structure that is shared)
-    /// reserves the size before it allocates it. Reservations add up over
-    /// the call and end with it, and [`NativeHeap::allocate`] draws on
-    /// them.
+    /// A function whose result or temporary can outgrow its arguments by
+    /// more than a small fixed multiple (it follows a count, a product of
+    /// two sizes or structure that is shared, or it holds many times the
+    /// bytes it reads, as a parse tree or an integer's digits do) reserves
+    /// the size before it allocates it. Reservations add up over the call
+    /// and end with it, and [`NativeHeap::allocate`] draws on them.
     fn reserve(&mut self, values: u64, bytes: u64) -> Result<(), NativeError>;
 }
 
@@ -144,6 +145,15 @@ pub struct NativeCall<'a> {
 /// no state a second call could observe, and calls no guest code. Called
 /// again with equal arguments it returns an equal result, raises the same
 /// error, or passes its guard at the same count (`K-LIB-006`).
+///
+/// Failure mode: a call runs to its end inside one machine step, and the
+/// machine accounts its result only when it returns. Nothing stops it in
+/// between: no deadline, no cancel, no charge, and a guard counts work, not
+/// bytes. An implementation that builds a large result or temporary before
+/// it calls [`NativeHeap::reserve`] is stopped only by the worker's
+/// address-space ceiling, which ends the worker as a crash instead of the
+/// run with its typed memory bound. So the size is computed from the
+/// arguments and reserved first; what is reserved is the bound's to refuse.
 pub trait NativeFunction: Send + Sync {
     fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError>;
 }

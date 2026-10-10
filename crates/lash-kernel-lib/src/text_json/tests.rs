@@ -1718,6 +1718,13 @@ fn an_amplifier_reserves_its_result_before_it_builds_it() {
         ("json.parse", |_| {
             vec![s("1e40000"), s("int"), s("by_spelling")]
         }),
+        ("json.parse", |_| {
+            let text = format!("[{}0]", "0,".repeat(1_999));
+            vec![s(&text), s("int"), s("by_spelling")]
+        }),
+        ("format.radix", |_| {
+            vec![int(num_bigint::BigInt::from(1) << 16_000), int(2)]
+        }),
         ("json.stringify", |heap| {
             let mut shared = list(heap, vec![s("xxxxxxxx")]);
             for _ in 0..12 {
@@ -1749,4 +1756,27 @@ fn an_amplifier_reserves_its_result_before_it_builds_it() {
         );
     }
     assert_eq!(unreserved, [""; 0]);
+}
+
+/// `K-BND-001`, `K-EFF-005`: a parse whose tree its room refuses still
+/// reads the whole text, so malformed JSON raises its syntax or depth error
+/// rather than the memory refusal, as it did before any reservation.
+#[test]
+fn a_refused_json_tree_still_reports_the_texts_own_error() {
+    let mut heap = Heap(BTreeMap::new(), Room::of(1 << 10));
+    let unclosed = format!("[{}0", "0,".repeat(1_999));
+    let result = call(
+        &mut heap,
+        "json.parse",
+        &[s(&unclosed), s("int"), s("by_spelling")],
+    );
+    assert_eq!(error_kind(result), "json_syntax");
+    let mut heap = Heap(BTreeMap::new(), Room::of(1 << 10));
+    let deep = format!("[{}{}]", "0,".repeat(1_999), "[".repeat(100));
+    let result = call(
+        &mut heap,
+        "json.parse",
+        &[s(&deep), s("int"), s("by_spelling")],
+    );
+    assert_eq!(error_kind(result), "json_depth");
 }

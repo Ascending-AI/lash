@@ -21,15 +21,20 @@
 //! allocation: it collects the heap and makes the call again, and a second
 //! refusal ends the run with [`Bound::Memory`]. The accounting after the
 //! call still runs for every function, and for one that reserved it
-//! confirms room the reservation already took. A function whose result is
-//! no larger than a fixed multiple of its arguments reserves nothing: its
-//! arguments are live and inside the bound, so it can pass the bound by
-//! that multiple at most before the accounting refuses it.
+//! confirms room the reservation already took. A function whose result and
+//! temporaries are no larger than a small fixed multiple of its arguments
+//! (a copy, a concatenation, a case change at most three times its text)
+//! reserves nothing: its arguments are live and inside the bound, so it can
+//! pass the bound by that multiple at most before the accounting refuses
+//! it. A larger multiple is reserved like an amplifier: `json.parse` holds
+//! a tree node for every two bytes of `[0,0,...]`, and an integer's digits
+//! in radix 2 are eight times its bytes.
 //!
 //! The laws: `the_memory_bound_refuses_a_native_reservation_before_the_allocation`
 //! here pins the machine's side. The functions that must reserve are pinned
-//! where they live: `an_amplifier_reserves_its_result_before_it_builds_it`
-//! and `n_pow_reserves_each_product_before_it_multiplies` in
+//! where they live: `an_amplifier_reserves_its_result_before_it_builds_it`,
+//! `an_integer_reserves_its_digits_before_it_writes_them` and
+//! `n_pow_reserves_each_product_before_it_multiplies` in
 //! `lash-kernel-lib`, and
 //! `a_result_the_heap_has_no_room_for_is_refused_at_its_reservation` in
 //! `lash-ext-regex-ecma`.

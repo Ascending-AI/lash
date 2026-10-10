@@ -7,7 +7,7 @@ use std::sync::Arc;
 use lash_kernel_doc::{
     ErrorValue, Float, Formula, FunctionDefinition, FunctionRegistry, Guard, Identity,
     Implementation, Integer, KERNEL_VERSION, Name, NativeCall, NativeError, NativeFunction,
-    Operand, Param, QualifiedName, RegistryError, Signature, Type, Value, ValueKind,
+    NativeHeap, Operand, Param, QualifiedName, RegistryError, Signature, Type, Value, ValueKind,
 };
 use num_bigint::BigInt;
 use num_traits::ToPrimitive;
@@ -519,14 +519,14 @@ impl NativeFunction for NumericFunction {
                 _ => Err(raised("type_error", "expected a number")),
             },
             Operation::ToText => match a {
-                Value::Int(value) => Ok(Value::text(value.to_string())),
+                Value::Int(value) => integer_text(call.heap, value, 10),
                 Value::Float(value) => Ok(Value::text(value.to_string())),
                 _ => Err(raised("type_error", "expected a number")),
             },
             Operation::IntText => {
                 let radix = radix(&call.args[1])?;
                 if let Value::Int(value) = a {
-                    Ok(Value::text(value.as_bigint().to_str_radix(radix)))
+                    integer_text(call.heap, value, radix)
                 } else {
                     Err(raised("type_error", "expected an integer"))
                 }
@@ -561,6 +561,22 @@ impl NativeFunction for NumericFunction {
             }
         }
     }
+}
+
+/// An integer's digits in `radix`, a text that can be eight times the
+/// integer's own bytes (radix 2). The digits are reserved, as the text and
+/// as the buffer they are written in, before they are written; a refusal
+/// is [`NativeError::Memory`].
+pub(crate) fn integer_text(
+    heap: &mut dyn NativeHeap,
+    integer: &Integer,
+    radix: u32,
+) -> Result<Value, NativeError> {
+    // An integer below 2^bits has at most bits / log2(radix) + 1 digits;
+    // one more digit absorbs the float's rounding, and one is the sign.
+    let digits = (integer.bits() as f64 / f64::from(radix).log2()) as u64 + 3;
+    heap.reserve(0, digits.saturating_mul(2))?;
+    Ok(Value::text(integer.as_bigint().to_str_radix(radix)))
 }
 
 fn radix(value: &Value) -> Result<u32, NativeError> {

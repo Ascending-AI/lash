@@ -3,7 +3,9 @@ use std::fmt::Write as _;
 use lash_kernel_doc::{Formula, NativeCall, NativeError, NativeHeap, Type, Value};
 use num_traits::ToPrimitive;
 
-use super::{Function, arg, count_arg, definition, integer_arg, raise, text_arg, text_buffer};
+use super::{
+    Function, arg, count_arg, definition, integer_arg, integer_value, raise, text_arg, text_buffer,
+};
 
 pub(super) fn functions() -> Vec<Function> {
     let mut parts = definition(
@@ -163,7 +165,8 @@ fn radix(call: NativeCall<'_>) -> Result<Value, NativeError> {
         .to_u32()
         .filter(|r| (2..=36).contains(r))
         .ok_or_else(|| raise("number_range", "radix must be between 2 and 36"))?;
-    Ok(Value::text(integer_arg(call.args, 0)?.to_str_radix(radix)))
+    let integer = integer_value(call.args, 0)?;
+    crate::numbers::integer_text(call.heap, integer, radix)
 }
 
 fn pad(call: NativeCall<'_>) -> Result<Value, NativeError> {
