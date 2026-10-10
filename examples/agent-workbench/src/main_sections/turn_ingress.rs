@@ -1,6 +1,13 @@
 use super::*;
 use lash::SessionId;
 
+pub(crate) fn turn_input_routes() -> Router<AppState> {
+    Router::new()
+        .route("/api/turn/input", post(enqueue_turn_input))
+        .route("/api/turn/input/{input_id}", delete(cancel_pending_input))
+        .route("/api/turn/input/{input_id}/edit", post(edit_pending_input))
+}
+
 // The workbench's turn-input ingress admission.
 //
 // Two routes admit an input into the session's durable ingress lane —
@@ -183,5 +190,96 @@ pub(crate) async fn reject_if_active_turn_settled(
             "active-turn input `{}` disappeared during settle reconciliation",
             acceptance.input_id
         ))),
+    }
+}
+
+/// Session admission and authorization precede every queue mutation. The store
+/// owns withdrawal, including the race with engine admission; the host returns
+/// its typed answer instead of inferring success from an earlier read.
+async fn pending_input_session(
+    state: &AppState,
+    query: &SessionQuery,
+) -> Result<lash::DurableSession, AppError> {
+    let session_id = state.admit_session(query, "api.turn.input.manage").await?;
+    state
+        .authorization
+        .authorize(WorkbenchAuthorizationAction::ManageTurnInputs {
+            session_id: session_id.clone(),
+        })?;
+    state
+        .core
+        .session(session_id)
+        .durable()
+        .await
+        .map_err(AppError::runtime)
+}
+
+pub(crate) async fn cancel_pending_input(
+    State(state): State<AppState>,
+    Query(query): Query<SessionQuery>,
+    AxumPath(input_id): AxumPath<String>,
+) -> Result<Json<lash::PendingTurnInputCancelReceipt>, AppError> {
+    let session = pending_input_session(&state, &query).await?;
+    let receipt = session
+        .cancel_pending_turn_inputs([lash::PendingTurnInputCancelTarget::input_id(input_id)])
+        .await
+        .map_err(AppError::runtime)?
+        .into_iter()
+        .next()
+        .ok_or_else(|| AppError::internal("input withdrawal returned no receipt"))?;
+    publish_input_withdrawals(&state, std::slice::from_ref(&receipt.outcome));
+    Ok(Json(receipt))
+}
+
+pub(crate) async fn edit_pending_input(
+    State(state): State<AppState>,
+    Query(query): Query<SessionQuery>,
+    AxumPath(input_id): AxumPath<String>,
+) -> Result<Json<lash::PendingTurnInputSuffixCancelOutcome>, AppError> {
+    let session = pending_input_session(&state, &query).await?;
+    let outcome = session
+        .cancel_pending_turn_input_suffix(lash::PendingTurnInputCancelTarget::input_id(input_id))
+        .await
+        .map_err(AppError::runtime)?;
+    if let lash::PendingTurnInputSuffixCancelOutcome::Outcomes { outcomes, .. } = &outcome {
+        publish_input_withdrawals(&state, outcomes);
+    }
+    Ok(Json(outcome))
+}
+
+fn publish_input_withdrawals(state: &AppState, outcomes: &[lash::PendingTurnInputCancelOutcome]) {
+    for outcome in outcomes {
+        let lash::PendingTurnInputCancelOutcome::Cancelled(input) = outcome else {
+            continue;
+        };
+        let text = input
+            .input
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                lash::InputItem::Text { text } => Some(text.as_str()),
+                lash::InputItem::Attachment { .. } => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let receipt = TurnInputReceipt {
+            accepted: false,
+            input_id: input.input_id.to_string(),
+            ingress: input.state.ingress(),
+            state: input.state.clone(),
+            text,
+        };
+        state.trace_for_session(
+            &input.session_id,
+            "turn_input.cancelled",
+            json!({ "outcome": outcome }),
+        );
+        // The existing input lane carries the durable cancelled state to all
+        // viewers. No new persisted event shape or process-local queue exists.
+        state.publish_for_session_identified(
+            &input.session_id,
+            format!("turn-input-cancelled:{}", input.input_id),
+            StreamItem::TurnInput { receipt },
+        );
     }
 }

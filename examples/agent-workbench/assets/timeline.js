@@ -505,6 +505,7 @@ function createWorkbenchTimeline({ list, footer, empty, hooks = {} }) {
   const committedKeys = new Map();
   const committedCounters = new Map();
   const admittedInputs = new Set();
+  const cancelledInputs = new Set();
   let pendingSends = 0;
   /* Every change takes the next epoch. A snapshot read that started at
      epoch E retires only what was last said at or before E: anything the
@@ -1049,10 +1050,22 @@ function createWorkbenchTimeline({ list, footer, empty, hooks = {} }) {
       const node = document.createElement("div");
       const kind = el("div", "ingress-kind");
       const body = el("div", "ingress-text");
-      node.append(kind, body);
-      entry.view = { node, kind, body };
+      const actions = el("div", "ingress-actions");
+      const edit = el("button", "inline-action", "edit");
+      const cancel = el("button", "inline-action", "cancel input");
+      edit.type = cancel.type = "button";
+      edit.addEventListener("click", () => hooks.editPendingInput?.(entry.payload));
+      cancel.addEventListener("click", async () => {
+        edit.disabled = cancel.disabled = true;
+        try { await hooks.cancelPendingInput?.(entry.payload.input_id); }
+        catch (error) { local("error", { text: error.message || "Input cancellation failed. Try again." }); }
+        finally { edit.disabled = cancel.disabled = false; }
+      });
+      actions.append(edit, cancel);
+      node.append(kind, body, actions);
+      entry.view = { node, kind, body, actions, edit, cancel };
     }
-    const { node, kind, body } = entry.view;
+    const { node, kind, body, actions, edit, cancel } = entry.view;
     node.className = "ingress-receipt " + (scope === "active_turn" ? "active-turn" : "next-turn");
     node.dataset.inputId = receipt.input_id;
     node.dataset.ingress = scope;
@@ -1064,6 +1077,9 @@ function createWorkbenchTimeline({ list, footer, empty, hooks = {} }) {
     }
     kind.textContent = label;
     body.textContent = receipt.text || "input accepted";
+    actions.hidden = Boolean(receipt.applied);
+    edit.setAttribute("aria-label", "Edit pending input: " + receipt.text);
+    cancel.setAttribute("aria-label", "Cancel pending input: " + receipt.text);
   }
 
   function renderBatch(entry) {
@@ -1177,7 +1193,13 @@ function createWorkbenchTimeline({ list, footer, empty, hooks = {} }) {
   }
 
   function applyReceipt(receipt) {
-    if (!receipt?.input_id || admittedInputs.has(receipt.input_id)) return;
+    if (!receipt?.input_id) return;
+    if (receipt.state?.cancelled) {
+      cancelledInputs.add(receipt.input_id);
+      retireFooter(`receipt:${receipt.input_id}`);
+      return;
+    }
+    if (admittedInputs.has(receipt.input_id) || cancelledInputs.has(receipt.input_id)) return;
     footerRow(`receipt:${receipt.input_id}`, "receipt", { ...footerRows.get(`receipt:${receipt.input_id}`)?.payload, ...receipt });
   }
 
@@ -1339,7 +1361,7 @@ function createWorkbenchTimeline({ list, footer, empty, hooks = {} }) {
     const waitingReceipts = new Map();
     for (const pending of state.pending_turn_inputs || []) {
       const admission = pending?.input;
-      if (!admission?.input_id) continue;
+      if (!admission?.input_id || cancelledInputs.has(admission.input_id)) continue;
       const text = (admission.input?.items || []).find(item => item?.type === "text" && typeof item.text === "string")?.text
         || "pending input";
       if (pending.status?.kind === "admitted" && pending.status.run) {
@@ -1496,6 +1518,7 @@ function createWorkbenchTimeline({ list, footer, empty, hooks = {} }) {
     committedKeys.clear();
     committedCounters.clear();
     admittedInputs.clear();
+    cancelledInputs.clear();
     pendingSends = 0;
     list.replaceChildren();
     footer.replaceChildren();

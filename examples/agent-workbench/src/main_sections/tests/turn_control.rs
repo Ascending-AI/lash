@@ -800,3 +800,121 @@ async fn a_confirmed_tombstone_retires_the_route_a_cancel_had_to_keep() {
     gate.release(1);
     workbench.shutdown().await;
 }
+
+/// FIG-995: queue management withdraws at the store boundary, edits only a
+/// successfully cancelled anchor, and leaves earlier and admitted input alone.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn queued_inputs_can_be_single_cancelled_suffix_edited_and_resubmitted() {
+    let mut gate = GatedProvider::new();
+    let workbench = Workbench::builder(gate.provider.clone()).build().await;
+    let state = &workbench.state;
+    let session_id = state.current_session_id();
+    let turn_id = running_turn(state, &mut gate).await;
+    let app = turn_input_routes().with_state(state.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind routes");
+    let address = listener.local_addr().expect("address");
+    let server = tokio::spawn(async move { axum::serve(listener, app).await });
+    let client = reqwest::Client::new();
+    let base = format!("http://{address}/api/turn/input");
+    let mut ids = Vec::new();
+    for text in [
+        "keep earlier",
+        "edit anchor",
+        "cancel later",
+        "single cancel",
+    ] {
+        let receipt = client
+            .post(&base)
+            .json(&json!({"text": text, "ingress": "next_turn"}))
+            .send()
+            .await
+            .expect("enqueue")
+            .error_for_status()
+            .expect("accepted")
+            .json::<Value>()
+            .await
+            .expect("receipt");
+        ids.push(receipt["input_id"].as_str().expect("id").to_owned());
+    }
+    let single = client
+        .delete(format!("{base}/{}", ids[3]))
+        .send()
+        .await
+        .expect("cancel");
+    assert_eq!(
+        single.status(),
+        StatusCode::OK,
+        "the host exposes single cancellation"
+    );
+    assert_eq!(
+        single.json::<Value>().await.expect("single receipt")["outcome"]["outcome"],
+        "cancelled"
+    );
+    let suffix = client
+        .post(format!("{base}/{}/edit", ids[1]))
+        .send()
+        .await
+        .expect("edit")
+        .error_for_status()
+        .expect("suffix cancelled")
+        .json::<Value>()
+        .await
+        .expect("suffix receipt");
+    assert_eq!(suffix["outcome"], "outcomes");
+    let outcomes = suffix["data"]["outcomes"].as_array().expect("outcomes");
+    assert_eq!(
+        outcomes
+            .iter()
+            .filter(|o| o["outcome"] == "cancelled")
+            .count(),
+        2
+    );
+    let replacement = client
+        .post(&base)
+        .json(&json!({"text": "edited replacement", "ingress": "next_turn"}))
+        .send()
+        .await
+        .expect("resubmit")
+        .error_for_status()
+        .expect("accepted")
+        .json::<Value>()
+        .await
+        .expect("replacement");
+    assert!(!ids.iter().any(|id| replacement["input_id"] == *id));
+    let session = state
+        .open_session(&session_id, "test")
+        .await
+        .expect("session");
+    let pending = session
+        .durable()
+        .pending_turn_inputs()
+        .await
+        .expect("pending");
+    assert!(pending.iter().any(|p| p.input.input_id == ids[0]));
+    assert!(
+        pending
+            .iter()
+            .any(|p| replacement["input_id"] == p.input.input_id.to_string())
+    );
+    assert!(
+        !pending
+            .iter()
+            .any(|p| ids[1..].contains(&p.input.input_id.to_string()))
+    );
+    let admitted = pending.iter().find(|p| matches!(&p.status, lash::PendingTurnInputReadStatus::Admitted { run } if *run == turn_id)).expect("admitted input");
+    let refusal = client
+        .delete(format!("{base}/{}", admitted.input.input_id))
+        .send()
+        .await
+        .expect("cancel admitted")
+        .json::<Value>()
+        .await
+        .expect("typed refusal");
+    assert_eq!(refusal["outcome"]["outcome"], "already_admitted");
+    gate.release(1);
+    server.abort();
+    let _ = server.await;
+    workbench.shutdown().await;
+}

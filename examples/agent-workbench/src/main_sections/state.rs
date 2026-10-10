@@ -119,6 +119,9 @@ pub(crate) enum WorkbenchAuthorizationAction {
     EnqueueTurnInput {
         session_id: SessionId,
     },
+    ManageTurnInputs {
+        session_id: SessionId,
+    },
     CancelTurn {
         session_id: SessionId,
     },
@@ -167,6 +170,7 @@ impl WorkbenchAuthorizer for AllowAllWorkbenchAuthorizer {
             WorkbenchAuthorizationAction::Observe { session_id }
             | WorkbenchAuthorizationAction::EnqueueTurn { session_id }
             | WorkbenchAuthorizationAction::EnqueueTurnInput { session_id }
+            | WorkbenchAuthorizationAction::ManageTurnInputs { session_id }
             | WorkbenchAuthorizationAction::CancelTurn { session_id }
             | WorkbenchAuthorizationAction::ManageQueuedWork { session_id } => {
                 let _ = session_id;

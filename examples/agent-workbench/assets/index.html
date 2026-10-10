@@ -971,13 +971,25 @@
 
     .ingress-receipt {
       display: grid;
-      grid-template-columns: 112px minmax(0, 1fr);
+      grid-template-columns: 112px minmax(0, 1fr) auto;
       gap: var(--space-md);
       margin: var(--space-sm) 0;
       padding: var(--space-sm) var(--space-md);
       border: 1px solid var(--line);
       border-radius: 4px;
       background: var(--form);
+    }
+
+    .ingress-actions { display: flex; gap: var(--space-sm); align-items: start; flex-wrap: wrap; }
+    .pending-input-editor { padding: var(--space-md); background: var(--form); border: 1px solid var(--line); }
+    .pending-input-editor label { display: block; margin-bottom: var(--space-sm); }
+    .pending-input-editor textarea { width: 100%; min-height: 96px; padding: var(--space-sm); color: var(--chalk); background: var(--form); border: 1px solid var(--line-strong); font: inherit; resize: vertical; }
+    .pending-input-editor p { margin: var(--space-sm) 0; color: var(--chalk-mid); }
+    .pending-input-editor button, .ingress-actions .inline-action { min-height: 32px; font-size: var(--text-xs); }
+    .ingress-actions button:disabled { opacity: 0.5; cursor: wait; }
+    .pending-input-editor textarea:focus-visible, .ingress-actions button:focus-visible { outline: 2px solid var(--sodium); outline-offset: 3px; }
+    @media (max-width: 600px) {
+      .ingress-receipt { grid-template-columns: minmax(0, 1fr); gap: var(--space-sm); }
     }
 
     .ingress-receipt.active-turn {
@@ -2657,7 +2669,17 @@
           connecting to the workbench…
         </div>
         <div id="timelineRows" class="timeline-rows"></div>
-        <div id="timelineFooter" class="timeline-footer" aria-label="Waiting for a turn"></div>
+        <div id="timelineFooter" class="timeline-footer" aria-label="Pending turn inputs"></div>
+        <form id="pendingInputEditor" class="pending-input-editor" hidden>
+          <label for="pendingInputText">Edit pending input</label>
+          <textarea id="pendingInputText" required></textarea>
+          <p id="pendingInputWarning">Resubmitting cancels this input and all later pending inputs, then sends the edited input as a new turn. Later inputs are not resubmitted.</p>
+          <p id="pendingInputStatus" role="status" aria-live="polite"></p>
+          <div class="ingress-actions">
+            <button id="pendingInputSubmit" type="submit" class="inline-action">cancel from here &amp; resubmit</button>
+            <button id="pendingInputClose" type="button" class="inline-action">keep queued</button>
+          </div>
+        </form>
       </section>
 
       <section id="executionExplorer" class="execution-explorer" aria-label="Lash VM execution explorer" hidden>
@@ -3772,6 +3794,8 @@
           if (!response.ok) throw new Error("approval decision failed");
           refreshApprovals();
         },
+        editPendingInput: receipt => openPendingInputEditor(receipt),
+        cancelPendingInput: inputId => cancelPendingInput(inputId),
         async cancelQueuedBatch(batchId) {
           const response = await fetch("/api/queued-work/" + encodeURIComponent(batchId), { method: "DELETE" });
           if (!response.ok) throw new Error("queued-work action failed");
@@ -3779,6 +3803,117 @@
         }
       }
     });
+    const pendingInputEditor = document.getElementById("pendingInputEditor");
+    const pendingInputText = document.getElementById("pendingInputText");
+    const pendingInputStatus = document.getElementById("pendingInputStatus");
+    const pendingInputSubmit = document.getElementById("pendingInputSubmit");
+    const pendingInputClose = document.getElementById("pendingInputClose");
+    let pendingInputDraft = null;
+    let pendingInputMutation = false;
+
+    function closePendingInputEditor() {
+      pendingInputDraft = null;
+      pendingInputEditor.hidden = true;
+    }
+
+    function openPendingInputEditor(receipt) {
+      if (pendingInputMutation || pendingInputDraft) return;
+      pendingInputDraft = { inputId: receipt.input_id, sessionId: projectionState.sessionId, cancelled: false, attachment: null };
+      pendingInputText.value = receipt.text || "";
+      pendingInputStatus.textContent = "";
+      pendingInputSubmit.hidden = false;
+      pendingInputSubmit.textContent = "cancel from here & resubmit";
+      pendingInputClose.textContent = "keep queued";
+      pendingInputEditor.hidden = false;
+      pendingInputText.focus();
+    }
+
+    function showInputWithdrawal(outcome) {
+      if (outcome.outcome === "cancelled" || outcome.outcome === "already_cancelled") {
+        const input = outcome.data;
+        conversation.showReceipt({ input_id: input.input_id, state: input.state });
+      }
+    }
+
+    function inputWithdrawalMessage(outcome) {
+      return {
+        already_admitted: "This input has already been admitted to a run. Use the running turn controls to stop it.",
+        already_completed: "This input has already completed.",
+        already_cancelled: "This input was already cancelled. It was not resubmitted.",
+        not_found: "This input is no longer available. Refresh the session."
+      }[outcome] || "The input could not be withdrawn.";
+    }
+
+    async function cancelPendingInput(inputId) {
+      const sessionId = projectionState.sessionId;
+      const response = await fetch("/api/turn/input/" + encodeURIComponent(inputId), { method: "DELETE" });
+      if (!response.ok) throw new Error("Input cancellation failed. Try again.");
+      const receipt = await response.json();
+      if (sessionId !== projectionState.sessionId) return;
+      showInputWithdrawal(receipt.outcome);
+      if (receipt.outcome.outcome !== "cancelled") renderNote(inputWithdrawalMessage(receipt.outcome.outcome));
+    }
+
+    pendingInputClose.addEventListener("click", () => {
+      if (!pendingInputMutation) closePendingInputEditor();
+    });
+    pendingInputEditor.addEventListener("submit", async event => {
+      event.preventDefault();
+      const text = pendingInputText.value.trim();
+      const draft = pendingInputDraft;
+      if (!text || !draft || pendingInputMutation) return;
+      pendingInputMutation = true;
+      pendingInputSubmit.disabled = pendingInputClose.disabled = true;
+      pendingInputStatus.textContent = "Withdrawing pending inputs…";
+      try {
+        if (!draft.cancelled) {
+          const response = await fetch("/api/turn/input/" + encodeURIComponent(draft.inputId) + "/edit", { method: "POST" });
+          if (!response.ok) throw new Error("Could not withdraw the queue. Your edit is still here; try again.");
+          const receipt = await response.json();
+          if (draft !== pendingInputDraft || draft.sessionId !== projectionState.sessionId) return;
+          const outcomes = receipt.data?.outcomes || [];
+          for (const outcome of outcomes) showInputWithdrawal(outcome);
+          const anchor = outcomes.find(outcome => outcome.data?.input_id === draft.inputId || outcome.data?.input?.input_id === draft.inputId);
+          if (anchor?.outcome !== "cancelled") {
+            const cancelled = outcomes.filter(outcome => outcome.outcome === "cancelled").length;
+            pendingInputStatus.textContent = inputWithdrawalMessage(anchor?.outcome || "not_found")
+              + (cancelled ? ` ${cancelled} later pending inputs were cancelled.` : "");
+            pendingInputSubmit.hidden = true;
+            pendingInputClose.textContent = "close";
+            return;
+          }
+          draft.cancelled = true;
+          draft.attachment = anchor.data.input.items.find(item => item.type === "attachment")?.reference || null;
+          const cancelled = outcomes.filter(outcome => outcome.outcome === "cancelled").length;
+          const retained = outcomes.filter(outcome => outcome.outcome === "already_admitted").length;
+          draft.withdrawal = `${cancelled} pending input${cancelled === 1 ? "" : "s"} cancelled.`
+            + (retained ? ` ${retained} already admitted; those runs continue.` : "");
+          pendingInputClose.textContent = "discard edit";
+          pendingInputSubmit.textContent = "resubmit edited input";
+        }
+        pendingInputStatus.textContent = draft.withdrawal + " Resubmitting…";
+        let response;
+        try { response = await fetch("/api/turn", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text, attachment: draft.attachment })
+        }); } catch (_) {
+          pendingInputSubmit.hidden = true;
+          throw new Error(draft.withdrawal + " Resubmission outcome is unknown. Refresh the session before sending again; copy your edited draft if needed.");
+        }
+        if (draft !== pendingInputDraft || draft.sessionId !== projectionState.sessionId) return;
+        if (!response.ok) throw new Error(draft.withdrawal + " Resubmission failed. Your edited draft is still here; retry resubmission.");
+        const accepted = await response.json();
+        if (accepted.queued_input) conversation.showReceipt(accepted.queued_input);
+        renderNote(draft.withdrawal + " Edited input resubmitted as a new turn.");
+        closePendingInputEditor();
+      } catch (error) {
+        if (draft === pendingInputDraft) pendingInputStatus.textContent = error.message;
+      } finally {
+        pendingInputMutation = false;
+        pendingInputSubmit.disabled = pendingInputClose.disabled = false;
+      }
+    });
+
     let busy = false;
     let resetInFlight = false;
     let controller = null;
@@ -4298,6 +4433,7 @@
 
     /* The only clear of the timeline: a different session, or a cold boot. */
     function clearTranscript() {
+      closePendingInputEditor();
       conversation.reset();
       clearStreamingUsage();
       lastUserText = "";

@@ -156,7 +156,58 @@ Save ordered provider/trace evidence as `04-provider-order.json`, committed stor
 as `04-session-history.json`, and screenshot `04-two-turns-settled.png` with the latest
 transcript rows visible.
 
-## Phase 5 — Teardown and score
+## Phase 5 — Queue → view → edit → cancel (FIG-995)
+
+This is a separate named guarantee: **queued inputs can be listed, single-cancelled,
+suffix-edited and resubmitted without claiming withdrawal of admitted input**.
+Use a fresh running turn with a proven sleep window as in Phase 1. For a bounded,
+repeatable referee of queue management alone, boot a fresh workbench with
+`AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO=exec-blocked`: its first cell sleeps,
+leaving the durable engine active while the browser manages the queue. Gate
+its dev-only startup warning, `warning: agent-workbench development provider
+scenario enabled: exec-blocked`, and the served TypeScript cell
+`await sleep(600000);` before queueing. The scripted follow-up answer is
+`session recovered after break glass`; it is not a live-model assertion. This
+fixture substitutes only the provider; the routes, engine and SQLite are real.
+It does not certify Phases 2–4's live-provider assertions.
+
+1. In the browser, **queue next** four unique messages in order: `KEEP`, `EDIT`,
+   `LATER`, `SINGLE` (with a run nonce). Record each HTTP receipt and input id.
+   All four must appear in the pending rail, with **edit** and **cancel input**.
+   Reconcile the visible order and text with `/api/state.pending_turn_inputs`
+   and SQLite `pending_turn_inputs`, ordered by `enqueue_seq`. Screenshot
+   `05-queue-desktop.png` and `05-queue-mobile.png`.
+2. Click **cancel input** on `SINGLE`. Capture
+   `DELETE /api/turn/input/<input_id>`: its typed receipt must say `cancelled`.
+   Only this row disappears; the running turn and the other three stay.
+   The row on disk becomes `cancelled`, and the session trace carries
+   `agent_workbench.turn_input.cancelled` with that input id.
+3. Click **edit** on `EDIT`. The inline editor must contain its text and warn
+   that this input **and all later pending inputs** are cancelled, and later
+   inputs are not resubmitted. **keep queued** closes the editor without any
+   withdrawal. Reopen, change the text to `EDITED`, and click
+   **cancel from here & resubmit**. Screenshot `05-edit-warning.png` before
+   submission. Capture `POST /api/turn/input/<input_id>/edit` and its typed
+   suffix outcomes, followed by `POST /api/turn`. Only an anchor whose outcome
+   is `cancelled` may be resubmitted. An `already_admitted` input keeps its run;
+   the UI must state that fact and the number of later inputs withdrawn.
+4. The resubmission has a fresh input id and next-turn ingress. `KEEP` stays,
+   `EDIT` and `LATER` disappear, and `EDITED` appears once. SQLite must retain
+   the original rows as `cancelled`, plus a new open `EDITED` row after `KEEP`.
+   Reconcile the replacement's input id across page, API and disk. If the
+   original had a PNG reference, the replacement must retain that same ref.
+5. Reload the page to prove this list is recovered from durable state. Cancel
+   `EDITED` through its own **cancel input**, and reconcile page/API/disk again:
+   only `KEEP` remains pending behind the running input. A second browser tab
+   must also retire confirmed cancellations through the product event lane.
+   Screenshot `05-managed-queue.png`; save all receipts, the before/after API
+   reads, SQLite lifecycle rows and cancellation trace as `05-management.json`.
+6. No cancelled marker may enter committed transcript or provider history.
+   Stop the running turn and withdraw `KEEP` before teardown. A network error
+   during resubmission must leave the edited text available and state that the
+   submission outcome is unknown, rather than silently issuing another send.
+
+## Phase 6 — Teardown and score
 
 Run `just agent-workbench-down <port>` and confirm the workbench is gone.
 
@@ -169,6 +220,7 @@ Run `just agent-workbench-down <port>` and confirm the workbench is gone.
 | Exactly-once injection | input reaches the next initial-turn provider iteration, commits once as a normal user message, and appears once in later assembled history | | `04-provider-order.json`, session store |
 | Post-settle dispatch | queue marker first appears after initial terminal in its own turn | | provider/trace ordering |
 | Transcript fidelity | injected and queued user messages agree across rendered page, `/api/state`, and durable session graph | | `04-two-turns-settled.png`, history JSON |
+| Queue management (FIG-995) | ordered list; one single cancellation; honest suffix withdrawal; fresh replacement; reload and two-tab reconciliation agree with API, SQLite and trace | | `05-management.json`, queue/editor screenshots |
 | Claim settlement | both durable input ids settle with no duplicate or stranded row | | SQLite evidence |
 
 **Aggregate:** did the host-selected ingress operation match the rendered intent and

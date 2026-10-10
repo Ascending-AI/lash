@@ -393,6 +393,25 @@ an untyped diagnostic, and it never infers application from
 `pending_turn_inputs()`: pending input is admission state, not proof that a
 canonical message was committed.
 
+### Managing pending inputs
+
+The timeline lists pending turn inputs with **cancel input** and **edit** controls.
+Single cancellation uses `DELETE /api/turn/input/<input_id>`. Editing opens an
+inline draft: **keep queued** closes it without a mutation, while
+**cancel from here & resubmit** calls `POST /api/turn/input/<input_id>/edit` to
+withdraw the same-session suffix atomically, then submits the edited text as a
+new next-turn input through `/api/turn`. The original PNG reference is retained.
+Later pending inputs are cancelled and are not automatically resubmitted.
+
+The host returns Lash's typed cancellation outcomes. Only a newly `Cancelled`
+anchor becomes an editable replacement; an already admitted input belongs to
+its run and keeps running. Confirmed withdrawals are published as cancelled
+`TurnInput` receipts to all viewers, and reload reconstructs the queue from
+`pending_turn_inputs()`. Session admission and `ManageTurnInputs` authorization
+precede both mutations. The FIG-995 phase of
+[workbench-turn-ingress](../../runbooks/workbench-turn-ingress/runbook.md)
+reconciles the page with HTTP, SQLite and trace evidence.
+
 ### Recovery is not retry-as-copy
 
 Recovery resumes the same Lash turn id. The stable product ids and observation

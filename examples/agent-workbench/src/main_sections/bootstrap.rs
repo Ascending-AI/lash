@@ -843,7 +843,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         .route("/api/turn", post(send_turn))
         .route("/api/attachments", post(upload_attachment))
         .route("/api/attachments/{attachment_id}", get(retrieve_attachment))
-        .route("/api/turn/input", post(enqueue_turn_input))
+        .merge(turn_input_routes())
         .route("/api/turn/cancel", post(cancel_turn))
         .route("/api/session", delete(reset_chat))
         .route("/api/reset", post(reset_chat))
