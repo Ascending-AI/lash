@@ -266,7 +266,9 @@ mod tests {
     /// arrives, and a document resolves against nothing else. The standard
     /// embedding holds the kernel library, the machine's functions, the
     /// regular-expression extension and the TypeScript dialect's helpers,
-    /// each under one name.
+    /// each under one name, once for every kernel version the build
+    /// interprets: a build that interprets a version's successor holds each
+    /// function redeclared for it too (FIG-5793).
     #[test]
     fn the_standard_embedding_registers_every_function_at_startup() {
         let embedding = standard(&WorkerTuning::standard()).expect("the standard embedding");
@@ -289,10 +291,25 @@ mod tests {
                 "{name} is registered"
             );
         }
+        let mut library = names.clone();
+        library.sort();
+        for version in lash_kernel_doc::KernelVersion::ALL {
+            let mut held: Vec<String> = embedding
+                .registry()
+                .iter()
+                .filter(|(_, function)| function.definition.kernel == version.number())
+                .map(|(_, function)| function.definition.name.to_string())
+                .collect();
+            held.sort();
+            assert_eq!(
+                held, library,
+                "kernel version {version} holds every function once, under its one name"
+            );
+        }
         assert_eq!(
             embedding.registry().iter().count(),
-            names.len(),
-            "every registered function has one name"
+            names.len() * lash_kernel_doc::KernelVersion::ALL.len(),
+            "every registered function is of a version the build interprets"
         );
         assert!(embedding.dialects.contains_key("typescript"));
     }

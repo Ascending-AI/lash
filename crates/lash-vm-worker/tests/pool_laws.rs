@@ -12,7 +12,6 @@ use lash_kernel_vm::{Bindings, Bound, End, Outcome, Request, RunError, Start as 
 use lash_vm_client::wire::{self, EndWire, OutcomeWire, ParkWire, ProjectionRead, StartWire};
 use lash_vm_client::*;
 use lash_vm_protocol::*;
-use std::time::Duration;
 
 const SLICE: u64 = 1_000_000;
 
@@ -21,9 +20,10 @@ fn config(mode: &str) -> PoolConfig {
     if !mode.is_empty() {
         entry.args.push(mode.into());
     }
+    // The shipped watchdog: it also bounds a worker's startup, which
+    // assembles the whole standard library before the worker is ready.
     let mut config = PoolConfig::standard(entry);
     config.max_workers = 1;
-    config.protocol.no_response_watchdog = Duration::from_secs(2);
     config
 }
 

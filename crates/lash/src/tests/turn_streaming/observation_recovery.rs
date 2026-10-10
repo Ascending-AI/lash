@@ -128,16 +128,106 @@ fn reported_failures<'a>(
         .collect()
 }
 
+/// A live replay whose publication of a reported failure is slow: the
+/// stop's terminal, which its turn holds until the commit is accepted
+/// (ADR 0122), reaches the replay well after the store shows the run ended.
+struct SlowFailurePublication {
+    inner: lash_core::facade_support::InMemoryLiveReplayStore,
+}
+
+impl SlowFailurePublication {
+    const DELAY: std::time::Duration = std::time::Duration::from_millis(300);
+}
+
+#[async_trait::async_trait]
+impl lash_core::LiveReplayStore for SlowFailurePublication {
+    async fn publish(
+        &self,
+        session_id: &SessionId,
+        revision: lash_core::SessionRevision,
+        events: Vec<lash_core::LiveReplayEventDraft>,
+    ) -> std::result::Result<
+        Vec<Arc<lash_core::SessionObservationEvent>>,
+        lash_core::LiveReplayStoreError,
+    > {
+        if events.iter().any(|event| {
+            matches!(
+                &event.payload,
+                lash_core::SessionObservationEventPayload::TurnActivity(activity)
+                    if matches!(activity.event, TurnEvent::Error(_))
+            )
+        }) {
+            tokio::time::sleep(Self::DELAY).await;
+        }
+        self.inner.publish(session_id, revision, events).await
+    }
+
+    async fn replay_after_cursor(
+        &self,
+        cursor: &lash_core::SessionCursor,
+    ) -> std::result::Result<lash_core::LiveReplayOutcome, lash_core::LiveReplayStoreError> {
+        self.inner.replay_after_cursor(cursor).await
+    }
+
+    async fn subscribe_after_cursor(
+        &self,
+        cursor: &lash_core::SessionCursor,
+    ) -> std::result::Result<lash_core::LiveReplaySubscribeOutcome, lash_core::LiveReplayStoreError>
+    {
+        self.inner.subscribe_after_cursor(cursor).await
+    }
+
+    fn current_cursor(
+        &self,
+        session_id: &SessionId,
+        revision: lash_core::SessionRevision,
+    ) -> lash_core::SessionCursor {
+        self.inner.current_cursor(session_id, revision)
+    }
+
+    fn earliest_cursor(
+        &self,
+        session_id: &SessionId,
+        revision: lash_core::SessionRevision,
+    ) -> lash_core::SessionCursor {
+        self.inner.earliest_cursor(session_id, revision)
+    }
+
+    async fn invalidate_all(&self) -> std::result::Result<(), lash_core::LiveReplayStoreError> {
+        self.inner.invalidate_all().await
+    }
+
+    async fn invalidate_session(
+        &self,
+        session_id: &SessionId,
+    ) -> std::result::Result<(), lash_core::LiveReplayStoreError> {
+        self.inner.invalidate_session(session_id).await
+    }
+
+    async fn trim_session(
+        &self,
+        session_id: &SessionId,
+    ) -> std::result::Result<(), lash_core::LiveReplayStoreError> {
+        self.inner.trim_session(session_id).await
+    }
+}
+
 /// FIG-5526: a provider failure with a structured vendor code reaches a
 /// host's turn-activity feed with its kind, code and retryability, and the
 /// live replay hands a reopened session the same typed payload — a host
 /// never parses the message to classify the failure.
+///
+/// FIG-5793: the failure is the stop's terminal, published only after the
+/// turn's commit, so the store shows the run ended first. The replay here
+/// publishes it late on purpose: the send follower still collects it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_provider_failure_reaches_the_activity_feed_typed_and_reads_back_after_a_reopen()
 -> Result<()> {
-    let replay = Arc::new(lash_core::facade_support::InMemoryLiveReplayStore::new(
-        lash_core::facade_support::InMemoryLiveReplayStoreConfig::standard(),
-    ));
+    let replay = Arc::new(SlowFailurePublication {
+        inner: lash_core::facade_support::InMemoryLiveReplayStore::new(
+            lash_core::facade_support::InMemoryLiveReplayStoreConfig::standard(),
+        ),
+    });
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         sqlite_memory_store_backend().await,
     ))

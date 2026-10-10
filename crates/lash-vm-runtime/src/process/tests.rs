@@ -9,6 +9,8 @@ use lash_vm_client::{OpaqueVmState, VmOwner};
 use super::advance::{advance, decode, state_format};
 use super::state::{Issued, KERNEL_RUN_STEP, KernelRunInput, KernelRunOutput, Phase, refused};
 use lash_kernel_doc::KernelVersion;
+use lash_kernel_state::{ParkedRun, Run};
+use std::collections::{BTreeMap, BTreeSet};
 
 fn process() -> lash_core::ProcessId {
     lash_core::ProcessIdMint::sequential_id_for_testing(1)
@@ -24,15 +26,39 @@ fn completed(text: String) -> SettledOutput {
     ))
 }
 
+/// A parked run sealed under this build's kernel version, whose bytes state
+/// kernel version `stated`: what a worker exports when `stated` is the
+/// seal's version.
+fn sealed(stated: u32) -> OpaqueVmState {
+    let document = DocumentId::from_bytes([7; 32]);
+    let run = ParkedRun {
+        run: Run {
+            kernel: stated,
+            document,
+            functions: BTreeSet::new(),
+            charged: 0,
+            objects_allocated: 0,
+            waits_issued: 0,
+            ready: Vec::new(),
+            withdrawn: BTreeSet::new(),
+            unreported: Vec::new(),
+        },
+        session: BTreeMap::new(),
+        tasks: Vec::new(),
+        objects: BTreeMap::new(),
+    };
+    OpaqueVmState::seal(
+        VmOwner::new("process:law"),
+        crate::LASH_KERNEL_VERSION,
+        document.to_string(),
+        run.to_json().expect("a parked run serializes"),
+    )
+}
+
 fn parked(issued: Vec<Issued>, withdrawn: Vec<u64>) -> SettledOutput {
     completed(
         serde_json::to_string(&KernelRunOutput::Parked {
-            state: OpaqueVmState::seal(
-                VmOwner::new("process:law"),
-                crate::LASH_KERNEL_VERSION,
-                DocumentId::from_bytes([7; 32]).to_string(),
-                b"{}".to_vec(),
-            ),
+            state: sealed(crate::LASH_KERNEL_VERSION),
             issued,
             withdrawn,
         })
@@ -273,5 +299,93 @@ fn a_refused_effect_is_raised_without_a_step_and_a_withdrawn_wait_is_never_deliv
             .map(|d| (d.wait, d.outcome.clone()))
             .collect::<Vec<_>>(),
         vec![(3, OutcomeWire::Elapsed)]
+    );
+}
+
+/// KMIGRATE's stale-seal check at every engine state that holds a run
+/// (FIG-5793): a process's decode reads the kernel version the parked
+/// run's bytes state in each state the transitions write with a run in it
+/// (parked on a step and a timer, a run in flight, asleep on the timer,
+/// ended) and accepts it under its seal, and refuses each one whose bytes
+/// state another version than the seal.
+#[test]
+fn every_engine_state_holding_a_run_is_read_against_its_seal() {
+    let mut written = Vec::new();
+    let (state, run0) = started();
+    let (state, action) = settle(
+        state,
+        &run0,
+        parked(
+            vec![
+                effect(1, element(0)),
+                Issued::Sleep {
+                    wait: 2,
+                    identity: element(1),
+                    until_ms: 5_000,
+                },
+            ],
+            vec![],
+        ),
+    );
+    written.push(state.clone());
+    let EngineAction::Steps { steps, .. } = &action else {
+        panic!("a park on an effect asks for its step, found {action:?}");
+    };
+    let effect_step = steps[0].step().clone();
+    let (state, action) = settle(state, &effect_step, completed("\"a\"".to_owned()));
+    let (run1, _, _) = run_of(&action);
+    written.push(state.clone());
+    let (state, action) = settle(state, &run1, parked(vec![], vec![]));
+    assert!(matches!(action, EngineAction::Sleep { .. }));
+    written.push(state.clone());
+    let (state, action) =
+        advance(KernelVersion::NEWEST, state, EngineEvent::Woke).expect("a wake advances");
+    let (run2, _, _) = run_of(&action);
+    written.push(state.clone());
+    let outcome = lash_core::ProcessAwaitOutput::from_tool_output(
+        lash_core::ToolCallOutput::success(serde_json::json!("done")),
+    );
+    let (state, _) = settle(
+        state,
+        &run2,
+        completed(
+            serde_json::to_string(&KernelRunOutput::Ended {
+                outcome: Box::new(outcome),
+            })
+            .expect("a run output serializes"),
+        ),
+    );
+    written.push(state);
+
+    let phases = |phase: &Phase| match phase {
+        Phase::Running { .. } => "running",
+        Phase::Parked => "parked",
+        Phase::Ended => "ended",
+    };
+    let mut seen = Vec::new();
+    for state in written {
+        let (mut decoded, _) = decode(KernelVersion::NEWEST, &state)
+            .unwrap_or_else(|error| panic!("a written state decodes: {error:?}"));
+        assert!(decoded.parked.is_some(), "the state holds its run");
+        seen.push(phases(&decoded.phase));
+
+        decoded.parked = Some(sealed(crate::LASH_KERNEL_VERSION + 1));
+        let stale =
+            super::advance::encode(&decoded, KernelVersion::NEWEST).expect("a state encodes");
+        let refused = decode(KernelVersion::NEWEST, &stale)
+            .expect_err("a run whose bytes state another version is refused");
+        assert!(
+            format!("{refused:?}").contains(&format!(
+                "sealed under kernel version {}, and its bytes state kernel version {}",
+                crate::LASH_KERNEL_VERSION,
+                crate::LASH_KERNEL_VERSION + 1
+            )),
+            "{refused:?}"
+        );
+    }
+    assert_eq!(
+        seen,
+        vec!["parked", "running", "parked", "running", "ended"],
+        "every kind of state that holds a run is read"
     );
 }

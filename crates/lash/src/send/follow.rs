@@ -17,9 +17,12 @@
 //! committing never publishes. The replay is whole by then: a turn's node
 //! publishes the turn's activity before it commits (FIG-5507). Only a stop's
 //! own terminal activity is published after its commit (ADR 0122), and the
-//! outcome it carries is the terminal's.
+//! outcome it carries is the terminal's. A follower that has been receiving
+//! a stopped run's activity reads on for it, until the commit's own
+//! observation that follows it, for at most the follow poll's ceiling
+//! (FIG-5793).
 
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::time::Duration;
 
 use futures_util::StreamExt;
@@ -102,6 +105,10 @@ struct Adoption {
     buffered: VecDeque<(TurnId, TurnActivity)>,
     buffer_capacity: usize,
     collected: Vec<TurnActivity>,
+    /// The turn of the last activity delivered.
+    last_turn: Option<TurnId>,
+    /// Every turn whose commit this follower observed.
+    committed: HashSet<TurnId>,
 }
 
 impl Adoption {
@@ -115,7 +122,17 @@ impl Adoption {
             buffered: VecDeque::new(),
             buffer_capacity,
             collected: Vec::new(),
+            last_turn: None,
+            committed: HashSet::new(),
         }
+    }
+
+    /// Whether the turn this follower last heard the run from has not yet
+    /// been observed committing.
+    fn awaits_commit(&self) -> bool {
+        self.last_turn
+            .as_ref()
+            .is_some_and(|turn| !self.committed.contains(turn))
     }
 
     fn adopts(&self, turn: &TurnId) -> bool {
@@ -133,14 +150,15 @@ impl Adoption {
         let buffered = std::mem::take(&mut self.buffered);
         for (turn, activity) in buffered {
             if self.adopts(&turn) {
-                self.deliver(activity, tap).await;
+                self.deliver(turn, activity, tap).await;
             }
         }
     }
 
-    async fn deliver(&mut self, activity: TurnActivity, tap: &mut Tap<'_>) {
+    async fn deliver(&mut self, turn: TurnId, activity: TurnActivity, tap: &mut Tap<'_>) {
         tap.activity(&activity).await;
         self.collected.push(activity);
+        self.last_turn = Some(turn);
     }
 
     /// One observation event. Answers whether it should wake a resolve.
@@ -157,7 +175,7 @@ impl Adoption {
                         (Subject::Input(receipt), TurnEvent::QueuedInputAccepted { applications })
                         if applications.iter().any(|application| application.input_id == receipt.input_id));
                 if self.adopts(turn) {
-                    self.deliver(activity.clone(), tap).await;
+                    self.deliver(turn.clone(), activity.clone(), tap).await;
                 } else if self.run.is_none() {
                     if self.buffered.len() >= self.buffer_capacity {
                         self.buffered.pop_front();
@@ -166,8 +184,13 @@ impl Adoption {
                 }
                 applied
             }
-            SessionObservationEventPayload::Committed { .. }
-            | SessionObservationEventPayload::QueueChanged { .. } => true,
+            SessionObservationEventPayload::Committed { .. } => {
+                if let Some(turn) = event.turn_id.as_ref() {
+                    self.committed.insert(turn.clone());
+                }
+                true
+            }
+            SessionObservationEventPayload::QueueChanged { .. } => true,
             _ => false,
         }
     }
@@ -456,6 +479,9 @@ pub(super) async fn follow(
                 }
                 Resolution::Settled { run, outcome } => {
                     adoption.adopt(run.clone(), tap).await;
+                    if matches!(outcome, TurnOutcome::Stopped(_)) {
+                        await_stop_terminal(ctx, &mut adoption, &mut observation, tap).await;
+                    }
                     drain(ctx, &mut adoption, &mut observation, tap).await;
                     ctx.refresh().await?;
                     let observed = observed_before || !adoption.collected.is_empty();
@@ -626,6 +652,39 @@ async fn next_event(
             })
         }),
         Replay::Ended => std::future::pending().await,
+    }
+}
+
+/// Read on for a stopped run's terminal activity. Its node holds it for the
+/// run's commit and publishes it after (ADR 0122), and then the commit's own
+/// observation, so the store can show the run ended before the replay holds
+/// its terminal: a reported failure the host's feed would otherwise miss. A
+/// follower that has been receiving the run's activity reads until it
+/// observes the commit of the turn it last heard the run from, for at most
+/// the follow poll's ceiling: a node that died after committing publishes
+/// neither (FIG-5793).
+async fn await_stop_terminal(
+    ctx: &SendContext,
+    adoption: &mut Adoption,
+    observation: &mut Observation,
+    tap: &mut Tap<'_>,
+) {
+    let deadline = tokio::time::Instant::now() + ctx.parts.observer_pacing.follow.maximum();
+    while adoption.awaits_commit() {
+        tokio::select! {
+            event = next_event(&mut observation.replay) => match event {
+                Some(Ok(event)) => {
+                    observation.last_cursor = event.cursor.clone();
+                    let _ = adoption.observe(&event, tap).await;
+                }
+                Some(Err(_)) => observation.lost(ctx, tap).await,
+                None => {
+                    observation.replay = Replay::Ended;
+                    return;
+                }
+            },
+            () = tokio::time::sleep_until(deadline) => return,
+        }
     }
 }
 
