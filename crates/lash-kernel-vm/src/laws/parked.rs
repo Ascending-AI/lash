@@ -3,9 +3,12 @@
 //! programs, and the fragment law over what a save rewrites.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 use std::time::Instant;
 
-use lash_kernel_doc::{Datum, EffectName, Integer, Name, Object, ObjectId, TaskIdentity, Value};
+use lash_kernel_doc::{
+    Datum, EffectName, Integer, Name, Object, ObjectId, TaskIdentity, Unit, Value, parse_definition,
+};
 use lash_kernel_state::{
     Baseline, Ended, Entered, Fragment, Incoming, Outcome as SavedOutcome, ParkedRun, PerformState,
     Request as SavedRequest, Root, RootState, SavedFragment, TaskState, WaitId,
@@ -13,7 +16,8 @@ use lash_kernel_state::{
 
 use super::embedder::{Embedder, ROOMY, Setup, label};
 use crate::{
-    Bindings, Bounds, End, ImportError, Layout, Machine, Outcome, Request, Start, Step, Target,
+    Bindings, Bounds, End, ImportError, KernelMachine, Layout, Machine, Outcome, PreparedLibrary,
+    Program, Request, Start, Step, Target,
 };
 
 type Observed = (End, Vec<Datum>, Vec<Request>, u64);
@@ -707,6 +711,49 @@ fn a_parked_run_resumes_only_under_what_it_pins() {
     assert!(matches!(
         embedder.resumed(foreign).map(|_| ()).unwrap_err(),
         ImportError::DocumentMismatch { .. }
+    ));
+}
+
+/// A parked run resumes only in the bodies of the functions its document
+/// lists, which are the functions it pins (`docs/kernel/parked-state.md`,
+/// `executable`). The prepared library holds every body the registry has,
+/// so a state that stands in a body of another function is refused, even
+/// one shaped exactly like the body the run parked in.
+#[test]
+fn a_parked_call_in_a_body_the_document_does_not_list_is_refused() {
+    let mut embedder = Embedder::new(
+        "main { let f = fn(x) { let r = perform echo(x) as Any return r } \
+         let y = invoke each.twice(f, 1) return y }",
+    );
+    first_park(&mut embedder);
+    let mut parked = embedder.machine.export().unwrap();
+    let mut registry = (*super::embedder::library(true).registry).clone();
+    let again = parse_definition(
+        "function each.again(f: Fn(x: Any) -> Any, x: Any) -> Any\nkernel 1\ncharge 5\n\
+         body { let a = apply f(x) let b = apply f(a) return b }\n",
+    )
+    .unwrap();
+    let again = Unit::Library(registry.register(again, None).unwrap());
+    let twice = Unit::Library(embedder.library.ids["each.twice"]);
+    let mut moved = 0;
+    for call in parked.tasks.iter_mut().flat_map(|task| &mut task.calls) {
+        if call.call.statement.unit == twice {
+            call.call.statement.unit = again.clone();
+            for binding in &mut call.call.bindings {
+                binding.declared.unit = again.clone();
+            }
+            moved += 1;
+        }
+    }
+    assert_eq!(moved, 1, "the run parks inside `each.twice`");
+    let (program, _) = embedder.program(true);
+    let program = Program {
+        document: program.document,
+        library: PreparedLibrary::new(Arc::new(registry)),
+    };
+    assert!(matches!(
+        KernelMachine::import(program, ROOMY, parked).map(|_| ()),
+        Err(ImportError::Malformed { .. })
     ));
 }
 

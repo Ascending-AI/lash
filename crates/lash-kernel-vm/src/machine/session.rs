@@ -20,20 +20,19 @@ pub(super) fn start(
     start: Start,
     layout: Layout,
 ) -> Result<KernelMachine, StartError> {
+    let registry = program.library.registry();
     for function in program.document.manifest.functions.keys() {
-        if program.registry.get(function).is_none() {
+        if registry.get(function).is_none() {
             return Err(StartError::MissingFunction {
                 function: *function,
             });
         }
     }
-    validate_document(&program.document, program.registry.as_ref())?;
-    let in_flight = BTreeSet::new();
+    validate_document(&program.document, registry.as_ref())?;
+    let library = program.library.in_layout(layout);
     let exe =
-        compile(&program.document, &program.registry, layout, &in_flight).map_err(|missing| {
-            StartError::MissingFunction {
-                function: missing.0,
-            }
+        compile(&program.document, &library).map_err(|missing| StartError::MissingFunction {
+            function: missing.0,
         })?;
     let exe = Arc::new(exe);
     let costs = crate::costs::Costs::of_document(&program.document);

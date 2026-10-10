@@ -20,7 +20,7 @@ use crate::compile::{Action, Executable, Rhs, Stmt, StmtId};
 
 /// The action of a statement, when it has one.
 fn action_of(exe: &Executable, stmt: StmtId) -> Option<&Action> {
-    match exe.stmts.get(stmt.0 as usize)? {
+    match exe.get_stmt(stmt)? {
         Stmt::Let {
             value: Rhs::Action(action),
             ..

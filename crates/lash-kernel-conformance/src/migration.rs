@@ -14,7 +14,7 @@ use std::sync::Arc;
 use lash_kernel_doc::FunctionRegistry;
 use lash_kernel_migrate::Migration;
 use lash_kernel_state::ParkedRun;
-use lash_kernel_vm::{Machine, Program};
+use lash_kernel_vm::{Machine, PreparedLibrary, Program};
 
 use crate::machine::{Park, run_case};
 use crate::{Case, HarnessError, Observations, Trace};
@@ -39,7 +39,8 @@ pub fn check_migration<M: Machine<Parked = ParkedRun>>(
     registry: &Arc<FunctionRegistry>,
     case: &Case,
 ) -> Result<MigrationCheck, HarnessError> {
-    let stayed = run_case::<M>(registry, case, &mut |at| Ok(at.machine))?;
+    let library = &PreparedLibrary::new(Arc::clone(registry));
+    let stayed = run_case::<M>(library, case, &mut |at| Ok(at.machine))?;
     case.expected
         .check(&stayed)
         .map_err(|error| HarnessError(format!("{}: {error}", case.name)))?;
@@ -49,11 +50,11 @@ pub fn check_migration<M: Machine<Parked = ParkedRun>>(
     let mut migrated = Vec::new();
     for park in 1..=stayed.parks {
         let mut expected = stayed.trace.clone();
-        let observed = run_case::<M>(registry, case, &mut |at| {
+        let observed = run_case::<M>(library, case, &mut |at| {
             if at.number != park {
                 return Ok(at.machine);
             }
-            migrate(migration, registry, case, at, &mut expected)
+            migrate(migration, library, case, at, &mut expected)
         })?;
         let same = observed.prints == stayed.prints
             && observed.end == stayed.end
@@ -76,11 +77,12 @@ pub fn check_migration<M: Machine<Parked = ParkedRun>>(
 /// issued after this park is identified in the rewritten document.
 fn migrate<M: Machine<Parked = ParkedRun>>(
     migration: &Migration,
-    registry: &Arc<FunctionRegistry>,
+    library: &PreparedLibrary,
     case: &Case,
     at: Park<'_, M>,
     expected: &mut [Trace],
 ) -> Result<M, HarnessError> {
+    let registry = library.registry();
     let refused = |error: &dyn std::fmt::Display| HarnessError(format!("{}: {error}", case.name));
     let mut machine = at.machine;
     let parked = machine.export().map_err(|error| refused(&error))?;
@@ -111,7 +113,7 @@ fn migrate<M: Machine<Parked = ParkedRun>>(
     }
     *at.program = Program {
         document: Arc::new(rewritten.document),
-        registry: Arc::clone(registry),
+        library: library.clone(),
     };
     M::import(at.program.clone(), at.bounds, carried).map_err(|error| refused(&error))
 }

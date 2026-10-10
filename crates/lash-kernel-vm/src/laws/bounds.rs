@@ -330,7 +330,7 @@ fn grow_in_a_body(charge: &str) -> Duration {
     );
     let program = Program {
         document: Arc::new(parse_document(&text).unwrap()),
-        registry: Arc::new(registry),
+        library: crate::PreparedLibrary::new(Arc::new(registry)),
     };
     let start = Start {
         target: Target::Main,

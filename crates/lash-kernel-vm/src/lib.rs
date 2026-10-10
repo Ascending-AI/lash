@@ -12,6 +12,10 @@
 //! [`Machine::export`] writes one at any safe point and [`Machine::import`]
 //! resumes it against an executable compiled afresh.
 //!
+//! An embedder prepares its registry once as a [`PreparedLibrary`], which
+//! compiles every library body, and hands it to every [`Program`]: a run's
+//! start compiles only its document.
+//!
 //! [`KernelMachine`] is the machine; [`Machine`] is the interface an embedder
 //! and the conformance harness drive it through. Its rules are the `K-MACH` rules of
 //! `docs/kernel/semantics.md`.
@@ -27,7 +31,7 @@ mod machine;
 #[cfg(test)]
 mod laws;
 
-pub use compile::Layout;
+pub use compile::{Layout, PreparedLibrary};
 pub use functions::{MachineFunctions, register_machine_functions};
 pub use machine::KernelMachine;
 

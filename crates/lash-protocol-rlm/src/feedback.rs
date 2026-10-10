@@ -435,7 +435,7 @@ mod tests {
             let mut machine = KernelMachine::start(
                 Program {
                     document: Arc::new(document),
-                    registry: Arc::new(registry),
+                    library: lash_kernel_vm::PreparedLibrary::new(Arc::new(registry)),
                 },
                 Bounds {
                     charge: 1000,

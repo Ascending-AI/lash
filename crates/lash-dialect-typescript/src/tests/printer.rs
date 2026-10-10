@@ -6,7 +6,8 @@ use lash_kernel_dialect::{Environment, NamedLibrary, Printer};
 use lash_kernel_doc as k;
 use lash_kernel_edit::{Draft, Edit, Position, Transaction};
 use lash_kernel_vm::{
-    Bounds, End, Host, KernelMachine, Machine, Outcome, Program, Request, Start, Step, Target,
+    Bounds, End, Host, KernelMachine, Machine, Outcome, PreparedLibrary, Program, Request, Start,
+    Step, Target,
 };
 
 use crate::TypeScript;
@@ -37,15 +38,11 @@ impl Host for Observer {
         false
     }
 }
-fn run(
-    document: &k::Document,
-    registry: &Arc<k::FunctionRegistry>,
-    target: Target,
-) -> (End, Vec<String>) {
+fn run(document: &k::Document, library: &PreparedLibrary, target: Target) -> (End, Vec<String>) {
     let mut machine = KernelMachine::start(
         Program {
             document: Arc::new(document.clone()),
-            registry: Arc::clone(registry),
+            library: library.clone(),
         },
         Bounds {
             charge: 10_000_000,
@@ -121,6 +118,7 @@ fn roundtrip(document: &k::Document, registry: &Arc<k::FunctionRegistry>, librar
     // Retaining the tree also retains sites, task interleaving and errors at
     // bounds. The law's oracle remains a run on the production machine.
     assert_eq!(lowered.document, *document, "{source}");
+    let registry = &PreparedLibrary::new(Arc::clone(registry));
     assert_eq!(
         run(document, registry, Target::Main),
         run(&lowered.document, registry, Target::Main),

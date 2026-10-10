@@ -529,7 +529,7 @@ impl KernelMachine {
             .tasks
             .get(task.0 as usize)
             .and_then(|task| task.frames.last())
-            .is_none_or(|frame| exe.codes[frame.code.0 as usize].charged);
+            .is_none_or(|frame| exe.code(frame.code).charged);
     }
 
     fn settle(
@@ -727,8 +727,7 @@ impl Machine for KernelMachine {
                             .ok()
                             .and_then(|frame| frame.library.as_ref().map(|call| call.lib))
                     {
-                        exceeded.function =
-                            Some(self.exe.libs[lib.0 as usize].definition.name.clone());
+                        exceeded.function = Some(self.exe.lib(lib).definition.name.clone());
                     }
                     return Ok(self.finish_with(End::Error(RunError::Bound(exceeded))));
                 }

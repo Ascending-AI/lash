@@ -14,15 +14,15 @@ use lash_kernel_doc::{
     Timestamp, Type,
 };
 use lash_kernel_vm::{
-    Bindings, Bounds, End, Host, KernelMachine, Machine, Outcome, Park, Program, Request, RunError,
-    Start, Step, Target, WaitId, register_machine_functions,
+    Bindings, Bounds, End, Host, KernelMachine, Machine, Outcome, Park, PreparedLibrary, Program,
+    Request, RunError, Start, Step, Target, WaitId, register_machine_functions,
 };
 use serde::Deserialize;
 
 use crate::define_helpers;
 
 struct Installed {
-    registry: Arc<FunctionRegistry>,
+    prepared: PreparedLibrary,
     library: NamedLibrary,
 }
 
@@ -46,7 +46,7 @@ fn installed() -> &'static Installed {
                 .unwrap_or_else(|error| panic!("{error}"));
         }
         Installed {
-            registry: Arc::new(registry),
+            prepared: PreparedLibrary::new(Arc::new(registry)),
             library,
         }
     })
@@ -288,7 +288,7 @@ fn start(
     }
     let program = Program {
         document: Arc::new(lowered.document),
-        registry: Arc::clone(&installed().registry),
+        library: installed().prepared.clone(),
     };
     let start = Start {
         target: Target::Main,

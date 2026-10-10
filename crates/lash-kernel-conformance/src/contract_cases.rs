@@ -14,8 +14,8 @@ use lash_kernel_doc::{
     validate_definition, validate_document,
 };
 use lash_kernel_vm::{
-    DeliverError, Delivered, End, KernelMachine, Layout, Machine, Outcome, Program, Request, Start,
-    Step, WaitId,
+    DeliverError, Delivered, End, KernelMachine, Layout, Machine, Outcome, PreparedLibrary,
+    Program, Request, Start, Step, WaitId,
 };
 
 use crate::{Case, ExpectedEnd, MachineRunner, Shard, check_case};
@@ -508,7 +508,7 @@ fn charge_invariance(shard: &Shard, registry: &FunctionRegistry) {
         for layout in [Layout(0), Layout(37)] {
             let program = Program {
                 document: Arc::new(document.clone()),
-                registry: Arc::new(same_registry(BOTH, native)),
+                library: PreparedLibrary::new(Arc::new(same_registry(BOTH, native))),
             };
             let mut machine = KernelMachine::start_with_layout(
                 program,
@@ -547,7 +547,7 @@ fn instance_isolation(shard: &Shard, registry: &FunctionRegistry) {
 fn program(case: &Case, registry: &FunctionRegistry) -> Program {
     Program {
         document: Arc::new(doc(&case.document)),
-        registry: Arc::new(registry.clone()),
+        library: PreparedLibrary::new(Arc::new(registry.clone())),
     }
 }
 

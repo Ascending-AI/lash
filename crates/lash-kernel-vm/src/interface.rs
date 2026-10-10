@@ -38,19 +38,21 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::PreparedLibrary;
 use lash_kernel_doc::{
     Datum, Document, DocumentId, EffectIdentity, EffectName, ErrorDatum, FunctionId, FunctionName,
-    FunctionRegistry, Handle, Invalid, Name, Object, ObjectId, TaskIdentity, Timestamp, Type,
-    Value,
+    Handle, Invalid, Name, Object, ObjectId, TaskIdentity, Timestamp, Type, Value,
 };
 
 /// What a machine runs: an admitted document and the library functions the
-/// embedder registered. The machine compiles it to an executable of its
-/// own, which is a cache: derived deterministically, never saved.
+/// embedder registered, prepared once for every program that uses them.
+/// The machine compiles the document to an executable of its own over the
+/// prepared library; both are caches: derived deterministically, never
+/// saved.
 #[derive(Clone, Debug)]
 pub struct Program {
     pub document: Arc<Document>,
-    pub registry: Arc<FunctionRegistry>,
+    pub library: PreparedLibrary,
 }
 
 /// The execution bounds the embedder states (`K-BND-001`). Passing one ends
@@ -376,7 +378,8 @@ pub trait Machine: Sized {
     /// `lash-kernel-state`.
     type Parked;
 
-    /// Compiles `program` and creates a run that has executed nothing.
+    /// Compiles `program`'s document and creates a run that has executed
+    /// nothing.
     fn start(program: Program, bounds: Bounds, start: Start) -> Result<Self, StartError>;
 
     /// Runs ready tasks, first in first out, until no task is ready, the
@@ -392,8 +395,8 @@ pub trait Machine: Sized {
     /// (`K-MACH-007`).
     fn export(&mut self) -> Result<Self::Parked, ExportError>;
 
-    /// Rebuilds a run from a parked state. The executable is compiled
-    /// afresh; resuming continues the computation and its effect ownership
+    /// Rebuilds a run from a parked state. The document's executable is
+    /// compiled afresh; resuming continues the computation and its effect ownership
     /// exactly (`K-MACH-008`).
     fn import(program: Program, bounds: Bounds, parked: Self::Parked) -> Result<Self, ImportError>;
 

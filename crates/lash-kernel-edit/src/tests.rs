@@ -203,7 +203,7 @@ impl Host for Printer {
 fn run(document: &Document, answer: &Datum) -> Ran {
     let program = Program {
         document: Arc::new(document.clone()),
-        registry: Arc::new(FunctionRegistry::new()),
+        library: lash_kernel_vm::PreparedLibrary::new(Arc::new(FunctionRegistry::new())),
     };
     let bounds = Bounds {
         charge: 1_000_000,

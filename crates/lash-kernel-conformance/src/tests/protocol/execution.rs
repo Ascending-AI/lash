@@ -6,7 +6,7 @@ use lash_kernel_doc::{
     Formula, FunctionRegistry, NativeCall, NativeError, NativeFunction, Operand, Value,
     parse_definition,
 };
-use lash_kernel_vm::{Bindings, End, KernelMachine, Machine};
+use lash_kernel_vm::{Bindings, End, KernelMachine, Machine, PreparedLibrary};
 
 use super::{Case, World, end, int, main, program, registry, start};
 
@@ -187,7 +187,7 @@ fn session(rule: &str, case: &Case) {
 }
 
 fn sites(rule: &str, case: &Case) {
-    let library = registry();
+    let library = PreparedLibrary::new(registry());
     let mut inspected = 0;
     let actual = crate::machine::run_case::<KernelMachine>(&library, case, &mut |mut at| {
         inspected += 1;

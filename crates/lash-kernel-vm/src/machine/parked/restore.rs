@@ -4,9 +4,7 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::Arc;
 
-use lash_kernel_doc::{
-    FunctionId, Identity, Object, ObjectId, Site, TaskId, Unit, Value, validate_document,
-};
+use lash_kernel_doc::{Identity, Object, ObjectId, Site, TaskId, Unit, Value, validate_document};
 use lash_kernel_state as state;
 use lash_kernel_state::{ParkedCall, ParkedRun};
 
@@ -16,7 +14,7 @@ use super::super::{
 };
 use super::action_of;
 use crate::Layout;
-use crate::compile::{ActionKind, BlockId, CodeId, Executable, LibId, Stmt, compile};
+use crate::compile::{ActionKind, BlockId, CodeId, Executable, Stmt, compile};
 use crate::heap::{ClosureObj, Heap, Key, MAX_VALUE_DEPTH, Obj, Table, within_depth};
 use crate::interface::{
     Bounds, EffectRequest, ImportError, Outcome, Program, Request, SleepRequest, WaitId,
@@ -32,11 +30,9 @@ fn malformed(problem: impl Into<String>) -> ImportError {
 /// closure body nearest above it.
 fn code_of(exe: &Executable, site: &Site) -> Option<CodeId> {
     let block = site.path.len().checked_sub(1)?;
-    (0..=block).rev().find_map(|length| {
-        exe.code_at
-            .get(&Site::new(site.unit.clone(), &site.path[..length]))
-            .copied()
-    })
+    (0..=block)
+        .rev()
+        .find_map(|length| exe.code_at(&Site::new(site.unit.clone(), &site.path[..length])))
 }
 
 /// A parked run being put back.
@@ -118,7 +114,7 @@ impl Restore<'_> {
         let ParkedCall { call, held } = parked;
         let code_id = code_of(exe, &call.statement)
             .ok_or_else(|| malformed(format!("no function body holds {}", call.statement)))?;
-        let code = &exe.codes[code_id.0 as usize];
+        let code = exe.code(code_id);
         let nowhere = || {
             malformed(format!(
                 "{} is no statement of the document",
@@ -136,7 +132,7 @@ impl Restore<'_> {
         let mut awaiting = None;
         loop {
             let index = *path.get(depth).ok_or_else(nowhere)? as usize;
-            let stmts = &exe.blocks[block.0 as usize].stmts;
+            let stmts = &exe.block(block).stmts;
             if depth + 1 == path.len() {
                 let next = if continues {
                     let stmt = *stmts.get(index).ok_or_else(nowhere)?;
@@ -164,8 +160,8 @@ impl Restore<'_> {
                 next: index + 1,
             });
             let inner = Site::new(call.statement.unit.clone(), &path[..depth + 2]);
-            let at = |candidate: BlockId| exe.blocks[candidate.0 as usize].site == inner;
-            block = match &exe.stmts[stmt.0 as usize] {
+            let at = |candidate: BlockId| exe.block(candidate).site == inner;
+            block = match exe.stmt(stmt) {
                 Stmt::If {
                     then_block,
                     else_block,
@@ -296,7 +292,7 @@ impl Restore<'_> {
         let library = match (library, &held.arguments) {
             (Some(function), Some(args)) => {
                 self.values(args)?;
-                let lib = lib_of(exe, function).ok_or_else(|| {
+                let lib = exe.lib_of(&function).ok_or_else(|| {
                     malformed("a call runs a function the document does not reach")
                 })?;
                 Some(LibraryCall {
@@ -346,13 +342,6 @@ impl Restore<'_> {
     }
 }
 
-fn lib_of(exe: &Executable, function: FunctionId) -> Option<LibId> {
-    exe.libs
-        .iter()
-        .position(|lib| lib.id == function)
-        .map(|index| LibId(index as u32))
-}
-
 fn table_of(entries: impl IntoIterator<Item = (Value, Value)>) -> Result<Table, ImportError> {
     let mut table = Table::default();
     for (key, value) in entries {
@@ -382,11 +371,9 @@ fn object_of(exe: &Executable, object: Object) -> Result<Obj, ImportError> {
         Object::Variable(value) => Obj::Variable(value),
         Object::Closure(closure) => {
             let code = exe
-                .code_at
-                .get(&closure.site.child(0))
-                .copied()
+                .code_at(&closure.site.child(0))
                 .ok_or_else(|| malformed(format!("no closure is written at {}", closure.site)))?;
-            let wanted = &exe.codes[code.0 as usize];
+            let wanted = exe.code(code);
             if wanted.captures.len() != closure.captures.len() {
                 return Err(malformed(format!(
                     "the closure at {} shares {} variable(s)",
@@ -477,15 +464,13 @@ pub(in crate::machine) fn import(
     }
     let costs = crate::costs::Costs::of_document(&program.document);
     let manifest = &program.document.manifest.functions;
-    if let Some(function) = manifest
-        .keys()
-        .find(|id| program.registry.get(id).is_none())
-    {
+    let registry = program.library.registry();
+    if let Some(function) = manifest.keys().find(|id| registry.get(id).is_none()) {
         return Err(ImportError::MissingFunction {
             function: *function,
         });
     }
-    validate_document(&program.document, program.registry.as_ref())?;
+    validate_document(&program.document, registry.as_ref())?;
     let document = program
         .document
         .identity()
@@ -503,20 +488,12 @@ pub(in crate::machine) fn import(
     }
 
     // A call parked inside a library function's kernel body goes on there,
-    // whichever implementation this registry runs new calls with.
-    let in_flight: BTreeSet<FunctionId> = parked_tasks
-        .iter()
-        .flat_map(|task| &task.calls)
-        .filter_map(|call| match &call.call.statement.unit {
-            Unit::Library(function) => Some(*function),
-            _ => None,
-        })
-        .collect();
+    // whichever implementation this registry runs new calls with: the
+    // prepared library holds every body.
+    let library = program.library.in_layout(layout);
     let exe =
-        compile(&program.document, &program.registry, layout, &in_flight).map_err(|missing| {
-            ImportError::MissingFunction {
-                function: missing.0,
-            }
+        compile(&program.document, &library).map_err(|missing| ImportError::MissingFunction {
+            function: missing.0,
         })?;
     let exe = Arc::new(exe);
 
@@ -725,11 +702,8 @@ pub(in crate::machine) fn import(
                 .and_then(|(_, statement)| statement.split_last())
                 .and_then(|(index, block)| {
                     let block = Site::new(occurrence.site.unit.clone(), block);
-                    let block = exe.block_at.get(&block)?;
-                    exe.blocks[block.0 as usize]
-                        .stmts
-                        .get(*index as usize)
-                        .copied()
+                    let block = exe.block_at(&block)?;
+                    exe.block(block).stmts.get(*index as usize).copied()
                 })
                 .filter(|stmt| {
                     action_of(&exe, *stmt).is_some_and(|action| action.site == occurrence.site)

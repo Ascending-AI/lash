@@ -67,7 +67,7 @@ impl KernelMachine {
         let frame = self.frame(task)?;
         match frame.control.last_mut() {
             Some(Control::Block { block, next }) => {
-                let stmts = &exe.blocks[block.0 as usize].stmts;
+                let stmts = &exe.block(*block).stmts;
                 match stmts.get(*next) {
                     Some(stmt) => {
                         *next += 1;
@@ -90,8 +90,8 @@ impl KernelMachine {
     fn pop_control(&mut self, task: TaskId, exe: &Executable) -> Result<(), Halt> {
         let frame = self.frame(task)?;
         if let Some(Control::Block { block, .. }) = frame.control.pop() {
-            let code = &exe.codes[frame.code.0 as usize];
-            for slot in &exe.blocks[block.0 as usize].declares {
+            let code = exe.code(frame.code);
+            for slot in &exe.block(block).declares {
                 frame.slots[code.positions[*slot as usize] as usize] = SlotState::Empty;
             }
         }
@@ -121,7 +121,7 @@ impl KernelMachine {
                 Ok(Completion::Normal)
             }
             Some(Control::Try { stmt, phase }) => {
-                let finally = match &exe.stmts[stmt.0 as usize] {
+                let finally = match exe.stmt(*stmt) {
                     Stmt::Try { finally, .. } => *finally,
                     _ => None,
                 };
@@ -198,7 +198,7 @@ impl KernelMachine {
                     }
                 },
                 Control::Try { stmt, phase } => {
-                    let (catch, finally) = match &exe.stmts[stmt.0 as usize] {
+                    let (catch, finally) = match exe.stmt(*stmt) {
                         Stmt::Try { catch, finally, .. } => (*catch, *finally),
                         _ => (None, None),
                     };
@@ -278,7 +278,7 @@ impl KernelMachine {
         if !self.charging {
             return Ok(());
         }
-        let definition = &exe.libs[lib.0 as usize].definition;
+        let definition = &exe.lib(lib).definition;
         let units = self.formula(
             &definition.charge,
             &definition.signature.params,
@@ -329,7 +329,7 @@ impl KernelMachine {
             library,
             inline,
         } = call;
-        let code = &exe.codes[code_id.0 as usize];
+        let code = exe.code(code_id);
         if args.len() > code.params.len() {
             return raise(
                 "arity",
@@ -382,7 +382,7 @@ impl KernelMachine {
         value: Value,
     ) -> Result<(), Halt> {
         let code = self.frame(task)?.code;
-        let code = &exe.codes[code.0 as usize];
+        let code = exe.code(code);
         let state = if code.slots[slot as usize].shared {
             SlotState::Cell(self.alloc(Obj::Variable(value))?)
         } else {
@@ -406,7 +406,7 @@ impl KernelMachine {
         match var {
             Var::Local(slot) => {
                 let frame = self.frame(task)?;
-                let code = &exe.codes[frame.code.0 as usize];
+                let code = exe.code(frame.code);
                 match &frame.slots[code.positions[*slot as usize] as usize] {
                     SlotState::Value(value) => Ok(value.clone()),
                     SlotState::Cell(cell) => {
@@ -441,7 +441,7 @@ impl KernelMachine {
         match var {
             Var::Local(slot) => {
                 let frame = self.frame(task)?;
-                let code = &exe.codes[frame.code.0 as usize];
+                let code = exe.code(frame.code);
                 match &mut frame.slots[code.positions[*slot as usize] as usize] {
                     SlotState::Value(held) => *held = value,
                     SlotState::Cell(cell) => {
@@ -472,7 +472,7 @@ impl KernelMachine {
         exe: &Executable,
         id: StmtId,
     ) -> Eval<Completion> {
-        match &exe.stmts[id.0 as usize] {
+        match exe.stmt(id) {
             Stmt::Let { value, .. } | Stmt::Assign { value, .. } => {
                 let value = match value {
                     Rhs::Expr(expr) => Some(self.eval(task, host, exe, expr)?),
@@ -590,7 +590,7 @@ impl KernelMachine {
                 cursor,
                 started,
             }) => {
-                let Stmt::For { binding, body, .. } = &exe.stmts[stmt.0 as usize] else {
+                let Stmt::For { binding, body, .. } = exe.stmt(*stmt) else {
                     return Err(fault("a `for` loop is not at a `for`").into());
                 };
                 let element = match cursor {
@@ -634,7 +634,7 @@ impl KernelMachine {
             Some(Control::While { stmt, .. }) => {
                 let Stmt::While {
                     condition, body, ..
-                } = &exe.stmts[stmt.0 as usize]
+                } = exe.stmt(*stmt)
                 else {
                     return Err(fault("a `while` loop is not at a `while`").into());
                 };
@@ -687,7 +687,7 @@ impl KernelMachine {
             }
             Outcome::Completed(datum) => {
                 let awaiting = self.frame(task)?.awaiting;
-                let ty = awaiting.and_then(|stmt| match &exe.stmts[stmt.0 as usize] {
+                let ty = awaiting.and_then(|stmt| match exe.stmt(stmt) {
                     Stmt::Let {
                         value: Rhs::Action(action),
                         ..
@@ -764,7 +764,7 @@ impl KernelMachine {
         let Some(stmt) = self.frame(task)?.awaiting.take() else {
             return Err(fault("a value arrived at no statement").into());
         };
-        match &exe.stmts[stmt.0 as usize] {
+        match exe.stmt(stmt) {
             Stmt::Let {
                 target: Target::Slot(slot),
                 ..

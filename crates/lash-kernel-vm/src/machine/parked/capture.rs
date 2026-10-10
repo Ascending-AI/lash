@@ -54,7 +54,7 @@ impl HeapView<'_> {
             Obj::Record(fields) => Object::Record(fields.clone()),
             Obj::Variable(value) => Object::Variable(value.clone()),
             Obj::Closure(closure) => {
-                let code = self.exe.codes.get(closure.code.0 as usize)?;
+                let code = self.exe.get_code(closure.code)?;
                 // A closure's body is the one child of its expression.
                 let mut path = code.site.path.clone();
                 path.pop()?;
@@ -264,7 +264,7 @@ impl KernelMachine {
         if frame.inline {
             return Err(fault("a call inside an expression is live at a safe point"));
         }
-        let code = &exe.codes[frame.code.0 as usize];
+        let code = exe.code(frame.code);
         let Some(Control::Block { block, next }) = frame.control.last() else {
             return Err(fault("a call stands in no block at a safe point"));
         };
@@ -278,7 +278,7 @@ impl KernelMachine {
             None => *next,
         };
         let mut call = state::Call {
-            statement: exe.blocks[block.0 as usize].site.child(index as u32),
+            statement: exe.block(*block).site.child(index as u32),
             bindings: Vec::new(),
             loops: Vec::new(),
             finally: Vec::new(),
@@ -307,7 +307,7 @@ impl KernelMachine {
                     cursor,
                     started,
                 } => {
-                    let Stmt::For { site, .. } = &exe.stmts[stmt.0 as usize] else {
+                    let Stmt::For { site, .. } = exe.stmt(*stmt) else {
                         return Err(fault("a `for` loop is not at a `for`"));
                     };
                     let (iterated, position) = match cursor {
@@ -331,7 +331,7 @@ impl KernelMachine {
                     });
                 }
                 Control::While { stmt, started } => {
-                    let Stmt::While { site, .. } = &exe.stmts[stmt.0 as usize] else {
+                    let Stmt::While { site, .. } = exe.stmt(*stmt) else {
                         return Err(fault("a `while` loop is not at a `while`"));
                     };
                     call.loops.push(state::Loop {
@@ -348,7 +348,7 @@ impl KernelMachine {
                     stmt,
                     phase: TryPhase::Finally(departure),
                 } => {
-                    let Stmt::Try { site, .. } = &exe.stmts[stmt.0 as usize] else {
+                    let Stmt::Try { site, .. } = exe.stmt(*stmt) else {
                         return Err(fault("a `try` is not at a `try`"));
                     };
                     let entered = match departure {

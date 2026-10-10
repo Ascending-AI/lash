@@ -55,7 +55,7 @@ impl KernelMachine {
                     Target::Library(lib) => match self.call_library(task, exe, lib, args)? {
                         Ok(value) => Ok(Some(value)),
                         Err(args) => {
-                            let LibRun::Body(code) = &exe.libs[lib.0 as usize].run else {
+                            let LibRun::Body(code) = &exe.lib(lib).run else {
                                 return Err(fault("a function with no body was run as one").into());
                             };
                             self.push_frame(task, exe, Call::new(*code, args).of_library(lib))?;
@@ -297,9 +297,7 @@ impl KernelMachine {
                     }
                     _ => continue,
                 };
-                if let Stmt::For { site, .. } | Stmt::While { site, .. } =
-                    &exe.stmts[stmt.0 as usize]
-                {
+                if let Stmt::For { site, .. } | Stmt::While { site, .. } = exe.stmt(*stmt) {
                     loops.push(LoopIteration {
                         site: site.clone(),
                         iteration: started.saturating_sub(1),
@@ -345,7 +343,7 @@ impl KernelMachine {
         args: Vec<Value>,
     ) -> Eval<Option<Value>> {
         if let Target::Code(code, _) = &target
-            && args.len() > exe.codes[code.0 as usize].params.len()
+            && args.len() > exe.code(*code).params.len()
         {
             return raise(
                 "arity",
@@ -386,7 +384,7 @@ impl KernelMachine {
                     self.end_task(child, Ok(value))?;
                     return Ok(Some(handle));
                 }
-                Ok(Err(args)) => match &exe.libs[lib.0 as usize].run {
+                Ok(Err(args)) => match &exe.lib(lib).run {
                     LibRun::Body(code) => {
                         self.push_frame(child, exe, Call::new(*code, args).of_library(lib))
                     }

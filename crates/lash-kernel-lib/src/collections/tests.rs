@@ -58,7 +58,7 @@ fn program(source: &str) -> Program {
     text.push_str(source);
     Program {
         document: Arc::new(parse_document(&text).unwrap()),
-        registry,
+        library: lash_kernel_vm::PreparedLibrary::new(registry),
     }
 }
 fn machine(source: &str) -> KernelMachine {
@@ -586,7 +586,7 @@ fn recorded_iteration(shard: &str) {
         let document = parse_document(case["document"].as_str().unwrap()).unwrap();
         let program = Program {
             document: Arc::new(document),
-            registry: Arc::new(FunctionRegistry::new()),
+            library: lash_kernel_vm::PreparedLibrary::new(Arc::new(FunctionRegistry::new())),
         };
         let mut machine = KernelMachine::start(
             program,

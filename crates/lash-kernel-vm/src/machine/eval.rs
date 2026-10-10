@@ -107,9 +107,9 @@ impl KernelMachine {
             Expr::Member(member) => self.read_member(task, host, exe, member),
             Expr::Closure(code) => {
                 let frame = self.frame(task)?;
-                let outer = &exe.codes[frame.code.0 as usize];
+                let outer = exe.code(frame.code);
                 let mut captures = Vec::new();
-                for capture in &exe.codes[code.0 as usize].captures {
+                for capture in &exe.code(*code).captures {
                     match &frame.slots[outer.positions[capture.outer as usize] as usize] {
                         super::SlotState::Cell(cell) => captures.push(*cell),
                         _ => return Err(fault("a captured variable has no cell").into()),
@@ -252,7 +252,7 @@ impl KernelMachine {
         args: Vec<Value>,
     ) -> Eval<Result<Value, Vec<Value>>> {
         self.call_library_inner(task, exe, lib, args)
-            .map_err(|interrupt| interrupt.in_function(&exe.libs[lib.0 as usize].definition.name))
+            .map_err(|interrupt| interrupt.in_function(&exe.lib(lib).definition.name))
     }
 
     fn call_library_inner(
@@ -262,7 +262,7 @@ impl KernelMachine {
         lib: LibId,
         mut args: Vec<Value>,
     ) -> Eval<Result<Value, Vec<Value>>> {
-        let function = &exe.libs[lib.0 as usize];
+        let function = exe.lib(lib);
         let params = &function.definition.signature.params;
         if args.len() > params.len() {
             return raise(
@@ -372,14 +372,14 @@ impl KernelMachine {
         lib: LibId,
         args: Vec<Value>,
     ) -> Eval<Value> {
-        let LibRun::Body(code) = &exe.libs[lib.0 as usize].run else {
+        let LibRun::Body(code) = &exe.lib(lib).run else {
             return Err(fault("a function with no body was run as one").into());
         };
         if self.inline_depth >= MAX_INLINE_DEPTH {
             return Err(bound(Bound::CallDepth, u64::from(self.bounds.call_depth)).into());
         }
         self.push_frame(task, exe, Call::new(*code, args).of_library(lib).inline())
-            .map_err(|halt| halt.in_function(&exe.libs[lib.0 as usize].definition.name))?;
+            .map_err(|halt| halt.in_function(&exe.lib(lib).definition.name))?;
         self.inline_depth += 1;
         let result = loop {
             if let Some(result) = self.inline_result.take() {
@@ -388,9 +388,7 @@ impl KernelMachine {
             let outcome = self.advance(task, host, exe);
             if let Err(halt) = self.settle(task, host, exe, outcome) {
                 self.inline_depth -= 1;
-                return Err(halt
-                    .in_function(&exe.libs[lib.0 as usize].definition.name)
-                    .into());
+                return Err(halt.in_function(&exe.lib(lib).definition.name).into());
             }
             if self.current != Some(task) {
                 self.inline_depth -= 1;
@@ -402,7 +400,7 @@ impl KernelMachine {
         match result {
             Ok(value) => {
                 self.pin(&value)
-                    .map_err(|halt| halt.in_function(&exe.libs[lib.0 as usize].definition.name))?;
+                    .map_err(|halt| halt.in_function(&exe.lib(lib).definition.name))?;
                 Ok(value)
             }
             Err(value) => Err(Interrupt::Raise(value)),

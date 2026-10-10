@@ -3,9 +3,9 @@
 //! The programs of the retired VM's benchmark (`crates/lash-vm/benches/
 //! benchmark.rs` at `515a596747`, the last main commit before the cutover),
 //! written as the TypeScript a cell author would write and lowered through
-//! this dialect. Each is timed on the kernel machine alone: lowering and
-//! registry assembly happen once, outside the timed loop, as the old
-//! `compiled_execute` mode compiled once. A scripted host answers every
+//! this dialect. Each is timed on the kernel machine alone: lowering,
+//! registry assembly and the library's preparation happen once, outside the
+//! timed loop, as the old `compiled_execute` mode compiled once. A scripted host answers every
 //! tool call at once.
 //!
 //! `kernel_perf <most iterations> [program or file.ts...]` runs each program
@@ -29,8 +29,8 @@ use lash_kernel_doc::{
     Signature, Timestamp, Type, Unit,
 };
 use lash_kernel_vm::{
-    Bindings, Bounds, End, Host, KernelMachine, Machine, Outcome, Program, Request, Start, Step,
-    Target,
+    Bindings, Bounds, End, Host, KernelMachine, Machine, Outcome, PreparedLibrary, Program,
+    Request, Start, Step, Target,
 };
 
 const BOUNDS: Bounds = Bounds {
@@ -675,6 +675,9 @@ fn main() {
         programs.push((file, source));
     }
     let registry = registry();
+    // Prepared once, as a worker prepares its registry: every library body
+    // is compiled here, and a run's start compiles only its document.
+    let prepared = PreparedLibrary::new(Arc::clone(&registry));
     let library = NamedLibrary::from_registry(&registry).expect("unique library names");
     let effects = effects();
     let controls = BTreeMap::from([(
@@ -705,7 +708,7 @@ fn main() {
         let functions = lowered.document.manifest.functions.len();
         let program = Program {
             document: Arc::new(lowered.document),
-            registry: Arc::clone(&registry),
+            library: prepared.clone(),
         };
         let first = Instant::now();
         let (charged, result) = to_end(&mut start(&program), name);

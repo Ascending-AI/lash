@@ -5,15 +5,15 @@ use std::collections::BTreeSet;
 use std::sync::{Arc, OnceLock};
 
 use lash_kernel_dialect::{Environment, NamedLibrary};
-use lash_kernel_doc::{Datum, ErrorDatum, FunctionRegistry, Handle, Integer, Timestamp};
+use lash_kernel_doc::{Datum, ErrorDatum, Handle, Integer, Timestamp};
 use lash_kernel_vm::{
-    Bindings, Bounds, End, Host, KernelMachine, Machine, Outcome, Program, Request, Start, Step,
-    Target,
+    Bindings, Bounds, End, Host, KernelMachine, Machine, Outcome, PreparedLibrary, Program,
+    Request, Start, Step, Target,
 };
 
 struct Kernel {
     library: NamedLibrary,
-    registry: Arc<FunctionRegistry>,
+    prepared: PreparedLibrary,
 }
 
 fn kernel() -> &'static Kernel {
@@ -26,7 +26,7 @@ fn kernel() -> &'static Kernel {
         }
         Kernel {
             library,
-            registry: Arc::new(registry),
+            prepared: PreparedLibrary::new(Arc::new(registry)),
         }
     })
 }
@@ -84,7 +84,7 @@ fn drive_document(
     let text = lash_kernel_doc::print_document(&document);
     let program = Program {
         document: Arc::new(document),
-        registry: Arc::clone(&kernel.registry),
+        library: kernel.prepared.clone(),
     };
     let bounds = Bounds {
         charge: 100_000_000,

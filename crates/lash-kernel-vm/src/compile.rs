@@ -7,11 +7,20 @@
 //! frame slots, declared and library functions to table indexes, and every
 //! node that an identity names keeps its site.
 //!
+//! It is compiled in two parts. A [`PreparedLibrary`] holds every library
+//! body of a registry, compiled once for all the runs that use the
+//! registry. A run compiles only its document's own code, numbered after
+//! the library's, so its start does not grow with the library. A
+//! function's identity is its content, so the body compiled under it is
+//! the one every document that lists it runs, and the one a parked run
+//! that pins it resumes in.
+//!
 //! A [`Layout`] permutes the tables and the frame slots. No value, effect
 //! identity or charge may depend on it; the laws compile one document under
 //! several layouts and compare the runs.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
 use std::sync::Arc;
 
 use lash_kernel_doc as doc;
@@ -23,9 +32,9 @@ use lash_kernel_doc::{
 use crate::functions::{MachineFunction, machine_function};
 
 /// How the executable is laid out. Layout `0` is the natural order; any
-/// other value permutes the code, block and statement tables and each
-/// frame's slots. It exists for tests: every layout runs a document the
-/// same way.
+/// other value permutes the code, block, statement and library tables and
+/// each frame's slots. It exists for tests: every layout runs a document
+/// the same way.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Layout(pub u64);
 
@@ -40,17 +49,274 @@ pub(crate) struct LibId(pub(crate) u32);
 /// A variable of a code, by declaration order.
 pub(crate) type Slot = u32;
 
-pub(crate) struct Executable {
-    pub(crate) codes: Vec<Code>,
-    pub(crate) blocks: Vec<Block>,
-    pub(crate) stmts: Vec<Stmt>,
-    pub(crate) libs: Vec<Lib>,
-    pub(crate) main: CodeId,
-    pub(crate) declared: BTreeMap<Name, CodeId>,
+/// Compiled code: a library's bodies, or one document's own code.
+#[derive(Default)]
+struct Tables {
+    codes: Vec<Code>,
+    blocks: Vec<Block>,
+    stmts: Vec<Stmt>,
     /// Each function body by its site, and each block by its own: how a
     /// parked run's coordinates find their place in this layout.
-    pub(crate) code_at: BTreeMap<Site, CodeId>,
-    pub(crate) block_at: BTreeMap<Site, BlockId>,
+    code_at: BTreeMap<Site, CodeId>,
+    block_at: BTreeMap<Site, BlockId>,
+}
+
+/// A function registry with every library body in it compiled, once, for
+/// all the runs of all the documents that use it. An embedder prepares
+/// its registry once and hands the same library to every [`Program`]
+/// (`crate::Program`); a run's start then compiles only its document.
+///
+/// Like the executable it is a cache: derived deterministically from the
+/// registry and never saved. A body is found by its function's identity,
+/// which is the function's content, so a parked run that pins a function
+/// resumes in the body it parked in (`K-MACH-008`).
+#[derive(Clone)]
+pub struct PreparedLibrary(Arc<Prepared>);
+
+struct Prepared {
+    registry: Arc<FunctionRegistry>,
+    layout: Layout,
+    tables: Tables,
+    /// Every registered function, in the layout's order.
+    libs: Vec<Lib>,
+    lib_of: BTreeMap<FunctionId, LibId>,
+    /// Each function whose body reaches, through the bodies the machine
+    /// runs, a function the registry does not hold: that function.
+    missing: BTreeMap<FunctionId, FunctionId>,
+}
+
+impl fmt::Debug for PreparedLibrary {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PreparedLibrary")
+            .field("functions", &self.0.libs.len())
+            .field("bodies", &self.0.tables.codes.len())
+            .finish_non_exhaustive()
+    }
+}
+
+impl PreparedLibrary {
+    /// Compiles every library body in `registry`.
+    pub fn new(registry: Arc<FunctionRegistry>) -> Self {
+        Self::with_layout(registry, Layout::default())
+    }
+
+    /// The registry the library was prepared from.
+    pub fn registry(&self) -> &Arc<FunctionRegistry> {
+        &self.0.registry
+    }
+
+    /// This library laid out as `layout` says: itself, or for a test's
+    /// other layout, the registry compiled afresh in that layout.
+    pub(crate) fn in_layout(&self, layout: Layout) -> Self {
+        if self.0.layout == layout {
+            self.clone()
+        } else {
+            Self::with_layout(Arc::clone(&self.0.registry), layout)
+        }
+    }
+
+    /// Compiles every library body in `registry` laid out as `layout`
+    /// says. Every body gets a code, even one whose calls a native
+    /// implementation runs: a parked run inside such a body resumes there
+    /// (`K-MACH-008`).
+    pub(crate) fn with_layout(registry: Arc<FunctionRegistry>, layout: Layout) -> Self {
+        let mut shuffler = Shuffler(layout.0);
+        let mut library: Vec<(FunctionId, &doc::RegisteredFunction)> = registry
+            .iter()
+            .map(|(function, registered)| (*function, registered))
+            .collect();
+        shuffler.shuffle(layout, &mut library);
+        let lib_of: BTreeMap<FunctionId, LibId> = library
+            .iter()
+            .enumerate()
+            .map(|(index, (function, _))| (*function, LibId(index as u32)))
+            .collect();
+        let mut units: Vec<(FunctionId, &FunctionDefinition)> = library
+            .iter()
+            .filter(|(_, registered)| machine_function(&registered.definition).is_none())
+            .filter(|(_, registered)| registered.definition.body().is_some())
+            .map(|(function, registered)| (*function, registered.definition.as_ref()))
+            .collect();
+        shuffler.shuffle(layout, &mut units);
+
+        let mut compiler = Compiler::new(
+            layout,
+            shuffler,
+            Resolve {
+                lib_of: &lib_of,
+                listed: None,
+            },
+            &NO_BINDINGS,
+            Base::default(),
+        );
+        let codes: Vec<CodeId> = units.iter().map(|_| compiler.reserve()).collect();
+        let mut bodies = BTreeMap::new();
+        for ((function, definition), code) in units.iter().zip(codes) {
+            bodies.insert(*function, code);
+            if let Some(body) = definition.body() {
+                let params: Vec<Name> = definition
+                    .signature
+                    .params
+                    .iter()
+                    .map(|param| param.name.clone())
+                    .collect();
+                compiler.unit_code(code, Unit::Library(*function), &params, &body.block, false);
+            }
+        }
+        let tables = compiler.finish();
+        let libs = library
+            .iter()
+            .map(|(function, registered)| {
+                let definition = Arc::clone(&registered.definition);
+                let run = if let Some(machine) = machine_function(&definition) {
+                    LibRun::Machine(machine)
+                } else if let Some(native) = &registered.native {
+                    LibRun::Native(Arc::clone(native))
+                } else {
+                    // A function with no native registered has a body, and
+                    // the loop above gave every such body a code.
+                    LibRun::Body(bodies.get(function).copied().unwrap_or(CodeId(0)))
+                };
+                Lib {
+                    id: *function,
+                    definition,
+                    run,
+                }
+            })
+            .collect();
+        let missing = missing(&registry);
+        Self(Arc::new(Prepared {
+            registry,
+            layout,
+            tables,
+            libs,
+            lib_of,
+            missing,
+        }))
+    }
+}
+
+/// Each function whose body reaches a function `registry` does not hold,
+/// through the bodies of functions with no native implementation, and the
+/// function it reaches.
+fn missing(registry: &FunctionRegistry) -> BTreeMap<FunctionId, FunctionId> {
+    let mut callers: BTreeMap<FunctionId, Vec<FunctionId>> = BTreeMap::new();
+    for (function, registered) in registry.iter() {
+        if registered.native.is_none()
+            && let Some(body) = registered.definition.body()
+        {
+            for callee in body.functions.keys() {
+                callers.entry(*callee).or_default().push(*function);
+            }
+        }
+    }
+    let mut pending: Vec<(FunctionId, FunctionId)> = callers
+        .iter()
+        .filter(|(callee, _)| registry.get(callee).is_none())
+        .flat_map(|(absent, callers)| callers.iter().map(|caller| (*caller, *absent)))
+        .collect();
+    let mut missing = BTreeMap::new();
+    while let Some((function, absent)) = pending.pop() {
+        if missing.contains_key(&function) {
+            continue;
+        }
+        missing.insert(function, absent);
+        if let Some(callers) = callers.get(&function) {
+            pending.extend(callers.iter().map(|caller| (*caller, absent)));
+        }
+    }
+    missing
+}
+
+/// One run's executable: its document's own code over a prepared library.
+/// The document's codes, blocks and statements are numbered after the
+/// library's.
+pub(crate) struct Executable {
+    library: PreparedLibrary,
+    document: Arc<Document>,
+    own: Tables,
+    pub(crate) main: CodeId,
+    pub(crate) declared: BTreeMap<Name, CodeId>,
+}
+
+/// The entry `index` names in a library's table followed by a document's.
+fn entry<'t, T>(library: &'t [T], own: &'t [T], index: u32) -> Option<&'t T> {
+    let index = index as usize;
+    match index.checked_sub(library.len()) {
+        None => library.get(index),
+        Some(own_index) => own.get(own_index),
+    }
+}
+
+impl Executable {
+    pub(crate) fn get_code(&self, id: CodeId) -> Option<&Code> {
+        entry(&self.library.0.tables.codes, &self.own.codes, id.0)
+    }
+
+    pub(crate) fn get_stmt(&self, id: StmtId) -> Option<&Stmt> {
+        entry(&self.library.0.tables.stmts, &self.own.stmts, id.0)
+    }
+
+    #[expect(
+        clippy::expect_used,
+        reason = "every code id the machine holds was handed out by this executable"
+    )]
+    pub(crate) fn code(&self, id: CodeId) -> &Code {
+        self.get_code(id).expect("a code of this executable")
+    }
+
+    #[expect(
+        clippy::expect_used,
+        reason = "every block id the machine holds was handed out by this executable"
+    )]
+    pub(crate) fn block(&self, id: BlockId) -> &Block {
+        entry(&self.library.0.tables.blocks, &self.own.blocks, id.0)
+            .expect("a block of this executable")
+    }
+
+    #[expect(
+        clippy::expect_used,
+        reason = "every statement id the machine holds was handed out by this executable"
+    )]
+    pub(crate) fn stmt(&self, id: StmtId) -> &Stmt {
+        self.get_stmt(id).expect("a statement of this executable")
+    }
+
+    pub(crate) fn lib(&self, id: LibId) -> &Lib {
+        &self.library.0.libs[id.0 as usize]
+    }
+
+    /// The library function `function`, when the document lists it.
+    pub(crate) fn lib_of(&self, function: &FunctionId) -> Option<LibId> {
+        if !self.document.manifest.functions.contains_key(function) {
+            return None;
+        }
+        self.library.0.lib_of.get(function).copied()
+    }
+
+    /// The tables that hold `unit`'s code: the library's for a function
+    /// the document lists, the document's own for its main and functions.
+    fn tables_of(&self, unit: &Unit) -> Option<&Tables> {
+        match unit {
+            Unit::Library(function) => self
+                .document
+                .manifest
+                .functions
+                .contains_key(function)
+                .then_some(&self.library.0.tables),
+            Unit::Main | Unit::Function(_) => Some(&self.own),
+        }
+    }
+
+    /// The function body or closure body whose site is `site`.
+    pub(crate) fn code_at(&self, site: &Site) -> Option<CodeId> {
+        self.tables_of(&site.unit)?.code_at.get(site).copied()
+    }
+
+    /// The block whose site is `site`.
+    pub(crate) fn block_at(&self, site: &Site) -> Option<BlockId> {
+        self.tables_of(&site.unit)?.block_at.get(site).copied()
+    }
 }
 
 /// One function body: `main`, a declared function, a library body or a
@@ -273,15 +539,50 @@ enum Declared {
     Session,
 }
 
+/// The session bindings a library body declares: none.
+static NO_BINDINGS: BTreeSet<Name> = BTreeSet::new();
+
+/// How a compiled call names a library function.
+#[derive(Clone, Copy)]
+struct Resolve<'a> {
+    lib_of: &'a BTreeMap<FunctionId, LibId>,
+    /// The functions a document lists; a library body's calls resolve
+    /// against the whole registry, which its registration checked.
+    listed: Option<&'a BTreeMap<FunctionId, doc::FunctionName>>,
+}
+
+impl Resolve<'_> {
+    fn lib(&self, function: &FunctionId) -> Option<LibId> {
+        if self
+            .listed
+            .is_some_and(|listed| !listed.contains_key(function))
+        {
+            return None;
+        }
+        self.lib_of.get(function).copied()
+    }
+}
+
+/// The first id of each table a compilation adds to: zero for a library,
+/// and for a document the length of its library's tables.
+#[derive(Clone, Copy, Default)]
+struct Base {
+    codes: u32,
+    blocks: u32,
+    stmts: u32,
+}
+
 struct Compiler<'a> {
-    document: &'a Document,
+    /// The session bindings `main` keeps private.
+    private: &'a BTreeSet<Name>,
     layout: Layout,
     shuffler: Shuffler,
+    base: Base,
     codes: Vec<Option<Code>>,
     blocks: Vec<Block>,
     stmts: Vec<Stmt>,
     declared: BTreeMap<Name, CodeId>,
-    libs: BTreeMap<FunctionId, LibId>,
+    resolve: Resolve<'a>,
     /// The codes being compiled, the outermost first; each closure adds one.
     scopes: Vec<Scopes>,
     unit: Unit,
@@ -291,84 +592,52 @@ struct Compiler<'a> {
 enum UnitSource<'a> {
     Main,
     Function(&'a Name),
-    Library(FunctionId, &'a Arc<FunctionDefinition>),
 }
 
-/// Compiles `document`. `in_flight` names library functions whose kernel
-/// body gets a code even where a native implementation runs their calls:
-/// a parked run that is inside such a body resumes there (`K-MACH-008`).
+/// Compiles `document`'s own code over `library`, which holds every
+/// library body it reaches.
 pub(crate) fn compile(
-    document: &Document,
-    registry: &FunctionRegistry,
-    layout: Layout,
-    in_flight: &BTreeSet<FunctionId>,
+    document: &Arc<Document>,
+    library: &PreparedLibrary,
 ) -> Result<Executable, Missing> {
-    // Every library function the document reaches, through bodies too.
-    let mut reached: BTreeMap<FunctionId, &doc::RegisteredFunction> = BTreeMap::new();
-    let mut pending: Vec<FunctionId> = document.manifest.functions.keys().copied().collect();
-    while let Some(function) = pending.pop() {
-        if reached.contains_key(&function) {
-            continue;
+    let prepared = &library.0;
+    if !prepared.missing.is_empty() {
+        for function in document.manifest.functions.keys() {
+            if let Some(absent) = prepared.missing.get(function) {
+                return Err(Missing(*absent));
+            }
         }
-        let registered = registry.get(&function).ok_or(Missing(function))?;
-        if registered.native.is_none()
-            && let Some(body) = registered.definition.body()
-        {
-            pending.extend(body.functions.keys().copied());
-        }
-        reached.insert(function, registered);
     }
-
+    let layout = prepared.layout;
     let mut shuffler = Shuffler(layout.0);
-    let mut library: Vec<(FunctionId, &doc::RegisteredFunction)> = reached.into_iter().collect();
-    shuffler.shuffle(layout, &mut library);
     let mut units: Vec<UnitSource<'_>> = vec![UnitSource::Main];
     units.extend(document.functions.keys().map(UnitSource::Function));
-    let mut libs = Vec::with_capacity(library.len());
-    let mut lib_ids = BTreeMap::new();
-    for (index, (function, registered)) in library.iter().enumerate() {
-        lib_ids.insert(*function, LibId(index as u32));
-        // Filled in below, once every unit has its code id.
-        libs.push((*function, *registered));
-        let runs_body = (registered.native.is_none() || in_flight.contains(function))
-            && machine_function(&registered.definition).is_none()
-            && registered.definition.body().is_some();
-        if runs_body {
-            units.push(UnitSource::Library(*function, &registered.definition));
-        }
-    }
     shuffler.shuffle(layout, &mut units);
-
-    let mut compiler = Compiler {
-        document,
+    let mut compiler = Compiler::new(
         layout,
         shuffler,
-        codes: Vec::new(),
-        blocks: Vec::new(),
-        stmts: Vec::new(),
-        declared: BTreeMap::new(),
-        libs: lib_ids,
-        scopes: Vec::new(),
-        unit: Unit::Main,
-        path: Vec::new(),
-    };
-    let mut main = CodeId(0);
-    let mut bodies: BTreeMap<FunctionId, CodeId> = BTreeMap::new();
-    for (index, unit) in units.iter().enumerate() {
-        let code = CodeId(index as u32);
-        compiler.codes.push(None);
+        Resolve {
+            lib_of: &prepared.lib_of,
+            listed: Some(&document.manifest.functions),
+        },
+        &document.private_bindings,
+        Base {
+            codes: prepared.tables.codes.len() as u32,
+            blocks: prepared.tables.blocks.len() as u32,
+            stmts: prepared.tables.stmts.len() as u32,
+        },
+    );
+    let codes: Vec<CodeId> = units.iter().map(|_| compiler.reserve()).collect();
+    let mut main = codes.first().copied().unwrap_or(CodeId(0));
+    for (unit, code) in units.iter().zip(&codes) {
         match unit {
-            UnitSource::Main => main = code,
+            UnitSource::Main => main = *code,
             UnitSource::Function(name) => {
-                compiler.declared.insert((*name).clone(), code);
-            }
-            UnitSource::Library(function, _) => {
-                bodies.insert(*function, code);
+                compiler.declared.insert((*name).clone(), *code);
             }
         }
     }
-    for (index, unit) in units.iter().enumerate() {
-        let code = CodeId(index as u32);
+    for (unit, code) in units.iter().zip(codes) {
         match unit {
             UnitSource::Main => compiler.unit_code(code, Unit::Main, &[], &document.main, true),
             UnitSource::Function(name) => {
@@ -377,63 +646,72 @@ pub(crate) fn compile(
                     compiler.unit_code(code, unit, &function.params, &function.body, true);
                 }
             }
-            UnitSource::Library(function, definition) => {
-                if let Some(body) = definition.body() {
-                    let params: Vec<Name> = definition
-                        .signature
-                        .params
-                        .iter()
-                        .map(|param| param.name.clone())
-                        .collect();
-                    let unit = Unit::Library(*function);
-                    compiler.unit_code(code, unit, &params, &body.block, false);
-                }
-            }
+        }
+    }
+    let declared = std::mem::take(&mut compiler.declared);
+    Ok(Executable {
+        library: library.clone(),
+        document: Arc::clone(document),
+        own: compiler.finish(),
+        main,
+        declared,
+    })
+}
+
+impl<'a> Compiler<'a> {
+    fn new(
+        layout: Layout,
+        shuffler: Shuffler,
+        resolve: Resolve<'a>,
+        private: &'a BTreeSet<Name>,
+        base: Base,
+    ) -> Self {
+        Self {
+            private,
+            layout,
+            shuffler,
+            base,
+            codes: Vec::new(),
+            blocks: Vec::new(),
+            stmts: Vec::new(),
+            declared: BTreeMap::new(),
+            resolve,
+            scopes: Vec::new(),
+            unit: Unit::Main,
+            path: Vec::new(),
         }
     }
 
-    let libs = libs
-        .into_iter()
-        .map(|(function, registered)| {
-            let definition = Arc::clone(&registered.definition);
-            let run = if let Some(machine) = machine_function(&definition) {
-                LibRun::Machine(machine)
-            } else if let Some(native) = &registered.native {
-                LibRun::Native(Arc::clone(native))
-            } else {
-                // A function with no native registered has a body, and the
-                // loop above gave every such body a code.
-                LibRun::Body(bodies.get(&function).copied().unwrap_or(main))
-            };
-            Lib {
-                id: function,
-                definition,
-                run,
-            }
-        })
-        .collect();
-    let codes: Vec<Code> = compiler.codes.into_iter().flatten().collect();
-    let code_at = codes
-        .iter()
-        .enumerate()
-        .map(|(index, code)| (code.site.clone(), CodeId(index as u32)))
-        .collect();
-    let block_at = compiler
-        .blocks
-        .iter()
-        .enumerate()
-        .map(|(index, block)| (block.site.clone(), BlockId(index as u32)))
-        .collect();
-    Ok(Executable {
-        codes,
-        blocks: compiler.blocks,
-        stmts: compiler.stmts,
-        libs,
-        main,
-        declared: compiler.declared,
-        code_at,
-        block_at,
-    })
+    /// Takes the next code id, for a unit compiled later.
+    fn reserve(&mut self) -> CodeId {
+        let id = CodeId(self.base.codes + self.codes.len() as u32);
+        self.codes.push(None);
+        id
+    }
+
+    /// The compiled tables, with every body and block found by its site.
+    fn finish(self) -> Tables {
+        let base = self.base;
+        let codes: Vec<Code> = self.codes.into_iter().flatten().collect();
+        let code_at = codes
+            .iter()
+            .enumerate()
+            .map(|(index, code)| (code.site.clone(), CodeId(base.codes + index as u32)))
+            .collect();
+        let block_at = self
+            .blocks
+            .iter()
+            .enumerate()
+            .map(|(index, block)| (block.site.clone(), BlockId(base.blocks + index as u32)))
+            .collect();
+        Tables {
+            codes,
+            blocks: self.blocks,
+            stmts: self.stmts,
+            code_at,
+            block_at,
+        }
+    }
 }
 
 impl Compiler<'_> {
@@ -454,7 +732,7 @@ impl Compiler<'_> {
         self.unit = unit;
         self.path.clear();
         let compiled = self.code(params, body, main, charged);
-        self.codes[code.0 as usize] = Some(compiled);
+        self.codes[(code.0 - self.base.codes) as usize] = Some(compiled);
     }
 
     /// Compiles a function body in a scope of its own. The path addresses
@@ -535,7 +813,7 @@ impl Compiler<'_> {
             .collect();
         // Statement and block ids are taken in the order the layout visits
         // the units, so they differ between layouts.
-        let id = BlockId(self.blocks.len() as u32);
+        let id = BlockId(self.base.blocks + self.blocks.len() as u32);
         self.blocks.push(Block {
             site: self.site(),
             stmts: Vec::new(),
@@ -544,12 +822,12 @@ impl Compiler<'_> {
         let ids = stmts
             .into_iter()
             .map(|stmt| {
-                let id = StmtId(self.stmts.len() as u32);
+                let id = StmtId(self.base.stmts + self.stmts.len() as u32);
                 self.stmts.push(stmt);
                 id
             })
             .collect();
-        self.blocks[id.0 as usize].stmts = ids;
+        self.blocks[(id.0 - self.base.blocks) as usize].stmts = ids;
         (id, bound)
     }
 
@@ -570,7 +848,7 @@ impl Compiler<'_> {
                         .scopes
                         .last()
                         .is_some_and(|scopes| scopes.main && scopes.blocks.len() == 1);
-                let target = if top_level && !self.document.private_bindings.contains(name) {
+                let target = if top_level && !self.private.contains(name) {
                     if let Some(block) = self.scopes.last_mut().and_then(|s| s.blocks.last_mut()) {
                         block.push((name.clone(), Declared::Session));
                     }
@@ -718,8 +996,8 @@ impl Compiler<'_> {
                 None => Callee::Value(Var::Unbound(name.clone())),
             },
             doc::Callee::Value(name) => Callee::Value(self.resolve(name)),
-            doc::Callee::Library(function) => match self.libs.get(function) {
-                Some(lib) => Callee::Library(*lib),
+            doc::Callee::Library(function) => match self.resolve.lib(function) {
+                Some(lib) => Callee::Library(lib),
                 None => Callee::Value(Var::Unbound(Name::new(function.to_string()))),
             },
         }
@@ -780,11 +1058,11 @@ impl Compiler<'_> {
                 let code = self.child(0, |c| {
                     c.code(&closure.params, &closure.body, false, charged)
                 });
-                let id = CodeId(self.codes.len() as u32);
+                let id = CodeId(self.base.codes + self.codes.len() as u32);
                 self.codes.push(Some(code));
                 Expr::Closure(id)
             }
-            doc::Expr::Call { function, args } => match self.libs.get(function).copied() {
+            doc::Expr::Call { function, args } => match self.resolve.lib(function) {
                 Some(lib) => Expr::Call {
                     lib,
                     args: self.exprs(args),

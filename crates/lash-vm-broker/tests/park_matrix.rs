@@ -132,7 +132,7 @@ main {{
     );
     Program {
         document: Arc::new(parse_document(&text).expect("a valid kernel fan-out document")),
-        registry: Arc::new(FunctionRegistry::new()),
+        library: lash_kernel_vm::PreparedLibrary::new(Arc::new(FunctionRegistry::new())),
     }
 }
 

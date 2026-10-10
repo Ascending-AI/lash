@@ -19,7 +19,8 @@ use lash_dialect_typescript::{DiagnosticCode, define_helpers};
 use lash_kernel_dialect::{Environment, Lowered, NamedLibrary};
 use lash_kernel_doc::{Datum, ErrorDatum, FunctionRegistry, Handle, Integer, Name, Timestamp};
 use lash_kernel_vm::{
-    Bindings, Bounds, End, Host, KernelMachine, Machine, Program, RunError, Start, Step, Target,
+    Bindings, Bounds, End, Host, KernelMachine, Machine, PreparedLibrary, Program, RunError, Start,
+    Step, Target,
 };
 
 use super::ingest::{data_path, harness_shim, source_for, source_without_unshimmed};
@@ -112,14 +113,14 @@ pub(crate) trait Executor: Sync {
 
 /// Runs a document on any implementation of the kernel's machine interface.
 pub(crate) struct OnMachine<M> {
-    registry: Arc<FunctionRegistry>,
+    library: PreparedLibrary,
     machine: std::marker::PhantomData<fn() -> M>,
 }
 
 impl<M: Machine> OnMachine<M> {
     pub(crate) fn new(registry: Arc<FunctionRegistry>) -> Self {
         Self {
-            registry,
+            library: PreparedLibrary::new(registry),
             machine: std::marker::PhantomData,
         }
     }
@@ -164,7 +165,7 @@ impl<M: Machine> Executor for OnMachine<M> {
     fn run(&self, lowered: &Lowered) -> Result<End, String> {
         let program = Program {
             document: Arc::new(lowered.document.clone()),
-            registry: Arc::clone(&self.registry),
+            library: self.library.clone(),
         };
         let start = Start {
             target: Target::Main,

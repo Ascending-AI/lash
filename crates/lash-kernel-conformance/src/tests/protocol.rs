@@ -7,7 +7,9 @@ use std::sync::Arc;
 use lash_kernel_doc::{
     Datum, ErrorDatum, FunctionRegistry, Handle, Integer, Site, Timestamp, Unit, parse_document,
 };
-use lash_kernel_vm::{Bindings, End, Host, KernelMachine, Machine, Program, Start, Step, Target};
+use lash_kernel_vm::{
+    Bindings, End, Host, KernelMachine, Machine, PreparedLibrary, Program, Start, Step, Target,
+};
 
 use crate::{Case, CaseBounds, Shard};
 
@@ -53,12 +55,12 @@ fn main(path: &[u32]) -> Site {
 fn program(case: &Case, registry: Arc<FunctionRegistry>) -> Program {
     Program {
         document: Arc::new(parse_document(&case.document).expect("case document")),
-        registry,
+        library: PreparedLibrary::new(registry),
     }
 }
 
 fn start(program: Program, bounds: CaseBounds, bindings: Bindings) -> KernelMachine {
-    let mut admission = lash_kernel_check::Environment::new(program.registry.as_ref());
+    let mut admission = lash_kernel_check::Environment::new(program.library.registry().as_ref());
     admission.effects = program.document.manifest.effects.clone();
     admission.bindings = bindings.variables.keys().cloned().collect();
     lash_kernel_check::admit(&program.document, &admission).expect("admit protocol document");

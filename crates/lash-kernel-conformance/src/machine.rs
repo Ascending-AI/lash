@@ -8,20 +8,21 @@ use lash_kernel_doc::{
     Datum, ErrorDatum, FunctionRegistry, Handle, Integer, Timestamp, parse_document,
 };
 use lash_kernel_vm::{
-    Bindings, Delivered, Host, Machine, Program, Request, Start, StartError, Step, Target,
+    Bindings, Delivered, Host, Machine, PreparedLibrary, Program, Request, Start, StartError, Step,
+    Target,
 };
 
 use crate::{Case, DocumentRunner, ExpectedEnd, HarnessError, HostAnswer, Observations, Trace};
 
 pub struct MachineRunner<M> {
-    registry: Arc<FunctionRegistry>,
+    library: PreparedLibrary,
     machine: PhantomData<fn() -> M>,
 }
 
 impl<M: Machine> MachineRunner<M> {
     pub fn new(registry: Arc<FunctionRegistry>) -> Self {
         Self {
-            registry,
+            library: PreparedLibrary::new(registry),
             machine: PhantomData,
         }
     }
@@ -30,7 +31,7 @@ impl<M: Machine> MachineRunner<M> {
 impl<M: Machine> DocumentRunner for MachineRunner<M> {
     fn observe(&mut self, case: &Case) -> Result<Observations, HarnessError> {
         let resume = case.environment.resume;
-        run_case::<M>(&self.registry, case, &mut |at: Park<'_, M>| {
+        run_case::<M>(&self.library, case, &mut |at: Park<'_, M>| {
             if !resume {
                 return Ok(at.machine);
             }
@@ -59,10 +60,11 @@ pub(crate) struct Park<'a, M> {
 /// Runs `case` under its script. `at_park` is handed the machine at every
 /// park and answers the machine the run goes on with.
 pub(crate) fn run_case<M: Machine>(
-    registry: &Arc<FunctionRegistry>,
+    library: &PreparedLibrary,
     case: &Case,
     at_park: &mut dyn FnMut(Park<'_, M>) -> Result<M, HarnessError>,
 ) -> Result<Observations, HarnessError> {
+    let registry = library.registry();
     let refused = || Observations {
         prints: Vec::new(),
         end: ExpectedEnd::Refused,
@@ -85,7 +87,7 @@ pub(crate) fn run_case<M: Machine>(
     }
     let mut program = Program {
         document: Arc::new(document),
-        registry: registry.clone(),
+        library: library.clone(),
     };
     let bounds = env.bounds.into();
     let start = Start {

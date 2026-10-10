@@ -14,8 +14,8 @@ use lash_kernel_doc::{
 use lash_kernel_state::{Baseline, ParkedRun};
 
 use crate::{
-    Bounds, Delivered, End, Host, KernelMachine, Layout, Machine, Outcome, Program, Request,
-    RunError, Start, Step, Target, WaitId, register_machine_functions,
+    Bounds, Delivered, End, Host, KernelMachine, Layout, Machine, Outcome, PreparedLibrary,
+    Program, Request, RunError, Start, Step, Target, WaitId, register_machine_functions,
 };
 
 /// Bounds no law reaches unless it sets one.
@@ -380,7 +380,7 @@ impl Embedder {
         let document = Arc::new(document);
         let program = Program {
             document: Arc::clone(&document),
-            registry: Arc::clone(&library.registry),
+            library: PreparedLibrary::new(Arc::clone(&library.registry)),
         };
         let machine =
             KernelMachine::start_with_layout(program, setup.bounds, setup.start, setup.layout)
@@ -404,7 +404,7 @@ impl Embedder {
         let library = library(native_twice);
         let program = Program {
             document: Arc::clone(&self.document),
-            registry: Arc::clone(&library.registry),
+            library: PreparedLibrary::new(Arc::clone(&library.registry)),
         };
         (program, library)
     }

@@ -13,8 +13,8 @@ use lash_kernel_doc::{
     Timestamp, Type,
 };
 use lash_kernel_vm::{
-    Bindings, Bounds, End, Host, KernelMachine, Machine, Outcome, Program, Request, RunError,
-    Start, Step, Target, WaitId,
+    Bindings, Bounds, End, Host, KernelMachine, Machine, Outcome, PreparedLibrary, Program,
+    Request, RunError, Start, Step, Target, WaitId,
 };
 use serde::Deserialize;
 
@@ -34,6 +34,12 @@ pub(super) fn registry() -> &'static Arc<FunctionRegistry> {
         }
         Arc::new(registry)
     })
+}
+
+/// [`registry`] with its library bodies compiled, once for every run.
+fn prepared() -> &'static PreparedLibrary {
+    static PREPARED: OnceLock<PreparedLibrary> = OnceLock::new();
+    PREPARED.get_or_init(|| PreparedLibrary::new(Arc::clone(registry())))
 }
 
 /// The tools a cell may call: `echo(x)` answers `x` and `boom(x)` fails
@@ -242,7 +248,7 @@ pub(crate) fn end_of_entry(
     let text = lash_kernel_doc::print_document(&document);
     let program = Program {
         document: Arc::new(document),
-        registry: Arc::clone(registry()),
+        library: prepared().clone(),
     };
     let start = Start {
         target: Target::Entry(Name::new(entry)),
@@ -299,7 +305,7 @@ fn start_with_bindings(source: &str, values: Bindings) -> (KernelMachine, String
     }
     let program = Program {
         document: Arc::new(lowered.document),
-        registry: Arc::clone(registry()),
+        library: prepared().clone(),
     };
     let start = Start {
         target: Target::Main,

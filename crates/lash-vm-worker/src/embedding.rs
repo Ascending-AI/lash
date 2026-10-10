@@ -24,6 +24,7 @@ use lash_kernel_dialect::{
 use lash_kernel_doc::{
     Document, FunctionDefinition, FunctionId, FunctionRegistry, ValidatedFunctions,
 };
+use lash_kernel_vm::PreparedLibrary;
 use lash_vm_client::WorkerTuning;
 
 use crate::releases::HelperReleaseIndex;
@@ -63,6 +64,11 @@ pub struct Embedding {
     /// the build interprets, made when first asked for: a worker that runs
     /// no successor's document never redeclares (FIG-5796).
     interpreted: OnceLock<Arc<FunctionRegistry>>,
+    /// `written` and `interpreted` with every library body compiled, once
+    /// for all the runs of the worker, made when a document first runs
+    /// against each.
+    prepared_written: OnceLock<PreparedLibrary>,
+    prepared_interpreted: OnceLock<PreparedLibrary>,
     pub(crate) library: NamedLibrary,
     pub(crate) dialects: BTreeMap<String, Package>,
     /// The helper release the embedding's own names are.
@@ -158,6 +164,26 @@ impl Embedding {
             return Ok(&self.written);
         }
         self.registry()
+    }
+
+    /// The prepared library a machine runs a document written for kernel
+    /// version `kernel` over: [`Embedding::registry_for`]'s registry, its
+    /// library bodies compiled when a document first runs against it.
+    ///
+    /// # Errors
+    ///
+    /// [`Embedding::registry`]'s.
+    pub(crate) fn prepared_for(&self, kernel: u32) -> Result<&PreparedLibrary, EmbedError> {
+        let prepared = if kernel == lash_kernel_doc::KERNEL_VERSION {
+            &self.prepared_written
+        } else {
+            &self.prepared_interpreted
+        };
+        if let Some(library) = prepared.get() {
+            return Ok(library);
+        }
+        let registry = self.registry_for(kernel)?;
+        Ok(prepared.get_or_init(|| PreparedLibrary::new(Arc::clone(registry))))
     }
 
     /// Lowers `source` as the installed dialect `dialect` does for a cell:
@@ -279,6 +305,8 @@ impl Embedder {
             library: self.library()?,
             written: Arc::new(self.registry),
             interpreted: OnceLock::new(),
+            prepared_written: OnceLock::new(),
+            prepared_interpreted: OnceLock::new(),
             dialects: self.dialects,
             writes: self.writes,
             releases: self

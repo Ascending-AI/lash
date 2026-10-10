@@ -4,12 +4,12 @@
 use lash_kernel_doc::parse_definition;
 use lash_kernel_doc::{Document, KernelVersion};
 use lash_kernel_state::ParkedRun;
-use lash_kernel_vm::{KernelMachine, Machine};
+use lash_kernel_vm::{KernelMachine, Machine, PreparedLibrary};
 
 use super::{Case, registry};
 
 pub(super) fn check(rule: &str, case: &Case) {
-    let library = registry();
+    let library = PreparedLibrary::new(registry());
     if rule == "K-VER-003" {
         // Unsupported versions win over malformed payloads: none of these
         // readers may enter the unsupported version's decoder.
@@ -42,7 +42,7 @@ pub(super) fn check(rule: &str, case: &Case) {
         // document's manifest, even when its signature is unchanged.
         #[cfg(feature = "synthetic-next")]
         {
-            let mut library = (*library).clone();
+            let mut library = lash_kernel_doc::FunctionRegistry::clone(library.registry());
             let mut definition = parse_definition(
                 "function identity(x: Any) -> Any\nkernel 1\ncharge 1\nbody { return x }",
             )
@@ -63,13 +63,14 @@ pub(super) fn check(rule: &str, case: &Case) {
             lash_kernel_migrate::migration_from(KernelVersion::One).is_none(),
             "the 1.0 baseline has no predecessor migration"
         );
-        let mut runner = crate::MachineRunner::<KernelMachine>::new(library);
+        let mut runner =
+            crate::MachineRunner::<KernelMachine>::new(std::sync::Arc::clone(library.registry()));
         crate::check_case(&mut runner, case).unwrap();
     }
     #[cfg(feature = "synthetic-next")]
     {
         let migration = lash_kernel_migrate::migration_from(KernelVersion::One).unwrap();
-        let mut library = (*library).clone();
+        let mut library = lash_kernel_doc::FunctionRegistry::clone(library.registry());
         let definition = parse_definition(
             "function identity(x: Any) -> Any\nkernel 1\ncharge 1\nbody { return x }",
         )

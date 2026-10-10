@@ -181,7 +181,7 @@ fn a_run_parked_in_a_library_body_is_refused_with_the_site_it_stands_on() {
     .expect("a document that waits inside a library body");
     let program = Program {
         document: Arc::new(document),
-        registry: Arc::clone(&registry),
+        library: lash_kernel_vm::PreparedLibrary::new(Arc::clone(&registry)),
     };
     let start = Start {
         target: Target::Main,
@@ -263,7 +263,7 @@ fn ran(
         .expect("the document is one its version's library runs");
     let program = Program {
         document: Arc::new(document),
-        registry: Arc::clone(registry),
+        library: lash_kernel_vm::PreparedLibrary::new(Arc::clone(registry)),
     };
     let start = Start {
         target: Target::Main,

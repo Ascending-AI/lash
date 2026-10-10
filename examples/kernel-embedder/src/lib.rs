@@ -5,8 +5,8 @@ use std::sync::Arc;
 
 use lash_kernel_doc::{Datum, FunctionRegistry, Handle, Integer, Timestamp, parse_document};
 use lash_kernel_vm::{
-    Bindings, Bounds, EffectRequest, End, Host, Machine, Outcome, Program, Request, Start, Step,
-    Target,
+    Bindings, Bounds, EffectRequest, End, Host, Machine, Outcome, PreparedLibrary, Program,
+    Request, Start, Step, Target,
 };
 
 /// Two children request effects before their parent joins them.
@@ -44,7 +44,7 @@ pub fn embed<M: Machine>(
     lash_kernel_check::admit(&document, &environment).map_err(|e| e.to_string())?;
     let program = Program {
         document: Arc::new(document),
-        registry,
+        library: PreparedLibrary::new(registry),
     };
     let bounds = Bounds {
         charge: 100_000,

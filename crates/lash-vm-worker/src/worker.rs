@@ -385,14 +385,14 @@ impl<'embedding> Server<'embedding> {
             .map_err(|error| undecodable(RunInput::Document, &error))?
             .to_string();
         let kernel = document.manifest.kernel;
-        let registry = self.embedding.registry_for(kernel).map_err(|error| {
+        let library = self.embedding.prepared_for(kernel).map_err(|error| {
             PoolError::breach(ProtocolBreach::Machine {
                 detail: Detail::new(error),
             })
         })?;
         let program = Program {
             document: Arc::new(document),
-            registry: Arc::clone(registry),
+            library: library.clone(),
         };
         let bounds = Bounds {
             charge: start.bounds.charge,

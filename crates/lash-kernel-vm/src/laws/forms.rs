@@ -751,7 +751,7 @@ fn a_start_that_does_not_fit_the_document_is_refused() {
                 lash_kernel_doc::parse_document(&format!("kernel 1\nnumbers float\n{text}"))
                     .unwrap(),
             ),
-            registry: library.registry,
+            library: crate::PreparedLibrary::new(library.registry),
         }
     };
     let source = "entry go(n: Int, label?: Text) -> Any\nfn go(n, label) { return n }\nmain { }";
