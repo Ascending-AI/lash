@@ -63,6 +63,12 @@ the baseline needs a new definition identity (`K-VER-002`).
   scalar integers, raising `invalid_scalar` for surrogates or out-of-range
   values. `text.from_utf16_units(list)` requires integers in 0..65535 and
   well-paired surrogates, raising `invalid_utf16` otherwise (`K-VAL-006`).
+- **K-LTXT-010.** `text.normalize_u17_0_0(text, form)` applies Unicode 17
+  normalization with the checksum-pinned `unicode-normalization` tables.
+  `form` is exactly `NFC`, `NFD`, `NFKC` or `NFKD`; anything else raises
+  `normalization_form`. Temporary decomposition and output storage are reserved
+  against the native memory bound before normalization starts. The dialect
+  supplies ECMAScript coercion and maps an invalid form to `RangeError`.
 
 ## Bytes
 

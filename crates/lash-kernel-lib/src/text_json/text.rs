@@ -1,6 +1,7 @@
 use lash_kernel_doc::{NativeCall, NativeError, NativeHeap, Object, Type, Value};
 use num_bigint::BigInt;
 use num_traits::ToPrimitive;
+use unicode_normalization::UnicodeNormalization;
 
 use super::{
     Function, count_arg, definition, int, integer_arg, ordering, raise, reserve_list, sequence,
@@ -164,6 +165,14 @@ pub(super) fn functions() -> Vec<Function> {
             native,
         ));
     }
+    let (major, minor, patch) = unicode_normalization::UNICODE_VERSION;
+    functions.push(definition(
+        &format!("text.normalize_u{major}_{minor}_{patch}"),
+        &[("text", Type::Text), ("form", Type::Text)],
+        Type::Text,
+        &["normalization_form"],
+        normalize,
+    ));
     for (name, native) in [
         (
             "text.to_code_points",
@@ -195,6 +204,36 @@ pub(super) fn functions() -> Vec<Function> {
         ));
     }
     functions
+}
+
+fn normalize(call: NativeCall<'_>) -> Result<Value, NativeError> {
+    let text = text_arg(call.args, 0)?;
+    let form = text_arg(call.args, 1)?;
+    if !matches!(form, "NFC" | "NFD" | "NFKC" | "NFKD") {
+        return Err(raise(
+            "normalization_form",
+            "expected NFC, NFD, NFKC or NFKD",
+        ));
+    }
+    // Unicode 17's largest recursive decomposition has 18 scalars. Reserve
+    // the reorder buffer and output before the iterator allocates either.
+    let scalars = text
+        .chars()
+        .count()
+        .checked_mul(18)
+        .ok_or(NativeError::Memory)?;
+    let bytes = scalars.checked_mul(4).ok_or(NativeError::Memory)?;
+    call.heap
+        .reserve(0, super::room(scalars).saturating_mul(16))?;
+    let mut output = text_buffer(call.heap, bytes)?;
+    match form {
+        "NFC" => output.extend(text.nfc()),
+        "NFD" => output.extend(text.nfd()),
+        "NFKC" => output.extend(text.nfkc()),
+        "NFKD" => output.extend(text.nfkd()),
+        _ => unreachable!("validated normalization form"),
+    }
+    Ok(Value::text(output))
 }
 
 /// Negative positions count from the end; slice positions are clamped.

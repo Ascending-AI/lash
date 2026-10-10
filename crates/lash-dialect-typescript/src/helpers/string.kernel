@@ -21,6 +21,7 @@ use text.concat
 use text.from_code_points
 use text.from_utf16_units
 use text.lower_u17_0_0
+use text.normalize_u17_0_0
 use text.repeat
 use text.upper_u17_0_0
 use text.utf16_find
@@ -48,6 +49,7 @@ use ts.string.integer
 use ts.string.lastIndexOf
 use ts.string.length
 use ts.string.length_value
+use ts.string.normalize
 use ts.string.padEnd
 use ts.string.padStart
 use ts.string.raw
@@ -442,6 +444,27 @@ body {
     set text = text.concat(text, piece)
   }
   return text
+}
+
+function ts.string.normalize(this: Any, args: List(Any)) -> Text
+kernel 1
+errors "type_error", "RangeError", "normalization_form"
+charge sum(8, deep(result))
+body {
+  do invoke ts.require_object_coercible(this)
+  let text = invoke ts.to_string(this)
+  let args = invoke ts.pad(args, 1)
+  let form = "NFC"
+  if same(kind(args[0]), "absent") {} else {
+    let argument = args[0]
+    set form = invoke ts.to_string(argument)
+  }
+  let valid = false
+  for name in ["NFC", "NFD", "NFKC", "NFKD"] {
+    if same(form, name) { set valid = true }
+  }
+  if valid {} else { throw error.new("RangeError", "Invalid normalization form", null) }
+  return text.normalize_u17_0_0(text, form)
 }
 
 function ts.string.toLowerCase(this: Any, args: List(Any)) -> Text

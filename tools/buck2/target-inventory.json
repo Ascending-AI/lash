@@ -52800,7 +52800,8 @@
         "libm",
         "num-bigint",
         "num-traits",
-        "serde_json"
+        "serde_json",
+        "unicode-normalization"
       ],
       "doc": "//crates/lash-kernel-lib:lash-kernel-lib__doc",
       "manifest": "crates/lash-kernel-lib/Cargo.toml",

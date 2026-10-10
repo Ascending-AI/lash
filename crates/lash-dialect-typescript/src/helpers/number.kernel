@@ -48,6 +48,7 @@ use ts.number.toPrecision
 use ts.number.toString
 use ts.number.to_string
 use ts.number.valueOf
+use ts.number.receiver
 use ts.pad
 use ts.receiver
 use ts.to_int32
@@ -141,11 +142,23 @@ let base = invoke ts.to_int32(builtin_arg_3)
   return output
 }
 
+# ThisNumberValue: unlike Number(), prototype methods never coerce receivers.
+function ts.number.receiver(value: Any) -> Number
+kernel 1
+errors "type_error"
+charge 8
+body {
+  let receiver = invoke ts.receiver(value)
+  if same(receiver, "number") { return value }
+  throw error.new("type_error", "Number receiver required", null)
+}
+
 function ts.number.valueOf(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
+  let this = invoke ts.number.receiver(this)
   return this
 }
 
@@ -154,6 +167,7 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
+  let this = invoke ts.number.receiver(this)
   let args = invoke ts.pad(args, 1)
   if same(kind(args[0]), "absent") {
     let output = invoke ts.number.to_string(this)
@@ -191,6 +205,7 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
+  let this = invoke ts.number.receiver(this)
   let args = invoke ts.pad(args, 1)
   let precision = 0.0
   if same(kind(args[0]), "absent") {} else { let builtin_arg_5 = args[0]
@@ -217,14 +232,15 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
+  let this = invoke ts.number.receiver(this)
   let args = invoke ts.pad(args, 1)
   let precision = 0.0
   if same(kind(args[0]), "absent") {} else { let builtin_arg_7 = args[0]
 set precision = invoke ts.to_number(builtin_arg_7) }
   if num.is_nan(precision) { set precision = 0.0 }
   set precision = num.trunc(precision)
-  if num.le(0, precision) { if num.le(precision, 100) {} else { throw error.new("RangeError", "Invalid precision", null) } } else { throw error.new("RangeError", "Invalid precision", null) }
   if num.is_finite(this) {} else { let output = invoke ts.number.to_string(this) return output }
+  if num.le(0, precision) { if num.le(precision, 100) {} else { throw error.new("RangeError", "Invalid precision", null) } } else { throw error.new("RangeError", "Invalid precision", null) }
   let precision = float.to_int(precision)
   let absolute = num.abs(this)
   let sign = ""
@@ -255,6 +271,7 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
+  let this = invoke ts.number.receiver(this)
   let args = invoke ts.pad(args, 1)
   if same(kind(args[0]), "absent") { let output = invoke ts.number.to_string(this) return output }
   let precision = 0.0
@@ -262,8 +279,8 @@ body {
 set precision = invoke ts.to_number(builtin_arg_10) }
   if num.is_nan(precision) { set precision = 0.0 }
   set precision = num.trunc(precision)
-  if num.le(1, precision) { if num.le(precision, 100) {} else { throw error.new("RangeError", "Invalid precision", null) } } else { throw error.new("RangeError", "Invalid precision", null) }
   if num.is_finite(this) {} else { let output = invoke ts.number.to_string(this) return output }
+  if num.le(1, precision) { if num.le(precision, 100) {} else { throw error.new("RangeError", "Invalid precision", null) } } else { throw error.new("RangeError", "Invalid precision", null) }
   let precision = float.to_int(precision)
   let absolute = num.abs(this)
   let sign = ""

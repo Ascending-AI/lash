@@ -139,14 +139,20 @@ impl Lowerer<'_> {
     /// not bind: `Math.max`, `console.log`.
     fn global_path(&self, expr: &ast::Expr) -> Option<String> {
         match expr {
-            ast::Expr::Ident(name, _) => {
-                (!self.is_bound(name) && crate::builtins::is_global(name)).then(|| name.clone())
-            }
+            ast::Expr::Ident(name, _) => (!self.is_bound(name)
+                && crate::builtins::is_global(name)
+                && !matches!(name.as_str(), "NaN" | "Infinity" | "undefined"))
+            .then(|| name.clone()),
             ast::Expr::Member {
                 object,
                 property: ast::MemberProperty::Field(field),
                 ..
-            } => Some(format!("{}.{field}", self.global_path(object)?)),
+            } => {
+                let path = self.global_path(object)?;
+                // Constants are receivers, rather than namespaces of global
+                // functions: Number.NaN.toString uses the Number method row.
+                (!self.table.values.contains_key(path.as_str())).then(|| format!("{path}.{field}"))
+            }
             _ => None,
         }
     }
@@ -321,6 +327,10 @@ impl Lowerer<'_> {
                 let args = self.arguments(args)?;
                 let receiver = if path.starts_with("String.prototype.") {
                     Operand::text("")
+                } else if path.starts_with("Number.prototype.") {
+                    Operand::number(0.0)
+                } else if path.starts_with("Boolean.prototype.") {
+                    Operand::bool(false)
                 } else {
                     Operand::undefined()
                 };

@@ -68,6 +68,27 @@ fn number_parsers_and_decimal_formatters_keep_javascript_edges() {
 }
 
 #[test]
+fn number_constant_receivers_use_number_methods_and_validate_radix() {
+    agrees(
+        "let invalid = false; try { NaN.toString(1); } catch (e) { invalid = e instanceof RangeError; } finish(invalid && NaN.toString() === 'NaN' && Infinity.toString(16) === 'Infinity' && NaN.toExponential(101) === 'NaN' && NaN.toPrecision(0) === 'NaN' && Number.NaN.toString(10) === 'NaN');",
+    );
+}
+
+#[test]
+fn number_prototype_is_zero_and_borrowed_methods_require_numbers() {
+    agrees(
+        "let invalid = false; try { Number.prototype.valueOf.call({}); } catch (e) { invalid = e instanceof TypeError; } finish(invalid && Number.prototype.toFixed(1) === '0.0' && Number.prototype.toExponential(0) === '0e+0' && Number.prototype.toPrecision(1) === '0');",
+    );
+}
+
+#[test]
+fn string_normalization_orders_coercions_and_preserves_canonical_forms() {
+    agrees(
+        "let order = ''; const value = {toString: () => { order += 's'; return 'e\\u0301'; }}; const form = {toString: () => { order += 'f'; return 'NFC'; }}; const normalize = String.prototype.normalize; const normalized = normalize.call(value, form); let invalid = false; try { 'x'.normalize('bad'); } catch (e) { invalid = e instanceof RangeError; } let nullish = false; try { String.prototype.normalize.call(null); } catch (e) { nullish = e instanceof TypeError; } finish(order === 'sf' && normalized === 'é' && 'é'.normalize('NFD') === 'e\\u0301' && 'ﬀ'.normalize('NFKC') === 'ff' && 'ﬀ'.normalize('NFKD') === 'ff' && invalid && nullish);",
+    );
+}
+
+#[test]
 fn math_coercions_keep_signed_zero_nan_and_binary32_rounding() {
     agrees(
         "finish(Math.abs('-2') === 2 && Math.max(-0, 0) === 0 && 1 / Math.min(0, -0) === -Infinity && 1 / Math.round(-0.5) === -Infinity && Math.imul(4294967295, 5) === -5 && Math.imul(1.9, 2.2) === 2 && Math.clz32(1) === 31 && Math.hypot(3, 4) === 5 && Math.fround(16777217) === 16777216 && Math.fround(1e40) === Infinity && Math.PI > 3);",

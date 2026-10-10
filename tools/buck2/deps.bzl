@@ -1048,7 +1048,8 @@ PACKAGE_DEPS = {
             "libm": "//third-party/rust:p0187",
             "num_bigint": "//third-party/rust:p0211",
             "num_traits": "//third-party/rust:p0217",
-            "serde_json": "//third-party/rust:p0319"
+            "serde_json": "//third-party/rust:p0319",
+            "unicode_normalization": "//third-party/rust:p0409"
         }
     },
     "lash-kernel-migrate": {

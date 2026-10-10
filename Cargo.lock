@@ -2837,6 +2837,7 @@ dependencies = [
  "num-bigint",
  "num-traits",
  "serde_json",
+ "unicode-normalization",
 ]
 
 [[package]]

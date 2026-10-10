@@ -277,6 +277,7 @@ url = "=2.5.8"
 uuid = "1"
 num-bigint = "0.4"
 num-traits = "0.2"
+unicode-normalization = "=0.1.25"
 # Software math pins the kernel library independently of the host C library.
 libm = { version = "=0.2.16", default-features = false }
 

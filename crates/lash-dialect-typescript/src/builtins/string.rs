@@ -5,6 +5,15 @@ pub(super) fn object() -> Object {
         source: include_str!("../helpers/string.kernel"),
         rows: vec![
             Row::Function {
+                path: "String.prototype.normalize",
+                function: "ts.string.normalize",
+            },
+            Row::Method {
+                receiver: Receiver::Text,
+                name: "normalize",
+                function: "ts.string.normalize",
+            },
+            Row::Function {
                 path: "String.prototype.at",
                 function: "ts.string.at",
             },
