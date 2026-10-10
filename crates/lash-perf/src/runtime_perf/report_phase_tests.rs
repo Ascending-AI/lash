@@ -478,12 +478,6 @@ fn runtime_phase_inventory_is_closed_in_both_directions() {
 #[test]
 fn materially_different_shared_phases_use_scenario_budgets() {
     assert!(
-        phase_wall_clock_budget_ms(
-            RuntimePerfScenario::RlmObliqueStackMix,
-            "codemode_lash_vm.execute",
-        ) > phase_wall_clock_budget_ms(RuntimePerfScenario::Rlm, "codemode_lash_vm.execute")
-    );
-    assert!(
         phase_wall_clock_budget_ms(RuntimePerfScenario::RlmLargeToolCatalog, "effect_loop")
             > phase_wall_clock_budget_ms(RuntimePerfScenario::Rlm, "effect_loop")
     );

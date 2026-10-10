@@ -39,6 +39,7 @@ results; their old launchers have been retired.
 - [cpu-profiles](instruments/cpu-profiles.md): where a workload spends CPU and where its threads block off-CPU.
 - [durable-substrate-waits](instruments/durable-substrate-waits.md): how long direct durable-substrate process registration and waits take.
 - [durable-transaction-telemetry](instruments/durable-transaction-telemetry.md): what per-statement elapsed time inside one durable PostgreSQL commit attempt shows.
+- [kernel-gate6](instruments/kernel-gate6.md): strict raw kernel receipts, recorded baseline comparison and advisory history.
 - [duration-history](instruments/duration-history.md): how durations compare against retained history and what operation tails show.
 - [fixture-graph-curves](instruments/fixture-graph-curves.md): whether the named runtime fixtures reach real product paths and how the counted graph curves scale.
 - [flight-recorder](instruments/flight-recorder.md): what bounded recent context a snapshot captures on a slow or failed operation.

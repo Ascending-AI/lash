@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 0,
   "cargo_package_count": 70,
-  "cargo_target_count": 213,
+  "cargo_target_count": 214,
   "facade_production_check_targets": [
     "//crates/lash-core-effect:lash-core-effect__fv_969a08f2__metadata[check]",
     "//crates/lash-core-effect:lash-core-effect__fv_d3926888__metadata[check]",
@@ -52375,7 +52375,7 @@
       "//crates/lash:lash__fv_da373a79"
     ]
   },
-  "generated_label_count": 294,
+  "generated_label_count": 296,
   "main_test_exclusions": {
     "//crates/lash-s3-store:lash-s3-store__unit_test": "requires an external service or credentials"
   },
@@ -53475,7 +53475,7 @@
     "//runbooks/lash-facade-failover:lash-facade-failover__unit_test",
     "//runbooks/rlm-smoke:rlm-smoke__unit_test"
   ],
-  "metadata_target_count": 1129,
+  "metadata_target_count": 1130,
   "packages": [
     {
       "declared_features": [
@@ -54131,6 +54131,8 @@
         "serde",
         "serde_json",
         "serde_yaml",
+        "sha2",
+        "stats_alloc",
         "swc_common",
         "swc_ecma_ast",
         "swc_ecma_parser",
@@ -54141,6 +54143,22 @@
       "package": "lash-dialect-typescript",
       "resolved_features": [],
       "targets": [
+        {
+          "build_label": "//crates/lash-dialect-typescript:build_script",
+          "clippy_exempt": "the run action has no compile subtargets; its build.rs compile is linted as :build_script__build",
+          "kind": "custom-build",
+          "label": "//crates/lash-dialect-typescript:build_script"
+        },
+        {
+          "build_label": "//crates/lash-dialect-typescript:build_script__build",
+          "check_label": "//crates/lash-dialect-typescript:build_script__build__metadata[check]",
+          "clippy_label": "//crates/lash-dialect-typescript:build_script__build__clippy[clippy.txt]",
+          "kind": "custom-build-compile",
+          "label": "//crates/lash-dialect-typescript:build_script__build",
+          "tags": [
+            "manual"
+          ]
+        },
         {
           "build_label": "//crates/lash-dialect-typescript:lash-dialect-typescript[static]",
           "cargo": "lash_dialect_typescript",
@@ -59146,6 +59164,8 @@
     "//crates/lash-core:turn_event_schema__test",
     "//crates/lash-dialect-python:lash-dialect-python[static]",
     "//crates/lash-dialect-python:lash-dialect-python__unit_test",
+    "//crates/lash-dialect-typescript:build_script",
+    "//crates/lash-dialect-typescript:build_script__build",
     "//crates/lash-dialect-typescript:kernel_perf__example",
     "//crates/lash-dialect-typescript:lash-dialect-typescript[static]",
     "//crates/lash-dialect-typescript:lash-dialect-typescript__unit_test",
@@ -59456,6 +59476,7 @@
     "//crates/lash-core:turn_event_schema__test__rust_test__metadata[check]",
     "//crates/lash-dialect-python:lash-dialect-python__metadata[check]",
     "//crates/lash-dialect-python:lash-dialect-python__unit_test__rust_test__metadata[check]",
+    "//crates/lash-dialect-typescript:build_script__build__metadata[check]",
     "//crates/lash-dialect-typescript:kernel_perf__example__metadata[check]",
     "//crates/lash-dialect-typescript:lash-dialect-typescript__metadata[check]",
     "//crates/lash-dialect-typescript:lash-dialect-typescript__unit_test__rust_test__metadata[check]",
@@ -59782,6 +59803,7 @@
     "//crates/lash-core:turn_event_schema__test__clippy[clippy.txt]",
     "//crates/lash-dialect-python:lash-dialect-python__clippy[clippy.txt]",
     "//crates/lash-dialect-python:lash-dialect-python__unit_test__clippy[clippy.txt]",
+    "//crates/lash-dialect-typescript:build_script__build__clippy[clippy.txt]",
     "//crates/lash-dialect-typescript:kernel_perf__example__clippy[clippy.txt]",
     "//crates/lash-dialect-typescript:lash-dialect-typescript__clippy[clippy.txt]",
     "//crates/lash-dialect-typescript:lash-dialect-typescript__unit_test__clippy[clippy.txt]",
@@ -60076,6 +60098,7 @@
     "//crates/lash-core:turn_event_schema__test",
     "//crates/lash-dialect-python:lash-dialect-python",
     "//crates/lash-dialect-python:lash-dialect-python__unit_test",
+    "//crates/lash-dialect-typescript:build_script__build",
     "//crates/lash-dialect-typescript:kernel_perf__example",
     "//crates/lash-dialect-typescript:lash-dialect-typescript",
     "//crates/lash-dialect-typescript:lash-dialect-typescript__unit_test",
@@ -60370,6 +60393,8 @@
     "//crates/lash-core:turn_event_schema__test",
     "//crates/lash-dialect-python:lash-dialect-python",
     "//crates/lash-dialect-python:lash-dialect-python__unit_test",
+    "//crates/lash-dialect-typescript:build_script",
+    "//crates/lash-dialect-typescript:build_script__build",
     "//crates/lash-dialect-typescript:kernel_perf__example",
     "//crates/lash-dialect-typescript:lash-dialect-typescript",
     "//crates/lash-dialect-typescript:lash-dialect-typescript__unit_test",

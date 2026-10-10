@@ -127,7 +127,9 @@ PACKAGE_DEPS = {
             "lash_kernel_lib": "//crates/lash-kernel-lib:lash-kernel-lib",
             "lash_kernel_vm": "//crates/lash-kernel-vm:lash-kernel-vm",
             "serde": "//third-party/rust:p0315",
-            "serde_yaml": "//third-party/rust:p0324"
+            "serde_yaml": "//third-party/rust:p0324",
+            "sha2": "//third-party/rust:p0326",
+            "stats_alloc": "//third-party/rust:p0349"
         },
         "normal": {
             "lash_ext_regex_ecma": "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma",

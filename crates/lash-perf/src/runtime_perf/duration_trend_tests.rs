@@ -753,6 +753,7 @@ fn an_acceptance_nobody_can_audit_is_refused() {
 
 fn record(scenario: &str, profile: &str, index: usize, total_ms: f64) -> DurationHistoryRecord {
     DurationHistoryRecord {
+        kernel: None,
         version: HISTORY_RECORD_VERSION,
         identity: fixture_identity().for_scenario(scenario),
         scenario: scenario.to_string(),

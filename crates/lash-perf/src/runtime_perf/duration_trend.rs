@@ -290,6 +290,9 @@ pub(crate) struct DurationHistoryRecord {
     /// deliberately stay out of this wall-clock-duration trend contract.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub(crate) duration_metrics_ms: BTreeMap<String, DurationMetricHistoryValue>,
+    /// Raw kernel samples and integer allocator/charge records, retained with this observation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) kernel: Option<super::kernel_history::KernelObservation>,
 }
 
 /// A history read leniently: what parsed, what could not, and what this build
@@ -391,6 +394,7 @@ pub(crate) fn records_for_run(
                 .map(|total| (summary, total))
         })
         .map(|(summary, total)| DurationHistoryRecord {
+            kernel: None,
             version: HISTORY_RECORD_VERSION,
             identity: identity.for_scenario(&summary.scenario),
             scenario: summary.scenario.clone(),
@@ -1156,6 +1160,9 @@ pub fn run_duration_trend_cli(history: &Path, profile: Option<&str>) -> anyhow::
     let rows = trend_rows(&records, profile);
     print!("{}", render_trend_table(&rows));
     report_drift(&rows);
+    if records.iter().any(|record| record.kernel.is_some()) {
+        print!("{}", super::kernel_history::render_counts(&records));
+    }
     Ok(())
 }
 

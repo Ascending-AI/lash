@@ -27,6 +27,13 @@ pub use diagnostics::{CodeClassification, Diagnostic, DiagnosticCode, Diagnostic
 pub use package::define_helpers;
 pub use printer::print;
 
+/// Build provenance for standalone dialect measurement tools.
+#[doc(hidden)]
+pub const BUILD_IDENTITY: (&str, &str) = (
+    env!("KERNEL_PERF_COMPILER"),
+    env!("KERNEL_PERF_BUILD_PROFILE"),
+);
+
 use lash_kernel_dialect::{Environment, FrontEnd, FunctionValues, Lowered};
 
 /// The tag of the token a TypeScript function value is: a tuple of the tag,

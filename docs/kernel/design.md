@@ -264,7 +264,7 @@ It is built directly, on an arc branch, in the crates of §9. Every lane that re
 3. a generic host with no dialect code cannot change an effect argument, insert a statement and replace a condition using only typed edits;
 4. parking at every park, discarding the executable, rebuilding it with a different layout and a native function swapped for its kernel body, then resuming, changes any value, error, effect identity or charge; or a crash injected before admission, after admission and after an outcome commits runs a committed effect again;
 5. a regex's result, charge or point of failure differs between cold and warm caches;
-6. the programs of the old VM's benchmark suite, lowered through the new TypeScript front end, run more than 3 times slower than on the old VM, VM time only.
+6. At cutover, the old VM benchmark suite supplied a one-time 3× VM-time comparison. The maintained kernel comparison now uses recorded kernel baselines and advisory duration history; see [kernel gate 6 receipts](../perf/instruments/kernel-gate6.md). The retired VM is no longer a comparison producer.
 
 ## 12. Order
 

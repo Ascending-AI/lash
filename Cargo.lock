@@ -2009,6 +2009,8 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
+ "sha2",
+ "stats_alloc",
  "swc_common",
  "swc_ecma_ast",
  "swc_ecma_parser",

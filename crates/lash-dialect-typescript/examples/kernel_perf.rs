@@ -1,4 +1,4 @@
-//! The kernel's speed gate (kernel workflow spec §11, gate 6).
+//! Kernel execution measurements consumed by `scripts/perf/kernel/measure.py`.
 //!
 //! The programs of the retired VM's benchmark (`crates/lash-vm/benches/
 //! benchmark.rs` at `515a596747`, the last main commit before the cutover),
@@ -20,11 +20,33 @@
 //! that does the work;
 //! the body of a library function with a native implementation is covered
 //! by its formula and runs within one step. `KERNEL_PERF_SPLIT=0` skips the
-//! second run, for a profiler.
+//! second run, for a profiler. Raw iteration times and allocator call counts
+//! accompany every row, with executable and source hashes and build identity.
+//! Counts exclude machine destruction and receipt construction. `KERNEL_PERF_FIXED=1`
+//! uses the exact cap so maintained comparisons have fixed workload geometry.
+//! Means remain descriptive; shared-host timing is advisory.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::Instant;
+
+use serde::Serialize;
+use sha2::{Digest, Sha256};
+
+#[global_allocator]
+static ALLOCATOR: &stats_alloc::StatsAlloc<std::alloc::System> = &stats_alloc::INSTRUMENTED_SYSTEM;
+
+#[derive(Serialize)]
+struct Sample {
+    iteration: u32,
+    ns_start_and_run: u128,
+    ns_run: u128,
+    allocations_start_and_run: usize,
+    allocations_run: usize,
+    reallocations_start_and_run: usize,
+    reallocations_run: usize,
+    charged: u64,
+}
 
 use lash_kernel_dialect::{EffectControl, Environment, NamedLibrary};
 use lash_kernel_doc::{
@@ -137,8 +159,8 @@ fn to_end(machine: &mut KernelMachine, name: &str) -> (u64, Datum) {
 /// Where the charge of one run went.
 #[derive(Default)]
 struct Split {
-    /// Steps of one unit of charge.
-    steps: u64,
+    /// Calls to `run(1)`, including parks and the terminal call.
+    run_calls: u64,
     helpers: u64,
     library: u64,
     program: u64,
@@ -166,7 +188,7 @@ fn split(program: &Program, registry: &FunctionRegistry, name: &str) -> Split {
             .run(&mut console, 1)
             .unwrap_or_else(|error| panic!("{name}: {error}"));
         let took = began.elapsed();
-        split.steps += 1;
+        split.run_calls += 1;
         let now = machine.meters().charged;
         let spent = now - charged;
         charged = now;
@@ -245,11 +267,25 @@ fn registry() -> Arc<FunctionRegistry> {
     clippy::disallowed_methods,
     reason = "benchmark entry point: it reads its arguments, its program files and its one switch, and reports on stdout"
 )]
-fn main() {
-    let mut args = std::env::args().skip(1);
+fn main() -> Result<(), String> {
+    let mut args = std::env::args().skip(1).peekable();
+    if args.peek().is_some_and(|arg| arg == "--list-programs") {
+        args.next();
+        if args.next().is_some() {
+            return Err("--list-programs takes no selection".to_string());
+        }
+        for (name, _) in programs() {
+            println!("{name}");
+        }
+        return Ok(());
+    }
     let cap: u32 = args
         .next()
-        .map_or(2000, |count| count.parse().expect("an iteration count"));
+        .map_or(Ok(2000), |count| count.parse())
+        .map_err(|error| format!("invalid iteration count: {error}"))?;
+    if cap == 0 {
+        return Err("iteration count must be positive".to_string());
+    }
     // A name selects a program; a path to a `.ts` file adds one, named by
     // its path.
     let (files, only): (Vec<String>, BTreeSet<String>) = {
@@ -266,6 +302,23 @@ fn main() {
             std::fs::read_to_string(&file).unwrap_or_else(|error| panic!("{file}: {error}"));
         programs.push((file, source));
     }
+    for name in &only {
+        if !programs.iter().any(|(selected, _)| selected == name) {
+            return Err(format!("unknown kernel program: {name}"));
+        }
+    }
+    if programs.is_empty() {
+        return Err("empty kernel selection".to_string());
+    }
+    let artifact = format!(
+        "{:x}",
+        Sha256::digest(
+            std::fs::read(std::env::current_exe().map_err(|error| error.to_string())?)
+                .map_err(|error| error.to_string())?
+        )
+    );
+    let observed_split = !std::env::var("KERNEL_PERF_SPLIT").is_ok_and(|split| split == "0");
+    let fixed = std::env::var("KERNEL_PERF_FIXED").is_ok_and(|fixed| fixed == "1");
     let registry = registry();
     // Prepared once, as a worker prepares its registry: every library body
     // is compiled here, and a run's start compiles only its document.
@@ -286,15 +339,14 @@ fn main() {
         functions: &BTreeMap::new(),
     };
     println!(
-        "program\tfunctions\titerations\tns_start_and_run\tns_run\tcharged\tsteps\thelper_charge\tlibrary_body_charge\tprogram_charge\ttop_helpers\thelper_time_share\tslowest_helpers\tlibrary_body_time_share\tprogram_time_share\tresult"
+        "program\tfunctions\titerations\tns_start_and_run\tns_run\tcharged\trun_calls\thelper_charge\tlibrary_body_charge\tprogram_charge\ttop_helpers\thelper_time_share\tslowest_helpers\tlibrary_body_time_share\tprogram_time_share\tresult\treceipt"
     );
     for (name, source) in &programs {
         let name = name.as_str();
         let lowered = match lash_dialect_typescript::lower(source, &environment) {
             Ok(lowered) => lowered,
             Err(diagnostic) => {
-                println!("{name}\trefused\t{diagnostic:?}");
-                continue;
+                return Err(format!("{name}: refused: {diagnostic:?}"));
             }
         };
         let functions = lowered.document.manifest.functions.len();
@@ -306,25 +358,64 @@ fn main() {
         let (charged, result) = to_end(&mut start(&program), name);
         // About two seconds a program, and at most the requested count.
         let once = first.elapsed().as_secs_f64().max(1e-6);
-        let iterations = ((2.0 / once) as u32).clamp(3, cap);
-        for _ in 0..iterations.min(20) {
+        let iterations = if fixed {
+            cap
+        } else {
+            ((2.0 / once) as u32).clamp(cap.min(3), cap)
+        };
+        let warmups = iterations.min(20);
+        for _ in 0..warmups {
             to_end(&mut start(&program), name);
         }
-        let mut running = std::time::Duration::ZERO;
-        let began = Instant::now();
-        for _ in 0..iterations {
+        let mut samples = Vec::with_capacity(iterations as usize);
+        for iteration in 0..iterations {
+            let whole_counts = stats_alloc::Region::new(ALLOCATOR);
+            let began = Instant::now();
             let mut machine = start(&program);
+            let run_counts = stats_alloc::Region::new(ALLOCATOR);
             let ran = Instant::now();
-            to_end(&mut machine, name);
-            running += ran.elapsed();
+            let (actual_charge, actual_result) = to_end(&mut machine, name);
+            let ns_run = ran.elapsed().as_nanos();
+            let counts_run = run_counts.change();
+            let ns_start_and_run = began.elapsed().as_nanos();
+            let counts_whole = whole_counts.change();
+            assert_eq!(actual_charge, charged, "{name}: iteration charge");
+            assert_eq!(actual_result, result, "{name}: iteration result");
+            samples.push(Sample {
+                iteration,
+                ns_start_and_run,
+                ns_run,
+                allocations_start_and_run: counts_whole.allocations,
+                allocations_run: counts_run.allocations,
+                reallocations_start_and_run: counts_whole.reallocations,
+                reallocations_run: counts_run.reallocations,
+                charged: actual_charge,
+            });
         }
-        let whole = began.elapsed();
-        let per = |total: std::time::Duration| total.as_nanos() as f64 / f64::from(iterations);
-        if std::env::var("KERNEL_PERF_SPLIT").is_ok_and(|split| split == "0") {
+        let mean = |get: fn(&Sample) -> u128| {
+            samples.iter().map(get).sum::<u128>() as f64 / f64::from(iterations)
+        };
+        let receipt = serde_json::to_string(&serde_json::json!({
+            "program": name,
+            "artifact_sha256": artifact,
+            "workload_sha256": format!("{:x}", Sha256::digest(source.as_bytes())),
+            "compiler": lash_dialect_typescript::BUILD_IDENTITY.0,
+            "build_profile": lash_dialect_typescript::BUILD_IDENTITY.1,
+            "debug_assertions": cfg!(debug_assertions),
+            "allocator": "system+stats_alloc",
+            "split": observed_split,
+            "fixed_iterations": fixed,
+            "cap": cap,
+            "iterations": iterations,
+            "warmups": warmups,
+            "samples": samples,
+        }))
+        .map_err(|error| error.to_string())?;
+        if !observed_split {
             println!(
-                "{name}\t{functions}\t{iterations}\t{:.1}\t{:.1}\t{charged}",
-                per(whole),
-                per(running),
+                "{name}\t{functions}\t{iterations}\t{:.1}\t{:.1}\t{charged}\t\t\t\t\t\t\t\t\t\t{result:?}\t{receipt}",
+                mean(|sample| sample.ns_start_and_run),
+                mean(|sample| sample.ns_run),
             );
             continue;
         }
@@ -355,13 +446,14 @@ fn main() {
         let library_time_share = split.library_time.as_secs_f64() / stepped.as_secs_f64().max(1e-9);
         let program_time_share = split.program_time.as_secs_f64() / stepped.as_secs_f64().max(1e-9);
         println!(
-            "{name}\t{functions}\t{iterations}\t{:.1}\t{:.1}\t{charged}\t{}\t{}\t{}\t{}\t{top}\t{helper_time_share:.6}\t{slow}\t{library_time_share:.6}\t{program_time_share:.6}\t{result:?}",
-            per(whole),
-            per(running),
-            split.steps,
+            "{name}\t{functions}\t{iterations}\t{:.1}\t{:.1}\t{charged}\t{}\t{}\t{}\t{}\t{top}\t{helper_time_share:.6}\t{slow}\t{library_time_share:.6}\t{program_time_share:.6}\t{result:?}\t{receipt}",
+            mean(|sample| sample.ns_start_and_run),
+            mean(|sample| sample.ns_run),
+            split.run_calls,
             split.helpers,
             split.library,
             split.program,
         );
     }
+    Ok(())
 }

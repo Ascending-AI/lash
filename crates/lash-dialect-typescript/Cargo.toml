@@ -35,6 +35,8 @@ thiserror = { workspace = true }
 
 [dev-dependencies]
 arbitrary = "1"
+stats_alloc = "0.1"
+sha2 = { workspace = true }
 lash-kernel-conformance = { path = "../lash-kernel-conformance" }
 lash-kernel-check = { workspace = true }
 lash-kernel-edit = { workspace = true }

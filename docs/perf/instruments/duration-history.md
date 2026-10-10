@@ -71,3 +71,8 @@ cannot overwrite per-run metric medians. The CSV carries quantities, units,
 window, statistics and full identities for offline review. The trend remains
 advisory, and neither this reader nor a receipt establishes a quiet-host baseline
 or guarantees someone has read a warning.
+
+Kernel execution receipts also enter this history through `lash-perf kernel-history`.
+The maintained [kernel gate 6 caller](kernel-gate6.md) retains raw iterations,
+keeps allocation/charge counts in integer units and feeds the same advisory
+shift detector. The Performance workflow publishes its reader output.

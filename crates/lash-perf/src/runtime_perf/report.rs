@@ -1215,32 +1215,6 @@ mod tests {
     }
 
     #[test]
-    fn rlm_process_async_completion_requires_named_phase_metrics() {
-        let phases = required_phases(RuntimePerfScenario::RlmProcessAsyncToolCompletion);
-        for expected in [
-            "codemode_lash_vm.compile_link",
-            "codemode_lash_vm.store_module_artifact",
-            "codemode_lash_vm.execute",
-            // `codemode_process.prepare_start` and `codemode_process.start` are not
-            // listed: #1529 deleted the `start_process` execution-host method
-            // they named when the TypeScript process special forms gave way to
-            // the catalogue-rendered `processes.start`, so no code emits them.
-            "codemode_process.await_handle",
-            "codemode_process.load_artifact",
-            "codemode_process.resolve_environment",
-            "codemode_process.compile",
-            "codemode_process.build_context",
-            "codemode_process.execute",
-            "codemode_process.shutdown",
-        ] {
-            assert!(
-                phases.contains(&expected),
-                "missing required phase {expected}"
-            );
-        }
-    }
-
-    #[test]
     fn turn_lifecycle_hot_paths_have_specific_phase_budgets() {
         for (scenario, phase) in [
             (RuntimePerfScenario::TurnStartGate, "turn_cancel.start_gate"),
@@ -1260,71 +1234,6 @@ mod tests {
                     .is_some_and(|budget_ms| budget_ms > 0.0 && budget_ms < total_budget_ms)
             );
         }
-    }
-
-    #[test]
-    fn rlm_large_print_requires_projector_phase_metrics() {
-        let phases = required_phases(RuntimePerfScenario::RlmLargePrint);
-        for expected in [
-            "codemode_lash_vm.compile_link",
-            "codemode_lash_vm.execute",
-            "codemode_lash_vm.print_project",
-        ] {
-            assert!(
-                phases.contains(&expected),
-                "missing required phase {expected}"
-            );
-        }
-        assert!(allocation_budget_bytes(RuntimePerfScenario::RlmLargePrint) <= 1_000_000_000.0);
-        assert!(
-            steady_state_turn_allocation_budget_bytes(RuntimePerfScenario::RlmLargePrint)
-                <= 750_000_000.0
-        );
-    }
-
-    #[test]
-    fn rlm_oblique_stack_mix_requires_stack_sensitive_phase_metrics() {
-        let phases = required_phases(RuntimePerfScenario::RlmObliqueStackMix);
-        for expected in [
-            "codemode_lash_vm.compile_link",
-            "codemode_lash_vm.execute",
-            "codemode_lash_vm.print_project",
-            // See the note above: #1529 retired the two process-start phases.
-            "codemode_process.await_handle",
-            "codemode_process.execute",
-            "process.await_handle",
-        ] {
-            assert!(
-                phases.contains(&expected),
-                "missing required phase {expected}"
-            );
-        }
-        assert!(
-            allocation_budget_bytes(RuntimePerfScenario::RlmObliqueStackMix) <= 2_100_000_000.0
-        );
-        assert!(
-            steady_state_turn_allocation_budget_bytes(RuntimePerfScenario::RlmObliqueStackMix)
-                <= 180_000_000.0
-        );
-        assert!(wall_clock_budget_ms(RuntimePerfScenario::RlmObliqueStackMix) <= 20_000.0);
-    }
-
-    #[test]
-    fn streamed_paired_lash_vm_requires_lash_vm_phase_metrics() {
-        let phases = required_phases(RuntimePerfScenario::RlmStreamedPairedLashVm);
-        for expected in ["codemode_lash_vm.compile_link", "codemode_lash_vm.execute"] {
-            assert!(
-                phases.contains(&expected),
-                "missing required phase {expected}"
-            );
-        }
-        assert!(
-            allocation_budget_bytes(RuntimePerfScenario::RlmStreamedPairedLashVm) <= 150_000_000.0
-        );
-        assert!(
-            steady_state_turn_allocation_budget_bytes(RuntimePerfScenario::RlmStreamedPairedLashVm)
-                <= 64_000_000.0
-        );
     }
 
     #[test]

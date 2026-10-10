@@ -164,8 +164,14 @@ enum Command {
         #[arg(long, value_name = "WORKLOAD.json")]
         file: std::path::PathBuf,
     },
-    /// Print the advisory duration trend table for an existing history file
-    /// without running the benchmark.
+    /// Import a complete kernel gate 6 receipt and read advisory history.
+    KernelHistory {
+        #[arg(long)]
+        receipt: std::path::PathBuf,
+        #[arg(long)]
+        history: std::path::PathBuf,
+    },
+    /// Print advisory duration history without running the benchmark.
     DurationTrend {
         #[arg(long, value_name = "HISTORY.jsonl")]
         history: std::path::PathBuf,
@@ -344,6 +350,9 @@ fn run_main() -> anyhow::Result<()> {
                 workload.spec().provenance.fields.len()
             );
             return Ok(());
+        }
+        Some(Command::KernelHistory { receipt, history }) => {
+            return lash_perf::runtime_perf::record_kernel_receipt(receipt, history);
         }
         Some(Command::DurationTrend {
             history,
