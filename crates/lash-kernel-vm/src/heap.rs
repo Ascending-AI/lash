@@ -5,6 +5,12 @@
 //! and a set keep their entries under a sequence number, so a loop over one
 //! holds a position that insertions and removals do not move
 //! (`K-ITER-003`).
+//!
+//! The objects live in chunks of [`CHUNK`] consecutive identities, each
+//! packed in identity order behind a bitmap of the identities it holds. A
+//! lookup is a bitmap count, a collection marks and sweeps the chunks in
+//! place, and a chunk with no object left is dropped, so storage follows
+//! what is live and not how many objects the run has allocated.
 
 use std::collections::BTreeMap;
 use std::ops::ControlFlow;
@@ -236,9 +242,54 @@ struct Held {
     written: u64,
 }
 
+/// How many consecutive identities one chunk covers.
+const CHUNK: u64 = 64;
+
+/// The objects whose identities are `number * CHUNK` and the `CHUNK - 1`
+/// after it. Bit `i` of `held` says whether identity `number * CHUNK + i`
+/// is held; its object sits at the count of held identities below it.
+#[derive(Debug)]
+struct Chunk {
+    number: u64,
+    held: u64,
+    /// The identities a collection in progress has reached.
+    marked: u64,
+    objects: Vec<Held>,
+}
+
+impl Chunk {
+    /// Where the object of offset `offset` sits, when the chunk holds it.
+    fn position(&self, offset: u64) -> Option<usize> {
+        let bit = 1u64 << offset;
+        (self.held & bit != 0).then(|| (self.held & (bit - 1)).count_ones() as usize)
+    }
+}
+
+/// Adds what `object` names: what a collection that reaches it reaches next.
+fn trace(object: &Obj, seeds: &mut Vec<Identity>) {
+    match object {
+        Obj::List(items) => items.iter().for_each(|item| refs(item, seeds)),
+        Obj::Map(table) | Obj::Set(table) => {
+            for (key, value) in table.iter() {
+                refs(key, seeds);
+                refs(value, seeds);
+            }
+        }
+        Obj::Record(fields) => fields.iter().for_each(|(_, value)| refs(value, seeds)),
+        Obj::Closure(closure) => {
+            seeds.extend(closure.captures.iter().copied().map(Identity::Object));
+        }
+        Obj::Variable(value) => refs(value, seeds),
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct Heap {
-    objects: BTreeMap<u64, Held>,
+    /// The chunks that hold an object, ascending by number. Nothing is
+    /// freed between two collections, so every chunk numbered since the
+    /// last one is here: a recent identity's chunk sits as many places
+    /// before the newest as its number is below the newest's.
+    chunks: Vec<Chunk>,
     next: u64,
     /// Counts writes: every allocation and every mutable borrow.
     clock: u64,
@@ -252,7 +303,7 @@ pub(crate) struct Heap {
 impl Heap {
     pub(crate) fn new(bound: u64) -> Self {
         Self {
-            objects: BTreeMap::new(),
+            chunks: Vec::new(),
             next: 0,
             clock: 0,
             memory: 0,
@@ -260,13 +311,43 @@ impl Heap {
         }
     }
 
+    /// The index of the chunk that covers identity `id`, when one is held.
+    fn chunk(&self, id: u64) -> Option<usize> {
+        let number = id / CHUNK;
+        let newest = self.chunks.len().checked_sub(1)?;
+        let behind = self.chunks[newest].number.checked_sub(number)?;
+        // Numbers ascend without repeating, so the chunk `behind` places
+        // before the newest is numbered at most `number`: it is the one,
+        // or the one sits after it.
+        let from = match usize::try_from(behind)
+            .ok()
+            .and_then(|behind| newest.checked_sub(behind))
+        {
+            Some(guess) if self.chunks[guess].number == number => return Some(guess),
+            Some(guess) => guess + 1,
+            None => 0,
+        };
+        self.chunks[from..]
+            .binary_search_by_key(&number, |chunk| chunk.number)
+            .ok()
+            .map(|index| from + index)
+    }
+
+    fn held(&self, id: ObjectId) -> Option<&Held> {
+        let chunk = &self.chunks[self.chunk(id.0)?];
+        chunk.objects.get(chunk.position(id.0 % CHUNK)?)
+    }
+
     pub(crate) fn get(&self, id: ObjectId) -> Option<&Obj> {
-        self.objects.get(&id.0).map(|held| &held.object)
+        self.held(id).map(|held| &held.object)
     }
 
     /// Borrows an object to write it, and stamps it written.
     pub(crate) fn get_mut(&mut self, id: ObjectId) -> Option<&mut Obj> {
-        let held = self.objects.get_mut(&id.0)?;
+        let index = self.chunk(id.0)?;
+        let chunk = &mut self.chunks[index];
+        let position = chunk.position(id.0 % CHUNK)?;
+        let held = chunk.objects.get_mut(position)?;
         self.clock += 1;
         held.written = self.clock;
         Some(&mut held.object)
@@ -277,8 +358,30 @@ impl Heap {
         let id = self.next;
         self.next += 1;
         self.clock += 1;
-        let written = self.clock;
-        self.objects.insert(id, Held { object, written });
+        let held = Held {
+            object,
+            written: self.clock,
+        };
+        // Every identity held is below the next one, so a new object goes
+        // at the end of the newest chunk or opens one after it.
+        let number = id / CHUNK;
+        let bit = 1u64 << (id % CHUNK);
+        match self.chunks.last_mut() {
+            Some(chunk) if chunk.number == number => {
+                chunk.held |= bit;
+                chunk.objects.push(held);
+            }
+            _ => {
+                let mut objects = Vec::with_capacity(CHUNK as usize);
+                objects.push(held);
+                self.chunks.push(Chunk {
+                    number,
+                    held: bit,
+                    marked: 0,
+                    objects,
+                });
+            }
+        }
         ObjectId(id)
     }
 
@@ -286,8 +389,32 @@ impl Heap {
     /// unwritten: stamp 0 is what a loaded baseline holds for it. Returns
     /// whether the identity was free.
     pub(crate) fn restore(&mut self, id: ObjectId, object: Obj) -> bool {
-        let held = Held { object, written: 0 };
-        self.objects.insert(id.0, held).is_none()
+        let number = id.0 / CHUNK;
+        let bit = 1u64 << (id.0 % CHUNK);
+        let index = match self
+            .chunks
+            .binary_search_by_key(&number, |chunk| chunk.number)
+        {
+            Ok(index) => index,
+            Err(index) => {
+                let chunk = Chunk {
+                    number,
+                    held: 0,
+                    marked: 0,
+                    objects: Vec::new(),
+                };
+                self.chunks.insert(index, chunk);
+                index
+            }
+        };
+        let chunk = &mut self.chunks[index];
+        if chunk.held & bit != 0 {
+            return false;
+        }
+        let position = (chunk.held & (bit - 1)).count_ones() as usize;
+        chunk.held |= bit;
+        chunk.objects.insert(position, Held { object, written: 0 });
+        true
     }
 
     /// How many objects the run has allocated: the next identity.
@@ -299,22 +426,27 @@ impl Heap {
     /// whether every object the heap holds is below it.
     pub(crate) fn set_allocated(&mut self, allocated: u64) -> bool {
         self.next = allocated;
-        self.objects
-            .keys()
-            .next_back()
-            .is_none_or(|last| *last < allocated)
+        self.chunks.last().is_none_or(|chunk| {
+            let last = chunk.number * CHUNK + (CHUNK - 1 - u64::from(chunk.held.leading_zeros()));
+            last < allocated
+        })
     }
 
     /// Every object the heap holds, ascending by identity.
     pub(crate) fn iter(&self) -> impl Iterator<Item = (ObjectId, &Obj)> {
-        self.objects
-            .iter()
-            .map(|(id, held)| (ObjectId(*id), &held.object))
+        self.chunks.iter().flat_map(|chunk| {
+            let mut rest = chunk.held;
+            chunk.objects.iter().map(move |held| {
+                let offset = u64::from(rest.trailing_zeros());
+                rest &= rest - 1;
+                (ObjectId(chunk.number * CHUNK + offset), &held.object)
+            })
+        })
     }
 
     /// The write stamp of an object.
     pub(crate) fn written(&self, id: ObjectId) -> u64 {
-        self.objects.get(&id.0).map_or(0, |held| held.written)
+        self.held(id).map_or(0, |held| held.written)
     }
 
     pub(crate) fn list(&self, id: ObjectId) -> Option<&Vec<Value>> {
@@ -365,7 +497,6 @@ impl Heap {
         mut seeds: Vec<Identity>,
         task: &mut dyn FnMut(TaskId, &mut Vec<Identity>),
     ) -> u64 {
-        let mut live: BTreeMap<u64, Held> = BTreeMap::new();
         let mut bytes = 0u64;
         while let Some(seed) = seeds.pop() {
             let id = match seed {
@@ -375,27 +506,41 @@ impl Heap {
                     continue;
                 }
             };
-            let Some(held) = self.objects.remove(&id.0) else {
+            let Some(index) = self.chunk(id.0) else {
+                continue;
+            };
+            let chunk = &mut self.chunks[index];
+            let bit = 1u64 << (id.0 % CHUNK);
+            if chunk.marked & bit != 0 {
+                continue;
+            }
+            let Some(held) = chunk
+                .position(id.0 % CHUNK)
+                .and_then(|position| chunk.objects.get(position))
+            else {
                 continue;
             };
             bytes = bytes.saturating_add(object_bytes(&held.object));
-            match &held.object {
-                Obj::List(items) => items.iter().for_each(|item| refs(item, &mut seeds)),
-                Obj::Map(table) | Obj::Set(table) => {
-                    for (key, value) in table.iter() {
-                        refs(key, &mut seeds);
-                        refs(value, &mut seeds);
-                    }
-                }
-                Obj::Record(fields) => fields.iter().for_each(|(_, value)| refs(value, &mut seeds)),
-                Obj::Closure(closure) => {
-                    seeds.extend(closure.captures.iter().copied().map(Identity::Object));
-                }
-                Obj::Variable(value) => refs(value, &mut seeds),
-            }
-            live.insert(id.0, held);
+            trace(&held.object, &mut seeds);
+            chunk.marked |= bit;
         }
-        self.objects = live;
+        for chunk in &mut self.chunks {
+            let marked = std::mem::take(&mut chunk.marked);
+            if marked == chunk.held {
+                continue;
+            }
+            let mut rest = chunk.held;
+            chunk.objects.retain(|_| {
+                let bit = rest.isolate_lowest_one();
+                rest &= rest - 1;
+                marked & bit != 0
+            });
+            chunk.held = marked;
+            if chunk.objects.len() * 2 < chunk.objects.capacity() {
+                chunk.objects.shrink_to_fit();
+            }
+        }
+        self.chunks.retain(|chunk| chunk.held != 0);
         bytes
     }
 

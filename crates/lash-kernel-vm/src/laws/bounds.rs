@@ -246,7 +246,9 @@ fn a_native_guard_ends_the_run() {
 /// `K-BND-003`, `K-VAL-011`: collecting the heap frees nothing the run
 /// can still reach. A value in flight between two frames, or between a
 /// wait and the statement it resumes, is held by no variable; the padding
-/// moves the collections across every such point.
+/// moves the collections across every such point. `keep` outlives every
+/// collection while the objects allocated around it are freed, and is read
+/// and written after each.
 #[test]
 fn a_collection_frees_nothing_the_run_can_reach() {
     let mut embedder = Embedder::with(
@@ -255,10 +257,13 @@ fn thrower(i) { let e = {kind: "x", n: [i, i]} throw e }
 fn returner(i) { let r = {n: [i, i]} return r }
 fn later(i) { do yield let r = [i, i] return r }
 main {
+  let keep = [7, 8]
   let i = 0
   let total = 0
   while num.lt(i, 300) {
     let pad = work.fill(i)
+    set total = num.add(total, keep[1])
+    set keep[1] = num.add(keep[1], 1)
     try { do call thrower(i) } catch e { let n = e.n set total = num.add(total, n[0]) }
     let r = call returner(i)
     let n = r.n
@@ -282,7 +287,32 @@ main {
             ..Setup::default()
         },
     );
-    assert_eq!(result(embedder.run_to_end(&[])), int(3 * (299 * 300 / 2)));
+    assert_eq!(
+        result(embedder.run_to_end(&[])),
+        int(3 * (299 * 300 / 2) + (8..308).sum::<i64>())
+    );
+}
+
+/// `K-CHG-005`: a value copied out is charged its deep size, a heap object
+/// reached more than once counted the first time only, however many
+/// objects the value holds.
+#[test]
+fn a_shared_object_is_charged_once_in_a_wide_graph() {
+    let lists: Vec<String> = (1..=10).map(|n| format!("a{n}")).collect();
+    let made: String = (1..=10).map(|n| format!("let a{n} = [{n}] ")).collect();
+    let body = format!("{made}let x = [{0}, {0}]", lists.join(", "));
+    let charged = |body: &str| {
+        let mut embedder = Embedder::new(&format!("main {{ {body} }}"));
+        embedder.run_to_end(&[]);
+        embedder.machine.meters().charged
+    };
+    // `return x`: 1 statement, 1 variable node, and `x` copied out: the
+    // list of 20 members (21) and each of its ten lists once, `[n]` (2)
+    // with its one-word integer (2).
+    assert_eq!(
+        charged(&format!("{body} return x")) - charged(&body),
+        2 + 21 + 10 * 4
+    );
 }
 
 /// `K-CHG-007`: a helper, a function with only a kernel-code body, is

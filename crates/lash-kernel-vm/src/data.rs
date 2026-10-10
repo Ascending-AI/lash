@@ -61,8 +61,20 @@ pub(crate) fn size(heap: &Heap, value: &Value) -> u64 {
 /// A value's size with everything it holds, a heap object counted the
 /// first time it is reached (`K-CHG-005`).
 pub(crate) fn deep_size(heap: &Heap, value: &Value) -> u64 {
+    // A value that holds nothing is its own size: most measured values are.
+    if !matches!(
+        value,
+        Value::List(_)
+            | Value::Map(_)
+            | Value::Set(_)
+            | Value::Record(_)
+            | Value::Tuple(_)
+            | Value::Error(_)
+    ) {
+        return size(heap, value);
+    }
     let mut total = 0u64;
-    let mut seen = BTreeSet::new();
+    let mut seen = Seen::new();
     let mut pending = Vec::new();
     measure(heap, value, &mut total, &mut seen, &mut pending);
     while let Some(id) = pending.pop() {
@@ -81,11 +93,48 @@ pub(crate) fn deep_size(heap: &Heap, value: &Value) -> u64 {
     total
 }
 
+/// How many objects a measurement remembers before it needs a set.
+const FEW: usize = 8;
+
+/// The objects a measurement has reached: the first few in place, the rest
+/// in a set made only when they do not fit, so measuring a small graph
+/// allocates and frees nothing for them.
+struct Seen {
+    few: [ObjectId; FEW],
+    count: usize,
+    rest: Option<BTreeSet<ObjectId>>,
+}
+
+impl Seen {
+    fn new() -> Self {
+        Self {
+            few: [ObjectId(0); FEW],
+            count: 0,
+            rest: None,
+        }
+    }
+
+    /// Adds `id`, and says whether it was new.
+    fn insert(&mut self, id: ObjectId) -> bool {
+        let few = self.count.min(FEW);
+        if self.few[..few].contains(&id) {
+            return false;
+        }
+        if self.count < FEW {
+            self.few[self.count] = id;
+        } else if !self.rest.get_or_insert_default().insert(id) {
+            return false;
+        }
+        self.count += 1;
+        true
+    }
+}
+
 fn measure(
     heap: &Heap,
     value: &Value,
     total: &mut u64,
-    seen: &mut BTreeSet<ObjectId>,
+    seen: &mut Seen,
     pending: &mut Vec<ObjectId>,
 ) {
     match value {
