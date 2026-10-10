@@ -9,6 +9,7 @@ use lash_kernel_doc::{
 use crate::Diagnostic;
 
 mod array;
+mod array_callbacks;
 mod async_fn;
 mod builtin_values;
 mod controls;

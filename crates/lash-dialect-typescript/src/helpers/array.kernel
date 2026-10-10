@@ -162,6 +162,8 @@ kernel 1
 errors "type_error", "RangeError"
 charge 8
 body {
+  # A list's `length` is its own length, as the read below would find it.
+  if same(kind(this), "list") { return num.to_float(list.len(this)) }
   do invoke ts.require_object_coercible(this)
   let value = invoke ts.get(this, "length")
   let length = invoke ts.array.integer(value)
@@ -204,6 +206,13 @@ kernel 1
 errors "type_error", "RangeError"
 charge 8
 body {
+  # A function the program made calls the closure it carries, as
+  # ts.callable gives it.
+  if same(kind(callback), "tuple") {
+    if same(callback, ()) {} else {
+      if same(callback[0], "ts.function") { return callback[4] }
+    }
+  }
   let receiver = invoke ts.receiver(callback)
   if same(receiver, "closure") {
     let made = invoke ts.callable(callback)
@@ -587,27 +596,36 @@ body {
   let input = invoke ts.array.argument(args, 0)
   let callback = invoke ts.array.callback(input)
   let context = invoke ts.array.argument(args, 1)
+  let index = 0.0
+  if same(kind(this), "list") {
+    # The result starts as a copy, of the source's length and with its
+    # holes, and each slot is written as the loop reaches it: the
+    # callback's answer, or a hole where a callback deleted the element.
+    # The loop reads the source live and stops at the length taken first.
+    let output = list.copy(this)
+    for value in this {
+      if same(index, length) { break }
+      if same(value, ()) { set output[index] = () } else {
+        let passed = [value, index, this]
+        let answer = apply callback(context, passed)
+        set output[index] = answer
+      }
+      set index = num.add(index, 1.0)
+    }
+    # A callback shortened the source: the slots past its end are holes.
+    while num.lt(index, length) {
+      set output[index] = ()
+      set index = num.add(index, 1.0)
+    }
+    return output
+  }
   let output = []
   do invoke ts.set(output, "length", length)
-  let index = 0.0
-  let actual_list = same(kind(this), "list")
   while num.lt(index, length) {
-    if num.lt(index, 0) { break }
-    let present = false
-    let value = absent
-    if actual_list {
-      # Callbacks can delete slots or shorten the source. Test its live
-      # length before the direct read, then distinguish holes from undefined.
-      if num.lt(index, list.len(this)) {
-        set value = this[index]
-        set present = bool.not(same(value, ()))
-      }
-    } else {
-      set present = invoke ts.has_own(this, index)
-      if present { set value = invoke ts.get(this, index) }
-    }
+    let present = invoke ts.has_own(this, index)
     if present {
-      let passed = [value, num.to_float(index), this]
+      let value = invoke ts.get(this, index)
+      let passed = [value, index, this]
       let answer = apply callback(context, passed)
       set output[index] = answer
     }
@@ -615,6 +633,11 @@ body {
   }
   return output
 }
+
+# filter, forEach, every, some and reduce visit a list with a `for` loop,
+# which reads it live by position as the generic loop does, and skips its
+# holes. A callback that shortens the list ends that loop early; the
+# generic loop then tests the slots that remain, none of them present.
 
 function ts.array.filter(this: Any, args: List(Any)) -> Any
 kernel 1
@@ -627,12 +650,27 @@ body {
   let context = invoke ts.array.argument(args, 1)
   let output = []
   let index = 0.0
+  if same(kind(this), "list") {
+    for value in this {
+      if same(index, length) { break }
+      if same(value, ()) {} else {
+        let passed = [value, index, this]
+        let answer = apply callback(context, passed)
+        if same(answer, true) { set output[list.len(output)] = value } else {
+          if same(answer, false) {} else {
+            let truth = invoke ts.to_boolean(answer)
+            if truth { set output[list.len(output)] = value }
+          }
+        }
+      }
+      set index = num.add(index, 1.0)
+    }
+  }
   while num.lt(index, length) {
-    if num.lt(index, 0) { break }
     let present = invoke ts.has_own(this, index)
     if present {
       let value = invoke ts.get(this, index)
-      let passed = [value, num.to_float(index), this]
+      let passed = [value, index, this]
       let answer = apply callback(context, passed)
       let truth = invoke ts.to_boolean(answer)
       if truth { set output[list.len(output)] = value }
@@ -651,15 +689,23 @@ body {
   let input = invoke ts.array.argument(args, 0)
   let callback = invoke ts.array.callback(input)
   let context = invoke ts.array.argument(args, 1)
-  let output = []
   let index = 0.0
+  if same(kind(this), "list") {
+    for value in this {
+      if same(index, length) { break }
+      if same(value, ()) {} else {
+        let passed = [value, index, this]
+        do apply callback(context, passed)
+      }
+      set index = num.add(index, 1.0)
+    }
+  }
   while num.lt(index, length) {
-    if num.lt(index, 0) { break }
     let present = invoke ts.has_own(this, index)
     if present {
       let value = invoke ts.get(this, index)
-      let passed = [value, num.to_float(index), this]
-      let answer = apply callback(context, passed)
+      let passed = [value, index, this]
+      do apply callback(context, passed)
     }
     set index = num.add(index, 1.0)
   }
@@ -675,14 +721,27 @@ body {
   let input = invoke ts.array.argument(args, 0)
   let callback = invoke ts.array.callback(input)
   let context = invoke ts.array.argument(args, 1)
-  let output = []
   let index = 0.0
+  if same(kind(this), "list") {
+    for value in this {
+      if same(index, length) { break }
+      if same(value, ()) {} else {
+        let passed = [value, index, this]
+        let answer = apply callback(context, passed)
+        if same(answer, true) {} else {
+          if same(answer, false) { return false }
+          let truth = invoke ts.to_boolean(answer)
+          if truth {} else { return false }
+        }
+      }
+      set index = num.add(index, 1.0)
+    }
+  }
   while num.lt(index, length) {
-    if num.lt(index, 0) { break }
     let present = invoke ts.has_own(this, index)
     if present {
       let value = invoke ts.get(this, index)
-      let passed = [value, num.to_float(index), this]
+      let passed = [value, index, this]
       let answer = apply callback(context, passed)
       let truth = invoke ts.to_boolean(answer)
       if truth {} else { return false }
@@ -701,14 +760,27 @@ body {
   let input = invoke ts.array.argument(args, 0)
   let callback = invoke ts.array.callback(input)
   let context = invoke ts.array.argument(args, 1)
-  let output = []
   let index = 0.0
+  if same(kind(this), "list") {
+    for value in this {
+      if same(index, length) { break }
+      if same(value, ()) {} else {
+        let passed = [value, index, this]
+        let answer = apply callback(context, passed)
+        if same(answer, true) { return true }
+        if same(answer, false) {} else {
+          let truth = invoke ts.to_boolean(answer)
+          if truth { return true }
+        }
+      }
+      set index = num.add(index, 1.0)
+    }
+  }
   while num.lt(index, length) {
-    if num.lt(index, 0) { break }
     let present = invoke ts.has_own(this, index)
     if present {
       let value = invoke ts.get(this, index)
-      let passed = [value, num.to_float(index), this]
+      let passed = [value, index, this]
       let answer = apply callback(context, passed)
       let truth = invoke ts.to_boolean(answer)
       if truth { return true }
@@ -717,6 +789,10 @@ body {
   }
   return false
 }
+
+# find and findIndex visit holes too, as undefined. On a list the `for`
+# loop reads each slot live; a callback that shortens the list ends it, and
+# the generic loop reads the rest, which a later callback may write again.
 
 function ts.array.find(this: Any, args: List(Any)) -> Any
 kernel 1
@@ -727,19 +803,28 @@ body {
   let input = invoke ts.array.argument(args, 0)
   let callback = invoke ts.array.callback(input)
   let context = invoke ts.array.argument(args, 1)
-  let output = []
   let index = 0.0
-  while num.lt(index, length) {
-    if num.lt(index, 0) { break }
-    let present = invoke ts.has_own(this, index)
-    set present = true
-    if present {
-      let value = invoke ts.get(this, index)
-      let passed = [value, num.to_float(index), this]
+  if same(kind(this), "list") {
+    for value in this {
+      if same(index, length) { break }
+      if same(value, ()) { set value = absent }
+      let passed = [value, index, this]
       let answer = apply callback(context, passed)
-      let truth = invoke ts.to_boolean(answer)
-      if truth { return value }
+      if same(answer, true) { return value }
+      if same(answer, false) {} else {
+        let truth = invoke ts.to_boolean(answer)
+        if truth { return value }
+      }
+      set index = num.add(index, 1.0)
     }
+  }
+  while num.lt(index, length) {
+    do invoke ts.has_own(this, index)
+    let value = invoke ts.get(this, index)
+    let passed = [value, index, this]
+    let answer = apply callback(context, passed)
+    let truth = invoke ts.to_boolean(answer)
+    if truth { return value }
     set index = num.add(index, 1.0)
   }
   return absent
@@ -754,23 +839,36 @@ body {
   let input = invoke ts.array.argument(args, 0)
   let callback = invoke ts.array.callback(input)
   let context = invoke ts.array.argument(args, 1)
-  let output = []
   let index = 0.0
-  while num.lt(index, length) {
-    if num.lt(index, 0) { break }
-    let present = invoke ts.has_own(this, index)
-    set present = true
-    if present {
-      let value = invoke ts.get(this, index)
-      let passed = [value, num.to_float(index), this]
+  if same(kind(this), "list") {
+    for value in this {
+      if same(index, length) { break }
+      if same(value, ()) { set value = absent }
+      let passed = [value, index, this]
       let answer = apply callback(context, passed)
-      let truth = invoke ts.to_boolean(answer)
-      if truth { return num.to_float(index) }
+      if same(answer, true) { return index }
+      if same(answer, false) {} else {
+        let truth = invoke ts.to_boolean(answer)
+        if truth { return index }
+      }
+      set index = num.add(index, 1.0)
     }
+  }
+  while num.lt(index, length) {
+    do invoke ts.has_own(this, index)
+    let value = invoke ts.get(this, index)
+    let passed = [value, index, this]
+    let answer = apply callback(context, passed)
+    let truth = invoke ts.to_boolean(answer)
+    if truth { return index }
     set index = num.add(index, 1.0)
   }
   return -1.0
 }
+
+# findLast and findLastIndex walk down from the length taken first. On a
+# list each slot is read live: a hole, or a slot a callback cut off, is
+# undefined.
 
 function ts.array.findLast(this: Any, args: List(Any)) -> Any
 kernel 1
@@ -781,20 +879,27 @@ body {
   let input = invoke ts.array.argument(args, 0)
   let callback = invoke ts.array.callback(input)
   let context = invoke ts.array.argument(args, 1)
-  let output = []
-  let index = num.sub(length, 1)
-  while num.lt(index, length) {
-    if num.lt(index, 0) { break }
-    let present = invoke ts.has_own(this, index)
-    set present = true
-    if present {
-      let value = invoke ts.get(this, index)
-      let passed = [value, num.to_float(index), this]
-      let answer = apply callback(context, passed)
+  let index = num.sub(length, 1.0)
+  let actual_list = same(kind(this), "list")
+  while num.le(0, index) {
+    let value = absent
+    if actual_list {
+      if num.lt(index, list.len(this)) {
+        set value = this[index]
+        if same(value, ()) { set value = absent }
+      }
+    } else {
+      do invoke ts.has_own(this, index)
+      set value = invoke ts.get(this, index)
+    }
+    let passed = [value, index, this]
+    let answer = apply callback(context, passed)
+    if same(answer, true) { return value }
+    if same(answer, false) {} else {
       let truth = invoke ts.to_boolean(answer)
       if truth { return value }
     }
-    set index = num.add(index, -1.0)
+    set index = num.sub(index, 1.0)
   }
   return absent
 }
@@ -808,20 +913,27 @@ body {
   let input = invoke ts.array.argument(args, 0)
   let callback = invoke ts.array.callback(input)
   let context = invoke ts.array.argument(args, 1)
-  let output = []
-  let index = num.sub(length, 1)
-  while num.lt(index, length) {
-    if num.lt(index, 0) { break }
-    let present = invoke ts.has_own(this, index)
-    set present = true
-    if present {
-      let value = invoke ts.get(this, index)
-      let passed = [value, num.to_float(index), this]
-      let answer = apply callback(context, passed)
-      let truth = invoke ts.to_boolean(answer)
-      if truth { return num.to_float(index) }
+  let index = num.sub(length, 1.0)
+  let actual_list = same(kind(this), "list")
+  while num.le(0, index) {
+    let value = absent
+    if actual_list {
+      if num.lt(index, list.len(this)) {
+        set value = this[index]
+        if same(value, ()) { set value = absent }
+      }
+    } else {
+      do invoke ts.has_own(this, index)
+      set value = invoke ts.get(this, index)
     }
-    set index = num.add(index, -1.0)
+    let passed = [value, index, this]
+    let answer = apply callback(context, passed)
+    if same(answer, true) { return index }
+    if same(answer, false) {} else {
+      let truth = invoke ts.to_boolean(answer)
+      if truth { return index }
+    }
+    set index = num.sub(index, 1.0)
   }
   return -1.0
 }
@@ -837,13 +949,27 @@ body {
   let accumulator = invoke ts.array.argument(args, 1)
   let initialised = num.lt(1, list.len(args))
   let index = 0.0
+  if same(kind(this), "list") {
+    for value in this {
+      if same(index, length) { break }
+      if same(value, ()) {} else {
+        if initialised {
+          let passed = [accumulator, value, index, this]
+          set accumulator = apply callback(absent, passed)
+        } else {
+          set accumulator = value
+          set initialised = true
+        }
+      }
+      set index = num.add(index, 1.0)
+    }
+  }
   while num.lt(index, length) {
-    if num.lt(index, 0) { break }
     let present = invoke ts.has_own(this, index)
     if present {
       let value = invoke ts.get(this, index)
       if initialised {
-        let passed = [accumulator, value, num.to_float(index), this]
+        let passed = [accumulator, value, index, this]
         set accumulator = apply callback(absent, passed)
       } else {
         set accumulator = value
@@ -866,21 +992,30 @@ body {
   let callback = invoke ts.array.callback(input)
   let accumulator = invoke ts.array.argument(args, 1)
   let initialised = num.lt(1, list.len(args))
-  let index = num.sub(length, 1)
-  while num.lt(index, length) {
-    if num.lt(index, 0) { break }
-    let present = invoke ts.has_own(this, index)
+  let index = num.sub(length, 1.0)
+  let actual_list = same(kind(this), "list")
+  while num.le(0, index) {
+    let present = false
+    let value = absent
+    if actual_list {
+      if num.lt(index, list.len(this)) {
+        set value = this[index]
+        set present = bool.not(same(value, ()))
+      }
+    } else {
+      set present = invoke ts.has_own(this, index)
+      if present { set value = invoke ts.get(this, index) }
+    }
     if present {
-      let value = invoke ts.get(this, index)
       if initialised {
-        let passed = [accumulator, value, num.to_float(index), this]
+        let passed = [accumulator, value, index, this]
         set accumulator = apply callback(absent, passed)
       } else {
         set accumulator = value
         set initialised = true
       }
     }
-    set index = num.add(index, -1.0)
+    set index = num.sub(index, 1.0)
   }
   if initialised { return accumulator }
   throw error.new("type_error", "Reduce of empty array with no initial value", null)

@@ -1,0 +1,336 @@
+# The definitions FIG-5886 replaced, as main had them before it: the
+# oracle of the differential law in `array_callbacks.rs`, which swaps each
+# into `helpers/array.kernel` in place of its successor.
+
+function ts.array.length(this: Any) -> Number
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  do invoke ts.require_object_coercible(this)
+  let value = invoke ts.get(this, "length")
+  let length = invoke ts.array.integer(value)
+  if num.le(length, 0) { return 0.0 }
+  return num.min(length, 9007199254740991.0)
+}
+
+function ts.array.callback(callback: Any) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  let receiver = invoke ts.receiver(callback)
+  if same(receiver, "closure") {
+    let made = invoke ts.callable(callback)
+    return made
+  }
+  throw error.new("type_error", "callback is not a function", null)
+}
+
+function ts.array.map(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  let length = invoke ts.array.length(this)
+  let input = invoke ts.array.argument(args, 0)
+  let callback = invoke ts.array.callback(input)
+  let context = invoke ts.array.argument(args, 1)
+  let output = []
+  do invoke ts.set(output, "length", length)
+  let index = 0.0
+  let actual_list = same(kind(this), "list")
+  while num.lt(index, length) {
+    if num.lt(index, 0) { break }
+    let present = false
+    let value = absent
+    if actual_list {
+      # Callbacks can delete slots or shorten the source. Test its live
+      # length before the direct read, then distinguish holes from undefined.
+      if num.lt(index, list.len(this)) {
+        set value = this[index]
+        set present = bool.not(same(value, ()))
+      }
+    } else {
+      set present = invoke ts.has_own(this, index)
+      if present { set value = invoke ts.get(this, index) }
+    }
+    if present {
+      let passed = [value, num.to_float(index), this]
+      let answer = apply callback(context, passed)
+      set output[index] = answer
+    }
+    set index = num.add(index, 1.0)
+  }
+  return output
+}
+
+function ts.array.filter(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  let length = invoke ts.array.length(this)
+  let input = invoke ts.array.argument(args, 0)
+  let callback = invoke ts.array.callback(input)
+  let context = invoke ts.array.argument(args, 1)
+  let output = []
+  let index = 0.0
+  while num.lt(index, length) {
+    if num.lt(index, 0) { break }
+    let present = invoke ts.has_own(this, index)
+    if present {
+      let value = invoke ts.get(this, index)
+      let passed = [value, num.to_float(index), this]
+      let answer = apply callback(context, passed)
+      let truth = invoke ts.to_boolean(answer)
+      if truth { set output[list.len(output)] = value }
+    }
+    set index = num.add(index, 1.0)
+  }
+  return output
+}
+
+function ts.array.forEach(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  let length = invoke ts.array.length(this)
+  let input = invoke ts.array.argument(args, 0)
+  let callback = invoke ts.array.callback(input)
+  let context = invoke ts.array.argument(args, 1)
+  let output = []
+  let index = 0.0
+  while num.lt(index, length) {
+    if num.lt(index, 0) { break }
+    let present = invoke ts.has_own(this, index)
+    if present {
+      let value = invoke ts.get(this, index)
+      let passed = [value, num.to_float(index), this]
+      let answer = apply callback(context, passed)
+    }
+    set index = num.add(index, 1.0)
+  }
+  return absent
+}
+
+function ts.array.every(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  let length = invoke ts.array.length(this)
+  let input = invoke ts.array.argument(args, 0)
+  let callback = invoke ts.array.callback(input)
+  let context = invoke ts.array.argument(args, 1)
+  let output = []
+  let index = 0.0
+  while num.lt(index, length) {
+    if num.lt(index, 0) { break }
+    let present = invoke ts.has_own(this, index)
+    if present {
+      let value = invoke ts.get(this, index)
+      let passed = [value, num.to_float(index), this]
+      let answer = apply callback(context, passed)
+      let truth = invoke ts.to_boolean(answer)
+      if truth {} else { return false }
+    }
+    set index = num.add(index, 1.0)
+  }
+  return true
+}
+
+function ts.array.some(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  let length = invoke ts.array.length(this)
+  let input = invoke ts.array.argument(args, 0)
+  let callback = invoke ts.array.callback(input)
+  let context = invoke ts.array.argument(args, 1)
+  let output = []
+  let index = 0.0
+  while num.lt(index, length) {
+    if num.lt(index, 0) { break }
+    let present = invoke ts.has_own(this, index)
+    if present {
+      let value = invoke ts.get(this, index)
+      let passed = [value, num.to_float(index), this]
+      let answer = apply callback(context, passed)
+      let truth = invoke ts.to_boolean(answer)
+      if truth { return true }
+    }
+    set index = num.add(index, 1.0)
+  }
+  return false
+}
+
+function ts.array.find(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  let length = invoke ts.array.length(this)
+  let input = invoke ts.array.argument(args, 0)
+  let callback = invoke ts.array.callback(input)
+  let context = invoke ts.array.argument(args, 1)
+  let output = []
+  let index = 0.0
+  while num.lt(index, length) {
+    if num.lt(index, 0) { break }
+    let present = invoke ts.has_own(this, index)
+    set present = true
+    if present {
+      let value = invoke ts.get(this, index)
+      let passed = [value, num.to_float(index), this]
+      let answer = apply callback(context, passed)
+      let truth = invoke ts.to_boolean(answer)
+      if truth { return value }
+    }
+    set index = num.add(index, 1.0)
+  }
+  return absent
+}
+
+function ts.array.findIndex(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  let length = invoke ts.array.length(this)
+  let input = invoke ts.array.argument(args, 0)
+  let callback = invoke ts.array.callback(input)
+  let context = invoke ts.array.argument(args, 1)
+  let output = []
+  let index = 0.0
+  while num.lt(index, length) {
+    if num.lt(index, 0) { break }
+    let present = invoke ts.has_own(this, index)
+    set present = true
+    if present {
+      let value = invoke ts.get(this, index)
+      let passed = [value, num.to_float(index), this]
+      let answer = apply callback(context, passed)
+      let truth = invoke ts.to_boolean(answer)
+      if truth { return num.to_float(index) }
+    }
+    set index = num.add(index, 1.0)
+  }
+  return -1.0
+}
+
+function ts.array.findLast(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  let length = invoke ts.array.length(this)
+  let input = invoke ts.array.argument(args, 0)
+  let callback = invoke ts.array.callback(input)
+  let context = invoke ts.array.argument(args, 1)
+  let output = []
+  let index = num.sub(length, 1)
+  while num.lt(index, length) {
+    if num.lt(index, 0) { break }
+    let present = invoke ts.has_own(this, index)
+    set present = true
+    if present {
+      let value = invoke ts.get(this, index)
+      let passed = [value, num.to_float(index), this]
+      let answer = apply callback(context, passed)
+      let truth = invoke ts.to_boolean(answer)
+      if truth { return value }
+    }
+    set index = num.add(index, -1.0)
+  }
+  return absent
+}
+
+function ts.array.findLastIndex(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  let length = invoke ts.array.length(this)
+  let input = invoke ts.array.argument(args, 0)
+  let callback = invoke ts.array.callback(input)
+  let context = invoke ts.array.argument(args, 1)
+  let output = []
+  let index = num.sub(length, 1)
+  while num.lt(index, length) {
+    if num.lt(index, 0) { break }
+    let present = invoke ts.has_own(this, index)
+    set present = true
+    if present {
+      let value = invoke ts.get(this, index)
+      let passed = [value, num.to_float(index), this]
+      let answer = apply callback(context, passed)
+      let truth = invoke ts.to_boolean(answer)
+      if truth { return num.to_float(index) }
+    }
+    set index = num.add(index, -1.0)
+  }
+  return -1.0
+}
+
+function ts.array.reduce(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  let length = invoke ts.array.length(this)
+  let input = invoke ts.array.argument(args, 0)
+  let callback = invoke ts.array.callback(input)
+  let accumulator = invoke ts.array.argument(args, 1)
+  let initialised = num.lt(1, list.len(args))
+  let index = 0.0
+  while num.lt(index, length) {
+    if num.lt(index, 0) { break }
+    let present = invoke ts.has_own(this, index)
+    if present {
+      let value = invoke ts.get(this, index)
+      if initialised {
+        let passed = [accumulator, value, num.to_float(index), this]
+        set accumulator = apply callback(absent, passed)
+      } else {
+        set accumulator = value
+        set initialised = true
+      }
+    }
+    set index = num.add(index, 1.0)
+  }
+  if initialised { return accumulator }
+  throw error.new("type_error", "Reduce of empty array with no initial value", null)
+}
+
+function ts.array.reduceRight(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  let length = invoke ts.array.length(this)
+  let input = invoke ts.array.argument(args, 0)
+  let callback = invoke ts.array.callback(input)
+  let accumulator = invoke ts.array.argument(args, 1)
+  let initialised = num.lt(1, list.len(args))
+  let index = num.sub(length, 1)
+  while num.lt(index, length) {
+    if num.lt(index, 0) { break }
+    let present = invoke ts.has_own(this, index)
+    if present {
+      let value = invoke ts.get(this, index)
+      if initialised {
+        let passed = [accumulator, value, num.to_float(index), this]
+        set accumulator = apply callback(absent, passed)
+      } else {
+        set accumulator = value
+        set initialised = true
+      }
+    }
+    set index = num.add(index, -1.0)
+  }
+  if initialised { return accumulator }
+  throw error.new("type_error", "Reduce of empty array with no initial value", null)
+}

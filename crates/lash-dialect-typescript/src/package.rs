@@ -13,6 +13,14 @@ use crate::builtins::{self, Receiver};
 /// then the functions that make built-ins values, then one generated
 /// dispatcher per method and property name the built-in rows mention.
 pub fn define_helpers(library: &mut NamedLibrary) -> Result<Vec<FunctionDefinition>, SourceError> {
+    define_helpers_from(library, builtins::objects())
+}
+
+/// [`define_helpers`] with the given built-in objects' helper sources.
+pub(crate) fn define_helpers_from(
+    library: &mut NamedLibrary,
+    objects: Vec<builtins::Object>,
+) -> Result<Vec<FunctionDefinition>, SourceError> {
     let mut definitions =
         define_functions(include_str!("helpers/number_primitive.kernel"), library)?;
     definitions.extend(define_functions(
@@ -27,7 +35,7 @@ pub fn define_helpers(library: &mut NamedLibrary) -> Result<Vec<FunctionDefiniti
         include_str!("helpers/core.kernel"),
         library,
     )?);
-    for object in builtins::objects() {
+    for object in objects {
         definitions.extend(define_functions(object.source, library)?);
     }
     let table = builtins::table();
