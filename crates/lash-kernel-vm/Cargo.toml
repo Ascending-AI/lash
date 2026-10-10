@@ -25,6 +25,11 @@ synthetic-next = ["lash-kernel-doc/synthetic-next", "lash-kernel-state/synthetic
 workspace = true
 
 [dependencies]
+cranelift-codegen = { workspace = true }
+cranelift-frontend = { workspace = true }
+cranelift-jit = { workspace = true }
+cranelift-module = { workspace = true }
+cranelift-native = { workspace = true }
 lash-kernel-doc = { workspace = true }
 lash-kernel-state = { workspace = true }
 num-bigint = { workspace = true }

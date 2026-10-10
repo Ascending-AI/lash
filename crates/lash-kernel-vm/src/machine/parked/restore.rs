@@ -811,6 +811,7 @@ pub(in crate::machine) fn import(
         storage: Storage::default(),
         end: None,
         ended: false,
+        jit: Default::default(),
     };
     // Accounts the memory of what was put back, as the machine that parked
     // it did when it wrote the state.

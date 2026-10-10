@@ -53077,6 +53077,11 @@
         "synthetic-next"
       ],
       "dependencies": [
+        "cranelift-codegen",
+        "cranelift-frontend",
+        "cranelift-jit",
+        "cranelift-module",
+        "cranelift-native",
         "lash-kernel-doc",
         "lash-kernel-state",
         "num-bigint",

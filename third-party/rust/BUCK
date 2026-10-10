@@ -750,6 +750,49 @@ third_party_rust_library(
 
 alias(
     name = "p0012",
+    actual = ":arbitrary-1",
+    visibility = ["PUBLIC"],
+)
+
+third_party_http_archive(
+    name = "arbitrary-1.5.0.crate",
+    sha256 = "3bc62ac97cc33321f50863d514c3bc38a453947a8f9e781137e47c7401020aed",
+    strip_prefix = "arbitrary-1.5.0",
+    urls = ["https://static.crates.io/crates/arbitrary/1.5.0/download"],
+    visibility = [],
+)
+
+third_party_rust_library(
+    name = "arbitrary-1",
+    srcs = [":arbitrary-1.5.0.crate"],
+    crate = "arbitrary",
+    crate_root = "arbitrary-1.5.0.crate/src/lib.rs",
+    edition = "2021",
+    env = {
+        "CARGO_BIN_NAME": "arbitrary",
+        "CARGO_CRATE_NAME": "arbitrary",
+        "CARGO_MANIFEST_DIR": "arbitrary-1.5.0.crate",
+        "CARGO_PKG_AUTHORS": "The Rust-Fuzz Project Developers:Nick Fitzgerald <fitzgen@gmail.com>:Manish Goregaokar <manishsmail@gmail.com>:Simonas Kazlauskas <arbitrary@kazlauskas.me>:Brian L. Troutwine <brian@troutwine.us>:Corey Farwell <coreyf@rwell.org>",
+        "CARGO_PKG_DESCRIPTION": "The trait for generating structured data from unstructured data",
+        "CARGO_PKG_HOMEPAGE": "",
+        "CARGO_PKG_NAME": "arbitrary",
+        "CARGO_PKG_README": "README.md",
+        "CARGO_PKG_REPOSITORY": "https://github.com/rust-fuzz/arbitrary/",
+        "CARGO_PKG_RUST_VERSION": "1.71.0",
+        "CARGO_PKG_VERSION": "1.5.0",
+        "CARGO_PKG_VERSION_MAJOR": "1",
+        "CARGO_PKG_VERSION_MINOR": "5",
+        "CARGO_PKG_VERSION_PATCH": "0",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    platform = {
+        "linux-x86_64": dict(),
+    },
+    visibility = [],
+)
+
+alias(
+    name = "p0013",
     actual = ":arc-swap-1",
     visibility = ["PUBLIC"],
 )
@@ -793,7 +836,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0013",
+    name = "p0014",
     actual = ":arrayvec-0.7",
     visibility = ["PUBLIC"],
 )
@@ -840,7 +883,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0014",
+    name = "p0015",
     actual = ":ast_node-6",
     visibility = ["PUBLIC"],
 )
@@ -889,7 +932,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0015",
+    name = "p0016",
     actual = ":async-trait-0.1",
     visibility = ["PUBLIC"],
 )
@@ -938,7 +981,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0016",
+    name = "p0017",
     actual = ":atoi-2",
     visibility = ["PUBLIC"],
 )
@@ -986,7 +1029,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0017",
+    name = "p0018",
     actual = ":atomic-waker-1",
     visibility = ["PUBLIC"],
 )
@@ -1029,7 +1072,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0018",
+    name = "p0019",
     actual = ":attribute-derive-0.10",
     visibility = ["PUBLIC"],
 )
@@ -1080,7 +1123,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0019",
+    name = "p0020",
     actual = ":attribute-derive-macro-0.10",
     visibility = ["PUBLIC"],
 )
@@ -1134,7 +1177,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0020",
+    name = "p0021",
     actual = ":autocfg-1",
     visibility = ["PUBLIC"],
 )
@@ -1177,7 +1220,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0021",
+    name = "p0022",
     actual = ":aws-lc-rs-1",
     visibility = ["PUBLIC"],
 )
@@ -1293,7 +1336,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0022",
+    name = "p0023",
     actual = ":aws-lc-sys-0.45",
     visibility = ["PUBLIC"],
 )
@@ -1403,7 +1446,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0023",
+    name = "p0024",
     actual = ":axum-0.8",
     visibility = ["PUBLIC"],
 )
@@ -1485,7 +1528,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0024",
+    name = "p0025",
     actual = ":axum-core-0.5",
     visibility = ["PUBLIC"],
 )
@@ -1591,7 +1634,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0025",
+    name = "p0026",
     actual = ":base64-0.22",
     visibility = ["PUBLIC"],
 )
@@ -1639,7 +1682,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0026",
+    name = "p0027",
     actual = ":base64-0.23",
     visibility = ["PUBLIC"],
 )
@@ -1688,7 +1731,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0027",
+    name = "p0028",
     actual = ":better_scoped_tls-1",
     visibility = ["PUBLIC"],
 )
@@ -1732,7 +1775,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0028",
+    name = "p0029",
     actual = ":bit-set-0.8",
     visibility = ["PUBLIC"],
 )
@@ -1780,7 +1823,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0029",
+    name = "p0030",
     actual = ":bit-vec-0.8",
     visibility = ["PUBLIC"],
 )
@@ -1827,7 +1870,51 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0030",
+    name = "p0031",
+    actual = ":bitflags-1",
+    visibility = ["PUBLIC"],
+)
+
+third_party_http_archive(
+    name = "bitflags-1.3.2.crate",
+    sha256 = "bef38d45163c2f1dde094a7dfd33ccf595c92905c8f8f4fdc18d06fb1037718a",
+    strip_prefix = "bitflags-1.3.2",
+    urls = ["https://static.crates.io/crates/bitflags/1.3.2/download"],
+    visibility = [],
+)
+
+third_party_rust_library(
+    name = "bitflags-1",
+    srcs = [":bitflags-1.3.2.crate"],
+    crate = "bitflags",
+    crate_root = "bitflags-1.3.2.crate/src/lib.rs",
+    edition = "2018",
+    env = {
+        "CARGO_BIN_NAME": "bitflags",
+        "CARGO_CRATE_NAME": "bitflags",
+        "CARGO_MANIFEST_DIR": "bitflags-1.3.2.crate",
+        "CARGO_PKG_AUTHORS": "The Rust Project Developers",
+        "CARGO_PKG_DESCRIPTION": "A macro to generate structures which behave like bitflags.\n",
+        "CARGO_PKG_HOMEPAGE": "https://github.com/bitflags/bitflags",
+        "CARGO_PKG_NAME": "bitflags",
+        "CARGO_PKG_README": "README.md",
+        "CARGO_PKG_REPOSITORY": "https://github.com/bitflags/bitflags",
+        "CARGO_PKG_RUST_VERSION": "",
+        "CARGO_PKG_VERSION": "1.3.2",
+        "CARGO_PKG_VERSION_MAJOR": "1",
+        "CARGO_PKG_VERSION_MINOR": "3",
+        "CARGO_PKG_VERSION_PATCH": "2",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = ["default"],
+    platform = {
+        "linux-x86_64": dict(),
+    },
+    visibility = [],
+)
+
+alias(
+    name = "p0032",
     actual = ":bitflags-2",
     visibility = ["PUBLIC"],
 )
@@ -1871,7 +1958,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0031",
+    name = "p0033",
     actual = ":blake3-1",
     visibility = ["PUBLIC"],
 )
@@ -1988,7 +2075,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0032",
+    name = "p0034",
     actual = ":block-buffer-0.10",
     visibility = ["PUBLIC"],
 )
@@ -2032,7 +2119,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0033",
+    name = "p0035",
     actual = ":block-buffer-0.12",
     visibility = ["PUBLIC"],
 )
@@ -2076,7 +2163,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0034",
+    name = "p0036",
     actual = ":borrow-or-share-0.2",
     visibility = ["PUBLIC"],
 )
@@ -2120,7 +2207,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0035",
+    name = "p0037",
     actual = ":bstr-1",
     visibility = ["PUBLIC"],
 )
@@ -2173,7 +2260,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0036",
+    name = "p0038",
     actual = ":bumpalo-3",
     visibility = ["PUBLIC"],
 )
@@ -2209,15 +2296,19 @@ third_party_rust_library(
         "CARGO_PKG_VERSION_PATCH": "3",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    features = ["default"],
+    features = [
+        "allocator-api2",
+        "default",
+    ],
     platform = {
         "linux-x86_64": dict(),
     },
     visibility = [],
+    deps = [":allocator-api2-0.2"],
 )
 
 alias(
-    name = "p0037",
+    name = "p0039",
     actual = ":bytecount-0.6",
     visibility = ["PUBLIC"],
 )
@@ -2261,7 +2352,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0038",
+    name = "p0040",
     actual = ":byteorder-1",
     visibility = ["PUBLIC"],
 )
@@ -2305,7 +2396,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0039",
+    name = "p0041",
     actual = ":bytes-1",
     visibility = ["PUBLIC"],
 )
@@ -2352,7 +2443,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0040",
+    name = "p0042",
     actual = ":bytes-str-0.2",
     visibility = ["PUBLIC"],
 )
@@ -2400,7 +2491,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0041",
+    name = "p0043",
     actual = ":castaway-0.2",
     visibility = ["PUBLIC"],
 )
@@ -2449,7 +2540,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0042",
+    name = "p0044",
     actual = ":cc-1",
     visibility = ["PUBLIC"],
 )
@@ -2499,7 +2590,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0043",
+    name = "p0045",
     actual = ":cfg-if-1",
     visibility = ["PUBLIC"],
 )
@@ -2542,7 +2633,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0044",
+    name = "p0046",
     actual = ":cfg_aliases-0.2",
     visibility = ["PUBLIC"],
 )
@@ -2585,7 +2676,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0045",
+    name = "p0047",
     actual = ":chacha20-0.10",
     visibility = ["PUBLIC"],
 )
@@ -2634,7 +2725,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0046",
+    name = "p0048",
     actual = ":char_str-0.0.2",
     visibility = ["PUBLIC"],
 )
@@ -2688,7 +2779,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0047",
+    name = "p0049",
     actual = ":chrono-0.4",
     visibility = ["PUBLIC"],
 )
@@ -2751,7 +2842,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0048",
+    name = "p0050",
     actual = ":chrono-tz-0.10",
     visibility = ["PUBLIC"],
 )
@@ -2865,7 +2956,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0049",
+    name = "p0051",
     actual = ":clap-4",
     visibility = ["PUBLIC"],
 )
@@ -2923,7 +3014,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0050",
+    name = "p0052",
     actual = ":clap_builder-4",
     visibility = ["PUBLIC"],
 )
@@ -2981,7 +3072,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0051",
+    name = "p0053",
     actual = ":clap_derive-4",
     visibility = ["PUBLIC"],
 )
@@ -3032,7 +3123,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0052",
+    name = "p0054",
     actual = ":clap_lex-1",
     visibility = ["PUBLIC"],
 )
@@ -3075,7 +3166,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0053",
+    name = "p0055",
     actual = ":cmake-0.1",
     visibility = ["PUBLIC"],
 )
@@ -3119,7 +3210,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0054",
+    name = "p0056",
     actual = ":collection_literals-1",
     visibility = ["PUBLIC"],
 )
@@ -3162,7 +3253,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0055",
+    name = "p0057",
     actual = ":colorchoice-1",
     visibility = ["PUBLIC"],
 )
@@ -3205,7 +3296,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0056",
+    name = "p0058",
     actual = ":combine-4",
     visibility = ["PUBLIC"],
 )
@@ -3258,7 +3349,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0058",
+    name = "p0060",
     actual = ":compact_str-0.7",
     visibility = ["PUBLIC"],
 )
@@ -3308,7 +3399,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0057",
+    name = "p0059",
     actual = ":compact_str-0.10",
     visibility = ["PUBLIC"],
 )
@@ -3362,7 +3453,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0059",
+    name = "p0061",
     actual = ":concurrent-queue-2",
     visibility = ["PUBLIC"],
 )
@@ -3407,7 +3498,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0060",
+    name = "p0062",
     actual = ":console-0.16",
     visibility = ["PUBLIC"],
 )
@@ -3455,7 +3546,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0061",
+    name = "p0063",
     actual = ":constant_time_eq-0.4",
     visibility = ["PUBLIC"],
 )
@@ -3499,7 +3590,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0062",
+    name = "p0064",
     actual = ":core-foundation-0.10",
     visibility = ["PUBLIC"],
 )
@@ -3550,7 +3641,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0063",
+    name = "p0065",
     actual = ":core-foundation-sys-0.8",
     visibility = ["PUBLIC"],
 )
@@ -3597,7 +3688,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0064",
+    name = "p0066",
     actual = ":cpufeatures-0.2",
     visibility = ["PUBLIC"],
 )
@@ -3640,7 +3731,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0065",
+    name = "p0067",
     actual = ":cpufeatures-0.3",
     visibility = ["PUBLIC"],
 )
@@ -3683,7 +3774,929 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0066",
+    name = "p0068",
+    actual = ":cranelift-assembler-x64-0.136",
+    visibility = ["PUBLIC"],
+)
+
+third_party_http_archive(
+    name = "cranelift-assembler-x64-0.136.2.crate",
+    sha256 = "658e8623bea025d142fb11c299b8c6572ffe9fd663b52887c4dc124735cc130b",
+    strip_prefix = "cranelift-assembler-x64-0.136.2",
+    urls = ["https://static.crates.io/crates/cranelift-assembler-x64/0.136.2/download"],
+    visibility = [],
+)
+
+third_party_rust_library(
+    name = "cranelift-assembler-x64-0.136",
+    srcs = [":cranelift-assembler-x64-0.136.2.crate"],
+    crate = "cranelift_assembler_x64",
+    crate_root = "cranelift-assembler-x64-0.136.2.crate/src/lib.rs",
+    edition = "2024",
+    env = {
+        "CARGO_BIN_NAME": "cranelift_assembler_x64",
+        "CARGO_CRATE_NAME": "cranelift_assembler_x64",
+        "CARGO_MANIFEST_DIR": "cranelift-assembler-x64-0.136.2.crate",
+        "CARGO_PKG_AUTHORS": "",
+        "CARGO_PKG_DESCRIPTION": "A Cranelift-specific x64 assembler",
+        "CARGO_PKG_HOMEPAGE": "",
+        "CARGO_PKG_NAME": "cranelift-assembler-x64",
+        "CARGO_PKG_README": "README.md",
+        "CARGO_PKG_REPOSITORY": "",
+        "CARGO_PKG_RUST_VERSION": "1.96.0",
+        "CARGO_PKG_VERSION": "0.136.2",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "136",
+        "CARGO_PKG_VERSION_PATCH": "2",
+        "CARGO_PKG_VERSION_PRE": "",
+        "OUT_DIR": "$(location :cranelift-assembler-x64-0.136-build-script-run[out_dir])",
+    },
+    platform = {
+        "linux-x86_64": dict(),
+    },
+    rustc_flags = ["@$(location :cranelift-assembler-x64-0.136-build-script-run[rustc_flags])"],
+    visibility = [],
+)
+
+third_party_rust_binary(
+    name = "cranelift-assembler-x64-0.136-build-script-build",
+    srcs = [":cranelift-assembler-x64-0.136.2.crate"],
+    crate = "build_script_build",
+    crate_root = "cranelift-assembler-x64-0.136.2.crate/build.rs",
+    edition = "2024",
+    env = {
+        "CARGO_BIN_NAME": "build-script-build",
+        "CARGO_CRATE_NAME": "build_script_build",
+        "CARGO_MANIFEST_DIR": "cranelift-assembler-x64-0.136.2.crate",
+        "CARGO_PKG_AUTHORS": "",
+        "CARGO_PKG_DESCRIPTION": "A Cranelift-specific x64 assembler",
+        "CARGO_PKG_HOMEPAGE": "",
+        "CARGO_PKG_NAME": "cranelift-assembler-x64",
+        "CARGO_PKG_README": "README.md",
+        "CARGO_PKG_REPOSITORY": "",
+        "CARGO_PKG_RUST_VERSION": "1.96.0",
+        "CARGO_PKG_VERSION": "0.136.2",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "136",
+        "CARGO_PKG_VERSION_PATCH": "2",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    platform = {
+        "linux-x86_64": dict(),
+    },
+    visibility = [],
+    deps = [":cranelift-assembler-x64-meta-0.136"],
+)
+
+third_party_buildscript_run(
+    name = "cranelift-assembler-x64-0.136-build-script-run",
+    package_name = "cranelift-assembler-x64",
+    buildscript_rule = ":cranelift-assembler-x64-0.136-build-script-build",
+    env = {
+        "CARGO_PKG_AUTHORS": "",
+        "CARGO_PKG_DESCRIPTION": "A Cranelift-specific x64 assembler",
+        "CARGO_PKG_HOMEPAGE": "",
+        "CARGO_PKG_README": "README.md",
+        "CARGO_PKG_REPOSITORY": "",
+        "CARGO_PKG_RUST_VERSION": "1.96.0",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "136",
+        "CARGO_PKG_VERSION_PATCH": "2",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    platform = {
+        "linux-x86_64": dict(),
+    },
+    rustc_link_lib = True,
+    rustc_link_search = True,
+    version = "0.136.2",
+)
+
+alias(
+    name = "p0069",
+    actual = ":cranelift-assembler-x64-meta-0.136",
+    visibility = ["PUBLIC"],
+)
+
+third_party_http_archive(
+    name = "cranelift-assembler-x64-meta-0.136.2.crate",
+    sha256 = "a4b12b8c55c31c3d8598c2de9a657c3b978f905f6886c43e02216e0b15fe45a3",
+    strip_prefix = "cranelift-assembler-x64-meta-0.136.2",
+    urls = ["https://static.crates.io/crates/cranelift-assembler-x64-meta/0.136.2/download"],
+    visibility = [],
+)
+
+third_party_rust_library(
+    name = "cranelift-assembler-x64-meta-0.136",
+    srcs = [":cranelift-assembler-x64-meta-0.136.2.crate"],
+    crate = "cranelift_assembler_x64_meta",
+    crate_root = "cranelift-assembler-x64-meta-0.136.2.crate/src/lib.rs",
+    edition = "2024",
+    env = {
+        "CARGO_BIN_NAME": "cranelift_assembler_x64_meta",
+        "CARGO_CRATE_NAME": "cranelift_assembler_x64_meta",
+        "CARGO_MANIFEST_DIR": "cranelift-assembler-x64-meta-0.136.2.crate",
+        "CARGO_PKG_AUTHORS": "",
+        "CARGO_PKG_DESCRIPTION": "Generate a Cranelift-specific assembler for x64 instructions",
+        "CARGO_PKG_HOMEPAGE": "",
+        "CARGO_PKG_NAME": "cranelift-assembler-x64-meta",
+        "CARGO_PKG_README": "README.md",
+        "CARGO_PKG_REPOSITORY": "",
+        "CARGO_PKG_RUST_VERSION": "1.96.0",
+        "CARGO_PKG_VERSION": "0.136.2",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "136",
+        "CARGO_PKG_VERSION_PATCH": "2",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    platform = {
+        "linux-x86_64": dict(),
+    },
+    visibility = [],
+    deps = [":cranelift-srcgen-0.136"],
+)
+
+alias(
+    name = "p0070",
+    actual = ":cranelift-bforest-0.136",
+    visibility = ["PUBLIC"],
+)
+
+third_party_http_archive(
+    name = "cranelift-bforest-0.136.2.crate",
+    sha256 = "894b984f82c5a36f05fdd4973fbf4d37d69cd5cdf8c16e8ffe3af4a9cdfe193c",
+    strip_prefix = "cranelift-bforest-0.136.2",
+    urls = ["https://static.crates.io/crates/cranelift-bforest/0.136.2/download"],
+    visibility = [],
+)
+
+third_party_rust_library(
+    name = "cranelift-bforest-0.136",
+    srcs = [":cranelift-bforest-0.136.2.crate"],
+    crate = "cranelift_bforest",
+    crate_root = "cranelift-bforest-0.136.2.crate/src/lib.rs",
+    edition = "2024",
+    env = {
+        "CARGO_BIN_NAME": "cranelift_bforest",
+        "CARGO_CRATE_NAME": "cranelift_bforest",
+        "CARGO_MANIFEST_DIR": "cranelift-bforest-0.136.2.crate",
+        "CARGO_PKG_AUTHORS": "The Cranelift Project Developers",
+        "CARGO_PKG_DESCRIPTION": "A forest of B+-trees",
+        "CARGO_PKG_HOMEPAGE": "",
+        "CARGO_PKG_NAME": "cranelift-bforest",
+        "CARGO_PKG_README": "README.md",
+        "CARGO_PKG_REPOSITORY": "https://github.com/bytecodealliance/wasmtime",
+        "CARGO_PKG_RUST_VERSION": "1.96.0",
+        "CARGO_PKG_VERSION": "0.136.2",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "136",
+        "CARGO_PKG_VERSION_PATCH": "2",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    named_deps = {
+        "wasmtime_core": ":wasmtime-internal-core-49",
+    },
+    platform = {
+        "linux-x86_64": dict(),
+    },
+    visibility = [],
+    deps = [":cranelift-entity-0.136"],
+)
+
+alias(
+    name = "p0071",
+    actual = ":cranelift-bitset-0.136",
+    visibility = ["PUBLIC"],
+)
+
+third_party_http_archive(
+    name = "cranelift-bitset-0.136.2.crate",
+    sha256 = "3a1e4c34abe94193ada09f821f474be87ac8a1fbbacd87058571ef04c1bf4009",
+    strip_prefix = "cranelift-bitset-0.136.2",
+    urls = ["https://static.crates.io/crates/cranelift-bitset/0.136.2/download"],
+    visibility = [],
+)
+
+third_party_rust_library(
+    name = "cranelift-bitset-0.136",
+    srcs = [":cranelift-bitset-0.136.2.crate"],
+    crate = "cranelift_bitset",
+    crate_root = "cranelift-bitset-0.136.2.crate/src/lib.rs",
+    edition = "2024",
+    env = {
+        "CARGO_BIN_NAME": "cranelift_bitset",
+        "CARGO_CRATE_NAME": "cranelift_bitset",
+        "CARGO_MANIFEST_DIR": "cranelift-bitset-0.136.2.crate",
+        "CARGO_PKG_AUTHORS": "The Cranelift Project Developers",
+        "CARGO_PKG_DESCRIPTION": "Various bitset stuff for use inside Cranelift",
+        "CARGO_PKG_HOMEPAGE": "",
+        "CARGO_PKG_NAME": "cranelift-bitset",
+        "CARGO_PKG_README": "",
+        "CARGO_PKG_REPOSITORY": "https://github.com/bytecodealliance/wasmtime",
+        "CARGO_PKG_RUST_VERSION": "1.96.0",
+        "CARGO_PKG_VERSION": "0.136.2",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "136",
+        "CARGO_PKG_VERSION_PATCH": "2",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    named_deps = {
+        "wasmtime_core": ":wasmtime-internal-core-49",
+    },
+    platform = {
+        "linux-x86_64": dict(),
+    },
+    visibility = [],
+)
+
+alias(
+    name = "p0072",
+    actual = ":cranelift-codegen-0.136",
+    visibility = ["PUBLIC"],
+)
+
+third_party_http_archive(
+    name = "cranelift-codegen-0.136.2.crate",
+    sha256 = "63826cef0bf70e61d56cc930aa4ee423638f66dc3cfc10d683e73138a6d177b8",
+    strip_prefix = "cranelift-codegen-0.136.2",
+    urls = ["https://static.crates.io/crates/cranelift-codegen/0.136.2/download"],
+    visibility = [],
+)
+
+third_party_rust_library(
+    name = "cranelift-codegen-0.136",
+    srcs = [":cranelift-codegen-0.136.2.crate"],
+    crate = "cranelift_codegen",
+    crate_root = "cranelift-codegen-0.136.2.crate/src/lib.rs",
+    edition = "2024",
+    env = {
+        "CARGO_BIN_NAME": "cranelift_codegen",
+        "CARGO_CRATE_NAME": "cranelift_codegen",
+        "CARGO_MANIFEST_DIR": "cranelift-codegen-0.136.2.crate",
+        "CARGO_PKG_AUTHORS": "The Cranelift Project Developers",
+        "CARGO_PKG_DESCRIPTION": "Low-level code generator library",
+        "CARGO_PKG_HOMEPAGE": "",
+        "CARGO_PKG_NAME": "cranelift-codegen",
+        "CARGO_PKG_README": "README.md",
+        "CARGO_PKG_REPOSITORY": "https://github.com/bytecodealliance/wasmtime",
+        "CARGO_PKG_RUST_VERSION": "1.96.0",
+        "CARGO_PKG_VERSION": "0.136.2",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "136",
+        "CARGO_PKG_VERSION_PATCH": "2",
+        "CARGO_PKG_VERSION_PRE": "",
+        "OUT_DIR": "$(location :cranelift-codegen-0.136-build-script-run[out_dir])",
+    },
+    features = [
+        "gimli",
+        "host-arch",
+        "std",
+        "unwind",
+    ],
+    named_deps = {
+        "wasmtime_core": ":wasmtime-internal-core-49",
+    },
+    platform = {
+        "linux-x86_64": dict(),
+    },
+    rustc_flags = ["@$(location :cranelift-codegen-0.136-build-script-run[rustc_flags])"],
+    visibility = [],
+    deps = [
+        ":bumpalo-3",
+        ":cranelift-assembler-x64-0.136",
+        ":cranelift-bforest-0.136",
+        ":cranelift-bitset-0.136",
+        ":cranelift-codegen-shared-0.136",
+        ":cranelift-control-0.136",
+        ":cranelift-entity-0.136",
+        ":gimli-0.33",
+        ":hashbrown-0.17",
+        ":libm-0.2",
+        ":log-0.4",
+        ":regalloc2-0.15",
+        ":rustc-hash-2",
+        ":smallvec-1",
+        ":target-lexicon-0.13",
+    ],
+)
+
+third_party_rust_binary(
+    name = "cranelift-codegen-0.136-build-script-build",
+    srcs = [":cranelift-codegen-0.136.2.crate"],
+    crate = "build_script_build",
+    crate_root = "cranelift-codegen-0.136.2.crate/build.rs",
+    edition = "2024",
+    env = {
+        "CARGO_BIN_NAME": "build-script-build",
+        "CARGO_CRATE_NAME": "build_script_build",
+        "CARGO_MANIFEST_DIR": "cranelift-codegen-0.136.2.crate",
+        "CARGO_PKG_AUTHORS": "The Cranelift Project Developers",
+        "CARGO_PKG_DESCRIPTION": "Low-level code generator library",
+        "CARGO_PKG_HOMEPAGE": "",
+        "CARGO_PKG_NAME": "cranelift-codegen",
+        "CARGO_PKG_README": "README.md",
+        "CARGO_PKG_REPOSITORY": "https://github.com/bytecodealliance/wasmtime",
+        "CARGO_PKG_RUST_VERSION": "1.96.0",
+        "CARGO_PKG_VERSION": "0.136.2",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "136",
+        "CARGO_PKG_VERSION_PATCH": "2",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = [
+        "gimli",
+        "host-arch",
+        "std",
+        "unwind",
+    ],
+    platform = {
+        "linux-x86_64": dict(),
+    },
+    visibility = [],
+    deps = [
+        ":cranelift-codegen-meta-0.136",
+        ":cranelift-isle-0.136",
+    ],
+)
+
+third_party_buildscript_run(
+    name = "cranelift-codegen-0.136-build-script-run",
+    package_name = "cranelift-codegen",
+    buildscript_rule = ":cranelift-codegen-0.136-build-script-build",
+    env = {
+        "CARGO_PKG_AUTHORS": "The Cranelift Project Developers",
+        "CARGO_PKG_DESCRIPTION": "Low-level code generator library",
+        "CARGO_PKG_HOMEPAGE": "",
+        "CARGO_PKG_README": "README.md",
+        "CARGO_PKG_REPOSITORY": "https://github.com/bytecodealliance/wasmtime",
+        "CARGO_PKG_RUST_VERSION": "1.96.0",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "136",
+        "CARGO_PKG_VERSION_PATCH": "2",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = [
+        "gimli",
+        "host-arch",
+        "std",
+        "unwind",
+    ],
+    platform = {
+        "linux-x86_64": dict(),
+    },
+    rustc_link_lib = True,
+    rustc_link_search = True,
+    version = "0.136.2",
+)
+
+alias(
+    name = "p0073",
+    actual = ":cranelift-codegen-meta-0.136",
+    visibility = ["PUBLIC"],
+)
+
+third_party_http_archive(
+    name = "cranelift-codegen-meta-0.136.2.crate",
+    sha256 = "26de7849112293681a19f7525c689e1d73dc6eb2687355170fb7458c4da8d353",
+    strip_prefix = "cranelift-codegen-meta-0.136.2",
+    urls = ["https://static.crates.io/crates/cranelift-codegen-meta/0.136.2/download"],
+    visibility = [],
+)
+
+third_party_rust_library(
+    name = "cranelift-codegen-meta-0.136",
+    srcs = [":cranelift-codegen-meta-0.136.2.crate"],
+    crate = "cranelift_codegen_meta",
+    crate_root = "cranelift-codegen-meta-0.136.2.crate/src/lib.rs",
+    edition = "2024",
+    env = {
+        "CARGO_BIN_NAME": "cranelift_codegen_meta",
+        "CARGO_CRATE_NAME": "cranelift_codegen_meta",
+        "CARGO_MANIFEST_DIR": "cranelift-codegen-meta-0.136.2.crate",
+        "CARGO_PKG_AUTHORS": "The Cranelift Project Developers",
+        "CARGO_PKG_DESCRIPTION": "Metaprogram for cranelift-codegen code generator library",
+        "CARGO_PKG_HOMEPAGE": "",
+        "CARGO_PKG_NAME": "cranelift-codegen-meta",
+        "CARGO_PKG_README": "README.md",
+        "CARGO_PKG_REPOSITORY": "https://github.com/bytecodealliance/wasmtime",
+        "CARGO_PKG_RUST_VERSION": "1.96.0",
+        "CARGO_PKG_VERSION": "0.136.2",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "136",
+        "CARGO_PKG_VERSION_PATCH": "2",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    platform = {
+        "linux-x86_64": dict(),
+    },
+    visibility = [],
+    deps = [
+        ":cranelift-assembler-x64-meta-0.136",
+        ":cranelift-codegen-shared-0.136",
+        ":cranelift-srcgen-0.136",
+        ":heck-0.5",
+    ],
+)
+
+alias(
+    name = "p0074",
+    actual = ":cranelift-codegen-shared-0.136",
+    visibility = ["PUBLIC"],
+)
+
+third_party_http_archive(
+    name = "cranelift-codegen-shared-0.136.2.crate",
+    sha256 = "df315a8b1cfd6e620971e3d4249bd2c4528167717e8f48a6317a87c55891bcb8",
+    strip_prefix = "cranelift-codegen-shared-0.136.2",
+    urls = ["https://static.crates.io/crates/cranelift-codegen-shared/0.136.2/download"],
+    visibility = [],
+)
+
+third_party_rust_library(
+    name = "cranelift-codegen-shared-0.136",
+    srcs = [":cranelift-codegen-shared-0.136.2.crate"],
+    crate = "cranelift_codegen_shared",
+    crate_root = "cranelift-codegen-shared-0.136.2.crate/src/lib.rs",
+    edition = "2024",
+    env = {
+        "CARGO_BIN_NAME": "cranelift_codegen_shared",
+        "CARGO_CRATE_NAME": "cranelift_codegen_shared",
+        "CARGO_MANIFEST_DIR": "cranelift-codegen-shared-0.136.2.crate",
+        "CARGO_PKG_AUTHORS": "The Cranelift Project Developers",
+        "CARGO_PKG_DESCRIPTION": "For code shared between cranelift-codegen-meta and cranelift-codegen",
+        "CARGO_PKG_HOMEPAGE": "",
+        "CARGO_PKG_NAME": "cranelift-codegen-shared",
+        "CARGO_PKG_README": "README.md",
+        "CARGO_PKG_REPOSITORY": "https://github.com/bytecodealliance/wasmtime",
+        "CARGO_PKG_RUST_VERSION": "1.96.0",
+        "CARGO_PKG_VERSION": "0.136.2",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "136",
+        "CARGO_PKG_VERSION_PATCH": "2",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    platform = {
+        "linux-x86_64": dict(),
+    },
+    visibility = [],
+)
+
+alias(
+    name = "p0075",
+    actual = ":cranelift-control-0.136",
+    visibility = ["PUBLIC"],
+)
+
+third_party_http_archive(
+    name = "cranelift-control-0.136.2.crate",
+    sha256 = "2c3fff7610fb17f228f16598e1a044db79a12806ece7496ff2c69cf1a27a79a5",
+    strip_prefix = "cranelift-control-0.136.2",
+    urls = ["https://static.crates.io/crates/cranelift-control/0.136.2/download"],
+    visibility = [],
+)
+
+third_party_rust_library(
+    name = "cranelift-control-0.136",
+    srcs = [":cranelift-control-0.136.2.crate"],
+    crate = "cranelift_control",
+    crate_root = "cranelift-control-0.136.2.crate/src/lib.rs",
+    edition = "2024",
+    env = {
+        "CARGO_BIN_NAME": "cranelift_control",
+        "CARGO_CRATE_NAME": "cranelift_control",
+        "CARGO_MANIFEST_DIR": "cranelift-control-0.136.2.crate",
+        "CARGO_PKG_AUTHORS": "The Cranelift Project Developers",
+        "CARGO_PKG_DESCRIPTION": "White-box fuzz testing framework",
+        "CARGO_PKG_HOMEPAGE": "",
+        "CARGO_PKG_NAME": "cranelift-control",
+        "CARGO_PKG_README": "README.md",
+        "CARGO_PKG_REPOSITORY": "https://github.com/bytecodealliance/wasmtime",
+        "CARGO_PKG_RUST_VERSION": "1.96.0",
+        "CARGO_PKG_VERSION": "0.136.2",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "136",
+        "CARGO_PKG_VERSION_PATCH": "2",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = ["fuzz"],
+    platform = {
+        "linux-x86_64": dict(),
+    },
+    visibility = [],
+    deps = [":arbitrary-1"],
+)
+
+alias(
+    name = "p0076",
+    actual = ":cranelift-entity-0.136",
+    visibility = ["PUBLIC"],
+)
+
+third_party_http_archive(
+    name = "cranelift-entity-0.136.2.crate",
+    sha256 = "6158b1ac381792ad11e670abbcd15db8b1737e84bfa8a7f2bd7eb41388a92530",
+    strip_prefix = "cranelift-entity-0.136.2",
+    urls = ["https://static.crates.io/crates/cranelift-entity/0.136.2/download"],
+    visibility = [],
+)
+
+third_party_rust_library(
+    name = "cranelift-entity-0.136",
+    srcs = [":cranelift-entity-0.136.2.crate"],
+    crate = "cranelift_entity",
+    crate_root = "cranelift-entity-0.136.2.crate/src/lib.rs",
+    edition = "2024",
+    env = {
+        "CARGO_BIN_NAME": "cranelift_entity",
+        "CARGO_CRATE_NAME": "cranelift_entity",
+        "CARGO_MANIFEST_DIR": "cranelift-entity-0.136.2.crate",
+        "CARGO_PKG_AUTHORS": "The Cranelift Project Developers",
+        "CARGO_PKG_DESCRIPTION": "Data structures using entity references as mapping keys",
+        "CARGO_PKG_HOMEPAGE": "",
+        "CARGO_PKG_NAME": "cranelift-entity",
+        "CARGO_PKG_README": "README.md",
+        "CARGO_PKG_REPOSITORY": "https://github.com/bytecodealliance/wasmtime",
+        "CARGO_PKG_RUST_VERSION": "1.96.0",
+        "CARGO_PKG_VERSION": "0.136.2",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "136",
+        "CARGO_PKG_VERSION_PATCH": "2",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    named_deps = {
+        "wasmtime_core": ":wasmtime-internal-core-49",
+    },
+    platform = {
+        "linux-x86_64": dict(),
+    },
+    visibility = [],
+    deps = [":cranelift-bitset-0.136"],
+)
+
+alias(
+    name = "p0077",
+    actual = ":cranelift-frontend-0.136",
+    visibility = ["PUBLIC"],
+)
+
+third_party_http_archive(
+    name = "cranelift-frontend-0.136.2.crate",
+    sha256 = "099361a0919067086dcde624a281ce719834cebf8544d6c24646f5e924107234",
+    strip_prefix = "cranelift-frontend-0.136.2",
+    urls = ["https://static.crates.io/crates/cranelift-frontend/0.136.2/download"],
+    visibility = [],
+)
+
+third_party_rust_library(
+    name = "cranelift-frontend-0.136",
+    srcs = [":cranelift-frontend-0.136.2.crate"],
+    crate = "cranelift_frontend",
+    crate_root = "cranelift-frontend-0.136.2.crate/src/lib.rs",
+    edition = "2024",
+    env = {
+        "CARGO_BIN_NAME": "cranelift_frontend",
+        "CARGO_CRATE_NAME": "cranelift_frontend",
+        "CARGO_MANIFEST_DIR": "cranelift-frontend-0.136.2.crate",
+        "CARGO_PKG_AUTHORS": "The Cranelift Project Developers",
+        "CARGO_PKG_DESCRIPTION": "Cranelift IR builder helper",
+        "CARGO_PKG_HOMEPAGE": "",
+        "CARGO_PKG_NAME": "cranelift-frontend",
+        "CARGO_PKG_README": "README.md",
+        "CARGO_PKG_REPOSITORY": "https://github.com/bytecodealliance/wasmtime",
+        "CARGO_PKG_RUST_VERSION": "1.96.0",
+        "CARGO_PKG_VERSION": "0.136.2",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "136",
+        "CARGO_PKG_VERSION_PATCH": "2",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = [
+        "default",
+        "std",
+    ],
+    platform = {
+        "linux-x86_64": dict(),
+    },
+    visibility = [],
+    deps = [
+        ":cranelift-codegen-0.136",
+        ":hashbrown-0.17",
+        ":log-0.4",
+        ":smallvec-1",
+        ":target-lexicon-0.13",
+    ],
+)
+
+alias(
+    name = "p0078",
+    actual = ":cranelift-isle-0.136",
+    visibility = ["PUBLIC"],
+)
+
+third_party_http_archive(
+    name = "cranelift-isle-0.136.2.crate",
+    sha256 = "2a2f30ea3fd5a11f7d3473976d3b62b5b3f2b62fa943c85e0331d88bf505082c",
+    strip_prefix = "cranelift-isle-0.136.2",
+    urls = ["https://static.crates.io/crates/cranelift-isle/0.136.2/download"],
+    visibility = [],
+)
+
+third_party_rust_library(
+    name = "cranelift-isle-0.136",
+    srcs = [":cranelift-isle-0.136.2.crate"],
+    crate = "cranelift_isle",
+    crate_root = "cranelift-isle-0.136.2.crate/src/lib.rs",
+    edition = "2024",
+    env = {
+        "CARGO_BIN_NAME": "cranelift_isle",
+        "CARGO_CRATE_NAME": "cranelift_isle",
+        "CARGO_MANIFEST_DIR": "cranelift-isle-0.136.2.crate",
+        "CARGO_PKG_AUTHORS": "The Cranelift Project Developers",
+        "CARGO_PKG_DESCRIPTION": "ISLE: Instruction Selection and Lowering Expressions. A domain-specific language for instruction selection in Cranelift.",
+        "CARGO_PKG_HOMEPAGE": "",
+        "CARGO_PKG_NAME": "cranelift-isle",
+        "CARGO_PKG_README": "README.md",
+        "CARGO_PKG_REPOSITORY": "https://github.com/bytecodealliance/wasmtime/tree/main/cranelift/isle",
+        "CARGO_PKG_RUST_VERSION": "1.96.0",
+        "CARGO_PKG_VERSION": "0.136.2",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "136",
+        "CARGO_PKG_VERSION_PATCH": "2",
+        "CARGO_PKG_VERSION_PRE": "",
+        "OUT_DIR": "$(location :cranelift-isle-0.136-build-script-run[out_dir])",
+    },
+    features = ["default"],
+    platform = {
+        "linux-x86_64": dict(),
+    },
+    rustc_flags = ["@$(location :cranelift-isle-0.136-build-script-run[rustc_flags])"],
+    visibility = [],
+)
+
+third_party_rust_binary(
+    name = "cranelift-isle-0.136-build-script-build",
+    srcs = [":cranelift-isle-0.136.2.crate"],
+    crate = "build_script_build",
+    crate_root = "cranelift-isle-0.136.2.crate/build.rs",
+    edition = "2024",
+    env = {
+        "CARGO_BIN_NAME": "build-script-build",
+        "CARGO_CRATE_NAME": "build_script_build",
+        "CARGO_MANIFEST_DIR": "cranelift-isle-0.136.2.crate",
+        "CARGO_PKG_AUTHORS": "The Cranelift Project Developers",
+        "CARGO_PKG_DESCRIPTION": "ISLE: Instruction Selection and Lowering Expressions. A domain-specific language for instruction selection in Cranelift.",
+        "CARGO_PKG_HOMEPAGE": "",
+        "CARGO_PKG_NAME": "cranelift-isle",
+        "CARGO_PKG_README": "README.md",
+        "CARGO_PKG_REPOSITORY": "https://github.com/bytecodealliance/wasmtime/tree/main/cranelift/isle",
+        "CARGO_PKG_RUST_VERSION": "1.96.0",
+        "CARGO_PKG_VERSION": "0.136.2",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "136",
+        "CARGO_PKG_VERSION_PATCH": "2",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = ["default"],
+    platform = {
+        "linux-x86_64": dict(),
+    },
+    visibility = [],
+)
+
+third_party_buildscript_run(
+    name = "cranelift-isle-0.136-build-script-run",
+    package_name = "cranelift-isle",
+    buildscript_rule = ":cranelift-isle-0.136-build-script-build",
+    env = {
+        "CARGO_PKG_AUTHORS": "The Cranelift Project Developers",
+        "CARGO_PKG_DESCRIPTION": "ISLE: Instruction Selection and Lowering Expressions. A domain-specific language for instruction selection in Cranelift.",
+        "CARGO_PKG_HOMEPAGE": "",
+        "CARGO_PKG_README": "README.md",
+        "CARGO_PKG_REPOSITORY": "https://github.com/bytecodealliance/wasmtime/tree/main/cranelift/isle",
+        "CARGO_PKG_RUST_VERSION": "1.96.0",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "136",
+        "CARGO_PKG_VERSION_PATCH": "2",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = ["default"],
+    platform = {
+        "linux-x86_64": dict(),
+    },
+    rustc_link_lib = True,
+    rustc_link_search = True,
+    version = "0.136.2",
+)
+
+alias(
+    name = "p0079",
+    actual = ":cranelift-jit-0.136",
+    visibility = ["PUBLIC"],
+)
+
+third_party_http_archive(
+    name = "cranelift-jit-0.136.2.crate",
+    sha256 = "3b295275f5b395c764bc8e19f10afe1845cadd8fbcdd933ed40c298427c95ec2",
+    strip_prefix = "cranelift-jit-0.136.2",
+    urls = ["https://static.crates.io/crates/cranelift-jit/0.136.2/download"],
+    visibility = [],
+)
+
+third_party_rust_library(
+    name = "cranelift-jit-0.136",
+    srcs = [":cranelift-jit-0.136.2.crate"],
+    crate = "cranelift_jit",
+    crate_root = "cranelift-jit-0.136.2.crate/src/lib.rs",
+    edition = "2024",
+    env = {
+        "CARGO_BIN_NAME": "cranelift_jit",
+        "CARGO_CRATE_NAME": "cranelift_jit",
+        "CARGO_MANIFEST_DIR": "cranelift-jit-0.136.2.crate",
+        "CARGO_PKG_AUTHORS": "The Cranelift Project Developers",
+        "CARGO_PKG_DESCRIPTION": "A JIT library backed by Cranelift",
+        "CARGO_PKG_HOMEPAGE": "",
+        "CARGO_PKG_NAME": "cranelift-jit",
+        "CARGO_PKG_README": "README.md",
+        "CARGO_PKG_REPOSITORY": "https://github.com/bytecodealliance/wasmtime",
+        "CARGO_PKG_RUST_VERSION": "1.96.0",
+        "CARGO_PKG_VERSION": "0.136.2",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "136",
+        "CARGO_PKG_VERSION_PATCH": "2",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = ["default"],
+    named_deps = {
+        "wasmtime_jit_icache_coherence": ":wasmtime-internal-jit-icache-coherence-49",
+    },
+    platform = {
+        "linux-x86_64": dict(),
+    },
+    visibility = [],
+    deps = [
+        ":anyhow-1",
+        ":cranelift-codegen-0.136",
+        ":cranelift-control-0.136",
+        ":cranelift-entity-0.136",
+        ":cranelift-module-0.136",
+        ":cranelift-native-0.136",
+        ":libc-0.2",
+        ":log-0.4",
+        ":memmap2-0.9",
+        ":region-3",
+        ":target-lexicon-0.13",
+    ],
+)
+
+alias(
+    name = "p0080",
+    actual = ":cranelift-module-0.136",
+    visibility = ["PUBLIC"],
+)
+
+third_party_http_archive(
+    name = "cranelift-module-0.136.2.crate",
+    sha256 = "382105ee9ba862bbca7f7b7119ef507125309764a0ee6cbcf46d1e0958e1dafc",
+    strip_prefix = "cranelift-module-0.136.2",
+    urls = ["https://static.crates.io/crates/cranelift-module/0.136.2/download"],
+    visibility = [],
+)
+
+third_party_rust_library(
+    name = "cranelift-module-0.136",
+    srcs = [":cranelift-module-0.136.2.crate"],
+    crate = "cranelift_module",
+    crate_root = "cranelift-module-0.136.2.crate/src/lib.rs",
+    edition = "2024",
+    env = {
+        "CARGO_BIN_NAME": "cranelift_module",
+        "CARGO_CRATE_NAME": "cranelift_module",
+        "CARGO_MANIFEST_DIR": "cranelift-module-0.136.2.crate",
+        "CARGO_PKG_AUTHORS": "The Cranelift Project Developers",
+        "CARGO_PKG_DESCRIPTION": "Support for linking functions and data with Cranelift",
+        "CARGO_PKG_HOMEPAGE": "",
+        "CARGO_PKG_NAME": "cranelift-module",
+        "CARGO_PKG_README": "README.md",
+        "CARGO_PKG_REPOSITORY": "https://github.com/bytecodealliance/wasmtime",
+        "CARGO_PKG_RUST_VERSION": "1.96.0",
+        "CARGO_PKG_VERSION": "0.136.2",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "136",
+        "CARGO_PKG_VERSION_PATCH": "2",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = [
+        "default",
+        "std",
+    ],
+    platform = {
+        "linux-x86_64": dict(),
+    },
+    visibility = [],
+    deps = [
+        ":anyhow-1",
+        ":cranelift-codegen-0.136",
+        ":cranelift-control-0.136",
+        ":hashbrown-0.17",
+    ],
+)
+
+alias(
+    name = "p0081",
+    actual = ":cranelift-native-0.136",
+    visibility = ["PUBLIC"],
+)
+
+third_party_http_archive(
+    name = "cranelift-native-0.136.2.crate",
+    sha256 = "397508a8d817dc74019603ac5a4c4e40b4df627e5aed4f2f8088345d4c01d401",
+    strip_prefix = "cranelift-native-0.136.2",
+    urls = ["https://static.crates.io/crates/cranelift-native/0.136.2/download"],
+    visibility = [],
+)
+
+third_party_rust_library(
+    name = "cranelift-native-0.136",
+    srcs = [":cranelift-native-0.136.2.crate"],
+    crate = "cranelift_native",
+    crate_root = "cranelift-native-0.136.2.crate/src/lib.rs",
+    edition = "2024",
+    env = {
+        "CARGO_BIN_NAME": "cranelift_native",
+        "CARGO_CRATE_NAME": "cranelift_native",
+        "CARGO_MANIFEST_DIR": "cranelift-native-0.136.2.crate",
+        "CARGO_PKG_AUTHORS": "The Cranelift Project Developers",
+        "CARGO_PKG_DESCRIPTION": "Support for targeting the host with Cranelift",
+        "CARGO_PKG_HOMEPAGE": "",
+        "CARGO_PKG_NAME": "cranelift-native",
+        "CARGO_PKG_README": "README.md",
+        "CARGO_PKG_REPOSITORY": "https://github.com/bytecodealliance/wasmtime",
+        "CARGO_PKG_RUST_VERSION": "1.96.0",
+        "CARGO_PKG_VERSION": "0.136.2",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "136",
+        "CARGO_PKG_VERSION_PATCH": "2",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = [
+        "default",
+        "std",
+    ],
+    platform = {
+        "linux-x86_64": dict(),
+    },
+    visibility = [],
+    deps = [
+        ":cranelift-codegen-0.136",
+        ":target-lexicon-0.13",
+    ],
+)
+
+alias(
+    name = "p0082",
+    actual = ":cranelift-srcgen-0.136",
+    visibility = ["PUBLIC"],
+)
+
+third_party_http_archive(
+    name = "cranelift-srcgen-0.136.2.crate",
+    sha256 = "b4944ef05513e1c1a85a945cf8f29d95ddea8bcbb19e0bfd4e71063450967420",
+    strip_prefix = "cranelift-srcgen-0.136.2",
+    urls = ["https://static.crates.io/crates/cranelift-srcgen/0.136.2/download"],
+    visibility = [],
+)
+
+third_party_rust_library(
+    name = "cranelift-srcgen-0.136",
+    srcs = [":cranelift-srcgen-0.136.2.crate"],
+    crate = "cranelift_srcgen",
+    crate_root = "cranelift-srcgen-0.136.2.crate/src/lib.rs",
+    edition = "2024",
+    env = {
+        "CARGO_BIN_NAME": "cranelift_srcgen",
+        "CARGO_CRATE_NAME": "cranelift_srcgen",
+        "CARGO_MANIFEST_DIR": "cranelift-srcgen-0.136.2.crate",
+        "CARGO_PKG_AUTHORS": "The Wasmtime Project Developers",
+        "CARGO_PKG_DESCRIPTION": "Helper functions for generating Rust and ISLE files",
+        "CARGO_PKG_HOMEPAGE": "",
+        "CARGO_PKG_NAME": "cranelift-srcgen",
+        "CARGO_PKG_README": "",
+        "CARGO_PKG_REPOSITORY": "https://github.com/bytecodealliance/wasmtime",
+        "CARGO_PKG_RUST_VERSION": "1.96.0",
+        "CARGO_PKG_VERSION": "0.136.2",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "136",
+        "CARGO_PKG_VERSION_PATCH": "2",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    platform = {
+        "linux-x86_64": dict(),
+    },
+    visibility = [],
+)
+
+alias(
+    name = "p0083",
     actual = ":crc-3",
     visibility = ["PUBLIC"],
 )
@@ -3727,7 +4740,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0067",
+    name = "p0084",
     actual = ":crc-catalog-2",
     visibility = ["PUBLIC"],
 )
@@ -3770,7 +4783,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0068",
+    name = "p0085",
     actual = ":crc-fast-1",
     visibility = ["PUBLIC"],
 )
@@ -3815,7 +4828,7 @@ third_party_rust_library(
         "panic-handler",
         "std",
     ],
-    linkable_alias = "p0068",
+    linkable_alias = "p0085",
     platform = {
         "linux-x86_64": dict(),
     },
@@ -3827,7 +4840,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0069",
+    name = "p0086",
     actual = ":crc32fast-1",
     visibility = ["PUBLIC"],
 )
@@ -3938,7 +4951,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0070",
+    name = "p0087",
     actual = ":croner-3",
     visibility = ["PUBLIC"],
 )
@@ -3986,7 +4999,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0071",
+    name = "p0088",
     actual = ":crossbeam-channel-0.5",
     visibility = ["PUBLIC"],
 )
@@ -4034,7 +5047,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0072",
+    name = "p0089",
     actual = ":crossbeam-queue-0.3",
     visibility = ["PUBLIC"],
 )
@@ -4083,7 +5096,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0073",
+    name = "p0090",
     actual = ":crossbeam-utils-0.8",
     visibility = ["PUBLIC"],
 )
@@ -4184,7 +5197,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0074",
+    name = "p0091",
     actual = ":crypto-common-0.1",
     visibility = ["PUBLIC"],
 )
@@ -4232,7 +5245,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0075",
+    name = "p0092",
     actual = ":crypto-common-0.2",
     visibility = ["PUBLIC"],
 )
@@ -4276,7 +5289,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0076",
+    name = "p0093",
     actual = ":darling-0.20",
     visibility = ["PUBLIC"],
 )
@@ -4327,7 +5340,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0077",
+    name = "p0094",
     actual = ":darling-0.23",
     visibility = ["PUBLIC"],
 )
@@ -4378,7 +5391,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0078",
+    name = "p0095",
     actual = ":darling_core-0.20",
     visibility = ["PUBLIC"],
 )
@@ -4433,7 +5446,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0079",
+    name = "p0096",
     actual = ":darling_core-0.23",
     visibility = ["PUBLIC"],
 )
@@ -4487,7 +5500,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0080",
+    name = "p0097",
     actual = ":darling_macro-0.20",
     visibility = ["PUBLIC"],
 )
@@ -4536,7 +5549,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0081",
+    name = "p0098",
     actual = ":darling_macro-0.23",
     visibility = ["PUBLIC"],
 )
@@ -4585,7 +5598,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0082",
+    name = "p0099",
     actual = ":data-encoding-2",
     visibility = ["PUBLIC"],
 )
@@ -4633,7 +5646,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0083",
+    name = "p0100",
     actual = ":derive-where-1",
     visibility = ["PUBLIC"],
 )
@@ -4682,7 +5695,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0084",
+    name = "p0101",
     actual = ":derive_builder-0.20",
     visibility = ["PUBLIC"],
 )
@@ -4730,7 +5743,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0085",
+    name = "p0102",
     actual = ":derive_builder_core-0.20",
     visibility = ["PUBLIC"],
 )
@@ -4780,7 +5793,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0086",
+    name = "p0103",
     actual = ":derive_builder_macro-0.20",
     visibility = ["PUBLIC"],
 )
@@ -4882,7 +5895,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0087",
+    name = "p0104",
     actual = ":diff-0.1",
     visibility = ["PUBLIC"],
 )
@@ -4925,7 +5938,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0088",
+    name = "p0105",
     actual = ":digest-0.10",
     visibility = ["PUBLIC"],
 )
@@ -4982,7 +5995,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0089",
+    name = "p0106",
     actual = ":digest-0.11",
     visibility = ["PUBLIC"],
 )
@@ -5033,7 +6046,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0090",
+    name = "p0107",
     actual = ":displaydoc-0.2",
     visibility = ["PUBLIC"],
 )
@@ -5082,7 +6095,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0091",
+    name = "p0108",
     actual = ":dotenvy-0.15",
     visibility = ["PUBLIC"],
 )
@@ -5125,7 +6138,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0092",
+    name = "p0109",
     actual = ":drop_bomb-0.1",
     visibility = ["PUBLIC"],
 )
@@ -5168,7 +6181,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0093",
+    name = "p0110",
     actual = ":dunce-1",
     visibility = ["PUBLIC"],
 )
@@ -5211,7 +6224,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0094",
+    name = "p0111",
     actual = ":dyn-clone-1",
     visibility = ["PUBLIC"],
 )
@@ -5254,7 +6267,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0095",
+    name = "p0112",
     actual = ":either-1",
     visibility = ["PUBLIC"],
 )
@@ -5304,7 +6317,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0096",
+    name = "p0113",
     actual = ":email_address-0.2",
     visibility = ["PUBLIC"],
 )
@@ -5353,7 +6366,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0097",
+    name = "p0114",
     actual = ":encode_unicode-1",
     visibility = ["PUBLIC"],
 )
@@ -5400,7 +6413,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0098",
+    name = "p0115",
     actual = ":equivalent-1",
     visibility = ["PUBLIC"],
 )
@@ -5443,7 +6456,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0099",
+    name = "p0116",
     actual = ":errno-0.3",
     visibility = ["PUBLIC"],
 )
@@ -5491,7 +6504,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0100",
+    name = "p0117",
     actual = ":etcetera-0.8",
     visibility = ["PUBLIC"],
 )
@@ -5538,7 +6551,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0101",
+    name = "p0118",
     actual = ":event-listener-5",
     visibility = ["PUBLIC"],
 )
@@ -5591,7 +6604,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0102",
+    name = "p0119",
     actual = ":fallible-iterator-0.3",
     visibility = ["PUBLIC"],
 )
@@ -5638,7 +6651,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0103",
+    name = "p0120",
     actual = ":fallible-streaming-iterator-0.1",
     visibility = ["PUBLIC"],
 )
@@ -5681,7 +6694,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0104",
+    name = "p0121",
     actual = ":fancy-regex-0.19",
     visibility = ["PUBLIC"],
 )
@@ -5736,7 +6749,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0105",
+    name = "p0122",
     actual = ":fastrand-2",
     visibility = ["PUBLIC"],
 )
@@ -5784,7 +6797,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0106",
+    name = "p0123",
     actual = ":find-msvc-tools-0.1",
     visibility = ["PUBLIC"],
 )
@@ -5827,7 +6840,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0107",
+    name = "p0124",
     actual = ":flate2-1",
     visibility = ["PUBLIC"],
 )
@@ -5880,7 +6893,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0108",
+    name = "p0125",
     actual = ":fluent-uri-0.4",
     visibility = ["PUBLIC"],
 )
@@ -5935,7 +6948,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0109",
+    name = "p0126",
     actual = ":fnv-1",
     visibility = ["PUBLIC"],
 )
@@ -5982,7 +6995,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0110",
+    name = "p0127",
     actual = ":foldhash-0.1",
     visibility = ["PUBLIC"],
 )
@@ -6025,7 +7038,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0111",
+    name = "p0128",
     actual = ":foldhash-0.2",
     visibility = ["PUBLIC"],
 )
@@ -6068,7 +7081,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0112",
+    name = "p0129",
     actual = ":form_urlencoded-1",
     visibility = ["PUBLIC"],
 )
@@ -6117,7 +7130,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0113",
+    name = "p0130",
     actual = ":fraction-0.17",
     visibility = ["PUBLIC"],
 )
@@ -6168,7 +7181,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0114",
+    name = "p0131",
     actual = ":from_variant-3",
     visibility = ["PUBLIC"],
 )
@@ -6216,7 +7229,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0115",
+    name = "p0132",
     actual = ":fs_extra-1",
     visibility = ["PUBLIC"],
 )
@@ -6259,7 +7272,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0116",
+    name = "p0133",
     actual = ":futures-0.3",
     visibility = ["PUBLIC"],
 )
@@ -6319,7 +7332,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0117",
+    name = "p0134",
     actual = ":futures-channel-0.3",
     visibility = ["PUBLIC"],
 )
@@ -6373,7 +7386,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0118",
+    name = "p0135",
     actual = ":futures-core-0.3",
     visibility = ["PUBLIC"],
 )
@@ -6421,7 +7434,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0119",
+    name = "p0136",
     actual = ":futures-executor-0.3",
     visibility = ["PUBLIC"],
 )
@@ -6473,7 +7486,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0120",
+    name = "p0137",
     actual = ":futures-intrusive-0.5",
     visibility = ["PUBLIC"],
 )
@@ -6527,7 +7540,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0121",
+    name = "p0138",
     actual = ":futures-io-0.3",
     visibility = ["PUBLIC"],
 )
@@ -6574,7 +7587,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0122",
+    name = "p0139",
     actual = ":futures-macro-0.3",
     visibility = ["PUBLIC"],
 )
@@ -6623,7 +7636,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0123",
+    name = "p0140",
     actual = ":futures-sink-0.3",
     visibility = ["PUBLIC"],
 )
@@ -6671,7 +7684,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0124",
+    name = "p0141",
     actual = ":futures-task-0.3",
     visibility = ["PUBLIC"],
 )
@@ -6718,7 +7731,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0125",
+    name = "p0142",
     actual = ":futures-util-0.3",
     visibility = ["PUBLIC"],
 )
@@ -6788,7 +7801,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0126",
+    name = "p0143",
     actual = ":generic-array-0.14",
     visibility = ["PUBLIC"],
 )
@@ -6891,7 +7904,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0127",
+    name = "p0144",
     actual = ":get-size-derive2-0.10",
     visibility = ["PUBLIC"],
 )
@@ -6940,7 +7953,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0128",
+    name = "p0145",
     actual = ":get-size2-0.10",
     visibility = ["PUBLIC"],
 )
@@ -7001,7 +8014,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0129",
+    name = "p0146",
     actual = ":getopts-0.2",
     visibility = ["PUBLIC"],
 )
@@ -7049,7 +8062,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0130",
+    name = "p0147",
     actual = ":getrandom-0.2",
     visibility = ["PUBLIC"],
 )
@@ -7102,7 +8115,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0131",
+    name = "p0148",
     actual = ":getrandom-0.3",
     visibility = ["PUBLIC"],
 )
@@ -7216,7 +8229,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0132",
+    name = "p0149",
     actual = ":getrandom-0.4",
     visibility = ["PUBLIC"],
 )
@@ -7375,7 +8388,61 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0133",
+    name = "p0150",
+    actual = ":gimli-0.33",
+    visibility = ["PUBLIC"],
+)
+
+third_party_http_archive(
+    name = "gimli-0.33.0.crate",
+    sha256 = "0bf7f043f89559805f8c7cacc432749b2fa0d0a0a9ee46ce47164ed5ba7f126c",
+    strip_prefix = "gimli-0.33.0",
+    urls = ["https://static.crates.io/crates/gimli/0.33.0/download"],
+    visibility = [],
+)
+
+third_party_rust_library(
+    name = "gimli-0.33",
+    srcs = [":gimli-0.33.0.crate"],
+    crate = "gimli",
+    crate_root = "gimli-0.33.0.crate/src/lib.rs",
+    edition = "2024",
+    env = {
+        "CARGO_BIN_NAME": "gimli",
+        "CARGO_CRATE_NAME": "gimli",
+        "CARGO_MANIFEST_DIR": "gimli-0.33.0.crate",
+        "CARGO_PKG_AUTHORS": "",
+        "CARGO_PKG_DESCRIPTION": "A library for reading and writing the DWARF debugging format.",
+        "CARGO_PKG_HOMEPAGE": "",
+        "CARGO_PKG_NAME": "gimli",
+        "CARGO_PKG_README": "README.md",
+        "CARGO_PKG_REPOSITORY": "https://github.com/gimli-rs/gimli",
+        "CARGO_PKG_RUST_VERSION": "1.88",
+        "CARGO_PKG_VERSION": "0.33.0",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "33",
+        "CARGO_PKG_VERSION_PATCH": "0",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = [
+        "read",
+        "read-core",
+        "std",
+        "write",
+    ],
+    platform = {
+        "linux-x86_64": dict(),
+    },
+    visibility = [],
+    deps = [
+        ":fnv-1",
+        ":hashbrown-0.16",
+        ":indexmap-2",
+    ],
+)
+
+alias(
+    name = "p0151",
     actual = ":glob-0.3",
     visibility = ["PUBLIC"],
 )
@@ -7418,7 +8485,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0134",
+    name = "p0152",
     actual = ":h2-0.4",
     visibility = ["PUBLIC"],
 )
@@ -7474,7 +8541,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0135",
+    name = "p0153",
     actual = ":hashbrown-0.14",
     visibility = ["PUBLIC"],
 )
@@ -7527,7 +8594,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0136",
+    name = "p0154",
     actual = ":hashbrown-0.15",
     visibility = ["PUBLIC"],
 )
@@ -7583,7 +8650,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0137",
+    name = "p0155",
     actual = ":hashbrown-0.16",
     visibility = ["PUBLIC"],
 )
@@ -7639,7 +8706,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0138",
+    name = "p0156",
     actual = ":hashbrown-0.17",
     visibility = ["PUBLIC"],
 )
@@ -7695,7 +8762,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0139",
+    name = "p0157",
     actual = ":hashlink-0.10",
     visibility = ["PUBLIC"],
 )
@@ -7739,7 +8806,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0140",
+    name = "p0158",
     actual = ":heck-0.5",
     visibility = ["PUBLIC"],
 )
@@ -7782,7 +8849,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0141",
+    name = "p0159",
     actual = ":hex-0.4",
     visibility = ["PUBLIC"],
 )
@@ -7830,7 +8897,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0142",
+    name = "p0160",
     actual = ":hkdf-0.12",
     visibility = ["PUBLIC"],
 )
@@ -7874,7 +8941,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0143",
+    name = "p0161",
     actual = ":hmac-0.12",
     visibility = ["PUBLIC"],
 )
@@ -7919,7 +8986,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0144",
+    name = "p0162",
     actual = ":home-0.5",
     visibility = ["PUBLIC"],
 )
@@ -7962,7 +9029,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0145",
+    name = "p0163",
     actual = ":hstr-4",
     visibility = ["PUBLIC"],
 )
@@ -8014,7 +9081,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0146",
+    name = "p0164",
     actual = ":http-1",
     visibility = ["PUBLIC"],
 )
@@ -8065,7 +9132,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0147",
+    name = "p0165",
     actual = ":http-body-1",
     visibility = ["PUBLIC"],
 )
@@ -8112,7 +9179,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0148",
+    name = "p0166",
     actual = ":http-body-util-0.1",
     visibility = ["PUBLIC"],
 )
@@ -8163,7 +9230,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0149",
+    name = "p0167",
     actual = ":httparse-1",
     visibility = ["PUBLIC"],
 )
@@ -8273,7 +9340,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0150",
+    name = "p0168",
     actual = ":httpdate-1",
     visibility = ["PUBLIC"],
 )
@@ -8316,7 +9383,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0151",
+    name = "p0169",
     actual = ":humantime-2",
     visibility = ["PUBLIC"],
 )
@@ -8359,7 +9426,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0152",
+    name = "p0170",
     actual = ":hybrid-array-0.4",
     visibility = ["PUBLIC"],
 )
@@ -8403,7 +9470,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0153",
+    name = "p0171",
     actual = ":hyper-1",
     visibility = ["PUBLIC"],
 )
@@ -8469,7 +9536,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0154",
+    name = "p0172",
     actual = ":hyper-rustls-0.27",
     visibility = ["PUBLIC"],
 )
@@ -8527,7 +9594,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0155",
+    name = "p0173",
     actual = ":hyper-util-0.1",
     visibility = ["PUBLIC"],
 )
@@ -8598,7 +9665,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0156",
+    name = "p0174",
     actual = ":iana-time-zone-0.1",
     visibility = ["PUBLIC"],
 )
@@ -8642,7 +9709,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0157",
+    name = "p0175",
     actual = ":iana-time-zone-haiku-0.1",
     visibility = ["PUBLIC"],
 )
@@ -8741,7 +9808,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0158",
+    name = "p0176",
     actual = ":icu_collections-2",
     visibility = ["PUBLIC"],
 )
@@ -8792,7 +9859,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0159",
+    name = "p0177",
     actual = ":icu_locale_core-2",
     visibility = ["PUBLIC"],
 )
@@ -8843,7 +9910,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0160",
+    name = "p0178",
     actual = ":icu_normalizer-2",
     visibility = ["PUBLIC"],
 )
@@ -8894,7 +9961,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0161",
+    name = "p0179",
     actual = ":icu_normalizer_data-2",
     visibility = ["PUBLIC"],
 )
@@ -8992,7 +10059,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0162",
+    name = "p0180",
     actual = ":icu_properties-2",
     visibility = ["PUBLIC"],
 )
@@ -9044,7 +10111,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0163",
+    name = "p0181",
     actual = ":icu_properties_data-2",
     visibility = ["PUBLIC"],
 )
@@ -9142,7 +10209,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0164",
+    name = "p0182",
     actual = ":icu_provider-2",
     visibility = ["PUBLIC"],
 )
@@ -9195,7 +10262,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0165",
+    name = "p0183",
     actual = ":ident_case-1",
     visibility = ["PUBLIC"],
 )
@@ -9238,7 +10305,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0166",
+    name = "p0184",
     actual = ":idna-1",
     visibility = ["PUBLIC"],
 )
@@ -9292,7 +10359,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0167",
+    name = "p0185",
     actual = ":idna_adapter-1",
     visibility = ["PUBLIC"],
 )
@@ -9340,7 +10407,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0168",
+    name = "p0186",
     actual = ":indexmap-2",
     visibility = ["PUBLIC"],
 )
@@ -9391,7 +10458,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0169",
+    name = "p0187",
     actual = ":insta-1",
     visibility = ["PUBLIC"],
 )
@@ -9445,7 +10512,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0170",
+    name = "p0188",
     actual = ":interpolator-0.5",
     visibility = ["PUBLIC"],
 )
@@ -9489,7 +10556,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0171",
+    name = "p0189",
     actual = ":ipnet-2",
     visibility = ["PUBLIC"],
 )
@@ -9536,7 +10603,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0172",
+    name = "p0190",
     actual = ":is-macro-0.3",
     visibility = ["PUBLIC"],
 )
@@ -9586,7 +10653,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0173",
+    name = "p0191",
     actual = ":is_terminal_polyfill-1",
     visibility = ["PUBLIC"],
 )
@@ -9630,7 +10697,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0174",
+    name = "p0192",
     actual = ":itertools-0.15",
     visibility = ["PUBLIC"],
 )
@@ -9679,7 +10746,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0175",
+    name = "p0193",
     actual = ":itoa-1",
     visibility = ["PUBLIC"],
 )
@@ -9722,7 +10789,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0176",
+    name = "p0194",
     actual = ":jni-0.22",
     visibility = ["PUBLIC"],
 )
@@ -9830,7 +10897,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0177",
+    name = "p0195",
     actual = ":jni-macros-0.22",
     visibility = ["PUBLIC"],
 )
@@ -9936,7 +11003,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0178",
+    name = "p0196",
     actual = ":jni-sys-0.4",
     visibility = ["PUBLIC"],
 )
@@ -9980,7 +11047,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0179",
+    name = "p0197",
     actual = ":jni-sys-macros-0.4",
     visibility = ["PUBLIC"],
 )
@@ -10028,7 +11095,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0180",
+    name = "p0198",
     actual = ":jobserver-0.1",
     visibility = ["PUBLIC"],
 )
@@ -10072,7 +11139,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0181",
+    name = "p0199",
     actual = ":js-sys-0.3",
     visibility = ["PUBLIC"],
 )
@@ -10125,7 +11192,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0182",
+    name = "p0200",
     actual = ":jsonschema-0.58",
     visibility = ["PUBLIC"],
 )
@@ -10191,7 +11258,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0183",
+    name = "p0201",
     actual = ":jsonschema-regex-0.58",
     visibility = ["PUBLIC"],
 )
@@ -10235,7 +11302,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0184",
+    name = "p0202",
     actual = ":jsonschema-value-0.58",
     visibility = ["PUBLIC"],
 )
@@ -10354,7 +11421,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0185",
+    name = "p0203",
     actual = ":lazy_static-1",
     visibility = ["PUBLIC"],
 )
@@ -10397,7 +11464,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0186",
+    name = "p0204",
     actual = ":libc-0.2",
     visibility = ["PUBLIC"],
 )
@@ -10510,7 +11577,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0187",
+    name = "p0205",
     actual = ":libm-0.2",
     visibility = ["PUBLIC"],
 )
@@ -10547,6 +11614,10 @@ third_party_rust_library(
         "CARGO_PKG_VERSION_PRE": "",
         "OUT_DIR": "$(location :libm-0.2-build-script-run[out_dir])",
     },
+    features = [
+        "arch",
+        "default",
+    ],
     platform = {
         "linux-x86_64": dict(),
     },
@@ -10577,6 +11648,10 @@ third_party_rust_binary(
         "CARGO_PKG_VERSION_PATCH": "16",
         "CARGO_PKG_VERSION_PRE": "",
     },
+    features = [
+        "arch",
+        "default",
+    ],
     platform = {
         "linux-x86_64": dict(),
     },
@@ -10599,6 +11674,10 @@ third_party_buildscript_run(
         "CARGO_PKG_VERSION_PATCH": "16",
         "CARGO_PKG_VERSION_PRE": "",
     },
+    features = [
+        "arch",
+        "default",
+    ],
     platform = {
         "linux-x86_64": dict(),
     },
@@ -10608,7 +11687,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0188",
+    name = "p0206",
     actual = ":libredox-0.1",
     visibility = ["PUBLIC"],
 )
@@ -10668,7 +11747,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0189",
+    name = "p0207",
     actual = ":libsqlite3-sys-0.35",
     visibility = ["PUBLIC"],
 )
@@ -10799,7 +11878,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0190",
+    name = "p0208",
     actual = ":linux-raw-sys-0.12",
     visibility = ["PUBLIC"],
 )
@@ -10850,7 +11929,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0191",
+    name = "p0209",
     actual = ":litemap-0.8",
     visibility = ["PUBLIC"],
 )
@@ -10893,7 +11972,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0192",
+    name = "p0210",
     actual = ":lock_api-0.4",
     visibility = ["PUBLIC"],
 )
@@ -10941,7 +12020,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0193",
+    name = "p0211",
     actual = ":log-0.4",
     visibility = ["PUBLIC"],
 )
@@ -10985,7 +12064,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0194",
+    name = "p0212",
     actual = ":lru-slab-0.1",
     visibility = ["PUBLIC"],
 )
@@ -11028,7 +12107,51 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0195",
+    name = "p0213",
+    actual = ":mach2-0.4",
+    visibility = ["PUBLIC"],
+)
+
+third_party_http_archive(
+    name = "mach2-0.4.3.crate",
+    sha256 = "d640282b302c0bb0a2a8e0233ead9035e3bed871f0b7e81fe4a1ec829765db44",
+    strip_prefix = "mach2-0.4.3",
+    urls = ["https://static.crates.io/crates/mach2/0.4.3/download"],
+    visibility = [],
+)
+
+third_party_rust_library(
+    name = "mach2-0.4",
+    srcs = [":mach2-0.4.3.crate"],
+    crate = "mach2",
+    crate_root = "mach2-0.4.3.crate/src/lib.rs",
+    edition = "2015",
+    env = {
+        "CARGO_BIN_NAME": "mach2",
+        "CARGO_CRATE_NAME": "mach2",
+        "CARGO_MANIFEST_DIR": "mach2-0.4.3.crate",
+        "CARGO_PKG_AUTHORS": "",
+        "CARGO_PKG_DESCRIPTION": "A Rust interface to the user-space API of the Mach 3.0 kernel that underlies OSX.",
+        "CARGO_PKG_HOMEPAGE": "",
+        "CARGO_PKG_NAME": "mach2",
+        "CARGO_PKG_README": "README.md",
+        "CARGO_PKG_REPOSITORY": "https://github.com/JohnTitor/mach2",
+        "CARGO_PKG_RUST_VERSION": "",
+        "CARGO_PKG_VERSION": "0.4.3",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "4",
+        "CARGO_PKG_VERSION_PATCH": "3",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = ["default"],
+    platform = {
+        "linux-x86_64": dict(),
+    },
+    visibility = [],
+)
+
+alias(
+    name = "p0214",
     actual = ":manyhow-0.11",
     visibility = ["PUBLIC"],
 )
@@ -11085,7 +12208,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0196",
+    name = "p0215",
     actual = ":manyhow-macros-0.11",
     visibility = ["PUBLIC"],
 )
@@ -11134,7 +12257,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0197",
+    name = "p0216",
     actual = ":matchers-0.2",
     visibility = ["PUBLIC"],
 )
@@ -11178,7 +12301,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0198",
+    name = "p0217",
     actual = ":matchit-0.8",
     visibility = ["PUBLIC"],
 )
@@ -11222,7 +12345,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0199",
+    name = "p0218",
     actual = ":md-5-0.10",
     visibility = ["PUBLIC"],
 )
@@ -11269,7 +12392,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0200",
+    name = "p0219",
     actual = ":md-5-0.11",
     visibility = ["PUBLIC"],
 )
@@ -11316,7 +12439,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0201",
+    name = "p0220",
     actual = ":memchr-2",
     visibility = ["PUBLIC"],
 )
@@ -11364,7 +12487,51 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0202",
+    name = "p0221",
+    actual = ":memmap2-0.9",
+    visibility = ["PUBLIC"],
+)
+
+third_party_http_archive(
+    name = "memmap2-0.9.11.crate",
+    sha256 = "d1219ed1b7f229ee7104d281dd01d6802fe28bb6e95d292942c4daacdeb798c0",
+    strip_prefix = "memmap2-0.9.11",
+    urls = ["https://static.crates.io/crates/memmap2/0.9.11/download"],
+    visibility = [],
+)
+
+third_party_rust_library(
+    name = "memmap2-0.9",
+    srcs = [":memmap2-0.9.11.crate"],
+    crate = "memmap2",
+    crate_root = "memmap2-0.9.11.crate/src/lib.rs",
+    edition = "2021",
+    env = {
+        "CARGO_BIN_NAME": "memmap2",
+        "CARGO_CRATE_NAME": "memmap2",
+        "CARGO_MANIFEST_DIR": "memmap2-0.9.11.crate",
+        "CARGO_PKG_AUTHORS": "Dan Burkert <dan@danburkert.com>:Yevhenii Reizner <razrfalcon@gmail.com>:The Contributors",
+        "CARGO_PKG_DESCRIPTION": "Cross-platform Rust API for memory-mapped file IO",
+        "CARGO_PKG_HOMEPAGE": "",
+        "CARGO_PKG_NAME": "memmap2",
+        "CARGO_PKG_README": "README.md",
+        "CARGO_PKG_REPOSITORY": "https://github.com/RazrFalcon/memmap2-rs",
+        "CARGO_PKG_RUST_VERSION": "1.65",
+        "CARGO_PKG_VERSION": "0.9.11",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "9",
+        "CARGO_PKG_VERSION_PATCH": "11",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    platform = {
+        "linux-x86_64": dict(),
+    },
+    visibility = [],
+    deps = [":libc-0.2"],
+)
+
+alias(
+    name = "p0222",
     actual = ":micromap-0.3",
     visibility = ["PUBLIC"],
 )
@@ -11408,7 +12575,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0203",
+    name = "p0223",
     actual = ":mime-0.3",
     visibility = ["PUBLIC"],
 )
@@ -11451,7 +12618,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0204",
+    name = "p0224",
     actual = ":miniz_oxide-0.8",
     visibility = ["PUBLIC"],
 )
@@ -11540,7 +12707,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0205",
+    name = "p0225",
     actual = ":mio-1",
     visibility = ["PUBLIC"],
 )
@@ -11589,7 +12756,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0206",
+    name = "p0226",
     actual = ":mutants-0.0.4",
     visibility = ["PUBLIC"],
 )
@@ -11633,7 +12800,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0207",
+    name = "p0227",
     actual = ":new_debug_unreachable-1",
     visibility = ["PUBLIC"],
 )
@@ -11676,7 +12843,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0208",
+    name = "p0228",
     actual = ":nix-0.31",
     visibility = ["PUBLIC"],
 )
@@ -11798,7 +12965,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0209",
+    name = "p0229",
     actual = ":nu-ansi-term-0.50",
     visibility = ["PUBLIC"],
 )
@@ -11845,7 +13012,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0210",
+    name = "p0230",
     actual = ":num-0.4",
     visibility = ["PUBLIC"],
 )
@@ -11900,7 +13067,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0211",
+    name = "p0231",
     actual = ":num-bigint-0.4",
     visibility = ["PUBLIC"],
 )
@@ -11953,7 +13120,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0212",
+    name = "p0232",
     actual = ":num-cmp-0.1",
     visibility = ["PUBLIC"],
 )
@@ -11996,7 +13163,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0213",
+    name = "p0233",
     actual = ":num-complex-0.4",
     visibility = ["PUBLIC"],
 )
@@ -12041,7 +13208,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0214",
+    name = "p0234",
     actual = ":num-integer-0.1",
     visibility = ["PUBLIC"],
 )
@@ -12089,7 +13256,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0215",
+    name = "p0235",
     actual = ":num-iter-0.1",
     visibility = ["PUBLIC"],
 )
@@ -12140,7 +13307,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0216",
+    name = "p0236",
     actual = ":num-rational-0.4",
     visibility = ["PUBLIC"],
 )
@@ -12193,7 +13360,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0217",
+    name = "p0237",
     actual = ":num-traits-0.2",
     visibility = ["PUBLIC"],
 )
@@ -12430,7 +13597,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0218",
+    name = "p0238",
     actual = ":object-0.39",
     visibility = ["PUBLIC"],
 )
@@ -12562,7 +13729,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0219",
+    name = "p0239",
     actual = ":object_store-0.14",
     visibility = ["PUBLIC"],
 )
@@ -12655,7 +13822,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0220",
+    name = "p0240",
     actual = ":once_cell-1",
     visibility = ["PUBLIC"],
 )
@@ -12704,7 +13871,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0221",
+    name = "p0241",
     actual = ":once_cell_polyfill-1",
     visibility = ["PUBLIC"],
 )
@@ -12748,7 +13915,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0222",
+    name = "p0242",
     actual = ":openssl-probe-0.2",
     visibility = ["PUBLIC"],
 )
@@ -12791,7 +13958,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0223",
+    name = "p0243",
     actual = ":opentelemetry-0.33",
     visibility = ["PUBLIC"],
 )
@@ -12855,7 +14022,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0224",
+    name = "p0244",
     actual = ":opentelemetry_sdk-0.33",
     visibility = ["PUBLIC"],
 )
@@ -12919,7 +14086,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0225",
+    name = "p0245",
     actual = ":ordermap-1",
     visibility = ["PUBLIC"],
 )
@@ -12963,7 +14130,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0226",
+    name = "p0246",
     actual = ":outref-0.5",
     visibility = ["PUBLIC"],
 )
@@ -13006,7 +14173,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0227",
+    name = "p0247",
     actual = ":parking-2",
     visibility = ["PUBLIC"],
 )
@@ -13049,7 +14216,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0228",
+    name = "p0248",
     actual = ":parking_lot-0.12",
     visibility = ["PUBLIC"],
 )
@@ -13097,7 +14264,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0229",
+    name = "p0249",
     actual = ":parking_lot_core-0.9",
     visibility = ["PUBLIC"],
 )
@@ -13200,7 +14367,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0230",
+    name = "p0250",
     actual = ":pastey-0.2",
     visibility = ["PUBLIC"],
 )
@@ -13244,7 +14411,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0231",
+    name = "p0251",
     actual = ":percent-encoding-2",
     visibility = ["PUBLIC"],
 )
@@ -13292,7 +14459,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0232",
+    name = "p0252",
     actual = ":phf-0.11",
     visibility = ["PUBLIC"],
 )
@@ -13345,7 +14512,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0233",
+    name = "p0253",
     actual = ":phf-0.12",
     visibility = ["PUBLIC"],
 )
@@ -13389,7 +14556,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0234",
+    name = "p0254",
     actual = ":phf_codegen-0.11",
     visibility = ["PUBLIC"],
 )
@@ -13436,7 +14603,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0235",
+    name = "p0255",
     actual = ":phf_generator-0.11",
     visibility = ["PUBLIC"],
 )
@@ -13483,7 +14650,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0236",
+    name = "p0256",
     actual = ":phf_macros-0.11",
     visibility = ["PUBLIC"],
 )
@@ -13534,7 +14701,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0237",
+    name = "p0257",
     actual = ":phf_shared-0.11",
     visibility = ["PUBLIC"],
 )
@@ -13582,7 +14749,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0238",
+    name = "p0258",
     actual = ":phf_shared-0.12",
     visibility = ["PUBLIC"],
 )
@@ -13626,7 +14793,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0239",
+    name = "p0259",
     actual = ":pin-project-lite-0.2",
     visibility = ["PUBLIC"],
 )
@@ -13669,7 +14836,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0240",
+    name = "p0260",
     actual = ":pkg-config-0.3",
     visibility = ["PUBLIC"],
 )
@@ -13712,7 +14879,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0241",
+    name = "p0261",
     actual = ":plain-0.2",
     visibility = ["PUBLIC"],
 )
@@ -13755,7 +14922,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0242",
+    name = "p0262",
     actual = ":portable-atomic-1",
     visibility = ["PUBLIC"],
 )
@@ -13856,7 +15023,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0243",
+    name = "p0263",
     actual = ":potential_utf-0.1",
     visibility = ["PUBLIC"],
 )
@@ -13901,7 +15068,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0244",
+    name = "p0264",
     actual = ":ppv-lite86-0.2",
     visibility = ["PUBLIC"],
 )
@@ -13949,7 +15116,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0245",
+    name = "p0265",
     actual = ":pretty_assertions-1",
     visibility = ["PUBLIC"],
 )
@@ -14000,7 +15167,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0246",
+    name = "p0266",
     actual = ":proc-macro-utils-0.10",
     visibility = ["PUBLIC"],
 )
@@ -14056,7 +15223,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0247",
+    name = "p0267",
     actual = ":proc-macro2-1",
     visibility = ["PUBLIC"],
 )
@@ -14167,7 +15334,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0248",
+    name = "p0268",
     actual = ":process-wrap-9",
     visibility = ["PUBLIC"],
 )
@@ -14227,7 +15394,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0249",
+    name = "p0269",
     actual = ":proptest-1",
     visibility = ["PUBLIC"],
 )
@@ -14293,7 +15460,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0250",
+    name = "p0270",
     actual = ":psm-0.1",
     visibility = ["PUBLIC"],
 )
@@ -14395,7 +15562,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0251",
+    name = "p0271",
     actual = ":quick-error-1",
     visibility = ["PUBLIC"],
 )
@@ -14438,7 +15605,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0252",
+    name = "p0272",
     actual = ":quick-xml-0.41",
     visibility = ["PUBLIC"],
 )
@@ -14491,7 +15658,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0253",
+    name = "p0273",
     actual = ":quinn-0.11",
     visibility = ["PUBLIC"],
 )
@@ -14619,7 +15786,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0254",
+    name = "p0274",
     actual = ":quinn-proto-0.11",
     visibility = ["PUBLIC"],
 )
@@ -14679,7 +15846,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0255",
+    name = "p0275",
     actual = ":quinn-udp-0.5",
     visibility = ["PUBLIC"],
 )
@@ -14786,7 +15953,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0256",
+    name = "p0276",
     actual = ":quote-1",
     visibility = ["PUBLIC"],
 )
@@ -14897,7 +16064,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0257",
+    name = "p0277",
     actual = ":quote-use-0.8",
     visibility = ["PUBLIC"],
 )
@@ -14944,7 +16111,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0258",
+    name = "p0278",
     actual = ":quote-use-macros-0.8",
     visibility = ["PUBLIC"],
 )
@@ -14994,7 +16161,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0259",
+    name = "p0279",
     actual = ":r-efi-5",
     visibility = ["PUBLIC"],
 )
@@ -15037,7 +16204,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0260",
+    name = "p0280",
     actual = ":r-efi-6",
     visibility = ["PUBLIC"],
 )
@@ -15080,7 +16247,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0262",
+    name = "p0282",
     actual = ":rand-0.8",
     visibility = ["PUBLIC"],
 )
@@ -15138,7 +16305,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0263",
+    name = "p0283",
     actual = ":rand-0.9",
     visibility = ["PUBLIC"],
 )
@@ -15194,7 +16361,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0261",
+    name = "p0281",
     actual = ":rand-0.10",
     visibility = ["PUBLIC"],
 )
@@ -15250,7 +16417,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0264",
+    name = "p0284",
     actual = ":rand_chacha-0.3",
     visibility = ["PUBLIC"],
 )
@@ -15298,7 +16465,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0265",
+    name = "p0285",
     actual = ":rand_chacha-0.9",
     visibility = ["PUBLIC"],
 )
@@ -15349,7 +16516,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0267",
+    name = "p0287",
     actual = ":rand_core-0.6",
     visibility = ["PUBLIC"],
 )
@@ -15398,7 +16565,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0268",
+    name = "p0288",
     actual = ":rand_core-0.9",
     visibility = ["PUBLIC"],
 )
@@ -15446,7 +16613,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0266",
+    name = "p0286",
     actual = ":rand_core-0.10",
     visibility = ["PUBLIC"],
 )
@@ -15489,7 +16656,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0269",
+    name = "p0289",
     actual = ":rand_pcg-0.10",
     visibility = ["PUBLIC"],
 )
@@ -15533,7 +16700,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0270",
+    name = "p0290",
     actual = ":rand_xorshift-0.4",
     visibility = ["PUBLIC"],
 )
@@ -15577,7 +16744,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0271",
+    name = "p0291",
     actual = ":redox_syscall-0.5",
     visibility = ["PUBLIC"],
 )
@@ -15625,7 +16792,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0272",
+    name = "p0292",
     actual = ":redox_syscall-0.9",
     visibility = ["PUBLIC"],
 )
@@ -15673,7 +16840,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0273",
+    name = "p0293",
     actual = ":ref-cast-1",
     visibility = ["PUBLIC"],
 )
@@ -15772,7 +16939,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0274",
+    name = "p0294",
     actual = ":ref-cast-impl-1",
     visibility = ["PUBLIC"],
 )
@@ -15821,7 +16988,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0275",
+    name = "p0295",
     actual = ":referencing-0.58",
     visibility = ["PUBLIC"],
 )
@@ -15875,7 +17042,63 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0276",
+    name = "p0296",
+    actual = ":regalloc2-0.15",
+    visibility = ["PUBLIC"],
+)
+
+third_party_http_archive(
+    name = "regalloc2-0.15.2.crate",
+    sha256 = "757712e8e61590d6d4f5d563483755538b5aa13467837a3b41cd9832509a7f85",
+    strip_prefix = "regalloc2-0.15.2",
+    urls = ["https://static.crates.io/crates/regalloc2/0.15.2/download"],
+    visibility = [],
+)
+
+third_party_rust_library(
+    name = "regalloc2-0.15",
+    srcs = [":regalloc2-0.15.2.crate"],
+    crate = "regalloc2",
+    crate_root = "regalloc2-0.15.2.crate/src/lib.rs",
+    edition = "2018",
+    env = {
+        "CARGO_BIN_NAME": "regalloc2",
+        "CARGO_CRATE_NAME": "regalloc2",
+        "CARGO_MANIFEST_DIR": "regalloc2-0.15.2.crate",
+        "CARGO_PKG_AUTHORS": "Chris Fallin <chris@cfallin.org>:Mozilla SpiderMonkey Developers",
+        "CARGO_PKG_DESCRIPTION": "Backtracking register allocator inspired from IonMonkey",
+        "CARGO_PKG_HOMEPAGE": "",
+        "CARGO_PKG_NAME": "regalloc2",
+        "CARGO_PKG_README": "README.md",
+        "CARGO_PKG_REPOSITORY": "https://github.com/bytecodealliance/regalloc2",
+        "CARGO_PKG_RUST_VERSION": "",
+        "CARGO_PKG_VERSION": "0.15.2",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "15",
+        "CARGO_PKG_VERSION_PATCH": "2",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = [
+        "checker",
+        "default",
+        "std",
+    ],
+    platform = {
+        "linux-x86_64": dict(),
+    },
+    visibility = [],
+    deps = [
+        ":allocator-api2-0.2",
+        ":bumpalo-3",
+        ":hashbrown-0.17",
+        ":log-0.4",
+        ":rustc-hash-2",
+        ":smallvec-1",
+    ],
+)
+
+alias(
+    name = "p0297",
     actual = ":regex-1",
     visibility = ["PUBLIC"],
 )
@@ -15943,7 +17166,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0277",
+    name = "p0298",
     actual = ":regex-automata-0.4",
     visibility = ["PUBLIC"],
 )
@@ -16019,7 +17242,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0278",
+    name = "p0299",
     actual = ":regex-syntax-0.8",
     visibility = ["PUBLIC"],
 )
@@ -16074,7 +17297,54 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0279",
+    name = "p0300",
+    actual = ":region-3",
+    visibility = ["PUBLIC"],
+)
+
+third_party_http_archive(
+    name = "region-3.0.2.crate",
+    sha256 = "e6b6ebd13bc009aef9cd476c1310d49ac354d36e240cf1bd753290f3dc7199a7",
+    strip_prefix = "region-3.0.2",
+    urls = ["https://static.crates.io/crates/region/3.0.2/download"],
+    visibility = [],
+)
+
+third_party_rust_library(
+    name = "region-3",
+    srcs = [":region-3.0.2.crate"],
+    crate = "region",
+    crate_root = "region-3.0.2.crate/src/lib.rs",
+    edition = "2018",
+    env = {
+        "CARGO_BIN_NAME": "region",
+        "CARGO_CRATE_NAME": "region",
+        "CARGO_MANIFEST_DIR": "region-3.0.2.crate",
+        "CARGO_PKG_AUTHORS": "Elliott Linder <elliott.darfink@gmail.com>",
+        "CARGO_PKG_DESCRIPTION": "Cross-platform virtual memory API",
+        "CARGO_PKG_HOMEPAGE": "https://github.com/darfink/region-rs",
+        "CARGO_PKG_NAME": "region",
+        "CARGO_PKG_README": "README.md",
+        "CARGO_PKG_REPOSITORY": "https://github.com/darfink/region-rs",
+        "CARGO_PKG_RUST_VERSION": "",
+        "CARGO_PKG_VERSION": "3.0.2",
+        "CARGO_PKG_VERSION_MAJOR": "3",
+        "CARGO_PKG_VERSION_MINOR": "0",
+        "CARGO_PKG_VERSION_PATCH": "2",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    platform = {
+        "linux-x86_64": dict(),
+    },
+    visibility = [],
+    deps = [
+        ":bitflags-1",
+        ":libc-0.2",
+    ],
+)
+
+alias(
+    name = "p0301",
     actual = ":reqwest-0.13",
     visibility = ["PUBLIC"],
 )
@@ -16157,7 +17427,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0280",
+    name = "p0302",
     actual = ":ring-0.17",
     visibility = ["PUBLIC"],
 )
@@ -16280,7 +17550,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0281",
+    name = "p0303",
     actual = ":rmcp-1",
     visibility = ["PUBLIC"],
 )
@@ -16465,7 +17735,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0282",
+    name = "p0304",
     actual = ":rmcp-macros-1",
     visibility = ["PUBLIC"],
 )
@@ -16516,7 +17786,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0283",
+    name = "p0305",
     actual = ":rmp-0.8",
     visibility = ["PUBLIC"],
 )
@@ -16564,7 +17834,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0284",
+    name = "p0306",
     actual = ":rmp-serde-1",
     visibility = ["PUBLIC"],
 )
@@ -16611,7 +17881,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0285",
+    name = "p0307",
     actual = ":ruff_python_ast-0.0.11",
     visibility = ["PUBLIC"],
 )
@@ -16671,7 +17941,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0286",
+    name = "p0308",
     actual = ":ruff_python_parser-0.0.11",
     visibility = ["PUBLIC"],
 )
@@ -16731,7 +18001,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0287",
+    name = "p0309",
     actual = ":ruff_python_trivia-0.0.11",
     visibility = ["PUBLIC"],
 )
@@ -16781,7 +18051,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0288",
+    name = "p0310",
     actual = ":ruff_source_file-0.0.11",
     visibility = ["PUBLIC"],
 )
@@ -16828,7 +18098,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0289",
+    name = "p0311",
     actual = ":ruff_text_size-0.0.11",
     visibility = ["PUBLIC"],
 )
@@ -16873,7 +18143,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0290",
+    name = "p0312",
     actual = ":rusqlite-0.37",
     visibility = ["PUBLIC"],
 )
@@ -17008,7 +18278,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0291",
+    name = "p0313",
     actual = ":rustc-hash-2",
     visibility = ["PUBLIC"],
 )
@@ -17055,7 +18325,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0292",
+    name = "p0314",
     actual = ":rustc_version-0.4",
     visibility = ["PUBLIC"],
 )
@@ -17099,7 +18369,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0293",
+    name = "p0315",
     actual = ":rustix-1",
     visibility = ["PUBLIC"],
 )
@@ -17219,7 +18489,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0294",
+    name = "p0316",
     actual = ":rustls-0.23",
     visibility = ["PUBLIC"],
 )
@@ -17350,7 +18620,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0295",
+    name = "p0317",
     actual = ":rustls-native-certs-0.8",
     visibility = ["PUBLIC"],
 )
@@ -17397,7 +18667,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0296",
+    name = "p0318",
     actual = ":rustls-pki-types-1",
     visibility = ["PUBLIC"],
 )
@@ -17448,7 +18718,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0297",
+    name = "p0319",
     actual = ":rustls-platform-verifier-0.7",
     visibility = ["PUBLIC"],
 )
@@ -17497,7 +18767,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0298",
+    name = "p0320",
     actual = ":rustls-platform-verifier-android-0.1",
     visibility = ["PUBLIC"],
 )
@@ -17540,7 +18810,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0299",
+    name = "p0321",
     actual = ":rustls-webpki-0.103",
     visibility = ["PUBLIC"],
 )
@@ -17597,7 +18867,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0300",
+    name = "p0322",
     actual = ":rustversion-1",
     visibility = ["PUBLIC"],
 )
@@ -17696,7 +18966,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0301",
+    name = "p0323",
     actual = ":rusty-fork-0.3",
     visibility = ["PUBLIC"],
 )
@@ -17749,7 +19019,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0302",
+    name = "p0324",
     actual = ":ryu-1",
     visibility = ["PUBLIC"],
 )
@@ -17792,7 +19062,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0303",
+    name = "p0325",
     actual = ":ryu-js-1",
     visibility = ["PUBLIC"],
 )
@@ -17835,7 +19105,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0304",
+    name = "p0326",
     actual = ":same-file-1",
     visibility = ["PUBLIC"],
 )
@@ -17878,7 +19148,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0305",
+    name = "p0327",
     actual = ":schannel-0.1",
     visibility = ["PUBLIC"],
 )
@@ -17922,7 +19192,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0306",
+    name = "p0328",
     actual = ":schemars-1",
     visibility = ["PUBLIC"],
 )
@@ -17982,7 +19252,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0307",
+    name = "p0329",
     actual = ":schemars_derive-1",
     visibility = ["PUBLIC"],
 )
@@ -18032,7 +19302,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0308",
+    name = "p0330",
     actual = ":scoped-tls-1",
     visibility = ["PUBLIC"],
 )
@@ -18075,7 +19345,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0309",
+    name = "p0331",
     actual = ":scopeguard-1",
     visibility = ["PUBLIC"],
 )
@@ -18118,7 +19388,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0310",
+    name = "p0332",
     actual = ":security-framework-3",
     visibility = ["PUBLIC"],
 )
@@ -18174,7 +19444,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0311",
+    name = "p0333",
     actual = ":security-framework-sys-2",
     visibility = ["PUBLIC"],
 )
@@ -18225,7 +19495,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0312",
+    name = "p0334",
     actual = ":semver-1",
     visibility = ["PUBLIC"],
 )
@@ -18272,7 +19542,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0313",
+    name = "p0335",
     actual = ":seq-macro-0.3",
     visibility = ["PUBLIC"],
 )
@@ -18316,7 +19586,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0314",
+    name = "p0336",
     actual = ":serde-1",
     visibility = ["PUBLIC"],
 )
@@ -18442,7 +19712,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0315",
+    name = "p0337",
     actual = ":serde_bytes-0.11",
     visibility = ["PUBLIC"],
 )
@@ -18490,7 +19760,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0316",
+    name = "p0338",
     actual = ":serde_core-1",
     visibility = ["PUBLIC"],
 )
@@ -18609,7 +19879,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0317",
+    name = "p0339",
     actual = ":serde_derive-1",
     visibility = ["PUBLIC"],
 )
@@ -18659,7 +19929,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0318",
+    name = "p0340",
     actual = ":serde_derive_internals-0.30",
     visibility = ["PUBLIC"],
 )
@@ -18707,7 +19977,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0319",
+    name = "p0341",
     actual = ":serde_json-1",
     visibility = ["PUBLIC"],
 )
@@ -18835,7 +20105,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0320",
+    name = "p0342",
     actual = ":serde_path_to_error-0.1",
     visibility = ["PUBLIC"],
 )
@@ -18882,7 +20152,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0321",
+    name = "p0343",
     actual = ":serde_spanned-1",
     visibility = ["PUBLIC"],
 )
@@ -18931,7 +20201,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0322",
+    name = "p0344",
     actual = ":serde_urlencoded-0.7",
     visibility = ["PUBLIC"],
 )
@@ -18980,7 +20250,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0323",
+    name = "p0345",
     actual = ":serde_yaml-0.9",
     visibility = ["PUBLIC"],
 )
@@ -19030,7 +20300,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0324",
+    name = "p0346",
     actual = ":sha1-0.10",
     visibility = ["PUBLIC"],
 )
@@ -19082,7 +20352,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0325",
+    name = "p0347",
     actual = ":sha2-0.10",
     visibility = ["PUBLIC"],
 )
@@ -19134,7 +20404,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0326",
+    name = "p0348",
     actual = ":sharded-slab-0.1",
     visibility = ["PUBLIC"],
 )
@@ -19178,7 +20448,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0327",
+    name = "p0349",
     actual = ":shlex-2",
     visibility = ["PUBLIC"],
 )
@@ -19225,7 +20495,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0328",
+    name = "p0350",
     actual = ":signal-hook-registry-1",
     visibility = ["PUBLIC"],
 )
@@ -19272,7 +20542,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0329",
+    name = "p0351",
     actual = ":simd-adler32-0.3",
     visibility = ["PUBLIC"],
 )
@@ -19315,7 +20585,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0330",
+    name = "p0352",
     actual = ":simd_cesu8-1",
     visibility = ["PUBLIC"],
 )
@@ -19363,7 +20633,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0331",
+    name = "p0353",
     actual = ":simdutf8-0.1",
     visibility = ["PUBLIC"],
 )
@@ -19407,7 +20677,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0332",
+    name = "p0354",
     actual = ":similar-2",
     visibility = ["PUBLIC"],
 )
@@ -19455,7 +20725,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0333",
+    name = "p0355",
     actual = ":siphasher-0.3",
     visibility = ["PUBLIC"],
 )
@@ -19502,7 +20772,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0334",
+    name = "p0356",
     actual = ":siphasher-1",
     visibility = ["PUBLIC"],
 )
@@ -19549,7 +20819,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0335",
+    name = "p0357",
     actual = ":slab-0.4",
     visibility = ["PUBLIC"],
 )
@@ -19596,7 +20866,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0336",
+    name = "p0358",
     actual = ":smallvec-1",
     visibility = ["PUBLIC"],
 )
@@ -19636,6 +20906,7 @@ third_party_rust_library(
         "const_generics",
         "const_new",
         "serde",
+        "union",
     ],
     platform = {
         "linux-x86_64": dict(),
@@ -19645,7 +20916,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0337",
+    name = "p0359",
     actual = ":socket2-0.6",
     visibility = ["PUBLIC"],
 )
@@ -19690,7 +20961,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0338",
+    name = "p0360",
     actual = ":spin-0.10",
     visibility = ["PUBLIC"],
 )
@@ -19739,7 +21010,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0339",
+    name = "p0361",
     actual = ":sqlx-0.8",
     visibility = ["PUBLIC"],
 )
@@ -19795,7 +21066,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0340",
+    name = "p0362",
     actual = ":sqlx-core-0.8",
     visibility = ["PUBLIC"],
 )
@@ -19886,7 +21157,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0341",
+    name = "p0363",
     actual = ":sqlx-macros-0.8",
     visibility = ["PUBLIC"],
 )
@@ -19943,7 +21214,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0342",
+    name = "p0364",
     actual = ":sqlx-macros-core-0.8",
     visibility = ["PUBLIC"],
 )
@@ -20011,7 +21282,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0343",
+    name = "p0365",
     actual = ":sqlx-postgres-0.8",
     visibility = ["PUBLIC"],
 )
@@ -20088,7 +21359,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0344",
+    name = "p0366",
     actual = ":sse-stream-0.2",
     visibility = ["PUBLIC"],
 )
@@ -20139,7 +21410,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0345",
+    name = "p0367",
     actual = ":stable_deref_trait-1",
     visibility = ["PUBLIC"],
 )
@@ -20175,6 +21446,10 @@ third_party_rust_library(
         "CARGO_PKG_VERSION_PATCH": "1",
         "CARGO_PKG_VERSION_PRE": "",
     },
+    features = [
+        "alloc",
+        "std",
+    ],
     platform = {
         "linux-x86_64": dict(),
     },
@@ -20182,7 +21457,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0346",
+    name = "p0368",
     actual = ":stacker-0.1",
     visibility = ["PUBLIC"],
 )
@@ -20286,7 +21561,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0347",
+    name = "p0369",
     actual = ":static_assertions-1",
     visibility = ["PUBLIC"],
 )
@@ -20329,7 +21604,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0348",
+    name = "p0370",
     actual = ":stats_alloc-0.1",
     visibility = ["PUBLIC"],
 )
@@ -20373,7 +21648,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0349",
+    name = "p0371",
     actual = ":string_enum-1",
     visibility = ["PUBLIC"],
 )
@@ -20422,7 +21697,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0350",
+    name = "p0372",
     actual = ":stringprep-0.1",
     visibility = ["PUBLIC"],
 )
@@ -20470,7 +21745,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0351",
+    name = "p0373",
     actual = ":strsim-0.11",
     visibility = ["PUBLIC"],
 )
@@ -20513,7 +21788,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0352",
+    name = "p0374",
     actual = ":strum-0.27",
     visibility = ["PUBLIC"],
 )
@@ -20563,7 +21838,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0353",
+    name = "p0375",
     actual = ":strum-0.28",
     visibility = ["PUBLIC"],
 )
@@ -20613,7 +21888,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0354",
+    name = "p0376",
     actual = ":strum_macros-0.27",
     visibility = ["PUBLIC"],
 )
@@ -20663,7 +21938,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0355",
+    name = "p0377",
     actual = ":strum_macros-0.28",
     visibility = ["PUBLIC"],
 )
@@ -20713,7 +21988,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0356",
+    name = "p0378",
     actual = ":subtle-2",
     visibility = ["PUBLIC"],
 )
@@ -20756,7 +22031,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0357",
+    name = "p0379",
     actual = ":swc_atoms-10",
     visibility = ["PUBLIC"],
 )
@@ -20804,7 +22079,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0358",
+    name = "p0380",
     actual = ":swc_common-25",
     visibility = ["PUBLIC"],
 )
@@ -20867,7 +22142,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0359",
+    name = "p0381",
     actual = ":swc_ecma_ast-28",
     visibility = ["PUBLIC"],
 )
@@ -20924,7 +22199,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0360",
+    name = "p0382",
     actual = ":swc_ecma_parser-44",
     visibility = ["PUBLIC"],
 )
@@ -20982,7 +22257,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0361",
+    name = "p0383",
     actual = ":swc_eq_ignore_macros-1",
     visibility = ["PUBLIC"],
 )
@@ -21031,7 +22306,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0362",
+    name = "p0384",
     actual = ":swc_macros_common-1",
     visibility = ["PUBLIC"],
 )
@@ -21079,7 +22354,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0363",
+    name = "p0385",
     actual = ":swc_visit-2",
     visibility = ["PUBLIC"],
 )
@@ -21126,7 +22401,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0364",
+    name = "p0386",
     actual = ":syn-2",
     visibility = ["PUBLIC"],
 )
@@ -21187,7 +22462,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0365",
+    name = "p0387",
     actual = ":syn-3",
     visibility = ["PUBLIC"],
 )
@@ -21245,7 +22520,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0366",
+    name = "p0388",
     actual = ":sync_wrapper-1",
     visibility = ["PUBLIC"],
 )
@@ -21293,7 +22568,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0367",
+    name = "p0389",
     actual = ":synstructure-0.13",
     visibility = ["PUBLIC"],
 )
@@ -21345,7 +22620,108 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0368",
+    name = "p0390",
+    actual = ":target-lexicon-0.13",
+    visibility = ["PUBLIC"],
+)
+
+third_party_http_archive(
+    name = "target-lexicon-0.13.5.crate",
+    sha256 = "adb6935a6f5c20170eeceb1a3835a49e12e19d792f6dd344ccc76a985ca5a6ca",
+    strip_prefix = "target-lexicon-0.13.5",
+    urls = ["https://static.crates.io/crates/target-lexicon/0.13.5/download"],
+    visibility = [],
+)
+
+third_party_rust_library(
+    name = "target-lexicon-0.13",
+    srcs = [":target-lexicon-0.13.5.crate"],
+    crate = "target_lexicon",
+    crate_root = "target-lexicon-0.13.5.crate/src/lib.rs",
+    edition = "2018",
+    env = {
+        "CARGO_BIN_NAME": "target_lexicon",
+        "CARGO_CRATE_NAME": "target_lexicon",
+        "CARGO_MANIFEST_DIR": "target-lexicon-0.13.5.crate",
+        "CARGO_PKG_AUTHORS": "Dan Gohman <sunfish@mozilla.com>",
+        "CARGO_PKG_DESCRIPTION": "LLVM target triple types",
+        "CARGO_PKG_HOMEPAGE": "",
+        "CARGO_PKG_NAME": "target-lexicon",
+        "CARGO_PKG_README": "README.md",
+        "CARGO_PKG_REPOSITORY": "https://github.com/bytecodealliance/target-lexicon",
+        "CARGO_PKG_RUST_VERSION": "",
+        "CARGO_PKG_VERSION": "0.13.5",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "13",
+        "CARGO_PKG_VERSION_PATCH": "5",
+        "CARGO_PKG_VERSION_PRE": "",
+        "OUT_DIR": "$(location :target-lexicon-0.13-build-script-run[out_dir])",
+    },
+    features = ["default"],
+    platform = {
+        "linux-x86_64": dict(),
+    },
+    rustc_flags = ["@$(location :target-lexicon-0.13-build-script-run[rustc_flags])"],
+    visibility = [],
+)
+
+third_party_rust_binary(
+    name = "target-lexicon-0.13-build-script-build",
+    srcs = [":target-lexicon-0.13.5.crate"],
+    crate = "build_script_build",
+    crate_root = "target-lexicon-0.13.5.crate/build.rs",
+    edition = "2018",
+    env = {
+        "CARGO_BIN_NAME": "build-script-build",
+        "CARGO_CRATE_NAME": "build_script_build",
+        "CARGO_MANIFEST_DIR": "target-lexicon-0.13.5.crate",
+        "CARGO_PKG_AUTHORS": "Dan Gohman <sunfish@mozilla.com>",
+        "CARGO_PKG_DESCRIPTION": "LLVM target triple types",
+        "CARGO_PKG_HOMEPAGE": "",
+        "CARGO_PKG_NAME": "target-lexicon",
+        "CARGO_PKG_README": "README.md",
+        "CARGO_PKG_REPOSITORY": "https://github.com/bytecodealliance/target-lexicon",
+        "CARGO_PKG_RUST_VERSION": "",
+        "CARGO_PKG_VERSION": "0.13.5",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "13",
+        "CARGO_PKG_VERSION_PATCH": "5",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = ["default"],
+    platform = {
+        "linux-x86_64": dict(),
+    },
+    visibility = [],
+)
+
+third_party_buildscript_run(
+    name = "target-lexicon-0.13-build-script-run",
+    package_name = "target-lexicon",
+    buildscript_rule = ":target-lexicon-0.13-build-script-build",
+    env = {
+        "CARGO_PKG_AUTHORS": "Dan Gohman <sunfish@mozilla.com>",
+        "CARGO_PKG_DESCRIPTION": "LLVM target triple types",
+        "CARGO_PKG_HOMEPAGE": "",
+        "CARGO_PKG_README": "README.md",
+        "CARGO_PKG_REPOSITORY": "https://github.com/bytecodealliance/target-lexicon",
+        "CARGO_PKG_RUST_VERSION": "",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "13",
+        "CARGO_PKG_VERSION_PATCH": "5",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = ["default"],
+    platform = {
+        "linux-x86_64": dict(),
+    },
+    rustc_link_lib = True,
+    rustc_link_search = True,
+    version = "0.13.5",
+)
+
+alias(
+    name = "p0391",
     actual = ":target-triple-1",
     visibility = ["PUBLIC"],
 )
@@ -21443,7 +22819,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0369",
+    name = "p0392",
     actual = ":tempfile-3",
     visibility = ["PUBLIC"],
 )
@@ -21496,7 +22872,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0370",
+    name = "p0393",
     actual = ":termcolor-1",
     visibility = ["PUBLIC"],
 )
@@ -21539,7 +22915,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0371",
+    name = "p0394",
     actual = ":thin-vec-0.2",
     visibility = ["PUBLIC"],
 )
@@ -21586,7 +22962,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0372",
+    name = "p0395",
     actual = ":thiserror-2",
     visibility = ["PUBLIC"],
 )
@@ -21697,7 +23073,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0373",
+    name = "p0396",
     actual = ":thiserror-impl-2",
     visibility = ["PUBLIC"],
 )
@@ -21783,7 +23159,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0374",
+    name = "p0397",
     actual = ":thread_local-1",
     visibility = ["PUBLIC"],
 )
@@ -21827,7 +23203,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0375",
+    name = "p0398",
     actual = ":tinystr-0.8",
     visibility = ["PUBLIC"],
 )
@@ -21875,7 +23251,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0376",
+    name = "p0399",
     actual = ":tinyvec-1",
     visibility = ["PUBLIC"],
 )
@@ -21924,7 +23300,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0377",
+    name = "p0400",
     actual = ":tinyvec_macros-0.1",
     visibility = ["PUBLIC"],
 )
@@ -21967,7 +23343,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0378",
+    name = "p0401",
     actual = ":tokio-1",
     visibility = ["PUBLIC"],
 )
@@ -22041,7 +23417,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0379",
+    name = "p0402",
     actual = ":tokio-macros-2",
     visibility = ["PUBLIC"],
 )
@@ -22090,7 +23466,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0380",
+    name = "p0403",
     actual = ":tokio-metrics-0.5",
     visibility = ["PUBLIC"],
 )
@@ -22138,7 +23514,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0381",
+    name = "p0404",
     actual = ":tokio-rusqlite-0.7",
     visibility = ["PUBLIC"],
 )
@@ -22190,7 +23566,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0382",
+    name = "p0405",
     actual = ":tokio-rustls-0.26",
     visibility = ["PUBLIC"],
 )
@@ -22242,7 +23618,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0383",
+    name = "p0406",
     actual = ":tokio-stream-0.1",
     visibility = ["PUBLIC"],
 )
@@ -22295,7 +23671,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0384",
+    name = "p0407",
     actual = ":tokio-tungstenite-0.29",
     visibility = ["PUBLIC"],
 )
@@ -22359,7 +23735,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0385",
+    name = "p0408",
     actual = ":tokio-util-0.7",
     visibility = ["PUBLIC"],
 )
@@ -22417,7 +23793,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0386",
+    name = "p0409",
     actual = ":toml-1",
     visibility = ["PUBLIC"],
 )
@@ -22475,7 +23851,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0387",
+    name = "p0410",
     actual = ":toml_datetime-1",
     visibility = ["PUBLIC"],
 )
@@ -22524,7 +23900,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0388",
+    name = "p0411",
     actual = ":toml_parser-1",
     visibility = ["PUBLIC"],
 )
@@ -22572,7 +23948,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0389",
+    name = "p0412",
     actual = ":toml_writer-1",
     visibility = ["PUBLIC"],
 )
@@ -22619,7 +23995,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0390",
+    name = "p0413",
     actual = ":tower-0.5",
     visibility = ["PUBLIC"],
 )
@@ -22685,7 +24061,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0391",
+    name = "p0414",
     actual = ":tower-http-0.6",
     visibility = ["PUBLIC"],
 )
@@ -22745,7 +24121,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0392",
+    name = "p0415",
     actual = ":tower-layer-0.3",
     visibility = ["PUBLIC"],
 )
@@ -22788,7 +24164,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0393",
+    name = "p0416",
     actual = ":tower-service-0.3",
     visibility = ["PUBLIC"],
 )
@@ -22831,7 +24207,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0394",
+    name = "p0417",
     actual = ":tracing-0.1",
     visibility = ["PUBLIC"],
 )
@@ -22887,7 +24263,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0395",
+    name = "p0418",
     actual = ":tracing-attributes-0.1",
     visibility = ["PUBLIC"],
 )
@@ -22936,7 +24312,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0396",
+    name = "p0419",
     actual = ":tracing-core-0.1",
     visibility = ["PUBLIC"],
 )
@@ -22985,7 +24361,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0397",
+    name = "p0420",
     actual = ":tracing-log-0.2",
     visibility = ["PUBLIC"],
 )
@@ -23037,7 +24413,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0398",
+    name = "p0421",
     actual = ":tracing-subscriber-0.3",
     visibility = ["PUBLIC"],
 )
@@ -23109,7 +24485,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0399",
+    name = "p0422",
     actual = ":triomphe-0.1",
     visibility = ["PUBLIC"],
 )
@@ -23162,7 +24538,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0400",
+    name = "p0423",
     actual = ":try-lock-0.2",
     visibility = ["PUBLIC"],
 )
@@ -23205,7 +24581,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0401",
+    name = "p0424",
     actual = ":trybuild-1",
     visibility = ["PUBLIC"],
 )
@@ -23257,7 +24633,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0402",
+    name = "p0425",
     actual = ":tungstenite-0.29",
     visibility = ["PUBLIC"],
 )
@@ -23322,7 +24698,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0403",
+    name = "p0426",
     actual = ":typenum-1",
     visibility = ["PUBLIC"],
 )
@@ -23366,7 +24742,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0404",
+    name = "p0427",
     actual = ":unarray-0.1",
     visibility = ["PUBLIC"],
 )
@@ -23409,7 +24785,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0405",
+    name = "p0428",
     actual = ":unicode-bidi-0.3",
     visibility = ["PUBLIC"],
 )
@@ -23457,7 +24833,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0406",
+    name = "p0429",
     actual = ":unicode-general-category-1",
     visibility = ["PUBLIC"],
 )
@@ -23555,7 +24931,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0407",
+    name = "p0430",
     actual = ":unicode-id-start-1",
     visibility = ["PUBLIC"],
 )
@@ -23598,7 +24974,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0408",
+    name = "p0431",
     actual = ":unicode-ident-1",
     visibility = ["PUBLIC"],
 )
@@ -23641,7 +25017,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0409",
+    name = "p0432",
     actual = ":unicode-normalization-0.1",
     visibility = ["PUBLIC"],
 )
@@ -23689,7 +25065,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0410",
+    name = "p0433",
     actual = ":unicode-properties-0.1",
     visibility = ["PUBLIC"],
 )
@@ -23737,7 +25113,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0411",
+    name = "p0434",
     actual = ":unicode-width-0.2",
     visibility = ["PUBLIC"],
 )
@@ -23784,7 +25160,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0412",
+    name = "p0435",
     actual = ":unicode_names2-1",
     visibility = ["PUBLIC"],
 )
@@ -23887,7 +25263,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0413",
+    name = "p0436",
     actual = ":unicode_names2_generator-1",
     visibility = ["PUBLIC"],
 )
@@ -23937,7 +25313,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0414",
+    name = "p0437",
     actual = ":unsafe-libyaml-0.2",
     visibility = ["PUBLIC"],
 )
@@ -23980,7 +25356,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0415",
+    name = "p0438",
     actual = ":untrusted-0.9",
     visibility = ["PUBLIC"],
 )
@@ -24023,7 +25399,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0416",
+    name = "p0439",
     actual = ":url-2",
     visibility = ["PUBLIC"],
 )
@@ -24075,7 +25451,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0417",
+    name = "p0440",
     actual = ":utf8_iter-1",
     visibility = ["PUBLIC"],
 )
@@ -24118,7 +25494,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0418",
+    name = "p0441",
     actual = ":utf8parse-0.2",
     visibility = ["PUBLIC"],
 )
@@ -24162,7 +25538,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0419",
+    name = "p0442",
     actual = ":uuid-1",
     visibility = ["PUBLIC"],
 )
@@ -24213,7 +25589,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0420",
+    name = "p0443",
     actual = ":uuid-simd-0.8",
     visibility = ["PUBLIC"],
 )
@@ -24265,7 +25641,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0421",
+    name = "p0444",
     actual = ":valuable-0.1",
     visibility = ["PUBLIC"],
 )
@@ -24375,7 +25751,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0422",
+    name = "p0445",
     actual = ":vcpkg-0.2",
     visibility = ["PUBLIC"],
 )
@@ -24418,7 +25794,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0423",
+    name = "p0446",
     actual = ":version_check-0.9",
     visibility = ["PUBLIC"],
 )
@@ -24461,7 +25837,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0424",
+    name = "p0447",
     actual = ":vsimd-0.8",
     visibility = ["PUBLIC"],
 )
@@ -24509,7 +25885,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0425",
+    name = "p0448",
     actual = ":wait-timeout-0.2",
     visibility = ["PUBLIC"],
 )
@@ -24553,7 +25929,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0426",
+    name = "p0449",
     actual = ":walkdir-2",
     visibility = ["PUBLIC"],
 )
@@ -24597,7 +25973,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0427",
+    name = "p0450",
     actual = ":want-0.3",
     visibility = ["PUBLIC"],
 )
@@ -24641,7 +26017,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0428",
+    name = "p0451",
     actual = ":wasi-0.11",
     visibility = ["PUBLIC"],
 )
@@ -24688,7 +26064,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0429",
+    name = "p0452",
     actual = ":wasip2-1",
     visibility = ["PUBLIC"],
 )
@@ -24732,7 +26108,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0430",
+    name = "p0453",
     actual = ":wasite-0.1",
     visibility = ["PUBLIC"],
 )
@@ -24775,7 +26151,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0431",
+    name = "p0454",
     actual = ":wasm-bindgen-0.2",
     visibility = ["PUBLIC"],
 )
@@ -24895,7 +26271,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0432",
+    name = "p0455",
     actual = ":wasm-bindgen-futures-0.4",
     visibility = ["PUBLIC"],
 )
@@ -24946,7 +26322,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0433",
+    name = "p0456",
     actual = ":wasm-bindgen-macro-0.2",
     visibility = ["PUBLIC"],
 )
@@ -24994,7 +26370,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0434",
+    name = "p0457",
     actual = ":wasm-bindgen-macro-support-0.2",
     visibility = ["PUBLIC"],
 )
@@ -25044,7 +26420,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0435",
+    name = "p0458",
     actual = ":wasm-bindgen-shared-0.2",
     visibility = ["PUBLIC"],
 )
@@ -25144,7 +26520,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0436",
+    name = "p0459",
     actual = ":wasm-streams-0.5",
     visibility = ["PUBLIC"],
 )
@@ -25181,7 +26557,7 @@ third_party_rust_library(
         "CARGO_PKG_VERSION_PATCH": "0",
         "CARGO_PKG_VERSION_PRE": "",
     },
-    linkable_alias = "p0436",
+    linkable_alias = "p0459",
     platform = {
         "linux-x86_64": dict(),
     },
@@ -25196,7 +26572,156 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0437",
+    name = "p0460",
+    actual = ":wasmtime-internal-core-49",
+    visibility = ["PUBLIC"],
+)
+
+third_party_http_archive(
+    name = "wasmtime-internal-core-49.0.2.crate",
+    sha256 = "2053fd1d90080e502ca4ea39d86c3528587a40220b9572a874c8b742c219a00c",
+    strip_prefix = "wasmtime-internal-core-49.0.2",
+    urls = ["https://static.crates.io/crates/wasmtime-internal-core/49.0.2/download"],
+    visibility = [],
+)
+
+third_party_rust_library(
+    name = "wasmtime-internal-core-49",
+    srcs = [":wasmtime-internal-core-49.0.2.crate"],
+    crate = "wasmtime_internal_core",
+    crate_root = "wasmtime-internal-core-49.0.2.crate/src/lib.rs",
+    edition = "2024",
+    env = {
+        "CARGO_BIN_NAME": "wasmtime_internal_core",
+        "CARGO_CRATE_NAME": "wasmtime_internal_core",
+        "CARGO_MANIFEST_DIR": "wasmtime-internal-core-49.0.2.crate",
+        "CARGO_PKG_AUTHORS": "The Wasmtime Project Developers",
+        "CARGO_PKG_DESCRIPTION": "INTERNAL: Wasmtime's core utilities and helpers with minimal dependencies",
+        "CARGO_PKG_HOMEPAGE": "",
+        "CARGO_PKG_NAME": "wasmtime-internal-core",
+        "CARGO_PKG_README": "",
+        "CARGO_PKG_REPOSITORY": "",
+        "CARGO_PKG_RUST_VERSION": "1.96.0",
+        "CARGO_PKG_VERSION": "49.0.2",
+        "CARGO_PKG_VERSION_MAJOR": "49",
+        "CARGO_PKG_VERSION_MINOR": "0",
+        "CARGO_PKG_VERSION_PATCH": "2",
+        "CARGO_PKG_VERSION_PRE": "",
+        "OUT_DIR": "$(location :wasmtime-internal-core-49-build-script-run[out_dir])",
+    },
+    platform = {
+        "linux-x86_64": dict(),
+    },
+    rustc_flags = ["@$(location :wasmtime-internal-core-49-build-script-run[rustc_flags])"],
+    visibility = [],
+    deps = [
+        ":hashbrown-0.17",
+        ":libm-0.2",
+    ],
+)
+
+third_party_rust_binary(
+    name = "wasmtime-internal-core-49-build-script-build",
+    srcs = [":wasmtime-internal-core-49.0.2.crate"],
+    crate = "build_script_build",
+    crate_root = "wasmtime-internal-core-49.0.2.crate/build.rs",
+    edition = "2024",
+    env = {
+        "CARGO_BIN_NAME": "build-script-build",
+        "CARGO_CRATE_NAME": "build_script_build",
+        "CARGO_MANIFEST_DIR": "wasmtime-internal-core-49.0.2.crate",
+        "CARGO_PKG_AUTHORS": "The Wasmtime Project Developers",
+        "CARGO_PKG_DESCRIPTION": "INTERNAL: Wasmtime's core utilities and helpers with minimal dependencies",
+        "CARGO_PKG_HOMEPAGE": "",
+        "CARGO_PKG_NAME": "wasmtime-internal-core",
+        "CARGO_PKG_README": "",
+        "CARGO_PKG_REPOSITORY": "",
+        "CARGO_PKG_RUST_VERSION": "1.96.0",
+        "CARGO_PKG_VERSION": "49.0.2",
+        "CARGO_PKG_VERSION_MAJOR": "49",
+        "CARGO_PKG_VERSION_MINOR": "0",
+        "CARGO_PKG_VERSION_PATCH": "2",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    platform = {
+        "linux-x86_64": dict(),
+    },
+    visibility = [],
+)
+
+third_party_buildscript_run(
+    name = "wasmtime-internal-core-49-build-script-run",
+    package_name = "wasmtime-internal-core",
+    buildscript_rule = ":wasmtime-internal-core-49-build-script-build",
+    env = {
+        "CARGO_PKG_AUTHORS": "The Wasmtime Project Developers",
+        "CARGO_PKG_DESCRIPTION": "INTERNAL: Wasmtime's core utilities and helpers with minimal dependencies",
+        "CARGO_PKG_HOMEPAGE": "",
+        "CARGO_PKG_README": "",
+        "CARGO_PKG_REPOSITORY": "",
+        "CARGO_PKG_RUST_VERSION": "1.96.0",
+        "CARGO_PKG_VERSION_MAJOR": "49",
+        "CARGO_PKG_VERSION_MINOR": "0",
+        "CARGO_PKG_VERSION_PATCH": "2",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    platform = {
+        "linux-x86_64": dict(),
+    },
+    rustc_link_lib = True,
+    rustc_link_search = True,
+    version = "49.0.2",
+)
+
+alias(
+    name = "p0461",
+    actual = ":wasmtime-internal-jit-icache-coherence-49",
+    visibility = ["PUBLIC"],
+)
+
+third_party_http_archive(
+    name = "wasmtime-internal-jit-icache-coherence-49.0.2.crate",
+    sha256 = "5dead9a2d7b5d835698a2e1a32006e7d0b5711f4697b24bab1564bb2488e3d7a",
+    strip_prefix = "wasmtime-internal-jit-icache-coherence-49.0.2",
+    urls = ["https://static.crates.io/crates/wasmtime-internal-jit-icache-coherence/49.0.2/download"],
+    visibility = [],
+)
+
+third_party_rust_library(
+    name = "wasmtime-internal-jit-icache-coherence-49",
+    srcs = [":wasmtime-internal-jit-icache-coherence-49.0.2.crate"],
+    crate = "wasmtime_internal_jit_icache_coherence",
+    crate_root = "wasmtime-internal-jit-icache-coherence-49.0.2.crate/src/lib.rs",
+    edition = "2024",
+    env = {
+        "CARGO_BIN_NAME": "wasmtime_internal_jit_icache_coherence",
+        "CARGO_CRATE_NAME": "wasmtime_internal_jit_icache_coherence",
+        "CARGO_MANIFEST_DIR": "wasmtime-internal-jit-icache-coherence-49.0.2.crate",
+        "CARGO_PKG_AUTHORS": "The Wasmtime Project Developers",
+        "CARGO_PKG_DESCRIPTION": "INTERNAL: Utilities for JIT icache maintenance",
+        "CARGO_PKG_HOMEPAGE": "",
+        "CARGO_PKG_NAME": "wasmtime-internal-jit-icache-coherence",
+        "CARGO_PKG_README": "",
+        "CARGO_PKG_REPOSITORY": "https://github.com/bytecodealliance/wasmtime",
+        "CARGO_PKG_RUST_VERSION": "1.96.0",
+        "CARGO_PKG_VERSION": "49.0.2",
+        "CARGO_PKG_VERSION_MAJOR": "49",
+        "CARGO_PKG_VERSION_MINOR": "0",
+        "CARGO_PKG_VERSION_PATCH": "2",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    named_deps = {
+        "wasmtime_core": ":wasmtime-internal-core-49",
+    },
+    platform = {
+        "linux-x86_64": dict(),
+    },
+    visibility = [],
+    deps = [":libc-0.2"],
+)
+
+alias(
+    name = "p0462",
     actual = ":web-sys-0.3",
     visibility = ["PUBLIC"],
 )
@@ -25285,7 +26810,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0438",
+    name = "p0463",
     actual = ":web-time-1",
     visibility = ["PUBLIC"],
 )
@@ -25328,7 +26853,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0439",
+    name = "p0464",
     actual = ":webpki-root-certs-1",
     visibility = ["PUBLIC"],
 )
@@ -25374,7 +26899,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0440",
+    name = "p0465",
     actual = ":webpki-roots-0.26",
     visibility = ["PUBLIC"],
 )
@@ -25420,7 +26945,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0441",
+    name = "p0466",
     actual = ":webpki-roots-1",
     visibility = ["PUBLIC"],
 )
@@ -25466,7 +26991,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0442",
+    name = "p0467",
     actual = ":whoami-1",
     visibility = ["PUBLIC"],
 )
@@ -25509,7 +27034,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0443",
+    name = "p0468",
     actual = ":winapi-util-0.1",
     visibility = ["PUBLIC"],
 )
@@ -25552,7 +27077,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0444",
+    name = "p0469",
     actual = ":windows-0.62",
     visibility = ["PUBLIC"],
 )
@@ -25614,7 +27139,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0445",
+    name = "p0470",
     actual = ":windows-collections-0.3",
     visibility = ["PUBLIC"],
 )
@@ -25659,7 +27184,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0446",
+    name = "p0471",
     actual = ":windows-core-0.62",
     visibility = ["PUBLIC"],
 )
@@ -25713,7 +27238,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0447",
+    name = "p0472",
     actual = ":windows-future-0.3",
     visibility = ["PUBLIC"],
 )
@@ -25762,7 +27287,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0448",
+    name = "p0473",
     actual = ":windows-implement-0.60",
     visibility = ["PUBLIC"],
 )
@@ -25811,7 +27336,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0449",
+    name = "p0474",
     actual = ":windows-interface-0.59",
     visibility = ["PUBLIC"],
 )
@@ -25860,7 +27385,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0450",
+    name = "p0475",
     actual = ":windows-link-0.2",
     visibility = ["PUBLIC"],
 )
@@ -25903,7 +27428,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0451",
+    name = "p0476",
     actual = ":windows-numerics-0.3",
     visibility = ["PUBLIC"],
 )
@@ -25951,7 +27476,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0452",
+    name = "p0477",
     actual = ":windows-result-0.4",
     visibility = ["PUBLIC"],
 )
@@ -25996,7 +27521,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0453",
+    name = "p0478",
     actual = ":windows-strings-0.5",
     visibility = ["PUBLIC"],
 )
@@ -26041,7 +27566,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0454",
+    name = "p0479",
     actual = ":windows-sys-0.48",
     visibility = ["PUBLIC"],
 )
@@ -26092,7 +27617,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0455",
+    name = "p0480",
     actual = ":windows-sys-0.52",
     visibility = ["PUBLIC"],
 )
@@ -26132,6 +27657,10 @@ third_party_rust_library(
         "Win32",
         "Win32_Foundation",
         "Win32_System",
+        "Win32_System_Diagnostics",
+        "Win32_System_Diagnostics_Debug",
+        "Win32_System_Memory",
+        "Win32_System_SystemInformation",
         "Win32_System_Threading",
         "default",
     ],
@@ -26143,7 +27672,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0456",
+    name = "p0481",
     actual = ":windows-sys-0.61",
     visibility = ["PUBLIC"],
 )
@@ -26224,7 +27753,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0457",
+    name = "p0482",
     actual = ":windows-targets-0.48",
     visibility = ["PUBLIC"],
 )
@@ -26268,7 +27797,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0458",
+    name = "p0483",
     actual = ":windows-targets-0.52",
     visibility = ["PUBLIC"],
 )
@@ -26312,7 +27841,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0459",
+    name = "p0484",
     actual = ":windows-threading-0.2",
     visibility = ["PUBLIC"],
 )
@@ -26356,7 +27885,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0460",
+    name = "p0485",
     actual = ":windows_aarch64_gnullvm-0.48",
     visibility = ["PUBLIC"],
 )
@@ -26454,7 +27983,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0461",
+    name = "p0486",
     actual = ":windows_aarch64_gnullvm-0.52",
     visibility = ["PUBLIC"],
 )
@@ -26552,7 +28081,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0462",
+    name = "p0487",
     actual = ":windows_aarch64_msvc-0.48",
     visibility = ["PUBLIC"],
 )
@@ -26650,7 +28179,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0463",
+    name = "p0488",
     actual = ":windows_aarch64_msvc-0.52",
     visibility = ["PUBLIC"],
 )
@@ -26748,7 +28277,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0464",
+    name = "p0489",
     actual = ":windows_i686_gnu-0.48",
     visibility = ["PUBLIC"],
 )
@@ -26846,7 +28375,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0465",
+    name = "p0490",
     actual = ":windows_i686_gnu-0.52",
     visibility = ["PUBLIC"],
 )
@@ -26944,7 +28473,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0466",
+    name = "p0491",
     actual = ":windows_i686_gnullvm-0.52",
     visibility = ["PUBLIC"],
 )
@@ -27042,7 +28571,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0467",
+    name = "p0492",
     actual = ":windows_i686_msvc-0.48",
     visibility = ["PUBLIC"],
 )
@@ -27140,7 +28669,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0468",
+    name = "p0493",
     actual = ":windows_i686_msvc-0.52",
     visibility = ["PUBLIC"],
 )
@@ -27238,7 +28767,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0469",
+    name = "p0494",
     actual = ":windows_x86_64_gnu-0.48",
     visibility = ["PUBLIC"],
 )
@@ -27336,7 +28865,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0470",
+    name = "p0495",
     actual = ":windows_x86_64_gnu-0.52",
     visibility = ["PUBLIC"],
 )
@@ -27434,7 +28963,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0471",
+    name = "p0496",
     actual = ":windows_x86_64_gnullvm-0.48",
     visibility = ["PUBLIC"],
 )
@@ -27532,7 +29061,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0472",
+    name = "p0497",
     actual = ":windows_x86_64_gnullvm-0.52",
     visibility = ["PUBLIC"],
 )
@@ -27630,7 +29159,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0473",
+    name = "p0498",
     actual = ":windows_x86_64_msvc-0.48",
     visibility = ["PUBLIC"],
 )
@@ -27728,7 +29257,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0474",
+    name = "p0499",
     actual = ":windows_x86_64_msvc-0.52",
     visibility = ["PUBLIC"],
 )
@@ -27826,7 +29355,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0475",
+    name = "p0500",
     actual = ":winnow-1",
     visibility = ["PUBLIC"],
 )
@@ -27869,7 +29398,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0476",
+    name = "p0501",
     actual = ":wit-bindgen-0.57",
     visibility = ["PUBLIC"],
 )
@@ -27967,7 +29496,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0477",
+    name = "p0502",
     actual = ":writeable-0.6",
     visibility = ["PUBLIC"],
 )
@@ -28010,7 +29539,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0478",
+    name = "p0503",
     actual = ":yansi-1",
     visibility = ["PUBLIC"],
 )
@@ -28058,7 +29587,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0479",
+    name = "p0504",
     actual = ":yoke-0.8",
     visibility = ["PUBLIC"],
 )
@@ -28110,7 +29639,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0480",
+    name = "p0505",
     actual = ":yoke-derive-0.8",
     visibility = ["PUBLIC"],
 )
@@ -28160,7 +29689,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0481",
+    name = "p0506",
     actual = ":zerocopy-0.8",
     visibility = ["PUBLIC"],
 )
@@ -28261,7 +29790,7 @@ third_party_buildscript_run(
 )
 
 alias(
-    name = "p0482",
+    name = "p0507",
     actual = ":zerocopy-derive-0.8",
     visibility = ["PUBLIC"],
 )
@@ -28310,7 +29839,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0483",
+    name = "p0508",
     actual = ":zerofrom-0.1",
     visibility = ["PUBLIC"],
 )
@@ -28355,7 +29884,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0484",
+    name = "p0509",
     actual = ":zerofrom-derive-0.1",
     visibility = ["PUBLIC"],
 )
@@ -28405,7 +29934,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0485",
+    name = "p0510",
     actual = ":zeroize-1",
     visibility = ["PUBLIC"],
 )
@@ -28452,7 +29981,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0486",
+    name = "p0511",
     actual = ":zerotrie-0.2",
     visibility = ["PUBLIC"],
 )
@@ -28504,7 +30033,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0487",
+    name = "p0512",
     actual = ":zerovec-0.11",
     visibility = ["PUBLIC"],
 )
@@ -28556,7 +30085,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0488",
+    name = "p0513",
     actual = ":zerovec-derive-0.11",
     visibility = ["PUBLIC"],
 )
@@ -28605,7 +30134,7 @@ third_party_rust_library(
 )
 
 alias(
-    name = "p0489",
+    name = "p0514",
     actual = ":zmij-1",
     visibility = ["PUBLIC"],
 )

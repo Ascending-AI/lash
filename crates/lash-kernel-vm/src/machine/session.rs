@@ -74,6 +74,7 @@ pub(super) fn start(
         storage: Storage::default(),
         end: None,
         ended: false,
+        jit: Default::default(),
         program,
     };
     let arguments = |problem: String| StartError::Arguments { problem };

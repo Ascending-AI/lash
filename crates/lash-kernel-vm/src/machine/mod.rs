@@ -8,6 +8,7 @@
 mod actions;
 mod eval;
 mod exec;
+pub(crate) mod jit_rt;
 mod parked;
 mod session;
 
@@ -323,6 +324,8 @@ pub struct KernelMachine {
     storage: Storage,
     end: Option<End>,
     ended: bool,
+    /// What compiled code keeps between entries.
+    jit: jit_rt::JitState,
 }
 
 impl std::fmt::Debug for KernelMachine {
@@ -379,6 +382,17 @@ impl KernelMachine {
         layout: Layout,
     ) -> Result<Self, ImportError> {
         parked::import(program, bounds, parked, layout)
+    }
+
+    /// Counts each entry into compiled code from now on (spike, FIG-5848).
+    pub fn count_jit(&mut self) {
+        self.jit.counting = true;
+    }
+
+    /// Entries into compiled code by code: entries, then exits at a step
+    /// boundary, deopts and outcomes.
+    pub fn jit_counts(&self) -> &std::collections::BTreeMap<String, [u64; 4]> {
+        &self.jit.counts
     }
 
     /// Writes the run's state at this safe point as a header and one
@@ -726,6 +740,8 @@ impl Machine for KernelMachine {
             return Err(MachineError::Ended);
         }
         let before = self.charged;
+        self.jit.before = before;
+        self.jit.slice = slice;
         // The executable is the run's for its whole life.
         let exe = Arc::clone(&self.exe);
         loop {

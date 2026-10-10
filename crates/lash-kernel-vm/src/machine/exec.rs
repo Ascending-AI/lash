@@ -66,6 +66,11 @@ impl KernelMachine {
         host: &mut dyn Host,
         exe: &Executable,
     ) -> Eval<Completion> {
+        if exe.jit().is_some()
+            && let Some(outcome) = self.try_compiled(task, host, exe)
+        {
+            return outcome;
+        }
         let frame = self
             .tasks
             .get_mut(task.0 as usize)
@@ -533,7 +538,13 @@ impl KernelMachine {
         }
     }
 
-    fn write_var(&mut self, task: TaskId, exe: &Executable, var: &Var, value: Value) -> Eval<()> {
+    pub(super) fn write_var(
+        &mut self,
+        task: TaskId,
+        exe: &Executable,
+        var: &Var,
+        value: Value,
+    ) -> Eval<()> {
         let unbound = |name: &lash_kernel_doc::Name| {
             Err(Interrupt::Raise(Value::Error(Arc::new(
                 lash_kernel_doc::ErrorValue {
@@ -883,7 +894,7 @@ impl KernelMachine {
     }
 
     /// Completes a statement with the value of its right-hand side.
-    fn complete_stmt(
+    pub(super) fn complete_stmt(
         &mut self,
         task: TaskId,
         host: &mut dyn Host,
@@ -995,7 +1006,7 @@ impl KernelMachine {
     }
 
     /// Field and text-index assignment share a record's insertion order.
-    fn write_record_field(
+    pub(super) fn write_record_field(
         &mut self,
         record: lash_kernel_doc::ObjectId,
         field: &str,

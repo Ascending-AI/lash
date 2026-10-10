@@ -668,6 +668,13 @@ fn registry() -> Arc<FunctionRegistry> {
     reason = "benchmark entry point: it reads its arguments, its program files and its one switch, and reports on stdout"
 )]
 fn main() {
+    if std::env::args()
+        .nth(1)
+        .is_some_and(|mode| mode.starts_with("jit-"))
+    {
+        jit::main();
+        return;
+    }
     let mut args = std::env::args().skip(1);
     let cap: u32 = args
         .next()
@@ -691,7 +698,11 @@ fn main() {
     let registry = registry();
     // Prepared once, as a worker prepares its registry: every library body
     // is compiled here, and a run's start compiles only its document.
-    let prepared = PreparedLibrary::new(Arc::clone(&registry));
+    let prepared = if std::env::var("KERNEL_JIT").is_ok_and(|jit| jit == "1") {
+        PreparedLibrary::compiled(Arc::clone(&registry), None)
+    } else {
+        PreparedLibrary::new(Arc::clone(&registry))
+    };
     let library = NamedLibrary::from_registry(&registry).expect("unique library names");
     let effects = effects();
     let controls = BTreeMap::from([(
@@ -785,5 +796,867 @@ fn main() {
             split.library,
             split.program,
         );
+    }
+}
+
+/// The compiled tier's spike (FIG-5848): differential checks, the park
+/// inside a compiled callback, and paired timings.
+#[expect(
+    clippy::expect_used,
+    clippy::disallowed_methods,
+    reason = "benchmark harness: it reads its arguments, program files and switches, and a failed step is a failed check"
+)]
+mod jit {
+    // The compiled tier's spike (FIG-5848).
+    //
+    // `kernel_perf jit-stats` prints what the tier compiled; `jit-check
+    // [programs]` runs each program interpreted and compiled and asserts the
+    // same end, charge, memory and parked state at every step; `jit-park`
+    // parks inside a callback that compiled `ts.array.map` calls, resumes the
+    // state in the interpreter and asserts the same result and charge;
+    // `jit-paired [programs]` and `jit-micro` time both tiers, paired, the
+    // minimum of three rounds.
+
+    use std::collections::{BTreeMap, BTreeSet};
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    use lash_kernel_dialect::{EffectControl, Environment, NamedLibrary};
+    use lash_kernel_doc::{Datum, EffectName, FunctionRegistry, Name, Signature, Unit};
+    use lash_kernel_vm::{
+        Bindings, KernelMachine, Machine, PreparedLibrary, Program, Start, Step, Target,
+    };
+
+    use super::{BOUNDS, Console, deliver_all, effects, programs, registry};
+
+    type ParkedRun = <KernelMachine as Machine>::Parked;
+
+    struct Setup {
+        registry: Arc<FunctionRegistry>,
+        plain: PreparedLibrary,
+        compiled: PreparedLibrary,
+        library: NamedLibrary,
+        effects: BTreeMap<EffectName, Signature>,
+        controls: BTreeMap<EffectName, BTreeSet<EffectControl>>,
+        tool_roots: BTreeSet<Name>,
+        compile_time: Duration,
+    }
+
+    impl Setup {
+        fn new() -> Self {
+            let registry = registry();
+            // `JIT_PLAIN_PRIMS=1` gives the interpreted tier the primitives'
+            // fast paths too, to time what the compiled tier adds alone.
+            let plain = if std::env::var("JIT_PLAIN_PRIMS").is_ok_and(|on| on == "1") {
+                PreparedLibrary::new(Arc::clone(&registry)).with_primitives()
+            } else {
+                PreparedLibrary::new(Arc::clone(&registry))
+            };
+            let began = Instant::now();
+            let compiled = PreparedLibrary::compiled(Arc::clone(&registry), None);
+            let compile_time = began.elapsed();
+            let library = NamedLibrary::from_registry(&registry).expect("unique library names");
+            let controls = BTreeMap::from([(
+                EffectName::new("finish").expect("a tool's name"),
+                BTreeSet::from([EffectControl::Finish]),
+            )]);
+            let tool_roots: BTreeSet<Name> =
+                ["processes", "jobs"].into_iter().map(Name::new).collect();
+            Self {
+                registry,
+                plain,
+                compiled,
+                library,
+                effects: effects(),
+                controls,
+                tool_roots,
+                compile_time,
+            }
+        }
+
+        /// The program lowered once, over each library.
+        fn programs(&self, source: &str) -> Option<(Program, Program)> {
+            let bindings = BTreeSet::new();
+            let functions = BTreeMap::new();
+            let environment = Environment {
+                library: &self.library,
+                effects: &self.effects,
+                tool_roots: &self.tool_roots,
+                controls: &self.controls,
+                bindings: &bindings,
+                functions: &functions,
+            };
+            let lowered = match lash_dialect_typescript::lower(source, &environment) {
+                Ok(lowered) => lowered,
+                Err(diagnostic) => {
+                    eprintln!("refused: {diagnostic:?}");
+                    return None;
+                }
+            };
+            let document = Arc::new(lowered.document);
+            Some((
+                Program {
+                    document: Arc::clone(&document),
+                    library: self.plain.clone(),
+                },
+                Program {
+                    document,
+                    library: self.compiled.clone(),
+                },
+            ))
+        }
+
+        fn name_of(&self, unit: &Unit) -> String {
+            match unit {
+                Unit::Library(function) => self
+                    .registry
+                    .get(function)
+                    .map_or_else(|| function.to_string(), |f| f.definition.name.to_string()),
+                Unit::Main => "main".to_string(),
+                Unit::Function(name) => name.to_string(),
+            }
+        }
+    }
+
+    fn start(program: &Program) -> KernelMachine {
+        let start = Start {
+            target: Target::Main,
+            args: Vec::new(),
+            bindings: Bindings::default(),
+        };
+        KernelMachine::start(program.clone(), BOUNDS, start)
+            .unwrap_or_else(|error| panic!("{error}"))
+    }
+
+    /// What a run shows: its end, the value it finished with, its meters and
+    /// the state it exported at every slice and park.
+    #[derive(Debug, PartialEq)]
+    struct Observed {
+        end: String,
+        finished: Option<Datum>,
+        charged: u64,
+        memory: u64,
+        printed: usize,
+        exports: Vec<ParkedRun>,
+    }
+
+    fn drive(machine: &mut KernelMachine, slice: u64, export: bool) -> Observed {
+        let mut console = Console::default();
+        let mut finished = None;
+        let mut exports = Vec::new();
+        let end = loop {
+            match machine
+                .run(&mut console, slice)
+                .unwrap_or_else(|error| panic!("{error}"))
+            {
+                Step::Slice => {
+                    if export {
+                        exports.push(machine.export().expect("an export at a slice"));
+                    }
+                }
+                Step::Parked(park) => {
+                    if export {
+                        exports.push(machine.export().expect("an export at a park"));
+                    }
+                    if let Some(value) = deliver_all(machine, park.requests) {
+                        finished = Some(value);
+                    }
+                }
+                Step::Ended(end) => break end,
+            }
+        };
+        let meters = machine.meters();
+        Observed {
+            end: format!("{end:?}"),
+            finished,
+            charged: meters.charged,
+            memory: meters.memory,
+            printed: console.printed,
+            exports,
+        }
+    }
+
+    pub(super) fn main() {
+        let mut args = std::env::args().skip(1);
+        let mode = args.next().unwrap_or_default();
+        let rest: Vec<String> = args.collect();
+        let setup = Setup::new();
+        match mode.as_str() {
+            "jit-stats" => stats(&setup),
+            "jit-check" => check(&setup, &rest),
+            "jit-park" => park(&setup),
+            "jit-paired" => paired(&setup, &rest),
+            "jit-micro" => micro(&setup, &rest),
+            "jit-bisect" => bisect(&setup, &rest),
+            "jit-probe" => probe(&setup, &rest),
+            "jit-counts" => counts(&setup, &rest),
+            "jit-kmicro" => kmicro(&setup, &rest),
+            "jit-formulas" => {
+                for (_, function) in setup.registry.iter() {
+                    let name = function.definition.name.to_string();
+                    if rest.contains(&name) {
+                        println!(
+                            "{name}\t{:?}\tguard {:?}\tnative {}",
+                            function.definition.charge,
+                            function.definition.guard.is_some(),
+                            function.native.is_some()
+                        );
+                    }
+                }
+            }
+            other => panic!("unknown mode {other}"),
+        }
+    }
+
+    fn selected(rest: &[String]) -> Vec<(String, String)> {
+        let mut all: Vec<(String, String)> = programs()
+            .into_iter()
+            .map(|(name, source)| (name.to_string(), source))
+            .collect();
+        all.extend(
+            micro_programs()
+                .into_iter()
+                .map(|(name, source)| (name.to_string(), source)),
+        );
+        let mut chosen: Vec<(String, String)> = all
+            .into_iter()
+            .filter(|(name, _)| rest.is_empty() || rest.iter().any(|wanted| wanted == name))
+            .collect();
+        for file in rest.iter().filter(|arg| arg.ends_with(".ts")) {
+            let source =
+                std::fs::read_to_string(file).unwrap_or_else(|error| panic!("{file}: {error}"));
+            chosen.push((file.clone(), source));
+        }
+        chosen
+    }
+
+    fn stats(setup: &Setup) {
+        let stats = setup.compiled.jit_stats();
+        let bytes: usize = stats.iter().map(|row| row.code_bytes).sum();
+        let compile: u64 = stats.iter().map(|row| row.compile_ns).sum();
+        let statements: u32 = stats.iter().map(|row| row.statements).sum();
+        let compiled: u32 = stats.iter().map(|row| row.compiled_statements).sum();
+        println!(
+            "codes\t{}\tcode_bytes\t{bytes}\tcompile_ms_sum\t{:.3}\tprepare_ms_total\t{:.3}\tstatements\t{statements}\tcompiled_statements\t{compiled}",
+            stats.len(),
+            compile as f64 / 1e6,
+            setup.compile_time.as_secs_f64() * 1e3,
+        );
+        let mut sorted: Vec<_> = stats.iter().map(|row| row.compile_ns).collect();
+        sorted.sort_unstable();
+        let pick = |q: f64| sorted[((sorted.len() - 1) as f64 * q) as usize] as f64 / 1e3;
+        println!(
+            "compile_us\tp50\t{:.1}\tp90\t{:.1}\tp99\t{:.1}\tmax\t{:.1}",
+            pick(0.5),
+            pick(0.9),
+            pick(0.99),
+            pick(1.0)
+        );
+        let mut sizes: Vec<_> = stats.iter().map(|row| row.code_bytes).collect();
+        sizes.sort_unstable();
+        let size = |q: f64| sizes[((sizes.len() - 1) as f64 * q) as usize];
+        println!(
+            "code_bytes\tp50\t{}\tp90\t{}\tp99\t{}\tmax\t{}",
+            size(0.5),
+            size(0.9),
+            size(0.99),
+            size(1.0)
+        );
+        println!("name\tcode_bytes\tcompile_us\tstatements\tcompiled_statements");
+        for row in &stats {
+            let wanted = rest_wanted(&row.name);
+            if wanted || std::env::var("JIT_STATS_ALL").is_ok() {
+                println!(
+                    "{}\t{}\t{:.1}\t{}\t{}",
+                    row.name,
+                    row.code_bytes,
+                    row.compile_ns as f64 / 1e3,
+                    row.statements,
+                    row.compiled_statements
+                );
+            }
+        }
+    }
+
+    fn rest_wanted(name: &str) -> bool {
+        name == "ts.get"
+            || name == "ts.array.map"
+            || name.starts_with("ts.json.stringify")
+            || name == "ts.receiver"
+            || name == "ts.to_property_key"
+            || name == "ts.callable"
+            || name == "ts.object.own_keys"
+            || name == "ts.number.to_string"
+    }
+
+    /// Runs both tiers in lockstep with the same slice, comparing every
+    /// step's kind and, when `export`, the state each exports there.
+    /// Gives the number of states compared.
+    fn lockstep(
+        name: &str,
+        plain: &Program,
+        compiled: &Program,
+        slice: u64,
+        export: bool,
+    ) -> usize {
+        let mut console = Console::default();
+        let mut twin_console = Console::default();
+        let mut interpreted = start(plain);
+        let mut machine = start(compiled);
+        let mut compared = 0;
+        let mut steps = 0u64;
+        loop {
+            let twin = interpreted.run(&mut twin_console, slice).expect("a step");
+            let step = machine.run(&mut console, slice).expect("a step");
+            steps += 1;
+            if export {
+                match (interpreted.export(), machine.export()) {
+                    (Ok(a), Ok(b)) => {
+                        if a != b {
+                            panic!(
+                                "{name} slice {slice} step {steps}: the exported states differ\n{:#?}\n{:#?}",
+                                a.tasks, b.tasks
+                            );
+                        }
+                        compared += 1;
+                    }
+                    (Err(_), Err(_)) => {}
+                    (a, b) => panic!("{name} slice {slice} step {steps}: export {a:?} vs {b:?}"),
+                }
+            }
+            let (meters, twin_meters) = (machine.meters(), interpreted.meters());
+            assert_eq!(
+                (meters.charged, meters.memory, meters.live_tasks),
+                (
+                    twin_meters.charged,
+                    twin_meters.memory,
+                    twin_meters.live_tasks
+                ),
+                "{name} slice {slice} step {steps}: the meters"
+            );
+            match (twin, step) {
+                (Step::Slice, Step::Slice) => {}
+                (Step::Parked(twin_park), Step::Parked(park)) => {
+                    assert_eq!(
+                        format!("{twin_park:?}"),
+                        format!("{park:?}"),
+                        "{name} slice {slice} step {steps}: the parks"
+                    );
+                    let a = deliver_all(&mut interpreted, twin_park.requests);
+                    let b = deliver_all(&mut machine, park.requests);
+                    assert_eq!(a, b, "{name}: what finished");
+                }
+                (Step::Ended(twin_end), Step::Ended(end)) => {
+                    assert_eq!(
+                        format!("{twin_end:?}"),
+                        format!("{end:?}"),
+                        "{name} slice {slice}: the ends"
+                    );
+                    assert!(
+                        format!("{end:?}").starts_with("Finished"),
+                        "{name}: {end:?}"
+                    );
+                    assert_eq!(console.printed, twin_console.printed, "{name}: prints");
+                    return compared;
+                }
+                (twin, step) => panic!("{name} slice {slice} step {steps}: {twin:?} vs {step:?}"),
+            }
+        }
+    }
+
+    fn check(setup: &Setup, rest: &[String]) {
+        let mut checked = 0;
+        let mut exports = 0;
+        for (name, source) in selected(rest) {
+            let Some((plain, compiled)) = setup.programs(&source) else {
+                println!("{name}\trefused");
+                continue;
+            };
+            // A program that holds a large heap copies it at every save: it
+            // saves at every 97 units instead of every unit.
+            let slices: &[(u64, bool)] = if name == "rows_print_3000" {
+                &[(u64::MAX, false), (u64::MAX, true), (97, true)]
+            } else {
+                &[
+                    (u64::MAX, false),
+                    (u64::MAX, true),
+                    (1, true),
+                    (7, true),
+                    (0, true),
+                ]
+            };
+            for &(slice, export) in slices {
+                exports += lockstep(&name, &plain, &compiled, slice, export);
+                checked += 1;
+            }
+            println!("{name}\tsame");
+        }
+        println!("checked\t{checked}\texports_compared\t{exports}");
+    }
+
+    const MAP_PARK: &str = r#"
+    const source: number[] = [];
+    for (let n = 0; n < 12; n++) { source.push(n); }
+    let calls = 0;
+    const doubled = source.map((item: number) => { calls = calls + 1; return item + item + calls; });
+    await finish({ doubled: doubled, calls: calls, last: doubled[doubled.length - 1] });
+    "#;
+
+    /// Whether a parked run's first task is inside a callback that a compiled
+    /// `ts.array.map` frame called: the map's frame below, document code on
+    /// top.
+    fn inside_map_callback(setup: &Setup, parked: &ParkedRun) -> bool {
+        let Some(task) = parked.tasks.first() else {
+            return false;
+        };
+        let units: Vec<String> = task
+            .calls
+            .iter()
+            .map(|call| setup.name_of(&call.call.statement.unit))
+            .collect();
+        units.len() >= 2
+            && units[..units.len() - 1]
+                .iter()
+                .any(|unit| unit == "ts.array.map")
+            && units.last().is_some_and(|unit| unit == "main")
+    }
+
+    fn park(setup: &Setup) {
+        let (plain, compiled) = setup.programs(MAP_PARK).expect("the program lowers");
+        let straight = drive(&mut start(&plain), u64::MAX, false);
+        assert!(straight.end.starts_with("Finished"), "{}", straight.end);
+        let mut console = Console::default();
+        let mut interpreted = start(&plain);
+        let mut machine = start(&compiled);
+        let mut parks_inside = 0;
+        let mut resumed_runs = 0;
+        loop {
+            // The same slices on both tiers: each exports the same state.
+            let step = machine.run(&mut console, 1).expect("a step");
+            let twin = interpreted.run(&mut console, 1).expect("a step");
+            match (&step, &twin) {
+                (Step::Slice, Step::Slice) => {}
+                (Step::Parked(park), Step::Parked(twin_park)) => {
+                    deliver_all(&mut machine, park.requests.clone());
+                    deliver_all(&mut interpreted, twin_park.requests.clone());
+                    continue;
+                }
+                (Step::Ended(_), Step::Ended(_)) => break,
+                other => panic!("the tiers step apart: {other:?}"),
+            }
+            let parked = machine.export().expect("an export");
+            let twin_parked = interpreted.export().expect("an export");
+            assert_eq!(
+                parked, twin_parked,
+                "the compiled tier saves what the interpreter saves"
+            );
+            if !inside_map_callback(setup, &parked) {
+                continue;
+            }
+            parks_inside += 1;
+            // Resume this state in the interpreter, on a machine built afresh.
+            let mut resumed =
+                KernelMachine::import(plain.clone(), BOUNDS, parked).expect("the state imports");
+            let resumed = drive(&mut resumed, u64::MAX, false);
+            assert_eq!(
+                resumed.end, straight.end,
+                "a resumed run ends as the straight run"
+            );
+            assert_eq!(resumed.finished, straight.finished, "the same result");
+            assert_eq!(resumed.charged, straight.charged, "the same charge");
+            resumed_runs += 1;
+        }
+        assert!(parks_inside > 0, "the run parked inside the callback");
+        println!(
+            "park\tinside_callback_parks\t{parks_inside}\tresumed_in_interpreter\t{resumed_runs}\tcharged\t{}\tresult\t{:?}",
+            straight.charged, straight.finished
+        );
+    }
+
+    /// Microbenchmarks: each program calls one helper `N` times; its twin does
+    /// the same loop without the call.
+    fn micro_programs() -> Vec<(&'static str, String)> {
+        vec![
+            (
+                "micro_get",
+                r#"
+    const o = { alpha: 1, beta: 2, gamma: 3 };
+    const keys: any[] = ["alpha", "beta", "gamma"];
+    let total = 0;
+    for (let i = 0; i < 300; i++) { const key = keys[i % 3]; total = total + o[key]; }
+    await finish(total);
+    "#
+                .to_string(),
+            ),
+            (
+                "micro_get_base",
+                r#"
+    const o = { alpha: 1, beta: 2, gamma: 3 };
+    const keys: any[] = ["alpha", "beta", "gamma"];
+    let total = 0;
+    for (let i = 0; i < 300; i++) { const key = keys[i % 3]; total = total + 1; }
+    await finish(total);
+    "#
+                .to_string(),
+            ),
+            (
+                "micro_map",
+                r#"
+    const source: number[] = [];
+    for (let n = 0; n < 300; n++) { source.push(n); }
+    const out = source.map((item: number) => item);
+    await finish(out.length);
+    "#
+                .to_string(),
+            ),
+            (
+                "micro_map_base",
+                r#"
+    const source: number[] = [];
+    for (let n = 0; n < 300; n++) { source.push(n); }
+    await finish(source.length);
+    "#
+                .to_string(),
+            ),
+            (
+                "micro_stringify",
+                r#"
+    const img = { type: "image", id: "img-1", media_type: "image/png", label: "chart.png", size: 1234, width: 640, height: 480 };
+    let total = 0;
+    for (let i = 0; i < 20; i++) { const s = JSON.stringify(img); total = total + 1; }
+    await finish(total);
+    "#
+                .to_string(),
+            ),
+            (
+                "micro_stringify_base",
+                r#"
+    const img = { type: "image", id: "img-1", media_type: "image/png", label: "chart.png", size: 1234, width: 640, height: 480 };
+    let total = 0;
+    for (let i = 0; i < 20; i++) { const s = img; total = total + 1; }
+    await finish(total);
+    "#
+                .to_string(),
+            ),
+        ]
+    }
+
+    /// The run time of `iterations` runs, start excluded.
+    fn time(program: &Program, iterations: u32) -> Duration {
+        let mut running = Duration::ZERO;
+        for _ in 0..iterations {
+            let mut machine = start(program);
+            let ran = Instant::now();
+            drive(&mut machine, u64::MAX, false);
+            running += ran.elapsed();
+        }
+        running
+    }
+
+    /// Paired timings: interpreted then compiled, three rounds, the minimum
+    /// of each. Gives ns per run for each tier and the charge.
+    fn pair(program: (&Program, &Program), budget: f64) -> (f64, f64, u64) {
+        let (plain, compiled) = program;
+        let once = Instant::now();
+        let observed = drive(&mut start(plain), u64::MAX, false);
+        let iterations =
+            ((budget / once.elapsed().as_secs_f64().max(1e-6)) as u32).clamp(5, 20_000);
+        // Warm both tiers.
+        time(plain, iterations.min(50));
+        time(compiled, iterations.min(50));
+        let mut best = (f64::MAX, f64::MAX);
+        for _ in 0..3 {
+            let interpreted = time(plain, iterations).as_nanos() as f64 / f64::from(iterations);
+            let compiled_ns = time(compiled, iterations).as_nanos() as f64 / f64::from(iterations);
+            best.0 = best.0.min(interpreted);
+            best.1 = best.1.min(compiled_ns);
+        }
+        (best.0, best.1, observed.charged)
+    }
+
+    fn paired(setup: &Setup, rest: &[String]) {
+        println!("program\tinterpreted_ns\tcompiled_ns\tcompiled/interpreted\tcharged");
+        let mut logs = Vec::new();
+        for (name, source) in selected(rest) {
+            let Some((plain, compiled)) = setup.programs(&source) else {
+                println!("{name}\trefused");
+                continue;
+            };
+            let (interpreted, compiled_ns, charged) = pair((&plain, &compiled), 0.4);
+            let ratio = compiled_ns / interpreted;
+            logs.push(ratio.ln());
+            println!("{name}\t{interpreted:.1}\t{compiled_ns:.1}\t{ratio:.4}\t{charged}");
+        }
+        let geomean = (logs.iter().sum::<f64>() / logs.len().max(1) as f64).exp();
+        println!("geomean\t\t\t{geomean:.4}");
+    }
+
+    /// Compiles one code at a time and reports each whose compiled run of
+    /// the program differs from the interpreted one.
+    fn bisect(setup: &Setup, rest: &[String]) {
+        let names: Vec<String> = setup
+            .compiled
+            .jit_stats()
+            .into_iter()
+            .map(|row| row.name)
+            .collect();
+        for (name, source) in selected(rest) {
+            let Some((plain, _)) = setup.programs(&source) else {
+                continue;
+            };
+            let interpreted = drive(&mut start(&plain), 1, true);
+            let used: BTreeSet<String> = plain
+                .document
+                .manifest
+                .functions
+                .keys()
+                .filter_map(|function| setup.registry.get(function))
+                .map(|function| function.definition.name.to_string())
+                .collect();
+            for code in &names {
+                let base = code.split('@').next().unwrap_or(code);
+                if !used.contains(base) {
+                    continue;
+                }
+                eprintln!("bisect: {code}");
+                let wanted = code.clone();
+                let only = move |candidate: &str| candidate == wanted;
+                let library = PreparedLibrary::compiled(Arc::clone(&setup.registry), Some(&only));
+                let program = Program {
+                    document: Arc::clone(&plain.document),
+                    library,
+                };
+                let run = drive(&mut start(&program), 1, true);
+                if run != interpreted {
+                    let first = interpreted
+                        .exports
+                        .iter()
+                        .zip(&run.exports)
+                        .position(|(a, b)| a != b);
+                    println!(
+                        "{name}\t{code}\tcharged {} vs {}\tfirst differing export {first:?} of {}",
+                        interpreted.charged,
+                        run.charged,
+                        interpreted.exports.len()
+                    );
+                }
+            }
+        }
+    }
+
+    /// A kernel-text document over the registry, using `uses`.
+    fn kernel_programs(setup: &Setup, uses: &[&str], main: &str) -> (Program, Program) {
+        let mut text = String::from("kernel 1\nnumbers by_spelling\n");
+        for name in uses {
+            let id = setup
+                .registry
+                .iter()
+                .find(|(_, function)| function.definition.name.to_string() == *name)
+                .map(|(id, _)| *id)
+                .unwrap_or_else(|| panic!("no function {name}"));
+            text.push_str(&format!("use {name} = @{id}\n"));
+        }
+        text.push_str(main);
+        let document = Arc::new(
+            lash_kernel_doc::parse_document(&text)
+                .unwrap_or_else(|error| panic!("{error}\n{text}")),
+        );
+        (
+            Program {
+                document: Arc::clone(&document),
+                library: setup.plain.clone(),
+            },
+            Program {
+                document,
+                library: setup.compiled.clone(),
+            },
+        )
+    }
+
+    /// Per-call cost of the three helpers, called straight from kernel
+    /// code: each document calls one helper `N` times and its twin runs the
+    /// same loop without the call.
+    fn kmicro(setup: &Setup, rest: &[String]) {
+        let uses = [
+            "ts.get",
+            "ts.array.map",
+            "ts.json.stringify",
+            "num.add",
+            "num.lt",
+            "list.len",
+        ];
+        let rows: [(&str, f64, String, String); 3] = [
+            (
+                "ts.get (plain record, text key)",
+                400.0,
+                "main {\n let o = {alpha: 1.0, beta: 2.0, gamma: 3.0}\n let i = 0\n while num.lt(i, 400) {\n  let v = invoke ts.get(o, \"beta\")\n  set i = num.add(i, 1)\n }\n return i\n}\n".to_string(),
+                "main {\n let o = {alpha: 1.0, beta: 2.0, gamma: 3.0}\n let i = 0\n while num.lt(i, 400) {\n  let v = o.beta\n  set i = num.add(i, 1)\n }\n return i\n}\n".to_string(),
+            ),
+            (
+                "ts.array.map (list-direct, per element)",
+                400.0,
+                "main {\n let xs = []\n let i = 0\n while num.lt(i, 400) {\n  set xs[list.len(xs)] = i\n  set i = num.add(i, 1)\n }\n let f = fn(this, args) { return args[0] }\n let args = [f]\n let out = invoke ts.array.map(xs, args)\n return list.len(out)\n}\n".to_string(),
+                "main {\n let xs = []\n let i = 0\n while num.lt(i, 400) {\n  set xs[list.len(xs)] = i\n  set i = num.add(i, 1)\n }\n let f = fn(this, args) { return args[0] }\n let args = [f]\n let out = xs\n return list.len(out)\n}\n".to_string(),
+            ),
+            (
+                "ts.json.stringify (7-field plain record)",
+                20.0,
+                "main {\n let o = {type: \"image\", id: \"img-1\", media_type: \"image/png\", label: \"chart.png\", size: 1234.0, width: 640.0, height: 480.0}\n let i = 0\n while num.lt(i, 20) {\n  let args = [o]\n  let s = invoke ts.json.stringify(null, args)\n  set i = num.add(i, 1)\n }\n return i\n}\n".to_string(),
+                "main {\n let o = {type: \"image\", id: \"img-1\", media_type: \"image/png\", label: \"chart.png\", size: 1234.0, width: 640.0, height: 480.0}\n let i = 0\n while num.lt(i, 20) {\n  let args = [o]\n  let s = o\n  set i = num.add(i, 1)\n }\n return i\n}\n".to_string(),
+            ),
+        ];
+        println!(
+            "helper\tcalls\tinterpreted_ns_per_call\tcompiled_ns_per_call\tcompiled/interpreted\tcharge_per_call\tprogram_interpreted_ns\tprogram_compiled_ns\tbase_interpreted_ns\tbase_compiled_ns"
+        );
+        // `jit-kmicro loop <row> <tier>` runs one row's program for three
+        // seconds, for a profiler.
+        if rest.first().is_some_and(|word| word == "loop") {
+            let row: usize = rest[1].parse().expect("a row");
+            let (plain, compiled) = kernel_programs(setup, &uses, &rows[row].2);
+            let program = if rest[2] == "compiled" {
+                compiled
+            } else {
+                plain
+            };
+            let began = Instant::now();
+            while began.elapsed() < Duration::from_secs(20) {
+                drive(&mut start(&program), u64::MAX, false);
+            }
+            return;
+        }
+        for (label, calls, text, base) in rows {
+            let (plain, compiled) = kernel_programs(setup, &uses, &text);
+            let (base_plain, base_compiled) = kernel_programs(setup, &uses, &base);
+            // The tiers agree before they are timed.
+            let a = drive(&mut start(&plain), u64::MAX, false);
+            let b = drive(&mut start(&compiled), u64::MAX, false);
+            assert_eq!(a, b, "{label}: the tiers differ");
+            assert!(a.end.starts_with("Finished"), "{label}: {}", a.end);
+            let base_observed = drive(&mut start(&base_plain), u64::MAX, false);
+            let (interpreted, compiled_ns, charged) = pair((&plain, &compiled), 0.6);
+            let (base_interpreted, base_compiled_ns, _) = pair((&base_plain, &base_compiled), 0.6);
+            let per_interpreted = (interpreted - base_interpreted) / calls;
+            let per_compiled = (compiled_ns - base_compiled_ns) / calls;
+            println!(
+                "{label}\t{calls}\t{per_interpreted:.1}\t{per_compiled:.1}\t{:.4}\t{:.1}\t{interpreted:.1}\t{compiled_ns:.1}\t{base_interpreted:.1}\t{base_compiled_ns:.1}",
+                per_compiled / per_interpreted,
+                (charged - base_observed.charged) as f64 / calls,
+            );
+        }
+    }
+
+    /// How often each program entered compiled code, and how it left.
+    fn counts(setup: &Setup, rest: &[String]) {
+        println!("program\tcode\tentries\tstep_exits\tdeopts\toutcomes");
+        for (name, source) in selected(rest) {
+            let Some((_, compiled)) = setup.programs(&source) else {
+                continue;
+            };
+            let mut machine = start(&compiled);
+            machine.count_jit();
+            drive(&mut machine, u64::MAX, false);
+            let mut total = [0u64; 4];
+            let mut rows: Vec<_> = machine.jit_counts().iter().collect();
+            rows.sort_by(|a, b| b.1[0].cmp(&a.1[0]));
+            for (_, row) in &rows {
+                for (sum, value) in total.iter_mut().zip(row.iter()) {
+                    *sum += value;
+                }
+            }
+            println!(
+                "{name}\tALL\t{}\t{}\t{}\t{}",
+                total[0], total[1], total[2], total[3]
+            );
+            for (code, row) in rows.iter().take(8) {
+                println!(
+                    "{name}\t{code}\t{}\t{}\t{}\t{}",
+                    row[0], row[1], row[2], row[3]
+                );
+            }
+        }
+    }
+
+    /// Steps a program in the interpreter one statement at a time and
+    /// prints the frames of each export until one fails.
+    fn probe(setup: &Setup, rest: &[String]) {
+        for (name, source) in selected(rest) {
+            let Some((plain, compiled)) = setup.programs(&source) else {
+                continue;
+            };
+            let program = if std::env::var("PROBE_JIT").is_ok() {
+                compiled
+            } else {
+                plain
+            };
+            let mut machine = start(&program);
+            let mut console = Console::default();
+            let mut last = String::new();
+            for step_index in 0.. {
+                match machine.run(&mut console, 1).expect("a step") {
+                    Step::Ended(_) => break,
+                    Step::Parked(park) => {
+                        if let Err(error) = machine.export() {
+                            println!(
+                                "{name}: park at step {step_index}: {error:?}\nlast good: {last}"
+                            );
+                            break;
+                        }
+                        deliver_all(&mut machine, park.requests);
+                        continue;
+                    }
+                    Step::Slice => {}
+                }
+                match machine.export() {
+                    Ok(parked) => {
+                        last = parked
+                            .tasks
+                            .iter()
+                            .map(|task| {
+                                task.calls
+                                    .iter()
+                                    .map(|call| {
+                                        format!(
+                                            "{}:{:?}",
+                                            setup.name_of(&call.call.statement.unit),
+                                            call.call.statement.path
+                                        )
+                                    })
+                                    .collect::<Vec<_>>()
+                                    .join(" > ")
+                            })
+                            .collect::<Vec<_>>()
+                            .join(" || ");
+                    }
+                    Err(error) => {
+                        println!("{name}: step {step_index}: {error:?}\nlast good: {last}");
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    fn micro(setup: &Setup, _rest: &[String]) {
+        let all: BTreeMap<&str, String> = micro_programs().into_iter().collect();
+        println!(
+            "helper\tcalls\tinterpreted_ns_per_call\tcompiled_ns_per_call\tcompiled/interpreted\tprogram_interpreted_ns\tprogram_compiled_ns\tbase_interpreted_ns\tbase_compiled_ns"
+        );
+        for (name, calls) in [
+            ("micro_get", 300.0),
+            ("micro_map", 300.0),
+            ("micro_stringify", 20.0),
+        ] {
+            let (plain, compiled) = setup.programs(&all[name]).expect("lowers");
+            let base = format!("{name}_base");
+            let (base_plain, base_compiled) = setup.programs(&all[base.as_str()]).expect("lowers");
+            let (interpreted, compiled_ns, _) = pair((&plain, &compiled), 0.6);
+            let (base_interpreted, base_compiled_ns, _) = pair((&base_plain, &base_compiled), 0.6);
+            let per_interpreted = (interpreted - base_interpreted) / calls;
+            let per_compiled = (compiled_ns - base_compiled_ns) / calls;
+            println!(
+                "{name}\t{calls}\t{per_interpreted:.1}\t{per_compiled:.1}\t{:.4}\t{interpreted:.1}\t{compiled_ns:.1}\t{base_interpreted:.1}\t{base_compiled_ns:.1}",
+                per_compiled / per_interpreted
+            );
+        }
     }
 }

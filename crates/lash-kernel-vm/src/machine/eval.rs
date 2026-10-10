@@ -332,6 +332,25 @@ impl KernelMachine {
                     .collect();
                 Ok(Value::List(self.alloc(Obj::List(unfinished))?))
             }
+            LibRun::Native(_)
+                if function.prim != 0
+                    && let Some((value, units)) = super::jit_rt::prim_fast(
+                        &self.heap,
+                        function.prim,
+                        &self.storage.args[base..],
+                    ) =>
+            {
+                // The primitive's fast path (spike, FIG-5848): what the
+                // native and `call_units` give for these operands.
+                self.pin(&value)?;
+                let units = if self.charging && function.native {
+                    units
+                } else {
+                    0
+                };
+                self.charge_call(exe, lib, units)?;
+                return Ok(Some(value));
+            }
             LibRun::Native(native) => {
                 let limit = function
                     .limit

@@ -44,7 +44,7 @@ pub struct Layout(pub u64);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct CodeId(pub(crate) u32);
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct BlockId(pub(crate) u32);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct StmtId(pub(crate) u32);
@@ -77,10 +77,10 @@ impl Local {
 
 /// Compiled code: a library's bodies, or one document's own code.
 #[derive(Default)]
-struct Tables {
-    codes: Vec<Code>,
-    blocks: Vec<Block>,
-    stmts: Vec<Stmt>,
+pub(crate) struct Tables {
+    pub(crate) codes: Vec<Code>,
+    pub(crate) blocks: Vec<Block>,
+    pub(crate) stmts: Vec<Stmt>,
     /// Each function body by its site, and each block by its own: how a
     /// parked run's coordinates find their place in this layout.
     code_at: BTreeMap<Site, CodeId>,
@@ -109,6 +109,8 @@ struct Prepared {
     /// Each function whose body reaches, through the bodies the machine
     /// runs, a function the registry does not hold: that function.
     missing: BTreeMap<FunctionId, FunctionId>,
+    /// The library's codes compiled to machine code (spike, FIG-5848).
+    jit: Option<crate::jit::JitLibrary>,
 }
 
 impl fmt::Debug for PreparedLibrary {
@@ -129,6 +131,72 @@ impl PreparedLibrary {
     /// The registry the library was prepared from.
     pub fn registry(&self) -> &Arc<FunctionRegistry> {
         &self.0.registry
+    }
+
+    /// Compiles every library body in `registry`, and every charged one
+    /// to machine code as well (spike, FIG-5848). `only`, when given,
+    /// selects the codes compiled by the name of the function they belong
+    /// to.
+    pub fn compiled(registry: Arc<FunctionRegistry>, only: Option<&dyn Fn(&str) -> bool>) -> Self {
+        let plain = Self::with_layout(registry, Layout::default()).with_primitives();
+        let Ok(mut prepared) = Arc::try_unwrap(plain.0) else {
+            unreachable!("a library just prepared has one owner")
+        };
+        let mut names = std::collections::HashMap::new();
+        for (index, code) in prepared.tables.codes.iter().enumerate() {
+            if let Unit::Library(function) = &code.site.unit {
+                let base = prepared
+                    .registry
+                    .get(function)
+                    .map_or_else(|| function.to_string(), |f| f.definition.name.to_string());
+                let name = if code.site.path.is_empty() {
+                    base
+                } else {
+                    format!("{base}@{:?}", code.site.path)
+                };
+                names.insert(index as u32, name);
+            }
+        }
+        prepared.jit = Some(crate::jit::JitLibrary::compile(
+            &prepared.tables,
+            &prepared.libs,
+            &names,
+            only,
+        ));
+        Self(Arc::new(prepared))
+    }
+
+    /// Every library body in `registry`, with the kernel primitives that
+    /// have a fast path taking it in the interpreter and in the compiled
+    /// tier (spike, FIG-5848).
+    pub fn with_primitives(self) -> Self {
+        let Ok(mut prepared) = Arc::try_unwrap(self.0) else {
+            unreachable!("a library just prepared has one owner")
+        };
+        for lib in &mut prepared.libs {
+            if !matches!(lib.run, LibRun::Native(_)) || lib.limit.is_some() {
+                continue;
+            }
+            lib.prim = match lib.definition.name.to_string().as_str() {
+                "kind" => crate::machine::jit_rt::PRIM_KIND,
+                "same" => crate::machine::jit_rt::PRIM_SAME,
+                "num.lt" => crate::machine::jit_rt::PRIM_LT,
+                "num.le" => crate::machine::jit_rt::PRIM_LE,
+                "bool.not" => crate::machine::jit_rt::PRIM_NOT,
+                "list.len" => crate::machine::jit_rt::PRIM_LIST_LEN,
+                _ => 0,
+            };
+        }
+        Self(Arc::new(prepared))
+    }
+
+    /// What the compiled tier compiled: one row per code.
+    pub fn jit_stats(&self) -> Vec<crate::jit::CodeStats> {
+        self.0
+            .jit
+            .as_ref()
+            .map(crate::jit::JitLibrary::stats)
+            .unwrap_or_default()
     }
 
     /// This library laid out as `layout` says: itself, or for a test's
@@ -221,6 +289,7 @@ impl PreparedLibrary {
                     limit,
                     definition,
                     run,
+                    prim: 0,
                 }
             })
             .collect();
@@ -232,6 +301,7 @@ impl PreparedLibrary {
             libs,
             lib_of,
             missing,
+            jit: None,
         }))
     }
 }
@@ -326,6 +396,11 @@ impl Executable {
         &self.library.0.libs[id.0 as usize]
     }
 
+    /// The library's compiled tier, when it has one.
+    pub(crate) fn jit(&self) -> Option<&crate::jit::JitLibrary> {
+        self.library.0.jit.as_ref()
+    }
+
     /// The library function `function`, when the document lists it.
     pub(crate) fn lib_of(&self, function: &FunctionId) -> Option<LibId> {
         if !self.document.manifest.functions.contains_key(function) {
@@ -417,6 +492,9 @@ pub(crate) struct Lib {
     /// The definition's charge formula, and its guard's limit.
     pub(crate) charge: Plan,
     pub(crate) limit: Option<Plan>,
+    /// The primitive fast path both tiers take for it (spike, FIG-5848);
+    /// 0 for none.
+    pub(crate) prim: u64,
 }
 
 pub(crate) enum LibRun {

@@ -26,6 +26,7 @@ mod data;
 mod functions;
 mod heap;
 mod interface;
+mod jit;
 mod machine;
 
 #[cfg(test)]
@@ -33,6 +34,7 @@ mod laws;
 
 pub use compile::{Layout, PreparedLibrary};
 pub use functions::{MachineFunctions, register_machine_functions};
+pub use jit::CodeStats;
 pub use machine::KernelMachine;
 
 pub use interface::{
