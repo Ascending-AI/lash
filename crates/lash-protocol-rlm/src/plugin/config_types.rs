@@ -60,6 +60,23 @@ impl InstructionBound {
         }
     }
 
+    /// The standard instruction budget, set from measurement: 20,000,000
+    /// charge units. A host that wants another states it with
+    /// [`Self::instructions`].
+    ///
+    /// Measured with kernel_perf over the repository's model-written cells,
+    /// each run with its tool calls answered at once (FIG-5822): the
+    /// lash-perf scenarios, the examples' and the sim's scripted cells and
+    /// the facade's and durable tests' fixtures, 112 cells that run outside
+    /// their hosts. Their median charge is 380. The costliest builds 3,000
+    /// rows, prints them and finishes with them, at 9,097,832; the next is
+    /// the large-print scenario at 2,121,577. Twice the costliest, rounded
+    /// up to the next five million, is 20,000,000: about half a second of
+    /// kernel work on the measuring host.
+    pub const fn standard() -> Self {
+        Self::instructions(20_000_000)
+    }
+
     /// An explicit opt-out: the host takes responsibility for stopping runaway
     /// executions by some other means.
     pub const fn unbounded() -> Self {

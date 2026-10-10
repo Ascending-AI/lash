@@ -15,12 +15,14 @@ use num.is_nan
 use num.lt
 use num.max
 use num.min
+use num.sub
 use num.trunc
 use ref
 use same
 use set.contains
 use text.concat
 use text.ends_with
+use text.join
 use text.repeat
 use text.utf16_len
 use text.utf16_slice
@@ -34,6 +36,7 @@ use ts.object.own_keys
 use ts.pad
 use ts.receiver
 use ts.set
+use ts.to_property_key
 use ts.to_string
 
 function ts.json.parse(this: Any, args: List(Any)) -> Any
@@ -106,6 +109,10 @@ body {
     set gap = text.repeat(" ", float.to_int(count))
   }
   if same(k, "text") { set gap = text.utf16_slice(space, 0, num.min(10, text.utf16_len(space))) }
+  # Every value writes its fragments to `out`, which is joined once: the
+  # text is copied once whatever its depth. A value JSON skips writes
+  # nothing and answers false.
+  let out = []
   let stack = set{}
   let serialize = absent
   set serialize = fn(holder, key, indent) {
@@ -116,7 +123,8 @@ body {
       let to_json = value.toJSON
       set to_json = invoke ts.callable(to_json)
       if same(kind(to_json), "closure") {
-        let passed = [key]
+        let name = invoke ts.to_property_key(key)
+        let passed = [name]
         set value = apply to_json(value, passed)
       } else {
         let brand = value.brand
@@ -125,64 +133,78 @@ body {
       }
     }
     if same(k, "timestamp") { set value = date.ecma.format(value, "iso") }
-    if same(kind(replacer), "closure") { let passed = [key, value] set value = apply replacer(holder, passed) }
+    if same(kind(replacer), "closure") {
+      let name = invoke ts.to_property_key(key)
+      let passed = [name, value]
+      set value = apply replacer(holder, passed)
+    }
     let k = invoke ts.receiver(value)
-    if same(k, "absent") { return absent }
-    if same(k, "closure") { return absent }
+    if same(k, "absent") { return false }
+    if same(k, "closure") { return false }
     if same(k, "builtin") {
       if text.ends_with(value[1], ".prototype") { throw error.new("TS_REFLECTION_UNSUPPORTED", "A built-in prototype as JSON is outside the TypeScript dialect", null) }
-      return "{}"
+      set out[list.len(out)] = "{}"
+      return true
     }
     if same(k, "number") {
-      if num.is_finite(value) { let rendered = invoke ts.number.to_string(value) return rendered }
-      return "null"
+      let rendered = "null"
+      if num.is_finite(value) { set rendered = invoke ts.number.to_string(value) }
+      set out[list.len(out)] = rendered
+      return true
     }
-    if same(k, "text") { return json.stringify(value) }
-    if same(k, "bool") { if value { return "true" } return "false" }
-    if same(k, "null") { return "null" }
+    if same(k, "text") { set out[list.len(out)] = json.stringify(value) return true }
+    if same(k, "bool") {
+      if value { set out[list.len(out)] = "true" } else { set out[list.len(out)] = "false" }
+      return true
+    }
+    if same(k, "null") { set out[list.len(out)] = "null" return true }
     let array = same(k, "list")
     let object = same(k, "record")
-    if array {} else { if object {} else { return "{}" } }
+    if array {} else { if object {} else { set out[list.len(out)] = "{}" return true } }
     let identity = ref(value)
     if set.contains(stack, identity) { throw error.new("type_error", "Converting circular structure to JSON", null) }
     set stack[identity] = true
     let next_indent = text.concat(indent, gap)
+    # An array's keys are its indexes as numbers, read without spelling
+    # them; a callback that sees a key is given its text.
     let keys = []
     if array {
       let i = 0.0
-      while num.lt(i, list.len(value)) { let key = invoke ts.number.to_string(i) set keys[list.len(keys)] = key set i = num.add(i, 1.0) }
+      while num.lt(i, list.len(value)) { set keys[list.len(keys)] = i set i = num.add(i, 1.0) }
     } else {
       if same(kind(allowed), "absent") { set keys = invoke ts.object.own_keys(value) } else { set keys = allowed }
     }
-    let pieces = []
+    let colon = ":"
+    if same(gap, "") {} else { set colon = ": " }
+    let open = ""
+    if same(gap, "") {} else { set open = text.concat("\n", next_indent) }
+    if array { set out[list.len(out)] = "[" } else { set out[list.len(out)] = "{" }
+    let written = 0
     for child in keys {
-      let piece = apply serialize(value, child, next_indent)
-      if same(kind(piece), "absent") { if array { set piece = "null" } }
-      if same(kind(piece), "absent") {} else {
-        if array {} else {
-          let colon = ":"
-          if same(gap, "") {} else { set colon = ": " }
-          set piece = text.concat(json.stringify(child), text.concat(colon, piece))
-        }
-        set pieces[list.len(pieces)] = piece
+      let mark = list.len(out)
+      if eq(written, 0) {} else { set out[list.len(out)] = "," }
+      if same(gap, "") {} else { set out[list.len(out)] = open }
+      if array {} else {
+        set out[list.len(out)] = json.stringify(child)
+        set out[list.len(out)] = colon
       }
+      let wrote = apply serialize(value, child, next_indent)
+      if wrote {} else {
+        if array { set out[list.len(out)] = "null" } else {
+          while num.lt(mark, list.len(out)) { remove out[num.sub(list.len(out), 1)] }
+        }
+      }
+      if eq(mark, list.len(out)) {} else { set written = num.add(written, 1) }
     }
     set stack[identity] = false
-    let begin = "{"
-    let end = "}"
-    if array { set begin = "[" set end = "]" }
-    if eq(list.len(pieces), 0) { return text.concat(begin, end) }
-    let joined = ""
-    let first = true
-    for piece in pieces {
-      if first { set first = false } else { set joined = text.concat(joined, ",") }
-      if same(gap, "") {} else { set joined = text.concat(joined, text.concat("\n", next_indent)) }
-      set joined = text.concat(joined, piece)
+    if eq(written, 0) {} else {
+      if same(gap, "") {} else { set out[list.len(out)] = text.concat("\n", indent) }
     }
-    if same(gap, "") {} else { set joined = text.concat(joined, text.concat("\n", indent)) }
-    return text.concat(begin, text.concat(joined, end))
+    if array { set out[list.len(out)] = "]" } else { set out[list.len(out)] = "}" }
+    return true
   }
   let holder = {"": args[0]}
-  let output = apply serialize(holder, "", "")
-  return output
+  let wrote = apply serialize(holder, "", "")
+  if wrote { return text.join(out, "") }
+  return absent
 }

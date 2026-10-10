@@ -41,6 +41,7 @@ use text.utf16_len
 use text.utf16_get
 use text.utf16_slice
 use text.concat
+use text.join
 use text.len
 use text.slice
 use text.compare
@@ -386,23 +387,18 @@ body {
     }
     if same(k, "brand:ts.arguments") { return "[object Arguments]" }
     if same(k, "list") {
-      let joined = ""
-      let first = true
+      let pieces = []
       for item in value {
-        if first {
-          set first = false
-        } else {
-          set joined = text.concat(joined, ",")
-        }
+        let piece = ""
         let nullish = same(item, ())
         if nullish {} else { set nullish = invoke ts.is_nullish(item) }
         if nullish {} else {
           let primitive = apply convert(item, "string")
-          let piece = invoke ts.primitive_to_string(primitive)
-          set joined = text.concat(joined, piece)
+          set piece = invoke ts.primitive_to_string(primitive)
         }
+        set pieces[list.len(pieces)] = piece
       }
-      return joined
+      return text.join(pieces, ",")
     }
     if same(k, "record") {
       let order = ["valueOf", "toString"]
@@ -491,18 +487,6 @@ body {
   }
   let spelled = invoke ts.to_string(key)
   return spelled
-}
-
-# The parts of a template literal or of any concatenation, already texts.
-function ts.join(parts: List(Text)) -> Text
-kernel 1
-charge sum(2, deep(parts))
-body {
-  let joined = ""
-  for part in parts {
-    set joined = text.concat(joined, part)
-  }
-  return joined
 }
 
 # `a + b`.

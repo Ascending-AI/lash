@@ -539,7 +539,7 @@ impl WorkflowHost {
 pub fn core(backend: lash::Backend) -> lash::Result<WorkflowHost> {
     let tools = Arc::new(crate::display::HostTools::default());
     let config = lash::rlm::RlmProtocolPluginConfig::builder()
-        .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
+        .instruction_limit(lash::rlm::InstructionBound::standard())
         .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
         .channel(lash::rlm::RlmChannel::Cell)
         .build();

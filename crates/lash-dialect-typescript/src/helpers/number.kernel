@@ -18,6 +18,7 @@ use num.sub
 use num.trunc
 use same
 use text.concat
+use text.join
 use text.len
 use text.slice
 use ts.number.EPSILON
@@ -185,16 +186,17 @@ let base = invoke ts.to_number(builtin_arg_4)
   let fraction = num.sub(absolute, num.trunc(absolute))
   let output = int.to_text(whole, radix)
   if num.lt(0, fraction) {
-    set output = text.concat(output, ".")
+    let digits = [output, "."]
     let count = 0
     while num.lt(0, fraction) {
       if num.le(1100, count) { break }
       set fraction = num.mul(fraction, base)
       let digit = num.trunc(fraction)
-      set output = text.concat(output, int.to_text(float.to_int(digit), radix))
+      set digits[list.len(digits)] = int.to_text(float.to_int(digit), radix)
       set fraction = num.sub(fraction, digit)
       set count = num.add(count, 1)
     }
+    set output = text.join(digits, "")
   }
   if num.lt(this, 0) { return text.concat("-", output) }
   return output

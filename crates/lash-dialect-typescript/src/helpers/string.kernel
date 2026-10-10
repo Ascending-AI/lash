@@ -3,6 +3,7 @@
 use eq
 use error.new
 use float.to_int
+use int.div_floor
 use int.rem_floor
 use kind
 use list.len
@@ -20,6 +21,7 @@ use same
 use text.concat
 use text.from_code_points
 use text.from_utf16_units
+use text.join
 use text.lower_u17_0_0
 use text.normalize_u17_0_0
 use text.repeat
@@ -439,11 +441,12 @@ errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
 charge sum(8, deep(result))
 body {
   let text = invoke ts.string.receiver(this)
+  let pieces = [text]
   for value in args {
     let piece = invoke ts.to_string(value)
-    set text = text.concat(text, piece)
+    set pieces[list.len(pieces)] = piece
   }
-  return text
+  return text.join(pieces, "")
 }
 
 function ts.string.normalize(this: Any, args: List(Any)) -> Text
@@ -547,13 +550,9 @@ body {
   let width = text.utf16_len(fill)
   if eq(width, 0) { return text }
   let remaining = num.sub(length, original)
-  let pad = ""
-  while num.le(width, remaining) {
-    set pad = text.concat(pad, fill)
-    set remaining = num.sub(remaining, width)
-  }
-  let tail = invoke ts.string.slice_units(fill, 0, remaining)
-  set pad = text.concat(pad, tail)
+  let rest = int.rem_floor(remaining, width)
+  let tail = invoke ts.string.slice_units(fill, 0, rest)
+  let pad = text.concat(text.repeat(fill, int.div_floor(remaining, width)), tail)
   return text.concat(pad, text)
 }
 
@@ -575,13 +574,9 @@ body {
   let width = text.utf16_len(fill)
   if eq(width, 0) { return text }
   let remaining = num.sub(length, original)
-  let pad = ""
-  while num.le(width, remaining) {
-    set pad = text.concat(pad, fill)
-    set remaining = num.sub(remaining, width)
-  }
-  let tail = invoke ts.string.slice_units(fill, 0, remaining)
-  set pad = text.concat(pad, tail)
+  let rest = int.rem_floor(remaining, width)
+  let tail = invoke ts.string.slice_units(fill, 0, rest)
+  let pad = text.concat(text.repeat(fill, int.div_floor(remaining, width)), tail)
   return text.concat(text, pad)
 }
 
@@ -630,22 +625,22 @@ body {
   do invoke ts.require_object_coercible(raw)
   let count = invoke ts.get(raw, "length")
   let length = invoke ts.string.length_value(count)
-  let output_value = ""
+  let pieces = []
   let index = 0
   while num.lt(index, length) {
     let value = invoke ts.get(raw, index)
     let text = invoke ts.to_string(value)
-    set output_value = text.concat(output_value, text)
+    set pieces[list.len(pieces)] = text
     set index = num.add(index, 1)
     if num.lt(index, length) {
       if num.lt(index, list.len(args)) {
         let arg_29 = args[index]
         let substitution = invoke ts.to_string(arg_29)
-        set output_value = text.concat(output_value, substitution)
+        set pieces[list.len(pieces)] = substitution
       }
     }
   }
-  return output_value
+  return text.join(pieces, "")
 }
 
 # CreateListFromArrayLike for Function.prototype.apply on a registered built-in.

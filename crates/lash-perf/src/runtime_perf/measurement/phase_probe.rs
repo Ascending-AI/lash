@@ -414,7 +414,9 @@ async fn run_once_inner(
     if matches!(scenario, RuntimePerfScenario::RlmLargePrint) {
         extra_counters.lock_recover().insert(
             "rlm.configured_instruction_limit_per_cell".into(),
-            super::super::harness::benchmark_rlm_instruction_limit(scenario),
+            lash_protocol_rlm::InstructionBound::standard()
+                .limit()
+                .map_or(0, std::num::NonZeroU64::get),
         );
     }
     if scenario.wiring().large_tool_catalog_plugin {

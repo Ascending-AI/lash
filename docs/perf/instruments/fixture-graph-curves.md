@@ -16,10 +16,9 @@ The same geometry applies to `rlm_large_tool_catalog`,
 state export finish; the session handle alone does not own the serving node.
 
 Large print retains its 70-line text and sixteen repeated rows. Its receipt's
-`rlm.configured_instruction_limit_per_cell` is the configured 8,000,000-unit
-fuel bound, not a measured opcode count: the VM also charges proportional
-string work and graph imports/exports. Other RLM fixtures retain their
-1,000,000-unit bound. The catalog fixtures retain the full tool population and
+`rlm.configured_instruction_limit_per_cell` is the configured bound, not a
+measured charge: every RLM fixture runs under the standard instruction budget,
+`rlm::InstructionBound::standard()` (20,000,000 units). The catalog fixtures retain the full tool population and
 configure their session prompt plan for it. The receipt labels the configured
 limits as `prompt.configured_section_bytes_limit_per_call` (524,288 bytes per
 section) and `prompt.configured_total_bytes_limit_per_call` (1,048,576 bytes

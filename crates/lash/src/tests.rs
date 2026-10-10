@@ -378,7 +378,7 @@ fn rlm_factory() -> lash_protocol_rlm::RlmProtocolPluginFactory {
     lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()
             .channel(lash_protocol_rlm::RlmChannel::Cell)
-            .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
+            .instruction_limit(lash_protocol_rlm::InstructionBound::standard())
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),
         lash_protocol_rlm::CellDialect::typescript(),
@@ -405,6 +405,8 @@ fn untimed_fixture_workers() -> crate::vm::WorkerService {
 
 mod absent_session_delete;
 mod assistant_hook_faults;
+#[cfg(feature = "rlm")]
+mod cell_budget;
 #[cfg(feature = "rlm")]
 mod cell_race_loser;
 mod config_transactions;

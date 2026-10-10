@@ -9,6 +9,8 @@ use text.utf16_len
 use text.utf16_get
 use text.utf16_slice
 use text.concat
+use text.join
+use list.len
 use ts.regexp.escaped_source
 
 function ts.regexp.escaped_source(pattern: Text) -> Text
@@ -16,7 +18,7 @@ kernel 1
 charge sum(8, size(pattern), size(result))
 body {
   if same(pattern, "") { return "(?:)" }
-  let output_value = ""
+  let pieces = []
   # Escaping operates on scalar text, never on a single half-surrogate.
   let position = 0
   let escaped = false
@@ -37,10 +39,10 @@ body {
         if eq(unit, 47) { if inClass {} else { set character = "\\/" } }
       }
     }
-    set output_value = text.concat(output_value, character)
+    set pieces[list.len(pieces)] = character
     set position = end
   }
-  return output_value
+  return text.join(pieces, "")
 }
 
 function ts.regexp.spell(pattern: Text, flags: Text) -> Text

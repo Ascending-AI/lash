@@ -375,7 +375,7 @@ fn build_turn_core(
                 } else {
                     lash::rlm::RlmChannel::NativeTool
                 })
-                .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
+                .instruction_limit(lash::rlm::InstructionBound::standard())
                 .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
                 .build();
             config.prompt_features.images = false;

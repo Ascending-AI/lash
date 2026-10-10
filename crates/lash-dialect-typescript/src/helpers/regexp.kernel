@@ -5,6 +5,7 @@ use eq
 use error.new
 use kind
 use list.len
+use list.slice
 use num.add
 use num.le
 use num.lt
@@ -18,6 +19,8 @@ use regex.ecma.split
 use regex.ecma.test
 use same
 use text.concat
+use text.join
+use text.split
 use text.utf16_find
 use text.utf16_get
 use text.utf16_len
@@ -451,31 +454,28 @@ body {
   if same(padded[0], absent) { return [text] }
   let arg_6 = padded[0]
   let separator = invoke ts.to_string(arg_6)
-  let output_value = []
-  let start = 0
-  let width = text.utf16_len(separator)
+  # The native split cuts at the separator's occurrences, which are UTF-16
+  # boundaries too. An empty separator cuts every character, which is a
+  # UTF-16 unit unless it is astral: then the units are cut one by one, and
+  # a cut inside a surrogate pair is refused.
+  let parts = text.split(text, separator)
   let length = text.utf16_len(text)
-  if eq(width, 0) {
-    while num.lt(start, length) {
-      let end = num.add(start, 1)
-      let part = invoke ts.string.slice_units(text, start, end)
-      set output_value[list.len(output_value)] = part
-      if eq(list.len(output_value), limit) { return output_value }
-      set start = end
+  if same(separator, "") {
+    if eq(list.len(parts), length) {} else {
+      let output_value = []
+      let start = 0
+      while num.lt(start, length) {
+        let end = num.add(start, 1)
+        let part = invoke ts.string.slice_units(text, start, end)
+        set output_value[list.len(output_value)] = part
+        if eq(list.len(output_value), limit) { return output_value }
+        set start = end
+      }
+      return output_value
     }
-    return output_value
   }
-  while true {
-    let position = text.utf16_find(text, separator, start)
-    if num.lt(position, 0) { break }
-    let part = invoke ts.string.slice_units(text, start, position)
-    set output_value[list.len(output_value)] = part
-    if eq(list.len(output_value), limit) { return output_value }
-    set start = num.add(position, width)
-  }
-  let tail = invoke ts.string.slice_units(text, start, length)
-  set output_value[list.len(output_value)] = tail
-  return output_value
+  if num.lt(limit, list.len(parts)) { return list.slice(parts, 0, limit) }
+  return parts
 }
 
 function ts.string.substitute(replacement: Text, text: Text, needle: Text, position: Int) -> Text
@@ -483,36 +483,38 @@ kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
 charge sum(8, deep(result))
 body {
-  let output_value = ""
+  # The text between two `$` is copied whole; a `$` starts a token or
+  # stands for itself.
+  let pieces = []
   let index = 0
   let length = text.utf16_len(replacement)
   while num.lt(index, length) {
-    let unit = text.utf16_get(replacement, index)
-    let end = num.add(index, 1)
-    if eq(unit, 36) {
-      if num.lt(end, length) {
-        let token = text.utf16_get(replacement, end)
-        let piece = absent
-        if eq(token, 36) { set piece = "$" }
-        if eq(token, 38) { set piece = needle }
-        if eq(token, 96) { set piece = invoke ts.string.slice_units(text, 0, position) }
-        if eq(token, 39) {
-          let after = num.add(position, text.utf16_len(needle))
-          let size = text.utf16_len(text)
-          set piece = invoke ts.string.slice_units(text, after, size)
-        }
-        if same(piece, absent) {} else {
-          set output_value = text.concat(output_value, piece)
-          set index = num.add(end, 1)
-          continue
-        }
+    let dollar = text.utf16_find(replacement, "$", index)
+    if num.lt(dollar, 0) { break }
+    let end = num.add(dollar, 1)
+    let piece = absent
+    if num.lt(end, length) {
+      let token = text.utf16_get(replacement, end)
+      if eq(token, 36) { set piece = "$" }
+      if eq(token, 38) { set piece = needle }
+      if eq(token, 96) { set piece = invoke ts.string.slice_units(text, 0, position) }
+      if eq(token, 39) {
+        let after = num.add(position, text.utf16_len(needle))
+        let size = text.utf16_len(text)
+        set piece = invoke ts.string.slice_units(text, after, size)
       }
     }
-    if num.le(55296, unit) { if num.le(unit, 56319) { set end = num.add(end, 1) } }
-    set output_value = text.concat(output_value, text.utf16_slice(replacement, index, end))
-    set index = end
+    if same(piece, absent) {
+      set pieces[list.len(pieces)] = text.utf16_slice(replacement, index, end)
+      set index = end
+    } else {
+      set pieces[list.len(pieces)] = text.utf16_slice(replacement, index, dollar)
+      set pieces[list.len(pieces)] = piece
+      set index = num.add(end, 1)
+    }
   }
-  return output_value
+  if num.lt(index, length) { set pieces[list.len(pieces)] = text.utf16_slice(replacement, index, length) }
+  return text.join(pieces, "")
 }
 
 function ts.string.replace_value(this: Any, args: List(Any), replace_every: Bool) -> Text
@@ -551,7 +553,7 @@ body {
         }
       }
     }
-    let output_value = ""
+    let pieces = []
     let end = 0
     for match in matches {
       let passed = []
@@ -569,17 +571,19 @@ body {
       let substituted = invoke ts.to_string(value)
       let arg_7 = match.index
       let prefix = invoke ts.string.slice_units(text, end, arg_7)
-      set output_value = text.concat(output_value, text.concat(prefix, substituted))
+      set pieces[list.len(pieces)] = prefix
+      set pieces[list.len(pieces)] = substituted
       set end = num.add(match.index, text.utf16_len(match.groups[0]))
     }
     let size = text.utf16_len(text)
     let tail = invoke ts.string.slice_units(text, end, size)
-    return text.concat(output_value, tail)
+    set pieces[list.len(pieces)] = tail
+    return text.join(pieces, "")
   }
   let needle = invoke ts.to_string(search)
   let template = ""
   if callback {} else { set template = invoke ts.to_string(replacement) }
-  let output_value = ""
+  let pieces = []
   let end = 0
   let next = 0
   let length = text.utf16_len(text)
@@ -594,14 +598,16 @@ body {
       set piece = invoke ts.to_string(value)
     } else { set piece = invoke ts.string.substitute(template, text, needle, position) }
     let prefix = invoke ts.string.slice_units(text, end, position)
-    set output_value = text.concat(output_value, text.concat(prefix, piece))
+    set pieces[list.len(pieces)] = prefix
+    set pieces[list.len(pieces)] = piece
     set end = num.add(position, width)
     if replace_every {} else { break }
     set next = end
     if eq(width, 0) { set next = num.add(next, 1) }
   }
   let tail = invoke ts.string.slice_units(text, end, length)
-  return text.concat(output_value, tail)
+  set pieces[list.len(pieces)] = tail
+  return text.join(pieces, "")
 }
 
 function ts.string.replace(this: Any, args: List(Any)) -> Text

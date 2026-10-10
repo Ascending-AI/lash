@@ -164,7 +164,7 @@ fn builder_over(backend: lash::Backend, bodies: &std::path::Path) -> Result<lash
         .open(bodies)
         .with_context(|| format!("open {}", bodies.display()))?;
     let config = lash::rlm::RlmProtocolPluginConfig::builder()
-        .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
+        .instruction_limit(lash::rlm::InstructionBound::standard())
         .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
         .channel(lash::rlm::RlmChannel::Cell)
         .build();

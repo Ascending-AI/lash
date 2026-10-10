@@ -1,6 +1,7 @@
 use ts.boundary
 use same
-use text.concat
+use text.join
+use list.len
 use json.stringify
 use record.keys
 use ts.console.json
@@ -15,39 +16,45 @@ kernel 1
 errors "type_error"
 charge sum(8, deep(value), size(result))
 body {
+  # Every value writes its fragments to `out`, which is joined once: the
+  # text is copied once whatever its depth.
+  let out = []
   let convert = absent
   set convert = fn(item) {
     let k = invoke ts.receiver(item)
     if same(k, "number") {
       let spelled = invoke ts.to_string(item)
-      return spelled
+      set out[list.len(out)] = spelled
+      return null
     }
     if same(k, "list") {
-      let result_value = "["
-      let separator = ""
+      set out[list.len(out)] = "["
+      let first = true
       for member in item {
-        let spelled = apply convert(member)
-        set result_value = text.concat(result_value, text.concat(separator, spelled))
-        set separator = ","
+        if first { set first = false } else { set out[list.len(out)] = "," }
+        do apply convert(member)
       }
-      return text.concat(result_value, "]")
+      set out[list.len(out)] = "]"
+      return null
     }
     if same(k, "record") {
-      let result_value = "{"
-      let separator = ""
+      set out[list.len(out)] = "{"
+      let first = true
       for name in record.keys(item) {
+        if first { set first = false } else { set out[list.len(out)] = "," }
+        set out[list.len(out)] = json.stringify(name)
+        set out[list.len(out)] = ":"
         let member = item[name]
-        let spelled = apply convert(member)
-        let field = text.concat(json.stringify(name), text.concat(":", spelled))
-        set result_value = text.concat(result_value, text.concat(separator, field))
-        set separator = ","
+        do apply convert(member)
       }
-      return text.concat(result_value, "}")
+      set out[list.len(out)] = "}"
+      return null
     }
-    return json.stringify(item)
+    set out[list.len(out)] = json.stringify(item)
+    return null
   }
-  let result_value = apply convert(value)
-  return result_value
+  do apply convert(value)
+  return text.join(out, "")
 }
 
 # `console.log` and its siblings: one print of the arguments joined by a
@@ -58,14 +65,8 @@ kernel 1
 errors "type_error"
 charge sum(4, deep(args))
 body {
-  let line = ""
-  let first = true
+  let pieces = []
   for item in args {
-    if first {
-      set first = false
-    } else {
-      set line = text.concat(line, " ")
-    }
     let k = invoke ts.receiver(item)
     let structured = same(k, "record")
     if structured {} else {
@@ -75,12 +76,13 @@ body {
       let copied = invoke ts.boundary(item)
       let checked = json.stringify(copied)
       let piece = invoke ts.console.json(copied)
-      set line = text.concat(line, piece)
+      set pieces[list.len(pieces)] = piece
     } else {
       let piece = invoke ts.to_string(item)
-      set line = text.concat(line, piece)
+      set pieces[list.len(pieces)] = piece
     }
   }
+  let line = text.join(pieces, " ")
   print line
   return absent
 }

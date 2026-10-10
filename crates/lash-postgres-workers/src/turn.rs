@@ -230,7 +230,7 @@ pub fn core(backend: &Backend, witness: Witness, hold: Hold) -> Result<lash::Las
         lash::rlm::RlmProtocolPluginFactory::new(
             lash::rlm::RlmProtocolPluginConfig::builder()
                 .channel(lash::rlm::RlmChannel::Cell)
-                .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
+                .instruction_limit(lash::rlm::InstructionBound::standard())
                 .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
                 .build(),
             lash::rlm::CellDialect::typescript(),

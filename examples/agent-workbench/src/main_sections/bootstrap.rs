@@ -297,7 +297,7 @@ pub(crate) async fn workbench_core_builder(
         crate::session_protocol::SessionProtocol::Rlm => {
             let mut rlm_config = lash::rlm::RlmProtocolPluginConfig::builder()
                 .channel(rlm_channel)
-                .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
+                .instruction_limit(lash::rlm::InstructionBound::standard())
                 .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
                 .build();
             if let Some(warn_tokens) =

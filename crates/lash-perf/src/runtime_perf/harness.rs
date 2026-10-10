@@ -721,27 +721,11 @@ fn preview(value: &str, max_chars: usize) -> String {
     preview.replace('\n', "\\n")
 }
 
-// A configured fixture bound, not an observed opcode count. The 70 string
-// concatenations already exhaust 1M fuel with only 1,902 profiled opcodes:
-// proportional string work and heap traversals share the opcode budget.
-// The full print fixture also carries sixteen repeated rows across a tool call.
-pub(crate) fn benchmark_rlm_instruction_limit(scenario: RuntimePerfScenario) -> u64 {
-    if matches!(scenario, RuntimePerfScenario::RlmLargePrint) {
-        8_000_000
-    } else {
-        1_000_000
-    }
-}
-
-fn benchmark_rlm_protocol_factory(
-    scenario: RuntimePerfScenario,
-) -> lash_protocol_rlm::RlmProtocolPluginFactory {
+fn benchmark_rlm_protocol_factory() -> lash_protocol_rlm::RlmProtocolPluginFactory {
     lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()
             .channel(lash_protocol_rlm::RlmChannel::Cell)
-            .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(
-                benchmark_rlm_instruction_limit(scenario),
-            ))
+            .instruction_limit(lash_protocol_rlm::InstructionBound::standard())
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),
         lash_protocol_rlm::CellDialect::typescript(),
@@ -900,7 +884,7 @@ pub(crate) async fn build_embed_core(
             .map(BenchmarkCore::Standard)
             .map_err(anyhow::Error::from),
         ExecutionMode::Rlm => {
-            let factory = benchmark_rlm_protocol_factory(scenario);
+            let factory = benchmark_rlm_protocol_factory();
             // Worker startup belongs to the measured build phase, before
             // any turn is sent to the embed's serving node.
             factory.worker_service().pool()?;
@@ -985,7 +969,7 @@ pub(crate) async fn build_runtime(
             BenchmarkCore::Standard(builder.build(runtime_perf_owner())?)
         }
         ExecutionMode::Rlm => {
-            let factory = benchmark_rlm_protocol_factory(scenario);
+            let factory = benchmark_rlm_protocol_factory();
             let mut tracing = lash_core::trace::TraceRuntime::new(backend.clock());
             if let Some(path) = trace_config
                 .as_ref()
@@ -1171,7 +1155,7 @@ fn durable_benchmark_core(
     let builder = match mode_id {
         ExecutionMode::Standard => benchmark_standard_builder(backend, provider),
         ExecutionMode::Rlm => {
-            let factory = benchmark_rlm_protocol_factory(RuntimePerfScenario::Rlm);
+            let factory = benchmark_rlm_protocol_factory();
             benchmark_rlm_builder(backend, provider, factory)
         }
     };

@@ -577,8 +577,13 @@ impl Lowerer<'_> {
             };
             parts.push(spelled.expr());
         }
+        // One native join, charged by the bytes it writes.
         let parts = self.let_expr(Expr::List(parts), Ty::Unknown);
-        self.invoke("ts.join", &[parts], Ty::Text)
+        let joined = self.native(
+            "text.join",
+            vec![parts.expr(), Operand::text(String::new()).expr()],
+        )?;
+        Ok(self.let_expr(joined, Ty::Text))
     }
 
     fn lower_assign(

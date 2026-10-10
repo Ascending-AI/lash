@@ -19,7 +19,7 @@ use num.min
 use num.max
 use num.is_nan
 use num.to_float
-use text.concat
+use text.join
 use text.utf16_compare
 use list.len
 use list.copy
@@ -835,19 +835,17 @@ body {
   let input = invoke ts.array.argument(args, 0)
   let separator = ","
   if same(input, absent) {} else { set separator = invoke ts.to_string(input) }
-  let output = ""
+  let pieces = []
   let index = 0.0
   while num.lt(index, length) {
-    if num.lt(0, index) { set output = text.concat(output, separator) }
     let value = invoke ts.get(this, index)
+    let piece = ""
     let nullish = invoke ts.is_nullish(value)
-    if nullish {} else {
-      let piece = invoke ts.to_string(value)
-      set output = text.concat(output, piece)
-    }
+    if nullish {} else { set piece = invoke ts.to_string(value) }
+    set pieces[list.len(pieces)] = piece
     set index = num.add(index, 1)
   }
-  return output
+  return text.join(pieces, separator)
 }
 
 function ts.array.toString(this: Any, args: List(Any)) -> Any

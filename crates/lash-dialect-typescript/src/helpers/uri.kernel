@@ -13,6 +13,7 @@ use num.lt
 use num.mul
 use num.sub
 use text.concat
+use text.join
 use text.from_utf16_units
 use text.utf16_find
 use text.utf16_get
@@ -58,7 +59,7 @@ kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
 charge sum(8, deep(result))
 body {
-  let output_value = ""
+  let pieces = []
   let index = 0
   let length = text.utf16_len(input)
   while num.lt(index, length) {
@@ -79,7 +80,7 @@ body {
       if preserve {
         if num.le(0, text.utf16_find(";/?:@&=+$,#", character, 0)) { set unescaped = true }
       }
-      if unescaped { set output_value = text.concat(output_value, character) }
+      if unescaped { set pieces[list.len(pieces)] = character }
     }
     if unescaped {} else {
       let octets = []
@@ -96,11 +97,11 @@ body {
       }
       for octet in octets {
         let escaped = invoke ts.uri.escape(octet)
-        set output_value = text.concat(output_value, escaped)
+        set pieces[list.len(pieces)] = escaped
       }
     }
   }
-  return output_value
+  return text.join(pieces, "")
 }
 
 function ts.uri.flush(octets: List(Int)) -> Text
@@ -118,7 +119,7 @@ kernel 1
 errors "URIError"
 charge sum(8, deep(result))
 body {
-  let output_value = ""
+  let pieces = []
   let octets = []
   let index = 0
   let length = text.utf16_len(input)
@@ -140,23 +141,24 @@ body {
       }
       if reserved {
         let flushed = invoke ts.uri.flush(octets)
-        set output_value = text.concat(output_value, flushed)
+        set pieces[list.len(pieces)] = flushed
         set octets = []
-        set output_value = text.concat(output_value, text.utf16_slice(input, index, num.add(index, 3)))
+        set pieces[list.len(pieces)] = text.utf16_slice(input, index, num.add(index, 3))
       } else { set octets[list.len(octets)] = octet }
       set index = num.add(index, 3)
     } else {
       let flushed = invoke ts.uri.flush(octets)
-      set output_value = text.concat(output_value, flushed)
+      set pieces[list.len(pieces)] = flushed
       set octets = []
       let end = num.add(index, 1)
       if num.le(55296, unit) { if num.le(unit, 56319) { set end = num.add(end, 1) } }
-      set output_value = text.concat(output_value, text.utf16_slice(input, index, end))
+      set pieces[list.len(pieces)] = text.utf16_slice(input, index, end)
       set index = end
     }
   }
   let flushed = invoke ts.uri.flush(octets)
-  return text.concat(output_value, flushed)
+  set pieces[list.len(pieces)] = flushed
+  return text.join(pieces, "")
 }
 
 function ts.uri.encodeURI(this: Any, args: List(Any)) -> Text
