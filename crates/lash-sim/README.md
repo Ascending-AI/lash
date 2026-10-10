@@ -115,10 +115,18 @@ bound, not a discovered runtime invariant violation.
   queued ingress, cancellation, observer reconnects, backend
   failure choices, provider mutations, atomic tools, exec-code, durable
   effects under crash and redrive, retries, and duplicates.
-- Generated traces include scheduler/completion evidence, a named
-  `sim.oracle.operational-coverage.v1` oracle for the operational case set,
-  and scenario contract oracles for Runtime, Standard, RLM, and Agent coverage
-  without importing scenario test modules. Combined with interleaved live
+- Each seed deterministically selects feature weights (0, 1, 4 or 16) before
+  planning its operational spine. Provider histories and observer snapshots
+  remain prerequisites; zero-weight operational features stay absent, including
+  in extra transitions. The seed and generated plan record the choices for replay.
+- Generated traces include scheduler/completion evidence and applicable
+  scenario contract oracles for Runtime, Standard, RLM, and Agent coverage
+  without importing scenario test modules. Evidence and search both require
+  `sim.oracle.fleet-operational-coverage.v1`: completed seeds collectively cover
+  operational cases, interleaving, suspend/resume, transport mutations, different
+  structural spines and every scenario contract. An uncovered or empty fleet
+  writes its summary and fails; a narrow seed is valid when it delivers what its
+  plan declared. Combined with interleaved live
   turns, suspend/resume, a live failure turn, the invariant floor, and durable
   effects redriven by the engine, this is seeded boundary orchestration over
   real execution,

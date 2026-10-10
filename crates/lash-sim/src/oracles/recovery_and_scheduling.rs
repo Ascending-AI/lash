@@ -231,131 +231,30 @@ pub fn scheduler_owned_runtime_completions(
     )
 }
 
-pub fn operational_coverage(
-    events: &[DeliveredBoundary],
-    summary: &AbstractWorldView,
-) -> OracleVerdict {
-    let mut missing = Vec::new();
-    if !summary
-        .sessions
-        .iter()
-        .any(|session| session.queued_ingress_count > 0)
-    {
-        missing.push("queueing inputs");
-    }
-
-    if !summary
-        .sessions
-        .iter()
-        .any(|session| session.cancellation_count > 0)
-    {
-        missing.push("cancellation");
-    }
-    if !summary
-        .sessions
-        .iter()
-        .any(|session| session.observer_reconnects > 0)
-    {
-        missing.push("observer reconnects");
-    }
-    let provider_mutations = events
-        .iter()
-        .filter(|event| event.kind == BoundaryKind::ProviderMutation)
-        .filter_map(|event| {
-            event
-                .observed
-                .get("mutation")
-                .or_else(|| event.payload.get("mutation"))
-                .and_then(serde_json::Value::as_str)
-        })
-        .collect::<BTreeSet<_>>();
-    if !provider_mutations.contains("malformed_sse_chunk")
-        || !provider_mutations.contains("rate_limit_error_envelope")
-    {
-        missing.push("provider failures/mutations");
-    }
-    if !summary
-        .sessions
-        .iter()
-        .any(|session| !session.tool_outputs.is_empty())
-    {
-        missing.push("tool results");
-    }
-    if !summary
-        .sessions
-        .iter()
-        .any(|session| !session.exec_code_outputs.is_empty())
-    {
-        missing.push("exec-code results");
-    }
-    if !summary
-        .durable_effects
-        .iter()
-        .any(|effect| effect.execution_count == 1 && effect.replay_count > 0)
-    {
-        missing.push("durable effects");
-    }
-    let backend_fault = |fault: &str| {
-        events.iter().any(|event| {
-            event.kind == BoundaryKind::BackendFailure
-                && event
-                    .payload
-                    .get("fault")
-                    .and_then(serde_json::Value::as_str)
-                    == Some(fault)
-        })
-    };
-    if !backend_fault("refused") || !backend_fault("reply_lost") {
-        missing.push("backend choices");
-    }
-    let backend_retry_attempt = events.iter().any(|event| {
-        event.kind == BoundaryKind::BackendFailure
-            && event
-                .observed
-                .get("attempt")
-                .and_then(serde_json::Value::as_u64)
-                .unwrap_or(0)
-                > 1
-    });
-    if !backend_retry_attempt || !durable_effect_replay_semantics(events, summary) {
-        missing.push("retries/duplicates");
-    }
-
-    if missing.is_empty() {
-        OracleVerdict::passed(
-            OPERATIONAL_COVERAGE_ORACLE,
-            "generated DST trace hit queueing, cancellation, observer reconnects, provider failure/mutation, tool/exec, durable effect, backend choice, retry, and duplicate cases",
-        )
-    } else {
-        OracleVerdict::failed(
-            OPERATIONAL_COVERAGE_ORACLE,
-            format!(
-                "generated DST trace missed operational cases: {}",
-                missing.join(", ")
-            ),
-        )
-    }
-}
-
 pub fn state_machine_semantic_invariants(
     events: &[DeliveredBoundary],
     summary: &AbstractWorldView,
+    expectations: &WorkloadExpectations,
 ) -> OracleVerdict {
+    let required = |kind| expectations.declared_completion_count(kind) != Some(0);
     let mut missing = Vec::new();
-    if !queued_active_turn_input_hidden_semantics(events) {
+    if required(BoundaryKind::QueuedIngress) && !queued_active_turn_input_hidden_semantics(events) {
         missing.push("queued active-turn input hidden from live provider turns");
     }
-    if !cancellation_terminalizes_pending_input(events) {
+    if required(BoundaryKind::Cancellation) && !cancellation_terminalizes_pending_input(events) {
         missing.push("cancellation terminalizes a pending queued input");
     }
 
-    if !backend_fault_classification_semantics(events) {
+    if required(BoundaryKind::BackendFailure) && !backend_fault_classification_semantics(events) {
         missing.push("production backend fault classification");
     }
-    if !duplicate_delivery_semantics(events, summary) {
+    if required(BoundaryKind::DurableEffect) && !duplicate_delivery_semantics(events, summary) {
         missing.push("duplicate delivery/replay semantics");
     }
-    if !protocol_terminal_state_semantics(events, summary) {
+    if !duplicate_free_stream_finalization(events, summary)
+        || (required(BoundaryKind::ProviderMutation)
+            && !protocol_terminal_state_semantics(events, summary))
+    {
         missing.push("provider/protocol terminal state semantics");
     }
 

@@ -973,7 +973,8 @@ fn critic_named_contracts_reject_generic_proxy_fact_backings() {
 fn state_machine_semantic_oracle_checks_contract_outcomes_not_presence() {
     let summary = semantic_summary();
     let events = semantic_events();
-    let verdict = state_machine_semantic_invariants(&events, &summary);
+    let verdict =
+        state_machine_semantic_invariants(&events, &summary, &WorkloadExpectations::default());
     assert_eq!(verdict.status, crate::trace::OracleStatus::Passed);
     assert_eq!(verdict.oracle_id, STATE_MACHINE_SEMANTIC_INVARIANTS_ORACLE);
 
@@ -987,7 +988,11 @@ fn state_machine_semantic_oracle_checks_contract_outcomes_not_presence() {
         .as_object_mut()
         .expect("observed object")
         .insert("cancel_outcome".to_string(), json!("not_found"));
-    let verdict = state_machine_semantic_invariants(&cancelled_not_terminal, &summary);
+    let verdict = state_machine_semantic_invariants(
+        &cancelled_not_terminal,
+        &summary,
+        &WorkloadExpectations::default(),
+    );
     assert_eq!(verdict.status, crate::trace::OracleStatus::Failed);
     assert!(
         verdict
@@ -1000,7 +1005,11 @@ fn state_machine_semantic_oracle_checks_contract_outcomes_not_presence() {
         !(event.kind == BoundaryKind::BackendFailure
             && event.payload.get("fault").and_then(Value::as_str) == Some("reply_lost"))
     });
-    let verdict = state_machine_semantic_invariants(&retry_not_terminal, &summary);
+    let verdict = state_machine_semantic_invariants(
+        &retry_not_terminal,
+        &summary,
+        &WorkloadExpectations::default(),
+    );
     assert_eq!(verdict.status, crate::trace::OracleStatus::Failed);
     assert!(
         verdict

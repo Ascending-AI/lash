@@ -86,7 +86,9 @@ impl GeneratedWorkload {
         .with_completion_counts(
             crate::oracles::SCHEDULER_OWNED_RUNTIME_COMPLETION_ORACLE_KINDS
                 .iter()
-                .map(|&kind| (kind, self.boundary_count(kind)))
+                .copied()
+                .chain([BoundaryKind::QueuedIngress])
+                .map(|kind| (kind, self.boundary_count(kind)))
                 .collect(),
         )
     }
@@ -111,6 +113,7 @@ pub fn generate_workload(
     let profile_kind = WorkloadProfile::parse(profile)?;
     let mut aliases = StableAliases::default();
     let mut rng = seed;
+    let weights = SwarmWeights::for_seed(seed);
     let session_count = profile_kind.session_count(&mut rng);
     let sessions = (0..session_count)
         .map(|index| {
@@ -127,11 +130,12 @@ pub fn generate_workload(
         seed,
         profile: profile.to_string(),
         profile_kind,
+        weights,
         rng,
         sessions,
         operations: Vec::new(),
     };
-    planner.plan_required_contracts();
+    planner.plan_selected_contracts();
     // Reserve budget for the suspend-session ingress boundaries so the total
     // generated boundary count still lands on `max_boundaries`.
     planner.plan_extra_transitions(max_boundaries.saturating_sub(SUSPEND_KINDS.len()));
@@ -267,6 +271,44 @@ impl WorkloadProfile {
             Self::Default => 4 + (next_seed(rng) as usize % 2),
             Self::Full => 4 + (next_seed(rng) as usize % 3),
         }
+    }
+}
+
+/// A seed chooses a feature subset and its relative frequencies before planning.
+/// Hash-derived high bits avoid the scheduler LCG's correlated low-bit draws.
+struct SwarmWeights([usize; 8]);
+
+impl SwarmWeights {
+    fn for_seed(seed: u64) -> Self {
+        let weights = std::array::from_fn(|feature| {
+            let draw = content_draw(seed, "swarm-weights", feature as u8);
+            match draw >> 62 {
+                0 => 0,
+                1 => 1,
+                2 => 4,
+                _ => 16,
+            }
+        });
+        let mut weights = Self(weights);
+        // Provider turns and observer snapshots establish the session histories.
+        weights.0[0] = weights.0[0].max(1);
+        weights.0[2] = weights.0[2].max(1);
+        weights
+    }
+
+    fn enabled(&self, feature: usize) -> bool {
+        self.0[feature] > 0
+    }
+
+    fn select(&self, draw: usize) -> usize {
+        let mut ticket = draw % self.0.iter().sum::<usize>();
+        for (feature, weight) in self.0.iter().copied().enumerate() {
+            if ticket < weight {
+                return feature;
+            }
+            ticket -= weight;
+        }
+        unreachable!("positive provider and observer weights bound the draw")
     }
 }
 
@@ -431,39 +473,38 @@ struct StateMachinePlanner {
     profile: String,
     profile_kind: WorkloadProfile,
     rng: u64,
+    weights: SwarmWeights,
     sessions: Vec<SessionPlan>,
     operations: Vec<PlannedOperation>,
 }
 
 impl StateMachinePlanner {
-    fn plan_required_contracts(&mut self) {
-        let provider_error_repair_session = 0usize;
-        let provider_error_operation =
-            self.plan_backend_failure(provider_error_repair_session, BackendFault::Refused);
-        self.plan_backend_retry(
-            provider_error_repair_session,
-            provider_error_operation,
-            BackendFault::Refused,
-        );
-        self.plan_backend_retry(
-            provider_error_repair_session,
-            provider_error_operation,
-            BackendFault::ReplyLost,
-        );
-        let first_provider_turn = self.plan_provider_turn(provider_error_repair_session);
-        self.plan_queue_cancel_pair(
-            provider_error_repair_session,
-            first_provider_turn,
-            QueuedIngressMode::ActiveTurn,
-        );
-        self.plan_observer_snapshot(provider_error_repair_session, first_provider_turn);
-        self.plan_tool(provider_error_repair_session);
-        self.plan_exec_code(provider_error_repair_session, 0);
-        self.plan_provider_turn_with_observer(provider_error_repair_session);
-        if self.profile_kind != WorkloadProfile::Fast {
-            self.plan_provider_turn_with_observer(provider_error_repair_session);
+    fn plan_selected_contracts(&mut self) {
+        if self.weights.enabled(3) {
+            let operation = self.plan_backend_failure(0, BackendFault::Refused);
+            self.plan_backend_retry(0, operation, BackendFault::Refused);
+            self.plan_backend_retry(0, operation, BackendFault::ReplyLost);
         }
-
+        // A mutation-only seed still needs a failure before its first provider
+        // completion; a backend fault is no longer a universal prerequisite.
+        if self.weights.enabled(4) {
+            self.plan_provider_mutation(0, "malformed_sse_chunk");
+        }
+        let first = self.plan_provider_turn(0);
+        if self.weights.enabled(1) {
+            self.plan_queue_cancel_pair(0, first, QueuedIngressMode::ActiveTurn);
+        }
+        self.plan_observer_snapshot(0, first);
+        if self.weights.enabled(5) {
+            self.plan_tool(0);
+        }
+        if self.weights.enabled(6) {
+            self.plan_exec_code(0, 0);
+        }
+        self.plan_provider_turn_with_observer(0);
+        if self.profile_kind != WorkloadProfile::Fast {
+            self.plan_provider_turn_with_observer(0);
+        }
         for session in 1..self.sessions.len() {
             self.plan_provider_turn_with_observer(session);
             self.plan_provider_turn_with_observer(session);
@@ -471,38 +512,35 @@ impl StateMachinePlanner {
                 self.plan_provider_turn_with_observer(session);
             }
         }
-        if self.sessions.len() > 1 {
-            let next_turn_session = 1;
-            let next_turn_ref = self.first_provider_turn_ref(next_turn_session);
-            self.plan_queue_cancel_pair(
-                next_turn_session,
-                next_turn_ref,
-                QueuedIngressMode::NextTurn,
-            );
+        if self.weights.enabled(1) && self.sessions.len() > 1 {
+            let first = self.first_provider_turn_ref(1);
+            self.plan_queue_cancel_pair(1, first, QueuedIngressMode::NextTurn);
         }
-
-        let primary = (self.next_usize() % self.sessions.len()).min(self.sessions.len() - 1);
+        let primary = self.next_usize() % self.sessions.len();
         let secondary = (primary + 1) % self.sessions.len();
         self.plan_observer_reconnect(primary);
-        let backend_retry_operation = self.plan_backend_failure(primary, BackendFault::Refused);
-        self.plan_backend_retry(primary, backend_retry_operation, BackendFault::Refused);
-        self.plan_backend_failure(secondary, BackendFault::ReplyLost);
-        self.plan_provider_mutation(primary, "malformed_sse_chunk");
-        self.plan_provider_mutation(secondary, "rate_limit_error_envelope");
-        self.plan_provider_mutation(primary, "dropped_terminal_event");
-        // The three classes above are required across all four provider parsers
-        // by the coverage and protocol-terminal-state oracles, so they stay
-        // anchored. Beyond them, seed-select one transport/HTTP perturbation
-        // class so every generated run also executes a socket disconnect, a
-        // response-start/chunk timeout, or a retryable 5xx through a live
-        // provider request.
-        let transport_mutation =
-            TRANSPORT_PROVIDER_MUTATIONS[self.next_usize() % TRANSPORT_PROVIDER_MUTATIONS.len()];
-        self.plan_provider_mutation(secondary, transport_mutation);
-        self.plan_tool(primary);
-        self.plan_exec_code(primary, 0);
-        self.plan_durable_effect(primary);
-        self.plan_durable_effect(secondary);
+        if self.weights.enabled(3) {
+            let operation = self.plan_backend_failure(primary, BackendFault::Refused);
+            self.plan_backend_retry(primary, operation, BackendFault::Refused);
+            self.plan_backend_failure(secondary, BackendFault::ReplyLost);
+        }
+        if self.weights.enabled(4) {
+            self.plan_provider_mutation(secondary, "rate_limit_error_envelope");
+            self.plan_provider_mutation(primary, "dropped_terminal_event");
+            let mutation = TRANSPORT_PROVIDER_MUTATIONS
+                [self.next_usize() % TRANSPORT_PROVIDER_MUTATIONS.len()];
+            self.plan_provider_mutation(secondary, mutation);
+        }
+        if self.weights.enabled(5) {
+            self.plan_tool(primary);
+        }
+        if self.weights.enabled(6) {
+            self.plan_exec_code(primary, 0);
+        }
+        if self.weights.enabled(7) {
+            self.plan_durable_effect(primary);
+            self.plan_durable_effect(secondary);
+        }
     }
 
     fn plan_extra_transitions(&mut self, max_boundaries: usize) {
@@ -511,7 +549,8 @@ impl StateMachinePlanner {
         while self.sessions.len() + self.operations.len() < target {
             let remaining = target - self.sessions.len() - self.operations.len();
             let session = self.next_usize() % self.sessions.len();
-            match self.next_usize() % 10 {
+            let draw = (next_seed(&mut self.rng) >> 32) as usize;
+            match self.weights.select(draw) {
                 0 if remaining >= 2 && self.can_plan_provider_turn(session) => {
                     self.plan_provider_turn_with_observer(session);
                 }
@@ -551,10 +590,6 @@ impl StateMachinePlanner {
                     self.plan_exec_code(session, exit_code);
                 }
                 7 => self.plan_durable_effect(session),
-                8 => self.plan_observer_reconnect(session),
-                _ if remaining >= 2 && self.can_plan_provider_turn(session) => {
-                    self.plan_provider_turn_with_observer(session);
-                }
                 _ => self.plan_observer_reconnect(session),
             }
         }
@@ -1165,6 +1200,49 @@ fn hex_digest(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Swarm seeds must select different feature subsets even without an extra budget.
+    #[test]
+    fn seed_swarm_varies_operational_spines_and_reproduces() {
+        let kinds = [
+            BoundaryKind::QueuedIngress,
+            BoundaryKind::BackendFailure,
+            BoundaryKind::ProviderMutation,
+            BoundaryKind::Tool,
+            BoundaryKind::ExecCode,
+            BoundaryKind::DurableEffect,
+        ];
+        let mut spines = std::collections::BTreeSet::new();
+        for seed in 0..64 {
+            let workload = generate_workload(seed, "fast", 0).expect("workload");
+            assert_eq!(
+                workload,
+                generate_workload(seed, "fast", 0).expect("replay")
+            );
+            let extra = generate_workload(seed, "fast", 256).expect("extra workload");
+            for kind in kinds {
+                if workload.boundary_count(kind) == 0 {
+                    assert_eq!(extra.boundary_count(kind), 0, "disabled feature {kind:?}");
+                }
+            }
+            spines.insert(kinds.map(|kind| workload.boundary_count(kind) > 0));
+        }
+        assert!(
+            spines.len() >= 8,
+            "swarm seeds must explore feature subsets, observed {} spines",
+            spines.len()
+        );
+        for index in 0..kinds.len() {
+            assert!(
+                spines.iter().any(|spine| spine[index]),
+                "feature never enabled"
+            );
+            assert!(
+                spines.iter().any(|spine| !spine[index]),
+                "feature never disabled"
+            );
+        }
+    }
 
     /// Seeds vary the transition schedule independently of generated identities and text.
     #[test]

@@ -121,6 +121,7 @@ pub(super) async fn drive_generated_workload(
         &mut store,
         workload.seed,
         world.checkpoint_write_collector(),
+        &workload.expectations(),
     )
     .await?;
     // The generated lane owns both runtime-turn and attributed contract-proof

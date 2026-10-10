@@ -764,3 +764,115 @@ fn scheduler_owned_runtime_completion_oracle_keeps_presence_floor_when_undeclare
         verdict.message
     );
 }
+
+/// Fleet coverage is the union of completed seeds, with diversity and no empty success.
+#[test]
+fn fleet_operational_coverage_requires_the_union_and_different_spines() {
+    let mut fleet = FleetCoverage::default();
+    assert!(
+        !fleet.verdict().is_passed(),
+        "an empty fleet cannot certify coverage"
+    );
+    let mut first = semantic_summary();
+    first.sessions[0].exec_code_outputs.clear();
+    first.durable_effects.clear();
+    let cases = [
+        (
+            BoundaryKind::ProviderMutation,
+            json!({"mutation": "malformed_sse_chunk"}),
+            json!({}),
+        ),
+        (
+            BoundaryKind::ProviderMutation,
+            json!({"mutation": "mid_stream_disconnect"}),
+            json!({}),
+        ),
+        (
+            BoundaryKind::BackendFailure,
+            json!({"fault": "refused"}),
+            json!({"attempt": 1}),
+        ),
+        (
+            BoundaryKind::ProviderEvent,
+            json!({"turn_boundary_id": "a"}),
+            json!({}),
+        ),
+        (
+            BoundaryKind::ProviderEvent,
+            json!({"turn_boundary_id": "b"}),
+            json!({}),
+        ),
+        (
+            BoundaryKind::Tool,
+            json!({"suspend_resume": true}),
+            json!({}),
+        ),
+    ];
+    let events = cases
+        .into_iter()
+        .enumerate()
+        .map(|(index, (kind, payload, observed))| {
+            delivered_with_payload(
+                index,
+                &format!("first-{index}"),
+                "session-001",
+                kind,
+                payload,
+                observed,
+            )
+        })
+        .collect::<Vec<_>>();
+    let contracts = all_scenario_contracts()
+        .map(|contract| {
+            OracleVerdict::passed(
+                SCENARIO_CONTRACT_ORACLE.with_id(&scenario_contract_oracle_id(contract)),
+                "checked contract",
+            )
+        })
+        .collect::<Vec<_>>();
+    fleet.observe(&events, &first, &contracts);
+    assert!(
+        !fleet.verdict().is_passed(),
+        "one incomplete spine must fail"
+    );
+    let second = semantic_summary();
+    let events = vec![
+        delivered_with_payload(
+            0,
+            "second-mutation",
+            "session-001",
+            BoundaryKind::ProviderMutation,
+            json!({"mutation": "rate_limit_error_envelope"}),
+            json!({}),
+        ),
+        delivered_with_payload(
+            1,
+            "second-retry",
+            "session-001",
+            BoundaryKind::BackendFailure,
+            json!({"fault": "reply_lost"}),
+            json!({"attempt": 2}),
+        ),
+        delivered_with_payload(
+            2,
+            "second-durable",
+            "session-001",
+            BoundaryKind::DurableEffect,
+            json!({}),
+            json!({"runtime_effect": {"local_executor_called": true,
+                "redrive_local_executor_called": false}, "redrive_served_recorded_result": true,
+                "execution_count": 1, "replay_count": 1}),
+        ),
+    ];
+    fleet.observe(&events, &second, &[]);
+    assert!(fleet.verdict().is_passed(), "{}", fleet.verdict().message);
+    assert_eq!(
+        fleet.verdict().oracle_id,
+        FLEET_OPERATIONAL_COVERAGE_ORACLE.id
+    );
+
+    let mut uniform = FleetCoverage::default();
+    uniform.observe(&events, &second, &contracts);
+    uniform.observe(&events, &second, &contracts);
+    assert!(uniform.verdict().message.contains("different spines"));
+}

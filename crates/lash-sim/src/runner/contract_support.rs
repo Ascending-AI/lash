@@ -8,11 +8,12 @@ pub(super) async fn append_contract_execution_boundaries(
     store: &mut ModelStore,
     seed: u64,
     checkpoint_writes: CheckpointWriteCollector,
+    expectations: &WorkloadExpectations,
 ) -> Result<(), FixedScriptRunnerError> {
     let start_sequence = events.len();
     let mut scheduler = BoundaryScheduler::with_events(
         seed ^ 0x5e_3a_11_ce_c0_de,
-        contract_execution_boundaries(events, &checkpoint_writes).await?,
+        contract_execution_boundaries(events, &checkpoint_writes, expectations).await?,
     );
     while let Some(mut delivered) = scheduler.deliver_next_with(|event| store.apply_boundary(event))
     {
@@ -55,6 +56,7 @@ pub(super) type TurnMachineContractExecutor = fn() -> Result<Value, FixedScriptR
 async fn contract_execution_boundaries(
     events: &[crate::scheduler::DeliveredBoundary],
     checkpoint_writes: &CheckpointWriteCollector,
+    expectations: &WorkloadExpectations,
 ) -> Result<Vec<BoundaryEvent>, FixedScriptRunnerError> {
     let mut next_at = events
         .iter()
@@ -64,6 +66,9 @@ async fn contract_execution_boundaries(
         .saturating_add(1);
     let mut proof_events = Vec::new();
     for row in STANDARD_CONTRACT_ROWS {
+        if !crate::oracles::scenario_contract_applies(row.semantic_oracle, expectations) {
+            continue;
+        }
         let execution = contract_execution_payload(row, (row.execute)()?)?;
         proof_events.push(fixed_contract_execution_boundary(
             events, next_at, row, execution,
@@ -71,13 +76,16 @@ async fn contract_execution_boundaries(
         next_at = next_at.saturating_add(1);
     }
     for row in RLM_CONTRACT_ROWS {
+        if !crate::oracles::scenario_contract_applies(row.semantic_oracle, expectations) {
+            continue;
+        }
         let execution = contract_execution_payload(row, (row.execute)()?)?;
         proof_events.push(fixed_contract_execution_boundary(
             events, next_at, row, execution,
         )?);
         next_at = next_at.saturating_add(1);
     }
-    for execution in agent_contract_executions().await? {
+    for execution in agent_contract_executions(expectations).await? {
         let boundary =
             fixed_contract_execution_boundary(events, next_at, execution.row, execution.payload)?;
         for mut write in execution.checkpoint_writes {

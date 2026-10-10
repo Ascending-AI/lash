@@ -931,7 +931,7 @@ fn generated_sim_profile_writes_trace_replay_and_provider_artifacts() {
             )
     );
     assert!(report.oracle_verdicts.iter().any(|verdict| {
-        verdict.oracle_id == "sim.oracle.operational-coverage.v1"
+        verdict.oracle_id == "sim.oracle.fleet-operational-coverage.v1"
             && verdict.status == OracleStatus::Passed
     }));
     assert!(tmp.path().join(GENERATED_SIM_SUMMARY).exists());
@@ -1710,4 +1710,50 @@ fn runtime_scenario_contracts_dispatch_to_contract_owned_facts() {
                 .all(|fact| fact.status == "passed" && !fact.boundary_ids.is_empty())
         );
     }
+}
+
+/// Narrow seeds retain their declared-delivery laws without a per-seed class floor.
+#[test]
+fn swarm_narrow_seed_runs_without_per_seed_operational_coverage() {
+    let trace =
+        run_on_sim_harness_stack("swarm-narrow-seed", SIM_HARNESS_STACK_LIMIT_BYTES, || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(FixedScriptRunnerError::Io)?;
+            runtime.block_on(run_generated_workload_for_fixture(
+                generate_workload(0, "fast-random", 72)?,
+                "swarm-law",
+            ))
+        })
+        .expect("narrow seed executes its selected contracts");
+    assert_eq!(
+        trace
+            .expectations
+            .declared_completion_count(BoundaryKind::Tool),
+        Some(0)
+    );
+    assert_eq!(
+        trace
+            .expectations
+            .declared_completion_count(BoundaryKind::BackendFailure),
+        Some(0)
+    );
+    assert_eq!(
+        trace
+            .expectations
+            .declared_completion_count(BoundaryKind::ProviderMutation),
+        Some(0)
+    );
+    assert!(trace.oracles.iter().all(OracleVerdict::is_passed));
+    assert!(
+        !trace
+            .oracles
+            .iter()
+            .any(|verdict| verdict.oracle_id.contains("operational-coverage"))
+    );
+    assert!(
+        trace.oracles.iter().any(|verdict| verdict.oracle_id
+            == crate::oracles::SCHEDULER_OWNED_RUNTIME_COMPLETION_ORACLE.id)
+    );
 }

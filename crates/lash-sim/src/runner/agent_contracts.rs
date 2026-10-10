@@ -89,21 +89,26 @@ await control.finish({
     Ok(result)
 }
 
-pub(super) async fn agent_contract_executions()
--> Result<Vec<AgentContractExecution>, FixedScriptRunnerError> {
+pub(super) async fn agent_contract_executions(
+    expectations: &WorkloadExpectations,
+) -> Result<Vec<AgentContractExecution>, FixedScriptRunnerError> {
     // Aggregating every fixed Agent execution is simulation-harness work used by
     // generated proof/minimizer packages. It may use the bounded harness stack;
     // individual product facade executions are separately probed at 2 MiB.
+    let expectations = expectations.clone();
     run_on_sim_harness_stack(
         "agent-contract-executions-aggregate",
         SIM_HARNESS_STACK_LIMIT_BYTES,
-        || {
+        move || {
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
                 .map_err(FixedScriptRunnerError::Io)?;
             let mut executions = Vec::new();
             for row in AGENT_CONTRACT_ROWS {
+                if !crate::oracles::scenario_contract_applies(row.semantic_oracle, &expectations) {
+                    continue;
+                }
                 let collector = CheckpointWriteCollector::default();
                 let result =
                     observe_contract_checkpoints(collector.clone(), || (row.execute)(&runtime))?;

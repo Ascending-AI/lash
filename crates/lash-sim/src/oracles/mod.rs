@@ -35,8 +35,8 @@ pub const OBSERVER_CONVERGENCE_ORACLE: crate::trace::OracleId<'static> =
     crate::trace::OracleId::model("sim.oracle.observer-convergence.v1");
 pub const OBSERVER_RECONNECT_ORACLE: crate::trace::OracleId<'static> =
     crate::trace::OracleId::real("sim.oracle.observer-reconnect.v1");
-pub const OPERATIONAL_COVERAGE_ORACLE: crate::trace::OracleId<'static> =
-    crate::trace::OracleId::model("sim.oracle.operational-coverage.v1");
+pub const FLEET_OPERATIONAL_COVERAGE_ORACLE: crate::trace::OracleId<'static> =
+    crate::trace::OracleId::model("sim.oracle.fleet-operational-coverage.v1");
 pub const PROVIDER_MUTATION_ORACLE: crate::trace::OracleId<'static> =
     crate::trace::OracleId::real("sim.oracle.provider-mutation-rejected.v1");
 pub const QUEUED_INGRESS_ORACLE: crate::trace::OracleId<'static> =
@@ -126,7 +126,9 @@ pub struct FrameSwitchSeedObservation {
 
 mod agent_contracts;
 mod contract_facts;
+mod fleet;
 mod frame_switch;
+pub(crate) use fleet::FleetCoverage;
 mod live_provider;
 mod mini_scenarios;
 mod recovery_and_scheduling;
@@ -160,9 +162,8 @@ pub use mini_scenarios::{
 };
 pub use recovery_and_scheduling::{
     HEALTHY_LONG_TURN_LIVENESS_ORACLE, SCHEDULER_OWNED_RUNTIME_COMPLETION_ORACLE_KINDS,
-    durable_effect_exactly_once, healthy_long_turn_liveness, operational_coverage,
-    scheduler_controlled_delivery, scheduler_owned_runtime_completions,
-    state_machine_semantic_invariants,
+    durable_effect_exactly_once, healthy_long_turn_liveness, scheduler_controlled_delivery,
+    scheduler_owned_runtime_completions, state_machine_semantic_invariants,
 };
 use rlm_contracts::*;
 use runtime_observation::*;
@@ -270,7 +271,8 @@ pub fn walk_generated_trace_oracles<S, V>(
 {
     macro_rules! battery {
         ($oracle_id:expr, $verdict:expr) => {
-            if !skip(&OracleSlot::Battery($oracle_id)) {
+            if battery_applies($oracle_id, expectations) && !skip(&OracleSlot::Battery($oracle_id))
+            {
                 let verdict = $verdict;
                 debug_assert_eq!(
                     verdict.oracle_id, $oracle_id,
@@ -292,11 +294,7 @@ pub fn walk_generated_trace_oracles<S, V>(
     );
     battery!(
         STATE_MACHINE_SEMANTIC_INVARIANTS_ORACLE,
-        state_machine_semantic_invariants(events, summary)
-    );
-    battery!(
-        OPERATIONAL_COVERAGE_ORACLE,
-        operational_coverage(events, summary)
+        state_machine_semantic_invariants(events, summary, expectations)
     );
     battery!(
         INGRESS_SESSION_OPENED_ORACLE,
@@ -429,7 +427,9 @@ pub fn walk_generated_trace_oracles<S, V>(
         mini_agent_parallel_spawn_join(events, summary)
     );
     for contract in all_scenario_contracts() {
-        if skip(&OracleSlot::ScenarioContract(contract)) {
+        if !scenario_contract_applies(contract.semantic_oracle, expectations)
+            || skip(&OracleSlot::ScenarioContract(contract))
+        {
             continue;
         }
         let verdict = scenario_contract_oracle(contract, events, summary, memo);
@@ -442,6 +442,87 @@ pub fn walk_generated_trace_oracles<S, V>(
             return;
         }
     }
+}
+
+/// Applicability is declared by the plan, never inferred from missing observations.
+/// The scheduler completion oracle still checks planned runtime completion counts first.
+fn battery_applies(id: crate::trace::OracleId<'_>, plan: &WorkloadExpectations) -> bool {
+    let kind = match id.id {
+        id if [
+            QUEUED_INGRESS_ORACLE.id,
+            SCENARIO_MINI_RUNTIME_QUEUED_HIDDEN_ORACLE.id,
+        ]
+        .contains(&id) =>
+        {
+            BoundaryKind::QueuedIngress
+        }
+        id if [
+            CANCELLATION_ORACLE.id,
+            SCENARIO_MINI_RUNTIME_CANCEL_IDLE_ORACLE.id,
+        ]
+        .contains(&id) =>
+        {
+            BoundaryKind::Cancellation
+        }
+        id if [
+            BACKEND_FAILURE_ORACLE.id,
+            SCENARIO_MINI_AGENT_CHILD_FAILURE_ORACLE.id,
+        ]
+        .contains(&id) =>
+        {
+            BoundaryKind::BackendFailure
+        }
+        id if [
+            PROVIDER_MUTATION_ORACLE.id,
+            SCENARIO_MINI_STANDARD_PROVIDER_ERROR_ORACLE.id,
+            SCENARIO_MINI_RLM_SCHEMA_REPAIR_ORACLE.id,
+        ]
+        .contains(&id) =>
+        {
+            BoundaryKind::ProviderMutation
+        }
+        id if [
+            TOOL_BOUNDARY_ORACLE.id,
+            SCENARIO_MINI_STANDARD_TOOL_REENTRY_ORACLE.id,
+        ]
+        .contains(&id) =>
+        {
+            BoundaryKind::Tool
+        }
+        id if [EXEC_CODE_ORACLE.id, SCENARIO_MINI_RLM_CELL_EXEC_ORACLE.id].contains(&id) => {
+            BoundaryKind::ExecCode
+        }
+        id if [
+            DURABLE_EFFECT_EXACTLY_ONCE_ORACLE.id,
+            SCENARIO_MINI_AGENT_DURABLE_INPUT_ORACLE.id,
+        ]
+        .contains(&id) =>
+        {
+            BoundaryKind::DurableEffect
+        }
+        _ => return true,
+    };
+    plan.declared_completion_count(kind) != Some(0)
+}
+
+pub(crate) fn scenario_contract_applies(semantic: &str, plan: &WorkloadExpectations) -> bool {
+    all_scenario_contracts()
+        .find(|contract| contract.semantic_oracle == semantic)
+        .is_some_and(|contract| {
+            contract.required_sim_evidence.iter().all(|evidence| {
+                let kind = match *evidence {
+                    "queued_ingress" => BoundaryKind::QueuedIngress,
+                    "cancellation" => BoundaryKind::Cancellation,
+                    "backend_failure" => BoundaryKind::BackendFailure,
+                    "provider_mutation" => BoundaryKind::ProviderMutation,
+                    "tool_result" => BoundaryKind::Tool,
+                    "exec_code" => BoundaryKind::ExecCode,
+                    "durable_effect" => BoundaryKind::DurableEffect,
+                    _ => return true,
+                };
+                plan.declared_completion_count(kind) != Some(0)
+            })
+        })
 }
 
 /// [`walk_generated_trace_oracles`] with nothing skipped, against a fresh fact

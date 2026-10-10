@@ -378,8 +378,21 @@ fn generated_multi_arm_plan(
     const PROFILE: &str = "fast-random";
     const MAX_BOUNDARIES: usize = 24;
 
-    let workload = crate::generator::generate_workload(seed, PROFILE, MAX_BOUNDARIES)
-        .map_err(|error| error.to_string())?;
+    // This dedicated fault lane needs both arms. Select a workload that declares
+    // them rather than imposing its coverage requirement on every swarm seed.
+    let mut workload_seed = seed;
+    let workload = loop {
+        let candidate = crate::generator::generate_workload(workload_seed, PROFILE, MAX_BOUNDARIES)
+            .map_err(|error| error.to_string())?;
+        if candidate
+            .expectations()
+            .declared_completion_count(crate::scheduler::BoundaryKind::BackendFailure)
+            .is_some_and(|count| count > 0)
+        {
+            break candidate;
+        }
+        workload_seed = crate::scheduler::next_seed(&mut workload_seed);
+    };
     let retryable = workload
         .boundaries
         .iter()
@@ -400,7 +413,7 @@ fn generated_multi_arm_plan(
         .ok_or_else(|| {
             "generated workload has no lost-reply backend-failure boundary".to_string()
         })?;
-    let faults = match workload.seed % 4 {
+    let faults = match seed % 4 {
         0 => [BackendFault::Refused, BackendFault::ReplyLost],
         1 => [BackendFault::ReplyLost, BackendFault::Refused],
         2 => [BackendFault::Refused, BackendFault::Refused],
@@ -424,11 +437,11 @@ fn generated_multi_arm_plan(
     ];
     Ok(BackendFaultCompositionPlan {
         schema: naming(backend).plan_schema.to_string(),
-        workload_seed: seed,
+        workload_seed,
         workload_profile: PROFILE.to_string(),
         workload_max_boundaries: MAX_BOUNDARIES,
         workload_id: workload.workload_id,
-        selection_policy: "the generated workload seed selects one of the four ordered pairs of commit faults; its first refused and first lost-reply backend boundaries supply arm identities; the kth selected arm faults the kth commit attempt".to_string(),
+        selection_policy: "the input seed selects one of four ordered fault pairs; deterministic seed draws select the first swarm workload with backend failures enabled and record its seed; its first refused and first lost-reply boundaries supply arm identities; the kth arm faults the kth commit attempt".to_string(),
         max_attempts: 2,
         arms,
     })

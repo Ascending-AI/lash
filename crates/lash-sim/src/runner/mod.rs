@@ -51,7 +51,7 @@ use crate::provider::{
     ProviderWireEvent, ProviderWireHeader, ProviderWireScript, ScriptedLlmHttpExchange,
     ScriptedLlmHttpTransport, ScriptedTransportSchedule,
 };
-use crate::provider_mutations::{ProviderMutationMatrixCache, is_transport_provider_mutation};
+use crate::provider_mutations::ProviderMutationMatrixCache;
 use crate::replay::{ReplayError, replay_trace};
 use crate::runtime_contracts::{
     RuntimeTurnObservation, require_passed, runtime_agent_frame_invariant_facts,
@@ -75,7 +75,7 @@ use crate::store::{
 };
 use crate::trace::{
     AbstractWorldView, OracleCensus, OracleStatus, OracleVerdict, SimulationTrace, TraceEventLine,
-    TraceIoError, write_event_lines, write_replay_report, write_trace,
+    TraceIoError, WorkloadExpectations, write_event_lines, write_replay_report, write_trace,
 };
 use lash_durable_test::SimClock;
 

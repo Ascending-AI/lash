@@ -3,53 +3,6 @@ use std::time::{Duration, Instant};
 use super::*;
 use crate::scheduler::PendingRuntimeBoundary;
 
-/// Anti-vacuity: across the whole generated seed set, the interleaving,
-/// suspend/resume, and transport-mutation boundary classes must EACH appear at
-/// least once. Several class oracles pass when their class is absent (you cannot
-/// interleave one session, a run with no suspend boundary has nothing to check,
-/// etc.); this lane-level guard fails loudly if a generator regression silently
-/// drops a class so those oracles can never pass vacuously across the run.
-fn assert_generated_class_coverage(
-    event_lines: &[TraceEventLine],
-    interleaving_depth_max: usize,
-) -> Result<(), FixedScriptRunnerError> {
-    if interleaving_depth_max < 2 {
-        return Err(FixedScriptRunnerError::Assertion(format!(
-            "no generated seed interleaved >= 2 live provider turns (peak {interleaving_depth_max}); the interleaving class is absent across the seed set"
-        )));
-    }
-    let suspend_resume = event_lines.iter().any(|line| {
-        line.event.observed.get("runtime_suspend").is_some()
-            || line
-                .event
-                .payload
-                .get("suspend_resume")
-                .and_then(Value::as_bool)
-                == Some(true)
-    });
-    if !suspend_resume {
-        return Err(FixedScriptRunnerError::Assertion(
-            "no suspend-resume boundary appeared across the generated seed set; the suspend/resume class is absent".to_string(),
-        ));
-    }
-    let transport_mutation = event_lines.iter().any(|line| {
-        line.event.kind == BoundaryKind::ProviderMutation
-            && line
-                .event
-                .observed
-                .get("mutation")
-                .or_else(|| line.event.payload.get("mutation"))
-                .and_then(Value::as_str)
-                .is_some_and(is_transport_provider_mutation)
-    });
-    if !transport_mutation {
-        return Err(FixedScriptRunnerError::Assertion(
-            "no transport provider mutation appeared across the generated seed set; the transport-mutation class is absent".to_string(),
-        ));
-    }
-    Ok(())
-}
-
 /// How a count-based generated run treats per-seed artifacts.
 ///
 /// `Evidence` writes the full per-seed artifact set (trace, replay report,
@@ -281,6 +234,7 @@ async fn run_generated_evidence_profile(
     let mut runtime_turn_proofs = 0;
     let mut interleaving_depth_max = 0;
     let mut interleaving_depth_min = usize::MAX;
+    let mut fleet = crate::oracles::FleetCoverage::default();
 
     // A time budget bounds the sweep between seeds: a seed that starts always
     // runs to completion, and the loop stops cleanly once the budget is spent.
@@ -300,6 +254,7 @@ async fn run_generated_evidence_profile(
                 trace.oracle.message.clone(),
             ));
         }
+        fleet.observe(&trace.events, &trace.final_summary, &trace.oracles);
         boundary_events += trace.events.len();
         runtime_turn_proofs += trace
             .events
@@ -385,7 +340,8 @@ async fn run_generated_evidence_profile(
             .clone(),
     );
 
-    assert_generated_class_coverage(&event_lines, interleaving_depth_max)?;
+    let fleet_verdict = fleet.verdict();
+    oracle_verdicts.push(fleet_verdict.clone());
     let events_sha256 = write_event_lines(&artifact_root.join(GENERATED_SIM_EVENTS), &event_lines)?;
     write_failure_artifact_shape(artifact_root)?;
 
@@ -406,18 +362,28 @@ async fn run_generated_evidence_profile(
                 .is_some()
         })
         .count();
-    let scenario_contract_slices =
-        write_scenario_contract_slices(artifact_root, &event_lines, &oracle_verdicts)?;
+    let scenario_contract_slices = if fleet_verdict.is_passed() {
+        write_scenario_contract_slices(artifact_root, &event_lines, &oracle_verdicts)?
+    } else {
+        Vec::new()
+    };
     let scenario_contract_slice_count = scenario_contract_slices.len();
-    let scenario_contract_packages = write_scenario_contract_packages(
-        artifact_root,
-        &event_lines,
-        &oracle_verdicts,
-        &replay_reports,
-    )?;
+    let scenario_contract_packages = if fleet_verdict.is_passed() {
+        write_scenario_contract_packages(
+            artifact_root,
+            &event_lines,
+            &oracle_verdicts,
+            &replay_reports,
+        )?
+    } else {
+        Vec::new()
+    };
     let scenario_contract_package_count = scenario_contract_packages.len();
-    let generated_backend_regression_fixtures =
-        write_generated_backend_regression_fixtures(artifact_root, &event_lines, &replay_reports)?;
+    let generated_backend_regression_fixtures = if fleet_verdict.is_passed() {
+        write_generated_backend_regression_fixtures(artifact_root, &event_lines, &replay_reports)?
+    } else {
+        Vec::new()
+    };
     let generated_backend_regression_fixture_count = generated_backend_regression_fixtures.len();
     let generated_runtime_provider_matrix = generated_runtime_provider_matrix(&event_lines);
     let summary_path = artifact_root.join(GENERATED_SIM_SUMMARY);
@@ -480,6 +446,14 @@ async fn run_generated_evidence_profile(
         summary_path: summary_path.clone(),
     };
     std::fs::write(&summary_path, serde_json::to_vec_pretty(&report)?)?;
+    if !fleet_verdict.is_passed() {
+        return Err(FixedScriptRunnerError::Assertion(format!(
+            "{} ({} completed seeds); coverage evidence: {}",
+            fleet_verdict.message,
+            reached_seeds,
+            summary_path.display()
+        )));
+    }
     Ok(report)
 }
 
@@ -547,6 +521,7 @@ async fn run_generated_search_profile(
     let mut model_store_sessions = 0usize;
     let mut interleaving_depth_max = 0usize;
     let mut interleaving_depth_min = usize::MAX;
+    let mut fleet = crate::oracles::FleetCoverage::default();
 
     // A time budget bounds the sweep between seeds: a seed that starts always
     // runs to completion, and the loop stops cleanly once the budget is spent.
@@ -563,6 +538,7 @@ async fn run_generated_search_profile(
             run_generated_workload(workload, &fixed_manifest.script_bundle_hash, &labels.shard)
                 .await?;
 
+        fleet.observe(&trace.events, &trace.final_summary, &trace.oracles);
         boundary_events += trace.events.len();
         runtime_turn_proofs += trace
             .events
@@ -739,6 +715,9 @@ async fn run_generated_search_profile(
         )));
     }
 
+    let fleet_verdict = fleet.verdict();
+    oracle_census.record(&fleet_verdict);
+    recorded_verdicts.push(fleet_verdict.clone());
     write_failure_artifact_shape(artifact_root)?;
     let generated_runtime_provider_matrix = finish_runtime_provider_matrix(provider_matrix_by_kind);
     let summary_path = artifact_root.join(GENERATED_SIM_SUMMARY);
@@ -801,6 +780,14 @@ async fn run_generated_search_profile(
         summary_path: summary_path.clone(),
     };
     std::fs::write(&summary_path, serde_json::to_vec_pretty(&report)?)?;
+    if !fleet_verdict.is_passed() {
+        return Err(FixedScriptRunnerError::Assertion(format!(
+            "{} ({} completed seeds); coverage evidence: {}",
+            fleet_verdict.message,
+            reached_seeds,
+            summary_path.display()
+        )));
+    }
     Ok(report)
 }
 
@@ -1047,7 +1034,7 @@ mod seed_tests {
         let tmp = tempfile::tempdir().expect("tempdir");
 
         // A spent budget stops the sweep before the first seed; the run still
-        // writes a summary so the caller can see how far it got.
+        // writes a summary and refuses fleet certification so the caller can see how far it got.
         let artifact_root = tmp.path().to_path_buf();
         let seeds = crate::quick_seed_sweep(4);
         let report = run_on_sim_harness_stack(
@@ -1070,19 +1057,24 @@ mod seed_tests {
                 ))
             },
         )
-        .expect("generated sim search with spent budget");
+        .expect_err("a spent budget cannot certify an empty fleet");
+        assert!(report.to_string().contains("completed swarm fleet missed"));
+        let report: Value = serde_json::from_slice(
+            &std::fs::read(tmp.path().join(GENERATED_SIM_SUMMARY)).expect("summary bytes"),
+        )
+        .expect("summary");
 
-        assert_eq!(report.mode, "search");
-        assert_eq!(report.time_budget_seconds, Some(0));
+        assert_eq!(report["mode"], "search");
+        assert_eq!(report["time_budget_seconds"], json!(0));
         // The shard still owns its selected seeds; none of them ran.
         assert_eq!(
-            report.counts.generated_seeds,
+            report["counts"]["generated_seeds"],
             (0..seeds)
                 .filter(|index| SimShard::new(1, 2).expect("shard").selects(*index))
                 .count()
         );
-        assert_eq!(report.counts.reached_seeds, 0);
-        assert_eq!(report.counts.boundary_events, 0);
+        assert_eq!(report["counts"]["reached_seeds"], 0);
+        assert_eq!(report["counts"]["boundary_events"], 0);
         assert!(tmp.path().join(GENERATED_SIM_SUMMARY).exists());
     }
 }
