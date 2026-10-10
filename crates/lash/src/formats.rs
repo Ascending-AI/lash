@@ -532,19 +532,24 @@ pub fn actor_state_surfaces() -> Vec<lash_core::durable_port::FormatSurface> {
 pub fn previous_actor_state_surfaces() -> Vec<lash_core::durable_port::FormatSurface> {
     #[cfg(feature = "rlm")]
     {
-        use lash_core::durable_port::FormatSurface;
         lash_vm_runtime::previous_kernel_version()
-            .map(|previous| {
-                vec![
-                    FormatSurface::new("kernel-parked-state", previous),
-                    FormatSurface::new("kernel-saved-function", KERNEL_SAVED_FUNCTION_VERSION),
-                    FormatSurface::new("rlm-snapshot", RLM_SNAPSHOT_VERSION),
-                ]
-            })
+            .map(kernel_actor_state_surfaces)
             .unwrap_or_default()
     }
     #[cfg(not(feature = "rlm"))]
     {
         Vec::new()
     }
+}
+
+/// [`actor_state_surfaces`] as a build that parks kernel runs under kernel
+/// version `kernel` declares them.
+#[cfg(feature = "rlm")]
+pub fn kernel_actor_state_surfaces(kernel: u32) -> Vec<lash_core::durable_port::FormatSurface> {
+    use lash_core::durable_port::FormatSurface;
+    vec![
+        FormatSurface::new("kernel-parked-state", kernel),
+        FormatSurface::new("kernel-saved-function", KERNEL_SAVED_FUNCTION_VERSION),
+        FormatSurface::new("rlm-snapshot", RLM_SNAPSHOT_VERSION),
+    ]
 }

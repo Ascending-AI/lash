@@ -111,6 +111,33 @@ pub(super) async fn read(
     }))
 }
 
+/// Every snapshot whose execution key starts with `prefix`, by key.
+pub(super) async fn under(
+    tx: &mut PgConnection,
+    prefix: &str,
+) -> Result<Vec<SnapshotRow>, DurableError> {
+    let rows = sqlx::query(SQL.under.sql())
+        .bind(prefix)
+        .fetch_all(crate::observed_sql::executor(&mut *tx))
+        .await
+        .map_err(sqlx_failure)?;
+    rows.iter()
+        .map(|row| {
+            let key: String = row.try_get(0).map_err(sqlx_failure)?;
+            let format_version: i64 = row.try_get(4).map_err(sqlx_failure)?;
+            Ok(SnapshotRow {
+                exec: ExecKey::parse(&key)
+                    .map_err(|error| super::corrupt("execution key", &error.0))?,
+                rev: revision(row.try_get(1).map_err(sqlx_failure)?)?,
+                snapshot_ref: row.try_get(2).map_err(sqlx_failure)?,
+                executable_identity: row.try_get(3).map_err(sqlx_failure)?,
+                format_version: integer::<u32>(format_version)?,
+                written_epoch: Epoch(row.try_get(5).map_err(sqlx_failure)?),
+            })
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

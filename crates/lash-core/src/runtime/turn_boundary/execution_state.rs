@@ -7,7 +7,7 @@ use crate::{Session, SessionError, StoreError};
 use super::RuntimeSessionState;
 
 #[derive(Debug, PartialEq, Eq)]
-pub(super) enum ExecutionStateUpdate {
+pub(in crate::runtime) enum ExecutionStateUpdate {
     Clean,
     Replace(crate::plugin::ExecutionStateCapture),
     /// The execution state is wiped. On a committed frame switch `carries`
@@ -19,7 +19,10 @@ pub(super) enum ExecutionStateUpdate {
 }
 
 impl ExecutionStateUpdate {
-    pub(super) fn apply(self, state: &mut RuntimeSessionState) -> Result<(), StoreError> {
+    pub(in crate::runtime) fn apply(
+        self,
+        state: &mut RuntimeSessionState,
+    ) -> Result<(), StoreError> {
         match self {
             Self::Clean => {}
             Self::Replace(snapshot) => state.set_execution_state_components(snapshot)?,
@@ -161,7 +164,7 @@ fn last_committed_frame(state: &RuntimeSessionState) -> Option<crate::FrameNodeI
 /// Take the turn's one execution-state capture. Called only from the final
 /// commit: a capture staged anywhere else would be speculative, because no
 /// earlier boundary writes to the store.
-pub(super) async fn capture_execution_state_update(
+pub(in crate::runtime) async fn capture_execution_state_update(
     session: &mut Session,
 ) -> Result<ExecutionStateUpdate, SessionError> {
     let Some(code_executor) = session.plugins().code_executor() else {

@@ -353,6 +353,15 @@ impl DurableStore for CountingStore {
     async fn actor(&self, actor: &ActorKey) -> Result<Option<ActorSnapshot>, DurableError> {
         self.inner.actor(actor).await
     }
+
+    async fn actors_in(
+        &self,
+        formats: &crate::FormatSet,
+        after: Option<&ActorKey>,
+        limit: usize,
+    ) -> Result<Vec<ActorKey>, DurableError> {
+        self.inner.actors_in(formats, after, limit).await
+    }
 }
 
 #[async_trait::async_trait]
@@ -389,6 +398,14 @@ impl DurableReads for CountingStore {
         exec: &domain::ExecKey,
     ) -> Result<Option<domain::SnapshotRow>, DurableError> {
         self.inner.snapshot(exec).await
+    }
+
+    async fn cell_snapshots(
+        &self,
+        session: &SessionId,
+        run: &TurnId,
+    ) -> Result<Vec<domain::SnapshotRow>, DurableError> {
+        self.inner.cell_snapshots(session, run).await
     }
 
     async fn pending_waits(&self, owner: &ActorKey) -> Result<Vec<domain::WaitRow>, DurableError> {

@@ -128,6 +128,27 @@ pub trait TurnServices: Send + Sync {
         Ok(None)
     }
 
+    /// Carry `session`, idle and in the session format set of an earlier
+    /// build this one carries forward, to this build's (ADR 0106 §2,
+    /// FIG-5787): what it holds is restored, recaptured and committed with
+    /// this build's session format set, outside a turn. Services that keep
+    /// no session state of their own record the format set alone.
+    ///
+    /// # Errors
+    ///
+    /// [`TurnError`] when the session does not restore under this build or
+    /// the commit is refused; nothing of it committed.
+    async fn carry_session(
+        &self,
+        cx: &ActorContext,
+        _session: &SessionId,
+    ) -> Result<(), TurnError> {
+        let mut tx = cx.begin().await?;
+        tx.stamp_formats(cx.backend().formats().session().clone());
+        cx.commit(tx, CommitLabel::SESSION_COMMAND).await?;
+        Ok(())
+    }
+
     /// How many next-turn inputs one of the session's runs takes: the
     /// host's installed queued-work batching. The default takes each input
     /// as its own run.
@@ -581,14 +602,16 @@ impl SessionActivation {
 
     /// One pass over the session's rows: admit a turn from its mail, run an
     /// unfinished turn to its commit over the head `heads` holds, or, with
-    /// nothing to do, stay hot ([`Pass::Idle`]) or release the actor when
-    /// `release`.
+    /// nothing to do, carry a session an earlier build left to this build's
+    /// formats (asked once per claim, as `carry_checked` records), stay hot
+    /// ([`Pass::Idle`]) or release the actor when `release`.
     async fn pass(
         &self,
         cx: &ActorContext,
         session: &SessionId,
         release: bool,
         heads: &mut HeadCache,
+        carry_checked: &mut bool,
     ) -> Result<Pass, TurnError> {
         // A turn's scope whose cascade a crash cut short is marked to its end
         // before anything else (L6b).
@@ -634,6 +657,20 @@ impl SessionActivation {
         let Some(row) = open else {
             // No unfinished turn: the mailbox says what runs next (L3s).
             let drain = drain_session_mail(cx, &mut tx, self.services.input_batching()).await?;
+            // An idle session an earlier build left is carried to this
+            // build's formats, once per claim, before it is let go: the
+            // operator's sweep wakes it for this (FIG-5787).
+            if drain.admit.is_none() && !*carry_checked {
+                *carry_checked = true;
+                if cx.holds_carried_session().await? {
+                    drop(tx);
+                    let carried = self.services.carry_session(cx, session).await;
+                    *carry_checked = carried.is_ok();
+                    carried?;
+                    heads.evict();
+                    return Ok(Pass::Again);
+                }
+            }
             return match drain.admit {
                 Some(admitted) if admitted.admission.is_turn() => {
                     // The turn's trace scope is retained by its admission,
@@ -868,6 +905,9 @@ impl Activation for SessionActivation {
         let mut idle_since = None;
         // The owner cache of the session's head, for this claim's epoch.
         let mut heads = HeadCache::default();
+        // Whether this claim asked if its idle session is to be carried to
+        // this build's formats (FIG-5787).
+        let mut carry_checked = false;
         // The passes in a row that failed with an error that does not pass
         // by itself: at the activation-loop budget the session parks
         // (FIG-5230), so a poison session holds no slot.
@@ -883,7 +923,8 @@ impl Activation for SessionActivation {
                 drain_release(&cx).await
             } else {
                 self.services.announce_head(&cx, &session).await;
-                self.pass(&cx, &session, release, &mut heads).await
+                self.pass(&cx, &session, release, &mut heads, &mut carry_checked)
+                    .await
             };
             if pass.is_ok() {
                 failed_passes = 0;

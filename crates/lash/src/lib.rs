@@ -165,6 +165,8 @@ pub mod render {
     pub use lash_render::*;
 }
 #[cfg(feature = "rlm")]
+mod kernel_migration;
+#[cfg(feature = "rlm")]
 /// RLM-specific turn-builder extensions.
 pub mod rlm;
 /// Reusable contracts for agent scenarios.

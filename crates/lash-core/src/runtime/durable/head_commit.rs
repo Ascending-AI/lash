@@ -1,6 +1,7 @@
 //! The session actor's head commits outside `turn.commit` (ADR 0132 §3,
-//! §14): a session command's (FIG-5230) and a context-pressure frame's
-//! open (FIG-5355).
+//! §14): a session command's (FIG-5230), a context-pressure frame's open
+//! (FIG-5355) and the carry of an idle session an earlier build wrote
+//! (FIG-5787).
 //!
 //! The caller builds the head commit. [`commit`] writes it as the session's
 //! own head commit ([`DomainWrite::SessionCommit`], the shape `turn.commit`
@@ -62,6 +63,23 @@ pub(crate) async fn commit(
     label: CommitLabel,
     metrics: &lash_trace::telemetry::metrics::TelemetryMetrics,
 ) -> Result<(), HeadCommitError> {
+    commit_in(owner, commit, label, metrics, None).await
+}
+
+/// [`commit`], recording in the same transaction that the session's state
+/// is written in `formats` from it on: the commit that carries a session an
+/// earlier build wrote to this build's formats (FIG-5787).
+///
+/// # Errors
+///
+/// As [`commit`].
+pub(crate) async fn commit_in(
+    owner: &ActorContext,
+    commit: RuntimeCommit,
+    label: CommitLabel,
+    metrics: &lash_trace::telemetry::metrics::TelemetryMetrics,
+    formats: Option<lash_durable::FormatSet>,
+) -> Result<(), HeadCommitError> {
     crate::store::admit_runtime_commit_budget(&commit, metrics).map_err(HeadCommitError::Store)?;
     let write = SessionCommitWrite {
         session: commit.session_id.clone(),
@@ -71,6 +89,9 @@ pub(crate) async fn commit(
     };
     let mut tx = owner.begin().await.map_err(HeadCommitError::Owner)?;
     tx.write(DomainWrite::SessionCommit(write));
+    if let Some(formats) = formats {
+        tx.stamp_formats(formats);
+    }
     let committed = owner.commit(tx, label).await;
     if let Err(DurableError::Domain(refusal)) = &committed
         && let Some(error) = refusal.session_commit_refusal()

@@ -32,9 +32,9 @@ use tokio_util::sync::CancellationToken;
 pub use documents::{DocumentStoreError, KernelDocuments};
 pub use migrate::{
     KernelMigrationRefusal, KernelMigrationSurvey, KernelMigrationSurveyError,
-    KernelStateMigration, PlannedMigration, RefusedKernelProcess, SealedKernelRefusal,
-    check_sealed_kernel, migrate_run, migrate_saved_function, migration_refusal, plan_migration,
-    survey_kernel_migration,
+    KernelStateMigration, PlannedMigration, RefusedKernelCell, RefusedKernelProcess,
+    SealedKernelRefusal, UnmigratedKernelSession, check_sealed_kernel, migrate_run,
+    migrate_saved_function, migration_refusal, plan_migration, survey_kernel_processes,
 };
 pub use run::with_definitions;
 pub use state::{KERNEL_RUN_STEP, KernelProcessDefinition, KernelProcessInput};

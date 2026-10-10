@@ -199,6 +199,15 @@ impl ExecKey {
         }
     }
 
+    /// The stored spelling every cell of `session`'s `run` starts with,
+    /// and no other key.
+    #[must_use]
+    pub fn turn_cells(session: &SessionId, run: &TurnId) -> String {
+        let mut prefix = stored("c", &[session.as_str(), run.as_str()]);
+        prefix.push('/');
+        prefix
+    }
+
     /// A stored spelling read back.
     ///
     /// # Errors

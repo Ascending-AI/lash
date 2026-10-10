@@ -33,7 +33,7 @@ use serde_json::{Value, json};
 /// version_surface = "coexist"
 /// format_outside_manifest = "operator CLI wire: gates a --json consumer, not state lash reopens"
 const LASHCTL_JSON_SCHEMA_VERSION: u32 = 1;
-const USAGE: &str = "usage: lashctl [--json] <migrate [--phase expand|backfill|contract] [--dry-run] | preflight [--processes-per-generation <n> --pool-max <n> --generations <n> --workers <n> --admin-headroom <n>] | stalled list <kind> [--after <id>] [--limit <n>] | stalled rearm <kind> <id> | deployment-status --accepting-new-work <bool> | kernel-migration list (recovery commands accept --sqlite-path <database-file>) | version>";
+const USAGE: &str = "usage: lashctl [--json] <migrate [--phase expand|backfill|contract] [--dry-run] | preflight [--processes-per-generation <n> --pool-max <n> --generations <n> --workers <n> --admin-headroom <n>] | stalled list <kind> [--after <id>] [--limit <n>] | stalled rearm <kind> <id> | deployment-status --accepting-new-work <bool> | kernel-migration list | kernel-migration run (recovery commands accept --sqlite-path <database-file>) | version>";
 
 #[derive(Clone, Copy)]
 enum Exit {
@@ -518,6 +518,7 @@ mod tests {
             vec!["stalled", "rearm", "artifact_cleanup", "delivery"],
             vec!["deployment-status", "--accepting-new-work", "false"],
             vec!["kernel-migration", "list"],
+            vec!["kernel-migration", "run"],
         ];
         for words in valid {
             assert!(
@@ -531,6 +532,7 @@ mod tests {
             vec!["deployment-status"],
             vec!["kernel-migration"],
             vec!["kernel-migration", "list", "extra"],
+            vec!["kernel-migration", "run", "extra"],
         ] {
             let error = parse(words.iter().map(|word| (*word).to_owned()))
                 .err()

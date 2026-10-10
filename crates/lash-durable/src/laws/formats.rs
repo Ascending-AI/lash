@@ -1,9 +1,12 @@
 //! The format laws (ADR 0106 §1, §2; L11, FIG-5187): the claim filter, the
-//! cancel of an actor no node decodes, the fleet-format gate and the
-//! draining node.
+//! cancel of an actor no node decodes, the fleet-format gate, the draining
+//! node, and the listings an operator's kernel migration survey reads
+//! (FIG-5787).
+
+use lash_sansio::{SessionId, TurnId};
 
 use super::{LawBroken, LawOutcome};
-use crate::domain::CANCEL_MAIL;
+use crate::domain::{CANCEL_MAIL, CellId, DomainWrite, ExecKey, SnapshotWrite};
 use crate::{
     ActorKey, ActorState, ClaimPurpose, CommitLabel, DurableError, DurableStore, FormatSet,
     MailKind, MailTx, NodeId, NodeLease, NodeSpec, Release, fleet_writable,
@@ -223,4 +226,109 @@ pub async fn a_draining_node_claims_nothing_and_releases_ready(
             "marking a released node draining answered {other:?}"
         ))),
     }
+}
+
+/// The listings an operator's survey and sweep read (FIG-5787): the actors
+/// in one format set that have not ended, by key and a page at a time; and
+/// the cell snapshots of one turn, which no other turn's cell, no turn of
+/// another session and no process joins.
+///
+/// # Errors
+///
+/// The first rule broken.
+pub async fn actors_in_a_format_set_and_a_turns_cells_are_listed(
+    store: &dyn DurableStore,
+) -> LawOutcome {
+    let lister = node(store, "lister", vec![old()]).await?;
+    let first = key(ActorKey::session("listed-a"))?;
+    let second = key(ActorKey::process("listed-b"))?;
+    let ended = key(ActorKey::session("listed-c"))?;
+    let elsewhere = key(ActorKey::session("listed-d"))?;
+    for actor in [&first, &second, &ended] {
+        create(store, actor, old()).await?;
+    }
+    create(store, &elsewhere, new()).await?;
+    let claimed = store.claim(&lister, 8).await?;
+    super::ensure!(
+        claimed.len() == 3,
+        "the lister did not claim the three actors in its set: {claimed:?}"
+    );
+    let session = SessionId::try_from("listed-a".to_owned())
+        .map_err(|_| LawBroken("session id listed-a".to_owned()))?;
+    let other_session = SessionId::try_from("listed-a2".to_owned())
+        .map_err(|_| LawBroken("session id listed-a2".to_owned()))?;
+    let turn = |name: &str| {
+        TurnId::try_from(name.to_owned()).map_err(|_| LawBroken(format!("turn id {name}")))
+    };
+    let (run, later_run) = (turn("run-1")?, turn("run-10")?);
+    let cell = |session: &SessionId, run: &TurnId, cell: &str| {
+        ExecKey::Cell(session.clone(), run.clone(), CellId::new(cell))
+    };
+    let process = lash_sansio::ProcessId::fixture("listed-b");
+    for claim in &claimed {
+        let mut tx = store.begin(&claim.actor, claim.epoch).await?;
+        if claim.actor == first {
+            for exec in [
+                cell(&session, &run, "cell-2"),
+                cell(&session, &run, "cell-1"),
+                cell(&session, &later_run, "cell-1"),
+                cell(&other_session, &run, "cell-1"),
+                ExecKey::Process(process.clone()),
+            ] {
+                tx.write(DomainWrite::Snapshot(SnapshotWrite::Put {
+                    snapshot_ref: exec.stored(),
+                    exec,
+                    expected: None,
+                    executable_identity: "law".to_owned(),
+                    format_version: 1,
+                }));
+            }
+        }
+        let release = if claim.actor == ended {
+            Release::Terminal
+        } else {
+            Release::Idle
+        };
+        tx.ack_seen().give_up(release);
+        store.commit(tx, CommitLabel::new("law.release")).await?;
+    }
+
+    // By key: a process's key sorts before a session's.
+    let listed = store.actors_in(&old(), None, 8).await?;
+    super::ensure!(
+        listed == [second.clone(), first.clone()],
+        "the actors listed in the older set were {listed:?}, not the two that have not ended"
+    );
+    let page = store.actors_in(&old(), None, 1).await?;
+    super::ensure!(page == [second.clone()], "the first page was {page:?}");
+    let page = store.actors_in(&old(), Some(&second), 1).await?;
+    super::ensure!(page == [first.clone()], "the second page was {page:?}");
+    let page = store.actors_in(&old(), Some(&first), 1).await?;
+    super::ensure!(page.is_empty(), "the page after the last was {page:?}");
+    let listed = store.actors_in(&new(), None, 8).await?;
+    super::ensure!(
+        listed == [elsewhere.clone()],
+        "the actors listed in the newer set were {listed:?}"
+    );
+
+    let cells = store.cell_snapshots(&session, &run).await?;
+    let keys: Vec<ExecKey> = cells.iter().map(|row| row.exec.clone()).collect();
+    super::ensure!(
+        keys == [
+            cell(&session, &run, "cell-1"),
+            cell(&session, &run, "cell-2")
+        ],
+        "the cells listed of one turn were {keys:?}"
+    );
+    super::ensure!(
+        cells
+            .iter()
+            .all(|row| row.snapshot_ref == row.exec.stored() && row.format_version == 1),
+        "a listed cell's snapshot is not the one written: {cells:?}"
+    );
+    let none = store
+        .cell_snapshots(&session, &turn("run-unknown")?)
+        .await?;
+    super::ensure!(none.is_empty(), "a turn with no cell listed {none:?}");
+    Ok(())
 }

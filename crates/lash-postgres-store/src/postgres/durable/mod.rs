@@ -1365,6 +1365,27 @@ impl DurableStore for PostgresDurableStore {
         })
         .await
     }
+
+    async fn actors_in(
+        &self,
+        formats: &FormatSet,
+        after: Option<&ActorKey>,
+        limit: usize,
+    ) -> Result<Vec<ActorKey>, DurableError> {
+        self.within(CommitCapacity::Work, async {
+            let rows = sqlx::query(SQL.actor.in_formats.sql())
+                .bind(formats.as_str())
+                .bind(after.map_or("", ActorKey::as_str))
+                .bind(i64::try_from(limit).unwrap_or(i64::MAX))
+                .fetch_all(crate::observed_sql::executor(&self.pools.work))
+                .await
+                .map_err(sqlx_failure)?;
+            rows.iter()
+                .map(|row| actor_key(&get::<String>(row, 0)?))
+                .collect()
+        })
+        .await
+    }
 }
 
 impl PostgresDurableStore {

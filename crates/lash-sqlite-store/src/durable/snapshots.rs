@@ -114,6 +114,39 @@ pub(super) fn read(tx: &Connection, exec: &ExecKey) -> Answer<Option<SnapshotRow
     Ok(Ok(row))
 }
 
+/// Every snapshot whose execution key starts with `prefix`, by key.
+pub(super) fn under(tx: &Connection, prefix: &str) -> Answer<Vec<SnapshotRow>> {
+    let rows = tx
+        .prepare_cached(SQL.under.sql())?
+        .query_map([prefix], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                revision(row.get(1)?)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, u32>(4)?,
+                Epoch(row.get(5)?),
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows
+        .into_iter()
+        .map(
+            |(key, rev, snapshot_ref, executable_identity, format_version, written_epoch)| {
+                Ok(SnapshotRow {
+                    exec: ExecKey::parse(&key)
+                        .map_err(|error| super::corrupt("execution key", &error.0))?,
+                    rev,
+                    snapshot_ref,
+                    executable_identity,
+                    format_version,
+                    written_epoch,
+                })
+            },
+        )
+        .collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

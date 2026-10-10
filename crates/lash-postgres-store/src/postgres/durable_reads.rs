@@ -57,6 +57,18 @@ impl DurableReads for PostgresDurableStore {
         .await
     }
 
+    async fn cell_snapshots(
+        &self,
+        session: &lash_sansio::SessionId,
+        run: &lash_sansio::TurnId,
+    ) -> Result<Vec<SnapshotRow>, DurableError> {
+        let prefix = ExecKey::turn_cells(session, run);
+        self.within(CommitCapacity::Work, async {
+            snapshots::under(&mut *self.reader().await?, &prefix).await
+        })
+        .await
+    }
+
     async fn pending_waits(&self, owner: &ActorKey) -> Result<Vec<WaitRow>, DurableError> {
         self.within(CommitCapacity::Work, async {
             waits::pending(&mut *self.reader().await?, owner).await

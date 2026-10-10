@@ -1243,6 +1243,27 @@ impl DurableStore for SqliteDurableStore {
         })
         .await
     }
+
+    async fn actors_in(
+        &self,
+        formats: &lash_durable::FormatSet,
+        after: Option<&ActorKey>,
+        limit: usize,
+    ) -> Result<Vec<ActorKey>, DurableError> {
+        let formats = formats.as_str().to_owned();
+        let after = after.map_or_else(String::new, |actor| actor.as_str().to_owned());
+        let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+        self.read(move |tx| {
+            let keys = tx
+                .prepare_cached(SQL.actor.in_formats.sql())?
+                .query_map(rusqlite::params![formats, after, limit], |row| {
+                    row.get::<_, String>(0)
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(keys.iter().map(|key| actor_key(key)).collect())
+        })
+        .await
+    }
 }
 
 #[async_trait::async_trait]
@@ -1283,6 +1304,15 @@ impl DurableReads for SqliteDurableStore {
     async fn snapshot(&self, exec: &ExecKey) -> Result<Option<SnapshotRow>, DurableError> {
         let exec = exec.clone();
         self.read(move |tx| snapshots::read(tx, &exec)).await
+    }
+
+    async fn cell_snapshots(
+        &self,
+        session: &lash_sansio::SessionId,
+        run: &lash_sansio::TurnId,
+    ) -> Result<Vec<SnapshotRow>, DurableError> {
+        let prefix = ExecKey::turn_cells(session, run);
+        self.read(move |tx| snapshots::under(tx, &prefix)).await
     }
 
     async fn pending_waits(&self, owner: &ActorKey) -> Result<Vec<WaitRow>, DurableError> {

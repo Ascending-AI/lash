@@ -427,16 +427,42 @@ pub struct RefusedKernelProcess {
     pub refusal: KernelMigrationRefusal,
 }
 
-/// What a kernel migration would refuse among a deployment's processes.
+/// The cell a session's open turn stopped in, which the next kernel
+/// version's build would not carry.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct RefusedKernelCell {
+    /// The turn it stopped.
+    pub turn: lash_core::TurnId,
+    /// The cell.
+    pub cell: String,
+    pub refusal: KernelMigrationRefusal,
+}
+
+/// A session still holding state in the kernel version before this build's
+/// newest: its bindings and saved functions, and the cell its open turn
+/// stopped in, if any.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct UnmigratedKernelSession {
+    pub session: lash_core::SessionId,
+    /// Each cell of its open turn this build would not resume, with why.
+    pub refused: Vec<RefusedKernelCell>,
+}
+
+/// What a kernel migration would refuse among a deployment's processes and
+/// sessions.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize)]
 pub struct KernelMigrationSurvey {
     /// How many unfinished kernel processes were checked.
     pub checked: usize,
-    /// How many of them are still in a kernel version before this build's
-    /// newest: carried when a node of this build next claims them.
+    /// How many processes and sessions are still in a kernel version before
+    /// this build's newest: each is carried when a node of this build next
+    /// claims it, or when `lashctl kernel-migration run` wakes it.
     pub unmigrated: usize,
-    /// Each one this build would park instead of carrying, with why.
+    /// Each process this build would park instead of carrying, with why.
     pub refused: Vec<RefusedKernelProcess>,
+    /// Each session still in the earlier kernel version, with the cells of
+    /// its open turn this build would not resume.
+    pub sessions: Vec<UnmigratedKernelSession>,
     /// Each library function with no counterpart in the next version, by
     /// identity, with the processes whose documents list it.
     pub retired_functions: std::collections::BTreeMap<lash_kernel_doc::FunctionId, Vec<ProcessId>>,
@@ -455,13 +481,14 @@ pub enum KernelMigrationSurveyError {
 
 /// Checks every unfinished kernel process of `backend` against the kernel
 /// migration this build ships, with `functions` as its library, and lists
-/// those it would refuse. It reads the store and writes nothing: an
-/// operator runs it with the next build's `lashctl` before the upgrade.
+/// those it would refuse. It reads the store and writes nothing: the
+/// process half of the survey `lashctl kernel-migration list` prints, whose
+/// session half needs the code executor's cell checkpoints (`lash::vm`).
 ///
 /// # Errors
 ///
 /// [`KernelMigrationSurveyError`]: a store did not answer.
-pub async fn survey_kernel_migration(
+pub async fn survey_kernel_processes(
     backend: &lash_core::Backend,
     functions: &FunctionRegistry,
 ) -> Result<KernelMigrationSurvey, KernelMigrationSurveyError> {

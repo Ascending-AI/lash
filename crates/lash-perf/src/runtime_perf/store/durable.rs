@@ -92,6 +92,15 @@ impl DurableStore for RuntimePerfDurableStore {
     async fn actor(&self, actor: &ActorKey) -> Result<Option<ActorSnapshot>, DurableError> {
         self.inner.actor(actor).await
     }
+
+    async fn actors_in(
+        &self,
+        formats: &lash_durable::FormatSet,
+        after: Option<&ActorKey>,
+        limit: usize,
+    ) -> Result<Vec<ActorKey>, DurableError> {
+        self.inner.actors_in(formats, after, limit).await
+    }
 }
 
 #[async_trait::async_trait]
@@ -122,6 +131,14 @@ impl DurableReads for RuntimePerfDurableStore {
 
     async fn snapshot(&self, exec: &ExecKey) -> Result<Option<SnapshotRow>, DurableError> {
         self.inner.snapshot(exec).await
+    }
+
+    async fn cell_snapshots(
+        &self,
+        session: &lash_sansio::SessionId,
+        run: &lash_sansio::TurnId,
+    ) -> Result<Vec<SnapshotRow>, DurableError> {
+        self.inner.cell_snapshots(session, run).await
     }
 
     async fn pending_waits(&self, owner: &ActorKey) -> Result<Vec<WaitRow>, DurableError> {

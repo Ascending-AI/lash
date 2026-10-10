@@ -57,6 +57,25 @@ pub struct BuildFormats {
     /// left is claimed, and what it holds in that build's formats is
     /// carried forward where it is restored.
     carried_sessions: Vec<FormatSet>,
+    /// The sets of earlier builds this build no longer decodes nor carries
+    /// forward (ADR 0115 §3.5): an actor still in one would be stranded, so
+    /// a node of this build does not start while there is one.
+    retired: Vec<FormatSet>,
+    /// The operator command that has a node of the build before this one
+    /// carry the actors in a retired set forward.
+    sweep: Option<String>,
+}
+
+/// The set of a process whose engine state is in `format`, by a build whose
+/// actors also hold `extra`.
+fn process_set(format: &EngineStateFormat, extra: &[FormatSurface]) -> FormatSet {
+    FormatSet::of(
+        ActorKind::Process,
+        tool_state()
+            .into_iter()
+            .chain([FormatSurface::engine(&format.kind, format.version)])
+            .chain(extra.iter().cloned()),
+    )
 }
 
 /// The set a session's state is written in by a build whose actors also
@@ -82,20 +101,12 @@ fn session_set(extra: &[FormatSurface]) -> FormatSet {
 
 impl BuildFormats {
     /// The sets of a build with `engines`, whose actors also hold `extra`.
-    pub(crate) fn new(engines: &[EngineStateFormat], extra: &[FormatSurface]) -> Self {
+    #[must_use]
+    pub fn new(engines: &[EngineStateFormat], extra: &[FormatSurface]) -> Self {
         let session = session_set(extra);
         let processes = engines
             .iter()
-            .map(|format| {
-                let set = FormatSet::of(
-                    ActorKind::Process,
-                    tool_state()
-                        .into_iter()
-                        .chain([FormatSurface::engine(&format.kind, format.version)])
-                        .chain(extra.iter().cloned()),
-                );
-                (format.kind.clone(), set)
-            })
+            .map(|format| (format.kind.clone(), process_set(format, extra)))
             .collect();
         Self {
             session,
@@ -106,6 +117,8 @@ impl BuildFormats {
                 .collect(),
             carried: BTreeMap::new(),
             carried_sessions: Vec::new(),
+            retired: Vec::new(),
+            sweep: None,
         }
     }
 
@@ -113,13 +126,10 @@ impl BuildFormats {
     /// `format`, an earlier build's: `format` with the tool state and
     /// `extra`, the other formats that build's actors held.
     pub(crate) fn carrying(mut self, format: &EngineStateFormat, extra: &[FormatSurface]) -> Self {
-        let set = FormatSet::of(
-            ActorKind::Process,
-            tool_state()
-                .into_iter()
-                .chain([FormatSurface::engine(&format.kind, format.version)])
-                .chain(extra.iter().cloned()),
-        );
+        let set = process_set(format, extra);
+        if self.retired.contains(&set) {
+            return self;
+        }
         self.carried.insert(format.clone(), set);
         let session = session_set(extra);
         if session != self.session && !self.carried_sessions.contains(&session) {
@@ -128,11 +138,55 @@ impl BuildFormats {
         self
     }
 
-    /// These sets, still carrying what `earlier` carried.
+    /// These sets, retiring the sets of an earlier build whose process
+    /// engine state is in `format` and whose actors also held `extra`: this
+    /// build neither decodes nor carries them forward, and `sweep` is the
+    /// operator command that has a node of the build before it carry an
+    /// actor still in one forward.
+    pub(crate) fn retiring(
+        mut self,
+        format: &EngineStateFormat,
+        extra: &[FormatSurface],
+        sweep: &str,
+    ) -> Self {
+        let process = process_set(format, extra);
+        let session = session_set(extra);
+        self.carried.retain(|_, set| *set != process);
+        self.carried_sessions.retain(|set| *set != session);
+        for set in [process, session] {
+            if set != self.session
+                && !self.processes.values().any(|own| *own == set)
+                && !self.retired.contains(&set)
+            {
+                self.retired.push(set);
+            }
+        }
+        self.sweep = Some(sweep.to_owned());
+        self
+    }
+
+    /// These sets, still carrying and retiring what `earlier` did.
     pub(crate) fn keeping(mut self, earlier: &Self) -> Self {
         self.carried = earlier.carried.clone();
         self.carried_sessions = earlier.carried_sessions.clone();
+        self.retired = earlier.retired.clone();
+        self.sweep = earlier.sweep.clone();
         self
+    }
+
+    /// The sets of earlier builds this build no longer decodes nor carries
+    /// forward: a node of this build does not start while an actor is in
+    /// one (ADR 0115 §3.5).
+    #[must_use]
+    pub fn retired(&self) -> &[FormatSet] {
+        &self.retired
+    }
+
+    /// The operator command that carries an actor in a
+    /// [`retired`](Self::retired) set forward, when this build retires any.
+    #[must_use]
+    pub fn sweep(&self) -> Option<&str> {
+        self.sweep.as_deref()
     }
 
     /// The set of a process whose engine state is in `format`: this

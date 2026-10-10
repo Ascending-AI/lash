@@ -435,6 +435,15 @@ pub trait DurableReads: Send + Sync {
     /// V0, then L7: the latest snapshot of `exec`.
     async fn snapshot(&self, exec: &ExecKey) -> Result<Option<SnapshotRow>, DurableError>;
 
+    /// FIG-5787: the latest snapshot of each cell of `session`'s `run`, by
+    /// execution key: what an operator's survey reads of a turn stopped in
+    /// a cell.
+    async fn cell_snapshots(
+        &self,
+        session: &SessionId,
+        run: &TurnId,
+    ) -> Result<Vec<SnapshotRow>, DurableError>;
+
     /// L5: every pending wait `owner` owns.
     async fn pending_waits(&self, owner: &ActorKey) -> Result<Vec<WaitRow>, DurableError>;
 

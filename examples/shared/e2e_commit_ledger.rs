@@ -336,6 +336,14 @@ impl DurableReads for LedgerStore {
         self.inner.snapshot(exec).await
     }
 
+    async fn cell_snapshots(
+        &self,
+        session: &lash::SessionId,
+        run: &lash::TurnId,
+    ) -> Result<Vec<SnapshotRow>, DurableError> {
+        self.inner.cell_snapshots(session, run).await
+    }
+
     async fn pending_waits(&self, owner: &ActorKey) -> Result<Vec<WaitRow>, DurableError> {
         self.inner.pending_waits(owner).await
     }
@@ -517,5 +525,14 @@ impl DurableStore for LedgerStore {
 
     async fn actor(&self, actor: &ActorKey) -> Result<Option<ActorSnapshot>, DurableError> {
         self.inner.actor(actor).await
+    }
+
+    async fn actors_in(
+        &self,
+        formats: &FormatSet,
+        after: Option<&ActorKey>,
+        limit: usize,
+    ) -> Result<Vec<ActorKey>, DurableError> {
+        self.inner.actors_in(formats, after, limit).await
     }
 }

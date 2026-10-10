@@ -24,6 +24,7 @@ mod snapshot;
 mod trace;
 
 pub(crate) use carry::KernelCarry;
+pub use carry::cell_migration_refusal;
 pub(crate) use envelope::{check_cell_snapshot, snapshot_tool_calls};
 pub(crate) use host::site_label;
 pub use host::{TOOL_ARGUMENTS, TOOL_CALL_LIMIT, TOOL_FAILED, UNKNOWN_EFFECT};

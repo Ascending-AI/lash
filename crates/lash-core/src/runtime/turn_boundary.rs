@@ -11,7 +11,8 @@ mod execution_state;
 mod materialize;
 use execution_state::*;
 pub(in crate::runtime) use execution_state::{
-    SeedCarries, committed_frame_transition, derive_seed_carries,
+    ExecutionStateUpdate, SeedCarries, capture_execution_state_update, committed_frame_transition,
+    derive_seed_carries,
 };
 mod durable_commit;
 mod recorded_assembly;
@@ -45,7 +46,7 @@ fn derive_commit_node_ids(
     Ok(node_id_mapping)
 }
 
-fn execution_state_capture_error(err: crate::SessionError) -> StoreError {
+pub(in crate::runtime) fn execution_state_capture_error(err: crate::SessionError) -> StoreError {
     match err {
         crate::SessionError::Plugin(crate::PluginError::Runtime(error)) => {
             StoreError::TurnOutcomeMaterializationRefused {

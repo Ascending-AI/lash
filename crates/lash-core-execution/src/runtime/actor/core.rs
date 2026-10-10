@@ -315,6 +315,30 @@ impl ActorContext {
         Ok(lash_durable::fleet_writable(&candidates, &live) == Some(formats.session()))
     }
 
+    /// Whether the claimed actor, a session, is in the session set of an
+    /// earlier build that this build carries forward, and is carried now
+    /// ([`Self::carries_sessions`]): such a session with no turn to run is
+    /// carried outside a turn (FIG-5787). The actor's row is read
+    /// unfenced; only its owner moves its format set, so what it reads is
+    /// this owner's own.
+    ///
+    /// # Errors
+    ///
+    /// The store's.
+    pub async fn holds_carried_session(&self) -> Result<bool, DurableError> {
+        let formats = self.backend().formats();
+        if formats.carried_sessions().is_empty() {
+            return Ok(false);
+        }
+        let Some(row) = self.durable()?.actor(self.actor()).await? else {
+            return Ok(false);
+        };
+        if !formats.carried_sessions().contains(&row.formats) {
+            return Ok(false);
+        }
+        self.carries_sessions().await
+    }
+
     /// Whether the node this context's claim runs on is draining: the
     /// activation releases the actor at its next committed phase (ADR 0106
     /// §1). False for a context that owns no claim.

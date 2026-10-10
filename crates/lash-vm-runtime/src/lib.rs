@@ -23,7 +23,7 @@ pub use binding::{
 pub use boundary::{BoundaryError, HostBoundary, HostEffect, type_of_schema};
 pub use formats::{
     KERNEL_DOCUMENT_SCHEMA_VERSION, KERNEL_PARKED_STATE_VERSION, KERNEL_SAVED_FUNCTION_VERSION,
-    LASH_KERNEL_VERSION, previous_kernel_version,
+    LASH_KERNEL_VERSION, previous_kernel_version, retired_kernel_version,
 };
 pub use host::ParentHost;
 /// Why a kernel migration does not carry a document or a parked run.
@@ -43,11 +43,11 @@ pub use process::{
     KernelDocuments, KernelEngineSteps, KernelMigrationRefusal, KernelMigrationSurvey,
     KernelMigrationSurveyError, KernelProcessDefinition, KernelProcessEngine,
     KernelProcessFailureCode, KernelProcessInput, KernelRecordedSettings, KernelRunPolicy,
-    KernelStateMigration, LASH_VM_ENGINE_KIND, PlannedMigration, RefusedKernelProcess,
-    SealedKernelRefusal, TOOL_FAILED, WorkflowAdmissionOutcome, WorkflowAdmissionRefusal,
-    WorkflowAdmissionRequest, WorkflowDocument, WorkflowDocumentError, WorkflowEnvironment,
-    WorkflowEnvironmentRequest, admit_kernel_process, check_sealed_kernel, definition_draft,
-    definition_of_entry, entry_signature, kernel_process_engine_registration, migrate_run,
-    migrate_saved_function, migration_refusal, plan_migration, survey_kernel_migration,
-    with_definitions,
+    KernelStateMigration, LASH_VM_ENGINE_KIND, PlannedMigration, RefusedKernelCell,
+    RefusedKernelProcess, SealedKernelRefusal, TOOL_FAILED, UnmigratedKernelSession,
+    WorkflowAdmissionOutcome, WorkflowAdmissionRefusal, WorkflowAdmissionRequest, WorkflowDocument,
+    WorkflowDocumentError, WorkflowEnvironment, WorkflowEnvironmentRequest, admit_kernel_process,
+    check_sealed_kernel, definition_draft, definition_of_entry, entry_signature,
+    kernel_process_engine_registration, migrate_run, migrate_saved_function, migration_refusal,
+    plan_migration, survey_kernel_processes, with_definitions,
 };

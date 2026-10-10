@@ -105,4 +105,17 @@ pub enum DurableError {
     /// The store failed.
     #[error(transparent)]
     Store(StoreFailure),
+    /// The node's build no longer decodes format sets that `unmigrated`
+    /// actors are still in (ADR 0115 §3.5, drain by release): serving, it
+    /// would strand them, so it does not start. `command` is the operator
+    /// command that has a node of the build before it carry them forward.
+    #[error(
+        "{unmigrated} actors are still in format sets this build no longer decodes: run `{command}` with a node of the build before this one serving, then start this one"
+    )]
+    Unmigrated {
+        /// How many actors are still in a retired format set.
+        unmigrated: u64,
+        /// The operator command that carries them forward.
+        command: String,
+    },
 }

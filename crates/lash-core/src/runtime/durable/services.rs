@@ -323,6 +323,29 @@ impl TurnServices for RuntimeTurnServices {
         Ok(())
     }
 
+    async fn carry_session(&self, cx: &ActorContext, session: &SessionId) -> Result<(), TurnError> {
+        let mut runtime = self.runtimes.open(session).await?;
+        let controller = cx.scoped(AdmittedScope::session_operation(
+            session.clone(),
+            "session-carry",
+        ))?;
+        let commit = CommitBase::of(&runtime);
+        // The carry commits once, as its last step: a reader that finds the
+        // head past this base waits for the publication below (FIG-5605).
+        let _committing = commit
+            .as_ref()
+            .map(|commit| self.published.committing(commit));
+        runtime
+            .carry_session_state(&controller, cx.backend().formats().session().clone())
+            .await?;
+        if let Some(commit) = commit {
+            commit
+                .publish(self.runtimes.live_replay().as_ref(), &self.published, None)
+                .await;
+        }
+        Ok(())
+    }
+
     fn input_batching(&self) -> &dyn InputBatching {
         self
     }

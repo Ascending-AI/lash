@@ -57,19 +57,65 @@ fn engine_format(kernel: KernelVersion) -> String {
     format!("engine/{KIND}@{}", kernel.number())
 }
 
-/// A core over `stores`: of build N when `previous`, else of build N+1.
-fn core(stores: &Arc<dyn StoreSet>, previous: bool, boot: &str) -> (lash::Backend, lash::LashCore) {
-    serving(stores, previous, boot, &[])
+/// Which build a core of these laws is.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Build {
+    /// Build N, whose engine writes kernel version 1.
+    N,
+    /// Build N+1, the synthetic successor, which carries build N's state
+    /// forward.
+    NPlus1,
+    /// The build after N+1, which closes the window N+1 opened: it retires
+    /// build N's formats and carries nothing of them forward.
+    Closing,
 }
 
-/// [`core`], serving a model that answers each call with the next of
-/// `cells`, a TypeScript cell.
+/// A core over `stores`: of build N when `previous`, else of build N+1.
+fn core(stores: &Arc<dyn StoreSet>, previous: bool, boot: &str) -> (lash::Backend, lash::LashCore) {
+    let build = if previous { Build::N } else { Build::NPlus1 };
+    serving(stores, build, boot, &[])
+}
+
+/// A core of `build` over `stores`, serving a model that answers each call
+/// with the next of `cells`, a TypeScript cell.
 fn serving(
     stores: &Arc<dyn StoreSet>,
-    previous: bool,
+    build: Build,
     boot: &str,
     cells: &[&str],
 ) -> (lash::Backend, lash::LashCore) {
+    serving_under(
+        stores,
+        build,
+        boot,
+        cells,
+        lash::durable::DurableSettings::standard(),
+    )
+}
+
+/// [`serving`], its node letting go of a session with nothing to do soon,
+/// so a law can leave one idle, which no node claims until something wakes
+/// it.
+fn idling(
+    stores: &Arc<dyn StoreSet>,
+    build: Build,
+    boot: &str,
+    cells: &[&str],
+) -> (lash::Backend, lash::LashCore) {
+    let mut settings = lash::durable::DurableSettings::standard();
+    settings.idle_evict = Duration::from_millis(200);
+    serving_under(stores, build, boot, cells, settings)
+}
+
+/// [`serving`] under the durable `settings`.
+fn serving_under(
+    stores: &Arc<dyn StoreSet>,
+    build: Build,
+    boot: &str,
+    cells: &[&str],
+    settings: lash::durable::DurableSettings,
+) -> (lash::Backend, lash::LashCore) {
+    let previous = build == Build::N;
     let replies = Arc::new(std::sync::Mutex::new(
         cells
             .iter()
@@ -97,11 +143,11 @@ fn serving(
         })
         .build()
         .into_handle();
-    let builder = lash::durable::DurableBackendBuilder::new(Arc::clone(stores));
-    let builder = if previous {
-        builder.previous_build()
-    } else {
-        builder
+    let builder = lash::durable::DurableBackendBuilder::new(Arc::clone(stores)).config(settings);
+    let builder = match build {
+        Build::N => builder.previous_build(),
+        Build::NPlus1 => builder,
+        Build::Closing => builder.closing_window(),
     };
     let backend = builder.build().expect("the backend assembles");
     let factory = lash::rlm::RlmProtocolPluginFactory::new(
@@ -467,7 +513,7 @@ async fn a_session_cell_parked_by_build_n_is_claimed_migrated_and_resumed_by_bui
             async move {
                 let (old_backend, old) = serving(
                     &stores,
-                    true,
+                    Build::N,
                     "build-n",
                     &[
                         "function double(n: number) { return n * 2; }\nfinish('bound');",
@@ -526,7 +572,12 @@ async fn a_session_cell_parked_by_build_n_is_claimed_migrated_and_resumed_by_bui
     // Build N+1 reaps the dead node, claims the session and carries the
     // cell before the cell runs again: the session is in its format set
     // while no later turn has been admitted.
-    let (new_backend, new) = serving(&stores, false, "build-n-plus-1", &["finish('after');"]);
+    let (new_backend, new) = serving(
+        &stores,
+        Build::NPlus1,
+        "build-n-plus-1",
+        &["finish('after');"],
+    );
     let mut carried = None;
     for _ in 0..6000 {
         let row = new_backend
@@ -566,4 +617,329 @@ async fn a_session_cell_parked_by_build_n_is_claimed_migrated_and_resumed_by_bui
         "the parked cell resumed under build N+1 to its answer: {finishes:?}"
     );
     assert_eq!(finishes.last(), Some(&serde_json::json!("after")));
+}
+
+/// `worker()` of [`WORKER`], its sleep an hour long: a process that no node
+/// claims within a law's time unless something wakes it.
+fn long_sleeper() -> String {
+    WORKER.replace("do sleep 1500", "do sleep 3600000")
+}
+
+/// The row of `actor` once its format set is no longer `written`.
+async fn carried_from(
+    backend: &lash::Backend,
+    actor: &ActorKey,
+    written: &lash_core::durable_port::FormatSet,
+) -> lash_core::durable_port::ActorSnapshot {
+    let mut last = None;
+    for _ in 0..6000 {
+        last = backend
+            .durable()
+            .actor(actor)
+            .await
+            .expect("the actor row is read");
+        if let Some(row) = last.clone().filter(|row| row.formats != *written) {
+            return row;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("{actor} was not carried out of {written:?} within a minute: {last:?}")
+}
+
+/// Session `id` of `core`, which binds a function in one turn and then has
+/// nothing to do: its node lets go of it, and its row is idle in the format
+/// set `core`'s build writes, which it answers.
+async fn idle_session(
+    backend: &lash::Backend,
+    core: &lash::LashCore,
+    id: &str,
+) -> lash_core::durable_port::FormatSet {
+    let bound = session(core, id)
+        .await
+        .send(lash::TurnInput::text("bind the function"))
+        .output()
+        .await
+        .expect("the binding turn");
+    assert!(bound.is_success(), "the binding turn: {bound:?}");
+    let actor = ActorKey::session(id).expect("a session actor key");
+    in_state(backend, &actor, ActorState::Idle).await.formats
+}
+
+/// The binding turn of [`idle_session`].
+const BIND: &str = "function double(n: number) { return n * 2; }\nfinish('bound');";
+
+/// FIG-5787: a process that waits on a long timer and a session that runs
+/// no turn are not claimed by build N+1 within its window, so they would
+/// be stranded under the build that closes it. The operator's sweep wakes
+/// both: a node of build N+1 claims each and carries it to its own formats,
+/// the process at its claim and the idle session outside a turn. Once
+/// build N+1 drains, the closing build, which no longer reads build N's
+/// formats, starts, decodes the process and runs a turn of the session
+/// that calls the function it saved under build N.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_idle_process_and_an_idle_session_are_swept_by_build_n_plus_1_and_read_by_the_closing_build()
+ {
+    const SESSION: &str = "kernel-sweep-session";
+    let stores: Arc<dyn StoreSet> = Arc::new(
+        lash_sqlite_store::SqliteStoreSet::memory()
+            .await
+            .expect("an in-memory store set opens"),
+    );
+    let (old_backend, old) = idling(&stores, Build::N, "build-n", &[BIND]);
+    let payload = payload(&old_backend, &long_sleeper()).await;
+    let process = start(&old, payload).await;
+    let process_actor = ActorKey::process(process.as_str()).expect("a process actor key");
+    let session_actor = ActorKey::session(SESSION).expect("a session actor key");
+    let process_written = waiting(&old_backend, &process_actor).await.formats;
+    let session_written = idle_session(&old_backend, &old, SESSION).await;
+    old.drain().await.expect("build N's node drains");
+    let listed = survey(&old_backend).await;
+    assert_eq!(listed["unmigrated"], 2, "{listed}");
+    assert_eq!(
+        listed["sessions"],
+        serde_json::json!([{"session": SESSION, "refused": []}]),
+        "{listed}"
+    );
+
+    let (new_backend, new) = serving(&stores, Build::NPlus1, "build-n-plus-1", &[]);
+    let swept = lash::vm::sweep_kernel_migration(&new_backend)
+        .await
+        .expect("the sweep wakes what is left");
+    assert_eq!(
+        serde_json::to_value(&swept).expect("the sweep encodes"),
+        serde_json::json!({"processes": 1, "sessions": 1})
+    );
+    let process_row = carried_from(&new_backend, &process_actor, &process_written).await;
+    let session_row = carried_from(&new_backend, &session_actor, &session_written).await;
+    assert!(
+        process_row
+            .formats
+            .as_str()
+            .contains(&engine_format(KernelVersion::SyntheticNext)),
+        "the process is in build N+1's format set: {:?}",
+        process_row.formats
+    );
+    assert_eq!(
+        &session_row.formats,
+        new_backend.formats().session(),
+        "the idle session is in build N+1's format set"
+    );
+    let listed = survey(&new_backend).await;
+    assert_eq!(listed["unmigrated"], 0, "{listed}");
+    new.drain().await.expect("build N+1's node drains");
+
+    let (closing_backend, closing) = serving(
+        &stores,
+        Build::Closing,
+        "build-closing",
+        &["finish(double(4));"],
+    );
+    // The closing build reads the swept process: woken, its node claims
+    // it, decodes its state and lets it wait for its timer again, where a
+    // state it did not read would park it.
+    let before = new_backend
+        .durable()
+        .actor(&process_actor)
+        .await
+        .expect("the actor row is read")
+        .expect("the process has its actor");
+    let mut wake = lash_core::durable_port::MailTx::new();
+    wake.wake(process_actor.clone());
+    closing_backend
+        .commit_mail(wake, lash_core::durable_port::CommitLabel::MAIL_PROCESS)
+        .await
+        .expect("the process is woken");
+    let mut last = None;
+    for _ in 0..6000 {
+        let row = closing_backend
+            .durable()
+            .actor(&process_actor)
+            .await
+            .expect("the actor row is read")
+            .expect("the process has its actor");
+        assert_ne!(
+            row.state,
+            ActorState::Parked,
+            "the closing build did not read the swept process: {row:?}"
+        );
+        if row.revision > before.revision && row.state == ActorState::Waiting {
+            last = Some(row);
+            break;
+        }
+        last = Some(row);
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(
+        last.as_ref()
+            .is_some_and(|row| row.revision > before.revision && row.state == ActorState::Waiting),
+        "the closing build's node did not take the woken process up: {last:?}"
+    );
+    let read = tokio::time::timeout(
+        Duration::from_secs(60),
+        session(&closing, SESSION)
+            .await
+            .send(lash::TurnInput::text("call it"))
+            .output(),
+    )
+    .await
+    .expect("the closing build's turn ends within a minute")
+    .expect("the closing build's turn");
+    assert!(read.is_success(), "the closing build's turn: {read:?}");
+    assert_eq!(
+        cell_finishes(&read).last(),
+        Some(&serde_json::json!(8)),
+        "the closing build called the function the session saved under build N"
+    );
+}
+
+/// FIG-5787 (ADR 0115 §3.5, drain by release): the build that closes the
+/// window does not start while a session is still in build N's formats,
+/// and its refusal names how many and the command that carries them; once
+/// the sweep has a node of build N+1 carry the session, it starts and runs
+/// the session's turn.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_closing_build_refuses_to_start_while_a_session_is_unmigrated_and_starts_after_the_sweep()
+ {
+    const SESSION: &str = "kernel-gate-session";
+    let stores: Arc<dyn StoreSet> = Arc::new(
+        lash_sqlite_store::SqliteStoreSet::memory()
+            .await
+            .expect("an in-memory store set opens"),
+    );
+    let session_actor = ActorKey::session(SESSION).expect("a session actor key");
+    let (old_backend, old) = idling(&stores, Build::N, "build-n", &[BIND]);
+    let written = idle_session(&old_backend, &old, SESSION).await;
+    old.drain().await.expect("build N's node drains");
+
+    let (_refusing_backend, refusing) = serving(&stores, Build::Closing, "build-closing", &[]);
+    let stopped = tokio::time::timeout(Duration::from_secs(60), refusing.node_stopped())
+        .await
+        .expect("the closing build's node stops within a minute");
+    match stopped {
+        Some(Err(lash::durable::DurableError::Unmigrated {
+            unmigrated,
+            command,
+        })) => {
+            assert_eq!(unmigrated, 1);
+            assert_eq!(command, lash::vm::KERNEL_MIGRATION_SWEEP);
+        }
+        other => panic!("the closing build started over an unmigrated session: {other:?}"),
+    }
+    drop(refusing);
+
+    let (new_backend, new) = serving(&stores, Build::NPlus1, "build-n-plus-1", &[]);
+    lash::vm::sweep_kernel_migration(&new_backend)
+        .await
+        .expect("the sweep wakes the session");
+    carried_from(&new_backend, &session_actor, &written).await;
+    new.drain().await.expect("build N+1's node drains");
+
+    let (_closing_backend, closing) = serving(
+        &stores,
+        Build::Closing,
+        "build-closing",
+        &["finish(double(21));"],
+    );
+    let read = tokio::time::timeout(
+        Duration::from_secs(60),
+        session(&closing, SESSION)
+            .await
+            .send(lash::TurnInput::text("call it"))
+            .output(),
+    )
+    .await
+    .expect("the closing build's turn ends within a minute")
+    .expect("the closing build's turn");
+    assert!(read.is_success(), "the closing build's turn: {read:?}");
+    assert_eq!(cell_finishes(&read).last(), Some(&serde_json::json!(42)));
+}
+
+/// FIG-5787: `lashctl kernel-migration list` names a session whose open
+/// turn stopped in a cell the migration would refuse, with the typed
+/// reason. The cell awaits a promise it made of a sleep, so its run is
+/// parked inside the dialect's `ts.await`, a library function's kernel
+/// body, which the synthetic migration declares it cannot carry.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_listing_names_a_refused_session_cell_with_its_reason() {
+    const SESSION: &str = "kernel-refused-cell-session";
+    let stores: Arc<dyn StoreSet> = Arc::new(
+        lash_sqlite_store::SqliteStoreSet::memory()
+            .await
+            .expect("an in-memory store set opens"),
+    );
+    let actor = ActorKey::session(SESSION).expect("a session actor key");
+    // Build N runs on a runtime of its own, which the law shuts down under
+    // it once the cell is parked: a node lets go of a sleeping cell only by
+    // dying.
+    let build_n = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .expect("build N's runtime");
+    let backend = build_n
+        .spawn({
+            let stores = Arc::clone(&stores);
+            let actor = actor.clone();
+            async move {
+                let (old_backend, old) = serving(
+                    &stores,
+                    Build::N,
+                    "build-n",
+                    &["const nap = sleep(60000);\nawait nap;\nfinish('woke');"],
+                );
+                let opened = session(&old, SESSION).await;
+                tokio::spawn(async move {
+                    let _ = opened
+                        .send(lash::TurnInput::text("await the nap"))
+                        .output()
+                        .await;
+                });
+                // The cell parks in its await: its snapshot is committed
+                // under the open turn until the sleep is over.
+                let id = lash::SessionId::parse(SESSION).expect("a session id");
+                let reads = old_backend.durable();
+                let mut last = None;
+                for _ in 0..3000 {
+                    last = reads.turn(&id).await.expect("the turn row is read");
+                    if let Some(turn) = &last
+                        && !reads
+                            .cell_snapshots(&id, &turn.run)
+                            .await
+                            .expect("the cell snapshots are read")
+                            .is_empty()
+                    {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+                let parked = match &last {
+                    Some(turn) => reads
+                        .cell_snapshots(&id, &turn.run)
+                        .await
+                        .expect("the cell snapshots are read"),
+                    None => Vec::new(),
+                };
+                assert!(
+                    !parked.is_empty(),
+                    "the cell did not park within half a minute: {last:?}, {:?}",
+                    reads.actor(&actor).await
+                );
+                std::mem::forget(old);
+                old_backend
+            }
+        })
+        .await
+        .expect("build N parks the cell");
+    build_n.shutdown_background();
+
+    let survey = survey(&backend).await;
+    assert_eq!(survey["unmigrated"], 1, "{survey}");
+    let listed = &survey["sessions"][0];
+    assert_eq!(listed["session"], SESSION, "{survey}");
+    let refused = &listed["refused"][0];
+    assert_eq!(refused["refusal"]["refused"], "parked", "{survey}");
+    assert_eq!(
+        refused["refusal"]["refusal"]["reason"], "site_not_carried",
+        "{survey}"
+    );
 }

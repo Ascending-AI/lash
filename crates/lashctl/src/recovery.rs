@@ -24,11 +24,17 @@ pub(super) enum Command {
     DeploymentStatus {
         accepting_new_work: bool,
     },
-    /// The kernel processes this build's kernel migration would refuse,
-    /// each with its typed reason, and each retired library function with
-    /// the processes that depend on it. Run with the next build's `lashctl`
-    /// before the upgrade; it writes nothing.
-    KernelMigration,
+    /// The kernel processes and sessions still in the previous kernel
+    /// version, each one this build's kernel migration would refuse with its
+    /// typed reason (a session's by the cell its open turn stopped in), and
+    /// each retired library function with the processes that depend on it.
+    /// Run with the next build's `lashctl` before the upgrade; it writes
+    /// nothing.
+    KernelMigrationList,
+    /// Wake every listed process and session, so a live node of the next
+    /// build carries it forward: what an operator runs before rolling out
+    /// the build that closes the window. Idempotent; run again to resume.
+    KernelMigrationRun,
 }
 
 impl Command {
@@ -37,7 +43,8 @@ impl Command {
             Self::Stalled { .. } => "stalled-list",
             Self::Rearm { .. } => "stalled-rearm",
             Self::DeploymentStatus { .. } => "deployment-status",
-            Self::KernelMigration => "kernel-migration-list",
+            Self::KernelMigrationList => "kernel-migration-list",
+            Self::KernelMigrationRun => "kernel-migration-run",
         }
     }
 }
@@ -93,7 +100,8 @@ pub(super) fn parse(verb: &str, rest: &[String]) -> Result<Invocation, CliError>
         ("deployment-status", ["--accepting-new-work", admission]) => Command::DeploymentStatus {
             accepting_new_work: admission.parse().map_err(|_| usage())?,
         },
-        ("kernel-migration", ["list"]) => Command::KernelMigration,
+        ("kernel-migration", ["list"]) => Command::KernelMigrationList,
+        ("kernel-migration", ["run"]) => Command::KernelMigrationRun,
         _ => return Err(usage()),
     };
     Ok(Invocation {
@@ -186,9 +194,12 @@ impl Invocation {
     }
 
     pub(super) async fn run(&self) -> Result<Value, CliError> {
-        if matches!(self.command, Command::KernelMigration) {
+        if matches!(
+            self.command,
+            Command::KernelMigrationList | Command::KernelMigrationRun
+        ) {
             let backend = durable_backend(open_stores(self.sqlite_path.as_deref()).await?)?;
-            return kernel_migration(&backend).await;
+            return kernel_migration(&backend, &self.command).await;
         }
         let core = self.core().await?;
         execute(&core, &self.command).await
@@ -214,20 +225,33 @@ async fn execute(core: &lash::LashCore, command: &Command) -> Result<Value, CliE
                 .map_err(core_error)?
         ),
         // Answered from the backend, before a core is built.
-        Command::KernelMigration => return Err(usage()),
+        Command::KernelMigrationList | Command::KernelMigrationRun => return Err(usage()),
     })
 }
 
-/// The survey of `backend`'s kernel processes against the migration this
-/// build ships, over the library its shipped worker holds.
-async fn kernel_migration(backend: &lash::Backend) -> Result<Value, CliError> {
+/// The survey of `backend`'s kernel processes and sessions against the
+/// migration this build ships, over the library its shipped worker holds;
+/// for `run`, the sweep that wakes each one still in the previous version,
+/// and the survey after it.
+async fn kernel_migration(backend: &lash::Backend, command: &Command) -> Result<Value, CliError> {
     let unexpected =
         |error: &dyn std::fmt::Display| CliError::new(Exit::Unexpected, error.to_string());
+    let swept = match command {
+        Command::KernelMigrationRun => Some(
+            lash::vm::sweep_kernel_migration(backend)
+                .await
+                .map_err(|error| unexpected(&error))?,
+        ),
+        _ => None,
+    };
     let functions = lash::vm::standard_functions().map_err(|error| unexpected(&error))?;
     let survey = lash::vm::survey_kernel_migration(backend, &functions)
         .await
         .map_err(|error| unexpected(&error))?;
-    serde_json::to_value(&survey).map_err(|error| unexpected(&error))
+    match swept {
+        Some(swept) => Ok(json!({"woken": swept, "survey": survey})),
+        None => serde_json::to_value(&survey).map_err(|error| unexpected(&error)),
+    }
 }
 
 pub(super) fn core_error(error: lash::EmbedError) -> CliError {

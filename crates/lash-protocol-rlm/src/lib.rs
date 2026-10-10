@@ -51,7 +51,7 @@ pub use driver::{RlmProjectorConfig, build_rlm_preamble};
 pub use executor::RlmCheckpointPerfFixture;
 pub use executor::{
     RLM_SNAPSHOT_VERSION, RlmSnapshotError, TOOL_ARGUMENTS, TOOL_CALL_LIMIT, TOOL_FAILED,
-    UNKNOWN_EFFECT,
+    UNKNOWN_EFFECT, cell_migration_refusal,
 };
 /// The kernel's typed snapshot validation causes and fragment roots.
 pub mod snapshot {

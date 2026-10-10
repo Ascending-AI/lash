@@ -298,4 +298,16 @@ pub trait DurableStore: DurableReads {
 
     /// Read `actor`'s row, unfenced.
     async fn actor(&self, actor: &ActorKey) -> Result<Option<ActorSnapshot>, DurableError>;
+
+    /// Up to `limit` actors whose state is written in `formats` and that
+    /// have not ended, by key, after `after`, read unfenced: what an
+    /// operator lists of the actors a build carries forward or retires
+    /// (ADR 0106 §1, ADR 0115 §3.5). An owner never decides anything from
+    /// it.
+    async fn actors_in(
+        &self,
+        formats: &FormatSet,
+        after: Option<&ActorKey>,
+        limit: usize,
+    ) -> Result<Vec<ActorKey>, DurableError>;
 }

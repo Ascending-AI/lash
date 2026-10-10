@@ -72,6 +72,7 @@ mod process_runtime;
 pub mod scenario_contracts;
 mod session_administration;
 mod session_api;
+mod session_carry;
 pub mod session_delete;
 use lash_core_store::session_catalog;
 pub use session_administration::{

@@ -45,6 +45,7 @@ pub use formats::{
     a_draining_node_claims_nothing_and_releases_ready,
     a_newer_format_is_not_written_while_an_older_node_is_live,
     a_node_claims_only_actors_whose_formats_it_decodes,
+    actors_in_a_format_set_and_a_turns_cells_are_listed,
 };
 pub use model_calls::a_turn_counts_the_model_calls_it_admitted;
 pub use prompts::{

@@ -118,6 +118,13 @@ crate::statements! {
         /// Record that actor `?1`'s state is written in format set `?2`.
         stamp_formats = "UPDATE actors SET formats = ?2 WHERE actor_key = ?1";
 
+        /// Up to `?3` actors in format set `?1` that have not ended, by key,
+        /// after key `?2`.
+        in_formats = "SELECT actor_key FROM actors
+             WHERE formats = ?1 AND state <> 'terminal' AND actor_key > ?2
+             ORDER BY actor_key
+             LIMIT ?3";
+
         /// Acknowledge actor `?1`'s mailbox through `?2`.
         ack = "UPDATE actors SET acked_seq = ?2 WHERE actor_key = ?1 AND acked_seq < ?2";
 

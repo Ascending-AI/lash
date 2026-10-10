@@ -87,6 +87,10 @@ law!(
     a_draining_node_claims_nothing_and_releases_ready,
     |store, _advance| { laws::a_draining_node_claims_nothing_and_releases_ready(store) }
 );
+law!(
+    actors_in_a_format_set_and_a_turns_cells_are_listed,
+    |store, _advance| { laws::actors_in_a_format_set_and_a_turns_cells_are_listed(store) }
+);
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn deleting_a_session_releases_its_prompt_roots_and_keeps_shared_text() {

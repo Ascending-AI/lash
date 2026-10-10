@@ -286,6 +286,11 @@ impl Backend {
         for format in migration.carries() {
             formats = formats.carrying(&format, previous);
         }
+        // A build that retires every format the migration carries from
+        // carries nothing forward (ADR 0115 §3.5).
+        if formats == self.inner.formats {
+            return self.clone();
+        }
         let mut migrations = self.inner.migrations.clone();
         migrations.insert(kind.to_owned(), migration);
         // Both serve the one durable store, whose wakes reach one runner.
@@ -298,6 +303,34 @@ impl Backend {
                 formats,
                 engines: self.inner.engines.clone(),
                 migrations,
+                providers: Arc::clone(&self.inner.providers),
+                surfaces: self.inner.surfaces.clone(),
+                hints: self.inner.hints.clone(),
+            }),
+        }
+    }
+
+    /// This backend retiring the sets of the build before it, whose process
+    /// engine state was in `format` and whose actors also held `previous`
+    /// (ADR 0115 §3.5): its nodes neither decode nor carry them forward, and
+    /// do not start while an actor is still in one. `sweep` is the operator
+    /// command that has a node of that build carry one forward.
+    #[must_use]
+    pub fn retiring(
+        &self,
+        format: &crate::EngineStateFormat,
+        previous: &[lash_durable::FormatSurface],
+        sweep: &str,
+    ) -> Self {
+        let durable = std::sync::OnceLock::from(Arc::clone(self.durable()));
+        Self {
+            inner: Arc::new(BackendInner {
+                stores: Arc::clone(&self.inner.stores),
+                durable,
+                config: self.inner.config,
+                formats: self.inner.formats.clone().retiring(format, previous, sweep),
+                engines: self.inner.engines.clone(),
+                migrations: self.inner.migrations.clone(),
                 providers: Arc::clone(&self.inner.providers),
                 surfaces: self.inner.surfaces.clone(),
                 hints: self.inner.hints.clone(),

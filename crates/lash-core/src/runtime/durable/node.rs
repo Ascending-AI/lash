@@ -21,6 +21,11 @@
 //!   `waiting` with the earliest due time its sources noted.
 //! - **Formats:** the node decodes the backend's format sets, so it claims
 //!   only actors whose state this build decodes (ADR 0106 §1).
+//! - **Retired formats:** a build that retires the format sets of the build
+//!   before it does not start while an actor is still in one: serving, it
+//!   would strand it (ADR 0115 §3.5). It refuses with
+//!   [`DurableError::Unmigrated`], naming how many and the command that
+//!   carries them forward.
 //! - **Drain:** once the host starts [`NodeServe::drain`], the node claims
 //!   nothing more, each activation releases its actor `ready` at its next
 //!   committed phase, and `serve` returns [`Stopped::Drained`] when none is
@@ -54,7 +59,9 @@ pub struct NodeServe {
 ///
 /// # Errors
 ///
-/// The store's refusal of the node's registration.
+/// [`DurableError::Unmigrated`] when an actor is still in a format set the
+/// backend's build retires, and the store's refusal of the node's
+/// registration.
 pub async fn serve(
     backend: &Backend,
     serve: NodeServe,
@@ -64,6 +71,13 @@ pub async fn serve(
     // The node decodes the backend's format sets: every one when it runs
     // processes, the session's alone when it runs none.
     let formats = backend.formats();
+    let unmigrated = unmigrated_actors(backend).await?;
+    if unmigrated > 0 {
+        return Err(DurableError::Unmigrated {
+            unmigrated,
+            command: formats.sweep().unwrap_or_default().to_owned(),
+        });
+    }
     let mut decodes = formats.session_decodes();
     let activation: Arc<dyn Activation> = match serve.processes {
         Some(process) => {
@@ -95,4 +109,30 @@ pub async fn serve(
         runner = runner.with_node_wakes(node_wakes);
     }
     runner.run(stop).await
+}
+
+/// How many actors are still in a format set `backend`'s build retires
+/// (ADR 0115 §3.5): none when it retires none.
+///
+/// # Errors
+///
+/// The store's.
+pub async fn unmigrated_actors(backend: &Backend) -> Result<u64, DurableError> {
+    const PAGE: usize = 256;
+    let mut unmigrated = 0_u64;
+    for set in backend.formats().retired() {
+        let mut after = None;
+        loop {
+            let page = backend
+                .durable()
+                .actors_in(set, after.as_ref(), PAGE)
+                .await?;
+            unmigrated = unmigrated.saturating_add(page.len() as u64);
+            if page.len() < PAGE {
+                break;
+            }
+            after = page.last().cloned();
+        }
+    }
+    Ok(unmigrated)
 }

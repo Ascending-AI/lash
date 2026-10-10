@@ -34,6 +34,8 @@ pub struct DurableBackendBuilder {
     providers: Vec<Arc<dyn crate::vm::ProjectionProvider>>,
     #[cfg(feature = "synthetic-next")]
     previous_build: bool,
+    #[cfg(feature = "synthetic-next")]
+    closing_window: bool,
 }
 
 impl DurableBackendBuilder {
@@ -50,6 +52,8 @@ impl DurableBackendBuilder {
             providers: Vec::new(),
             #[cfg(feature = "synthetic-next")]
             previous_build: false,
+            #[cfg(feature = "synthetic-next")]
+            closing_window: false,
         }
     }
 
@@ -92,6 +96,19 @@ impl DurableBackendBuilder {
         self
     }
 
+    /// This backend as the build after the synthetic successor's, which
+    /// closes the window it opened (ADR 0115 §3.5): it no longer interprets
+    /// the kernel version before the successor's, so it neither decodes nor
+    /// carries the formats a build of that version wrote, and its node does
+    /// not start while a process or session is still in one. The two-build
+    /// laws run the closing build from the same binary with it.
+    #[cfg(feature = "synthetic-next")]
+    #[must_use]
+    pub fn closing_window(mut self) -> Self {
+        self.closing_window = true;
+        self
+    }
+
     /// A host process engine; one per kind.
     #[must_use]
     pub fn process_engine(mut self, engine: Arc<dyn ProcessEngine>) -> Self {
@@ -115,7 +132,9 @@ impl DurableBackendBuilder {
         if self.host_settings && self.overridden {
             return Err(DurableBuildError::SettingsOwnedByHost);
         }
-        Backend::assemble(BackendParts {
+        #[cfg(feature = "rlm")]
+        let retired = self.retired_kernel_version();
+        let backend = Backend::assemble(BackendParts {
             #[cfg(feature = "rlm")]
             providers: projection_catalog(self.providers)?,
             #[cfg(not(feature = "rlm"))]
@@ -131,7 +150,27 @@ impl DurableBackendBuilder {
             },
             #[cfg(not(feature = "synthetic-next"))]
             formats: crate::formats::actor_state_surfaces(),
-        })
+        })?;
+        // A build that retires the kernel version before its own does not
+        // decode what that version's build wrote, and its node does not
+        // start while a process or session is still in it.
+        #[cfg(feature = "rlm")]
+        let backend = match retired {
+            Some(kernel) => crate::kernel_migration::retiring(&backend, kernel),
+            None => backend,
+        };
+        Ok(backend)
+    }
+
+    /// The kernel version this build no longer interprets, whose window is
+    /// closed.
+    #[cfg(feature = "rlm")]
+    fn retired_kernel_version(&self) -> Option<u32> {
+        #[cfg(feature = "synthetic-next")]
+        if self.closing_window {
+            return lash_vm_runtime::previous_kernel_version();
+        }
+        crate::kernel_migration::retired_kernel_version()
     }
 }
 

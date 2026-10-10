@@ -1093,6 +1093,10 @@ impl RlmExecutionState {
                 "a session's stored state holds a task; only bindings are a session's".to_string(),
             ));
         }
+        // A header an earlier kernel version wrote is rewritten by the next
+        // capture in this build's: what an idle session's carry recaptures
+        // (FIG-5787).
+        let stale_header = parked.run.kernel != KERNEL_VERSION;
         // A saved function stored in an earlier kernel version is carried
         // to this build's, each one alone; the next capture stores what was
         // carried. One the migration refuses is not held: the session lists
@@ -1141,7 +1145,7 @@ impl RlmExecutionState {
         let pruned_reserved = bindings.remove(&BTreeSet::from([HISTORY_BINDING.to_string()]));
         self.bindings = bindings;
         self.persisted_leaf_keys = expected_leaf_keys;
-        self.capture_dirty = pruned_reserved || carried_functions;
+        self.capture_dirty = pruned_reserved || carried_functions || stale_header;
         self.capture_rollback = None;
         self.pending_snapshot = None;
         self.active_execution_checkpoint = None;

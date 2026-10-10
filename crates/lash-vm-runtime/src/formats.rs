@@ -96,3 +96,18 @@ const _: () = assert!(KERNEL_SAVED_FUNCTION_VERSION == lash_kernel_doc::KERNEL_V
 pub fn previous_kernel_version() -> Option<u32> {
     KernelVersion::NEWEST.previous().map(KernelVersion::number)
 }
+
+/// The version of each kernel format the build before this one wrote, when
+/// this build no longer interprets it: the window that build opened is
+/// closed and its interpreter deleted, so a process or a session still
+/// holding state in that version is stranded under this build (ADR 0115
+/// §3.5, drain by release).
+pub fn retired_kernel_version() -> Option<u32> {
+    if previous_kernel_version().is_some() {
+        return None;
+    }
+    KernelVersion::NEWEST
+        .number()
+        .checked_sub(1)
+        .filter(|version| *version > 0)
+}

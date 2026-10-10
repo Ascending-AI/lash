@@ -153,3 +153,17 @@ impl KernelCarry {
         }))
     }
 }
+
+/// Why this build would not carry `snapshot`, a cell's stored checkpoint,
+/// to the kernel version it writes, with `functions` as its library; `None`
+/// when it would, or the cell needs no carrying. What `lashctl
+/// kernel-migration list` asks of the cell a session's open turn stopped in
+/// (FIG-5787); it writes nothing.
+pub fn cell_migration_refusal(
+    snapshot: &str,
+    functions: Arc<FunctionRegistry>,
+) -> Option<KernelMigrationRefusal> {
+    KernelCarry::new(Some(functions), None)
+        .cell_snapshot(snapshot)
+        .err()
+}
