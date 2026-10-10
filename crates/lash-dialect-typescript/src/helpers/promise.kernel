@@ -21,6 +21,7 @@ use eq
 use error.new
 use list.len
 use ts.receiver
+use ts.error.new_AggregateError
 use ts.pad
 use ts.iterate
 use ts.promise.is
@@ -398,8 +399,9 @@ body {
   let decided = invoke ts.promise.decided(states, "any")
   let wait = fn(this, args) {
     if eq(list.len(tasks), 0) {
-      let none = {errors: []}
-      throw error.new("AggregateError", "All promises were rejected", none)
+      let arguments = [[], "All promises were rejected"]
+      let error = invoke ts.error.new_AggregateError(absent, arguments)
+      throw error
     }
     if decided {
       do yield
@@ -411,8 +413,9 @@ body {
       let k = invoke ts.receiver(reason)
       if same(k, "error") {
         if same(reason.kind, "all_failed") {
-          let reasons = {errors: reason.data}
-          throw error.new("AggregateError", "All promises were rejected", reasons)
+          let arguments = [reason.data, "All promises were rejected"]
+          let error = invoke ts.error.new_AggregateError(absent, arguments)
+          throw error
         }
       }
       throw reason

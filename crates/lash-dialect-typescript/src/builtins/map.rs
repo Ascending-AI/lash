@@ -8,6 +8,10 @@ pub(super) fn object() -> Object {
                 class: "Map",
                 function: "ts.map.construct",
             },
+            Row::Function {
+                path: "Map",
+                function: "ts.map.call",
+            },
             Row::InstanceOf {
                 class: "Map",
                 function: "ts.map.is",

@@ -278,11 +278,16 @@ impl Lowerer<'_> {
         span: SourceSpan,
     ) -> Lowering<Operand> {
         if let ast::Expr::Member {
+            object,
             property: ast::MemberProperty::Field(name),
             span: member_span,
             ..
         } = callee
             && name == "toLocaleString"
+            && matches!(
+                object.as_ref(),
+                ast::Expr::Array(_) | ast::Expr::Number(_) | ast::Expr::String(_)
+            )
         {
             let method = &self.source[member_span.start..member_span.end];
             return Err(Diagnostic {

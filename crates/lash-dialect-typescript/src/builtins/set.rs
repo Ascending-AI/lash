@@ -8,6 +8,10 @@ pub(super) fn object() -> Object {
                 class: "Set",
                 function: "ts.set.construct",
             },
+            Row::Function {
+                path: "Set",
+                function: "ts.set.call",
+            },
             Row::InstanceOf {
                 class: "Set",
                 function: "ts.set.is",
@@ -56,11 +60,11 @@ pub(super) fn object() -> Object {
             Row::Method {
                 receiver: Receiver::Set,
                 name: "keys",
-                function: "ts.set.keys",
+                function: "ts.set.values",
             },
             Row::Function {
                 path: "Set.prototype.keys",
-                function: "ts.set.keys",
+                function: "ts.set.values",
             },
             Row::Method {
                 receiver: Receiver::Set,

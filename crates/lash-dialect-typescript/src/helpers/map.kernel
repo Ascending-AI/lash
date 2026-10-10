@@ -31,6 +31,15 @@ use ts.map.value
 use ts.map.values
 use ts.pad
 
+# Calling the constructor without NewTarget never reads the iterable.
+function ts.map.call(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error"
+charge 4
+body {
+  throw error.new("type_error", "Map requires new", null)
+}
+
 function ts.map.key(value: Any) -> Any
 kernel 1
 errors "type_error", "RangeError"

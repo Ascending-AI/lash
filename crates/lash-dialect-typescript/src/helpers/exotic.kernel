@@ -22,12 +22,15 @@ use date.ecma.format
 use url.whatwg.update
 use ts.exotic.error_name
 
-function ts.exotic.error_name(value: Any) -> Text
+function ts.exotic.error_name(value: Any) -> Any
 kernel 1
 charge 8
 body {
   if same(kind(value.data), "record") {
-    if record.contains(value.data, "name") { return value.data.name }
+    let properties = value.data.properties
+    if same(kind(properties), "record") {
+      if record.contains(properties, "name") { return properties.name }
+    }
   }
   let name = value.kind
   if same(name, "type_error") { return "TypeError" }
@@ -75,7 +78,10 @@ body {
       return name
     }
     if same(kind(target.data), "record") {
-      if record.contains(target.data, key) { return target.data[key] }
+      let properties = target.data.properties
+      if same(kind(properties), "record") {
+        if record.contains(properties, key) { return properties[key] }
+      }
       if same(key, "message") { return "" }
     } else { if same(key, "message") { return target.message } }
     return absent
@@ -100,10 +106,9 @@ body {
   let k = kind(target)
   if same(k, "error") {
     if same(kind(target.data), "record") {} else { throw error.new("type_error", "This kernel error has no mutable slots", null) }
-    if same(key, "message") {
-      if same(kind(value), "text") {} else { throw error.new("type_error", "Error.message must remain text", null) }
-    }
-    set target.data[key] = value
+    let properties = target.data.properties
+    if same(kind(properties), "record") {} else { throw error.new("type_error", "This kernel error has no mutable slots", null) }
+    set properties[key] = value
     return value
   }
   if same(k, "record") {

@@ -42,14 +42,9 @@ body {
     return name
   }
   if same(kind(value), "error") {} else { throw error.new("type_error", "Error receiver required", null) }
-  if same(kind(value.data), "record") {
-    if record.contains(value.data, "name") { return value.data.name }
-  }
-  let name = value.kind
-  if same(name, "type_error") { return "TypeError" }
-  if same(name, "number_range") { return "RangeError" }
-  if same(name, "index_out_of_range") { return "RangeError" }
-  if same(name, "unbound_variable") { return "ReferenceError" }
+  let name = invoke ts.get(value, "name")
+  if same(kind(name), "absent") { return "Error" }
+  let name = invoke ts.to_string(name)
   return name
 }
 
@@ -73,12 +68,14 @@ set error_items = invoke ts.iterate(builtin_arg_0)
   }
   let text = ""
   if same(kind(message), "absent") {} else { set text = invoke ts.to_string(message) }
-  let data = {name: name, classes: [name, "Error"]}
-  if same(kind(message), "absent") {} else { set data.message = text }
+  let attributes = {}
+  let properties = {}
+  let data = {classes: [name, "Error"], properties: properties, nonEnumerable: attributes}
+  if same(kind(message), "absent") {} else { set properties.message = text set attributes.message = true }
   if same(kind(options), "record") {
-    if record.contains(options, "cause") { set data.cause = options.cause }
+    if record.contains(options, "cause") { set properties.cause = options.cause set attributes.cause = true }
   }
-  if aggregate { set data["errors"] = error_items }
+  if aggregate { set properties["errors"] = error_items set attributes["errors"] = true }
   return error.new(name, text, data)
 }
 

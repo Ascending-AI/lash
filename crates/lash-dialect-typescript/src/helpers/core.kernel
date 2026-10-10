@@ -87,6 +87,7 @@ use ts.keys
 use ts.set
 use ts.delete
 use ts.hole_value
+use ts.has_own
 
 # What a value is to a dispatcher: "absent", "null", "bool", "number",
 # "text", "list", "record", "closure", "error", "map", "set", "timestamp",
@@ -926,6 +927,11 @@ errors "type_error"
 charge sum(12, deep(key))
 body {
   let k = invoke ts.receiver(target)
+  if same(k, "closure") {
+    let name = invoke ts.to_property_key(key)
+    if same(name, "caller") { throw error.new("type_error", "Restricted function property", null) }
+    if same(name, "arguments") { throw error.new("type_error", "Restricted function property", null) }
+  }
   if same(k, "text") {
     let length = text.utf16_len(target)
     if same(key, "length") { return num.to_float(length) }
@@ -998,6 +1004,11 @@ errors "type_error", "RangeError"
 charge sum(12, deep(key))
 body {
   let k = invoke ts.receiver(target)
+  if same(k, "closure") {
+    let name = invoke ts.to_property_key(key)
+    if same(name, "caller") { throw error.new("type_error", "Restricted function property", null) }
+    if same(name, "arguments") { throw error.new("type_error", "Restricted function property", null) }
+  }
   if same(k, "brand:regex.ecma") {
     let name = invoke ts.to_property_key(key)
     if same(name, "lastIndex") { set target.lastIndex = value
@@ -1045,6 +1056,16 @@ errors "type_error"
 charge sum(12, deep(key))
 body {
   let k = invoke ts.receiver(target)
+  if same(k, "error") {
+    let name = invoke ts.to_property_key(key)
+    if same(kind(target.data), "record") {
+      let properties = target.data.properties
+      if same(kind(properties), "record") { remove properties[name] }
+      let attributes = target.data.nonEnumerable
+      if same(kind(attributes), "record") { remove attributes[name] }
+    }
+    return true
+  }
   if same(k, "record") {
     let name = invoke ts.to_property_key(key)
     remove target[name]
@@ -1065,13 +1086,32 @@ body {
   throw error.new("type_error", "Only a property of a plain object can be deleted", null)
 }
 
-# `key in target`: an own-property test.
-function ts.has(target: Any, key: Any) -> Bool
+# HasOwnProperty after conceptual ToObject; no wrapper escapes.
+function ts.has_own(target: Any, key: Any) -> Bool
 kernel 1
 errors "type_error"
 charge sum(12, deep(key))
 body {
+  do invoke ts.require_object_coercible(target)
+  let name = invoke ts.to_property_key(key)
   let k = invoke ts.receiver(target)
+  if same(k, "text") {
+    if same(name, "length") { return true }
+    let length = text.utf16_len(target)
+    let position = invoke ts.list_index(name, length)
+    return num.le(0, position)
+  }
+  if same(k, "error") {
+    if same(kind(target.data), "record") {
+      let properties = target.data.properties
+      if same(kind(properties), "record") { return record.contains(properties, name) }
+      return false
+    }
+    return same(name, "message")
+  }
+  for object_kind in ["map", "set", "timestamp", "closure", "bool", "number", "brand:date.invalid"] {
+    if same(k, object_kind) { return false }
+  }
   if same(k, "brand:regex.match") {
     let name = invoke ts.to_property_key(key)
     for field in ["length", "index", "input", "groups"] { if same(name, field) { return true } }
@@ -1092,7 +1132,25 @@ body {
     if num.lt(position, 0) { return false }
     return bool.not(same(target[position], ()))
   }
-  throw error.new("type_error", "Cannot use 'in' to search in a value that is not an object", null)
+  return false
+}
+
+function ts.has(target: Any, key: Any) -> Bool
+kernel 1
+errors "type_error"
+charge sum(12, deep(key))
+body {
+  let primitive = invoke ts.is_primitive(target)
+  if primitive { throw error.new("type_error", "Cannot use 'in' to search in a value that is not an object", null) }
+  let k = invoke ts.receiver(target)
+  let name = invoke ts.to_property_key(key)
+  if same(k, "error") {
+    for inherited in ["name", "message", "toString", "constructor", "hasOwnProperty", "propertyIsEnumerable", "valueOf", "toLocaleString", "isPrototypeOf"] {
+      if same(name, inherited) { return true }
+    }
+  }
+  let own = invoke ts.has_own(target, name)
+  return own
 }
 
 # `target.key(args)` where no built-in row answers: the object's own
@@ -1119,6 +1177,30 @@ charge sum(4, size(target))
 body {
   let k = kind(target)
   let keys = []
+  if same(k, "error") {
+    if same(kind(target.data), "record") {
+      let attributes = target.data.nonEnumerable
+      let properties = target.data.properties
+      if same(kind(properties), "record") {
+        for name in record.keys(properties) {
+          let hidden = false
+          if same(kind(attributes), "record") { set hidden = record.contains(attributes, name) }
+          if hidden {} else { set keys[list.len(keys)] = name }
+        }
+      }
+    }
+    return keys
+  }
+  if same(k, "text") {
+    let position = 0.0
+    let length = text.utf16_len(target)
+    while num.lt(position, length) {
+      let key = invoke ts.number.to_string(position)
+      set keys[list.len(keys)] = key
+      set position = num.add(position, 1)
+    }
+    return keys
+  }
   if same(k, "record") {
     let numeric = []
     let other = []

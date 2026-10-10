@@ -32,6 +32,178 @@ pub(super) fn object() -> Object {
                 function: "ts.object.valueOf",
             },
             Row::Function {
+                path: "Object.prototype.propertyIsEnumerable",
+                function: "ts.object.propertyIsEnumerable",
+            },
+            Row::Method {
+                receiver: Receiver::Record,
+                name: "propertyIsEnumerable",
+                function: "ts.object.propertyIsEnumerable",
+            },
+            Row::Method {
+                receiver: Receiver::List,
+                name: "propertyIsEnumerable",
+                function: "ts.object.propertyIsEnumerable",
+            },
+            Row::Method {
+                receiver: Receiver::Text,
+                name: "propertyIsEnumerable",
+                function: "ts.object.propertyIsEnumerable",
+            },
+            Row::Method {
+                receiver: Receiver::Number,
+                name: "propertyIsEnumerable",
+                function: "ts.object.propertyIsEnumerable",
+            },
+            Row::Method {
+                receiver: Receiver::Bool,
+                name: "propertyIsEnumerable",
+                function: "ts.object.propertyIsEnumerable",
+            },
+            Row::Method {
+                receiver: Receiver::Map,
+                name: "propertyIsEnumerable",
+                function: "ts.object.propertyIsEnumerable",
+            },
+            Row::Method {
+                receiver: Receiver::Set,
+                name: "propertyIsEnumerable",
+                function: "ts.object.propertyIsEnumerable",
+            },
+            Row::Method {
+                receiver: Receiver::Error,
+                name: "propertyIsEnumerable",
+                function: "ts.object.propertyIsEnumerable",
+            },
+            Row::Method {
+                receiver: Receiver::Timestamp,
+                name: "propertyIsEnumerable",
+                function: "ts.object.propertyIsEnumerable",
+            },
+            Row::Method {
+                receiver: Receiver::Closure,
+                name: "propertyIsEnumerable",
+                function: "ts.object.propertyIsEnumerable",
+            },
+            Row::Method {
+                receiver: Receiver::Brand("ts.arguments"),
+                name: "propertyIsEnumerable",
+                function: "ts.object.propertyIsEnumerable",
+            },
+            Row::Function {
+                path: "Object.prototype.toLocaleString",
+                function: "ts.object.toLocaleString",
+            },
+            Row::Method {
+                receiver: Receiver::Record,
+                name: "toLocaleString",
+                function: "ts.object.toLocaleString",
+            },
+            Row::Function {
+                path: "Object.prototype.isPrototypeOf",
+                function: "ts.object.isPrototypeOf",
+            },
+            Row::Method {
+                receiver: Receiver::Record,
+                name: "isPrototypeOf",
+                function: "ts.object.isPrototypeOf",
+            },
+            Row::Method {
+                receiver: Receiver::List,
+                name: "isPrototypeOf",
+                function: "ts.object.isPrototypeOf",
+            },
+            Row::Method {
+                receiver: Receiver::Text,
+                name: "isPrototypeOf",
+                function: "ts.object.isPrototypeOf",
+            },
+            Row::Method {
+                receiver: Receiver::Number,
+                name: "isPrototypeOf",
+                function: "ts.object.isPrototypeOf",
+            },
+            Row::Method {
+                receiver: Receiver::Bool,
+                name: "isPrototypeOf",
+                function: "ts.object.isPrototypeOf",
+            },
+            Row::Method {
+                receiver: Receiver::Map,
+                name: "isPrototypeOf",
+                function: "ts.object.isPrototypeOf",
+            },
+            Row::Method {
+                receiver: Receiver::Set,
+                name: "isPrototypeOf",
+                function: "ts.object.isPrototypeOf",
+            },
+            Row::Method {
+                receiver: Receiver::Error,
+                name: "isPrototypeOf",
+                function: "ts.object.isPrototypeOf",
+            },
+            Row::Method {
+                receiver: Receiver::Timestamp,
+                name: "isPrototypeOf",
+                function: "ts.object.isPrototypeOf",
+            },
+            Row::Method {
+                receiver: Receiver::Closure,
+                name: "isPrototypeOf",
+                function: "ts.object.isPrototypeOf",
+            },
+            Row::Method {
+                receiver: Receiver::Brand("ts.arguments"),
+                name: "isPrototypeOf",
+                function: "ts.object.isPrototypeOf",
+            },
+            Row::Method {
+                receiver: Receiver::List,
+                name: "hasOwnProperty",
+                function: "ts.object.hasOwnProperty",
+            },
+            Row::Method {
+                receiver: Receiver::Text,
+                name: "hasOwnProperty",
+                function: "ts.object.hasOwnProperty",
+            },
+            Row::Method {
+                receiver: Receiver::Number,
+                name: "hasOwnProperty",
+                function: "ts.object.hasOwnProperty",
+            },
+            Row::Method {
+                receiver: Receiver::Bool,
+                name: "hasOwnProperty",
+                function: "ts.object.hasOwnProperty",
+            },
+            Row::Method {
+                receiver: Receiver::Map,
+                name: "hasOwnProperty",
+                function: "ts.object.hasOwnProperty",
+            },
+            Row::Method {
+                receiver: Receiver::Set,
+                name: "hasOwnProperty",
+                function: "ts.object.hasOwnProperty",
+            },
+            Row::Method {
+                receiver: Receiver::Error,
+                name: "hasOwnProperty",
+                function: "ts.object.hasOwnProperty",
+            },
+            Row::Method {
+                receiver: Receiver::Timestamp,
+                name: "hasOwnProperty",
+                function: "ts.object.hasOwnProperty",
+            },
+            Row::Method {
+                receiver: Receiver::Closure,
+                name: "hasOwnProperty",
+                function: "ts.object.hasOwnProperty",
+            },
+            Row::Function {
                 path: "Object",
                 function: "ts.object.convert",
             },

@@ -25,6 +25,22 @@ fn agrees_with_bindings(source: &str, bindings: Bindings) {
     );
 }
 
+/// Map checks NewTarget before touching the optional iterable.
+#[test]
+fn map_calls_require_a_new_target_before_reading_the_iterable() {
+    agrees(
+        "let count = 0; try { Map(); } catch (e) { if (e.name === 'TypeError') count++; } try { Map({toString() { throw 1; }}); } catch (e) { if (e.name === 'TypeError') count++; } finish(count === 2 && new Map().size === 0);",
+    );
+}
+
+/// Set checks NewTarget before touching the optional iterable.
+#[test]
+fn set_calls_require_a_new_target_before_reading_the_iterable() {
+    agrees(
+        "let count = 0; try { Set(); } catch (e) { if (e.name === 'TypeError') count++; } try { Set({toString() { throw 1; }}); } catch (e) { if (e.name === 'TypeError') count++; } finish(count === 2 && new Set().size === 0);",
+    );
+}
+
 #[test]
 fn map_keys_use_same_value_zero_and_explicit_object_identity() {
     agrees(
@@ -57,6 +73,45 @@ fn function_call_apply_and_bind_preserve_receiver_and_argument_prefix() {
 fn object_enumeration_orders_integer_names_before_insertion_order() {
     agrees(
         "let invalidEntry = false; try { Object.fromEntries([1]); } catch (e) { invalidEntry = e.name === 'TypeError'; } const o = {b: 1}; o['10'] = 10; o['2'] = 2; o.a = 3; const names = Object.keys(o); const v = Object.values(o); const e = Object.entries(o); const r = Object.fromEntries(e); const shadow = {toString: () => 'own'}; const read = shadow.toString; finish(invalidEntry && names[0] === '2' && names[1] === '10' && names[2] === 'b' && names[3] === 'a' && v[0] === 2 && r.a === 3 && Object.hasOwn(r, 'b') && r.hasOwnProperty('a') && r.toString() === '[object Object]' && shadow.toString() === 'own' && read() === 'own' && Object.is(NaN, NaN) && !Object.is(-0, 0));",
+    );
+}
+
+/// Object prototype methods coerce keys before checking the receiver, keep
+/// non-enumerable length distinct from indices, and invoke an own toString.
+#[test]
+fn object_prototype_methods_keep_coercion_enumerability_and_receiver() {
+    agrees(
+        "let coerced = false; let rejected = false; const key = {toString() { coerced = true; return 'x'; }}; try { Object.prototype.propertyIsEnumerable.call(null, key); } catch (e) { rejected = e.name === 'TypeError'; } function getArgs() { return arguments; } const argumentObject = getArgs(1); const a = [1, , 3]; const o = {x: 1, toString() { return this.x; }}; let prototypeRejected = false; try { Object.prototype.isPrototypeOf.call(null, {}); } catch (e) { prototypeRejected = e.name === 'TypeError'; } finish(argumentObject.propertyIsEnumerable('0') && !argumentObject.propertyIsEnumerable('length') && !argumentObject.propertyIsEnumerable('callee') && coerced && rejected && a.propertyIsEnumerable('0') && !a.propertyIsEnumerable('1') && !a.propertyIsEnumerable('length') && o.toLocaleString() === 1 && Object.prototype.isPrototypeOf.call(null, 1) === false && prototypeRejected);",
+    );
+}
+
+/// Enumeration boxes a string conceptually without exposing a wrapper value.
+#[test]
+fn object_string_enumeration_uses_utf16_indices_and_assign_copies_them() {
+    agrees(
+        "const keys = Object.keys('abc'); const values = Object.values('abc'); const entries = Object.entries('abc'); const assigned = Object.assign({}, 'ab'); finish(keys.length === 3 && keys[0] === '0' && keys[2] === '2' && values[1] === 'b' && entries[2][1] === 'c' && assigned[1] === 'b' && Object.keys('😀').length === 2);",
+    );
+}
+
+/// Option B's primitive wrappers are refused by name, including indirect
+/// Object conversion and the generic Object.prototype.valueOf path.
+#[test]
+fn object_primitive_wrappers_are_typed_refusals() {
+    assert_eq!(
+        machine::end("const wrap = Object; finish(wrap(true));"),
+        Ended::Raised("TS_BOXED_PRIMITIVE_UNSUPPORTED".into())
+    );
+    assert_eq!(
+        machine::end("finish(Object.prototype.valueOf.call(false));"),
+        Ended::Raised("TS_BOXED_PRIMITIVE_UNSUPPORTED".into())
+    );
+}
+
+/// Strict user and bound functions inherit the caller/arguments poison.
+#[test]
+fn user_functions_and_bind_poison_restricted_properties() {
+    agrees(
+        "function f(a, b = 2, ...rest) { return a + b; } const bound = f.bind(null, 3); let count = 0; try { f.caller; } catch (e) { if (e.name === 'TypeError') count++; } try { bound.arguments; } catch (e) { if (e.name === 'TypeError') count++; } try { bound.caller = {}; } catch (e) { if (e.name === 'TypeError') count++; } finish(count === 3 && bound() === 5 && !bound.hasOwnProperty('caller'));",
     );
 }
 
@@ -99,6 +154,15 @@ fn math_coercions_keep_signed_zero_nan_and_binary32_rounding() {
 fn errors_keep_class_cause_message_and_aliases_as_kernel_data() {
     agrees(
         "const cause = {}; const e = new TypeError('bad', {cause}); const alias = e; e.message = 'new'; const a = new AggregateError([e], 'many'); finish(e instanceof Error && e instanceof TypeError && !(e instanceof RangeError) && e.name === 'TypeError' && alias.message === 'new' && e.cause === cause && e.toString() === 'TypeError: new' && a.errors[0] === e && e !== new TypeError('new', {cause}));",
+    );
+}
+
+/// Error instance slots are writable and configurable but not enumerable;
+/// inherited name is not an own slot until assigned, and absent message stays absent.
+#[test]
+fn error_instance_own_slots_keep_presence_attributes_and_deletion() {
+    agrees(
+        "const cause = {}; const e = new Error('bad', {cause}); const a = new AggregateError([]); const empty = new Error(); let rejected; try { await Promise.any([Promise.reject(7)]); } catch (error) { rejected = error; } let noMembers; try { await Promise.any([]); } catch (error) { noMembers = error; } e.extra = 3; let own = Object.hasOwn(e, 'cause'); let present = 'cause' in e; let inherited = 'name' in e; let named = Object.hasOwn(e, 'name'); const keys = Object.keys(e); e.cause = 4; delete e.message; delete e.cause; finish(own && present && inherited && !named && keys.length === 1 && keys[0] === 'extra' && !Object.hasOwn(e, 'message') && !Object.hasOwn(e, 'cause') && e.message === '' && !Object.hasOwn(empty, 'message') && Object.hasOwn(a, 'errors') && !a.propertyIsEnumerable('errors') && rejected.errors[0] === 7 && Object.hasOwn(rejected, 'message') && noMembers.errors.length === 0 && !noMembers.propertyIsEnumerable('message'));",
     );
 }
 

@@ -25,7 +25,6 @@ use ts.set.is
 use ts.set.isDisjointFrom
 use ts.set.isSubsetOf
 use ts.set.isSupersetOf
-use ts.set.keys
 use ts.set.size
 use ts.set.symmetricDifference
 use ts.set.union
@@ -48,6 +47,15 @@ use ts.set.other
 use ts.set.contains_other
 
 use ts.set.other_size
+
+# Calling the constructor without NewTarget never reads the iterable.
+function ts.set.call(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error"
+charge 4
+body {
+  throw error.new("type_error", "Set requires new", null)
+}
 
 function ts.set.construct(this: Any, args: List(Any)) -> Any
 kernel 1
@@ -132,20 +140,6 @@ body {
   if same(kind(this), "set") {} else { throw error.new("type_error", "Set receiver required", null) }
   for key in set.values(this) { set this[key] = false }
   return absent
-}
-
-function ts.set.keys(this: Any, args: List(Any)) -> Any
-kernel 1
-errors "type_error", "RangeError"
-charge sum(8, deep(result))
-body {
-  if same(kind(this), "set") {} else { throw error.new("type_error", "Set receiver required", null) }
-  let output = []
-  for key in this {
-    let value = invoke ts.map.value(key)
-    set output[list.len(output)] = value
-  }
-  return output
 }
 
 function ts.set.values(this: Any, args: List(Any)) -> Any

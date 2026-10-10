@@ -15,7 +15,7 @@ use record.contains
 use same
 use ts.assign
 use ts.get
-use ts.has
+use ts.has_own
 use ts.is_nullish
 use ts.iterate
 use ts.keys
@@ -51,6 +51,11 @@ use ts.require_object_coercible
 use ts.rest
 use ts.strict_equals
 use ts.to_property_key
+use ts.is_primitive
+use ts.object.toString
+use ts.object.propertyIsEnumerable
+use ts.object.toLocaleString
+use ts.object.isPrototypeOf
 
 use kind
 
@@ -96,6 +101,8 @@ body {
   let value = args[0]
   let nullish = invoke ts.is_nullish(value)
   if nullish { return {} }
+  let primitive = invoke ts.is_primitive(value)
+  if primitive { throw error.new("TS_BOXED_PRIMITIVE_UNSUPPORTED", "Boxed primitive wrappers are outside the dialect", null) }
   return value
 }
 
@@ -177,11 +184,16 @@ body {
   let target = args[0]
   do invoke ts.require_object_coercible(target)
   let receiver = invoke ts.receiver(target)
+  let primitive = invoke ts.is_primitive(target)
+  if primitive { throw error.new("TS_BOXED_PRIMITIVE_UNSUPPORTED", "Boxed primitive wrappers are outside the dialect", null) }
   if same(receiver, "record") {} else { throw error.new("TS_METHOD_UNSUPPORTED", "Object.assign requires a plain record target", null) }
   let sources = invoke ts.rest(args, 1)
   for source in sources {
-    let receiver = invoke ts.receiver(source)
-    if same(receiver, "record") { do invoke ts.assign(target, source) }
+    let keys = invoke ts.object.own_keys(source)
+    for key in keys {
+      let value = invoke ts.get(source, key)
+      set target[key] = value
+    }
   }
   return target
 }
@@ -196,7 +208,7 @@ body {
 do invoke ts.require_object_coercible(builtin_arg_4)
   let builtin_arg_5 = args[0]
 let builtin_arg_6 = args[1]
-let output = invoke ts.has(builtin_arg_5, builtin_arg_6)
+let output = invoke ts.has_own(builtin_arg_5, builtin_arg_6)
   return output
 }
 
@@ -369,10 +381,11 @@ kernel 1
 errors "type_error"
 charge sum(12, deep(this), deep(args))
 body {
-  do invoke ts.require_object_coercible(this)
   let args = invoke ts.pad(args, 1)
-  let key = args[0]
-  let own = invoke ts.has(this, key)
+  let key_value = args[0]
+  let key = invoke ts.to_property_key(key_value)
+  do invoke ts.require_object_coercible(this)
+  let own = invoke ts.has_own(this, key)
   return own
 }
 
@@ -398,11 +411,70 @@ body {
   return text.concat("[object ", text.concat(tag, "]"))
 }
 
+function ts.object.propertyIsEnumerable(this: Any, args: List(Any)) -> Bool
+kernel 1
+errors "type_error"
+charge sum(12, size(this), deep(args))
+body {
+  let args = invoke ts.pad(args, 1)
+  let value = args[0]
+  let key = invoke ts.to_property_key(value)
+  do invoke ts.require_object_coercible(this)
+  let keys = invoke ts.keys(this)
+  for name in keys { if same(name, key) { return true } }
+  return false
+}
+
+function ts.object.toLocaleString(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error"
+charge sum(12, deep(this))
+body {
+  do invoke ts.require_object_coercible(this)
+  let receiver = invoke ts.receiver(this)
+  if same(receiver, "record") {
+    if record.contains(this, "toString") {
+      let method = this.toString
+      let none = []
+      let output = apply method(this, none)
+      return output
+    }
+  } else {
+    throw error.new("TS_METHOD_UNSUPPORTED", "Locale formatting for this receiver is outside the dialect", null)
+  }
+  let none = []
+  let output = invoke ts.object.toString(this, none)
+  return output
+}
+
+function ts.object.isPrototypeOf(this: Any, args: List(Any)) -> Bool
+kernel 1
+errors "type_error", "TS_METHOD_UNSUPPORTED"
+charge sum(12, deep(args))
+body {
+  let args = invoke ts.pad(args, 1)
+  let value = args[0]
+  let primitive = invoke ts.is_primitive(value)
+  if primitive { return false }
+  do invoke ts.require_object_coercible(this)
+  let primitive = invoke ts.is_primitive(this)
+  if primitive { return false }
+  let receiver = invoke ts.receiver(this)
+  for instance in ["record", "list", "map", "set", "error", "timestamp", "closure", "brand:date.invalid", "brand:regex.ecma", "brand:ts.arguments"] {
+    if same(receiver, instance) { return false }
+  }
+  # Ordinary guest objects cannot become another object's prototype:
+  # creation with a prototype and prototype surgery are refused.
+  throw error.new("TS_METHOD_UNSUPPORTED", "Reflection on built-in prototypes is outside the dialect", null)
+}
+
 function ts.object.valueOf(this: Any, args: List(Any)) -> Any
 kernel 1
 errors "type_error"
 charge 12
 body {
   do invoke ts.require_object_coercible(this)
+  let primitive = invoke ts.is_primitive(this)
+  if primitive { throw error.new("TS_BOXED_PRIMITIVE_UNSUPPORTED", "Boxed primitive wrappers are outside the dialect", null) }
   return this
 }

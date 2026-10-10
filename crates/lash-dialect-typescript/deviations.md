@@ -27,6 +27,7 @@ How asynchronous source maps to kernel tasks is described in `src/lower/async_fn
 | `TS_DATE_VALUE_IDENTITY` | Dates are distinct mutable objects even when their times match. | Valid Dates are immutable kernel timestamp values; equal times compare equal. Invalid Dates are branded records. | FIG-5709's required timestamp representation follows kernel value equality. | `tests::remaining_builtins::dates_use_timestamps_iso_parsing_utc_arithmetic_and_invalid_values` |
 | `TS_RESERVED_IDENTIFIER` | `k` is an ordinary identifier. | Binding `k` is refused; it names the kernel namespace. | Kernel surface names are reserved by K-DIALECT-001 (kernel spec §4). | `tests::printer::reserved_operations_obey_the_kernel_statement_rule` |
 | `TS_LONE_SURROGATE` | Strings may contain isolated UTF-16 surrogate units. | A lone-surrogate literal is refused with `TS_LONE_SURROGATE_LITERAL_UNSUPPORTED`; a String result raises `TS_LONE_SURROGATE_UNSUPPORTED`. | Kernel Text contains only Unicode scalar values (K-VAL-006). | `runner::lone_surrogate_literals_and_results_have_typed_refusals` |
+| `TS_BOXED_PRIMITIVE_UNSUPPORTED` | Object conversion and Object.prototype.valueOf box a primitive in a mutable object. | A primitive receiver is refused before a wrapper value can escape; Number, String and Boolean conversion functions remain supported. | option B: boxed primitive wrappers are outside the dialect (orchestrator, 2026-10-10). | `tests::remaining_builtins::object_primitive_wrappers_are_typed_refusals` |
 
 ## Types
 
@@ -53,5 +54,7 @@ Test262 is the oracle for the untyped language (`tests/test262_kernel.rs`). A te
 | `test/language/identifiers/vals-eng-alpha-lower-via-escape-hex4.js` | `TS_RESERVED_IDENTIFIER` |
 | `test/language/identifiers/vals-eng-alpha-lower.js` | `TS_RESERVED_IDENTIFIER` |
 | `test/language/statements/let/syntax/let-closure-inside-initialization.js` | `TS_RESERVED_IDENTIFIER` |
+| `test/built-ins/Object/prototype/valueOf/15.2.4.4-1.js` | `TS_BOXED_PRIMITIVE_UNSUPPORTED` |
+| `test/built-ins/Object/prototype/valueOf/15.2.4.4-2.js` | `TS_BOXED_PRIMITIVE_UNSUPPORTED` |
 
 Test262 programs carry no annotation, so no `TS_TYPED_*` row applies to them.
