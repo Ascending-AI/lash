@@ -27,15 +27,20 @@
 /// `examples/worker_host.rs` proves this bootstrap.
 /// The child starts with an empty environment and closes inherited descriptors.
 /// The language bounds guest authority; the process contains native crashes.
-/// A native escape still has the worker user's OS access.
+/// Before it serves, the worker confines itself ([`WorkerConfinement`]): a
+/// fixed system-call allowlist, under which it opens nothing and never maps
+/// memory writable and executable at once, and an address-space ceiling. A
+/// native escape keeps only what that allowlist grants.
 pub use lash_vm_client::service::Service as WorkerService;
 /// The worker pool [`WorkerService::pool`] starts, which a host prewarms at
 /// startup, and the counts it reports.
 pub use lash_vm_client::{PoolStats as WorkerPoolStats, WorkerPool};
 
-/// Host-selected worker entry, pool bounds, and execution deadlines.
+/// Host-selected worker entry, pool bounds, execution deadlines and process
+/// confinement.
 pub use lash_vm_client::{
-    Deadlines as WorkerDeadlines, PoolConfig as WorkerPoolConfig, WorkerEntry, WorkerTuning,
+    Deadlines as WorkerDeadlines, PoolConfig as WorkerPoolConfig, WorkerConfinement, WorkerEntry,
+    WorkerTuning,
 };
 /// A helper release a worker retains beside its own functions (FIG-5799).
 pub use lash_vm_runtime::{HelperReleaseIndex, KernelProcessPluginFactory};

@@ -83,6 +83,8 @@ fn worker_entry_inner(
             detail: Detail::new(error),
         })
     })?;
+    #[cfg(target_os = "linux")]
+    crate::process::confine(&bootstrap.confinement)?;
     run_server(pipe, codec, bootstrap, &embedding, &mut hook)?;
     Ok(true)
 }

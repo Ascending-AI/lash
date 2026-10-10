@@ -47,7 +47,7 @@ fn document(body: &str) -> (String, EncodedPayload) {
         lash_vm_worker::standard(&WorkerTuning::standard()).expect("the standard embedding");
     let mut text = String::from("numbers by_spelling\nkernel 1\neffect echo(x?: Any) -> Any\n");
     for (name, id) in embedding.library().iter() {
-        if ["num.add", "num.lt"].contains(&name.to_string().as_str()) {
+        if ["num.add", "num.lt", "text.repeat"].contains(&name.to_string().as_str()) {
             text.push_str(&format!("use {name} = @{id}\n"));
         }
     }
@@ -472,6 +472,78 @@ fn worker_crash_mid_run_leaves_the_parent_running() {
     let next = checkout(&pool);
     assert_ne!(next.pid(), Some(pid));
     next.release().expect("pristine replacement");
+}
+
+/// FIG-5858: a worker serves under a system-call allowlist. A call outside
+/// it, such as opening a socket or mapping memory writable and executable
+/// at once, kills the worker; the parent reads that as a typed crash and
+/// the pool hands out a replacement.
+#[test]
+fn a_forbidden_syscall_kills_the_worker_with_typed_evidence() {
+    let (identity, document) = document(TOOL_LOOP);
+    for mode in ["open_socket", "map_write_exec"] {
+        let pool = WorkerPool::new(config(mode)).expect("pool");
+        let mut worker = checkout(&pool);
+        let pid = worker.pid().expect("pid");
+        let started = worker.start(
+            fresh(&document, Target::Main, Vec::new()),
+            &identity,
+            ExecutionClass::Cell,
+        );
+        assert!(
+            matches!(
+                started,
+                Err(PoolError::Infrastructure(
+                    InfrastructureOutcome::WorkerCrashed {
+                        evidence: SupervisorEvidence::ForbiddenSyscall
+                    }
+                ))
+            ),
+            "{mode}: {started:?}"
+        );
+        drop(worker);
+        let next = checkout(&pool);
+        assert_ne!(next.pid(), Some(pid), "{mode}");
+        next.release().expect("pristine replacement");
+    }
+}
+
+/// FIG-5858: a worker's address space has a ceiling, which bounds what a
+/// run can allocate even where the run's memory bound would allow more.
+/// The allocation is refused as the run's memory bound, and the worker,
+/// which never held the memory, is reused.
+#[test]
+fn the_address_space_ceiling_bounds_a_runs_allocation() {
+    const GIB: u64 = 1024 * 1024 * 1024;
+    let mut config = config("");
+    config.confinement.address_space_bytes = GIB;
+    // Room for the parser stack of the largest admitted source.
+    config.protocol.max_source_bytes = 1024;
+    config.run_bounds.memory = 8 * GIB;
+    config.run_bounds.charge = u64::MAX;
+    let pool = WorkerPool::new(config).expect("pool");
+    let (identity, document) = document(
+        r#"
+main {
+  let big = text.repeat("x", 1500000000)
+  return 0
+}"#,
+    );
+    let mut worker = checkout(&pool);
+    let pid = worker.pid().expect("pid");
+    let mut start = fresh(&document, Target::Main, Vec::new());
+    start.bounds.memory = 8 * GIB;
+    start.bounds.charge = u64::MAX;
+    worker
+        .start(start, &identity, ExecutionClass::Cell)
+        .expect("start");
+    let End::Error(RunError::Bound(exceeded)) = ended(worker.run(SLICE, false).expect("run"))
+    else {
+        panic!("the ceiling refuses the text")
+    };
+    assert_eq!(exceeded.bound, Bound::Memory);
+    worker.release().expect("reset");
+    assert_eq!(checkout(&pool).pid(), Some(pid), "the worker is reused");
 }
 
 /// The kernel worker's live protocol is admitted before any guest request.

@@ -222,9 +222,12 @@ host failure across plugin and tool-attempt boundaries, so the attempt is
 recomputed or parks without recording a tool refusal. Guest lowering
 refusals remain tool results.
 
-This provides crash containment, not an OS sandbox. Lash installs no
-namespaces, seccomp, Landlock or cgroups. A native escape from the machine
-has the worker user's OS access. An owned child installs a kernel CPU
+This provides crash containment and system-call confinement, not a full OS
+sandbox. Before it serves, a worker installs an address-space ceiling and a
+seccomp allowlist of the calls it was measured to make (FIG-5858); a call
+outside it kills the worker. Lash installs no namespaces, Landlock or
+cgroups. A native escape from the machine keeps the worker user's identity
+but only the allowlisted calls. An owned child installs a kernel CPU
 ceiling (`RLIMIT_CPU`) before guest work, from its current process CPU and
 the configured execution CPU budget; only a reset for a new checkout
 installs another.

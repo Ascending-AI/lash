@@ -69,6 +69,30 @@ fn main() {
         if matches!(message, lash_vm_protocol::ParentMessage::Start(_)) {
             started = true;
         }
+        // A run's first act is a system call the worker's confinement
+        // forbids: a socket, or memory both writable and executable.
+        if matches!(message, lash_vm_protocol::ParentMessage::Start(_)) {
+            #[expect(
+                unsafe_code,
+                reason = "the fixture makes system calls its confinement must kill"
+            )]
+            match mode {
+                "open_socket" => unsafe {
+                    libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0);
+                },
+                "map_write_exec" => unsafe {
+                    libc::mmap(
+                        std::ptr::null_mut(),
+                        4096,
+                        libc::PROT_READ | libc::PROT_WRITE | libc::PROT_EXEC,
+                        libc::MAP_PRIVATE | libc::MAP_ANONYMOUS,
+                        -1,
+                        0,
+                    );
+                },
+                _ => {}
+            }
+        }
         if mode == "hang" && matches!(message, lash_vm_protocol::ParentMessage::Start(_)) {
             std::thread::sleep(std::time::Duration::from_secs(60));
         }

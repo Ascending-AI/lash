@@ -2,7 +2,7 @@
 compile_error!("Lash VM workers require Linux");
 
 use std::io::{Read, Write};
-use std::os::fd::AsRawFd;
+use std::os::fd::{AsRawFd, FromRawFd};
 use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
 use std::process::{Child, Command, Stdio};
@@ -24,6 +24,8 @@ pub struct Worker {
     pub pipe: UnixStream,
     pub codec: FrameCodec,
     pub cpu_nanos: u64,
+    /// How long a worker whose stream ended has to report its exit.
+    exit_grace: Duration,
 }
 
 impl Worker {
@@ -93,6 +95,7 @@ impl Worker {
             pipe,
             codec: FrameCodec::new(config.protocol.decode),
             cpu_nanos: 0,
+            exit_grace: config.deadlines.cancel_grace,
         })
     }
 
@@ -153,6 +156,7 @@ impl Worker {
     }
 
     fn exit_evidence(&self) -> lash_vm_protocol::SupervisorEvidence {
+        self.await_exit();
         // Observe without reaping: terminate owns wait4 and its CPU receipt.
         let mut info = std::mem::MaybeUninit::<libc::siginfo_t>::zeroed();
         #[expect(
@@ -182,11 +186,45 @@ impl Worker {
         let status = unsafe { info.si_status() };
         match info.si_code {
             libc::CLD_EXITED => lash_vm_protocol::SupervisorEvidence::Exited { code: status },
+            libc::CLD_KILLED | libc::CLD_DUMPED if status == libc::SIGSYS => {
+                lash_vm_protocol::SupervisorEvidence::ForbiddenSyscall
+            }
             libc::CLD_KILLED | libc::CLD_DUMPED => {
                 lash_vm_protocol::SupervisorEvidence::Signalled { signal: status }
             }
             _ => lash_vm_protocol::SupervisorEvidence::EndOfStream,
         }
+    }
+
+    /// A worker whose stream ended is exiting, but the kernel closes its
+    /// descriptors before it reports the exit. Waits for that report, for
+    /// at most the cancel grace, so the evidence names how the worker ended.
+    fn await_exit(&self) {
+        #[expect(
+            unsafe_code,
+            reason = "pidfd_open only names this owned, unreaped child"
+        )]
+        let pidfd = unsafe { libc::syscall(libc::SYS_pidfd_open, self.child.id(), 0) };
+        let Ok(pidfd) = i32::try_from(pidfd) else {
+            return;
+        };
+        if pidfd < 0 {
+            return;
+        }
+        // SAFETY: pidfd_open returned this new descriptor, owned only here.
+        #[expect(unsafe_code, reason = "the new pidfd is owned and closed here")]
+        let pidfd = unsafe { std::os::fd::OwnedFd::from_raw_fd(pidfd) };
+        let mut exit = libc::pollfd {
+            fd: pidfd.as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        let wait = i32::try_from(self.exit_grace.as_millis()).unwrap_or(i32::MAX);
+        // SAFETY: one pollfd in writable storage for the duration of the call.
+        #[expect(unsafe_code, reason = "poll waits on the owned pidfd")]
+        unsafe {
+            libc::poll(&mut exit, 1, wait)
+        };
     }
 
     /// Kill and reap before a replacement can be admitted. wait4 supplies
@@ -245,6 +283,7 @@ pub struct Bootstrap {
     pub cpu_nanos: u64,
     pub serialization: Duration,
     pub tuning: crate::WorkerTuning,
+    pub confinement: crate::WorkerConfinement,
 }
 impl From<&PoolConfig> for Bootstrap {
     fn from(c: &PoolConfig) -> Self {
@@ -258,6 +297,7 @@ impl From<&PoolConfig> for Bootstrap {
             source: c.protocol.max_source_bytes,
             serialization: c.deadlines.serialization,
             tuning: c.tuning,
+            confinement: c.confinement,
             cpu_nanos: c
                 .deadlines
                 .cumulative_cpu

@@ -32,6 +32,9 @@ pub enum SupervisorEvidence {
     Signalled {
         signal: i32,
     },
+    /// The worker made a system call its confinement does not allow, and
+    /// the kernel killed it (`SIGSYS`).
+    ForbiddenSyscall,
 }
 
 pub use lash_sansio::worker_limit::{WorkerFrameKind, WorkerLimit};
@@ -195,6 +198,8 @@ pub enum BootstrapFault {
     MissingBounds,
     #[error("the IPC bounds do not decode")]
     InvalidBounds,
+    #[error("the worker could not confine itself")]
+    Confinement,
 }
 
 /// A failure of the supervising pool itself, met while it drove a worker.

@@ -10,7 +10,7 @@ pub mod service;
 #[cfg(any(test, feature = "testing"))]
 mod testing;
 pub mod wire;
-pub use config::{Deadlines, PoolConfig, WorkerEntry, WorkerTuning};
+pub use config::{Deadlines, PoolConfig, WorkerConfinement, WorkerEntry, WorkerTuning};
 pub use error::PoolError;
 /// The VM-protocol vocabulary a worker pool's configuration and outcomes
 /// name.

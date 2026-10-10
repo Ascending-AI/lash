@@ -93,6 +93,36 @@ impl Default for WorkerTuning {
     }
 }
 
+/// What confines a worker process before it serves (FIG-5858). The worker
+/// installs it from its bootstrap, the pool's recorded configuration, and
+/// reads nothing live. Its system calls are always the worker's fixed
+/// allowlist; a call outside it kills the process
+/// ([`lash_vm_protocol::SupervisorEvidence::ForbiddenSyscall`]).
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkerConfinement {
+    /// The worker's address-space ceiling (`RLIMIT_AS`), soft and hard: an
+    /// allocation past it fails in the worker, whatever the run's memory
+    /// bound. It must hold the parser stack for the largest admitted source.
+    pub address_space_bytes: u64,
+}
+impl WorkerConfinement {
+    /// A 4 GiB address-space ceiling. Its largest measured tenant is the
+    /// parser stack for a 64 KiB source under `WorkerTuning::standard`
+    /// (2,508 MiB reserved); a worker's peak with it was 2,678 MiB. The rest
+    /// is headroom for the run's heap and decoding, unmeasured.
+    pub const fn standard() -> Self {
+        Self {
+            address_space_bytes: 4 * 1024 * 1024 * 1024,
+        }
+    }
+}
+impl Default for WorkerConfinement {
+    fn default() -> Self {
+        Self::standard()
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct PoolConfig {
     pub entry: WorkerEntry,
@@ -105,6 +135,7 @@ pub struct PoolConfig {
     pub run_bounds: RunBounds,
     pub deadlines: Deadlines,
     pub tuning: WorkerTuning,
+    pub confinement: WorkerConfinement,
     pub restart_window: Duration,
     pub max_restarts: usize,
 }
@@ -115,7 +146,8 @@ impl PoolConfig {
     /// run bounds are 50 million charge units, 64 MiB, 1,024 nested calls,
     /// 1,024 live tasks, 256 requests a park and 1,024 members a join;
     /// deadlines use `Deadlines::standard`; restarts allow eight per 60 seconds;
-    /// working policy uses `WorkerTuning::standard`. FIG-4157/4162 measured
+    /// working policy uses `WorkerTuning::standard`; confinement uses
+    /// `WorkerConfinement::standard`. FIG-4157/4162 measured
     /// synthetic workloads, not optimal concurrency or arbitrary guest spend.
     pub fn standard(entry: WorkerEntry) -> Self {
         Self {
@@ -135,6 +167,7 @@ impl PoolConfig {
             },
             deadlines: Deadlines::standard(),
             tuning: WorkerTuning::standard(),
+            confinement: WorkerConfinement::standard(),
             restart_window: Duration::from_secs(60),
             max_restarts: 8,
         }
@@ -153,6 +186,15 @@ impl PoolConfig {
     }
 
     pub(crate) fn validate(&self) -> Result<(), PoolError> {
+        let largest_parser_stack = usize::try_from(self.protocol.max_source_bytes)
+            .ok()
+            .and_then(|bytes| {
+                self.tuning
+                    .parser_stack_bytes_per_source_byte
+                    .checked_mul(bytes)
+            })
+            .and_then(|size| size.checked_add(self.tuning.parser_stack_base_bytes))
+            .and_then(|size| u64::try_from(size).ok());
         if self.tuning.parent_wait.is_zero()
             || self.tuning.inbound_buffer_bytes.get() < lash_vm_protocol::FRAME_HEADER_BYTES
             || self
@@ -183,6 +225,8 @@ impl PoolConfig {
             || self.deadlines.cumulative_cpu.is_zero()
             || self.deadlines.max_attempts == 0
             || self.protocol.no_response_watchdog.is_zero()
+            || largest_parser_stack
+                .is_none_or(|stack| stack >= self.confinement.address_space_bytes)
         {
             return Err(PoolError::InvalidConfiguration);
         }

@@ -16,9 +16,19 @@ The launcher clears the environment. Immediately after exec, the entry closes
 all inherited descriptors except its socket. Linux uses `close_range` and
 requires kernel 5.9 or newer. Workers support Linux only; elsewhere the entry
 refuses with `PoolError::UnsupportedPlatform`. The kernel limits guest
-authority and the process contains native crashes. This does not provide OS
-confinement against a native escape. Before guest work an owned child installs
-a CPU ceiling (`RLIMIT_CPU`) from the configured execution budget.
+authority and the process contains native crashes. Once its embedding is
+assembled, and before it reads a frame, the entry confines the process
+(`WorkerConfinement`, carried in the bootstrap): an address-space ceiling
+(`RLIMIT_AS`, soft and hard) and a seccomp filter on every thread. The filter
+admits the system calls a serving worker was measured to make: its socket,
+memory that is never writable and executable at once, threads of its own
+process, clocks, entropy, its own CPU ceiling and an abort's signal. `openat`
+and `clone3` are refused with an error, for the C library's fallbacks; any
+other call kills the process, which the parent reports as
+`WorkerCrashed { evidence: ForbiddenSyscall }`. x86-64 and aarch64 only; a
+worker that cannot confine itself refuses with `BootstrapFault::Confinement`.
+Before guest work an owned child installs a CPU ceiling (`RLIMIT_CPU`) from
+the configured execution budget.
 
 `checkout` reserves the complete encoded input size and bounds its wait. A
 checkout owns one execution lease. `start` hands the worker the admitted
@@ -69,7 +79,9 @@ Runs allow fifty million charge units, 64 MiB of machine memory, call depth
 1,024, 1,024 live tasks, 256 requests per park and 1,024 `join` members.
 Checkout is five seconds, compute thirty seconds, serialization five seconds,
 cancellation grace 100 ms and cumulative CPU ten seconds. An invocation allows
-three attempts; the pool permits eight failed replacements per minute. These
+three attempts; the pool permits eight failed replacements per minute. A
+worker's address space is capped at 4 GiB, which must exceed the parser stack
+of the largest admitted source. These
 are host bounds, not latency targets or guarantees for arbitrary guests.
 `PoolConfig::codemode` raises parked state to 64 MiB, frames and queued input to
 128 MiB and charged decode allocation to 256 MiB. Hosts can supply a smaller
@@ -117,4 +129,4 @@ worker library remains refused.
 
 Code mode and process hosts share `lash_vm_client::service::Service`. The facade
 names its configuration as `lash::vm::WorkerService`, `WorkerPoolConfig`,
-`WorkerEntry` and `WorkerDeadlines`.
+`WorkerEntry`, `WorkerDeadlines` and `WorkerConfinement`.
