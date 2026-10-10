@@ -1,0 +1,141 @@
+{
+  "rule": "K-CHG-006",
+  "cases": [
+    {
+      "name": "magnitude of 0 is 0",
+      "document": "kernel 1\nnumbers by_spelling\nuse probe.magnitude = @afe21621cddb92ce26925460ab4b7f17ed6f93546395cc8aaf644cc3acc10097\nfn f() { return null }\nmain { let x = 0 finish probe.magnitude(x) }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": "null"
+        },
+        "charged": 6
+      },
+      "environment": {
+        "bounds": {
+          "charge": 18446744073709551615
+        }
+      }
+    },
+    {
+      "name": "magnitude of 3.9 is 3",
+      "document": "kernel 1\nnumbers by_spelling\nuse probe.magnitude = @afe21621cddb92ce26925460ab4b7f17ed6f93546395cc8aaf644cc3acc10097\nfn f() { return null }\nmain { let x = 3.9 finish probe.magnitude(x) }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": "null"
+        },
+        "charged": 9
+      },
+      "environment": {
+        "bounds": {
+          "charge": 18446744073709551615
+        }
+      }
+    },
+    {
+      "name": "magnitude of -1 is 0",
+      "document": "kernel 1\nnumbers by_spelling\nuse probe.magnitude = @afe21621cddb92ce26925460ab4b7f17ed6f93546395cc8aaf644cc3acc10097\nfn f() { return null }\nmain { let x = -1 finish probe.magnitude(x) }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": "null"
+        },
+        "charged": 6
+      },
+      "environment": {
+        "bounds": {
+          "charge": 18446744073709551615
+        }
+      }
+    },
+    {
+      "name": "magnitude of nan is 0",
+      "document": "kernel 1\nnumbers by_spelling\nuse probe.magnitude = @afe21621cddb92ce26925460ab4b7f17ed6f93546395cc8aaf644cc3acc10097\nfn f() { return null }\nmain { let x = nan finish probe.magnitude(x) }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": "null"
+        },
+        "charged": 6
+      },
+      "environment": {
+        "bounds": {
+          "charge": 18446744073709551615
+        }
+      }
+    },
+    {
+      "name": "magnitude of inf is 0",
+      "document": "kernel 1\nnumbers by_spelling\nuse probe.magnitude = @afe21621cddb92ce26925460ab4b7f17ed6f93546395cc8aaf644cc3acc10097\nfn f() { return null }\nmain { let x = inf finish probe.magnitude(x) }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": "null"
+        },
+        "charged": 6
+      },
+      "environment": {
+        "bounds": {
+          "charge": 18446744073709551615
+        }
+      }
+    },
+    {
+      "name": "magnitude of -inf is 0",
+      "document": "kernel 1\nnumbers by_spelling\nuse probe.magnitude = @afe21621cddb92ce26925460ab4b7f17ed6f93546395cc8aaf644cc3acc10097\nfn f() { return null }\nmain { let x = -inf finish probe.magnitude(x) }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": "null"
+        },
+        "charged": 6
+      },
+      "environment": {
+        "bounds": {
+          "charge": 18446744073709551615
+        }
+      }
+    },
+    {
+      "name": "magnitude of 18446744073709551616 is 18446744073709551615",
+      "document": "kernel 1\nnumbers by_spelling\nuse probe.magnitude = @afe21621cddb92ce26925460ab4b7f17ed6f93546395cc8aaf644cc3acc10097\nfn f() { return null }\nmain { let x = 18446744073709551616 finish probe.magnitude(x) }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": "null"
+        },
+        "charged": 18446744073709551615
+      },
+      "environment": {
+        "bounds": {
+          "charge": 18446744073709551615
+        }
+      }
+    },
+    {
+      "name": "magnitude of \"3\" is 0",
+      "document": "kernel 1\nnumbers by_spelling\nuse probe.magnitude = @afe21621cddb92ce26925460ab4b7f17ed6f93546395cc8aaf644cc3acc10097\nfn f() { return null }\nmain { let x = \"3\" finish probe.magnitude(x) }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": "null"
+        },
+        "charged": 6
+      },
+      "environment": {
+        "bounds": {
+          "charge": 18446744073709551615
+        }
+      }
+    }
+  ]
+}

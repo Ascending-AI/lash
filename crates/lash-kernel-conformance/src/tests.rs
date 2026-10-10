@@ -9,6 +9,8 @@ include!("corpus_files.rs");
 #[path = "contract_cases.rs"]
 mod contract_cases;
 
+mod protocol;
+
 // These three owning-library shards fill rules this corpus does not own.
 const LIBRARY_CORPUS_FILES: &[(&str, &str)] = &[
     (
@@ -42,8 +44,14 @@ const LIBRARY_SUPPLEMENT_FILES: &[(&str, &str)] = &[
 ];
 
 fn corpus_shards() -> Vec<Shard> {
-    load_corpus(CORPUS_FILES.iter().chain(LIBRARY_CORPUS_FILES).copied())
-        .expect("decode independently owned document shards")
+    load_corpus(
+        CORPUS_FILES
+            .iter()
+            .chain(LIBRARY_CORPUS_FILES)
+            .chain(protocol::files())
+            .copied(),
+    )
+    .expect("decode independently owned document shards")
 }
 
 mod rule_cases {

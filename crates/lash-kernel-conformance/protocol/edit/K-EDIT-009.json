@@ -1,0 +1,18 @@
+{
+  "rule": "K-EDIT-009",
+  "cases": [
+    {
+      "name": "adoption replaces all written calls and refuses missing definitions",
+      "document": "kernel 1\nnumbers by_spelling\nuse corrected = @25d7ace18ca40da93867a3c56e88b114d8a1f7e943e36581e5f45f3101b8e03c\nfn f() { let y = invoke corrected(2) return y }\nmain { let x = invoke corrected(1) finish x }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "int": "1"
+          }
+        }
+      }
+    }
+  ]
+}

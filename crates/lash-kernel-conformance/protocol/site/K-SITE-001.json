@@ -1,0 +1,45 @@
+{
+  "rule": "K-SITE-001",
+  "cases": [
+    {
+      "name": "pending calling and cleanup coordinates are statements",
+      "document": "kernel 1\nnumbers by_spelling\neffect echo(n: Int) -> Int\nfn f() { try { return 7 } finally { do perform echo(1) as Int } }\nmain { let r = call f() finish r }\n",
+      "expected": {
+        "prints": [],
+        "trace": [
+          {
+            "effect": {
+              "effect": "echo",
+              "args": [
+                {
+                  "int": "1"
+                }
+              ],
+              "result": "int"
+            }
+          }
+        ],
+        "end": {
+          "finished": {
+            "int": "7"
+          }
+        }
+      },
+      "environment": {
+        "resume": true,
+        "deliveries": [
+          [
+            {
+              "request": 0,
+              "outcome": {
+                "completed": {
+                  "int": "2"
+                }
+              }
+            }
+          ]
+        ]
+      }
+    }
+  ]
+}

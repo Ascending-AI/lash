@@ -1,0 +1,20 @@
+{
+  "rule": "K-EDIT-003",
+  "cases": [
+    {
+      "name": "removing a temporary refuses its surviving use",
+      "document": "kernel 1\nnumbers by_spelling\nmain { let tmp = 7 print tmp finish null }\n",
+      "expected": {
+        "prints": [
+          {
+            "int": "7"
+          }
+        ],
+        "trace": [],
+        "end": {
+          "finished": "null"
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "rule": "K-SES-002",
+  "cases": [
+    {
+      "name": "aliases share one object after the cell handover",
+      "document": "kernel 1\nnumbers by_spelling\nmain { let a = [1] let b = a finish null }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": "null"
+        }
+      }
+    }
+  ]
+}

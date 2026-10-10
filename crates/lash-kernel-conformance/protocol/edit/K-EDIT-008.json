@@ -1,0 +1,18 @@
+{
+  "rule": "K-EDIT-008",
+  "cases": [
+    {
+      "name": "entry rename follows calls spawn and references",
+      "document": "kernel 1\nnumbers by_spelling\nfn f() { return 3 }\nentry f() -> Int\nmain { let r = call f() let h = spawn call f() let j = join h finish &f }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "function": "f"
+          }
+        }
+      }
+    }
+  ]
+}

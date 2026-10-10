@@ -105,7 +105,7 @@ impl Document {
     }
 
     pub fn from_json(text: &str) -> Result<Self, DecodeError> {
-        from_json(text)
+        from_versioned_json(text)
     }
 }
 
@@ -156,6 +156,39 @@ pub(crate) fn from_json<T: DeserializeOwned>(text: &str) -> Result<T, DecodeErro
     let value = T::deserialize(&mut decoder).map_err(invalid)?;
     decoder.end().map_err(invalid)?;
     Ok(value)
+}
+
+/// Read only the version envelope before decoding any forms (K-VER-003).
+/// Unknown fields are skipped by serde, so a payload malformed for this
+/// build cannot disguise an unsupported version as a form decoding fault.
+pub(crate) fn from_versioned_json<T: DeserializeOwned>(text: &str) -> Result<T, DecodeError> {
+    #[derive(Deserialize)]
+    struct Version {
+        kernel: u32,
+    }
+    #[derive(Deserialize)]
+    struct Header {
+        #[serde(default)]
+        kernel: Option<u32>,
+        #[serde(default)]
+        manifest: Option<Version>,
+    }
+    let header: Header = from_json(text)?;
+    let kernel = header
+        .manifest
+        .map(|manifest| manifest.kernel)
+        .or(header.kernel);
+    if let Some(found) = kernel.filter(|kernel| crate::KernelVersion::of(*kernel).is_none()) {
+        return Err(DecodeError::Invalid {
+            message: format!(
+                "unsupported kernel version {found}; newest supported is {}",
+                crate::KernelVersion::NEWEST
+            ),
+            line: 0,
+            column: 0,
+        });
+    }
+    from_json(text)
 }
 
 /// The annotation layer of one document: everything about it that is not

@@ -1,0 +1,46 @@
+{
+  "rule": "K-EFF-011",
+  "cases": [
+    {
+      "name": "committed outcome survives a crash before the perform continues",
+      "document": "kernel 1\nnumbers by_spelling\neffect echo(n: Int) -> Int\nmain { let answer = perform echo(1) as Int finish answer }\n",
+      "environment": {
+        "deliveries": [
+          [
+            {
+              "request": 0,
+              "outcome": {
+                "completed": {
+                  "int": "7"
+                }
+              }
+            }
+          ]
+        ],
+        "resume": true
+      },
+      "expected": {
+        "prints": [],
+        "end": {
+          "finished": {
+            "int": "7"
+          }
+        },
+        "trace": [
+          {
+            "effect": {
+              "effect": "echo",
+              "args": [
+                {
+                  "int": "1"
+                }
+              ],
+              "result": "int"
+            }
+          }
+        ],
+        "parks": 1
+      }
+    }
+  ]
+}

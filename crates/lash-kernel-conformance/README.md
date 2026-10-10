@@ -1,5 +1,18 @@
 The corpus pins written kernel rules, independently of a dialect. Each file
 `corpus/<family>/<K-RULE-ID>.json` owns one rule and contains `{rule, cases}`.
+Host-operation cases live in `protocol/<family>/<K-RULE-ID>.json` with the
+same envelope. Their per-rule laws in `src/tests/protocol/` apply typed
+transactions, hand bindings to a new document, inspect exported sites, or
+carry a parked run; the document observations and the protocol assertions
+both have to pass. These shards join the coverage and text/JSON round-trip
+selection. They are separate from the dialect printer selection, which
+cannot express a host editing, importing bindings or migrating a run.
+`K-VER-004` and `K-VER-005` execute the shipped migration under the existing
+`synthetic-next` feature witness; the baseline also checks that version 1
+has no predecessor migration. `K-EFF-011` restores an admitted wait with a
+committed answer and a committed wait before guest code consumes it, and
+requires both paths to end without another effect request.
+
 Each owning crate embeds its own shard tree with `index.py`; no lane edits
 another lane's index. `load_corpus` decodes host-supplied `(path, bytes)` pairs
 in sorted order, so the kernel library does no filesystem I/O;
@@ -122,3 +135,15 @@ derived sites, and rejected deliveries leaving exported state unchanged.
 Definition probes use kernel text and the public checker and machine seams.
 The machine corpus registry includes the kernel numeric library for document
 cases that call its native definitions. The portable case envelope is unchanged.
+
+Regenerate the host-operation selection with:
+
+```sh
+python3 crates/lash-kernel-conformance/index.py crates/lash-kernel-conformance/protocol crates/lash-kernel-conformance/src/tests/protocol_files.rs --tests-output crates/lash-kernel-conformance/src/tests/protocol_cases.rs
+```
+
+The test-only drivers register the literal probe definitions and the ordinary
+numeric natives the documents call. Charge cases pin the total charge written
+in each fixture; sizes and magnitudes are never inferred from the machine.
+The owner-completion law also rejects any of these 26 rules reappearing in
+`pending.json`.

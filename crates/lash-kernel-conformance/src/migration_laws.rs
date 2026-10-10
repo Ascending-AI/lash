@@ -316,6 +316,7 @@ fn a_function_saved_under_one_version_is_migrated_and_called_under_the_next() {
             &[(function.name.clone(), function.clone())].into(),
             &[function.name.clone()].into(),
             &Default::default(),
+            &Default::default(),
             &|library| registry.get(library).is_some(),
         )
         .expect("the function installs");

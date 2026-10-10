@@ -1,0 +1,43 @@
+{
+  "rule": "K-SITE-003",
+  "cases": [
+    {
+      "name": "saved and effect loop coordinates are loop statements",
+      "document": "kernel 1\nnumbers by_spelling\neffect echo(n: Int) -> Int\nmain { for n in [1] { do perform echo(n) as Int } finish null }\n",
+      "expected": {
+        "prints": [],
+        "trace": [
+          {
+            "effect": {
+              "effect": "echo",
+              "args": [
+                {
+                  "int": "1"
+                }
+              ],
+              "result": "int"
+            }
+          }
+        ],
+        "end": {
+          "finished": "null"
+        }
+      },
+      "environment": {
+        "resume": true,
+        "deliveries": [
+          [
+            {
+              "request": 0,
+              "outcome": {
+                "completed": {
+                  "int": "2"
+                }
+              }
+            }
+          ]
+        ]
+      }
+    }
+  ]
+}

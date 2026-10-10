@@ -1,0 +1,23 @@
+{
+  "rule": "K-EDIT-007",
+  "cases": [
+    {
+      "name": "rename resolves one private declaration and refuses capture",
+      "document": "kernel 1\nnumbers by_spelling\nprivate x\nmain { let x = 1 if true { let x = 2 print x } print x finish null }\n",
+      "expected": {
+        "prints": [
+          {
+            "int": "2"
+          },
+          {
+            "int": "1"
+          }
+        ],
+        "trace": [],
+        "end": {
+          "finished": "null"
+        }
+      }
+    }
+  ]
+}

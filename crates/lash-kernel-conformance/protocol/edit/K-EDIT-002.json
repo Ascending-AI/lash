@@ -1,0 +1,23 @@
+{
+  "rule": "K-EDIT-002",
+  "cases": [
+    {
+      "name": "later edits follow base sites after removal",
+      "document": "kernel 1\nnumbers by_spelling\nmain { print 1 if true { print 2 } finish null }\n",
+      "expected": {
+        "prints": [
+          {
+            "int": "1"
+          },
+          {
+            "int": "2"
+          }
+        ],
+        "trace": [],
+        "end": {
+          "finished": "null"
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "rule": "K-EDIT-005",
+  "cases": [
+    {
+      "name": "rederived manifest replaces the removed effect",
+      "document": "kernel 1\nnumbers by_spelling\neffect old() -> Any\nmain { do perform old() as Any finish null }\n",
+      "expected": {
+        "prints": [],
+        "trace": [
+          {
+            "effect": {
+              "effect": "old",
+              "args": [],
+              "result": "any"
+            }
+          }
+        ],
+        "end": {
+          "finished": "null"
+        }
+      },
+      "environment": {
+        "deliveries": [
+          [
+            {
+              "request": 0,
+              "outcome": {
+                "completed": "null"
+              }
+            }
+          ]
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "rule": "K-SES-003",
+  "cases": [
+    {
+      "name": "nested closures and task handles are named and not carried",
+      "document": "kernel 1\nnumbers by_spelling\nfn f() { return null }\nmain { let kept = 1 let closure = [fn() { return null }] let task = spawn call f() let got = join task let nested = {h: task} finish null }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": "null"
+        }
+      }
+    }
+  ]
+}

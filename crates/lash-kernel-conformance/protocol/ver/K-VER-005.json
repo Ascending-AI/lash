@@ -1,0 +1,66 @@
+{
+  "rule": "K-VER-005",
+  "cases": [
+    {
+      "name": "migration carries every saved coordinate and preserves observations",
+      "document": "kernel 1\nnumbers by_spelling\neffect echo(n: Int) -> Int\nfn worker(n) { let answer = perform echo(n) as Int return answer }\nmain {\n let kept = [1]\n let shared = kept\n let identity = fn(x) { return x }\n for n in [1] {\n  try {\n   let h = spawn call worker(n)\n   let answer = join h\n   set shared[0] = answer\n  } finally { do perform echo(9) as Int }\n }\n let value = kept[0]\n let got = apply identity(value)\n finish got\n}\n",
+      "expected": {
+        "prints": [],
+        "trace": [
+          {
+            "effect": {
+              "effect": "echo",
+              "args": [
+                {
+                  "int": "1"
+                }
+              ],
+              "result": "int"
+            }
+          },
+          {
+            "effect": {
+              "effect": "echo",
+              "args": [
+                {
+                  "int": "9"
+                }
+              ],
+              "result": "int"
+            }
+          }
+        ],
+        "end": {
+          "finished": {
+            "int": "7"
+          }
+        }
+      },
+      "environment": {
+        "resume": true,
+        "deliveries": [
+          [
+            {
+              "request": 0,
+              "outcome": {
+                "completed": {
+                  "int": "7"
+                }
+              }
+            }
+          ],
+          [
+            {
+              "request": 1,
+              "outcome": {
+                "completed": {
+                  "int": "0"
+                }
+              }
+            }
+          ]
+        ]
+      }
+    }
+  ]
+}

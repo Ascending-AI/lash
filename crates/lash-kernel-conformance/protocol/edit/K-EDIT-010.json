@@ -1,0 +1,23 @@
+{
+  "rule": "K-EDIT-010",
+  "cases": [
+    {
+      "name": "transaction and correspondence are closed JSON data",
+      "document": "kernel 1\nnumbers by_spelling\nmain { try { print 1 } finally { print 2 } finish null }\n",
+      "expected": {
+        "prints": [
+          {
+            "int": "1"
+          },
+          {
+            "int": "2"
+          }
+        ],
+        "trace": [],
+        "end": {
+          "finished": "null"
+        }
+      }
+    }
+  ]
+}

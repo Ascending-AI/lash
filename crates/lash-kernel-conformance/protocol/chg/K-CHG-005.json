@@ -1,0 +1,107 @@
+{
+  "rule": "K-CHG-005",
+  "cases": [
+    {
+      "name": "deep of (1, 2) is 7",
+      "document": "kernel 1\nnumbers by_spelling\nuse probe.deep = @22d56a1ff84e07a9a12a985d574ab66c4edca91b6f8990e9a04eeb4254e05dfd\nfn f() { return null }\nmain { let x = (1, 2) finish probe.deep(x) }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": "null"
+        },
+        "charged": 17
+      },
+      "environment": {
+        "bounds": {
+          "charge": 18446744073709551615
+        }
+      }
+    },
+    {
+      "name": "deep of [1, 2] is 7",
+      "document": "kernel 1\nnumbers by_spelling\nuse probe.deep = @22d56a1ff84e07a9a12a985d574ab66c4edca91b6f8990e9a04eeb4254e05dfd\nfn f() { return null }\nmain { let x = [1, 2] finish probe.deep(x) }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": "null"
+        },
+        "charged": 17
+      },
+      "environment": {
+        "bounds": {
+          "charge": 18446744073709551615
+        }
+      }
+    },
+    {
+      "name": "deep of map{1:2} is 7",
+      "document": "kernel 1\nnumbers by_spelling\nuse probe.deep = @22d56a1ff84e07a9a12a985d574ab66c4edca91b6f8990e9a04eeb4254e05dfd\nfn f() { return null }\nmain { let x = map{1:2} finish probe.deep(x) }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": "null"
+        },
+        "charged": 16
+      },
+      "environment": {
+        "bounds": {
+          "charge": 18446744073709551615
+        }
+      }
+    },
+    {
+      "name": "deep of {a:[1]} is 6",
+      "document": "kernel 1\nnumbers by_spelling\nuse probe.deep = @22d56a1ff84e07a9a12a985d574ab66c4edca91b6f8990e9a04eeb4254e05dfd\nfn f() { return null }\nmain { let x = {a:[1]} finish probe.deep(x) }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": "null"
+        },
+        "charged": 16
+      },
+      "environment": {
+        "bounds": {
+          "charge": 18446744073709551615
+        }
+      }
+    },
+    {
+      "name": "deep of shared list is 7",
+      "document": "kernel 1\nnumbers by_spelling\nuse probe.deep = @22d56a1ff84e07a9a12a985d574ab66c4edca91b6f8990e9a04eeb4254e05dfd\nmain { let a = [1] let x = [a,a] finish probe.deep(x) }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": "null"
+        },
+        "charged": 21
+      },
+      "environment": {
+        "bounds": {
+          "charge": 18446744073709551615
+        }
+      }
+    },
+    {
+      "name": "deep of cyclic list is 2",
+      "document": "kernel 1\nnumbers by_spelling\nuse probe.deep = @22d56a1ff84e07a9a12a985d574ab66c4edca91b6f8990e9a04eeb4254e05dfd\nmain { let x = [] set x[0] = x finish probe.deep(x) }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": "null"
+        },
+        "charged": 12
+      },
+      "environment": {
+        "bounds": {
+          "charge": 18446744073709551615
+        }
+      }
+    }
+  ]
+}

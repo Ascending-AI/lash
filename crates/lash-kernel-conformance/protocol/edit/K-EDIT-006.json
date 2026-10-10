@@ -1,0 +1,23 @@
+{
+  "rule": "K-EDIT-006",
+  "cases": [
+    {
+      "name": "labels follow move copy and removal without changing behavior",
+      "document": "kernel 1\nnumbers by_spelling\nmain { print 1 print 2 finish null }\n",
+      "expected": {
+        "prints": [
+          {
+            "int": "1"
+          },
+          {
+            "int": "2"
+          }
+        ],
+        "trace": [],
+        "end": {
+          "finished": "null"
+        }
+      }
+    }
+  ]
+}

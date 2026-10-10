@@ -1,0 +1,18 @@
+{
+  "rule": "K-SES-001",
+  "cases": [
+    {
+      "name": "top level public bindings enter the next document private and nested names do not",
+      "document": "kernel 1\nnumbers by_spelling\nprivate hidden\nmain { let x = 7 let hidden = 8 if true { let nested = 9 } finish x }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "int": "7"
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "rule": "K-EDIT-004",
+  "cases": [
+    {
+      "name": "moves survive copies are new replacements keep only the root",
+      "document": "kernel 1\nnumbers by_spelling\nmain { print [1] print 2 finish null }\n",
+      "expected": {
+        "prints": [
+          {
+            "list": [
+              {
+                "int": "1"
+              }
+            ]
+          },
+          {
+            "int": "2"
+          }
+        ],
+        "trace": [],
+        "end": {
+          "finished": "null"
+        }
+      }
+    }
+  ]
+}

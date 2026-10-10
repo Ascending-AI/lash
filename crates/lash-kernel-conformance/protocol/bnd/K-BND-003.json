@@ -1,0 +1,40 @@
+{
+  "rule": "K-BND-003",
+  "cases": [
+    {
+      "name": "unreachable allocations do not exhaust memory",
+      "document": "kernel 1\nnumbers by_spelling\nmain { for i in [1,2,3,4,5,6,7,8] { let garbage = [\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"] } finish null }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": "null"
+        }
+      },
+      "environment": {
+        "bounds": {
+          "memory": 1600
+        }
+      }
+    },
+    {
+      "name": "reachable allocations count against the same memory bound",
+      "document": "kernel 1\nnumbers by_spelling\nmain { let kept = [] for i in [0,1,2,3,4,5,6,7] { set kept[i] = [\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"] } finish null }\n",
+      "environment": {
+        "bounds": {
+          "memory": 1600
+        }
+      },
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "bound": {
+            "name": "memory",
+            "limit": 1600
+          }
+        }
+      }
+    }
+  ]
+}

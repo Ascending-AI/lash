@@ -39,6 +39,7 @@ serde_json.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+lash-kernel-edit.workspace = true
 kernel-embedder = { path = "../../examples/kernel-embedder" }
 lash-kernel-lib = { path = "../lash-kernel-lib" }
 lash-ext-regex-ecma = { path = "../lash-ext-regex-ecma" }

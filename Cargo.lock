@@ -2782,6 +2782,7 @@ dependencies = [
  "lash-kernel-check",
  "lash-kernel-dialect",
  "lash-kernel-doc",
+ "lash-kernel-edit",
  "lash-kernel-lib",
  "lash-kernel-migrate",
  "lash-kernel-state",

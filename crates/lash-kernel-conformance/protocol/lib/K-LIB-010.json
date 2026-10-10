@@ -1,0 +1,31 @@
+{
+  "rule": "K-LIB-010",
+  "cases": [
+    {
+      "name": "machine functions are recognised by identity inside expressions",
+      "document": "kernel 1\nnumbers by_spelling\nuse tasks.unfinished = @2e4b1fc9067053510f2bdef6bf6bde3c31aa69bb3a8156f8f4ece8e38e914ff1\nmain { finish tasks.unfinished() }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "list": []
+          }
+        }
+      }
+    },
+    {
+      "name": "deref is an expression and returns the same mutable object",
+      "document": "kernel 1\nnumbers by_spelling\nuse deref = @de72f688caa0a0a18d9b16f9d8c09f1eb7f541d481e6c5abbe1731c8deb0c42b\nuse ref = @153e944ca1091d91e3ca964a3f8eba0e8ace1517880176d10fab14781a6cd663\nmain { let a = [1] let b = deref(ref(a)) set b[0] = 7 finish a[0] }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": {
+            "int": "7"
+          }
+        }
+      }
+    }
+  ]
+}

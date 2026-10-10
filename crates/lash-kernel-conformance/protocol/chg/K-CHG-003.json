@@ -1,0 +1,29 @@
+{
+  "rule": "K-CHG-003",
+  "cases": [
+    {
+      "name": "return charges result size 2",
+      "document": "kernel 1\nnumbers by_spelling\nuse probe.result = @e1a02c752f2efaef4704b5c882207ecffe443ea2fdae845c52037bba879bb5a2\nmain { try { do invoke probe.result() } catch e { } finish null }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": "null"
+        },
+        "charged": 16
+      }
+    },
+    {
+      "name": "throw charges result size 0",
+      "document": "kernel 1\nnumbers by_spelling\nuse probe.result = @f614bbc8b6cd2cf88185a4fbf8874e679387a5f8ae6546692153ba0e817d3455\nmain { try { do invoke probe.result() } catch e { } finish null }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": "null"
+        },
+        "charged": 14
+      }
+    }
+  ]
+}

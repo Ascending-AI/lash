@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::ast::Block;
 use crate::canonical::{EncodeError, digest};
-use crate::document::{DecodeError, from_json, to_json};
+use crate::document::{DecodeError, from_versioned_json, to_json};
 use crate::name::{FunctionId, FunctionName, Name};
 use crate::types::Signature;
 
@@ -185,6 +185,6 @@ impl FunctionDefinition {
     }
 
     pub fn from_json(text: &str) -> Result<Self, DecodeError> {
-        from_json(text)
+        from_versioned_json(text)
     }
 }

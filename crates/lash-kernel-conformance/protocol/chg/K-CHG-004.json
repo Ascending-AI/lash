@@ -1,0 +1,260 @@
+{
+  "rule": "K-CHG-004",
+  "cases": [
+    {
+      "name": "size of null is 1",
+      "document": "kernel 1\nnumbers by_spelling\nuse probe.size = @45fe31c7b6dcfabf8acd82faa0d7ecf954154a12d365e38b3e27995b088f6fa2\nfn f() { return null }\nmain { let x = null finish probe.size(x) }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": "null"
+        },
+        "charged": 7
+      },
+      "environment": {
+        "bounds": {
+          "charge": 18446744073709551615
+        }
+      }
+    },
+    {
+      "name": "size of absent is 1",
+      "document": "kernel 1\nnumbers by_spelling\nuse probe.size = @45fe31c7b6dcfabf8acd82faa0d7ecf954154a12d365e38b3e27995b088f6fa2\nfn f() { return null }\nmain { let x = absent finish probe.size(x) }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": "null"
+        },
+        "charged": 7
+      },
+      "environment": {
+        "bounds": {
+          "charge": 18446744073709551615
+        }
+      }
+    },
+    {
+      "name": "size of true is 1",
+      "document": "kernel 1\nnumbers by_spelling\nuse probe.size = @45fe31c7b6dcfabf8acd82faa0d7ecf954154a12d365e38b3e27995b088f6fa2\nfn f() { return null }\nmain { let x = true finish probe.size(x) }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": "null"
+        },
+        "charged": 7
+      },
+      "environment": {
+        "bounds": {
+          "charge": 18446744073709551615
+        }
+      }
+    },
+    {
+      "name": "size of 1.0 is 1",
+      "document": "kernel 1\nnumbers by_spelling\nuse probe.size = @45fe31c7b6dcfabf8acd82faa0d7ecf954154a12d365e38b3e27995b088f6fa2\nfn f() { return null }\nmain { let x = 1.0 finish probe.size(x) }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": "null"
+        },
+        "charged": 7
+      },
+      "environment": {
+        "bounds": {
+          "charge": 18446744073709551615
+        }
+      }
+    },
+    {
+      "name": "size of 0 is 1",
+      "document": "kernel 1\nnumbers by_spelling\nuse probe.size = @45fe31c7b6dcfabf8acd82faa0d7ecf954154a12d365e38b3e27995b088f6fa2\nfn f() { return null }\nmain { let x = 0 finish probe.size(x) }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": "null"
+        },
+        "charged": 7
+      },
+      "environment": {
+        "bounds": {
+          "charge": 18446744073709551615
+        }
+      }
+    },
+    {
+      "name": "size of 18446744073709551616 is 3",
+      "document": "kernel 1\nnumbers by_spelling\nuse probe.size = @45fe31c7b6dcfabf8acd82faa0d7ecf954154a12d365e38b3e27995b088f6fa2\nfn f() { return null }\nmain { let x = 18446744073709551616 finish probe.size(x) }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": "null"
+        },
+        "charged": 9
+      },
+      "environment": {
+        "bounds": {
+          "charge": 18446744073709551615
+        }
+      }
+    },
+    {
+      "name": "size of \"é\" is 3",
+      "document": "kernel 1\nnumbers by_spelling\nuse probe.size = @45fe31c7b6dcfabf8acd82faa0d7ecf954154a12d365e38b3e27995b088f6fa2\nfn f() { return null }\nmain { let x = \"é\" finish probe.size(x) }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": "null"
+        },
+        "charged": 9
+      },
+      "environment": {
+        "bounds": {
+          "charge": 18446744073709551615
+        }
+      }
+    },
+    {
+      "name": "size of b\"0001\" is 3",
+      "document": "kernel 1\nnumbers by_spelling\nuse probe.size = @45fe31c7b6dcfabf8acd82faa0d7ecf954154a12d365e38b3e27995b088f6fa2\nfn f() { return null }\nmain { let x = b\"0001\" finish probe.size(x) }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": "null"
+        },
+        "charged": 9
+      },
+      "environment": {
+        "bounds": {
+          "charge": 18446744073709551615
+        }
+      }
+    },
+    {
+      "name": "size of (1, 2) is 3",
+      "document": "kernel 1\nnumbers by_spelling\nuse probe.size = @45fe31c7b6dcfabf8acd82faa0d7ecf954154a12d365e38b3e27995b088f6fa2\nfn f() { return null }\nmain { let x = (1, 2) finish probe.size(x) }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": "null"
+        },
+        "charged": 13
+      },
+      "environment": {
+        "bounds": {
+          "charge": 18446744073709551615
+        }
+      }
+    },
+    {
+      "name": "size of [1, 2] is 3",
+      "document": "kernel 1\nnumbers by_spelling\nuse probe.size = @45fe31c7b6dcfabf8acd82faa0d7ecf954154a12d365e38b3e27995b088f6fa2\nfn f() { return null }\nmain { let x = [1, 2] finish probe.size(x) }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": "null"
+        },
+        "charged": 13
+      },
+      "environment": {
+        "bounds": {
+          "charge": 18446744073709551615
+        }
+      }
+    },
+    {
+      "name": "size of map{1:2} is 3",
+      "document": "kernel 1\nnumbers by_spelling\nuse probe.size = @45fe31c7b6dcfabf8acd82faa0d7ecf954154a12d365e38b3e27995b088f6fa2\nfn f() { return null }\nmain { let x = map{1:2} finish probe.size(x) }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": "null"
+        },
+        "charged": 12
+      },
+      "environment": {
+        "bounds": {
+          "charge": 18446744073709551615
+        }
+      }
+    },
+    {
+      "name": "size of set{1,2} is 3",
+      "document": "kernel 1\nnumbers by_spelling\nuse probe.size = @45fe31c7b6dcfabf8acd82faa0d7ecf954154a12d365e38b3e27995b088f6fa2\nfn f() { return null }\nmain { let x = set{1,2} finish probe.size(x) }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": "null"
+        },
+        "charged": 13
+      },
+      "environment": {
+        "bounds": {
+          "charge": 18446744073709551615
+        }
+      }
+    },
+    {
+      "name": "size of {a:1,b:2} is 3",
+      "document": "kernel 1\nnumbers by_spelling\nuse probe.size = @45fe31c7b6dcfabf8acd82faa0d7ecf954154a12d365e38b3e27995b088f6fa2\nfn f() { return null }\nmain { let x = {a:1,b:2} finish probe.size(x) }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": "null"
+        },
+        "charged": 13
+      },
+      "environment": {
+        "bounds": {
+          "charge": 18446744073709551615
+        }
+      }
+    },
+    {
+      "name": "size of fn() { return null } is 1",
+      "document": "kernel 1\nnumbers by_spelling\nuse probe.size = @45fe31c7b6dcfabf8acd82faa0d7ecf954154a12d365e38b3e27995b088f6fa2\nfn f() { return null }\nmain { let x = fn() { return null } finish probe.size(x) }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": "null"
+        },
+        "charged": 7
+      },
+      "environment": {
+        "bounds": {
+          "charge": 18446744073709551615
+        }
+      }
+    },
+    {
+      "name": "size of &f is 1",
+      "document": "kernel 1\nnumbers by_spelling\nuse probe.size = @45fe31c7b6dcfabf8acd82faa0d7ecf954154a12d365e38b3e27995b088f6fa2\nfn f() { return null }\nmain { let x = &f finish probe.size(x) }\n",
+      "expected": {
+        "prints": [],
+        "trace": [],
+        "end": {
+          "finished": "null"
+        },
+        "charged": 7
+      },
+      "environment": {
+        "bounds": {
+          "charge": 18446744073709551615
+        }
+      }
+    }
+  ]
+}
