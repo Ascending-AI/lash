@@ -4,9 +4,23 @@
 #![allow(clippy::disallowed_methods)]
 
 #[derive(Clone, Copy, Debug)]
+enum CargoTestTarget {
+    Library(&'static str),
+    Integration(&'static str),
+}
+
+impl CargoTestTarget {
+    fn binary_name(self) -> &'static str {
+        match self {
+            Self::Library(name) | Self::Integration(name) => name,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
 struct CargoTestEvidence {
     package: &'static str,
-    test_target: Option<&'static str>,
+    target: CargoTestTarget,
     filter: Option<&'static str>,
 }
 
@@ -37,16 +51,16 @@ const DURABLE_FAULT_MATRIX: &[DurableFaultMatrixRow] = &[
     DurableFaultMatrixRow {
         id: "provider-retry-exhaustion",
         evidence: FaultEvidence::CargoTest(CargoTestEvidence {
-            package: "lash-internal-core",
-            test_target: None,
-            filter: Some("retryable_llm_failures_exhaust_and_fail_turn"),
+            package: "lash-runtime",
+            target: CargoTestTarget::Library("lash"),
+            filter: Some("tests::turn_checkpoints::retryable_llm_failures_exhaust_and_fail_turn"),
         }),
     },
     DurableFaultMatrixRow {
         id: "protocol-provider-failure",
         evidence: FaultEvidence::CargoTest(CargoTestEvidence {
             package: "lash-internal-protocol-standard",
-            test_target: Some("protocol_scenarios"),
+            target: CargoTestTarget::Integration("protocol_scenarios"),
             filter: Some("standard_protocol_scenario_provider_error_stops_without_checkpoint"),
         }),
     },
@@ -63,26 +77,26 @@ const DURABLE_FAULT_MATRIX: &[DurableFaultMatrixRow] = &[
         evidence: FaultEvidence::RuntimeScenario,
     },
     DurableFaultMatrixRow {
-        id: "stale-shift-fence-writes-nothing",
+        id: "stale-epoch-writes-nothing",
         evidence: FaultEvidence::CargoTest(CargoTestEvidence {
             package: "lash-internal-sqlite-store",
-            test_target: Some("conformance_memory"),
-            filter: Some("a_stale_fence_writes_nothing"),
+            target: CargoTestTarget::Library("lash_sqlite_store"),
+            filter: Some("durable::tests::no_write_through_a_stale_epoch::memory"),
         }),
     },
     DurableFaultMatrixRow {
-        id: "settlement-predicated-on-the-run",
+        id: "terminal-preserves-next-run-mail",
         evidence: FaultEvidence::CargoTest(CargoTestEvidence {
-            package: "lash-internal-sqlite-store",
-            test_target: Some("conformance_memory"),
-            filter: Some("settlement_is_predicated_on_the_run"),
+            package: "lash-internal-durable-test",
+            target: CargoTestTarget::Integration("steering_crash_laws"),
+            filter: Some("a_withheld_steer_killed_at_every_label_runs_once_next_on_sqlite_memory"),
         }),
     },
     DurableFaultMatrixRow {
         id: "sqlite-backend-conformance",
         evidence: FaultEvidence::CargoTest(CargoTestEvidence {
             package: "lash-internal-sqlite-store",
-            test_target: Some("conformance"),
+            target: CargoTestTarget::Integration("conformance"),
             filter: None,
         }),
     },
@@ -153,97 +167,130 @@ fn durable_fault_matrix_gate_probe_ignores_inherited_confidence_stage_routing() 
         ],
     );
     assert_eq!(
-        under_a_stage, clean,
+        under_a_stage.as_slice(),
+        clean,
         "a Confidence stage environment must not change fast:fault-matrix routing"
     );
 }
 
-const REAL_CARGO_FILTER_CHUNKS: usize = 5;
-// Raising the chunk count must add a matching test and bump this pin.
-const _: () = assert!(REAL_CARGO_FILTER_CHUNKS == 5);
-
+/// Keep the Cargo-owned probes in one process: nextest runs separate tests
+/// in separate processes, so splitting rows repeated gate setup and contended
+/// on the same Cargo build lock. Share the unfiltered catalogue as well. Every row still has its own nonempty check.
 #[test]
-fn durable_fault_matrix_real_cargo_filters_chunk_0() {
-    assert_real_cargo_filter_chunk_selects_tests(0);
-}
-
-#[test]
-fn durable_fault_matrix_real_cargo_filters_chunk_1() {
-    assert_real_cargo_filter_chunk_selects_tests(1);
-}
-
-#[test]
-fn durable_fault_matrix_real_cargo_filters_chunk_2() {
-    assert_real_cargo_filter_chunk_selects_tests(2);
-}
-
-#[test]
-fn durable_fault_matrix_real_cargo_filters_chunk_3() {
-    assert_real_cargo_filter_chunk_selects_tests(3);
-}
-
-#[test]
-fn durable_fault_matrix_real_cargo_filters_chunk_4() {
-    assert_real_cargo_filter_chunk_selects_tests(4);
-}
-
-fn assert_real_cargo_filter_chunk_selects_tests(chunk_index: usize) {
-    assert!(chunk_index < REAL_CARGO_FILTER_CHUNKS);
+fn durable_fault_matrix_real_cargo_filters_select_tests() {
     let fault_matrix_commands = run_fast_gate_with_fake_cargo("fault-matrix");
-    let mut cargo_evidence_index = 0;
-
+    let catalogue = real_cargo_test_catalogue();
+    let mut failures = Vec::new();
     for row in DURABLE_FAULT_MATRIX {
         let FaultEvidence::CargoTest(evidence) = row.evidence else {
             continue;
         };
-        let row_chunk = cargo_evidence_index % REAL_CARGO_FILTER_CHUNKS;
-        cargo_evidence_index += 1;
-        if row_chunk != chunk_index {
-            continue;
-        }
-
         let command = fault_matrix_commands
             .iter()
-            .find(|command| command_executes_evidence(command, evidence))
-            .unwrap_or_else(|| {
-                panic!(
-                    "{} is non-blocked CargoTest evidence but is not executed by scripts/confidence-gate.sh fast:fault-matrix; observed commands: {fault_matrix_commands:?}",
-                    row.id
-                )
-            });
-        assert_real_cargo_filter_selects_tests(command, row.id);
+            .find(|command| command_executes_evidence(command, evidence));
+        match command {
+            Some(command) => {
+                if let Err(error) =
+                    real_cargo_filter_selects_tests(&catalogue, command, evidence, row.id)
+                {
+                    failures.push(error);
+                }
+            }
+            None => failures.push(format!(
+                "{} has no gate command; observed: {fault_matrix_commands:?}",
+                row.id
+            )),
+        }
     }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
-fn assert_real_cargo_filter_selects_tests(command: &[String], row_id: &str) {
-    let repo_root = repository_root();
+/// One Cargo-owned catalogue for all rows. Nextest lists libtest's full names
+/// once after one workspace build; package and target identity stay attached
+/// to each suite, so a name in another crate cannot satisfy a stale command.
+fn real_cargo_test_catalogue() -> serde_json::Map<String, serde_json::Value> {
+    // Keep workspace feature resolution, but build/list only the evidence
+    // binaries. Every test name within those binaries is still catalogued.
+    let targets = DURABLE_FAULT_MATRIX
+        .iter()
+        .filter_map(|row| match row.evidence {
+            FaultEvidence::CargoTest(evidence) => Some(format!(
+                "(package(={}) & binary(={}))",
+                evidence.package,
+                evidence.target.binary_name()
+            )),
+            FaultEvidence::RuntimeScenario | FaultEvidence::Blocked => None,
+        })
+        .collect::<Vec<_>>()
+        .join(" | ");
     let output =
         std::process::Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()))
-            .args(command)
-            .args(["--", "--list"])
-            .current_dir(repo_root)
+            .args([
+                "nextest",
+                "list",
+                "--workspace",
+                "--all-targets",
+                "--locked",
+                "--profile",
+                "default",
+                "--ignore-default-filter",
+                "--message-format",
+                "json",
+            ])
+            .args(["--filterset", &targets])
+            .current_dir(repository_root())
             .output()
-            .unwrap_or_else(|err| panic!("execute real cargo list probe for {row_id}: {err}"));
+            .expect("execute real Cargo test catalogue probe");
     assert!(
         output.status.success(),
-        "real cargo list probe failed for {row_id}: {}",
+        "real Cargo test catalogue failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let selected = String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .filter(|line| line.ends_with(": test"))
+    let catalogue: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("nextest's JSON test catalogue");
+    catalogue["rust-suites"]
+        .as_object()
+        .expect("catalogued Rust suites")
+        .clone()
+}
+
+fn real_cargo_filter_selects_tests(
+    catalogue: &serde_json::Map<String, serde_json::Value>,
+    command: &[String],
+    evidence: CargoTestEvidence,
+    row_id: &str,
+) -> Result<(), String> {
+    let selected = catalogue
+        .values()
+        .filter(|suite| {
+            suite["package-name"].as_str() == Some(evidence.package)
+                && suite["binary-name"].as_str() == Some(evidence.target.binary_name())
+                && suite["kind"].as_str()
+                    == Some(match evidence.target {
+                        CargoTestTarget::Library(_) => "lib",
+                        CargoTestTarget::Integration(_) => "test",
+                    })
+        })
+        .flat_map(|suite| suite["testcases"].as_object().expect("suite's test names"))
+        .filter(|(name, test)| {
+            test["kind"].as_str() == Some("test")
+                && cargo_test_filter(command).is_none_or(|filter| name.contains(filter))
+        })
         .count();
-    assert!(
-        selected > 0,
-        "confidence-gate command for {row_id} selected zero tests under real cargo: {command:?}"
-    );
+    eprintln!("fault-matrix {row_id}: selected={selected}");
+    if selected == 0 {
+        return Err(format!(
+            "confidence-gate command for {row_id} selected zero tests under real cargo: {command:?}"
+        ));
+    }
+    Ok(())
 }
 
 #[test]
 fn durable_fault_matrix_target_name_is_not_a_test_filter() {
     let evidence = CargoTestEvidence {
         package: "lash-internal-sqlite-store",
-        test_target: Some("conformance"),
+        target: CargoTestTarget::Integration("conformance"),
         filter: Some("conformance"),
     };
     let mut command = [
@@ -276,6 +323,13 @@ fn durable_fault_matrix_target_name_is_not_a_test_filter() {
     command.push("conformance".to_string());
     command.push("--locked".to_string());
     assert!(command_executes_evidence(&command, evidence));
+    let library = CargoTestEvidence {
+        target: CargoTestTarget::Library("lash_sqlite_store"),
+        ..evidence
+    };
+    assert!(!command_executes_evidence(&command, library));
+    command.push("--lib".to_owned());
+    assert!(command_executes_evidence(&command, library));
 }
 
 fn command_executes_evidence(command: &[String], evidence: CargoTestEvidence) -> bool {
@@ -287,11 +341,12 @@ fn command_executes_evidence(command: &[String], evidence: CargoTestEvidence) ->
     {
         return false;
     }
-    evidence.test_target.is_none_or(|target| {
-        command
+    match evidence.target {
+        CargoTestTarget::Library(_) => command.iter().any(|arg| arg == "--lib"),
+        CargoTestTarget::Integration(target) => command
             .windows(2)
-            .any(|pair| pair[0] == "--test" && pair[1] == target)
-    })
+            .any(|pair| pair[0] == "--test" && pair[1] == target),
+    }
 }
 
 fn cargo_test_filter(command: &[String]) -> Option<&str> {
@@ -310,8 +365,17 @@ fn cargo_test_filter(command: &[String]) -> Option<&str> {
     None
 }
 
-fn run_fast_gate_with_fake_cargo(shard: &str) -> Vec<Vec<String>> {
-    run_fast_gate_with_fake_cargo_inheriting(shard, &[])
+fn run_fast_gate_with_fake_cargo(shard: &str) -> &'static [Vec<String>] {
+    use std::sync::OnceLock;
+
+    static SCENARIOS: OnceLock<Vec<Vec<String>>> = OnceLock::new();
+    static FAULTS: OnceLock<Vec<Vec<String>>> = OnceLock::new();
+    let commands = match shard {
+        "scenario-harnesses" => &SCENARIOS,
+        "fault-matrix" => &FAULTS,
+        _ => panic!("uncatalogued gate probe shard: {shard}"),
+    };
+    commands.get_or_init(|| run_fast_gate_with_fake_cargo_inheriting(shard, &[]))
 }
 
 /// `inherited` is applied to the child environment before the gate variables

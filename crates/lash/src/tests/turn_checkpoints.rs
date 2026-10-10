@@ -155,11 +155,16 @@ fn transient_500() -> Answer {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn retryable_llm_failures_exhaust_and_fail_turn() {
     let requests = Arc::new(StdMutex::new(Vec::new()));
-    let core = core_with(
-        sqlite_memory_store_backend().await,
-        scripted(Arc::clone(&requests), Arc::new(|_| transient_500())),
-        None,
-    );
+    let mut model = scripted(Arc::clone(&requests), Arc::new(|_| transient_500()));
+    // This law pins exhaustion and its ledger, not elapsed backoff. Keep
+    // retries enabled with the same four attempts; remove only their waits.
+    let mut options = model.options();
+    options.reliability.retry.max_attempts = Some(4);
+    options.reliability.retry.base_delay_ms = 0;
+    options.reliability.retry.max_delay_ms = 0;
+    options.reliability.retry.jitter_ms = 0;
+    model.set_options(options);
+    let core = core_with(sqlite_memory_store_backend().await, model, None);
     let session = created(&core, "retryable-error").await;
     let output = session
         .send(crate::TurnInput::text("hello"))
@@ -178,9 +183,10 @@ async fn retryable_llm_failures_exhaust_and_fail_turn() {
         panic!("one logical model call: {:?}", output.result.llm_calls);
     };
     let attempts = &call.attempts;
-    assert!(
-        attempts.len() > 1,
-        "a retryable failure retries: {attempts:?}"
+    assert_eq!(
+        attempts.len(),
+        4,
+        "all four attempts are spent: {attempts:?}"
     );
     assert_eq!(
         requests.lock_recover().len(),
@@ -202,6 +208,17 @@ async fn retryable_llm_failures_exhaust_and_fail_turn() {
             );
         }
     }
+    let scheduled: Vec<_> = attempts
+        .iter()
+        .filter_map(|attempt| {
+            attempt
+                .retry_decision
+                .as_ref()
+                .and_then(lash_core::RetryDecision::delay)
+        })
+        .collect();
+    assert_eq!(scheduled.len(), 3);
+    assert!(scheduled.iter().all(std::time::Duration::is_zero));
     core.shutdown().await.expect("shutdown");
 }
 

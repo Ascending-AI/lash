@@ -268,14 +268,13 @@ declare -A MUTATION_PACKAGES_FULL_MUTANTS=(
   [lash-internal-postgres-store]="8"
 )
 MUTATION_PACKAGES_FULL_MUTANTS_DEFAULT=16
-# The five durable_fault_matrix_real_cargo_filters_chunk_* probes each fork a
-# real `cargo test -- --list` (~90 s apiece in a cold mutants tree, ~447 s
-# together in run 35117123483) — they verify Cargo's own name-filter
-# selection, not behavior mutants can reach, and alone exceed the baseline's
+# The batched durable_fault_matrix_real_cargo_filters_select_tests probe forks
+# one real `cargo nextest list` command to verify Cargo's own name-filter
+# selection, not behavior mutants can reach, and can exceed the baseline's
 # per-test timeout. The trunk-only `Test heavy suites` job owns them and the
 # ordinary Buck2 targets already skip them, so the mutation lanes skip them
 # identically by forwarding the filter through `cargo test` to libtest.
-MUTATION_EXCLUDED_TEST_NAME='durable_fault_matrix_real_cargo_filters_chunk_'
+MUTATION_EXCLUDED_TEST_NAME='durable_fault_matrix_real_cargo_filters_select_tests'
 case "$lane" in
   fast) default_mutation_scope="none" ;;
   default|mutation) default_mutation_scope="targeted" ;;
@@ -1105,10 +1104,10 @@ run_state_machine_and_fault_matrix() {
     step "Durable fault matrix gate selection"
     run_cargo_tests -p lash-internal-core --locked durable_fault_matrix
     step "Durable process fault-matrix evidence"
-    run_cargo_tests -p lash-internal-sqlite-store --locked --test conformance_memory \
-      a_stale_fence_writes_nothing
-    run_cargo_tests -p lash-internal-sqlite-store --locked --test conformance_memory \
-      settlement_is_predicated_on_the_run
+    run_cargo_tests -p lash-internal-sqlite-store --lib --locked \
+      durable::tests::no_write_through_a_stale_epoch::memory
+    run_cargo_tests -p lash-internal-durable-test --locked --test steering_crash_laws \
+      a_withheld_steer_killed_at_every_label_runs_once_next_on_sqlite_memory
     run_cargo_tests -p lash-internal-sqlite-store --locked --test conformance_memory \
       concurrent_admissions_bind_every_row_to_at_most_one_run
   fi
@@ -1119,7 +1118,8 @@ run_state_machine_and_fault_matrix() {
     run_cargo_tests -p lash-internal-provider-anthropic --locked --test property
     run_cargo_tests -p lash-internal-provider-google --locked --test property
     step "Provider retry fault-matrix evidence"
-    run_cargo_tests -p lash-internal-core --locked retryable_llm_failures_exhaust_and_fail_turn
+    run_cargo_tests -p lash-runtime --lib --locked \
+      tests::turn_checkpoints::retryable_llm_failures_exhaust_and_fail_turn
     run_cargo_tests -p lash-internal-protocol-standard --locked --test protocol_scenarios \
       standard_protocol_scenario_provider_error_stops_without_checkpoint
   fi

@@ -377,18 +377,18 @@ data = [
 ]
 
 # The fault-matrix routing probes execute the real scripts/confidence-gate.sh
-# against a recording `cargo`. The five `..._real_cargo_filters_chunk_*` cases
-# each fork a real `cargo test ... -- --list` against the workspace to prove
+# against a recording `cargo`. The batched `..._real_cargo_filters_select_tests` case
+# uses one real `cargo nextest list` catalogue of the workspace to prove
 # the gate's name filters still select tests. That is a claim about Cargo's own
 # selection, so it cannot be proved inside a hermetic action; the trunk-only
-# `Test heavy suites` job (nextest `profile.ci-heavy`) owns them. Excluded by
+# `Test heavy suites` job (nextest `profile.ci-heavy`) owns it. Excluded by
 # name here so the label is honest about what it executed.
 [[rule]]
 packages = ["lash-internal-core"]
 kinds = ["bin", "test", "example", "bench"]
 targets = ["runtime_scenarios"]
 data = ["//:confidence_gate_scripts"]
-args = ["--skip=runtime::tests::runtime_scenarios::fault_matrix::durable_fault_matrix_real_cargo_filters_chunk_"]
+args = ["--skip=runtime::tests::runtime_scenarios::fault_matrix::durable_fault_matrix_real_cargo_filters_select_tests"]
 
 [[rule]]
 packages = ["lash-sim"]

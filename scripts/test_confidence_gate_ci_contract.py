@@ -621,7 +621,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
 
         self.assertIn("[profile.ci-heavy]", nextest)
         heavy_filter = (
-            "durable_fault_matrix_real_cargo_filters_chunk_"
+            "durable_fault_matrix_real_cargo_filters_select_tests"
         )
         ci_profile = nextest.split("[profile.ci]", 1)[1].split("[profile.ci-heavy]", 1)[0]
         ci_heavy_profile = nextest.split("[profile.ci-heavy]", 1)[1]
@@ -1134,7 +1134,7 @@ set -euo pipefail
 {full_fn}
 area_mutation_file_args=()
 MUTATION_PACKAGES_SMOKE_MUTANTS=12
-MUTATION_EXCLUDED_TEST_NAME='durable_fault_matrix_real_cargo_filters_chunk_'
+MUTATION_EXCLUDED_TEST_NAME='durable_fault_matrix_real_cargo_filters_select_tests'
 declare -A MUTATION_PACKAGES_FULL_MUTANTS=([pkg-x]="5")
 MUTATION_PACKAGES_FULL_MUTANTS_DEFAULT=4
 selected_packages=(pkg-x)
@@ -1396,12 +1396,12 @@ run_postgres_mutants_recorded() {{ printf 'PG %s\\n' "$*"; }}
 
 
     def test_mutation_package_loops_skip_the_real_cargo_fault_matrix_probes(self) -> None:
-        """The fault-matrix chunk tests fork a real `cargo test` each and alone
+        """The batched fault-matrix probe builds a real Cargo test catalogue and alone
         exceed the baseline's per-test timeout; every package-scoped
         cargo-mutants run must forward the same skip the Buck2 targets use."""
         gate = GATE.read_text(encoding="utf-8")
         self.assertIn(
-            "MUTATION_EXCLUDED_TEST_NAME='durable_fault_matrix_real_cargo_filters_chunk_'",
+            "MUTATION_EXCLUDED_TEST_NAME='durable_fault_matrix_real_cargo_filters_select_tests'",
             gate,
         )
         for function in (
@@ -1424,7 +1424,7 @@ run_postgres_mutants_recorded() {{ printf 'PG %s\\n' "$*"; }}
 set -euo pipefail
 {smoke_fn}
 MUTATION_PACKAGES_SMOKE_MUTANTS=4
-MUTATION_EXCLUDED_TEST_NAME='durable_fault_matrix_real_cargo_filters_chunk_'
+MUTATION_EXCLUDED_TEST_NAME='durable_fault_matrix_real_cargo_filters_select_tests'
 selected_packages=(pkg-x)
 area_mutation_file_args=()
 out_dir="$1"
@@ -1443,7 +1443,7 @@ run_mutants_recorded() {{ printf 'RECORDED %s\\n' "$*"; }}
         )
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertIn(
-            "-- -- --skip=durable_fault_matrix_real_cargo_filters_chunk_",
+            "-- -- --skip=durable_fault_matrix_real_cargo_filters_select_tests",
             result.stdout,
         )
 

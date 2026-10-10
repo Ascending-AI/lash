@@ -809,8 +809,8 @@ PostgreSQL 17 and 18 are supported; 18 is primary and the one development and
 CI major. 17 runs only in the release gate (`with-service.sh pg17 -- scripts/ci/store-tests.sh pg-release`). Use `kiln gate lash <fork> -- <cmd>` for other live gates, with
 identities and ports derived from `KILN_GATE_ID`.
 
-The ordinary partition retains ignored-test selection and exclusions. The five
-`durable_fault_matrix_real_cargo_filters_chunk_0..4` cases remain in the named
+The ordinary partition retains ignored-test selection and exclusions. The
+`durable_fault_matrix_real_cargo_filters_select_tests` case remains in the named
 nested-Cargo heavy gate.
 Manual service, trybuild, frontend and required-feature labels have explicit
 inventory reasons.

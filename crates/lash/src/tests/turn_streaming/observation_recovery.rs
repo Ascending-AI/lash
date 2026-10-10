@@ -19,6 +19,229 @@ pub(super) fn observation_assistant_delta(
     }
 }
 
+/// A one-session publisher with independent transport and replay windows.
+/// A real broadcast overflow loses notifications while the production replay
+/// store still retains every event. Publication and subscription share a lock
+/// so the replay/live boundary cannot lose a racing publication.
+struct LaggingReplay {
+    retained: lash_core::facade_support::InMemoryLiveReplayStore,
+    live: tokio::sync::broadcast::Sender<Arc<lash_core::SessionObservationEvent>>,
+    boundary: tokio::sync::Mutex<()>,
+    subscribed: StdMutex<Vec<lash_core::SessionCursor>>,
+    lagged: Arc<std::sync::atomic::AtomicU64>,
+}
+
+impl LaggingReplay {
+    fn new() -> Self {
+        Self {
+            retained: lash_core::facade_support::InMemoryLiveReplayStore::new(
+                lash_core::facade_support::InMemoryLiveReplayStoreConfig::standard(),
+            ),
+            live: tokio::sync::broadcast::channel(1).0,
+            boundary: tokio::sync::Mutex::new(()),
+            subscribed: StdMutex::new(Vec::new()),
+            lagged: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core::LiveReplayStore for LaggingReplay {
+    async fn publish(
+        &self,
+        session_id: &SessionId,
+        revision: lash_core::SessionRevision,
+        events: Vec<lash_core::LiveReplayEventDraft>,
+    ) -> std::result::Result<
+        Vec<Arc<lash_core::SessionObservationEvent>>,
+        lash_core::LiveReplayStoreError,
+    > {
+        let _boundary = self.boundary.lock().await;
+        let events = self.retained.publish(session_id, revision, events).await?;
+        for event in &events {
+            let _ = self.live.send(Arc::clone(event));
+        }
+        Ok(events)
+    }
+
+    async fn replay_after_cursor(
+        &self,
+        cursor: &lash_core::SessionCursor,
+    ) -> std::result::Result<lash_core::LiveReplayOutcome, lash_core::LiveReplayStoreError> {
+        self.retained.replay_after_cursor(cursor).await
+    }
+
+    async fn subscribe_after_cursor(
+        &self,
+        cursor: &lash_core::SessionCursor,
+    ) -> std::result::Result<lash_core::LiveReplaySubscribeOutcome, lash_core::LiveReplayStoreError>
+    {
+        let _boundary = self.boundary.lock().await;
+        let replay = match self.retained.replay_after_cursor(cursor).await? {
+            lash_core::LiveReplayOutcome::Replayed(events) => events,
+            lash_core::LiveReplayOutcome::Gap(reason) => {
+                return Ok(lash_core::LiveReplaySubscribeOutcome::Gap(reason));
+            }
+        };
+        self.subscribed.lock_recover().push(cursor.clone());
+        let live = futures_util::stream::unfold(
+            (self.live.subscribe(), Arc::clone(&self.lagged), false),
+            |(mut receiver, lagged, ended)| async move {
+                if ended {
+                    return None;
+                }
+                let item = match receiver.recv().await {
+                    Ok(event) => Ok(event),
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(count)) => {
+                        lagged.fetch_add(count, std::sync::atomic::Ordering::SeqCst);
+                        Err(lash_core::LiveReplayStoreError::SubscriberLagged(count))
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        Err(lash_core::LiveReplayStoreError::Closed)
+                    }
+                };
+                let ended = item.is_err();
+                Some((item, (receiver, lagged, ended)))
+            },
+        );
+        Ok(lash_core::LiveReplaySubscribeOutcome::Subscribed(
+            lash_core::LiveReplaySubscription::new(replay, live),
+        ))
+    }
+
+    fn current_cursor(
+        &self,
+        session_id: &SessionId,
+        revision: lash_core::SessionRevision,
+    ) -> lash_core::SessionCursor {
+        self.retained.current_cursor(session_id, revision)
+    }
+
+    fn earliest_cursor(
+        &self,
+        session_id: &SessionId,
+        revision: lash_core::SessionRevision,
+    ) -> lash_core::SessionCursor {
+        self.retained.earliest_cursor(session_id, revision)
+    }
+
+    async fn invalidate_session(
+        &self,
+        session_id: &SessionId,
+    ) -> std::result::Result<(), lash_core::LiveReplayStoreError> {
+        self.retained.invalidate_session(session_id).await
+    }
+
+    async fn invalidate_all(&self) -> std::result::Result<(), lash_core::LiveReplayStoreError> {
+        self.retained.invalidate_all().await
+    }
+
+    async fn trim_session(
+        &self,
+        session_id: &SessionId,
+    ) -> std::result::Result<(), lash_core::LiveReplayStoreError> {
+        self.retained.trim_session(session_id).await
+    }
+}
+
+/// ADR 0002: transport lag from a retained cursor replays the entire missing
+/// suffix in order, without a gap or duplication, then follows the live tail.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn subscriber_lag_from_retained_cursor_replays_every_event_then_continues() -> Result<()> {
+    use futures_util::StreamExt as _;
+    use lash_core::LiveReplayStore as _;
+
+    let replay = Arc::new(LaggingReplay::new());
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        sqlite_memory_store_backend().await,
+    ))
+    .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
+    .live_replay_store(replay.clone())
+    .build(crate::testing::runtime_lease_owner())?;
+    let session_id = SessionId::from("retained-subscriber-lag");
+    let session = core
+        .session(session_id.clone())
+        .created()
+        .await
+        .open()
+        .await?;
+    let cursor = session.observe().snapshot().await?.cursor;
+    let revision = cursor.parse().expect("snapshot cursor").revision;
+    let mut feed = session.observe().subscribe_and_recover(cursor.clone());
+    assert!(futures_util::poll!(feed.next()).is_pending());
+
+    let draft = || {
+        lash_core::LiveReplayEventDraft::new(
+            None::<TurnId>,
+            lash_core::SessionObservationEventPayload::ResidentChanged,
+        )
+    };
+    let first = replay
+        .publish(&session_id, revision, vec![draft()])
+        .await
+        .expect("publish the delivered event");
+    let next_cursor = |item| match item {
+        crate::observe::SessionObservationStreamItem::Event(event) => event.cursor.clone(),
+        crate::observe::SessionObservationStreamItem::Gap { .. } => {
+            panic!("a retained cursor must recover without replacing the observation");
+        }
+    };
+    assert_eq!(
+        next_cursor(feed.next().await.expect("first event")?),
+        first[0].cursor
+    );
+
+    // The subscriber stops polling while three notifications enter its
+    // one-slot channel. Replay retention is untouched by that overflow.
+    let suffix = replay
+        .publish(&session_id, revision, vec![draft(), draft(), draft()])
+        .await
+        .expect("publish the lagging suffix");
+    let lash_core::LiveReplayOutcome::Replayed(retained) = replay
+        .replay_after_cursor(&first[0].cursor)
+        .await
+        .expect("read the retained suffix")
+    else {
+        panic!("the delivered cursor must remain replayable during transport lag");
+    };
+    assert_eq!(
+        retained
+            .iter()
+            .map(|event| &event.cursor)
+            .collect::<Vec<_>>(),
+        suffix.iter().map(|event| &event.cursor).collect::<Vec<_>>()
+    );
+    for expected in &suffix {
+        let item = tokio::time::timeout(std::time::Duration::from_secs(2), feed.next())
+            .await
+            .expect("lag recovery completes")
+            .expect("the lagged feed stays open")?;
+        assert_eq!(next_cursor(item), expected.cursor);
+    }
+    assert_eq!(replay.lagged.load(std::sync::atomic::Ordering::SeqCst), 2);
+    assert_eq!(
+        *replay.subscribed.lock_recover(),
+        vec![cursor, first[0].cursor.clone()],
+        "recovery resubscribes from the last delivered cursor"
+    );
+
+    let tail = replay
+        .publish(&session_id, revision, vec![draft()])
+        .await
+        .expect("publish live continuation");
+    let item = tokio::time::timeout(std::time::Duration::from_secs(2), feed.next())
+        .await
+        .expect("live continuation arrives")
+        .expect("the recovered feed stays open")?;
+    assert_eq!(next_cursor(item), tail[0].cursor);
+    assert!(
+        futures_util::poll!(feed.next()).is_pending(),
+        "replay and live delivery leave no duplicate"
+    );
+    core.shutdown().await?;
+    Ok(())
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn invalidated_live_observation_recovers_with_an_authoritative_snapshot() -> Result<()> {
     use futures_util::FutureExt as _;

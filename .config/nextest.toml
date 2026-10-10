@@ -6,8 +6,8 @@
 #      is annotated, not terminated; the CI profile terminates at measured
 #      bounds (each derived from recorded runs below) so a hung test releases
 #      its runner instead of holding it to the job timeout.
-#   2. Bound the two known co-scheduling hazards — the fault-matrix chunk tests,
-#      which each fork real `cargo` invocations of their own, and the suites
+#   2. Bound the two known co-scheduling hazards — the nested-Cargo fault-matrix probe,
+#      which builds a real Cargo test catalogue, and the suites
 #      that share a single Postgres database or S3 bucket.
 #   3. Give CI a profile that finishes the whole run rather than stopping at
 #      the first failure, and that refuses to launder a flaky pass into a
@@ -54,14 +54,12 @@ max-threads = 2
 # end-of-run summary rather than scrolling past mid-run.
 final-status-level = "slow"
 
-# Each fault-matrix chunk test spawns real `cargo test -p ... -- --list`
-# probes. The chunks usefully overlap, but all share one CARGO_TARGET_DIR, so
-# cap the group at two rather than reserving the whole runner for a cheap fake
-# gate test or letting all five contend on Cargo's build lock at once.
+# The batched fault-matrix test uses a real Cargo test catalogue. Keep it in
+# its existing group; the ordinary routing probes use only a recording Cargo.
 [[profile.default.overrides]]
 filter = '''
   package(lash-internal-core)
-  & test(/runtime::tests::runtime_scenarios::fault_matrix::durable_fault_matrix_real_cargo_filters_chunk_.*/)
+  & test(/runtime::tests::runtime_scenarios::fault_matrix::durable_fault_matrix_real_cargo_filters_select_tests/)
 '''
 test-group = "fault-matrix-real-cargo"
 
@@ -86,7 +84,7 @@ test-group = "docker-services"
 
 [profile.ci]
 # The per-push profile. Only the Cargo-owned heavy set is excluded here: the
-# five fault-matrix chunk tests, each a 3-9 minute serial run that forks real
+# batched fault-matrix probe, a serial run that forks real
 # `cargo` invocations of its own, run by the trunk-only `Test heavy suites` CI
 # job under `profile.ci-heavy`. The lash-sim runner/minimizer fixture cases are
 # no longer excluded: they are deterministic compute, so the Buck2 partition
@@ -105,7 +103,7 @@ default-filter = '''
   not (
       (
         package(lash-internal-core)
-        & test(/runtime::tests::runtime_scenarios::fault_matrix::durable_fault_matrix_real_cargo_filters_chunk_.*/)
+        & test(/runtime::tests::runtime_scenarios::fault_matrix::durable_fault_matrix_real_cargo_filters_select_tests/)
       )
     + (package(lash-runtime) & binary(ui))
   )
@@ -172,7 +170,7 @@ flaky-result = "fail"
 final-status-level = "slow"
 default-filter = '''
   package(lash-internal-core)
-  & test(/runtime::tests::runtime_scenarios::fault_matrix::durable_fault_matrix_real_cargo_filters_chunk_.*/)
+  & test(/runtime::tests::runtime_scenarios::fault_matrix::durable_fault_matrix_real_cargo_filters_select_tests/)
 '''
 
 # Start the nested-Cargo fault probes first. Isolated runs measured 205-219s;
@@ -181,7 +179,7 @@ default-filter = '''
 [[profile.ci-heavy.overrides]]
 filter = '''
   package(lash-internal-core)
-  & test(/runtime::tests::runtime_scenarios::fault_matrix::durable_fault_matrix_real_cargo_filters_chunk_.*/)
+  & test(/runtime::tests::runtime_scenarios::fault_matrix::durable_fault_matrix_real_cargo_filters_select_tests/)
 '''
 priority = 100
 slow-timeout = { period = "300s", terminate-after = 5 }
