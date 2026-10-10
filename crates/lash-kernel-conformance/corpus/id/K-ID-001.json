@@ -1,0 +1,16 @@
+{
+  "rule": "K-ID-001",
+  "cases": [
+    {
+      "name": "document identity has the specified domain and behavior",
+      "document": "kernel 1\nnumbers by_spelling\nmain { finish 7 }\n",
+      "expected": {
+        "end": {
+          "finished": {
+            "int": "7"
+          }
+        }
+      }
+    }
+  ]
+}

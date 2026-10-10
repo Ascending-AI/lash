@@ -10,8 +10,38 @@ fn k_adm_002() {
 }
 
 #[test]
+fn k_adm_003() {
+    super::run_rule("K-ADM-003", include_str!("../corpus/adm/K-ADM-003.json"));
+}
+
+#[test]
 fn k_adm_004() {
     super::run_rule("K-ADM-004", include_str!("../corpus/adm/K-ADM-004.json"));
+}
+
+#[test]
+fn k_adm_005() {
+    super::run_rule("K-ADM-005", include_str!("../corpus/adm/K-ADM-005.json"));
+}
+
+#[test]
+fn k_adm_006() {
+    super::run_rule("K-ADM-006", include_str!("../corpus/adm/K-ADM-006.json"));
+}
+
+#[test]
+fn k_adm_007() {
+    super::run_rule("K-ADM-007", include_str!("../corpus/adm/K-ADM-007.json"));
+}
+
+#[test]
+fn k_adm_008() {
+    super::run_rule("K-ADM-008", include_str!("../corpus/adm/K-ADM-008.json"));
+}
+
+#[test]
+fn k_adm_009() {
+    super::run_rule("K-ADM-009", include_str!("../corpus/adm/K-ADM-009.json"));
 }
 
 #[test]
@@ -22,6 +52,11 @@ fn k_bnd_001() {
 #[test]
 fn k_bnd_002() {
     super::run_rule("K-BND-002", include_str!("../corpus/bnd/K-BND-002.json"));
+}
+
+#[test]
+fn k_chg_001() {
+    super::run_rule("K-CHG-001", include_str!("../corpus/chg/K-CHG-001.json"));
 }
 
 #[test]
@@ -70,8 +105,38 @@ fn k_dialect_002() {
 }
 
 #[test]
+fn k_doc_001() {
+    super::run_rule("K-DOC-001", include_str!("../corpus/doc/K-DOC-001.json"));
+}
+
+#[test]
+fn k_doc_002() {
+    super::run_rule("K-DOC-002", include_str!("../corpus/doc/K-DOC-002.json"));
+}
+
+#[test]
+fn k_doc_003() {
+    super::run_rule("K-DOC-003", include_str!("../corpus/doc/K-DOC-003.json"));
+}
+
+#[test]
+fn k_doc_004() {
+    super::run_rule("K-DOC-004", include_str!("../corpus/doc/K-DOC-004.json"));
+}
+
+#[test]
+fn k_doc_005() {
+    super::run_rule("K-DOC-005", include_str!("../corpus/doc/K-DOC-005.json"));
+}
+
+#[test]
 fn k_doc_006() {
     super::run_rule("K-DOC-006", include_str!("../corpus/doc/K-DOC-006.json"));
+}
+
+#[test]
+fn k_doc_007() {
+    super::run_rule("K-DOC-007", include_str!("../corpus/doc/K-DOC-007.json"));
 }
 
 #[test]
@@ -325,6 +390,21 @@ fn k_host_004() {
 }
 
 #[test]
+fn k_id_001() {
+    super::run_rule("K-ID-001", include_str!("../corpus/id/K-ID-001.json"));
+}
+
+#[test]
+fn k_id_002() {
+    super::run_rule("K-ID-002", include_str!("../corpus/id/K-ID-002.json"));
+}
+
+#[test]
+fn k_id_003() {
+    super::run_rule("K-ID-003", include_str!("../corpus/id/K-ID-003.json"));
+}
+
+#[test]
 fn k_id_004() {
     super::run_rule("K-ID-004", include_str!("../corpus/id/K-ID-004.json"));
 }
@@ -365,6 +445,36 @@ fn k_key_005() {
 }
 
 #[test]
+fn k_lib_001() {
+    super::run_rule("K-LIB-001", include_str!("../corpus/lib/K-LIB-001.json"));
+}
+
+#[test]
+fn k_lib_002() {
+    super::run_rule("K-LIB-002", include_str!("../corpus/lib/K-LIB-002.json"));
+}
+
+#[test]
+fn k_lib_003() {
+    super::run_rule("K-LIB-003", include_str!("../corpus/lib/K-LIB-003.json"));
+}
+
+#[test]
+fn k_lib_004() {
+    super::run_rule("K-LIB-004", include_str!("../corpus/lib/K-LIB-004.json"));
+}
+
+#[test]
+fn k_lib_005() {
+    super::run_rule("K-LIB-005", include_str!("../corpus/lib/K-LIB-005.json"));
+}
+
+#[test]
+fn k_lib_006() {
+    super::run_rule("K-LIB-006", include_str!("../corpus/lib/K-LIB-006.json"));
+}
+
+#[test]
 fn k_lib_007() {
     super::run_rule("K-LIB-007", include_str!("../corpus/lib/K-LIB-007.json"));
 }
@@ -375,6 +485,21 @@ fn k_lib_008() {
 }
 
 #[test]
+fn k_lib_009() {
+    super::run_rule("K-LIB-009", include_str!("../corpus/lib/K-LIB-009.json"));
+}
+
+#[test]
+fn k_lib_011() {
+    super::run_rule("K-LIB-011", include_str!("../corpus/lib/K-LIB-011.json"));
+}
+
+#[test]
+fn k_mach_001() {
+    super::run_rule("K-MACH-001", include_str!("../corpus/mach/K-MACH-001.json"));
+}
+
+#[test]
 fn k_mach_002() {
     super::run_rule("K-MACH-002", include_str!("../corpus/mach/K-MACH-002.json"));
 }
@@ -382,6 +507,11 @@ fn k_mach_002() {
 #[test]
 fn k_mach_003() {
     super::run_rule("K-MACH-003", include_str!("../corpus/mach/K-MACH-003.json"));
+}
+
+#[test]
+fn k_mach_004() {
+    super::run_rule("K-MACH-004", include_str!("../corpus/mach/K-MACH-004.json"));
 }
 
 #[test]
@@ -445,8 +575,28 @@ fn k_num_008() {
 }
 
 #[test]
+fn k_site_004() {
+    super::run_rule("K-SITE-004", include_str!("../corpus/site/K-SITE-004.json"));
+}
+
+#[test]
+fn k_site_005() {
+    super::run_rule("K-SITE-005", include_str!("../corpus/site/K-SITE-005.json"));
+}
+
+#[test]
 fn k_stmt_001() {
     super::run_rule("K-STMT-001", include_str!("../corpus/stmt/K-STMT-001.json"));
+}
+
+#[test]
+fn k_stmt_002() {
+    super::run_rule("K-STMT-002", include_str!("../corpus/stmt/K-STMT-002.json"));
+}
+
+#[test]
+fn k_stmt_003() {
+    super::run_rule("K-STMT-003", include_str!("../corpus/stmt/K-STMT-003.json"));
 }
 
 #[test]
@@ -582,6 +732,21 @@ fn k_task_024() {
 #[test]
 fn k_task_025() {
     super::run_rule("K-TASK-025", include_str!("../corpus/task/K-TASK-025.json"));
+}
+
+#[test]
+fn k_text_001() {
+    super::run_rule("K-TEXT-001", include_str!("../corpus/text/K-TEXT-001.json"));
+}
+
+#[test]
+fn k_text_002() {
+    super::run_rule("K-TEXT-002", include_str!("../corpus/text/K-TEXT-002.json"));
+}
+
+#[test]
+fn k_text_003() {
+    super::run_rule("K-TEXT-003", include_str!("../corpus/text/K-TEXT-003.json"));
 }
 
 #[test]
@@ -737,4 +902,14 @@ fn k_val_033() {
 #[test]
 fn k_val_034() {
     super::run_rule("K-VAL-034", include_str!("../corpus/val/K-VAL-034.json"));
+}
+
+#[test]
+fn k_ver_001() {
+    super::run_rule("K-VER-001", include_str!("../corpus/ver/K-VER-001.json"));
+}
+
+#[test]
+fn k_ver_002() {
+    super::run_rule("K-VER-002", include_str!("../corpus/ver/K-VER-002.json"));
 }

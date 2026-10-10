@@ -1,0 +1,20 @@
+{
+  "rule": "K-MACH-001",
+  "cases": [
+    {
+      "name": "fresh machines own fresh mutable objects",
+      "document": "kernel 1\nnumbers by_spelling\nmain { let xs = [1] set xs[0] = 7 finish xs }\n",
+      "expected": {
+        "end": {
+          "finished": {
+            "list": [
+              {
+                "int": "7"
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

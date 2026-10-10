@@ -1,0 +1,16 @@
+{
+  "rule": "K-SITE-004",
+  "cases": [
+    {
+      "name": "a closure starts its own loop context",
+      "document": "kernel 1\nnumbers by_spelling\nmain { for x in [1] { let f = fn() { for y in [2] { do yield } return 7 } let y = apply f() finish y } }\n",
+      "expected": {
+        "end": {
+          "finished": {
+            "int": "7"
+          }
+        }
+      }
+    }
+  ]
+}

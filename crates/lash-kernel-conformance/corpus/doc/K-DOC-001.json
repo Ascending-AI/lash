@@ -1,0 +1,16 @@
+{
+  "rule": "K-DOC-001",
+  "cases": [
+    {
+      "name": "declared entry and private binding are document nodes",
+      "document": "kernel 1\nnumbers by_spelling\nentry start(x: Int) -> Int\nprivate scratch\nfn start(x) { return x }\nmain { let scratch = 7 let y = call start(scratch) finish y }\n",
+      "expected": {
+        "end": {
+          "finished": {
+            "int": "7"
+          }
+        }
+      }
+    }
+  ]
+}

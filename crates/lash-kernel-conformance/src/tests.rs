@@ -6,6 +6,9 @@ use crate::{
 
 include!("corpus_files.rs");
 
+#[path = "contract_cases.rs"]
+mod contract_cases;
+
 // These three owning-library shards fill rules this corpus does not own.
 const LIBRARY_CORPUS_FILES: &[(&str, &str)] = &[
     (
@@ -60,6 +63,7 @@ fn run_rule(rule: &str, text: &str) {
         &std::sync::Arc::new(lash_ext_regex_ecma::Engine::new(4)),
     )
     .expect("register regex natives");
+    contract_cases::verify(&shard, &registry);
     run_shard(&shard, registry);
 }
 

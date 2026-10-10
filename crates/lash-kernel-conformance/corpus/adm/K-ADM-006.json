@@ -1,0 +1,12 @@
+{
+  "rule": "K-ADM-006",
+  "cases": [
+    {
+      "name": "disjoint perform result is refused",
+      "document": "kernel 1\nnumbers by_spelling\neffect echo(x: Int) -> Int\nmain { do perform echo(1) as Text }\n",
+      "expected": {
+        "end": "refused"
+      }
+    }
+  ]
+}

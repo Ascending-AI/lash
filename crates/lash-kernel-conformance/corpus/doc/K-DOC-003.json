@@ -1,0 +1,38 @@
+{
+  "rule": "K-DOC-003",
+  "cases": [
+    {
+      "name": "a host starts the declared entry with its signature",
+      "document": "kernel 1\nnumbers by_spelling\nentry start(x: Int) -> Int\nfn start(x) { return x }\nmain { finish 99 }\n",
+      "expected": {
+        "end": {
+          "finished": {
+            "int": "7"
+          }
+        }
+      },
+      "environment": {
+        "entry": "start",
+        "args": [
+          {
+            "int": "7"
+          }
+        ]
+      }
+    },
+    {
+      "name": "an entry cannot invent a function",
+      "document": "kernel 1\nnumbers by_spelling\nentry start(x: Int) -> Int\nmain { finish null }\n",
+      "expected": {
+        "end": "refused"
+      }
+    },
+    {
+      "name": "entry arity agrees with the declaration",
+      "document": "kernel 1\nnumbers by_spelling\nentry start(x: Int) -> Int\nfn start() { return null }\nmain { finish null }\n",
+      "expected": {
+        "end": "refused"
+      }
+    }
+  ]
+}

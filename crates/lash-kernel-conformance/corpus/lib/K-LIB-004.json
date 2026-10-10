@@ -1,0 +1,43 @@
+{
+  "rule": "K-LIB-004",
+  "cases": [
+    {
+      "name": "an effect in a callback remains an ordinary action",
+      "document": "kernel 1\nnumbers by_spelling\neffect echo(x: Int) -> Int\nmain { let callback = fn() { let x = perform echo(1) as Int return x } let x = apply callback() finish x }\n",
+      "expected": {
+        "end": {
+          "finished": {
+            "int": "2"
+          }
+        },
+        "trace": [
+          {
+            "effect": {
+              "effect": "echo",
+              "args": [
+                {
+                  "int": "1"
+                }
+              ],
+              "result": "int"
+            }
+          }
+        ]
+      },
+      "environment": {
+        "deliveries": [
+          [
+            {
+              "request": 0,
+              "outcome": {
+                "completed": {
+                  "int": "2"
+                }
+              }
+            }
+          ]
+        ]
+      }
+    }
+  ]
+}

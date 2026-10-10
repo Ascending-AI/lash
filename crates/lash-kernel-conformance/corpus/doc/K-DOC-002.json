@@ -1,0 +1,12 @@
+{
+  "rule": "K-DOC-002",
+  "cases": [
+    {
+      "name": "an undeclared effect cannot be performed",
+      "document": "kernel 1\nnumbers by_spelling\nmain { let x = perform echo(1) as Int finish x }\n",
+      "expected": {
+        "end": "refused"
+      }
+    }
+  ]
+}

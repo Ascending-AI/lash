@@ -1,0 +1,12 @@
+{
+  "rule": "K-LIB-005",
+  "cases": [
+    {
+      "name": "a document cannot load an unregistered native",
+      "document": "kernel 1\nnumbers by_spelling\nuse missing = @0000000000000000000000000000000000000000000000000000000000000000\nmain { finish missing(1) }\n",
+      "expected": {
+        "end": "refused"
+      }
+    }
+  ]
+}

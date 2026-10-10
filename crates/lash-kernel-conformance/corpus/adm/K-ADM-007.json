@@ -1,0 +1,26 @@
+{
+  "rule": "K-ADM-007",
+  "cases": [
+    {
+      "name": "unused effect is refused",
+      "document": "kernel 1\nnumbers by_spelling\neffect echo(x: Int) -> Int\nmain { finish null }\n",
+      "expected": {
+        "end": "refused"
+      }
+    },
+    {
+      "name": "unused library identity is refused",
+      "document": "kernel 1\nnumbers by_spelling\nuse eq = @f537bb3edf9746f3847d63ebb49e6f4f440f52d258e658ed3e1f57336dba4a25\nmain { finish null }\n",
+      "expected": {
+        "end": "refused"
+      }
+    },
+    {
+      "name": "definition name cannot be relabeled",
+      "document": "kernel 1\nnumbers by_spelling\nuse wrong = @f537bb3edf9746f3847d63ebb49e6f4f440f52d258e658ed3e1f57336dba4a25\nmain { finish wrong(1, 1) }\n",
+      "expected": {
+        "end": "refused"
+      }
+    }
+  ]
+}

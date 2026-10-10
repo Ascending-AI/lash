@@ -1,0 +1,16 @@
+{
+  "rule": "K-LIB-009",
+  "cases": [
+    {
+      "name": "identity is callable without a unique textual alias",
+      "document": "kernel 1\nnumbers by_spelling\nuse eq = @f537bb3edf9746f3847d63ebb49e6f4f440f52d258e658ed3e1f57336dba4a25\nmain { finish @f537bb3edf9746f3847d63ebb49e6f4f440f52d258e658ed3e1f57336dba4a25(1, 1) }\n",
+      "expected": {
+        "end": {
+          "finished": {
+            "bool": true
+          }
+        }
+      }
+    }
+  ]
+}

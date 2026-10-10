@@ -1,0 +1,16 @@
+{
+  "rule": "K-DOC-007",
+  "cases": [
+    {
+      "name": "labels and source are separate from behavior",
+      "document": "kernel 1\nnumbers by_spelling\nmain { finish 7 }\n",
+      "expected": {
+        "end": {
+          "finished": {
+            "int": "7"
+          }
+        }
+      }
+    }
+  ]
+}

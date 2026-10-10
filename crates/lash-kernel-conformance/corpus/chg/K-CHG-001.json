@@ -1,0 +1,46 @@
+{
+  "rule": "K-CHG-001",
+  "cases": [
+    {
+      "name": "park and rebuild preserve the pinned charge",
+      "document": "kernel 1\nnumbers by_spelling\neffect echo(x: Int) -> Int\nmain { let x = perform echo(1) as Int finish x }\n",
+      "expected": {
+        "end": {
+          "finished": {
+            "int": "2"
+          }
+        },
+        "charged": 10,
+        "parks": 1,
+        "trace": [
+          {
+            "effect": {
+              "effect": "echo",
+              "args": [
+                {
+                  "int": "1"
+                }
+              ],
+              "result": "int"
+            }
+          }
+        ]
+      },
+      "environment": {
+        "resume": true,
+        "deliveries": [
+          [
+            {
+              "request": 0,
+              "outcome": {
+                "completed": {
+                  "int": "2"
+                }
+              }
+            }
+          ]
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "rule": "K-LIB-003",
+  "cases": [
+    {
+      "name": "callbacks execute as ordinary kernel code",
+      "document": "kernel 1\nnumbers by_spelling\nfn f(x) { return x } main { let callback = fn(x) { let y = call f(x) return y } let y = apply callback(7) finish y }\n",
+      "expected": {
+        "end": {
+          "finished": {
+            "int": "7"
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "rule": "K-ADM-008",
+  "cases": [
+    {
+      "name": "closed function bodies cannot read an unbound name",
+      "document": "kernel 1\nnumbers by_spelling\nfn f() { return missing } main { let x = call f() finish x }\n",
+      "expected": {
+        "end": "refused"
+      }
+    }
+  ]
+}

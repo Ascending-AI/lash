@@ -1,0 +1,16 @@
+{
+  "rule": "K-SITE-005",
+  "cases": [
+    {
+      "name": "closure sites continue the writing unit path",
+      "document": "kernel 1\nnumbers by_spelling\nfn z() { return 9 } fn a() { return 1 } main { let f = fn() { return 7 } let x = apply f() finish x }\n",
+      "expected": {
+        "end": {
+          "finished": {
+            "int": "7"
+          }
+        }
+      }
+    }
+  ]
+}

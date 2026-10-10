@@ -1,0 +1,24 @@
+{
+  "rule": "K-STMT-003",
+  "cases": [
+    {
+      "name": "each statement validates without adjacency requirements",
+      "document": "kernel 1\nnumbers by_spelling\nfn f(x) { return x } main { let x = 1 print 0 let y = call f(x) print y finish y }\n",
+      "expected": {
+        "end": {
+          "finished": {
+            "int": "1"
+          }
+        },
+        "prints": [
+          {
+            "int": "0"
+          },
+          {
+            "int": "1"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "rule": "K-ID-003",
+  "cases": [
+    {
+      "name": "canonical identity sorts keys and uses only prescribed escapes",
+      "document": "kernel 1\nnumbers by_spelling\nmain { finish {z: \"é\\n\\t\\\"\\\\\", a: 1} }\n",
+      "expected": {
+        "end": {
+          "finished": {
+            "record": [
+              [
+                "z",
+                {
+                  "text": "é\n\t\"\\"
+                }
+              ],
+              [
+                "a",
+                {
+                  "int": "1"
+                }
+              ]
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

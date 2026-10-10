@@ -1,0 +1,21 @@
+{
+  "rule": "K-ADM-009",
+  "cases": [
+    {
+      "name": "derived bindings follow the declaration not annotations",
+      "document": "kernel 1\nnumbers by_spelling\nmain { let x = 1 if true { let x = 7 print x } finish x }\n",
+      "expected": {
+        "end": {
+          "finished": {
+            "int": "1"
+          }
+        },
+        "prints": [
+          {
+            "int": "7"
+          }
+        ]
+      }
+    }
+  ]
+}

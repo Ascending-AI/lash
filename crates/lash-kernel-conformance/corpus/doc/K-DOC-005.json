@@ -1,0 +1,47 @@
+{
+  "rule": "K-DOC-005",
+  "cases": [
+    {
+      "name": "loop control outside loop",
+      "document": "kernel 1\nnumbers by_spelling\nmain { break }\n",
+      "expected": {
+        "end": "refused"
+      }
+    },
+    {
+      "name": "repeated parameters",
+      "document": "kernel 1\nnumbers by_spelling\nfn f(x, x) { return x } main { finish null }\n",
+      "expected": {
+        "end": "refused"
+      }
+    },
+    {
+      "name": "repeated record fields",
+      "document": "kernel 1\nnumbers by_spelling\nmain { finish {x: 1, x: 2} }\n",
+      "expected": {
+        "end": "refused"
+      }
+    },
+    {
+      "name": "undeclared call",
+      "document": "kernel 1\nnumbers by_spelling\nmain { do call missing() }\n",
+      "expected": {
+        "end": "refused"
+      }
+    },
+    {
+      "name": "too many declared arguments",
+      "document": "kernel 1\nnumbers by_spelling\nfn f(x) { return x } main { do call f(1, 2) }\n",
+      "expected": {
+        "end": "refused"
+      }
+    },
+    {
+      "name": "empty name",
+      "document": "kernel 1\nnumbers by_spelling\nmain { let `` = 1 }\n",
+      "expected": {
+        "end": "refused"
+      }
+    }
+  ]
+}

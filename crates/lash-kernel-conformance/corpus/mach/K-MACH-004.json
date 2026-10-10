@@ -1,0 +1,113 @@
+{
+  "rule": "K-MACH-004",
+  "cases": [
+    {
+      "name": "a delivered wait resumes its own task",
+      "document": "kernel 1\nnumbers by_spelling\neffect echo(x: Int) -> Int\nmain { let x = perform echo(1) as Int finish x }\n",
+      "expected": {
+        "end": {
+          "finished": {
+            "int": "2"
+          }
+        },
+        "trace": [
+          {
+            "effect": {
+              "effect": "echo",
+              "args": [
+                {
+                  "int": "1"
+                }
+              ],
+              "result": "int"
+            }
+          }
+        ]
+      },
+      "environment": {
+        "deliveries": [
+          [
+            {
+              "request": 0,
+              "outcome": {
+                "completed": {
+                  "int": "2"
+                }
+              }
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "name": "an outcome for a withdrawn handed-out wait is dropped",
+      "document": "kernel 1\nnumbers by_spelling\neffect echo(x: Int) -> Int\nfn slow() { try { do sleep 0 } catch e { return e.kind } }\nmain { let h = spawn call slow() let first = perform echo(1) as Int do cancel h let cancelled = join h let last = perform echo(2) as Int finish cancelled }\n",
+      "environment": {
+        "deliveries": [
+          [
+            {
+              "request": 1,
+              "outcome": {
+                "completed": {
+                  "int": "2"
+                }
+              }
+            }
+          ],
+          [
+            {
+              "request": 0,
+              "outcome": "elapsed",
+              "dropped": true
+            },
+            {
+              "request": 2,
+              "outcome": {
+                "completed": {
+                  "int": "3"
+                }
+              }
+            }
+          ]
+        ]
+      },
+      "expected": {
+        "end": {
+          "finished": {
+            "text": "cancelled"
+          }
+        },
+        "parks": 2,
+        "trace": [
+          {
+            "sleep": {
+              "nanoseconds": 0
+            }
+          },
+          {
+            "effect": {
+              "effect": "echo",
+              "args": [
+                {
+                  "int": "1"
+                }
+              ],
+              "result": "int"
+            }
+          },
+          {
+            "effect": {
+              "effect": "echo",
+              "args": [
+                {
+                  "int": "2"
+                }
+              ],
+              "result": "int"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

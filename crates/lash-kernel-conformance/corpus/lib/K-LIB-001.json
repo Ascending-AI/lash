@@ -1,0 +1,23 @@
+{
+  "rule": "K-LIB-001",
+  "cases": [
+    {
+      "name": "one native definition supplies name signature and charge",
+      "document": "kernel 1\nnumbers by_spelling\nuse eq = @f537bb3edf9746f3847d63ebb49e6f4f440f52d258e658ed3e1f57336dba4a25\nmain { finish (eq(1, 1), eq(1, 1)) }\n",
+      "expected": {
+        "end": {
+          "finished": {
+            "tuple": [
+              {
+                "bool": true
+              },
+              {
+                "bool": true
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

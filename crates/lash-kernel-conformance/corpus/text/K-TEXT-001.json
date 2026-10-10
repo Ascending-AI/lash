@@ -1,0 +1,16 @@
+{
+  "rule": "K-TEXT-001",
+  "cases": [
+    {
+      "name": "comments whitespace and quoted keyword names preserve behavior",
+      "document": "kernel 1\nnumbers by_spelling\n  # behavior only\n main { let `finish` = 7\n let `odd name` = `finish` # comment\n finish `odd name` }\n",
+      "expected": {
+        "end": {
+          "finished": {
+            "int": "7"
+          }
+        }
+      }
+    }
+  ]
+}

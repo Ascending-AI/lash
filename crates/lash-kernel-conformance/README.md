@@ -113,3 +113,12 @@ It compares complete observations, including effect identities, charge and parks
 Refusal fixtures remain under the core parsing/admission oracle.
 The printer law reuses the core embedding index, so adding a shard to the core
 selection also adds it to the printer selection.
+
+The core rule laws also run test-only contract probes from
+`src/contract_cases.rs` alongside their owning shards. These inspect properties
+that output traces cannot express: stored JSON, domain-separated identity test
+vectors, annotation independence, definition validation, transitive manifests,
+derived sites, and rejected deliveries leaving exported state unchanged.
+Definition probes use kernel text and the public checker and machine seams.
+The machine corpus registry includes the kernel numeric library for document
+cases that call its native definitions. The portable case envelope is unchanged.

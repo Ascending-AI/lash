@@ -1,0 +1,64 @@
+{
+  "rule": "K-ADM-005",
+  "cases": [
+    {
+      "name": "disjoint argument main { do perform echo(\"wrong\") as Int }",
+      "document": "kernel 1\nnumbers by_spelling\neffect echo(x: Int) -> Int\nmain { do perform echo(\"wrong\") as Int }\n",
+      "expected": {
+        "end": "refused"
+      }
+    },
+    {
+      "name": "disjoint argument main { let x = \"wrong\" do perform echo(x) as Int }",
+      "document": "kernel 1\nnumbers by_spelling\neffect echo(x: Int) -> Int\nmain { let x = \"wrong\" do perform echo(x) as Int }\n",
+      "expected": {
+        "end": "refused"
+      }
+    },
+    {
+      "name": "disjoint argument main { let x = [] do perform echo(x) as Int }",
+      "document": "kernel 1\nnumbers by_spelling\neffect echo(x: Int) -> Int\nmain { let x = [] do perform echo(x) as Int }\n",
+      "expected": {
+        "end": "refused"
+      }
+    },
+    {
+      "name": "an argument that might fit is admitted",
+      "document": "kernel 1\nnumbers by_spelling\neffect echo(x: Int) -> Int\nfn f(x) { let y = perform echo(x) as Int return y } main { let x = call f(1) finish x }\n",
+      "expected": {
+        "end": {
+          "finished": {
+            "int": "2"
+          }
+        },
+        "trace": [
+          {
+            "effect": {
+              "effect": "echo",
+              "args": [
+                {
+                  "int": "1"
+                }
+              ],
+              "result": "int"
+            }
+          }
+        ]
+      },
+      "environment": {
+        "deliveries": [
+          [
+            {
+              "request": 0,
+              "outcome": {
+                "completed": {
+                  "int": "2"
+                }
+              }
+            }
+          ]
+        ]
+      }
+    }
+  ]
+}

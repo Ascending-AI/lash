@@ -1,0 +1,27 @@
+{
+  "rule": "K-DOC-004",
+  "cases": [
+    {
+      "name": "stored literals preserve numeric spelling and bytes",
+      "document": "kernel 1\nnumbers by_spelling\nmain { finish (1, -0.0, b\"00ff\", absent) }\n",
+      "expected": {
+        "end": {
+          "finished": {
+            "tuple": [
+              {
+                "int": "1"
+              },
+              {
+                "float": "-0.0"
+              },
+              {
+                "bytes": "00ff"
+              },
+              "absent"
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

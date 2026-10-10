@@ -1,0 +1,12 @@
+{
+  "rule": "K-VER-001",
+  "cases": [
+    {
+      "name": "another kernel version is refused",
+      "document": "kernel 99\nnumbers by_spelling\nmain { finish null }\n",
+      "expected": {
+        "end": "refused"
+      }
+    }
+  ]
+}

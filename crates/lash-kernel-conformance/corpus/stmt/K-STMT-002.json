@@ -1,0 +1,19 @@
+{
+  "rule": "K-STMT-002",
+  "cases": [
+    {
+      "name": "wait in a tuple",
+      "document": "kernel 1\nnumbers by_spelling\neffect echo(x: Any) -> Int\nmain { finish (perform echo(1) as Int,) }\n",
+      "expected": {
+        "end": "refused"
+      }
+    },
+    {
+      "name": "computed action argument",
+      "document": "kernel 1\nnumbers by_spelling\neffect echo(x: Any) -> Int\nmain { do perform echo([1]) as Int }\n",
+      "expected": {
+        "end": "refused"
+      }
+    }
+  ]
+}
