@@ -1409,11 +1409,11 @@ body {
     set skip[name] = true
   }
   let rest = {}
-  if same(kind(source), "record") {
-    for name in record.keys(source) {
-      if skip[name] {} else {
-        set rest[name] = source[name]
-      }
+  let keys = invoke ts.keys(source)
+  for name in keys {
+    if skip[name] {} else {
+      let value = invoke ts.get(source, name)
+      set rest[name] = value
     }
   }
   return rest

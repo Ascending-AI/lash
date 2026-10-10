@@ -192,11 +192,11 @@ impl Lowerer<'_> {
             _ => {}
         }
         self.read_global(name, span).unwrap_or_else(|| {
-            Err(if name == "Reflect" {
+            Err(if matches!(name, "Reflect" | "Symbol") {
                 // The global the language gives reflection by.
                 Diagnostic::refusal(
                     DiagnosticCode::ReflectionUnsupported,
-                    "Unsupported: `Reflect`, which is reflection",
+                    format!("Unsupported: `{name}`, whose reflective protocol is outside the TypeScript dialect"),
                     span,
                 )
             } else {

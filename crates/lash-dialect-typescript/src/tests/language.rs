@@ -271,3 +271,15 @@ fn arguments_iteration_reads_live_length_and_indices() {
         Ended::Finished(lash_kernel_doc::Datum::Bool(true))
     );
 }
+
+/// Object rest copies a string's enumerable indices into a new ordinary object.
+#[test]
+fn object_rest_copies_string_indices_into_a_fresh_object() {
+    use super::machine::{Ended, end};
+    assert_eq!(
+        end(
+            "const {0: first, ...rest} = 'foo'; await finish(first === 'f' && rest[1] === 'o' && rest[2] === 'o' && Object.keys(rest).length === 2 && rest instanceof Object);"
+        ),
+        Ended::Finished(lash_kernel_doc::Datum::Bool(true)),
+    );
+}

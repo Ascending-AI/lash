@@ -96,3 +96,43 @@ fn a_program_reaches_only_the_built_ins_it_names() {
         );
     }
 }
+
+/// The global eval is a function value even though dynamic evaluation is refused.
+#[test]
+fn eval_is_a_function_value_without_dynamic_evaluation() {
+    assert_eq!(
+        machine::end(
+            "function sameReceiver() { return this === eval; } await finish([1].every(sameReceiver, eval) && eval.length === 1 && eval.prototype === undefined);"
+        ),
+        Ended::Finished(lash_kernel_doc::Datum::Bool(true)),
+    );
+    assert_eq!(
+        machine::end("const evaluate = eval; evaluate('1 + 2');"),
+        Ended::Raised("TS_EVAL_UNSUPPORTED".to_string()),
+    );
+}
+
+/// Object instances include containers and functions, but exclude primitives.
+#[test]
+fn object_instanceof_distinguishes_objects_from_primitives() {
+    agrees(
+        "let valid = true; for (const value of [{}, [], new Map(), new Set(), new Date(0), /x/, function() {}, Math, new Error()]) { valid = valid && value instanceof Object; } for (const value of [null, undefined, false, 0, 'x']) { valid = valid && !(value instanceof Object); } await finish(valid && !(Object.prototype instanceof Object));",
+    );
+}
+
+/// Option B refuses reflective access to symbols and replacement of globals.
+#[test]
+fn reflective_protocols_and_builtin_global_writes_are_typed_refusals() {
+    for source in [
+        "Symbol.iterator;",
+        "NaN = 12;",
+        "undefined = 12;",
+        "Object = 12;",
+        "Number = 12;",
+    ] {
+        assert_eq!(
+            super::lower(source).expect_err(source).code,
+            DiagnosticCode::ReflectionUnsupported
+        );
+    }
+}

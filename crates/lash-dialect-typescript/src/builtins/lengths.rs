@@ -293,6 +293,7 @@ pub(super) const LENGTHS: &[(&str, u8)] = &[
     ("decodeURIComponent", 1),
     ("encodeURI", 1),
     ("encodeURIComponent", 1),
+    ("eval", 1),
     ("isFinite", 1),
     ("isNaN", 1),
     ("parseFloat", 1),

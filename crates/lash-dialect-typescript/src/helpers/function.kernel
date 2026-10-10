@@ -86,3 +86,12 @@ body {
   if same(kind(this), "tuple") { return text.concat("function ", text.concat(this[2], "() { [native code] }")) }
   throw error.new("TS_FUNCTION_STRING_COERCION", "Function source is unavailable", null)
 }
+
+# The global function is a value; calling it cannot admit dynamic source.
+function ts.function.eval(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "TS_EVAL_UNSUPPORTED"
+charge 4
+body {
+  throw error.new("TS_EVAL_UNSUPPORTED", "Dynamic evaluation is outside the TypeScript dialect; write the code in the cell", null)
+}

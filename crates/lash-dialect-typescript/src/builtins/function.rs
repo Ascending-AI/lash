@@ -4,6 +4,10 @@ pub(super) fn object() -> Object {
     Object {
         source: include_str!("../helpers/function.kernel"),
         rows: vec![
+            Row::Function {
+                path: "eval",
+                function: "ts.function.eval",
+            },
             Row::Method {
                 receiver: Receiver::Closure,
                 name: "call",

@@ -699,6 +699,16 @@ impl Lowerer<'_> {
         if self.session.contains(&Name::new(name)) {
             return Ok(Name::new(name));
         }
+        if builtins::is_global(name) {
+            return Err(Diagnostic::with_repair(
+                DiagnosticCode::ReflectionUnsupported,
+                format!(
+                    "`{name}` is a built-in global; replacing it is outside the TypeScript dialect"
+                ),
+                format!("assign to a new name such as `{name}_` instead"),
+                span,
+            ));
+        }
         Err(unknown_binding(name, span))
     }
 

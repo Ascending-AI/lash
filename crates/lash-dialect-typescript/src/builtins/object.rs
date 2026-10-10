@@ -4,6 +4,10 @@ pub(super) fn object() -> Object {
     Object {
         source: include_str!("../helpers/object.kernel"),
         rows: vec![
+            Row::InstanceOf {
+                class: "Object",
+                function: "ts.object.is_instance",
+            },
             Row::Method {
                 receiver: Receiver::Brand("ts.arguments"),
                 name: "hasOwnProperty",

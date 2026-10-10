@@ -483,3 +483,17 @@ body {
   if primitive { throw error.new("TS_BOXED_PRIMITIVE_UNSUPPORTED", "Boxed primitive wrappers are outside the dialect", null) }
   return this
 }
+
+# Every dialect object inherits Object.prototype; primitive values do not.
+function ts.object.is_instance(value: Any) -> Bool
+kernel 1
+charge 8
+body {
+  let primitive = invoke ts.is_primitive(value)
+  if primitive { return false }
+  let receiver = invoke ts.receiver(value)
+  if same(receiver, "builtin") {
+    if same(value[1], "Object.prototype") { return false }
+  }
+  return true
+}

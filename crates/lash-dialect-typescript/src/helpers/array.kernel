@@ -434,11 +434,24 @@ body {
   let from = invoke ts.array.integer(input)
   let index = num.max(from, 0)
   if num.lt(from, 0) { set index = num.max(num.add(length, from), 0) }
+  let dense = same(kind(this), "list")
   while num.lt(index, length) {
     if num.lt(index, 0) { break }
-    let present = invoke ts.has_own(this, index)
+    let present = false
+    let value = absent
+    if dense {
+      # A list index is already an index, not a property name to spell and
+      # parse again. Coercing fromIndex may have shortened the list after
+      # we captured its length, and an empty tuple is a missing slot.
+      if num.lt(index, list.len(this)) {
+        set value = this[index]
+        set present = bool.not(same(value, ()))
+      }
+    } else {
+      set present = invoke ts.has_own(this, index)
+      if present { set value = invoke ts.get(this, index) }
+    }
     if present {
-      let value = invoke ts.get(this, index)
       let equal = invoke ts.strict_equals(value, search)
       if equal { return num.to_float(index) }
     }

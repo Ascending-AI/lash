@@ -264,7 +264,10 @@ fn generic_receivers_bounds_search_and_reduce_follow_ecma_steps() {
         const holes = a.includes(undefined) && a.indexOf(undefined) === -1;
         const nans = [NaN].includes(NaN) && [NaN].indexOf(NaN) === -1;
         const bounds = a.slice(-2.9).join(',') === '3,4';
-        await finish(sparse && holes && nans && bounds && reduced === 8 && reverse === '431');
+        const shortened = [1, 2];
+        const from = {valueOf() { shortened.length = 0; return 0; }};
+        const shrink = shortened.indexOf(undefined, from) === -1;
+        await finish(sparse && holes && nans && bounds && shrink && reduced === 8 && reverse === '431');
     "#);
 }
 
