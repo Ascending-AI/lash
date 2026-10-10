@@ -17,7 +17,7 @@ pub(crate) fn execution_section(
     dialect: &SessionDialect,
     features: crate::protocol::RlmPromptFeatures,
     catalog: &lash_core::ToolCatalog,
-    discovery: Option<&lash_core::ToolDiscovery>,
+    discovery: Option<&crate::plugin::RlmDiscovery>,
 ) -> ExecutionSection {
     let tags = dialect.cell_tags();
     let without_tag_lines = |text: String| {

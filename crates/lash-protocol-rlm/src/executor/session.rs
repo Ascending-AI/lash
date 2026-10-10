@@ -1324,10 +1324,13 @@ impl CodeModeExecutionState {
     /// The session's bindings as JSON for the "Bound Variables" prompt
     /// section, without the reserved history binding and the `exclude`
     /// names, which are read-only values with a section of their own.
+    /// The session's bound variables but `exclude`: a host resource handle
+    /// as itself, which stays opaque, and every other value as the host
+    /// reads it.
     pub(crate) fn bound_variable_values(
         &self,
         exclude: &BTreeSet<String>,
-    ) -> Vec<(String, serde_json::Value)> {
+    ) -> Vec<(String, crate::session_globals::SessionGlobalKind)> {
         self.bindings
             .variables
             .iter()
@@ -1335,10 +1338,16 @@ impl CodeModeExecutionState {
                 name.as_str() != HISTORY_BINDING && !exclude.contains(name.as_str())
             })
             .map(|(name, value)| {
-                (
-                    name.to_string(),
-                    crate::cell_value::binding_json(value, &self.bindings.objects),
-                )
+                let kind = match value {
+                    Value::Handle(handle) => crate::session_globals::SessionGlobalKind::Handle {
+                        kind: handle.kind.clone(),
+                        id: handle.id.clone(),
+                    },
+                    value => crate::session_globals::SessionGlobalKind::Data(
+                        crate::cell_value::binding_json(value, &self.bindings.objects),
+                    ),
+                };
+                (name.to_string(), kind)
             })
             .collect()
     }

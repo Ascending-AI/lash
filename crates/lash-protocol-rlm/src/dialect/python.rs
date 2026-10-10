@@ -84,16 +84,19 @@ impl DialectPrompts for PythonPrompts {
         let ExecutionSectionRequest {
             channel,
             tools,
-            discovery_operation,
+            catalogue,
             ..
         } = request;
-        let discovery = discovery_operation.map(|operation| {
-            format!(
-                "Other tools exist; find them with `await {}({{ ... }})`.",
-                operation.replace('.', "_")
+        let label = catalogue.map(|catalogue| {
+            super::catalogue_label(
+                catalogue,
+                &format!(
+                    "await {}({{ ... }})",
+                    catalogue.discovery_operation.replace('.', "_")
+                ),
             )
         });
-        let tools = [discovery.as_deref(), (!tools.is_empty()).then_some(tools)]
+        let tools = [(!tools.is_empty()).then_some(tools), label.as_deref()]
             .into_iter()
             .flatten()
             .collect::<Vec<_>>();

@@ -484,10 +484,12 @@ async fn assembled_prompt_fragments_with_projection(
             .prepare_bound_variables_prompt(
                 &std::collections::BTreeSet::new(),
                 lash_render::RenderParams::preview(),
+                Default::default(),
             )
             .await
             .expect("bound variables prompt")
             .render()
+            .0
             .to_string(),
     ));
 

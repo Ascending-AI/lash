@@ -276,3 +276,52 @@ async fn a_saved_function_the_migration_refuses_is_listed_and_not_held() {
         "what the restore carried and dropped is stored by the next capture"
     );
 }
+
+/// A global holding a host resource handle is disclosed as one: listed as
+/// an opaque handle of its type, never as a record whose fields a cell
+/// might try to read (FIG-1438).
+#[test]
+fn a_handle_binding_is_disclosed_as_an_opaque_handle() {
+    let mut state = CodeModeExecutionState::new("typescript", NumberPolicy::Float);
+    state.bindings.variables.insert(
+        lash_kernel_doc::Name::from("job"),
+        lash_kernel_doc::Value::Handle(std::sync::Arc::new(lash_kernel_doc::Handle {
+            kind: "process".to_string(),
+            id: "p-7".to_string(),
+        })),
+    );
+    let kinds = state.bound_variable_values(&BTreeSet::new());
+    assert_eq!(
+        kinds,
+        [(
+            "job".to_string(),
+            crate::session_globals::SessionGlobalKind::Handle {
+                kind: "process".to_string(),
+                id: "p-7".to_string(),
+            }
+        )]
+    );
+    let (text, _) = crate::rlm_support::render_bound_variables(
+        &mut Default::default(),
+        kinds
+            .into_iter()
+            .map(|(name, kind)| crate::session_globals::SessionGlobal {
+                name,
+                cell: None,
+                kind,
+            })
+            .collect(),
+        &crate::dialect::TypescriptPrompts,
+        &crate::render::BuiltinCodeRenderer,
+        &lash_render::RenderParams::preview(),
+        crate::RlmPresentationConfig::standard().max_inline_keys,
+        usize::MAX,
+    );
+    assert!(
+        text.contains(
+            "- `job`: opaque `process` handle `p-7`; pass it whole, it has no fields to read"
+        ),
+        "{text}"
+    );
+    assert!(!text.contains("$kind"), "{text}");
+}

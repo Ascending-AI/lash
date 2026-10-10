@@ -180,15 +180,18 @@ fn render_execution_section(request: ExecutionSectionRequest<'_>) -> ExecutionSe
         channel,
         tools,
         tool_catalog,
-        discovery_operation,
+        catalogue,
     } = request;
-    // A host with a discovery tool says so where the model reads which
-    // tools it may call: under **Tools**, which renders whether or not the
-    // session keeps the built-in prose.
-    let discovery = discovery_operation.map(|operation| {
-        format!("Other tools exist; find them with `await {operation}({{ ... }})`.")
+    // A host with a discovery tool labels the listing where the model reads
+    // which tools it may call: under **Tools**, which renders whether or not
+    // the session keeps the built-in prose.
+    let label = catalogue.map(|catalogue| {
+        super::catalogue_label(
+            catalogue,
+            &format!("await {}({{ ... }})", catalogue.discovery_operation),
+        )
     });
-    let tools = [discovery.as_deref(), (!tools.is_empty()).then_some(tools)]
+    let tools = [(!tools.is_empty()).then_some(tools), label.as_deref()]
         .into_iter()
         .flatten()
         .collect::<Vec<_>>();

@@ -11,6 +11,10 @@ pub struct RlmPresentationConfig {
     /// How many binding names a cell's record keeps of what the cell did to
     /// the session's bindings; it counts the rest.
     pub max_binding_change_names: usize,
+    /// The bytes the bound-variables listing may take, its rows and their
+    /// schema definitions together. The rows past it are counted, not
+    /// listed (FIG-1438).
+    pub max_bound_variable_bytes: usize,
 }
 impl Default for RlmPresentationConfig {
     fn default() -> Self {
@@ -19,8 +23,9 @@ impl Default for RlmPresentationConfig {
 }
 impl RlmPresentationConfig {
     /// Standard preset: standard tool/schema presentation, 12 inline
-    /// catalogue keys, 128 tool-call records, 64 KiB inline scalar bodies and
-    /// 32 binding-change names.
+    /// catalogue keys, 128 tool-call records, 64 KiB inline scalar bodies,
+    /// 32 binding-change names and a 24 KiB bound-variables listing, which
+    /// leaves room under the standard 32 KiB prompt section.
     /// These historical presentation cuts have no universal workload measurement.
     pub const fn standard() -> Self {
         Self {
@@ -29,8 +34,24 @@ impl RlmPresentationConfig {
             max_tool_call_records: 128,
             max_inline_scalar_bytes: 64 * 1024,
             max_binding_change_names: 32,
+            max_bound_variable_bytes: 24 * 1024,
         }
     }
+}
+
+/// How a session lists a catalogue too large to show whole (FIG-1435): the
+/// host operation that finds the tools its prompt leaves out, and the bytes
+/// the listed tools' docs share. A host that offers discovery states both;
+/// neither has a preset.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RlmDiscovery {
+    /// The discovery tool's call path, as a cell writes it. The tool is
+    /// always listed.
+    pub operation: String,
+    /// The bytes the listed tools' docs take together, the discovery tool's
+    /// included; module headings and separators are not counted.
+    pub catalogue_bytes: usize,
 }
 
 /// A host's RLM protocol configuration.
@@ -53,9 +74,9 @@ pub struct RlmProtocolPluginConfig {
     pub render: lash_rlm_types::RlmRenderPatch,
     #[serde(default)]
     pub presentation: RlmPresentationConfig,
-    /// The discovery operation a new session records, if any.
+    /// The discovery a new session records, if any.
     #[serde(skip)]
-    pub discovery: Option<lash_core::ToolDiscovery>,
+    pub discovery: Option<RlmDiscovery>,
     /// Session-pinned transport used for model-authored programs.
     pub channel: super::RlmChannel,
     pub instruction_limit: InstructionBound,
@@ -93,10 +114,10 @@ pub struct RlmRecordedBehaviour {
     /// `None` for no warning.
     #[serde(deserialize_with = "serde::Deserialize::deserialize")]
     pub continue_as_soft_warn_tokens: Option<usize>,
-    /// The host operation the model discovers tools omitted from the prompt
-    /// with, or `None` when every tool is inline.
+    /// How the model finds tools the prompt omits and the budget of the
+    /// tools it lists, or `None` when every tool is listed.
     #[serde(deserialize_with = "serde::Deserialize::deserialize")]
-    pub discovery_operation: Option<String>,
+    pub discovery: Option<RlmDiscovery>,
     /// The render the creating deployment configured: the base a run's
     /// render is resolved over, under the session's own render preferences
     /// (FIG-4527).
@@ -180,7 +201,7 @@ impl RlmProtocolPluginConfigBuilder<InstructionBound, MemoryBound, super::RlmCha
 }
 
 impl RlmProtocolPluginConfig {
-    pub fn with_discovery(mut self, discovery: lash_core::ToolDiscovery) -> Self {
+    pub fn with_discovery(mut self, discovery: RlmDiscovery) -> Self {
         self.discovery = Some(discovery);
         self
     }
@@ -217,10 +238,7 @@ impl RlmProtocolPluginConfig {
             prompt_features: self.prompt_features,
             max_output_chars: self.max_output_chars,
             continue_as_soft_warn_tokens: self.continue_as_soft_warn_tokens,
-            discovery_operation: self
-                .discovery
-                .as_ref()
-                .map(|discovery| discovery.operation.clone()),
+            discovery: self.discovery.clone(),
             render: crate::render::ResolvedRlmRender::resolve(&self.render, &Default::default())
                 .as_patch(),
             presentation: self.presentation,
@@ -236,10 +254,7 @@ impl RlmProtocolPluginConfig {
         self.prompt_features = behaviour.prompt_features;
         self.max_output_chars = behaviour.max_output_chars;
         self.continue_as_soft_warn_tokens = behaviour.continue_as_soft_warn_tokens;
-        self.discovery = behaviour
-            .discovery_operation
-            .clone()
-            .map(|operation| lash_core::ToolDiscovery { operation });
+        self.discovery = behaviour.discovery.clone();
         self.render = behaviour.render.clone();
         self.presentation = behaviour.presentation;
         self

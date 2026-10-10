@@ -20,15 +20,23 @@ pub use native::{NATIVE_EXECUTE_TOOL_NAME, RlmNativeToolPlugin};
 mod projection;
 mod prompt_sections;
 mod protocol;
-pub use prompt_sections::{section_id, section_keys};
+pub use prompt_sections::{RlmPromptFacts, section_id, section_keys};
 pub mod render;
 pub use render::{BuiltinCodeRenderer, CodeRenderer, CodeRendererSlot, ResolvedRlmRender};
 mod rlm_support;
 pub mod scenario_contracts;
+mod session_globals;
+pub use session_globals::{
+    GlobalsPage, GlobalsPageView, SessionGlobal, SessionGlobalKind, SessionGlobals,
+    StaleGlobalsPage,
+};
 mod stream_mask;
 #[cfg(test)]
 mod testing;
 mod tool_catalog;
+pub use tool_catalog::{
+    ToolCatalogueDisclosure, discovered_tool_doc, discovery_text, tool_catalogue_disclosure,
+};
 
 pub use catalogue_preview::{
     CataloguePreviewEntry, CataloguePreviewOptions, DEFAULT_CATALOGUE_PREVIEW_CALL_NAME_LIMIT,
@@ -70,10 +78,11 @@ pub use lash_sansio::{
 pub use lash_vm_runtime::ResolvedToolBinding;
 pub use plugin::{
     ExecutionBounds, HelperReleaseGate, InstructionBound, MemoryBound, RLM_PROTOCOL_PLUGIN_ID,
-    RlmChannel, RlmConfigOwner, RlmConfigRefusal, RlmCreateConfig, RlmPresentationConfig,
-    RlmProtocolPluginConfig, RlmProtocolPluginConfigBuilder, RlmProtocolPluginFactory,
-    RlmRecordedBehaviour, RlmRecordedConfig, RlmRenderRefusal, RlmRunOptions,
-    RlmSessionConfigDecodeError, SetRlmRender, UnsetBound, UnsetChannel, rlm_session_config,
+    RlmChannel, RlmConfigOwner, RlmConfigRefusal, RlmCreateConfig, RlmDiscovery,
+    RlmPresentationConfig, RlmProtocolPluginConfig, RlmProtocolPluginConfigBuilder,
+    RlmProtocolPluginFactory, RlmRecordedBehaviour, RlmRecordedConfig, RlmRenderRefusal,
+    RlmRunOptions, RlmSessionConfigDecodeError, SetRlmRender, UnsetBound, UnsetChannel,
+    rlm_session_config,
 };
 pub use projection::{
     CodeModeProjectedBindings, ProjectedBindingError, rlm_session_projection_extension,

@@ -114,17 +114,23 @@ pub(crate) fn rendered_bound_variables(
         .as_object()
         .expect("globals object")
         .iter()
-        .map(|(name, value)| (name.clone(), value.clone()))
+        .map(|(name, value)| crate::session_globals::SessionGlobal {
+            name: name.clone(),
+            cell: None,
+            kind: crate::session_globals::SessionGlobalKind::Data(value.clone()),
+        })
         .collect::<Vec<_>>();
+    let presentation = crate::RlmPresentationConfig::standard();
     crate::rlm_support::render_bound_variables(
         cache,
-        &globals,
-        &[],
+        globals,
         &crate::dialect::TypescriptPrompts,
         &crate::render::BuiltinCodeRenderer,
         &lash_render::RenderParams::preview(),
-        crate::RlmPresentationConfig::standard().max_inline_keys,
+        presentation.max_inline_keys,
+        presentation.max_bound_variable_bytes,
     )
+    .0
 }
 
 fn project_iteration_request(
@@ -203,6 +209,7 @@ pub(crate) fn projected_request_with_facts(
         ),
         bound_variables: Arc::from("- `scratch_note` = \"saved\""),
         read_only_variables: None,
+        globals: Default::default(),
     };
     let config = projection_test_config("test-model", Default::default(), None);
     let request = projector

@@ -236,6 +236,20 @@ mod rlm_inventory {
     use lash::rlm::ShapeKind as _;
     use lash::rlm::TypescriptPrompts as _;
 
+    // What a code-mode prompt discloses (FIG-1435, FIG-1438).
+    use lash::rlm::GlobalsPage as _;
+    use lash::rlm::GlobalsPageView as _;
+    use lash::rlm::RlmDiscovery as _;
+    use lash::rlm::RlmPromptFacts as _;
+    use lash::rlm::SessionGlobal as _;
+    use lash::rlm::SessionGlobalKind as _;
+    use lash::rlm::SessionGlobals as _;
+    use lash::rlm::StaleGlobalsPage as _;
+    use lash::rlm::ToolCatalogueDisclosure as _;
+    use lash::rlm::discovered_tool_doc as _;
+    use lash::rlm::discovery_text as _;
+    use lash::rlm::tool_catalogue_disclosure as _;
+
     // The Lash VM language vocabulary, re-exported whole as `lash::vm::ir`.
 }
 

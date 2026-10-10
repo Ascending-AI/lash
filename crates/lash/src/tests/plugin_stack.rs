@@ -628,7 +628,7 @@ fn facade_recorded_render_refuses_omitted_base_choices() {
             .expect("patch")
             .remove("max_chars");
         assert!(serde_json::from_value::<crate::rlm::RlmRecordedBehaviour>(omission).is_err());
-        for field in ["continue_as_soft_warn_tokens", "discovery_operation"] {
+        for field in ["continue_as_soft_warn_tokens", "discovery"] {
             let mut omission = serde_json::to_value(&recorded).expect("behaviour");
             omission.as_object_mut().expect("behaviour").remove(field);
             assert!(serde_json::from_value::<crate::rlm::RlmRecordedBehaviour>(omission).is_err());

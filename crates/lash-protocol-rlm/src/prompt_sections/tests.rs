@@ -74,6 +74,7 @@ fn facts() -> RlmPromptFacts {
             &bindings,
             &crate::dialect::TypescriptPrompts,
         ),
+        globals: Default::default(),
     }
 }
 
@@ -229,8 +230,9 @@ fn the_declarations_describe_exactly_the_offered_callable_tools() {
         hidden,
     ]);
     let discovery = RlmSections {
-        discovery: Some(lash_core::ToolDiscovery {
+        discovery: Some(crate::plugin::RlmDiscovery {
             operation: "tools.search".to_string(),
+            catalogue_bytes: usize::MAX,
         }),
         ..sections(&discovering)
     };
@@ -242,8 +244,8 @@ fn the_declarations_describe_exactly_the_offered_callable_tools() {
         let composed = compose(&plugins, turn(discovering.clone()));
         let rendered = initial(&composed);
         assert!(rendered.contains(
-            "### Tools\n\nOther tools exist; find them with `await tools.search({ ... })`."
-        ));
+            "Find tools.\n\nCatalogue: PARTIAL. 1 of 2 tools are listed above; find the other 1 with `await tools.search({ ... })`."
+        ), "{rendered}");
         assert!(rendered.contains("Find tools."));
         assert!(!rendered.contains("A tool found by search."));
     }
@@ -318,6 +320,7 @@ fn bound_variables_render_late_in_name_order() {
                 history_binding: Arc::from(""),
                 bound_variables,
                 read_only_variables: None,
+                globals: Default::default(),
             }),
             ..Call::default()
         },
@@ -527,6 +530,7 @@ fn the_initial_instructions_are_stable_while_globals_change() {
                     history_binding: Arc::from(""),
                     bound_variables,
                     read_only_variables: None,
+                    globals: Default::default(),
                 }),
                 iteration,
                 ..Call::default()

@@ -234,82 +234,70 @@ pub(crate) fn render_read_only_variables(
     lines.join("\n")
 }
 
-/// Renders the session's bindings: `globals` are the host-view values, shown
-/// with their shapes and previews; `opaque` are the bindings with no host view
-/// (a `Map`, a `Date`, a record holding one), shown by their bounded runtime
-/// summary, so the listing names every binding a cell can use (FIG-3629).
+/// Renders the session's globals in name order, each with the cell that
+/// bound it: data with its shape and preview, a handle as opaque, a saved
+/// function by its signature and a name that was not carried with why, so
+/// the listing names every binding a cell can use (FIG-3629). The rows and
+/// the schema definitions they introduce take at most `max_bytes`; the
+/// listing stops at the first row past it and counts the rest, which stay
+/// in the returned facts (FIG-1438).
 pub(crate) fn render_bound_variables(
     cache: &mut BoundVariableRenderCache,
-    globals: &[(String, FlowValue)],
-    opaque: &[(String, String)],
+    mut globals: Vec<crate::session_globals::SessionGlobal>,
     dialect: &dyn DialectPrompts,
     renderer: &dyn CodeRenderer,
     params: &RenderParams,
     max_inline_keys: usize,
-) -> Arc<str> {
+    max_bytes: usize,
+) -> (Arc<str>, crate::session_globals::SessionGlobals) {
+    use crate::session_globals::{SessionGlobalKind, SessionGlobals};
     let vocabulary = dialect.prompt_vocabulary();
-    let mut lines = vec![
-        format!(
-            "These variables are already bound in {}. Access them directly in `{}` {}s; do not recreate them manually.",
-            vocabulary.language_name, vocabulary.cell_tags.open, vocabulary.cell_noun
-        ),
-        // Every key of every value below is written out — in the row itself
-        // where the record is small enough, in the `Schema:` block otherwise —
-        // and the dialect states what its runtime does with a key that is not.
-        vocabulary.field_miss_rule.to_string(),
-    ];
+    globals.sort_by(|left, right| left.name.cmp(&right.name));
 
     // Drop cache slots for variables that no longer exist.
-    cache
-        .entries
-        .retain(|name, _| globals.iter().any(|(global, _)| global == name));
+    cache.entries.retain(|name, _| {
+        globals
+            .iter()
+            .any(|global| &global.name == name && matches!(global.kind, SessionGlobalKind::Data(_)))
+    });
 
     // Reuse the cached build for an unchanged variable (detected by a cheap
     // structural value hash); only rebuild changed/new ones. Rebuilding —
     // serialize, shape inference, preview — is the expensive part, so this is
     // the win for globals that are stable across prompt builds.
-    let mut rows: Vec<WorkRow> = Vec::with_capacity(globals.len());
-    for (name, value) in globals {
+    let mut snapshot = DefaultHasher::new();
+    let mut rows: Vec<Option<WorkRow>> = Vec::with_capacity(globals.len());
+    for global in &globals {
+        global.name.hash(&mut snapshot);
+        global.cell.hash(&mut snapshot);
+        let SessionGlobalKind::Data(value) = &global.kind else {
+            format!("{:?}", global.kind).hash(&mut snapshot);
+            rows.push(None);
+            continue;
+        };
         let hash = value_hash(value, params, renderer.id(), max_inline_keys);
-        match cache.entries.get(name) {
-            Some(entry) if entry.value_hash == hash => rows.push(WorkRow {
-                name: name.clone(),
+        hash.hash(&mut snapshot);
+        let row = match cache.entries.get(&global.name) {
+            Some(entry) if entry.value_hash == hash => WorkRow {
+                name: global.name.clone(),
                 value_hash: hash,
                 shape: entry.shape.clone(),
                 inline: entry.inline.clone(),
                 size_hint: entry.size_hint.clone(),
                 preview: entry.preview.clone(),
-            }),
+            },
             _ => {
                 let built = build_bound_variable_row(value, renderer, params, max_inline_keys);
-                rows.push(WorkRow {
-                    name: name.clone(),
+                WorkRow {
+                    name: global.name.clone(),
                     value_hash: hash,
                     shape: built.shape,
                     inline: built.inline,
                     size_hint: built.size_hint,
                     preview: built.preview,
-                });
+                }
             }
-        }
-    }
-
-    rows.sort_by(|left, right| left.name.cmp(&right.name));
-
-    // Rebuild the schema registry from every row's shape in name order so its
-    // generated type names are deterministic.
-    let mut registry = SchemaRegistry::default();
-    for row in &rows {
-        if let Some(shape) = &row.shape {
-            registry.register_root(&row.name, shape);
-        }
-    }
-
-    lines.push(String::new());
-    lines.push("Available variables:".to_string());
-    let mut listed = Vec::with_capacity(rows.len() + opaque.len());
-    for row in &rows {
-        let line = render_row_line(row, &registry, dialect);
+        };
         cache.entries.insert(
             row.name.clone(),
             BoundVariableRenderCacheEntry {
@@ -320,22 +308,105 @@ pub(crate) fn render_bound_variables(
                 preview: row.preview.clone(),
             },
         );
-        listed.push((row.name.as_str(), line));
+        rows.push(Some(row));
     }
-    for (name, summary) in opaque {
-        listed.push((name.as_str(), format!("- `{name}`: {summary}")));
-    }
-    listed.sort_by(|left, right| left.0.cmp(right.0));
-    lines.extend(listed.into_iter().map(|(_, line)| line));
 
-    if rows.is_empty() && opaque.is_empty() {
-        return Arc::from("");
+    // The schema registry grows row by row in name order, so its generated
+    // type names are deterministic and a row is charged the definitions it
+    // introduces.
+    let mut registry = SchemaRegistry::default();
+    let mut listed_lines = Vec::new();
+    let mut previewed = false;
+    let mut used = 0usize;
+    for (global, row) in globals.iter().zip(&rows) {
+        let mut trial = None;
+        let line = match &global.kind {
+            SessionGlobalKind::Data(_) => {
+                // Every data global was given its row above.
+                let Some(row) = row else { continue };
+                let mut grown = registry.clone();
+                if let Some(shape) = &row.shape {
+                    grown.register_root(&row.name, shape);
+                }
+                let line = render_row_line(row, &grown, dialect);
+                trial = Some(grown);
+                line
+            }
+            SessionGlobalKind::Handle { kind, id } => format!(
+                "- `{}`: opaque `{kind}` handle `{id}`; pass it whole, it has no fields to read",
+                global.name
+            ),
+            SessionGlobalKind::Function {
+                signature,
+                frozen_at,
+            } => {
+                let frozen = match frozen_at {
+                    Some(cell) => format!("captures frozen at {} {cell}", vocabulary.cell_noun),
+                    None => "captures frozen before this session".to_owned(),
+                };
+                format!("- `{}`: function {signature}; {frozen}", global.name)
+            }
+            SessionGlobalKind::NotCarried { why } => {
+                format!("- `{}`: not bound: {why}", global.name)
+            }
+        };
+        let line = match &global.cell {
+            Some(cell) => format!("{line} — from {} `{cell}`", vocabulary.cell_noun),
+            None => line,
+        };
+        let introduced = trial.as_ref().map_or(0, |grown| {
+            grown.definitions[registry.definitions.len()..]
+                .iter()
+                .map(|(name, shape)| {
+                    dialect
+                        .schema_definition(name, &grown.definition(shape))
+                        .len()
+                        + 2
+                })
+                .sum::<usize>()
+        });
+        let cost = line.len() + 1 + introduced;
+        if used.saturating_add(cost) > max_bytes {
+            break;
+        }
+        used += cost;
+        if let Some(grown) = trial {
+            registry = grown;
+        }
+        previewed |= row
+            .as_ref()
+            .is_some_and(|row| row.inline.is_none() && row.preview.is_some());
+        listed_lines.push(line);
     }
-    if rows
-        .iter()
-        .any(|row| row.inline.is_none() && row.preview.is_some())
-    {
+    let listed = listed_lines.len();
+    let omitted = globals.len() - listed;
+    let facts = SessionGlobals::new(globals, listed, snapshot.finish());
+    if facts.entries().is_empty() {
+        return (Arc::from(""), facts);
+    }
+
+    let mut lines = vec![
+        format!(
+            "These variables are already bound in {}. Access them directly in `{}` {}s; do not recreate them manually.",
+            vocabulary.language_name, vocabulary.cell_tags.open, vocabulary.cell_noun
+        ),
+        // Every key of every value below is written out — in the row itself
+        // where the record is small enough, in the `Schema:` block otherwise —
+        // and the dialect states what its runtime does with a key that is not.
+        vocabulary.field_miss_rule.to_string(),
+    ];
+    if previewed {
         lines.insert(1, format!("Previews are truncated; variables retain complete values. Use `{}` on the part you need.", vocabulary.print_call));
+    }
+    lines.push(String::new());
+    lines.push("Available variables:".to_string());
+    lines.extend(listed_lines);
+    if omitted > 0 {
+        lines.push(format!(
+            "{omitted} more {} not listed here; each is still in scope under its name, and `{}` shows one.",
+            if omitted == 1 { "variable is" } else { "variables are" },
+            vocabulary.print_statement("name"),
+        ));
     }
     if !registry.definitions.is_empty() {
         lines.push("\nSchema:".to_string());
@@ -348,7 +419,7 @@ pub(crate) fn render_bound_variables(
         lines.push(dialect.schema_definition(name, &registry.definition(shape)));
     }
 
-    Arc::from(lines.join("\n"))
+    (Arc::from(lines.join("\n")), facts)
 }
 
 fn append_schema_registry(
@@ -552,7 +623,7 @@ fn render_value_size_hint(value: &serde_json::Value, max_inline_keys: usize) -> 
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct SchemaRegistry {
     names_by_key: BTreeMap<String, String>,
     definitions: Vec<(String, SchemaShape)>,
@@ -844,27 +915,39 @@ mod bound_variable_tests {
         "###);
     }
 
-    fn globals(value: serde_json::Value) -> Vec<(String, FlowValue)> {
+    fn globals(value: serde_json::Value) -> Vec<crate::session_globals::SessionGlobal> {
         value
             .as_object()
             .expect("object")
             .iter()
-            .map(|(key, value)| (key.clone(), value.clone()))
+            .map(|(key, value)| crate::session_globals::SessionGlobal {
+                name: key.clone(),
+                cell: None,
+                kind: crate::session_globals::SessionGlobalKind::Data(value.clone()),
+            })
             .collect()
     }
 
-    fn render_with_cache(cache: &mut BoundVariableRenderCache, value: serde_json::Value) -> String {
-        let globals = globals(value);
+    fn render(
+        cache: &mut BoundVariableRenderCache,
+        globals: Vec<crate::session_globals::SessionGlobal>,
+    ) -> String {
+        let presentation = crate::RlmPresentationConfig::standard();
         render_bound_variables(
             cache,
-            &globals,
-            &[],
+            globals,
             &crate::dialect::TypescriptPrompts,
             &crate::render::BuiltinCodeRenderer,
             &lash_render::RenderParams::preview(),
-            crate::RlmPresentationConfig::standard().max_inline_keys,
+            presentation.max_inline_keys,
+            presentation.max_bound_variable_bytes,
         )
+        .0
         .to_string()
+    }
+
+    fn render_with_cache(cache: &mut BoundVariableRenderCache, value: serde_json::Value) -> String {
+        render(cache, globals(value))
     }
 
     #[test]
@@ -896,16 +979,7 @@ mod bound_variable_tests {
         let items: Vec<_> = (0..40).map(|i| json!(format!("note-{i:02}"))).collect();
         let g = globals(json!({ "notes": items }));
         let mut cache = BoundVariableRenderCache::default();
-        let s = render_bound_variables(
-            &mut cache,
-            &g,
-            &[],
-            &crate::dialect::TypescriptPrompts,
-            &crate::render::BuiltinCodeRenderer,
-            &lash_render::RenderParams::preview(),
-            crate::RlmPresentationConfig::standard().max_inline_keys,
-        )
-        .to_string();
+        let s = render(&mut cache, g);
         assert!(s.contains("len=40"), "{s}");
         assert!(s.contains("note-00"), "{s}"); // head retained
         assert!(s.contains("note-39"), "{s}"); // tail retained
@@ -953,15 +1027,7 @@ mod bound_variable_tests {
         );
 
         let mut cache = BoundVariableRenderCache::default();
-        let rendered = render_bound_variables(
-            &mut cache,
-            &[("payload".to_string(), value)],
-            &[],
-            &crate::dialect::TypescriptPrompts,
-            &crate::render::BuiltinCodeRenderer,
-            &lash_render::RenderParams::preview(),
-            crate::RlmPresentationConfig::standard().max_inline_keys,
-        );
+        let rendered = render(&mut cache, globals(json!({ "payload": value })));
         assert!(
             rendered.contains("keys=2 (__projected__payload, body)")
                 && rendered.contains(r#"≈ {"__projected__payload":"#)

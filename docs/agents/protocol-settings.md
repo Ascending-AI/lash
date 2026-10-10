@@ -11,8 +11,8 @@ Immutable refusal ceilings remain unchanged.
 | Standard protocol | `plugins::StandardProtocolConfig::standard()`; no discovery, built-in renderer, batch enabled with 64 members |
 | Standard tool output | `render::ToolRenderParams::standard()`; 16,000 characters, 400 lines, 50 percent head, prefer authored view; standard value render |
 | Value render | `rlm::RenderParams::standard()` and `rlm::RenderParams::preview()` supply the protocol's print/preview patches; standard print is 8,000 characters, auto format, width 80, indent 2, depth 3, array threshold 10, head 3, tail 2, minimum cut 80, stack head 3 and tail 1; preview is compact, 1,000 characters and depth 2 |
-| RLM protocol | `rlm::RlmProtocolPluginConfig::standard()` starts the typed builder; images and decomposition on, durable sleep always available, label annotations on, 10,000 output characters, warning at 100,000 tokens, no discovery; channel and execution budgets are explicit inputs, and `rlm::InstructionBound::standard()` is the instruction budget measured over the repository's model-written cells, 20,000,000 charge units |
-| RLM presentation | `rlm::RlmPresentationConfig::standard()`; 12 inline object keys, 128 host-call records and diagnostic ledger entries, 64 KiB scalar bodies, 32 binding-change names per cell record |
+| RLM protocol | `rlm::RlmProtocolPluginConfig::standard()` starts the typed builder; images and decomposition on, durable sleep always available, label annotations on, 10,000 output characters, warning at 100,000 tokens, no discovery; channel and execution budgets are explicit inputs, and `rlm::InstructionBound::standard()` is the instruction budget measured over the repository's model-written cells, 20,000,000 charge units. Discovery (`with_discovery`) has no preset: an `rlm::RlmDiscovery` names the discovery tool and the bytes the listed tool docs share |
+| RLM presentation | `rlm::RlmPresentationConfig::standard()`; 12 inline object keys, 128 host-call records and diagnostic ledger entries, 64 KiB scalar bodies, 32 binding-change names per cell record, 24 KiB of bound-variable rows and their schema definitions |
 | Compact contracts | `tools::ToolPresentationConfig::standard()`; two examples, 240 characters each, schema depth eight; use `ToolContract::compact_contract_with_presentation` for a custom policy |
 | Heap summaries | `vm::BindingSummaryConfig::standard()`; four members, depth two, 160 characters; RLM carries custom values to the VM worker through its presentation config |
 | Catalogue advertisement | `tools::CataloguePreviewOptions::standard()`; title Catalogued Capabilities, search through tools.search, 100 modules and 50 call names |
@@ -36,3 +36,21 @@ and `sleep_until` are always available to cells and processes. A sleep parks
 on a timer row in the waits table; turn deadlines and host cancellation bound
 it like any parked call.
 Both RLM channels use one shared transcript projection policy.
+
+A discovery session lists the discovery tool and the control tools, then
+the inline tools that fit its recorded catalogue budget, one namespace at a
+time in turn, in catalogue order under each module's heading. A label after
+the docs says whether the listing is complete, and how many tools the
+discovery tool finds beyond it. A tool appended to the catalogue appends
+its doc, so the listing before it keeps its bytes; a removal rewrites the
+listing from the removed tool on. `rlm::tool_catalogue_disclosure` gives a
+host the same facts, and `rlm::discovered_tool_doc` and
+`rlm::discovery_text` show and index a tool its discovery finds, field
+notes included.
+
+The bound-variables section lists the session's globals in name order,
+each with the cell whose committed record last bound it, until the
+presentation budget is spent, and counts the rest. A host handle is listed
+as opaque. A host reads every global, listed or not, from the call's
+`rlm::RlmPromptFacts`, and pages the omitted ones with the snapshot-scoped
+`rlm::GlobalsPage` it leaves.

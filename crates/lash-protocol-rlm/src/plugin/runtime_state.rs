@@ -151,26 +151,26 @@ impl RlmRuntimeState {
             self.dialect.read_only_variables_prompt(&bindings)
         };
         let exclude = self.protected_projected_binding_names().await;
-        let bound_variables = self
+        let projection = history
+            .map(|view| view.chronological_projection())
+            .unwrap_or_default();
+        let provenance =
+            crate::session_globals::binding_provenance(&projection).map_err(history_corruption)?;
+        let (bound_variables, globals) = self
             .execution
             .lock()
             .await
-            .prepare_bound_variables_prompt(&exclude, params.preview)
+            .prepare_bound_variables_prompt(&exclude, params.preview, provenance)
             .await?
             .render();
         Ok(crate::prompt_sections::RlmPromptFacts {
             history_binding: Arc::from(
-                crate::prompt_sections::history_binding(
-                    &self.dialect,
-                    &history
-                        .map(|view| view.chronological_projection())
-                        .unwrap_or_default(),
-                    images,
-                )
-                .map_err(history_corruption)?,
+                crate::prompt_sections::history_binding(&self.dialect, &projection, images)
+                    .map_err(history_corruption)?,
             ),
             bound_variables,
             read_only_variables,
+            globals: Arc::new(globals),
         })
     }
 

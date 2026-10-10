@@ -196,8 +196,10 @@ pub struct ExecutionSectionRequest<'a> {
     pub tools: &'a str,
     /// The catalog the docs were rendered from.
     pub tool_catalog: &'a lash_core::ToolCatalog,
-    /// The tool that finds the tools not listed, when the host has one.
-    pub discovery_operation: Option<&'a str>,
+    /// What a discovery session lists and leaves to its discovery tool, for
+    /// the dialect to label the listing complete or partial; `None` when the
+    /// session has no discovery and every tool is listed.
+    pub catalogue: Option<&'a crate::tool_catalog::ToolCatalogueDisclosure>,
 }
 
 /// The words and call forms shared prompt fragments take from their dialect.
@@ -271,6 +273,27 @@ pub(crate) struct CodeModeDialectServices {
     pub(crate) helpers: Option<Arc<dyn crate::plugin::HelperReleaseGate>>,
 }
 
+/// The label under a discovery session's listed tools: whether the listing
+/// is complete, and when it is not, how many tools are left out and the
+/// call, in the dialect's spelling, that finds them (FIG-1435). It follows
+/// the docs, so a tool appended to the catalogue leaves the docs before it
+/// byte for byte as they were.
+pub(crate) fn catalogue_label(
+    catalogue: &crate::tool_catalog::ToolCatalogueDisclosure,
+    discovery_call: &str,
+) -> String {
+    let total = catalogue.total();
+    if catalogue.is_complete() {
+        format!("Catalogue: COMPLETE. All {total} tools are listed above.")
+    } else {
+        format!(
+            "Catalogue: PARTIAL. {} of {total} tools are listed above; find the other {} with `{discovery_call}`.",
+            catalogue.listed.len(),
+            catalogue.omitted.len(),
+        )
+    }
+}
+
 /// Shared cell transport teaching; native transport replaces this whole section.
 pub(crate) fn cell_response_shape(tags: CellTags) -> String {
     format!(
@@ -317,6 +340,12 @@ impl SessionDialect {
                 helpers: None,
             },
         }
+    }
+
+    /// This dialect presenting tools and values under `presentation`.
+    pub(crate) fn with_presentation(mut self, presentation: crate::RlmPresentationConfig) -> Self {
+        self.services.presentation = presentation;
+        self
     }
 
     /// What a stored kernel definition is carried forward with.
@@ -378,7 +407,7 @@ impl SessionDialect {
         features: crate::protocol::RlmPromptFeatures,
         tool_catalog: &lash_core::ToolCatalog,
         channel: crate::plugin::RlmChannel,
-        discovery: Option<&lash_core::ToolDiscovery>,
+        discovery: Option<&crate::plugin::RlmDiscovery>,
     ) -> Result<String, SessionError> {
         self.execution_section(features, tool_catalog, channel, discovery)
             .map(|section| section.joined())
@@ -389,16 +418,16 @@ impl SessionDialect {
         features: crate::protocol::RlmPromptFeatures,
         tool_catalog: &lash_core::ToolCatalog,
         channel: crate::plugin::RlmChannel,
-        discovery: Option<&lash_core::ToolDiscovery>,
+        discovery: Option<&crate::plugin::RlmDiscovery>,
     ) -> Result<ExecutionSection, SessionError> {
-        let tools = crate::tool_catalog::rlm_prompt_tool_docs(tool_catalog, self, features);
+        let listing = crate::tool_catalog::ToolListing::of(tool_catalog, self, features, discovery);
         Ok(self
             .language()
             .render_execution_section(ExecutionSectionRequest {
                 channel,
-                tools: &tools,
+                tools: &listing.docs,
                 tool_catalog,
-                discovery_operation: discovery.map(|discovery| discovery.operation.as_str()),
+                catalogue: listing.disclosure.as_ref(),
             }))
     }
 
@@ -660,18 +689,21 @@ impl SessionDialect {
     }
 }
 
+type BoundVariables = (Arc<str>, crate::session_globals::SessionGlobals);
+
 pub(crate) struct BoundVariablesPromptRender {
-    render: Box<dyn FnOnce() -> Arc<str> + Send>,
+    render: Box<dyn FnOnce() -> BoundVariables + Send>,
 }
 
 impl BoundVariablesPromptRender {
-    pub(crate) fn new(render: impl FnOnce() -> Arc<str> + Send + 'static) -> Self {
+    pub(crate) fn new(render: impl FnOnce() -> BoundVariables + Send + 'static) -> Self {
         Self {
             render: Box::new(render),
         }
     }
 
-    pub(crate) fn render(self) -> Arc<str> {
+    /// The listing's text and the globals it was rendered over.
+    pub(crate) fn render(self) -> BoundVariables {
         (self.render)()
     }
 }
@@ -833,30 +865,42 @@ impl DialectSession {
         self.state.seed_functions(functions, protected_names).await
     }
 
-    /// The bound-variable prompt: the session's bindings, each a value a
-    /// cell left. A binding that was not carried (`K-SES-003`) is listed by
+    /// The bound-variable prompt and the globals it lists: the session's
+    /// bindings, each a value a cell left, with the cell `provenance` names
+    /// for it. A binding that was not carried (`K-SES-003`) is listed by
     /// name with why it is not bound, so the listing names every name an
     /// earlier cell wrote.
     pub(crate) async fn prepare_bound_variables_prompt(
         &self,
         exclude: &BTreeSet<String>,
         params: lash_render::RenderParams,
+        mut provenance: std::collections::BTreeMap<String, String>,
     ) -> Result<BoundVariablesPromptRender, SessionError> {
-        let globals = self.state.bound_variable_values(exclude);
-        let noun = self.dialect.prompts.prompt_vocabulary().cell_noun;
-        let not_carried = self
+        use crate::session_globals::{SessionGlobal, SessionGlobalKind};
+        let bindings = self.state.bindings();
+        let held_functions = bindings.held_functions();
+        let kinds = self
             .state
-            .bindings()
-            .not_carried()
-            .iter()
-            .filter(|(name, _)| !exclude.contains(name.as_str()))
-            .map(|(name, why)| (name.to_string(), format!("not bound: {why}")))
+            .bound_variable_values(exclude)
+            .into_iter()
+            .chain(
+                bindings
+                    .not_carried()
+                    .iter()
+                    .filter(|(name, _)| !exclude.contains(name.as_str()))
+                    .map(|(name, why)| {
+                        (
+                            name.to_string(),
+                            SessionGlobalKind::NotCarried {
+                                why: why.to_string(),
+                            },
+                        )
+                    }),
+            )
             // A saved function is listed with its signature and the cell
             // whose end froze what it reads.
             .chain(
-                self.state
-                    .bindings()
-                    .held_functions()
+                held_functions
                     .iter()
                     .filter(|(name, _)| !exclude.contains(name.as_str()))
                     .map(|(name, held)| {
@@ -866,30 +910,38 @@ impl DialectSession {
                             .as_ref()
                             .and_then(|written| written.signature.as_deref())
                             .unwrap_or("(...)");
-                        let frozen = match held.cell {
-                            Some(cell) => format!("captures frozen at {noun} {cell}"),
-                            None => "captures frozen before this session".to_owned(),
-                        };
-                        (name.to_string(), format!("function {signature}; {frozen}"))
+                        (
+                            name.to_string(),
+                            SessionGlobalKind::Function {
+                                signature: signature.to_owned(),
+                                frozen_at: held.cell,
+                            },
+                        )
                     }),
-            )
+            );
+        let globals = kinds
+            .map(|(name, kind)| SessionGlobal {
+                cell: provenance.remove(&name),
+                name,
+                kind,
+            })
             .collect::<Vec<_>>();
         let cache = Arc::clone(&self.bound_variable_render_cache);
         let renderer = self.services.code_renderer.clone();
         let prompts = self.dialect.prompts();
-        let max_inline_keys = self.services.presentation.max_inline_keys;
+        let presentation = self.services.presentation;
         Ok(BoundVariablesPromptRender::new(move || {
             let mut cache = cache
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             render_bound_variables(
                 &mut cache,
-                &globals,
-                &not_carried,
+                globals,
                 prompts.as_ref(),
                 renderer.0.as_ref(),
                 &params,
-                max_inline_keys,
+                presentation.max_inline_keys,
+                presentation.max_bound_variable_bytes,
             )
         }))
     }
@@ -971,8 +1023,12 @@ mod tests {
             )
             .await
             .expect("bind a value to render through the session");
-        let prompt = session
-            .prepare_bound_variables_prompt(&BTreeSet::new(), lash_render::RenderParams::default())
+        let (prompt, _) = session
+            .prepare_bound_variables_prompt(
+                &BTreeSet::new(),
+                lash_render::RenderParams::default(),
+                Default::default(),
+            )
             .await
             .expect("render the extension session's bindings")
             .render();
@@ -989,14 +1045,19 @@ mod tests {
             "numbers": [1, 1.5, null],
             "rows": [{"ok": true}, {"ok": null}],
         });
-        let bound = render_bound_variables(
+        let presentation = crate::RlmPresentationConfig::standard();
+        let (bound, _) = render_bound_variables(
             &mut BoundVariableRenderCache::default(),
-            &[("payload".to_string(), value.clone())],
-            &[],
+            vec![crate::session_globals::SessionGlobal {
+                name: "payload".to_string(),
+                cell: None,
+                kind: crate::session_globals::SessionGlobalKind::Data(value.clone()),
+            }],
             &ExtensionFixture,
             &crate::render::BuiltinCodeRenderer,
             &lash_render::RenderParams::preview(),
-            crate::RlmPresentationConfig::standard().max_inline_keys,
+            presentation.max_inline_keys,
+            presentation.max_bound_variable_bytes,
         );
         let read_only = crate::rlm_support::render_read_only_variables(
             vec![crate::rlm_support::ReadOnlyVariableDoc {

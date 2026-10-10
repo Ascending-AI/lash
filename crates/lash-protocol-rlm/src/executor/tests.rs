@@ -182,6 +182,10 @@ await control.finish(winner);"#,
     let bindings: std::collections::BTreeMap<_, _> = state
         .bound_variable_values(&std::collections::BTreeSet::new())
         .into_iter()
+        .filter_map(|(name, kind)| match kind {
+            crate::session_globals::SessionGlobalKind::Data(value) => Some((name, value)),
+            _ => None,
+        })
         .collect();
     let refusal = &bindings["refusal"];
     assert_eq!(refusal["kind"], "control_refused", "{refusal}");
@@ -727,6 +731,54 @@ async fn a_cell_reports_the_bindings_its_committed_transition_changed() {
         "the failed cell's assignment was not committed"
     );
     assert_eq!(*after.bindings, lash_core::BindingChanges::default());
+}
+
+/// FIG-1438: a later cell declares a session global again, with `let` or
+/// `const` either way round, and that rebinds it: the cell runs, its
+/// record names both as changed, and the next cell reads the new values.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_later_cell_redeclares_a_session_global() {
+    let host = open_host().await;
+    let tools = Arc::new(CellTools::default());
+    let services = typescript_services(None);
+    let mut state = typescript_state();
+
+    let first = run_cell(
+        &mut state,
+        cell_context(&host, SESSION, TURN, "exec-code:0", tools.clone()),
+        &services,
+        "const total = 1;\nlet rows = [1];",
+    )
+    .await;
+    assert!(first.error().is_none(), "{:?}", first.error());
+
+    let again = run_cell(
+        &mut state,
+        cell_context(&host, SESSION, TURN, "exec-code:1", tools.clone()),
+        &services,
+        "let total = 10;\nconst rows = [\"a\"];",
+    )
+    .await;
+    assert!(again.error().is_none(), "{:?}", again.error());
+    assert_eq!(
+        *again.bindings,
+        lash_core::BindingChanges {
+            changed: vec!["rows".to_owned(), "total".to_owned()],
+            ..Default::default()
+        }
+    );
+
+    let read = run_cell(
+        &mut state,
+        cell_context(&host, SESSION, TURN, "exec-code:2", tools),
+        &services,
+        "await control.finish({ total, rows });",
+    )
+    .await;
+    assert_eq!(
+        finish_of(&read),
+        serde_json::json!({ "total": 10, "rows": ["a"] })
+    );
 }
 
 /// `K-TASK-018`, the unjoined-task rule: a cell that ends with work it

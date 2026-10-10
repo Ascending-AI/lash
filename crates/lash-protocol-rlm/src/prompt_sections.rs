@@ -28,15 +28,27 @@ pub mod section_keys {
 }
 
 /// The facts the RLM protocol derives from its committed execution state for
-/// one call: what its programs have bound.
+/// one call: what its programs have bound. A host's sections and wrappers
+/// read them through
+/// [`PromptInput::protocol_facts`](lash_core::plugin::prompt::PromptInput::protocol_facts).
 #[derive(Clone, Debug, Default)]
-pub(crate) struct RlmPromptFacts {
+pub struct RlmPromptFacts {
     /// The built-in history binding and, when structured, its item schema.
     pub(crate) history_binding: Arc<str>,
     /// The bound-variables view under the run's recorded render.
     pub(crate) bound_variables: Arc<str>,
     /// The declaration of the session's read-only variables.
     pub(crate) read_only_variables: Option<String>,
+    /// The globals the bound-variables view lists.
+    pub(crate) globals: Arc<crate::session_globals::SessionGlobals>,
+}
+
+impl RlmPromptFacts {
+    /// The session's globals at the call's cut, with how many the
+    /// bound-variables section lists (FIG-1438).
+    pub fn globals(&self) -> &crate::session_globals::SessionGlobals {
+        &self.globals
+    }
 }
 
 /// The built-in binding and schema, derived before rendering any section.
@@ -72,14 +84,14 @@ pub(crate) struct RlmSectionBehaviour {
     pub(crate) dialect: Arc<SessionDialect>,
     pub(crate) channel: RlmChannel,
     pub(crate) prompt_features: crate::protocol::RlmPromptFeatures,
-    pub(crate) discovery: Option<lash_core::ToolDiscovery>,
+    pub(crate) discovery: Option<crate::plugin::RlmDiscovery>,
     /// The soft context budget the session's plugin was built with.
     pub(crate) budget_tokens: Option<usize>,
 }
 
 /// The execution section a session on `behaviour.channel` renders over
-/// `tool_catalog`: the tools the model sees inline when the session has a
-/// discovery operation, every tool otherwise.
+/// `tool_catalog`: every tool, or, when the session has a discovery
+/// operation, the tools its recorded budget lists.
 #[expect(
     clippy::expect_used,
     reason = "catalog registration validates every tool binding against the session's dialect; the execution section only errs on an unvalidated catalog"
@@ -88,13 +100,6 @@ pub(crate) fn execution_section(
     behaviour: &RlmSectionBehaviour,
     tool_catalog: &lash_core::ToolCatalog,
 ) -> ExecutionSection {
-    let visible_catalog;
-    let tool_catalog = if behaviour.discovery.is_some() {
-        visible_catalog = tool_catalog.inline_tools();
-        &visible_catalog
-    } else {
-        tool_catalog
-    };
     match behaviour.channel {
         RlmChannel::Cell => behaviour
             .dialect

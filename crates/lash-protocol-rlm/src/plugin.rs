@@ -14,7 +14,7 @@ pub(crate) mod runtime_state;
 pub(crate) mod tool_args;
 
 pub use config::{
-    RlmPresentationConfig, RlmProtocolPluginConfig, RlmProtocolPluginConfigBuilder,
+    RlmDiscovery, RlmPresentationConfig, RlmProtocolPluginConfig, RlmProtocolPluginConfigBuilder,
     RlmRecordedBehaviour, UnsetBound, UnsetChannel,
 };
 pub use config_owner::{

@@ -81,7 +81,7 @@ pub use lash_protocol_rlm::is_rlm_protocol_output;
 pub use lash_protocol_rlm::rlm_seed_initial_nodes;
 pub use lash_protocol_rlm::{
     BuiltinCodeRenderer, CodeRenderer, CodeRendererSlot, ExecutionBounds, InstructionBound,
-    MemoryBound, RLM_PROTOCOL_PLUGIN_ID, RlmChannel, RlmPresentationConfig,
+    MemoryBound, RLM_PROTOCOL_PLUGIN_ID, RlmChannel, RlmDiscovery, RlmPresentationConfig,
     RlmProtocolPluginConfig, RlmProtocolPluginConfigBuilder, RlmProtocolPluginFactory,
     RlmSessionConfigDecodeError, UnsetBound, rlm_protocol_event,
 };
@@ -120,6 +120,18 @@ pub use lash_protocol_rlm::{
 /// Lash's two control tools, as a session advertises them.
 pub use lash_protocol_rlm::{
     FINISH_TOOL_NAME, continue_as_tool_definition, finish_tool_definition,
+};
+/// What a code-mode prompt discloses (FIG-1435, FIG-1438): which tools a
+/// discovery session lists under its recorded budget and which it leaves to
+/// discovery, how a discovered tool is shown and searched, and the session
+/// globals a call's prompt lists, with their cells and the continuation of
+/// the ones it leaves out. Hosts read the globals from a call's
+/// [`RlmPromptFacts`] through
+/// [`PromptInput::protocol_facts`](crate::plugins::PromptInput::protocol_facts).
+pub use lash_protocol_rlm::{
+    GlobalsPage, GlobalsPageView, RlmPromptFacts, SessionGlobal, SessionGlobalKind, SessionGlobals,
+    StaleGlobalsPage, ToolCatalogueDisclosure, discovered_tool_doc, discovery_text,
+    tool_catalogue_disclosure,
 };
 /// The RLM protocol's config owner and its command (FIG-4379).
 pub use lash_protocol_rlm::{

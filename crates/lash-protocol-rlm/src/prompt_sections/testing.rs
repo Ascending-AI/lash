@@ -19,7 +19,7 @@ pub(crate) struct RlmSections {
     pub(crate) dialect: Arc<SessionDialect>,
     pub(crate) channel: RlmChannel,
     pub(crate) prompt_features: crate::protocol::RlmPromptFeatures,
-    pub(crate) discovery: Option<lash_core::ToolDiscovery>,
+    pub(crate) discovery: Option<crate::plugin::RlmDiscovery>,
     pub(crate) budget_tokens: Option<usize>,
 }
 

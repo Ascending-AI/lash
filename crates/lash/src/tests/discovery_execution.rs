@@ -113,8 +113,9 @@ async fn discovery_hidden_tool_executes_through_rlm_and_standard_batch_but_not_n
                         ))
                         .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
                         .build()
-                        .with_discovery(lash_core::ToolDiscovery {
+                        .with_discovery(lash_protocol_rlm::RlmDiscovery {
                             operation: "tools.search".into(),
+                            catalogue_bytes: usize::MAX,
                         }),
                     lash_protocol_rlm::CellDialect::typescript(),
                 ),
