@@ -320,9 +320,10 @@ impl Lowerer<'_> {
         })
     }
 
-    /// Calls a function value: `apply f(this, args)`. A value that may be
-    /// a built-in's token is first made callable by `ts.callable`; a
-    /// function declaration nothing assigns to always holds its closure.
+    /// Calls a function value: `apply f(this, args)`. A value that may not
+    /// be a function's token is made callable by `ts.callable`; a function
+    /// declaration nothing assigns to always holds its token, whose closure
+    /// is called directly.
     fn apply(
         &mut self,
         function: Operand,
@@ -333,7 +334,10 @@ impl Lowerer<'_> {
         // A call gives what the function's declared return type says.
         let returned = function.ty.returned();
         let function = match function.atom {
-            Atom::Variable(name) if declared => name,
+            Atom::Variable(_) if declared => {
+                let closure = self.let_expr(Self::element(&function, 4), Ty::Unknown);
+                super::statements::variable_of(&closure)
+            }
             Atom::Variable(_) => {
                 let callable = self.invoke("ts.callable", &[function], Ty::Unknown)?;
                 super::statements::variable_of(&callable)

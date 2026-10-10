@@ -10,8 +10,8 @@ use super::{lower_against, lower_in_session, main_text};
 
 /// The statements of `source`'s lowered `main` that compute something: a
 /// direct kernel call or a helper call, without the binding's name. A
-/// function's calling convention (its closure, its own-properties test and
-/// its padded arguments) is not one.
+/// function's calling convention (its closure, its token and its padded
+/// arguments) is not one.
 fn operations(source: &str) -> Vec<String> {
     main_text(source)
         .lines()
@@ -20,7 +20,7 @@ fn operations(source: &str) -> Vec<String> {
         .filter(|value| value.contains('('))
         .filter(|value| {
             !value.starts_with("fn(")
-                && !value.starts_with("list.len(args")
+                && !value.starts_with("(\"ts.function\"")
                 && !value.starts_with("invoke ts.pad(")
         })
         .collect()

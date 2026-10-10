@@ -389,7 +389,26 @@ pub(crate) fn lower(
     )?;
     lowerer.lower_statements(&program.statements)?;
     lowerer.pop_scope();
-    let main = std::mem::take(&mut lowerer.buf);
+    let mut main = std::mem::take(&mut lowerer.buf);
+    // A saved function the cell uses is the token it was saved in, which
+    // the session starts as a reference to its declaration.
+    let remade: Vec<(Stmt, Note)> = lowerer
+        .saved_used
+        .iter()
+        .filter_map(|name| {
+            let token = environment.functions.get(name)?.value()?;
+            Some((
+                Stmt::Assign {
+                    place: Place::Variable(name.clone()),
+                    value: Rhs::Expr(token),
+                },
+                Note::default(),
+            ))
+        })
+        .collect();
+    let (stmts, notes): (Vec<Stmt>, Vec<Note>) = remade.into_iter().unzip();
+    main.stmts.splice(0..0, stmts);
+    main.notes.splice(0..0, notes);
     let mut document = Document::new(NumberPolicy::Float, main.stmts);
     document.private_bindings = lowerer.private;
     document.functions = lowerer.declared;
@@ -579,7 +598,7 @@ impl Lowerer<'_> {
     }
 
     /// Whether `name` is a function declaration that nothing assigns to,
-    /// which therefore always holds the closure it declares.
+    /// which therefore always holds the token of the function it declares.
     pub(crate) fn holds_declared_function(&self, name: &str) -> bool {
         self.scopes
             .iter()

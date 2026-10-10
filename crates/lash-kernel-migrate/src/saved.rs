@@ -43,5 +43,6 @@ pub fn saved_function(
         document: rewritten.document,
         captures: function.captures.clone(),
         written: function.written.clone(),
+        token: function.token.clone(),
     })
 }

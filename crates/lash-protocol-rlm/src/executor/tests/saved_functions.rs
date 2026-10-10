@@ -51,6 +51,46 @@ async fn a_function_a_cell_defines_is_called_two_cells_later() {
     );
 }
 
+/// A saved function is the value its cell left, name and length included:
+/// a later cell reads them, a deletion of one lasts into the next cell, a
+/// binding that takes the function keeps its name, and a function made
+/// inside another and returned still calls the one it closes over.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_saved_function_keeps_its_name_and_length_across_cells() {
+    let host = open_host().await;
+    let tools = Arc::new(CellTools::default());
+    let mut state = typescript_state();
+    cell(
+        &mut state,
+        &host,
+        "exec-code:0",
+        tools.clone(),
+        "function advance(a, b = 1) { return a + b; }\nconst make = () => { function inner(x) { return x + 1; } return (n) => inner(n); };\nconst bump = make();",
+    )
+    .await;
+    cell(
+        &mut state,
+        &host,
+        "exec-code:1",
+        tools.clone(),
+        "const alias = advance;\ndelete (advance as any).length;",
+    )
+    .await;
+    let called = cell(
+        &mut state,
+        &host,
+        "exec-code:2",
+        tools,
+        "await control.finish({ name: advance.name, length: advance.length, alias: alias.name, bump: bump.length, bumped: bump(1), called: alias(2) });",
+    )
+    .await;
+    assert_eq!(
+        finish_of(&called),
+        serde_json::json!({ "name": "advance", "length": 0, "alias": "advance", "bump": 1, "bumped": 2, "called": 3 }),
+        "the functions keep the name, length and deletion their cells left"
+    );
+}
+
 /// One cell of `state`, which must complete.
 async fn cell(
     state: &mut super::RlmExecutionState,

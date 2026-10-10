@@ -1213,9 +1213,7 @@ body {
   do invoke ts.require_object_coercible(this)
   let index = 0.0
   let exhausted = false
-  let own = {name: "next", length: 0.0}
   let next = fn(context, passed) {
-    try { let counted = list.len(passed) } catch asked { return own }
     let length = invoke ts.array.length(this)
     if exhausted { return {value: absent, done: true} }
     if num.le(length, index) {
@@ -1227,7 +1225,7 @@ body {
     let value = num.to_float(position)
     return {value: value, done: false}
   }
-  return {brand: "ts.iterator", next: next}
+  return {brand: "ts.iterator", next: ("ts.function", "", "next", 0.0, next, {})}
 }
 
 function ts.array.values(this: Any, args: List(Any)) -> Any
@@ -1238,9 +1236,7 @@ body {
   do invoke ts.require_object_coercible(this)
   let index = 0.0
   let exhausted = false
-  let own = {name: "next", length: 0.0}
   let next = fn(context, passed) {
-    try { let counted = list.len(passed) } catch asked { return own }
     let length = invoke ts.array.length(this)
     if exhausted { return {value: absent, done: true} }
     if num.le(length, index) {
@@ -1252,7 +1248,7 @@ body {
     let value = invoke ts.get(this, position)
     return {value: value, done: false}
   }
-  return {brand: "ts.iterator", next: next}
+  return {brand: "ts.iterator", next: ("ts.function", "", "next", 0.0, next, {})}
 }
 
 function ts.array.entries(this: Any, args: List(Any)) -> Any
@@ -1263,9 +1259,7 @@ body {
   do invoke ts.require_object_coercible(this)
   let index = 0.0
   let exhausted = false
-  let own = {name: "next", length: 0.0}
   let next = fn(context, passed) {
-    try { let counted = list.len(passed) } catch asked { return own }
     let length = invoke ts.array.length(this)
     if exhausted { return {value: absent, done: true} }
     if num.le(length, index) {
@@ -1278,7 +1272,7 @@ body {
     set value = [num.to_float(position), value]
     return {value: value, done: false}
   }
-  return {brand: "ts.iterator", next: next}
+  return {brand: "ts.iterator", next: ("ts.function", "", "next", 0.0, next, {})}
 }
 
 # Array iteration retains its receiver and reads length anew on each step.
@@ -1324,6 +1318,7 @@ body {
   if iterable {
     let iterator = invoke ts.array.iterator(source)
     let next = iterator.next
+    set next = invoke ts.callable(next)
     let none = []
     while true {
       let step = apply next(iterator, none)

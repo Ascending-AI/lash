@@ -82,6 +82,15 @@ fn declares_saved_functions(dialect: &str) -> bool {
     matches!(dialect, "typescript" | "python")
 }
 
+/// The tag of the token `dialect` holds a function value in
+/// (`lash_kernel_dialect::Left::function_tag`).
+fn function_tag(dialect: &str) -> Option<&'static str> {
+    match dialect {
+        "typescript" => Some("ts.function"),
+        _ => None,
+    }
+}
+
 /// A saved function as a session holds it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -153,8 +162,9 @@ impl SessionBindings {
 
     /// Takes what a cell left. A binding that holds a function whose
     /// captures are data or other saved functions becomes a saved
-    /// function; a binding still bound to the reference it started as
-    /// keeps the function it names. Where the session's dialect declares
+    /// function; a binding that holds a reference to a saved function, bare
+    /// or in its dialect's token (`function_tag`), keeps the function it
+    /// names, with that token. Where the session's dialect declares
     /// no saved function (`declares_saved`), none is saved. Answers what
     /// that did to the bindings, every name: a saved function is a binding
     /// like any other.
@@ -162,6 +172,7 @@ impl SessionBindings {
         &mut self,
         cell: CellLeft<'_>,
         declares_saved: bool,
+        function_tag: Option<&str>,
     ) -> lash_core::BindingChanges {
         self.document = Some(cell.identity);
         self.cells += 1;
@@ -177,6 +188,7 @@ impl SessionBindings {
                     not_carried: &cell.not_carried,
                     controls: &cell.controls,
                     annotations: cell.annotations,
+                    function_tag,
                 },
                 &held,
             )
@@ -198,19 +210,22 @@ impl SessionBindings {
         let mut left = cell.bindings;
         let mut functions = BTreeMap::new();
         left.variables.retain(|name, value| {
-            let Value::Function(target) = &*value else {
+            let Some(target) = lash_kernel_dialect::function_reference(value, function_tag) else {
                 return true;
             };
             // A reference to a saved function is that function, under
-            // whichever name holds it now.
+            // whichever name holds it now, in the token it is held in.
             let Some(held) = self.functions.get(target) else {
                 return true;
             };
-            let function = if name == target {
+            let mut function = if name == target {
                 held.function.clone()
             } else {
                 held.function.renamed(name)
             };
+            if let Some(token) = lash_kernel_dialect::token_of(value, &left.objects, name) {
+                function.token = Some(token);
+            }
             functions.insert(
                 name.clone(),
                 HeldFunction {
@@ -709,8 +724,11 @@ impl RlmExecutionState {
     /// Takes what a finished cell left (see [`SessionBindings::settle`]).
     pub(super) fn settle_cell(&mut self, cell: CellLeft<'_>) -> lash_core::BindingChanges {
         self.capture_dirty = true;
-        self.bindings
-            .settle(cell, declares_saved_functions(&self.dialect))
+        self.bindings.settle(
+            cell,
+            declares_saved_functions(&self.dialect),
+            function_tag(&self.dialect),
+        )
     }
 
     /// The functions the session holds, in the form another session is

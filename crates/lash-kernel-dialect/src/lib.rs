@@ -26,8 +26,8 @@ pub use diagnostic::{Diagnostic, DiagnosticKind, Span};
 pub use dialect::{EffectControl, Environment, FrontEnd, Lowered, Package, Printer};
 pub use library::{Library, LibraryError, NamedLibrary};
 pub use saved::{
-    CaptureRefusal, Left, NotSaved, SavedFunction, Unusable, WRITTEN, Written, closure_of, install,
-    save,
+    CaptureRefusal, Left, NotSaved, SavedFunction, Unusable, WRITTEN, Written, closure_of,
+    function_reference, install, save, token_of,
 };
 pub use source::{SourceError, define_functions};
 

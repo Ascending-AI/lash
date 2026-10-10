@@ -8,7 +8,6 @@ use num.add
 use num.lt
 use num.sub
 use num.to_float
-use record.contains
 use same
 use ts.function.apply
 use ts.function.bind
@@ -16,7 +15,6 @@ use ts.function.call
 use ts.function.toString
 use ts.get
 use ts.is_nullish
-use ts.own
 use ts.pad
 use ts.rest
 use ts.spread
@@ -72,28 +70,21 @@ body {
   let args = invoke ts.pad(args, 1)
   let receiver = args[0]
   let prefix = invoke ts.rest(args, 1)
-  # Named for the target, with the target's own length less the
-  # arguments bound (ECMA-262 Function.prototype.bind).
-  let length = 0.0
-  if same(kind(this), "closure") {
-    let target_own = invoke ts.own(this)
-    if record.contains(target_own, "length") { set length = target_own.length }
-  } else {
-    let token_length = invoke ts.get(this, "length")
-    set length = token_length
-  }
+  # Named for the target, with the target's length less the arguments
+  # bound (ECMA-262 Function.prototype.bind).
+  let length = invoke ts.get(this, "length")
+  if same(kind(length), "float") {} else { set length = 0.0 }
   set length = num.sub(length, num.to_float(list.len(prefix)))
   if num.lt(length, 0) { set length = 0.0 }
   let name = invoke ts.get(this, "name")
   if same(kind(name), "text") {} else { set name = "" }
-  let own = {name: text.concat("bound ", name), length: length}
-  return fn(ignored, tail) {
-    try { let counted = list.len(tail) } catch asked { return own }
+  let bound = fn(ignored, tail) {
     let builtin_arg_0 = [prefix, tail]
 let passed = invoke ts.spread(builtin_arg_0)
     let output = apply original(receiver, passed)
     return output
   }
+  return ("ts.function", "", text.concat("bound ", name), length, bound, {})
 }
 
 function ts.function.toString(this: Any, args: List(Any)) -> Any
@@ -103,7 +94,9 @@ charge sum(8, deep(result))
 body {
   let target = invoke ts.callable(this)
   if same(kind(target), "closure") {} else { throw error.new("type_error", "Function receiver required", null) }
-  if same(kind(this), "tuple") { return text.concat("function ", text.concat(this[2], "() { [native code] }")) }
+  if same(kind(this), "tuple") {
+    if same(this[1], "") {} else { return text.concat("function ", text.concat(this[2], "() { [native code] }")) }
+  }
   throw error.new("TS_FUNCTION_STRING_COERCION", "Function source is unavailable", null)
 }
 

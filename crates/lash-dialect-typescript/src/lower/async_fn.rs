@@ -42,15 +42,15 @@ pub(super) enum Wait {
 }
 
 impl Lowerer<'_> {
-    /// An `async` function or arrow. Gives the operand of its value, a
-    /// closure by the dialect's calling convention: called, it starts the
-    /// body as a task and returns that task's promise.
+    /// An `async` function or arrow. Gives the operand of its value, the
+    /// token of a closure by the dialect's calling convention: called, it
+    /// starts the body as a task and returns that task's promise.
     pub(super) fn lower_async_function(
         &mut self,
         function: &ast::Function,
         _span: Option<SourceSpan>,
     ) -> Lowering<Operand> {
-        let body = self.closure(function, None)?;
+        let body = self.closure(function)?;
         // The function the source wrote is the one that starts the task,
         // not the closure of its body.
         if let Some(note) = self.buf.notes.last_mut() {
@@ -60,18 +60,17 @@ impl Lowerer<'_> {
         let this = self.fresh("this");
         let args = self.fresh("args");
         let params = vec![this.clone(), args.clone()];
-        let own = self.own_properties(function);
-        let mut block = self.block(|lowerer| {
+        let block = self.block(|lowerer| {
             let promise =
-                lowerer.start_promise(&body, Atom::Variable(this), Atom::Variable(args.clone()))?;
+                lowerer.start_promise(&body, Atom::Variable(this), Atom::Variable(args))?;
             lowerer.emit(Stmt::Return {
                 value: promise.expr(),
             });
             Ok(())
         })?;
-        self.answer_own(&mut block, &args, &own)?;
         self.written = written;
-        Ok(self.emit_closure(params, block))
+        let closure = self.emit_closure(params, block);
+        Ok(self.function_token(function, closure))
     }
 
     /// `await value`. The statements of everything the source evaluated

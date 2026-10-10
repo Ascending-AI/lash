@@ -54,9 +54,13 @@ body {
   if same(k, "error") { return ("error", ref(value.data), value.kind, value.message) }
   if same(k, "tuple") {
     if same(value, ()) {} else {
-      # A built-in function's token holds the closure that calls it, which
-      # is keyed as the object it is.
-      if same(value[0], "ts.function") { return ("ts.function", value[1], value[2], value[3], ref(value[4])) }
+      # A function's token holds the closure that calls it, which is keyed
+      # as the object it is, and so is the deleted record of one the
+      # program made.
+      if same(value[0], "ts.function") {
+        if same(value[1], "") { return ("ts.function", "", value[2], value[3], ref(value[4]), ref(value[5])) }
+        return ("ts.function", value[1], value[2], value[3], ref(value[4]))
+      }
     }
   }
   if same(k, "float") { if eq(value, 0) { return 0.0 } }
@@ -72,7 +76,10 @@ body {
   if same(kind(key), "tuple") {
     if same(key[0], "error") { return error.new(key[2], key[3], deref(key[1])) }
     if same(key[0], "undefined") { return absent }
-    if same(key[0], "ts.function") { return ("ts.function", key[1], key[2], key[3], deref(key[4])) }
+    if same(key[0], "ts.function") {
+      if same(key[1], "") { return ("ts.function", "", key[2], key[3], deref(key[4]), deref(key[5])) }
+      return ("ts.function", key[1], key[2], key[3], deref(key[4]))
+    }
     # A built-in object's token is its own key.
     return key
   }

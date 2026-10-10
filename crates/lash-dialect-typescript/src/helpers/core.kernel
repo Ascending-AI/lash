@@ -65,7 +65,6 @@ use ts.exotic.set
 use ts.exotic.iterate
 use ts.receiver
 use ts.callable
-use ts.own
 use ts.identity
 use ts.is_primitive
 use ts.is_nullish
@@ -141,26 +140,19 @@ body {
   return value
 }
 
-# A function's own properties, `name` and `length`: the record a closure
-# the dialect made gives when called with no argument list, which no
-# JavaScript call does (`lower/functions.rs`). Deleting one removes it.
-function ts.own(target: Any) -> Any
-kernel 1
-charge sum(4, deep(result))
-body {
-  let own = apply target(absent, absent)
-  return own
-}
-
 # What `===` compares: a built-in function's token by its path, since each
-# read of a built-in makes a new token, and any other value as itself.
+# read of a built-in makes a new token; a function the program made, whose
+# path is empty, by the closure it carries; and any other value as itself.
 function ts.identity(value: Any) -> Any
 kernel 1
 charge 4
 body {
   if same(kind(value), "tuple") {} else { return value }
   if same(value, ()) { return value }
-  if same(value[0], "ts.function") { return ("ts.function", value[1]) }
+  if same(value[0], "ts.function") {
+    if same(value[1], "") { return value[4] }
+    return ("ts.function", value[1])
+  }
   return value
 }
 
@@ -424,7 +416,9 @@ body {
     }
     if same(k, "closure") {
       if same(kind(value), "tuple") {
-        return text.concat("function ", text.concat(value[2], "() { [native code] }"))
+        if same(value[1], "") {} else {
+          return text.concat("function ", text.concat(value[2], "() { [native code] }"))
+        }
       }
       throw error.new("type_error", "A function has no string or number form", null)
     }
@@ -991,6 +985,7 @@ body {
   if same(k, "brand:ts.iterator") {
       let iterator_items = []
       let next = target.next
+      set next = invoke ts.callable(next)
       while true {
         let array_arg_1 = []
         let step = apply next(target, array_arg_1)
@@ -1031,17 +1026,20 @@ body {
     let name = invoke ts.to_property_key(key)
     if same(name, "caller") { throw error.new("type_error", "Restricted function property", null) }
     if same(name, "arguments") { throw error.new("type_error", "Restricted function property", null) }
-    if same(kind(target), "closure") {
-      # Without its own, a function reads Function.prototype's.
-      if same(name, "name") {
-        let own = invoke ts.own(target)
-        if record.contains(own, name) { return own.name }
-        return ""
-      }
-      if same(name, "length") {
-        let own = invoke ts.own(target)
-        if record.contains(own, name) { return own.length }
-        return 0.0
+    if same(kind(target), "tuple") {
+      if same(target[1], "") {
+        # A function the program made has its own `name` and `length`;
+        # once one is deleted it reads Function.prototype's.
+        let deleted = target[5]
+        if same(name, "name") {
+          if record.contains(deleted, name) { return "" }
+          return target[2]
+        }
+        if same(name, "length") {
+          if record.contains(deleted, name) { return 0.0 }
+          return target[3]
+        }
+        return absent
       }
     }
   }
@@ -1136,7 +1134,9 @@ body {
     let name = invoke ts.to_property_key(key)
     if same(name, "caller") { throw error.new("type_error", "Restricted function property", null) }
     if same(name, "arguments") { throw error.new("type_error", "Restricted function property", null) }
-    if same(kind(target), "closure") {
+    let builtin = false
+    if same(kind(target), "tuple") { set builtin = bool.not(same(target[1], "")) }
+    if builtin {} else {
       # Own or inherited from Function.prototype, both are read-only.
       for described in ["name", "length"] {
         if same(name, described) { throw error.new("type_error", text.concat("Cannot assign to read only property '", text.concat(name, "' of function")), null) }
@@ -1182,7 +1182,9 @@ body {
   }
   if same(kind(target), "tuple") {
     if same(k, "tuple") {} else {
-      throw error.new("TS_REFLECTION_UNSUPPORTED", "Assigning a property of a built-in is outside the TypeScript dialect", null)
+      if same(target[1], "") {} else {
+        throw error.new("TS_REFLECTION_UNSUPPORTED", "Assigning a property of a built-in is outside the TypeScript dialect", null)
+      }
     }
   }
   let nullish = invoke ts.is_nullish(target)
@@ -1211,13 +1213,17 @@ body {
     }
     return true
   }
-  if same(kind(target), "closure") {
-    let name = invoke ts.to_property_key(key)
-    for described in ["name", "length"] {
-      if same(name, described) {
-        let own = invoke ts.own(target)
-        remove own[name]
-        return true
+  if same(k, "closure") {
+    if same(kind(target), "tuple") {
+      if same(target[1], "") {
+        let name = invoke ts.to_property_key(key)
+        for described in ["name", "length"] {
+          if same(name, described) {
+            let deleted = target[5]
+            set deleted[name] = true
+            return true
+          }
+        }
       }
     }
   }
@@ -1243,7 +1249,9 @@ body {
   }
   if same(kind(target), "tuple") {
     if same(k, "tuple") {} else {
-      throw error.new("TS_REFLECTION_UNSUPPORTED", "Deleting a property of a built-in is outside the TypeScript dialect", null)
+      if same(target[1], "") {} else {
+        throw error.new("TS_REFLECTION_UNSUPPORTED", "Deleting a property of a built-in is outside the TypeScript dialect", null)
+      }
     }
   }
   let nullish = invoke ts.is_nullish(target)
@@ -1265,17 +1273,14 @@ body {
   let name = invoke ts.to_property_key(key)
   let k = invoke ts.receiver(target)
   let token = same(k, "builtin")
-  if same(k, "closure") { set token = same(kind(target), "tuple") }
+  if same(k, "closure") { if same(kind(target), "tuple") { set token = bool.not(same(target[1], "")) } }
   if token {
     throw error.new("TS_REFLECTION_UNSUPPORTED", "Testing a built-in's own properties is outside the TypeScript dialect", null)
   }
   if same(k, "closure") {
-    if same(kind(target), "closure") {
+    if same(kind(target), "tuple") {
       for described in ["name", "length"] {
-        if same(name, described) {
-          let own = invoke ts.own(target)
-          return record.contains(own, name)
-        }
+        if same(name, described) { return bool.not(record.contains(target[5], name)) }
       }
     }
     # A function's own `prototype` carries attributes the dialect does not
@@ -1487,7 +1492,7 @@ body {
     if same(k, "tuple") {
       let token = invoke ts.receiver(item)
       for callable in ["closure", "builtin"] {
-        if same(token, callable) { throw error.new("not_data", "A built-in function or object is not data", null) }
+        if same(token, callable) { throw error.new("not_data", "A function or a built-in object is not data", null) }
       }
     }
     if same(k, "list") {

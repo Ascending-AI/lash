@@ -84,10 +84,11 @@ fn called(table: &Table, path: &str) -> Option<String> {
 }
 
 /// `ts.read(target, key)`: a member read of a name no built-in has. A
-/// function token answers its `name` and `length`, and has no `prototype`;
-/// no token has an element; anything else of a token is not a member the
-/// dialect has.
-const READ: &str = "use same\nuse kind\nuse num.le\nuse text.concat\nuse error.new\nuse ts.receiver\nuse ts.get\nuse ts.list_index\nuse ts.to_property_key\n\
+/// built-in function's token answers its `name` and `length`, and has no
+/// `prototype`; no built-in's token has an element; anything else of one is
+/// not a member the dialect has. A function the program made, whose token's
+/// path is empty, is read as `ts.get` reads it.
+const READ: &str = "use same\nuse kind\nuse bool.not\nuse num.le\nuse text.concat\nuse error.new\nuse ts.receiver\nuse ts.get\nuse ts.list_index\nuse ts.to_property_key\n\
 function ts.read(target: Any, key: Any) -> Any
 kernel 1
 errors \"type_error\", \"TS_METHOD_UNSUPPORTED\", \"TS_REFLECTION_UNSUPPORTED\"
@@ -95,7 +96,7 @@ charge sum(12, deep(key))
 body {
   let receiver = invoke ts.receiver(target)
   let token = same(receiver, \"builtin\")
-  if same(receiver, \"closure\") { set token = same(kind(target), \"tuple\") }
+  if same(receiver, \"closure\") { if same(kind(target), \"tuple\") { set token = bool.not(same(target[1], \"\")) } }
   if token {
     let name = invoke ts.to_property_key(key)
     if same(receiver, \"closure\") {
@@ -125,6 +126,7 @@ pub(crate) fn member_reader(table: &Table, name: &str) -> String {
     let mut uses: Vec<String> = [
         "same",
         "kind",
+        "bool.not",
         "record.contains",
         "ts.receiver",
         "ts.get",
@@ -223,7 +225,7 @@ pub(crate) fn member_reader(table: &Table, name: &str) -> String {
          \x20   }}\n\
          \x20 }}\n\
          \x20 let token = same(receiver, \"builtin\")\n\
-         \x20 if same(receiver, \"closure\") {{ set token = same(kind(this), \"tuple\") }}\n\
+         \x20 if same(receiver, \"closure\") {{ if same(kind(this), \"tuple\") {{ set token = bool.not(same(this[1], \"\")) }} }}\n\
          \x20 if token {{\n\
          \x20   let path = this[1]\n{tokens}\
          \x20   let outcome = invoke ts.read(this, \"{name}\")\n\

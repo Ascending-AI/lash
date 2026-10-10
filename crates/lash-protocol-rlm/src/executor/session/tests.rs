@@ -125,6 +125,7 @@ fn saved(name: &str, kernel: u32) -> serde_json::Value {
         document,
         captures: Default::default(),
         written: None,
+        token: None,
     })
     .expect("the saved function encodes")
 }

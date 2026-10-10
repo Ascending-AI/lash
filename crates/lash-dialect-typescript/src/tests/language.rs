@@ -15,13 +15,21 @@ fn function_declarations_are_hoisted_and_mutually_reachable() {
          function odd(n) { return n !== 0 && even(n - 1); }",
     );
     assert!(
-        text.starts_with(
-            "let odd = absent\nlet own1 = {name: \"even\", length: 1.0}\nlet even = fn("
-        ),
+        text.starts_with("let odd = absent\nlet t10 = fn("),
         "{text}"
     );
-    assert!(text.contains("\nset odd = fn("), "{text}");
-    assert!(text.ends_with("do apply even(absent, t19)"), "{text}");
+    assert!(
+        text.contains("\nlet even = (\"ts.function\", \"\", \"even\", 1.0, t10, {})\n"),
+        "{text}"
+    );
+    assert!(
+        text.contains("\nset odd = (\"ts.function\", \"\", \"odd\", 1.0, t21, {})\n"),
+        "{text}"
+    );
+    assert!(
+        text.ends_with("let t24 = even[4.0]\ndo apply t24(absent, t23)"),
+        "{text}"
+    );
 }
 
 /// A function that ends without `return` gives `undefined`; the kernel's
@@ -30,7 +38,7 @@ fn function_declarations_are_hoisted_and_mutually_reachable() {
 fn a_function_without_a_return_gives_undefined() {
     assert_eq!(
         main_text("function f() {}"),
-        "let own1 = {name: \"f\", length: 0.0}\nlet f = fn(this1, args1) {\n  try {\n    let arity1 = list.len(args1)\n  } catch asked1 {\n    return own1\n  }\n  return absent\n}"
+        "let t1 = fn(this1, args1) {\n  return absent\n}\nlet f = (\"ts.function\", \"\", \"f\", 0.0, t1, {})"
     );
 }
 
@@ -74,7 +82,7 @@ fn a_binding_read_before_its_declaration_is_caught() {
     );
     assert!(text.contains("let late_1 = ()"), "{text}");
     assert!(
-        text.contains("let t2 = invoke ts.tdz(late_1, \"late\")"),
+        text.contains("let t3 = invoke ts.tdz(late_1, \"late\")"),
         "{text}"
     );
     let refused = lower("x = 1; let x;").unwrap_err();
@@ -312,5 +320,15 @@ fn a_functions_name_and_length_are_read_only_and_configurable() {
 fn bound_functions_and_iterator_methods_have_their_own_name_and_length() {
     super::remaining_builtins::agrees(
         "function bar(x, y) {} const once = bar.bind(null, 1); const twice = once.bind(null, 2, 3); const it = [7].values(); await finish(once.name === 'bound bar' && once.length === 1 && twice.name === 'bound bound bar' && twice.length === 0 && Math.max.bind(null).length === 2 && it.next.name === 'next' && it.next.length === 0 && it.next().value === 7);",
+    );
+}
+
+/// A function the program made is a token with an empty path, compared by
+/// the closure it carries: it equals itself however it is reached, and two
+/// functions never compare equal, as Map keys or array members either.
+#[test]
+fn distinct_functions_are_never_equal() {
+    super::remaining_builtins::agrees(
+        "const a = () => 1; const b = () => 1; function f() {} const g = f; const m = new Map([[a, 1]]); await finish(a !== b && a === a && f === g && Object.is(f, g) && !Object.is(a, b) && [a].includes(a) && ![a].includes(b) && [b, a].indexOf(a) === 1 && m.get(a) === 1 && !m.has(b) && new Set([a, b, a]).size === 2 && typeof a === 'function');",
     );
 }

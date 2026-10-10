@@ -15,12 +15,15 @@
 //! file.
 //!
 //! A built-in read as a value is a token, an immutable tuple the program
-//! cannot otherwise make: `("ts.function", path, name, length)` for a
-//! function, constructor or prototype method, and `("ts.object", path, tag)`
-//! for a namespace or a prototype. A token compares equal to every other
-//! read of the same path. Calling one goes through `ts.callable`, which the
-//! package builder generates after every row's helper, because a helper
-//! cannot call a function defined after it.
+//! cannot otherwise make: `("ts.function", path, name, length, closure)` for
+//! a function, constructor or prototype method, and `("ts.object", path,
+//! tag)` for a namespace or a prototype. A token compares equal to every
+//! other read of the same path. A function the program makes is the same
+//! token with an empty path and one more member, the record of the own
+//! properties it has deleted (`lower/functions.rs`); it compares by its
+//! closure. Calling one goes through `ts.callable`, which the package
+//! builder generates after every row's helper, because a helper cannot call
+//! a function defined after it.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::OnceLock;
