@@ -31,6 +31,27 @@ pub struct FunctionDefinition {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub guard: Option<Guard>,
     pub implementation: Implementation,
+    /// The version of the native implementation (`K-LIB-011`): its code is
+    /// not part of the definition, so a native that answers otherwise is
+    /// stated anew under the next version, which is a new function. Only a
+    /// definition that states a native implementation states one other
+    /// than the first.
+    #[serde(
+        default = "first_native_version",
+        skip_serializing_if = "is_first_native_version"
+    )]
+    pub native_version: u32,
+}
+
+/// The version a native implementation states when it states none.
+pub const FIRST_NATIVE_VERSION: u32 = 1;
+
+fn first_native_version() -> u32 {
+    FIRST_NATIVE_VERSION
+}
+
+fn is_first_native_version(version: &u32) -> bool {
+    *version == FIRST_NATIVE_VERSION
 }
 
 /// How a library function is implemented.

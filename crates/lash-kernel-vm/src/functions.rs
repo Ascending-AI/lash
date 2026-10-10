@@ -62,6 +62,7 @@ fn definition(function: MachineFunction, kernel: u32) -> FunctionDefinition {
         charge,
         guard: None,
         implementation: Implementation::Native,
+        native_version: lash_kernel_doc::FIRST_NATIVE_VERSION,
     }
 }
 

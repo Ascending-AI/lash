@@ -5,6 +5,7 @@ mod config;
 mod config_owner;
 mod config_types;
 mod factory;
+mod helpers;
 mod prose_projector;
 mod protocol_driver;
 pub(crate) mod protocol_session;
@@ -22,6 +23,7 @@ pub use config_owner::{
 };
 pub use config_types::{ExecutionBounds, InstructionBound, MemoryBound};
 pub use factory::RlmProtocolPluginFactory;
+pub use helpers::HelperReleaseGate;
 pub use protocol_session::{RlmSessionConfigDecodeError, rlm_session_config};
 
 mod channel;

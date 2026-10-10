@@ -664,3 +664,41 @@ fn validated_functions_join_only_the_registry_they_were_validated_against() {
         assert_eq!(other.len(), held, "nothing joins another registry");
     }
 }
+
+/// `K-LIB-011`: a native implementation states its version, the first when
+/// it states none. A definition that states none has the identity it had
+/// before versions were stated; the next version is a new function, written
+/// `native <version>`, and a definition with no native implementation, or
+/// a version 0, is refused.
+#[test]
+fn a_native_version_is_part_of_the_identity_and_only_a_native_states_one() {
+    let first = definition("num.twice", true);
+    assert_eq!(first.native_version, crate::FIRST_NATIVE_VERSION);
+    assert!(
+        !first.to_json().unwrap().contains("native_version"),
+        "the first version is not written"
+    );
+    let text = "function num.twice(x: Any) -> Any\nkernel 1\ncharge 1\nnative 2\n";
+    let second = parse_definition(text).unwrap();
+    assert_eq!(second.native_version, 2);
+    assert_eq!(print_definition(&second), text);
+    assert_ne!(second.identity().unwrap(), first.identity().unwrap());
+    let empty = FunctionRegistry::new();
+    crate::validate_definition(&second, &empty).expect("a native states its version");
+    let body = FunctionDefinition {
+        native_version: 2,
+        ..definition("helper.same", false)
+    };
+    assert!(matches!(
+        crate::validate_definition(&body, &empty).map_err(|invalid| *invalid.reason),
+        Err(InvalidReason::NativeVersionWithoutNative { version: 2 })
+    ));
+    let zero = FunctionDefinition {
+        native_version: 0,
+        ..first
+    };
+    assert!(matches!(
+        crate::validate_definition(&zero, &empty).map_err(|invalid| *invalid.reason),
+        Err(InvalidReason::NativeVersionZero)
+    ));
+}

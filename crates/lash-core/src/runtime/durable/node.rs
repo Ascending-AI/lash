@@ -25,7 +25,9 @@
 //!   before it does not start while an actor is still in one: serving, it
 //!   would strand it (ADR 0115 §3.5). It refuses with
 //!   [`DurableError::Unmigrated`], naming how many and the command that
-//!   carries them forward.
+//!   carries them forward. Nor does a build that no longer holds functions
+//!   an earlier release shipped while an unfinished actor still pins one
+//!   ([`DurableError::RetiredDependents`], FIG-5799).
 //! - **Drain:** once the host starts [`NodeServe::drain`], the node claims
 //!   nothing more, each activation releases its actor `ready` at its next
 //!   committed phase, and `serve` returns [`Stopped::Drained`] when none is
@@ -60,8 +62,9 @@ pub struct NodeServe {
 /// # Errors
 ///
 /// [`DurableError::Unmigrated`] when an actor is still in a format set the
-/// backend's build retires, and the store's refusal of the node's
-/// registration.
+/// backend's build retires, [`DurableError::RetiredDependents`] when one
+/// still pins a function of an earlier release the build no longer holds,
+/// and the store's refusal of the node's registration.
 pub async fn serve(
     backend: &Backend,
     serve: NodeServe,
@@ -77,6 +80,18 @@ pub async fn serve(
             unmigrated,
             command: formats.sweep().unwrap_or_default().to_owned(),
         });
+    }
+    // Nor while an unfinished actor still pins a function of an earlier
+    // release the build no longer holds (FIG-5799).
+    if let Some(retirement) = backend.retirement() {
+        let dependents = retirement.dependents(backend).await?;
+        if dependents > 0 {
+            return Err(DurableError::RetiredDependents {
+                retired: retirement.retired(),
+                dependents,
+                command: retirement.command(),
+            });
+        }
     }
     let mut decodes = formats.session_decodes();
     let activation: Arc<dyn Activation> = match serve.processes {

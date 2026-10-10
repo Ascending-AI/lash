@@ -140,6 +140,12 @@ pub enum InvalidReason {
     EmptyFormula,
     #[error("a guard bounds a native implementation; this function states none")]
     GuardWithoutNative,
+    /// `K-LIB-011`: a native version versions a native implementation.
+    #[error("native version {version} is stated by a function with no native implementation")]
+    NativeVersionWithoutNative { version: u32 },
+    /// `K-LIB-011`: native versions count from 1.
+    #[error("native version 0 is not a version; the first is 1")]
+    NativeVersionZero,
     #[error("a guard's unit is empty")]
     EmptyGuardUnit,
     /// `K-LIB-003`: a function with a native implementation takes no
@@ -276,6 +282,17 @@ pub fn validate_definition(
     }
     check_signature(&definition.signature)?;
     check_formula(&definition.charge, &definition.signature, true)?;
+    if definition.native_version == 0 {
+        return Err(invalid(None, InvalidReason::NativeVersionZero));
+    }
+    if definition.native_version != crate::FIRST_NATIVE_VERSION && !definition.has_native() {
+        return Err(invalid(
+            None,
+            InvalidReason::NativeVersionWithoutNative {
+                version: definition.native_version,
+            },
+        ));
+    }
     if let Some(guard) = &definition.guard {
         if !definition.has_native() {
             return Err(invalid(None, InvalidReason::GuardWithoutNative));

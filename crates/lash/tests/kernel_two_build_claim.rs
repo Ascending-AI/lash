@@ -13,6 +13,15 @@
 //! kernel body, which the synthetic migration declares it cannot carry, is
 //! listed with that typed reason by the survey `lashctl kernel-migration
 //! list` prints, and build N+1 parks it with the same reason at the claim.
+//!
+//! The helper-release laws (FIG-5799) run build N against a build that
+//! keeps its kernel version and changes a helper, `ts.array.forEach`: a
+//! process, a session cell and a saved function written against the
+//! earlier helpers resume on the later build, a run parked inside the
+//! changed helper on its old body; the later build writes the later helpers
+//! only once no live node lacks them, and stamps what it writes so such a
+//! node never claims it; and the build that stops retaining the earlier
+//! helpers does not start while a run depends on them.
 
 #![cfg(all(feature = "synthetic-next", feature = "rlm", feature = "sqlite"))]
 #![allow(clippy::disallowed_methods, clippy::expect_used, clippy::unwrap_used)]
@@ -68,6 +77,15 @@ enum Build {
     /// The build after N+1, which closes the window N+1 opened: it retires
     /// build N's formats and carries nothing of them forward.
     Closing,
+    /// The build after N that keeps its kernel version and changes a helper
+    /// (FIG-5799): it retains build N's helpers and reads what build N
+    /// wrote as written.
+    Helpers,
+    /// [`Build::Helpers`], its kernel engine adopting what build N wrote
+    /// onto the changed helpers.
+    HelpersAdopting,
+    /// [`Build::Helpers`], no longer retaining build N's helpers.
+    HelpersClosing,
 }
 
 /// A core over `stores`: of build N when `previous`, else of build N+1.
@@ -115,7 +133,10 @@ fn serving_under(
     cells: &[&str],
     settings: lash::durable::DurableSettings,
 ) -> (lash::Backend, lash::LashCore) {
-    let previous = build == Build::N;
+    let kernel_one = matches!(
+        build,
+        Build::N | Build::Helpers | Build::HelpersAdopting | Build::HelpersClosing
+    );
     let replies = Arc::new(std::sync::Mutex::new(
         cells
             .iter()
@@ -148,6 +169,8 @@ fn serving_under(
         Build::N => builder.previous_build(),
         Build::NPlus1 => builder,
         Build::Closing => builder.closing_window(),
+        Build::Helpers | Build::HelpersAdopting => builder.helper_successor(),
+        Build::HelpersClosing => builder.closing_helpers(),
     };
     let backend = builder.build().expect("the backend assembles");
     let factory = lash::rlm::RlmProtocolPluginFactory::new(
@@ -159,8 +182,13 @@ fn serving_under(
         lash::rlm::CellDialect::typescript(),
     )
     .with_worker_service(lash::vm::WorkerService::default());
-    let factory = if previous {
+    let factory = if kernel_one {
         factory.writing_kernel(KernelVersion::One)
+    } else {
+        factory
+    };
+    let factory = if build == Build::HelpersAdopting {
+        factory.adopting_helpers()
     } else {
         factory
     };
@@ -944,5 +972,424 @@ async fn the_listing_names_a_refused_session_cell_with_its_reason() {
     assert_eq!(
         refused["refusal"]["refusal"]["reason"], "site_not_carried",
         "{survey}"
+    );
+}
+
+/// The identity helper release 1.0 gives `ts.array.forEach`, the helper the
+/// synthetic successor changes (FIG-5799).
+fn released_for_each() -> String {
+    let functions = lash::vm::standard_functions().expect("the shipped library assembles");
+    let release = lash_vm_runtime::standard_helper_releases()
+        .expect("the shipped helper releases")
+        .into_iter()
+        .next()
+        .expect("the build retains helper release 1.0");
+    release
+        .writes
+        .iter()
+        .find(|function| {
+            functions.get(function).is_some_and(|registered| {
+                registered.definition.name.to_string() == "ts.array.forEach"
+            })
+        })
+        .expect("helper release 1.0 writes ts.array.forEach")
+        .to_string()
+}
+
+/// `worker()` calls helper release 1.0's `ts.array.forEach` with a callback
+/// that sleeps, so its run parks inside the helper's kernel body, which the
+/// synthetic successor changes. It sleeps twice: a sleep's deadline is
+/// counted from its run's admission, which a cold worker's start can
+/// outlast, so only the second is sure to park the process.
+fn inside_for_each_worker() -> String {
+    format!(
+        r#"kernel 1
+numbers float
+use ts.array.forEach = @{for_each}
+entry worker() -> Any
+
+fn worker() {{
+  let nap = fn(this, args) {{ do sleep 1500 return null }}
+  let items = ["first", "second"]
+  let args = [nap]
+  let out = invoke ts.array.forEach(items, args)
+  return "done"
+}}
+
+main {{
+  finish null
+}}
+"#,
+        for_each = released_for_each()
+    )
+}
+
+/// `worker()` calls helper release 1.0's `ts.array.forEach`, then sleeps an
+/// hour in its own code: a run that pins the earlier helper and stands
+/// outside it.
+fn after_for_each_sleeper() -> String {
+    format!(
+        r#"kernel 1
+numbers float
+use ts.array.forEach = @{for_each}
+entry worker() -> Any
+
+fn worker() {{
+  let note = fn(this, args) {{ return null }}
+  let items = ["first", "second"]
+  let args = [note]
+  let out = invoke ts.array.forEach(items, args)
+  do sleep 3600000
+  return "done"
+}}
+
+main {{
+  finish null
+}}
+"#,
+        for_each = released_for_each()
+    )
+}
+
+/// FIG-5799: a process build N parked inside `ts.array.forEach`, a helper
+/// the later build changes, depends on build N's helper release; the
+/// listing names it, with the typed reason a node that adopts would not
+/// adopt it. A node of the later build that adopts claims it, does not
+/// adopt it, and resumes it on the helper's old body to its answer.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_process_parked_inside_a_changed_helper_is_refused_adoption_and_resumes_on_the_old_body()
+{
+    let stores: Arc<dyn StoreSet> = Arc::new(
+        lash_sqlite_store::SqliteStoreSet::memory()
+            .await
+            .expect("an in-memory store set opens"),
+    );
+    let (old_backend, old) = serving(&stores, Build::N, "build-n", &[]);
+    let payload = payload(&old_backend, &inside_for_each_worker()).await;
+    let process = start(&old, payload).await;
+    let actor = ActorKey::process(process.as_str()).expect("a process actor key");
+    let processes = old.processes();
+    tokio::select! {
+        _ = waiting(&old_backend, &actor) => {}
+        output = processes.await_output(&process) => {
+            panic!("the process ended instead of sleeping: {output:?}")
+        }
+    }
+    old.drain().await.expect("build N's node drains");
+
+    let listed = survey(&old_backend).await;
+    let dependent = &listed["helper_processes"][0];
+    assert_eq!(dependent["process"], serde_json::json!(process), "{listed}");
+    assert_eq!(
+        dependent["functions"],
+        serde_json::json!([released_for_each()]),
+        "{listed}"
+    );
+    assert_eq!(
+        dependent["refused"]["refused"], "parked_inside_changed",
+        "{listed}"
+    );
+    assert_eq!(
+        dependent["refused"]["function"],
+        serde_json::json!(released_for_each()),
+        "{listed}"
+    );
+
+    let (_new_backend, new) = serving(&stores, Build::HelpersAdopting, "build-helpers", &[]);
+    let output = tokio::time::timeout(
+        Duration::from_secs(60),
+        new.processes().await_output(&process),
+    )
+    .await
+    .expect("the process ends within a minute")
+    .expect("the process's end is read");
+    let lash_core::ProcessAwaitOutput::Settled { output } = output else {
+        panic!("the process ended without an answer: {output:?}");
+    };
+    assert!(output.is_success(), "the process failed: {output:?}");
+    assert_eq!(output.value_for_projection(), serde_json::json!("done"));
+}
+
+/// FIG-5799: a session cell build N parked after a call of the earlier
+/// `ts.array.forEach` resumes on the build that changed the helper, which
+/// reads build N's session as written, to the answer it would have
+/// reached.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_session_cell_parked_under_the_earlier_helpers_resumes_on_the_build_that_changed_them() {
+    const SESSION: &str = "helper-two-build-session";
+    let stores: Arc<dyn StoreSet> = Arc::new(
+        lash_sqlite_store::SqliteStoreSet::memory()
+            .await
+            .expect("an in-memory store set opens"),
+    );
+    let actor = ActorKey::session(SESSION).expect("a session actor key");
+    // Build N runs on a runtime of its own, which the law shuts down under
+    // it: a node lets go of a turn whose cell sleeps only by dying.
+    let build_n = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .expect("build N's runtime");
+    let written = build_n
+        .spawn({
+            let stores = Arc::clone(&stores);
+            let actor = actor.clone();
+            async move {
+                let (old_backend, old) = serving(
+                    &stores,
+                    Build::N,
+                    "build-n",
+                    &["const out: number[] = [];\n[1, 2].forEach((x) => { out.push(x * 2); });\nawait sleep(3000);\nawait control.finish(out);"],
+                );
+                let opened = session(&old, SESSION).await;
+                tokio::spawn(async move {
+                    let _ = opened
+                        .send(lash::TurnInput::text("double, then sleep"))
+                        .output()
+                        .await;
+                });
+                let row = || async {
+                    loop {
+                        if let Some(row) = old_backend
+                            .durable()
+                            .actor(&actor)
+                            .await
+                            .expect("the actor row is read")
+                        {
+                            return row;
+                        }
+                        tokio::time::sleep(Duration::from_millis(10)).await;
+                    }
+                };
+                let mut parked = row().await;
+                let mut still = 0;
+                while still < 100 {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                    let now = row().await;
+                    still = if now.revision == parked.revision && now.state == ActorState::Owned {
+                        still + 1
+                    } else {
+                        0
+                    };
+                    parked = now;
+                }
+                std::mem::forget(old);
+                parked.formats
+            }
+        })
+        .await
+        .expect("build N parks the cell");
+    build_n.shutdown_background();
+    assert!(
+        !written.as_str().contains("kernel-helpers"),
+        "the parked session is in build N's format set: {written:?}"
+    );
+
+    let (_new_backend, new) = serving(
+        &stores,
+        Build::Helpers,
+        "build-helpers",
+        &["await control.finish('after');"],
+    );
+    let later = tokio::time::timeout(
+        Duration::from_secs(60),
+        session(&new, SESSION)
+            .await
+            .send(lash::TurnInput::text("go on"))
+            .output(),
+    )
+    .await
+    .expect("the later turn ends within a minute")
+    .expect("the later turn");
+    assert!(later.is_success(), "the later turn: {later:?}");
+    let finishes = cell_finishes(&later);
+    assert_eq!(
+        finishes.first(),
+        Some(&serde_json::json!([2, 4])),
+        "the parked cell resumed on the later build to its answer: {finishes:?}"
+    );
+    assert_eq!(finishes.last(), Some(&serde_json::json!("after")));
+}
+
+/// The binding turn of the saved-function laws: a function that calls
+/// `ts.array.forEach`.
+const BIND_EVENS: &str = "function evens(xs: number[]) { const out: number[] = []; xs.forEach((x) => { if (x % 2 === 0) { out.push(x); } }); return out; }\nawait control.finish('bound');";
+
+/// FIG-5799: a function a session saved under build N holds the earlier
+/// `ts.array.forEach`; the listing names the session as depending on build
+/// N's helper release, and a new cell on the build that changed the helper
+/// calls it, which runs on the identities it holds.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_saved_function_holding_an_earlier_helper_identity_is_called_in_a_new_cell() {
+    const SESSION: &str = "helper-saved-session";
+    let stores: Arc<dyn StoreSet> = Arc::new(
+        lash_sqlite_store::SqliteStoreSet::memory()
+            .await
+            .expect("an in-memory store set opens"),
+    );
+    let (old_backend, old) = idling(&stores, Build::N, "build-n", &[BIND_EVENS]);
+    idle_session(&old_backend, &old, SESSION).await;
+    old.drain().await.expect("build N's node drains");
+
+    let (new_backend, new) = serving(
+        &stores,
+        Build::Helpers,
+        "build-helpers",
+        &["await control.finish(evens([1, 2, 3, 4]));"],
+    );
+    let listed = survey(&new_backend).await;
+    assert_eq!(
+        listed["helper_sessions"],
+        serde_json::json!([{"session": SESSION, "saved": ["evens"]}]),
+        "{listed}"
+    );
+    let called = tokio::time::timeout(
+        Duration::from_secs(60),
+        session(&new, SESSION)
+            .await
+            .send(lash::TurnInput::text("call it"))
+            .output(),
+    )
+    .await
+    .expect("the turn ends within a minute")
+    .expect("the turn");
+    assert!(called.is_success(), "the turn: {called:?}");
+    assert_eq!(
+        cell_finishes(&called).last(),
+        Some(&serde_json::json!([2, 4]))
+    );
+}
+
+/// FIG-5799 (ADR 0106 §2): while a node of build N, which holds only the
+/// earlier helpers, is live, a node of the later build writes what it
+/// saves against the earlier helpers too; once build N drains, it writes
+/// the later helpers, and stamps the session with a set build N's node
+/// does not decode, so that node is never handed it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_rolling_fleet_never_hands_later_helper_work_to_a_node_that_holds_only_the_earlier() {
+    const DURING: &str = "helper-rolling-during";
+    const AFTER: &str = "helper-rolling-after";
+    let stores: Arc<dyn StoreSet> = Arc::new(
+        lash_sqlite_store::SqliteStoreSet::memory()
+            .await
+            .expect("an in-memory store set opens"),
+    );
+    let (old_backend, old) = idling(&stores, Build::N, "build-n", &[BIND_EVENS]);
+    let (new_backend, new) = idling(
+        &stores,
+        Build::Helpers,
+        "build-helpers",
+        &[BIND_EVENS, BIND_EVENS],
+    );
+    // Both nodes serve: the session is written against the earlier
+    // helpers, whichever claims it.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    while new_backend
+        .durable()
+        .live_decodes()
+        .await
+        .expect("the live nodes are read")
+        .len()
+        < 2
+    {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "both nodes register"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let bound = session(&new, DURING)
+        .await
+        .send(lash::TurnInput::text("bind the function"))
+        .output()
+        .await
+        .expect("the binding turn");
+    assert!(bound.is_success(), "the binding turn: {bound:?}");
+    old.drain().await.expect("build N's node drains");
+
+    let written = idle_session(&new_backend, &new, AFTER).await;
+    assert!(
+        written.as_str().contains("kernel-helpers@2"),
+        "the later build stamps what it writes with its helper release: {written:?}"
+    );
+    assert!(
+        !old_backend.formats().session_decodes().contains(&written),
+        "build N's node does not decode what the later build wrote: {written:?}"
+    );
+    let listed = survey(&new_backend).await;
+    assert_eq!(
+        listed["helper_sessions"],
+        serde_json::json!([{"session": DURING, "saved": ["evens"]}]),
+        "only the session written while build N served holds the earlier helpers: {listed}"
+    );
+}
+
+/// FIG-5799: the build that stops retaining build N's helpers does not
+/// start while a process build N wrote still pins one, and its refusal
+/// names how many and the command that sweeps them. The process stands
+/// outside the helper it pins, so once a node of the later build that
+/// adopts has been woken to it by the sweep and adopted it onto the
+/// changed helper, the build starts.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn retiring_a_helper_release_is_refused_while_a_run_depends_on_it_and_allowed_after_the_sweep()
+ {
+    let stores: Arc<dyn StoreSet> = Arc::new(
+        lash_sqlite_store::SqliteStoreSet::memory()
+            .await
+            .expect("an in-memory store set opens"),
+    );
+    let (old_backend, old) = serving(&stores, Build::N, "build-n", &[]);
+    let payload = payload(&old_backend, &after_for_each_sleeper()).await;
+    let process = start(&old, payload).await;
+    let actor = ActorKey::process(process.as_str()).expect("a process actor key");
+    let written = waiting(&old_backend, &actor).await.formats;
+    old.drain().await.expect("build N's node drains");
+    let listed = survey(&old_backend).await;
+    assert_eq!(
+        listed["helper_processes"],
+        serde_json::json!([{"process": process, "functions": [released_for_each()], "refused": null}]),
+        "{listed}"
+    );
+
+    let (_refusing_backend, refusing) =
+        serving(&stores, Build::HelpersClosing, "build-helpers-closing", &[]);
+    let stopped = tokio::time::timeout(Duration::from_secs(60), refusing.node_stopped())
+        .await
+        .expect("the closing build's node stops within a minute");
+    match stopped {
+        Some(Err(lash::durable::DurableError::RetiredDependents {
+            retired,
+            dependents,
+            command,
+        })) => {
+            assert_eq!(retired, "helper release 1.0");
+            assert_eq!(dependents, 1);
+            assert_eq!(command, lash::vm::KERNEL_MIGRATION_SWEEP);
+        }
+        other => panic!("the closing build started over a dependent run: {other:?}"),
+    }
+    drop(refusing);
+
+    let (new_backend, new) = serving(&stores, Build::HelpersAdopting, "build-helpers", &[]);
+    let swept = lash::vm::sweep_kernel_migration(&new_backend)
+        .await
+        .expect("the sweep wakes the process");
+    assert_eq!(swept.helper_processes, 1);
+    let adopted = carried_from(&new_backend, &actor, &written).await;
+    assert!(
+        adopted.formats.as_str().contains("kernel-helpers@2"),
+        "the adopted process is in the later build's set: {:?}",
+        adopted.formats
+    );
+    let listed = survey(&new_backend).await;
+    assert!(listed.get("helper_processes").is_none(), "{listed}");
+    new.drain().await.expect("the later build's node drains");
+
+    let (_closing_backend, closing) =
+        serving(&stores, Build::HelpersClosing, "build-helpers-closing", &[]);
+    let started = tokio::time::timeout(Duration::from_secs(5), closing.node_stopped()).await;
+    assert!(
+        started.is_err(),
+        "the closing build's node serves once no run depends on the retired helpers: {started:?}"
     );
 }

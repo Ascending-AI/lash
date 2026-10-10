@@ -7,15 +7,26 @@
 //! each extension crate's, and each dialect's helpers. The standard
 //! embedding's TypeScript helpers are defined once, when the crate is built
 //! (`build.rs`); a worker registers them as built (FIG-5796).
+//!
+//! The standard embedding also holds every function of the helper releases
+//! it retains that it does not define itself (FIG-5799, `releases.rs`): a
+//! run parked under an earlier release's helpers, and a saved function
+//! written against them, resume on exactly the functions they pin. Names
+//! resolve against the embedding's own functions alone, or, for a writer the
+//! fleet holds to an earlier release, against that release's.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use lash_kernel_dialect::{
     Diagnostic, Environment, FrontEnd, Library, Lowered, NamedLibrary, Package, Printer,
 };
-use lash_kernel_doc::{Document, FunctionDefinition, FunctionRegistry, ValidatedFunctions};
+use lash_kernel_doc::{
+    Document, FunctionDefinition, FunctionId, FunctionRegistry, ValidatedFunctions,
+};
 use lash_vm_client::WorkerTuning;
+
+use crate::releases::HelperReleaseIndex;
 
 /// Why a worker could not assemble what it runs. The worker refuses to
 /// start: it is a defect of the build, never of a document.
@@ -27,7 +38,21 @@ pub enum EmbedError {
     DuplicateDialect { dialect: String },
     #[error("the dialect `{dialect}` could not be installed: {message}")]
     Dialect { dialect: String, message: String },
+    /// A writer asked for the names of a helper release the embedding does
+    /// not hold.
+    #[error("helper release {release} is not held by this embedding")]
+    HelperReleaseNotHeld { release: u32 },
 }
+
+/// The helper release the standard embedding writes: the version of the
+/// `kernel-helpers` format surface a state its cells and processes write
+/// holds (FIG-5799). The synthetic successor changes a helper, so it writes
+/// the release after the one this tree builds, and retains that one.
+#[cfg(not(feature = "synthetic-next"))]
+pub const HELPER_RELEASE: u32 = 1;
+/// The synthetic successor's helper release.
+#[cfg(feature = "synthetic-next")]
+pub const HELPER_RELEASE: u32 = 2;
 
 /// Everything a worker registered at startup.
 pub struct Embedding {
@@ -40,6 +65,11 @@ pub struct Embedding {
     interpreted: OnceLock<Arc<FunctionRegistry>>,
     pub(crate) library: NamedLibrary,
     pub(crate) dialects: BTreeMap<String, Package>,
+    /// The helper release the embedding's own names are.
+    writes: u32,
+    /// The released helper sets the embedding holds, each with the names a
+    /// writer of it resolves against, made when first asked for.
+    releases: Vec<(HelperReleaseIndex, OnceLock<NamedLibrary>)>,
 }
 
 impl Embedding {
@@ -47,6 +77,43 @@ impl Embedding {
     /// resolves its names against.
     pub fn library(&self) -> &NamedLibrary {
         &self.library
+    }
+
+    /// The helper release the embedding's own names are.
+    pub fn helper_release(&self) -> u32 {
+        self.writes
+    }
+
+    /// The released helper sets the embedding holds besides its own
+    /// functions, oldest first.
+    pub fn helper_releases(&self) -> impl Iterator<Item = &HelperReleaseIndex> {
+        self.releases.iter().map(|(release, _)| release)
+    }
+
+    /// The names a writer of helper release `release` resolves against:
+    /// the embedding's own for its own release, and a retained release's
+    /// as that release wrote them, over every function the embedding holds.
+    ///
+    /// # Errors
+    ///
+    /// [`EmbedError::HelperReleaseNotHeld`], and [`EmbedError::Registry`]
+    /// when a release's names cannot be assembled: a defect of the build.
+    pub fn library_for(&self, release: u32) -> Result<&NamedLibrary, EmbedError> {
+        if release == self.writes {
+            return Ok(&self.library);
+        }
+        let (index, library) = self
+            .releases
+            .iter()
+            .find(|(index, _)| index.ordinal == release)
+            .ok_or(EmbedError::HelperReleaseNotHeld { release })?;
+        if let Some(library) = library.get() {
+            return Ok(library);
+        }
+        let named =
+            NamedLibrary::resolving(&self.written, |function| index.writes.contains(function))
+                .map_err(|error| EmbedError::Registry(error.to_string()))?;
+        Ok(library.get_or_init(|| named))
     }
 
     /// The registry a machine runs documents against: each function once
@@ -115,6 +182,11 @@ impl Embedding {
 pub struct Embedder {
     registry: FunctionRegistry,
     dialects: BTreeMap<String, Package>,
+    /// The functions registered as an earlier release's, which no name
+    /// resolves to.
+    pub(crate) retained: BTreeSet<FunctionId>,
+    writes: u32,
+    releases: Vec<HelperReleaseIndex>,
 }
 
 impl Embedder {
@@ -129,6 +201,9 @@ impl Embedder {
         Ok(Self {
             registry,
             dialects: BTreeMap::new(),
+            retained: BTreeSet::new(),
+            writes: HELPER_RELEASE,
+            releases: Vec::new(),
         })
     }
 
@@ -144,8 +219,29 @@ impl Embedder {
     ///
     /// [`EmbedError::Registry`] when two functions share a name.
     pub fn library(&self) -> Result<NamedLibrary, EmbedError> {
-        NamedLibrary::from_registry(&self.registry)
+        NamedLibrary::resolving(&self.registry, |function| !self.retained.contains(function))
             .map_err(|error| EmbedError::Registry(error.to_string()))
+    }
+
+    /// Registers functions of the helper releases `releases` this embedding
+    /// retains, validated against exactly what it holds now, under no name:
+    /// they are found by identity alone (FIG-5799).
+    ///
+    /// # Errors
+    ///
+    /// [`EmbedError::Registry`].
+    fn retain(
+        &mut self,
+        functions: ValidatedFunctions,
+        releases: Vec<HelperReleaseIndex>,
+    ) -> Result<(), EmbedError> {
+        self.retained
+            .extend(functions.iter().map(|(function, _)| *function));
+        self.registry
+            .register_validated(functions)
+            .map_err(|error| EmbedError::Registry(error.to_string()))?;
+        self.releases = releases;
+        Ok(())
     }
 
     /// Installs a dialect: registers its functions, in the order the
@@ -184,6 +280,12 @@ impl Embedder {
             written: Arc::new(self.registry),
             interpreted: OnceLock::new(),
             dialects: self.dialects,
+            writes: self.writes,
+            releases: self
+                .releases
+                .into_iter()
+                .map(|release| (release, OnceLock::new()))
+                .collect(),
         })
     }
 }
@@ -193,6 +295,15 @@ impl Embedder {
 /// those (`build.rs`).
 const TYPESCRIPT_HELPERS: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/typescript_helpers.json"));
+
+/// The functions of the helper releases the build retains that it does not
+/// define itself, validated in a registry holding exactly the kernel
+/// library, lash's extensions and the TypeScript helpers (`build.rs`).
+const RETAINED_FUNCTIONS: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/retained_functions.json"));
+
+/// The helper releases the build retains, oldest first (`build.rs`).
+const HELPER_RELEASES: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/helper_releases.json"));
 
 /// The embedding lash ships: the kernel library, lash's extensions and the
 /// TypeScript dialect, whose helpers it registers as the build defined
@@ -210,8 +321,113 @@ pub fn standard(tuning: &WorkerTuning) -> Result<Embedding, EmbedError> {
         .registry()
         .register_validated(helpers)
         .map_err(|error| EmbedError::Registry(error.to_string()))?;
+    let retained = ValidatedFunctions::from_json(RETAINED_FUNCTIONS)
+        .map_err(|error| EmbedError::Registry(error.to_string()))?;
+    embedder.retain(retained, standard_helper_releases()?)?;
+    #[cfg(feature = "synthetic-next")]
+    crate::synthetic::change_helpers(&mut embedder)?;
     embedder.install(typescript_package(tuning, Vec::new()))?;
     embedder.finish()
+}
+
+/// The name and ordinal of each helper release the standard embedding
+/// retains, oldest first: the last is the release the tree builds
+/// (FIG-5799).
+pub const RETAINED_HELPER_RELEASES: &[(&str, u32)] =
+    include!(concat!(env!("OUT_DIR"), "/helper_release_names.rs"));
+
+/// The helper releases the standard embedding retains, oldest first: the
+/// last is the release the tree builds (FIG-5799).
+///
+/// # Errors
+///
+/// [`EmbedError::Registry`] when the build's index does not decode: a
+/// defect of the build.
+pub fn standard_helper_releases() -> Result<Vec<HelperReleaseIndex>, EmbedError> {
+    serde_json::from_slice(HELPER_RELEASES).map_err(|error| EmbedError::Registry(error.to_string()))
+}
+
+/// The functions a build of [`standard`] would stop holding were it to stop
+/// retaining helper release `release`, each with its counterpart: the
+/// function of the same name and kernel version the embedding writes, when
+/// it has one (FIG-5799). A function no newer retained release holds and
+/// the embedding does not write is listed, and so is each function a kernel
+/// version this build interprets redeclares it as. Empty when the
+/// embedding retains no such release.
+///
+/// # Errors
+///
+/// [`EmbedError::Registry`]: a defect of the build.
+pub fn standard_retired_helpers(
+    release: u32,
+) -> Result<BTreeMap<FunctionId, Option<FunctionId>>, EmbedError> {
+    let embedding = standard(&WorkerTuning::standard())?;
+    let Some(retired) = embedding
+        .helper_releases()
+        .find(|index| index.ordinal == release)
+    else {
+        return Ok(BTreeMap::new());
+    };
+    let named: BTreeMap<&lash_kernel_doc::FunctionName, FunctionId> = embedding
+        .library()
+        .iter()
+        .map(|(name, function)| (name, *function))
+        .collect();
+    let mut kept: BTreeSet<FunctionId> = named.values().copied().collect();
+    for newer in embedding
+        .helper_releases()
+        .filter(|index| index.ordinal > release)
+    {
+        kept.extend(newer.functions.iter().copied());
+    }
+    let mut level: BTreeMap<FunctionId, Option<FunctionId>> = retired
+        .functions
+        .iter()
+        .filter(|function| !kept.contains(function))
+        .map(|function| {
+            let counterpart = embedding
+                .written
+                .get(function)
+                .and_then(|registered| named.get(&registered.definition.name).copied());
+            (*function, counterpart)
+        })
+        .collect();
+    let mut dropped = level.clone();
+    let interpreted = embedding.registry()?;
+    let refused =
+        |error: lash_kernel_migrate::DocumentRefusal| EmbedError::Registry(error.to_string());
+    for version in lash_kernel_doc::KernelVersion::ALL {
+        let Some(migration) = lash_kernel_migrate::migration_from(*version) else {
+            continue;
+        };
+        let redeclared = |functions: Vec<FunctionId>| {
+            lash_kernel_migrate::redeclare(migration.definition, functions, &**interpreted)
+                .map(|all| {
+                    all.into_iter()
+                        .map(|function| (function.from, function.to))
+                        .collect::<BTreeMap<_, _>>()
+                })
+                .map_err(refused)
+        };
+        let old = redeclared(level.keys().copied().collect())?;
+        let new = redeclared(level.values().flatten().copied().collect())?;
+        level = level
+            .iter()
+            .filter_map(|(function, counterpart)| {
+                let to = *old.get(function)?;
+                Some((
+                    to,
+                    counterpart.and_then(|counterpart| new.get(&counterpart).copied()),
+                ))
+            })
+            .collect();
+        dropped.extend(
+            level
+                .iter()
+                .map(|(function, counterpart)| (*function, *counterpart)),
+        );
+    }
+    Ok(dropped)
 }
 
 /// The function registry of [`standard`], assembled once in this process:
@@ -349,10 +565,11 @@ mod tests {
     /// arrives, and a document resolves against nothing else. The standard
     /// embedding holds the kernel library, the machine's functions, the
     /// regular-expression extension and the TypeScript dialect's helpers,
-    /// each under one name, once for every kernel version the build
-    /// interprets: a build that interprets a version's successor holds each
-    /// function redeclared for it too (FIG-5793), from when a document of
-    /// the successor first needs them (FIG-5796).
+    /// each under one name, and the functions of the helper releases it
+    /// retains under none (FIG-5799), each once for every kernel version
+    /// the build interprets: a build that interprets a version's successor
+    /// holds each function redeclared for it too (FIG-5793), from when a
+    /// document of the successor first needs them (FIG-5796).
     #[test]
     fn the_standard_embedding_registers_every_function_at_startup() {
         let embedding = standard(&WorkerTuning::standard()).expect("the standard embedding");
@@ -376,23 +593,28 @@ mod tests {
                 "{name} is registered"
             );
         }
-        let mut library = names.clone();
-        library.sort();
+        let written = embedding
+            .registry_for(lash_kernel_doc::KERNEL_VERSION)
+            .expect("the functions as registered");
+        let named: BTreeSet<FunctionId> = embedding.library().iter().map(|(_, id)| *id).collect();
+        assert!(
+            named.iter().all(|function| written.get(function).is_some()),
+            "every name resolves to a registered function"
+        );
         for version in lash_kernel_doc::KernelVersion::ALL {
-            let mut held: Vec<String> = registry
+            let held = registry
                 .iter()
                 .filter(|(_, function)| function.definition.kernel == version.number())
-                .map(|(_, function)| function.definition.name.to_string())
-                .collect();
-            held.sort();
+                .count();
             assert_eq!(
-                held, library,
-                "kernel version {version} holds every function once, under its one name"
+                held,
+                written.len(),
+                "kernel version {version} holds every registered function once"
             );
         }
         assert_eq!(
             registry.iter().count(),
-            names.len() * lash_kernel_doc::KernelVersion::ALL.len(),
+            written.len() * lash_kernel_doc::KernelVersion::ALL.len(),
             "every registered function is of a version the build interprets"
         );
         assert!(embedding.dialects.contains_key("typescript"));
@@ -447,3 +669,6 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod release_tests;

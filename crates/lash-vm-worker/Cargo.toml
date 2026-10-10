@@ -63,6 +63,7 @@ rmp-serde = { workspace = true }
 serde_json = { workspace = true }
 
 [build-dependencies]
+blake3 = { workspace = true }
 lash-kernel-doc = { workspace = true }
 lash-kernel-dialect = { workspace = true }
 lash-kernel-lib = { workspace = true }
@@ -71,6 +72,8 @@ lash-dialect-typescript = { workspace = true }
 lash-ext-date-ecma = { workspace = true }
 lash-ext-regex-ecma = { workspace = true }
 lash-ext-url-whatwg = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = { workspace = true }

@@ -73,7 +73,19 @@ pub trait EngineStateMigration: Send + Sync {
     /// The earlier formats the engine carries forward.
     fn carries(&self) -> Vec<EngineStateFormat>;
 
-    /// `state`, written in a carried format, in the engine's own; or
+    /// Whether the engine also carries a state already in its own format
+    /// onto what this build holds: the adoption an operator chose of what
+    /// an earlier build wrote against functions this build is about to
+    /// stop holding (FIG-5799). The claimer asks
+    /// [`migrate`](Self::migrate) of such a state too, once every live node
+    /// that serves the process decodes this build's set; a refusal leaves
+    /// the process as written.
+    fn adopts(&self) -> bool {
+        false
+    }
+
+    /// `state`, written in a carried format, in the engine's own, or
+    /// adopted when the engine [`adopts`](Self::adopts); or
     /// `None` when the process is not at a point the engine carries it
     /// from, and goes on in the format it is in. It may read and publish
     /// what the state names, and it changes nothing of the process: the

@@ -9,6 +9,11 @@
 //! that serves the process decodes the newer set. Until then it advances
 //! the process in the format it is in, so a node of the previous build can
 //! still take it back.
+//!
+//! An engine that adopts carries a state already in its own format the
+//! same way: what a build of an earlier helper release wrote, onto this
+//! build's helpers (FIG-5799). A state it does not adopt goes on as
+//! written.
 
 use lash_durable::domain::{ExecKey, ProcessActorRow, ProcessWrite, SnapshotRev, SnapshotWrite};
 use lash_durable::runner::Owned;
@@ -52,7 +57,7 @@ impl ProcessActivation {
     ) -> Result<Carry, DurableError> {
         let written = state.format.clone();
         let declared = engine.state_format();
-        if written == declared || owned.draining() {
+        if owned.draining() {
             return Ok(Carry::AsWritten(Box::new(tx)));
         }
         let kind = engine.kind();
@@ -62,7 +67,18 @@ impl ProcessActivation {
         ) else {
             return Ok(Carry::AsWritten(Box::new(tx)));
         };
-        if !self.fleet_decodes(owned, &written, &newer).await? {
+        // A state in the engine's own format is carried only by an engine
+        // that adopts, and goes on as written when it refuses (FIG-5799).
+        let adopting = written == declared;
+        if adopting && !migration.adopts() {
+            return Ok(Carry::AsWritten(Box::new(tx)));
+        }
+        let decoded = if adopting {
+            self.fleet_adopts(owned, &newer).await?
+        } else {
+            self.fleet_decodes(owned, &written, &newer).await?
+        };
+        if !decoded {
             return Ok(Carry::AsWritten(Box::new(tx)));
         }
         let reason = match migration.migrate(process, state).await {
@@ -92,6 +108,9 @@ impl ProcessActivation {
             // Not at a point its engine carries it from: it goes on as
             // written, and is asked again at its next pass.
             Ok(None) => return Ok(Carry::AsWritten(Box::new(tx))),
+            // A run the engine does not adopt resumes on the functions it
+            // pins, which this build still holds.
+            Err(_) if adopting => return Ok(Carry::AsWritten(Box::new(tx))),
             Err(refusal) if refusal.fatal => ProcessParkReason::MigrationRefused {
                 kind: written.kind,
                 version: written.version,
@@ -109,6 +128,18 @@ impl ProcessActivation {
             }
         };
         self.park(owned, tx, &reason).await.map(Carry::Ended)
+    }
+
+    /// Whether every live node that decodes the claimed process's set, the
+    /// set of a build whose state this build reads as written, also decodes
+    /// `newer`: the fleet-format gate an adoption passes (FIG-5799).
+    async fn fleet_adopts(&self, owned: &Owned, newer: &FormatSet) -> Result<bool, DurableError> {
+        let Some(row) = owned.store().actor(owned.actor()).await? else {
+            return Ok(false);
+        };
+        let live = owned.store().live_decodes().await?;
+        let candidates = [newer.clone(), row.formats];
+        Ok(lash_durable::fleet_writable(&candidates, &live) == Some(newer))
     }
 
     /// Whether every live node that decodes the set of a state in

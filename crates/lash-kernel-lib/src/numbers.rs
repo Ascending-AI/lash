@@ -186,6 +186,7 @@ pub fn numbers() -> Vec<(FunctionDefinition, Arc<dyn NativeFunction>)> {
             charge,
             guard,
             implementation: Implementation::Native,
+            native_version: lash_kernel_doc::FIRST_NATIVE_VERSION,
         };
         let native: Arc<dyn NativeFunction> = Arc::new(NumericFunction {
             operation,

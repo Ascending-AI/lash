@@ -75,8 +75,8 @@ pub use lash_protocol_rlm::{
 pub use lash_sansio::TURN_CHECKPOINT_SCHEMA_VERSION;
 #[cfg(feature = "rlm")]
 pub use lash_vm_runtime::{
-    KERNEL_DOCUMENT_SCHEMA_VERSION, KERNEL_PARKED_STATE_VERSION, KERNEL_SAVED_FUNCTION_VERSION,
-    LASH_KERNEL_VERSION,
+    KERNEL_DOCUMENT_SCHEMA_VERSION, KERNEL_HELPER_RELEASE, KERNEL_PARKED_STATE_VERSION,
+    KERNEL_SAVED_FUNCTION_VERSION, LASH_KERNEL_VERSION,
 };
 
 /// One durable format whose version decides whether stored bytes open under
@@ -510,12 +510,7 @@ pub fn durable_format(format: DurableFormat) -> Option<DurableFormatEntry> {
 pub fn actor_state_surfaces() -> Vec<lash_core::durable_port::FormatSurface> {
     #[cfg(feature = "rlm")]
     {
-        use lash_core::durable_port::FormatSurface;
-        vec![
-            FormatSurface::new("kernel-parked-state", KERNEL_PARKED_STATE_VERSION),
-            FormatSurface::new("kernel-saved-function", KERNEL_SAVED_FUNCTION_VERSION),
-            FormatSurface::new("rlm-snapshot", RLM_SNAPSHOT_VERSION),
-        ]
+        kernel_actor_state_surfaces(KERNEL_PARKED_STATE_VERSION, KERNEL_HELPER_RELEASE)
     }
     #[cfg(not(feature = "rlm"))]
     {
@@ -526,14 +521,21 @@ pub fn actor_state_surfaces() -> Vec<lash_core::durable_port::FormatSurface> {
 /// [`actor_state_surfaces`] as the previous build declared them, for the
 /// formats this build carries forward from it (ADR 0106 §1): with `rlm`,
 /// when this build also interprets the kernel version before its own, the
-/// parked kernel run of that version. A process the previous build parked
-/// is stamped with the set these make, and a node of this build claims it
-/// to migrate it. Empty when this build interprets one kernel version.
+/// parked kernel run of that version, written against the helper release
+/// before this build's when this build retains one (FIG-5799). A process
+/// the previous build parked is stamped with the set these make, and a
+/// node of this build claims it to migrate it. Empty when this build
+/// interprets one kernel version.
 pub fn previous_actor_state_surfaces() -> Vec<lash_core::durable_port::FormatSurface> {
     #[cfg(feature = "rlm")]
     {
         lash_vm_runtime::previous_kernel_version()
-            .map(kernel_actor_state_surfaces)
+            .map(|kernel| {
+                kernel_actor_state_surfaces(
+                    kernel,
+                    previous_helper_release().unwrap_or(KERNEL_HELPER_RELEASE),
+                )
+            })
             .unwrap_or_default()
     }
     #[cfg(not(feature = "rlm"))]
@@ -542,14 +544,56 @@ pub fn previous_actor_state_surfaces() -> Vec<lash_core::durable_port::FormatSur
     }
 }
 
-/// [`actor_state_surfaces`] as a build that parks kernel runs under kernel
-/// version `kernel` declares them.
+/// The format surface that states which helper release an actor's cells
+/// and processes were written against (FIG-5799). A set without it is
+/// helper release 1's, the 1.0 baseline's.
 #[cfg(feature = "rlm")]
-pub fn kernel_actor_state_surfaces(kernel: u32) -> Vec<lash_core::durable_port::FormatSurface> {
+pub const KERNEL_HELPERS_SURFACE: &str = "kernel-helpers";
+
+/// [`actor_state_surfaces`] as a build that parks kernel runs under kernel
+/// version `kernel`, written against helper release `helpers`, declares
+/// them.
+#[cfg(feature = "rlm")]
+pub fn kernel_actor_state_surfaces(
+    kernel: u32,
+    helpers: u32,
+) -> Vec<lash_core::durable_port::FormatSurface> {
     use lash_core::durable_port::FormatSurface;
-    vec![
+    let mut surfaces = vec![
         FormatSurface::new("kernel-parked-state", kernel),
         FormatSurface::new("kernel-saved-function", KERNEL_SAVED_FUNCTION_VERSION),
         FormatSurface::new("rlm-snapshot", RLM_SNAPSHOT_VERSION),
-    ]
+    ];
+    if helpers > 1 {
+        surfaces.push(FormatSurface::new(KERNEL_HELPERS_SURFACE, helpers));
+    }
+    surfaces
+}
+
+/// The newest helper release before this build's own that it retains:
+/// what the build before it wrote against, when that build wrote another.
+#[cfg(feature = "rlm")]
+pub fn previous_helper_release() -> Option<u32> {
+    earlier_helper_releases().last().copied()
+}
+
+/// Every helper release before this build's own that it retains, oldest
+/// first: a node of this build reads what a build of one wrote as written
+/// (FIG-5799).
+#[cfg(feature = "rlm")]
+pub fn earlier_helper_releases() -> Vec<u32> {
+    lash_vm_runtime::RETAINED_HELPER_RELEASES
+        .iter()
+        .map(|(_, ordinal)| *ordinal)
+        .filter(|ordinal| *ordinal < KERNEL_HELPER_RELEASE)
+        .collect()
+}
+
+/// The helper release a set holding `surfaces` was written against.
+#[cfg(feature = "rlm")]
+pub fn helper_release_of(surfaces: &[lash_core::durable_port::FormatSurface]) -> u32 {
+    surfaces
+        .iter()
+        .find(|surface| surface.id == KERNEL_HELPERS_SURFACE)
+        .map_or(1, |surface| surface.version)
 }

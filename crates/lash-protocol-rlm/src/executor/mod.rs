@@ -24,11 +24,11 @@ mod snapshot;
 mod trace;
 
 pub(crate) use carry::KernelCarry;
-pub use carry::cell_migration_refusal;
+pub use carry::{cell_migration_refusal, cell_snapshot_functions};
 pub(crate) use envelope::{check_cell_snapshot, snapshot_tool_calls};
 pub(crate) use host::site_label;
 pub use host::{CONTROL_REFUSED, TOOL_ARGUMENTS, TOOL_CALL_LIMIT, TOOL_FAILED, UNKNOWN_EFFECT};
-pub use session::RlmExecutionState;
+pub use session::{RlmExecutionState, saved_function_pins};
 pub use snapshot::{RLM_SNAPSHOT_VERSION, RlmSnapshotError};
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -61,6 +61,9 @@ pub(crate) struct CellServices {
     pub code_renderer: crate::render::CodeRendererSlot,
     /// How the session's dialect words what a model reads.
     pub prompts: Arc<dyn crate::dialect::DialectPrompts>,
+    /// Which helper release the cell is lowered against; `None` is the
+    /// build's own (FIG-5799).
+    pub helpers: Option<Arc<dyn crate::plugin::HelperReleaseGate>>,
 }
 
 /// Runs one cell of `state`'s session, or resumes it from its parked state.
@@ -351,6 +354,12 @@ async fn link_cell(
     let session = state.bindings();
     let mut names = session.names();
     names.extend(projected.keys().map(|name| Name::new(name.as_str())));
+    // A cell is written against the newest helper release every live node
+    // holds (FIG-5799).
+    let helpers = match &services.helpers {
+        Some(gate) => gate.writable().await,
+        None => lash_vm_runtime::KERNEL_HELPER_RELEASE,
+    };
     let lowered = services
         .workers
         .request_accounted(Request::Lower {
@@ -361,6 +370,7 @@ async fn link_cell(
             controls: boundary.controls(),
             bindings: names,
             functions: session.functions(),
+            helpers,
         })
         .await;
     let (document, annotations) = match lowered {
@@ -381,6 +391,11 @@ async fn link_cell(
         Ok(Response::UnknownDialect { dialect }) => {
             return Err(host_failure(format!(
                 "this session's cells are written in `{dialect}`, and no worker has that dialect installed"
+            )));
+        }
+        Ok(Response::HelperReleaseNotHeld { release }) => {
+            return Err(host_failure(format!(
+                "this session's cells are written against helper release {release}, and the worker does not hold it"
             )));
         }
         Ok(Response::Printed { .. }) => {
@@ -1118,6 +1133,7 @@ impl RlmCheckpointPerfFixture {
                 channel: crate::plugin::RlmChannel::Cell,
                 code_renderer: crate::render::CodeRendererSlot::default(),
                 prompts: dialect.prompts(),
+                helpers: None,
             },
             state,
             binding_count,

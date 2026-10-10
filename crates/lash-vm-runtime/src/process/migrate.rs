@@ -236,12 +236,67 @@ pub struct KernelStateMigration {
 
 impl KernelStateMigration {
     /// The migration of `engine`'s processes, or `None` when its build
-    /// ships none: it interprets one kernel version.
+    /// ships none: it interprets one kernel version, and adopts no process
+    /// off a helper release (FIG-5799).
     pub fn of(engine: Arc<KernelProcessEngine>) -> Option<Self> {
-        let previous = engine.writes.previous()?;
-        migration_from(previous)
-            .is_some_and(|migration| migration.to == engine.writes)
-            .then_some(Self { engine })
+        let carries = engine.writes.previous().is_some_and(|previous| {
+            migration_from(previous).is_some_and(|migration| migration.to == engine.writes)
+        });
+        (carries || engine.adopts.is_some()).then_some(Self { engine })
+    }
+}
+
+impl KernelStateMigration {
+    /// `state`, in this build's format, adopted onto the build's helpers;
+    /// `None` when the engine adopts nothing or the process reaches no
+    /// helper it retires. A refusal is not final: the process goes on as
+    /// written, and the survey names it.
+    async fn adopt(
+        &self,
+        process: &ProcessId,
+        state: &EngineState,
+    ) -> Result<Option<EngineState>, EngineStateRefusal> {
+        let engine = &self.engine;
+        let Some(retired) = &engine.adopts else {
+            return Ok(None);
+        };
+        let adopted = super::helpers::adopt_state(
+            &engine.documents,
+            &engine.functions,
+            retired,
+            engine.writes,
+            state,
+        )
+        .await
+        .map_err(|error| match error {
+            super::helpers::AdoptError::Refused(refusal) => EngineStateRefusal {
+                refusal: serde_json::to_value(&refusal).unwrap_or(serde_json::Value::Null),
+                message: refusal.to_string(),
+                fatal: false,
+            },
+            super::helpers::AdoptError::Store(error) => retried(error),
+        })?;
+        let Some(super::helpers::Adopted {
+            mut state,
+            mut input,
+            document,
+        }) = adopted
+        else {
+            return Ok(None);
+        };
+        let claim = lash_core::ReferrerClaim::unguarded(
+            lash_core::ArtifactReferrer::ProcessRecord(process.clone()),
+        )
+        .map_err(retried)?;
+        input.document = engine
+            .documents
+            .publish(&claim, &document)
+            .await
+            .map_err(retried)?;
+        state.payload = serde_json::to_value(&input).map_err(retried)?;
+        advance::encode(&state, engine.writes)
+            .map(Some)
+            .map_err(retried)
     }
 }
 
@@ -267,9 +322,17 @@ impl lash_core::EngineStateMigration for KernelStateMigration {
         self.engine
             .writes
             .previous()
+            .filter(|previous| {
+                migration_from(*previous)
+                    .is_some_and(|migration| migration.to == self.engine.writes)
+            })
             .map(advance::state_format)
             .into_iter()
             .collect()
+    }
+
+    fn adopts(&self) -> bool {
+        self.engine.adopts.is_some()
     }
 
     async fn migrate(
@@ -278,6 +341,9 @@ impl lash_core::EngineStateMigration for KernelStateMigration {
         state: &EngineState,
     ) -> Result<Option<EngineState>, EngineStateRefusal> {
         let engine = &self.engine;
+        if state.format == advance::state_format(engine.writes) {
+            return self.adopt(process, state).await;
+        }
         let carried = carry(&engine.documents, &engine.functions, engine.writes, state)
             .await
             .map_err(|error| match error {
@@ -466,6 +532,15 @@ pub struct KernelMigrationSurvey {
     /// Each library function with no counterpart in the next version, by
     /// identity, with the processes whose documents list it.
     pub retired_functions: std::collections::BTreeMap<lash_kernel_doc::FunctionId, Vec<ProcessId>>,
+    /// Each unfinished kernel process that pins a function of a helper
+    /// release before this build's own, with why a node that adopts would
+    /// not adopt it (FIG-5799). A build that stops retaining the release
+    /// does not start while one is listed.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub helper_processes: Vec<super::HelperDependentProcess>,
+    /// Each session that pins one.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub helper_sessions: Vec<super::HelperDependentSession>,
 }
 
 /// Why a survey did not finish.
@@ -477,6 +552,9 @@ pub enum KernelMigrationSurveyError {
     State(#[from] lash_core::durable_port::DurableError),
     #[error(transparent)]
     Documents(#[from] DocumentStoreError),
+    /// A session's stored state did not load.
+    #[error(transparent)]
+    Sessions(#[from] lash_core::StoreError),
 }
 
 /// Checks every unfinished kernel process of `backend` against the kernel

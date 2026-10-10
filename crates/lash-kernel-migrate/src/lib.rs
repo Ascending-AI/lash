@@ -21,9 +21,15 @@
 //! A saved function ([`saved_function`]) is a document of its own, so it is
 //! carried by the document rewrite alone.
 //!
+//! [`adopt`] is a rewrite within one version: a document's library
+//! functions replaced by others, as a build that stops retaining a helper
+//! release adopts what was written against it (FIG-5799), with the
+//! correspondence [`carry`] moves a run parked under it over.
+//!
 //! The crate depends on `lash-kernel-doc`, `lash-kernel-dialect`,
 //! `lash-kernel-edit` and `lash-kernel-state`, and on no other lash crate.
 
+mod adopt;
 mod carry;
 mod migration;
 mod rewrite;
@@ -31,6 +37,7 @@ mod saved;
 #[cfg(feature = "synthetic-next")]
 mod synthetic;
 
+pub use adopt::adopt;
 pub use carry::carry;
 pub use lash_kernel_edit::{Correspondence, Survivor};
 pub use migration::{

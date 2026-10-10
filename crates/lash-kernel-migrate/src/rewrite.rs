@@ -94,7 +94,7 @@ pub fn replace_functions(document: &mut Document, functions: &BTreeMap<FunctionI
     }
 }
 
-fn replace_in_block(block: &mut Block, functions: &BTreeMap<FunctionId, FunctionId>) {
+pub(crate) fn replace_in_block(block: &mut Block, functions: &BTreeMap<FunctionId, FunctionId>) {
     for stmt in block {
         match stmt {
             Stmt::Let { value, .. } => replace_in_rhs(value, functions),
@@ -208,31 +208,49 @@ fn replace_in_expr(expr: &mut Expr, functions: &BTreeMap<FunctionId, FunctionId>
 /// declared function: every node of `base` to the same site of `result`.
 /// A node of a library function's body is not listed.
 pub fn unchanged(base: &Document, result: &Document) -> Result<Correspondence, DocumentRefusal> {
-    let identity = |document: &Document| {
-        document
-            .identity()
-            .map_err(|error| DocumentRefusal::Encode {
-                message: error.message,
-            })
-    };
+    Correspondence::of(
+        document_identity(base)?,
+        document_identity(result)?,
+        unmoved(base),
+    )
+    .ok_or(DocumentRefusal::Correspondence)
+}
+
+pub(crate) fn document_identity(
+    document: &Document,
+) -> Result<lash_kernel_doc::DocumentId, DocumentRefusal> {
+    document
+        .identity()
+        .map_err(|error| DocumentRefusal::Encode {
+            message: error.message,
+        })
+}
+
+/// Every node of `base`'s `main` and declared functions, at the same site.
+pub(crate) fn unmoved(base: &Document) -> Vec<Survivor> {
     let mut entries = Vec::new();
-    let mut list = |unit: Unit, body: &Block| {
-        let mut pending = vec![(Site::new(unit, []), Node::Block(body))];
-        while let Some((site, node)) = pending.pop() {
-            for (index, child) in (0u32..).zip(node.children()) {
-                pending.push((site.child(index), child));
-            }
-            entries.push(Survivor {
-                from: site.clone(),
-                to: site,
-                edited: false,
-            });
-        }
-    };
-    list(Unit::Main, &base.main);
+    same_sites(Unit::Main, Unit::Main, &base.main, &mut entries);
     for (name, function) in &base.functions {
-        list(Unit::Function(name.clone()), &function.body);
+        let unit = Unit::Function(name.clone());
+        same_sites(unit.clone(), unit, &function.body, &mut entries);
     }
-    Correspondence::of(identity(base)?, identity(result)?, entries)
-        .ok_or(DocumentRefusal::Correspondence)
+    entries
+}
+
+/// Lists every node of `body`, the code of `from`, as at the same path of
+/// `to`.
+pub(crate) fn same_sites(from: Unit, to: Unit, body: &Block, entries: &mut Vec<Survivor>) {
+    let mut pending = vec![(Vec::new(), Node::Block(body))];
+    while let Some((path, node)) = pending.pop() {
+        for (index, child) in (0u32..).zip(node.children()) {
+            let mut child_path = path.clone();
+            child_path.push(index);
+            pending.push((child_path, child));
+        }
+        entries.push(Survivor {
+            from: Site::new(from.clone(), path.clone()),
+            to: Site::new(to.clone(), path),
+            edited: false,
+        });
+    }
 }

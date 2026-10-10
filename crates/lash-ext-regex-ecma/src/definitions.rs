@@ -172,6 +172,7 @@ impl Operation {
             charge,
             guard,
             implementation: Implementation::Native,
+            native_version: lash_kernel_doc::FIRST_NATIVE_VERSION,
         }
     }
 }

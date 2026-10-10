@@ -51,6 +51,30 @@ impl NamedLibrary {
         Ok(library)
     }
 
+    /// The functions of `registry` that `named` admits, each by the name
+    /// its definition carries, over every function `registry` holds as the
+    /// catalog. A front end resolves a name against the named functions
+    /// alone, and still finds any function the registry holds by identity:
+    /// a build that retains an earlier release's functions writes its own,
+    /// while a saved function or a document written against the earlier
+    /// ones is read as written (FIG-5799).
+    pub fn resolving(
+        registry: &FunctionRegistry,
+        named: impl Fn(&FunctionId) -> bool,
+    ) -> Result<Self, LibraryError> {
+        let mut library = Self::new();
+        for (function, registered) in registry.iter() {
+            if named(function) {
+                library.insert_identified(*function, Arc::clone(&registered.definition))?;
+            } else {
+                library
+                    .definitions
+                    .insert(*function, Arc::clone(&registered.definition));
+            }
+        }
+        Ok(library)
+    }
+
     /// Adds a function under its definition's name, which must be free.
     pub fn insert(
         &mut self,

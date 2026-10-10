@@ -37,7 +37,8 @@ pub use document::{
     NodeAnnotation,
 };
 pub use function::{
-    Formula, FunctionBody, FunctionDefinition, Guard, Implementation, Measure, Operand,
+    FIRST_NATIVE_VERSION, Formula, FunctionBody, FunctionDefinition, Guard, Implementation,
+    Measure, Operand,
 };
 pub use identity::{EffectIdentity, LoopIteration, SpawnIdentity, TaskIdentity};
 pub use name::{

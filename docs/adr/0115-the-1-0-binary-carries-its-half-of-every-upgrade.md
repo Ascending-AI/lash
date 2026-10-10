@@ -444,7 +444,12 @@ then finish backfills and contract. The current `lashctl` supplies `migrate`,
 `kernel-migration list`, `kernel-migration run` and `version`. A build that
 retires the previous kernel version's formats does not start while a process
 or session is still in them (`DurableError::Unmigrated`, naming
-`lashctl kernel-migration run`; `docs/kernel/design.md` §6).
+`lashctl kernel-migration run`; `docs/kernel/design.md` §6). A build that
+stops retaining a released helper set does not start while an unfinished
+process or session still pins one of its functions
+(`DurableError::RetiredDependents`); `kernel-migration list` names each,
+and `kernel-migration run` wakes the processes for a node that adopts
+(FIG-5799). A helper set is never retired by calendar.
 Its exit codes are 0 done, 1 failure, 2 usage, 3 refused precondition and
 4 incompatible store (`crates/lashctl/src/main.rs`). Node draining is exposed
 through `LashCore::drain` (`crates/lash/src/core/node.rs`), not operator drain

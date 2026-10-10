@@ -165,6 +165,8 @@ pub mod render {
     pub use lash_render::*;
 }
 #[cfg(feature = "rlm")]
+mod helper_releases;
+#[cfg(feature = "rlm")]
 mod kernel_migration;
 #[cfg(feature = "rlm")]
 /// RLM-specific turn-builder extensions.

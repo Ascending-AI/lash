@@ -89,7 +89,13 @@ pub fn print_definition(definition: &FunctionDefinition) -> String {
         printer.out.push('\n');
     }
     if definition.has_native() {
-        printer.out.push_str("native\n");
+        printer.out.push_str("native");
+        if definition.native_version != crate::FIRST_NATIVE_VERSION {
+            printer
+                .out
+                .push_str(&format!(" {}", definition.native_version));
+        }
+        printer.out.push('\n');
     }
     if let Some(body) = definition.body() {
         printer.uses(&body.functions);

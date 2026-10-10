@@ -96,6 +96,7 @@ fn definition(
             charge,
             guard: None,
             implementation: Implementation::Native,
+            native_version: lash_kernel_doc::FIRST_NATIVE_VERSION,
         },
         Arc::new(Native {
             function: native,

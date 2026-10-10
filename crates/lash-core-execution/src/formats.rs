@@ -64,6 +64,11 @@ pub struct BuildFormats {
     /// The operator command that has a node of the build before this one
     /// carry the actors in a retired set forward.
     sweep: Option<String>,
+    /// The formats, beside the core's own, of the earlier builds whose
+    /// state this build reads as written: each a build of a helper release
+    /// this one retains (FIG-5799). A node of this build claims the actors
+    /// they left and carries nothing of them.
+    decoded: Vec<Vec<FormatSurface>>,
 }
 
 /// The set of a process whose engine state is in `format`, by a build whose
@@ -119,7 +124,31 @@ impl BuildFormats {
             carried_sessions: Vec::new(),
             retired: Vec::new(),
             sweep: None,
+            decoded: Vec::new(),
         }
+    }
+
+    /// These sets, also decoding the sets of an earlier build whose actors
+    /// held `extra` beside the core's formats, and whose engines wrote this
+    /// build's engine states: a build of a helper release this one retains
+    /// (FIG-5799). Their state is read as written; nothing is carried.
+    pub(crate) fn decoding(mut self, extra: &[FormatSurface]) -> Self {
+        let extra = extra.to_vec();
+        if !self.decoded.contains(&extra) {
+            self.decoded.push(extra);
+        }
+        self
+    }
+
+    /// The session set of each earlier build whose state this build reads
+    /// as written, newest first, with the formats beside the core's own its
+    /// actors held (FIG-5799).
+    #[must_use]
+    pub fn decoded_sessions(&self) -> Vec<(&[FormatSurface], FormatSet)> {
+        self.decoded
+            .iter()
+            .map(|extra| (extra.as_slice(), session_set(extra)))
+            .collect()
     }
 
     /// These sets, and the set of a process whose engine state is in
@@ -171,6 +200,7 @@ impl BuildFormats {
         self.carried_sessions = earlier.carried_sessions.clone();
         self.retired = earlier.retired.clone();
         self.sweep = earlier.sweep.clone();
+        self.decoded = earlier.decoded.clone();
         self
     }
 
@@ -225,6 +255,7 @@ impl BuildFormats {
     pub fn session_decodes(&self) -> Vec<FormatSet> {
         let mut decodes = vec![self.session.clone(), FormatSet::unstarted_session()];
         decodes.extend(self.carried_sessions.iter().cloned());
+        decodes.extend(self.decoded.iter().map(|extra| session_set(extra)));
         decodes
     }
 
@@ -239,6 +270,13 @@ impl BuildFormats {
             decodes.push(set.clone());
         }
         decodes.extend(self.carried.values().cloned());
+        for extra in &self.decoded {
+            decodes.extend(
+                self.written
+                    .values()
+                    .map(|format| process_set(format, extra)),
+            );
+        }
         decodes
     }
 }

@@ -26,6 +26,12 @@ pub struct RlmProtocolPluginFactory {
     #[cfg(feature = "synthetic-next")]
     kernel_writes: Option<lash_kernel_doc::KernelVersion>,
     deferred_tool_resolver: Option<SharedDeferredToolResolver>,
+    /// Which helper release this host's cells are written against; `None`
+    /// is the build's own (FIG-5799).
+    helpers: Option<Arc<dyn super::HelperReleaseGate>>,
+    /// Whether the kernel engine adopts processes written against an
+    /// earlier helper release onto the build's own (FIG-5799).
+    adopting_helpers: bool,
 }
 
 impl RlmProtocolPluginFactory {
@@ -45,6 +51,8 @@ impl RlmProtocolPluginFactory {
             #[cfg(feature = "synthetic-next")]
             kernel_writes: None,
             deferred_tool_resolver: None,
+            helpers: None,
+            adopting_helpers: false,
         }
     }
 
@@ -81,6 +89,43 @@ impl RlmProtocolPluginFactory {
     pub fn writing_kernel(mut self, writes: lash_kernel_doc::KernelVersion) -> Self {
         self.kernel_writes = Some(writes);
         self
+    }
+
+    /// This host as a build of helper release `release` (FIG-5799): its
+    /// cells are written against that release's functions, whatever the
+    /// fleet holds. The two-build laws run a node of each release from one
+    /// binary with it.
+    #[cfg(feature = "synthetic-next")]
+    #[must_use]
+    pub fn writing_helpers(self, release: u32) -> Self {
+        self.with_helper_gate(Arc::new(super::helpers::WritingRelease(release)))
+    }
+
+    /// Write this host's cells against the helper release `gate` answers
+    /// as each is lowered: the newest every live node of the fleet holds
+    /// (FIG-5799). A host whose fleet runs one build needs none.
+    #[must_use]
+    pub fn with_helper_gate(mut self, gate: Arc<dyn super::HelperReleaseGate>) -> Self {
+        self.helpers = Some(gate);
+        self
+    }
+
+    /// Adopt each kernel process this host's node claims that pins a
+    /// function of a helper release before the build's own onto the
+    /// build's function of the same name, when its run is not parked
+    /// inside a helper the adoption changes (FIG-5799): the operator's
+    /// choice before a build that stops retaining that release starts. A
+    /// process it does not adopt goes on as written, and `lashctl
+    /// kernel-migration list` names it with the typed reason.
+    #[must_use]
+    pub fn adopting_helpers(mut self) -> Self {
+        self.adopting_helpers = true;
+        self
+    }
+
+    /// Whether a helper release gate is installed.
+    pub fn has_helper_gate(&self) -> bool {
+        self.helpers.is_some()
     }
 
     /// State the library functions the worker entry was assembled with,
@@ -251,6 +296,14 @@ impl PluginFactory for RlmProtocolPluginFactory {
             Some(writes) => engine.writing(writes),
             None => engine,
         };
+        let engine = if self.adopting_helpers {
+            engine.adopting_helpers(
+                lash_vm_runtime::retained_earlier_helpers()
+                    .map_err(|error| PluginError::Registration(error.to_string()))?,
+            )
+        } else {
+            engine
+        };
         Ok(vec![lash_vm_runtime::kernel_process_engine_registration(
             engine,
         )])
@@ -280,6 +333,7 @@ impl PluginFactory for RlmProtocolPluginFactory {
             execution_bounds: config.execution_bounds(),
             channel: config.channel,
             kernel: crate::executor::KernelCarry::new(self.worker_functions.clone(), writes),
+            helpers: self.helpers.clone(),
         };
         let dialect = Arc::new(SessionDialect::new(dialect, services));
         if config.channel == super::RlmChannel::NativeTool {

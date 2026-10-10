@@ -51,7 +51,8 @@ pub use driver::{RlmProjectorConfig, build_rlm_preamble};
 pub use executor::RlmCheckpointPerfFixture;
 pub use executor::{
     CONTROL_REFUSED, RLM_SNAPSHOT_VERSION, RlmSnapshotError, TOOL_ARGUMENTS, TOOL_CALL_LIMIT,
-    TOOL_FAILED, UNKNOWN_EFFECT, cell_migration_refusal,
+    TOOL_FAILED, UNKNOWN_EFFECT, cell_migration_refusal, cell_snapshot_functions,
+    saved_function_pins,
 };
 /// The kernel's typed snapshot validation causes and fragment roots.
 pub mod snapshot {
@@ -68,8 +69,8 @@ pub use lash_sansio::{
 };
 pub use lash_vm_runtime::ResolvedToolBinding;
 pub use plugin::{
-    ExecutionBounds, InstructionBound, MemoryBound, RLM_PROTOCOL_PLUGIN_ID, RlmChannel,
-    RlmConfigOwner, RlmConfigRefusal, RlmCreateConfig, RlmPresentationConfig,
+    ExecutionBounds, HelperReleaseGate, InstructionBound, MemoryBound, RLM_PROTOCOL_PLUGIN_ID,
+    RlmChannel, RlmConfigOwner, RlmConfigRefusal, RlmCreateConfig, RlmPresentationConfig,
     RlmProtocolPluginConfig, RlmProtocolPluginConfigBuilder, RlmProtocolPluginFactory,
     RlmRecordedBehaviour, RlmRecordedConfig, RlmRenderRefusal, RlmRunOptions,
     RlmSessionConfigDecodeError, SetRlmRender, UnsetBound, UnsetChannel, rlm_session_config,

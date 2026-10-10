@@ -1664,6 +1664,12 @@
     "name": {
       "$ref": "#/$defs/QualifiedName"
     },
+    "native_version": {
+      "description": "The version of the native implementation (`K-LIB-011`): its code is\nnot part of the definition, so a native that answers otherwise is\nstated anew under the next version, which is a new function. Only a\ndefinition that states a native implementation states one other\nthan the first.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
     "signature": {
       "$ref": "#/$defs/Signature"
     }

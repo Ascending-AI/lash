@@ -1234,5 +1234,38 @@ impl RlmExecutionState {
     }
 }
 
+/// The library functions each function a session saved pins, by the
+/// binding it is called through, read from `root`, the stored root of the
+/// session's execution state (FIG-5799): what a build that drops a helper
+/// release asks of an idle session.
+///
+/// # Errors
+///
+/// [`RlmSnapshotError::FormatMismatch`] when `root` is not one.
+pub fn saved_function_pins(
+    root: &[u8],
+) -> Result<BTreeMap<String, BTreeSet<lash_kernel_doc::FunctionId>>, RlmSnapshotError> {
+    let parsed: RlmSnapshotRoot =
+        serde_json::from_slice(root).map_err(|error| RlmSnapshotError::FormatMismatch {
+            details: error.to_string(),
+        })?;
+    Ok(parsed
+        .functions
+        .into_iter()
+        .map(|(name, held)| {
+            (
+                name,
+                held.function
+                    .document
+                    .manifest
+                    .functions
+                    .keys()
+                    .copied()
+                    .collect(),
+            )
+        })
+        .collect())
+}
+
 #[cfg(test)]
 mod tests;

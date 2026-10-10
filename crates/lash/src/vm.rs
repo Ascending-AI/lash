@@ -32,6 +32,8 @@ pub use lash_vm_client::{PoolStats as WorkerPoolStats, WorkerPool};
 pub use lash_vm_client::{
     Deadlines as WorkerDeadlines, PoolConfig as WorkerPoolConfig, WorkerEntry, WorkerTuning,
 };
+/// A helper release a worker retains beside its own functions (FIG-5799).
+pub use lash_vm_worker::HelperReleaseIndex;
 /// What a worker registers when it starts: the kernel library, extension
 /// functions and the dialects it lowers and prints.
 pub use lash_vm_worker::{
@@ -76,3 +78,7 @@ pub use lash_vm_runtime::{
     ParkedRefusal as KernelParkedRefusal, RefusedKernelCell, RefusedKernelProcess,
     UnmigratedKernelSession, standard_functions,
 };
+/// What still pins a helper release before this build's own, and why a
+/// node that adopts would not adopt a process off it (FIG-5799).
+#[cfg(feature = "rlm")]
+pub use lash_vm_runtime::{HelperAdoptionRefusal, HelperDependentProcess, HelperDependentSession};

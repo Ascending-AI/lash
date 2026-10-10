@@ -14,6 +14,7 @@
 
 mod advance;
 mod documents;
+mod helpers;
 mod migrate;
 mod run;
 mod state;
@@ -30,6 +31,11 @@ use lash_kernel_doc::{Document, DocumentId, Name, Signature};
 use tokio_util::sync::CancellationToken;
 
 pub use documents::{DocumentStoreError, KernelDocuments};
+pub use helpers::{
+    AdoptedRun, HelperAdoptionRefusal, HelperDependentProcess, HelperDependentSession,
+    RetiredHelpers, plan_helper_adoption, retained_earlier_helpers, retired_functions_reached,
+    survey_helper_processes,
+};
 pub use migrate::{
     KernelMigrationRefusal, KernelMigrationSurvey, KernelMigrationSurveyError,
     KernelStateMigration, PlannedMigration, RefusedKernelCell, RefusedKernelProcess,
@@ -210,6 +216,9 @@ pub struct KernelProcessEngine {
     pub(crate) policy: KernelRunPolicy,
     pub(crate) random: Arc<dyn Fn() -> u64 + Send + Sync>,
     pub(crate) trace_runtime: Option<lash_core::trace::TraceRuntime>,
+    /// The functions of the helper releases a node of this engine adopts
+    /// processes off, with their counterparts (FIG-5799).
+    pub(crate) adopts: Option<Arc<RetiredHelpers>>,
 }
 
 /// Host-selected policy for one `kernel_run`, separate from a process's
@@ -283,7 +292,22 @@ impl KernelProcessEngine {
             policy: KernelRunPolicy::standard(),
             random: Arc::new(process_random),
             trace_runtime: None,
+            adopts: None,
         }
+    }
+
+    /// This engine adopting each process it claims whose document reaches
+    /// a function of `retired` onto that function's counterpart, the
+    /// build's own helper of its name, when the run is not parked inside a
+    /// helper the adoption changes (FIG-5799). An operator chooses it to
+    /// carry what the build before it wrote off a helper release before a
+    /// build that no longer retains that release starts. A process it
+    /// refuses goes on as written, and `lashctl kernel-migration list`
+    /// names it with the typed reason.
+    #[must_use]
+    pub fn adopting_helpers(mut self, retired: RetiredHelpers) -> Self {
+        self.adopts = (!retired.is_empty()).then(|| Arc::new(retired));
+        self
     }
 
     /// This engine as the previous build's: it writes kernel version

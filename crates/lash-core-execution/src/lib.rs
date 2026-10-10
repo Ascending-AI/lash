@@ -50,7 +50,9 @@ pub use lash_core_store::runtime_owner::RuntimeOwner;
 pub use lash_core_store::surface_format;
 mod backend;
 pub mod formats;
-pub use backend::{Backend, BackendParts, DurableBuildError, StoreBindingId, StoreSet};
+pub use backend::{
+    Backend, BackendParts, DurableBuildError, RetirementCheck, StoreBindingId, StoreSet,
+};
 /// The durable store a [`StoreSet`] hands out (ADR 0132 §1).
 pub use lash_durable::{DurableConfig, DurableSettings, DurableStore};
 mod module_artifacts;

@@ -47,6 +47,7 @@ impl RlmRuntimeState {
             execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
             code_renderer: Default::default(),
             channel: crate::plugin::RlmChannel::Cell,
+            helpers: None,
         };
         Self::new(Arc::new(crate::dialect::SessionDialect::new(
             crate::dialect::CellDialect::typescript(),

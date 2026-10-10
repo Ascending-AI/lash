@@ -245,6 +245,16 @@ impl LashCore {
         backend: Backend,
         factory: crate::rlm::RlmProtocolPluginFactory,
     ) -> LashCoreBuilder {
+        // While a node of a build of an earlier helper release is live,
+        // cells are written against the newest release it holds too
+        // (FIG-5799).
+        let factory = if factory.has_helper_gate() {
+            factory
+        } else {
+            factory.with_helper_gate(Arc::new(crate::helper_releases::FleetHelperWrites::new(
+                backend.clone(),
+            )))
+        };
         LashCore::builder(backend).protocol_plugin(Arc::new(factory))
     }
 

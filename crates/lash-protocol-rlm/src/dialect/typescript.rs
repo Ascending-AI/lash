@@ -276,6 +276,7 @@ mod tests {
                 execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
                 code_renderer: Default::default(),
                 channel: crate::plugin::RlmChannel::Cell,
+                helpers: None,
             },
         );
         let render = |catalog: &lash_core::ToolCatalog| {

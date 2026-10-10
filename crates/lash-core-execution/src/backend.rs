@@ -120,6 +120,29 @@ struct BackendInner {
     /// under, when it serves, takes its hints from here, so a mailbox commit
     /// made on this node reaches its actors without waiting for a poll.
     hints: Hints,
+    /// What this build no longer holds of an earlier release and counts
+    /// the actors still depending on, before its node starts
+    /// ([`Backend::with_retirement`]).
+    retirement: Option<Arc<dyn RetirementCheck>>,
+}
+
+/// What a build drops of an earlier release beside its format sets: the
+/// functions a run pins by identity (FIG-5799). A node of the build does not
+/// start while an unfinished actor still depends on one.
+#[async_trait::async_trait]
+pub trait RetirementCheck: Send + Sync {
+    /// What the build no longer holds, as an operator reads it.
+    fn retired(&self) -> String;
+
+    /// The operator command that lists the actors still depending on it.
+    fn command(&self) -> String;
+
+    /// How many unfinished actors of `backend` still depend on it.
+    ///
+    /// # Errors
+    ///
+    /// The store's.
+    async fn dependents(&self, backend: &Backend) -> Result<u64, lash_durable::DurableError>;
 }
 
 impl Backend {
@@ -168,6 +191,7 @@ impl Backend {
                 formats,
                 surfaces: parts.formats,
                 hints: Hints::default(),
+                retirement: None,
             }),
         })
     }
@@ -208,6 +232,7 @@ impl Backend {
                 formats: self.inner.formats.clone(),
                 surfaces: self.inner.surfaces.clone(),
                 hints: self.inner.hints.clone(),
+                retirement: self.inner.retirement.clone(),
             }),
         }
     }
@@ -241,6 +266,7 @@ impl Backend {
                 providers: Arc::clone(&self.inner.providers),
                 surfaces: self.inner.surfaces.clone(),
                 hints: self.inner.hints.clone(),
+                retirement: self.inner.retirement.clone(),
             }),
         }
     }
@@ -287,8 +313,8 @@ impl Backend {
             formats = formats.carrying(&format, previous);
         }
         // A build that retires every format the migration carries from
-        // carries nothing forward (ADR 0115 §3.5).
-        if formats == self.inner.formats {
+        // carries nothing forward (ADR 0115 §3.5), unless it adopts.
+        if formats == self.inner.formats && !migration.adopts() {
             return self.clone();
         }
         let mut migrations = self.inner.migrations.clone();
@@ -306,6 +332,7 @@ impl Backend {
                 providers: Arc::clone(&self.inner.providers),
                 surfaces: self.inner.surfaces.clone(),
                 hints: self.inner.hints.clone(),
+                retirement: self.inner.retirement.clone(),
             }),
         }
     }
@@ -334,8 +361,66 @@ impl Backend {
                 providers: Arc::clone(&self.inner.providers),
                 surfaces: self.inner.surfaces.clone(),
                 hints: self.inner.hints.clone(),
+                retirement: self.inner.retirement.clone(),
             }),
         }
+    }
+
+    /// This backend also decoding the sets of an earlier build whose actors
+    /// held `previous` beside the core's formats and whose engines wrote
+    /// this build's engine states: a build of a helper release this one
+    /// retains (FIG-5799). Its nodes claim what that build left and read it
+    /// as written.
+    #[must_use]
+    pub fn decoding(&self, previous: &[lash_durable::FormatSurface]) -> Self {
+        let durable = std::sync::OnceLock::from(Arc::clone(self.durable()));
+        Self {
+            inner: Arc::new(BackendInner {
+                stores: Arc::clone(&self.inner.stores),
+                durable,
+                config: self.inner.config,
+                formats: self.inner.formats.clone().decoding(previous),
+                engines: self.inner.engines.clone(),
+                migrations: self.inner.migrations.clone(),
+                providers: Arc::clone(&self.inner.providers),
+                surfaces: self.inner.surfaces.clone(),
+                hints: self.inner.hints.clone(),
+                retirement: self.inner.retirement.clone(),
+            }),
+        }
+    }
+
+    /// This backend dropping what `check` names of an earlier release: its
+    /// node does not start while an unfinished actor still depends on it
+    /// (FIG-5799).
+    #[must_use]
+    pub fn with_retirement(&self, check: Arc<dyn RetirementCheck>) -> Self {
+        let durable = std::sync::OnceLock::from(Arc::clone(self.durable()));
+        Self {
+            inner: Arc::new(BackendInner {
+                stores: Arc::clone(&self.inner.stores),
+                durable,
+                config: self.inner.config,
+                formats: self.inner.formats.clone(),
+                engines: self.inner.engines.clone(),
+                migrations: self.inner.migrations.clone(),
+                providers: Arc::clone(&self.inner.providers),
+                surfaces: self.inner.surfaces.clone(),
+                hints: self.inner.hints.clone(),
+                retirement: Some(check),
+            }),
+        }
+    }
+
+    /// The formats this build's actors hold beside the core's own.
+    pub fn surfaces(&self) -> &[lash_durable::FormatSurface] {
+        &self.inner.surfaces
+    }
+
+    /// What this build drops of an earlier release beside its format sets,
+    /// when it drops anything.
+    pub fn retirement(&self) -> Option<&Arc<dyn RetirementCheck>> {
+        self.inner.retirement.as_ref()
     }
 
     /// How the engine of `kind` carries an earlier build's state forward,

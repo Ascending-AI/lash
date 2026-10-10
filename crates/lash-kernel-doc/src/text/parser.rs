@@ -118,6 +118,7 @@ pub fn parse_definition(text: &str) -> Result<FunctionDefinition, ParseError> {
     let mut charge = None;
     let mut guard = None;
     let mut native = false;
+    let mut native_version = None;
     let mut body_start = None;
     while parser.peek() != &Token::End {
         let word = parser.keyword("a definition item")?;
@@ -141,7 +142,13 @@ pub fn parse_definition(text: &str) -> Result<FunctionDefinition, ParseError> {
                 let limit = parser.formula()?;
                 parser.once(guard.replace(Guard { unit, limit }), "`guard`")?;
             }
-            "native" => native = true,
+            "native" => {
+                native = true;
+                if matches!(parser.peek(), Token::Int(_)) {
+                    let version = parser.version()?;
+                    parser.once(native_version.replace(version), "the native version")?;
+                }
+            }
             "use" => parser.use_line()?,
             "body" => {
                 parser.once(body_start.replace(parser.position), "`body`")?;
@@ -175,6 +182,7 @@ pub fn parse_definition(text: &str) -> Result<FunctionDefinition, ParseError> {
         charge: charge.ok_or_else(|| parser.missing("the `charge` line"))?,
         guard,
         implementation,
+        native_version: native_version.unwrap_or(crate::FIRST_NATIVE_VERSION),
     })
 }
 

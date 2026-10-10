@@ -90,6 +90,15 @@ pub const KERNEL_SAVED_FUNCTION_VERSION: u32 = 1;
 
 const _: () = assert!(KERNEL_SAVED_FUNCTION_VERSION == lash_kernel_doc::KERNEL_VERSION);
 
+/// The helper release this build's cells and processes are written against
+/// (FIG-5799): the version of the `kernel-helpers` surface in its actors'
+/// format sets. A build holds the functions of each earlier release it
+/// retains beside its own, so a node of it decodes what a build of one of
+/// those wrote, and a node of a build that holds only an earlier release
+/// never claims what a build of this one wrote. A format set without the
+/// surface is release 1's, the 1.0 baseline's.
+pub const KERNEL_HELPER_RELEASE: u32 = lash_vm_worker::HELPER_RELEASE;
+
 /// The version of each kernel format the previous build wrote, when this
 /// build still interprets it: what a process that build parked is stored
 /// in, and what a node of this build carries forward.

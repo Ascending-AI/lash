@@ -143,6 +143,8 @@ impl RlmSessionExt for crate::LashSession {
 // `lash::process`; they are not re-exported here.
 /// How a session's turns may end.
 pub use lash_core::TerminationMode;
+/// Which helper release a host's cells are written against (FIG-5799).
+pub use lash_protocol_rlm::HelperReleaseGate;
 /// Identifies the RLM protocol's durable output by its typed message origin.
 pub use lash_protocol_rlm::is_rlm_protocol_output;
 /// The initial nodes that bind a [`RlmSeed`] in a session being created: a

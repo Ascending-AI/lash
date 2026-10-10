@@ -24,24 +24,28 @@ pub(crate) fn perform(
             controls,
             bindings,
             functions,
-        } => match embedding.lower(
-            &dialect,
-            &source,
-            &lash_kernel_dialect::Environment {
-                library: embedding.library(),
-                effects: &effects,
-                tool_roots: &tool_roots,
-                controls: &controls,
-                bindings: &bindings,
-                functions: &functions,
+            helpers,
+        } => match embedding.library_for(helpers) {
+            Err(_) => Response::HelperReleaseNotHeld { release: helpers },
+            Ok(library) => match embedding.lower(
+                &dialect,
+                &source,
+                &lash_kernel_dialect::Environment {
+                    library,
+                    effects: &effects,
+                    tool_roots: &tool_roots,
+                    controls: &controls,
+                    bindings: &bindings,
+                    functions: &functions,
+                },
+            ) {
+                None => Response::UnknownDialect { dialect },
+                Some(Ok(lowered)) => Response::Lowered {
+                    document: encoded(lowered.document.to_json())?,
+                    annotations: encoded(lowered.annotations.to_json())?,
+                },
+                Some(Err(diagnostic)) => Response::DialectRefused(refusal(diagnostic)),
             },
-        ) {
-            None => Response::UnknownDialect { dialect },
-            Some(Ok(lowered)) => Response::Lowered {
-                document: encoded(lowered.document.to_json())?,
-                annotations: encoded(lowered.annotations.to_json())?,
-            },
-            Some(Err(diagnostic)) => Response::DialectRefused(refusal(diagnostic)),
         },
         Request::Print { dialect, document } => {
             let document = std::str::from_utf8(&document)

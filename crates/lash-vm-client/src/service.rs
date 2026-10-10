@@ -27,6 +27,9 @@ pub enum Request {
         /// The functions the session holds: the document declares the
         /// ones the source names.
         functions: BTreeMap<Name, lash_kernel_dialect::SavedFunction>,
+        /// The helper release whose names the source resolves against: the
+        /// newest every live node holds (FIG-5799).
+        helpers: u32,
     },
     /// Print `document` (its JSON encoding) as source in `dialect`.
     Print {
@@ -68,6 +71,10 @@ pub enum Response {
     /// The worker has no such dialect installed.
     UnknownDialect {
         dialect: String,
+    },
+    /// The worker holds no such helper release.
+    HelperReleaseNotHeld {
+        release: u32,
     },
 }
 

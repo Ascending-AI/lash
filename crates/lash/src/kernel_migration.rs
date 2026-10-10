@@ -44,7 +44,11 @@ fn earlier_kernel_formats() -> Option<BuildFormats> {
             kind: LASH_VM_ENGINE_KIND.to_owned(),
             version: kernel,
         }],
-        &crate::formats::kernel_actor_state_surfaces(kernel),
+        &crate::formats::kernel_actor_state_surfaces(
+            kernel,
+            crate::formats::previous_helper_release()
+                .unwrap_or(crate::formats::KERNEL_HELPER_RELEASE),
+        ),
     ))
 }
 
@@ -83,11 +87,13 @@ pub async fn survey_kernel_migration(
     functions: &Arc<FunctionRegistry>,
 ) -> Result<KernelMigrationSurvey, KernelMigrationSurveyError> {
     let mut survey = lash_vm_runtime::survey_kernel_processes(backend, functions).await?;
-    let Some(earlier) = earlier_kernel_formats() else {
-        return Ok(survey);
-    };
+    let earlier = earlier_kernel_formats();
     let reads = backend.durable();
-    for actor in actors_in(backend, earlier.session()).await? {
+    let sessions = match &earlier {
+        Some(earlier) => actors_in(backend, earlier.session()).await?,
+        None => Vec::new(),
+    };
+    for actor in sessions {
         let Ok(session) = lash_core::SessionId::parse(actor.id()) else {
             continue;
         };
@@ -114,6 +120,16 @@ pub async fn survey_kernel_migration(
             .sessions
             .push(UnmigratedKernelSession { session, refused });
     }
+    // What still pins a helper release before this build's own, which a
+    // later build may stop retaining (FIG-5799).
+    for release in crate::formats::earlier_helper_releases() {
+        let retired = crate::helper_releases::retired_helpers(release)?;
+        let (processes, sessions) =
+            crate::helper_releases::survey_helper_dependents(backend, functions, release, &retired)
+                .await?;
+        survey.helper_processes.extend(processes);
+        survey.helper_sessions.extend(sessions);
+    }
     Ok(survey)
 }
 
@@ -124,6 +140,14 @@ pub struct KernelMigrationSweep {
     pub processes: usize,
     /// The sessions still in it it woke.
     pub sessions: usize,
+    /// The processes still pinning a helper release before this build's
+    /// own it woke, for a node that adopts to adopt (FIG-5799).
+    #[serde(skip_serializing_if = "is_zero")]
+    pub helper_processes: usize,
+}
+
+fn is_zero(count: &usize) -> bool {
+    *count == 0
 }
 
 /// Wakes every process and session of `backend` still in the kernel
@@ -140,7 +164,10 @@ pub struct KernelMigrationSweep {
 pub async fn sweep_kernel_migration(
     backend: &crate::Backend,
 ) -> Result<KernelMigrationSweep, DurableError> {
-    let mut sweep = KernelMigrationSweep::default();
+    let mut sweep = KernelMigrationSweep {
+        helper_processes: wake_helper_dependents(backend).await?,
+        ..KernelMigrationSweep::default()
+    };
     let Some(earlier) = earlier_kernel_formats() else {
         return Ok(sweep);
     };
@@ -171,6 +198,49 @@ pub async fn sweep_kernel_migration(
     Ok(sweep)
 }
 
+/// Wakes every unfinished kernel process that pins a function of a helper
+/// release before this build's own, so a node that adopts claims it and
+/// adopts it; answers how many it woke.
+async fn wake_helper_dependents(backend: &crate::Backend) -> Result<usize, DurableError> {
+    let unavailable = |error: KernelMigrationSurveyError| match error {
+        KernelMigrationSurveyError::State(error) => error,
+        other => DurableError::Store(lash_core::durable_port::StoreFailure {
+            kind: lash_core::durable_port::StoreFailureKind::Unavailable,
+            message: other.to_string(),
+        }),
+    };
+    let mut woken = 0;
+    for release in crate::formats::earlier_helper_releases() {
+        let retired = crate::helper_releases::retired_helpers(release).map_err(unavailable)?;
+        let functions = lash_vm_runtime::standard_functions().map_err(|error| {
+            unavailable(KernelMigrationSurveyError::State(DurableError::Store(
+                lash_core::durable_port::StoreFailure {
+                    kind: lash_core::durable_port::StoreFailureKind::Corrupt,
+                    message: error.to_string(),
+                },
+            )))
+        })?;
+        let processes = lash_vm_runtime::survey_helper_processes(backend, &functions, &retired)
+            .await
+            .map_err(unavailable)?;
+        for dependent in processes {
+            let Ok(actor) = ActorKey::process(dependent.process.as_str()) else {
+                continue;
+            };
+            let mut tx = MailTx::new();
+            tx.wake(actor);
+            match backend.commit_mail(tx, CommitLabel::MAIL_PROCESS).await {
+                Ok(_) => woken += 1,
+                Err(DurableError::MailRefused(
+                    MailRefusal::ActorTerminal(_) | MailRefusal::UnknownActor(_),
+                )) => {}
+                Err(error) => return Err(error),
+            }
+        }
+    }
+    Ok(woken)
+}
+
 /// The kernel version a backend of this build retires, when the window the
 /// build before it opened is closed: what its nodes refuse to start over
 /// while a process or session is still in it.
@@ -185,7 +255,11 @@ pub(crate) fn retiring(backend: &crate::Backend, kernel: u32) -> crate::Backend 
             kind: LASH_VM_ENGINE_KIND.to_owned(),
             version: kernel,
         },
-        &crate::formats::kernel_actor_state_surfaces(kernel),
+        &crate::formats::kernel_actor_state_surfaces(
+            kernel,
+            crate::formats::previous_helper_release()
+                .unwrap_or(crate::formats::KERNEL_HELPER_RELEASE),
+        ),
         KERNEL_MIGRATION_SWEEP,
     )
 }

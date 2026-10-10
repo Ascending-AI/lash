@@ -22,8 +22,9 @@ pub use binding::{
 };
 pub use boundary::{BoundaryError, HostBoundary, HostEffect, type_of_schema};
 pub use formats::{
-    KERNEL_DOCUMENT_SCHEMA_VERSION, KERNEL_PARKED_STATE_VERSION, KERNEL_SAVED_FUNCTION_VERSION,
-    LASH_KERNEL_VERSION, previous_kernel_version, retired_kernel_version,
+    KERNEL_DOCUMENT_SCHEMA_VERSION, KERNEL_HELPER_RELEASE, KERNEL_PARKED_STATE_VERSION,
+    KERNEL_SAVED_FUNCTION_VERSION, LASH_KERNEL_VERSION, previous_kernel_version,
+    retired_kernel_version,
 };
 pub use host::ParentHost;
 /// Why a kernel migration does not carry a document or a parked run.
@@ -32,6 +33,12 @@ pub use lash_kernel_migrate::{DocumentRefusal, ParkedRefusal};
 /// document is linked, admitted and migrated against when the host
 /// assembled no worker of its own.
 pub use lash_vm_worker::standard_functions;
+/// The helper releases lash's shipped worker retains beside its own
+/// functions (FIG-5799).
+pub use lash_vm_worker::{
+    HelperReleaseIndex, RETAINED_HELPER_RELEASES, standard_helper_releases,
+    standard_retired_helpers,
+};
 pub use projection::{ProjectionCatalog, ProjectionProvider, ProjectionRefusal};
 
 /// The machine a worker hosts, as the broker drives it, and the run's
@@ -39,7 +46,8 @@ pub use projection::{ProjectionCatalog, ProjectionProvider, ProjectionRefusal};
 pub use lash_vm_client::{RemoteMachine, RemoteMachines, RunHost};
 
 pub use process::{
-    AdmittedWorkflow, DocumentStoreError, EFFECT_ARGUMENTS, EFFECT_UNKNOWN, KERNEL_RUN_STEP,
+    AdmittedWorkflow, AdoptedRun, DocumentStoreError, EFFECT_ARGUMENTS, EFFECT_UNKNOWN,
+    HelperAdoptionRefusal, HelperDependentProcess, HelperDependentSession, KERNEL_RUN_STEP,
     KernelDocuments, KernelEngineSteps, KernelMigrationRefusal, KernelMigrationSurvey,
     KernelMigrationSurveyError, KernelProcessDefinition, KernelProcessEngine,
     KernelProcessFailureCode, KernelProcessInput, KernelRecordedSettings, KernelRunPolicy,
@@ -49,5 +57,7 @@ pub use process::{
     WorkflowDocumentError, WorkflowEnvironment, WorkflowEnvironmentRequest, admit_kernel_process,
     check_sealed_kernel, definition_draft, definition_of_entry, entry_signature,
     kernel_process_engine_registration, migrate_run, migrate_saved_function, migration_refusal,
-    plan_migration, survey_kernel_processes, with_definitions,
+    plan_helper_adoption, plan_migration, retired_functions_reached, survey_helper_processes,
+    survey_kernel_processes, with_definitions,
 };
+pub use process::{RetiredHelpers, retained_earlier_helpers};

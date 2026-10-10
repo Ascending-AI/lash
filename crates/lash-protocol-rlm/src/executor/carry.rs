@@ -12,8 +12,10 @@
 
 use std::sync::Arc;
 
+use std::collections::BTreeSet;
+
 use lash_kernel_dialect::SavedFunction;
-use lash_kernel_doc::{Annotations, FunctionRegistry, KERNEL_VERSION, KernelVersion};
+use lash_kernel_doc::{Annotations, FunctionId, FunctionRegistry, KERNEL_VERSION, KernelVersion};
 use lash_vm_protocol::{EncodedPayload, OpaqueVmState};
 use lash_vm_runtime::{
     KernelMigrationRefusal, migrate_run, migrate_saved_function, plan_migration,
@@ -166,4 +168,15 @@ pub fn cell_migration_refusal(
     KernelCarry::new(Some(functions), None)
         .cell_snapshot(snapshot)
         .err()
+}
+
+/// The library functions the cell `snapshot`, a cell's stored checkpoint,
+/// pins: those its document's manifest lists (FIG-5799). `None` when the
+/// checkpoint holds no cell or does not decode. What a build that drops a
+/// helper release asks of the cell a session's open turn stopped in.
+pub fn cell_snapshot_functions(snapshot: &str) -> Option<BTreeSet<FunctionId>> {
+    let checkpoint = stored_checkpoint(snapshot).ok()?;
+    let envelope = envelope_of(&checkpoint).ok()??;
+    let document = envelope.cell.document().ok()?;
+    Some(document.manifest.functions.keys().copied().collect())
 }

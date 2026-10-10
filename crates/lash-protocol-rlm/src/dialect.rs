@@ -266,6 +266,9 @@ pub(crate) struct RlmDialectServices {
     pub(crate) channel: crate::plugin::RlmChannel,
     /// What a stored kernel definition is carried forward with.
     pub(crate) kernel: crate::executor::KernelCarry,
+    /// Which helper release a cell is lowered against; `None` is the
+    /// build's own (FIG-5799).
+    pub(crate) helpers: Option<Arc<dyn crate::plugin::HelperReleaseGate>>,
 }
 
 /// Shared cell transport teaching; native transport replaces this whole section.
@@ -317,6 +320,7 @@ impl SessionDialect {
                 channel: crate::plugin::RlmChannel::Cell,
                 presentation: crate::RlmPresentationConfig::standard(),
                 kernel: crate::executor::KernelCarry::default(),
+                helpers: None,
             },
         }
     }
@@ -717,6 +721,7 @@ impl DialectSession {
                 channel: self.services.channel,
                 code_renderer: self.services.code_renderer.clone(),
                 prompts: self.dialect.prompts(),
+                helpers: self.services.helpers.clone(),
             },
             session_projected_bindings,
         )
@@ -1116,6 +1121,7 @@ pub(crate) fn test_dialect_services() -> RlmDialectServices {
         execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
         code_renderer: Default::default(),
         channel: crate::plugin::RlmChannel::Cell,
+        helpers: None,
     }
 }
 

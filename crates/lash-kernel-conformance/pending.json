@@ -192,6 +192,10 @@
     "owner": "KVM (FIG-5695)"
   },
   {
+    "rule": "K-LIB-011",
+    "owner": "KCONF (FIG-5702)"
+  },
+  {
     "rule": "K-MACH-001",
     "owner": "KCONF (FIG-5702)"
   },
