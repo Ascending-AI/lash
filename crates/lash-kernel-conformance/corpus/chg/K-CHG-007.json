@@ -2,7 +2,7 @@
   "rule": "K-CHG-007",
   "cases": [
     {
-      "name": "library body forms are priced entirely by its formula",
+      "name": "a library function with only a kernel-code body is charged its forms as they run, not its formula",
       "document": "kernel 1\nnumbers by_spelling\nuse list.len = @2af47738c9957502745b3ba75ddaff3325cf093a5eee2059159363b7674fcc03\nuse list.push = @f79996ff493ff2eda606d6256e7bd9492c9ddc049f3b91a7780819b03b4a1e7a\nmain { let xs = [1] do invoke list.push(xs, 2) finish xs }\n",
       "expected": {
         "prints": [],
@@ -19,11 +19,11 @@
             ]
           }
         },
-        "charged": 17
+        "charged": 26
       }
     },
     {
-      "name": "callback code is charged even within a library body",
+      "name": "callback code is charged within a library body",
       "document": "kernel 1\nnumbers by_spelling\nuse list.len = @2af47738c9957502745b3ba75ddaff3325cf093a5eee2059159363b7674fcc03\nuse collection.map = @88bf325aa4eda58b2c42bebd0da3777b9e440955735df3041b4e77daa4ee27cc\nuse collection.function_check = @949d6dbcda876ed611e162dfb3fa30e697ae6d4bb5aadc6b643900966f4700e3\nmain { let xs = [1] let cb = fn(x) { return x } let ys = invoke collection.map(xs, cb) finish ys }\n",
       "expected": {
         "prints": [],
@@ -37,7 +37,7 @@
             ]
           }
         },
-        "charged": 22
+        "charged": 36
       }
     }
   ]

@@ -152,6 +152,7 @@ pub(crate) struct Library {
 
 /// Builds the laws' library. `pair.twice` has a native implementation and
 /// a kernel body; `native_twice` says whether the native one is registered.
+/// Its formula reads its argument: 7 for a one-word integer.
 pub(crate) fn library(native_twice: bool) -> Library {
     let mut registry = FunctionRegistry::new();
     let mut ids = BTreeMap::new();
@@ -205,7 +206,7 @@ pub(crate) fn library(native_twice: bool) -> Library {
         ids.insert(name, registry.register(definition, Some(native)).unwrap());
     }
     let twice = parse_definition(&format!(
-        "function pair.twice(x: Any) -> Any\nkernel 1\ncharge 7\nuse num.add = @{}\nnative\n\
+        "function pair.twice(x: Any) -> Any\nkernel 1\ncharge sum(5, size(x))\nuse num.add = @{}\nnative\n\
          body {{ return num.add(x, x) }}\n",
         ids["num.add"]
     ))

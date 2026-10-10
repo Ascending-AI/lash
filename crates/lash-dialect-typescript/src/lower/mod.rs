@@ -51,6 +51,7 @@ pub(crate) type Lowering<T> = Result<T, Diagnostic>;
 pub(crate) const CORE_OPERATIONS: &[&str] = &[
     "bool.not",
     "eq",
+    "list.check",
     "list.get",
     "list.len",
     "num.add",
@@ -64,6 +65,7 @@ pub(crate) const CORE_OPERATIONS: &[&str] = &[
     "num.to_float",
     "same",
     "text.concat",
+    "text.len",
     "ts.add",
     "ts.arguments",
     "ts.await",

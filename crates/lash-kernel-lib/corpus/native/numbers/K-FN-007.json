@@ -915,7 +915,7 @@
     },
     {
       "name": "float.pow: K-FN-007 wrong-kind operand 0",
-      "function": "1e1538591ca30ca140e245dad20ac171ba36972df42627d591283c285fad3917",
+      "function": "2c34c3d269cfd0d90b5c477aa3b916efbc4b978906f62b4170953664b256de3c",
       "args": [
         "null",
         {
@@ -930,13 +930,13 @@
             "data": "null"
           }
         },
-        "charged": 5,
+        "charged": 3,
         "work": 0
       }
     },
     {
       "name": "float.pow: K-FN-007 wrong-kind operand 1",
-      "function": "1e1538591ca30ca140e245dad20ac171ba36972df42627d591283c285fad3917",
+      "function": "2c34c3d269cfd0d90b5c477aa3b916efbc4b978906f62b4170953664b256de3c",
       "args": [
         {
           "float": "2.0"
@@ -951,7 +951,7 @@
             "data": "null"
           }
         },
-        "charged": 1,
+        "charged": 3,
         "work": 0
       }
     },

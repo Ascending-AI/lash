@@ -231,7 +231,7 @@
     },
     {
       "name": "float.pow: K-NUM-002 edge",
-      "function": "1e1538591ca30ca140e245dad20ac171ba36972df42627d591283c285fad3917",
+      "function": "2c34c3d269cfd0d90b5c477aa3b916efbc4b978906f62b4170953664b256de3c",
       "args": [
         {
           "float": "2.0"
@@ -246,7 +246,7 @@
             "float": "8.0"
           }
         },
-        "charged": 8,
+        "charged": 4,
         "work": 0
       }
     },

@@ -352,8 +352,10 @@ pub struct Held {
     /// with, outermost first.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub departing: Vec<Value>,
-    /// The arguments of a call of a library function's body, which its
-    /// charge formula measures when the call ends (`K-CHG-003`).
+    /// The arguments of a call of the body of a library function with a
+    /// native implementation, which its charge formula measures when the
+    /// call ends (`K-CHG-003`). A helper's body has none: it was charged as
+    /// it ran (`K-CHG-007`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub arguments: Option<Vec<Value>>,
 }

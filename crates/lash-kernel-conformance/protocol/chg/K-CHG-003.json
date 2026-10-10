@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "return charges result size 2",
-      "document": "kernel 1\nnumbers by_spelling\nuse probe.result = @e1a02c752f2efaef4704b5c882207ecffe443ea2fdae845c52037bba879bb5a2\nmain { try { do invoke probe.result() } catch e { } finish null }\n",
+      "document": "kernel 1\nnumbers by_spelling\nuse probe.result = @c8819bc5167db8475c6f2d731724c41772a1deefa6e52595b16886b5d620e0b7\nmain { try { do invoke probe.result() } catch e { } finish null }\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -15,7 +15,7 @@
     },
     {
       "name": "throw charges result size 0",
-      "document": "kernel 1\nnumbers by_spelling\nuse probe.result = @f614bbc8b6cd2cf88185a4fbf8874e679387a5f8ae6546692153ba0e817d3455\nmain { try { do invoke probe.result() } catch e { } finish null }\n",
+      "document": "kernel 1\nnumbers by_spelling\nuse probe.result = @85b0fed3ea0d40109e0b05627df36e894bb108ca1cdc76c3a5f0a42d23314e4d\nmain { try { do invoke probe.result() } catch e { } finish null }\n",
       "expected": {
         "prints": [],
         "trace": [],

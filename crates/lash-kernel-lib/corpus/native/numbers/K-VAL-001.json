@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "kind null",
-      "function": "c28eecc85bad363c613d67ae6fa651de6a23e2491273d9a0244431ebf80de3a6",
+      "function": "a2d0e055cddc49a50484d376a472cbc1f4ef620995f5e1a13f7d386d20edbfb4",
       "args": [
         "null"
       ],
@@ -13,13 +13,13 @@
             "text": "null"
           }
         },
-        "charged": 7,
+        "charged": 6,
         "work": 0
       }
     },
     {
       "name": "kind absent",
-      "function": "c28eecc85bad363c613d67ae6fa651de6a23e2491273d9a0244431ebf80de3a6",
+      "function": "a2d0e055cddc49a50484d376a472cbc1f4ef620995f5e1a13f7d386d20edbfb4",
       "args": [
         "absent"
       ],
@@ -29,13 +29,13 @@
             "text": "absent"
           }
         },
-        "charged": 9,
+        "charged": 8,
         "work": 0
       }
     },
     {
       "name": "kind bool",
-      "function": "c28eecc85bad363c613d67ae6fa651de6a23e2491273d9a0244431ebf80de3a6",
+      "function": "a2d0e055cddc49a50484d376a472cbc1f4ef620995f5e1a13f7d386d20edbfb4",
       "args": [
         {
           "bool": false
@@ -47,13 +47,13 @@
             "text": "bool"
           }
         },
-        "charged": 7,
+        "charged": 6,
         "work": 0
       }
     },
     {
       "name": "kind integer",
-      "function": "c28eecc85bad363c613d67ae6fa651de6a23e2491273d9a0244431ebf80de3a6",
+      "function": "a2d0e055cddc49a50484d376a472cbc1f4ef620995f5e1a13f7d386d20edbfb4",
       "args": [
         {
           "int": "1"
@@ -65,13 +65,13 @@
             "text": "integer"
           }
         },
-        "charged": 11,
+        "charged": 9,
         "work": 0
       }
     },
     {
       "name": "kind float",
-      "function": "c28eecc85bad363c613d67ae6fa651de6a23e2491273d9a0244431ebf80de3a6",
+      "function": "a2d0e055cddc49a50484d376a472cbc1f4ef620995f5e1a13f7d386d20edbfb4",
       "args": [
         {
           "float": "1.0"
@@ -83,13 +83,13 @@
             "text": "float"
           }
         },
-        "charged": 8,
+        "charged": 7,
         "work": 0
       }
     },
     {
       "name": "kind text",
-      "function": "c28eecc85bad363c613d67ae6fa651de6a23e2491273d9a0244431ebf80de3a6",
+      "function": "a2d0e055cddc49a50484d376a472cbc1f4ef620995f5e1a13f7d386d20edbfb4",
       "args": [
         {
           "text": "x"
@@ -101,13 +101,13 @@
             "text": "text"
           }
         },
-        "charged": 8,
+        "charged": 6,
         "work": 0
       }
     },
     {
       "name": "kind bytes",
-      "function": "c28eecc85bad363c613d67ae6fa651de6a23e2491273d9a0244431ebf80de3a6",
+      "function": "a2d0e055cddc49a50484d376a472cbc1f4ef620995f5e1a13f7d386d20edbfb4",
       "args": [
         {
           "bytes": "00ff"
@@ -119,13 +119,13 @@
             "text": "bytes"
           }
         },
-        "charged": 10,
+        "charged": 7,
         "work": 0
       }
     },
     {
       "name": "kind timestamp",
-      "function": "c28eecc85bad363c613d67ae6fa651de6a23e2491273d9a0244431ebf80de3a6",
+      "function": "a2d0e055cddc49a50484d376a472cbc1f4ef620995f5e1a13f7d386d20edbfb4",
       "args": [
         {
           "timestamp": "0"
@@ -137,13 +137,13 @@
             "text": "timestamp"
           }
         },
-        "charged": 12,
+        "charged": 11,
         "work": 0
       }
     },
     {
       "name": "kind tuple",
-      "function": "c28eecc85bad363c613d67ae6fa651de6a23e2491273d9a0244431ebf80de3a6",
+      "function": "a2d0e055cddc49a50484d376a472cbc1f4ef620995f5e1a13f7d386d20edbfb4",
       "args": [
         {
           "tuple": [
@@ -159,13 +159,13 @@
             "text": "tuple"
           }
         },
-        "charged": 11,
+        "charged": 7,
         "work": 0
       }
     },
     {
       "name": "kind list",
-      "function": "c28eecc85bad363c613d67ae6fa651de6a23e2491273d9a0244431ebf80de3a6",
+      "function": "a2d0e055cddc49a50484d376a472cbc1f4ef620995f5e1a13f7d386d20edbfb4",
       "args": [
         {
           "list": [
@@ -181,13 +181,13 @@
             "text": "list"
           }
         },
-        "charged": 10,
+        "charged": 6,
         "work": 0
       }
     },
     {
       "name": "kind map",
-      "function": "c28eecc85bad363c613d67ae6fa651de6a23e2491273d9a0244431ebf80de3a6",
+      "function": "a2d0e055cddc49a50484d376a472cbc1f4ef620995f5e1a13f7d386d20edbfb4",
       "args": [
         {
           "map": [
@@ -208,13 +208,13 @@
             "text": "map"
           }
         },
-        "charged": 12,
+        "charged": 5,
         "work": 0
       }
     },
     {
       "name": "kind set",
-      "function": "c28eecc85bad363c613d67ae6fa651de6a23e2491273d9a0244431ebf80de3a6",
+      "function": "a2d0e055cddc49a50484d376a472cbc1f4ef620995f5e1a13f7d386d20edbfb4",
       "args": [
         {
           "set": [
@@ -230,13 +230,13 @@
             "text": "set"
           }
         },
-        "charged": 9,
+        "charged": 5,
         "work": 0
       }
     },
     {
       "name": "kind record",
-      "function": "c28eecc85bad363c613d67ae6fa651de6a23e2491273d9a0244431ebf80de3a6",
+      "function": "a2d0e055cddc49a50484d376a472cbc1f4ef620995f5e1a13f7d386d20edbfb4",
       "args": [
         {
           "record": [
@@ -255,13 +255,13 @@
             "text": "record"
           }
         },
-        "charged": 12,
+        "charged": 8,
         "work": 0
       }
     },
     {
       "name": "kind error",
-      "function": "c28eecc85bad363c613d67ae6fa651de6a23e2491273d9a0244431ebf80de3a6",
+      "function": "a2d0e055cddc49a50484d376a472cbc1f4ef620995f5e1a13f7d386d20edbfb4",
       "args": [
         {
           "error": {
@@ -277,13 +277,13 @@
             "text": "error"
           }
         },
-        "charged": 23,
+        "charged": 7,
         "work": 0
       }
     },
     {
       "name": "kind function",
-      "function": "c28eecc85bad363c613d67ae6fa651de6a23e2491273d9a0244431ebf80de3a6",
+      "function": "a2d0e055cddc49a50484d376a472cbc1f4ef620995f5e1a13f7d386d20edbfb4",
       "args": [
         {
           "function": "f"
@@ -295,13 +295,13 @@
             "text": "function"
           }
         },
-        "charged": 11,
+        "charged": 10,
         "work": 0
       }
     },
     {
       "name": "kind handle",
-      "function": "c28eecc85bad363c613d67ae6fa651de6a23e2491273d9a0244431ebf80de3a6",
+      "function": "a2d0e055cddc49a50484d376a472cbc1f4ef620995f5e1a13f7d386d20edbfb4",
       "args": [
         {
           "handle": {
@@ -316,7 +316,7 @@
             "text": "handle"
           }
         },
-        "charged": 9,
+        "charged": 8,
         "work": 0
       }
     }

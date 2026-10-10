@@ -15,9 +15,12 @@
 //! after every unit of charge and reads the pending statement's site from the
 //! exported state (exporting changes no charge, `K-MACH-007`): the charge and
 //! the time of each step go to TypeScript helper bodies, kernel library bodies
-//! or the document's own code. A helper's caller is charged its formula, so
-//! one step can cover a whole helper call; the time shares say more than the
-//! charge shares. `KERNEL_PERF_SPLIT=0` skips the second run, for a profiler.
+//! or the document's own code. A helper's body is charged as it runs and
+//! its formula is not (`K-CHG-007`), so a step is a statement of the body
+//! that does the work;
+//! the body of a library function with a native implementation is covered
+//! by its formula and runs within one step. `KERNEL_PERF_SPLIT=0` skips the
+//! second run, for a profiler.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;

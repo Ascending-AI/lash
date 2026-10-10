@@ -270,7 +270,9 @@ impl KernelMachine {
     }
 
     /// What a library call is charged by its definition's formula
-    /// (`K-CHG-003`). A call that raised has a result of size 0.
+    /// (`K-CHG-003`). A call that raised has a result of size 0. A function
+    /// with only a kernel-code body is charged nothing here: its body was
+    /// charged as it ran (`K-CHG-007`).
     pub(super) fn call_units(
         &self,
         exe: &Executable,
@@ -278,12 +280,16 @@ impl KernelMachine {
         args: &[Value],
         result: Option<&Value>,
     ) -> u64 {
-        // Inside a library body nothing is charged (`K-CHG-007`), so the
-        // formula, whose deep sizes walk whole graphs, is not evaluated.
+        // Inside the body of a function with a native implementation
+        // nothing is charged (`K-CHG-007`), so the formula, whose deep sizes
+        // walk whole graphs, is not evaluated.
         if !self.charging {
             return 0;
         }
         let definition = &exe.lib(lib).definition;
+        if !definition.has_native() {
+            return 0;
+        }
         self.formula(
             &definition.charge,
             &definition.signature.params,
@@ -398,7 +404,11 @@ impl KernelMachine {
             control,
             awaiting: None,
             library: library.map(|lib| {
-                args.extend_from_slice(&self.storage.args[base..]);
+                // Only a native implementation's formula, charged when the
+                // call ends, reads them (`K-CHG-007`).
+                if exe.lib(lib).definition.has_native() {
+                    args.extend_from_slice(&self.storage.args[base..]);
+                }
                 LibraryCall { lib, args }
             }),
             inline,

@@ -1,9 +1,10 @@
 //! Members, calls and the globals a built-in row answers for.
 
-use lash_kernel_doc::{Action, Atom, Callee, Expr, Literal, Place, Stmt};
+use lash_kernel_doc::{Action, Atom, Callee, Expr, Literal, Member, Place, Stmt};
 
 use super::{Buf, Lowerer, Lowering, Operand, Ty};
 use crate::adapter as ast;
+use crate::builtins::Receiver;
 use crate::{Diagnostic, DiagnosticCode, DiagnosticKind, SourceSpan};
 
 /// The methods every built-in function or object inherits, which a call of
@@ -19,6 +20,19 @@ const INHERITED: &[&str] = &[
     "isPrototypeOf",
     "toLocaleString",
 ];
+
+/// The built-in kind every value of `ty` is, with the kernel function that
+/// raises `type_error` on a value of any other kind, when the type names
+/// one kind whose methods are rows.
+fn declared_receiver(ty: &Ty) -> Option<(Receiver, &'static str)> {
+    match ty {
+        Ty::List(_) => Some((Receiver::List, "list.check")),
+        Ty::Text => Some((Receiver::Text, "text.len")),
+        Ty::Float | Ty::Number => Some((Receiver::Number, "num.to_float")),
+        Ty::Bool => Some((Receiver::Bool, "bool.not")),
+        _ => None,
+    }
+}
 
 /// A property key, already evaluated.
 #[derive(Clone, Debug)]
@@ -97,7 +111,8 @@ impl Lowerer<'_> {
                 Key::Computed(index) if index.ty.is_number() => {
                     let read = self.native("list.get", vec![object.expr(), index.expr()])?;
                     let read = self.let_expr(read, (**element).clone());
-                    return self.invoke("ts.hole_value", &[read], (**element).clone());
+                    self.absent_if_hole(&super::statements::variable_of(&read), &read)?;
+                    return Ok(read);
                 }
                 Key::Static(name) if name == "length" => {
                     let length = self.native("list.len", vec![object.expr()])?;
@@ -474,6 +489,11 @@ impl Lowerer<'_> {
                 let object = self.lower_expr(object)?;
                 let object = self.pin(object);
                 let key = self.lower_key(property)?;
+                if let Key::Static(name) = &key
+                    && let Some(called) = self.call_declared(&object, name, args)?
+                {
+                    return Ok(called);
+                }
                 let function = self.get_member(&object, &key)?;
                 let function = self.pin(function);
                 let args = self.arguments(args)?;
@@ -496,6 +516,67 @@ impl Lowerer<'_> {
                 self.apply(function, Operand::undefined(), args, declared)
             }
         }
+    }
+
+    /// `object.name(args)` where the object's type is one built-in kind
+    /// (`TS_TYPED_*_METHOD`): the call is the method row that kind's
+    /// dispatcher would choose, without the dispatch. `push` on an array is
+    /// the kernel's own append. The kind is checked where JavaScript reads
+    /// the method, before the arguments, and a value of another kind raises
+    /// `type_error`. `None` when the type names no single kind or the kind
+    /// has no row by that name.
+    fn call_declared(
+        &mut self,
+        object: &Operand,
+        name: &str,
+        args: &[ast::CallArg],
+    ) -> Lowering<Option<Operand>> {
+        let Some((receiver, check)) = declared_receiver(&object.ty) else {
+            return Ok(None);
+        };
+        let Some(function) = self
+            .table
+            .methods
+            .get(name)
+            .and_then(|rows| rows.iter().find(|(kind, _)| *kind == receiver))
+            .map(|(_, function)| *function)
+        else {
+            return Ok(None);
+        };
+        let checked = self.native(check, vec![object.expr()])?;
+        let checked = self.let_expr(checked, Ty::Unknown);
+        self.discard(checked);
+        let values: Option<Vec<&ast::Expr>> = args
+            .iter()
+            .map(|arg| match arg {
+                ast::CallArg::Value(value) => Some(value),
+                ast::CallArg::Spread(_) => None,
+            })
+            .collect();
+        if receiver == Receiver::List
+            && name == "push"
+            && let Some(values) = values
+        {
+            // Each value is appended at the length the list has then
+            // (`K-FORM-006`), after every argument has been evaluated.
+            for value in self.operands(&values)? {
+                let length = self.native("list.len", vec![object.expr()])?;
+                let place = Place::Member(Member::Index {
+                    target: object.expr(),
+                    index: length,
+                });
+                self.store(place, value);
+            }
+            let length = self.native("list.len", vec![object.expr()])?;
+            let length = self.native("num.to_float", vec![length])?;
+            return Ok(Some(self.let_expr(length, Ty::Float)));
+        }
+        let args = self.arguments(args)?;
+        Ok(Some(self.invoke(
+            function,
+            &[object.clone(), args],
+            Ty::Unknown,
+        )?))
     }
 
     /// `Object.hasOwn(Math, k)`, `Math.hasOwnProperty(k)` and the like: a

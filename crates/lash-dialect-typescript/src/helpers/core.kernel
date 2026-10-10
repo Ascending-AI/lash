@@ -19,7 +19,9 @@ use num.sub
 use num.mul
 use num.div
 use num.rem_trunc
-use num.pow
+use num.rem_floor
+use num.div_floor
+use float.pow
 use num.neg
 use num.lt
 use num.le
@@ -41,6 +43,7 @@ use text.utf16_slice
 use text.concat
 use text.len
 use text.slice
+use text.compare
 use text.ends_with
 use float.parse
 use text.utf16_compare
@@ -84,6 +87,7 @@ use ts.strict_equals
 use ts.loose_equals
 use ts.relational
 use ts.list_index
+use ts.number_index
 use ts.get
 use ts.has_own
 use ts.require_object_coercible
@@ -103,20 +107,25 @@ kernel 1
 charge 3
 body {
   let k = kind(value)
-  if same(k, "integer") {
-    return "number"
-  }
-  if same(k, "float") {
-    return "number"
-  }
-  if same(k, "function") {
-    return "closure"
-  }
+  # The kinds most receivers have come first.
   if same(k, "record") {
     let brand = value.brand
     if same(kind(brand), "text") {
       return text.concat("brand:", brand)
     }
+    return k
+  }
+  if same(k, "list") {
+    return k
+  }
+  if same(k, "float") {
+    return "number"
+  }
+  if same(k, "integer") {
+    return "number"
+  }
+  if same(k, "function") {
+    return "closure"
   }
   if same(k, "tuple") {
     if same(value, ()) {} else {
@@ -186,8 +195,8 @@ function ts.is_primitive(value: Any) -> Bool
 kernel 1
 charge 4
 body {
-  let k = invoke ts.receiver(value)
-  for primitive in ["absent", "null", "bool", "number", "text"] {
+  let k = kind(value)
+  for primitive in ["float", "text", "integer", "bool", "null", "absent"] {
     if same(k, primitive) {
       return true
     }
@@ -298,10 +307,10 @@ kernel 1
 errors "type_error"
 charge sum(4, size(result))
 body {
-  let k = invoke ts.receiver(value)
-  if same(k, "text") {
+  if same(kind(value), "text") {
     return value
   }
+  let k = invoke ts.receiver(value)
   if same(k, "absent") {
     return "undefined"
   }
@@ -327,6 +336,9 @@ kernel 1
 errors "type_error"
 charge sum(4, size(value))
 body {
+  if same(kind(value), "float") {
+    return value
+  }
   let k = invoke ts.receiver(value)
   if same(k, "number") {
     return num.to_float(value)
@@ -359,6 +371,11 @@ kernel 1
 errors "type_error"
 charge sum(4, deep(value))
 body {
+  # A primitive is its own primitive: no hint changes it.
+  let primitive = invoke ts.is_primitive(value)
+  if primitive {
+    return value
+  }
   let convert = absent
   set convert = fn(value, hint) {
     let k = invoke ts.receiver(value)
@@ -441,6 +458,9 @@ kernel 1
 errors "type_error"
 charge sum(8, deep(value))
 body {
+  if same(kind(value), "text") {
+    return value
+  }
   let primitive = invoke ts.to_primitive(value, "string")
   let spelled = invoke ts.primitive_to_string(primitive)
   return spelled
@@ -452,6 +472,9 @@ kernel 1
 errors "type_error"
 charge sum(8, deep(value))
 body {
+  if same(kind(value), "float") {
+    return value
+  }
   let primitive = invoke ts.to_primitive(value, "number")
   let number = invoke ts.primitive_to_number(primitive)
   return number
@@ -557,7 +580,7 @@ body {
   if eq(num.abs(a), 1) {
     if num.is_finite(b) {} else { return nan }
   }
-  return num.pow(a, b)
+  return float.pow(num.to_float(a), num.to_float(b))
 }
 
 function ts.neg(value: Any) -> Number
@@ -614,28 +637,31 @@ function ts.bitwise32(left: Int, right: Int, operation: Text) -> Int
 kernel 1
 charge 1024
 body {
-  let a = int.rem_floor(left, 4294967296)
-  let b = int.rem_floor(right, 4294967296)
-  let weight = 1
-  let result_value = 0
-  let index = 0
-  while num.lt(index, 32) {
-    let x = int.rem_floor(a, 2)
-    let y = int.rem_floor(b, 2)
-    let bit = num.mul(x, y)
-    if same(operation, "or") {
-      set bit = num.sub(num.add(x, y), bit)
-    }
-    if same(operation, "xor") {
-      set bit = int.rem_floor(num.add(x, y), 2)
+  # Below 2^32 a float is exact, and float arithmetic is cheaper than
+  # integer arithmetic.
+  let a = num.to_float(int.rem_floor(left, 4294967296))
+  let b = num.to_float(int.rem_floor(right, 4294967296))
+  let conjunction = same(operation, "and")
+  let disjunction = same(operation, "or")
+  let weight = 1.0
+  let result_value = 0.0
+  # Once both operands have no bits left, every remaining bit is 0; for
+  # "and", once either has none.
+  while num.lt(0.0, num.add(a, b)) {
+    if conjunction { if eq(num.min(a, b), 0.0) { break } }
+    let x = num.rem_floor(a, 2.0)
+    let y = num.rem_floor(b, 2.0)
+    let bit = num.add(x, y)
+    if conjunction { set bit = num.mul(x, y) } else {
+      if disjunction { set bit = num.min(bit, 1.0) } else { set bit = num.rem_floor(bit, 2.0) }
     }
     set result_value = num.add(result_value, num.mul(weight, bit))
-    set a = int.div_floor(a, 2)
-    set b = int.div_floor(b, 2)
-    set weight = num.mul(weight, 2)
-    set index = num.add(index, 1)
+    set a = num.div_floor(a, 2.0)
+    set b = num.div_floor(b, 2.0)
+    set weight = num.mul(weight, 2.0)
   }
-  let signed = invoke ts.wrap_int32(result_value)
+  let combined = float.to_int(result_value)
+  let signed = invoke ts.wrap_int32(combined)
   return signed
 }
 
@@ -998,13 +1024,38 @@ body {
   return items
 }
 
+# The position a number key names in a list of `length` elements, as
+# ts.list_index gives it for the key's text, which a number's conversion
+# cannot observe: -1 when it names none, and -2 when the key is no number.
+function ts.number_index(key: Any, length: Number) -> Number
+kernel 1
+charge 4
+body {
+  let k = kind(key)
+  let numeric = same(k, "float")
+  if same(k, "integer") { set numeric = true }
+  if numeric {} else { return -2.0 }
+  if num.is_finite(key) {} else { return -1.0 }
+  if eq(num.floor(key), key) {} else { return -1.0 }
+  if num.lt(key, 0) { return -1.0 }
+  if num.lt(key, length) { return num.add(num.to_float(key), 0.0) }
+  return -1.0
+}
+
 # The position a property key names in a list of `length` elements, or -1
 # when it names none.
 function ts.list_index(key: Any, length: Number) -> Number
 kernel 1
 charge sum(6, size(key))
 body {
+  let numbered = invoke ts.number_index(key, length)
+  if num.lt(-2.0, numbered) { return numbered }
   let name = invoke ts.to_property_key(key)
+  # The text of an index begins with a digit; no other name is one.
+  let first = text.slice(name, 0, 1)
+  if same(first, "") { return -1.0 }
+  if num.lt(text.compare(first, "0"), 0) { return -1.0 }
+  if num.lt(0, text.compare(first, "9")) { return -1.0 }
   let position = invoke ts.number.parse(name)
   if num.is_finite(position) {} else { return -1.0 }
   if eq(num.floor(position), position) {} else { return -1.0 }
@@ -1022,6 +1073,27 @@ errors "type_error"
 charge sum(12, deep(key))
 body {
   let k = invoke ts.receiver(target)
+  # A plain object and an array first: the kinds most reads have.
+  if same(k, "record") {
+    let name = invoke ts.to_property_key(key)
+    return target[name]
+  }
+  if same(k, "list") {
+    let length = list.len(target)
+    let position = invoke ts.number_index(key, length)
+    if same(position, -2.0) {
+      let name = invoke ts.to_property_key(key)
+      if same(name, "length") { return num.to_float(length) }
+      set position = invoke ts.list_index(name, length)
+    }
+    if num.lt(position, 0) {
+      let other = invoke ts.exotic.get(target, key)
+      return other
+    }
+    let value = target[position]
+    if same(value, ()) { return absent }
+    return value
+  }
   if same(k, "closure") {
     let name = invoke ts.to_property_key(key)
     if same(name, "caller") { throw error.new("type_error", "Restricted function property", null) }
@@ -1087,23 +1159,6 @@ body {
     let name = invoke ts.to_property_key(key)
     return target[name]
   }
-  if same(k, "record") {
-    let name = invoke ts.to_property_key(key)
-    return target[name]
-  }
-  if same(k, "list") {
-    let length = list.len(target)
-    let name = invoke ts.to_property_key(key)
-    if same(name, "length") { return num.to_float(length) }
-    let position = invoke ts.list_index(name, length)
-    if num.lt(position, 0) {
-      let other = invoke ts.exotic.get(target, key)
-      return other
-    }
-    let value = target[position]
-    let element_value = invoke ts.hole_value(value)
-    return element_value
-  }
   if same(kind(target), "tuple") {
     if same(k, "closure") {
       let name = invoke ts.to_property_key(key)
@@ -1161,6 +1216,8 @@ body {
     return value
   }
   if same(k, "list") {
+    let position = invoke ts.number_index(key, 4294967295.0)
+    if same(position, -2.0) {
     let name = invoke ts.to_property_key(key)
     if same(name, "length") {
       let length = invoke ts.to_number(value)
@@ -1172,7 +1229,8 @@ body {
       while num.lt(list.len(target), length) { set target[list.len(target)] = () }
       return value
     }
-    let position = invoke ts.list_index(name, 4294967295.0)
+    set position = invoke ts.list_index(name, 4294967295.0)
+    }
     if num.lt(position, 0) {
       throw error.new("TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED", "arrays do not carry named properties", null)
     }
@@ -1240,10 +1298,13 @@ body {
     return true
   }
   if same(k, "list") {
-    let name = invoke ts.to_property_key(key)
-    if same(name, "length") { throw error.new("type_error", "Cannot delete array length", null) }
     let array_arg_2 = list.len(target)
-    let position = invoke ts.list_index(name, array_arg_2)
+    let position = invoke ts.number_index(key, array_arg_2)
+    if same(position, -2.0) {
+      let name = invoke ts.to_property_key(key)
+      if same(name, "length") { throw error.new("type_error", "Cannot delete array length", null) }
+      set position = invoke ts.list_index(name, array_arg_2)
+    }
     if num.le(0, position) { set target[position] = () }
     return true
   }
@@ -1270,6 +1331,14 @@ errors "type_error", "TS_REFLECTION_UNSUPPORTED"
 charge sum(12, deep(key))
 body {
   do invoke ts.require_object_coercible(target)
+  if same(kind(target), "list") {
+    let length = list.len(target)
+    let position = invoke ts.number_index(key, length)
+    if same(position, -2.0) {} else {
+      if num.lt(position, 0) { return false }
+      return bool.not(same(target[position], ()))
+    }
+  }
   let name = invoke ts.to_property_key(key)
   let k = invoke ts.receiver(target)
   let token = same(k, "builtin")

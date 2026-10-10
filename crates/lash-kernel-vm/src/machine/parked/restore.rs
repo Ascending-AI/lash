@@ -26,6 +26,12 @@ fn malformed(problem: impl Into<String>) -> ImportError {
     }
 }
 
+fn unheld() -> ImportError {
+    malformed(
+        "arguments are held for the body of a function with a native implementation, and only for one",
+    )
+}
+
 /// The code whose body holds the statement at `site`: the unit's, or the
 /// closure body nearest above it.
 fn code_of(exe: &Executable, site: &Site) -> Option<CodeId> {
@@ -283,29 +289,30 @@ impl Restore<'_> {
             };
         }
 
-        // A library function's body is charged its formula when it ends,
-        // over the arguments it was called with.
+        // The body of a function with a native implementation is charged
+        // its formula when it ends, over the arguments it was called with;
+        // a helper's body was charged as it ran (`K-CHG-007`).
         let library = match (&code.site.unit, code.site.path.is_empty()) {
             (Unit::Library(function), true) => Some(*function),
             _ => None,
         };
-        let library = match (library, &held.arguments) {
-            (Some(function), Some(args)) => {
-                self.values(args)?;
+        let library = match library {
+            Some(function) => {
                 let lib = exe.lib_of(&function).ok_or_else(|| {
                     malformed("a call runs a function the document does not reach")
                 })?;
-                Some(LibraryCall {
-                    lib,
-                    args: args.clone(),
-                })
+                let args = match (exe.lib(lib).definition.has_native(), &held.arguments) {
+                    (true, Some(args)) => {
+                        self.values(args)?;
+                        args.clone()
+                    }
+                    (false, None) => Vec::new(),
+                    _ => return Err(unheld()),
+                };
+                Some(LibraryCall { lib, args })
             }
-            (None, None) => None,
-            _ => {
-                return Err(malformed(
-                    "arguments are held for a library function's body, and only for one",
-                ));
-            }
+            None if held.arguments.is_none() => None,
+            None => return Err(unheld()),
         };
         self.values(held.departing.iter())?;
         Ok(Frame {

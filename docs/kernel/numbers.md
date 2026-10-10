@@ -136,10 +136,14 @@ second operand's sign (NaN included), and `nextafter` with NaN is NaN.
 
 For a call, let S be the sum of deep sizes of its arguments and R the result's
 deep size, or zero on a raise (`K-CHG-003..005`). Each definition carries its
-formula: 1+S+R for unary/conversion/text/identity functions; 1+S*S+R for equality,
+formula: 1+S+R for unary/conversion/text functions; 1+S*S+R for equality,
 ordering, multiplication and division/remainders; 1+S*magnitude(exponent)+R for
-power; 65+S+R for software math. These formulas describe logical work, independent
-of object layout, hash tables, caches, or whether a future body is substituted.
+`pow` and `num.pow`, whose integer power grows with the exponent, and 1+S+R for
+`float.pow`, one libm call; 65+S+R for software math. `kind` is 1+R: it reads a tag. `same` is
+1+min(size(a), size(b))+R, by shallow sizes: two heap objects are compared by
+identity, never by what they hold, and two immutable values member by member.
+These formulas describe logical work, independent of object layout, hash tables,
+caches, or whether a future body is substituted.
 
 Integer power has a native guard of 1,048,576 upper-bound 64-bit output magnitude
 words produced by its exponentiation products. Before each multiply/square it

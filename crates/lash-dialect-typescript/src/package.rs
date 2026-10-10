@@ -146,7 +146,10 @@ pub(crate) fn dispatcher(
 }
 
 /// Computed names use the same rows and readers as literal names. The key
-/// is coerced once, preserving its observable conversion.
+/// is coerced once, preserving its observable conversion. The name is
+/// found among the rows by halving them in name order with
+/// `text.compare`, so a read costs the logarithm of the rows, not their
+/// count.
 fn computed_dispatcher(table: &builtins::Table, call: bool) -> String {
     let family = if call {
         "call_computed"
@@ -155,8 +158,11 @@ fn computed_dispatcher(table: &builtins::Table, call: bool) -> String {
     };
     let fallback = if call { "ts.call_member" } else { "ts.read" };
     let mut source = format!(
-        "use same\nuse ts.to_property_key\nuse ts.require_object_coercible\nuse {fallback}\n"
+        "use same\nuse num.lt\nuse text.compare\nuse ts.to_property_key\nuse ts.require_object_coercible\nuse {fallback}\n"
     );
+    if !call {
+        source.push_str("use kind\nuse num.le\nuse num.to_float\nuse list.len\nuse text.utf16_len\nuse ts.number_index\nuse ts.get\n");
+    }
     if call {
         source.push_str("use ts.call_value\n");
     }
@@ -190,26 +196,40 @@ fn computed_dispatcher(table: &builtins::Table, call: bool) -> String {
     for (_, function, _) in &rows {
         source.push_str(&format!("use {function}\n"));
     }
+    // `text.compare` orders texts by code point, as `str` orders them.
+    rows.sort_by(|left, right| left.0.cmp(right.0));
+    let branches: Vec<(&str, String)> = rows
+        .iter()
+        .map(|(name, function, read_then_call)| {
+            let outcome = if *read_then_call {
+                format!(
+                    "let member = invoke {function}(this)\nlet outcome = invoke ts.call_value(member, this, name, args)"
+                )
+            } else if call {
+                format!("let outcome = invoke {function}(this, args)")
+            } else {
+                format!("let outcome = invoke {function}(this)")
+            };
+            (*name, outcome)
+        })
+        .collect();
     let params = if call {
         "this: Any, key: Any, args: List(Any)"
     } else {
         "this: Any, key: Any"
     };
-    source.push_str(&format!("function ts.{family}({params}) -> Any\nkernel 1\ncharge {}\nbody {{\n  do invoke ts.require_object_coercible(this)\n  let name = invoke ts.to_property_key(key)\n", 4 + rows.len()));
-    for (name, function, read_then_call) in &rows {
-        let outcome = if *read_then_call {
-            format!(
-                "let member = invoke {function}(this)\n    let outcome = invoke ts.call_value(member, this, name, args)"
-            )
-        } else if call {
-            format!("let outcome = invoke {function}(this, args)")
-        } else {
-            format!("let outcome = invoke {function}(this)")
-        };
-        source.push_str(&format!(
-            "  if same(name, \"{name}\") {{\n    {outcome}\n    return outcome\n  }}\n"
-        ));
+    source.push_str(&format!("function ts.{family}({params}) -> Any\nkernel 1\ncharge 4\nbody {{\n  do invoke ts.require_object_coercible(this)\n"));
+    // A number naming an element of a list or a text spells a row's name
+    // only if some row's name is all digits; then every key takes the rows.
+    if !call
+        && !rows
+            .iter()
+            .any(|(name, _, _)| name.bytes().all(|byte| byte.is_ascii_digit()))
+    {
+        source.push_str(ELEMENT_READ);
     }
+    source.push_str("  let name = invoke ts.to_property_key(key)\n");
+    search(&branches, 1, &mut source);
     let args = if call {
         "this, name, args"
     } else {
@@ -219,4 +239,42 @@ fn computed_dispatcher(table: &builtins::Table, call: bool) -> String {
         "  let outcome = invoke {fallback}({args})\n  return outcome\n}}\n"
     ));
     source
+}
+
+/// A read whose key is a number naming an element of a list or a text: what
+/// `ts.read` gives for the key's spelling, without spelling it.
+const ELEMENT_READ: &str = "  if same(kind(key), \"float\") {
+    let size = -1.0
+    if same(kind(this), \"list\") { set size = num.to_float(list.len(this)) }
+    if same(kind(this), \"text\") { set size = num.to_float(text.utf16_len(this)) }
+    let position = invoke ts.number_index(key, size)
+    if num.le(0, position) {
+      let element = invoke ts.get(this, key)
+      return element
+    }
+  }
+";
+
+/// The kernel text that finds `name` among `branches`, sorted by name, and
+/// returns what the matching branch gives; no match falls through.
+fn search(branches: &[(&str, String)], depth: usize, source: &mut String) {
+    let indent = "  ".repeat(depth);
+    if branches.len() <= 4 {
+        for (name, outcome) in branches {
+            let outcome = outcome.replace('\n', &format!("\n{indent}  "));
+            source.push_str(&format!(
+                "{indent}if same(name, \"{name}\") {{\n{indent}  {outcome}\n{indent}  return outcome\n{indent}}}\n"
+            ));
+        }
+        return;
+    }
+    let (below, rest) = branches.split_at(branches.len() / 2);
+    source.push_str(&format!(
+        "{indent}if num.lt(text.compare(name, \"{}\"), 0) {{\n",
+        rest[0].0
+    ));
+    search(below, depth + 1, source);
+    source.push_str(&format!("{indent}}} else {{\n"));
+    search(rest, depth + 1, source);
+    source.push_str(&format!("{indent}}}\n"));
 }

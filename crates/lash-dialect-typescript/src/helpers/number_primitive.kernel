@@ -22,14 +22,16 @@ use num.mul
 use num.neg
 use num.sub
 use num.to_float
+use num.to_int
 use num.to_text
 use same
 use text.concat
-use text.ends_with
 use text.len
 use text.repeat
 use text.slice
+use ts.string.is_space
 use ts.string.trim_value
+use text.utf16_find
 use ts.number.digit
 use ts.number.layout
 use ts.number.parse
@@ -40,24 +42,37 @@ use ts.number.ratio
 use ts.number.round_decimal
 use ts.number.to_string
 
-# ECMA WhiteSpace and LineTerminator code units: BOM is included, NEL is not.
+# Whether a code unit is ECMA WhiteSpace or a LineTerminator: BOM is
+# included, NEL is not. Every such unit is below 33 or above 159.
+function ts.string.is_space(unit: Int) -> Bool
+kernel 1
+charge 4
+body {
+  if num.lt(32, unit) { if num.lt(unit, 160) { return false } }
+  return list.contains([9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279], unit)
+}
+
+# Trims ECMA white space from either end.
 function ts.string.trim_value(text: Text, leading: Bool, trailing: Bool) -> Text
 kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
 charge sum(8, size(text))
 body {
-  let whitespace = [9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279]
   let start = 0
   let end = text.utf16_len(text)
   if leading {
     while num.lt(start, end) {
-      if list.contains(whitespace, text.utf16_get(text, start)) {} else { break }
+      let unit = text.utf16_get(text, start)
+      let space = invoke ts.string.is_space(unit)
+      if space {} else { break }
       set start = num.add(start, 1)
     }
   }
   if trailing {
     while num.lt(start, end) {
-      if list.contains(whitespace, text.utf16_get(text, num.sub(end, 1))) {} else { break }
+      let unit = text.utf16_get(text, num.sub(end, 1))
+      let space = invoke ts.string.is_space(unit)
+      if space {} else { break }
       set end = num.sub(end, 1)
     }
   }
@@ -69,18 +84,13 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
-  let digits = "0123456789abcdefghijklmnopqrstuvwxyz"
-  let i = 0
-  while num.lt(i, radix) {
-    if same(text.slice(digits, i, num.add(i, 1)), character) { return i }
-    set i = num.add(i, 1)
-  }
-  let upper = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-  set i = 10
-  while num.lt(i, radix) {
-    if same(text.slice(upper, num.sub(i, 10), num.sub(i, 9)), character) { return i }
-    set i = num.add(i, 1)
-  }
+  if eq(text.utf16_len(character), 1) {} else { return -1 }
+  let unit = text.utf16_get(character, 0)
+  let value = -1
+  if num.le(48, unit) { if num.le(unit, 57) { set value = num.sub(unit, 48) } }
+  if num.le(97, unit) { if num.le(unit, 122) { set value = num.sub(unit, 87) } }
+  if num.le(65, unit) { if num.le(unit, 90) { set value = num.sub(unit, 55) } }
+  if num.lt(value, radix) { return value }
   return -1
 }
 
@@ -214,34 +224,36 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
+  # The spelling is ASCII: a mantissa, maybe with a point, then maybe an
+  # exponent after "e".
   let raw = num.to_text(num.abs(value))
-  let digits = ""
+  let mantissa = raw
   let exponent = 0
-  let point = false
-  let i = 0
-  while num.lt(i, text.len(raw)) {
-    let ch = text.slice(raw, i, num.add(i, 1))
-    if same(ch, "e") {
-      let tail = text.slice(raw, num.add(i, 1), text.len(raw))
-      set exponent = num.add(exponent, int.parse(tail, 10))
-      break
-    }
-    if same(ch, ".") { set point = true } else {
-      set digits = text.concat(digits, ch)
-      if point { set exponent = num.sub(exponent, 1) }
-    }
-    set i = num.add(i, 1)
+  let marker = text.utf16_find(raw, "e", 0)
+  if num.le(0, marker) {
+    set exponent = int.parse(text.utf16_slice(raw, num.add(marker, 1), text.utf16_len(raw)), 10)
+    set mantissa = text.utf16_slice(raw, 0, marker)
   }
-  while num.lt(1, text.len(digits)) {
-    if same(text.slice(digits, 0, 1), "0") { set digits = text.slice(digits, 1, text.len(digits)) } else { break }
+  let digits = mantissa
+  let point = text.utf16_find(mantissa, ".", 0)
+  if num.le(0, point) {
+    let fraction = text.utf16_slice(mantissa, num.add(point, 1), text.utf16_len(mantissa))
+    set digits = text.concat(text.utf16_slice(mantissa, 0, point), fraction)
+    set exponent = num.sub(exponent, text.utf16_len(fraction))
   }
-  while num.lt(1, text.len(digits)) {
-    if text.ends_with(digits, "0") {
-      set digits = text.slice(digits, 0, num.sub(text.len(digits), 1))
+  # Leading zeros go; trailing zeros move into the exponent. One digit stays.
+  let first = 0
+  let last = text.utf16_len(digits)
+  while num.lt(num.add(first, 1), last) {
+    if eq(text.utf16_get(digits, first), 48) { set first = num.add(first, 1) } else { break }
+  }
+  while num.lt(num.add(first, 1), last) {
+    if eq(text.utf16_get(digits, num.sub(last, 1)), 48) {
+      set last = num.sub(last, 1)
       set exponent = num.add(exponent, 1)
     } else { break }
   }
-  return (digits, exponent)
+  return (text.utf16_slice(digits, first, last), exponent)
 }
 
 function ts.number.layout(digits: Text, point: Int, scientific: Bool) -> Text
@@ -276,6 +288,11 @@ body {
   if eq(value, inf) { return "Infinity" }
   if eq(value, -inf) { return "-Infinity" }
   if eq(value, 0) { return "0" }
+  # Every integer below 2^53 is a float exactly, so its shortest digits
+  # are its decimal digits.
+  if eq(num.floor(value), value) {
+    if num.lt(num.abs(value), 9007199254740992.0) { return int.to_text(num.to_int(value), 10) }
+  }
   let parts = invoke ts.number.parts(value)
   let digits = parts[0]
   let point = num.add(text.len(digits), parts[1])

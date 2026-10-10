@@ -98,7 +98,7 @@ A library function is a content-addressed definition with a name, a typed signat
 
 A document references functions by identity and lists them in its manifest; it does not contain their bodies. A host can resolve and read any body. Changing behaviour means a new definition with a new identity. A host adopts a corrected function with one edit that replaces identity A with B across a document.
 
-A function with a kernel-code body is ordinary kernel code: it obeys the statement rule, may call a function argument, and so may wait if its callback does. Nothing about the registry makes a call effect-free.
+A function with a kernel-code body is ordinary kernel code: it obeys the statement rule, may call a function argument, and so may wait if its callback does. Nothing about the registry makes a call effect-free. Without a native implementation it is charged as ordinary code too, its forms as they run, so a helper's charge is its work.
 
 **Admission test for the kernel library.** A function belongs in it only if its meaning fits in a sentence that names no language, two dialects would map to it directly or expansions need it as a building block, and every edge is pinned. Coercing addition, any language's truthiness and operand-returning logical operators fail the test and are helpers.
 

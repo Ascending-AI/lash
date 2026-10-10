@@ -9,7 +9,11 @@ Each operation takes the first tier that applies.
 
 1. **Direct.** The operand types are known, so the operation is one kernel
    function: `a + b` on two numbers is `num.add`, `xs[i]` on an array is
-   `list.get`. A direct call sits inside an expression and costs one node.
+   `list.get`, `xs.push(v)` on an array is the kernel's append and
+   `for (x of xs)` its loop over a list. A direct call sits inside an
+   expression and costs one node. A method call on a value whose type is one
+   kind (an array, a string, a number, a boolean) calls the helper of that
+   kind's method row itself, without the dispatch on the receiver.
 2. **Helper.** The operand types are not known, so the operation is a call to
    a `ts.*` helper, kernel code that does what JavaScript does: `ts.add`
    converts its operands, then concatenates or adds.
@@ -39,9 +43,10 @@ dialect's one deviation register, and each row has a law.
 
 What no row covers keeps JavaScript's behaviour: `**`, the bitwise operators,
 `<` on two strings, `===` on anything but two numbers, a write `xs[i] = v`, a
-method call, and every read of an object's property. A read from a declared
-object type or array gives a value the front end believes to be what the
-type says, so a later operation on it is a row.
+method call on a value whose type is not one of the kinds above, and every
+read of an object's property. A read from a declared object type or array
+gives a value the front end believes to be what the type says, so a later
+operation on it is a row.
 
 ## Asynchronous code
 

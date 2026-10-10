@@ -295,8 +295,14 @@ impl KernelMachine {
                 value,
             });
         }
+        // Only a native implementation's formula, charged when the call
+        // ends, reads a call's arguments (`K-CHG-007`).
         let mut held = state::Held {
-            arguments: frame.library.as_ref().map(|library| library.args.clone()),
+            arguments: frame
+                .library
+                .as_ref()
+                .filter(|library| exe.lib(library.lib).definition.has_native())
+                .map(|library| library.args.clone()),
             ..state::Held::default()
         };
         for control in &frame.control {

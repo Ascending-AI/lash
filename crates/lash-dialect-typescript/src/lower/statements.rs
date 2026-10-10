@@ -15,6 +15,15 @@ fn kind_of(kind: VarKind) -> BindingKind {
     }
 }
 
+/// How a `for...of` or `for...in` head binds what each pass gives.
+fn mode_of(kind: Option<VarKind>) -> Mode {
+    match kind {
+        None => Mode::Assign,
+        Some(VarKind::Var) => Mode::Declared,
+        Some(_) => Mode::Local,
+    }
+}
+
 fn truth() -> Expr {
     Expr::Literal(Literal::Bool(true))
 }
@@ -472,6 +481,27 @@ impl Lowerer<'_> {
         Ok(())
     }
 
+    /// The element a loop over a list binds, as JavaScript reads it: a hole
+    /// is `undefined`.
+    pub(super) fn element_value(&mut self, raw: &Operand) -> Lowering<Operand> {
+        let element = self.temp();
+        self.bind(element.clone(), raw.clone());
+        self.absent_if_hole(&element, raw)?;
+        Ok(Operand::variable(element, raw.ty.clone()))
+    }
+
+    /// `if same(raw, ()) { set element = absent }`: the empty tuple is a
+    /// hole, which no JavaScript value is.
+    pub(super) fn absent_if_hole(&mut self, element: &Name, raw: &Operand) -> Lowering<()> {
+        let hole = self.same(raw.expr(), Expr::Tuple(Vec::new()))?;
+        let absent = one(Stmt::Assign {
+            place: Place::Variable(element.clone()),
+            value: lash_kernel_doc::Rhs::Expr(Expr::Literal(Literal::Absent)),
+        });
+        self.emit_if(hole, absent, Buf::default());
+        Ok(())
+    }
+
     /// `for (pattern of iterable)` and `for (pattern in object)`: a kernel
     /// loop over the list `helper` gives.
     fn lower_for_each(
@@ -485,46 +515,70 @@ impl Lowerer<'_> {
         let subject = self.lower_expr(subject)?;
         let subject = self.pin(subject);
         if helper == "ts.iterate" {
+            if let Ty::List(element) = &subject.ty {
+                // `TS_TYPED_ARRAY_ITERATION`: a declared array is the
+                // kernel's live loop over a list (`K-ITER-002`), which reads
+                // length and element anew on each pass as an array iterator
+                // does. A value of another kind raises `type_error` here.
+                let checked = self.native("list.check", vec![subject.expr()])?;
+                let checked = self.let_expr(checked, Ty::Unknown);
+                self.discard(checked);
+                let item = self.temp();
+                let raw = Operand::variable(item.clone(), (**element).clone());
+                let body = self.loop_block(Vec::new(), |this| {
+                    let value = this.element_value(&raw)?;
+                    this.destructure(pattern, value, mode_of(kind))?;
+                    this.lower_statement(body)
+                })?;
+                self.emit_for(item, subject.expr(), body);
+                return Ok(());
+            }
             // Kernel collection loops retain insertion-sequence cursors. A
             // snapshot list would lose additions and visit deleted entries.
+            // A list is the same live loop, as an array iterator reads it.
             let receiver = self.invoke("ts.receiver", std::slice::from_ref(&subject), Ty::Text)?;
+            let list = self.same(receiver.expr(), Operand::text("list").expr())?;
             let map = self.same(receiver.expr(), Operand::text("map").expr())?;
             let set = self.same(receiver.expr(), Operand::text("set").expr())?;
-            let map = self.let_expr(map, Ty::Bool);
-            let collection = self
-                .short_circuit(ast::LogicalOp::Or, map, |this| {
+            let list = self.let_expr(list, Ty::Bool);
+            let collection = self.short_circuit(ast::LogicalOp::Or, list, |this| {
+                let map = this.let_expr(map, Ty::Bool);
+                this.short_circuit(ast::LogicalOp::Or, map, |this| {
                     Ok(this.let_expr(set, Ty::Bool))
-                })?
-                .expr();
+                })
+            })?;
             let live = self.block(|this| {
                 let key = this.temp();
                 let raw = Operand::variable(key.clone(), Ty::Unknown);
                 let body = this.loop_block(Vec::new(), |this| {
-                    let value =
-                        this.invoke("ts.map.value", std::slice::from_ref(&raw), Ty::Unknown)?;
+                    let list = this.same(receiver.expr(), Operand::text("list").expr())?;
                     let element = this.temp();
-                    this.bind(element.clone(), value.clone());
-                    let entry = this.block(|this| {
-                        let read = Expr::Member(Box::new(Member::Index {
-                            target: subject.expr(),
-                            index: raw.expr(),
-                        }));
-                        let read = this.let_expr(read, Ty::Unknown);
-                        let pair = this.let_expr(
-                            Expr::List(vec![Expr::Variable(element.clone()), read.expr()]),
-                            Ty::Unknown,
-                        );
-                        this.store(Place::Variable(element.clone()), pair);
+                    let value = Operand::variable(element.clone(), Ty::Unknown);
+                    this.bind(element.clone(), raw.clone());
+                    let hole = this.block(|this| this.absent_if_hole(&element, &raw))?;
+                    let keyed = this.block(|this| {
+                        let key_value =
+                            this.invoke("ts.map.value", std::slice::from_ref(&raw), Ty::Unknown)?;
+                        this.store(Place::Variable(element.clone()), key_value);
+                        let entry = this.block(|this| {
+                            let read = Expr::Member(Box::new(Member::Index {
+                                target: subject.expr(),
+                                index: raw.expr(),
+                            }));
+                            let read = this.let_expr(read, Ty::Unknown);
+                            let pair = this.let_expr(
+                                Expr::List(vec![Expr::Variable(element.clone()), read.expr()]),
+                                Ty::Unknown,
+                            );
+                            this.store(Place::Variable(element.clone()), pair);
+                            Ok(())
+                        })?;
+                        let map = this.same(receiver.expr(), Operand::text("map").expr())?;
+                        this.emit_if(map, entry, Buf::default());
                         Ok(())
                     })?;
-                    let map = this.same(receiver.expr(), Operand::text("map").expr())?;
-                    this.emit_if(map, entry, Buf::default());
-                    let mode = match kind {
-                        None => Mode::Assign,
-                        Some(VarKind::Var) => Mode::Declared,
-                        Some(_) => Mode::Local,
-                    };
-                    this.destructure(pattern, Operand::variable(element, Ty::Unknown), mode)?;
+                    this.emit_if(list, hole, keyed);
+                    this.destructure(pattern, value, mode_of(kind))?;
                     this.lower_statement(body)
                 })?;
                 this.emit_for(key, subject.expr(), body);
@@ -532,7 +586,7 @@ impl Lowerer<'_> {
             })?;
             let array =
                 self.block(|this| this.lower_for_of_iterator(pattern, kind, subject, body))?;
-            self.emit_if(collection, live, array);
+            self.emit_if(collection.expr(), live, array);
             return Ok(());
         }
         let items = self.invoke(helper, std::slice::from_ref(&subject), Ty::Unknown)?;
@@ -541,12 +595,7 @@ impl Lowerer<'_> {
         let body = self.loop_block(Vec::new(), |this| {
             let present = this.invoke("ts.has", &[subject, element.clone()], Ty::Bool)?;
             let visits = this.block(|this| {
-                let mode = match kind {
-                    None => Mode::Assign,
-                    Some(VarKind::Var) => Mode::Declared,
-                    Some(_) => Mode::Local,
-                };
-                this.destructure(pattern, element, mode)?;
+                this.destructure(pattern, element, mode_of(kind))?;
                 this.lower_statement(body)
             })?;
             this.emit_if(present.expr(), visits, Buf::default());
@@ -579,12 +628,7 @@ impl Lowerer<'_> {
             let onward = this.invoke("ts.not", &[done], Ty::Bool)?;
             this.exit_unless(onward.expr());
             let element = this.invoke("ts.get", &[step, Operand::text("value")], Ty::Unknown)?;
-            let mode = match kind {
-                None => Mode::Assign,
-                Some(VarKind::Var) => Mode::Declared,
-                Some(_) => Mode::Local,
-            };
-            this.destructure(pattern, element, mode)?;
+            this.destructure(pattern, element, mode_of(kind))?;
             this.lower_statement(body)
         })?;
         self.emit_while(truth(), body);

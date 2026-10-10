@@ -95,6 +95,11 @@ errors \"type_error\", \"TS_METHOD_UNSUPPORTED\", \"TS_REFLECTION_UNSUPPORTED\"
 charge sum(12, deep(key))
 body {
   let receiver = invoke ts.receiver(target)
+  if same(receiver, \"record\") {
+    if same(kind(key), \"text\") { return target[key] }
+    let name = invoke ts.to_property_key(key)
+    return target[name]
+  }
   let token = same(receiver, \"builtin\")
   if same(receiver, \"closure\") { if same(kind(target), \"tuple\") { set token = bool.not(same(target[1], \"\")) } }
   if token {
@@ -129,7 +134,6 @@ pub(crate) fn member_reader(table: &Table, name: &str) -> String {
         "bool.not",
         "record.contains",
         "ts.receiver",
-        "ts.get",
         "ts.read",
     ]
     .iter()
@@ -219,10 +223,7 @@ pub(crate) fn member_reader(table: &Table, name: &str) -> String {
          charge {}\nbody {{\n\
          \x20 let receiver = invoke ts.receiver(this)\n\
          \x20 if same(receiver, \"record\") {{\n\
-         \x20   if record.contains(this, \"{name}\") {{\n\
-         \x20     let own = invoke ts.get(this, \"{name}\")\n\
-         \x20     return own\n\
-         \x20   }}\n\
+         \x20   if record.contains(this, \"{name}\") {{ return this[\"{name}\"] }}\n\
          \x20 }}\n\
          \x20 let token = same(receiver, \"builtin\")\n\
          \x20 if same(receiver, \"closure\") {{ if same(kind(this), \"tuple\") {{ set token = bool.not(same(this[1], \"\")) }} }}\n\

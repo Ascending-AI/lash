@@ -75,7 +75,9 @@ fn formula(case: &Case) {
     );
 
     // Returning and raising bodies both use the result formula; a raised
-    // arbitrary value is not that result and contributes zero.
+    // arbitrary value is not that result and contributes zero. The probe
+    // states a native implementation, so its formula is its whole charge
+    // whichever implementation runs (`K-CHG-007`); here its body runs.
     let body = if case.name.starts_with("return") {
         "return 7"
     } else {
@@ -84,7 +86,7 @@ fn formula(case: &Case) {
     {
         let mut library = FunctionRegistry::new();
         let definition = parse_definition(&format!(
-            "function probe.result() -> Any\nkernel 1\ncharge sum(9, size(result))\nbody {{ {body} }}"
+            "function probe.result() -> Any\nkernel 1\ncharge sum(9, size(result))\nnative\nbody {{ {body} }}"
         )).unwrap();
         library.register(definition, None).unwrap();
         let mut runner = crate::MachineRunner::<KernelMachine>::new(Arc::new(library));

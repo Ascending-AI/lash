@@ -160,7 +160,11 @@ impl PreparedLibrary {
                     .iter()
                     .map(|param| param.name.clone())
                     .collect();
-                compiler.unit_code(code, Unit::Library(*function), &params, &body.block, false);
+                // A helper's body is ordinary code; the body of a function
+                // with a native implementation is covered by its formula.
+                let unit = Unit::Library(*function);
+                let charged = !definition.has_native();
+                compiler.unit_code(code, unit, &params, &body.block, charged);
             }
         }
         let tables = compiler.finish();
@@ -331,8 +335,8 @@ pub(crate) struct Code {
     pub(crate) positions: Vec<u32>,
     /// The enclosing code's variables this closure shares.
     pub(crate) captures: Vec<Capture>,
-    /// Whether the code's forms are charged: a library body's are not
-    /// (`K-CHG-007`).
+    /// Whether the code's forms are charged: those of the body of a library
+    /// function with a native implementation are not (`K-CHG-007`).
     pub(crate) charged: bool,
 }
 
@@ -586,6 +590,8 @@ struct Compiler<'a> {
     /// The codes being compiled, the outermost first; each closure adds one.
     scopes: Vec<Scopes>,
     unit: Unit,
+    /// Whether the unit being compiled charges its forms (`K-CHG-007`).
+    charged: bool,
     path: Vec<u32>,
 }
 
@@ -678,6 +684,7 @@ impl<'a> Compiler<'a> {
             resolve,
             scopes: Vec::new(),
             unit: Unit::Main,
+            charged: true,
             path: Vec::new(),
         }
     }
@@ -730,6 +737,7 @@ impl Compiler<'_> {
     ) {
         let main = unit == Unit::Main;
         self.unit = unit;
+        self.charged = charged;
         self.path.clear();
         let compiled = self.code(params, body, main, charged);
         self.codes[(code.0 - self.base.codes) as usize] = Some(compiled);
@@ -1054,7 +1062,7 @@ impl Compiler<'_> {
             ),
             doc::Expr::Member(member) => Expr::Member(Box::new(self.member(member, 0).0)),
             doc::Expr::Closure(closure) => {
-                let charged = !matches!(self.unit, Unit::Library(_));
+                let charged = self.charged;
                 let code = self.child(0, |c| {
                     c.code(&closure.params, &closure.body, false, charged)
                 });

@@ -280,6 +280,8 @@ struct Row {
     text: &'static str,
     slice: u64,
     park: fn(&mut Embedder),
+    /// Whether `pair.twice` runs natively or its kernel body runs.
+    native_twice: bool,
     /// Applied to both states of the pair.
     prepare: fn(&mut ParkedRun),
     change: fn(&mut ParkedRun),
@@ -313,6 +315,7 @@ impl Row {
             text,
             slice: u64::MAX,
             park: first_park,
+            native_twice: true,
             prepare: unprepared,
             change,
             watch: to_the_end,
@@ -408,12 +411,10 @@ main {
 }
 "#;
 
-const MAPPED: &str = r#"
+const TWICE: &str = r#"
 main {
-  let f = fn(x) { let r = perform echo(x) as Any return r }
-  let xs = ["p", "q"]
-  let ys = invoke each.map(f, xs)
-  return ys
+  let y = invoke pair.twice(3)
+  return y
 }
 "#;
 
@@ -648,11 +649,23 @@ fn rows() -> Vec<Row> {
         Row::new("the value a finally leaves with", THROWN_LIST, |parked| {
             parked.tasks[0].calls[0].held.departing[0] = Value::Null;
         }),
-        Row::new("a library call's arguments", MAPPED, |parked| {
-            let held = &mut parked.tasks[0].calls[1].held;
-            assert!(held.arguments.is_some());
-            held.arguments = Some(Vec::new());
-        }),
+        // A slice ends inside the kernel body of a function with a native
+        // implementation, whose formula reads the arguments when it ends.
+        Row {
+            slice: 1,
+            native_twice: false,
+            park: |embedder| loop {
+                assert!(matches!(embedder.run(), Step::Slice));
+                if embedder.machine.export().unwrap().tasks[0].calls.len() == 2 {
+                    return;
+                }
+            },
+            ..Row::new("a library call's arguments", TWICE, |parked| {
+                let held = &mut parked.tasks[0].calls[1].held;
+                assert!(held.arguments.is_some());
+                held.arguments = Some(vec![int(0)]);
+            })
+        },
     ]
 }
 
@@ -665,6 +678,7 @@ fn every_saved_row_changes_how_a_run_resumes() {
             row.text,
             Setup {
                 slice: row.slice,
+                native_twice: row.native_twice,
                 ..Setup::default()
             },
         );

@@ -113,6 +113,21 @@ const ROWS: &[Row] = &[
         answer: || number(2.0),
     },
     Row {
+        code: "TS_TYPED_NUMBER_METHOD",
+        ecmascript: "`n.m(...)` calls the method `m` of whatever `n` is.",
+        dialect: "With `n` declared a `number`, a value that is not a number raises `type_error`.",
+        raises: "type_error",
+        program: |declared| {
+            program(
+                declared,
+                &[("n", "number")],
+                "return n.toString();",
+                "'7' as any",
+            )
+        },
+        answer: || text("7"),
+    },
+    Row {
         code: "TS_TYPED_STRING_CONCAT",
         ecmascript: "`a + b` with a string operand converts the other to a string.",
         dialect: "With both operands declared `string`, a value that is not a string raises `type_error`.",
@@ -136,6 +151,21 @@ const ROWS: &[Row] = &[
         answer: || text("n=true"),
     },
     Row {
+        code: "TS_TYPED_STRING_METHOD",
+        ecmascript: "`s.m(...)` calls the method `m` of whatever `s` is.",
+        dialect: "With `s` declared a `string`, a value that is not a string raises `type_error`.",
+        raises: "type_error",
+        program: |declared| {
+            program(
+                declared,
+                &[("s", "string")],
+                "return s.indexOf('b');",
+                "['a', 'b'] as any",
+            )
+        },
+        answer: || number(1.0),
+    },
+    Row {
         code: "TS_TYPED_BOOLEAN_NOT",
         ecmascript: "`!a` takes the operand's truthiness.",
         dialect: "With the operand declared `boolean`, a value that is not a boolean raises `type_error`.",
@@ -157,6 +187,21 @@ const ROWS: &[Row] = &[
             )
         },
         answer: || number(2.0),
+    },
+    Row {
+        code: "TS_TYPED_BOOLEAN_METHOD",
+        ecmascript: "`b.m(...)` calls the method `m` of whatever `b` is.",
+        dialect: "With `b` declared a `boolean`, a value that is not a boolean raises `type_error`.",
+        raises: "type_error",
+        program: |declared| {
+            program(
+                declared,
+                &[("b", "boolean")],
+                "return b.toString();",
+                "1 as any",
+            )
+        },
+        answer: || text("1"),
     },
     Row {
         code: "TS_TYPED_ARRAY_ELEMENT",
@@ -188,6 +233,36 @@ const ROWS: &[Row] = &[
             )
         },
         answer: || Datum::Absent,
+    },
+    Row {
+        code: "TS_TYPED_ARRAY_METHOD",
+        ecmascript: "`xs.m(...)` calls the method `m` of whatever `xs` is.",
+        dialect: "With `xs` declared an array, a value that is not an array raises `type_error`.",
+        raises: "type_error",
+        program: |declared| {
+            program(
+                declared,
+                &[("xs", "number[]")],
+                "return xs.push(3);",
+                "({ push: (v: any) => v + 1 }) as any",
+            )
+        },
+        answer: || number(4.0),
+    },
+    Row {
+        code: "TS_TYPED_ARRAY_ITERATION",
+        ecmascript: "`for (x of xs)` iterates whatever `xs` is.",
+        dialect: "With `xs` declared an array, a value that is not an array raises `type_error`.",
+        raises: "type_error",
+        program: |declared| {
+            program(
+                declared,
+                &[("xs", "number[]")],
+                "let n = 0; for (const x of xs) { n = n + 1; } return n;",
+                "'ab' as any",
+            )
+        },
+        answer: || number(2.0),
     },
 ];
 
@@ -230,13 +305,18 @@ rows! {
     number_equal_raises_on_a_mistyped_operand => "TS_TYPED_NUMBER_EQUAL",
     number_negate_raises_on_a_mistyped_operand => "TS_TYPED_NUMBER_NEGATE",
     number_update_raises_on_a_mistyped_operand => "TS_TYPED_NUMBER_UPDATE",
+    number_method_raises_on_a_value_that_is_not_a_number => "TS_TYPED_NUMBER_METHOD",
     string_concat_raises_on_a_mistyped_operand => "TS_TYPED_STRING_CONCAT",
     string_template_raises_on_a_mistyped_value => "TS_TYPED_STRING_TEMPLATE",
+    string_method_raises_on_a_value_that_is_not_a_string => "TS_TYPED_STRING_METHOD",
     boolean_not_raises_on_a_mistyped_operand => "TS_TYPED_BOOLEAN_NOT",
     boolean_condition_raises_on_a_mistyped_test => "TS_TYPED_BOOLEAN_CONDITION",
+    boolean_method_raises_on_a_value_that_is_not_a_boolean => "TS_TYPED_BOOLEAN_METHOD",
     array_element_raises_on_a_value_that_is_not_an_array => "TS_TYPED_ARRAY_ELEMENT",
     array_index_out_of_range_raises => "TS_TYPED_ARRAY_INDEX_RANGE",
     array_length_raises_on_a_value_that_is_not_an_array => "TS_TYPED_ARRAY_LENGTH",
+    array_method_raises_on_a_value_that_is_not_an_array => "TS_TYPED_ARRAY_METHOD",
+    array_iteration_raises_on_a_value_that_is_not_an_array => "TS_TYPED_ARRAY_ITERATION",
 }
 
 /// The register's `TS_TYPED_*` rows are the rows here, in the same words,

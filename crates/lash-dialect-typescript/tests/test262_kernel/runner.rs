@@ -38,11 +38,15 @@ const EARLY_ERROR_CODES: [DiagnosticCode; 5] = [
 
 /// Fixed measurement bounds, identical for every Test262 case. Crossing one is
 /// a failure with the kernel's typed bound error, never a conformance exemption.
-/// These cases test semantics, not billion-element materialization. Four million
-/// charge units and 8 MiB of guest memory allow ordinary harnesses and programs
-/// while bounding dense representations of JavaScript's huge sparse arrays.
+/// These cases test semantics, not billion-element materialization. 8 MiB of
+/// guest memory bounds dense representations of JavaScript's huge sparse
+/// arrays. The charge bound is measured, in units where a helper's body is
+/// charged as it runs (`K-CHG-007`): with the bound lifted to 400,000,000,
+/// the costliest recorded pass the register does not exclude,
+/// `decodeURI/S15.1.3.1_A1.13_T1.js`, charged 22,018,500; twice that, rounded
+/// up to a million, is 45,000,000.
 const BOUNDS: Bounds = Bounds {
-    charge: 4_000_000,
+    charge: 45_000_000,
     memory: 8 << 20,
     call_depth: 1_000,
     live_tasks: 1_024,

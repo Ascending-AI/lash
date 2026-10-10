@@ -121,11 +121,24 @@ pub fn numbers() -> Vec<(FunctionDefinition, Arc<dyn NativeFunction>)> {
                 | Binary::RemFloor
                 | Binary::RemTrunc,
             ) => Formula::Product(vec![input.clone(), input]),
+            // A float power is one libm call; only an integer power does
+            // work that grows with the exponent.
+            Operation::Binary(Binary::Pow) if matches!(domain, Domain::Float) => input,
             Operation::Binary(Binary::Pow) => Formula::Product(vec![
                 input,
                 Formula::Magnitude(Operand::Param(Name::new("arg1"))),
             ]),
             Operation::Math(_) => Formula::Sum(vec![Formula::Constant(64), input]),
+            // `kind` reads a tag, and `same` compares two heap objects by
+            // identity and two immutable values member by member: neither
+            // walks what a heap object holds, so neither is charged for it.
+            Operation::Kind => Formula::Constant(0),
+            Operation::Same => Formula::Min(
+                param_defs
+                    .iter()
+                    .map(|param| Formula::Size(Operand::Param(param.name.clone())))
+                    .collect(),
+            ),
             _ => input,
         };
         let charge = Formula::Sum(vec![

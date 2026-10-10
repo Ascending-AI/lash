@@ -515,7 +515,7 @@
       "description": "The values a call's control state holds and no variable does.",
       "properties": {
         "arguments": {
-          "description": "The arguments of a call of a library function's body, which its\ncharge formula measures when the call ends (`K-CHG-003`).",
+          "description": "The arguments of a call of the body of a library function with a\nnative implementation, which its charge formula measures when the\ncall ends (`K-CHG-003`). A helper's body has none: it was charged as\nit ran (`K-CHG-007`).",
           "items": {
             "$ref": "#/$defs/Value"
           },
