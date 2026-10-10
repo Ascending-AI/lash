@@ -838,8 +838,7 @@ impl ProtocolDriverHandle for ToolBatchDriver {
     ) -> Vec<DriverAction> {
         vec![DriverAction::Start(PendingWork::WaitingForToolResults {
             settled: None,
-            held: Vec::new(),
-            earlier: Vec::new(),
+            control: None,
             calls: vec![
                 PendingToolCall {
                     call_id: crate::ToolCallId::fixture("call-read"),

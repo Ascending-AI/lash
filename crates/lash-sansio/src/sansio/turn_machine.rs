@@ -795,9 +795,8 @@ impl<M: TurnProtocol> TurnMachine<M> {
             AnsweredWork::Tools {
                 expansion,
                 results,
-                held,
-                earlier,
-            } => self.handle_tool_results(&expansion, results, held, earlier),
+                control,
+            } => self.handle_tool_results(expansion, results, control),
             AnsweredWork::Exec {
                 driver_state,
                 result,
@@ -1127,11 +1126,24 @@ impl<M: TurnProtocol> TurnMachine<M> {
 
     fn handle_tool_results(
         &mut self,
-        expansion: &ToolExpansionPlan,
+        expansion: ToolExpansionPlan,
         completed: Vec<CompletedToolCall<M::IntentOutcome>>,
-        held: Vec<PendingToolCall>,
-        earlier: Vec<CompletedToolCall<M::IntentOutcome>>,
+        control: Option<Box<crate::sansio::HeldControl<M::IntentOutcome>>>,
     ) {
+        // A control call that ran answers at its own slot, among the
+        // results of the slots that settled before it.
+        let (completed, waiting) = match control.map(|control| *control) {
+            None => (completed, None),
+            Some(crate::sansio::HeldControl::Running { slot, siblings }) => (
+                completed
+                    .into_iter()
+                    .fold(siblings, |all, outcome| at_slot(all, slot, outcome)),
+                None,
+            ),
+            Some(crate::sansio::HeldControl::Waiting { slot, call }) => {
+                (completed, Some((slot, call)))
+            }
+        };
         // Host panic evidence must not enter protocol expansion or repair.
         if let Some(stop) = completed
             .iter()
@@ -1149,36 +1161,32 @@ impl<M: TurnProtocol> TurnMachine<M> {
             self.finish(TurnOutcome::Stopped(stop));
             return;
         }
+        // A held control call runs only once every other slot of its step
+        // settled successfully, judged on the slots' own results before any
+        // folding; a slot that failed or was cancelled refuses it before
+        // its body runs. Either way it answers at its own slot.
+        let completed = match waiting {
+            None => completed,
+            Some((slot, call)) => {
+                if completed.iter().all(|outcome| outcome.output.is_success()) {
+                    self.start(PendingWork::WaitingForToolResults {
+                        calls: vec![call],
+                        settled: None,
+                        expansion,
+                        control: Some(Box::new(crate::sansio::HeldControl::Running {
+                            slot,
+                            siblings: completed,
+                        })),
+                    });
+                    return;
+                }
+                at_slot(completed, slot, sibling_failed(call))
+            }
+        };
         let completed = if expansion.is_empty() {
             completed
         } else {
-            Arc::clone(&self.config.protocol_driver).fold_tool_results(expansion, completed)
-        };
-        // A held control call runs only once every sibling settled
-        // successfully; a sibling that failed or was cancelled refuses it
-        // before its body runs. Either way every result reaches the driver.
-        let mut completed = completed;
-        if !held.is_empty() {
-            if completed.iter().all(|outcome| outcome.output.is_success()) {
-                let mut earlier = earlier;
-                earlier.extend(completed);
-                self.start(PendingWork::WaitingForToolResults {
-                    calls: held,
-                    settled: None,
-                    expansion: ToolExpansionPlan::default(),
-                    held: Vec::new(),
-                    earlier,
-                });
-                return;
-            }
-            completed.extend(held.into_iter().map(sibling_failed));
-        }
-        let completed = if earlier.is_empty() {
-            completed
-        } else {
-            let mut all = earlier;
-            all.extend(completed);
-            all
+            Arc::clone(&self.config.protocol_driver).fold_tool_results(&expansion, completed)
         };
         for outcome in &completed {
             self.emit(SessionStreamEvent::ToolCall {
@@ -1226,19 +1234,22 @@ impl<M: TurnProtocol> TurnMachine<M> {
     }
 }
 
+/// `slots` with `outcome` answering flat slot `slot` among them.
+fn at_slot<I>(
+    mut slots: Vec<CompletedToolCall<I>>,
+    slot: u32,
+    outcome: CompletedToolCall<I>,
+) -> Vec<CompletedToolCall<I>> {
+    let at = usize::try_from(slot).unwrap_or(usize::MAX).min(slots.len());
+    slots.insert(at, outcome);
+    slots
+}
+
 /// The answer of a held control call refused because a sibling of its step
 /// failed or was cancelled: its body never ran.
 fn sibling_failed<I>(call: PendingToolCall) -> CompletedToolCall<I> {
-    let output = crate::ToolCallOutput::failure(
-        crate::ToolFailure::invalid_request(
-            "control_sibling_failed",
-            format!(
-                "`{}` was not called: another call of the same step failed, so the turn does not end on it",
-                call.tool_name
-            ),
-        )
-        .with_cause(crate::ToolFailureCause::ControlSiblingFailed),
-    );
+    let output =
+        crate::ToolCallOutput::failure(crate::ToolFailure::control_sibling_failed(&call.tool_name));
     CompletedToolCall {
         model_return: crate::ModelToolReturn::from_output(call.tool_name.clone(), &output),
         call_id: call.call_id,

@@ -313,9 +313,12 @@ fn the_preamble_offers_batch_only_when_enabled() {
         serde_json::json!(8)
     );
     assert!(
-        crate::standard_execution_section(BatchSugar::Enabled {
-            max_members: std::num::NonZeroUsize::new(8).expect("eight is non-zero"),
-        })
+        crate::standard_execution_section(
+            BatchSugar::Enabled {
+                max_members: std::num::NonZeroUsize::new(8).expect("eight is non-zero"),
+            },
+            lash_core::TerminationMode::Natural,
+        )
         .contains("at most 8 per batch")
     );
     assert!(
@@ -504,10 +507,109 @@ fn a_failed_sibling_refuses_the_control_call_before_it_runs() {
     );
 }
 
-/// Law 8 (FIG-5781): a control call is the step's own call, never a member
-/// of `batch`; the member is refused and the batch's other members run.
+fn raw_call(call_id: &str, tool_name: &str, input_json: &str) -> LlmOutputPart {
+    LlmOutputPart::ToolCall {
+        call_id: call_id.to_string(),
+        tool_name: tool_name.to_string(),
+        input_json: input_json.to_string(),
+        replay: None,
+    }
+}
+
+fn failed(_: &str) -> ToolCallOutput {
+    ToolCallOutput::failure(ToolFailure::tool(
+        ToolFailureClass::Execution,
+        "probe_failed",
+        "probe failed",
+    ))
+}
+
+/// What the model reads of a control call a failed sibling refused.
+const SIBLING_FAILED: &str = "another call of the same step failed";
+
+/// The step's control call never ran: no wave dispatched it, nothing ended
+/// the turn, the turn checkpoints after its work, and `cause` was reported.
+fn assert_control_refused(effects: &[Effect], machine: &TurnMachine, cause: &str) {
+    assert!(
+        tool_calls(effects)
+            .is_none_or(|(_, calls)| calls.iter().all(|call| call.tool_name != "finish")),
+        "the control call never runs: {effects:?}"
+    );
+    assert_eq!(turn_outcomes(effects), Vec::new(), "{effects:?}");
+    assert!(!machine.is_done());
+    let reported = reported_causes(machine);
+    assert!(reported.contains(cause), "{cause} is reported: {reported}");
+}
+
+/// Law 8 (FIG-5801): a failing member of a `batch` is a failed sibling of
+/// the step's control call, though the wrapper folds into one result: the
+/// control call is refused before its body runs.
 #[test]
-fn a_batch_member_naming_a_control_tool_is_refused() {
+fn a_batch_with_a_failing_member_blocks_the_control() {
+    let mut machine = controlling_machine();
+    let effects = drain(&mut machine);
+    let effects = respond(
+        &mut machine,
+        &effects,
+        vec![
+            batch_call(
+                "call-b",
+                serde_json::json!([{ "tool": "probe", "parameters": {} }]),
+            ),
+            call("call-f", "finish"),
+        ],
+    );
+    let (id, calls) = tool_calls(&effects).expect("the siblings' round");
+    let names: Vec<_> = calls.iter().map(|call| call.tool_name.as_str()).collect();
+    assert_eq!(names, ["probe"], "the control call waits for the batch");
+    let effects = answer(&mut machine, id, &calls, failed);
+    assert_control_refused(&effects, &machine, SIBLING_FAILED);
+    let (_, kind) = checkpoint(&effects).expect("an after-work checkpoint");
+    assert_eq!(kind, CheckpointKind::AfterWork);
+}
+
+/// Law 8 (FIG-5801): a sibling refused before dispatch, here for malformed
+/// JSON arguments, failed: the control call is refused before its body runs.
+#[test]
+fn malformed_json_for_a_sibling_blocks_the_control() {
+    let mut machine = controlling_machine();
+    let effects = drain(&mut machine);
+    let effects = respond(
+        &mut machine,
+        &effects,
+        vec![raw_call("call-1", "probe", "{"), call("call-2", "finish")],
+    );
+    assert_control_refused(&effects, &machine, SIBLING_FAILED);
+    assert!(
+        reported_causes(&machine).contains("invalid_tool_call_json"),
+        "the malformed sibling is reported"
+    );
+}
+
+/// Law 8 (FIG-5801): the step's one control attempt is reserved by the
+/// first control call in response order, before its arguments are parsed:
+/// a malformed first control call spends it, and the next one is refused.
+#[test]
+fn a_malformed_first_control_spends_the_slot() {
+    let mut machine = controlling_machine();
+    let effects = drain(&mut machine);
+    let effects = respond(
+        &mut machine,
+        &effects,
+        vec![raw_call("call-1", "finish", "{"), call("call-2", "finish")],
+    );
+    assert_control_refused(&effects, &machine, "control_attempt_spent");
+    assert!(
+        reported_causes(&machine).contains("invalid_tool_call_json"),
+        "the malformed control call is reported"
+    );
+}
+
+/// Law 8 (FIG-5801): a control call made as a member of `batch` keeps its
+/// member identity: it runs after the batch's other members, the turn's
+/// candidate names the member, and the wrapper's result reports both rows.
+#[test]
+fn a_control_member_inside_a_batch_finishes_with_its_identity() {
     let mut machine = controlling_machine();
     let effects = drain(&mut machine);
     let effects = respond(
@@ -521,11 +623,101 @@ fn a_batch_member_naming_a_control_tool_is_refused() {
             ]),
         )],
     );
-    let (_, calls, plan) = tool_work(&effects);
+    let (id, calls, plan) = tool_work(&effects);
     let names: Vec<_> = calls.iter().map(|call| call.tool_name.as_str()).collect();
-    assert_eq!(names, ["probe"]);
-    let rows = serde_json::to_string(&plan).expect("plan encodes");
-    assert!(rows.contains("cannot run inside `batch`"), "{rows}");
+    assert_eq!(names, ["probe"], "the control member waits for its sibling");
+    let wrapper = plan.wrappers[0].call_id.clone();
+    let effects = answer(&mut machine, id, &calls, |_| {
+        ToolCallOutput::success(serde_json::json!("ok"))
+    });
+    let (id, calls) = tool_calls(&effects).expect("the control member's round");
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].tool_name, "finish");
+    assert_eq!(
+        calls[0].call_id,
+        wrapper.child(1),
+        "the member's own identity"
+    );
+    let effects = answer(&mut machine, id, &calls, |_| {
+        ToolCallOutput::finish(serde_json::json!({ "value": 1 }))
+    });
+    let (id, kind) = checkpoint(&effects).expect("a completion checkpoint");
+    assert_eq!(kind, CheckpointKind::BeforeCompletion);
+    machine.handle_response(Response::Checkpoint {
+        id,
+        delivery: sansio::CheckpointDelivery::default(),
+    });
+    let effects = drain(&mut machine);
+    assert_eq!(
+        turn_outcomes(&effects),
+        vec![TurnOutcome::Finished(TurnFinish::Finished {
+            tool_name: "finish".to_string(),
+            value: serde_json::json!({ "value": 1 }),
+        })],
+        "{effects:?}"
+    );
+    let candidates = machine.completion_candidates();
+    assert_eq!(candidates.len(), 1);
+    assert_eq!(candidates[0].call_id, wrapper.child(1));
+    let reported = reported_causes(&machine);
+    assert_eq!(
+        reported.matches("\"kind\":\"ToolResult\"").count(),
+        1,
+        "the wrapper answers once for its members: {reported}"
+    );
+    assert!(
+        reported.contains("\\\"tool\\\":\\\"finish\\\""),
+        "the control member has its row: {reported}"
+    );
+}
+
+/// The namespace of a session whose turns only a control call ends.
+fn terminal_required() -> lash_core::ProtocolTurnOptions {
+    lash_core::ProtocolTurnOptions::from_payload(serde_json::json!({
+        "behaviour": StandardProtocolConfig::default().recorded_behaviour(),
+        "termination": "terminal_required",
+    }))
+}
+
+/// Law 8 (FIG-5801): under TerminalRequired, a reply in prose does not end
+/// the turn: the reply is kept, the model is told to end the turn through a
+/// control call, and the turn goes on to its next iteration.
+#[test]
+fn terminal_required_standard_prose_takes_the_repair_path() {
+    let mut config = machine_config(Some(4));
+    config.termination = terminal_required();
+    let mut machine = TurnMachine::new(
+        config,
+        vec![Message {
+            id: "m0".to_string(),
+            role: MessageRole::User,
+            parts: vec![Part::text("m0.p0".to_string(), "shift".to_string(), None)].into(),
+            origin: None,
+            reply_marker: None,
+        }],
+        Default::default(),
+        0,
+    );
+    let effects = drain(&mut machine);
+    let effects = respond(
+        &mut machine,
+        &effects,
+        vec![LlmOutputPart::Text {
+            text: "the answer is 4".to_string(),
+            response_meta: None,
+        }],
+    );
+    assert_eq!(turn_outcomes(&effects), Vec::new(), "{effects:?}");
+    assert!(!machine.is_done());
+    let (_, kind) = checkpoint(&effects).expect("an after-work checkpoint");
+    assert_eq!(kind, CheckpointKind::AfterWork);
+    assert_eq!(machine.protocol_iteration(), 1, "the turn goes on");
+    let reported = reported_causes(&machine);
+    assert!(reported.contains("the answer is 4"), "{reported}");
+    assert!(
+        reported.contains("`finish`"),
+        "the repair names the control: {reported}"
+    );
 }
 
 #[test]

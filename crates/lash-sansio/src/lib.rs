@@ -149,8 +149,8 @@ pub use run_aggregate::RunAggregateWakePolicy;
 pub use sansio::{
     ChatContextProjector, CheckpointContentRef, CheckpointDelivery, CheckpointResumeAction,
     CompletedToolCall, ContextProjector, DriverAction, DriverContextView, Effect, EffectId,
-    ExpandedRow, ExpandedWrapper, LlmCallError, ModelToolCalls, PendingToolCall, PendingWork,
-    ProjectorContext, ProtocolDriverHandle, Response, ResponseToolCalls, SavedTurn,
+    ExpandedRow, ExpandedWrapper, HeldControl, LlmCallError, ModelToolCalls, PendingToolCall,
+    PendingWork, ProjectorContext, ProtocolDriverHandle, Response, ResponseToolCalls, SavedTurn,
     TURN_CHECKPOINT_SCHEMA_VERSION, ToolExpansionPlan, TurnCheckpoint, TurnCheckpointContent,
     TurnCheckpointRestoreError, TurnMachine, TurnMachineConfig, TurnProtocol, TurnWindow,
     TurnWindowPin, UndecodableDriverState, UnitTurnProtocol,

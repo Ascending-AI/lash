@@ -823,7 +823,7 @@ pub mod plugins {
     pub use lash_sansio::{
         AttachmentMaterializationNotice, CheckpointResumeAction, CompletionCandidate,
         CompletionDisposition, DegradedBinding, DriverAction, DriverContextView, EffectId,
-        ExpandedRow, ExpandedWrapper, ModelToolCalls, ModelToolReturn, PendingWork,
+        ExpandedRow, ExpandedWrapper, HeldControl, ModelToolCalls, ModelToolReturn, PendingWork,
         ProjectorContext, ResponseToolCalls, SessionStreamEvent, StreamMessageKind,
         ToolCatalogBuildError, ToolContractResolver, ToolExpansionPlan, TurnMachineConfig,
         TurnProtocol, UndecodableDriverState, UnitTurnProtocol, WriterFormats,

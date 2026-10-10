@@ -40,9 +40,9 @@ pub use turn_protocol::{
     ChatContextProjector, CheckpointDelivery, CheckpointResumeAction, CompletedToolCall,
     ContextProjector, DriverAction, DriverContextView, Effect, EffectId, ExecutionEnvironmentSync,
     ExecutionEnvironmentSyncFailure, ExecutionEnvironmentSyncFailureKind, ExpandedRow,
-    ExpandedWrapper, LlmCallError, LogEvent, ModelToolCalls, PendingToolCall, PendingWork,
-    ProjectorContext, ProtocolDriverHandle, Response, ResponseToolCalls, SyncedEnvironment,
-    ToolExpansionPlan, TurnMachineConfig, UndecodableDriverState, place_prompt,
+    ExpandedWrapper, HeldControl, LlmCallError, LogEvent, ModelToolCalls, PendingToolCall,
+    PendingWork, ProjectorContext, ProtocolDriverHandle, Response, ResponseToolCalls,
+    SyncedEnvironment, ToolExpansionPlan, TurnMachineConfig, UndecodableDriverState, place_prompt,
     stored_history_refusal_actions,
 };
 mod checkpoint_content;

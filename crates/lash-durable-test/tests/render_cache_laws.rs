@@ -364,6 +364,7 @@ async fn standard_runtime_keeps_recorded_history_across_params_renderer_and_reop
                     lash::standard::STANDARD_PROTOCOL_PLUGIN_ID,
                     lash::standard::StandardTurnOptions {
                         render: Some(standard_render(140)),
+                        termination: None,
                     },
                 )
                 .expect("the render options encode"),
@@ -409,6 +410,7 @@ async fn standard_runtime_keeps_recorded_history_across_params_renderer_and_reop
         Some(
             lash::runtime::ProtocolTurnOptions::typed(lash::standard::StandardRunOptions {
                 render: Some(standard_render(100)),
+                termination: None,
             })
             .expect("the run's render options encode"),
         ),

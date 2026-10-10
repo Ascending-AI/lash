@@ -12,6 +12,9 @@
 //! - The `batch` protocol sugar: the driver expands each `batch` call into
 //!   the step's one tool group beside the response's native calls, and folds
 //!   the members' results back into one batch result (ADR 0116 §2).
+//! - The step's one control call ([`round`]): reserved in response order,
+//!   held behind the step's other calls, and refused when one of them
+//!   failed.
 
 use lash_sansio::TurnId;
 use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
@@ -36,7 +39,9 @@ use lash_core::session_model::{
 };
 
 mod batch;
+mod finish;
 mod prompt;
+mod round;
 pub use prompt::section_keys;
 pub mod render;
 pub use batch::BatchResultRow;
@@ -59,13 +64,24 @@ use serde_json::Value;
 pub const STANDARD_PROTOCOL_PLUGIN_ID: &str = "standard_protocol";
 
 /// The execution section of the prompt, naming `batch` and its maximum only
-/// when the sugar is offered.
-fn standard_execution_section(batch: BatchSugar) -> String {
+/// when the sugar is offered, and `finish` when only a control call ends the
+/// session's turns.
+fn standard_execution_section(
+    batch: BatchSugar,
+    termination: lash_core::TerminationMode,
+) -> String {
+    let ending = if termination.prose_ends_turn() {
+        "Answer in prose only when no tool is needed."
+    } else {
+        "A prose reply does not end the turn: once the work is done, call `finish` with the answer, on its own."
+    };
     match batch {
         BatchSugar::Enabled { max_members } => format!(
-            "Call tools directly with their declared JSON arguments. Use `batch` for two or more independent calls (at most {max_members} per batch); make dependent calls after their inputs return. Check each batch result’s success flag before using its value. Answer in prose only when no tool is needed."
+            "Call tools directly with their declared JSON arguments. Use `batch` for two or more independent calls (at most {max_members} per batch); make dependent calls after their inputs return. Check each batch result’s success flag before using its value. {ending}"
         ),
-        BatchSugar::Disabled => "Call tools directly with their declared JSON arguments. Make independent calls together; make dependent calls after their inputs return. Answer in prose only when no tool is needed.".to_string(),
+        BatchSugar::Disabled => format!(
+            "Call tools directly with their declared JSON arguments. Make independent calls together; make dependent calls after their inputs return. {ending}"
+        ),
     }
 }
 
@@ -220,8 +236,25 @@ pub struct StandardRecordedConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Option<serde_json::Value>")]
     pub render: Option<StandardRenderConfig>,
+    /// How the session's turns may end. Absence is the `Natural` default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<serde_json::Value>")]
+    pub termination: Option<lash_core::TerminationMode>,
     #[schemars(with = "serde_json::Value")]
     pub behaviour: StandardRecordedBehaviour,
+}
+
+impl StandardRecordedConfig {
+    /// How a turn under the namespace `namespace` may end: as it recorded,
+    /// or `Natural` for a session that recorded no standard namespace.
+    fn termination_of(
+        namespace: &lash_core::ProtocolTurnOptions,
+    ) -> Result<lash_core::TerminationMode, lash_core::ProtocolTurnOptionsError> {
+        if namespace.is_empty() {
+            return Ok(lash_core::TerminationMode::default());
+        }
+        Ok(namespace.decode::<Self>()?.termination.unwrap_or_default())
+    }
 }
 
 /// The recorded key of the session's behaviour, named when a rebuilt
@@ -229,8 +262,8 @@ pub struct StandardRecordedConfig {
 const BEHAVIOUR_FIELD: &str = "behaviour";
 
 /// Standard protocol creation input (FIG-4379): the render options its tool
-/// results render with, over the host's configured render. A stated `null`
-/// reads as unstated. The prompt is not creation input: the protocol
+/// results render with, over the host's configured render, and how its
+/// turns may end (FIG-5801). A stated `null` reads as unstated. The prompt is not creation input: the protocol
 /// contributes keyed sections, and a host adds or wraps sections of its own
 /// (ADR 0133).
 #[derive(
@@ -242,6 +275,11 @@ pub struct StandardTurnOptions {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Option<serde_json::Value>")]
     pub render: Option<StandardRenderConfig>,
+    /// `TerminalRequired` turns end only through a control call, and the
+    /// session is offered `finish`; absence is `Natural`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<serde_json::Value>")]
+    pub termination: Option<lash_core::TerminationMode>,
 }
 
 /// The wire form a [`StandardTurnOptions`] decodes through once its nulls
@@ -251,6 +289,8 @@ pub struct StandardTurnOptions {
 struct StandardTurnOptionsWire {
     #[serde(default)]
     render: Option<StandardRenderConfig>,
+    #[serde(default)]
+    termination: Option<lash_core::TerminationMode>,
 }
 
 impl TryFrom<serde_json::Value> for StandardTurnOptions {
@@ -260,13 +300,15 @@ impl TryFrom<serde_json::Value> for StandardTurnOptions {
         let wire: StandardTurnOptionsWire = serde_json::from_value(render::without_nulls(value))?;
         Ok(Self {
             render: wire.render,
+            termination: wire.termination,
         })
     }
 }
 
 /// The options a run states for the standard protocol (FIG-4589): its render
 /// options, which the owner applies field by field over the session's
-/// ([`ConfigOwner::apply_run_options`]). Nothing else is a field: a payload
+/// ([`ConfigOwner::apply_run_options`]), and how the run's turn may end,
+/// which replaces the session's. Nothing else is a field: a payload
 /// that names the session's behaviour does not decode, so a run cannot
 /// state it, whatever value it gives. A stated `null` reads as
 /// unstated.
@@ -279,6 +321,9 @@ pub struct StandardRunOptions {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Option<serde_json::Value>")]
     pub render: Option<StandardRenderConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<serde_json::Value>")]
+    pub termination: Option<lash_core::TerminationMode>,
 }
 
 /// The wire form a [`StandardRunOptions`] decodes through once its nulls are
@@ -288,6 +333,8 @@ pub struct StandardRunOptions {
 struct StandardRunOptionsWire {
     #[serde(default)]
     render: Option<StandardRenderConfig>,
+    #[serde(default)]
+    termination: Option<lash_core::TerminationMode>,
 }
 
 impl TryFrom<serde_json::Value> for StandardRunOptions {
@@ -297,6 +344,7 @@ impl TryFrom<serde_json::Value> for StandardRunOptions {
         let wire: StandardRunOptionsWire = serde_json::from_value(render::without_nulls(value))?;
         Ok(Self {
             render: wire.render,
+            termination: wire.termination,
         })
     }
 }
@@ -376,6 +424,7 @@ impl ConfigOwner for StandardConfigOwner {
         let input = input.unwrap_or_default();
         Ok(Some(StandardRecordedConfig {
             render: input.render,
+            termination: input.termination,
             behaviour: self.behaviour.clone(),
         }))
     }
@@ -403,7 +452,8 @@ impl ConfigOwner for StandardConfigOwner {
     }
 
     /// A run's render options apply over the session's, field by field
-    /// and tool by tool. The behaviour stays as recorded.
+    /// and tool by tool, and its stated termination replaces the session's.
+    /// The behaviour stays as recorded.
     fn apply_run_options(
         &self,
         recorded: &StandardRecordedConfig,
@@ -415,6 +465,7 @@ impl ConfigOwner for StandardConfigOwner {
         };
         Ok(StandardRecordedConfig {
             render,
+            termination: options.termination.or(recorded.termination),
             ..recorded.clone()
         })
     }
@@ -487,6 +538,14 @@ impl PluginFactory for StandardProtocolPluginFactory {
                     "invalid recorded standard-protocol session config: {error}"
                 ))
             })?;
+        // A session whose turns only a control call ends is offered
+        // `finish`. A run that requires one of a session that is not finds
+        // no `finish` unless the host installed a tool that declares it,
+        // and is refused when its turn is formed.
+        let termination = recorded
+            .as_ref()
+            .and_then(|recorded| recorded.termination)
+            .unwrap_or_default();
         let behaviour = match recorded {
             Some(recorded) => recorded.behaviour,
             None if matches!(
@@ -511,6 +570,7 @@ impl PluginFactory for StandardProtocolPluginFactory {
         }
         Ok(Arc::new(StandardProtocolPlugin {
             config: self.config.clone().under_recorded_behaviour(&behaviour),
+            termination,
         }))
     }
 }
@@ -523,6 +583,7 @@ impl lash_core::plugin::PluginDefinition for StandardProtocolPluginFactory {
 
 struct StandardProtocolPlugin {
     config: StandardProtocolConfig,
+    termination: lash_core::TerminationMode,
 }
 
 impl SessionPlugin for StandardProtocolPlugin {
@@ -541,12 +602,16 @@ impl SessionPlugin for StandardProtocolPlugin {
             reg,
             prompt::StandardPromptBehaviour {
                 batch: self.config.batch,
+                termination: self.termination,
             },
         )?;
         reg.protocol()
             .protocol_driver(Arc::new(StandardProtocolDriver {
                 config: self.config.clone(),
             }))?;
+        if !self.termination.prose_ends_turn() {
+            reg.tools().provider(Arc::new(finish::FinishToolProvider))?;
+        }
         let discovery = self.config.discovery.clone();
         let batch = self.config.batch;
         reg.tool_catalog().contribute(
@@ -792,22 +857,10 @@ fn collect_standard_response(
     }
 }
 
-/// A tool call lifted out of the response, keeping the parse verdict on its
-/// raw argument text so a malformed call can be refused before dispatch
-/// without losing the original text.
-struct ReassembledToolCall {
-    call_id: lash_core::ToolCallId,
-    provider_call_id: String,
-    tool_name: String,
-    input_json: String,
-    args: Result<Value, String>,
-    replay: Option<ProviderReplayMeta>,
-}
-
 fn reassemble_standard_response(
     assistant_id: &str,
     parts: Vec<StandardResponsePart>,
-) -> (Vec<Part>, Vec<ReassembledToolCall>) {
+) -> (Vec<Part>, Vec<round::ResponseCall>) {
     let mut message_parts = Vec::with_capacity(parts.len());
     let mut calls = Vec::new();
 
@@ -843,15 +896,21 @@ fn reassemble_standard_response(
                     tool_call.tool_name.clone(),
                     tool_call.replay.clone(),
                 ));
-                let args = serde_json::from_str::<Value>(&tool_call.input_json)
-                    .map_err(|error| error.to_string());
-                calls.push(ReassembledToolCall {
-                    call_id: tool_call.call_id,
-                    provider_call_id: tool_call.provider_call_id,
-                    tool_name: tool_call.tool_name,
+                let (args, parse_error) = match serde_json::from_str::<Value>(&tool_call.input_json)
+                {
+                    Ok(args) => (args, None),
+                    Err(error) => (Value::Null, Some(error.to_string())),
+                };
+                calls.push(round::ResponseCall {
+                    call: PendingToolCall {
+                        call_id: tool_call.call_id,
+                        provider_call_id: Some(tool_call.provider_call_id),
+                        tool_name: tool_call.tool_name,
+                        args,
+                        replay: tool_call.replay,
+                    },
                     input_json: tool_call.input_json,
-                    args,
-                    replay: tool_call.replay,
+                    parse_error,
                 });
             }
         }
@@ -896,6 +955,9 @@ fn refused_tool_call_completion(
 
 impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
     fn prepare_protocol_iteration(&self, ctx: DriverContextView<'_>) -> Vec<DriverAction> {
+        if let Err(refusal) = finish_available(&ctx) {
+            return invalid_turn_options_actions(refusal);
+        }
         let request = match ctx.project_llm_request(true) {
             Ok(request) => request,
             Err(error) => return lash_sansio::sansio::stored_history_refusal_actions(error),
@@ -990,6 +1052,18 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
                     },
                 )]));
             }
+            match StandardRecordedConfig::termination_of(ctx.termination()) {
+                Err(error) => {
+                    return invalid_turn_options_actions(format!(
+                        "the turn's standard-protocol options do not decode: {error}"
+                    ));
+                }
+                Ok(termination) if !termination.prose_ends_turn() => {
+                    actions.extend(finish_required_repair(&ctx));
+                    return actions;
+                }
+                Ok(_) => {}
+            }
             actions.push(DriverAction::Start(PendingWork::Checkpoint {
                 checkpoint: CheckpointKind::BeforeCompletion,
                 on_empty: CheckpointResumeAction::Finish(TurnOutcome::Finished(
@@ -1013,132 +1087,37 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
             )]));
         }
 
-        let mut calls: Vec<PendingToolCall> = Vec::new();
-        let mut refused: Vec<CompletedToolCall> = Vec::new();
-        for call in reassembled_calls {
-            match call.args {
-                Err(parse_error) => {
-                    let output = lash_core::ToolCallOutput::failure(
-                        lash_core::ToolFailure::runtime(
-                            lash_core::ToolFailureClass::InvalidRequest,
-                            "invalid_tool_call_json",
-                            format!(
-                                "Tool `{}` was not executed: its arguments were not valid JSON ({parse_error}).",
-                                call.tool_name
-                            ),
-                        ),
-                    );
-                    refused.push(refused_tool_call_completion(
-                        call.call_id,
-                        Some(call.provider_call_id),
-                        call.tool_name,
-                        Value::String(call.input_json),
-                        output,
-                        call.replay,
-                    ));
-                }
-                Ok(args) => {
-                    let call = PendingToolCall {
-                        call_id: call.call_id,
-                        provider_call_id: Some(call.provider_call_id),
-                        tool_name: call.tool_name,
-                        args,
-                        replay: call.replay,
-                    };
-                    // A `batch` wrapper is listed whenever the sugar is on,
-                    // and its members resolve against the session's callable
-                    // catalog, not the request's listed tools.
-                    if self.discovery
-                        && !request.tools.iter().any(|tool| tool.name == call.tool_name)
-                    {
-                        let output = lash_core::ToolCallOutput::failure(
-                            lash_core::ToolFailure::runtime(
-                                lash_core::ToolFailureClass::Unavailable,
-                                "unknown_tool",
-                                match self.batch {
-                                    BatchSugar::Enabled { .. } => format!(
-                                        "Tool `{}` was not listed in this request; use a listed discovery operation or batch.",
-                                        call.tool_name
-                                    ),
-                                    BatchSugar::Disabled => format!(
-                                        "Tool `{}` was not listed in this request; use a listed discovery operation.",
-                                        call.tool_name
-                                    ),
-                                },
-                            ),
-                        );
-                        refused.push(refused_tool_call_completion(
-                            call.call_id,
-                            call.provider_call_id,
-                            call.tool_name,
-                            call.args,
-                            output,
-                            call.replay,
-                        ));
-                    } else {
-                        calls.push(call);
-                    }
-                }
-            }
-        }
-        // The step's control call runs after its other calls, so it is held
-        // out of the round; a further one is refused on its own, as the
-        // step has one control attempt.
-        let mut held = None;
-        let mut ordinary = Vec::with_capacity(calls.len());
-        for call in calls {
-            if !ctx.ends_the_turn(&call.tool_name) {
-                ordinary.push(call);
-            } else if held.is_none() {
-                held = Some(call);
-            } else {
-                let output = lash_core::ToolCallOutput::failure(
-                    lash_core::ToolFailure::invalid_request(
-                        "control_attempt_spent",
-                        format!(
-                            "`{}` was not called: this step already makes its one turn-ending call",
-                            call.tool_name
-                        ),
-                    )
-                    .with_cause(lash_core::ToolFailureCause::ControlAttemptSpent),
-                );
-                refused.push(refused_tool_call_completion(
+        let listed = |name: &str| request.tools.iter().any(|tool| tool.name == name);
+        let ends_the_turn = |name: &str| ctx.ends_the_turn(name);
+        let round = round::plan_round(
+            reassembled_calls,
+            &round::RoundRules {
+                batch: self.batch,
+                listed: self.discovery.then_some(&listed as &dyn Fn(&str) -> bool),
+                ends_the_turn: &ends_the_turn,
+            },
+        );
+        let calls = round.calls;
+        let refused = round
+            .refused
+            .into_iter()
+            .map(|(call, output)| {
+                refused_tool_call_completion(
                     call.call_id,
                     call.provider_call_id,
                     call.tool_name,
                     call.args,
                     output,
                     call.replay,
-                ));
-            }
-        }
-        let calls = ordinary;
-        let expansion = match self.batch {
-            BatchSugar::Enabled { max_members } => {
-                batch::expand(calls, max_members, &|name| ctx.ends_the_turn(name))
-            }
-            BatchSugar::Disabled => batch::Expansion {
-                calls,
-                ..batch::Expansion::default()
-            },
-        };
-        let calls = expansion.calls;
-        refused.extend(expansion.refused.into_iter().map(|(call, output)| {
-            refused_tool_call_completion(
-                call.call_id,
-                call.provider_call_id,
-                call.tool_name,
-                call.args,
-                output,
-                call.replay,
-            )
-        }));
+                )
+            })
+            .collect::<Vec<_>>();
         if !refused.is_empty() {
             let completed = refused;
             actions.push(DriverAction::ReportToolCalls {
                 completed: completed.clone(),
             });
-            if calls.is_empty() && expansion.plan.is_empty() && held.is_none() {
+            if calls.is_empty() && round.plan.is_empty() && round.control.is_none() {
                 actions.extend(self.handle_tool_results(ctx, completed));
                 return actions;
             }
@@ -1159,13 +1138,11 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
                 },
             )]));
         }
-        actions.push(DriverAction::Start(match held {
-            // A control call alone in its step has no sibling to wait on.
-            Some(control) if calls.is_empty() && expansion.plan.is_empty() => {
-                PendingWork::tool_round(vec![control], expansion.plan)
+        actions.push(DriverAction::Start(match round.control {
+            Some((slot, control)) => {
+                PendingWork::tool_round_with_control(calls, round.plan, slot, control)
             }
-            Some(control) => PendingWork::tool_round_holding(calls, expansion.plan, control),
-            None => PendingWork::tool_round(calls, expansion.plan),
+            None => PendingWork::tool_round(calls, round.plan),
         }));
         actions
     }
@@ -1194,10 +1171,23 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
             if terminal_outcome.is_none() && outcome.output.is_success() {
                 match outcome.output.control.as_ref() {
                     Some(lash_core::ToolControl::Turn { control }) if candidate.is_none() => {
+                        // A `batch` member's control is the member's own:
+                        // its wrapper only carries it.
+                        let (call_id, tool_name) = match self.batch {
+                            BatchSugar::Enabled { .. }
+                                if outcome.tool_name == batch::BATCH_TOOL_NAME =>
+                            {
+                                batch::control_member(&outcome, &|name| ctx.ends_the_turn(name))
+                                    .unwrap_or_else(|| {
+                                        (outcome.call_id.clone(), outcome.tool_name.clone())
+                                    })
+                            }
+                            _ => (outcome.call_id.clone(), outcome.tool_name.clone()),
+                        };
                         candidate = Some(lash_core::CompletionCandidate::pending(
                             ctx.protocol_iteration(),
-                            outcome.call_id.clone(),
-                            outcome.tool_name.clone(),
+                            call_id,
+                            tool_name,
                             control.clone(),
                         ));
                     }
@@ -1284,6 +1274,108 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
     ) -> Vec<DriverAction> {
         Vec::new()
     }
+}
+
+/// A turn that only a control call ends can end only if a tool it can
+/// call declares Finish: one that cannot is refused when its turn is
+/// formed, whether the session recorded the mode or the run stated it.
+fn finish_available(ctx: &DriverContextView<'_>) -> Result<(), String> {
+    let termination = StandardRecordedConfig::termination_of(ctx.termination())
+        .map_err(|error| format!("the turn's standard-protocol options do not decode: {error}"))?;
+    if termination.prose_ends_turn() || ctx.can_finish() {
+        return Ok(());
+    }
+    Err(
+        "the turn requires a finish (TerminalRequired), but no tool it can call declares Finish: create the session with `terminal_required` or install a tool that declares it"
+            .to_owned(),
+    )
+}
+
+fn invalid_turn_options_actions(error: String) -> Vec<DriverAction> {
+    vec![
+        DriverAction::Emit(lash_core::session_model::make_error_event(
+            lash_core::session_model::TurnFailureKind::Runtime,
+            Some(lash_core::session_model::TurnFailureCode::InvalidTurnOptions.into()),
+            error.clone(),
+            Some(error),
+            lash_sansio::session_model::RuntimeOutputCuts::standard(),
+        )),
+        DriverAction::Finish(TurnOutcome::Stopped(TurnStop::RuntimeError)),
+    ]
+}
+
+/// A reply that ends no turn its prose cannot end: the model is told to end
+/// it through a control call, and the turn goes on, within its turn budget
+/// and its no-progress budget, which counts the replies repaired since the
+/// turn's last tool results.
+fn finish_required_repair(ctx: &DriverContextView<'_>) -> Vec<DriverAction> {
+    let mut actions = vec![DriverAction::AdvanceProtocolIteration];
+    let next_protocol_iteration = ctx.protocol_iteration() + 1;
+    if let Some(max_turns) = ctx.turn_budget().max_turns()
+        && next_protocol_iteration >= ctx.protocol_run_offset() + max_turns
+    {
+        actions.push(DriverAction::Finish(TurnOutcome::Stopped(
+            TurnStop::MaxTurns,
+        )));
+        return actions;
+    }
+    if ctx
+        .no_progress_budget()
+        .is_exhausted_by(repaired_replies(ctx) + 1)
+    {
+        actions.push(DriverAction::Finish(TurnOutcome::Stopped(
+            TurnStop::MaxTurns,
+        )));
+        return actions;
+    }
+    let id = standard_message_id(
+        ctx.turn_id(),
+        ctx.protocol_iteration(),
+        FINISH_REQUIRED_PURPOSE,
+    );
+    let tools = ctx
+        .finishing_tools()
+        .map(|name| format!("`{name}`"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    actions.push(DriverAction::AppendEvents(vec![conversation_event(
+        Message {
+            id: id.clone(),
+            role: MessageRole::System,
+            parts: shared_parts(vec![Part::text(
+                format!("{id}.p0"),
+                format!(
+                    "That reply did not end the turn: this turn ends only through a call that ends it ({tools}). Finish any remaining work, then make that call with the answer."
+                ),
+                None,
+            )]),
+            origin: Some(standard_message_origin(ctx.turn_id())),
+            reply_marker: None,
+        },
+    )]));
+    actions.push(DriverAction::Start(PendingWork::Checkpoint {
+        checkpoint: CheckpointKind::AfterWork,
+        on_empty: CheckpointResumeAction::PrepareIteration,
+    }));
+    actions
+}
+
+/// The purpose of a finish-required repair message's id.
+const FINISH_REQUIRED_PURPOSE: &str = "finish_required";
+
+/// The replies this turn repaired since its last tool results.
+fn repaired_replies(ctx: &DriverContextView<'_>) -> usize {
+    let prefix = format!("m_standard_{}_", ctx.turn_id());
+    ctx.events()
+        .iter()
+        .rev()
+        .filter_map(|record| match record {
+            SessionHistoryRecord::Conversation(record) => record.id.strip_prefix(&prefix),
+            SessionHistoryRecord::Protocol(_) => None,
+        })
+        .take_while(|id| !id.ends_with("_tool_results") && !id.ends_with("_refused_tools"))
+        .filter(|id| id.ends_with(FINISH_REQUIRED_PURPOSE))
+        .count()
 }
 
 /// What the model reads when input arrived at BeforeCompletion and its

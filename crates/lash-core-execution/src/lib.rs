@@ -407,9 +407,9 @@ pub mod sansio {
     pub use lash_sansio::sansio::{
         ChatContextProjector, CheckpointDelivery, CheckpointResumeAction, ContextProjector,
         EffectId, ExecutionEnvironmentSync, ExecutionEnvironmentSyncFailure,
-        ExecutionEnvironmentSyncFailureKind, ExpandedRow, ExpandedWrapper, LlmCallError,
-        ModelToolCalls, PendingToolCall, PendingWork, ProtocolDriverHandle, ResponseToolCalls,
-        SyncedEnvironment, ToolExpansionPlan, TurnMachine, place_prompt,
+        ExecutionEnvironmentSyncFailureKind, ExpandedRow, ExpandedWrapper, HeldControl,
+        LlmCallError, ModelToolCalls, PendingToolCall, PendingWork, ProtocolDriverHandle,
+        ResponseToolCalls, SyncedEnvironment, ToolExpansionPlan, TurnMachine, place_prompt,
     };
 }
 

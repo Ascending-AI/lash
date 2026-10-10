@@ -1,8 +1,8 @@
 //! `batch` is protocol sugar (ADR 0116 §2): never a tool, never executed.
 //!
 //! The driver expands each `batch` call of a response into slots of the
-//! Run's tool round, beside the response's native calls, and folds the
-//! slots' results back into one result per wrapper. Both directions are pure
+//! Run's tool round, beside the response's native calls ([`crate::round`]),
+//! and folds the slots' results back into one result per wrapper. Both directions are pure
 //! functions of the recorded response and the turn's admitted configuration,
 //! so a replay recomputes the identical plan and presentation.
 
@@ -10,10 +10,8 @@ use std::num::NonZeroUsize;
 
 use lash_core::ToolDefinition;
 use lash_core::facade_support::{ModelToolReturn, ModelToolReturnPart};
-use lash_core::sansio::{
-    CompletedToolCall, ExpandedRow, ExpandedWrapper, PendingToolCall, ToolExpansionPlan,
-};
-use lash_core::{ToolCallOutput, ToolFailure, ToolFailureClass};
+use lash_core::sansio::{CompletedToolCall, ExpandedRow, ExpandedWrapper, ToolExpansionPlan};
+use lash_core::{ToolCallOutput, ToolControl};
 use lash_tool_support::object_schema;
 use serde_json::Value;
 
@@ -82,109 +80,15 @@ fn batch_output_schema() -> Value {
     })
 }
 
-/// A response's dispatchable calls after expansion.
-#[derive(Debug, Default)]
-pub(crate) struct Expansion {
-    /// The flat executable slots of the Run's tool round.
-    pub(crate) calls: Vec<PendingToolCall>,
-    /// How the slots fold back into the response's calls.
-    pub(crate) plan: ToolExpansionPlan,
-    /// Wrappers refused whole: a structurally malformed, empty or oversized
-    /// member list. None of their members starts.
-    pub(crate) refused: Vec<(PendingToolCall, ToolCallOutput)>,
+pub(crate) struct Member {
+    pub(crate) tool: String,
+    pub(crate) parameters: Value,
 }
 
-/// Expands every `batch` call of `calls` into consecutive slots at the
-/// wrapper's position. Native calls take one slot each, in order.
-/// A member naming a tool whose call ends the turn (`ends_the_turn`) is
-/// refused: a control call is the step's own call, never a member.
-pub(crate) fn expand(
-    calls: Vec<PendingToolCall>,
+pub(crate) fn parse_members(
+    args: &Value,
     max_members: NonZeroUsize,
-    ends_the_turn: &dyn Fn(&str) -> bool,
-) -> Expansion {
-    let mut expansion = Expansion::default();
-    let mut source_position = 0_u32;
-    for call in calls {
-        if call.tool_name != BATCH_TOOL_NAME {
-            expansion.calls.push(call);
-            source_position += 1;
-            continue;
-        }
-        let members = match parse_members(&call.args, max_members) {
-            Ok(members) => members,
-            Err(message) => {
-                let output = ToolCallOutput::failure(ToolFailure::runtime(
-                    ToolFailureClass::InvalidRequest,
-                    "invalid_batch",
-                    message,
-                ));
-                expansion.refused.push((call, output));
-                continue;
-            }
-        };
-        let mut rows = Vec::with_capacity(members.len());
-        for (member_index, member) in members.into_iter().enumerate() {
-            let member_index = index_u32(member_index);
-            if member.tool == BATCH_TOOL_NAME {
-                rows.push(ExpandedRow::Refused {
-                    member_index,
-                    tool: member.tool,
-                    error: Value::String("`batch` cannot run inside `batch`".to_string()),
-                });
-                continue;
-            }
-            if ends_the_turn(&member.tool) {
-                rows.push(ExpandedRow::Refused {
-                    member_index,
-                    error: Value::String(format!(
-                        "`{}` ends the turn, so it cannot run inside `batch`; call it on its own",
-                        member.tool
-                    )),
-                    tool: member.tool,
-                });
-                continue;
-            }
-            rows.push(ExpandedRow::Slot {
-                member_index,
-                tool: member.tool.clone(),
-                slot: index_u32(expansion.calls.len()),
-            });
-            // A member is named under its wrapper by its original member
-            // index, counted before refusals (ADR 0117 §2).
-            expansion.calls.push(PendingToolCall {
-                call_id: call.call_id.child(u64::from(member_index)),
-                provider_call_id: None,
-                tool_name: member.tool,
-                args: member.parameters,
-                replay: None,
-            });
-        }
-        expansion.plan.wrappers.push(ExpandedWrapper {
-            source_position,
-            call_id: call.call_id,
-            provider_call_id: call.provider_call_id,
-            tool_name: call.tool_name,
-            args: call.args,
-            replay: call.replay,
-            rows,
-        });
-        source_position += 1;
-    }
-    expansion
-}
-
-/// Slot and member counts are bounded by admission, far below `u32::MAX`.
-fn index_u32(index: usize) -> u32 {
-    u32::try_from(index).unwrap_or(u32::MAX)
-}
-
-struct Member {
-    tool: String,
-    parameters: Value,
-}
-
-fn parse_members(args: &Value, max_members: NonZeroUsize) -> Result<Vec<Member>, String> {
+) -> Result<Vec<Member>, String> {
     let Some(raw_calls) = args.get("tool_calls").and_then(Value::as_array) else {
         return Err("`batch` was not run: `tool_calls` must be an array of calls.".to_string());
     };
@@ -283,6 +187,9 @@ fn fold_wrapper(
     let mut attachments = Vec::new();
     let mut attachment_notices = Vec::new();
     let mut intent_outcomes = Vec::new();
+    // A member's settled control is the step's: the wrapper carries it, and
+    // [`control_member`] names the member it came from.
+    let mut control = None;
     for row in &wrapper.rows {
         match row {
             ExpandedRow::Refused {
@@ -310,6 +217,9 @@ fn fold_wrapper(
                     continue;
                 };
                 let success = member.output.is_success();
+                if success && let Some(turn @ ToolControl::Turn { .. }) = &member.output.control {
+                    control = Some(turn.clone());
+                }
                 let value = member.output.value_for_projection();
                 let (presented, member_attachments) = presented_member(member.model_return.parts);
                 attachments.extend(member_attachments);
@@ -333,7 +243,10 @@ fn fold_wrapper(
         provider_call_id: wrapper.provider_call_id.clone(),
         tool_name: wrapper.tool_name.clone(),
         args: wrapper.args.clone(),
-        output: ToolCallOutput::success(serde_json::json!({ "results": rows })),
+        output: ToolCallOutput {
+            control,
+            ..ToolCallOutput::success(serde_json::json!({ "results": rows }))
+        },
         model_return: ModelToolReturn {
             tool_name: wrapper.tool_name.clone(),
             parts,
@@ -342,6 +255,22 @@ fn fold_wrapper(
         intent_outcomes,
         replay: wrapper.replay.clone(),
     }
+}
+
+/// The member of the folded `batch` result `wrapper` whose settled control
+/// the wrapper carries: the one member that succeeded calling a tool whose
+/// call ends the turn, as a step runs at most one control call. Its identity
+/// is its wrapper's child at its member index.
+pub(crate) fn control_member(
+    wrapper: &CompletedToolCall,
+    ends_the_turn: &dyn Fn(&str) -> bool,
+) -> Option<(lash_core::ToolCallId, String)> {
+    let results = wrapper.output.value_for_projection();
+    let rows =
+        serde_json::from_value::<Vec<BatchResultRow>>(results.get("results")?.clone()).ok()?;
+    rows.into_iter()
+        .find(|row| row.success && ends_the_turn(&row.tool))
+        .map(|row| (wrapper.call_id.child(row.index as u64), row.tool))
 }
 
 /// A member's presentation as the model saw it on its own: its text blocks

@@ -705,6 +705,18 @@ impl ToolFailure {
         Self::tool(ToolFailureClass::InvalidRequest, code, message)
     }
 
+    /// The refusal of a step's control call to `tool_name` because another
+    /// call of the step failed or was cancelled: its body never ran.
+    pub fn control_sibling_failed(tool_name: &str) -> Self {
+        Self::invalid_request(
+            "control_sibling_failed",
+            format!(
+                "`{tool_name}` was not called: another call of the same step failed, so the turn does not end on it"
+            ),
+        )
+        .with_cause(ToolFailureCause::ControlSiblingFailed)
+    }
+
     pub fn io(code: impl Into<String>, message: impl Into<String>) -> Self {
         Self::tool(ToolFailureClass::Io, code, message)
     }

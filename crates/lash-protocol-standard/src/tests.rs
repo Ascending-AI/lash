@@ -2,7 +2,8 @@ use super::*;
 
 #[test]
 fn standard_execution_section_uses_only_surviving_tool_examples() {
-    let section = standard_execution_section(BatchSugar::default());
+    let section =
+        standard_execution_section(BatchSugar::default(), lash_core::TerminationMode::Natural);
     for removed_tool in [
         "read_file",
         "\"edit\"",
@@ -16,11 +17,13 @@ fn standard_execution_section_uses_only_surviving_tool_examples() {
             "standard prompt should not mention removed tool `{removed_tool}`"
         );
     }
-    let enabled = standard_execution_section(BatchSugar::default());
+    let enabled =
+        standard_execution_section(BatchSugar::default(), lash_core::TerminationMode::Natural);
     assert!(enabled.contains("declared JSON arguments"));
     assert!(enabled.contains("Check each batch result’s success flag"));
     assert!(enabled.contains("at most 64 per batch"));
-    let disabled = standard_execution_section(BatchSugar::Disabled);
+    let disabled =
+        standard_execution_section(BatchSugar::Disabled, lash_core::TerminationMode::Natural);
     assert!(
         !disabled.contains("batch"),
         "a disabled batch is not offered in the prompt: {disabled}"

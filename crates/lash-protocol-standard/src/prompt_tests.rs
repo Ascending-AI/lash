@@ -8,7 +8,10 @@ use lash_core::prompt_sections::{PromptPlan, PromptPurpose};
 use lash_core::testing::prompt::{ComposedPrompt, PromptCutParts};
 
 fn standard(config: StandardProtocolConfig) -> Arc<dyn SessionPlugin> {
-    Arc::new(StandardProtocolPlugin { config })
+    Arc::new(StandardProtocolPlugin {
+        config,
+        termination: lash_core::TerminationMode::Natural,
+    })
 }
 
 async fn compose(
@@ -122,7 +125,10 @@ async fn an_ask_tool_does_not_select_interaction_policy() {
             instructions(&asking),
             format!(
                 "## Execution\n\n{}",
-                standard_execution_section(BatchSugar::default())
+                standard_execution_section(
+                    BatchSugar::default(),
+                    lash_core::TerminationMode::Natural
+                )
             )
         );
     }

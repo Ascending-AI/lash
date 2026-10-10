@@ -709,3 +709,73 @@ async fn final_and_tool_calling_responses_persist_identical_typed_provider_parts
     assert_eq!(final_parts[1].response_meta(), Some(&expected_text));
     assert_eq!(tool_parts[1].response_meta(), Some(&expected_text));
 }
+
+/// The first request answers in prose; every later one calls `finish`.
+fn prose_then_finish(n: usize) -> LlmResponse {
+    if n == 1 {
+        return text_response("the answer is 42");
+    }
+    LlmResponse {
+        parts: vec![LlmOutputPart::ToolCall {
+            call_id: format!("finish-call-{n}"),
+            tool_name: "finish".to_string(),
+            input_json: r#"{"value":42}"#.to_string(),
+            replay: None,
+        }],
+        ..LlmResponse::default()
+    }
+}
+
+/// FIG-5801: a standard session created `terminal_required` is offered
+/// `finish`. A prose reply does not end its turn: the model is told to end
+/// it through `finish`, and the turn ends on that call with its value.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_terminal_required_standard_session_ends_through_finish() {
+    let requests = Arc::new(StdMutex::new(Vec::new()));
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        sqlite_memory_store_backend().await,
+    ))
+    .serve_test_llm_profile(
+        scripted_provider(Arc::clone(&requests), prose_then_finish),
+        mock_llm_profile_spec(),
+    )
+    .build(crate::testing::runtime_lease_owner())
+    .expect("standard core");
+    let session = core
+        .session(crate::SessionId::from("terminal-required-standard"))
+        .create(crate::SessionCreation::root(
+            crate::plugins::SessionToolAccess::ambient(),
+            mock_session_spec()
+                .plugin(
+                    crate::standard::STANDARD_PROTOCOL_PLUGIN_ID,
+                    crate::standard::StandardTurnOptions {
+                        render: None,
+                        termination: Some(lash_core::TerminationMode::TerminalRequired),
+                    },
+                )
+                .expect("the creation options encode"),
+        ))
+        .await
+        .expect("created");
+    let output = session
+        .send(crate::TurnInput::text("what is six times seven?"))
+        .output()
+        .await
+        .expect("the turn answers");
+    assert_eq!(
+        output.finished(),
+        Some(("finish", &serde_json::json!(42))),
+        "{:?}",
+        output.result.outcome
+    );
+    let requests = requests.lock_recover().clone();
+    assert_eq!(requests.len(), 2, "the prose reply was repaired once");
+    assert!(
+        requests[0].tools.iter().any(|tool| tool.name == "finish"),
+        "the session is offered `finish`"
+    );
+    let repaired = format!("{:?}", requests[1].messages);
+    assert!(repaired.contains("the answer is 42"), "{repaired}");
+    assert!(repaired.contains("`finish`"), "{repaired}");
+    core.shutdown().await.expect("shutdown");
+}

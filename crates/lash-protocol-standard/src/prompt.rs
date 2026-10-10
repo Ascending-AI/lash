@@ -17,6 +17,7 @@ pub mod section_keys {
 
 pub(crate) struct StandardPromptBehaviour {
     pub(crate) batch: BatchSugar,
+    pub(crate) termination: lash_core::TerminationMode,
 }
 
 #[expect(
@@ -35,7 +36,7 @@ pub(crate) fn register_sections(
         Arc::new(move |_: &PromptInput<'_>| {
             Ok(SectionText::Text(format!(
                 "## Execution\n\n{}",
-                standard_execution_section(behaviour.batch)
+                standard_execution_section(behaviour.batch, behaviour.termination)
             )))
         }),
     )

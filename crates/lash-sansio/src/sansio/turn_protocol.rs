@@ -514,15 +514,10 @@ pub enum PendingWork<M: TurnProtocol = UnitTurnProtocol> {
         /// response held no sugar, and then absent from the encoding.
         #[serde(default, skip_serializing_if = "ToolExpansionPlan::is_empty")]
         expansion: ToolExpansionPlan,
-        /// The step's control call, held back until `calls` settle: it runs
-        /// next when every one of them succeeded, and is refused before its
-        /// body runs when one did not (`ControlSiblingFailed`).
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        held: Vec<PendingToolCall>,
-        /// For the held wave, the step's results that settled before it,
-        /// already folded: the driver reads them with the held call's.
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        earlier: Vec<CompletedToolCall<M::IntentOutcome>>,
+        /// The step's control call and the wave the round is in, when the
+        /// step makes one.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        control: Option<Box<HeldControl<M::IntentOutcome>>>,
     },
     Exec {
         language: String,
@@ -535,6 +530,27 @@ pub enum PendingWork<M: TurnProtocol = UnitTurnProtocol> {
     },
 }
 
+/// A step's control call (DESIGN §3): it takes flat slot `slot` of the
+/// step's tool group, but runs alone, after the group's other slots settle.
+#[derive(Clone, Debug, Serialize, serde::Deserialize)]
+#[serde(
+    tag = "wave",
+    rename_all = "snake_case",
+    bound(serialize = "I: Serialize", deserialize = "I: serde::Deserialize<'de>")
+)]
+pub enum HeldControl<I = ()> {
+    /// The other slots run while the control call waits. It runs next when
+    /// every one of them succeeded, and is refused before its body runs
+    /// when one failed or was cancelled (`ControlSiblingFailed`).
+    Waiting { slot: u32, call: PendingToolCall },
+    /// The control call runs. `siblings` are the other slots' results,
+    /// unfolded and in slot order; its own joins them at `slot`.
+    Running {
+        slot: u32,
+        siblings: Vec<CompletedToolCall<I>>,
+    },
+}
+
 impl<M: TurnProtocol> PendingWork<M> {
     /// The step's tool round over `calls`, folded back by `expansion`.
     pub fn tool_round(calls: Vec<PendingToolCall>, expansion: ToolExpansionPlan) -> Self {
@@ -542,24 +558,41 @@ impl<M: TurnProtocol> PendingWork<M> {
             calls,
             settled: None,
             expansion,
-            held: Vec::new(),
-            earlier: Vec::new(),
+            control: None,
         }
     }
 
-    /// The step's tool round over `calls`, with its control call `held`
-    /// back until they settle (see [`PendingWork::WaitingForToolResults`]).
-    pub fn tool_round_holding(
+    /// The step's tool round over `calls` and its `control` call, which
+    /// takes flat slot `slot` and runs once `calls` settled (see
+    /// [`HeldControl`]). With no other call it runs at once.
+    pub fn tool_round_with_control(
         calls: Vec<PendingToolCall>,
         expansion: ToolExpansionPlan,
-        held: PendingToolCall,
+        slot: u32,
+        control: PendingToolCall,
     ) -> Self {
+        let (calls, control) = if calls.is_empty() {
+            (
+                vec![control],
+                HeldControl::Running {
+                    slot,
+                    siblings: Vec::new(),
+                },
+            )
+        } else {
+            (
+                calls,
+                HeldControl::Waiting {
+                    slot,
+                    call: control,
+                },
+            )
+        };
         Self::WaitingForToolResults {
             calls,
             settled: None,
             expansion,
-            held: vec![held],
-            earlier: Vec::new(),
+            control: Some(Box::new(control)),
         }
     }
 }
@@ -579,14 +612,12 @@ impl<M: TurnProtocol> Clone for PendingWork<M> {
                 calls,
                 expansion,
                 settled,
-                held,
-                earlier,
+                control,
             } => Self::WaitingForToolResults {
                 settled: settled.clone(),
                 calls: calls.clone(),
                 expansion: expansion.clone(),
-                held: held.clone(),
-                earlier: earlier.clone(),
+                control: control.clone(),
             },
             Self::Exec {
                 language,
@@ -685,21 +716,18 @@ impl<M: TurnProtocol> PendingWork<M> {
                 calls,
                 expansion,
                 settled,
-                held,
-                earlier,
+                control,
             } => match response {
                 Response::ToolResults { results, .. } => Ok(AnsweredWork::Tools {
                     expansion,
                     results,
-                    held,
-                    earlier,
+                    control,
                 }),
                 _ => Err(Box::new(Self::WaitingForToolResults {
                     calls,
                     expansion,
                     settled,
-                    held,
-                    earlier,
+                    control,
                 })),
             },
             Self::Exec {
@@ -751,8 +779,7 @@ pub(super) enum AnsweredWork<M: TurnProtocol = UnitTurnProtocol> {
     Tools {
         expansion: ToolExpansionPlan,
         results: Vec<CompletedToolCall<M::IntentOutcome>>,
-        held: Vec<PendingToolCall>,
-        earlier: Vec<CompletedToolCall<M::IntentOutcome>>,
+        control: Option<Box<HeldControl<M::IntentOutcome>>>,
     },
     Exec {
         driver_state: M::DriverState,
@@ -839,10 +866,17 @@ impl<'a, M: TurnProtocol> DriverContextView<'a, M> {
     /// Whether a tool of the synced surface can end the turn with a value:
     /// one declares [`TurnControlKind::Finish`](crate::TurnControlKind::Finish).
     pub fn can_finish(&self) -> bool {
+        self.finishing_tools().next().is_some()
+    }
+
+    /// The tools of the synced surface that can end the turn with a value,
+    /// in name order.
+    pub fn finishing_tools(&self) -> impl Iterator<Item = &str> {
         self.environment
             .turn_controls
-            .values()
-            .any(|controls| controls.contains(crate::TurnControlKind::Finish))
+            .iter()
+            .filter(|(_, controls)| controls.contains(crate::TurnControlKind::Finish))
+            .map(|(name, _)| name.as_str())
     }
 
     /// The version this fleet's writers emit for the surface registered under

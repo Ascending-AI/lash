@@ -3,7 +3,10 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use super::*;
+use crate::round::{ResponseCall, RoundPlan, RoundRules, plan_round};
 use lash_core::llm::types::ProviderReplayMeta;
+use lash_core::sansio::PendingToolCall;
+use lash_core::{ToolFailure, ToolFailureClass};
 
 fn max(members: usize) -> NonZeroUsize {
     NonZeroUsize::new(members).expect("a non-zero maximum")
@@ -254,7 +257,21 @@ fn batch_config_ceiling_is_refused_at_build() {
     );
 }
 
-/// [`expand`] in a catalog where no tool ends the turn.
-fn expand_plain(calls: Vec<PendingToolCall>, max_members: NonZeroUsize) -> Expansion {
-    expand(calls, max_members, &|_| false)
+/// The round planned for `calls` in a catalog where no tool ends the turn.
+fn expand_plain(calls: Vec<PendingToolCall>, max_members: NonZeroUsize) -> RoundPlan {
+    plan_round(
+        calls
+            .into_iter()
+            .map(|call| ResponseCall {
+                input_json: call.args.to_string(),
+                call,
+                parse_error: None,
+            })
+            .collect(),
+        &RoundRules {
+            batch: crate::BatchSugar::Enabled { max_members },
+            listed: None,
+            ends_the_turn: &|_| false,
+        },
+    )
 }
