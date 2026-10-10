@@ -21,15 +21,14 @@ const INHERITED: &[&str] = &[
     "toLocaleString",
 ];
 
-/// The built-in kind every value of `ty` is, with the kernel function that
-/// raises `type_error` on a value of any other kind, when the type names
-/// one kind whose methods are rows.
-fn declared_receiver(ty: &Ty) -> Option<(Receiver, &'static str)> {
+/// The built-in kind every value of `ty` is, with its native kind check.
+/// Arrays use the dialect predicate because they include branded records.
+fn declared_receiver(ty: &Ty) -> Option<(Receiver, Option<&'static str>)> {
     match ty {
-        Ty::List(_) => Some((Receiver::List, "list.check")),
-        Ty::Text => Some((Receiver::Text, "text.len")),
-        Ty::Float | Ty::Number => Some((Receiver::Number, "num.to_float")),
-        Ty::Bool => Some((Receiver::Bool, "bool.not")),
+        Ty::List(_) => Some((Receiver::List, None)),
+        Ty::Text => Some((Receiver::Text, Some("text.len"))),
+        Ty::Float | Ty::Number => Some((Receiver::Number, Some("num.to_float"))),
+        Ty::Bool => Some((Receiver::Bool, Some("bool.not"))),
         _ => None,
     }
 }
@@ -101,22 +100,41 @@ impl Lowerer<'_> {
 
     /// `object.key` or `object[key]`.
     ///
-    /// An element of an array read by a number, and an array's length, are
-    /// the kernel's own `list.get` and `list.len`. Every other read keeps
+    /// An element of a kernel list read by a number, and its length, are
+    /// the kernel's own `list.get` and `list.len`. Branded arrays and other reads keep
     /// JavaScript's meaning, and what it gives is believed to be what the
     /// object's type says.
     pub(super) fn get_member(&mut self, object: &Operand, key: &Key) -> Lowering<Operand> {
         if let Ty::List(element) = &object.ty {
             match key {
                 Key::Computed(index) if index.ty.is_number() => {
-                    let read = self.native("list.get", vec![object.expr(), index.expr()])?;
-                    let read = self.let_expr(read, (**element).clone());
-                    self.absent_if_hole(&super::statements::variable_of(&read), &read)?;
-                    return Ok(read);
+                    return self.array_branch(
+                        object,
+                        |this| {
+                            let read =
+                                this.native("list.get", vec![object.expr(), index.expr()])?;
+                            let read = this.let_expr(read, (**element).clone());
+                            this.absent_if_hole(&super::statements::variable_of(&read), &read)?;
+                            Ok(read)
+                        },
+                        |this| {
+                            this.invoke(
+                                "ts.get_computed",
+                                &[object.clone(), index.clone()],
+                                (**element).clone(),
+                            )
+                        },
+                    );
                 }
                 Key::Static(name) if name == "length" => {
-                    let length = self.native("list.len", vec![object.expr()])?;
-                    return Ok(self.let_expr(length, Ty::Number));
+                    return self.array_branch(
+                        object,
+                        |this| {
+                            let length = this.native("list.len", vec![object.expr()])?;
+                            Ok(this.let_expr(length, Ty::Number))
+                        },
+                        |this| this.invoke("ts.get", &[object.clone(), key.operand()], Ty::Number),
+                    );
                 }
                 _ => {}
             }
@@ -149,6 +167,59 @@ impl Lowerer<'_> {
             "ts.read"
         };
         self.invoke(function, &[object.clone(), key.operand()], ty)
+    }
+
+    /// Admit every dialect array while reserving kernel list operations for
+    /// actual lists. Non-list arrays keep their branded access semantics.
+    pub(super) fn array_is_list(&mut self, object: &Operand) -> Lowering<Operand> {
+        let kind = self.native("kind", vec![object.expr()])?;
+        let list = self.same(kind, Operand::text("list").expr())?;
+        let list = self.let_expr(list, Ty::Bool);
+        let branded = self.block(|this| {
+            let array = this.invoke("ts.array.is", std::slice::from_ref(object), Ty::Bool)?;
+            let invalid = this.block(|this| {
+                let error = this.native(
+                    "error.new",
+                    vec![
+                        Operand::text("type_error").expr(),
+                        Operand::text("expected an array").expr(),
+                        Expr::Literal(Literal::Null),
+                    ],
+                )?;
+                this.emit(Stmt::Throw { value: error });
+                Ok(())
+            })?;
+            this.emit_if(array.expr(), Buf::default(), invalid);
+            Ok(())
+        })?;
+        self.emit_if(list.expr(), Buf::default(), branded);
+        Ok(list)
+    }
+
+    fn array_branch(
+        &mut self,
+        object: &Operand,
+        list: impl FnOnce(&mut Self) -> Lowering<Operand>,
+        branded: impl FnOnce(&mut Self) -> Lowering<Operand>,
+    ) -> Lowering<Operand> {
+        let is_list = self.array_is_list(object)?;
+        let result = self.let_expr(Expr::Literal(Literal::Absent), Ty::Unknown);
+        let place = Place::Variable(super::statements::variable_of(&result));
+        let mut ty = Ty::Never;
+        let list = self.block(|this| {
+            let value = list(this)?;
+            ty = ty.join(&value.ty);
+            this.store(place.clone(), value);
+            Ok(())
+        })?;
+        let branded = self.block(|this| {
+            let value = branded(this)?;
+            ty = ty.join(&value.ty);
+            this.store(place, value);
+            Ok(())
+        })?;
+        self.emit_if(is_list.expr(), list, branded);
+        Ok(Operand { ty, ..result })
     }
 
     /// `object[key] = value`.
@@ -543,9 +614,44 @@ impl Lowerer<'_> {
         else {
             return Ok(None);
         };
-        let checked = self.native(check, vec![object.expr()])?;
-        let checked = self.let_expr(checked, Ty::Unknown);
-        self.discard(checked);
+        if receiver == Receiver::List {
+            return self
+                .array_branch(
+                    object,
+                    |this| this.call_list_method(object, name, function, args),
+                    |this| {
+                        let generic = Operand {
+                            ty: Ty::Unknown,
+                            ..object.clone()
+                        };
+                        let method = this.get_member(&generic, &Key::Static(name.into()))?;
+                        let method = this.pin(method);
+                        let args = this.arguments(args)?;
+                        this.apply(method, object.clone(), args, false)
+                    },
+                )
+                .map(Some);
+        }
+        if let Some(check) = check {
+            let checked = self.native(check, vec![object.expr()])?;
+            let checked = self.let_expr(checked, Ty::Unknown);
+            self.discard(checked);
+        }
+        let args = self.arguments(args)?;
+        Ok(Some(self.invoke(
+            function,
+            &[object.clone(), args],
+            Ty::Unknown,
+        )?))
+    }
+
+    fn call_list_method(
+        &mut self,
+        object: &Operand,
+        name: &str,
+        function: &str,
+        args: &[ast::CallArg],
+    ) -> Lowering<Operand> {
         let values: Option<Vec<&ast::Expr>> = args
             .iter()
             .map(|arg| match arg {
@@ -553,8 +659,7 @@ impl Lowerer<'_> {
                 ast::CallArg::Spread(_) => None,
             })
             .collect();
-        if receiver == Receiver::List
-            && name == "push"
+        if name == "push"
             && let Some(values) = values
         {
             // Each value is appended at the length the list has then
@@ -569,14 +674,10 @@ impl Lowerer<'_> {
             }
             let length = self.native("list.len", vec![object.expr()])?;
             let length = self.native("num.to_float", vec![length])?;
-            return Ok(Some(self.let_expr(length, Ty::Float)));
+            return Ok(self.let_expr(length, Ty::Float));
         }
         let args = self.arguments(args)?;
-        Ok(Some(self.invoke(
-            function,
-            &[object.clone(), args],
-            Ty::Unknown,
-        )?))
+        self.invoke(function, &[object.clone(), args], Ty::Unknown)
     }
 
     /// `Object.hasOwn(Math, k)`, `Math.hasOwnProperty(k)` and the like: a

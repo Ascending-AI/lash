@@ -516,21 +516,25 @@ impl Lowerer<'_> {
         let subject = self.pin(subject);
         if helper == "ts.iterate" {
             if let Ty::List(element) = &subject.ty {
-                // `TS_TYPED_ARRAY_ITERATION`: a declared array is the
-                // kernel's live loop over a list (`K-ITER-002`), which reads
+                // `TS_TYPED_ARRAY_ITERATION`: an actual list takes the
+                // kernel's live loop (`K-ITER-002`), which reads
                 // length and element anew on each pass as an array iterator
                 // does. A value of another kind raises `type_error` here.
-                let checked = self.native("list.check", vec![subject.expr()])?;
-                let checked = self.let_expr(checked, Ty::Unknown);
-                self.discard(checked);
+                let list = self.array_is_list(&subject)?;
                 let item = self.temp();
                 let raw = Operand::variable(item.clone(), (**element).clone());
-                let body = self.loop_block(Vec::new(), |this| {
+                let list_body = self.loop_block(Vec::new(), |this| {
                     let value = this.element_value(&raw)?;
                     this.destructure(pattern, value, mode_of(kind))?;
                     this.lower_statement(body)
                 })?;
-                self.emit_for(item, subject.expr(), body);
+                let live = self.block(|this| {
+                    this.emit_for(item, subject.expr(), list_body);
+                    Ok(())
+                })?;
+                let branded =
+                    self.block(|this| this.lower_for_of_iterator(pattern, kind, subject, body))?;
+                self.emit_if(list.expr(), live, branded);
                 return Ok(());
             }
             // Kernel collection loops retain insertion-sequence cursors. A

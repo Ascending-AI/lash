@@ -44,9 +44,6 @@ fn declared_types_choose_the_kernel_function() {
         ("-a", "num.neg(num.to_float(a))"),
         ("s + s", "text.concat(s, s)"),
         ("!ok", "bool.not(ok)"),
-        ("xs[a]", "list.get(xs, t8)"),
-        ("xs.length", "list.len(xs)"),
-        ("xs[0] + o.n", "list.get(xs, 0.0)"),
     ] {
         let source = format!(
             "function f(a: number, b: number, s: string, ok: boolean, xs: number[], \
