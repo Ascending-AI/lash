@@ -3,9 +3,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use lash_kernel_doc::{
-    ClosureObject, Identity, KERNEL_VERSION, Name, Object, ObjectId, Site, Value,
-};
+use lash_kernel_doc::{ClosureObject, Identity, Name, Object, ObjectId, Site, Value};
 use lash_kernel_state as state;
 use lash_kernel_state::{Baseline, Objects, ParkedCall, ParkedRun, ParkedTask, Saved};
 
@@ -138,7 +136,7 @@ impl KernelMachine {
             tasks.push(self.task_data(&exe, task)?);
         }
         let run = state::Run {
-            kernel: KERNEL_VERSION,
+            kernel: self.program.document.manifest.kernel,
             document,
             functions: self
                 .program

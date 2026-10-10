@@ -12,6 +12,7 @@
 //! with the envelope its first activation recorded, and runs no saved
 //! statement again.
 
+mod carry;
 mod cell_outputs;
 use cell_outputs::record_cell_outputs;
 mod cell_run;
@@ -22,6 +23,7 @@ mod session;
 mod snapshot;
 mod trace;
 
+pub(crate) use carry::KernelCarry;
 pub(crate) use envelope::{check_cell_snapshot, snapshot_tool_calls};
 pub(crate) use host::site_label;
 pub use host::{TOOL_ARGUMENTS, TOOL_CALL_LIMIT, TOOL_FAILED, UNKNOWN_EFFECT};
@@ -459,12 +461,15 @@ fn cell_bounds(services: &CellServices) -> Bounds {
     }
 }
 
-/// The executable generation a session's cells run under (FIG-3571): the
-/// kernel version. A cell's document and everything it was lowered against
-/// are recorded in its envelope, so the kernel version is all of a build
-/// that decides how a recorded cell runs on.
+/// The executable generation a session's cells run under (FIG-3571): how
+/// a recorded cell is run on, which is its envelope. A cell's document
+/// and everything it was lowered against are recorded there, and a kernel
+/// version that replaces the one the document is written in carries the
+/// cell forward by migration when its turn is restored (kernel spec §6),
+/// so the kernel version is no part of the generation: a build that no
+/// longer reads a cell's kernel version refuses its snapshot instead.
 pub(crate) fn cell_generation() -> lash_core::ExecutableGeneration {
-    lash_core::ExecutableGeneration::new(format!("kernel:{}", lash_kernel_doc::KERNEL_VERSION))
+    lash_core::ExecutableGeneration::new("kernel:1")
 }
 
 #[expect(clippy::too_many_arguments, reason = "one cell's whole run")]

@@ -14,6 +14,7 @@
 
 mod advance;
 mod documents;
+mod migrate;
 mod run;
 mod state;
 mod trace;
@@ -29,6 +30,12 @@ use lash_kernel_doc::{Document, DocumentId, Name, Signature};
 use tokio_util::sync::CancellationToken;
 
 pub use documents::{DocumentStoreError, KernelDocuments};
+pub use migrate::{
+    KernelMigrationRefusal, KernelMigrationSurvey, KernelMigrationSurveyError,
+    KernelStateMigration, PlannedMigration, RefusedKernelProcess, SealedKernelRefusal,
+    check_sealed_kernel, migrate_run, migrate_saved_function, migration_refusal, plan_migration,
+    survey_kernel_migration,
+};
 pub use run::with_definitions;
 pub use state::{KERNEL_RUN_STEP, KernelProcessDefinition, KernelProcessInput};
 pub use workflow::{
@@ -197,6 +204,9 @@ pub struct KernelProcessEngine {
     pub(crate) functions: Arc<lash_kernel_doc::FunctionRegistry>,
     pub(crate) workers: lash_vm_client::service::Service,
     pub(crate) bounds: lash_kernel_vm::Bounds,
+    /// The kernel version this engine writes: the newest its build
+    /// interprets.
+    pub(crate) writes: lash_kernel_doc::KernelVersion,
     pub(crate) policy: KernelRunPolicy,
     pub(crate) random: Arc<dyn Fn() -> u64 + Send + Sync>,
     pub(crate) trace_runtime: Option<lash_core::trace::TraceRuntime>,
@@ -269,10 +279,21 @@ impl KernelProcessEngine {
             functions,
             workers,
             bounds,
+            writes: lash_kernel_doc::KernelVersion::NEWEST,
             policy: KernelRunPolicy::standard(),
             random: Arc::new(process_random),
             trace_runtime: None,
         }
+    }
+
+    /// This engine as the previous build's: it writes kernel version
+    /// `writes`, reads nothing newer and carries nothing forward. The
+    /// two-build laws run a node of each build from one binary with it.
+    #[cfg(feature = "synthetic-next")]
+    #[must_use]
+    pub fn writing(mut self, writes: lash_kernel_doc::KernelVersion) -> Self {
+        self.writes = writes;
+        self
     }
 
     /// Sets the policy of the engine's `kernel_run` step.
@@ -346,7 +367,7 @@ impl lash_core::ProcessEngine for KernelProcessEngine {
     }
 
     fn state_format(&self) -> lash_core::EngineStateFormat {
-        advance::state_format()
+        advance::state_format(self.writes)
     }
 
     fn cancel_grace(&self) -> std::time::Duration {
@@ -381,7 +402,7 @@ impl lash_core::ProcessEngine for KernelProcessEngine {
         event: lash_core::EngineEvent,
     ) -> Result<(lash_core::EngineState, lash_core::EngineAction), lash_core::ProcessInfraError>
     {
-        advance::advance(state, event)
+        advance::advance(self.writes, state, event)
     }
 
     /// A start names one artifact: its document, in the store set's module
@@ -564,7 +585,7 @@ pub fn kernel_process_engine_registration(
     engine: KernelProcessEngine,
 ) -> lash_core::ProcessEngineRegistration {
     let engine = Arc::new(engine);
-    lash_core::ProcessEngineRegistration::new(
+    let registration = lash_core::ProcessEngineRegistration::new(
         engine.clone(),
         lash_core::ProcessEngineAdmission::new(LASH_VM_ENGINE_KIND, admit_kernel_process),
     )
@@ -572,5 +593,11 @@ pub fn kernel_process_engine_registration(
     .with_document_provider(Arc::new(workflow::KernelDocumentProvider {
         engine: Arc::clone(&engine),
     }))
-    .with_engine_steps(Arc::new(KernelEngineSteps::new(engine)))
+    .with_engine_steps(Arc::new(KernelEngineSteps::new(Arc::clone(&engine))));
+    // A build that interprets the kernel version before its own carries
+    // that version's parked processes forward when it claims them.
+    match KernelStateMigration::of(engine) {
+        Some(migration) => registration.with_state_migration(Arc::new(migration)),
+        None => registration,
+    }
 }

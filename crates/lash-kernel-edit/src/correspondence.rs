@@ -45,6 +45,20 @@ impl Correspondence {
         }
     }
 
+    /// The correspondence `entries` state between two documents, or `None`
+    /// when two of them share a `from` or a `to`. A kernel version's
+    /// document migration answers one (`K-VER-004`).
+    pub fn of(base: DocumentId, result: DocumentId, entries: Vec<Survivor>) -> Option<Self> {
+        let distinct = {
+            let mut from = std::collections::BTreeSet::new();
+            let mut to = std::collections::BTreeSet::new();
+            entries
+                .iter()
+                .all(|entry| from.insert(&entry.from) && to.insert(&entry.to))
+        };
+        distinct.then(|| Self::new(base, result, entries))
+    }
+
     /// Every node of `document` to itself.
     pub(crate) fn identity(document: DocumentId, sites: impl IntoIterator<Item = Site>) -> Self {
         let entries = sites

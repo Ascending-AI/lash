@@ -36,6 +36,7 @@ pub(super) fn start(
             }
         })?;
     let exe = Arc::new(exe);
+    let costs = crate::costs::Costs::of_document(&program.document);
     let mut machine = KernelMachine {
         heap: Heap::new(bounds.memory),
         document: None,
@@ -67,6 +68,7 @@ pub(super) fn start(
         fresh: Vec::new(),
         charging: true,
         charged: 0,
+        costs,
         live_tasks: 1,
         inline_depth: 0,
         inline_result: None,

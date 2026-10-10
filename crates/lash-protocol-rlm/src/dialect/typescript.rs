@@ -275,6 +275,7 @@ mod tests {
         let dialect = SessionDialect::new(
             crate::dialect::CellDialect::typescript(),
             RlmDialectServices {
+                kernel: crate::executor::KernelCarry::default(),
                 presentation: crate::RlmPresentationConfig::standard(),
                 workers: lash_vm_client::service::Service::default(),
                 deferred_tool_resolver: None,

@@ -22,6 +22,7 @@ mod text;
 mod types;
 mod validate;
 mod value;
+mod version;
 
 #[cfg(test)]
 mod tests;
@@ -63,3 +64,4 @@ pub use value::{
     Bytes, ClosureObject, Datum, ErrorDatum, ErrorValue, Handle, Identity, InvalidBytes, Object,
     ObjectId, TaskId, Timestamp, Value, ValueKind,
 };
+pub use version::KernelVersion;

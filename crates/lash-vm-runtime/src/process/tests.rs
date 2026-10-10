@@ -8,6 +8,7 @@ use lash_vm_client::{OpaqueVmState, VmOwner};
 
 use super::advance::{advance, decode, state_format};
 use super::state::{Issued, KERNEL_RUN_STEP, KernelRunInput, KernelRunOutput, Phase, refused};
+use lash_kernel_doc::KernelVersion;
 
 fn process() -> lash_core::ProcessId {
     lash_core::ProcessIdMint::sequential_id_for_testing(1)
@@ -72,6 +73,7 @@ fn settle(
     outcome: SettledOutput,
 ) -> (EngineState, EngineAction) {
     advance(
+        KernelVersion::NEWEST,
         state,
         EngineEvent::StepSettled {
             call_id: None,
@@ -108,7 +110,8 @@ fn run_of(action: &EngineAction) -> (StepName, KernelRunInput, Vec<StepRequest>)
 
 fn started() -> (EngineState, StepName) {
     let (state, action) = advance(
-        EngineState::empty(state_format()),
+        KernelVersion::NEWEST,
+        EngineState::empty(state_format(KernelVersion::NEWEST)),
         EngineEvent::Started {
             payload: serde_json::json!({
                 "document": DocumentId::from_bytes([7; 32]),
@@ -193,7 +196,10 @@ fn a_fan_out_waits_on_every_element_and_delivers_each_outcome_once_in_any_order(
     );
     assert_eq!(action, EngineAction::Terminal(outcome));
     assert_eq!(
-        decode(&state).expect("the state decodes").phase,
+        decode(KernelVersion::NEWEST, &state)
+            .expect("the state decodes")
+            .0
+            .phase,
         Phase::Ended
     );
 }
@@ -257,7 +263,8 @@ fn a_refused_effect_is_raised_without_a_step_and_a_withdrawn_wait_is_never_deliv
     let (state, action) = settle(state, &withdrawn_step, completed("null".to_owned()));
     assert!(matches!(action, EngineAction::Sleep { .. }));
 
-    let (_, action) = advance(state, EngineEvent::Woke).expect("a wake advances");
+    let (_, action) =
+        advance(KernelVersion::NEWEST, state, EngineEvent::Woke).expect("a wake advances");
     let (_, input, _) = run_of(&action);
     assert_eq!(
         input

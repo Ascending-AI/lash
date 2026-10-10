@@ -7,7 +7,7 @@ use std::time::Instant;
 use crate::PoolError;
 use crate::embedding::Embedding;
 use crate::host::{Wire, WireHost};
-use lash_kernel_doc::{Datum, Document, KERNEL_VERSION};
+use lash_kernel_doc::{Datum, Document};
 use lash_kernel_state::ParkedRun;
 use lash_kernel_vm::{Bounds, KernelMachine, Machine, Program, Step};
 #[cfg(test)]
@@ -32,6 +32,9 @@ struct Hosted {
     /// The identity of the document the run executes, as its parked state
     /// names it.
     document: String,
+    /// The kernel version the document states, which its parked state is
+    /// sealed under.
+    kernel: u32,
     /// The run's heap bound, which also bounds what one slice may print
     /// (FIG-4458).
     memory: u64,
@@ -420,6 +423,7 @@ impl<'embedding, const MEASURE: bool> Server<'embedding, MEASURE> {
             .identity()
             .map_err(|error| undecodable(RunInput::Document, &error))?
             .to_string();
+        let kernel = document.manifest.kernel;
         let program = Program {
             document: Arc::new(document),
             registry: Arc::clone(&self.embedding.registry),
@@ -464,6 +468,7 @@ impl<'embedding, const MEASURE: bool> Server<'embedding, MEASURE> {
         Ok(Hosted {
             machine,
             document: identity,
+            kernel,
             memory: start.bounds.memory,
             ended: false,
         })
@@ -602,7 +607,7 @@ impl<'embedding, const MEASURE: bool> Server<'embedding, MEASURE> {
         }
         Ok(OpaqueVmState::seal(
             owner,
-            KERNEL_VERSION,
+            hosted.kernel,
             hosted.document.clone(),
             bytes,
         ))

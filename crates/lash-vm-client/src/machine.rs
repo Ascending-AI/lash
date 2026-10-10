@@ -10,7 +10,7 @@
 
 use std::sync::Arc;
 
-use lash_kernel_doc::{Datum, Document, DocumentId, ErrorDatum, Handle, KERNEL_VERSION, Timestamp};
+use lash_kernel_doc::{Datum, Document, DocumentId, ErrorDatum, Handle, KernelVersion, Timestamp};
 use lash_kernel_vm::{Bounds, Delivered, End, Outcome, Start, Step, WaitId};
 use lash_sansio::VersionRange;
 use lash_vm_broker::ParentFault;
@@ -26,7 +26,13 @@ use crate::{Checkout, ExecutionClass, PoolError, RunStep, WorkerPoolRuntimeOps a
 
 /// The kernel versions this build's workers resume a parked run under.
 pub fn kernel_reads() -> VersionRange {
-    VersionRange::exactly(KERNEL_VERSION)
+    let newest = KernelVersion::NEWEST.number();
+    let oldest = KernelVersion::ALL
+        .iter()
+        .map(|version| version.number())
+        .min()
+        .unwrap_or(newest);
+    VersionRange::between(oldest, newest)
 }
 
 /// What a run reads from its host, answered in the parent.

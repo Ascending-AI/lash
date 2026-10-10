@@ -12,9 +12,11 @@ use crate::name::{DocumentId, EffectName, FunctionId, FunctionName, Name};
 use crate::number::NumberPolicy;
 use crate::types::Signature;
 
-/// The kernel version this crate reads and writes: the forms, the values,
-/// evaluation order, the statement rule, task scheduling, site derivation
-/// and the canonical form (`K-VER-001`).
+/// The kernel version this crate's forms, values, evaluation order,
+/// statement rule, task scheduling, site derivation and canonical form are
+/// written for (`K-VER-001`): the number of [`crate::KernelVersion::One`],
+/// and what a front end and a library definition state. A build may
+/// interpret a second version beside it (`K-VER-003`).
 pub const KERNEL_VERSION: u32 = 1;
 
 /// The deepest a node may sit below its unit's body, counted in
@@ -121,6 +123,12 @@ pub enum DecodeError {
 }
 
 pub(crate) fn to_json<T: Serialize>(value: &T) -> Result<String, EncodeError> {
+    #[cfg(feature = "synthetic-next")]
+    if let Some(tree) = crate::version::synthetic::encode(value)? {
+        return serde_json::to_string(&tree).map_err(|error| EncodeError {
+            message: error.to_string(),
+        });
+    }
     serde_json::to_string(value).map_err(|error| EncodeError {
         message: error.to_string(),
     })
@@ -133,6 +141,10 @@ pub(crate) fn from_json<T: DeserializeOwned>(text: &str) -> Result<T, DecodeErro
             depth,
             limit: MAX_JSON_DEPTH,
         });
+    }
+    #[cfg(feature = "synthetic-next")]
+    if let Some(value) = crate::version::synthetic::decode(text)? {
+        return Ok(value);
     }
     let mut decoder = serde_json::Deserializer::from_str(text);
     decoder.disable_recursion_limit();

@@ -474,6 +474,42 @@ commands = [
   ["cargo", "check", "-p", "lash-runtime", "--lib", "--no-default-features", "--features", "synthetic-next", "--locked"],
 ]
 
+# The kernel's synthetic successor version (FIG-5716): the kernel crates carry
+# a second kernel version beside version 1 and the migration between them,
+# and the conformance harness runs that migration's laws.
+[[lane]]
+name = "kernel-synthetic-next"
+features = [
+  "lash-kernel-doc/synthetic-next:on",
+  "lash-kernel-doc/synthetic-next:off",
+  "lash-kernel-state/synthetic-next:on",
+  "lash-kernel-state/synthetic-next:off",
+  "lash-kernel-vm/synthetic-next:on",
+  "lash-kernel-vm/synthetic-next:off",
+  "lash-kernel-migrate/synthetic-next:on",
+  "lash-kernel-migrate/synthetic-next:off",
+  "lash-kernel-conformance/synthetic-next:on",
+  "lash-kernel-conformance/synthetic-next:off",
+  "lash-internal-vm-runtime/synthetic-next:on",
+  "lash-internal-vm-runtime/synthetic-next:off",
+]
+commands = [
+  ["cargo", "check", "-p", "lash-kernel-doc", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-kernel-doc", "--lib", "--no-default-features", "--features", "synthetic-next", "--locked"],
+  ["cargo", "check", "-p", "lash-kernel-state", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-kernel-state", "--lib", "--no-default-features", "--features", "synthetic-next", "--locked"],
+  ["cargo", "check", "-p", "lash-kernel-vm", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-kernel-vm", "--lib", "--no-default-features", "--features", "synthetic-next", "--locked"],
+  ["cargo", "check", "-p", "lash-kernel-migrate", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-kernel-migrate", "--lib", "--no-default-features", "--features", "synthetic-next", "--locked"],
+  ["cargo", "check", "-p", "lash-kernel-conformance", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-kernel-conformance", "--lib", "--no-default-features", "--features", "synthetic-next", "--locked"],
+  ["cargo", "test", "-p", "lash-kernel-conformance", "--lib", "--no-default-features", "--features", "synthetic-next", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-vm-runtime", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-vm-runtime", "--lib", "--no-default-features", "--features", "synthetic-next", "--locked"],
+  ["cargo", "test", "-p", "lash-runtime", "--test", "kernel_two_build_claim", "--no-default-features", "--features", "rlm,sqlite,testing,typescript,synthetic-next", "--locked"],
+]
+
 # The FIG-4169 rolling deploy replaces the load-test workers with the same
 # worker built as the synthetic N+1; `just multi-node-load` builds it both ways,
 # each beside the VM helper built with its worker's features.

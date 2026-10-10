@@ -70,7 +70,9 @@ use crate::runtime::actor::round::{
 use crate::runtime::actor::waits::{
     self, ParkDeadline, Resolution, WaitDeadline, WaitKind, WaitPurpose, WaitSpec,
 };
-use crate::runtime::process::engine_state::{EngineAction, EngineEvent, EngineState, StepRequest};
+use crate::runtime::process::engine_state::{
+    EngineAction, EngineEvent, EngineState, EngineStateFormat, StepRequest,
+};
 use crate::runtime::process::steps::{ProcessSteps, StepRefusal, StepRuntime};
 use crate::{
     ActorContext, AdmittedScope, Backend, CancelOrigin, ProcessEngine, ProcessId, ProcessInput,
@@ -500,6 +502,23 @@ impl ProcessActivation {
                 return self.park(owned, tx, &reason).await;
             }
         };
+        let written = state.format.clone();
+        let mut tx = match self
+            .carry_forward(
+                owned,
+                tx,
+                process,
+                &row,
+                &driver,
+                engine.as_ref(),
+                &state,
+                snapshot_rev,
+            )
+            .await?
+        {
+            super::carry::Carry::Ended(pass) => return Ok(pass),
+            super::carry::Carry::AsWritten(tx) => *tx,
+        };
         let now = owned.store().now().await?;
         if let (Some(origin), Some(until)) = (cancel, driver.grace_until)
             && now.0 >= until
@@ -625,7 +644,10 @@ impl ProcessActivation {
             }
         };
         let declared = engine.state_format();
-        if next.format != declared {
+        if next.format != declared
+            && next.format != written
+            && self.backend.formats().process_in(&next.format).is_none()
+        {
             let reason = ProcessParkReason::AdvanceRefused {
                 message: format!(
                     "engine returned state format {:?}, declared {:?}",
@@ -660,11 +682,12 @@ impl ProcessActivation {
             driver_json: driver.encode(),
         }));
         self.record_published(&mut tx, process, &row);
-        if row.state_rev == 0
-            && let Some(formats) = self.backend.formats().process(kind)
+        if (row.state_rev == 0 || next.format != written)
+            && let Some(formats) = self.backend.formats().process_in(&next.format)
         {
             // The first transition writes the engine's state: from now on
-            // only a node that decodes it claims the process.
+            // only a node that decodes it claims the process. A transition
+            // that leaves the state in another format says so too.
             tx.stamp_formats(formats.clone());
         }
         tx.write(DomainWrite::Snapshot(SnapshotWrite::Put {
@@ -691,6 +714,11 @@ impl ProcessActivation {
         engine: &dyn ProcessEngine,
     ) -> Result<Result<(EngineState, Option<SnapshotRev>), ProcessParkReason>, DurableError> {
         let format = engine.state_format();
+        let carried = self
+            .backend
+            .state_migration(&format.kind)
+            .map(|migration| migration.carries())
+            .unwrap_or_default();
         let snapshot = reads.snapshot(&ExecKey::Process(process.clone())).await?;
         let Some(snapshot) = snapshot else {
             return Ok(if row.state_rev == 0 {
@@ -702,16 +730,25 @@ impl ProcessActivation {
                 })
             });
         };
-        if snapshot.executable_identity != format.kind || snapshot.format_version != format.version
-        {
+        let stored = EngineStateFormat {
+            kind: snapshot.executable_identity,
+            version: snapshot.format_version,
+        };
+        if stored != format && !carried.contains(&stored) {
             return Ok(Err(ProcessParkReason::UndecodableState {
-                kind: snapshot.executable_identity,
-                version: snapshot.format_version,
+                kind: stored.kind,
+                version: stored.version,
             }));
         }
         let bytes = hex_decode(&snapshot.snapshot_ref)
             .ok_or_else(|| corrupt("a process's engine state", "it is not lowercase hex"))?;
-        Ok(Ok((EngineState { format, bytes }, Some(snapshot.rev))))
+        Ok(Ok((
+            EngineState {
+                format: stored,
+                bytes,
+            },
+            Some(snapshot.rev),
+        )))
     }
 
     pub(super) async fn park(
@@ -1543,7 +1580,7 @@ fn resolution(row: &lash_durable::domain::WaitRow) -> Result<waits::Resolution, 
 
 /// An engine state's bytes as `snapshot_ref` carries them inline: lowercase
 /// hex.
-fn hex_encode(bytes: &[u8]) -> String {
+pub(super) fn hex_encode(bytes: &[u8]) -> String {
     use std::fmt::Write as _;
     let mut text = String::with_capacity(bytes.len() * 2);
     for byte in bytes {
@@ -1552,7 +1589,7 @@ fn hex_encode(bytes: &[u8]) -> String {
     text
 }
 
-fn hex_decode(text: &str) -> Option<Vec<u8>> {
+pub(super) fn hex_decode(text: &str) -> Option<Vec<u8>> {
     if !text.len().is_multiple_of(2) {
         return None;
     }

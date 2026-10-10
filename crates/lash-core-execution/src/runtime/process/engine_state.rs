@@ -29,7 +29,9 @@ use crate::{ProcessId, ProcessOutcome, Resolution};
 /// The encoding of an engine's [`EngineState`]: the engine's kind and a
 /// version it bumps when the encoding changes. A node claims a process only
 /// when its engine reads the process's format (L11, FIG-5187).
-#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub struct EngineStateFormat {
     /// The engine kind that wrote the state.
     pub kind: String,
@@ -55,6 +57,46 @@ impl EngineState {
             bytes: Vec::new(),
         }
     }
+}
+
+/// An engine's carrying of its state from an earlier build's format to its
+/// own (ADR 0106 §1). An engine registered with one
+/// ([`Backend::with_state_migration`](crate::Backend::with_state_migration))
+/// decodes the formats it [`carries`](Self::carries) beside its
+/// [`state_format`](super::ProcessEngine::state_format), so its node claims
+/// a process the previous build left in one. The claimer carries the state
+/// forward as its first commit, before any transition, once every live node
+/// that serves the process decodes the newer format; until then it advances
+/// the process in the format it is in.
+#[async_trait::async_trait]
+pub trait EngineStateMigration: Send + Sync {
+    /// The earlier formats the engine carries forward.
+    fn carries(&self) -> Vec<EngineStateFormat>;
+
+    /// `state`, written in a carried format, in the engine's own; or
+    /// `None` when the process is not at a point the engine carries it
+    /// from, and goes on in the format it is in. It may read and publish
+    /// what the state names, and it changes nothing of the process: the
+    /// claimer commits the answer, or parks the process with the refusal.
+    async fn migrate(
+        &self,
+        process: &ProcessId,
+        state: &EngineState,
+    ) -> Result<Option<EngineState>, EngineStateRefusal>;
+}
+
+/// Why an engine did not carry a state forward.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EngineStateRefusal {
+    /// The engine's typed reason, as its own data.
+    pub refusal: serde_json::Value,
+    /// The reason in words.
+    pub message: String,
+    /// The same state will be refused again: the process is parked with
+    /// the refusal. A refusal that is not final, such as a store that did
+    /// not answer, is asked again at the next claim.
+    pub fatal: bool,
 }
 
 /// The name an engine gives one of its waits; unique within the process.

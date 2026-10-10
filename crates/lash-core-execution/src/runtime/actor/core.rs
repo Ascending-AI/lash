@@ -295,6 +295,26 @@ impl ActorContext {
         }
     }
 
+    /// Whether a session an earlier build left is carried to this build's
+    /// formats now (ADR 0106 §2): this build carries an earlier one's
+    /// session set, the node is not draining, and every live node that
+    /// serves sessions decodes this build's set. Until then a session's
+    /// state stays as the build that wrote it reads it.
+    ///
+    /// # Errors
+    ///
+    /// The store's.
+    pub async fn carries_sessions(&self) -> Result<bool, DurableError> {
+        let formats = self.backend().formats();
+        if formats.carried_sessions().is_empty() || self.draining() {
+            return Ok(false);
+        }
+        let live = self.durable()?.live_decodes().await?;
+        let mut candidates = vec![formats.session().clone()];
+        candidates.extend(formats.carried_sessions().iter().cloned());
+        Ok(lash_durable::fleet_writable(&candidates, &live) == Some(formats.session()))
+    }
+
     /// Whether the node this context's claim runs on is draining: the
     /// activation releases the actor at its next committed phase (ADR 0106
     /// §1). False for a context that owns no claim.

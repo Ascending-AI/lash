@@ -51,6 +51,7 @@ members = [
     "crates/lash-kernel-doc",
     "crates/lash-kernel-edit",
     "crates/lash-kernel-lib",
+    "crates/lash-kernel-migrate",
     "crates/lash-kernel-state",
     "crates/lash-kernel-vm",
     "crates/lash-ext-regex-ecma",
@@ -327,6 +328,7 @@ lash-kernel-dialect = { path = "crates/lash-kernel-dialect", version = "=0.0.0-d
 lash-kernel-doc = { path = "crates/lash-kernel-doc", version = "=0.0.0-dev" }
 lash-kernel-edit = { path = "crates/lash-kernel-edit", version = "=0.0.0-dev" }
 lash-kernel-lib = { path = "crates/lash-kernel-lib", version = "=0.0.0-dev" }
+lash-kernel-migrate = { path = "crates/lash-kernel-migrate", version = "=0.0.0-dev" }
 lash-kernel-state = { path = "crates/lash-kernel-state", version = "=0.0.0-dev" }
 lash-kernel-vm = { path = "crates/lash-kernel-vm", version = "=0.0.0-dev" }
 lash-ext-date-ecma = { path = "crates/lash-ext-date-ecma", version = "=0.0.0-dev" }

@@ -21,7 +21,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 
-use lash_kernel_doc::{Identity, KERNEL_VERSION, Name, Object, ObjectId, TaskId, Value};
+use lash_kernel_doc::{Identity, KernelVersion, Name, Object, ObjectId, TaskId, Value};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 
@@ -393,6 +393,40 @@ fn probe_kernel(header: &[u8]) -> Result<u32, LoadError> {
 }
 
 impl ParkedRun {
+    /// The kernel version a run stored whole states it was parked under,
+    /// read without decoding the rest: what a holder compares with the
+    /// version it sealed the bytes under.
+    ///
+    /// # Errors
+    ///
+    /// [`LoadError`] for bytes that are not a stored run.
+    pub fn kernel_of(bytes: &[u8]) -> Result<u32, LoadError> {
+        probe_kernel(bytes)
+    }
+
+    /// Reads a run stored whole, as the one JSON document it is: the form
+    /// a host holds when it does not store the parts. The kernel version is
+    /// checked before the rest is decoded, and nesting past the schema's
+    /// bound is refused before any of it is.
+    pub fn from_json(bytes: &[u8]) -> Result<Self, LoadError> {
+        let parked = probe_kernel(bytes)?;
+        if KernelVersion::of(parked).is_none() {
+            return Err(LoadError::KernelVersion {
+                parked,
+                supported: KernelVersion::NEWEST.number(),
+            });
+        }
+        decode(bytes, || "the run".to_string())
+    }
+
+    /// Writes the run whole, as [`Self::from_json`] reads it.
+    pub fn to_json(&self) -> Result<Vec<u8>, SaveError> {
+        serde_json::to_vec(self).map_err(|error| SaveError::Encode {
+            part: "the run".to_string(),
+            message: error.to_string(),
+        })
+    }
+
     /// Writes the run as a header and one fragment per root, rewriting
     /// only the fragments that differ from `since`.
     pub fn save(&self, since: &Baseline) -> Result<Saved, SaveError> {
@@ -414,10 +448,10 @@ impl ParkedRun {
         fragments: impl IntoIterator<Item = (&'a Root, &'a [u8])>,
     ) -> Result<(Self, Baseline), LoadError> {
         let parked = probe_kernel(header)?;
-        if parked != KERNEL_VERSION {
+        if KernelVersion::of(parked).is_none() {
             return Err(LoadError::KernelVersion {
                 parked,
-                supported: KERNEL_VERSION,
+                supported: KernelVersion::NEWEST.number(),
             });
         }
         let decoded: Header = decode(header, || "the header".to_string())?;

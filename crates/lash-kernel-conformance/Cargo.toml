@@ -14,12 +14,25 @@ publish = false
 [lib]
 doctest = false
 
+[features]
+# Runs the conformance case of the migration to kernel version 1's synthetic
+# successor.
+synthetic-next = [
+    "lash-kernel-doc/synthetic-next",
+    "lash-kernel-migrate/synthetic-next",
+    "lash-kernel-state/synthetic-next",
+    "lash-kernel-vm/synthetic-next",
+]
+
 [lints]
 workspace = true
 
 [dependencies]
 lash-kernel-check.workspace = true
+lash-kernel-dialect.workspace = true
 lash-kernel-doc.workspace = true
+lash-kernel-migrate.workspace = true
+lash-kernel-state.workspace = true
 lash-kernel-vm.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true

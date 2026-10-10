@@ -143,7 +143,7 @@ impl CellSegmentState {
 }
 
 /// The envelope `checkpoint` holds, if it holds one.
-fn envelope_of(
+pub(super) fn envelope_of(
     checkpoint: &ParkedCheckpoint<OpaqueVmState>,
 ) -> Result<Option<CellSegmentState>, String> {
     checkpoint
@@ -153,7 +153,7 @@ fn envelope_of(
         .transpose()
 }
 
-fn stored_checkpoint(snapshot: &str) -> Result<ParkedCheckpoint<OpaqueVmState>, String> {
+pub(super) fn stored_checkpoint(snapshot: &str) -> Result<ParkedCheckpoint<OpaqueVmState>, String> {
     serde_json::from_str(snapshot).map_err(|error| error.to_string())
 }
 
@@ -170,8 +170,8 @@ pub(crate) fn snapshot_tool_calls(
 /// Whether this build resumes `snapshot`, a cell's stored checkpoint: the
 /// broker's checkpoint and ledger, the envelope the resumed cell runs on
 /// with, the document it names, and the kernel version its parked state
-/// was written under. The account of whichever does not decode is the
-/// `Err`.
+/// was written under, which its bytes state as its seal does. The account
+/// of whichever does not decode is the `Err`.
 pub(crate) fn check_cell_snapshot(snapshot: &str) -> Result<(), String> {
     let checkpoint = stored_checkpoint(snapshot)?;
     let envelope = envelope_of(&checkpoint)?;
@@ -190,6 +190,7 @@ pub(crate) fn check_cell_snapshot(snapshot: &str) -> Result<(), String> {
                 .to_string(),
             );
         }
+        lash_vm_runtime::check_sealed_kernel(state).map_err(|refusal| refusal.to_string())?;
     }
     Ok(())
 }

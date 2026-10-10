@@ -3,10 +3,15 @@
 //! [`DocumentRunner`] is the reader seam. [`MachineRunner`] adapts any kernel
 //! machine, scripting deliveries and synchronous host answers. [`check_native`]
 //! compares cold and warm runs for every registered native implementation.
+//! [`check_migration`] is the conformance case a kernel version's migration
+//! ships with: a run parked under the old version at each of its parks,
+//! carried across and resumed under the new one, against a run that never
+//! left the old.
 
 mod case;
 mod coverage;
 mod machine;
+mod migration;
 mod native;
 mod native_calls;
 
@@ -16,6 +21,7 @@ pub use case::{
 };
 pub use coverage::{CoverageError, PendingRule, check_coverage, load_corpus, rule_ids};
 pub use machine::MachineRunner;
+pub use migration::{MigrationCheck, check_migration};
 pub use native::check_native;
 pub use native_calls::{
     NativeCase, NativeObservation, NativeOutcome, NativeShard, check_native_calls,
@@ -49,3 +55,6 @@ mod tests;
 
 #[cfg(test)]
 mod native_laws;
+
+#[cfg(all(test, feature = "synthetic-next"))]
+mod migration_laws;

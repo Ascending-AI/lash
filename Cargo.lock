@@ -2279,6 +2279,7 @@ dependencies = [
  "lash-internal-vm-client",
  "lash-internal-vm-protocol",
  "lash-internal-vm-runtime",
+ "lash-kernel-vm",
  "lash-runtime",
  "serde_json",
  "sqlx",
@@ -2726,6 +2727,8 @@ dependencies = [
  "lash-kernel-check",
  "lash-kernel-dialect",
  "lash-kernel-doc",
+ "lash-kernel-migrate",
+ "lash-kernel-state",
  "lash-kernel-vm",
  "serde",
  "serde_json",
@@ -2752,6 +2755,7 @@ dependencies = [
  "lash-kernel-dialect",
  "lash-kernel-doc",
  "lash-kernel-lib",
+ "lash-kernel-migrate",
  "lash-kernel-state",
  "lash-kernel-vm",
  "libc",
@@ -2776,8 +2780,11 @@ version = "0.0.0-dev"
 dependencies = [
  "kernel-embedder",
  "lash-kernel-check",
+ "lash-kernel-dialect",
  "lash-kernel-doc",
  "lash-kernel-lib",
+ "lash-kernel-migrate",
+ "lash-kernel-state",
  "lash-kernel-vm",
  "serde",
  "serde_json",
@@ -2830,6 +2837,19 @@ dependencies = [
  "num-bigint",
  "num-traits",
  "serde_json",
+]
+
+[[package]]
+name = "lash-kernel-migrate"
+version = "0.0.0-dev"
+dependencies = [
+ "lash-kernel-dialect",
+ "lash-kernel-doc",
+ "lash-kernel-edit",
+ "lash-kernel-state",
+ "serde",
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]

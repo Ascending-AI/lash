@@ -21,7 +21,15 @@ test = false
 
 [features]
 dhat-heap = ["dep:dhat"]
-synthetic-next = ["lash-vm-protocol/synthetic-next", "lash-vm-client/synthetic-next", "lash-core-execution/synthetic-next"]
+synthetic-next = [
+    "lash-vm-protocol/synthetic-next",
+    "lash-vm-client/synthetic-next",
+    "lash-core-execution/synthetic-next",
+    "lash-kernel-doc/synthetic-next",
+    "lash-kernel-migrate/synthetic-next",
+    "lash-kernel-state/synthetic-next",
+    "lash-kernel-vm/synthetic-next",
+]
 testing = ["lash-vm-client/testing"]
 
 [[bin]]
@@ -42,6 +50,7 @@ lash-vm-protocol = { workspace = true }
 lash-kernel-doc = { workspace = true }
 lash-kernel-vm = { workspace = true }
 lash-kernel-lib = { workspace = true }
+lash-kernel-migrate = { workspace = true }
 lash-kernel-state = { workspace = true }
 lash-kernel-dialect = { workspace = true }
 lash-dialect-typescript = { workspace = true }

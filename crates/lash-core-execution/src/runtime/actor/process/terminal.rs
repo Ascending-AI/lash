@@ -30,6 +30,19 @@ pub enum ProcessParkReason {
         /// Its version.
         version: u32,
     },
+    /// Its engine state is in an earlier build's format, and the engine
+    /// refuses to carry it to its own (ADR 0106 §1). The state is as that
+    /// build left it.
+    MigrationRefused {
+        /// The format kind the state is in.
+        kind: String,
+        /// Its version.
+        version: u32,
+        /// The engine's typed reason, as its own data.
+        refusal: serde_json::Value,
+        /// The reason in words.
+        message: String,
+    },
     /// Its driver row, what the actor records of its steps or of its child
     /// turn between transitions, does not decode on this node: another
     /// build wrote it. Nothing of the process ran or committed for it
@@ -147,6 +160,7 @@ impl ProcessParkReason {
             Self::ActivationLoop { .. } => "activation_loop",
             Self::UnknownEngine { .. } => "unknown_engine",
             Self::UndecodableState { .. } => "undecodable_state",
+            Self::MigrationRefused { .. } => "migration_refused",
             Self::UndecodableDriver { .. } => "undecodable_driver",
             Self::AdvanceRefused { .. } => "advance_refused",
             Self::UnservedSessionTurn => "unserved_session_turn",

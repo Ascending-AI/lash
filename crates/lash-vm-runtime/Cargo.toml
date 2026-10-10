@@ -29,7 +29,14 @@ typescript = ["dep:lash-dialect-typescript"]
 testing = ["lash-vm-client/testing", "lash-vm-worker/testing", "lash-core/testing"]
 # The worker this crate links and the client it drives move protocol
 # versions together.
-synthetic-next = ["lash-vm-client/synthetic-next", "lash-vm-worker/synthetic-next"]
+synthetic-next = [
+    "lash-vm-client/synthetic-next",
+    "lash-vm-worker/synthetic-next",
+    "lash-kernel-doc/synthetic-next",
+    "lash-kernel-migrate/synthetic-next",
+    "lash-kernel-state/synthetic-next",
+    "lash-kernel-vm/synthetic-next",
+]
 
 [lints]
 workspace = true
@@ -43,6 +50,8 @@ lash-core-execution = { workspace = true }
 lash-vm-broker = { workspace = true }
 lash-kernel-doc = { workspace = true }
 lash-kernel-vm = { workspace = true }
+lash-kernel-migrate = { workspace = true }
+lash-kernel-state = { workspace = true }
 lash-vm-worker = { workspace = true }
 lash-kernel-check = { workspace = true }
 lash-kernel-dialect = { workspace = true }

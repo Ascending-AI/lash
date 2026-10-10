@@ -21,6 +21,10 @@ pub struct RlmProtocolPluginFactory {
     /// The library functions the workers were assembled with; `None` is
     /// the embedding lash ships.
     worker_functions: Option<Arc<lash_kernel_doc::FunctionRegistry>>,
+    /// The kernel version this host's process engine writes, when it
+    /// stands in for the build before the synthetic successor.
+    #[cfg(feature = "synthetic-next")]
+    kernel_writes: Option<lash_kernel_doc::KernelVersion>,
     deferred_tool_resolver: Option<SharedDeferredToolResolver>,
 }
 
@@ -38,6 +42,8 @@ impl RlmProtocolPluginFactory {
             dialects: vec![dialect],
             workers: lash_vm_client::service::Service::default(),
             worker_functions: None,
+            #[cfg(feature = "synthetic-next")]
+            kernel_writes: None,
             deferred_tool_resolver: None,
         }
     }
@@ -64,6 +70,17 @@ impl RlmProtocolPluginFactory {
 
     pub fn worker_service(&self) -> &lash_vm_client::service::Service {
         &self.workers
+    }
+
+    /// This host as the build before the synthetic successor (ADR 0115
+    /// §6): its process engine writes kernel version `writes`, reads
+    /// nothing newer and migrates nothing. The two-build laws run a node
+    /// of each build from one binary with it.
+    #[cfg(feature = "synthetic-next")]
+    #[must_use]
+    pub fn writing_kernel(mut self, writes: lash_kernel_doc::KernelVersion) -> Self {
+        self.kernel_writes = Some(writes);
+        self
     }
 
     /// State the library functions the worker entry was assembled with,
@@ -229,6 +246,11 @@ impl PluginFactory for RlmProtocolPluginFactory {
             .map_err(|error| PluginError::Registration(error.to_string()))?,
         }
         .with_trace_runtime(ctx.trace_runtime().clone());
+        #[cfg(feature = "synthetic-next")]
+        let engine = match self.kernel_writes {
+            Some(writes) => engine.writing(writes),
+            None => engine,
+        };
         Ok(vec![lash_vm_runtime::kernel_process_engine_registration(
             engine,
         )])
@@ -246,6 +268,10 @@ impl PluginFactory for RlmProtocolPluginFactory {
             ctx.materialization,
         )?;
         let dialect = self.session_dialect(recorded.as_ref(), ctx.materialization)?;
+        #[cfg(feature = "synthetic-next")]
+        let writes = self.kernel_writes;
+        #[cfg(not(feature = "synthetic-next"))]
+        let writes = None;
         let services = RlmDialectServices {
             presentation: config.presentation,
             workers: self.workers.clone(),
@@ -253,6 +279,7 @@ impl PluginFactory for RlmProtocolPluginFactory {
             deferred_tool_resolver: self.deferred_tool_resolver.clone(),
             execution_bounds: config.execution_bounds(),
             channel: config.channel,
+            kernel: crate::executor::KernelCarry::new(self.worker_functions.clone(), writes),
         };
         let dialect = Arc::new(SessionDialect::new(dialect, services));
         if config.channel == super::RlmChannel::NativeTool {

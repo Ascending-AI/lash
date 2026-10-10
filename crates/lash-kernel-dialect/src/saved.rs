@@ -89,6 +89,12 @@ pub enum NotSaved {
     /// The session's dialect declares no saved function in a later cell.
     #[error("it holds a function, and this session's dialect keeps none between cells")]
     Dialect,
+    /// The function was saved under an earlier kernel version, whose
+    /// migration does not carry it to this one.
+    #[error(
+        "its function was saved under kernel version {from} and is not carried forward: {problem}"
+    )]
+    NotMigrated { from: u32, problem: String },
     /// The run's end did not describe the closure as its document has it.
     #[error("its function cannot be read back from the cell's document: {problem}")]
     Unreadable { problem: String },

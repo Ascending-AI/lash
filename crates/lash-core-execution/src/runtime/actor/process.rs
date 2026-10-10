@@ -5,12 +5,14 @@
 //! live here; the engine trait is `runtime::process::engine::ProcessEngine`.
 
 mod activation;
+mod carry;
 mod driver;
 mod session_turn;
 mod terminal;
 mod waiting;
 
 pub use activation::ProcessActivation;
+pub use carry::stored_engine_state;
 pub use session_turn::{SessionTurnCancel, SessionTurnMail, SessionTurns};
 pub use terminal::{ProcessParkReason, cancelled, park_of, record_park, record_terminal};
 

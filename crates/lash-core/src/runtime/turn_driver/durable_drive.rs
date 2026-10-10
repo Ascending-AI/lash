@@ -236,6 +236,12 @@ impl RuntimeDrive {
 /// Check the snapshot the cell of effect `id`, which the restored `machine`
 /// re-delivers, resumes from: the cell's executor decodes it before the cell
 /// runs again. A cell with no snapshot starts over and has nothing to check.
+///
+/// A snapshot the build before this one wrote is carried to this build's
+/// formats first, once the fleet permits it (ADR 0106 §2): the carried
+/// snapshot and the session's format set commit together before the cell
+/// runs again, and a snapshot the carry refuses is one this build does not
+/// resume.
 async fn check_cell_snapshot(
     cx: &ActorContext,
     driver: &RuntimeTurnDriver<'static>,
@@ -258,14 +264,40 @@ async fn check_cell_snapshot(
     let Some(snapshot) = cx.durable_reads()?.snapshot(&exec).await? else {
         return Ok(());
     };
+    let undecodable = |reason| TurnError::UndecodableState {
+        state: ParkedTurnState::CellSnapshot,
+        reason,
+    };
     code_executor
         .check_cell_snapshot(&snapshot.snapshot_ref)
         .await
         .map_err(runtime)?
-        .map_err(|reason| TurnError::UndecodableState {
-            state: ParkedTurnState::CellSnapshot,
-            reason,
-        })
+        .map_err(undecodable)?;
+    if !cx.carries_sessions().await? {
+        return Ok(());
+    }
+    let Some(carried) = code_executor
+        .carried_cell_snapshot(&snapshot.snapshot_ref)
+        .await
+        .map_err(runtime)?
+        .map_err(undecodable)?
+    else {
+        return Ok(());
+    };
+    let mut tx = cx.begin().await?;
+    tx.write(lash_durable::DomainWrite::Snapshot(
+        lash_durable::domain::SnapshotWrite::Put {
+            exec,
+            expected: Some(snapshot.rev),
+            snapshot_ref: carried.snapshot,
+            executable_identity: carried.executable_identity,
+            format_version: carried.format_version,
+        },
+    ));
+    tx.stamp_formats(cx.backend().formats().session().clone());
+    cx.commit(tx, lash_durable::CommitLabel::CELL_SNAPSHOT)
+        .await?;
+    Ok(())
 }
 
 /// The machine a prepared turn starts: ended at once when its recorded model

@@ -17,6 +17,11 @@ publish = false
 name = "lash_kernel_doc"
 doctest = false
 
+[features]
+# A second kernel version beside version 1, to prove migration between
+# kernel versions before a real one exists (ADR 0115 §6).
+synthetic-next = []
+
 [lints]
 workspace = true
 

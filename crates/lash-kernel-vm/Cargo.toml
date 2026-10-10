@@ -17,6 +17,10 @@ publish = false
 name = "lash_kernel_vm"
 doctest = false
 
+[features]
+# The machine also runs the synthetic successor of kernel version 1.
+synthetic-next = ["lash-kernel-doc/synthetic-next", "lash-kernel-state/synthetic-next"]
+
 [lints]
 workspace = true
 

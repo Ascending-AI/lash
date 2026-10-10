@@ -24,6 +24,11 @@ pub(super) enum Command {
     DeploymentStatus {
         accepting_new_work: bool,
     },
+    /// The kernel processes this build's kernel migration would refuse,
+    /// each with its typed reason, and each retired library function with
+    /// the processes that depend on it. Run with the next build's `lashctl`
+    /// before the upgrade; it writes nothing.
+    KernelMigration,
 }
 
 impl Command {
@@ -32,6 +37,7 @@ impl Command {
             Self::Stalled { .. } => "stalled-list",
             Self::Rearm { .. } => "stalled-rearm",
             Self::DeploymentStatus { .. } => "deployment-status",
+            Self::KernelMigration => "kernel-migration-list",
         }
     }
 }
@@ -87,6 +93,7 @@ pub(super) fn parse(verb: &str, rest: &[String]) -> Result<Invocation, CliError>
         ("deployment-status", ["--accepting-new-work", admission]) => Command::DeploymentStatus {
             accepting_new_work: admission.parse().map_err(|_| usage())?,
         },
+        ("kernel-migration", ["list"]) => Command::KernelMigration,
         _ => return Err(usage()),
     };
     Ok(Invocation {
@@ -179,6 +186,10 @@ impl Invocation {
     }
 
     pub(super) async fn run(&self) -> Result<Value, CliError> {
+        if matches!(self.command, Command::KernelMigration) {
+            let backend = durable_backend(open_stores(self.sqlite_path.as_deref()).await?)?;
+            return kernel_migration(&backend).await;
+        }
         let core = self.core().await?;
         execute(&core, &self.command).await
     }
@@ -202,7 +213,21 @@ async fn execute(core: &lash::LashCore, command: &Command) -> Result<Value, CliE
                 .await
                 .map_err(core_error)?
         ),
+        // Answered from the backend, before a core is built.
+        Command::KernelMigration => return Err(usage()),
     })
+}
+
+/// The survey of `backend`'s kernel processes against the migration this
+/// build ships, over the library its shipped worker holds.
+async fn kernel_migration(backend: &lash::Backend) -> Result<Value, CliError> {
+    let unexpected =
+        |error: &dyn std::fmt::Display| CliError::new(Exit::Unexpected, error.to_string());
+    let functions = lash::vm::standard_functions().map_err(|error| unexpected(&error))?;
+    let survey = lash::vm::survey_kernel_migration(backend, &functions)
+        .await
+        .map_err(|error| unexpected(&error))?;
+    serde_json::to_value(&survey).map_err(|error| unexpected(&error))
 }
 
 pub(super) fn core_error(error: lash::EmbedError) -> CliError {

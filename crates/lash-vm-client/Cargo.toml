@@ -15,7 +15,12 @@ name = "lash_vm_client"
 doctest = false
 
 [features]
-synthetic-next = ["lash-vm-protocol/synthetic-next", "lash-vm-broker/synthetic-next"]
+synthetic-next = [
+    "lash-vm-protocol/synthetic-next",
+    "lash-vm-broker/synthetic-next",
+    "lash-kernel-doc/synthetic-next",
+    "lash-kernel-vm/synthetic-next",
+]
 testing = []
 perf-witness = ["lash-core-execution/perf-witness"]
 

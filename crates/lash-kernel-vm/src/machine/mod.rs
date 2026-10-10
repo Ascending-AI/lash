@@ -296,6 +296,8 @@ pub struct KernelMachine {
     fresh: Vec<ObjectId>,
     charging: bool,
     charged: u64,
+    /// The cost table of the kernel version the document states.
+    costs: crate::costs::Costs,
     live_tasks: u32,
     inline_depth: u32,
     inline_result: Option<Result<Value, Value>>,

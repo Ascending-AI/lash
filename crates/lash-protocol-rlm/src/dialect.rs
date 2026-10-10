@@ -267,6 +267,8 @@ pub(crate) struct RlmDialectServices {
     /// services because the executor needs it to decide whether cell-delimiter
     /// advice is true of the source the model actually wrote (FIG-2769).
     pub(crate) channel: crate::plugin::RlmChannel,
+    /// What a stored kernel definition is carried forward with.
+    pub(crate) kernel: crate::executor::KernelCarry,
 }
 
 /// Shared cell transport teaching; native transport replaces this whole section.
@@ -317,8 +319,14 @@ impl SessionDialect {
                 code_renderer: Default::default(),
                 channel: crate::plugin::RlmChannel::Cell,
                 presentation: crate::RlmPresentationConfig::standard(),
+                kernel: crate::executor::KernelCarry::default(),
             },
         }
+    }
+
+    /// What a stored kernel definition is carried forward with.
+    pub(crate) fn kernel(&self) -> &crate::executor::KernelCarry {
+        &self.services.kernel
     }
 
     pub(crate) fn presentation(&self) -> crate::RlmPresentationConfig {
@@ -686,7 +694,8 @@ pub(crate) struct DialectSession {
 
 impl DialectSession {
     pub(crate) fn new(dialect: CellDialect, services: RlmDialectServices) -> Self {
-        let state = RlmExecutionState::new(dialect.name(), dialect.numbers());
+        let state = RlmExecutionState::new(dialect.name(), dialect.numbers())
+            .carrying(services.kernel.clone());
         Self {
             dialect,
             state,
@@ -1112,6 +1121,7 @@ mod tests {
 #[cfg(test)]
 pub(crate) fn test_dialect_services() -> RlmDialectServices {
     RlmDialectServices {
+        kernel: crate::executor::KernelCarry::default(),
         presentation: crate::RlmPresentationConfig::standard(),
         workers: lash_vm_client::service::Service::default(),
         deferred_tool_resolver: None,

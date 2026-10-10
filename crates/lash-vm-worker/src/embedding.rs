@@ -144,9 +144,20 @@ impl Embedder {
     ///
     /// [`EmbedError::Registry`].
     pub fn finish(self) -> Result<Embedding, EmbedError> {
+        // The names a front end resolves are those of the version it
+        // writes. A build that also interprets that version's successor
+        // holds every function redeclared for it too, by identity.
+        let library = self.library()?;
+        let mut registry = self.registry;
+        for version in lash_kernel_doc::KernelVersion::ALL {
+            if let Some(migration) = lash_kernel_migrate::migration_from(*version) {
+                lash_kernel_migrate::migrate_registry(&mut registry, migration)
+                    .map_err(|error| EmbedError::Registry(error.to_string()))?;
+            }
+        }
         Ok(Embedding {
-            library: self.library()?,
-            registry: Arc::new(self.registry),
+            library,
+            registry: Arc::new(registry),
             dialects: self.dialects,
         })
     }

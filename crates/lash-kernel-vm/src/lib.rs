@@ -17,6 +17,7 @@
 //! `docs/kernel/semantics.md`.
 
 mod compile;
+mod costs;
 mod data;
 mod functions;
 mod heap;

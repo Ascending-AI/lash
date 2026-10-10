@@ -60,3 +60,13 @@ pub use lash_vm_client::{
 };
 #[cfg(feature = "rlm")]
 pub use lash_vm_client::{StateDigest, StateExpectation};
+/// What a kernel migration would refuse among a deployment's processes
+/// (kernel spec §6 "Upgrades"): the survey `lashctl kernel-migration list`
+/// prints, over the library a host's workers hold.
+#[cfg(feature = "rlm")]
+pub use lash_vm_runtime::{
+    DocumentRefusal as KernelDocumentRefusal, DocumentStoreError as KernelDocumentStoreError,
+    KernelMigrationRefusal, KernelMigrationSurvey, KernelMigrationSurveyError,
+    ParkedRefusal as KernelParkedRefusal, RefusedKernelProcess, standard_functions,
+    survey_kernel_migration,
+};

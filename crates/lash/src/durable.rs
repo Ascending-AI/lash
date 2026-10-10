@@ -32,6 +32,8 @@ pub struct DurableBackendBuilder {
     engines: Vec<Arc<dyn ProcessEngine>>,
     #[cfg(feature = "rlm")]
     providers: Vec<Arc<dyn crate::vm::ProjectionProvider>>,
+    #[cfg(feature = "synthetic-next")]
+    previous_build: bool,
 }
 
 impl DurableBackendBuilder {
@@ -46,6 +48,8 @@ impl DurableBackendBuilder {
             engines: Vec::new(),
             #[cfg(feature = "rlm")]
             providers: Vec::new(),
+            #[cfg(feature = "synthetic-next")]
+            previous_build: false,
         }
     }
 
@@ -75,6 +79,16 @@ impl DurableBackendBuilder {
     pub fn config(mut self, settings: DurableSettings) -> Self {
         self.settings = settings;
         self.overridden = true;
+        self
+    }
+
+    /// This backend as the build before the synthetic successor declares
+    /// it (ADR 0115 §6): its actor state holds that build's formats. The
+    /// two-build laws run a node of each build from one binary with it.
+    #[cfg(feature = "synthetic-next")]
+    #[must_use]
+    pub fn previous_build(mut self) -> Self {
+        self.previous_build = true;
         self
     }
 
@@ -109,6 +123,13 @@ impl DurableBackendBuilder {
             stores: self.stores,
             settings: self.settings,
             engines: self.engines,
+            #[cfg(feature = "synthetic-next")]
+            formats: if self.previous_build {
+                crate::formats::previous_actor_state_surfaces()
+            } else {
+                crate::formats::actor_state_surfaces()
+            },
+            #[cfg(not(feature = "synthetic-next"))]
             formats: crate::formats::actor_state_surfaces(),
         })
     }

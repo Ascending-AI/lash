@@ -341,7 +341,9 @@ pub enum ImportError {
         parked: DocumentId,
         given: DocumentId,
     },
-    #[error("the state was parked under kernel version {parked}; this machine runs {supported}")]
+    #[error(
+        "the state was parked under kernel version {parked}; the document is written for {supported}"
+    )]
     KernelVersion { parked: u32, supported: u32 },
     #[error("the registry has no function {function}, which the parked run pins")]
     MissingFunction { function: FunctionId },

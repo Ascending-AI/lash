@@ -397,6 +397,7 @@ pub struct ProcessEngineRegistration {
     admission: ProcessEngineAdmission,
     engine_steps: Option<Arc<dyn super::engine_state::EngineSteps>>,
     document_provider: Option<Arc<dyn ProcessDocumentProvider>>,
+    state_migration: Option<Arc<dyn super::engine_state::EngineStateMigration>>,
     /// The host's retry policies for engine step kinds, over the engine's.
     engine_step_retries:
         BTreeMap<super::engine_state::EngineStepKind, lash_sansio::ExecutionPolicy>,
@@ -419,6 +420,7 @@ impl ProcessEngineRegistration {
             admission,
             engine_steps: None,
             document_provider: None,
+            state_migration: None,
             engine_step_retries: BTreeMap::new(),
         })
     }
@@ -431,6 +433,7 @@ impl ProcessEngineRegistration {
             admission,
             engine_steps: None,
             document_provider: None,
+            state_migration: None,
             engine_step_retries: BTreeMap::new(),
         }
     }
@@ -448,6 +451,18 @@ impl ProcessEngineRegistration {
     #[must_use]
     pub fn with_document_provider(mut self, provider: Arc<dyn ProcessDocumentProvider>) -> Self {
         self.document_provider = Some(provider);
+        self
+    }
+
+    /// Declare how this engine carries the state an earlier build wrote
+    /// into its own format: a node serving it also claims a process left
+    /// in a format the migration carries (ADR 0106 §1).
+    #[must_use]
+    pub fn with_state_migration(
+        mut self,
+        migration: Arc<dyn super::engine_state::EngineStateMigration>,
+    ) -> Self {
+        self.state_migration = Some(migration);
         self
     }
 
@@ -471,6 +486,7 @@ pub struct ProcessEngineRegistry {
     admissions: Arc<BTreeMap<String, ProcessEngineAdmission>>,
     engine_steps: Arc<BTreeMap<String, Arc<dyn super::engine_state::EngineSteps>>>,
     document_providers: Arc<BTreeMap<String, Arc<dyn ProcessDocumentProvider>>>,
+    state_migrations: Arc<BTreeMap<String, Arc<dyn super::engine_state::EngineStateMigration>>>,
     artifact_ports: Option<Arc<super::ArtifactReferrerPorts>>,
 }
 
@@ -481,6 +497,8 @@ pub struct WeakProcessEngineRegistry {
     admissions: std::sync::Weak<BTreeMap<String, ProcessEngineAdmission>>,
     engine_steps: std::sync::Weak<BTreeMap<String, Arc<dyn super::engine_state::EngineSteps>>>,
     document_providers: std::sync::Weak<BTreeMap<String, Arc<dyn ProcessDocumentProvider>>>,
+    state_migrations:
+        std::sync::Weak<BTreeMap<String, Arc<dyn super::engine_state::EngineStateMigration>>>,
     artifact_ports: Option<Arc<super::ArtifactReferrerPorts>>,
 }
 
@@ -493,6 +511,7 @@ impl WeakProcessEngineRegistry {
             admissions: self.admissions.upgrade()?,
             engine_steps: self.engine_steps.upgrade()?,
             document_providers: self.document_providers.upgrade()?,
+            state_migrations: self.state_migrations.upgrade()?,
             artifact_ports: self.artifact_ports.clone(),
         })
     }
@@ -543,6 +562,7 @@ impl ProcessEngineRegistry {
             admissions: Arc::downgrade(&self.admissions),
             engine_steps: Arc::downgrade(&self.engine_steps),
             document_providers: Arc::downgrade(&self.document_providers),
+            state_migrations: Arc::downgrade(&self.state_migrations),
             artifact_ports: self.artifact_ports.clone(),
         }
     }
@@ -562,11 +582,13 @@ impl ProcessEngineRegistry {
         let mut admissions = (*self.admissions).clone();
         let mut engine_steps = (*self.engine_steps).clone();
         let mut document_providers = (*self.document_providers).clone();
+        let mut state_migrations = (*self.state_migrations).clone();
         let ProcessEngineRegistration {
             engine,
             admission,
             engine_steps: steps,
             document_provider,
+            state_migration,
             engine_step_retries: retries,
         } = registration;
         match steps {
@@ -583,6 +605,10 @@ impl ProcessEngineRegistry {
             Some(provider) => document_providers.insert(engine.kind().to_string(), provider),
             None => document_providers.remove(engine.kind()),
         };
+        match state_migration {
+            Some(migration) => state_migrations.insert(engine.kind().to_string(), migration),
+            None => state_migrations.remove(engine.kind()),
+        };
         engines.insert(engine.kind().to_string(), engine);
         admissions.insert(admission.kind().to_string(), admission);
         Self {
@@ -590,6 +616,7 @@ impl ProcessEngineRegistry {
             admissions: Arc::new(admissions),
             engine_steps: Arc::new(engine_steps),
             document_providers: Arc::new(document_providers),
+            state_migrations: Arc::new(state_migrations),
             artifact_ports: self.artifact_ports,
         }
     }
@@ -668,6 +695,16 @@ impl ProcessEngineRegistry {
             )));
         }
         Ok(self.with_registration(registration))
+    }
+
+    /// Every registered engine's carrying of an earlier build's state, by
+    /// engine kind.
+    pub fn state_migrations(
+        &self,
+    ) -> impl Iterator<Item = (&str, &Arc<dyn super::engine_state::EngineStateMigration>)> {
+        self.state_migrations
+            .iter()
+            .map(|(kind, migration)| (kind.as_str(), migration))
     }
 
     /// Every registered engine, by kind.

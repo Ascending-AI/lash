@@ -177,6 +177,28 @@ impl EffectLedger {
         Self::default()
     }
 
+    /// This ledger with each wait identified by `identify`: what a
+    /// migration of the run's document makes of it, the waits standing as
+    /// they stood.
+    ///
+    /// # Errors
+    ///
+    /// `identify`'s, for the first wait it refuses.
+    pub fn identified<E>(
+        &self,
+        mut identify: impl FnMut(&EffectIdentity) -> Result<EffectIdentity, E>,
+    ) -> Result<Self, E> {
+        let mut pending = BTreeMap::new();
+        for (identity, entry) in &self.pending {
+            pending.insert(identify(identity)?, entry.clone());
+        }
+        Ok(Self {
+            pending,
+            released: self.released.clone(),
+            next_park: self.next_park,
+        })
+    }
+
     /// The waits the state stands on, in identity order.
     pub fn pending(&self) -> impl Iterator<Item = (&EffectIdentity, &PendingEffect)> {
         self.pending.iter()

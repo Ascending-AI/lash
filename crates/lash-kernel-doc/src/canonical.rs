@@ -19,9 +19,12 @@ pub struct EncodeError {
 }
 
 pub(crate) fn canonical_bytes<T: Serialize>(value: &T) -> Result<Vec<u8>, EncodeError> {
-    let value = serde_json::to_value(value).map_err(|error| EncodeError {
+    #[cfg_attr(not(feature = "synthetic-next"), expect(unused_mut))]
+    let mut value = serde_json::to_value(value).map_err(|error| EncodeError {
         message: error.to_string(),
     })?;
+    #[cfg(feature = "synthetic-next")]
+    crate::version::synthetic::spell(&mut value);
     let mut out = String::new();
     write_value(&value, &mut out);
     Ok(out.into_bytes())

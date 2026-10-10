@@ -230,13 +230,13 @@ impl DurableFormat {
             DurableFormat::WaitRow => UpgradePolicy::Drain,
             DurableFormat::OutcomeMaterial => UpgradePolicy::Drain,
             DurableFormat::RuntimeCommitReceipt => UpgradePolicy::Migrate,
-            DurableFormat::KernelDocument => UpgradePolicy::Coexist,
-            DurableFormat::KernelParkedState => UpgradePolicy::Coexist,
+            DurableFormat::KernelDocument => UpgradePolicy::Migrate,
+            DurableFormat::KernelParkedState => UpgradePolicy::Migrate,
             DurableFormat::KernelSavedFunction => UpgradePolicy::Migrate,
             DurableFormat::RlmSnapshotEnvelope => UpgradePolicy::Migrate,
             DurableFormat::RlmDriverState => UpgradePolicy::Migrate,
             DurableFormat::Engine(format) => format.upgrade_policy,
-            DurableFormat::KernelVersion => UpgradePolicy::Coexist,
+            DurableFormat::KernelVersion => UpgradePolicy::Migrate,
         }
     }
 }
@@ -516,6 +516,32 @@ pub fn actor_state_surfaces() -> Vec<lash_core::durable_port::FormatSurface> {
             FormatSurface::new("kernel-saved-function", KERNEL_SAVED_FUNCTION_VERSION),
             FormatSurface::new("rlm-snapshot", RLM_SNAPSHOT_VERSION),
         ]
+    }
+    #[cfg(not(feature = "rlm"))]
+    {
+        Vec::new()
+    }
+}
+
+/// [`actor_state_surfaces`] as the previous build declared them, for the
+/// formats this build carries forward from it (ADR 0106 §1): with `rlm`,
+/// when this build also interprets the kernel version before its own, the
+/// parked kernel run of that version. A process the previous build parked
+/// is stamped with the set these make, and a node of this build claims it
+/// to migrate it. Empty when this build interprets one kernel version.
+pub fn previous_actor_state_surfaces() -> Vec<lash_core::durable_port::FormatSurface> {
+    #[cfg(feature = "rlm")]
+    {
+        use lash_core::durable_port::FormatSurface;
+        lash_vm_runtime::previous_kernel_version()
+            .map(|previous| {
+                vec![
+                    FormatSurface::new("kernel-parked-state", previous),
+                    FormatSurface::new("kernel-saved-function", KERNEL_SAVED_FUNCTION_VERSION),
+                    FormatSurface::new("rlm-snapshot", RLM_SNAPSHOT_VERSION),
+                ]
+            })
+            .unwrap_or_default()
     }
     #[cfg(not(feature = "rlm"))]
     {

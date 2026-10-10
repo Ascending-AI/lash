@@ -48,27 +48,42 @@ fn tool_state() -> [FormatSurface; 3] {
 pub struct BuildFormats {
     session: FormatSet,
     processes: BTreeMap<String, FormatSet>,
+    /// The state format of each engine this build has.
+    written: BTreeMap<String, EngineStateFormat>,
+    /// The sets of earlier builds this build's engines carry forward, by
+    /// the engine state format each holds.
+    carried: BTreeMap<EngineStateFormat, FormatSet>,
+    /// The session sets of those earlier builds: a session one of them
+    /// left is claimed, and what it holds in that build's formats is
+    /// carried forward where it is restored.
+    carried_sessions: Vec<FormatSet>,
+}
+
+/// The set a session's state is written in by a build whose actors also
+/// hold `extra`.
+fn session_set(extra: &[FormatSurface]) -> FormatSet {
+    FormatSet::of(
+        ActorKind::Session,
+        tool_state()
+            .into_iter()
+            .chain([
+                FormatSurface::new(
+                    TURN_CHECKPOINT_FORMAT_ID,
+                    lash_sansio::TURN_CHECKPOINT_SCHEMA_VERSION,
+                ),
+                FormatSurface::new(
+                    SESSION_STATE_FORMAT_ID,
+                    lash_core_store::store::CURRENT_SESSION_STATE_VERSION,
+                ),
+            ])
+            .chain(extra.iter().cloned()),
+    )
 }
 
 impl BuildFormats {
     /// The sets of a build with `engines`, whose actors also hold `extra`.
     pub(crate) fn new(engines: &[EngineStateFormat], extra: &[FormatSurface]) -> Self {
-        let session = FormatSet::of(
-            ActorKind::Session,
-            tool_state()
-                .into_iter()
-                .chain([
-                    FormatSurface::new(
-                        TURN_CHECKPOINT_FORMAT_ID,
-                        lash_sansio::TURN_CHECKPOINT_SCHEMA_VERSION,
-                    ),
-                    FormatSurface::new(
-                        SESSION_STATE_FORMAT_ID,
-                        lash_core_store::store::CURRENT_SESSION_STATE_VERSION,
-                    ),
-                ])
-                .chain(extra.iter().cloned()),
-        );
+        let session = session_set(extra);
         let processes = engines
             .iter()
             .map(|format| {
@@ -82,7 +97,52 @@ impl BuildFormats {
                 (format.kind.clone(), set)
             })
             .collect();
-        Self { session, processes }
+        Self {
+            session,
+            processes,
+            written: engines
+                .iter()
+                .map(|format| (format.kind.clone(), format.clone()))
+                .collect(),
+            carried: BTreeMap::new(),
+            carried_sessions: Vec::new(),
+        }
+    }
+
+    /// These sets, and the set of a process whose engine state is in
+    /// `format`, an earlier build's: `format` with the tool state and
+    /// `extra`, the other formats that build's actors held.
+    pub(crate) fn carrying(mut self, format: &EngineStateFormat, extra: &[FormatSurface]) -> Self {
+        let set = FormatSet::of(
+            ActorKind::Process,
+            tool_state()
+                .into_iter()
+                .chain([FormatSurface::engine(&format.kind, format.version)])
+                .chain(extra.iter().cloned()),
+        );
+        self.carried.insert(format.clone(), set);
+        let session = session_set(extra);
+        if session != self.session && !self.carried_sessions.contains(&session) {
+            self.carried_sessions.push(session);
+        }
+        self
+    }
+
+    /// These sets, still carrying what `earlier` carried.
+    pub(crate) fn keeping(mut self, earlier: &Self) -> Self {
+        self.carried = earlier.carried.clone();
+        self.carried_sessions = earlier.carried_sessions.clone();
+        self
+    }
+
+    /// The set of a process whose engine state is in `format`: this
+    /// build's own, or one it carries forward.
+    #[must_use]
+    pub fn process_in(&self, format: &EngineStateFormat) -> Option<&FormatSet> {
+        if self.written.get(&format.kind) == Some(format) {
+            return self.processes.get(&format.kind);
+        }
+        self.carried.get(format)
     }
 
     /// The set a session's state is written in.
@@ -98,11 +158,20 @@ impl BuildFormats {
         self.processes.get(kind)
     }
 
+    /// The session sets of the earlier builds this build carries forward.
+    #[must_use]
+    pub fn carried_sessions(&self) -> &[FormatSet] {
+        &self.carried_sessions
+    }
+
     /// The sets a node of this build that serves sessions decodes: the
-    /// session set, and the unstarted one a producer's wake creates.
+    /// session set, the unstarted one a producer's wake creates, and the
+    /// session sets it carries forward.
     #[must_use]
     pub fn session_decodes(&self) -> Vec<FormatSet> {
-        vec![self.session.clone(), FormatSet::unstarted_session()]
+        let mut decodes = vec![self.session.clone(), FormatSet::unstarted_session()];
+        decodes.extend(self.carried_sessions.iter().cloned());
+        decodes
     }
 
     /// Every set a node of this build decodes: the session sets, each
@@ -115,6 +184,7 @@ impl BuildFormats {
             decodes.push(FormatSet::unstarted_process(kind));
             decodes.push(set.clone());
         }
+        decodes.extend(self.carried.values().cloned());
         decodes
     }
 }

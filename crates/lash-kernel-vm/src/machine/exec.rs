@@ -569,7 +569,7 @@ impl KernelMachine {
     /// Tests the innermost loop's continuation and starts its next
     /// iteration or ends it (`K-ITER-002`, `K-ITER-003`, `K-FORM-013`).
     fn next_iteration(&mut self, task: TaskId, host: &mut dyn Host, exe: &Executable) -> Eval<()> {
-        self.charge(1)?;
+        self.charge(self.costs.loop_test)?;
         // Borrowed by field, so that the loop's position can be read
         // against the heap.
         let Some(frame) = self

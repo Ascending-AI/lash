@@ -11,11 +11,12 @@ use std::collections::BTreeSet;
 use crate::ast::{
     Action, Atom, Block, Callee, Closure, Expr, Literal, Member, Node, Place, Rhs, Site, Stmt, Unit,
 };
-use crate::document::{Annotations, Document, KERNEL_VERSION, MAX_NESTING_DEPTH};
+use crate::document::{Annotations, Document, MAX_NESTING_DEPTH};
 use crate::function::{Formula, FunctionDefinition, Implementation, Operand};
 use crate::name::{EffectName, FunctionId, FunctionName, Name};
 use crate::native::FunctionCatalog;
 use crate::types::{Signature, Type};
+use crate::version::KernelVersion;
 
 /// Why a document or a definition is refused, and the node at fault.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -83,6 +84,16 @@ pub enum InvalidReason {
     CallNotNative {
         function: FunctionId,
         name: FunctionName,
+    },
+    #[error(
+        "library function `{name}` ({function}) is written for kernel version {written_for}; \
+         what lists it runs under version {required}"
+    )]
+    FunctionOfAnotherVersion {
+        function: FunctionId,
+        name: FunctionName,
+        written_for: u32,
+        required: u32,
     },
     #[error("library function {function} is called but not listed in the manifest")]
     FunctionNotListed { function: FunctionId },
@@ -161,20 +172,45 @@ fn invalid(site: Option<&Site>, reason: InvalidReason) -> Invalid {
     }
 }
 
+/// A document or a body runs under one kernel version, so every library
+/// function it lists is written for that version (`K-VER-003`). A function
+/// the catalog does not hold is refused where it is called.
+fn check_written_for(
+    catalog: &dyn FunctionCatalog,
+    function: &FunctionId,
+    version: KernelVersion,
+) -> Result<(), Invalid> {
+    match catalog.definition(function) {
+        Some(definition) if definition.kernel != version.number() => Err(invalid(
+            None,
+            InvalidReason::FunctionOfAnotherVersion {
+                function: *function,
+                name: definition.name.clone(),
+                written_for: definition.kernel,
+                required: version.number(),
+            },
+        )),
+        _ => Ok(()),
+    }
+}
+
 /// Validates a document's structure, checking the statement rule against
 /// the definitions in `catalog`.
 pub fn validate_document(
     document: &Document,
     catalog: &dyn FunctionCatalog,
 ) -> Result<(), Invalid> {
-    if document.manifest.kernel != KERNEL_VERSION {
+    let Some(version) = KernelVersion::of(document.manifest.kernel) else {
         return Err(invalid(
             None,
             InvalidReason::KernelVersion {
                 found: document.manifest.kernel,
-                supported: KERNEL_VERSION,
+                supported: KernelVersion::NEWEST.number(),
             },
         ));
+    };
+    for function in document.manifest.functions.keys() {
+        check_written_for(catalog, function, version)?;
     }
     for signature in document.manifest.effects.values() {
         check_signature(signature)?;
@@ -224,14 +260,19 @@ pub fn validate_definition(
     definition: &FunctionDefinition,
     catalog: &dyn FunctionCatalog,
 ) -> Result<(), Invalid> {
-    if definition.kernel != KERNEL_VERSION {
+    let Some(version) = KernelVersion::of(definition.kernel) else {
         return Err(invalid(
             None,
             InvalidReason::KernelVersion {
                 found: definition.kernel,
-                supported: KERNEL_VERSION,
+                supported: KernelVersion::NEWEST.number(),
             },
         ));
+    };
+    if let Some(body) = definition.body() {
+        for function in body.functions.keys() {
+            check_written_for(catalog, function, version)?;
+        }
     }
     check_signature(&definition.signature)?;
     check_formula(&definition.charge, &definition.signature, true)?;

@@ -218,6 +218,18 @@ pub enum CodeExecutionOutcome {
     Terminated,
 }
 
+/// A cell's stored snapshot carried to this build's formats
+/// ([`CodeExecutorPlugin::carried_cell_snapshot`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CarriedCellSnapshot {
+    /// The snapshot, as the executor encodes one.
+    pub snapshot: String,
+    /// The executable the carried continuation runs on.
+    pub executable_identity: String,
+    /// The format version the carried snapshot is in.
+    pub format_version: u32,
+}
+
 #[async_trait::async_trait]
 pub trait CodeExecutorPlugin: Send + Sync {
     async fn execute_code(
@@ -276,6 +288,25 @@ pub trait CodeExecutorPlugin: Send + Sync {
         _snapshot: &str,
     ) -> Result<Result<(), String>, crate::RuntimeError> {
         Ok(Ok(()))
+    }
+
+    /// `snapshot`, a cell's stored snapshot written by the build before
+    /// this one, carried to this build's formats, or `None` when it is in
+    /// them already. A turn restored on the cell asks once every live node
+    /// that serves sessions decodes this build's session set, and commits
+    /// the answer before the cell runs again. The inner `Err` is the
+    /// account of a snapshot the carry refuses. An executor whose cells
+    /// snapshot nothing keeps the default.
+    ///
+    /// # Errors
+    ///
+    /// [`crate::RuntimeError`] when the carry itself could not run: nothing
+    /// is known of the snapshot, and the restore is tried again.
+    async fn carried_cell_snapshot(
+        &self,
+        _snapshot: &str,
+    ) -> Result<Result<Option<CarriedCellSnapshot>, String>, crate::RuntimeError> {
+        Ok(Ok(None))
     }
 
     /// The executable generation this executor runs cells under (FIG-3571):

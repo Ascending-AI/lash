@@ -29,130 +29,162 @@ impl<M: Machine> MachineRunner<M> {
 
 impl<M: Machine> DocumentRunner for MachineRunner<M> {
     fn observe(&mut self, case: &Case) -> Result<Observations, HarnessError> {
-        let refused = || Observations {
-            prints: Vec::new(),
-            end: ExpectedEnd::Refused,
-            trace: Vec::new(),
-            charged: 0,
-            parks: 0,
-        };
-        let document = match parse_document(&case.document) {
-            Ok(document) => document,
-            Err(_) => return Ok(refused()),
-        };
-        let env = &case.environment;
-        let mut admission = lash_kernel_check::Environment::new(self.registry.as_ref());
-        admission.effects = env
-            .effects
-            .clone()
-            .unwrap_or_else(|| document.manifest.effects.clone());
-        if lash_kernel_check::admit(&document, &admission).is_err() {
-            return Ok(refused());
-        }
-        let program = Program {
-            document: Arc::new(document),
-            registry: self.registry.clone(),
-        };
-        let bounds = env.bounds.into();
-        let start = Start {
-            target: env.entry.clone().map_or(Target::Main, Target::Entry),
-            args: env.args.clone(),
-            bindings: Bindings::default(),
-        };
-        let mut machine = match M::start(program.clone(), bounds, start) {
-            Ok(machine) => machine,
-            Err(StartError::NotAdmitted(_)) => return Ok(refused()),
-            Err(error) => return Err(HarnessError(error.to_string())),
-        };
-        let mut host = ScriptHost {
-            answers: env.host.clone().into(),
-            prints: Vec::new(),
-            fault: None,
-        };
-        let mut batches = env.deliveries.iter();
-        let mut waits = Vec::new();
-        let mut trace = Vec::new();
-        let mut parks = 0;
-        if env.slice == 0 {
-            return Err(HarnessError("a corpus slice must be positive".into()));
-        }
-        for _ in 0..env.max_steps {
-            let step = machine
-                .run(&mut host, env.slice)
-                .map_err(|error| HarnessError(error.to_string()))?;
-            if let Some(fault) = host.fault.take() {
-                return Err(HarnessError(fault));
+        let resume = case.environment.resume;
+        run_case::<M>(&self.registry, case, &mut |at: Park<'_, M>| {
+            if !resume {
+                return Ok(at.machine);
             }
-            match step {
-                Step::Slice => {}
-                Step::Ended(end) => {
-                    if batches.next().is_some() || !host.answers.is_empty() {
-                        return Err(HarnessError(
-                            "run ended before its script was consumed".into(),
-                        ));
-                    }
-                    return Ok(Observations {
-                        prints: host.prints,
-                        end: ExpectedEnd::from_end(end),
-                        trace,
-                        charged: machine.meters().charged,
-                        parks,
-                    });
-                }
-                Step::Parked(park) => {
-                    parks += 1;
-                    for request in park.requests {
-                        match request {
-                            Request::Effect(effect) => {
-                                waits.push(effect.wait);
-                                trace.push(Trace::Effect {
-                                    identity: Some(effect.identity),
-                                    effect: effect.effect.to_string(),
-                                    args: effect.args,
-                                    result: effect.result,
-                                });
-                            }
-                            Request::Sleep(sleep) => {
-                                waits.push(sleep.wait);
-                                trace.push(Trace::Sleep {
-                                    identity: Some(sleep.identity),
-                                    nanoseconds: sleep.duration.as_nanos(),
-                                });
-                            }
-                        }
-                    }
-                    if env.resume {
-                        let parked = machine.export().map_err(|e| HarnessError(e.to_string()))?;
-                        machine = M::import(program.clone(), bounds, parked)
-                            .map_err(|e| HarnessError(e.to_string()))?;
-                    }
-                    let batch = batches.next().ok_or_else(|| {
-                        HarnessError(format!("park {parks} has no scripted delivery batch"))
-                    })?;
-                    for delivery in batch {
-                        let wait = waits.get(delivery.request).ok_or_else(|| {
-                            HarnessError(format!(
-                                "request {} has not been issued",
-                                delivery.request
-                            ))
-                        })?;
-                        let delivered = machine
-                            .deliver(*wait, delivery.outcome.clone().into())
-                            .map_err(|e| HarnessError(e.to_string()))?;
-                        if (delivered == Delivered::Dropped) != delivery.dropped {
-                            return Err(HarnessError(format!(
-                                "unexpected delivery result {delivered:?}"
-                            )));
-                        }
-                    }
-                }
-            }
-        }
-        Err(HarnessError(format!(
-            "run passed the harness step bound {}",
-            env.max_steps
-        )))
+            let mut machine = at.machine;
+            let parked = machine.export().map_err(|e| HarnessError(e.to_string()))?;
+            M::import(at.program.clone(), at.bounds, parked)
+                .map_err(|e| HarnessError(e.to_string()))
+        })
     }
+}
+
+/// A run at one of its parks, after the park's requests are recorded and
+/// before its scripted outcomes are delivered.
+pub(crate) struct Park<'a, M> {
+    /// Which park of the run this is, from 1.
+    pub(crate) number: usize,
+    /// How many requests the run has issued so far.
+    pub(crate) issued: usize,
+    pub(crate) machine: M,
+    /// The program the run goes on under; a harness that carries the run
+    /// to another document replaces it.
+    pub(crate) program: &'a mut Program,
+    pub(crate) bounds: lash_kernel_vm::Bounds,
+}
+
+/// Runs `case` under its script. `at_park` is handed the machine at every
+/// park and answers the machine the run goes on with.
+pub(crate) fn run_case<M: Machine>(
+    registry: &Arc<FunctionRegistry>,
+    case: &Case,
+    at_park: &mut dyn FnMut(Park<'_, M>) -> Result<M, HarnessError>,
+) -> Result<Observations, HarnessError> {
+    let refused = || Observations {
+        prints: Vec::new(),
+        end: ExpectedEnd::Refused,
+        trace: Vec::new(),
+        charged: 0,
+        parks: 0,
+    };
+    let document = match parse_document(&case.document) {
+        Ok(document) => document,
+        Err(_) => return Ok(refused()),
+    };
+    let env = &case.environment;
+    let mut admission = lash_kernel_check::Environment::new(registry.as_ref());
+    admission.effects = env
+        .effects
+        .clone()
+        .unwrap_or_else(|| document.manifest.effects.clone());
+    if lash_kernel_check::admit(&document, &admission).is_err() {
+        return Ok(refused());
+    }
+    let mut program = Program {
+        document: Arc::new(document),
+        registry: registry.clone(),
+    };
+    let bounds = env.bounds.into();
+    let start = Start {
+        target: env.entry.clone().map_or(Target::Main, Target::Entry),
+        args: env.args.clone(),
+        bindings: Bindings::default(),
+    };
+    let mut machine = match M::start(program.clone(), bounds, start) {
+        Ok(machine) => machine,
+        Err(StartError::NotAdmitted(_)) => return Ok(refused()),
+        Err(error) => return Err(HarnessError(error.to_string())),
+    };
+    let mut host = ScriptHost {
+        answers: env.host.clone().into(),
+        prints: Vec::new(),
+        fault: None,
+    };
+    let mut batches = env.deliveries.iter();
+    let mut waits = Vec::new();
+    let mut trace = Vec::new();
+    let mut parks = 0;
+    if env.slice == 0 {
+        return Err(HarnessError("a corpus slice must be positive".into()));
+    }
+    for _ in 0..env.max_steps {
+        let step = machine
+            .run(&mut host, env.slice)
+            .map_err(|error| HarnessError(error.to_string()))?;
+        if let Some(fault) = host.fault.take() {
+            return Err(HarnessError(fault));
+        }
+        match step {
+            Step::Slice => {}
+            Step::Ended(end) => {
+                if batches.next().is_some() || !host.answers.is_empty() {
+                    return Err(HarnessError(
+                        "run ended before its script was consumed".into(),
+                    ));
+                }
+                return Ok(Observations {
+                    prints: host.prints,
+                    end: ExpectedEnd::from_end(end),
+                    trace,
+                    charged: machine.meters().charged,
+                    parks,
+                });
+            }
+            Step::Parked(park) => {
+                parks += 1;
+                for request in park.requests {
+                    match request {
+                        Request::Effect(effect) => {
+                            waits.push(effect.wait);
+                            trace.push(Trace::Effect {
+                                identity: Some(effect.identity),
+                                effect: effect.effect.to_string(),
+                                args: effect.args,
+                                result: effect.result,
+                            });
+                        }
+                        Request::Sleep(sleep) => {
+                            waits.push(sleep.wait);
+                            trace.push(Trace::Sleep {
+                                identity: Some(sleep.identity),
+                                nanoseconds: sleep.duration.as_nanos(),
+                            });
+                        }
+                    }
+                }
+                machine = at_park(Park {
+                    number: parks,
+                    issued: trace.len(),
+                    machine,
+                    program: &mut program,
+                    bounds,
+                })?;
+                let batch = batches.next().ok_or_else(|| {
+                    HarnessError(format!("park {parks} has no scripted delivery batch"))
+                })?;
+                for delivery in batch {
+                    let wait = waits.get(delivery.request).ok_or_else(|| {
+                        HarnessError(format!("request {} has not been issued", delivery.request))
+                    })?;
+                    let delivered = machine
+                        .deliver(*wait, delivery.outcome.clone().into())
+                        .map_err(|e| HarnessError(e.to_string()))?;
+                    if (delivered == Delivered::Dropped) != delivery.dropped {
+                        return Err(HarnessError(format!(
+                            "unexpected delivery result {delivered:?}"
+                        )));
+                    }
+                }
+            }
+        }
+    }
+    Err(HarnessError(format!(
+        "run passed the harness step bound {}",
+        env.max_steps
+    )))
 }
 
 struct ScriptHost {

@@ -107,3 +107,113 @@ async fn bindings_recorded_in_another_dialect_are_refused() {
         "{error}"
     );
 }
+
+/// A saved function whose code is `return 1`, written for kernel version
+/// `kernel`.
+fn saved(name: &str, kernel: u32) -> serde_json::Value {
+    let mut document = lash_kernel_doc::Document::new(NumberPolicy::Float, Vec::new());
+    document.manifest.kernel = kernel;
+    document.functions.insert(
+        lash_kernel_doc::Name::new(name),
+        lash_kernel_doc::Function {
+            params: Vec::new(),
+            body: Vec::new(),
+        },
+    );
+    serde_json::to_value(lash_kernel_dialect::SavedFunction {
+        name: lash_kernel_doc::Name::new(name),
+        document,
+        captures: Default::default(),
+        written: None,
+    })
+    .expect("the saved function encodes")
+}
+
+/// Kernel spec §6: a saved function is carried to this build's kernel
+/// version when its session is seeded or restored, and one the migration
+/// refuses is not held. The session lists its name with the refusal, as it
+/// lists a binding that was not saved, and keeps the functions it carries.
+#[tokio::test]
+async fn a_saved_function_the_migration_refuses_is_listed_and_not_held() {
+    let none = BTreeSet::new();
+    let unknown = lash_kernel_doc::KERNEL_VERSION + 98;
+    let listed = |state: &RlmExecutionState| {
+        let why = state
+            .bindings
+            .not_carried()
+            .get(&lash_kernel_doc::Name::new("old"))
+            .cloned();
+        assert!(
+            matches!(
+                &why,
+                Some(lash_kernel_dialect::NotSaved::NotMigrated { from, problem })
+                    if *from == unknown && problem.contains("kernel version")
+            ),
+            "{why:?}"
+        );
+        let held: Vec<String> = state
+            .bindings
+            .functions()
+            .keys()
+            .map(ToString::to_string)
+            .collect();
+        assert_eq!(held, ["kept"]);
+    };
+
+    // Seeded: the session is created with both.
+    let mut seeded = RlmExecutionState::new("typescript", NumberPolicy::Float);
+    let functions = [
+        (
+            "kept".to_string(),
+            saved("kept", lash_kernel_doc::KERNEL_VERSION),
+        ),
+        ("old".to_string(), saved("old", unknown)),
+    ]
+    .into_iter()
+    .collect();
+    seeded
+        .seed_functions(&functions, &none)
+        .await
+        .expect("a refused function does not refuse the seed");
+    listed(&seeded);
+
+    // Restored: a stored state holds both.
+    let mut stored = RlmExecutionState::new("typescript", NumberPolicy::Float);
+    let both = [
+        (
+            "kept".to_string(),
+            saved("kept", lash_kernel_doc::KERNEL_VERSION),
+        ),
+        (
+            "old".to_string(),
+            saved("old", lash_kernel_doc::KERNEL_VERSION),
+        ),
+    ]
+    .into_iter()
+    .collect();
+    stored
+        .seed_functions(&both, &none)
+        .await
+        .expect("seed the stored session");
+    capture(&mut stored).await;
+    let mut saved_state = stored
+        .hydrated_execution_state(lash_core::FleetFormat::current())
+        .await
+        .expect("the saved session state");
+    let mut root: serde_json::Value =
+        serde_json::from_slice(&saved_state.root).expect("the stored root");
+    root["functions"]["old"]["function"]["document"]["manifest"]["kernel"] = unknown.into();
+    saved_state.root = serde_json::to_vec(&root)
+        .expect("the stored root encodes")
+        .into();
+    let mut restored = RlmExecutionState::new("typescript", NumberPolicy::Float);
+    restored
+        .restore_execution_state(&saved_state, lash_core::FleetFormat::current())
+        .await
+        .expect("a refused function does not refuse the restore");
+    listed(&restored);
+    assert!(
+        restored.execution_state_dirty(),
+        "what the restore carried and dropped is stored by the next capture"
+    );
+}

@@ -80,9 +80,10 @@ pub use process::registry_transitions;
 pub use process::{
     AbandonEvidence, AbandonWriter, AdmittedProcessIdentity, Ancestry, ArgsMismatch, ArgsMode,
     CanonicalProcessEventAppend, DeclaredProcessIdentity, DefinitionAcquisition, EngineAction,
-    EngineEvent, EngineState, EngineStateFormat, EngineStepKind, EngineStepRefusal, EngineStepRun,
-    EngineSteps, HandleId, InspectedProcessDefinition, InvalidProcessDefinitionId, InvalidStartKey,
-    KeyName, Lifetime, LifetimeDecision, LifetimePolicy, MAX_NON_TERMINAL_PROCESS_PAGE_SIZE,
+    EngineEvent, EngineState, EngineStateFormat, EngineStateMigration, EngineStateRefusal,
+    EngineStepKind, EngineStepRefusal, EngineStepRun, EngineSteps, HandleId,
+    InspectedProcessDefinition, InvalidProcessDefinitionId, InvalidStartKey, KeyName, Lifetime,
+    LifetimeDecision, LifetimePolicy, MAX_NON_TERMINAL_PROCESS_PAGE_SIZE,
     MAX_PROCESS_ROSTER_PAGE_SIZE, Material, NamesMaterial, NonTerminalProcessPage, ObservedProcess,
     ObservedProcessChange, ObservedProcessEvent, ObservedProcessEventLite,
     ObservedProcessEventPage, ObservedProcessEventReadOutcome, ObservedWorkItem,

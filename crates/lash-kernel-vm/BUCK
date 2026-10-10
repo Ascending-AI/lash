@@ -21,7 +21,9 @@ lash_rust_library(
     build_script = None,
     crate_features = [],
     crate_name = "lash_kernel_vm",
-    declared_features = [],
+    declared_features = [
+        "synthetic-next",
+    ],
     exec_properties = sized_exec_properties("lash-kernel-vm", "lash_kernel_vm"),
     extra_compile_data = [],
     manifest_dir = "crates/lash-kernel-vm",
@@ -42,7 +44,9 @@ lash_rust_unit_test(
     crate_features = [],
     crate_name = "lash_kernel_vm",
     crate_root = "src/lib.rs",
-    declared_features = [],
+    declared_features = [
+        "synthetic-next",
+    ],
     exec_properties = sized_exec_properties("lash-kernel-vm", "lash_kernel_vm", "//crates/lash-kernel-vm:lash-kernel-vm__unit_test"),
     extra_compile_data = [],
     manifest_dir = "crates/lash-kernel-vm",
@@ -74,4 +78,34 @@ export_file(
     name = "Cargo.toml",
     src = "Cargo.toml",
     visibility = ["PUBLIC"],
+)
+
+# Feature-lane variants. One target per distinct `(package, resolved features,
+# Cargo target kind)` unit of scripts/feature-coverage.toml; see
+# tools/buck2/feature_variants.py.
+load(
+    "//tools/buck2:lash_rust.bzl",
+    "lash_rust_feature_library",
+)
+
+lash_rust_feature_library(
+    name = "lash-kernel-vm__fv_bfbe4314",
+    build_script = None,
+    crate_features = [
+        "synthetic-next",
+    ],
+    crate_name = "lash_kernel_vm",
+    declared_features = [
+        "synthetic-next",
+    ],
+    exec_properties = sized_exec_properties("lash-kernel-vm", "lash_kernel_vm"),
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-kernel-vm",
+    package_name = "lash-kernel-vm",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_e945df34", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_9e23a7d8", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_3e40da55", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_626b1cb4", "//crates/lash-core-store:lash-core-store": "//crates/lash-core-store:lash-core-store__fv_25986e5f", "//crates/lash-durable:lash-durable": "//crates/lash-durable:lash-durable__fv_55fef509", "//crates/lash-http-transport:lash-http-transport": "//crates/lash-http-transport:lash-http-transport__fv_1d451218", "//crates/lash-kernel-dialect:lash-kernel-dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_d8853c99", "//crates/lash-kernel-doc:lash-kernel-doc": "//crates/lash-kernel-doc:lash-kernel-doc__fv_45814574", "//crates/lash-kernel-state:lash-kernel-state": "//crates/lash-kernel-state:lash-kernel-state__fv_6d3bfb5d", "//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_4a14d73c", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_bfde2e1a", "//crates/lash-vm-broker:lash-vm-broker": "//crates/lash-vm-broker:lash-vm-broker__fv_58911b45", "//crates/lash-vm-client:lash-vm-client": "//crates/lash-vm-client:lash-vm-client__fv_4862016d", "//crates/lash-vm-protocol:lash-vm-protocol": "//crates/lash-vm-protocol:lash-vm-protocol__fv_db4ceb8e"},
+    version = "0.0.0-dev",
 )

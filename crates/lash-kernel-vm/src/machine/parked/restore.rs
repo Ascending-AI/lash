@@ -5,8 +5,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::Arc;
 
 use lash_kernel_doc::{
-    FunctionId, Identity, KERNEL_VERSION, Object, ObjectId, Site, TaskId, Unit, Value,
-    validate_document,
+    FunctionId, Identity, Object, ObjectId, Site, TaskId, Unit, Value, validate_document,
 };
 use lash_kernel_state as state;
 use lash_kernel_state::{ParkedCall, ParkedRun};
@@ -467,12 +466,16 @@ pub(in crate::machine) fn import(
         tasks: parked_tasks,
         objects,
     } = parked;
-    if run.kernel != KERNEL_VERSION {
+    // A run resumes under the version that parked it, on a document
+    // written for that version (`K-VER-003`). Carrying it to another is a
+    // migration, never an import.
+    if run.kernel != program.document.manifest.kernel {
         return Err(ImportError::KernelVersion {
             parked: run.kernel,
-            supported: KERNEL_VERSION,
+            supported: program.document.manifest.kernel,
         });
     }
+    let costs = crate::costs::Costs::of_document(&program.document);
     let manifest = &program.document.manifest.functions;
     if let Some(function) = manifest
         .keys()
@@ -799,6 +802,7 @@ pub(in crate::machine) fn import(
         fresh: Vec::new(),
         charging: true,
         charged: run.charged,
+        costs,
         live_tasks: u32::try_from(live_tasks).unwrap_or(u32::MAX),
         inline_depth: 0,
         inline_result: None,

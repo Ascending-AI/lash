@@ -16,6 +16,7 @@ use lash_core::{
     EngineAction, EngineEvent, EngineState, EngineStateFormat, EngineStepKind, ProcessInfraError,
     SettledOutput, StepName, StepRequest,
 };
+use lash_kernel_doc::KernelVersion;
 use lash_vm_client::wire::OutcomeWire;
 
 use super::state::{
@@ -24,11 +25,12 @@ use super::state::{
 };
 use super::{KernelProcessFailureCode, failure};
 
-/// The engine's state format.
-pub(crate) fn state_format() -> EngineStateFormat {
+/// The engine's state format for a run under kernel version `kernel`: the
+/// state holds the run as that version parks it.
+pub(crate) fn state_format(kernel: KernelVersion) -> EngineStateFormat {
     EngineStateFormat {
         kind: lash_sansio::LASH_VM_ENGINE_KIND.to_owned(),
-        version: crate::KERNEL_PARKED_STATE_VERSION,
+        version: kernel.number(),
     }
 }
 
@@ -39,26 +41,55 @@ fn infra(message: impl Into<String>) -> ProcessInfraError {
     })
 }
 
-fn encode(state: &KernelEngineState) -> Result<EngineState, ProcessInfraError> {
+/// `state` in the format of the kernel version its run is parked under,
+/// or `written` when it holds no run yet.
+pub(crate) fn encode(
+    state: &KernelEngineState,
+    written: KernelVersion,
+) -> Result<EngineState, ProcessInfraError> {
+    let kernel = match &state.parked {
+        Some(parked) => KernelVersion::of(parked.kernel()).ok_or_else(|| {
+            infra(format!(
+                "the run is parked under kernel version {}, which this build does not interpret",
+                parked.kernel()
+            ))
+        })?,
+        None => written,
+    };
     Ok(EngineState {
-        format: state_format(),
+        format: state_format(kernel),
         bytes: serde_json::to_vec(state).map_err(|error| infra(error.to_string()))?,
     })
 }
 
-pub(crate) fn decode(state: &EngineState) -> Result<KernelEngineState, ProcessInfraError> {
-    if state.format != state_format() {
-        return Err(infra(format!(
-            "state format {:?} is not this engine's {:?}",
-            state.format,
-            state_format()
-        )));
+/// The state and the kernel version its format states. An engine reads
+/// the version it writes and every earlier one its build interprets.
+pub(crate) fn decode(
+    writes: KernelVersion,
+    state: &EngineState,
+) -> Result<(KernelEngineState, KernelVersion), ProcessInfraError> {
+    let written = KernelVersion::of(state.format.version)
+        .filter(|written| state.format == state_format(*written) && *written <= writes)
+        .ok_or_else(|| {
+            infra(format!(
+                "state format {:?} is not one this engine reads; it writes {:?}",
+                state.format,
+                state_format(writes)
+            ))
+        })?;
+    let decoded: KernelEngineState =
+        serde_json::from_slice(&state.bytes).map_err(|error| infra(error.to_string()))?;
+    if let Some(parked) = &decoded.parked {
+        super::migrate::check_sealed_kernel(parked)
+            .map_err(|refusal| infra(refusal.to_string()))?;
     }
-    serde_json::from_slice(&state.bytes).map_err(|error| infra(error.to_string()))
+    Ok((decoded, written))
 }
 
-/// The engine's transition for `event` over `state`.
+/// The transition for `event` over `state`, of an engine that writes
+/// kernel version `writes`.
 pub(crate) fn advance(
+    writes: KernelVersion,
     state: EngineState,
     event: EngineEvent,
 ) -> Result<(EngineState, EngineAction), ProcessInfraError> {
@@ -76,11 +107,11 @@ pub(crate) fn advance(
             phase: Phase::Ended,
         };
         let action = run(&mut state, Vec::new())?;
-        return Ok((encode(&state)?, action));
+        return Ok((encode(&state, writes)?, action));
     }
-    let mut state = decode(&state)?;
+    let (mut state, written) = decode(writes, &state)?;
     let action = transition(&mut state, event)?;
-    Ok((encode(&state)?, action))
+    Ok((encode(&state, written)?, action))
 }
 
 fn transition(

@@ -77,3 +77,31 @@ export_file(
     src = "Cargo.toml",
     visibility = ["PUBLIC"],
 )
+
+# Feature-lane variants. One target per distinct `(package, resolved features,
+# Cargo target kind)` unit of scripts/feature-coverage.toml; see
+# tools/buck2/feature_variants.py.
+load(
+    "//tools/buck2:lash_rust.bzl",
+    "lash_rust_feature_library",
+)
+
+lash_rust_feature_library(
+    name = "kernel-embedder__fv_b9312f6e",
+    build_script = None,
+    crate_features = [],
+    crate_name = "kernel_embedder",
+    declared_features = [],
+    exec_properties = sized_exec_properties("kernel-embedder", "kernel_embedder"),
+    extra_compile_data = [
+        "//examples/kernel-embedder:package_files",
+    ],
+    manifest_dir = "examples/kernel-embedder",
+    package_name = "kernel-embedder",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-kernel-check:lash-kernel-check": "//crates/lash-kernel-check:lash-kernel-check__fv_47bd46f0", "//crates/lash-kernel-conformance:lash-kernel-conformance": "//crates/lash-kernel-conformance:lash-kernel-conformance__fv_658c11a7", "//crates/lash-kernel-dialect:lash-kernel-dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_d8853c99", "//crates/lash-kernel-doc:lash-kernel-doc": "//crates/lash-kernel-doc:lash-kernel-doc__fv_45814574", "//crates/lash-kernel-edit:lash-kernel-edit": "//crates/lash-kernel-edit:lash-kernel-edit__fv_636bcd3e", "//crates/lash-kernel-lib:lash-kernel-lib": "//crates/lash-kernel-lib:lash-kernel-lib__fv_bda8fe95", "//crates/lash-kernel-migrate:lash-kernel-migrate": "//crates/lash-kernel-migrate:lash-kernel-migrate__fv_6fecb03b", "//crates/lash-kernel-state:lash-kernel-state": "//crates/lash-kernel-state:lash-kernel-state__fv_6d3bfb5d", "//crates/lash-kernel-vm:lash-kernel-vm": "//crates/lash-kernel-vm:lash-kernel-vm__fv_bfbe4314"},
+    version = "0.0.0-dev",
+)

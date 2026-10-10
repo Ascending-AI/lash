@@ -354,5 +354,17 @@
   {
     "rule": "K-VER-002",
     "owner": "KCONF (FIG-5702)"
+  },
+  {
+    "rule": "K-VER-003",
+    "owner": "KMIGRATE (FIG-5716)"
+  },
+  {
+    "rule": "K-VER-004",
+    "owner": "KMIGRATE (FIG-5716)"
+  },
+  {
+    "rule": "K-VER-005",
+    "owner": "KMIGRATE (FIG-5716)"
   }
 ]

@@ -39,6 +39,7 @@ impl RlmRuntimeState {
         deferred_tool_resolver: Option<crate::SharedDeferredToolResolver>,
     ) -> Result<Self, SessionError> {
         let services = crate::dialect::RlmDialectServices {
+            kernel: crate::executor::KernelCarry::default(),
             presentation: crate::RlmPresentationConfig::standard(),
             workers: lash_vm_client::service::Service::default(),
             deferred_tool_resolver,
@@ -388,6 +389,21 @@ impl CodeExecutorPlugin for RlmCodeExecutor {
         snapshot: &str,
     ) -> Result<Result<(), String>, lash_core::RuntimeError> {
         Ok(crate::executor::check_cell_snapshot(snapshot))
+    }
+
+    async fn carried_cell_snapshot(
+        &self,
+        snapshot: &str,
+    ) -> Result<
+        Result<Option<lash_core::plugin::CarriedCellSnapshot>, String>,
+        lash_core::RuntimeError,
+    > {
+        Ok(self
+            .state
+            .dialect
+            .kernel()
+            .cell_snapshot(snapshot)
+            .map_err(|refusal| refusal.to_string()))
     }
 
     /// A session's cells publish no module artifacts: a frame switch has

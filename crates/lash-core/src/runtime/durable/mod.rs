@@ -33,7 +33,7 @@ mod turn_cancel;
 pub mod turn_scope;
 mod turn_trace;
 
-pub use lash_core_execution::runtime::actor::process::ProcessActivation;
+pub use lash_core_execution::runtime::actor::process::{ProcessActivation, stored_engine_state};
 
 #[cfg(test)]
 #[path = "scope_end_tests.rs"]

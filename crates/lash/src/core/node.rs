@@ -204,9 +204,18 @@ impl LashCore {
     /// to `probe`. The node opens runtimes through a clone of the core that
     /// holds no node of its own, so the node never keeps its core alive.
     pub(crate) fn node_activations(&self, probe: Arc<dyn DurableProbe>) -> NodeActivations {
-        let backend = self
+        let mut backend = self
             .backend
             .with_process_engines(self.host_process_engines.engines().cloned());
+        // An engine that carries the previous build's state forward makes
+        // this node a claimer of the processes that build parked.
+        for (kind, migration) in self.host_process_engines.state_migrations() {
+            backend = backend.with_state_migration(
+                kind,
+                Arc::clone(migration),
+                &crate::formats::previous_actor_state_surfaces(),
+            );
+        }
         let sessions = Arc::new(SessionActivation::new(
             backend.clone(),
             self.turn_services(),

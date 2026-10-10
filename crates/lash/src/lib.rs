@@ -891,15 +891,15 @@ pub mod plugins {
     };
     /// Protocol and process-engine contracts, including their complete runtime-owned state closure.
     pub use lash_core::plugin::{
-        AfterTurnDecisions, CheckpointApplication, CheckpointComponentKey, CodeExecutionOutcome,
-        CodeExecutorPlugin, ExecutionLeafName, ExecutionStateCapture, HydratedExecutionState,
-        InvalidExecutionLeafName, LeafChange, NamespaceEntry, NamespaceValues, PluginAbort,
-        PluginNamespaceState, PluginSessionMaterializationRequest, PluginSessionRequest,
-        PluginState, PluginStateEffect, PluginTransitionBase, PluginTransitionId,
-        PluginTransitionRecord, PluginTransitionRequest, ProtocolBeforeLlmCallContext,
-        ProtocolDriverPlugin, ProtocolLlmCallAction, ProtocolSessionContext, ProtocolSessionPlugin,
-        ProtocolSessionRestoreView, RecordedCallbackPhase, RecordedTurnContribution,
-        SessionAuthorityContext, TurnPreparation,
+        AfterTurnDecisions, CarriedCellSnapshot, CheckpointApplication, CheckpointComponentKey,
+        CodeExecutionOutcome, CodeExecutorPlugin, ExecutionLeafName, ExecutionStateCapture,
+        HydratedExecutionState, InvalidExecutionLeafName, LeafChange, NamespaceEntry,
+        NamespaceValues, PluginAbort, PluginNamespaceState, PluginSessionMaterializationRequest,
+        PluginSessionRequest, PluginState, PluginStateEffect, PluginTransitionBase,
+        PluginTransitionId, PluginTransitionRecord, PluginTransitionRequest,
+        ProtocolBeforeLlmCallContext, ProtocolDriverPlugin, ProtocolLlmCallAction,
+        ProtocolSessionContext, ProtocolSessionPlugin, ProtocolSessionRestoreView,
+        RecordedCallbackPhase, RecordedTurnContribution, SessionAuthorityContext, TurnPreparation,
     };
     /// The attachment-omission history policy (ADR 0133): a plugin names the
     /// attachments of a turn's projected history its request omits, and core
@@ -1032,9 +1032,9 @@ pub mod plugins {
     /// keeps, the events lash delivers to `advance`, and the action it
     /// answers with.
     pub use lash_core::{
-        EngineAction, EngineEvent, EngineState, EngineStateFormat, EngineStepKind,
-        EngineStepRefusal, EngineStepRun, EngineSteps, KeyName, Material, NamesMaterial,
-        SettledOutput, SettledOutputRefusal, StepName, StepRequest,
+        EngineAction, EngineEvent, EngineState, EngineStateFormat, EngineStateMigration,
+        EngineStateRefusal, EngineStepKind, EngineStepRefusal, EngineStepRun, EngineSteps, KeyName,
+        Material, NamesMaterial, SettledOutput, SettledOutputRefusal, StepName, StepRequest,
     };
     /// Executable identity and terminal rendering returned by protocol integrators.
     pub use lash_core::{ExecutableGeneration, RecordedRender};

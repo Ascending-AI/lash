@@ -1,0 +1,39 @@
+[package]
+name = "lash-kernel-migrate"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+rust-version.workspace = true
+description = "The lash kernel's version migrations: a document rewritten for the next kernel version and a parked run carried onto it."
+keywords = ["lash", "kernel", "workflow", "migration"]
+categories = ["data-structures"]
+publish = false
+
+[lib]
+name = "lash_kernel_migrate"
+doctest = false
+
+[features]
+# Ships the migration from kernel version 1 to its synthetic successor.
+synthetic-next = [
+    "lash-kernel-doc/synthetic-next",
+    "lash-kernel-state/synthetic-next",
+]
+
+[lints]
+workspace = true
+
+[dependencies]
+lash-kernel-dialect = { workspace = true }
+lash-kernel-doc = { workspace = true }
+lash-kernel-edit = { workspace = true }
+lash-kernel-state = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

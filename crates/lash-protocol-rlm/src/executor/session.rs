@@ -278,6 +278,25 @@ impl SessionBindings {
         changes
     }
 
+    /// Records that `function`, stored under `name` in an earlier kernel
+    /// version, was refused by the migration to this build's: the session
+    /// holds no function under the name, and lists it with why.
+    fn not_migrated(
+        &mut self,
+        name: Name,
+        function: &SavedFunction,
+        refusal: &lash_vm_runtime::KernelMigrationRefusal,
+    ) {
+        self.functions.remove(&name);
+        self.not_carried.insert(
+            name,
+            NotSaved::NotMigrated {
+                from: function.document.manifest.kernel,
+                problem: refusal.to_string(),
+            },
+        );
+    }
+
     /// Holds `function` under `name`, as a session is created with it.
     fn hold(&mut self, name: Name, function: SavedFunction) {
         let function = if function.name == name {
@@ -640,6 +659,9 @@ pub struct RlmExecutionState {
     pending_snapshot: Option<ExecutionStateCapture>,
     active_execution_checkpoint: Option<RlmExecutionCheckpoint>,
     execution_response_returned: bool,
+    /// What a saved function stored in an earlier kernel version is
+    /// carried forward with.
+    kernel: super::KernelCarry,
     #[cfg(test)]
     written_leaves_in_last_snapshot: usize,
 }
@@ -658,9 +680,17 @@ impl RlmExecutionState {
             pending_snapshot: None,
             active_execution_checkpoint: None,
             execution_response_returned: false,
+            kernel: super::KernelCarry::default(),
             #[cfg(test)]
             written_leaves_in_last_snapshot: 0,
         }
+    }
+
+    /// This state, carrying saved functions forward with `kernel`.
+    #[must_use]
+    pub(crate) fn carrying(mut self, kernel: super::KernelCarry) -> Self {
+        self.kernel = kernel;
+        self
     }
 
     /// The dialect the session recorded at its creation.
@@ -725,7 +755,13 @@ impl RlmExecutionState {
             read.push((Name::new(key.as_str()), function));
         }
         for (name, function) in read {
-            self.bindings.hold(name, function);
+            // One stored in an earlier kernel version is carried to this
+            // build's; one the migration refuses is not held, and the
+            // session lists its name with why.
+            match self.kernel.saved_function(&function) {
+                Ok(carried) => self.bindings.hold(name, carried.unwrap_or(function)),
+                Err(refusal) => self.bindings.not_migrated(name, &function, &refusal),
+            }
             self.capture_dirty = true;
         }
         Ok(())
@@ -1057,6 +1093,28 @@ impl RlmExecutionState {
                 "a session's stored state holds a task; only bindings are a session's".to_string(),
             ));
         }
+        // A saved function stored in an earlier kernel version is carried
+        // to this build's, each one alone; the next capture stores what was
+        // carried. One the migration refuses is not held: the session lists
+        // its name with why, as it does a binding that was not saved.
+        let mut carried_functions = false;
+        let mut functions = BTreeMap::new();
+        let mut not_migrated = Vec::new();
+        for (name, mut held) in parsed.functions {
+            match self.kernel.saved_function(&held.function) {
+                Ok(None) => {}
+                Ok(Some(carried)) => {
+                    held.function = carried;
+                    carried_functions = true;
+                }
+                Err(refusal) => {
+                    not_migrated.push((Name::new(name), held.function, refusal));
+                    carried_functions = true;
+                    continue;
+                }
+            }
+            functions.insert(Name::new(name), held);
+        }
         let mut bindings = SessionBindings {
             variables: parked.session,
             objects: parked.objects,
@@ -1071,20 +1129,19 @@ impl RlmExecutionState {
                 .into_iter()
                 .map(|(name, why)| (Name::new(name), why))
                 .collect(),
-            functions: parsed
-                .functions
-                .into_iter()
-                .map(|(name, held)| (Name::new(name), held))
-                .collect(),
+            functions,
             cells: parsed.cells,
             document: Some(parked.run.document),
         };
+        for (name, function, refusal) in not_migrated {
+            bindings.not_migrated(name, &function, &refusal);
+        }
         // The history binding is the projection's; a stored state never
         // shadows it.
         let pruned_reserved = bindings.remove(&BTreeSet::from([HISTORY_BINDING.to_string()]));
         self.bindings = bindings;
         self.persisted_leaf_keys = expected_leaf_keys;
-        self.capture_dirty = pruned_reserved;
+        self.capture_dirty = pruned_reserved || carried_functions;
         self.capture_rollback = None;
         self.pending_snapshot = None;
         self.active_execution_checkpoint = None;

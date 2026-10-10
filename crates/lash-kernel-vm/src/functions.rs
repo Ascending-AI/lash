@@ -35,7 +35,7 @@ pub struct MachineFunctions {
     clippy::expect_used,
     reason = "`deref` and `tasks.unfinished` are constant, well-formed qualified names"
 )]
-fn definition(function: MachineFunction) -> FunctionDefinition {
+fn definition(function: MachineFunction, kernel: u32) -> FunctionDefinition {
     let (name, params, result, charge) = match function {
         MachineFunction::Deref => (
             "deref",
@@ -55,7 +55,7 @@ fn definition(function: MachineFunction) -> FunctionDefinition {
         ),
     };
     FunctionDefinition {
-        kernel: KERNEL_VERSION,
+        kernel,
         name: QualifiedName::new(name).expect("a constant qualified name"),
         signature: Signature { params, result },
         errors: BTreeSet::new(),
@@ -69,7 +69,7 @@ fn definition(function: MachineFunction) -> FunctionDefinition {
 pub(crate) fn machine_function(candidate: &FunctionDefinition) -> Option<MachineFunction> {
     [MachineFunction::Deref, MachineFunction::TasksUnfinished]
         .into_iter()
-        .find(|function| definition(*function) == *candidate)
+        .find(|function| definition(*function, candidate.kernel) == *candidate)
 }
 
 /// Stands in the registry for a function the machine runs itself. A
@@ -90,8 +90,12 @@ impl NativeFunction for RunByTheMachine {
 pub fn register_machine_functions(
     registry: &mut FunctionRegistry,
 ) -> Result<MachineFunctions, RegistryError> {
-    let mut register =
-        |function| registry.register(definition(function), Some(Arc::new(RunByTheMachine)));
+    let mut register = |function| {
+        registry.register(
+            definition(function, KERNEL_VERSION),
+            Some(Arc::new(RunByTheMachine)),
+        )
+    };
     Ok(MachineFunctions {
         deref: register(MachineFunction::Deref)?,
         tasks_unfinished: register(MachineFunction::TasksUnfinished)?,
