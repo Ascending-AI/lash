@@ -12,6 +12,9 @@
 //!   nothing else: no function here decodes the bytes, and this crate depends
 //!   on nothing that could. Validation, compilation and resumption happen
 //!   only in the worker.
+//! - [`graph_state`]: [`SealedGraphState`], a parked run as checkpoint graph
+//!   nodes under a seal binding its root to its structural facts; the parent
+//!   checks the facts and the seal, never a guest frame.
 //! - [`codec`]: length-framed encoding and protocol-version admission, with
 //!   bounded decoding that charges frame size, depth, node count and
 //!   cumulative allocation before anything is allocated.
@@ -25,6 +28,7 @@
 
 pub mod bounds;
 pub mod codec;
+pub mod graph_state;
 pub mod message;
 pub mod outcome;
 pub mod state;
@@ -34,6 +38,10 @@ pub use bounds::ProtocolBounds;
 pub use codec::{
     CodecRefusal, DecodeLimits, FRAME_HEADER_BYTES, FRAME_MAGIC, FrameCodec, FrameReader,
     ObservationChunker,
+};
+pub use graph_state::{
+    GraphNodeBytes, GraphRoot, GraphStateExpectation, GraphStateRefusal, KernelRestoreRefusal,
+    SealedGraphState,
 };
 pub use message::{
     EncodedPayload, ExecutionLease, FrameEpoch, HeaderRefusal, HostReadId, HostReadKind,

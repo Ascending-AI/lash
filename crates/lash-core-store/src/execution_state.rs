@@ -141,6 +141,46 @@ impl ExecutionStateCapture {
         }
     }
 }
+/// Which capture of a session's execution state a graph capture is
+/// (FIG-5887 §6).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ExecutionGraphPurpose {
+    /// The complete post-cell state a turn phase owns as its
+    /// `working_execution_ref` until the next successful cell or the final
+    /// session transfer. Not a retained session revision.
+    Working,
+    /// The state a turn's final commit publishes with the session revision.
+    Final,
+}
+
+/// The graph successor of [`ExecutionStateCapture`] (FIG-5887 §4, §6): a
+/// complete SessionExecution root. Never a delta over an earlier root: the
+/// root owns every adopted binding and function, sharing immutable leaves
+/// and function bundles by reference.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum ExecutionGraphCapture {
+    /// The session holds no execution state.
+    #[default]
+    Clear,
+    Replace {
+        /// A SessionExecution node.
+        root: crate::checkpoint_graph::NodeId,
+        /// Nodes the root needs that no acknowledged root is known to have
+        /// installed. A commit that finds a reference missing refuses, and
+        /// the executor resends the node's retained bytes; staged nodes are
+        /// kept until the capture is acknowledged.
+        nodes: BTreeMap<crate::checkpoint_graph::NodeId, crate::checkpoint_graph::EncodedNode>,
+    },
+}
+
+/// A session's execution state as a hydrated graph: the SessionExecution root
+/// and every node reachable from it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HydratedExecutionGraph {
+    pub root: crate::checkpoint_graph::NodeId,
+    pub nodes: BTreeMap<crate::checkpoint_graph::NodeId, crate::checkpoint_graph::EncodedNode>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LeafChange {
     Changed(Arc<[u8]>),

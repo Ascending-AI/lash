@@ -12,8 +12,14 @@
 
 mod ast;
 mod canonical;
+mod codec_variants;
 mod document;
 mod function;
+/// The canonical binary token grammar of checkpoint graph node bodies: a
+/// cross-crate seam for the kernel's and the store's binary codecs, not part
+/// of the document vocabulary.
+#[doc(hidden)]
+pub mod graph_tokens;
 mod identity;
 mod name;
 mod native;

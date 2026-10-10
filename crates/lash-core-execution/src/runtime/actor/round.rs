@@ -83,6 +83,7 @@ use crate::{ToolCallId, ToolId};
 pub use crate::plugin::StagedPluginState;
 pub use lash_durable::domain::{OwnerKey, ProcessStartRows, RunSeq};
 
+mod codec_variants;
 mod context;
 mod fold;
 #[cfg(test)]

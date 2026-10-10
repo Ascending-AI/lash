@@ -426,6 +426,37 @@ pub trait CodeExecutorPlugin: Send + Sync {
     ) -> Result<(), crate::SessionError> {
         Ok(())
     }
+
+    /// Seam (FIG-5887 §4, §6): the session's complete SessionExecution graph
+    /// for `purpose`, built from live state: a working capture after each
+    /// successful cell, a final capture for the turn's commit. Its staged
+    /// nodes are kept until [`Self::acknowledge_execution_state_capture`];
+    /// a refused commit resends them. An executor that holds no execution
+    /// state keeps the default. Not yet part of the supported surface: the
+    /// code-mode executor implements it, and the cutover wires it in place
+    /// of [`Self::snapshot_execution_state`].
+    #[doc(hidden)]
+    async fn capture_execution_graph(
+        &self,
+        _ctx: ProtocolSessionContext<'_>,
+        _purpose: lash_core_store::execution_state::ExecutionGraphPurpose,
+    ) -> Result<lash_core_store::execution_state::ExecutionGraphCapture, crate::SessionError> {
+        Ok(lash_core_store::execution_state::ExecutionGraphCapture::Clear)
+    }
+
+    /// Seam (FIG-5887 §6): installs a hydrated SessionExecution graph into the
+    /// executor before any model continuation or cell compiles. An executor
+    /// that holds no execution state keeps the default. The code-mode
+    /// executor implements it, and the cutover wires it in place of
+    /// [`Self::restore_execution_state`].
+    #[doc(hidden)]
+    async fn restore_execution_graph(
+        &self,
+        _ctx: ProtocolSessionContext<'_>,
+        _graph: &lash_core_store::execution_state::HydratedExecutionGraph,
+    ) -> Result<(), crate::SessionError> {
+        Ok(())
+    }
 }
 
 pub trait AssistantProseProjectorPlugin: Send + Sync {

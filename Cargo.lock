@@ -2226,6 +2226,7 @@ dependencies = [
  "lash-internal-sansio",
  "lash-internal-trace",
  "lash-internal-vm-protocol",
+ "lash-kernel-doc",
  "rmp-serde",
  "schemars",
  "serde",

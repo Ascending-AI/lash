@@ -20,6 +20,7 @@
 //! The crate stores nothing and commits nothing: it produces and consumes
 //! bytes. It depends on `lash-kernel-doc` and on no other lash crate.
 
+mod codec_variants;
 mod fragments;
 mod schema;
 

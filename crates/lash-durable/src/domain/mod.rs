@@ -26,6 +26,11 @@
 //!   its domain file is I0's and stays as it is; a lane adds fields and
 //!   variants to its own domain's types only.
 
+/// The checkpoint graph seam (FIG-5887): rows, root owners and the graph
+/// commit contract. Not yet supported surface: the integrator exposes it with
+/// the cutover.
+#[doc(hidden)]
+pub mod graph;
 mod keys;
 pub mod park_events;
 pub mod processes;

@@ -41,6 +41,16 @@ impl StateDigest {
         )
     }
 
+    /// The seal over a graph state's structural facts, in its own domain.
+    pub(crate) fn of_graph_facts(facts: &[u8]) -> Self {
+        Self(
+            *blake3::Hasher::new_derive_key("lash-vm-protocol graph state")
+                .update(facts)
+                .finalize()
+                .as_bytes(),
+        )
+    }
+
     pub fn to_hex(&self) -> String {
         self.0.iter().map(|byte| format!("{byte:02x}")).collect()
     }
