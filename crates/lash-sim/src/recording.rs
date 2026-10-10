@@ -417,21 +417,32 @@ impl CaptureScrubber {
                 .iter()
                 .any(|allowed| allowed.eq_ignore_ascii_case(name));
             let sensitive = sensitive_json_key(name);
+            // Header names can contain secrets too. Inspect them before using
+            // them in a diagnostic; escape control characters when displaying.
+            if selected || sensitive {
+                self.check_artifact_text(name)?;
+            }
             if !selected {
                 if sensitive {
-                    return Err(recording_error(
-                        "refusing provider recording: credential response header outside caller allow-list",
-                    ));
+                    return Err(recording_error(format!(
+                        "refusing provider recording: credential response header {name:?} outside caller allow-list"
+                    )));
                 }
                 continue;
             }
+            let value = if sensitive {
+                REDACTED.to_string()
+            } else {
+                self.redact_text(value)
+            };
+            self.check_artifact_text(&value).map_err(|_| {
+                recording_error(format!(
+                    "refusing provider recording: possible secret in response header {name:?}"
+                ))
+            })?;
             retained.push(ProviderWireHeader {
                 name: name.clone(),
-                value: if sensitive {
-                    REDACTED.to_string()
-                } else {
-                    self.redact_text(value)
-                },
+                value,
             });
         }
         Ok(retained)
@@ -986,9 +997,63 @@ mod tests {
                 None,
             )
             .expect_err("unlisted authorization must refuse publication");
+        assert!(error.message.contains("Authorization"));
         assert!(!error.message.contains("unlisted-response-credential"));
         assert!(!output.path().join("secret.001.json").exists());
         assert!(exchange.recorded_paths.lock_recover().is_empty());
+    }
+
+    #[test]
+    fn recorder_names_secret_headers_without_echoing_values_or_secret_names() {
+        let output = tempfile::tempdir().expect("recording directory");
+        for (name, value, selected, safe_name) in [
+            ("X-Api-Key", "fake-api-credential", false, true),
+            (
+                "X-Diagnostic",
+                "Bearer fake-response-credential-123456789",
+                true,
+                true,
+            ),
+            (
+                "X-Diagnostic",
+                "sk-fake-provider-credential-123456789",
+                true,
+                true,
+            ),
+            (
+                "sk-fake-header-credential-123456789-api-key",
+                "fake-api-credential",
+                false,
+                false,
+            ),
+            (
+                "sk-fake-header-credential-123456789",
+                "fake-api-credential",
+                true,
+                false,
+            ),
+        ] {
+            let mut config = ProviderRecordingConfig::new(output.path(), "secret", "openai");
+            if selected {
+                config = config.with_response_header_allow_list([name]);
+            }
+            let exchange = recording_exchange(config);
+            let error = exchange
+                .write_response(
+                    200,
+                    &[(name.into(), value.into())],
+                    b"safe",
+                    Duration::ZERO,
+                    Duration::ZERO,
+                    None,
+                )
+                .expect_err("secret header must prevent publication");
+            assert_eq!(error.message.contains(name), safe_name);
+            assert!(!error.message.contains(value));
+            assert!(error.raw.is_none());
+            assert!(!output.path().join("secret.001.json").exists());
+            assert!(exchange.recorded_paths.lock_recover().is_empty());
+        }
     }
 
     #[test]
