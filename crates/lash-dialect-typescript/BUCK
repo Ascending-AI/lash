@@ -60,6 +60,30 @@ lash_rust_unit_test(
     version = "0.0.0-dev",
 )
 
+lash_rust_binary(
+    name = "kernel_perf__example",
+    crate_features = [],
+    crate_name = "kernel_perf",
+    crate_root = "examples/kernel_perf.rs",
+    declared_features = [],
+    compile_data_patterns = [
+        "src/helpers/*.kernel",
+    ],
+    data_exclude = [
+        "tests/test262/test/**/*.js",
+    ],
+    exec_properties = sized_exec_properties("lash-dialect-typescript", "kernel_perf"),
+    extra_compile_data = [],
+    include_dev_deps = True,
+    library = ":lash-dialect-typescript",
+    library_crate_name = "lash_dialect_typescript",
+    manifest_dir = "crates/lash-dialect-typescript",
+    package_name = "lash-dialect-typescript",
+    rustc_env = {},
+    tags = [],
+    version = "0.0.0-dev",
+)
+
 lash_rust_integration_test(
     name = "test262_kernel__test",
     crate_features = [],
