@@ -34,11 +34,8 @@ pub(super) async fn delete_session_from_catalog(
                     crate::clamp_epoch_ms(now_ms),
                 )?;
                 // Permanent identity evidence for every deleted session id,
-                // host-facing and runtime-internal alike. The deleted set is
-                // also the reclaim frontier for the delete arm below: a
-                // process-owned session id that never entered it would leave
-                // its tombstoned rows unreachable forever, because the id is
-                // just as unbindable as a host-facing one once deleted.
+                // host-facing and runtime-internal alike: the admission fence
+                // that refuses a re-bind (ADR 0049).
                 crate::conn::cached_execute(
                     tx,
                     session_sql().deleted_sqlite.insert_from_meta.sql(),
@@ -164,12 +161,11 @@ pub(super) async fn delete_session_from_catalog(
                 persistence::retire_unreachable_ancestry_conn(tx, &node_id)?;
             }
             // Delete-time reclaim covers this session's tombstoned rows plus any
-            // tombstoned row owned by an already-deleted session. A node can be
-            // tombstoned *after* its owner is gone (ancestry retired at a fork
-            // child's delete or collection),
-            // and no session-scoped vacuum could ever reach it: the owning id is
-            // permanently unbindable. Live sessions' rows stay resident for their
-            // own vacuum, so this is not a catalog-wide sweep.
+            // tombstoned row with no live owner. A node can be tombstoned
+            // *after* its owner is gone (ancestry retired at a fork child's
+            // delete or collection), and no session-scoped vacuum could ever
+            // reach it. Live sessions' rows stay resident for their own vacuum,
+            // so this is not a catalog-wide sweep.
             crate::conn::cached_execute(
                 tx,
                 session_sql()
