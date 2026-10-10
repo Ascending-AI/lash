@@ -57538,6 +57538,7 @@
         "lash-internal-vm-broker",
         "lash-internal-vm-client",
         "lash-internal-vm-library",
+        "lash-internal-vm-releases",
         "lash-kernel-check",
         "lash-kernel-dialect",
         "lash-kernel-doc",

@@ -975,6 +975,7 @@ PACKAGE_DEPS = {
             "lash_vm_broker": "//crates/lash-vm-broker:lash-vm-broker",
             "lash_vm_client": "//crates/lash-vm-client:lash-vm-client",
             "lash_vm_library": "//crates/lash-vm-library:lash-vm-library",
+            "lash_vm_releases": "//crates/lash-vm-releases:lash-vm-releases",
             "serde": "//third-party/rust:p0315",
             "serde_json": "//third-party/rust:p0320",
             "thiserror": "//third-party/rust:p0373",

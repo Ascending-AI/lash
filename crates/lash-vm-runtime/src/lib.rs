@@ -41,6 +41,11 @@ pub use lash_vm_library::{
 /// assembled no worker of its own. The parent reads them from the helper
 /// releases the build retains, so it links no dialect (FIG-5812).
 pub use lash_vm_library::{LibraryError, standard_functions};
+/// A helper release as checkpoint graph nodes: the exact manifest a run or a
+/// saved function pins (FIG-5887 §3).
+pub use lash_vm_releases::{
+    HeldManifests, ManifestFunction, ReleaseManifest, ReleaseRefusal, stage_held_release,
+};
 pub use projection::{ProjectionCatalog, ProjectionProvider, ProjectionRefusal};
 
 /// The machine a worker hosts, as the broker drives it, and the run's

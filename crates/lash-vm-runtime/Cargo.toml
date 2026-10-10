@@ -46,6 +46,7 @@ lash-kernel-vm = { workspace = true }
 lash-kernel-migrate = { workspace = true }
 lash-kernel-state = { workspace = true }
 lash-vm-library = { workspace = true }
+lash-vm-releases = { workspace = true }
 lash-kernel-check = { workspace = true }
 lash-kernel-dialect = { workspace = true }
 lash-dialect-typescript = { workspace = true, optional = true }
