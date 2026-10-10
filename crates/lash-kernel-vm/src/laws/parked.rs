@@ -20,14 +20,14 @@ use crate::{
     Program, Request, Start, Step, Target,
 };
 
-type Observed = (End, Vec<Datum>, Vec<Request>, u64);
+pub(super) type Observed = (End, Vec<Datum>, Vec<Request>, u64);
 
 fn int(value: i64) -> Value {
     Value::Int(Integer::from(value))
 }
 
 /// Answers the oldest pending request.
-fn deliver_next(embedder: &mut Embedder) {
+pub(super) fn deliver_next(embedder: &mut Embedder) {
     let next = label(
         embedder
             .pending
@@ -42,7 +42,7 @@ fn deliver_next(embedder: &mut Embedder) {
 /// point: at each park before and after its outcome is delivered, and at
 /// each slice. Every hop takes another layout, and every other hop swaps
 /// which implementation of `pair.twice` runs.
-fn observe(text: &str, slice: u64, relay: bool) -> Observed {
+pub(super) fn observe(text: &str, slice: u64, relay: bool) -> Observed {
     observe_with(
         text,
         Setup {
@@ -85,7 +85,7 @@ fn observe_with(text: &str, setup: Setup, relay: bool) -> Observed {
     )
 }
 
-const EXPRESSIONS: &str = r#"
+pub(super) const EXPRESSIONS: &str = r#"
 main {
   let m = map{"a": [1, (2, 3)], "b": {k: text.concat("x", "y")}}
   let n = num.add(list.len(m["a"]), pair.twice(4))
@@ -97,7 +97,7 @@ main {
 }
 "#;
 
-const HELPER_FROM_TWO_PLACES: &str = r#"
+pub(super) const HELPER_FROM_TWO_PLACES: &str = r#"
 fn fetch(tag) {
   let r = perform echo(tag) as Any
   return (tag, r)
@@ -114,7 +114,7 @@ main {
 }
 "#;
 
-const CALLBACK_IN_MAP: &str = r#"
+pub(super) const CALLBACK_IN_MAP: &str = r#"
 main {
   let seen = 0
   let f = fn(x) {
@@ -130,7 +130,7 @@ main {
 
 /// A cleanup block that waits, entered normally, by a throw of a list no
 /// variable names, and by `continue`.
-const CLEANUP_WITH_A_WAIT: &str = r#"
+pub(super) const CLEANUP_WITH_A_WAIT: &str = r#"
 main {
   let log = []
   for mode in [0, 1, 2] {
@@ -153,7 +153,7 @@ main {
 }
 "#;
 
-const FAN_OUT_WITH_ONE_ENDED: &str = r#"
+pub(super) const FAN_OUT_WITH_ONE_ENDED: &str = r#"
 fn worker(tag) {
   let r = perform echo(tag) as Any
   let s = perform echo(r) as Any
@@ -174,7 +174,7 @@ main {
 }
 "#;
 
-const CANCELLED_MID_CLEANUP: &str = r#"
+pub(super) const CANCELLED_MID_CLEANUP: &str = r#"
 fn guarded(tag) {
   try {
     let r = perform echo(tag) as Any
@@ -195,7 +195,7 @@ main {
 
 /// `K-ITER-003`, `K-KEY-003`, `K-KEY-005`: removals on both sides of a
 /// live cursor, including removing every entry and then reinserting.
-const TABLE_CHURN: &str = r#"
+pub(super) const TABLE_CHURN: &str = r#"
 main {
   let m = map{1.0: "first", 2: "two", 3: "three", 4: "four"}
   let s = set{1.0, 2, 3, 4}
