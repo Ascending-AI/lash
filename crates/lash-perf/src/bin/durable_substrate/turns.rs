@@ -378,9 +378,10 @@ struct BlockSample {
     cycle_us: Option<u64>,
 }
 
-/// The code mode cell (H5): a turn whose cell awaits `ext.echo` `cell_calls`
-/// times, keeping each answer; each await blocks the VM, which commits its
-/// snapshot with the operation's admission.
+/// The code mode cell (H5): a turn whose cell awaits `tools.ext_echo`
+/// `cell_calls` times, keeping each answer; each await blocks the VM, which
+/// commits its snapshot with the operation's admission. A batch whose cell
+/// does not settle every operation is refused.
 pub async fn cell(run: &Run<'_>, case: &Case) -> Result<()> {
     let mut deployment = run.deployment();
     deployment.boot_many(1).await?;
@@ -405,6 +406,15 @@ pub async fn cell(run: &Run<'_>, case: &Case) -> Result<()> {
         .await?;
         let after = counters.read().await?;
         let transactions = deployment.recorder.transactions_since(from);
+        let settled = transactions
+            .iter()
+            .filter(|t| t.actor == actor && t.ok && t.label == "round.outcome")
+            .count();
+        ensure!(
+            settled == case.script.cell_calls,
+            "{session}'s cell settled {settled} of its {} operations: it did not run as scripted",
+            case.script.cell_calls,
+        );
         let blocks: Vec<&Transaction> = transactions
             .iter()
             .filter(|t| t.actor == actor && t.ok && t.snapshot_bytes > 0)

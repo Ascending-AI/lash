@@ -122,7 +122,7 @@ fn cell_source(scripts: &Scripts, session: &SessionId) -> String {
     let script = scripts.get(session);
     let pad = "x".repeat(script.cell_payload);
     format!(
-        "<typescript>\nconst kept = [];\nfor (let i = 0; i < {calls}; i++) {{\n  const answer = await tools.{CELL_TOOL}({{ i: i, pad: \"{pad}\" }});\n  kept.push(answer);\n}}\nprint(kept.length);\n</typescript>",
+        "<typescript>\nconst kept = [];\nfor (let i = 0; i < {calls}; i++) {{\n  const answer = await tools.{CELL_TOOL}({{ i: i, pad: \"{pad}\" }});\n  kept.push(answer);\n}}\nconsole.log(kept.length);\n</typescript>",
         calls = script.cell_calls,
     )
 }

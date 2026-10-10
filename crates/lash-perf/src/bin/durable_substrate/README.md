@@ -9,13 +9,13 @@ L12a's baseline; the raw ledger is `docs/perf/durable-substrate-2026-10.jsonl`.
 What is production and what is the bench's:
 
 - **Production:** the node runner (`lash_core::runtime::durable::node::serve`),
-  the session activation and phase runner, the round runner, cells
-  (`lash_vm_broker::cell::run_cell`), the process activation, waits and keys,
-  session close, and the SQLite and PostgreSQL stores, with
-  `DurableSettings::default()`.
+  the session activation and phase runner, the round runner, cells (kernel
+  documents, their snapshots saved by `lash_vm_broker::kernel::store`), the
+  process activation, waits and keys, session close, and the SQLite and
+  PostgreSQL stores, with `DurableSettings::default()`.
 - **The bench's:** the `TurnServices`/`TurnDrive` (a scripted protocol and a
   model that answers at once), the `benchmark_echo` tool and the cell's
-  `ext.echo` operation (both `Once`, answering their arguments), and a process
+  `tools.ext_echo` operation (both `Once`, answering their arguments), and a process
   engine that pins and awaits keys. `recorder.rs` decorates the durable store
   to record each write transaction's label, latency and payload bytes; it
   forwards every call unchanged.
@@ -33,7 +33,7 @@ tool registry, projections and event feed; facade wiring exists in
 | `concurrent-{1,10,100}` | L12a's concurrency: S sessions per batch, five rounds of three parallel calls |
 | `resume-{1,5,20}` | A turn held at its model call after N rounds; its node stops; a fresh node resumes it |
 | `prior-{0,10,100,300}` | The same cold resume after K committed turns on the session (H2) |
-| `cell-{0,1024,16384}` | A cell awaiting `ext.echo` ten times, keeping each answer padded by P bytes (H5) |
+| `cell-{0,1024,16384}` | A cell awaiting `tools.ext_echo` ten times, keeping each answer padded by P bytes (H5) |
 | `parked-process` | A process parked on a key for `--park-seconds`, then resolved by a host |
 | `process-waits-10` | A process resolved ten times while its owner holds it |
 | `idle-{0,1000}` | What the deployment does for `--idle-seconds` with K processes waiting (H8) |
