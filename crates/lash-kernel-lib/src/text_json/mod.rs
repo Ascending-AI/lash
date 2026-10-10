@@ -23,12 +23,13 @@ pub(super) type Function = (FunctionDefinition, Arc<dyn NativeFunction>);
 
 struct Native {
     function: fn(NativeCall<'_>) -> Result<Value, NativeError>,
-    arity: usize,
+    /// From the required parameters to all of them (`K-FN-004`).
+    arity: std::ops::RangeInclusive<usize>,
 }
 
 impl NativeFunction for Native {
     fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
-        if call.args.len() != self.arity {
+        if !self.arity.contains(&call.args.len()) {
             return Err(raise("arity", "wrong argument count"));
         }
         (self.function)(call)
@@ -55,6 +56,8 @@ pub fn register_text_json(registry: &mut FunctionRegistry) -> Result<(), Registr
     Ok(())
 }
 
+/// A definition whose parameters are named as in kernel text: a name that
+/// ends in `?` is an optional parameter.
 fn definition(
     name: &str,
     params: &[(&str, Type)],
@@ -71,9 +74,9 @@ fn definition(
     let params: Vec<_> = params
         .iter()
         .map(|(name, ty)| Param {
-            name: Name::new(*name),
+            name: Name::new(name.trim_end_matches('?')),
             ty: ty.clone(),
-            optional: false,
+            optional: name.ends_with('?'),
         })
         .collect();
     let charge = Formula::Sum(
@@ -86,7 +89,7 @@ fn definition(
             .chain(std::iter::once(Formula::DeepSize(Operand::Result)))
             .collect(),
     );
-    let arity = params.len();
+    let arity = params.iter().filter(|param| !param.optional).count()..=params.len();
     (
         FunctionDefinition {
             kernel: KERNEL_VERSION,

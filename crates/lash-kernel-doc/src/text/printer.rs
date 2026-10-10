@@ -595,6 +595,7 @@ impl<'a> Printer<'a> {
             }
             Formula::Size(operand) => return self.measure("size", operand),
             Formula::DeepSize(operand) => return self.measure("deep", operand),
+            Formula::NestedSize(operand) => return self.measure("nested", operand),
             Formula::Magnitude(operand) => return self.measure("magnitude", operand),
             Formula::Sum(terms) => ("sum", terms),
             Formula::Product(terms) => ("product", terms),

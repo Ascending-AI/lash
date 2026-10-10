@@ -72,7 +72,11 @@ impl InstructionBound {
     /// rows, prints them and finishes with them, at 9,097,832; the next is
     /// the large-print scenario at 2,121,577. Twice the costliest, rounded
     /// up to the next five million, is 20,000,000: about half a second of
-    /// kernel work on the measuring host.
+    /// kernel work on the measuring host. `kernel_perf 3 rows_print_3000`
+    /// measures that cell: 9,217,786 under FIG-5825's charges. The lash
+    /// crate's law
+    /// `tests::cell_budget::the_costliest_measured_cell_fits_half_the_standard_instruction_budget`
+    /// keeps it within half this budget, so the derivation holds.
     pub const fn standard() -> Self {
         Self::instructions(20_000_000)
     }

@@ -140,8 +140,10 @@ formula: 1+S+R for unary/conversion/text functions; 1+S*S+R for equality,
 ordering, multiplication and division/remainders; 1+S*magnitude(exponent)+R for
 `pow` and `num.pow`, whose integer power grows with the exponent, and 1+S+R for
 `float.pow`, one libm call; 65+S+R for software math. `kind` is 1+R: it reads a tag. `same` is
-1+min(size(a), size(b))+R, by shallow sizes: two heap objects are compared by
-identity, never by what they hold, and two immutable values member by member.
+1+min(size(a), size(b))+nested(a)+nested(b)+R: two heap objects are compared by
+identity, never by what they hold, and two immutable values member by member,
+so the nested sizes count every member it may walk, down to the heap objects
+(`K-CHG-005`).
 These formulas describe logical work, independent of object layout, hash tables,
 caches, or whether a future body is substituted.
 

@@ -1048,6 +1048,7 @@ impl Parser {
             let formula = match word.as_str() {
                 "size" => Formula::Size(parser.operand()?),
                 "deep" => Formula::DeepSize(parser.operand()?),
+                "nested" => Formula::NestedSize(parser.operand()?),
                 "magnitude" => Formula::Magnitude(parser.operand()?),
                 "sum" | "product" | "max" | "min" => {
                     let mut terms = Vec::new();

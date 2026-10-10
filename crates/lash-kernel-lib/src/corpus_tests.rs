@@ -123,6 +123,20 @@ fn size(value: &Value, heap: &dyn NativeHeap) -> u64 {
     }
 }
 
+fn nested_size(value: &Value, heap: &dyn NativeHeap) -> u64 {
+    let held: Vec<&Value> = match value {
+        Value::Tuple(values) => values.iter().collect(),
+        Value::Error(error) => vec![&error.data],
+        _ => return 0,
+    };
+    held.into_iter()
+        .map(|value| match value {
+            Value::List(_) | Value::Map(_) | Value::Set(_) | Value::Record(_) => 1,
+            _ => size(value, heap) + nested_size(value, heap),
+        })
+        .sum()
+}
+
 fn deep_size(value: &Value, heap: &dyn NativeHeap) -> u64 {
     let mut pending = vec![value.clone()];
     let mut seen = HashSet::<ObjectId>::new();
@@ -229,6 +243,7 @@ fn k_lib_006_recorded_native_edges_and_charges_match() {
                         Measure::Size => size(value, &heap),
                         Measure::DeepSize => deep_size(value, &heap),
                         Measure::Magnitude => magnitude(value),
+                        Measure::NestedSize => nested_size(value, &heap),
                     })
                 })
             };

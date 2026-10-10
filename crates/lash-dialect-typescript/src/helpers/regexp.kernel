@@ -20,6 +20,7 @@ use regex.ecma.test
 use same
 use text.concat
 use text.join
+use text.len
 use text.split
 use text.utf16_find
 use text.utf16_get
@@ -455,13 +456,13 @@ body {
   let arg_6 = padded[0]
   let separator = invoke ts.to_string(arg_6)
   # The native split cuts at the separator's occurrences, which are UTF-16
-  # boundaries too. An empty separator cuts every character, which is a
-  # UTF-16 unit unless it is astral: then the units are cut one by one, and
-  # a cut inside a surrogate pair is refused.
-  let parts = text.split(text, separator)
-  let length = text.utf16_len(text)
+  # boundaries too, and builds only the pieces up to the limit. An empty
+  # separator cuts every character, which is a UTF-16 unit unless it is
+  # astral: then the units are cut one by one, and a cut inside a surrogate
+  # pair is refused.
   if same(separator, "") {
-    if eq(list.len(parts), length) {} else {
+    let length = text.utf16_len(text)
+    if eq(text.len(text), length) {} else {
       let output_value = []
       let start = 0
       while num.lt(start, length) {
@@ -474,8 +475,7 @@ body {
       return output_value
     }
   }
-  if num.lt(limit, list.len(parts)) { return list.slice(parts, 0, limit) }
-  return parts
+  return text.split(text, separator, limit)
 }
 
 function ts.string.substitute(replacement: Text, text: Text, needle: Text, position: Int) -> Text

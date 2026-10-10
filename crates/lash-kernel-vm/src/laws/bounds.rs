@@ -332,6 +332,53 @@ fn a_helper_that_runs_away_ends_at_the_charge_bound() {
     }
 }
 
+/// `K-CHG-007`, `K-LIB-004`: a closure made in the body of a function with a
+/// native implementation runs only where it is applied, which that body
+/// cannot do, so it is ordinary code: one that escapes the body and runs
+/// away ends at the charge bound (FIG-5825).
+#[test]
+fn a_closure_a_native_backed_body_makes_is_charged_where_it_runs() {
+    let library = library(true);
+    let mut registry = (*library.registry).clone();
+    let id = |name: &str| library.ids[name];
+    let uses = format!(
+        "use num.lt = @{}\nuse num.add = @{}\n",
+        id("num.lt"),
+        id("num.add")
+    );
+    // Its native implementation is not registered, so its body runs.
+    let make = parse_definition(&format!(
+        "function probe.counter(n: Any) -> Any\nkernel 1\ncharge 1\n{uses}native\n\
+         body {{ return fn() {{ let i = 0 while num.lt(i, n) {{ set i = num.add(i, 1) }} return i }} }}\n"
+    ))
+    .unwrap();
+    let make = registry.register(make, None).unwrap();
+    let text = format!(
+        "numbers by_spelling\nkernel 1\nuse probe.counter = @{make}\n\
+         main {{ let count = probe.counter(200000) let n = apply count() return n }}\n"
+    );
+    let program = Program {
+        document: Arc::new(parse_document(&text).unwrap()),
+        library: crate::PreparedLibrary::new(Arc::new(registry)),
+    };
+    let start = Start {
+        target: Target::Main,
+        args: Vec::new(),
+        bindings: Default::default(),
+    };
+    let bounds = Bounds {
+        charge: 10_000,
+        ..ROOMY
+    };
+    let mut machine = KernelMachine::start(program, bounds, start).unwrap();
+    match machine.run(&mut World::default(), u64::MAX).unwrap() {
+        Step::Ended(End::Error(RunError::Bound(exceeded))) => {
+            assert_eq!((exceeded.bound, exceeded.limit), (Bound::Charge, 10_000));
+        }
+        other => panic!("the escaped closure's loop was not charged: {other:?}"),
+    }
+}
+
 /// `K-CHG-007`: a helper's charge is its body's work; its formula is not
 /// charged on top. Two helpers with one body and different formulas cost
 /// the same.

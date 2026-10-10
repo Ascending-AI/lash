@@ -102,6 +102,9 @@ pub enum Formula {
     Size(Operand),
     /// The operand's size with everything it holds (`K-CHG-005`).
     DeepSize(Operand),
+    /// The sizes of the immutable values nested in the operand, down to
+    /// the heap objects it holds (`K-CHG-005`).
+    NestedSize(Operand),
     /// The operand's value, when it is a non-negative number (`K-CHG-006`).
     Magnitude(Operand),
     Sum(Vec<Formula>),
@@ -127,6 +130,7 @@ pub enum Operand {
 pub enum Measure {
     Size,
     DeepSize,
+    NestedSize,
     Magnitude,
 }
 
@@ -137,6 +141,7 @@ impl Formula {
             Self::Constant(amount) => *amount,
             Self::Size(operand) => measure(operand, Measure::Size),
             Self::DeepSize(operand) => measure(operand, Measure::DeepSize),
+            Self::NestedSize(operand) => measure(operand, Measure::NestedSize),
             Self::Magnitude(operand) => measure(operand, Measure::Magnitude),
             Self::Sum(terms) => terms
                 .iter()

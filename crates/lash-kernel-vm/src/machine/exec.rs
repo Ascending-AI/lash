@@ -11,7 +11,7 @@ use super::{
 use crate::compile::{
     BlockId, CodeId, Executable, LibId, Member, Place, Rhs, Slot, Stmt, StmtId, Target, Var,
 };
-use crate::data::{Decoder, copy_out, deep_size, magnitude, size};
+use crate::data::{Decoder, copy_out, deep_size, magnitude, nested_size, size};
 use crate::heap::{Key, Obj, value_bytes};
 use crate::interface::{Bound, Host, Outcome};
 
@@ -347,6 +347,7 @@ impl KernelMachine {
                 (None, _) => 0,
                 (Some(value), Measure::Size) => size(&self.heap, value),
                 (Some(value), Measure::DeepSize) => deep_size(&self.heap, value),
+                (Some(value), Measure::NestedSize) => nested_size(&self.heap, value),
                 (Some(value), Measure::Magnitude) => magnitude(value),
             }
         })

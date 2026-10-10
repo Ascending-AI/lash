@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "same compares object identity and immutable representation",
-      "document": "kernel 1\nnumbers by_spelling\nuse same = @44c69610fa6c123a1921778f6e6406283ad085d7aeb2b9a25b20baa1eb3ab612\nmain { let a = [1] let b = [1] finish [same(a, a), same(a, b), same(1, 1.0), same(-0.0, 0.0), same(nan, nan), same((nan, a,), (nan, a,)), same((nan, a,), (nan, b,))] }\n",
+      "document": "kernel 1\nnumbers by_spelling\nuse same = @5eef6f8a9d9e96bf15917c1895d3e1b3ef532823baf5d3b1ddc630d2e5af0f1f\nmain { let a = [1] let b = [1] finish [same(a, a), same(a, b), same(1, 1.0), same(-0.0, 0.0), same(nan, nan), same((nan, a,), (nan, a,)), same((nan, a,), (nan, b,))] }\n",
       "expected": {
         "prints": [],
         "trace": [],
@@ -38,7 +38,7 @@
     },
     {
       "name": "same uses closure and task identity",
-      "document": "kernel 1\nnumbers by_spelling\nuse same = @44c69610fa6c123a1921778f6e6406283ad085d7aeb2b9a25b20baa1eb3ab612\nfn f() { return null } main { let c = fn() { return null } let d = fn() { return null } let t = spawn call f() let u = spawn call f() finish [same(c, c), same(c, d), same(t, t), same(t, u)] }\n",
+      "document": "kernel 1\nnumbers by_spelling\nuse same = @5eef6f8a9d9e96bf15917c1895d3e1b3ef532823baf5d3b1ddc630d2e5af0f1f\nfn f() { return null } main { let c = fn() { return null } let d = fn() { return null } let t = spawn call f() let u = spawn call f() finish [same(c, c), same(c, d), same(t, t), same(t, u)] }\n",
       "expected": {
         "prints": [],
         "trace": [],

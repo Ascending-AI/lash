@@ -336,7 +336,9 @@ pub(crate) struct Code {
     /// The enclosing code's variables this closure shares.
     pub(crate) captures: Vec<Capture>,
     /// Whether the code's forms are charged: those of the body of a library
-    /// function with a native implementation are not (`K-CHG-007`).
+    /// function with a native implementation are not (`K-CHG-007`). That
+    /// body calls only functions with a native implementation (`K-LIB-004`),
+    /// so no charged frame runs above it, and a closure it makes is charged.
     pub(crate) charged: bool,
 }
 
@@ -590,8 +592,6 @@ struct Compiler<'a> {
     /// The codes being compiled, the outermost first; each closure adds one.
     scopes: Vec<Scopes>,
     unit: Unit,
-    /// Whether the unit being compiled charges its forms (`K-CHG-007`).
-    charged: bool,
     path: Vec<u32>,
 }
 
@@ -684,7 +684,6 @@ impl<'a> Compiler<'a> {
             resolve,
             scopes: Vec::new(),
             unit: Unit::Main,
-            charged: true,
             path: Vec::new(),
         }
     }
@@ -737,7 +736,6 @@ impl Compiler<'_> {
     ) {
         let main = unit == Unit::Main;
         self.unit = unit;
-        self.charged = charged;
         self.path.clear();
         let compiled = self.code(params, body, main, charged);
         self.codes[(code.0 - self.base.codes) as usize] = Some(compiled);
@@ -1062,10 +1060,10 @@ impl Compiler<'_> {
             ),
             doc::Expr::Member(member) => Expr::Member(Box::new(self.member(member, 0).0)),
             doc::Expr::Closure(closure) => {
-                let charged = self.charged;
-                let code = self.child(0, |c| {
-                    c.code(&closure.params, &closure.body, false, charged)
-                });
+                // A closure runs only where it is applied, which the body of
+                // a function with a native implementation cannot do
+                // (`K-LIB-004`): wherever it runs, it is ordinary code.
+                let code = self.child(0, |c| c.code(&closure.params, &closure.body, false, true));
                 let id = CodeId(self.base.codes + self.codes.len() as u32);
                 self.codes.push(Some(code));
                 Expr::Closure(id)

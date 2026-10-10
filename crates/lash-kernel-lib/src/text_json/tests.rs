@@ -258,6 +258,17 @@ fn k_ltxt_005_literal_split_join_replace_and_concat() {
     assert_eq!(items(&heap, result), vec![s("😀"), s("a")]);
     let result = call(&mut heap, "text.split", &[s(""), s("")]).unwrap();
     assert!(items(&heap, result).is_empty());
+    // A limit keeps the first pieces; an absent one keeps them all.
+    let result = call(&mut heap, "text.split", &[s("a..b.."), s(".."), int(2)]).unwrap();
+    assert_eq!(items(&heap, result), vec![s("a"), s("b")]);
+    let result = call(&mut heap, "text.split", &[s("😀a"), s(""), int(1)]).unwrap();
+    assert_eq!(items(&heap, result), vec![s("😀")]);
+    let result = call(&mut heap, "text.split", &[s("a.b"), s("."), Value::Absent]).unwrap();
+    assert_eq!(items(&heap, result), vec![s("a"), s("b")]);
+    assert_eq!(
+        error_kind(call(&mut heap, "text.split", &[s("a.b"), s("."), int(-1)])),
+        "number_range"
+    );
     assert_eq!(
         call(&mut heap, "text.replace", &[s("aaa"), s("aa"), s("x")]).unwrap(),
         s("xa")
@@ -1240,15 +1251,15 @@ fn k_lib_006_native_corpus_pins_results_charges_and_determinism() {
             .charge
             .evaluate(&mut |operand, _| match operand {
                 Operand::Result => result_size,
-                Operand::Param(name) => deep(
-                    &args[registered
-                        .definition
-                        .signature
-                        .params
-                        .iter()
-                        .position(|p| p.name == *name)
-                        .unwrap()],
-                ),
+                // An omitted optional argument measures nothing.
+                Operand::Param(name) => registered
+                    .definition
+                    .signature
+                    .params
+                    .iter()
+                    .position(|p| p.name == *name)
+                    .and_then(|index| args.get(index))
+                    .map_or(0, deep),
             });
         assert_eq!(
             charged,

@@ -89,7 +89,6 @@ pub(super) fn functions() -> Vec<Function> {
         ("text.concat", Type::Text, concat),
         ("text.starts_with", Type::Bool, starts_with),
         ("text.ends_with", Type::Bool, ends_with),
-        ("text.split", sequence_type(Type::Text), split),
     ] {
         functions.push(definition(
             name,
@@ -99,6 +98,17 @@ pub(super) fn functions() -> Vec<Function> {
             native,
         ));
     }
+    functions.push(definition(
+        "text.split",
+        &[
+            ("text", Type::Text),
+            ("separator", Type::Text),
+            ("limit?", Type::Int),
+        ],
+        sequence_type(Type::Text),
+        &[],
+        split,
+    ));
     functions.push(definition(
         "text.join",
         &[
@@ -394,23 +404,40 @@ fn ends_with(call: NativeCall<'_>) -> Result<Value, NativeError> {
     ))
 }
 
+/// The first `limit` pieces, the only ones split counts, reserves and
+/// builds (`K-LTXT-005`); an omitted limit takes them all.
 fn split(call: NativeCall<'_>) -> Result<Value, NativeError> {
     let text = text_arg(call.args, 0)?;
     let separator = text_arg(call.args, 1)?;
-    let pieces = if separator.is_empty() {
-        text.chars().count()
-    } else {
-        text.split(separator).count()
+    let limit = match call.args.get(2) {
+        None | Some(Value::Absent) => usize::MAX,
+        Some(_) => count_arg(call.args, 2)?,
     };
-    reserve_list(call.heap, pieces, text.len())?;
-    let items = if separator.is_empty() {
-        text.chars().map(|c| Value::text(c.to_string())).collect()
-    } else {
-        text.split(separator)
-            .map(|s| Value::text(s.to_owned()))
-            .collect()
-    };
+    let (count, bytes) = pieces(text, separator)
+        .take(limit)
+        .fold((0, 0), |(count, bytes), piece| {
+            (count + 1, bytes + piece.len())
+        });
+    reserve_list(call.heap, count, bytes)?;
+    let items = pieces(text, separator)
+        .take(limit)
+        .map(|piece| Value::text(piece.to_owned()))
+        .collect();
     Ok(Value::List(call.heap.allocate(Object::List(items))?))
+}
+
+/// The text between the separator's occurrences or, for an empty
+/// separator, each scalar value.
+fn pieces<'a>(text: &'a str, separator: &'a str) -> impl Iterator<Item = &'a str> {
+    let scalars = separator.is_empty().then(|| {
+        text.char_indices()
+            .map(|(start, scalar)| &text[start..start + scalar.len_utf8()])
+    });
+    let cuts = (!separator.is_empty()).then(|| text.split(separator));
+    scalars
+        .into_iter()
+        .flatten()
+        .chain(cuts.into_iter().flatten())
 }
 
 fn join(call: NativeCall<'_>) -> Result<Value, NativeError> {

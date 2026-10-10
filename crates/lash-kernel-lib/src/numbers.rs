@@ -129,15 +129,25 @@ pub fn numbers() -> Vec<(FunctionDefinition, Arc<dyn NativeFunction>)> {
                 Formula::Magnitude(Operand::Param(Name::new("arg1"))),
             ]),
             Operation::Math(_) => Formula::Sum(vec![Formula::Constant(64), input]),
-            // `kind` reads a tag, and `same` compares two heap objects by
-            // identity and two immutable values member by member: neither
-            // walks what a heap object holds, so neither is charged for it.
+            // `kind` reads a tag. `same` compares two heap objects by identity
+            // and two immutable values member by member: it walks no heap
+            // object's contents, but walks every member nested in a tuple or
+            // an error's data. Each operand's nested size bounds that walk,
+            // and is what measuring it costs.
             Operation::Kind => Formula::Constant(0),
-            Operation::Same => Formula::Min(
-                param_defs
-                    .iter()
-                    .map(|param| Formula::Size(Operand::Param(param.name.clone())))
-                    .collect(),
+            Operation::Same => Formula::Sum(
+                std::iter::once(Formula::Min(
+                    param_defs
+                        .iter()
+                        .map(|param| Formula::Size(Operand::Param(param.name.clone())))
+                        .collect(),
+                ))
+                .chain(
+                    param_defs
+                        .iter()
+                        .map(|param| Formula::NestedSize(Operand::Param(param.name.clone()))),
+                )
+                .collect(),
             ),
             _ => input,
         };

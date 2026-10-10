@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "native shallow copy allocates a result without changing its argument",
-      "document": "kernel 1\nnumbers by_spelling\nuse same = @44c69610fa6c123a1921778f6e6406283ad085d7aeb2b9a25b20baa1eb3ab612\nuse list.copy = @febc3d0b1353e857a075d9c5498af8880957dad8ea4c156acfe3c2a1729269f1\nmain { let xs = [1, 2] let ys = list.copy(xs) set ys[0] = 9 finish [xs, ys, same(xs, ys)] }\n",
+      "document": "kernel 1\nnumbers by_spelling\nuse same = @5eef6f8a9d9e96bf15917c1895d3e1b3ef532823baf5d3b1ddc630d2e5af0f1f\nuse list.copy = @febc3d0b1353e857a075d9c5498af8880957dad8ea4c156acfe3c2a1729269f1\nmain { let xs = [1, 2] let ys = list.copy(xs) set ys[0] = 9 finish [xs, ys, same(xs, ys)] }\n",
       "expected": {
         "prints": [],
         "trace": [],

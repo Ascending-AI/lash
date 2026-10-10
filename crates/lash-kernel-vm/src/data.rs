@@ -104,6 +104,29 @@ fn measure(
     *total = total.saturating_add(size(heap, value));
 }
 
+/// The sizes of the immutable values nested in a value, down to the heap
+/// objects it holds, each of which counts 1 (`K-CHG-005`).
+pub(crate) fn nested_size(heap: &Heap, value: &Value) -> u64 {
+    let mut total = 0u64;
+    let mut pending = vec![value];
+    while let Some(value) = pending.pop() {
+        let held = match value {
+            Value::Tuple(members) => &members[..],
+            Value::Error(error) => std::slice::from_ref(&error.data),
+            _ => continue,
+        };
+        for member in held {
+            let size = match member {
+                Value::List(_) | Value::Map(_) | Value::Set(_) | Value::Record(_) => 1,
+                _ => size(heap, member),
+            };
+            total = total.saturating_add(size);
+            pending.push(member);
+        }
+    }
+    total
+}
+
 /// A value's magnitude (`K-CHG-006`).
 pub(crate) fn magnitude(value: &Value) -> u64 {
     match value {

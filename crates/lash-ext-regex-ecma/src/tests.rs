@@ -224,6 +224,7 @@ fn measure(
         (Some(value), Measure::Size) => heap.size(value),
         (Some(value), Measure::DeepSize) => heap.deep_size(value, &mut BTreeSet::new()),
         (Some(_), Measure::Magnitude) => panic!("no formula here takes a magnitude"),
+        (Some(_), Measure::NestedSize) => panic!("no formula here takes a nested size"),
     }
 }
 

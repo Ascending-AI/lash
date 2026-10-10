@@ -590,7 +590,9 @@ fn the_nesting_limit_holds_in_text_json_and_validation() {
 }
 
 /// `K-LIB-003`, `K-LIB-004`: a function with a native implementation takes
-/// no function, and a body beside a native implementation cannot wait.
+/// no function, and a body beside a native implementation cannot wait: it
+/// calls only functions that state a native implementation, so all it runs
+/// is covered by its formula (`K-CHG-007`).
 #[test]
 fn a_native_function_takes_no_function_and_its_body_cannot_wait() {
     let (catalog, header) = catalog();
@@ -617,6 +619,18 @@ fn a_native_function_takes_no_function_and_its_body_cannot_wait() {
             .reason,
         InvalidReason::NativeBodyMayWait {
             form: StatementForm::Sleep
+        }
+    );
+    let calls_helper = parse_definition(&format!(
+        "function busy(x: Any) -> Any\nkernel 1\ncharge 1\nnative\n{uses}body {{\n  let y = invoke helper.twice(x)\n  return y\n}}\n"
+    ))
+    .unwrap();
+    assert_eq!(
+        *crate::validate_definition(&calls_helper, &catalog)
+            .unwrap_err()
+            .reason,
+        InvalidReason::NativeBodyMayWait {
+            form: StatementForm::Call
         }
     );
     let calls_native = parse_definition(&format!(

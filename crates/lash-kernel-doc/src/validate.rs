@@ -943,22 +943,23 @@ fn mentions_function(ty: &Type) -> bool {
 fn check_formula(formula: &Formula, signature: &Signature, result: bool) -> Result<(), Invalid> {
     match formula {
         Formula::Constant(_) => Ok(()),
-        Formula::Size(operand) | Formula::DeepSize(operand) | Formula::Magnitude(operand) => {
-            match operand {
-                Operand::Result if result => Ok(()),
-                Operand::Result => Err(invalid(None, InvalidReason::LimitMeasuresResult)),
-                Operand::Param(name) => {
-                    if signature.params.iter().any(|param| &param.name == name) {
-                        Ok(())
-                    } else {
-                        Err(invalid(
-                            None,
-                            InvalidReason::FormulaUnknownParam { name: name.clone() },
-                        ))
-                    }
+        Formula::Size(operand)
+        | Formula::DeepSize(operand)
+        | Formula::NestedSize(operand)
+        | Formula::Magnitude(operand) => match operand {
+            Operand::Result if result => Ok(()),
+            Operand::Result => Err(invalid(None, InvalidReason::LimitMeasuresResult)),
+            Operand::Param(name) => {
+                if signature.params.iter().any(|param| &param.name == name) {
+                    Ok(())
+                } else {
+                    Err(invalid(
+                        None,
+                        InvalidReason::FormulaUnknownParam { name: name.clone() },
+                    ))
                 }
             }
-        }
+        },
         Formula::Max(terms) | Formula::Min(terms) if terms.is_empty() => {
             Err(invalid(None, InvalidReason::EmptyFormula))
         }

@@ -326,6 +326,16 @@ const acc: number[] = [];
 for (let n = 0; n < 300; n++) { for (const x of other) { acc.push(x); } }
 await finish({ total: acc.length, head: acc[0] });
 "#.to_string()),
+        // The costliest model-written cell the RLM standard instruction
+        // budget was measured over (`InstructionBound::standard`).
+        ("rows_print_3000", r#"
+const rows = [];
+for (let i = 0; i < 3000; i++) {
+  rows.push({ index: i, text: "a row the cell prints and finishes with" });
+}
+console.log(rows);
+await finish({ rows });
+"#.to_string()),
     ];
     programs.push(("heap_shallow_chain_mutation", chain(6)));
     programs.push(("heap_deep_chain_mutation_24", chain(24)));

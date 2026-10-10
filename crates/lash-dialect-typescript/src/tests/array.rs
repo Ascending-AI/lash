@@ -184,6 +184,20 @@ fn callbacks_snapshot_length_but_read_live_properties() {
     "#);
 }
 
+/// A split with a limit builds only the pieces it returns: a list of a
+/// million pieces, at 16 bytes a piece, would not fit this run's 16 MiB
+/// (FIG-5825).
+#[test]
+fn a_limited_split_builds_only_the_pieces_it_returns() {
+    law(r#"
+        const commas = ",".repeat(1000000);
+        const first = commas.split(",", 1);
+        const two = commas.split("", 2);
+        await finish(first.length === 1 && first[0] === "" && two.join("|") === ",|,"
+            && "a😀b".split("", 1).join("|") === "a");
+    "#);
+}
+
 /// Async callbacks are ordinary calls: each starts a task immediately, map
 /// retains the resulting promises and the aggregate joins them concurrently.
 #[test]

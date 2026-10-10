@@ -32,11 +32,13 @@ the baseline needs a new definition identity (`K-VER-002`).
 - **K-LTXT-004.** `text.compare(a, b)` compares scalar values;
   `text.utf16_compare(a, b)` compares units. Both return -1, 0 or 1 and put a
   prefix before its extension (`K-VAL-030`).
-- **K-LTXT-005.** `text.concat(a, b)` concatenates. `text.split(text, separator)`
-  returns a fresh list, retaining empty pieces for a nonempty literal separator;
-  an empty separator gives the scalar values and gives an empty list for empty
-  text. `text.join(list, separator)` requires text members.
-  `text.replace(text, needle, replacement)` replaces all literal,
+- **K-LTXT-005.** `text.concat(a, b)` concatenates.
+  `text.split(text, separator, limit?)` returns a fresh list, retaining empty
+  pieces for a nonempty literal separator; an empty separator gives the scalar
+  values and gives an empty list for empty text. A limit keeps the first
+  `limit` pieces and builds no other; a negative limit raises `number_range`,
+  and an omitted one keeps every piece. `text.join(list, separator)` requires
+  text members. `text.replace(text, needle, replacement)` replaces all literal,
   nonoverlapping matches from left to right. An empty needle inserts at every
   scalar boundary, including both ends. No function uses regular expressions.
 - **K-LTXT-006.** `text.lower_u<major>_<minor>_<patch>` and

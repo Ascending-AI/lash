@@ -545,6 +545,33 @@ fn k_col_015_error_new_has_strict_text_and_retains_data_identity() {
     assert_eq!(error("return error.new(\"kind\", false)"), "type_error");
 }
 
+/// `K-CHG-003`, `K-CHG-005`: `same` compares two immutable values member by
+/// member, so it is charged the immutable values it walks: two equal texts
+/// in separate nested tuples, or in two errors' data, cost at least their
+/// bytes (FIG-5825).
+#[test]
+fn k_chg_005_same_is_charged_the_immutable_values_nested_in_its_operands() {
+    const BYTES: u64 = 100_000;
+    let long = format!("\"{}\"", "x".repeat(BYTES as usize));
+    for compared in [
+        format!("let a = (({long},),) let b = (({long},),) return same(a, b)"),
+        format!(
+            "let a = error.new(\"k\", \"m\", ({long},)) let b = error.new(\"k\", \"m\", ({long},)) \
+             return same(a, b)"
+        ),
+    ] {
+        let mut machine = machine(&format!("main {{ {compared} }}"));
+        let Step::Ended(End::Finished(done)) =
+            machine.run(&mut World::default(), u64::MAX).unwrap()
+        else {
+            panic!("{compared}")
+        };
+        assert_eq!(done.result, Datum::Bool(true));
+        let charged = machine.meters().charged;
+        assert!(charged >= 2 * BYTES, "charged {charged} for {compared:.40}");
+    }
+}
+
 #[test]
 fn k_col_014_native_charges_count_the_sizes_and_are_repeatable() {
     // K-CHG-004: size(list) = 1 + length. copy's charge is

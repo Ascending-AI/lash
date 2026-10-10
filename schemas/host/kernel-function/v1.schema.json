@@ -542,6 +542,19 @@
         },
         {
           "additionalProperties": false,
+          "description": "The sizes of the immutable values nested in the operand, down to\nthe heap objects it holds (`K-CHG-005`).",
+          "properties": {
+            "nested_size": {
+              "$ref": "#/$defs/Operand"
+            }
+          },
+          "required": [
+            "nested_size"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "The operand's value, when it is a non-negative number (`K-CHG-006`).",
           "properties": {
             "magnitude": {
