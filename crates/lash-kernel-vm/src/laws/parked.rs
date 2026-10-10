@@ -43,13 +43,19 @@ fn deliver_next(embedder: &mut Embedder) {
 /// each slice. Every hop takes another layout, and every other hop swaps
 /// which implementation of `pair.twice` runs.
 fn observe(text: &str, slice: u64, relay: bool) -> Observed {
-    let mut embedder = Embedder::with(
+    observe_with(
         text,
         Setup {
             slice,
             ..Setup::default()
         },
-    );
+        relay,
+    )
+}
+
+/// [`observe`] under a setup of the law's own.
+fn observe_with(text: &str, setup: Setup, relay: bool) -> Observed {
+    let mut embedder = Embedder::with(text, setup);
     let mut hops = 0u64;
     let mut hop = |embedder: &mut Embedder| {
         if relay {
@@ -252,6 +258,50 @@ fn a_run_rebuilt_at_every_safe_point_runs_the_same() {
         assert_eq!(observe(text, u64::MAX, true), straight, "{name}, at parks");
         // A slice of 0 returns after every statement.
         assert_eq!(observe(text, 0, true), straight, "{name}, at slices");
+    }
+}
+
+/// A `do` whose call completes at once, a block ended after it, and a
+/// `try` entered in the next block: a generated document reduced to what
+/// faulted its export.
+const DO_CALL_THEN_A_TRY: &str = r#"
+main {
+  let xs = [0, 1, 2]
+  if true {
+    do invoke list.len(xs)
+    print xs
+  }
+  if true {
+    try { throw [16990, "error"] } catch e { print e } finally { do sleep 1 }
+  }
+  return xs
+}
+"#;
+
+/// A `do` whose call completed at once waits in nothing (`K-STMT-001`,
+/// `K-MACH-007`): every slice after it ends between statements, and the
+/// run rebuilt there neither runs that statement again nor faults. Slices
+/// of every length up to the whole run's charge, rebuilt at each, run as
+/// the run that never sliced, within the charge that run spent.
+#[test]
+fn a_do_whose_call_completed_at_once_is_saved_past_its_statement() {
+    let straight = observe(DO_CALL_THEN_A_TRY, u64::MAX, false);
+    assert!(matches!(straight.0, End::Finished(_)), "{:?}", straight.0);
+    assert!(!straight.2.is_empty(), "the run parks");
+    for slice in 0..=straight.3 {
+        let setup = Setup {
+            bounds: Bounds {
+                charge: straight.3,
+                ..ROOMY
+            },
+            slice,
+            ..Setup::default()
+        };
+        assert_eq!(
+            observe_with(DO_CALL_THEN_A_TRY, setup, true),
+            straight,
+            "slices of {slice}"
+        );
     }
 }
 

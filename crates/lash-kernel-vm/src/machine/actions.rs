@@ -218,7 +218,9 @@ impl KernelMachine {
     }
 
     /// A call action, its arguments the argument stack from `base`. The
-    /// caller takes them off.
+    /// caller takes them off. The statement waits in the call only when the
+    /// call runs in a frame of its own: one that completed at once has
+    /// left its statement behind (`K-MACH-007`).
     fn call(
         &mut self,
         task: TaskId,
@@ -227,23 +229,26 @@ impl KernelMachine {
         target: Target,
         base: usize,
     ) -> Eval<Option<Value>> {
-        self.frame(task)?.awaiting = Some(stmt);
-        match target {
-            Target::Code(code, captures) => {
-                self.push_frame(task, exe, Call::new(code, base).sharing(&captures))?;
-                Ok(None)
-            }
+        let (code, captures, library) = match target {
+            Target::Code(code, captures) => (code, captures, None),
             Target::Library(lib) => match self.call_library(task, exe, lib, base)? {
-                Some(value) => Ok(Some(value)),
+                Some(value) => return Ok(Some(value)),
                 None => {
                     let LibRun::Body(code) = &exe.lib(lib).run else {
                         return Err(fault("a function with no body was run as one").into());
                     };
-                    self.push_frame(task, exe, Call::new(*code, base).of_library(lib))?;
-                    Ok(None)
+                    (*code, Vec::new(), Some(lib))
                 }
             },
-        }
+        };
+        self.frame(task)?.awaiting = Some(stmt);
+        let call = Call::new(code, base).sharing(&captures);
+        let call = match library {
+            Some(lib) => call.of_library(lib),
+            None => call,
+        };
+        self.push_frame(task, exe, call)?;
+        Ok(None)
     }
 
     /// Reads an action's atoms onto the argument stack, left to right
