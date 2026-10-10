@@ -439,8 +439,8 @@ pub trait TurnDrive: Send {
     ) -> Result<TurnCommit, TurnError>;
 
     /// The turn's `turn.commit` was acknowledged: publish what the turn held
-    /// back for it, its after-turn callbacks' state and its stop's terminal
-    /// among it (ADR 0122). A drive whose commit was refused, or whose
+    /// back for it, its after-turn callbacks' state and its outcome among it
+    /// (ADR 0122, FIG-5800). A drive whose commit was refused, or whose
     /// acknowledgement was lost, is dropped without it and publishes none of
     /// what it held.
     async fn committed(&mut self);

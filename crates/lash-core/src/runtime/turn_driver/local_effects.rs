@@ -11,6 +11,9 @@ struct LocalTurnEffectRunner {
     /// The machine's admitted last-call usage at this effect's boundary.
     last_call_usage: Option<crate::LlmUsage>,
     active_events: lash_sansio::AppendVec<crate::SessionHistoryRecord>,
+    /// The machine waits on a checkpoint that decides a control call's
+    /// candidate, which input addressed to the turn supersedes.
+    decides_candidate: bool,
     event_tx: TurnObserver,
 }
 
@@ -153,6 +156,7 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                         runner.messages.clone(),
                         runner.protocol_iteration,
                         checkpoint,
+                        runner.decides_candidate,
                         &runner.event_tx,
                     )
                     .await
@@ -283,6 +287,7 @@ pub(super) fn turn_effect_executor(
             prompt_messages: machine.prompt_message_sequence(),
             last_call_usage: machine.last_call_usage().cloned().and_then(nonzero_usage),
             active_events: driver.turn_pipeline.active_events(),
+            decides_candidate: machine.awaits_completion_decision(),
             event_tx,
         }),
         replay_trace,

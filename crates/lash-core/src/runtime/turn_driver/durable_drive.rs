@@ -800,8 +800,8 @@ impl TurnDrive for RuntimeDrive {
         // The turn's activity reaches the live stream before its commit is
         // durable: a follower that reads the run ended from the store finds
         // everything the run published already there, and waits for no
-        // observation of the commit (FIG-5507). A stop's terminal stays held
-        // for the commit (ADR 0122).
+        // observation of the commit (FIG-5507). The turn's outcome stays held
+        // for the commit (ADR 0122, FIG-5800).
         self.observer.published().await;
         self.committing = self
             .commit
@@ -815,7 +815,7 @@ impl TurnDrive for RuntimeDrive {
     }
 
     /// The after-turn callbacks' state publishes from the acknowledged
-    /// commit. What a stop held back for its commit is published with it,
+    /// commit. What the outcome held back for its commit is published with it,
     /// and the publisher ends once that reached the live stream; then the
     /// commit itself, which settles the turn's provisional activity; then
     /// the lifecycle observers see the finalized turn.

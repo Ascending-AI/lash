@@ -22,12 +22,13 @@
 //!   delta it queued, so a host that keeps up holds the streamed tail lash
 //!   does not keep (ADR 0122). Every non-delta event is always queued and
 //!   always delivered, behind every delta queued before it.
-//! - **A stop publishes after its commit.** From the moment a turn records a
-//!   `Stopped` terminal, everything it publishes is held
-//!   ([`TurnObserver::hold_terminal`]) until the turn's commit is accepted,
-//!   and is then released in order ([`TurnObserver::release_terminal`]). A
-//!   commit that fails publishes none of it: the drive that held it is
-//!   dropped.
+//! - **An outcome publishes after its commit.** From the moment a turn
+//!   records its outcome, a stop or a finish alike, everything it publishes
+//!   is held ([`TurnObserver::hold_terminal`]) until the turn's commit is
+//!   accepted, and is then released in order
+//!   ([`TurnObserver::release_terminal`]). A commit that fails, or that a
+//!   cancel the commit fences wins over, publishes none of it: the drive
+//!   that held it is dropped (FIG-5800).
 //! - **Everything else publishes before its commit.** A durable turn waits
 //!   for what it queued to reach the host ([`TurnObserver::published`])
 //!   before it commits, so whoever reads the turn's terminal from the store
@@ -119,8 +120,8 @@ struct QueueState {
     published_waiter: Option<Waker>,
     /// The host end is gone: nothing queued will be published.
     abandoned: bool,
-    /// A stopped turn's terminal and everything after it, held until its
-    /// commit is accepted.
+    /// A turn's outcome and everything after it, held until its commit is
+    /// accepted.
     held: Option<Vec<Observation>>,
 }
 
@@ -244,8 +245,8 @@ impl TurnObserver {
         }
     }
 
-    /// Hold everything published from now on: the turn recorded a `Stopped`
-    /// terminal, which no host may see before its commit (ADR 0122).
+    /// Hold everything published from now on: the turn recorded its outcome,
+    /// which no host may see before its commit (ADR 0122, FIG-5800).
     pub(in crate::runtime) fn hold_terminal(&self) {
         let mut state = self.queue.state.lock_recover();
         if state.held.is_none() {
@@ -286,7 +287,7 @@ impl TurnObserver {
     }
 
     /// Everything published so far has reached the host: every open frame
-    /// is queued, and the publisher has published the queue. What a stop
+    /// is queued, and the publisher has published the queue. What an outcome
     /// holds for its commit stays held. Answers at once when the host end
     /// is gone, since nothing will drain the queue.
     pub(in crate::runtime) async fn published(&self) {

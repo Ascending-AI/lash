@@ -1009,6 +1009,10 @@ const PROMPT_TOKENS: i64 = 190_000;
 struct PromptUsage {
     tripwire: Arc<Tripwire>,
     backend: Mutex<Option<Backend>>,
+    /// The virtual clock the database was built on, which the core's VM
+    /// worker calls hold: a cell that runs for real milliseconds must not
+    /// let the clock run its tool calls past their limits.
+    clock: Mutex<Option<Arc<SimClock>>>,
     core: Mutex<Option<lash::LashCore>>,
     keep: Mutex<Vec<Box<dyn std::any::Any + Send>>>,
 }
@@ -1018,6 +1022,7 @@ impl PromptUsage {
         Self {
             tripwire: Arc::default(),
             backend: Mutex::default(),
+            clock: Mutex::default(),
             core: Mutex::default(),
             keep: Mutex::default(),
         }
@@ -1033,6 +1038,11 @@ impl PromptUsage {
     /// The deployment's RLM core; the simulated nodes run its turns.
     fn core(&self) -> lash::LashCore {
         let backend = self.backend();
+        let clock = self
+            .clock
+            .lock_recover()
+            .clone()
+            .expect("the database is built first");
         self.core
             .lock_recover()
             .get_or_insert_with(|| {
@@ -1050,7 +1060,7 @@ impl PromptUsage {
                     .into_handle();
                 lash::LashCore::rlm_builder(
                     backend.clone(),
-                    served::rlm(&backend, None, sim::untimed_workers()),
+                    served::rlm(&backend, None, sim::workers(&clock)),
                 )
                 .serve_sessions(false)
                 .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
@@ -1073,6 +1083,7 @@ impl PromptUsage {
 #[async_trait::async_trait]
 impl Scenario for PromptUsage {
     async fn database(&self, clock: Arc<SimClock>) -> Arc<dyn DurableStore> {
+        *self.clock.lock_recover() = Some(Arc::clone(&clock));
         let (stores, database): (Arc<dyn StoreSet>, Arc<dyn DurableStore>) =
             dialect::open(Dialect::SqliteMemory, None, clock, &self.keep).await;
         let backend = Backend::assemble(BackendParts {

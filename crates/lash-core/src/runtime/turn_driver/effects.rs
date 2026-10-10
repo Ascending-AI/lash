@@ -111,13 +111,14 @@ impl RuntimeTurnDriver<'_> {
         messages: crate::MessageSequence,
         protocol_iteration: usize,
         checkpoint: CheckpointKind,
+        decides_candidate: bool,
         event_tx: &TurnObserver,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         // A store that did not answer the admission is this attempt's
         // fault, never the checkpoint's outcome: the turn stops uncommitted
         // and the session's next pass recomputes it from its last phase.
         let admission = self
-            .checkpoint_admission(checkpoint)
+            .checkpoint_admission(checkpoint, decides_candidate)
             .await
             .map_err(|fault| {
                 RuntimeEffectControllerError::from(fault).retryable_uncommitted_derivation()
@@ -156,14 +157,22 @@ impl RuntimeTurnDriver<'_> {
     /// open, and the checkpoint the resumed turn recomputes admits them
     /// again; once bound, no checkpoint reads them open.
     ///
-    /// The terminal checkpoint admits nothing: the committed finish is the
-    /// turn's answer, and what arrives for the turn is the session's next
-    /// run once the turn ends (ADR 0101 §3, §5.1).
+    /// A completion checkpoint admits only when it decides a settled control
+    /// call's candidate (`decides_candidate`): what it delivers supersedes
+    /// the candidate and the turn goes on (FIG-5800). One that ends the turn
+    /// with a prose answer admits nothing: that answer is the turn's, and
+    /// what arrives for the turn is the session's next run once the turn
+    /// ends (ADR 0101 §3, §5.1).
     async fn checkpoint_admission(
         &self,
         checkpoint: CheckpointKind,
+        decides_candidate: bool,
     ) -> Result<crate::store::CheckpointAdmission, RuntimeError> {
-        if checkpoint != CheckpointKind::AfterWork {
+        let admits = match checkpoint {
+            CheckpointKind::AfterWork => true,
+            CheckpointKind::BeforeCompletion => decides_candidate,
+        };
+        if !admits {
             return Ok(crate::store::CheckpointAdmission::default());
         }
         let store = self
@@ -368,9 +377,8 @@ impl RuntimeTurnDriver<'_> {
             self.pending_checkpoint_turn_inputs.is_none(),
             "checkpoint admissions must be resolved before another checkpoint runs"
         );
-        // Steering input reaches a work checkpoint only:
-        // the terminal checkpoint admits nothing, and the committed finish
-        // stays the turn's answer (FIG-5293, FIG-5294).
+        // Steering input reaches a work checkpoint, and a completion
+        // checkpoint whose candidate it supersedes ([`Self::checkpoint_admission`]).
         if let Some(mut admitted) = turn_input_admission {
             drop_held_rows(&self.pending_turn_inputs, &mut admitted);
             if !admitted.inputs.is_empty() {

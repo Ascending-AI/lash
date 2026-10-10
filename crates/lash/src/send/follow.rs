@@ -15,11 +15,11 @@
 //! reads it answers at once, with what the replay holds past its cursor, and
 //! waits for no observation of the commit, which a node that died after
 //! committing never publishes. The replay is whole by then: a turn's node
-//! publishes the turn's activity before it commits (FIG-5507). Only a stop's
-//! own terminal activity is published after its commit (ADR 0122), and the
-//! outcome it carries is the terminal's. A follower that has been receiving
-//! a stopped run's activity reads on for it, until the commit's own
-//! observation that follows it, for at most the follow poll's ceiling
+//! publishes the turn's activity before it commits (FIG-5507). Only the
+//! turn's outcome activity is published after its commit (ADR 0122,
+//! FIG-5800), and the outcome it carries is the terminal's. A follower that
+//! has been receiving a run's activity reads on for it, until the commit's
+//! own observation that follows it, for at most the follow poll's ceiling
 //! (FIG-5793).
 
 use std::collections::{HashSet, VecDeque};
@@ -479,9 +479,7 @@ pub(super) async fn follow(
                 }
                 Resolution::Settled { run, outcome } => {
                     adoption.adopt(run.clone(), tap).await;
-                    if matches!(outcome, TurnOutcome::Stopped(_)) {
-                        await_stop_terminal(ctx, &mut adoption, &mut observation, tap).await;
-                    }
+                    await_outcome_activity(ctx, &mut adoption, &mut observation, tap).await;
                     drain(ctx, &mut adoption, &mut observation, tap).await;
                     ctx.refresh().await?;
                     let observed = observed_before || !adoption.collected.is_empty();
@@ -655,15 +653,16 @@ async fn next_event(
     }
 }
 
-/// Read on for a stopped run's terminal activity. Its node holds it for the
-/// run's commit and publishes it after (ADR 0122), and then the commit's own
-/// observation, so the store can show the run ended before the replay holds
-/// its terminal: a reported failure the host's feed would otherwise miss. A
+/// Read on for a settled run's outcome activity. Its node holds it for the
+/// run's commit and publishes it after (ADR 0122, FIG-5800), and then the
+/// commit's own observation, so the store can show the run ended before the
+/// replay holds its outcome: a finish or a reported failure the host's feed
+/// would otherwise miss. A
 /// follower that has been receiving the run's activity reads until it
 /// observes the commit of the turn it last heard the run from, for at most
 /// the follow poll's ceiling: a node that died after committing publishes
 /// neither (FIG-5793).
-async fn await_stop_terminal(
+async fn await_outcome_activity(
     ctx: &SendContext,
     adoption: &mut Adoption,
     observation: &mut Observation,

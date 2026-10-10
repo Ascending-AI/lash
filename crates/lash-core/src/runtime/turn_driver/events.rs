@@ -5,14 +5,10 @@ impl RuntimeTurnDriver<'_> {
     /// Publish an event. Every event the machine emits, and every terminal
     /// event the driver writes itself, goes through here, in program order.
     pub(super) fn emit_recorded(&mut self, event_tx: &TurnObserver, event: SessionStreamEvent) {
-        // A stop publishes after the commit that records it: a host never
-        // sees `Stopped` for a turn whose commit failed.
-        if matches!(
-            event,
-            SessionStreamEvent::TurnOutcome {
-                outcome: crate::TurnOutcome::Stopped(_)
-            }
-        ) {
+        // An outcome publishes after the commit that records it: a host
+        // never sees `Stopped` for a turn whose commit failed, nor `Finished`
+        // for one a cancel the commit fenced ended instead (FIG-5800).
+        if matches!(event, SessionStreamEvent::TurnOutcome { .. }) {
             event_tx.hold_terminal();
         }
         self.turn_observations

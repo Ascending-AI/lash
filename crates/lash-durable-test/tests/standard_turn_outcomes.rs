@@ -1220,6 +1220,115 @@ async fn attachment_in_array_tool_value_then_immediate_cancel_loses_nothing(tier
     world.shutdown().await;
 }
 
+/// FIG-5800: an `Immediate` cancel the host commits while a control call's
+/// finish is decided at the completion checkpoint, before the turn's commit
+/// fences cancellation, wins. The run ends cancelled, and the finish the
+/// checkpoint accepted never reaches the host: its `Finished` is held for
+/// the commit the cancel prevented, and discarded with it.
+async fn an_immediate_cancel_before_an_accepted_finish_commits_publishes_no_finished(tier: Tier) {
+    const RUN: &str = "cancelled-finish-run";
+    let core: Arc<std::sync::OnceLock<lash::LashCore>> = Arc::default();
+    let cancels = Arc::new(AtomicUsize::new(0));
+    let hook_core = Arc::clone(&core);
+    let hook_cancels = Arc::clone(&cancels);
+    let cancel_at_completion: Arc<dyn lash_core::plugin::PluginFactory> =
+        Arc::new(lash_core::plugin::StaticPluginFactory::new(
+            lash_core::plugin::PluginDeclaration::initial("cancel-at-completion"),
+            lash_core::facade_support::PluginSpec::new().with_checkpoint(
+                lash_core::hook_key!("cancel-at-completion"),
+                Arc::new(move |ctx: lash_core::plugin::CheckpointHookContext| {
+                    let core = Arc::clone(&hook_core);
+                    let cancels = Arc::clone(&hook_cancels);
+                    Box::pin(async move {
+                        if ctx.checkpoint == lash_core::CheckpointKind::BeforeCompletion
+                            && cancels.fetch_add(1, Ordering::SeqCst) == 0
+                        {
+                            let core = core.get().expect("the core is built before its turn");
+                            core.session(ctx.session_id.clone())
+                                .durable()
+                                .await
+                                .expect("the session's durable handle")
+                                .cancel(lash::CancelTarget::Run(
+                                    lash::TurnId::parse(RUN).expect("a run id"),
+                                ))
+                                .mode(lash_core::TurnCancelMode::Immediate)
+                                .reason("the host stopped the finishing turn")
+                                .await
+                                .expect("the cancel is accepted");
+                        }
+                        Ok(Default::default())
+                    })
+                }),
+            ),
+        ));
+    let Some(world) = World::with_model(
+        tier,
+        Vec::new(),
+        mock_provider(vec![
+            answer(vec![tool_call(
+                "finish-1",
+                "terminal_tool_0",
+                serde_json::json!({}),
+            )]),
+            answer(vec![text("unexpected follow-up")]),
+        ])
+        .into_handle(),
+        move |backend| {
+            lash::LashCore::standard_builder(backend.clone())
+                .tools(Arc::new(TerminalControlTool {
+                    controls: vec![lash_core::ToolControl::Turn {
+                        control: lash_core::TurnControl::Finish {
+                            value: lash_core::ToolValue::untrusted_json(serde_json::json!(
+                                "accepted"
+                            )),
+                        },
+                    }],
+                }))
+                .plugin(cancel_at_completion)
+        },
+    )
+    .await
+    else {
+        return;
+    };
+    assert!(core.set(world.core.clone()).is_ok(), "the core is set once");
+    let session = world
+        .session("cancelled-accepted-finish", served::spec(8))
+        .await;
+    let output = tokio::time::timeout(
+        served::WATCHDOG,
+        session
+            .send(lash::TurnInput::text("finish, then be cancelled"))
+            .id(lash::TurnId::parse(RUN).expect("a run id"))
+            .output(),
+    )
+    .await
+    .expect("deadlock watchdog: the cancelled turn settles")
+    .expect("the cancelled turn answers");
+
+    assert_eq!(
+        cancels.load(Ordering::SeqCst),
+        1,
+        "the cancel was requested once"
+    );
+    assert_eq!(
+        output.status(),
+        lash::TurnStatus::Cancelled,
+        "{:?}",
+        output.result.outcome
+    );
+    let published_finish = output
+        .activities
+        .iter()
+        .filter(|activity| matches!(activity.event, TurnEvent::Finished { .. }))
+        .collect::<Vec<_>>();
+    assert!(
+        published_finish.is_empty(),
+        "a cancelled turn published a finish: {published_finish:?}"
+    );
+    world.shutdown().await;
+}
+
 /// A session handle opened before the node ran its turn closes without a
 /// write: an open builds no capabilities, so its park reads the head the
 /// node committed through its own store and adopts it rather than flushing
@@ -1277,5 +1386,6 @@ tiered_laws!(
     unsupported_committed_tool_attachment_degrades_and_session_remains_continuable,
     accepted_tool_attachment_round_trips_without_degradation,
     attachment_in_array_tool_value_then_immediate_cancel_loses_nothing,
+    an_immediate_cancel_before_an_accepted_finish_commits_publishes_no_finished,
     a_session_opened_before_its_served_turn_closes_without_a_write,
 );

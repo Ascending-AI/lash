@@ -13,8 +13,9 @@
 //! the provisional activity the turn streamed before it.
 //!
 //! A turn's own activity is published before its commit (FIG-5507); only
-//! the commit's observation follows it, so an owner lost between the two,
-//! or one whose commit's acknowledgement was lost, publishes nothing. A
+//! its outcome, held for the commit (ADR 0122, FIG-5800), and the commit's
+//! observation follow it, so an owner lost between the two, or one whose
+//! commit's acknowledgement was lost, publishes neither. A
 //! reader on the committing node waits for a publication in flight before
 //! it calls the head it trails a gap ([`PublishedHeads::window`]). Before
 //! each pass an owner announces the durable head it finds unpublished by its

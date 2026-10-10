@@ -1,5 +1,5 @@
 //! Steering input on the production session activation
-//! (FIG-5293, FIG-5294, ADR 0101 §5, ADR 0132 §4).
+//! (FIG-5293, FIG-5294, FIG-5800, ADR 0101 §5, ADR 0132 §4).
 //!
 //! A lash core's session holds one sent input. While its turn runs, a host
 //! sends the session a steering input addressed to that turn
@@ -17,6 +17,12 @@
 //!   model call runs. The committed finish is the turn's answer, so the
 //!   terminal checkpoint withholds it; it stays session mail and runs as
 //!   the session's next run, under its own id (ADR 0101 §3, §5.1).
+//! - **At a completion candidate:** the turn's first round is a control
+//!   call whose body sends the steer before its finish settles. The
+//!   completion checkpoint that decides the candidate delivers it: the
+//!   candidate is superseded, the turn goes on into a new iteration whose
+//!   model reads the steer, and its second finish is the run's one answer
+//!   (FIG-5800).
 //!
 //! The matrix cuts the uncut run at every labelled write, under
 //! fail-before, ack-hidden, zombie, abort and commit-then-abort, recovers on
@@ -58,6 +64,8 @@ const RUN: &str = "steering-turn";
 /// The steer's host id: the run it opens when no running turn takes it.
 const STEER_RUN: &str = "steering-follow-on";
 const TOOL: &str = "steer_round";
+/// The control tool of the completion scenario: it finishes with its label.
+const FINISH_TOOL: &str = "finish_round";
 const MODEL: &str = "steering-model";
 const ASK: &str = "work through two rounds";
 const STEER: &str = "and mind the steer";
@@ -97,19 +105,29 @@ fn actor() -> ActorKey {
 enum Arrival {
     /// A steer, while the first round's tool body runs: the work checkpoint
     /// after the round delivers it.
-    SteerAtWork,
+    Work,
     /// A steer, while the turn's last model call runs: the terminal
     /// checkpoint withholds it.
-    SteerAtTerminal,
+    Terminal,
+    /// A steer, while the first round's control call runs: the completion
+    /// checkpoint deciding its candidate delivers it, and the candidate is
+    /// superseded.
+    Candidate,
 }
 
 impl Arrival {
     async fn send(self, core: &OnceLock<lash::LashCore>) {
-        send_steer(core).await;
+        let boundary = match self {
+            Self::Candidate => lash::persistence::TurnInputCheckpointBoundary::BeforeCompletion,
+            Self::Work | Self::Terminal => {
+                lash::persistence::TurnInputCheckpointBoundary::AfterWork
+            }
+        };
+        send_steer(core, boundary).await;
     }
 
     fn at_work(self) -> bool {
-        matches!(self, Self::SteerAtWork)
+        matches!(self, Self::Work)
     }
 
     /// What it sends, as the turn the session runs sees it.
@@ -121,7 +139,10 @@ impl Arrival {
 /// Send the steer through `core`, addressed to the running turn. Every send
 /// is the same submission under its host id, so a body or call that runs
 /// again after a cut accepts it once.
-async fn send_steer(core: &OnceLock<lash::LashCore>) {
+async fn send_steer(
+    core: &OnceLock<lash::LashCore>,
+    boundary: lash::persistence::TurnInputCheckpointBoundary,
+) {
     let core = core.get().expect("the core is built before its turn runs");
     let session = core
         .session(session())
@@ -133,7 +154,7 @@ async fn send_steer(core: &OnceLock<lash::LashCore>) {
         .id(steer_run())
         .ingress(lash::persistence::TurnInputIngress::active_turn(
             run(),
-            lash::persistence::TurnInputCheckpointBoundary::AfterWork,
+            boundary,
         ))
         .await
         .expect("the running turn accepts its steer");
@@ -180,6 +201,47 @@ fn steer_round(
     ))
 }
 
+/// `finish_round`'s body: the first round's call sends the steer, then
+/// every call finishes the turn with its label.
+struct FinishRound(Arc<OnceLock<lash::LashCore>>, Arrival);
+
+#[async_trait::async_trait]
+impl StaticToolExecute for FinishRound {
+    async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        let label = call.args["label"].as_str().unwrap_or_default().to_owned();
+        if label == FIRST_ROUND {
+            self.1.send(&self.0).await;
+        }
+        ToolOutcome::finish(serde_json::json!(label)).into()
+    }
+}
+
+fn finish_round(
+    core: Arc<OnceLock<lash::LashCore>>,
+    arrival: Arrival,
+) -> Arc<dyn lash_core::ToolProvider> {
+    let definition = lash_core::ToolDefinition::control(
+        FINISH_TOOL,
+        FINISH_TOOL,
+        "Finishes the turn with its label; the first round's call sends the steer.",
+        serde_json::json!({ "type": "object", "additionalProperties": true }),
+        lash_core::TurnControls::finish(),
+    )
+    .expect("finish_round's schemas")
+    .with_execution(std::time::Duration::from_secs(120))
+    // A call a kill interrupted runs again at its ordinal, so the first
+    // round's body sends the steer whatever was cut.
+    .with_execution_policy(lash_core::ExecutionPolicy::repeatable(
+        std::num::NonZeroU32::new(3).expect("a nonzero attempt bound"),
+        1,
+        1,
+    ));
+    Arc::new(StaticToolProvider::new(
+        vec![definition],
+        FinishRound(core, arrival),
+    ))
+}
+
 fn text(request: &LlmRequest, text: &str) -> LlmResponse {
     if let Some(stream) = request.stream_events.as_ref() {
         stream.send(LlmStreamEvent::Block(StreamBlockEvent::Delta {
@@ -198,10 +260,14 @@ fn text(request: &LlmRequest, text: &str) -> LlmResponse {
 }
 
 fn round(call: &str, label: &str) -> LlmResponse {
+    call_tool(TOOL, call, label)
+}
+
+fn call_tool(tool: &str, call: &str, label: &str) -> LlmResponse {
     LlmResponse {
         parts: vec![LlmOutputPart::ToolCall {
             call_id: call.to_owned(),
-            tool_name: TOOL.to_owned(),
+            tool_name: tool.to_owned(),
             input_json: serde_json::json!({ "label": label }).to_string(),
             replay: None,
         }],
@@ -227,7 +293,15 @@ fn model(
                 seen.lock_recover().push(rendered.clone());
                 // Delivered: everything that arrives reached the request.
                 let delivered = rendered.contains(STEER);
-                let response = if arrival.at_work() {
+                let response = if matches!(arrival, Arrival::Candidate) {
+                    // The finish the steer supersedes, then the one that
+                    // answers once the model has read it.
+                    if delivered {
+                        call_tool(FINISH_TOOL, "finish-call-2", SECOND_ROUND)
+                    } else {
+                        call_tool(FINISH_TOOL, "finish-call-1", FIRST_ROUND)
+                    }
+                } else if arrival.at_work() {
                     if delivered && rendered.contains(SECOND_ROUND) {
                         text(&request, FINAL)
                     } else if delivered {
@@ -308,7 +382,12 @@ impl Steering {
                         model(self.arrival, Arc::clone(&self.core), Arc::clone(&self.seen)),
                         metadata(),
                     )
-                    .tools(steer_round(Arc::clone(&self.core), self.arrival))
+                    .tools(match self.arrival {
+                        Arrival::Candidate => finish_round(Arc::clone(&self.core), self.arrival),
+                        Arrival::Work | Arrival::Terminal => {
+                            steer_round(Arc::clone(&self.core), self.arrival)
+                        }
+                    })
                     .build(lash::persistence::LeaseOwnerIdentity::opaque(
                         lash::persistence::LeaseOwnerId::new("steering-deployment"),
                         lash::persistence::LeaseIncarnationId::new("steering-boot"),
@@ -410,6 +489,62 @@ impl Steering {
         ) {
             violations.push(format!(
                 "the steer was not applied once, at the running turn's work checkpoint: {applications:?}"
+            ));
+        }
+        if *rows != 1 {
+            violations.push(format!("{rows} committed rows carry the steer's input id"));
+        }
+        violations
+    }
+
+    fn candidate_laws(
+        seen: &[String],
+        evidence: &(Option<TurnId>, Vec<lash_core::TurnInputApplication>, usize),
+    ) -> Vec<String> {
+        let mut violations = Vec::new();
+        // The steer reaches the model in the running turn, after the finish
+        // it superseded: no request holds it without that first finish.
+        if let Some(apart) = seen
+            .iter()
+            .find(|request| request.contains(STEER) && !request.contains(FIRST_ROUND))
+        {
+            violations.push(format!(
+                "the steer did not reach the turn whose finish it supersedes: {apart}"
+            ));
+        }
+        if !seen.iter().any(|request| request.contains(STEER)) {
+            violations.push("the completion checkpoint never delivered the steer".to_owned());
+        }
+        // The model reads that its finish did not end the turn.
+        if let Some(unexplained) = seen
+            .iter()
+            .find(|request| request.contains(STEER) && !request.contains("was superseded"))
+        {
+            violations.push(format!(
+                "the request after the steer does not say the finish was superseded: {unexplained}"
+            ));
+        }
+        if let Some(twice) = seen
+            .iter()
+            .find(|request| request.matches(STEER).count() > 1)
+        {
+            violations.push(format!("a request holds the steer twice: {twice}"));
+        }
+        let (bound, applications, rows) = evidence;
+        if bound.as_ref() != Some(&run()) {
+            violations.push(format!(
+                "the steer is bound to {bound:?}, not the running run"
+            ));
+        }
+        if !matches!(
+            applications.as_slice(),
+            [application]
+                if application.turn_id == run()
+                    && application.checkpoint
+                        == Some(lash_core::CheckpointKind::BeforeCompletion)
+        ) {
+            violations.push(format!(
+                "the steer was not applied once, at the running turn's completion checkpoint: {applications:?}"
             ));
         }
         if *rows != 1 {
@@ -530,12 +665,16 @@ impl Scenario for Steering {
         };
 
         let runs = match self.arrival {
-            arrival if arrival.at_work() => vec![run()],
-            _ => vec![run(), steer_run()],
+            Arrival::Work | Arrival::Candidate => vec![run()],
+            Arrival::Terminal => vec![run(), steer_run()],
         };
         for answered in &runs {
             match database.turn_end(&session(), answered).await {
-                Ok(Some(end)) if end.kind() == RunTerminalKind::Answered => {}
+                Ok(Some(end)) if end.kind() == RunTerminalKind::Answered => {
+                    if matches!(self.arrival, Arrival::Candidate) {
+                        violations.extend(second_finish_laws(&end.cause));
+                    }
+                }
                 other => violations.push(format!("run {answered} did not answer: {other:?}")),
             }
         }
@@ -550,10 +689,11 @@ impl Scenario for Steering {
 
         {
             match self.steer_evidence().await {
-                Ok(evidence) if self.arrival.at_work() => {
-                    violations.extend(Self::checkpoint_laws(&seen, &evidence));
-                }
-                Ok(evidence) => violations.extend(Self::terminal_laws(&seen, &evidence)),
+                Ok(evidence) => violations.extend(match self.arrival {
+                    Arrival::Work => Self::checkpoint_laws(&seen, &evidence),
+                    Arrival::Terminal => Self::terminal_laws(&seen, &evidence),
+                    Arrival::Candidate => Self::candidate_laws(&seen, &evidence),
+                }),
                 Err(error) => violations.push(error),
             }
         }
@@ -575,6 +715,23 @@ impl Scenario for Steering {
             violations.extend(zombie_laws(cut, &trace));
         }
         violations
+    }
+}
+
+/// The run answers the finish of the iteration the steer opened: the one
+/// it superseded is never its outcome.
+fn second_finish_laws(cause: &lash_core_store::store::RunTerminalCause) -> Vec<String> {
+    match cause {
+        lash_core_store::store::RunTerminalCause::Committed {
+            outcome:
+                lash_core_store::store::RunCommittedOutcome::Finished(
+                    lash_sansio::TurnFinish::Finished { tool_name, value },
+                ),
+            ..
+        } if tool_name == FINISH_TOOL && *value == serde_json::json!(SECOND_ROUND) => Vec::new(),
+        other => vec![format!(
+            "the run did not answer the finish after the steer: {other:?}"
+        )],
     }
 }
 
@@ -616,6 +773,19 @@ fn uncut_labels(arrival: Arrival) -> Vec<CommitLabel> {
             CommitLabel::MODEL_DONE,
             CommitLabel::ROUND_OUTCOME,
             CommitLabel::ROUND_PRESENT_MODEL_START,
+            CommitLabel::TURN_COMMIT,
+            CommitLabel::SESSION_RELEASE,
+        ],
+        // The first finish's round, then the iteration the steer opened:
+        // its delivery commits with that iteration's `model.start`.
+        Arrival::Candidate => vec![
+            CommitLabel::TURN_ADMIT,
+            CommitLabel::MODEL_START,
+            CommitLabel::MODEL_DONE,
+            CommitLabel::ROUND_OUTCOME,
+            CommitLabel::ROUND_PRESENT_MODEL_START,
+            CommitLabel::MODEL_DONE,
+            CommitLabel::ROUND_OUTCOME,
             CommitLabel::TURN_COMMIT,
             CommitLabel::SESSION_RELEASE,
         ],
@@ -665,13 +835,13 @@ async fn prove(arrival: Arrival, dialect: Dialect, postgres_url: Option<String>)
 /// every label, is delivered exactly once.
 #[tokio::test]
 async fn a_steer_at_a_work_checkpoint_killed_at_every_label_is_delivered_once_on_sqlite_memory() {
-    prove(Arrival::SteerAtWork, Dialect::SqliteMemory, None).await;
+    prove(Arrival::Work, Dialect::SqliteMemory, None).await;
 }
 
 /// On a SQLite file.
 #[tokio::test]
 async fn a_steer_at_a_work_checkpoint_killed_at_every_label_is_delivered_once_on_sqlite_file() {
-    prove(Arrival::SteerAtWork, Dialect::SqliteFile, None).await;
+    prove(Arrival::Work, Dialect::SqliteFile, None).await;
 }
 
 /// On PostgreSQL.
@@ -681,20 +851,20 @@ async fn a_steer_at_a_work_checkpoint_killed_at_every_label_is_delivered_once_on
         eprintln!("skipping: LASH_POSTGRES_DATABASE_URL is not set");
         return;
     };
-    prove(Arrival::SteerAtWork, Dialect::Postgres, Some(url)).await;
+    prove(Arrival::Work, Dialect::Postgres, Some(url)).await;
 }
 
 /// On SQLite in memory: a steer withheld at the terminal checkpoint, killed
 /// at every label, runs exactly once, as the next run.
 #[tokio::test]
 async fn a_withheld_steer_killed_at_every_label_runs_once_next_on_sqlite_memory() {
-    prove(Arrival::SteerAtTerminal, Dialect::SqliteMemory, None).await;
+    prove(Arrival::Terminal, Dialect::SqliteMemory, None).await;
 }
 
 /// On a SQLite file.
 #[tokio::test]
 async fn a_withheld_steer_killed_at_every_label_runs_once_next_on_sqlite_file() {
-    prove(Arrival::SteerAtTerminal, Dialect::SqliteFile, None).await;
+    prove(Arrival::Terminal, Dialect::SqliteFile, None).await;
 }
 
 /// On PostgreSQL.
@@ -704,5 +874,28 @@ async fn a_withheld_steer_killed_at_every_label_runs_once_next_on_postgres() {
         eprintln!("skipping: LASH_POSTGRES_DATABASE_URL is not set");
         return;
     };
-    prove(Arrival::SteerAtTerminal, Dialect::Postgres, Some(url)).await;
+    prove(Arrival::Terminal, Dialect::Postgres, Some(url)).await;
+}
+
+/// Uncut, on SQLite in memory: a steer queued while the turn's finish
+/// settles supersedes it at the completion checkpoint, and the turn goes on
+/// to answer with its next finish (FIG-5800).
+#[tokio::test]
+async fn a_steer_at_a_completion_candidate_supersedes_it_and_the_turn_goes_on_on_sqlite_memory() {
+    let report = Matrix::new()
+        .faults(&[])
+        .horizon(Duration::from_secs(600))
+        .run(|| Steering::new(Arrival::Candidate, Dialect::SqliteMemory, None))
+        .await;
+    report.assert_held();
+    report.assert_baseline_labels(&uncut_labels(Arrival::Candidate));
+}
+
+/// On SQLite in memory: the supersession killed at every label, the
+/// checkpoint's delivery among them, ends the run once, with the finish
+/// after the steer.
+#[tokio::test]
+async fn a_steer_at_a_completion_candidate_killed_at_every_label_supersedes_once_on_sqlite_memory()
+{
+    prove(Arrival::Candidate, Dialect::SqliteMemory, None).await;
 }

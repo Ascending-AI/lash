@@ -275,6 +275,23 @@ impl<M: TurnProtocol> TurnMachine<M> {
         &self.completion_candidates
     }
 
+    /// Whether the machine waits on a checkpoint that decides a settled
+    /// control call's candidate: input that checkpoint delivers supersedes
+    /// the candidate, so the host admits what is addressed to the turn there.
+    /// A restored machine answers as the one that recorded it.
+    pub fn awaits_completion_decision(&self) -> bool {
+        matches!(
+            &self.state,
+            MachineState::Waiting {
+                work: PendingWork::Checkpoint {
+                    on_empty: CheckpointResumeAction::Complete { .. },
+                    ..
+                },
+                ..
+            }
+        )
+    }
+
     /// The configuration the machine was built with, the one its checkpoint
     /// restores under ([`Self::restore_from_checkpoint`]).
     pub fn into_config(self) -> TurnMachineConfig<M> {
