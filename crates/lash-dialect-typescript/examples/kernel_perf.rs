@@ -555,11 +555,12 @@ struct Split {
     library: u64,
     program: u64,
     by_helper: BTreeMap<String, u64>,
-    /// Time inside `run`, by where the step ran: helper bodies, and the
-    /// rest. Stepping and exporting slow a run down, so only the shares
+    /// Time inside `run`, by where the step ran: helper bodies, library
+    /// bodies and document code. Stepping and exporting slow a run down, so only the shares
     /// mean anything.
     helper_time: std::time::Duration,
-    other_time: std::time::Duration,
+    library_time: std::time::Duration,
+    program_time: std::time::Duration,
     helper_time_by: BTreeMap<String, std::time::Duration>,
 }
 
@@ -593,12 +594,12 @@ fn split(program: &Program, registry: &FunctionRegistry, name: &str) -> Split {
                     *split.by_helper.entry(label).or_default() += spent;
                 } else {
                     split.library += spent;
-                    split.other_time += took;
+                    split.library_time += took;
                 }
             }
             _ => {
                 split.program += spent;
-                split.other_time += took;
+                split.program_time += took;
             }
         }
         match step {
@@ -697,7 +698,7 @@ fn main() {
         functions: &BTreeMap::new(),
     };
     println!(
-        "program\tfunctions\titerations\tns_start_and_run\tns_run\tcharged\tsteps\thelper_charge\tlibrary_body_charge\tprogram_charge\ttop_helpers\thelper_time_share\tslowest_helpers\tresult"
+        "program\tfunctions\titerations\tns_start_and_run\tns_run\tcharged\tsteps\thelper_charge\tlibrary_body_charge\tprogram_charge\ttop_helpers\thelper_time_share\tslowest_helpers\tlibrary_body_time_share\tprogram_time_share\tresult"
     );
     for (name, source) in &programs {
         let name = name.as_str();
@@ -761,10 +762,12 @@ fn main() {
             .map(|(helper, took)| format!("{helper}={}us", took.as_micros()))
             .collect::<Vec<_>>()
             .join(",");
-        let stepped = split.helper_time + split.other_time;
+        let stepped = split.helper_time + split.library_time + split.program_time;
         let helper_time_share = split.helper_time.as_secs_f64() / stepped.as_secs_f64().max(1e-9);
+        let library_time_share = split.library_time.as_secs_f64() / stepped.as_secs_f64().max(1e-9);
+        let program_time_share = split.program_time.as_secs_f64() / stepped.as_secs_f64().max(1e-9);
         println!(
-            "{name}\t{functions}\t{iterations}\t{:.1}\t{:.1}\t{charged}\t{}\t{}\t{}\t{}\t{top}\t{helper_time_share:.2}\t{slow}\t{result:?}",
+            "{name}\t{functions}\t{iterations}\t{:.1}\t{:.1}\t{charged}\t{}\t{}\t{}\t{}\t{top}\t{helper_time_share:.6}\t{slow}\t{library_time_share:.6}\t{program_time_share:.6}\t{result:?}",
             per(whole),
             per(running),
             split.steps,
