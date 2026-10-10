@@ -188,6 +188,9 @@ pub async fn coordinate_tool_invocation<'run>(
                                 Some(
                                     crate::ToolFailureCause::Interrupted
                                         | crate::ToolFailureCause::Panicked { .. }
+                                        // A refusal by the declaration is the
+                                        // call's answer: no repeat repairs it.
+                                        | crate::ToolFailureCause::Declaration { .. }
                                         | crate::ToolFailureCause::ExecutionLimit {
                                             cause: crate::LimitCause::ExecutionTotal
                                                 | crate::LimitCause::WaitDeadline,

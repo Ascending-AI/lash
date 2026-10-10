@@ -1214,11 +1214,12 @@ mod tests {
                     cause: lash::persistence::RunTerminalCause::Committed {
                         commit: lash::persistence::TurnCommitId::new(run.clone(), 0),
                         turn: run.clone(),
-                        outcome: lash::persistence::RunCommittedOutcome::Finished(
-                            lash::TurnFinish::AssistantMessage {
+                        outcome: lash::persistence::RunCommittedOutcome::Finished {
+                            finish: lash::TurnFinish::AssistantMessage {
                                 text: String::new(),
                             },
-                        ),
+                            value_schema: None,
+                        },
                     },
                     head_revision: None,
                     at_ms: 1,

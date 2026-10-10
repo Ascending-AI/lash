@@ -94,7 +94,6 @@ fn rlm_protocol_response_shape_mutation_guard() {
         TerminationMode::Natural,
         None,
         None,
-        None,
         vec![
             RlmContractStep::Llm(vec![rlm_text_part("RLM final prose")]),
             RlmContractStep::Checkpoint,

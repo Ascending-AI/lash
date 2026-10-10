@@ -1,7 +1,6 @@
 use lash_sansio::sync::MutexExt;
 use std::sync::Arc;
 
-use lash::rlm::RlmSendBuilderExt;
 use lash_core::llm::types::{LlmContentBlock, LlmMessage, LlmRequest, LlmRole};
 use lash_core::provider::{CacheControlDialect, CacheRetention};
 use lash_llm_transport::cache_regression::{
@@ -183,19 +182,20 @@ async fn captured_rlm_iterations() -> Vec<LlmRequest> {
         )
         .build(crate::sim_process_owner())
         .expect("RLM cache regression core");
-    let session =
-        crate::open_created_session("cache-regression-model", &core, "cache-regression-session")
-            .await
-            .expect("RLM cache regression session");
+    let session = crate::open_created_finish_required_session(
+        "cache-regression-model",
+        &core,
+        "cache-regression-session",
+    )
+    .await
+    .expect("RLM cache regression session");
     engine
         .run_turn(
             &session,
             "cache-regression-turn",
             Arc::new(crate::backend::DiscardedTurnActivity),
             Arc::new(|session: &lash::LashSession| {
-                session
-                    .send(lash::TurnInput::text("increment a bound value twice"))
-                    .require_finish()
+                Ok(session.send(lash::TurnInput::text("increment a bound value twice")))
             }),
         )
         .await

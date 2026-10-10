@@ -64,8 +64,8 @@ mod tests {
     }
 
     /// A refused value names every violation, so the caller can fix them
-    /// all at once: what `control.finish` reports for a value its turn's
-    /// finish schema refuses (FIG-5802).
+    /// all at once: what a finish call reports for a value its tool's
+    /// declared value schema refuses (FIG-5802, FIG-5823).
     #[test]
     fn a_refused_value_names_every_violation() {
         let schema = JsonSchema::admit(serde_json::json!({

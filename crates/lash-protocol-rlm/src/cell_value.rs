@@ -54,6 +54,11 @@ fn float_json(value: Float) -> Json {
     if !float.is_finite() {
         return kinded("float", [("value", Json::String(value.to_string()))]);
     }
+    finite_float_json(float)
+}
+
+/// A finite float as a JSON number, a whole one without a fraction.
+fn finite_float_json(float: f64) -> Json {
     // 2^53: every whole float below it is one exact integer.
     if float.fract() == 0.0 && float.abs() < 9_007_199_254_740_992.0 {
         #[expect(
@@ -93,6 +98,28 @@ fn entries_json<K, V>(
                 ),
             )],
         ),
+    }
+}
+
+/// `value` with every whole number below 2^53 spelled as an integer, as
+/// [`datum_json`] spells a whole float: what a finish value's JSON is, so a
+/// dialect whose numbers are floats finishes with `7`, not `7.0`.
+pub(crate) fn whole_numbers_as_integers(value: Json) -> Json {
+    match value {
+        Json::Number(number) => match number.as_f64() {
+            Some(float) if number.is_f64() => finite_float_json(float),
+            _ => Json::Number(number),
+        },
+        Json::Array(values) => {
+            Json::Array(values.into_iter().map(whole_numbers_as_integers).collect())
+        }
+        Json::Object(entries) => Json::Object(
+            entries
+                .into_iter()
+                .map(|(key, value)| (key, whole_numbers_as_integers(value)))
+                .collect(),
+        ),
+        other => other,
     }
 }
 

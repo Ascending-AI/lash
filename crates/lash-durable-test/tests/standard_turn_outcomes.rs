@@ -211,9 +211,9 @@ impl lash_core::ToolProvider for UndeclaredFinish {
     }
 
     async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-        lash_core::ToolOutcome::turn_control(lash_core::TurnControl::Finish {
-            value: lash_core::ToolValue::untrusted_json(serde_json::json!("smuggled")),
-        })
+        lash_core::ToolOutcome::finish(lash_core::ToolValue::untrusted_json(serde_json::json!(
+            "smuggled"
+        )))
         .into()
     }
 }
@@ -292,11 +292,13 @@ async fn standard_runtime_tool_control_finish_emits_terminal_output(tier: Tier) 
                 lash_core::ToolControl::Turn {
                     control: lash_core::TurnControl::Finish {
                         value: lash_core::ToolValue::untrusted_json(serde_json::json!("first")),
+                        value_schema: None,
                     },
                 },
                 lash_core::ToolControl::Turn {
                     control: lash_core::TurnControl::Finish {
                         value: lash_core::ToolValue::untrusted_json(serde_json::json!("second")),
+                        value_schema: None,
                     },
                 },
             ],
@@ -1281,6 +1283,7 @@ async fn an_immediate_cancel_before_an_accepted_finish_commits_publishes_no_fini
                             value: lash_core::ToolValue::untrusted_json(serde_json::json!(
                                 "accepted"
                             )),
+                            value_schema: None,
                         },
                     }],
                 }))

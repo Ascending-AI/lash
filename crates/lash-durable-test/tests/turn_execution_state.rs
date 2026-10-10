@@ -389,7 +389,7 @@ fn rotating_definition(name: &str) -> lash_core::ToolDefinition {
             name,
             description,
             input,
-            lash_core::TurnControls::finish(),
+            lash_core::TurnControls::finish(lash_core::JsonSchema::any()),
         ),
         _ => lash_core::ToolDefinition::raw(
             format!("tool:{name}"),

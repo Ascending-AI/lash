@@ -520,76 +520,38 @@ async fn assembled_prompt_fragments_with_projection(
     }
 
     // Every copy the dialect owns for turn boundaries.
-    fragments.push((
-        "finalization",
-        dialect
-            .finalization_copy(
-                lash_core::TerminationMode::TerminalRequired,
-                None,
-                crate::plugin::RlmChannel::Cell,
-            )
-            .to_string(),
-    ));
-    fragments.push((
-        "finalization (natural)",
-        dialect
-            .finalization_copy(
-                lash_core::TerminationMode::Natural,
-                None,
-                crate::plugin::RlmChannel::Cell,
-            )
-            .to_string(),
-    ));
-    for (name, schema) in [
+    // A host's own finish tool, named in place of `control.finish`.
+    let host_finish = ["await tools.answer(…)".to_owned()];
+    for (name, termination, finishing) in [
         (
-            "finalization (natural, text schema)",
-            serde_json::json!({"type": "string"}),
+            "finalization",
+            lash_core::TerminationMode::TerminalRequired,
+            &[][..],
         ),
         (
-            "finalization (natural, schema)",
-            serde_json::json!({"type": "number"}),
+            "finalization (natural)",
+            lash_core::TerminationMode::Natural,
+            &[][..],
+        ),
+        (
+            "finalization (host finish)",
+            lash_core::TerminationMode::TerminalRequired,
+            &host_finish[..],
         ),
     ] {
         fragments.push((
             name,
-            dialect.finalization_copy(
-                lash_core::TerminationMode::Natural,
-                Some(&lash_sansio::JsonSchema::admit(schema).expect("valid finish schema")),
-                crate::plugin::RlmChannel::Cell,
-            ),
+            dialect.finalization_copy(termination, finishing, crate::plugin::RlmChannel::Cell),
         ));
     }
-    fragments.push((
-        "finalization (schema)",
-        dialect.finalization_copy(
-            lash_core::TerminationMode::TerminalRequired,
-            Some(
-                &lash_sansio::JsonSchema::admit(serde_json::json!({"type": "number"}))
-                    .expect("valid finish schema"),
-            ),
-            crate::plugin::RlmChannel::Cell,
-        ),
-    ));
-    fragments.push((
-        "required output",
-        dialect.required_output_contract(&serde_json::json!({
-            "type": "object",
-            "properties": {
-                "verdict": { "type": "string", "enum": ["pass", "fail"] },
-                "notes": { "type": "array", "items": { "type": "string" }, "maxItems": 3 },
-                "score": { "type": "integer", "minimum": 0 }
-            },
-            "required": ["verdict"]
-        })),
-    ));
     fragments.push(("history definition", dialect.history_item_definition(true)));
     fragments.push((
         "finish required",
-        dialect.finish_required_copy(false, crate::plugin::RlmChannel::Cell),
+        dialect.finish_required_copy(&[], crate::plugin::RlmChannel::Cell),
     ));
     fragments.push((
-        "finish schema",
-        dialect.finish_required_copy(true, crate::plugin::RlmChannel::Cell),
+        "finish required (host finish)",
+        dialect.finish_required_copy(&host_finish, crate::plugin::RlmChannel::Cell),
     ));
     fragments.push((
         "invalid cell retry",

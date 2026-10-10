@@ -18,7 +18,7 @@ pub(crate) use lash_protocol_rlm::{RlmDriver, RlmProtocolPluginConfig, RlmProtoc
 /// one sans-io machine for one session.
 pub(crate) const RLM_TRANSCRIPT_ACTOR: &str = "rlm";
 use lash_core::CellRecord;
-pub(crate) use lash_rlm_types::{RlmProtocolEvent, RlmTurnOptions};
+pub(crate) use lash_rlm_types::{RlmCreateExtras, RlmProtocolEvent};
 pub(crate) use lash_sansio::llm::types::{
     LlmContentBlock, LlmOutputPart, LlmRequest, LlmResponse, LlmRole,
 };
@@ -39,25 +39,23 @@ pub(crate) fn test_config() -> TurnMachineConfig {
 pub(crate) fn test_config_with_termination(
     termination: lash_core::TerminationMode,
 ) -> TurnMachineConfig {
-    test_config_with_protocol_turn_options(recorded_namespace(RlmTurnOptions {
+    test_config_with_protocol_turn_options(recorded_namespace(RlmCreateExtras {
         termination: Some(termination),
-        finish_schema: None,
         render: None,
     }))
 }
 
-/// The recorded RLM namespace of a session that stated `options`: what the
+/// The recorded RLM namespace of a session created stating `options`: what the
 /// driver reads a turn's options from. The behaviour is an unbounded
 /// cell-channel one without process lifecycle.
 #[expect(
     clippy::expect_used,
     reason = "test support: a recorded RLM namespace is plain data and always encodes"
 )]
-pub(crate) fn recorded_namespace(options: RlmTurnOptions) -> lash_core::ProtocolTurnOptions {
+pub(crate) fn recorded_namespace(options: RlmCreateExtras) -> lash_core::ProtocolTurnOptions {
     lash_core::ProtocolTurnOptions::typed(lash_protocol_rlm::RlmRecordedConfig {
         render: options.render,
         termination: options.termination,
-        finish_schema: options.finish_schema,
         channel: Some(lash_protocol_rlm::RlmChannel::Cell),
         dialect: None,
         behaviour: lash_protocol_rlm::RlmProtocolPluginConfig::builder()
@@ -413,7 +411,7 @@ pub(crate) fn rlm_environment() -> sansio::ExecutionEnvironmentSync {
     sansio::ExecutionEnvironmentSync {
         turn_controls: [(
             lash_protocol_rlm::FINISH_TOOL_NAME.to_string(),
-            lash_core::TurnControls::finish(),
+            lash_core::TurnControls::finish(lash_core::JsonSchema::any()),
         )]
         .into(),
         ..sansio::ExecutionEnvironmentSync::default()

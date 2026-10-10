@@ -1,7 +1,7 @@
-//! A control call settles as its declaration says (FIG-5802): Lash's
-//! `control.finish` takes its value under the turn's finish schema as its
-//! input, and a control tool's settled result is its control alone, whatever
-//! its body or a result transform made of it.
+//! A control call settles as its declaration says (FIG-5802, FIG-5823): a
+//! finish value has the type its tool declares, a host's finish tool takes
+//! the place of Lash's, and a control tool's settled result is its control
+//! alone, whatever its body or a result transform made of it.
 
 use super::*;
 
@@ -9,28 +9,39 @@ use crate::{TurnEvent, TurnInput};
 use lash_core::ToolDefinitionBindingExt as _;
 use lash_core::facade_support::{TurnFinish, TurnOutcome};
 
-/// FIG-5802: a send that states a finish schema makes it `control.finish`'s
-/// input schema. A value the schema refuses fails the call through ordinary
-/// input validation: the cell catches the failure and goes on, the call
-/// spent the cell's one control attempt, and a later cell finishes.
+/// `answer.submit`: the host's own finish tool, whose value
+/// `value_schema` types.
+#[cfg(feature = "rlm")]
+fn answer_tool(value_schema: serde_json::Value) -> lash_core::ToolDefinition {
+    lash_core::finish_tool(
+        "answer",
+        lash_core::JsonSchema::admit(value_schema).expect("valid value schema"),
+    )
+    .with_tool_binding(lash_core::ToolBinding::new(["answer"], "submit"))
+}
+
+/// FIG-5823 law 4: a host that offers its own finish tool replaces Lash's
+/// `control.finish`, and a send whose tool access offers that tool retyped
+/// changes the value's shape for its run alone. The retyped run finishes
+/// with text; the next run, under the session's access, refuses text as
+/// the integer the host declared, and finishes with one.
 #[cfg(feature = "rlm")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn an_invalid_finish_value_fails_the_call_inside_the_cell() -> Result<()> {
+async fn a_host_finish_replaces_the_default_and_a_run_retypes_it_alone() -> Result<()> {
     let requests = Arc::new(StdMutex::new(Vec::<String>::new()));
     let cells = Arc::new(StdMutex::new(std::collections::VecDeque::from(vec![
+        typescript_block("await answer.submit(\"seven\");"),
         typescript_block(
             "let first = \"none\";\n\
-             try {\n  await control.finish(\"wrong\");\n} catch (error) {\n  first = error.name;\n}\n\
-             let second = \"none\";\n\
-             try {\n  await control.finish(7);\n} catch (error) {\n  second = error.name;\n}\n\
-             console.log(`caught ${first} then ${second}`);",
+             try {\n  await answer.submit(\"seven\");\n} catch (error) {\n  first = error.name;\n}\n\
+             console.log(`caught ${first}`);",
         ),
-        typescript_block("await control.finish(7);"),
+        typescript_block("await answer.submit(7);"),
     ])));
     let provider = {
         let (requests, cells) = (Arc::clone(&requests), Arc::clone(&cells));
         crate::testing::TestProvider::builder()
-            .kind("finish-input-contract")
+            .kind("host-finish")
             .complete(move |request| {
                 requests.lock_recover().push(
                     serde_json::to_string(&request.messages).expect("serialize request messages"),
@@ -44,34 +55,58 @@ async fn an_invalid_finish_value_fails_the_call_inside_the_cell() -> Result<()> 
     let core =
         explicit_ephemeral_facets(rlm_core_builder_over(sqlite_memory_store_backend().await))
             .serve_test_llm_profile(provider, mock_llm_profile_spec())
+            .tools(Arc::new(lash_core::FinishToolProvider::new([answer_tool(
+                serde_json::json!({ "type": "integer" }),
+            )])))
             .build(crate::testing::runtime_lease_owner())?;
     let session = core
-        .session(SessionId::parse("finish-input-contract").expect("nonblank host identity"))
+        .session(SessionId::parse("host-finish").expect("nonblank host identity"))
         .created()
         .await
         .open()
         .await?;
-    let report = crate::rlm::RlmSendBuilderExt::finish_schema(
-        session.send(TurnInput::text("answer with a whole number")),
-        serde_json::json!({ "type": "integer" }),
-    )?
-    .output()
-    .await?;
+    let retyped = session
+        .send(TurnInput::text("answer in words"))
+        .tool_access(
+            crate::plugins::SessionToolAccess::restricted([answer_tool(
+                serde_json::json!({ "type": "string" }),
+            )])
+            .expect("a retyped finish is valid access"),
+        )
+        .output()
+        .await?;
+    let typed = session
+        .send(TurnInput::text("answer with a number"))
+        .output()
+        .await?;
 
     assert_eq!(
-        report.result.outcome,
+        retyped.result.outcome,
         TurnOutcome::Finished(TurnFinish::Finished {
-            tool_name: "finish".to_string(),
+            tool_name: "answer".to_string(),
+            value: serde_json::json!("seven"),
+        })
+    );
+    assert_eq!(
+        typed.result.outcome,
+        TurnOutcome::Finished(TurnFinish::Finished {
+            tool_name: "answer".to_string(),
             value: serde_json::json!(7),
         })
     );
     let requests = requests.lock_recover().clone();
-    assert_eq!(requests.len(), 2, "{requests:?}");
+    assert_eq!(requests.len(), 3, "{requests:?}");
     assert!(
-        requests[1].contains("caught tool_failed then control_refused"),
-        "the cell caught the refused value, and its second finish found the attempt spent: {}",
-        requests[1]
+        requests[2].contains("caught tool_failed"),
+        "the run under the session's access refused text: {}",
+        requests[2]
     );
+    for request in &requests {
+        assert!(
+            request.contains("answer.submit") && !request.contains("control.finish"),
+            "the host's finish is offered in place of Lash's: {request}"
+        );
+    }
     drop(session);
     core.shutdown().await?;
     Ok(())
@@ -82,12 +117,14 @@ const SUBMIT: &str = "submit";
 /// What `submit`'s body answers with its arguments.
 type SubmitBody = fn(&serde_json::Value) -> lash_core::ToolOutcome;
 
-/// `submit`: a host tool that declares Finish, whose body is `body`.
+/// `submit`: a host tool that declares Finish with the value schema
+/// `value`, whose body is `body`.
 struct SubmitTool {
     body: SubmitBody,
+    value: lash_core::JsonSchema,
 }
 
-fn submit_definition() -> lash_core::ToolDefinition {
+fn submit_definition(value: lash_core::JsonSchema) -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::control(
         format!("tool:{SUBMIT}"),
         SUBMIT,
@@ -98,7 +135,7 @@ fn submit_definition() -> lash_core::ToolDefinition {
             "required": ["answer"],
             "additionalProperties": false
         }),
-        lash_core::TurnControls::finish(),
+        lash_core::TurnControls::finish(value),
     )
     .expect("valid declared tool schema")
     .with_execution(std::time::Duration::from_secs(30))
@@ -108,11 +145,11 @@ fn submit_definition() -> lash_core::ToolDefinition {
 #[async_trait]
 impl ToolProvider for SubmitTool {
     fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
-        vec![submit_definition().manifest()]
+        vec![submit_definition(self.value.clone()).manifest()]
     }
 
     fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
-        (name == SUBMIT).then(|| Arc::new(submit_definition().contract()))
+        (name == SUBMIT).then(|| Arc::new(submit_definition(self.value.clone()).contract()))
     }
 
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -167,7 +204,10 @@ async fn run_submit_turn(
         sqlite_memory_store_backend().await,
     ))
     .serve_test_llm_profile(provider, mock_llm_profile_spec())
-    .tools(Arc::new(SubmitTool { body }))
+    .tools(Arc::new(SubmitTool {
+        body,
+        value: lash_core::JsonSchema::any(),
+    }))
     .plugin(plugin)
     .build(crate::testing::runtime_lease_owner())?;
     let session = core
@@ -316,5 +356,100 @@ async fn a_control_tool_that_answers_a_value_is_refused() -> Result<()> {
             "{route}: the value never reaches the model: {next}"
         );
     }
+    Ok(())
+}
+
+/// A `batch` call of the model's whose one member is `submit` with
+/// `answer`.
+fn batch_submit(call: usize, answer: serde_json::Value) -> LlmResponse {
+    LlmResponse {
+        parts: vec![LlmOutputPart::ToolCall {
+            call_id: format!("call-batch-{call}"),
+            tool_name: "batch".to_string(),
+            input_json: serde_json::json!({
+                "tool_calls": [{ "tool": SUBMIT, "parameters": { "answer": answer } }]
+            })
+            .to_string(),
+            replay: None,
+        }],
+        ..LlmResponse::default()
+    }
+}
+
+/// FIG-5823 law 5: a standard session that requires a finish, whose model
+/// finishes through a `batch` member, has that member's value checked
+/// against its tool's declared value schema. Text where the tool declares
+/// an integer fails the member, the turn goes on, and the model's next
+/// batch finishes it with the integer.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_batch_member_finish_is_checked_against_its_value_schema() -> Result<()> {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let requests = Arc::new(StdMutex::new(Vec::<String>::new()));
+    let provider = {
+        let (calls, requests) = (Arc::clone(&calls), Arc::clone(&requests));
+        crate::testing::TestProvider::builder()
+            .kind("batch-member-finish")
+            .complete(move |request| {
+                let call = calls.fetch_add(1, Ordering::SeqCst);
+                requests
+                    .lock_recover()
+                    .push(format!("{:?}", request.messages));
+                async move {
+                    Ok(match call {
+                        0 => batch_submit(call, serde_json::json!("forty-two")),
+                        _ => batch_submit(call, serde_json::json!(42)),
+                    })
+                }
+            })
+            .build()
+            .into_handle()
+    };
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        sqlite_memory_store_backend().await,
+    ))
+    .serve_test_llm_profile(provider, mock_llm_profile_spec())
+    .tools(Arc::new(SubmitTool {
+        body: |args| lash_core::ToolOutcome::finish(args["answer"].clone()),
+        value: lash_core::JsonSchema::admit(serde_json::json!({ "type": "integer" }))
+            .expect("an integer schema is admitted"),
+    }))
+    .build(crate::testing::runtime_lease_owner())?;
+    let session = core
+        .session(SessionId::parse("batch-member-finish").expect("nonblank host identity"))
+        .create(crate::SessionCreation::root(
+            crate::plugins::SessionToolAccess::ambient(),
+            mock_session_spec()
+                .plugin(
+                    crate::standard::STANDARD_PROTOCOL_PLUGIN_ID,
+                    crate::standard::StandardTurnOptions {
+                        render: None,
+                        termination: Some(lash_core::TerminationMode::TerminalRequired),
+                    },
+                )
+                .expect("the creation options encode"),
+        ))
+        .await?;
+    let report = session
+        .send(TurnInput::text("submit the answer"))
+        .output()
+        .await?;
+
+    assert_eq!(
+        report.result.outcome,
+        TurnOutcome::Finished(TurnFinish::Finished {
+            tool_name: SUBMIT.to_string(),
+            value: serde_json::json!(42),
+        })
+    );
+    let requests = requests.lock_recover().clone();
+    let [_, refused] = requests.as_slice() else {
+        panic!("two model calls: {requests:?}");
+    };
+    assert!(
+        refused.contains("declared value schema"),
+        "the member's text value was refused: {refused}"
+    );
+    drop(session);
+    core.shutdown().await?;
     Ok(())
 }

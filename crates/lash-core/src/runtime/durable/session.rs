@@ -514,6 +514,10 @@ pub struct TurnDone {
     pub protocol_iteration: usize,
     /// The outcome it emitted, if it emitted one.
     pub outcome: Option<TurnOutcome>,
+    /// The value schema its accepted finish was validated under: the
+    /// witness its completion candidate kept. `None` when no finish tool
+    /// ended it.
+    pub finish_value_schema: Option<crate::JsonSchema>,
 }
 
 impl TurnDone {
@@ -531,7 +535,10 @@ impl TurnDone {
             .outcome
             .clone()
             .unwrap_or(TurnOutcome::Stopped(crate::TurnStop::Incomplete));
-        let committed = crate::store::RunCommittedOutcome::of_turn_outcome(&outcome);
+        let committed = crate::store::RunCommittedOutcome::of_turn_outcome(
+            &outcome,
+            self.finish_value_schema.clone(),
+        );
         let commit = crate::store::TurnCommitId::of_physical_turn(run, run).ok_or_else(|| {
             TurnError::Exec(format!("turn {run} is not its own run's physical turn"))
         })?;

@@ -280,12 +280,6 @@ pub(crate) fn cell_response_shape(tags: CellTags) -> String {
     )
 }
 
-/// Whether a finish schema asks for text: the user-facing answer a chat turn
-/// finishes with, rather than a structured value.
-pub(crate) fn schema_is_text(schema: &lash_sansio::JsonSchema) -> bool {
-    schema.as_value().get("type") == Some(&serde_json::Value::from("string"))
-}
-
 /// The session's dialect with the host resources it runs against: what
 /// every protocol adapter of one session carries.
 #[derive(Clone)]
@@ -450,56 +444,79 @@ impl SessionDialect {
         line
     }
 
-    /// The value the turn's finish control call must carry, as its type and
-    /// the rows of the fields that carry notes.
-    pub(crate) fn required_output_contract(&self, schema: &serde_json::Value) -> String {
-        let shape = SchemaShape::from_json_schema_with_depth(
-            schema,
-            self.services.presentation.tools.schema_depth,
-        );
-        let head = self.language().schema_type(&shape);
-        let rows = self.noted_field_rows(&shape);
-        if rows.is_empty() {
-            head
-        } else {
-            format!("{head}\nFields:\n{}", rows.join("\n"))
+    /// How a cell calls the finish tool `manifest`: Lash's `control.finish`
+    /// as the dialect spells it, or a host's own by its call path. Its input
+    /// is what the catalog documents.
+    pub(crate) fn finish_call(&self, manifest: &lash_core::ToolManifest) -> String {
+        if manifest.id.as_str() == crate::control_tools::FINISH_TOOL_ID {
+            return self.prompt_vocabulary().finish_call.to_owned();
+        }
+        match self.tool_call_path(manifest) {
+            Ok(path) => format!("await {path}(…)"),
+            Err(_) => manifest.name.clone(),
         }
     }
 
+    /// How a cell calls the finish tool named `name`, when only its name is
+    /// known: what a repair message reads from the synced surface.
+    pub(crate) fn finish_call_named(&self, name: &str) -> String {
+        if name == crate::control_tools::FINISH_TOOL_NAME {
+            self.prompt_vocabulary().finish_call.to_owned()
+        } else {
+            name.to_owned()
+        }
+    }
+
+    /// How the model calls each finish tool `ctx`'s synced surface offers:
+    /// what a finish-required reminder names.
+    pub(crate) fn offered_finish_calls(
+        &self,
+        ctx: &lash_core::DriverContextView<'_>,
+    ) -> Vec<String> {
+        ctx.finishing_tools()
+            .map(|name| self.finish_call_named(name))
+            .collect()
+    }
+
+    /// The finish calls `finishing` as prose: each in backticks, joined by
+    /// "or". None reads as Lash's own.
+    fn finish_calls(&self, finishing: &[String]) -> String {
+        if finishing.is_empty() {
+            return format!("`{}`", self.prompt_vocabulary().finish_call);
+        }
+        finishing
+            .iter()
+            .map(|call| format!("`{call}`"))
+            .collect::<Vec<_>>()
+            .join(" or ")
+    }
+
+    /// The finalization copy of a turn under `termination` whose surface
+    /// offers the finish calls `finishing`.
     pub(crate) fn finalization_copy(
         &self,
         termination: lash_core::TerminationMode,
-        finish_schema: Option<&lash_core::JsonSchema>,
+        finishing: &[String],
         channel: crate::plugin::RlmChannel,
     ) -> String {
         match termination {
             lash_core::TerminationMode::TerminalRequired => {
-                self.finish_required_finalization(finish_schema.is_some(), channel)
+                self.finish_required_finalization(finishing, channel)
             }
             lash_core::TerminationMode::Natural => {
                 let step = match channel {
                     crate::plugin::RlmChannel::Cell => "in a block",
                     crate::plugin::RlmChannel::NativeTool => "in an `execute_code` call",
                 };
-                let finish = self.prompt_vocabulary().finish_call;
+                let finish = self.finish_calls(finishing);
                 // A model that reads "return a value" as "return what the
                 // tool gave back" ends a chat turn with a record nobody can
-                // read (FIG-5104), so every variant names prose as the answer
-                // and a tool result as the thing the finish call never
-                // passes on.
-                let finish_rule = match finish_schema {
-                    None => format!(
-                        "Prefer prose for the final answer. Call `{finish}` inside the program only when the answer is a value the program built for this request, never to hand back a tool's raw result."
-                    ),
-                    Some(schema) if schema_is_text(schema) => format!(
-                        "Prefer prose for the final answer. `{finish}` takes only the user-facing answer text as a string, never a raw tool result; any other value fails the call and the turn goes on."
-                    ),
-                    Some(_) => format!(
-                        "Prefer prose for the final answer. `{finish}` takes only a value matching the REQUIRED OUTPUT contract, never a raw tool result; any other value fails the call and the turn goes on."
-                    ),
-                };
+                // read (FIG-5104), so the copy names prose as the answer and
+                // a tool result as the thing the finish call never passes on.
+                // A finish tool whose input is typed refuses any other value
+                // as an ordinary failed call, which the catalog documents.
                 format!(
-                    "Natural termination: prose alone ends this turn as the final answer, so write prose only when no work remains; otherwise perform the next step {step}. {finish_rule}"
+                    "Natural termination: prose alone ends this turn as the final answer, so write prose only when no work remains; otherwise perform the next step {step}. Prefer prose for the final answer. Call {finish} inside the program only when the answer is a value the program built for this request, never to hand back a tool's raw result."
                 )
             }
         }
@@ -518,11 +535,10 @@ impl SessionDialect {
 
     pub(crate) fn finish_required_copy(
         &self,
-        requires_schema: bool,
+        finishing: &[String],
         channel: crate::plugin::RlmChannel,
     ) -> String {
-        let vocabulary = self.prompt_vocabulary();
-        let tags = vocabulary.cell_tags;
+        let tags = self.prompt_vocabulary().cell_tags;
         let place = match channel {
             crate::plugin::RlmChannel::Cell => {
                 format!("inside a paired `{}...{}` block", tags.open, tags.close)
@@ -531,16 +547,10 @@ impl SessionDialect {
                 "inside the `code` argument of an `execute_code` call".to_string()
             }
         };
-        let finish = vocabulary.finish_call;
-        if requires_schema {
-            format!(
-                "Call `{finish}` {place} when the task is complete, with a value matching the required output schema. It ends the turn: make it the last thing the program does."
-            )
-        } else {
-            format!(
-                "Call `{finish}` {place} when the task is complete. It ends the turn: make it the last thing the program does."
-            )
-        }
+        let finish = self.finish_calls(finishing);
+        format!(
+            "Call {finish} {place} when the task is complete. It ends the turn: make it the last thing the program does."
+        )
     }
 
     pub(crate) fn invalid_cell_retry_copy(&self, error_text: &str) -> String {
@@ -594,27 +604,21 @@ impl SessionDialect {
 
     pub(crate) fn finish_required_finalization(
         &self,
-        requires_schema: bool,
+        finishing: &[String],
         channel: crate::plugin::RlmChannel,
     ) -> String {
-        let vocabulary = self.prompt_vocabulary();
-        let tags = vocabulary.cell_tags;
-        let mut text = match channel {
+        let tags = self.prompt_vocabulary().cell_tags;
+        let finish = self.finish_calls(finishing);
+        match channel {
             crate::plugin::RlmChannel::Cell => format!(
-                "Finish-required: prose alone never ends this turn. Every response, including the last, acts inside a paired `{open}...{close}` block. Do not call `{finish}` until the answer is in hand; the final response's block calls `{finish}` as its last statement. Never announce an action without the block that performs it.",
+                "Finish-required: prose alone never ends this turn. Every response, including the last, acts inside a paired `{open}...{close}` block. Do not call {finish} until the answer is in hand; the final response's block calls it as its last statement. Never announce an action without the block that performs it.",
                 open = tags.open,
                 close = tags.close,
-                finish = vocabulary.finish_call,
             ),
             crate::plugin::RlmChannel::NativeTool => format!(
-                "Finish-required: prose alone never ends this turn. Every response, including the last, acts inside the `code` argument of an `execute_code` call. Do not call `{finish}` until the answer is in hand; the final response's `execute_code` call runs `{finish}` as its last statement. Never announce an action without the `execute_code` call that performs it.",
-                finish = vocabulary.finish_call,
+                "Finish-required: prose alone never ends this turn. Every response, including the last, acts inside the `code` argument of an `execute_code` call. Do not call {finish} until the answer is in hand; the final response's `execute_code` call runs it as its last statement. Never announce an action without the `execute_code` call that performs it."
             ),
-        };
-        if requires_schema {
-            text.push_str(" The value must match the REQUIRED OUTPUT contract.");
         }
-        text
     }
 
     /// What to tell a model that opened a line with the cell tag in a position

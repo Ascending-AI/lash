@@ -1,5 +1,4 @@
 //! Request-boundary witnesses for initial instructions and positional feedback.
-use lash::rlm::RlmSendBuilderExt;
 use lash_core::llm::types::{LlmMessage, LlmRequest, LlmRole};
 use lash_core::provider::CacheRetention;
 use lash_sansio::sync::MutexExt;
@@ -375,19 +374,20 @@ async fn captured_output_limit_retry() -> Vec<LlmRequest> {
         )
         .build(crate::sim_process_owner())
         .expect("RLM cache regression core");
-    let session =
-        crate::open_created_session("cache-regression-model", &core, "cache-regression-session")
-            .await
-            .expect("RLM cache regression session");
+    let session = crate::open_created_finish_required_session(
+        "cache-regression-model",
+        &core,
+        "cache-regression-session",
+    )
+    .await
+    .expect("RLM cache regression session");
     engine
         .run_turn(
             &session,
             "cache-regression-turn",
             Arc::new(crate::backend::DiscardedTurnActivity),
             Arc::new(|session: &lash::LashSession| {
-                session
-                    .send(lash::TurnInput::text("increment a bound value twice"))
-                    .require_finish()
+                Ok(session.send(lash::TurnInput::text("increment a bound value twice")))
             }),
         )
         .await

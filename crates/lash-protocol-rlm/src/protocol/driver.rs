@@ -183,7 +183,7 @@ impl RlmDriver {
             correction: finish_required_reminder_message(
                 self.dialect.as_ref(),
                 attempt.message_id("finish_reminder"),
-                termination.finish_schema().is_some(),
+                &attempt.finishing,
             ),
         }))
     }
@@ -312,6 +312,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                         .generation()
                         .output_token_cap
                         .map(std::num::NonZeroUsize::get),
+                    finishing: self.dialect.offered_finish_calls(&ctx),
                 };
                 if let Err(err) = self.stall_retry_epilogue(
                     &ctx,
@@ -382,6 +383,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                 .generation()
                 .output_token_cap
                 .map(std::num::NonZeroUsize::get),
+            finishing: self.dialect.offered_finish_calls(&ctx),
         };
         let cell = match self.classify_reply(
             &attempt,
@@ -979,6 +981,8 @@ struct AttemptContext<'a> {
     turn_id: &'a TurnId,
     protocol_iteration: usize,
     output_token_cap: Option<usize>,
+    /// How the model calls each finish tool the turn's surface offers.
+    finishing: Vec<String>,
 }
 
 impl AttemptContext<'_> {

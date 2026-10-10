@@ -137,6 +137,7 @@ async fn slow_or_timed_out_ordinary_work_is_never_rerun_as_a_process() {
         SingletonBodyOutcome::Failed {
             output: "transport timed out".into(),
             suggested_delay_ms: None,
+            repeatable: true,
         },
         SingletonBodyOutcome::Done {
             output: "done".into(),

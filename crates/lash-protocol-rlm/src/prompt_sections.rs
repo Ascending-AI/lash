@@ -1,8 +1,7 @@
 //! The RLM protocol's keyed execution sections (ADR 0133).
 //!
 //! `execution` and `declarations` render in the initial instructions.
-//! `bound_variables`, `finalization`, `required_output` and `context_budget`
-//! render late, outside history. The host's plan may move or exclude them,
+//! `bound_variables`, `finalization` and `context_budget` render late, outside history. The host's plan may move or exclude them,
 //! and trusted wrappers may replace their text. Hosts supply their own
 //! identity, interaction guidance and answer presentation through sections.
 //! Compaction calls run no code and select none of these turn sections.
@@ -25,7 +24,6 @@ pub mod section_keys {
     pub const DECLARATIONS: &str = "declarations";
     pub const BOUND_VARIABLES: &str = "bound_variables";
     pub const FINALIZATION: &str = "finalization";
-    pub const REQUIRED_OUTPUT: &str = "required_output";
     pub const CONTEXT_BUDGET: &str = "context_budget";
 }
 
@@ -201,35 +199,28 @@ fn finalization(
     input: &PromptInput<'_>,
 ) -> Result<SectionText, PromptRenderError> {
     let termination = recorded(input)?
-        .map(|recorded| crate::rlm_support::RlmCompletion::from(recorded.turn_options()))
+        .map(|recorded| crate::rlm_support::RlmCompletion::of(&recorded))
         .unwrap_or_default();
-    let copy = match behaviour.channel {
-        RlmChannel::Cell => behaviour.dialect.finalization_copy(
-            termination.mode,
-            termination.finish_schema(),
-            RlmChannel::Cell,
-        ),
-        RlmChannel::NativeTool => {
-            crate::native::prompt::finalization(&behaviour.dialect, &termination)
-        }
-    };
+    // The copy names the finish tools the turn is actually offered: Lash's
+    // `control.finish`, or a host's own in its place. Their inputs are in the
+    // catalog.
+    let finishing = input
+        .offered()
+        .manifests()
+        .filter(|tool| {
+            tool.declaration()
+                .controls
+                .contains(lash_core::TurnControlKind::Finish)
+        })
+        .map(|tool| behaviour.dialect.finish_call(tool))
+        .collect::<Vec<_>>();
+    let copy = behaviour
+        .dialect
+        .finalization_copy(termination.mode, &finishing, behaviour.channel);
     // The original tail separates finalization from bindings with three newlines.
     Ok(SectionText::Text(format!(
         "\n=== FINALIZATION ===\n\n{copy}"
     )))
-}
-
-fn required_output(
-    behaviour: &RlmSectionBehaviour,
-    input: &PromptInput<'_>,
-) -> Result<SectionText, PromptRenderError> {
-    let termination = recorded(input)?
-        .map(|recorded| crate::rlm_support::RlmCompletion::from(recorded.turn_options()))
-        .unwrap_or_default();
-    Ok(late_block(
-        "REQUIRED OUTPUT",
-        crate::driver::required_output_block(&behaviour.dialect, &termination),
-    ))
 }
 
 fn context_budget(
@@ -280,12 +271,11 @@ pub(crate) fn register_sections(
     use PromptPlacement::{CurrentContext, InitialInstructions};
     use section_keys::*;
     let behaviour = Arc::new(behaviour);
-    let sections: [(&str, PromptPlacement, Render); 6] = [
+    let sections: [(&str, PromptPlacement, Render); 5] = [
         (EXECUTION, InitialInstructions, execution),
         (DECLARATIONS, InitialInstructions, declarations),
         (BOUND_VARIABLES, CurrentContext, bound_variables),
         (FINALIZATION, CurrentContext, finalization),
-        (REQUIRED_OUTPUT, CurrentContext, required_output),
         (CONTEXT_BUDGET, CurrentContext, context_budget),
     ];
     for (local, placement, render) in sections {

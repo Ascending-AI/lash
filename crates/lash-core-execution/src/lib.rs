@@ -124,6 +124,9 @@ pub mod tool_registry;
 pub mod tool_result;
 pub mod trace;
 
+mod finish_tool;
+pub use finish_tool::{FinishToolProvider, finish_tool, finish_tool_id, suppress_default_finish};
+
 pub mod facade_support {
     pub use crate::Response;
     pub use crate::runtime::effect::scope_status;

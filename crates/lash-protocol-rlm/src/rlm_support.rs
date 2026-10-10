@@ -7,31 +7,14 @@ use crate::dialect::DialectPrompts;
 use crate::render::CodeRenderer;
 use lash_core::LlmUsage;
 use lash_render::{RenderNode, RenderParams, RenderValue, truncate_chars};
-use lash_rlm_types::RlmTurnOptions;
 use lash_sansio::{ExtraKeys, ObjectShape, SchemaShape, ShapeField, ShapeKind};
 use serde_json::Value as FlowValue;
 
-/// What a turn runs under, read from `namespace`, the RLM namespace the
-/// turn's run recorded. A session that recorded none runs under the
-/// defaults.
-pub(crate) fn decode_rlm_options(
-    namespace: &lash_core::ProtocolTurnOptions,
-) -> Result<RlmTurnOptions, String> {
-    crate::plugin::RlmRecordedConfig::read(namespace)
-        .map(|recorded| {
-            recorded
-                .map(|recorded| recorded.turn_options())
-                .unwrap_or_default()
-        })
-        .map_err(|err| format!("invalid recorded RLM session config: {err}"))
-}
-
-/// How a turn may end, as its effective options state it: the mode, and the
-/// schema `control.finish` takes its value under.
+/// How a turn may end: the termination its session recorded at creation.
+/// A session that recorded none runs under the default.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct RlmCompletion {
     pub mode: lash_core::TerminationMode,
-    pub finish_schema: Option<lash_core::JsonSchema>,
 }
 
 impl RlmCompletion {
@@ -40,25 +23,22 @@ impl RlmCompletion {
         self.mode.prose_ends_turn()
     }
 
-    /// The schema a finish value must match, if the turn states one.
-    pub(crate) fn finish_schema(&self) -> Option<&lash_core::JsonSchema> {
-        self.finish_schema.as_ref()
-    }
-}
-
-impl From<RlmTurnOptions> for RlmCompletion {
-    fn from(options: RlmTurnOptions) -> Self {
+    /// The termination `recorded` states.
+    pub(crate) fn of(recorded: &crate::plugin::RlmRecordedConfig) -> Self {
         Self {
-            mode: options.effective_termination(),
-            finish_schema: options.finish_schema,
+            mode: recorded.termination.unwrap_or_default(),
         }
     }
 }
 
+/// How a turn may end, read from `namespace`, the RLM namespace the turn's
+/// run recorded.
 pub(crate) fn decode_rlm_termination_options(
-    options: &lash_core::ProtocolTurnOptions,
+    namespace: &lash_core::ProtocolTurnOptions,
 ) -> Result<RlmCompletion, String> {
-    decode_rlm_options(options).map(RlmCompletion::from)
+    crate::plugin::RlmRecordedConfig::read(namespace)
+        .map(|recorded| recorded.as_ref().map(RlmCompletion::of).unwrap_or_default())
+        .map_err(|err| format!("invalid recorded RLM session config: {err}"))
 }
 
 /// A turn that only a control call ends needs a tool that can end it with

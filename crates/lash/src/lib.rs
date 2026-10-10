@@ -435,6 +435,14 @@ pub mod tools {
     /// or an outcome it does not admit.
     pub use lash_core::{DeclarationRefusal, OutcomeShape, ToolDeclaration};
     pub use lash_core::{DeclaredStart, DeclaredStartRefused};
+    /// Turn flow control constructed by tool implementors; attach it with
+    /// [`ToolCallOutput::with_control`] or [`ToolOutcome::with_control`].
+    pub use lash_core::{
+        FinishDeclaration, ToolControl, TurnControl, TurnControlKind, TurnControls,
+    };
+    /// A finish tool: its call ends the turn with its whole input as the
+    /// turn's value, typed by the schema it is built with.
+    pub use lash_core::{FinishToolProvider, finish_tool, finish_tool_id};
     /// A tool's host-set bounds: [`ToolDefinition::with_execution`] bounds
     /// its body, [`ToolDefinition::with_declaration`] the park of a tool that
     /// may defer. A tool missing one cannot be defined: the refusal names
@@ -450,9 +458,6 @@ pub mod tools {
     /// is lash's internal projection — hosts never read or write it, and which
     /// dialect executes a bound tool is decided inside lash.
     pub use lash_core::{TOOL_BINDING_KEY, ToolBinding, ToolDefinitionBindingExt};
-    /// Turn flow control constructed by tool implementors; attach it with
-    /// [`ToolCallOutput::with_control`] or [`ToolOutcome::with_control`].
-    pub use lash_core::{ToolControl, TurnControl, TurnControlKind, TurnControls};
     pub use lash_core::{
         ToolId, ToolState, facade_support::SupersededToolIdentity,
         facade_support::ToolMembershipUpdate, facade_support::ToolRestoreReport,

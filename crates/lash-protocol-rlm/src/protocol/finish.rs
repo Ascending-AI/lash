@@ -88,17 +88,19 @@ fn prose_message(
     }
 }
 
+/// The reminder a reply that ended a finish-required turn with no control
+/// call reads, naming the finish calls `finishing` its surface offers.
 pub(super) fn finish_required_reminder_message(
     dialect: &SessionDialect,
     id: String,
-    requires_schema: bool,
+    finishing: &[String],
 ) -> Message {
     let tags = dialect.cell_tags();
     let repair = format!(
         "No code from that response executed. Markdown code fences do not execute here. Resend the needed program between `{}` and `{}` on their own lines, without backticks. {}",
         tags.open,
         tags.close,
-        dialect.finish_required_copy(requires_schema, crate::plugin::RlmChannel::Cell),
+        dialect.finish_required_copy(finishing, crate::plugin::RlmChannel::Cell),
     );
     Message {
         id: id.clone(),

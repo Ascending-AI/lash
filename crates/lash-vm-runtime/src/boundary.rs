@@ -326,7 +326,7 @@ mod tests {
             "finish",
             "Ends the turn.",
             serde_json::json!({}),
-            lash_core::TurnControls::finish(),
+            lash_core::TurnControls::finish(lash_core::JsonSchema::any()),
         )
         .expect("valid declared tool schema")
         .with_execution(std::time::Duration::from_secs(30))

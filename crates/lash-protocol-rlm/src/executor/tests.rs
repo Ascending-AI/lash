@@ -2,6 +2,7 @@
 //! through the production entry, in a worker, on a claimed session actor
 //! over a SQLite durable store.
 
+mod finish_value;
 mod python;
 
 /// V14: a parked call cannot override its boundary's control fact or copy
@@ -41,7 +42,7 @@ fn cell_ledger_derives_completed_facts_from_their_owners() {
     };
     let mut state = serde_json::json!({
         "cell": {"code": "code", "dialect": "typescript", "document": "{}", "annotations": "{}",
-            "effects": {"tools.work": {"tool": "work", "signature": {"params": [], "result": "null"}, "controls": []}},
+            "effects": {"tools.work": {"tool": "work", "signature": {"params": [], "result": "null"}, "controls": {}}},
             "grants": {}, "projected": []},
         "prints": [], "host": host, "started_process_ids": []
     });
@@ -79,7 +80,7 @@ fn cell_ledger_derives_completed_facts_from_their_owners() {
         .effects
         .get_mut(&lash_kernel_doc::EffectName::new("tools.work").unwrap())
         .unwrap()
-        .controls = lash_core::TurnControls::finish();
+        .controls = lash_core::TurnControls::finish(lash_core::JsonSchema::any());
     assert!(
         restored
             .host

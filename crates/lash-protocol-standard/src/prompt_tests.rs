@@ -127,7 +127,8 @@ async fn an_ask_tool_does_not_select_interaction_policy() {
                 "## Execution\n\n{}",
                 standard_execution_section(
                     BatchSugar::default(),
-                    lash_core::TerminationMode::Natural
+                    lash_core::TerminationMode::Natural,
+                    &[]
                 )
             )
         );

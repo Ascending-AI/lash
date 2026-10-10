@@ -2046,6 +2046,7 @@ async fn move_head(backend: &Backend, run: &str, messages: Vec<Message>) -> u64 
                 outcome: Some(TurnOutcome::Finished(TurnFinish::AssistantMessage {
                     text: format!("{run} answered"),
                 })),
+                finish_value_schema: None,
             },
             commit_budget(),
         )
@@ -2393,11 +2394,12 @@ async fn each_turn_terminal_reads_back(dialect: Dialect, postgres_url: Option<St
     let ends = [
         (
             "answered",
-            committed(RunCommittedOutcome::Finished(
-                TurnFinish::AssistantMessage {
+            committed(RunCommittedOutcome::Finished {
+                finish: TurnFinish::AssistantMessage {
                     text: "done".to_owned(),
                 },
-            )),
+                value_schema: None,
+            }),
             None,
         ),
         (

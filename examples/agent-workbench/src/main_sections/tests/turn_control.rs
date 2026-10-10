@@ -392,7 +392,7 @@ const hold_for_stop = async () => {
   return "unreachable";
 };
 const handle = await processes.start({ definition: hold_for_stop });
-await control.finish(String(await handle));
+await chat.reply(String(await handle));
 </typescript>"#,
     )
     .await;

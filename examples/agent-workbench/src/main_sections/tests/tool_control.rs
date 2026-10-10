@@ -69,7 +69,7 @@ fn workbench_control_tools() -> Arc<dyn lash::tools::ToolProvider> {
             "workbench_finish",
             "Finish the turn directly from a workbench tool.",
             empty_input.clone(),
-            lash::tools::TurnControls::finish(),
+            lash::tools::TurnControls::finish(lash::schema::JsonSchema::any()),
         )
         .expect("valid declared tool schemas")
         .with_execution(std::time::Duration::from_secs(120))
@@ -117,7 +117,7 @@ fn workbench_control_cell(source: &str) -> String {
 async fn workbench_tools_expose_typed_cancellation_and_turn_control() {
     let workbench = Workbench::builder(scripted_cells_provider(vec![
         workbench_control_cell(
-            "try {\n  await workbench_control.cancel({});\n} catch (error) {\n}\nawait control.finish(\"cancellation observed\");",
+            "try {\n  await workbench_control.cancel({});\n} catch (error) {\n}\nawait chat.reply(\"cancellation observed\");",
         ),
         workbench_control_cell("await workbench_control.finish({});"),
         workbench_control_cell("await workbench_control.fail({});"),

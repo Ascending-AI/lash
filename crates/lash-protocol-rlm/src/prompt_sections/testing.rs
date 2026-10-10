@@ -7,7 +7,7 @@ use lash_core::plugin::prompt::{OfferedTools, PromptCall, PromptCatalog, PromptM
 use lash_core::plugin::{PluginError, PluginRegistrar, SessionPlugin};
 use lash_core::prompt_sections::{PromptPlan, PromptPurpose};
 use lash_core::testing::prompt::{ComposedPrompt, PromptCutParts};
-use lash_rlm_types::RlmTurnOptions;
+use lash_rlm_types::RlmCreateExtras;
 
 use super::{RlmPromptFacts, RlmSectionBehaviour, register_sections};
 use crate::dialect::SessionDialect;
@@ -65,7 +65,7 @@ impl SessionPlugin for RlmSections {
 pub(crate) struct Call {
     pub(crate) catalog: lash_core::ToolCatalog,
     pub(crate) facts: Option<RlmPromptFacts>,
-    pub(crate) options: RlmTurnOptions,
+    pub(crate) options: RlmCreateExtras,
     pub(crate) committed_usage: Option<lash_core::LlmUsage>,
     pub(crate) context_window_tokens: Option<u64>,
     pub(crate) iteration: u32,
@@ -78,7 +78,7 @@ impl Default for Call {
         Self {
             catalog: lash_core::ToolCatalog::default(),
             facts: None,
-            options: RlmTurnOptions::default(),
+            options: RlmCreateExtras::default(),
             committed_usage: None,
             context_window_tokens: None,
             iteration: 0,

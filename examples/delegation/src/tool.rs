@@ -217,6 +217,37 @@ fn task_input(task: &str, output_schema: Option<&Value>) -> lash::TurnInput {
 }
 
 impl SpawnAgent {
+    /// The child's tool access: the host's, with the child's
+    /// `control.finish` typed by the call's output shape when the host
+    /// restricts the child to definitions it states. The child's final value
+    /// then has the type of the tool it finishes with, and a value of
+    /// another shape fails its finish call inside the child, where its model
+    /// can repair it.
+    fn child_tool_access(
+        &self,
+        output_schema: Option<JsonSchema>,
+    ) -> Result<lash::plugins::SessionToolAccess, ToolOutcome> {
+        let access = self.child.tool_access.clone();
+        let (Some(schema), Some(tools)) = (output_schema, access.restricted_tools()) else {
+            return Ok(access);
+        };
+        let tools = tools
+            .iter()
+            .map(
+                |tool| match tool.manifest.name == lash::rlm::FINISH_TOOL_NAME {
+                    true => tool
+                        .clone()
+                        .with_finish_value_schema(schema.clone())
+                        .unwrap_or_else(|| tool.clone()),
+                    false => tool.clone(),
+                },
+            )
+            .collect::<Vec<_>>();
+        lash::plugins::SessionToolAccess::restricted(tools)
+            .and_then(|restricted| restricted.with_hidden_tools(access.hidden_tools().clone()))
+            .map_err(|error| invalid(error.to_string()))
+    }
+
     /// The child's create request: exactly what the host configured and the
     /// call stated, recorded as a child of `parent` caused by `caused_by`.
     pub(crate) fn create_request(
@@ -242,7 +273,6 @@ impl SpawnAgent {
                     RLM_PROTOCOL_PLUGIN_ID,
                     RlmCreateExtras {
                         termination: Some(TerminationMode::TerminalRequired),
-                        finish_schema: output_schema,
                         render: None,
                     },
                 )
@@ -252,7 +282,7 @@ impl SpawnAgent {
             return Err(invalid("spawn_agent: `seed` needs an RLM child"));
         }
         let mut request = SessionCreateRequest::child_session(
-            self.child.tool_access.clone(),
+            self.child_tool_access(output_schema)?,
             parent,
             SessionStartPoint::Empty,
             Default::default(),

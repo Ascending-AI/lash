@@ -14,7 +14,11 @@ pub(crate) fn rlm_tool_catalog(
 ) -> Result<ToolCatalogContribution, PluginError> {
     let _build_tool_catalog = lash_core::facade_support::build_tool_catalog;
     validate_rlm_language_bindings(&ctx.tools, dialect.language())?;
-    Ok(ToolCatalogContribution::default())
+    // A host's own finish tool takes the place of `control.finish`.
+    Ok(lash_core::suppress_default_finish(
+        &ctx,
+        &lash_core::ToolId::from(crate::control_tools::FINISH_TOOL_ID),
+    ))
 }
 
 /// Being a member *is* being presented.

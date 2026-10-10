@@ -97,6 +97,38 @@ pub(crate) async fn open_created_session(
     .await
 }
 
+/// [`open_created_session`] for an RLM session whose turns end only through
+/// a finish call: the termination its creation records.
+#[expect(
+    clippy::expect_used,
+    reason = "the RLM creation options are plain data and always encode"
+)]
+pub(crate) async fn open_created_finish_required_session(
+    model: impl Into<lash::LlmProfileKey>,
+    core: &lash::LashCore,
+    session_id: impl Into<lash::SessionId>,
+) -> lash::Result<lash::LashSession> {
+    open_created_session_from(
+        lash::SessionSpec::new(
+            model,
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1024),
+        )
+        .no_progress_budget(lash_core::NoProgressBudget::bounded(12))
+        .plugin(
+            lash::rlm::RLM_PROTOCOL_PLUGIN_ID,
+            lash::rlm::RlmCreateExtras {
+                termination: Some(lash::rlm::TerminationMode::TerminalRequired),
+                ..lash::rlm::RlmCreateExtras::default()
+            },
+        )
+        .expect("the RLM creation options encode"),
+        core,
+        session_id,
+    )
+    .await
+}
+
 /// [`open_created_session`], created from `spec`.
 pub(crate) async fn open_created_session_from(
     spec: lash::SessionSpec,

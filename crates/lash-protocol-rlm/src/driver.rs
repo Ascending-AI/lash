@@ -2,7 +2,6 @@ pub(crate) mod history;
 
 use std::sync::Arc;
 
-use crate::rlm_support::RlmCompletion;
 #[cfg(any(test, feature = "testing"))]
 use lash_core::llm::types::{LlmContentBlock, LlmMessage};
 use lash_core::llm::types::{LlmRequestScope, LlmToolChoice};
@@ -134,17 +133,6 @@ impl ContextProjector<lash_core::HostTurnProtocol> for RlmContextProjector {
             provider_trace: None,
         }))
     }
-}
-
-/// The REQUIRED OUTPUT block: the contract a finish value must match, under
-/// either termination that states one.
-pub(crate) fn required_output_block(
-    dialect: &SessionDialect,
-    termination: &RlmCompletion,
-) -> Option<String> {
-    termination
-        .finish_schema()
-        .map(|schema| dialect.required_output_contract(schema.as_value()))
 }
 
 impl RlmContextProjector {

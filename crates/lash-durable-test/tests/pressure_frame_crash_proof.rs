@@ -631,7 +631,7 @@ impl PressureFrame {
                     && matches!(
                         &end.cause,
                         RunTerminalCause::Committed {
-                            outcome: RunCommittedOutcome::Finished(_),
+                            outcome: RunCommittedOutcome::Finished { .. },
                             ..
                         }
                     ) => {}
@@ -675,9 +675,12 @@ impl PressureFrame {
                 if matches!(
                     &end.cause,
                     RunTerminalCause::Committed {
-                        outcome: RunCommittedOutcome::Finished(lash_core::facade_support::TurnFinish::Finished {
-                            tool_name, value,
-                        }),
+                        outcome: RunCommittedOutcome::Finished {
+                            finish: lash_core::facade_support::TurnFinish::Finished {
+                                tool_name, value,
+                            },
+                            ..
+                        },
                         ..
                     } if tool_name == "finish" && value.as_str() == Some(expected)
                 ) => {}

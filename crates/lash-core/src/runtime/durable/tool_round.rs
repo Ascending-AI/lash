@@ -348,6 +348,7 @@ pub(super) fn record_refused(
                         max_slice: std::time::Duration::ZERO,
                     },
                     park: None,
+                    declaration: None,
                 },
             )
         })

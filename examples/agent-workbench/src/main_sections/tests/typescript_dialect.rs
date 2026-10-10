@@ -103,8 +103,8 @@ fn workbench_effects() -> lash::vm::HostBoundary {
                 &input,
                 &output,
                 match path.as_str() {
-                    "control.finish" | "workbench_surface.terminal" => {
-                        lash::tools::TurnControls::finish()
+                    "chat.reply" | "workbench_surface.terminal" => {
+                        lash::tools::TurnControls::finish(lash::schema::JsonSchema::any())
                     }
                     "control.continue_as" => lash::tools::TurnControls::switch_agent_frame(),
                     _ => lash::tools::TurnControls::none(),
@@ -118,7 +118,8 @@ fn workbench_effects() -> lash::vm::HostBoundary {
     );
     for (module, operations) in [
         ("agents", &["spawn"][..]),
-        ("control", &["finish", "continue_as"][..]),
+        ("chat", &["reply"][..]),
+        ("control", &["continue_as"][..]),
         ("inbox.work", &["list", "send", "delete"][..]),
         ("inbox.personal", &["list", "send", "delete"][..]),
         ("workbench_surface", &["terminal"][..]),
@@ -187,7 +188,7 @@ fn the_workbench_typescript_tutorials_lower() {
     );
     // The front end must be able to refuse, or an empty list proves nothing.
     assert!(
-        lower("class Unsupported {} await control.finish(1);").is_err(),
+        lower("class Unsupported {} await chat.reply(1);").is_err(),
         "the control must be refused"
     );
 }
@@ -202,7 +203,7 @@ fn the_workbench_tutorials_never_print_a_registration_key() {
     let finishes = programs
         .iter()
         .flat_map(|program| program.lines())
-        .filter(|line| line.trim_start().starts_with("await control.finish("))
+        .filter(|line| line.trim_start().starts_with("await chat.reply("))
         .collect::<Vec<_>>();
     assert!(
         finishes.len() >= 3,

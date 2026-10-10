@@ -592,30 +592,27 @@ pub struct RlmDiagnosticEvent {
 /// RLM protocol session config. Natural turns finish with prose-only model
 /// responses or a declared control call (`control.finish`). Programmatic
 /// turns can require a control call ([`TerminationMode::TerminalRequired`]).
-/// Either mode can state the schema `control.finish` takes its value under.
+/// The termination is the session's: it is recorded here, at creation, and
+/// no run states it again. The type of a turn's final value is the one its
+/// finishing tool declares, never a session setting.
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct RlmCreateExtras {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub render: Option<RlmRenderPatch>,
     /// Session-wide termination requirement. Absence is the `Natural` default.
-    ///
-    /// Absence is a distinct statement from an explicit `Natural`: options that
-    /// say nothing about termination must leave a recorded `TerminalRequired`
-    /// alone, and only a value that is genuinely stated participates in the
-    /// set-if-unset guard (ADR 0066).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub termination: Option<TerminationMode>,
-    /// The schema `control.finish` takes its value under: the host's
-    /// final-answer schema. Absent, the value is any JSON value.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub finish_schema: Option<lash_sansio::JsonSchema>,
 }
 
-/// The RLM options a *single turn* may state again (FIG-1979).
+/// The RLM options a *single turn* may state again (FIG-1979): its render
+/// preferences.
 ///
 /// There is currently no language choice to state: TypeScript is the only shipped RLM dialect
 /// and nothing — a turn bag, a session bag, a create contract — names one.
+/// The termination is the session's, fixed at creation, and the type of the
+/// final value is the finishing tool's: a run that wants another final shape
+/// offers another finish tool through its tool access.
 ///
 /// These are the RLM owner's run options: the owner applies each stated
 /// field over the session's recorded value, and an unstated one leaves it
@@ -624,14 +621,6 @@ pub struct RlmCreateExtras {
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct RlmTurnOptions {
-    /// Termination requirement for this turn. Absence is the `Natural`
-    /// default, and leaves whatever the session recorded alone.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub termination: Option<TerminationMode>,
-    /// The schema `control.finish` takes its value under for this turn.
-    /// Absence leaves whatever the session recorded alone.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub finish_schema: Option<lash_sansio::JsonSchema>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub render: Option<RlmRenderPatch>,
 }
@@ -651,13 +640,6 @@ pub struct RlmRenderPatch {
     pub preview: lash_render::RenderParamsPatch,
 }
 
-impl RlmTurnOptions {
-    /// The termination this bag means, resolving absence to the default.
-    pub fn effective_termination(&self) -> TerminationMode {
-        self.termination.unwrap_or_default()
-    }
-}
-
 /// The durable RLM facts a session has recorded, read as recorded.
 ///
 /// Every field is `Option`-shaped on purpose: `None` means the session has
@@ -666,12 +648,10 @@ impl RlmTurnOptions {
 /// keys to label a fresh session honestly — the hack this type replaces.
 ///
 /// The facts are recorded once, when the session is created (FIG-4379): no
-/// config command changes them, and a turn states them again through its run's
-/// protocol turn options.
+/// config command or run changes them.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RlmSessionConfig {
     pub termination: Option<TerminationMode>,
-    pub finish_schema: Option<lash_sansio::JsonSchema>,
 }
 
 impl RlmSessionConfig {
@@ -685,13 +665,8 @@ impl RlmSessionConfig {
         self
     }
 
-    pub fn finish_schema(mut self, schema: lash_sansio::JsonSchema) -> Self {
-        self.finish_schema = Some(schema);
-        self
-    }
-
     pub fn is_empty(&self) -> bool {
-        self.termination.is_none() && self.finish_schema.is_none()
+        self.termination.is_none()
     }
 }
 
@@ -699,7 +674,6 @@ impl From<&RlmCreateExtras> for RlmSessionConfig {
     fn from(extras: &RlmCreateExtras) -> Self {
         Self {
             termination: extras.termination,
-            finish_schema: extras.finish_schema.clone(),
         }
     }
 }
@@ -709,7 +683,6 @@ impl From<&RlmSessionConfig> for RlmCreateExtras {
         Self {
             render: None,
             termination: config.termination,
-            finish_schema: config.finish_schema.clone(),
         }
     }
 }

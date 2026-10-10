@@ -142,6 +142,7 @@ pub struct ExecutionDraft {
     park: Option<ParkDeadline>,
     pinned: Option<PinnedWait>,
     trace: Option<lash_trace::DurableTraceScope>,
+    declaration: Option<crate::ToolDeclaration>,
 }
 
 impl ExecutionDraft {
@@ -165,7 +166,23 @@ impl ExecutionDraft {
             park,
             pinned: None,
             trace: None,
+            declaration: None,
         }
+    }
+
+    /// This draft with `declaration`, the one its call settles under
+    /// ([`MemberPin::declaration`]).
+    #[must_use]
+    pub fn with_declaration(mut self, declaration: Option<crate::ToolDeclaration>) -> Self {
+        self.declaration = declaration;
+        self
+    }
+
+    /// The declaration its admission pinned: what every attempt of the
+    /// call settles under. `None` when it pinned none.
+    #[must_use]
+    pub fn declaration(&self) -> Option<&crate::ToolDeclaration> {
+        self.declaration.as_ref()
     }
 
     /// This draft with `pinned`, the completion wait its round pinned.

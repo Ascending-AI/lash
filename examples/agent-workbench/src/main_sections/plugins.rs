@@ -445,10 +445,6 @@ impl AppState {
                 lash::rlm::RLM_PROTOCOL_PLUGIN_ID,
                 lash::rlm::RlmCreateExtras {
                     termination: Some(lash::rlm::TerminationMode::Natural),
-                    finish_schema: Some(
-                        lash::schema::JsonSchema::admit(json!({ "type": "string" }))
-                            .map_err(serde::de::Error::custom)?,
-                    ),
                     ..Default::default()
                 },
             )?,
@@ -458,6 +454,22 @@ impl AppState {
             spec,
         ))
     }
+}
+
+/// `chat.reply`, the chat's own finish tool, in place of Lash's: a turn
+/// that ends through a tool ends with the text the chat shows as its
+/// reply. Prose still ends a turn.
+#[expect(clippy::expect_used, reason = "a fixed string schema is admitted")]
+pub(crate) fn chat_reply_tool() -> lash::tools::ToolDefinition {
+    use lash::tools::ToolDefinitionBindingExt as _;
+    let mut tool = lash::tools::finish_tool(
+        "reply",
+        lash::schema::JsonSchema::admit(json!({ "type": "string" }))
+            .expect("a string schema is admitted"),
+    );
+    tool.manifest.description =
+        "Reply to the user with this text and end the turn. It returns nothing.".to_owned();
+    tool.with_tool_binding(lash::tools::ToolBinding::new(["chat"], "reply"))
 }
 
 /// The workbench's host prompt, stated in each session's creation spec. On

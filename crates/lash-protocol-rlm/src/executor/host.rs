@@ -177,11 +177,6 @@ pub(super) struct CellHost<'run> {
     /// The grants the session's deferred resolutions recorded, for a tool
     /// outside the catalog.
     pub grants: BTreeMap<lash_core::ToolId, ToolExecutionGrant>,
-    /// Lash's finish tool under the turn's finish schema, when the turn
-    /// states one: what a `control.finish` call is admitted under, so its
-    /// input validation refuses a value the turn's required output does not
-    /// admit ([`crate::control_tools::turn_finish_binding`]).
-    pub finish: Option<lash_core::ToolDefinition>,
     /// The cell's admitted calls, by call: what their bodies run.
     pub members: Arc<CellMembers>,
     pub opener: lash_core::EffectOpener,
@@ -248,33 +243,6 @@ impl CellHost<'_> {
                 format!("this session offers no `{}`", request.effect),
             )
         })?;
-        // Lash's finish tool takes the turn's answer whole, as a cell's
-        // value has always left it: a whole number is an integer, a value
-        // JSON has no form for keeps its kind, and no argument is `null`.
-        if effect.tool.as_str() == crate::control_tools::FINISH_TOOL_ID
-            && let [] | [_] = request.args.as_slice()
-        {
-            let answer = match request.args.first() {
-                None => serde_json::Value::Null,
-                Some(value) => self
-                    .entries
-                    .leaving(value)
-                    .map(|value| crate::cell_value::datum_json(&value))
-                    .map_err(|problem| {
-                        refused(
-                            TOOL_ARGUMENTS,
-                            format!("`{}` cannot take this value: {problem}", request.effect),
-                        )
-                    })?,
-            };
-            let invocation = self.invocation(request, call, effect.tool.clone(), answer);
-            // The call is admitted under the turn's finish contract, pinned
-            // with it: every owner validates it the same way.
-            return Ok(match &self.finish {
-                Some(finish) => invocation.with_recorded_binding(finish.clone()),
-                None => invocation,
-            });
-        }
         // A tool takes its input as one record (`HostBoundary::offer_tool`).
         let args = match request.args.as_slice() {
             [] => serde_json::Value::Object(serde_json::Map::new()),
@@ -284,6 +252,12 @@ impl CellHost<'_> {
                 .and_then(|input| datum_to_json(&input).map_err(|error| error.to_string()))
                 .and_then(|text| serde_json::from_str(&text).map_err(|error| error.to_string()))
                 .map(crate::projection::plain_json_for_transport)
+                // A finish value leaves the cell as a cell's value always
+                // has: a whole number is an integer, in either dialect.
+                .map(|args| match effect.controls.finish_declaration() {
+                    Some(_) => crate::cell_value::whole_numbers_as_integers(args),
+                    None => args,
+                })
                 .map_err(|problem| {
                     refused(
                         TOOL_ARGUMENTS,

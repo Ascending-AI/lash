@@ -58,7 +58,6 @@ fn run_options_apply_over_the_recorded_render_field_by_field() {
             &recorded,
             StandardRunOptions {
                 render: Some(stated),
-                termination: None,
             },
         )
         .expect("the run's render options apply");

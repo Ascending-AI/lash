@@ -11,9 +11,11 @@
 //! A session may change one setting: its render preferences, through
 //! [`SetRlmRender`]. Its prompt is not config: the protocol contributes keyed
 //! sections, and a host adds or wraps sections of its own (ADR 0133).
-//! The termination is fixed at creation: no
-//! command changes it, and a turn states it again through its run's options
-//! ([`RlmRunOptions`]), which this owner applies over the recorded namespace.
+//! The termination is fixed at creation: no command or run changes it. A
+//! run states its render preferences through its options
+//! ([`RlmRunOptions`]), which this owner applies over the recorded namespace;
+//! the type of a turn's final value is its finishing tool's, which a run
+//! chooses through its tool access.
 //! The channel, the dialect and the behaviour are the session's pins: a
 //! candidate that changes any of them is refused, and a run's options have
 //! no field for them.
@@ -48,11 +50,6 @@ pub struct RlmRecordedConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Option<serde_json::Value>")]
     pub termination: Option<TerminationMode>,
-    /// The schema `control.finish` takes its value under: the host's
-    /// final-answer schema. Absent, the value is any JSON value.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "Option<serde_json::Value>")]
-    pub finish_schema: Option<lash_core::JsonSchema>,
     /// The channel the session's programs run over.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Option<String>")]
@@ -80,8 +77,6 @@ impl RlmRecordedConfig {
     /// What a turn of this session runs under, of what a run may state again.
     pub fn turn_options(&self) -> RlmTurnOptions {
         RlmTurnOptions {
-            termination: self.termination,
-            finish_schema: self.finish_schema.clone(),
             render: self.render.clone(),
         }
     }
@@ -89,18 +84,17 @@ impl RlmRecordedConfig {
 
 #[cfg(any(test, feature = "testing"))]
 impl RlmRecordedConfig {
-    /// The recorded namespace of a session that stated `options`, for a
-    /// test that executes the protocol without creating a session: an
+    /// The recorded namespace of a session created stating `extras`, for
+    /// a test that executes the protocol without creating a session: an
     /// unbounded cell-channel behaviour.
     #[expect(
         clippy::expect_used,
         reason = "a recorded RLM namespace is plain data and always encodes"
     )]
-    pub fn for_testing(options: RlmTurnOptions) -> lash_core::ProtocolTurnOptions {
+    pub fn for_testing(extras: RlmCreateExtras) -> lash_core::ProtocolTurnOptions {
         lash_core::ProtocolTurnOptions::typed(Self {
-            render: options.render,
-            termination: options.termination,
-            finish_schema: options.finish_schema,
+            render: extras.render,
+            termination: extras.termination,
             channel: Some(RlmChannel::Cell),
             dialect: None,
             behaviour: RlmProtocolPluginConfig::builder()
@@ -120,7 +114,7 @@ impl RlmRecordedConfig {
 #[serde(transparent)]
 pub struct RlmCreateConfig(#[schemars(with = "serde_json::Value")] pub RlmCreateExtras);
 
-/// What a run states for the RLM namespace: termination and render preferences.
+/// What a run states for the RLM namespace: its render preferences.
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize, JsonSchema)]
 #[schemars(crate = "lash_core::facade_support::schemars")]
 #[serde(transparent)]
@@ -205,7 +199,6 @@ impl ConfigOwner for RlmConfigOwner {
         Ok(Some(RlmRecordedConfig {
             render: stated.render,
             termination: stated.termination,
-            finish_schema: stated.finish_schema,
             channel: Some(self.channel),
             dialect: Some(self.dialect.clone()),
             behaviour,
@@ -248,20 +241,15 @@ impl ConfigOwner for RlmConfigOwner {
         Ok(())
     }
 
-    /// A stated termination or finish schema replaces the recorded one for
-    /// the run, and stated render preferences apply field by field
-    /// over the recorded ones. The pins stay as recorded: a run's options
+    /// Stated render preferences apply field by field over the recorded
+    /// ones. The termination and the pins stay as recorded: a run's options
     /// cannot name them.
     fn apply_run_options(
         &self,
         recorded: &RlmRecordedConfig,
         options: RlmRunOptions,
     ) -> Result<RlmRecordedConfig, RlmConfigRefusal> {
-        let RlmTurnOptions {
-            termination,
-            finish_schema,
-            render,
-        } = options.0;
+        let RlmTurnOptions { render } = options.0;
         let render = match (render, recorded.render.as_ref()) {
             (Some(stated), Some(recorded)) => Some(RlmRenderPatch {
                 print: stated.print.over(&recorded.print),
@@ -271,8 +259,6 @@ impl ConfigOwner for RlmConfigOwner {
         };
         Ok(RlmRecordedConfig {
             render,
-            termination: termination.or(recorded.termination),
-            finish_schema: finish_schema.or_else(|| recorded.finish_schema.clone()),
             ..recorded.clone()
         })
     }
@@ -365,9 +351,8 @@ mod tests {
     }
 
     /// FIG-4652: the owner lays a run's options over its recorded namespace.
-    /// Stated render fields apply over the session's field by field, a
-    /// stated termination replaces the session's for the run, and nothing a
-    /// run cannot state moves.
+    /// Stated render fields apply over the session's field by field, and
+    /// nothing a run cannot state moves.
     #[test]
     fn run_options_apply_over_the_recorded_namespace_field_by_field() {
         let print = |max_chars, max_depth| RlmRenderPatch {
@@ -381,14 +366,12 @@ mod tests {
         let recorded = created(Some(RlmCreateExtras {
             render: Some(print(Some(5), None)),
             termination: Some(TerminationMode::TerminalRequired),
-            finish_schema: None,
         }));
         let applied = owner()
             .apply_run_options(
                 &recorded,
                 RlmRunOptions(RlmTurnOptions {
                     render: Some(print(None, Some(1))),
-                    ..RlmTurnOptions::default()
                 }),
             )
             .expect("the run's render options apply");
@@ -408,18 +391,6 @@ mod tests {
         assert_eq!(resolved.print.max_chars, 5);
         assert_eq!(resolved.print.max_depth, 1);
 
-        let run = owner()
-            .apply_run_options(
-                &recorded,
-                RlmRunOptions(RlmTurnOptions {
-                    termination: Some(TerminationMode::Natural),
-                    finish_schema: None,
-                    render: None,
-                }),
-            )
-            .expect("the run's termination applies");
-        assert_eq!(run.termination, Some(TerminationMode::Natural));
-        assert_eq!(run.render, recorded.render);
         assert_eq!(
             owner()
                 .apply_run_options(&recorded, RlmRunOptions::default())
@@ -438,7 +409,6 @@ mod tests {
         let recorded = serde_json::to_value(created(Some(RlmCreateExtras {
             render: Some(RlmRenderPatch::default()),
             termination: Some(TerminationMode::Natural),
-            finish_schema: None,
         })))
         .expect("the recorded namespace encodes");
         let stated: std::collections::BTreeSet<&str> = recorded
@@ -452,8 +422,8 @@ mod tests {
             .collect();
         assert_eq!(
             stated,
-            std::collections::BTreeSet::from(["render", "termination"]),
-            "a run states only its termination and its render"
+            std::collections::BTreeSet::from(["render"]),
+            "a run states only its render: the termination is the session's"
         );
     }
 

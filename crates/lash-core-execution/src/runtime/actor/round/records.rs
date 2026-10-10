@@ -64,6 +64,10 @@ pub(super) struct AdmittedMember {
     /// The call's trace scope the admission retained (FIG-5382).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     trace: Option<lash_trace::DurableTraceScope>,
+    /// The declaration the call settles under, as its tool stated it at
+    /// admission (FIG-5823).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    declaration: Option<crate::ToolDeclaration>,
 }
 
 impl AdmittedMember {
@@ -77,6 +81,7 @@ impl AdmittedMember {
             limit_max_slice_ms: millis(draft.limit().max_slice),
             wait_id: draft.pinned_wait().map(|pinned| pinned.id.to_hex()),
             trace: draft.trace().cloned(),
+            declaration: draft.declaration().cloned(),
         }
     }
 
@@ -124,7 +129,8 @@ impl AdmittedMember {
             park,
         )
         .with_pinned_wait(pinned)
-        .with_trace(self.trace.clone()))
+        .with_trace(self.trace.clone())
+        .with_declaration(self.declaration.clone()))
     }
 }
 

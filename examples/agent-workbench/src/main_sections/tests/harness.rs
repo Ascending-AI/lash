@@ -250,7 +250,7 @@ pub(crate) fn text_response(text: &str) -> lash::provider::LlmResponse {
 /// The cell that finishes a turn with `value` as its final string.
 pub(crate) fn finish_cell(value: &str) -> String {
     format!(
-        "<typescript>\nawait control.finish({});\n</typescript>",
+        "<typescript>\nawait chat.reply({});\n</typescript>",
         serde_json::to_string(value).expect("a string encodes")
     )
 }
@@ -290,7 +290,7 @@ pub(crate) fn silent_provider() -> ProviderHandle {
 
 /// A provider every call of which parks until the law releases it: each call
 /// `n` reports itself entered, waits for one permit, then answers (by default
-/// `await control.finish("answer n")`).
+/// `await chat.reply("answer n")`).
 pub(crate) struct GatedProvider {
     pub(crate) provider: ProviderHandle,
     pub(crate) entered: mpsc::UnboundedReceiver<usize>,

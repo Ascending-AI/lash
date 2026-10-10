@@ -205,17 +205,7 @@ impl CellTools {
         parked: &Material<CompletionSource>,
         resolution: Resolution,
     ) -> SettledOutput {
-        let definition = ProductionToolHandlers::new(self.context.clone(), None)
-            .leaf_definition(&call.invocation());
-        resolved_member(
-            &self.owner,
-            &call.pending(),
-            definition
-                .as_ref()
-                .map(|definition| definition.manifest.declaration()),
-            parked,
-            resolution,
-        )
+        resolved_member(&self.owner, &call.pending(), parked, resolution)
     }
 
     /// The final answer `output` that `call`'s park resolved to as

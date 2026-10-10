@@ -370,7 +370,9 @@ impl<'a> AdmittedToolCall<'a> {
                     }
                 };
                 if let SingletonCapture::Failed {
-                    suggested_delay_ms, ..
+                    suggested_delay_ms,
+                    repeatable: true,
+                    ..
                 } = &capture
                     && may_retry
                     && self.policy.permits_repeat(self.policy, ordinal.get())
@@ -459,10 +461,12 @@ impl<'a> AdmittedToolCall<'a> {
             SingletonBodyOutcome::Failed {
                 output,
                 suggested_delay_ms,
+                repeatable,
             } => SingletonCapture::Failed {
                 output,
                 stream,
                 suggested_delay_ms,
+                repeatable,
             },
             SingletonBodyOutcome::Interrupted => SingletonCapture::Interrupted,
             SingletonBodyOutcome::TimedOut { cause, evidence } => {

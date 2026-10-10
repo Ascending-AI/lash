@@ -36,8 +36,8 @@ pub use context::ToolCallLaunch;
 pub use context::{ToolCallIds, ToolDispatchOutcome, ToolPreparationOutcome};
 #[cfg(any(test, feature = "testing"))]
 pub(crate) use execution::coordinate_prepared_tool_call_launch_with_execution_context;
+pub(crate) use hooks::attempt_occurrence;
 pub use hooks::finalize_tool_result_with_execution_context;
-pub(crate) use hooks::{attempt_occurrence, deferred_occurrence};
 pub use intent_executor::IntentRealizationContext;
 // Cross-crate execution seam used by lash-core's production realization runtime.
 pub use intent_executor::execute_final_tool_intents;
@@ -53,4 +53,3 @@ pub use preparation::{
 #[cfg(any(test, feature = "testing"))]
 pub(crate) use retry::execute_once;
 pub(crate) use retry::normalized_outcome;
-pub(crate) use retry::settle_completed_pending_tool_call;

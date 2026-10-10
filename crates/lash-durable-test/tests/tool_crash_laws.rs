@@ -36,6 +36,11 @@
 //!   commits, its outcome's or the quiet point that prunes its records
 //!   after it, is the committed value after resume, and a member of a
 //!   `Promise.all` never observes the other's change before it committed.
+//! - **Finish declaration (FIG-5823):** a step of one call to a host
+//!   finish tool whose host retypes its value once the call's body ran.
+//!   Cut anywhere, the run answers the call's value under the schema the
+//!   call was admitted under, which its committed outcome records: a
+//!   settled call is never judged again under the live declaration.
 //! - **Process plugin state (FIG-5268):** a host engine's tool steps run on
 //!   the process's own plugin session through the core's node. A step's
 //!   change cut at its `step.outcome` is what the process's next step sees
@@ -112,6 +117,8 @@ const STATE_SET: &str = "state_set";
 const STATE_OBSERVE: &str = "state_observe";
 /// The key both tools set.
 const STATE_KEY: &str = "t";
+/// The host finish tool of [`Turn::Finish`].
+const SUBMIT: &str = "crash_submit";
 /// The tool that puts [`KEPT`] and [`SCRATCH`] and answers [`KEPT`].
 const PUT: &str = "crash_put";
 /// The blob the [`PUT`] call answers, which the turn's commit names.
@@ -166,6 +173,8 @@ enum Turn {
     /// One cell of one probe call, the core served with a recording
     /// telemetry adapter (FIG-5395).
     CellTrace,
+    /// One step of one [`SUBMIT`] call.
+    Finish,
 }
 
 impl Turn {
@@ -240,6 +249,11 @@ impl Turn {
                 serde_json::json!({ "label": TRACE }),
             )])],
             Self::CellTrace => vec![served::cell(&format!("await {};", call(CELL_TRACE)))],
+            Self::Finish => vec![served::response(vec![served::call(
+                "call-submit",
+                SUBMIT,
+                serde_json::json!({ "answer": 7 }),
+            )])],
             Self::State => vec![served::response(vec![served::call(
                 "call-state",
                 STATE_SET,
@@ -287,6 +301,7 @@ impl Turn {
             Self::Put => (vec![PUT.to_owned()], Vec::new()),
             Self::Trace => (vec![TRACE.to_owned()], Vec::new()),
             Self::CellTrace => (vec![CELL_TRACE.to_owned()], Vec::new()),
+            Self::Finish => (vec![SUBMIT.to_owned()], Vec::new()),
             Self::State => (vec!["T".to_owned()], Vec::new()),
             Self::StateCell => (vec!["C".to_owned()], Vec::new()),
             Self::StatePair | Self::StatePairCell => {
@@ -322,7 +337,8 @@ impl Turn {
             | Self::StateCell
             | Self::StatePairCell
             | Self::Trace
-            | Self::CellTrace => return None,
+            | Self::CellTrace
+            | Self::Finish => return None,
         };
         let exceeded = lash::ToolCallLimitExceeded {
             scope: lash::ToolCallLimitScope::Cell,
@@ -355,7 +371,8 @@ impl Turn {
             | Self::StateCell
             | Self::StatePairCell
             | Self::Trace
-            | Self::CellTrace => 64,
+            | Self::CellTrace
+            | Self::Finish => 64,
         }
     }
 }
@@ -379,6 +396,9 @@ struct World {
     observations: Mutex<Vec<(Option<serde_json::Value>, bool)>>,
     /// The deployment, whose trace an observation reads.
     nodes: OnceLock<Weak<SimNodes>>,
+    /// Whether the host retyped [`SUBMIT`]'s value: it does once a call's
+    /// body ran, so every node after it offers the tool retyped.
+    submit_retyped: std::sync::atomic::AtomicBool,
 }
 
 impl World {
@@ -458,6 +478,72 @@ impl lash_core::ToolProvider for Probe {
             .or_default()
             .push(call.context.call_id().clone());
         ToolOutcome::ok(serde_json::json!({ "label": label })).into()
+    }
+}
+
+/// The value schema [`SUBMIT`] declares: an integer, or text once the host
+/// retyped it.
+fn submit_value_schema(retyped: bool) -> serde_json::Value {
+    if retyped {
+        serde_json::json!({ "type": "string" })
+    } else {
+        serde_json::json!({ "type": "integer" })
+    }
+}
+
+/// [`SUBMIT`]: a host finish tool whose value is its input's `answer`,
+/// typed by [`submit_value_schema`].
+fn submit_definition(retyped: bool) -> lash_core::ToolDefinition {
+    lash_core::ToolDefinition::control(
+        format!("tool:{SUBMIT}"),
+        SUBMIT,
+        "Finishes the turn with its answer.",
+        serde_json::json!({ "type": "object", "additionalProperties": true }),
+        lash_core::TurnControls::finish(
+            lash_core::JsonSchema::admit(submit_value_schema(retyped))
+                .expect("submit's value schema"),
+        ),
+    )
+    .expect("submit's schemas")
+    .with_execution(std::time::Duration::from_secs(120))
+    // A call a kill interrupted before its outcome runs again.
+    .with_execution_policy(lash_core::ExecutionPolicy::repeatable(
+        std::num::NonZeroU32::new(3).expect("a nonzero attempt bound"),
+        1,
+        1,
+    ))
+}
+
+struct Submit {
+    world: Arc<World>,
+}
+
+impl Submit {
+    fn definition(&self) -> lash_core::ToolDefinition {
+        submit_definition(
+            self.world
+                .submit_retyped
+                .load(std::sync::atomic::Ordering::SeqCst),
+        )
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core::ToolProvider for Submit {
+    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+        vec![self.definition().manifest()]
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+        (name == SUBMIT).then(|| Arc::new(self.definition().contract()))
+    }
+
+    async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        self.world.enter(SUBMIT, call.context.call_id());
+        self.world
+            .submit_retyped
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        ToolOutcome::finish(call.args["answer"].clone()).into()
     }
 }
 
@@ -744,6 +830,13 @@ impl Crash {
                 } else {
                     builder
                 };
+                let builder = if self.turn == Turn::Finish {
+                    builder.tools(Arc::new(Submit {
+                        world: Arc::clone(&self.world),
+                    }))
+                } else {
+                    builder
+                };
                 let builder = if self.turn.traced() {
                     builder.trace_runtime(self.telemetry.runtime())
                 } else {
@@ -843,6 +936,9 @@ impl Crash {
         }
         if self.turn == Turn::Put {
             violations.extend(self.put_laws().await);
+        }
+        if self.turn == Turn::Finish {
+            violations.extend(self.finish_laws(nodes).await);
         }
         if self.turn.traced() {
             violations.extend(self.telemetry.first_turn_violations(SESSION));
@@ -949,6 +1045,42 @@ impl Crash {
             violations.push("the put no commit names survived the sweep".to_owned());
         }
         violations
+    }
+
+    /// The [`Turn::Finish`] laws, once the turn ended: the run answers the
+    /// submitted value, and its committed outcome records the schema the
+    /// call was admitted under, though the host retyped the tool since.
+    async fn finish_laws(&self, nodes: &SimNodes) -> Vec<String> {
+        let Some(run) = self
+            .host
+            .lock_recover()
+            .as_ref()
+            .and_then(|(_, handle)| handle.id().cloned())
+        else {
+            return vec!["the host's send opened no run".to_owned()];
+        };
+        match nodes.database().turn_end(&session(), &run).await {
+            Ok(Some(lash_durable::domain::TurnEnd {
+                cause:
+                    lash::persistence::RunTerminalCause::Committed {
+                        outcome:
+                            lash::persistence::RunCommittedOutcome::Finished {
+                                finish: lash::TurnFinish::Finished { tool_name, value },
+                                value_schema: Some(schema),
+                            },
+                        ..
+                    },
+                ..
+            })) if tool_name == SUBMIT
+                && value == serde_json::json!(7)
+                && schema.as_value() == &submit_value_schema(false) =>
+            {
+                Vec::new()
+            }
+            other => vec![format!(
+                "the run did not answer the submitted value under its admitted schema: {other:?}"
+            )],
+        }
     }
 
     /// The value of [`STATE_KEY`] in the session's committed plugin state.
@@ -1791,6 +1923,14 @@ async fn prove_under(turn: Turn, tier: Tier, cut_labels: &[CommitLabel], faults:
     }
 }
 
+/// FIG-5823: a host finish tool's call, cut anywhere between its admission
+/// and the turn's commit, settles under the declaration it was admitted
+/// under, and the run's committed outcome keeps that schema, though the
+/// host retyped the tool once the call's body ran.
+async fn a_finish_settles_under_its_admitted_declaration_across_a_crash(tier: Tier) {
+    prove(Turn::Finish, tier).await;
+}
+
 /// A turn that is cut anywhere refuses the same call the same way: the
 /// first group's calls are counted once, however many executions formed
 /// the group, and the refused calls run in no execution. A step of native
@@ -2010,6 +2150,7 @@ tiered_laws!(
     code_cells_keep_identity_and_distinguish_fresh_calls_across_a_kill,
     a_turns_and_its_calls_trace_admissions_are_exported_once_across_a_crash,
     a_cells_call_trace_admission_is_exported_once_across_a_crash,
+    a_finish_settles_under_its_admitted_declaration_across_a_crash,
 );
 
 /// The attachment put crash law on every store tier (FIG-5400).

@@ -174,6 +174,7 @@ impl ToolCallOutput {
     pub fn finish(value: impl Into<ToolValue>) -> Self {
         Self::turn_control(TurnControl::Finish {
             value: value.into(),
+            value_schema: None,
         })
     }
 
@@ -197,16 +198,24 @@ impl ToolCallOutput {
         self.as_turn_control().map(TurnControl::kind)
     }
 
-    /// This result as a call under `declaration` settles. A call that did
-    /// not succeed stays the failure it is and carries no turn control. A
-    /// tool that declares a turn control has no output: its success is null,
-    /// whatever its body or a result transform put beside the control.
+    /// This result as a call under `declaration` settles: the one check
+    /// every route a call's answer takes passes through, inline, cached,
+    /// deferred and after every result transform. A call that did not
+    /// succeed stays the failure it is and carries no turn control. A tool
+    /// that declares a turn control has no output: its success is null,
+    /// whatever its body or a result transform put beside the control. A
+    /// Finish's value is checked against the schema the declaration states,
+    /// and the settled Finish keeps that schema as the witness of the check.
     ///
     /// # Errors
     ///
+    /// [`DeclarationRefusal::UndeclaredControl`](crate::DeclarationRefusal::UndeclaredControl):
+    /// a control the declaration does not name.
     /// [`DeclarationRefusal::UndeclaredOutput`](crate::DeclarationRefusal::UndeclaredOutput):
     /// a tool that declares a turn control succeeded with a value and no
     /// control.
+    /// [`DeclarationRefusal::FinishValueMismatch`](crate::DeclarationRefusal::FinishValueMismatch):
+    /// a Finish whose value the declared schema does not admit.
     pub fn settled(
         mut self,
         declaration: &crate::ToolDeclaration,
@@ -217,11 +226,34 @@ impl ToolCallOutput {
             }
             return Ok(self);
         };
+        if let Some(control) = self.turn_control_kind()
+            && !declaration.controls.contains(control)
+        {
+            return Err(crate::DeclarationRefusal::UndeclaredControl { control });
+        }
         if declaration.controls.is_empty() {
             return Ok(self);
         }
         if self.as_turn_control().is_none() && !value.to_json_value().is_null() {
             return Err(crate::DeclarationRefusal::UndeclaredOutput);
+        }
+        if let Some(ToolControl::Turn {
+            control:
+                TurnControl::Finish {
+                    value,
+                    value_schema,
+                },
+        }) = &mut self.control
+            && let Some(declared) = declaration.controls.finish_declaration()
+        {
+            declared
+                .value_schema
+                .validate(&value.to_json_value())
+                .map_err(|mismatch| crate::DeclarationRefusal::FinishValueMismatch {
+                    value_schema: Box::new(declared.value_schema.clone()),
+                    mismatch: Box::new(mismatch),
+                })?;
+            *value_schema = Some(declared.value_schema.clone());
         }
         self.outcome = ToolCallOutcome::Success(ToolValue::untrusted_json(Value::Null));
         self.view = None;
@@ -861,7 +893,17 @@ fn project_raw_tool_value(mut value: Value, raw: Option<&ToolValue>) -> Value {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TurnControl {
     /// End the turn with `value`.
-    Finish { value: ToolValue },
+    Finish {
+        value: ToolValue,
+        /// The schema `value` was checked against when its call settled: the
+        /// admitted declaration's ([`FinishDeclaration`](crate::FinishDeclaration)).
+        /// A body's own Finish states none; settlement stamps it, and every
+        /// later reader — a completion candidate, a replay, a batch that
+        /// folds the call — keeps the schema the value settled under rather
+        /// than reading a live one.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        value_schema: Option<crate::JsonSchema>,
+    },
     /// End the turn by switching to a fresh agent frame that starts on
     /// `task` with `initial_nodes`.
     SwitchAgentFrame {

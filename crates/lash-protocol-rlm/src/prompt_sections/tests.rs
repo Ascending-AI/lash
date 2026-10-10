@@ -11,7 +11,7 @@ use lash_core::plugin::{PluginError, PluginRegistrar, SessionPlugin};
 use lash_core::prompt_sections::{
     PromptPlacement, PromptPlan, PromptSectionPlacement, PromptWrapKey,
 };
-use lash_rlm_types::RlmTurnOptions;
+use lash_rlm_types::RlmCreateExtras;
 use lash_vm_runtime::{ToolBinding, ToolDefinitionBindingExt};
 
 use super::testing::{Call, RlmSections, compose, compose_rlm};
@@ -290,19 +290,14 @@ fn a_section_with_nothing_to_say_renders_nothing() {
     let rendered = initial(&composed);
     assert!(!rendered.contains("Read-Only Variables"));
     assert!(!rendered.contains("\n\n\n"));
-    // Late, only the finalization: no bound values, no required output, no
-    // budget.
+    // Late, only the finalization: no bound values, no budget.
     assert_eq!(
         current(&composed),
         format!(
             "\n=== FINALIZATION ===\n\n{}",
             sections(&lash_core::ToolCatalog::default())
                 .dialect
-                .finalization_copy(
-                    lash_core::TerminationMode::default(),
-                    None,
-                    RlmChannel::Cell
-                )
+                .finalization_copy(lash_core::TerminationMode::default(), &[], RlmChannel::Cell)
         )
     );
 }
@@ -336,36 +331,6 @@ fn bound_variables_render_late_in_name_order() {
     let zeta = late.find("- `zeta` = 3").expect("zeta row");
     assert!(alpha < scratch && scratch < zeta, "{late}");
     assert!(late.find("=== FINALIZATION ===").expect("finalization") > zeta);
-}
-
-/// The REQUIRED OUTPUT block renders the finish contract under a
-/// schema-required termination, and the answer-format guidance stands aside.
-#[test]
-fn the_required_output_section_renders_the_finish_contract() {
-    let schema = serde_json::json!({
-        "type": "object",
-        "properties": {
-            "action": { "type": "string", "enum": ["call", "fold"] },
-            "amount": { "type": "integer", "minimum": 0 }
-        },
-        "required": ["action"]
-    });
-    let composed = compose_rlm(
-        RlmSections::typescript(),
-        Call {
-            options: RlmTurnOptions {
-                termination: Some(lash_core::TerminationMode::TerminalRequired),
-                finish_schema: Some(lash_sansio::JsonSchema::admit(schema).expect("valid schema")),
-                render: None,
-            },
-            ..Call::default()
-        },
-    );
-    let late = current(&composed);
-    assert!(late.contains("=== REQUIRED OUTPUT ==="), "{late}");
-    assert!(late.contains("{ action: \"call\" | \"fold\"; amount?: number }"));
-    assert!(late.contains("Fields:\n- `amount?: number` (>= 0)"));
-    assert!(!late.contains("=== FINAL ANSWER FORMAT ==="), "{late}");
 }
 
 fn usage(tokens: i64) -> lash_core::LlmUsage {
@@ -584,33 +549,16 @@ fn the_late_sections_keep_one_user_message_with_the_expected_tail() {
                 channel,
                 ..RlmSections::typescript()
             };
-            let options = if images {
-                RlmTurnOptions::default()
-            } else {
-                RlmTurnOptions {
-                    termination: Some(lash_core::TerminationMode::Natural),
-                    finish_schema: Some(
-                        lash_sansio::JsonSchema::admit(serde_json::json!({ "type": "integer" }))
-                            .expect("valid schema"),
-                    ),
-                    render: None,
-                }
-            };
-            let termination = options.effective_termination();
-            let completion = crate::rlm_support::RlmCompletion::from(options.clone());
+            let options = RlmCreateExtras::default();
             let finalization = sections.dialect.finalization_copy(
-                termination,
-                options.finish_schema.as_ref(),
+                options.termination.unwrap_or_default(),
+                &[],
                 channel,
             );
             let optional = if images {
                 String::new()
             } else {
-                format!(
-                    "\n\n=== REQUIRED OUTPUT ===\n\n{}\n\n=== CONTEXT BUDGET ===\n\nTurn: 1 · Tokens: 10000 · frame switch threshold: 200000 (5%).",
-                    crate::driver::required_output_block(&sections.dialect, &completion)
-                        .expect("required output")
-                )
+                "\n\n=== CONTEXT BUDGET ===\n\nTurn: 1 · Tokens: 10000 · frame switch threshold: 200000 (5%).".to_owned()
             };
             let schema = if structured {
                 format!(

@@ -23,13 +23,9 @@ fn non_cell_reply_classification_table_is_byte_identical() {
         turn_id: &turn_id,
         protocol_iteration: iteration,
         output_token_cap: Some(512),
+        finishing: Vec::new(),
     };
-    let completion = |mode| {
-        crate::rlm_support::RlmCompletion::from(lash_rlm_types::RlmTurnOptions {
-            termination: Some(mode),
-            ..Default::default()
-        })
-    };
+    let completion = |mode| crate::rlm_support::RlmCompletion { mode };
     let finish_required = completion(lash_core::TerminationMode::TerminalRequired);
     let natural = completion(lash_core::TerminationMode::Natural);
     let malformed = "<typescript >\nawait control.finish(1)\n</typescript>";

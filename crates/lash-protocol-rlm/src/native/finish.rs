@@ -48,17 +48,19 @@ fn prose_message(
     }
 }
 
+/// The reminder a reply that ended a finish-required turn with no control
+/// call reads, naming the finish calls `finishing` its surface offers.
 pub(super) fn finish_required_reminder_message(
     dialect: &SessionDialect,
     id: String,
-    requires_schema: bool,
+    finishing: &[String],
 ) -> Message {
     Message {
         id: id.clone(),
         role: MessageRole::System,
         parts: shared_parts(vec![Part::text(
             format!("{id}.p0"),
-            dialect.finish_required_copy(requires_schema, crate::plugin::RlmChannel::NativeTool),
+            dialect.finish_required_copy(finishing, crate::plugin::RlmChannel::NativeTool),
             None,
         )]),
         origin: Some(lash_core::MessageOrigin::Plugin {

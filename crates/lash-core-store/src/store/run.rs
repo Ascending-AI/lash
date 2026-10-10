@@ -111,7 +111,15 @@ impl RunTerminalKind {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RunCommittedOutcome {
-    Finished(TurnFinish),
+    Finished {
+        finish: TurnFinish,
+        /// The value schema the accepted finish was validated under, as
+        /// its tool's admitted declaration stated it: the record's own
+        /// evidence of the answer's type, whatever the host offers since.
+        /// `None` when no finish tool ended the turn.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        value_schema: Option<lash_sansio::JsonSchema>,
+    },
     AgentFrameSwitch {
         frame_key: lash_sansio::FrameKey,
         task: String,
@@ -120,11 +128,18 @@ pub enum RunCommittedOutcome {
 }
 
 impl RunCommittedOutcome {
-    /// The committed outcome `outcome` ends a run with.
+    /// The committed outcome `outcome` ends a run with, its finish
+    /// validated under `value_schema`.
     #[must_use]
-    pub fn of_turn_outcome(outcome: &TurnOutcome) -> Self {
+    pub fn of_turn_outcome(
+        outcome: &TurnOutcome,
+        value_schema: Option<lash_sansio::JsonSchema>,
+    ) -> Self {
         match outcome {
-            TurnOutcome::Finished(finish) => Self::Finished(finish.clone()),
+            TurnOutcome::Finished(finish) => Self::Finished {
+                finish: finish.clone(),
+                value_schema,
+            },
             TurnOutcome::AgentFrameSwitch {
                 frame_key, task, ..
             } => Self::AgentFrameSwitch {
@@ -139,7 +154,7 @@ impl RunCommittedOutcome {
     #[must_use]
     pub fn stop(&self) -> Option<&TurnStop> {
         match self {
-            Self::Finished(_) | Self::AgentFrameSwitch { .. } => None,
+            Self::Finished { .. } | Self::AgentFrameSwitch { .. } => None,
             Self::Stopped(stop) => Some(stop),
         }
     }
@@ -148,7 +163,7 @@ impl RunCommittedOutcome {
 impl From<RunCommittedOutcome> for TurnOutcome {
     fn from(outcome: RunCommittedOutcome) -> Self {
         match outcome {
-            RunCommittedOutcome::Finished(finish) => Self::Finished(finish),
+            RunCommittedOutcome::Finished { finish, .. } => Self::Finished(finish),
             RunCommittedOutcome::AgentFrameSwitch { frame_key, task } => Self::AgentFrameSwitch {
                 frame_key,
                 task,

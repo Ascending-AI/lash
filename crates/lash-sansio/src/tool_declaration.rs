@@ -4,7 +4,8 @@
 //! whether its body may return Deferred, which Lash intent kinds a Done
 //! result may declare, whether the call is isolated — a process from its
 //! start, with no inline body — and which turn-ending controls its result
-//! may be ([`TurnControls`]). A manifest holds only a valid declaration
+//! may be ([`TurnControls`]), a Finish with the schema its value must
+//! match. A manifest holds only a valid declaration
 //! ([`ToolManifest::declared`](crate::ToolManifest::declared)): an invalid
 //! one, or an isolated one naming no process engine, is refused when its
 //! tool is registered, so no call is refused for it. Admission records the
@@ -59,13 +60,28 @@ impl TurnControlKind {
     }
 }
 
-/// The turn-ending controls a tool declares its result may be. A tool that
-/// declares any has no output: a control is its call's whole result.
-#[derive(
-    Clone, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema,
-)]
-#[serde(transparent)]
-pub struct TurnControls(BTreeSet<TurnControlKind>);
+/// What a tool that may end its caller's turn with a value declares: the
+/// type of that value. Settlement validates the Finish a call emits against
+/// it, so the turn's final value has the type of the tool it ended on.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FinishDeclaration {
+    /// The schema the value of every Finish the tool emits must match.
+    pub value_schema: crate::JsonSchema,
+}
+
+/// The turn-ending controls a tool declares its result may be, keyed by
+/// kind: each kind at most once, and a Finish with the one schema its value
+/// must match. A tool that declares any has no output: a control is its
+/// call's whole result.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TurnControls {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    finish: Option<FinishDeclaration>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    switch_agent_frame: bool,
+}
 
 impl TurnControls {
     /// No control: an ordinary tool.
@@ -74,32 +90,53 @@ impl TurnControls {
         Self::default()
     }
 
+    /// A Finish whose value must match `value_schema`.
     #[must_use]
-    pub fn finish() -> Self {
-        Self::none().with(TurnControlKind::Finish)
+    pub fn finish(value_schema: crate::JsonSchema) -> Self {
+        Self::none().with_finish(value_schema)
     }
 
     #[must_use]
     pub fn switch_agent_frame() -> Self {
-        Self::none().with(TurnControlKind::SwitchAgentFrame)
+        Self::none().with_switch_agent_frame()
     }
 
+    /// These controls, also declaring a Finish whose value must match
+    /// `value_schema`; it replaces a Finish already declared.
     #[must_use]
-    pub fn with(mut self, kind: TurnControlKind) -> Self {
-        self.0.insert(kind);
+    pub fn with_finish(mut self, value_schema: crate::JsonSchema) -> Self {
+        self.finish = Some(FinishDeclaration { value_schema });
+        self
+    }
+
+    /// These controls, also declaring a switch of the agent frame.
+    #[must_use]
+    pub fn with_switch_agent_frame(mut self) -> Self {
+        self.switch_agent_frame = true;
         self
     }
 
     pub fn contains(&self, kind: TurnControlKind) -> bool {
-        self.0.contains(&kind)
+        match kind {
+            TurnControlKind::Finish => self.finish.is_some(),
+            TurnControlKind::SwitchAgentFrame => self.switch_agent_frame,
+        }
     }
 
     pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
+        self.finish.is_none() && !self.switch_agent_frame
     }
 
+    /// The declared kinds, in vocabulary order.
     pub fn iter(&self) -> impl Iterator<Item = TurnControlKind> + '_ {
-        self.0.iter().copied()
+        [TurnControlKind::Finish, TurnControlKind::SwitchAgentFrame]
+            .into_iter()
+            .filter(|kind| self.contains(*kind))
+    }
+
+    /// The declared Finish, with the schema its value must match.
+    pub fn finish_declaration(&self) -> Option<&FinishDeclaration> {
+        self.finish.as_ref()
     }
 }
 
@@ -165,6 +202,17 @@ pub enum DeclarationRefusal {
     UndeclaredOutput,
     #[error("an isolated call produced an inline outcome")]
     InlineOutcomeFromIsolated,
+    /// A Finish's value does not match the schema its tool declares
+    /// ([`FinishDeclaration`]). The call fails with no control: it makes no
+    /// completion candidate, is never repeated, and its control attempt
+    /// stays spent.
+    #[error("the finish value does not match the tool's declared value schema: {mismatch}")]
+    FinishValueMismatch {
+        /// The schema the value was checked against: the admitted
+        /// declaration's.
+        value_schema: Box<crate::JsonSchema>,
+        mismatch: Box<crate::ValueMismatch>,
+    },
 }
 
 fn intent_position(kind: ToolIntentKind) -> usize {

@@ -64,16 +64,24 @@ use serde_json::Value;
 pub const STANDARD_PROTOCOL_PLUGIN_ID: &str = "standard_protocol";
 
 /// The execution section of the prompt, naming `batch` and its maximum only
-/// when the sugar is offered, and `finish` when only a control call ends the
-/// session's turns.
+/// when the sugar is offered, and the `finishing` tools the turn is offered
+/// when only a control call ends the session's turns.
 fn standard_execution_section(
     batch: BatchSugar,
     termination: lash_core::TerminationMode,
+    finishing: &[String],
 ) -> String {
     let ending = if termination.prose_ends_turn() {
-        "Answer in prose only when no tool is needed."
+        "Answer in prose only when no tool is needed.".to_owned()
     } else {
-        "A prose reply does not end the turn: once the work is done, call `finish` with the answer, on its own."
+        let tools = finishing
+            .iter()
+            .map(|name| format!("`{name}`"))
+            .collect::<Vec<_>>()
+            .join(" or ");
+        format!(
+            "A prose reply does not end the turn: once the work is done, call {tools} with the answer as its arguments, on its own."
+        )
     };
     match batch {
         BatchSugar::Enabled { max_members } => format!(
@@ -307,10 +315,10 @@ impl TryFrom<serde_json::Value> for StandardTurnOptions {
 
 /// The options a run states for the standard protocol (FIG-4589): its render
 /// options, which the owner applies field by field over the session's
-/// ([`ConfigOwner::apply_run_options`]), and how the run's turn may end,
-/// which replaces the session's. Nothing else is a field: a payload
-/// that names the session's behaviour does not decode, so a run cannot
-/// state it, whatever value it gives. A stated `null` reads as
+/// ([`ConfigOwner::apply_run_options`]). Nothing else is a field: a payload
+/// that names the session's behaviour or termination does not decode, so a
+/// run cannot state either, whatever value it gives: how the session's
+/// turns end is fixed at creation. A stated `null` reads as
 /// unstated.
 #[derive(
     Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, JsonSchema,
@@ -321,9 +329,6 @@ pub struct StandardRunOptions {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Option<serde_json::Value>")]
     pub render: Option<StandardRenderConfig>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "Option<serde_json::Value>")]
-    pub termination: Option<lash_core::TerminationMode>,
 }
 
 /// The wire form a [`StandardRunOptions`] decodes through once its nulls are
@@ -333,8 +338,6 @@ pub struct StandardRunOptions {
 struct StandardRunOptionsWire {
     #[serde(default)]
     render: Option<StandardRenderConfig>,
-    #[serde(default)]
-    termination: Option<lash_core::TerminationMode>,
 }
 
 impl TryFrom<serde_json::Value> for StandardRunOptions {
@@ -344,7 +347,6 @@ impl TryFrom<serde_json::Value> for StandardRunOptions {
         let wire: StandardRunOptionsWire = serde_json::from_value(render::without_nulls(value))?;
         Ok(Self {
             render: wire.render,
-            termination: wire.termination,
         })
     }
 }
@@ -452,8 +454,8 @@ impl ConfigOwner for StandardConfigOwner {
     }
 
     /// A run's render options apply over the session's, field by field
-    /// and tool by tool, and its stated termination replaces the session's.
-    /// The behaviour stays as recorded.
+    /// and tool by tool. The termination and the behaviour stay as
+    /// recorded.
     fn apply_run_options(
         &self,
         recorded: &StandardRecordedConfig,
@@ -465,7 +467,6 @@ impl ConfigOwner for StandardConfigOwner {
         };
         Ok(StandardRecordedConfig {
             render,
-            termination: options.termination.or(recorded.termination),
             ..recorded.clone()
         })
     }
@@ -610,7 +611,8 @@ impl SessionPlugin for StandardProtocolPlugin {
                 config: self.config.clone(),
             }))?;
         if !self.termination.prose_ends_turn() {
-            reg.tools().provider(Arc::new(finish::FinishToolProvider))?;
+            reg.tools()
+                .provider(Arc::new(finish::finish_tool_provider()))?;
         }
         let discovery = self.config.discovery.clone();
         let batch = self.config.batch;
@@ -619,7 +621,11 @@ impl SessionPlugin for StandardProtocolPlugin {
             Arc::new(move |ctx| {
                 validate_discovery(&ctx.tools, discovery.as_ref())?;
                 validate_batch_name(&ctx.tools, batch)?;
-                Ok(Default::default())
+                // A host's own finish tool takes the place of `finish`.
+                Ok(lash_core::suppress_default_finish(
+                    &ctx,
+                    &finish::finish_tool_id(),
+                ))
             }),
         )?;
         Ok(())

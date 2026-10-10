@@ -457,7 +457,7 @@ impl EchoEndsTheTurn {
             "echo",
             "Echo the text back, ending the turn",
             lash_core::ToolDefinition::default_input_schema(),
-            lash_core::TurnControls::finish(),
+            lash_core::TurnControls::finish(lash_core::JsonSchema::any()),
         )
         .expect("valid declared tool schema")
         .with_execution(std::time::Duration::from_secs(120))

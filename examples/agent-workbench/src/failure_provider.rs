@@ -160,10 +160,10 @@ impl DevProviderScenario {
   throw "deterministic durable process failure";
 };
 await processes.start({ definition: FIG425_deterministic_failure, args: { request: 1 } });
-await control.finish("started deterministic failing process");"#,
+await chat.reply("started deterministic failing process");"#,
             ),
             (Self::ExecBlocked, 0) => cell(
-                "await sleep(600000);\nawait control.finish(\"exec block unexpectedly returned\");",
+                "await sleep(600000);\nawait chat.reply(\"exec block unexpectedly returned\");",
             ),
             (Self::ExecBlocked, _) => finish_cell("\"session recovered after break glass\""),
             (Self::ToolValue, _) => cell("await workbench_surface.terminal({});"),
@@ -209,7 +209,7 @@ await control.finish("started deterministic failing process");"#,
                     "properties": {},
                     "additionalProperties": false
                 }),
-                lash::tools::TurnControls::finish(),
+                lash::tools::TurnControls::finish(lash::schema::JsonSchema::any()),
             )
             .expect("valid declared tool schemas")
             .with_execution(std::time::Duration::from_secs(120))
@@ -422,7 +422,7 @@ fn cell(body: &str) -> String {
 
 /// The common shape: one cell that finishes with `value`.
 fn finish_cell(value: &str) -> String {
-    cell(&format!("await control.finish({value});"))
+    cell(&format!("await chat.reply({value});"))
 }
 
 fn streamed_response(request: &LlmRequest, text: &str) -> LlmResponse {
@@ -555,11 +555,11 @@ fn mcp_fixture_response(request: &LlmRequest) -> LlmResponse {
 const form = await workspace_stdio.elicit_confirmation({});
 const url = await workspace_stdio.elicit_via_url({});
 const roots = await workspace_stdio.list_host_roots({});
-await control.finish(summary.summary);"#
+await chat.reply(summary.summary);"#
     } else if prompt.contains("MCP-DETACHED") {
-        "await control.finish(\"badge tool is detached\");"
+        "await chat.reply(\"badge tool is detached\");"
     } else {
-        "const badge = await workspace_http.workspace_badge({}); await control.finish(\"workspace badge came back\");"
+        "const badge = await workspace_http.workspace_badge({}); await chat.reply(\"workspace badge came back\");"
     };
     streamed_response(request, &cell(body))
 }

@@ -176,14 +176,6 @@ pub(crate) fn attempt_occurrence(attempt: u32) -> ToolHookOccurrence {
     }
 }
 
-/// The occurrence of a Deferred completion that parked `attempt`.
-pub(crate) fn deferred_occurrence(attempt: u32) -> ToolHookOccurrence {
-    ToolHookOccurrence::DeferredCompletion {
-        attempt: lash_core_store::tool_run::AttemptOrdinal::new(attempt)
-            .unwrap_or(lash_core_store::tool_run::AttemptOrdinal::FIRST),
-    }
-}
-
 fn before_kind(verdict: &BeforeToolDecision) -> crate::ToolCheckVerdictKind {
     match verdict {
         BeforeToolDecision::Allow => crate::ToolCheckVerdictKind::Allow,

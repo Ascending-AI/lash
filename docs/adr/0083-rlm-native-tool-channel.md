@@ -23,7 +23,7 @@ JSON, missing code, and extra properties receive their own repair decisions.
 Shared response assembly normalizes provider call ids under ADR 0117 before
 native admission checks arity and arguments.
 
-Both channels share execution, finish-schema validation, semantic trajectory,
+Both channels share execution, finish-value settlement, semantic trajectory,
 control tools, bindings, and checkpoint identity. Drivers, projectors, response
 normalization, and transport prompt copy are channel-specific. Native results
 use the common observation renderer.
@@ -49,15 +49,16 @@ error. Finish values, schema mismatch, and execution errors use the common cell
 adjudication contract. Completed code executions emit the shared cell-start and
 cell-end observations.
 
-Either termination may state a finish schema (FIG-5104; since FIG-5781 the
-`finish_schema` field beside `TerminationMode`, per send through
-`RlmSendBuilderExt::finish_schema` or session-wide through the recorded
-config). It is `control.finish`'s input schema. Under Natural, prose still
-ends the turn. A `control.finish` value is validated on both channels, and a
-mismatch fails the cell as a Program failure carrying the mismatch; the model
-reads it and the loop continues. A text schema is the chat shape: the finalization copy says
-`finish` takes only the user-facing answer text, never a raw tool result, and
-that prose is preferred.
+A turn's final value has the type of the finish tool that ended it
+(FIG-5823). Each tool that declares `Finish` states its value schema on the
+declaration, and settlement checks every Finish value against the schema
+the call was admitted under, on both channels. A mismatch fails the call
+with no completion candidate and is never repeated; the model reads it and
+the loop continues. A host that wants a typed answer offers its own finish
+tool, which takes the place of `control.finish`; a send that offers it
+retyped through its tool access types that run alone. Termination is the
+session's, fixed at creation. Under Natural, prose still ends the turn, and
+the finalization copy names the finish tools the surface offers.
 
 ## Alternatives considered
 

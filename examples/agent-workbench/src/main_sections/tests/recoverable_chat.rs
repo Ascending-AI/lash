@@ -1,7 +1,6 @@
 use super::*;
 use lash::SessionId;
 use lash::TurnId;
-use lash::rlm::RlmSendBuilderExt;
 
 #[test]
 fn attachment_urls_percent_encode_the_id_path_segment() {
@@ -860,10 +859,9 @@ async fn send_turn_state_projection_stays_readable_and_settles_to_durable_truth(
 /// adds no terminal event: each completed turn keeps exactly its one `Done`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn workbench_settled_turn_cancels_preserve_execution_done() {
-    let workbench = Workbench::replying(
-        "<typescript>\nawait control.finish(\"canonical answer\");\n</typescript>",
-    )
-    .await;
+    let workbench =
+        Workbench::replying("<typescript>\nawait chat.reply(\"canonical answer\");\n</typescript>")
+            .await;
     let state = &workbench.state;
     let session_id = state.current_session_id();
     let session = state
@@ -887,8 +885,6 @@ async fn workbench_settled_turn_cancels_preserve_execution_done() {
         session
             .send(lash::TurnInput::text(format!("complete {turn_id}")))
             .id(lash::TurnId::parse(turn_id).expect("nonblank host identity"))
-            .require_finish()
-            .expect("require finish")
             .output()
             .await
             .expect("complete turn before stale cancel");

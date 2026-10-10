@@ -82,10 +82,15 @@ fn bounded_tool_call_output(
             control: control.clone(),
         },
         ToolControl::Turn {
-            control: TurnControl::Finish { value },
+            control:
+                TurnControl::Finish {
+                    value,
+                    value_schema,
+                },
         } => ToolControl::Turn {
             control: TurnControl::Finish {
                 value: bounded_tool_value(value, config),
+                value_schema: value_schema.clone(),
             },
         },
         ToolControl::Fail { failure } => ToolControl::Fail {
@@ -179,7 +184,7 @@ fn tool_output_attachments(output: &ToolCallOutput) -> Vec<lash_core::Attachment
     let mut attachments = output.attachments();
     match output.control.as_ref() {
         Some(ToolControl::Turn {
-            control: TurnControl::Finish { value },
+            control: TurnControl::Finish { value, .. },
         }) => attachments.extend(value.attachments()),
         Some(ToolControl::Fail { failure }) => attachments.extend(
             failure

@@ -1,6 +1,5 @@
 use crate::dialect::{ExecutionSection, SessionDialect};
 use crate::plugin::RlmChannel;
-use crate::rlm_support::RlmCompletion;
 
 /// The native channel's execution section is the dialect's own rendering for
 /// this transport: every transport-specific fragment (lead-in, response-shape
@@ -34,12 +33,4 @@ pub(crate) fn execution_section(
         prose: without_tag_lines(section.prose),
         declarations: without_tag_lines(section.declarations),
     }
-}
-
-pub(crate) fn finalization(dialect: &SessionDialect, termination: &RlmCompletion) -> String {
-    dialect.finalization_copy(
-        termination.mode,
-        termination.finish_schema(),
-        RlmChannel::NativeTool,
-    )
 }

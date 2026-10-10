@@ -319,7 +319,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                                     ctx.protocol_iteration(),
                                     "finish_reminder",
                                 ),
-                                termination.finish_schema().is_some(),
+                                &self.dialect.offered_finish_calls(&ctx),
                             )
                         }),
                     ];

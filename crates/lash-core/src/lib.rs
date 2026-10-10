@@ -468,21 +468,22 @@ pub use lash_sansio::{
     CheckpointKind, CompactToolContract, CompletionCandidate, CompletionDisposition,
     DeclarationRefusal, DegradedBinding, ExecCodeFailure, ExecCodeFailureReason, ExecResponse,
     ExecutedCall, ExecutedCallOutcome, ExecutionBudgets, ExecutionBudgetsConfig,
-    ExecutionBudgetsError, ExecutionLimit, ExecutionPolicy, FrameKey, FrameKeyError, InputId,
-    InternalPartKind, JsonSchema, LimitCause, LlmCallError, LlmUsage, MediaType, Message,
-    MessageOrigin, MessageRole, NodeId, OmittedToolCalls, OutcomeShape, OutputRetentionPolicy,
-    OutputValue, ParkBound, Part, PartKind, PluginMessage, PluginRuntimeEvent, ProjectionMode,
-    ProviderAttemptLimits, RegistrationRefused, RetainedOutput, RunId, SchemaAdmissionError,
-    SchemaContract, SchemaDialect, SchemaProjectionOverride, SchemaProjectionPolicy,
-    SessionAppendNode, TOOL_BINDING_KEY, TerminationMode, TextProjectionMetadata,
-    TokenUsageOverflow, ToolArgumentProjectionPolicy, ToolBinding, ToolBound, ToolBounds,
-    ToolCallOutcome, ToolCallOutput, ToolCallRecord, ToolCancellation, ToolCatalog,
-    ToolCatalogBuildError, ToolCatalogEntry, ToolCheckConflict, ToolCheckPhase, ToolCheckReply,
-    ToolCheckVerdictKind, ToolContract, ToolControl, ToolDeclaration, ToolDefinition,
-    ToolDefinitionBindingExt, ToolDiscovery, ToolDraft, ToolFailure, ToolFailureCause,
-    ToolFailureClass, ToolFailureSource, ToolId, ToolIntentIdentity, ToolIntentKind, ToolManifest,
-    ToolModule, ToolOutputContract, ToolValue, ToolView, ToolViewBlock, ToolViewMeta, TurnControl,
-    TurnControlKind, TurnControls, TurnId, TurnOutputSource, TurnReply, ValueMismatch,
+    ExecutionBudgetsError, ExecutionLimit, ExecutionPolicy, FinishDeclaration, FrameKey,
+    FrameKeyError, InputId, InternalPartKind, JsonSchema, LimitCause, LlmCallError, LlmUsage,
+    MediaType, Message, MessageOrigin, MessageRole, NodeId, OmittedToolCalls, OutcomeShape,
+    OutputRetentionPolicy, OutputValue, ParkBound, Part, PartKind, PluginMessage,
+    PluginRuntimeEvent, ProjectionMode, ProviderAttemptLimits, RegistrationRefused, RetainedOutput,
+    RunId, SchemaAdmissionError, SchemaContract, SchemaDialect, SchemaProjectionOverride,
+    SchemaProjectionPolicy, SessionAppendNode, TOOL_BINDING_KEY, TerminationMode,
+    TextProjectionMetadata, TokenUsageOverflow, ToolArgumentProjectionPolicy, ToolBinding,
+    ToolBound, ToolBounds, ToolCallOutcome, ToolCallOutput, ToolCallRecord, ToolCancellation,
+    ToolCatalog, ToolCatalogBuildError, ToolCatalogEntry, ToolCheckConflict, ToolCheckPhase,
+    ToolCheckReply, ToolCheckVerdictKind, ToolContract, ToolControl, ToolDeclaration,
+    ToolDefinition, ToolDefinitionBindingExt, ToolDiscovery, ToolDraft, ToolFailure,
+    ToolFailureCause, ToolFailureClass, ToolFailureSource, ToolId, ToolIntentIdentity,
+    ToolIntentKind, ToolManifest, ToolModule, ToolOutputContract, ToolValue, ToolView,
+    ToolViewBlock, ToolViewMeta, TurnControl, TurnControlKind, TurnControls, TurnId,
+    TurnOutputSource, TurnReply, ValueMismatch,
 };
 pub(crate) use lash_sansio::{
     BaseRenderCache, build_turn, messages_are_prompt_resume_safe, visible_response_parts,
@@ -566,6 +567,9 @@ pub use plugin::{
 };
 pub use plugin::{OpenAgentFrameOutcome, OpenAgentFrameRequest};
 
+pub use lash_core_execution::{
+    FinishToolProvider, finish_tool, finish_tool_id, suppress_default_finish,
+};
 pub use lash_core_execution::{Material, NamesMaterial, SettledOutput, SettledOutputRefusal};
 pub use provider::{
     AnthropicThinkingRetention, AttachmentAcceptanceRule, AttachmentAcceptor,

@@ -136,7 +136,8 @@ pub use tool_contract::{
     XLashType, is_named_type_reference, schema_for,
 };
 pub use tool_declaration::{
-    DeclarationRefusal, OutcomeShape, ToolDeclaration, TurnControlKind, TurnControls,
+    DeclarationRefusal, FinishDeclaration, OutcomeShape, ToolDeclaration, TurnControlKind,
+    TurnControls,
 };
 pub use tool_output::{
     AttachmentMaterializationNotice, AttachmentMaterializationReason, CancelOrigin, CancelRequest,

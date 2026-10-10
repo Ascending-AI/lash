@@ -625,7 +625,10 @@ pub enum CompletionDisposition {
 }
 
 /// A settled control call that may end its turn: recorded when the call
-/// settles, and decided once at BeforeCompletion.
+/// settles, and decided once at BeforeCompletion. Its `control` is the
+/// settled one, so a Finish keeps the schema its value was validated under
+/// (`TurnControl::Finish::value_schema`): a superseded candidate keeps its
+/// own, and neither a replay nor a later surface judges it again.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CompletionCandidate {
@@ -657,11 +660,13 @@ impl CompletionCandidate {
     /// The outcome the turn ends with when this candidate is accepted.
     pub fn outcome(&self) -> TurnOutcome {
         match &self.control {
-            crate::TurnControl::Finish { value } => TurnOutcome::Finished(TurnFinish::Finished {
-                tool_name: self.tool_name.clone(),
-                value: crate::ToolCallOutput::success_tool_value(value.clone())
-                    .value_for_projection(),
-            }),
+            crate::TurnControl::Finish { value, .. } => {
+                TurnOutcome::Finished(TurnFinish::Finished {
+                    tool_name: self.tool_name.clone(),
+                    value: crate::ToolCallOutput::success_tool_value(value.clone())
+                        .value_for_projection(),
+                })
+            }
             crate::TurnControl::SwitchAgentFrame {
                 frame_key,
                 initial_nodes,

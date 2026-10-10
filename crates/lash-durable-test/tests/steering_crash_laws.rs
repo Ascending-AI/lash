@@ -22,7 +22,10 @@
 //!   completion checkpoint that decides the candidate delivers it: the
 //!   candidate is superseded, the turn goes on into a new iteration whose
 //!   model reads the steer, and its second finish is the run's one answer
-//!   (FIG-5800).
+//!   (FIG-5800). The two finishes are calls of two finish tools that
+//!   declare different value schemas: the answer is checked against its
+//!   own tool's, and the run's committed outcome records that schema, not
+//!   the superseded finish's (FIG-5823).
 //!
 //! The matrix cuts the uncut run at every labelled write, under
 //! fail-before, ack-hidden, zombie, abort and commit-then-abort, recovers on
@@ -66,6 +69,9 @@ const STEER_RUN: &str = "steering-follow-on";
 const TOOL: &str = "steer_round";
 /// The control tool of the completion scenario: it finishes with its label.
 const FINISH_TOOL: &str = "finish_round";
+/// The control tool the completion scenario's model finishes with once it
+/// read the steer.
+const FINISH_STEERED: &str = "finish_steered";
 const MODEL: &str = "steering-model";
 const ASK: &str = "work through two rounds";
 const STEER: &str = "and mind the steer";
@@ -216,18 +222,26 @@ impl StaticToolExecute for FinishRound {
     }
 }
 
-fn finish_round(
-    core: Arc<OnceLock<lash::LashCore>>,
-    arrival: Arrival,
-) -> Arc<dyn lash_core::ToolProvider> {
-    let definition = lash_core::ToolDefinition::control(
-        FINISH_TOOL,
-        FINISH_TOOL,
+/// The value schema of the finish tool `tool`: the one label its call may
+/// finish with.
+fn finish_value_schema(tool: &str) -> serde_json::Value {
+    serde_json::json!({
+        "const": if tool == FINISH_TOOL { FIRST_ROUND } else { SECOND_ROUND }
+    })
+}
+
+fn finish_definition(tool: &str) -> lash_core::ToolDefinition {
+    lash_core::ToolDefinition::control(
+        tool,
+        tool,
         "Finishes the turn with its label; the first round's call sends the steer.",
         serde_json::json!({ "type": "object", "additionalProperties": true }),
-        lash_core::TurnControls::finish(),
+        lash_core::TurnControls::finish(
+            lash_core::JsonSchema::admit(finish_value_schema(tool))
+                .expect("a finish tool's value schema"),
+        ),
     )
-    .expect("finish_round's schemas")
+    .expect("a finish tool's schemas")
     .with_execution(std::time::Duration::from_secs(120))
     // A call a kill interrupted runs again at its ordinal, so the first
     // round's body sends the steer whatever was cut.
@@ -235,9 +249,18 @@ fn finish_round(
         std::num::NonZeroU32::new(3).expect("a nonzero attempt bound"),
         1,
         1,
-    ));
+    ))
+}
+
+fn finish_round(
+    core: Arc<OnceLock<lash::LashCore>>,
+    arrival: Arrival,
+) -> Arc<dyn lash_core::ToolProvider> {
     Arc::new(StaticToolProvider::new(
-        vec![definition],
+        vec![
+            finish_definition(FINISH_TOOL),
+            finish_definition(FINISH_STEERED),
+        ],
         FinishRound(core, arrival),
     ))
 }
@@ -297,7 +320,7 @@ fn model(
                     // The finish the steer supersedes, then the one that
                     // answers once the model has read it.
                     if delivered {
-                        call_tool(FINISH_TOOL, "finish-call-2", SECOND_ROUND)
+                        call_tool(FINISH_STEERED, "finish-call-2", SECOND_ROUND)
                     } else {
                         call_tool(FINISH_TOOL, "finish-call-1", FIRST_ROUND)
                     }
@@ -718,17 +741,24 @@ impl Scenario for Steering {
     }
 }
 
-/// The run answers the finish of the iteration the steer opened: the one
-/// it superseded is never its outcome.
+/// The run answers the finish of the iteration the steer opened, under its
+/// own tool's value schema: the one it superseded is never its outcome,
+/// nor its schema the answer's.
 fn second_finish_laws(cause: &lash_core_store::store::RunTerminalCause) -> Vec<String> {
     match cause {
         lash_core_store::store::RunTerminalCause::Committed {
             outcome:
-                lash_core_store::store::RunCommittedOutcome::Finished(
-                    lash_sansio::TurnFinish::Finished { tool_name, value },
-                ),
+                lash_core_store::store::RunCommittedOutcome::Finished {
+                    finish: lash_sansio::TurnFinish::Finished { tool_name, value },
+                    value_schema: Some(schema),
+                },
             ..
-        } if tool_name == FINISH_TOOL && *value == serde_json::json!(SECOND_ROUND) => Vec::new(),
+        } if tool_name == FINISH_STEERED
+            && *value == serde_json::json!(SECOND_ROUND)
+            && schema.as_value() == &finish_value_schema(FINISH_STEERED) =>
+        {
+            Vec::new()
+        }
         other => vec![format!(
             "the run did not answer the finish after the steer: {other:?}"
         )],

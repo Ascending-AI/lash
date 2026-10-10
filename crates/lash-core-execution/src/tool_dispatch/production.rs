@@ -35,6 +35,9 @@ pub(crate) struct ProductionToolHandlers<'run> {
     isolated: Mutex<BTreeMap<crate::ToolCallId, IsolatedToolStart>>,
     /// The key of the completion wait a round member's round pinned for it.
     completion_key: Option<crate::PinnedKey>,
+    /// The declaration a round member's admission pinned: what its attempt
+    /// settles under, whatever its tool declares now.
+    admitted_declaration: Option<crate::ToolDeclaration>,
     /// The trace scope an attempt traces its call's start and terminal
     /// under: a cell member's, which its cell's admission retained and
     /// selected (FIG-5395). A round member is traced by its round's fold,
@@ -156,6 +159,7 @@ impl<'run> ProductionToolHandlers<'run> {
             declarations: Mutex::default(),
             isolated: Mutex::default(),
             completion_key: None,
+            admitted_declaration: None,
             traced_scope: None,
         }
     }
@@ -326,6 +330,16 @@ impl<'run> ProductionToolHandlers<'run> {
         self
     }
 
+    /// These handlers, settling their call under `declaration`, the one
+    /// its admission pinned.
+    pub(crate) fn with_admitted_declaration(
+        mut self,
+        declaration: Option<crate::ToolDeclaration>,
+    ) -> Self {
+        self.admitted_declaration = declaration;
+        self
+    }
+
     /// Stage the start a parked call declared, under its start key beneath
     /// the call's lineage, holding the child for the call: its launch
     /// receipt, and the rows that register it with the park.
@@ -392,6 +406,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                 output,
                 stream: Default::default(),
                 suggested_delay_ms: None,
+                repeatable: false,
             }
         })
     }
@@ -732,6 +747,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                     Ok(SingletonBodyOutcome::Failed {
                         output: encode(&capture)?,
                         suggested_delay_ms: None,
+                        repeatable: false,
                     })
                 } else if let Some(crate::PendingResolver::DeclaredStart(start)) =
                     &pending.resolved_by
@@ -759,6 +775,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                     Ok(SingletonBodyOutcome::Failed {
                         output: encode(&capture)?,
                         suggested_delay_ms: None,
+                        repeatable: true,
                     })
                 } else if completion_context.take_completion_key().is_none() {
                     let capture = self
@@ -778,6 +795,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                     Ok(SingletonBodyOutcome::Failed {
                         output: encode(&capture)?,
                         suggested_delay_ms: None,
+                        repeatable: true,
                     })
                 } else {
                     let mut store_local = Vec::new();
@@ -811,6 +829,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                                 return Ok(SingletonBodyOutcome::Failed {
                                     output: encode(&capture)?,
                                     suggested_delay_ms: None,
+                                    repeatable: true,
                                 });
                             }
                             store_local.extend(effect);
@@ -889,9 +908,17 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                                 evidence: Some(output),
                             })
                         }
+                        // An outcome its declaration refused (a Finish
+                        // value its schema does not admit among them) is
+                        // the call's answer: no repeat can repair it
+                        // without running its body's work again.
                         _ => Ok(SingletonBodyOutcome::Failed {
                             output,
                             suggested_delay_ms: failure.suggested_delay_ms,
+                            repeatable: !matches!(
+                                failure.cause.as_deref(),
+                                Some(crate::ToolFailureCause::Declaration { .. })
+                            ),
                         }),
                     },
                     crate::ToolCallOutcome::Cancelled(_) => Ok(SingletonBodyOutcome::Cancelled {

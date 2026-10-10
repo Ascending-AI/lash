@@ -410,7 +410,6 @@ async fn standard_runtime_keeps_recorded_history_across_params_renderer_and_reop
         Some(
             lash::runtime::ProtocolTurnOptions::typed(lash::standard::StandardRunOptions {
                 render: Some(standard_render(100)),
-                termination: None,
             })
             .expect("the run's render options encode"),
         ),
@@ -653,7 +652,6 @@ async fn stored_prints_keep_the_history_cache_prefix_across_renderer_change_and_
         Some(
             lash::runtime::ProtocolTurnOptions::typed(lash::rlm::RlmTurnOptions {
                 render: Some(print_cap(2)),
-                ..Default::default()
             })
             .expect("the run's render options encode"),
         ),

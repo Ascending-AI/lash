@@ -53,6 +53,10 @@ pub(super) fn register_rlm_protocol_plugin(
         .provider(Arc::new(crate::control_tools::RlmControlToolsProvider {
             vocabulary: dialect.prompt_vocabulary(),
         }))?;
+    reg.tools()
+        .provider(Arc::new(crate::control_tools::finish_tool_provider(
+            dialect.prompt_vocabulary(),
+        )))?;
     reg.tool_catalog().contribute(
         lash_core::hook_key!("rlm-catalog"),
         Arc::new(move |ctx| {

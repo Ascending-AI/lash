@@ -514,7 +514,7 @@ async fn facade_final_value_execution_inner(
     let core = builder
         .build(crate::sim_process_owner())
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-    let session = crate::open_created_session(provider_kind, &core, session_id)
+    let session = crate::open_created_finish_required_session(provider_kind, &core, session_id)
         .await
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     let result = engine
@@ -523,7 +523,7 @@ async fn facade_final_value_execution_inner(
             lash_core::TurnId::fixture(format!("{session_id}-turn")),
             events.clone(),
             Arc::new(move |session: &lash::LashSession| {
-                session.send(lash::TurnInput::text(prompt)).require_finish()
+                Ok(session.send(lash::TurnInput::text(prompt)))
             }),
         )
         .await?

@@ -525,49 +525,6 @@ impl RuntimeExecutionContext<'_> {
             .await;
     }
 
-    /// `call_key` is the material the settled call's observation lanes key
-    /// under — its await's journaled invocation replay key; see
-    /// [`Self::emit_tool_call_started`].
-    #[allow(clippy::too_many_arguments)]
-    pub async fn pending_completion_dispatch_outcome(
-        &self,
-        ids: &ToolCallIds,
-        call_key: &str,
-        tool_name: String,
-        args: serde_json::Value,
-        resolution: crate::Resolution,
-        resolver: Option<&crate::PendingResolver>,
-        attempts: Vec<lash_trace::TraceRetryAttempt>,
-    ) -> ToolDispatchOutcome {
-        let mut resumed_dispatch = (*self.dispatch).clone();
-        resumed_dispatch.observation_call_key = Some(self.call_observation_key(call_key));
-        // The parked row keeps the call's name, not its tool id: the catalog
-        // names the id while the tool is still a member.
-        let tool_id = crate::tool_dispatch::resolve_callable_manifest(&self.dispatch, &tool_name)
-            .map_or_else(
-                || crate::ToolId::from(tool_name.as_str()),
-                |manifest| manifest.id,
-            );
-        let prepared = crate::plugin::PreparedCallReadView::new(crate::PreparedToolCall {
-            call_id: ids.call_id.clone(),
-            provider_call_id: ids.provider_call_id.clone(),
-            tool_id,
-            tool_name,
-            args,
-            replay: None,
-            prepared_payload: serde_json::Value::Null,
-        });
-        crate::tool_dispatch::settle_completed_pending_tool_call(
-            &resumed_dispatch,
-            ids,
-            &prepared,
-            resolution,
-            resolver,
-            attempts,
-        )
-        .await
-    }
-
     pub(crate) async fn await_process_with_cancellation(
         &self,
         process_id: &crate::ProcessId,

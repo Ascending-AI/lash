@@ -521,9 +521,7 @@ pub(super) async fn run_final_value_turn(
             "sim-final-value-turn",
             events,
             Arc::new(|session: &lash::LashSession| {
-                session
-                    .send(lash::TurnInput::text("produce a semantic final value"))
-                    .require_finish()
+                Ok(session.send(lash::TurnInput::text("produce a semantic final value")))
             }),
         )
         .await
@@ -563,10 +561,13 @@ pub(super) async fn final_value_session(
         )
         .build(crate::sim_process_owner())
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-    let session =
-        crate::open_created_session("mock-rlm-final-value", &core, "sim-final-value-session")
-            .await
-            .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
+    let session = crate::open_created_finish_required_session(
+        "mock-rlm-final-value",
+        &core,
+        "sim-final-value-session",
+    )
+    .await
+    .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     Ok((core, session))
 }
 

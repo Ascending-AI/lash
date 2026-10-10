@@ -8,7 +8,7 @@ use super::*;
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn done_stream_items_are_transient_and_not_snapshotted() {
     let workbench =
-        Workbench::replying("<typescript>\nawait control.finish(\"done\");\n</typescript>").await;
+        Workbench::replying("<typescript>\nawait chat.reply(\"done\");\n</typescript>").await;
     let state = &workbench.state;
     let session_id = state.current_session_id();
     let mut events = state.event_tx.subscribe(&session_id);

@@ -20,8 +20,7 @@ async fn user_rows(state: &AppState, session_id: &SessionId) -> Vec<String> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn concurrent_sessions_isolate_transcripts() {
     let workbench =
-        Workbench::replying("<typescript>\nawait control.finish(\"isolated\");\n</typescript>")
-            .await;
+        Workbench::replying("<typescript>\nawait chat.reply(\"isolated\");\n</typescript>").await;
     let state = &workbench.state;
     let session_a = state.current_session_id();
     let Json(created) = create_session(

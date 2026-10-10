@@ -75,7 +75,10 @@ fn drain(machine: &mut TurnMachine) -> Vec<Effect> {
                 id,
                 result: Ok(sansio::ExecutionEnvironmentSync {
                     turn_controls: [
-                        ("finish".to_string(), lash_core::TurnControls::finish()),
+                        (
+                            "finish".to_string(),
+                            lash_core::TurnControls::finish(lash_core::JsonSchema::any()),
+                        ),
                         (
                             "switch".to_string(),
                             lash_core::TurnControls::switch_agent_frame(),
@@ -318,6 +321,7 @@ fn the_preamble_offers_batch_only_when_enabled() {
                 max_members: std::num::NonZeroUsize::new(8).expect("eight is non-zero"),
             },
             lash_core::TerminationMode::Natural,
+            &[],
         )
         .contains("at most 8 per batch")
     );
@@ -344,6 +348,7 @@ fn a_failed_tool_outcome_control_is_not_taken_as_the_turn_outcome() {
     .with_control(ToolControl::Turn {
         control: TurnControl::Finish {
             value: ToolValue::String("smuggled terminal value".to_string()),
+            value_schema: None,
         },
     });
     assert!(!failed_with_control.is_success());

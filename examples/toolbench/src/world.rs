@@ -138,7 +138,7 @@ impl SharedWorld {
     )]
     pub(crate) fn standard_provider(&self) -> Arc<dyn ToolProvider> {
         let mut tools = definitions(self.snapshot().catalog);
-        tools.push(ToolDefinition::control("tool:toolbench_submit", "submit", "Submit exactly the value the task asks for and end the task. Call exactly once, on its own, after all other work has succeeded.", json!({"type":"object", "properties":{"value":{"type":["number","string","boolean","null","array","object"]}}, "required":["value"], "additionalProperties":false}), lash::tools::TurnControls::finish()).expect("valid declared tool schemas").with_execution(std::time::Duration::from_secs(120)));
+        tools.push(ToolDefinition::control("tool:toolbench_submit", "submit", "Submit exactly the value the task asks for and end the task. Call exactly once, on its own, after all other work has succeeded.", json!({"type":"object", "properties":{"value":{"type":["number","string","boolean","null","array","object"]}}, "required":["value"], "additionalProperties":false}), lash::tools::TurnControls::finish(lash::schema::JsonSchema::any())).expect("valid declared tool schemas").with_execution(std::time::Duration::from_secs(120)));
         Arc::new(StaticToolProvider::new(tools, self.clone()))
     }
 
@@ -1151,7 +1151,7 @@ mod catalog_tests {
             assert_eq!(submit.name, "submit");
             assert_eq!(
                 submit.declaration().controls,
-                lash::tools::TurnControls::finish(),
+                lash::tools::TurnControls::finish(lash::schema::JsonSchema::any()),
                 "submit declares its authority to finish the turn"
             );
             assert_eq!(rlm, standard);

@@ -719,7 +719,7 @@ fn prose_then_finish(n: usize) -> LlmResponse {
         parts: vec![LlmOutputPart::ToolCall {
             call_id: format!("finish-call-{n}"),
             tool_name: "finish".to_string(),
-            input_json: r#"{"value":42}"#.to_string(),
+            input_json: r#"{"answer":42}"#.to_string(),
             replay: None,
         }],
         ..LlmResponse::default()
@@ -728,7 +728,8 @@ fn prose_then_finish(n: usize) -> LlmResponse {
 
 /// FIG-5801: a standard session created `terminal_required` is offered
 /// `finish`. A prose reply does not end its turn: the model is told to end
-/// it through `finish`, and the turn ends on that call with its value.
+/// it through `finish`, and the turn ends on that call with its whole
+/// input as its value.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_terminal_required_standard_session_ends_through_finish() {
     let requests = Arc::new(StdMutex::new(Vec::new()));
@@ -764,7 +765,7 @@ async fn a_terminal_required_standard_session_ends_through_finish() {
         .expect("the turn answers");
     assert_eq!(
         output.finished(),
-        Some(("finish", &serde_json::json!(42))),
+        Some(("finish", &serde_json::json!({ "answer": 42 }))),
         "{:?}",
         output.result.outcome
     );

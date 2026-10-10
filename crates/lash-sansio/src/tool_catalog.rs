@@ -344,6 +344,15 @@ pub fn build_tool_catalog(
                     tool_id: manifest.id.clone(),
                     name: manifest.name.clone(),
                 })?;
+            // A control call's result is its control: a tool that declares
+            // one has no output for a contract to state beside it.
+            if !manifest.declaration().controls.is_empty() && !contract.states_no_output() {
+                return Err(ToolCatalogBuildError::RegistrationRefused {
+                    refusal: crate::RegistrationRefused::ControlDeclaresOutput {
+                        tool: manifest.name.clone(),
+                    },
+                });
+            }
             Ok(ToolCatalogEntry { manifest, contract })
         })
         .collect::<Result<_, _>>()?;

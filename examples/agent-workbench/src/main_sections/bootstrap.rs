@@ -311,7 +311,10 @@ pub(crate) async fn workbench_core_builder(
             )
             .with_worker_service(rlm_workers.context("RLM worker was not prewarmed")?)
             .with_deferred_tool_resolver(deferred_tools.resolver());
-            LashCore::rlm_builder(host_backend, factory)
+            // The chat's own finish tool takes the place of Lash's.
+            LashCore::rlm_builder(host_backend, factory).tools(Arc::new(
+                lash::tools::FinishToolProvider::new([plugins::chat_reply_tool()]),
+            ))
         }
     }
     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))

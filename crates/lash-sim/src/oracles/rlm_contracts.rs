@@ -541,7 +541,6 @@ fn check_rlm_typed_finish_emits_outcome_and_done(
     require_rlm_trajectory_error(result, None, contract)?;
     Ok(json!({
         "mode": "terminal_required",
-        "finish_schema": result.get("finish_schema"),
         "done": true,
         "final_value": { "ok": true },
         "exec_code": "await control.finish({ ok: true });",

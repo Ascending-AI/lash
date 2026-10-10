@@ -39,7 +39,7 @@ impl DynamicToolSpec {
                 self.name,
                 self.description,
                 lash_core::ToolDefinition::default_input_schema(),
-                lash_core::TurnControls::none().with(lash_core::TurnControlKind::Finish),
+                lash_core::TurnControls::finish(lash_core::JsonSchema::any()),
             )
         } else {
             lash_core::ToolDefinition::raw(
@@ -105,9 +105,9 @@ impl lash_core::ToolProvider for DynamicToolSurface {
                 ));
             };
             if tool.finish_on_execute {
-                return lash_core::ToolOutcome::turn_control(lash_core::TurnControl::Finish {
-                    value: lash_core::ToolValue::untrusted_json(json!(tool.id)),
-                });
+                return lash_core::ToolOutcome::finish(lash_core::ToolValue::untrusted_json(
+                    json!(tool.id),
+                ));
             }
             lash_core::ToolOutcome::ok(json!({
                 "id": tool.id,

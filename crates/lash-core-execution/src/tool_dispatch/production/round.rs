@@ -41,6 +41,9 @@ pub(super) enum MemberEnd {
 pub(super) struct ParkedCall {
     completion: crate::PendingCompletion,
     launch: Option<super::super::LaunchReceipt>,
+    /// The declaration the call was admitted under: what its resolution
+    /// settles against, whatever the session's catalog has become since.
+    declaration: crate::ToolDeclaration,
 }
 
 impl ParkedCall {
@@ -186,9 +189,15 @@ impl ProductionToolHandlers<'_> {
         may_retry: bool,
         cancel: &tokio_util::sync::CancellationToken,
     ) -> Result<(MemberEnd, Vec<StoreLocalEffect>), SingletonRunError> {
-        let Some(definition) = self.leaf_definition(&invocation) else {
+        let Some(mut definition) = self.leaf_definition(&invocation) else {
             return Ok((MemberEnd::Final(answered(call, unavailable())), Vec::new()));
         };
+        // Every attempt settles under the declaration the call's admission
+        // pinned, on whichever owner runs it: a host that retyped the tool
+        // since changes later calls, never this one.
+        if let Some(admitted) = &self.admitted_declaration {
+            definition = definition.with_admitted_declaration(admitted.clone());
+        }
         if let Some(engine) = definition.manifest.isolation_engine() {
             let source = invocation
                 .execution_grant
@@ -214,6 +223,7 @@ impl ProductionToolHandlers<'_> {
                 .lock_recover()
                 .insert(invocation.id.clone(), start);
         }
+        let declaration = definition.manifest.declaration().clone();
         let mut environment = self.environment.clone();
         let singleton = self
             .admit_leaf(
@@ -267,6 +277,7 @@ impl ProductionToolHandlers<'_> {
                 MemberEnd::Parked(ParkedCall {
                     completion: *completion,
                     launch: launch.map(|launch| *launch),
+                    declaration,
                 }),
                 store_local,
             ),
@@ -337,7 +348,8 @@ pub(super) fn member_body(
                     context.clone().with_cancellation_token(token.clone()),
                     None,
                 )
-                .with_completion_key(key.clone());
+                .with_completion_key(key.clone())
+                .with_admitted_declaration(execution.draft().declaration().cloned());
                 handlers.traced_scope = traced_scope.clone();
                 let handlers = Arc::new(handlers);
                 match handlers
@@ -410,31 +422,39 @@ pub(super) fn member_body(
     })
 }
 
-/// The final answer of the member `call`, a call of a tool admitted under
-/// `declaration`, parked as `parked`, once one of its waits ended with
-/// `resolution`: a pure function of the resolution and the parked call its
-/// `Waiting` outcome recorded, settled as the declaration says. Runs no
-/// body.
+/// The final answer of the member `call`, parked as `parked`, once one of
+/// its waits ended with `resolution`: a pure function of the resolution and
+/// the parked call its `Waiting` outcome recorded, settled as the
+/// declaration the park recorded says. Runs no body. A park that does not
+/// decode has no declaration to settle under, and answers a typed recovery
+/// failure rather than a result no declaration checked.
 pub(super) fn resolved_member(
     owner: &crate::EffectOpener,
     call: &crate::sansio::PendingToolCall,
-    declaration: Option<&crate::ToolDeclaration>,
     parked: &Material<CompletionSource>,
     resolution: Resolution,
 ) -> SettledOutput {
-    let output = parked_call_output(parked, resolution);
-    let output = match declaration {
-        Some(declaration) => output
-            .settled(declaration)
-            .unwrap_or_else(super::declaration_refused),
-        None => output,
+    let Ok(recorded) = serde_json::from_str::<ParkedCall>(parked.payload()) else {
+        return member_output(
+            owner,
+            MemberEnd::Final(answered(
+                call,
+                ToolCallOutput::failure(crate::ToolFailure::runtime(
+                    crate::ToolFailureClass::Internal,
+                    "parked_call_unreadable",
+                    "the parked call's record does not decode, so its admitted declaration is unknown",
+                )),
+            )),
+        );
     };
-    let parked = serde_json::from_str::<ParkedCall>(parked.payload()).ok();
+    let output = parked_call_output(parked, resolution)
+        .settled(&recorded.declaration)
+        .unwrap_or_else(super::declaration_refused);
     let mut completed = answered(call, output);
     // The launch receipt is the call's host-facing intent outcome; the
     // model sees the child's value only.
-    completed.intent_outcomes = parked
-        .and_then(|parked| parked.launch)
+    completed.intent_outcomes = recorded
+        .launch
         .map(|launch| vec![launch.outcome])
         .unwrap_or_default();
     member_output(owner, MemberEnd::Final(completed))
@@ -609,7 +629,8 @@ pub(super) fn member_pin(
     now_ms: u64,
 ) -> MemberPin {
     if let Some(manifest) = manifest {
-        return MemberPin::admitted(tool, manifest.execution_policy, manifest.bounds(), now_ms);
+        return MemberPin::admitted(tool, manifest.execution_policy, manifest.bounds(), now_ms)
+            .with_declaration(manifest.declaration().clone());
     }
     let control = context
         .dispatch()
@@ -621,6 +642,7 @@ pub(super) fn member_pin(
         policy: ExecutionPolicy::Once,
         limit: lash_sansio::ExecutionLimit::starting_at(now_ms, control, control),
         park: None,
+        declaration: None,
     }
 }
 
@@ -792,17 +814,11 @@ impl RoundTools for ProductionRoundTools {
     fn resolved(
         &self,
         call: &crate::sansio::PendingToolCall,
-        execution: &AdmittedExecution,
+        _execution: &AdmittedExecution,
         parked: &Material<CompletionSource>,
         resolution: Resolution,
     ) -> SettledOutput {
-        let catalog = self.context.tool_catalog();
-        let declaration = catalog
-            .tools
-            .iter()
-            .find(|tool| tool.manifest.id == *execution.draft().tool())
-            .map(|tool| tool.manifest.declaration());
-        resolved_member(&self.owner, call, declaration, parked, resolution)
+        resolved_member(&self.owner, call, parked, resolution)
     }
 
     fn present<'a>(
@@ -880,3 +896,7 @@ impl RuntimeExecutionContext<'_> {
         }))
     }
 }
+
+#[cfg(test)]
+#[path = "round_tests.rs"]
+mod tests;

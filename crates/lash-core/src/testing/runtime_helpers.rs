@@ -1088,7 +1088,14 @@ impl TerminalControlTool {
                 name,
                 description,
                 input,
-                crate::TurnControls::none().with(control.kind()),
+                match control.kind() {
+                    crate::TurnControlKind::Finish => {
+                        crate::TurnControls::finish(crate::JsonSchema::any())
+                    }
+                    crate::TurnControlKind::SwitchAgentFrame => {
+                        crate::TurnControls::switch_agent_frame()
+                    }
+                },
             ),
             _ => crate::ToolDefinition::raw(
                 id,

@@ -103,6 +103,10 @@ pub enum SingletonCapture {
     Failed {
         output: String,
         suggested_delay_ms: Option<u64>,
+        /// Whether the call's policy may repeat it. A refusal of the outcome
+        /// by the admitted declaration is not: running the body again to
+        /// repair its result would repeat its outside work.
+        repeatable: bool,
         stream: AttemptStream,
     },
     Interrupted,
@@ -222,6 +226,9 @@ pub enum SingletonBodyOutcome {
     Failed {
         output: String,
         suggested_delay_ms: Option<u64>,
+        /// Whether the call's policy may repeat it: not when the admitted
+        /// declaration refused the outcome.
+        repeatable: bool,
     },
     Interrupted,
     TimedOut {

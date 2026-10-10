@@ -5,12 +5,11 @@
 // named a language its cells would ignore is a compile error, not a silently
 // discarded field.
 
-use lash::rlm::{TerminationMode, RlmTurnOptions};
+use lash::rlm::RlmTurnOptions;
 
 fn a_turn_cannot_name_a_dialect() {
     let _ = RlmTurnOptions {
         dialect: Some("typescript"),
-        termination: Some(TerminationMode::Natural),
         ..Default::default()
     };
 }

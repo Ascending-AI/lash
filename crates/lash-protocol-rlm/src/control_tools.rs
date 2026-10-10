@@ -19,7 +19,6 @@ pub(crate) struct RlmControlToolsProvider {
 impl ToolProvider for RlmControlToolsProvider {
     fn tool_manifests(&self) -> Vec<ToolManifest> {
         vec![
-            finish_tool_definition_for(self.vocabulary).manifest(),
             continue_as_tool_definition_for(self.vocabulary).manifest(),
             read_output_tool_definition().manifest(),
         ]
@@ -27,9 +26,6 @@ impl ToolProvider for RlmControlToolsProvider {
 
     fn resolve_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
         match name {
-            FINISH_TOOL_NAME => Some(Arc::new(
-                finish_tool_definition_for(self.vocabulary).contract(),
-            )),
             "continue_as" => Some(Arc::new(
                 continue_as_tool_definition_for(self.vocabulary).contract(),
             )),
@@ -39,12 +35,8 @@ impl ToolProvider for RlmControlToolsProvider {
     }
 
     async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-        if call.name() == "read_output" {
-            return read_output(call).await;
-        }
         match call.name() {
-            // The value is the whole input: the turn ends with it.
-            FINISH_TOOL_NAME => ToolOutcome::finish(call.args.clone()).into(),
+            "read_output" => read_output(call).await,
             "continue_as" => match continue_as_switch_frame(call.args, call.context) {
                 Ok(control) => ToolOutcome::turn_control(control).into(),
                 Err(err) => ToolOutcome::err(json!(err)).into(),
@@ -52,6 +44,14 @@ impl ToolProvider for RlmControlToolsProvider {
             _ => ToolOutcome::err_fmt(format_args!("Unknown tool: {}", call.name())).into(),
         }
     }
+}
+
+/// Lash's `control.finish`, the default finish a code-mode session offers:
+/// a [`lash_core::FinishToolProvider`] of [`finish_tool_definition_for`].
+pub(crate) fn finish_tool_provider(
+    vocabulary: crate::dialect::DialectPromptVocabulary,
+) -> lash_core::FinishToolProvider {
+    lash_core::FinishToolProvider::new([finish_tool_definition_for(vocabulary)])
 }
 
 #[expect(clippy::expect_used, reason = "the tool declares fixed valid schemas")]
@@ -124,79 +124,26 @@ pub const FINISH_TOOL_NAME: &str = "finish";
 /// The finish control tool's id. Its one input is the turn's answer, whole.
 pub(crate) const FINISH_TOOL_ID: &str = "tool:finish";
 
-/// Lash's finish tool as `catalog` offers it, taking its value under the
-/// finish schema the turn's `options` state: the binding a cell admits a
-/// `control.finish` call under, so the call's own input validation refuses
-/// a value the turn's required output does not admit. `None` when the turn
-/// states no schema or the catalog offers no finish.
-///
-/// # Errors
-///
-/// Options that are not the RLM namespace's.
-pub(crate) fn turn_finish_binding(
-    catalog: &lash_core::ToolCatalog,
-    options: &lash_core::ProtocolTurnOptions,
-) -> Result<Option<ToolDefinition>, String> {
-    let Some(schema) = crate::rlm_support::decode_rlm_termination_options(options)?.finish_schema
-    else {
-        return Ok(None);
-    };
-    let Some(finish) = catalog
-        .tools
-        .iter()
-        .find(|tool| tool.manifest.id.as_str() == FINISH_TOOL_ID)
-    else {
-        return Ok(None);
-    };
-    let mut contract = finish.contract.as_ref().clone();
-    contract.input_schema = lash_core::SchemaContract::new(schema);
-    Ok(Some(ToolDefinition::from_parts(
-        finish.manifest.clone(),
-        contract,
-    )))
-}
-
 /// The `finish` control tool as a session in `dialect` advertises it.
 pub fn finish_tool_definition(dialect: &dyn crate::dialect::DialectPrompts) -> ToolDefinition {
     finish_tool_definition_for(dialect.prompt_vocabulary())
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "this module declares the tool schema and admission checks its invariant"
-)]
+/// Lash's `control.finish`: [`lash_core::finish_tool`] over any JSON value,
+/// in the `control` binding. Its whole input is the turn's answer. A host
+/// that wants a typed answer offers its own finish tool, which takes this
+/// one's place ([`lash_core::suppress_default_finish`]).
 pub(crate) fn finish_tool_definition_for(
     vocabulary: crate::dialect::DialectPromptVocabulary,
 ) -> ToolDefinition {
-    ToolDefinition::control(
-        FINISH_TOOL_ID,
-        FINISH_TOOL_NAME,
-        format!(
-            "End the turn with `value` as its answer. Nothing after the call runs: make it the last thing the {cell_noun} does, once all its other work has finished. It returns nothing. When the turn states a required output, `value` must match it; a value that does not fails and the turn goes on.",
-            cell_noun = vocabulary.cell_noun
-        ),
-        // The whole input is the answer: any JSON value, unless the turn
-        // states a finish schema, which a cell's call is admitted under
-        // instead (`turn_finish_binding`).
-        json!({}),
-        TurnControls::finish(),
-    )
-    .expect("valid declared tool schema")
-    // No work of its own: the call is its control.
-    .with_execution(std::time::Duration::from_secs(30))
-    // Its body reads its argument and nothing else, so running it again
-    // is safe: a call a crash cut off runs again on the owner that resumes
-    // the cell, and one that timed out behind a lost owner is retried. The
-    // turn then ends on it rather than on a second model call. The body
-    // never fails on its own: what refuses a value is the call's input
-    // validation under the turn's finish schema.
-    .with_execution_policy(lash_core::ExecutionPolicy::repeatable(
-        std::num::NonZeroU32::new(3).expect("three is non-zero"),
-        100,
-        1_000,
-    ))
-    .with_examples(vec![vocabulary.finish_call.into()])
-    .with_tool_binding(ToolBinding::new(["control"], FINISH_TOOL_NAME))
+    let mut definition = lash_core::finish_tool(FINISH_TOOL_NAME, lash_core::JsonSchema::any());
+    definition.manifest.description = format!(
+        "End the turn with `value` as its answer. Nothing after the call runs: make it the last thing the {cell_noun} does, once all its other work has finished. It returns nothing.",
+        cell_noun = vocabulary.cell_noun
+    );
+    definition
+        .with_examples(vec![vocabulary.finish_call.into()])
+        .with_tool_binding(ToolBinding::new(["control"], FINISH_TOOL_NAME))
 }
 
 /// The `continue_as` control tool as a session in `dialect` advertises it.
@@ -544,19 +491,11 @@ mod tests {
                 ));
                 snapshot.authority.plugin_config.insert(
                     crate::RLM_PROTOCOL_PLUGIN_ID,
-                    lash_core::ProtocolTurnOptions::typed(lash_rlm_types::RlmTurnOptions {
+                    lash_core::ProtocolTurnOptions::typed(lash_rlm_types::RlmCreateExtras {
                         termination: Some(lash_core::TerminationMode::TerminalRequired),
-                        finish_schema: Some(
-                            lash_sansio::JsonSchema::admit(json!({
-                                "type": "object",
-                                "properties": { "answer": { "type": "string" } },
-                                "required": ["answer"]
-                            }))
-                            .expect("valid finish schema"),
-                        ),
                         ..Default::default()
                     })
-                    .expect("valid rlm turn options")
+                    .expect("valid rlm options")
                     .payload,
                 );
                 snapshot

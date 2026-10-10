@@ -1,32 +1,21 @@
 use lash_core::plugin::PluginSessionRequest;
 use lash_core::sansio::Response;
 use lash_core::{Effect, LlmOutputPart, LlmResponse, TurnMachine, TurnMachineConfig};
-use lash_rlm_types::{RlmProtocolEvent, RlmTurnOptions};
+use lash_rlm_types::{RlmCreateExtras, RlmProtocolEvent};
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use std::collections::VecDeque;
 use std::sync::Arc;
 
-/// How a test's turns may end, and the schema `control.finish` takes its
-/// value under.
+/// How a test's turns may end.
 #[derive(Clone)]
 pub(super) struct Ending {
     mode: lash_core::TerminationMode,
-    schema: Option<serde_json::Value>,
 }
 
 impl From<lash_core::TerminationMode> for Ending {
     fn from(mode: lash_core::TerminationMode) -> Self {
-        Self { mode, schema: None }
-    }
-}
-
-impl Ending {
-    fn with_schema(mode: lash_core::TerminationMode, schema: serde_json::Value) -> Self {
-        Self {
-            mode,
-            schema: Some(schema),
-        }
+        Self { mode }
     }
 }
 
@@ -90,11 +79,8 @@ pub(super) fn config(native: bool, ending: impl Into<Ending>) -> TurnMachineConf
         turn_id: TurnId::from("parity-turn"),
         emit_llm_trace: false,
         writer_formats: lash_core::build_newest_writer_formats(),
-        termination: crate::plugin::RlmRecordedConfig::for_testing(RlmTurnOptions {
+        termination: crate::plugin::RlmRecordedConfig::for_testing(RlmCreateExtras {
             termination: Some(ending.mode),
-            finish_schema: ending
-                .schema
-                .map(|schema| lash_sansio::JsonSchema::admit(schema).expect("valid finish schema")),
             render: None,
         }),
     }
@@ -202,7 +188,7 @@ pub(super) fn drain(machine: &mut TurnMachine) -> Vec<Effect> {
                 result: Ok(lash_core::sansio::ExecutionEnvironmentSync {
                     turn_controls: [(
                         crate::FINISH_TOOL_NAME.to_string(),
-                        lash_core::TurnControls::finish(),
+                        lash_core::TurnControls::finish(lash_core::JsonSchema::any()),
                     )]
                     .into(),
                     ..lash_core::sansio::ExecutionEnvironmentSync::default()
@@ -342,11 +328,9 @@ fn run(
                 let scenario = format!(
                     "{}_{}_{}",
                     if native { "native" } else { "cell" },
-                    match (termination.mode, termination.schema.is_some()) {
-                        (lash_core::TerminationMode::Natural, false) => "natural",
-                        (lash_core::TerminationMode::Natural, true) => "natural_schema",
-                        (lash_core::TerminationMode::TerminalRequired, false) => "finish",
-                        (lash_core::TerminationMode::TerminalRequired, true) => "schema",
+                    match termination.mode {
+                        lash_core::TerminationMode::Natural => "natural",
+                        lash_core::TerminationMode::TerminalRequired => "finish",
                     },
                     if prose.is_some() {
                         "prose"
@@ -626,12 +610,7 @@ fn cell_protocol_simultaneous_turn_and_no_progress_exhaustion_prefers_silent_tur
 fn termination_and_trajectory_parity() {
     for termination in [
         Ending::from(lash_core::TerminationMode::Natural),
-        natural_text_schema(),
         Ending::from(lash_core::TerminationMode::TerminalRequired),
-        Ending::with_schema(
-            lash_core::TerminationMode::TerminalRequired,
-            serde_json::json!({"type":"string"}),
-        ),
     ] {
         for prose in ["answer", ""] {
             assert_eq!(
@@ -1472,48 +1451,34 @@ fn markdown_fenced_finish_requests_an_explicit_no_execution_repair() {
         Arc::new(crate::dialect::typescript_test_dialect()) as Arc<crate::dialect::SessionDialect>,
         Arc::new(crate::dialect::typescript_test_dialect()),
     ] {
-        for schema in [None, Some(serde_json::json!({"type": "number"}))] {
-            let mut config = config(
-                false,
-                Ending {
-                    mode: lash_core::TerminationMode::TerminalRequired,
-                    schema: schema.clone(),
-                },
-            );
-            config.protocol_driver = Arc::new(crate::protocol::RlmDriver::with_dialect(
-                Arc::clone(&dialect),
-            ));
-            let mut machine = TurnMachine::new(config, Vec::new(), Default::default(), 0);
-            let initial = drain(&mut machine);
-            let effects = reply(
-                &mut machine,
-                &initial,
-                vec![text("```typescript\nawait control.finish(1)\n```")],
-            );
-            assert!(
-                !effects
-                    .iter()
-                    .any(|effect| matches!(effect, Effect::ExecCode { .. }))
-            );
-            let events = serde_json::to_string(&machine.events()).unwrap();
-            assert!(events.contains("request_finish"), "{events}");
-            // The repair is durably appended before the continuation checkpoint.
-            let continuation = events;
-            assert!(
-                continuation.contains(
-                    "No code from that response executed. Markdown code fences do not execute here."
-                ),
-                "{continuation}"
-            );
-            let tags = dialect.cell_tags();
-            assert!(continuation.contains(&format!("Resend the needed program between `{}` and `{}` on their own lines, without backticks.", tags.open, tags.close)), "{continuation}");
-            if schema.is_some() {
-                assert!(
-                    continuation.contains("matching the required output schema"),
-                    "{continuation}"
-                );
-            }
-        }
+        let mut config = config(false, lash_core::TerminationMode::TerminalRequired);
+        config.protocol_driver = Arc::new(crate::protocol::RlmDriver::with_dialect(Arc::clone(
+            &dialect,
+        )));
+        let mut machine = TurnMachine::new(config, Vec::new(), Default::default(), 0);
+        let initial = drain(&mut machine);
+        let effects = reply(
+            &mut machine,
+            &initial,
+            vec![text("```typescript\nawait control.finish(1)\n```")],
+        );
+        assert!(
+            !effects
+                .iter()
+                .any(|effect| matches!(effect, Effect::ExecCode { .. }))
+        );
+        let events = serde_json::to_string(&machine.events()).unwrap();
+        assert!(events.contains("request_finish"), "{events}");
+        // The repair is durably appended before the continuation checkpoint.
+        let continuation = events;
+        assert!(
+            continuation.contains(
+                "No code from that response executed. Markdown code fences do not execute here."
+            ),
+            "{continuation}"
+        );
+        let tags = dialect.cell_tags();
+        assert!(continuation.contains(&format!("Resend the needed program between `{}` and `{}` on their own lines, without backticks.", tags.open, tags.close)), "{continuation}");
     }
 }
 
@@ -1846,42 +1811,6 @@ fn a_recorded_tool_terminal_keeps_its_payload_and_usage_across_both_checkpoints(
             terminal
                 .iter()
                 .any(|effect| matches!(effect, Effect::Done { .. }))
-        );
-    }
-}
-
-/// A chat turn's ending: prose ends it, and `control.finish` must carry
-/// text.
-fn natural_text_schema() -> Ending {
-    Ending::with_schema(
-        lash_core::TerminationMode::Natural,
-        serde_json::json!({"type": "string"}),
-    )
-}
-
-/// FIG-5104: a finish schema on a Natural turn leaves prose the answer. A
-/// prose reply ends the turn exactly as it does with no schema, on both
-/// channels.
-#[test]
-fn a_natural_finish_schema_still_lets_prose_end_the_turn() {
-    for native in [false, true] {
-        let (with_schema, _) = run(native, natural_text_schema(), Some("answer"), None);
-        let (without, _) = run(
-            native,
-            lash_core::TerminationMode::Natural,
-            Some("answer"),
-            None,
-        );
-        assert_eq!(with_schema, without, "native={native}");
-        assert!(
-            with_schema.iter().any(|value| value
-                == &serde_json::to_value(lash_core::facade_support::TurnOutcome::Finished(
-                    lash_core::facade_support::TurnFinish::AssistantMessage {
-                        text: "answer".to_string(),
-                    }
-                ))
-                .expect("outcome serializes")),
-            "native={native}: {with_schema:?}"
         );
     }
 }

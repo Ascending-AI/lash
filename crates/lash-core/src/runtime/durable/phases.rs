@@ -470,6 +470,7 @@ pub async fn run_phases(
                     event_delta,
                     protocol_iteration,
                     outcome: outcome.take(),
+                    finish_value_schema: accepted_finish_value_schema(drive.machine()),
                 };
                 let cause = done.run_terminal_cause(&run)?;
                 let kind = cause.kind();
@@ -539,6 +540,19 @@ pub async fn run_phases(
             }
         }
     }
+}
+
+/// The value schema the turn's accepted finish was validated under, as its
+/// candidate kept it from the call's settlement.
+fn accepted_finish_value_schema(machine: &crate::TurnMachine) -> Option<crate::JsonSchema> {
+    machine
+        .completion_candidates()
+        .iter()
+        .find(|candidate| candidate.disposition == crate::CompletionDisposition::Accepted)
+        .and_then(|candidate| match &candidate.control {
+            crate::TurnControl::Finish { value_schema, .. } => value_schema.clone(),
+            crate::TurnControl::SwitchAgentFrame { .. } => None,
+        })
 }
 
 /// End `row`'s turn with `refusal`, the terminal error its preparation

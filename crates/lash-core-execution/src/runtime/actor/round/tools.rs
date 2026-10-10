@@ -45,6 +45,10 @@ pub struct MemberPin {
     /// completion wait its round pins, separate from the body's limit, or
     /// none for a park that lasts until its scope ends.
     pub park: Option<ParkDeadline>,
+    /// The declaration its call settles under, every attempt and every
+    /// owner: its tool's at admission, whatever the host offers since.
+    /// `None` when no tool answered the call at admission.
+    pub declaration: Option<crate::ToolDeclaration>,
 }
 
 impl MemberPin {
@@ -64,7 +68,15 @@ impl MemberPin {
             policy,
             limit: ExecutionLimit::starting_at(now_ms, bounds.execution, bounds.execution),
             park: bounds.park.map(|park| ParkDeadline::admitted(park, now)),
+            declaration: None,
         }
+    }
+
+    /// This pin with `declaration`, the one its call settles under.
+    #[must_use]
+    pub fn with_declaration(mut self, declaration: crate::ToolDeclaration) -> Self {
+        self.declaration = Some(declaration);
+        self
     }
 }
 
@@ -271,7 +283,8 @@ pub fn call_draft(
         pin.policy,
         pin.limit,
         pin.park,
-    ))
+    )
+    .with_declaration(pin.declaration))
 }
 
 /// The member bodies of one round: each admitted execution runs the body

@@ -76,7 +76,7 @@ pub(super) fn outcome(
     let failed = |done_reason| TraceTurnOutcome::Failed { done_reason };
     Some(match cause {
         RunTerminalCause::Committed { outcome, .. } => match outcome {
-            RunCommittedOutcome::Finished(finish) => TraceTurnOutcome::Completed {
+            RunCommittedOutcome::Finished { finish, .. } => TraceTurnOutcome::Completed {
                 done_reason: match finish {
                     TurnFinish::AssistantMessage { .. } => {
                         TraceTurnCompletionReason::AssistantMessage

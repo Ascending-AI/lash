@@ -187,7 +187,8 @@ pub enum RegistrationRefused {
     #[error("tool `{tool}` is isolated in process engine `{engine}`, which is not registered")]
     UnregisteredIsolationEngine { tool: String, engine: String },
     /// A tool defined with an output declares a turn control. A control
-    /// call has no output: [`ToolDefinition::control`] defines one.
+    /// call has no output, so its contract states none: the control is its
+    /// result. [`ToolDefinition::control`] defines one.
     #[error("tool `{tool}` declares a turn control, but it is defined with an output")]
     ControlDeclaresOutput { tool: String },
 }
@@ -700,6 +701,15 @@ impl Default for ToolContract {
 }
 
 impl ToolContract {
+    /// Whether the contract states no output: the null schema, projected as
+    /// itself, with a static output contract. The contract of every tool
+    /// that declares a turn control, whose result is its control alone.
+    pub fn states_no_output(&self) -> bool {
+        self.output_schema.canonical() == &serde_json::json!({ "type": "null" })
+            && self.output_schema.projection.is_default()
+            && self.output_contract.is_static()
+    }
+
     #[expect(
         clippy::expect_used,
         reason = "the default input schema is a fixed object schema"
@@ -1250,11 +1260,48 @@ impl ToolDefinition {
                 tool: self.manifest.name.clone(),
             });
         }
-        for kind in defined.iter() {
-            declaration.controls = declaration.controls.with(kind);
+        if let Some(finish) = defined.finish_declaration() {
+            declaration.controls = declaration
+                .controls
+                .with_finish(finish.value_schema.clone());
+        }
+        if defined.contains(crate::TurnControlKind::SwitchAgentFrame) {
+            declaration.controls = declaration.controls.with_switch_agent_frame();
         }
         self.manifest = self.manifest.declared(declaration, park, None)?;
         Ok(self)
+    }
+
+    /// This finish tool typed by `value_schema`: its input, and the value of
+    /// every Finish it emits, must match it. Its id, name, binding, bounds
+    /// and policy stay, so the provider that runs it runs it unchanged: a
+    /// run that offers it so through its restricted tool access changes the
+    /// final value's shape for that run alone. `None` when the tool declares
+    /// no Finish.
+    #[must_use]
+    pub fn with_finish_value_schema(mut self, value_schema: JsonSchema) -> Option<Self> {
+        self.manifest.declaration.controls.finish_declaration()?;
+        self.manifest.declaration.controls = self
+            .manifest
+            .declaration
+            .controls
+            .clone()
+            .with_finish(value_schema.clone());
+        self.manifest.compact_contract = None;
+        self.contract = ToolContract {
+            input_schema: SchemaContract::new(value_schema),
+            ..self.contract.clone()
+        };
+        Some(self)
+    }
+
+    /// This tool as a call of it was admitted: declaring `declaration`, the
+    /// declaration its admission recorded, so the call settles under it
+    /// whatever the live definition declares now.
+    #[must_use]
+    pub fn with_admitted_declaration(mut self, declaration: ToolDeclaration) -> Self {
+        self.manifest.declaration = declaration;
+        self
     }
 
     /// Declares the tool isolated: every call runs as a process of the

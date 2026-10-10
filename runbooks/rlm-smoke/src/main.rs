@@ -9,7 +9,6 @@ use async_trait::async_trait;
 use clap::Parser;
 use lash::openai::{OPENROUTER_BASE_URL, OpenAiCompat, OpenAiCompatibleProvider};
 use lash::provider::ProviderHandle;
-use lash::rlm::RlmSendBuilderExt as _;
 use lash::tools::{
     StaticToolExecute, StaticToolProvider, ToolAttemptOutcome, ToolBinding, ToolCall,
     ToolDefinition, ToolDefinitionBindingExt as _, ToolOutcome, ToolProvider,
@@ -544,9 +543,13 @@ async fn main() -> Result<()> {
                     .transpose()?,
                 ..Default::default()
             })
+            // Its turns end only through an explicit finish.
             .plugin(
                 lash::rlm::RLM_PROTOCOL_PLUGIN_ID,
-                lash::rlm::RlmCreateExtras::default(),
+                lash::rlm::RlmCreateExtras {
+                    termination: Some(lash::rlm::TerminationMode::TerminalRequired),
+                    ..lash::rlm::RlmCreateExtras::default()
+                },
             )
             .context("encode RLM session option")?,
         ))
@@ -560,17 +563,10 @@ async fn main() -> Result<()> {
         .open()
         .await
         .context("open RLM smoke session")?;
-    let output = tokio::time::timeout(
-        TURN_TIMEOUT,
-        session
-            .send(TurnInput::text(prompt))
-            .require_finish()
-            .context("require an explicit RLM finish")?
-            .output(),
-    )
-    .await
-    .context("RLM smoke turn timed out")?
-    .context("run RLM smoke turn")?;
+    let output = tokio::time::timeout(TURN_TIMEOUT, session.send(TurnInput::text(prompt)).output())
+        .await
+        .context("RLM smoke turn timed out")?
+        .context("run RLM smoke turn")?;
     ensure!(
         output.is_success(),
         "RLM smoke turn did not complete successfully"

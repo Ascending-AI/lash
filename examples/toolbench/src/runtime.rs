@@ -5,7 +5,6 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use lash::openai::{OpenAiCompat, OpenAiCompatibleProvider};
 use lash::provider::{ProviderHandle, ProviderOptions};
-use lash::rlm::RlmSendBuilderExt as _;
 use lash::{LashCore, TurnEvent, TurnInput};
 
 use crate::grading::RunEvidence;
@@ -291,11 +290,6 @@ async fn run_turn(
     let turn = session.send(TurnInput::text(
         task.prompt_for(channel == crate::ChannelSelection::Standard),
     ));
-    let turn = if channel == crate::ChannelSelection::Standard {
-        turn
-    } else {
-        turn.require_finish().context("require RLM finish value")?
-    };
     let result = turn
         .output_into(telemetry.as_ref())
         .await
@@ -517,8 +511,11 @@ fn profile_metadata(model: &str) -> Result<lash::LlmProfileMetadata> {
         .context("build model metadata")
 }
 
+/// An RLM session's options: its turns end only through a finish call,
+/// which the session records at creation.
 fn session_options() -> lash::rlm::RlmCreateExtras {
     lash::rlm::RlmCreateExtras {
+        termination: Some(lash::rlm::TerminationMode::TerminalRequired),
         ..lash::rlm::RlmCreateExtras::default()
     }
 }
