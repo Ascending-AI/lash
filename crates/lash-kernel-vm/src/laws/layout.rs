@@ -108,3 +108,97 @@ fn a_native_implementation_and_a_kernel_body_run_the_same() {
     });
     assert_eq!(body, native);
 }
+
+/// `K-CHG-003`: the executable computes a charge formula as the formula
+/// states it, in saturating unsigned arithmetic with an empty sum 0 and an
+/// empty product 1, however it groups the terms, folds the constants or
+/// reuses a measurement the formula takes twice.
+#[test]
+fn a_compiled_formula_charges_what_the_formula_states() {
+    use lash_kernel_doc::{Formula, Measure, Name, Operand, Param, Type};
+
+    use crate::compile::{Plan, Source};
+
+    let params: Vec<Param> = ["a", "b"]
+        .into_iter()
+        .map(|name| Param {
+            name: Name::new(name),
+            ty: Type::Any,
+            optional: false,
+        })
+        .collect();
+    let param = |name: &str| Operand::Param(Name::new(name));
+    let deep = |name: &str| Formula::DeepSize(param(name));
+    let size = |name: &str| Formula::Size(param(name));
+    let result = Formula::DeepSize(Operand::Result);
+    let input = Formula::Sum(vec![deep("a"), deep("b")]);
+    let near = u64::MAX - 1;
+    let formulas = [
+        Formula::Constant(7),
+        Formula::Sum(vec![]),
+        Formula::Product(vec![]),
+        Formula::Max(vec![]),
+        Formula::Min(vec![]),
+        Formula::Sum(vec![Formula::Constant(1), input.clone(), result.clone()]),
+        Formula::Sum(vec![
+            Formula::Constant(1),
+            Formula::Product(vec![input.clone(), input.clone()]),
+            result.clone(),
+        ]),
+        Formula::Sum(vec![
+            Formula::Constant(1),
+            Formula::Min(vec![size("a"), size("b")]),
+            Formula::NestedSize(param("a")),
+            Formula::NestedSize(param("b")),
+            result.clone(),
+        ]),
+        Formula::Sum(vec![
+            Formula::Constant(near),
+            Formula::Sum(vec![Formula::Constant(near), deep("a")]),
+        ]),
+        Formula::Product(vec![
+            Formula::Constant(near),
+            Formula::Constant(0),
+            Formula::Magnitude(param("b")),
+        ]),
+        Formula::Product(vec![
+            Formula::Product(vec![deep("a"), Formula::Constant(3)]),
+            Formula::Constant(near),
+        ]),
+        Formula::Max(vec![
+            deep("missing"),
+            Formula::Sum(vec![deep("a"), deep("a")]),
+            Formula::Min(vec![result.clone()]),
+        ]),
+        Formula::Sum(vec![deep("missing"), Formula::Magnitude(param("a"))]),
+    ];
+    let amounts: [(u64, u64, u64); 4] = [(0, 0, 0), (2, 5, 9), (u64::MAX, 1, 3), (1, u64::MAX, 0)];
+    for formula in &formulas {
+        let plan = Plan::new(formula, &params);
+        for (a, b, returned) in amounts {
+            // Each operand and measure gives its own amount.
+            let amount = |index: usize, measure: Measure| {
+                let base = [a, b, returned][index];
+                match measure {
+                    Measure::Size => base / 2,
+                    Measure::DeepSize => base,
+                    Measure::NestedSize => base / 3,
+                    Measure::Magnitude => base.saturating_add(4),
+                }
+            };
+            let stated = formula.evaluate(&mut |operand, measure| match operand {
+                Operand::Result => amount(2, measure),
+                Operand::Param(name) => params
+                    .iter()
+                    .position(|param| param.name == *name)
+                    .map_or(0, |index| amount(index, measure)),
+            });
+            let compiled = plan.evaluate(|source, measure| match source {
+                Source::Arg(index) => amount(index, measure),
+                Source::Result => amount(2, measure),
+                Source::Nothing => unreachable!("a missing operand measures nothing"),
+            });
+            assert_eq!(compiled, stated, "{formula:?} over {a}, {b}, {returned}");
+        }
+    }
+}

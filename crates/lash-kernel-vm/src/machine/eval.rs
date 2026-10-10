@@ -56,6 +56,13 @@ impl KernelMachine {
         match expr {
             Expr::Literal(value) => Ok(value.clone()),
             Expr::Var(var) => self.read_var(task, exe, var),
+            Expr::Member(member) => self.read_member(task, host, exe, member),
+            Expr::Call { lib, args } => {
+                let base = self.storage.args.len();
+                let value = self.call_expr(task, host, exe, *lib, args, base);
+                self.storage.args.truncate(base);
+                value
+            }
             Expr::Tuple(items) => {
                 let members = self.eval_all(task, host, exe, items)?;
                 self.charge(members.len() as u64)?;
@@ -104,13 +111,11 @@ impl KernelMachine {
                 self.charge(fields.len() as u64)?;
                 Ok(Value::Record(self.alloc(Obj::Record(fields))?))
             }
-            Expr::Member(member) => self.read_member(task, host, exe, member),
             Expr::Closure(code) => {
                 let frame = self.frame(task)?;
-                let outer = exe.code(frame.code);
                 let mut captures = Vec::new();
                 for capture in &exe.code(*code).captures {
-                    match &frame.slots[outer.positions[capture.outer as usize] as usize] {
+                    match &frame.slots[capture.outer_at as usize] {
                         super::SlotState::Cell(cell) => captures.push(*cell),
                         _ => return Err(fault("a captured variable has no cell").into()),
                     }
@@ -120,12 +125,6 @@ impl KernelMachine {
                     captures,
                 };
                 Ok(Value::Closure(self.alloc(Obj::Closure(closure))?))
-            }
-            Expr::Call { lib, args } => {
-                let base = self.storage.args.len();
-                let value = self.call_expr(task, host, exe, *lib, args, base);
-                self.storage.args.truncate(base);
-                value
             }
             Expr::Clock => Ok(Value::Timestamp(host.clock())),
             Expr::Random => {
@@ -180,7 +179,19 @@ impl KernelMachine {
         base: usize,
     ) -> Eval<Value> {
         for arg in args {
-            let value = self.eval(task, host, exe, arg)?;
+            // A variable or a literal, the usual argument, is evaluated
+            // here as `eval` would, without a call of its own.
+            let value = match arg {
+                Expr::Literal(value) => {
+                    self.charge(1)?;
+                    value.clone()
+                }
+                Expr::Var(var) => {
+                    self.charge(1)?;
+                    self.read_var(task, exe, var)?
+                }
+                _ => self.eval(task, host, exe, arg)?,
+            };
             self.storage.args.push(value);
         }
         match self.call_library(task, exe, lib, base)? {
@@ -284,21 +295,20 @@ impl KernelMachine {
         base: usize,
     ) -> Eval<Option<Value>> {
         let function = exe.lib(lib);
-        let params = &function.definition.signature.params;
         let given = self.storage.args.len() - base;
-        if given > params.len() {
+        if given > function.arity {
             return raise(
                 "arity",
                 format!(
                     "`{}` takes {} argument(s); {} given",
-                    function.definition.name,
-                    params.len(),
-                    given
+                    function.definition.name, function.arity, given
                 ),
             );
         }
-        if given < params.len() {
-            self.storage.args.resize(base + params.len(), Value::Absent);
+        if given < function.arity {
+            self.storage
+                .args
+                .resize(base + function.arity, Value::Absent);
         }
         let result = match &function.run {
             LibRun::Body(_) => return Ok(None),
@@ -323,9 +333,10 @@ impl KernelMachine {
                 Ok(Value::List(self.alloc(Obj::List(unfinished))?))
             }
             LibRun::Native(native) => {
-                let limit = function.definition.guard.as_ref().map(|guard| {
-                    self.formula(&guard.limit, params, &self.storage.args[base..], None)
-                });
+                let limit = function
+                    .limit
+                    .as_ref()
+                    .map(|limit| self.formula(limit, &self.storage.args[base..], None));
                 let mut attempt = 0;
                 loop {
                     let mut counter = WorkCounter::new(limit);

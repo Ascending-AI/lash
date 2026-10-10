@@ -521,27 +521,28 @@ impl KernelMachine {
     }
 
     /// Runs one statement of `task`, or resumes the one it waits in.
-    fn step(&mut self, task: TaskId, host: &mut dyn Host) -> Result<(), Halt> {
+    fn step(&mut self, task: TaskId, host: &mut dyn Host, exe: &Executable) -> Result<(), Halt> {
         self.pins.clear();
         self.fresh.clear();
-        let exe = Arc::clone(&self.exe);
         let outcome = match self.task(task)?.incoming.take() {
             Some(incoming) => {
-                self.refresh_charging(task, &exe);
-                match self.resume(task, &exe, incoming) {
+                self.refresh_charging(task, exe);
+                match self.resume(task, exe, incoming) {
                     Ok(value) => {
                         // The value is in no variable until the statement
                         // binds it.
                         self.pin(&value)?;
-                        self.finish_action(task, host, &exe, value)
-                            .map(|()| Completion::Normal)
+                        self.finish_action(task, host, exe, value).map(|()| {
+                            self.leave_ended_blocks(task, exe);
+                            Completion::Normal
+                        })
                     }
                     Err(interrupt) => Err(interrupt),
                 }
             }
-            None => self.advance(task, host, &exe),
+            None => self.advance(task, host, exe),
         };
-        self.settle(task, host, &exe, outcome)
+        self.settle(task, host, exe, outcome)
     }
 
     fn refresh_charging(&mut self, task: TaskId, exe: &Executable) {
@@ -560,6 +561,8 @@ impl KernelMachine {
         outcome: Eval<Completion>,
     ) -> Result<(), Halt> {
         let completion = match outcome {
+            // Most statements complete normally: nothing departs.
+            Ok(Completion::Normal) => return Ok(()),
             Ok(completion) => completion,
             Err(Interrupt::Raise(value)) => Completion::Throw(value),
             Err(Interrupt::Halt(halt)) => return Err(halt),
@@ -723,6 +726,8 @@ impl Machine for KernelMachine {
             return Err(MachineError::Ended);
         }
         let before = self.charged;
+        // The executable is the run's for its whole life.
+        let exe = Arc::clone(&self.exe);
         loop {
             let task = match self.current {
                 Some(task) => task,
@@ -734,7 +739,7 @@ impl Machine for KernelMachine {
                     None => return Ok(self.park(host)),
                 },
             };
-            match self.step(task, host) {
+            match self.step(task, host, &exe) {
                 Ok(()) => {}
                 Err(Halt::Fault(problem)) => {
                     self.ended = true;

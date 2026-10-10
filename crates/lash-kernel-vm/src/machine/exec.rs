@@ -2,14 +2,15 @@
 
 use std::sync::Arc;
 
-use lash_kernel_doc::{Formula, Measure, ObjectId, Operand, TaskId, Value};
+use lash_kernel_doc::{Measure, ObjectId, TaskId, Value};
 
 use super::{
     Completion, Control, Cursor, Eval, Frame, FrameStorage, Halt, Incoming, Interrupt,
     KernelMachine, LibraryCall, SlotState, TaskState, TryPhase, bound, fault, raise,
 };
 use crate::compile::{
-    BlockId, CodeId, Executable, LibId, Member, Place, Rhs, Slot, Stmt, StmtId, Target, Var,
+    BlockId, CodeId, Executable, LibId, Local, Member, Place, Plan, Rhs, Source, Stmt, StmtId,
+    Target, Var,
 };
 use crate::data::{Decoder, copy_out, deep_size, magnitude, nested_size, size};
 use crate::heap::{Key, Obj, value_bytes};
@@ -65,16 +66,25 @@ impl KernelMachine {
         host: &mut dyn Host,
         exe: &Executable,
     ) -> Eval<Completion> {
-        self.refresh_charging(task, exe);
-        let frame = self.frame(task)?;
+        let frame = self
+            .tasks
+            .get_mut(task.0 as usize)
+            .and_then(|task| task.frames.last_mut())
+            .ok_or_else(|| fault("a running task has no frame"))?;
+        self.charging = exe.code(frame.code).charged;
         match frame.control.last_mut() {
             Some(Control::Block { block, next }) => {
                 let stmts = &exe.block(*block).stmts;
                 match stmts.get(*next) {
                     Some(stmt) => {
                         *next += 1;
+                        let last = *next == stmts.len();
                         self.charge(1)?;
-                        self.exec(task, host, exe, *stmt)
+                        let completion = self.exec(task, host, exe, *stmt)?;
+                        if last && matches!(completion, Completion::Normal) {
+                            self.leave_ended_blocks(task, exe);
+                        }
+                        Ok(completion)
                     }
                     None => {
                         self.pop_control(task, exe)?;
@@ -92,12 +102,42 @@ impl KernelMachine {
     fn pop_control(&mut self, task: TaskId, exe: &Executable) -> Result<(), Halt> {
         let frame = self.frame(task)?;
         if let Some(Control::Block { block, .. }) = frame.control.pop() {
-            let code = exe.code(frame.code);
-            for slot in &exe.block(block).declares {
-                frame.slots[code.positions[*slot as usize] as usize] = SlotState::Empty;
+            for at in &exe.block(block).declares {
+                frame.slots[*at as usize] = SlotState::Empty;
             }
         }
         Ok(())
+    }
+
+    /// Leaves the blocks that the statement just completed was the last
+    /// of, while each is inside another block of the same frame: leaving
+    /// such a block ends its variables and runs and charges nothing, so the
+    /// statement's step takes it rather than a step of its own. A frame
+    /// that waits in a statement, or whose block is a loop's or a `try`'s,
+    /// is left as it is.
+    pub(super) fn leave_ended_blocks(&mut self, task: TaskId, exe: &Executable) {
+        let Some(frame) = self
+            .tasks
+            .get_mut(task.0 as usize)
+            .and_then(|task| task.frames.last_mut())
+        else {
+            return;
+        };
+        if frame.awaiting.is_some() {
+            return;
+        }
+        while let [.., Control::Block { .. }, Control::Block { block, next }] =
+            frame.control.as_slice()
+        {
+            let block = exe.block(*block);
+            if *next < block.stmts.len() {
+                break;
+            }
+            for at in &block.declares {
+                frame.slots[*at as usize] = SlotState::Empty;
+            }
+            frame.control.pop();
+        }
     }
 
     fn push_block(&mut self, task: TaskId, block: BlockId) -> Result<(), Halt> {
@@ -169,6 +209,16 @@ impl KernelMachine {
             let frame = self.frame(task)?;
             // The statement the call stood in is left behind.
             frame.awaiting = None;
+            // A return or a raise that no `try` of the frame can take leaves
+            // the frame at once: ending the frame ends all its variables.
+            if matches!(departure, Completion::Return(_) | Completion::Throw(_))
+                && !frame
+                    .control
+                    .iter()
+                    .any(|control| matches!(control, Control::Try { .. }))
+            {
+                frame.control.clear();
+            }
             let Some(control) = frame.control.last_mut() else {
                 let result = match departure {
                     Completion::Return(value) => Ok(value),
@@ -209,7 +259,7 @@ impl KernelMachine {
                             let value = value.clone();
                             *phase = TryPhase::Catch;
                             self.push_block(task, block)?;
-                            self.bind(task, exe, binding, value)?;
+                            self.bind(task, binding, value)?;
                             departure = Completion::Normal;
                         }
                         (TryPhase::Body | TryPhase::Catch, _, Some(finally), _) => {
@@ -260,7 +310,10 @@ impl KernelMachine {
                 // The value is in no variable until the statement binds it.
                 self.pin(&value)?;
                 match self.finish_action(task, host, exe, value) {
-                    Ok(()) => None,
+                    Ok(()) => {
+                        self.leave_ended_blocks(task, exe);
+                        None
+                    }
                     Err(Interrupt::Raise(value)) => Some(Completion::Throw(value)),
                     Err(Interrupt::Halt(halt)) => return Err(halt),
                 }
@@ -286,16 +339,11 @@ impl KernelMachine {
         if !self.charging {
             return 0;
         }
-        let definition = &exe.lib(lib).definition;
-        if !definition.has_native() {
+        let function = exe.lib(lib);
+        if !function.native {
             return 0;
         }
-        self.formula(
-            &definition.charge,
-            &definition.signature.params,
-            args,
-            result,
-        )
+        self.formula(&function.charge, args, result)
     }
 
     /// Charges a library call what [`Self::call_units`] gave.
@@ -328,20 +376,12 @@ impl KernelMachine {
         });
     }
 
-    pub(super) fn formula(
-        &self,
-        formula: &Formula,
-        params: &[lash_kernel_doc::Param],
-        args: &[Value],
-        result: Option<&Value>,
-    ) -> u64 {
-        formula.evaluate(&mut |operand, measure| {
-            let value = match operand {
-                Operand::Result => result,
-                Operand::Param(name) => params
-                    .iter()
-                    .position(|param| param.name == *name)
-                    .and_then(|index| args.get(index)),
+    pub(super) fn formula(&self, plan: &Plan, args: &[Value], result: Option<&Value>) -> u64 {
+        plan.evaluate(|source, measure| {
+            let value = match source {
+                Source::Arg(index) => args.get(index),
+                Source::Result => result,
+                Source::Nothing => None,
             };
             match (value, measure) {
                 (None, _) => 0,
@@ -407,7 +447,7 @@ impl KernelMachine {
             library: library.map(|lib| {
                 // Only a native implementation's formula, charged when the
                 // call ends, reads them (`K-CHG-007`).
-                if exe.lib(lib).definition.has_native() {
+                if exe.lib(lib).native {
                     args.extend_from_slice(&self.storage.args[base..]);
                 }
                 LibraryCall { lib, args }
@@ -415,7 +455,7 @@ impl KernelMachine {
             inline,
         };
         for (capture, cell) in code.captures.iter().zip(captures) {
-            frame.slots[code.positions[capture.inner as usize] as usize] = SlotState::Cell(*cell);
+            frame.slots[capture.inner_at as usize] = SlotState::Cell(*cell);
         }
         self.task(task)?.frames.push(frame);
         for (index, param) in code.params.iter().enumerate() {
@@ -424,32 +464,41 @@ impl KernelMachine {
                 .args
                 .get_mut(base + index)
                 .map_or(Value::Absent, |arg| std::mem::replace(arg, Value::Absent));
-            self.bind(task, exe, *param, value)?;
+            self.bind(task, *param, value)?;
         }
         Ok(())
     }
 
     /// Binds a new variable in the top frame (`K-FORM-004`).
-    pub(super) fn bind(
-        &mut self,
-        task: TaskId,
-        exe: &Executable,
-        slot: Slot,
-        value: Value,
-    ) -> Result<(), Halt> {
-        let code = self.frame(task)?.code;
-        let code = exe.code(code);
-        let state = if code.slots[slot as usize].shared {
+    pub(super) fn bind(&mut self, task: TaskId, local: Local, value: Value) -> Result<(), Halt> {
+        let state = if local.shared {
             SlotState::Cell(self.alloc(Obj::Variable(value))?)
         } else {
             self.reserve(value_bytes(&value))?;
             SlotState::Value(value)
         };
-        self.frame(task)?.slots[code.positions[slot as usize] as usize] = state;
+        self.frame(task)?.slots[local.at as usize] = state;
         Ok(())
     }
 
     pub(super) fn read_var(&mut self, task: TaskId, exe: &Executable, var: &Var) -> Eval<Value> {
+        if let Var::Local(local) = var
+            && let Some(SlotState::Value(value)) = self
+                .tasks
+                .get(task.0 as usize)
+                .and_then(|task| task.frames.last())
+                .map(|frame| &frame.slots[local.at as usize])
+        {
+            return Ok(value.clone());
+        }
+        self.read_other_var(task, exe, var)
+    }
+
+    /// The rest of [`Self::read_var`]: a variable a closure shares, a
+    /// session binding, and one that is not bound. Apart, so that reading
+    /// a local stays small.
+    #[inline(never)]
+    fn read_other_var(&mut self, task: TaskId, exe: &Executable, var: &Var) -> Eval<Value> {
         let unbound = |name: &lash_kernel_doc::Name| {
             Err(Interrupt::Raise(Value::Error(Arc::new(
                 lash_kernel_doc::ErrorValue {
@@ -460,10 +509,9 @@ impl KernelMachine {
             ))))
         };
         match var {
-            Var::Local(slot) => {
+            Var::Local(local) => {
                 let frame = self.frame(task)?;
-                let code = exe.code(frame.code);
-                match &frame.slots[code.positions[*slot as usize] as usize] {
+                match &frame.slots[local.at as usize] {
                     SlotState::Value(value) => Ok(value.clone()),
                     SlotState::Cell(cell) => {
                         let cell = *cell;
@@ -472,7 +520,9 @@ impl KernelMachine {
                             None => Err(fault("a shared variable has no cell").into()),
                         }
                     }
-                    SlotState::Empty => unbound(&code.slots[*slot as usize].name),
+                    SlotState::Empty => {
+                        unbound(&exe.code(frame.code).slots[local.slot as usize].name)
+                    }
                 }
             }
             Var::Session(name) => match self.session.get(name) {
@@ -495,10 +545,9 @@ impl KernelMachine {
         };
         self.reserve(value_bytes(&value))?;
         match var {
-            Var::Local(slot) => {
+            Var::Local(local) => {
                 let frame = self.frame(task)?;
-                let code = exe.code(frame.code);
-                match &mut frame.slots[code.positions[*slot as usize] as usize] {
+                match &mut frame.slots[local.at as usize] {
                     SlotState::Value(held) => *held = value,
                     SlotState::Cell(cell) => {
                         let cell = *cell;
@@ -506,7 +555,9 @@ impl KernelMachine {
                             *held = value;
                         }
                     }
-                    SlotState::Empty => return unbound(&code.slots[*slot as usize].name),
+                    SlotState::Empty => {
+                        return unbound(&exe.code(frame.code).slots[local.slot as usize].name);
+                    }
                 }
                 Ok(())
             }
@@ -528,17 +579,22 @@ impl KernelMachine {
         exe: &Executable,
         id: StmtId,
     ) -> Eval<Completion> {
-        match exe.stmt(id) {
-            Stmt::Let { value, .. } | Stmt::Assign { value, .. } => {
-                let value = match value {
-                    Rhs::Expr(expr) => Some(self.eval(task, host, exe, expr)?),
-                    Rhs::Action(action) => self.act(task, exe, id, action)?,
-                };
-                if let Some(value) = value {
-                    self.frame(task)?.awaiting = Some(id);
-                    self.finish_action(task, host, exe, value)?;
+        let stmt = exe.stmt(id);
+        match stmt {
+            Stmt::Let { value, .. } | Stmt::Assign { value, .. } => match value {
+                // A value at once completes the statement, which no action
+                // holds open.
+                Rhs::Expr(expr) => {
+                    let value = self.eval(task, host, exe, expr)?;
+                    self.complete_stmt(task, host, exe, stmt, value)?;
                 }
-            }
+                Rhs::Action(action) => {
+                    if let Some(value) = self.act(task, exe, id, action)? {
+                        self.frame(task)?.awaiting = Some(id);
+                        self.finish_action(task, host, exe, value)?;
+                    }
+                }
+            },
             Stmt::Do(action) => {
                 self.act(task, exe, id, action)?;
             }
@@ -553,7 +609,10 @@ impl KernelMachine {
                     Value::Bool(false) => *else_block,
                     _ => return raise("type_error", "an `if` condition must be a bool"),
                 };
-                self.push_block(task, block)?;
+                // An empty block would end as soon as it began.
+                if !exe.block(block).stmts.is_empty() {
+                    self.push_block(task, block)?;
+                }
             }
             Stmt::For { iterable, .. } => {
                 let cursor = match self.eval(task, host, exe, iterable)? {
@@ -680,7 +739,7 @@ impl KernelMachine {
                     Some(element) => {
                         *started += 1;
                         self.push_block(task, *body)?;
-                        self.bind(task, exe, *binding, element)?;
+                        self.bind(task, *binding, element)?;
                     }
                     None => {
                         frame.control.pop();
@@ -820,11 +879,23 @@ impl KernelMachine {
         let Some(stmt) = self.frame(task)?.awaiting.take() else {
             return Err(fault("a value arrived at no statement").into());
         };
-        match exe.stmt(stmt) {
+        self.complete_stmt(task, host, exe, exe.stmt(stmt), value)
+    }
+
+    /// Completes a statement with the value of its right-hand side.
+    fn complete_stmt(
+        &mut self,
+        task: TaskId,
+        host: &mut dyn Host,
+        exe: &Executable,
+        stmt: &Stmt,
+        value: Value,
+    ) -> Eval<()> {
+        match stmt {
             Stmt::Let {
                 target: Target::Slot(slot),
                 ..
-            } => self.bind(task, exe, *slot, value)?,
+            } => self.bind(task, *slot, value)?,
             Stmt::Let {
                 target: Target::Session(name),
                 ..
