@@ -817,6 +817,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         .route("/assets/timeline.js", get(timeline_script))
         .route("/healthz", get(healthz))
         .route("/api/state", get(app_state))
+        .merge(tool_catalog::routes())
         .route("/api/approvals", get(list_approvals))
         .route("/api/approvals/{key}/approve", post(approve_wait))
         .route("/api/approvals/{key}/deny", post(deny_wait))

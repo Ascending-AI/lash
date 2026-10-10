@@ -837,6 +837,144 @@ async fn turn_cancel_route_requests_first_party_turn_cancellation() {
     ));
 }
 
+/// Browser membership writes curate the durable session catalogue, retain a
+/// removed entry for restoration, and change what the next model turn sees.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn tool_catalog_route_removes_and_restores_the_models_tool() {
+    let prompts = Arc::new(Mutex::new(Vec::new()));
+    let provider = lash::testing::TestProvider::builder()
+        .kind("workbench-harness")
+        .complete({
+            let prompts = prompts.clone();
+            move |request| {
+                prompts.lock_recover().push(
+                    request
+                        .instructions
+                        .expect("the current catalogue is in the instructions")
+                        .to_string(),
+                );
+                async {
+                    Ok(text_response(
+                        "<typescript>await chat.reply(\"catalogue observed\");</typescript>",
+                    ))
+                }
+            }
+        })
+        .build()
+        .into_handle();
+    let mail = mail::MailWorld::new();
+    mail.add_account("test").expect("add account");
+    let workbench = Workbench::builder(provider).mail_world(mail).build().await;
+    let session_id = workbench.state.current_session_id();
+    let session = workbench
+        .state
+        .create_or_open_session(&session_id, "catalogue law")
+        .await
+        .expect("open session");
+    session
+        .send(lash::TurnInput::text("observe catalogue"))
+        .output()
+        .await
+        .expect("initial turn");
+    let tool = session
+        .admin()
+        .tools()
+        .active_manifests()
+        .await
+        .expect("catalogue")
+        .into_iter()
+        .find(|tool| tool.name == "inbox__test__send")
+        .expect("send tool");
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind");
+    let base = format!("http://{}", listener.local_addr().expect("address"));
+    let app = tool_catalog::routes().with_state(workbench.state.clone());
+    let server = tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("serve");
+    });
+    let client = reqwest::Client::new();
+    let listing = client
+        .get(format!("{base}/api/tools"))
+        .query(&[("session_id", session_id.as_str())])
+        .send()
+        .await
+        .expect("list");
+    assert_eq!(
+        listing.status(),
+        StatusCode::OK,
+        "the browser can list the catalogue"
+    );
+    for (index, member) in [false, true].into_iter().enumerate() {
+        let response = client.post(format!("{base}/api/tools/membership"))
+            .query(&[("session_id", session_id.as_str())])
+            .json(&json!({"tool_id": tool.id, "member": member, "request_id": format!("catalogue-law-{index}")}))
+            .send().await.expect("membership request");
+        assert!(matches!(
+            response.status(),
+            StatusCode::OK | StatusCode::ACCEPTED
+        ));
+        let result: Value = response.json().await.expect("membership response");
+        if result["status"] == "pending" {
+            let receipt = serde_json::from_value(result["receipt"].clone()).expect("typed receipt");
+            assert!(matches!(
+                session
+                    .admin()
+                    .commands()
+                    .settle(receipt)
+                    .await
+                    .expect("settle membership"),
+                lash::SessionCommandSettlement::Applied { .. }
+            ));
+        } else {
+            assert_eq!(result["status"], "applied");
+        }
+        let listing: Value = client
+            .get(format!("{base}/api/tools"))
+            .query(&[("session_id", session_id.as_str())])
+            .send()
+            .await
+            .expect("list")
+            .json()
+            .await
+            .expect("listing");
+        let entry = listing["tools"]
+            .as_array()
+            .expect("tools")
+            .iter()
+            .find(|entry| entry["id"] == tool.id.as_str())
+            .expect("removed tool stays restorable");
+        assert_eq!(entry["member"], member);
+        assert_eq!(
+            session
+                .admin()
+                .tools()
+                .active_manifests()
+                .await
+                .expect("active")
+                .iter()
+                .any(|manifest| manifest.id == tool.id),
+            member
+        );
+        session
+            .send(lash::TurnInput::text("observe catalogue again"))
+            .output()
+            .await
+            .expect("next turn");
+    }
+    let prompts = prompts.lock_recover().clone();
+    assert_eq!(prompts.len(), 3);
+    for (prompt, present) in prompts.iter().zip([true, false, true]) {
+        assert_eq!(
+            prompt.contains("inbox.test.send"),
+            present,
+            "the system catalogue tracks membership: {prompt}"
+        );
+    }
+    server.abort();
+    workbench.shutdown().await;
+}
+
 /// Every installed inbox account, whatever its name, resolves as a tool the
 /// session's recorded catalog carries, membership edits that catalog, and a
 /// turn sends through each account's installed plugin.

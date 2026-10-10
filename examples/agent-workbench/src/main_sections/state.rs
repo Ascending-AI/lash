@@ -128,6 +128,9 @@ pub(crate) enum WorkbenchAuthorizationAction {
     ManageQueuedWork {
         session_id: SessionId,
     },
+    ManageTools {
+        session_id: SessionId,
+    },
     /// Deployment-wide operator policy. Approval decisions are deliberately
     /// separate from chat/session participation.
     ManageApprovals,
@@ -172,7 +175,8 @@ impl WorkbenchAuthorizer for AllowAllWorkbenchAuthorizer {
             | WorkbenchAuthorizationAction::EnqueueTurnInput { session_id }
             | WorkbenchAuthorizationAction::ManageTurnInputs { session_id }
             | WorkbenchAuthorizationAction::CancelTurn { session_id }
-            | WorkbenchAuthorizationAction::ManageQueuedWork { session_id } => {
+            | WorkbenchAuthorizationAction::ManageQueuedWork { session_id }
+            | WorkbenchAuthorizationAction::ManageTools { session_id } => {
                 let _ = session_id;
             }
             WorkbenchAuthorizationAction::ManageApprovals => {}

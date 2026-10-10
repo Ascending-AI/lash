@@ -67,6 +67,7 @@ workbench-session-id-retirement = { tier = "economy", model = "deepseek/deepseek
 workbench-session-isolation = { tier = "economy", model = "deepseek/deepseek-v4-pro" }
 workbench-session-resume = { tier = "deterministic", model = "scripted-provider" }
 workbench-shared-session-multi-tab = { tier = "economy", model = "deepseek/deepseek-v4-pro" }
+workbench-tool-membership = { tier = "economy", model = "deepseek/deepseek-v4-flash" }
 workbench-trigger-lifecycle = { tier = "economy", model = "deepseek/deepseek-v4-pro" }
 workbench-turn-ingress = { tier = "frontier", model = "openai/gpt-5.6-sol", deterministic_phases = "Phase 5 queue management may use exec-blocked; Phases 0-4 use the live provider" }
 workbench-weather = { tier = "frontier", model = "openai/gpt-5.6-sol" }

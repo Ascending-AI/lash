@@ -615,3 +615,21 @@ The commented builder block in `src/main_sections/bootstrap.rs` demonstrates
 output retention, attachment limits and expiry, recovery lease and pass
 budgets, termination, abort drain grace, process observation, live replay and trace context. Those deployment policies are
 chosen before building the core; session changes use recorded commands.
+
+### Tool catalogue membership
+
+Open **tools** beside the model picker to curate the current session's recorded
+catalogue. Uncheck a tool to remove it from the next turn's catalogue; check it
+again to restore it. Removed tools stay listed. A change during a running turn
+is queued until that turn finishes, and the panel shows the recorded state until
+the command settles. Source-unavailable tools cannot be enabled here. Before
+a session has recorded its tools, send a turn and refresh the panel.
+
+`GET /api/tools?session_id=<id>` reads the recorded catalogue and pending state;
+`POST /api/tools/membership?session_id=<id>` accepts `tool_id`, `member`, and
+a client `request_id` for durable idempotency. It uses `ToolAdmin::set_membership`,
+returns an applied generation or a pending command receipt, and checks the
+host's session-scoped `ManageTools` policy. The sample allows all operators;
+deployments supply their own authorizer.
+
+The browser referee is [workbench-tool-membership](../../runbooks/workbench-tool-membership/runbook.md).

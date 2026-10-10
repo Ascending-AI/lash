@@ -336,6 +336,29 @@
     .msg-delete:hover { color: var(--error); }
     .inbox-empty { font-family: var(--font-ui); font-size: var(--text-xs); color: var(--ash-text); }
 
+    .tool-catalog { position: relative; }
+    .tool-catalog > summary { list-style: none; }
+    .tool-catalog > summary::-webkit-details-marker { display: none; }
+    .tool-catalog-panel {
+      position: absolute; bottom: calc(100% + var(--space-xs)); left: 0;
+      width: min(28rem, calc(100vw - 3rem)); max-height: 60vh; overflow: auto;
+      padding: var(--space-md); background: var(--form-raised);
+      border: 1px solid var(--line-strong); border-radius: 8px; z-index: 30;
+      box-shadow: 0 10px 24px oklch(0.06 0.002 75 / 0.55);
+    }
+    .tool-catalog-panel p { margin: 0 0 var(--space-sm); color: var(--chalk-mid); font-size: var(--text-xs); }
+    .tool-catalog-panel .tool-catalog-error { color: var(--error); }
+    .tool-catalog-row { display: flex; align-items: center; gap: var(--space-sm); padding: var(--space-xs) 0; font-size: var(--text-xs); }
+    .tool-catalog-row span { overflow-wrap: anywhere; }
+    .tool-catalog-row input { flex: none; accent-color: var(--sodium); }
+    .tool-catalog-row input:focus-visible, .tool-catalog > summary:focus-visible { outline: 2px solid var(--sodium); outline-offset: 3px; }
+    .tool-catalog-row small { margin-left: auto; color: var(--chalk-mid); }
+
+    @media (max-width: 720px) {
+      .tool-catalog { position: static; }
+      .tool-catalog-panel { left: var(--space-xs); right: var(--space-xs); width: auto; }
+    }
+
     .model-config { display: grid; gap: var(--space-md); }
 
     .field { display: grid; gap: var(--space-2xs); }
@@ -2748,6 +2771,16 @@
                   </div>
                 </div>
               </div>
+              <details id="toolCatalog" class="tool-catalog">
+                <summary class="model-button" title="Choose the tools this session offers the model">tools</summary>
+                <section class="tool-catalog-panel" aria-label="Tool catalogue">
+                  <p>Tools for this session. Changes apply before the next turn.</p>
+                  <p id="toolCatalogStatus" role="status" aria-live="polite">loading tools…</p>
+                  <p id="toolCatalogError" class="tool-catalog-error" role="alert" hidden></p>
+                  <button id="toolCatalogRefresh" class="ghost-btn" type="button">refresh tools</button>
+                  <div id="toolCatalogList"></div>
+                </section>
+              </details>
               <span id="usageTotal" class="usage-total">0 tokens</span>
             </div>
             <div id="idleActions" class="composer-actions">
@@ -3173,6 +3206,10 @@
     }
 
     async function showSessionInPlace(sessionId) {
+      toolCatalog.open = false;
+      ++toolCatalogGeneration;
+      toolCatalogSignature = "";
+      toolCatalogList.replaceChildren();
       /* A shell already parked on a refused, terminal or retiring session has
          given up its streams and retry ladder; a fresh page is the honest way
          to leave it. */
@@ -6844,6 +6881,101 @@
        because the read is expensive: `/api/sessions` answers from the durable
        roster and opens nothing (FIG-3151). */
     setInterval(loadSessions, 5000);
+
+    const toolCatalog = document.getElementById("toolCatalog");
+    const toolCatalogList = document.getElementById("toolCatalogList");
+    const toolCatalogStatus = document.getElementById("toolCatalogStatus");
+    const toolCatalogError = document.getElementById("toolCatalogError");
+    let toolCatalogGeneration = 0;
+    let toolCatalogSignature = "";
+    let toolCatalogWriting = false;
+
+    function showToolCatalogError(message) {
+      toolCatalogError.textContent = message;
+      toolCatalogError.hidden = !message;
+    }
+
+    async function loadToolCatalog() {
+      if (!toolCatalog.open || toolCatalogWriting) return;
+      const sessionId = shownSessionId();
+      if (!sessionId) return;
+      const generation = ++toolCatalogGeneration;
+      try {
+        const response = await fetch("/api/tools?session_id=" + encodeURIComponent(sessionId));
+        const body = await response.json();
+        if (generation !== toolCatalogGeneration || sessionId !== shownSessionId()) return;
+        if (!response.ok) throw new Error(body.error || "Could not load tools. Refresh to try again.");
+        if (body.session_id !== sessionId) return;
+        toolCatalogStatus.textContent = body.pending
+          ? "Change queued. It applies when the current turn finishes."
+          : body.tools.length ? "Checked tools are in the model's catalogue."
+          : "No recorded tools yet. Send a turn, then refresh tools.";
+        const signature = JSON.stringify(body);
+        if (signature === toolCatalogSignature) return;
+        toolCatalogSignature = signature;
+        toolCatalogList.replaceChildren();
+        for (const tool of body.tools) {
+          const label = document.createElement("label");
+          label.className = "tool-catalog-row";
+          const input = document.createElement("input");
+          input.type = "checkbox";
+          input.checked = tool.member;
+          input.disabled = body.pending || tool.orphaned;
+          input.dataset.toolId = tool.id;
+          const name = document.createElement("span");
+          name.textContent = tool.name;
+          label.append(input, name);
+          if (tool.orphaned) {
+            const status = document.createElement("small");
+            status.textContent = "source unavailable";
+            label.append(status);
+          }
+          input.addEventListener("change", () => changeToolMembership(sessionId, tool, input.checked));
+          toolCatalogList.append(label);
+        }
+      } catch (error) {
+        if (generation === toolCatalogGeneration && sessionId === shownSessionId()) {
+          toolCatalogList.replaceChildren();
+          toolCatalogSignature = "";
+          showToolCatalogError(error.message || "Could not load tools. Refresh to try again.");
+        }
+      }
+    }
+
+    async function changeToolMembership(sessionId, tool, member) {
+      if (sessionId !== shownSessionId() || toolCatalogWriting) return;
+      toolCatalogWriting = true;
+      ++toolCatalogGeneration;
+      showToolCatalogError("");
+      toolCatalogStatus.textContent = "Saving tool membership…";
+      for (const input of toolCatalogList.querySelectorAll("input")) input.disabled = true;
+      try {
+        const response = await fetch("/api/tools/membership?session_id=" + encodeURIComponent(sessionId), {
+          method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ tool_id: tool.id, member, request_id: crypto.randomUUID() })
+        });
+        const body = await response.json();
+        if (!response.ok) throw new Error(body.error || "Could not save membership. Refresh before trying again.");
+      } catch (error) {
+        if (sessionId === shownSessionId()) showToolCatalogError(error.message || "Could not confirm membership. Refresh before trying again.");
+      } finally {
+        toolCatalogWriting = false;
+        toolCatalogSignature = "";
+        await loadToolCatalog();
+      }
+    }
+
+    toolCatalog.addEventListener("toggle", () => {
+      if (toolCatalog.open) {
+        showToolCatalogError("");
+        loadToolCatalog();
+      } else ++toolCatalogGeneration;
+    });
+    document.getElementById("toolCatalogRefresh").addEventListener("click", () => {
+      showToolCatalogError("");
+      loadToolCatalog();
+    });
+    setInterval(() => { if (toolCatalog.open) loadToolCatalog(); }, 2000);
   </script>
 </body>
 </html>

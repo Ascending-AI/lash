@@ -141,6 +141,8 @@ mod routes;
 pub(crate) use routes::*;
 #[path = "main_sections/approval_routes.rs"]
 mod approval_routes;
+#[path = "main_sections/tool_catalog.rs"]
+mod tool_catalog;
 pub(crate) use approval_routes::*;
 #[path = "main_sections/session_routes.rs"]
 mod session_routes;
