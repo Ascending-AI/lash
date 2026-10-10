@@ -19600,7 +19600,7 @@ laws = [
 disposition = "replaced-by:crates/lash-sim/src/runner/tests.rs::generated_sim_search_mode_keeps_summary_lean_and_labels_shards"
 status = "deleted"
 owed = "generated-sim search mode keeps its summary lean and labels every shard"
-note = "FIG-5311: restored as written; #[ignore]d red on FIG-5350: run_generated_workload refuses every workload, since the generated runtime world went with Restate (5ad9641f9e, FIG-5190) and FIG-5184 rebuilt only the crash matrix and chaos soak"
+note = "FIG-5350: live on the durable SimEngine restored by FIG-5359; every shard-owned seed is reached, trace and content oracles pass, and search mode retains only its lean summary and no passing-seed packages"
 
 [[row]]
 path = "crates/lash-sim/src/runner/tests.rs"
@@ -19615,7 +19615,7 @@ laws = [
 disposition = "replaced-by:crates/lash-sim/src/runner/tests.rs::generated_sim_profile_writes_trace_replay_and_provider_artifacts"
 status = "deleted"
 owed = "a generated-sim profile run writes its trace, replay and provider artifacts"
-note = "FIG-5311: restored as written; #[ignore]d red on FIG-5350: run_generated_workload refuses every workload, since the generated runtime world went with Restate (5ad9641f9e, FIG-5190) and FIG-5184 rebuilt only the crash matrix and chaos soak"
+note = "FIG-5350: live on the durable SimEngine restored by FIG-5359; every seed is reached and writes trace, replay and provider artifacts with passing oracles. The host-owned trigger fixture and host-owned OAuth exclusion expectations are subject-deleted under D-HOSTEVENTS and D-HOSTCREDENTIALS"
 
 [[row]]
 path = "crates/lash-sim/src/runner/generated_profiles.rs"
