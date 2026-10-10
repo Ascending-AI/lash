@@ -1,9 +1,11 @@
-//! The laws of a session's saved bindings: one fragment per binding, each
-//! written only when its binding changed, under the dialect that recorded
-//! them.
+//! The laws of a session's stored state: one complete graph per capture,
+//! each node sent until a commit installs it, under the dialect that
+//! recorded it.
 
 use std::collections::BTreeSet;
 
+use lash_core_store::checkpoint_graph::{NodeId, NodeKind};
+use lash_core_store::execution_state::{ExecutionGraphCapture, ExecutionGraphPurpose};
 use lash_kernel_doc::NumberPolicy;
 use lash_rlm_types::RlmGlobalsPatchPluginBody;
 
@@ -15,26 +17,46 @@ fn bind(name: &str, value: serde_json::Value) -> RlmGlobalsPatchPluginBody {
     }
 }
 
-/// A value large enough that its fragment is a leaf of its own.
+/// A value whose text is placed in a leaf of its own.
 fn large(tag: &str) -> serde_json::Value {
     serde_json::json!([format!("{tag}-{}", "x".repeat(2_000))])
 }
 
-async fn capture(state: &mut CodeModeExecutionState) -> usize {
-    state
-        .snapshot_execution_state(lash_core::FleetFormat::current())
-        .await
-        .expect("capture the session's bindings");
-    let written = state.written_leaves_in_last_snapshot();
-    state.acknowledge_execution_state_capture();
-    written
+/// The root a capture names and the nodes it sends, with the kind of each.
+fn sent(capture: &ExecutionGraphCapture) -> (NodeId, Vec<(NodeId, NodeKind)>) {
+    let ExecutionGraphCapture::Replace { root, nodes } = capture else {
+        panic!("a session with bindings captures a root");
+    };
+    let nodes = nodes
+        .iter()
+        .map(|(id, node)| (*id, node.envelope().expect("a staged node").kind))
+        .collect();
+    (*root, nodes)
 }
 
-/// The session's bindings are saved per root: a capture writes the
-/// fragment of each binding that changed since the last one and names the
-/// rest unchanged.
+fn leaves(nodes: &[(NodeId, NodeKind)]) -> BTreeSet<NodeId> {
+    nodes
+        .iter()
+        .filter(|(_, kind)| *kind == NodeKind::TEXT_LEAF)
+        .map(|(id, _)| *id)
+        .collect()
+}
+
+fn capture(state: &mut CodeModeExecutionState) -> (NodeId, Vec<(NodeId, NodeKind)>) {
+    sent(
+        &state
+            .capture_execution_graph(ExecutionGraphPurpose::Final)
+            .expect("capture the session's state"),
+    )
+}
+
+/// Every capture names the complete state, and sends each node until a
+/// commit that installs it is acknowledged: a refused commit's nodes are
+/// sent again, an unchanged state's staged capture is the same capture, and
+/// once installed a large value is never sent again however its neighbours
+/// change.
 #[tokio::test]
-async fn a_capture_writes_only_the_bindings_that_changed() {
+async fn a_capture_sends_each_node_until_a_commit_installs_it() {
     let mut state = CodeModeExecutionState::new("typescript", NumberPolicy::Float);
     let none = BTreeSet::new();
     for (name, tag) in [("first", "a"), ("second", "b"), ("third", "c")] {
@@ -43,8 +65,25 @@ async fn a_capture_writes_only_the_bindings_that_changed() {
             .await
             .expect("bind a session variable");
     }
-    assert_eq!(capture(&mut state).await, 3, "every binding is new");
-    assert_eq!(capture(&mut state).await, 0, "nothing changed");
+    let (root, nodes) = capture(&mut state);
+    let placed = leaves(&nodes);
+    assert_eq!(placed.len(), 3, "each large text is a leaf");
+    assert!(nodes.iter().any(|(id, _)| *id == root), "the root is sent");
+
+    state.abort_execution_state_capture();
+    assert_eq!(
+        capture(&mut state),
+        (root, nodes.clone()),
+        "a refused commit's nodes are sent again"
+    );
+    assert_eq!(
+        capture(&mut state),
+        (root, nodes),
+        "an unchanged state stages the same capture"
+    );
+    state.acknowledge_execution_state_capture();
+    assert_eq!(capture(&mut state), (root, Vec::new()), "nothing changed");
+    state.acknowledge_execution_state_capture();
 
     state
         .prune_protected_globals(&BTreeSet::from(["second".to_string()]))
@@ -54,19 +93,20 @@ async fn a_capture_writes_only_the_bindings_that_changed() {
         .patch_globals(&bind("second", large("changed")), &none)
         .await
         .expect("rebind one session variable");
-    assert_eq!(
-        capture(&mut state).await,
-        1,
-        "only the rebound binding's fragment is written"
-    );
+    let (changed, nodes) = capture(&mut state);
+    assert_ne!(changed, root);
+    let new_leaves = leaves(&nodes);
+    assert_eq!(new_leaves.len(), 1, "only the rebound value's text is sent");
+    assert!(new_leaves.is_disjoint(&placed));
+    state.acknowledge_execution_state_capture();
 
     let saved = state
-        .hydrated_execution_state(lash_core::FleetFormat::current())
+        .hydrated_execution_state()
         .await
         .expect("the saved session state");
     let mut reloaded = CodeModeExecutionState::new("typescript", NumberPolicy::Float);
     reloaded
-        .restore_execution_state(&saved, lash_core::FleetFormat::current())
+        .restore_execution_state(&saved)
         .await
         .expect("load the saved bindings");
     assert_eq!(
@@ -76,6 +116,11 @@ async fn a_capture_writes_only_the_bindings_that_changed() {
     assert_eq!(
         reloaded.bound_variable_values(&none),
         state.bound_variable_values(&none)
+    );
+    assert_eq!(
+        capture(&mut reloaded),
+        (changed, Vec::new()),
+        "a restored state's nodes are the store's"
     );
 }
 
@@ -88,14 +133,15 @@ async fn bindings_recorded_in_another_dialect_are_refused() {
         .patch_globals(&bind("answer", serde_json::json!(42)), &BTreeSet::new())
         .await
         .expect("bind a session variable");
-    capture(&mut state).await;
+    capture(&mut state);
+    state.acknowledge_execution_state_capture();
     let saved = state
-        .hydrated_execution_state(lash_core::FleetFormat::current())
+        .hydrated_execution_state()
         .await
         .expect("the saved session state");
 
     let error = CodeModeExecutionState::new("python", NumberPolicy::BySpelling)
-        .restore_execution_state(&saved, lash_core::FleetFormat::current())
+        .restore_execution_state(&saved)
         .await
         .expect_err("another dialect's bindings are refused");
     assert!(
@@ -143,7 +189,6 @@ fn a_cell_whose_dialect_declares_no_function_values_keeps_no_function() {
     let mut bindings = super::SessionBindings::default();
     let changes = bindings.settle(super::CellLeft {
         document: &document,
-        identity: lash_kernel_doc::DocumentId::from_bytes([0; 32]),
         annotations: None,
         bindings: lash_kernel_vm::Bindings::default(),
         not_carried: vec![name.clone()],
@@ -236,38 +281,36 @@ async fn a_saved_function_the_migration_refuses_is_listed_and_not_held() {
         .expect("a refused function does not refuse the seed");
     listed(&seeded);
 
-    // Restored: a stored state holds both.
+    // Restored: a stored state holds both, one of them written in a
+    // kernel version this build does not carry.
     let mut stored = CodeModeExecutionState::new("typescript", NumberPolicy::Float);
-    let both = [
-        (
-            "kept".to_string(),
-            saved("kept", lash_kernel_doc::KERNEL_VERSION),
-        ),
-        (
-            "old".to_string(),
-            saved("old", lash_kernel_doc::KERNEL_VERSION),
-        ),
-    ]
+    let kept = [(
+        "kept".to_string(),
+        saved("kept", lash_kernel_doc::KERNEL_VERSION),
+    )]
     .into_iter()
     .collect();
     stored
-        .seed_functions(&both, &none)
+        .seed_functions(&kept, &none)
         .await
         .expect("seed the stored session");
-    capture(&mut stored).await;
-    let mut saved_state = stored
-        .hydrated_execution_state(lash_core::FleetFormat::current())
+    let old: lash_kernel_dialect::SavedFunction =
+        serde_json::from_value(saved("old", unknown)).expect("a saved function");
+    stored.bindings.functions.insert(
+        lash_kernel_doc::Name::new("old"),
+        super::HeldFunction {
+            function: old,
+            cell: None,
+            aliases: BTreeSet::new(),
+        },
+    );
+    let saved_state = stored
+        .hydrated_execution_state()
         .await
         .expect("the saved session state");
-    let mut root: serde_json::Value =
-        serde_json::from_slice(&saved_state.root).expect("the stored root");
-    root["functions"]["old"]["function"]["document"]["manifest"]["kernel"] = unknown.into();
-    saved_state.root = serde_json::to_vec(&root)
-        .expect("the stored root encodes")
-        .into();
     let mut restored = CodeModeExecutionState::new("typescript", NumberPolicy::Float);
     restored
-        .restore_execution_state(&saved_state, lash_core::FleetFormat::current())
+        .restore_execution_state(&saved_state)
         .await
         .expect("a refused function does not refuse the restore");
     listed(&restored);

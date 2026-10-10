@@ -183,7 +183,7 @@ async fn helper_session(
         .map(|loaded| loaded.state.execution_state_hydration())
         .transpose()?
         .flatten()
-        && let Ok(pins) = lash_protocol_rlm::saved_function_pins(&hydrated.root)
+        && let Ok(pins) = lash_protocol_rlm::saved_function_pins(&hydrated)
     {
         saved.extend(
             pins.into_iter()

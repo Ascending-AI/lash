@@ -41,6 +41,7 @@ lash-kernel-state = { workspace = true }
 lash-trace = { workspace = true }
 lash-sansio = { workspace = true }
 lash-core = { workspace = true }
+lash-core-store = { workspace = true }
 lash-vm-runtime = { workspace = true }
 lash-rlm-types = { workspace = true }
 lash-render = { workspace = true }

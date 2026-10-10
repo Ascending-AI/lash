@@ -3,6 +3,7 @@
 //! over a SQLite durable store.
 
 mod finish_value;
+mod graph;
 mod python;
 
 /// V14: a parked call cannot override its boundary's control fact or copy
@@ -196,25 +197,24 @@ await control.finish(winner);"#,
     assert_eq!(finish_of(&response), serde_json::json!("fast"));
 }
 
-/// FIG-5764: a corrupt fragment refuses the whole restore, and the host's
-/// error retains the typed hash mismatch and the binding it names.
+/// FIG-5764: a corrupt node refuses the whole restore, and the host's
+/// error retains the typed graph refusal naming the node.
 #[tokio::test]
-async fn a_corrupt_fragment_reports_its_binding_as_a_typed_restore_cause() {
+async fn a_corrupt_node_refuses_the_restore_with_a_typed_cause() {
     use std::collections::BTreeSet;
     use std::error::Error as _;
 
+    use lash_core_store::checkpoint_graph::{GraphRefusal, NodeId};
+
     use super::snapshot::CodeModeSnapshotError;
 
-    let fleet = lash_core::FleetFormat::current();
     let mut state = typescript_state();
     state
         .patch_globals(
             &lash_rlm_types::RlmGlobalsPatchPluginBody {
                 set_default: serde_json::Map::from_iter([(
                     "notes".to_string(),
-                    serde_json::json!(
-                        "x".repeat(lash_core::plugin::EXECUTION_STATE_LEAF_MIN_BODY_BYTES)
-                    ),
+                    serde_json::json!("x".repeat(1_000)),
                 )]),
             },
             &BTreeSet::new(),
@@ -222,33 +222,37 @@ async fn a_corrupt_fragment_reports_its_binding_as_a_typed_restore_cause() {
         .await
         .expect("bind a value stored as a leaf");
     let mut saved = state
-        .hydrated_execution_state(fleet)
+        .hydrated_execution_state()
         .await
         .expect("capture the bindings");
     let (component, body) = saved.components.first_key_value().expect("the notes leaf");
     let component = component.clone();
+    let named = component
+        .name()
+        .strip_prefix("node/")
+        .and_then(NodeId::from_hex)
+        .expect("a node leaf");
     let mut corrupt = body.to_vec();
     corrupt.push(b' ');
-    saved.components.insert(component.clone(), corrupt.into());
+    saved.components.insert(component, corrupt.into());
 
     let mut restored = typescript_state();
     let error = restored
-        .restore_execution_state(&saved, fleet)
+        .restore_execution_state(&saved)
         .await
         .map_err(lash_core::SessionError::from)
-        .expect_err("a corrupt fragment refuses the restore");
+        .expect_err("a corrupt node refuses the restore");
     let cause = error
         .source()
         .and_then(|source| source.downcast_ref::<CodeModeSnapshotError>())
         .expect("the public restore error retains its typed cause");
-    assert!(matches!(
-        cause,
-        CodeModeSnapshotError::LeafHashMismatch {
-            logical_key,
-            component: expected,
-            actual_component,
-        } if logical_key == "notes" && expected == &component && actual_component != expected
-    ));
+    assert!(
+        matches!(
+            cause,
+            CodeModeSnapshotError::Graph(GraphRefusal::HashMismatch(id)) if *id == named
+        ),
+        "{cause}"
+    );
     assert!(restored.bindings().names().is_empty());
 }
 
@@ -440,19 +444,18 @@ async fn session_bindings_are_carried_between_cells_and_across_a_reload() {
         "the second cell reads the first cell's bindings, and `alias` is still `rows`"
     );
 
-    let fleet = lash_core::FleetFormat::current();
     state
-        .snapshot_execution_state(fleet)
+        .snapshot_execution_state()
         .await
         .expect("capture the session's bindings");
     state.acknowledge_execution_state_capture();
     let saved = state
-        .hydrated_execution_state(fleet)
+        .hydrated_execution_state()
         .await
         .expect("the saved session state");
     let mut reloaded = typescript_state();
     reloaded
-        .restore_execution_state(&saved, fleet)
+        .restore_execution_state(&saved)
         .await
         .expect("load the session's bindings");
 

@@ -781,23 +781,25 @@ impl DialectSession {
 
     pub(crate) async fn snapshot_execution_state(
         &mut self,
-        fleet_format: lash_core::FleetFormat,
     ) -> Result<lash_core::plugin::ExecutionStateCapture, SessionError> {
-        self.state.snapshot_execution_state(fleet_format).await
+        self.state.snapshot_execution_state().await
     }
 
-    pub(crate) async fn probe_execution_state_capture(
+    pub(crate) fn capture_execution_graph(
         &mut self,
-        fleet_format: lash_core::FleetFormat,
-    ) -> Result<(), SessionError> {
-        self.state.probe_execution_state_capture(fleet_format).await
+        purpose: lash_core_store::execution_state::ExecutionGraphPurpose,
+    ) -> Result<lash_core_store::execution_state::ExecutionGraphCapture, SessionError> {
+        self.state.capture_execution_graph(purpose)
+    }
+
+    pub(crate) async fn probe_execution_state_capture(&mut self) -> Result<(), SessionError> {
+        self.state.probe_execution_state_capture().await
     }
 
     pub(crate) async fn hydrated_execution_state(
         &self,
-        fleet_format: lash_core::FleetFormat,
     ) -> Result<lash_core::plugin::HydratedExecutionState, SessionError> {
-        self.state.hydrated_execution_state(fleet_format).await
+        self.state.hydrated_execution_state().await
     }
 
     pub(crate) fn acknowledge_execution_state_capture(&mut self) -> Result<(), SessionError> {
@@ -832,11 +834,19 @@ impl DialectSession {
     pub(crate) async fn restore_execution_state(
         &mut self,
         state: &lash_core::plugin::HydratedExecutionState,
-        fleet_format: lash_core::FleetFormat,
     ) -> Result<(), SessionError> {
         self.state
-            .restore_execution_state(state, fleet_format)
+            .restore_execution_state(state)
             .await
+            .map_err(SessionError::from)
+    }
+
+    pub(crate) fn restore_execution_graph(
+        &mut self,
+        graph: &lash_core_store::execution_state::HydratedExecutionGraph,
+    ) -> Result<(), SessionError> {
+        self.state
+            .restore_execution_graph(graph)
             .map_err(SessionError::from)
     }
 

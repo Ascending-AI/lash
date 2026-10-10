@@ -776,12 +776,9 @@ async fn run_cell(
         }
         match end {
             End::Finished(finished) => {
-                let document = match document_identity {
-                    Ok(document) => document,
-                    Err(error) => {
-                        return failed(lash_core::CellFailureKind::Host, error.to_string());
-                    }
-                };
+                if let Err(error) = document_identity {
+                    return failed(lash_core::CellFailureKind::Host, error.to_string());
+                }
                 let mut left = finished.bindings;
                 // A process the cell bound or answered with leaves it as its
                 // definition.
@@ -796,7 +793,6 @@ async fn run_cell(
                     .retain(|name, _| !projected.contains(name.as_str()));
                 let bindings = state.settle_cell(session::CellLeft {
                     document: &host.entries.document,
-                    identity: document,
                     annotations: annotations.as_ref(),
                     bindings: left,
                     not_carried: finished.not_carried,
@@ -1145,9 +1141,7 @@ impl CodeModeCheckpointPerfFixture {
     pub async fn capture(
         &mut self,
     ) -> Result<lash_core::plugin::ExecutionStateCapture, lash_core::SessionError> {
-        self.state
-            .snapshot_execution_state(lash_core::FleetFormat::current())
-            .await
+        self.state.snapshot_execution_state().await
     }
 
     pub fn acknowledge_capture(&mut self) {
@@ -1193,7 +1187,7 @@ impl CodeModeCheckpointPerfFixture {
     ) -> Result<(), lash_core::SessionError> {
         let mut restored = CodeModeExecutionState::new(dialect.name(), dialect.numbers());
         restored
-            .restore_execution_state(state, lash_core::FleetFormat::current())
+            .restore_execution_state(state)
             .await
             .map_err(lash_core::SessionError::from)
     }

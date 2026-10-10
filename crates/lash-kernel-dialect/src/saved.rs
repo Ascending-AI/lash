@@ -22,6 +22,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::FunctionValues;
 
+mod graph;
+
+pub use graph::{
+    Bundle, BundleBody, BundleRefusal, DOCUMENT_NODE_KIND, FUNCTION_BUNDLE_NODE_KIND, MemberBody,
+};
+
 /// A function a session holds as a value of its own.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

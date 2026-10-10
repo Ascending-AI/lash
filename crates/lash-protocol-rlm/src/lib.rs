@@ -64,6 +64,10 @@ pub use executor::{
 };
 /// The kernel's typed snapshot validation causes and fragment roots.
 pub mod snapshot {
+    pub use lash_core_store::checkpoint_graph::{
+        GraphRefusal, KernelRestoreRefusal, NodeId, RootSource, roots::RootField,
+    };
+    pub use lash_kernel_dialect::BundleRefusal;
     pub use lash_kernel_state::{LoadError, Root, SaveError};
 }
 pub use feedback::{

@@ -116,20 +116,19 @@ async fn aliases_of_a_saved_function_stay_one_function_across_cells() {
         "const h = f;\ndelete (g as any).length;",
     )
     .await;
-    let fleet = lash_core::FleetFormat::current();
     state
-        .snapshot_execution_state(fleet)
+        .snapshot_execution_state()
         .await
         .expect("capture the session's state");
     state.acknowledge_execution_state_capture();
     let saved = state
-        .hydrated_execution_state(fleet)
+        .hydrated_execution_state()
         .await
         .expect("the saved session state");
     drop(state);
     let mut state = typescript_state();
     state
-        .restore_execution_state(&saved, fleet)
+        .restore_execution_state(&saved)
         .await
         .expect("load the session's state");
     let read = cell(
@@ -236,20 +235,19 @@ async fn a_saved_function_is_called_after_a_cold_restore() {
     )
     .await;
 
-    let fleet = lash_core::FleetFormat::current();
     state
-        .snapshot_execution_state(fleet)
+        .snapshot_execution_state()
         .await
         .expect("capture the session's state");
     state.acknowledge_execution_state_capture();
     let saved = state
-        .hydrated_execution_state(fleet)
+        .hydrated_execution_state()
         .await
         .expect("the saved session state");
     drop(state);
     let mut restored = typescript_state();
     restored
-        .restore_execution_state(&saved, fleet)
+        .restore_execution_state(&saved)
         .await
         .expect("load the session's state");
 
