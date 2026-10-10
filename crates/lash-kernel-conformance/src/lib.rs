@@ -14,6 +14,7 @@ mod machine;
 mod migration;
 mod native;
 mod native_calls;
+pub mod smith;
 
 pub use case::{
     Case, CaseBounds, Delivery, Environment, Expected, ExpectedEnd, HostAnswer, Observations,

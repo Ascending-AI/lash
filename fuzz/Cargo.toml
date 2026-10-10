@@ -9,11 +9,20 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
+arbitrary = "1"
+lash-kernel-conformance = { path = "../crates/lash-kernel-conformance" }
 lash-internal-sansio = { path = "../crates/lash-sansio" }
 
 [[bin]]
 name = "attachment_metadata"
 path = "fuzz_targets/attachment_metadata.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "kernel_tiers"
+path = "fuzz_targets/kernel_tiers.rs"
 test = false
 doc = false
 bench = false

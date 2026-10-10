@@ -154,6 +154,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "arbitrary"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3bc62ac97cc33321f50863d514c3bc38a453947a8f9e781137e47c7401020aed"
+
+[[package]]
 name = "arc-swap"
 version = "1.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2806,6 +2812,7 @@ dependencies = [
 name = "lash-kernel-conformance"
 version = "0.0.0-dev"
 dependencies = [
+ "arbitrary",
  "kernel-embedder",
  "lash-ext-regex-ecma",
  "lash-kernel-check",

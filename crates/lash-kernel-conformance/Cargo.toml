@@ -28,9 +28,11 @@ synthetic-next = [
 workspace = true
 
 [dependencies]
+arbitrary = "1"
 lash-kernel-check.workspace = true
 lash-kernel-dialect.workspace = true
 lash-kernel-doc.workspace = true
+lash-kernel-lib.workspace = true
 lash-kernel-migrate.workspace = true
 lash-kernel-state.workspace = true
 lash-kernel-vm.workspace = true
@@ -41,5 +43,4 @@ thiserror.workspace = true
 [dev-dependencies]
 lash-kernel-edit.workspace = true
 kernel-embedder = { path = "../../examples/kernel-embedder" }
-lash-kernel-lib = { path = "../lash-kernel-lib" }
 lash-ext-regex-ecma = { path = "../lash-ext-regex-ecma" }
