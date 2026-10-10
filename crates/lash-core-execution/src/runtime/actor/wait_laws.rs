@@ -1,11 +1,12 @@
 //! The laws of waits and completion keys (L5, FIG-5173; ADR 0132 §6, §11),
 //! written once over a [`Backend`] and run by each dialect's tests over its
 //! own store. Each law takes a fresh backend whose claim poll is short and
-//! returns the first rule it saw broken. Time is the store's real clock:
-//! deadlines are a few hundred milliseconds out.
+//! returns the first rule it saw broken. Deadlines use the store's clock;
+//! T1 controls the runner's poll clock independently of host scheduling.
 
-use std::sync::{Arc, Mutex, PoisonError};
-use std::time::Duration;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::{Duration, Instant};
 
 use lash_durable::domain::{
     CANCEL_MAIL, MailAnswer, MailDomainWrite, WaitResolution, WaitRow, WaitState,
@@ -54,9 +55,8 @@ macro_rules! ensure {
 /// The claim poll every law's backend runs with.
 pub const CLAIM_POLL: Duration = Duration::from_millis(25);
 
-/// How far past its due time a claimed wait may settle: scheduling slack on
-/// a loaded test host.
-const EPSILON: Duration = Duration::from_millis(750);
+/// T1's original observation budget, used only to guard a hung runner.
+const T1_WATCHDOG: Duration = Duration::from_millis(3_325);
 
 const SHORT: Duration = Duration::from_millis(300);
 const LONG: Duration = Duration::from_secs(60);
@@ -444,16 +444,49 @@ pub async fn the_first_resolution_wins(backend: &Backend) -> LawOutcome {
     Ok(())
 }
 
-/// What a T1 activation saw.
-#[derive(Default)]
+/// T1 permits the runner's first poll and holds every later timer. The
+/// store's clock remains authoritative for deadlines and settlement stamps.
+/// Keeping monotonic time fixed prevents host scheduling from spending a
+/// second claim poll before the first activation reports its result.
+#[derive(Debug)]
+struct FirstPollClock {
+    inner: Arc<dyn crate::Clock>,
+    now: Instant,
+    polls: AtomicUsize,
+}
+
+#[async_trait::async_trait]
+impl crate::Clock for FirstPollClock {
+    fn now(&self) -> Instant {
+        self.now
+    }
+
+    fn timestamp_datetime(&self) -> chrono::DateTime<chrono::Utc> {
+        self.inner.timestamp_datetime()
+    }
+
+    async fn sleep(&self, _duration: Duration) {
+        std::future::pending().await
+    }
+
+    async fn sleep_until(&self, deadline: Instant) {
+        if deadline <= self.now {
+            self.polls.fetch_add(1, Ordering::SeqCst);
+        } else {
+            std::future::pending().await
+        }
+    }
+}
+
+/// What the first T1 activation committed before releasing its actor.
 struct Seen {
-    claims: Vec<ClaimCause>,
+    cause: ClaimCause,
     settled: Vec<WaitRow>,
 }
 
 struct SettleOnClaim {
     backend: Backend,
-    seen: Arc<Mutex<Seen>>,
+    seen: tokio::sync::mpsc::UnboundedSender<Result<Seen, LawBroken>>,
 }
 
 #[async_trait::async_trait]
@@ -465,30 +498,32 @@ impl Activation for SettleOnClaim {
             owned.epoch(),
             turn_scope("t1"),
         );
-        let settled = waits::settle_due(&cx).await.unwrap_or_default();
-        let mut rows = Vec::new();
-        for wait in &settled {
-            if let Ok(Some(row)) = self.backend.durable().wait(&wait.id()).await {
-                rows.push(row);
+        let result = async {
+            // The first owner transaction must settle the due wait, before
+            // any other work or another claim poll can help it.
+            let settled = waits::settle_due(&cx).await?;
+            let mut rows = Vec::new();
+            for wait in &settled {
+                rows.push(row(&self.backend, wait).await?);
             }
-        }
-        {
-            let mut seen = self.seen.lock().unwrap_or_else(PoisonError::into_inner);
-            seen.claims.push(owned.cause());
-            seen.settled.extend(rows);
-        }
-        if let Ok(mut tx) = cx.begin().await {
+            let mut tx = cx.begin().await?;
             tx.ack_seen().give_up(Release::Idle);
-            let _ = cx.commit(tx, CommitLabel::new("law.release")).await;
+            cx.commit(tx, CommitLabel::new("law.release")).await?;
+            Ok(Seen {
+                cause: owned.cause(),
+                settled: rows,
+            })
         }
+        .await;
+        let _ = self.seen.send(result);
         Exit::Released
     }
 }
 
-/// T1: an actor released as `waiting` past a wait's deadline is claimed by
-/// the ordinary claim and settles `TimedOut` within the claim poll plus ε;
-/// the timeout is committed in the activation's first owner transaction,
-/// before it does anything else.
+/// T1: an actor released as `waiting` with an expired deadline is claimed
+/// by the first ordinary claim poll and settles `TimedOut` in that
+/// activation's first owner transaction, before it does anything else.
+/// Later polls are held; elapsed host time is not the settlement bound.
 ///
 /// # Errors
 ///
@@ -499,12 +534,16 @@ pub async fn a_waiting_actor_past_its_deadline_times_out_within_the_claim_poll(
     let actor = session_actor("t1")?;
     let minting = node(backend, "t1-minting", TTL_MILLIS).await?;
     let cx = own(backend, &minting, &actor, turn_scope("t1")).await?;
-    let (wait, _) = pin(&cx, WaitKind::ToolCompletion, None, Some(SHORT)).await?;
+    let (wait, _) = pin(&cx, WaitKind::ToolCompletion, None, Some(Duration::ZERO)).await?;
     let deadline = row(backend, &wait)
         .await?
         .purpose
         .deadline()
         .ok_or_else(|| LawBroken("the wait has no deadline".into()))?;
+    ensure!(
+        backend.durable().now().await? >= deadline,
+        "the wait is not due before the first claim poll"
+    );
     let mut tx = cx.begin().await?;
     tx.give_up(Release::Waiting {
         next_due: Some(deadline),
@@ -512,10 +551,15 @@ pub async fn a_waiting_actor_past_its_deadline_times_out_within_the_claim_poll(
     cx.commit(tx, CommitLabel::new("law.release")).await?;
     backend.durable().release_node(&minting).await?;
 
-    let seen = Arc::new(Mutex::new(Seen::default()));
+    let clock = Arc::new(FirstPollClock {
+        inner: backend.clock(),
+        now: backend.clock().now(),
+        polls: AtomicUsize::new(0),
+    });
+    let (send, mut seen) = tokio::sync::mpsc::unbounded_channel();
     let runner = Runner::new(
         Arc::clone(backend.durable()),
-        backend.clock(),
+        clock.clone(),
         RunnerConfig {
             node: NodeId::new("t1-serving"),
             decodes: vec![formats()],
@@ -525,7 +569,7 @@ pub async fn a_waiting_actor_past_its_deadline_times_out_within_the_claim_poll(
         },
         Arc::new(SettleOnClaim {
             backend: backend.clone(),
-            seen: Arc::clone(&seen),
+            seen: send,
         }),
     );
     let stop = CancellationToken::new();
@@ -533,28 +577,29 @@ pub async fn a_waiting_actor_past_its_deadline_times_out_within_the_claim_poll(
         let stop = stop.clone();
         async move { runner.run(async move { stop.cancelled().await }).await }
     });
-    let give_up_at = std::time::Instant::now() + SHORT + CLAIM_POLL + EPSILON * 4;
-    while seen
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .settled
-        .is_empty()
-        && std::time::Instant::now() < give_up_at
-    {
-        tokio::time::sleep(CLAIM_POLL).await;
-    }
+    let observed = tokio::time::timeout(T1_WATCHDOG, seen.recv()).await;
     stop.cancel();
-    let _ = serving.await;
-    let seen = seen.lock().unwrap_or_else(PoisonError::into_inner);
+    serving
+        .await
+        .map_err(|error| LawBroken(error.to_string()))??;
+    let seen = observed
+        .map_err(|_| LawBroken("the first claim poll never reported its activation".into()))?
+        .ok_or_else(|| LawBroken("the runner ended without an activation".into()))??;
     ensure!(
-        seen.claims.first() == Some(&ClaimCause::Due),
-        "the actor was not claimed as due: {:?}",
-        seen.claims
+        clock.polls.load(Ordering::SeqCst) == 1,
+        "settlement needed more than the first claim poll"
     );
-    let settled = seen
-        .settled
-        .first()
-        .ok_or_else(|| LawBroken("no wait settled".into()))?;
+    ensure!(
+        seen.cause == ClaimCause::Due,
+        "the actor was not claimed as due: {:?}",
+        seen.cause
+    );
+    ensure!(
+        seen.settled.len() == 1,
+        "the first activation settled {} waits instead of one",
+        seen.settled.len()
+    );
+    let settled = &seen.settled[0];
     ensure!(
         settled.id == wait.id() && settled.lifecycle.state() == WaitState::TimedOut,
         "the claimed wait settled as {:?}",
@@ -564,11 +609,9 @@ pub async fn a_waiting_actor_past_its_deadline_times_out_within_the_claim_poll(
         .lifecycle
         .resolved_at()
         .ok_or_else(|| LawBroken("a timed-out wait has no settle time".into()))?;
-    let bound = deadline
-        .after_millis(i64::try_from((CLAIM_POLL + EPSILON).as_millis()).unwrap_or(i64::MAX));
     ensure!(
-        resolved_at >= deadline && resolved_at <= bound,
-        "the wait due at {deadline:?} settled at {resolved_at:?}, past {bound:?}"
+        resolved_at >= deadline,
+        "the wait due at {deadline:?} settled early at {resolved_at:?}"
     );
     Ok(())
 }
