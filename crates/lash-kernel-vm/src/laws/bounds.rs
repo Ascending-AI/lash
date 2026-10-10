@@ -1,10 +1,19 @@
 //! The bound laws (`K-BND-001`): each bound ends the run with its typed
 //! error, and no `catch` or `finally` sees it (`K-ERR-004`).
 
+use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use std::time::{Duration, Instant};
 
-use super::embedder::{Embedder, REPEAT_BUILDS, ROOMY, Setup, int, result};
-use crate::{Bound, BoundExceeded, Bounds, End, Machine, RunError};
+use lash_kernel_doc::{
+    NativeCall, NativeError, NativeFunction, Value, parse_definition, parse_document,
+};
+
+use super::embedder::{Embedder, REPEAT_BUILDS, ROOMY, Setup, World, int, library, result};
+use crate::{
+    Bound, BoundExceeded, Bounds, End, KernelMachine, Machine, Program, RunError, Start, Step,
+    Target,
+};
 
 /// Wraps `body` so that a raise would be caught and a cleanup would
 /// print.
@@ -277,4 +286,80 @@ main {
         },
     );
     assert_eq!(result(embedder.run_to_end(&[])), int(3 * (299 * 300 / 2)));
+}
+
+/// Returns null; what a law reads is its definition's charge formula.
+struct Measured;
+impl NativeFunction for Measured {
+    fn call(&self, _call: NativeCall<'_>) -> Result<Value, NativeError> {
+        Ok(Value::Null)
+    }
+}
+
+const GROWN: i64 = 10_000;
+
+/// How long a library body takes to grow a list of `GROWN` one-member
+/// lists, calling after each step a function charged `charge` on the list.
+fn grow_in_a_body(charge: &str) -> Duration {
+    let library = library(true);
+    let mut registry = (*library.registry).clone();
+    let id = |name: &str| library.ids[name];
+    let measure = parse_definition(&format!(
+        "function probe.measure(xs: Any) -> Any\nkernel 1\ncharge {charge}\nnative\n"
+    ))
+    .unwrap();
+    let measure = registry
+        .register(measure, Some(Arc::new(Measured)))
+        .unwrap();
+    let uses = format!(
+        "use list.len = @{}\nuse num.lt = @{}\nuse num.add = @{}\nuse probe.measure = @{measure}\n",
+        id("list.len"),
+        id("num.lt"),
+        id("num.add")
+    );
+    let grow = parse_definition(&format!(
+        "function probe.grow(n: Any) -> Any\nkernel 1\ncharge 1\n{uses}\
+         body {{ let out = [] let i = 0 while num.lt(i, n) {{ set out[list.len(out)] = [i] \
+         let m = probe.measure(out) set i = num.add(i, 1) }} return list.len(out) }}\n"
+    ))
+    .unwrap();
+    let grow = registry.register(grow, None).unwrap();
+    let text = format!(
+        "numbers by_spelling\nkernel 1\n{uses}use probe.grow = @{grow}\n\
+         main {{ let n = invoke probe.grow({GROWN}) return n }}\n"
+    );
+    let program = Program {
+        document: Arc::new(parse_document(&text).unwrap()),
+        registry: Arc::new(registry),
+    };
+    let start = Start {
+        target: Target::Main,
+        args: Vec::new(),
+        bindings: Default::default(),
+    };
+    let mut machine = KernelMachine::start(program, ROOMY, start).unwrap();
+    let started = Instant::now();
+    let step = machine.run(&mut World::default(), u64::MAX).unwrap();
+    let elapsed = started.elapsed();
+    match step {
+        Step::Ended(end) => assert_eq!(result(end), int(GROWN)),
+        other => panic!("the run did not end: {other:?}"),
+    }
+    elapsed
+}
+
+/// `K-CHG-007`: inside a library body nothing is charged, so a call there
+/// costs no accounting. A body that calls a function charged by the deep
+/// size of the list it grows runs as fast as one that calls a function
+/// charged a constant; evaluating each discarded formula made it quadratic,
+/// and Test262 harness loops ran for minutes before their charge bound
+/// fired (FIG-5788).
+#[test]
+fn a_call_inside_a_library_body_does_no_accounting() {
+    let constant = grow_in_a_body("1");
+    let deep = grow_in_a_body("deep(xs)");
+    assert!(
+        deep < constant * 4 + Duration::from_secs(1),
+        "deep-size formula {deep:?}, constant formula {constant:?}"
+    );
 }

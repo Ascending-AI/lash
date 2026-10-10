@@ -210,6 +210,7 @@ errors "type_error", "RangeError"
 charge 8
 body {
   let length = invoke ts.array.length(this)
+  if num.lt(4294967295.0, length) { throw error.new("RangeError", "Invalid array length", null) }
   let output = []
   let index = 0.0
   while num.lt(index, length) {
@@ -325,6 +326,7 @@ body {
   let start = invoke ts.array.bound(input, length, 0.0)
   let stop = invoke ts.array.argument(args, 1)
   let end = invoke ts.array.bound(stop, length, length)
+  if num.lt(4294967295.0, num.sub(end, start)) { throw error.new("RangeError", "Invalid array length", null) }
   let output = []
   while num.lt(start, end) {
     let present = invoke ts.has(this, start)
@@ -985,8 +987,39 @@ kernel 1
 errors "type_error", "RangeError"
 charge 8
 body {
-  let output = invoke ts.array.dense(this)
-  do invoke ts.array.splice(output, args)
+  let length = invoke ts.array.length(this)
+  let input = invoke ts.array.argument(args, 0)
+  let start = invoke ts.array.bound(input, length, 0.0)
+  let skipped = 0.0
+  if num.lt(0, list.len(args)) { set skipped = num.sub(length, start) }
+  if num.lt(1, list.len(args)) {
+    let array_arg_8 = args[1]
+    let count = invoke ts.array.integer(array_arg_8)
+    set skipped = num.min(num.max(count, 0), num.sub(length, start))
+  }
+  let inserted = 0.0
+  if num.lt(2, list.len(args)) { set inserted = num.sub(list.len(args), 2) }
+  let new_length = num.add(num.sub(length, skipped), inserted)
+  if num.lt(9007199254740991.0, new_length) { throw error.new("type_error", "Invalid array-like length", null) }
+  if num.lt(4294967295.0, new_length) { throw error.new("RangeError", "Invalid array length", null) }
+  let output = []
+  let index = 0.0
+  while num.lt(index, start) {
+    let value = invoke ts.get(this, index)
+    set output[list.len(output)] = value
+    set index = num.add(index, 1)
+  }
+  let position = 2
+  while num.lt(position, list.len(args)) {
+    set output[list.len(output)] = args[position]
+    set position = num.add(position, 1)
+  }
+  let from = num.add(start, skipped)
+  while num.lt(from, length) {
+    let value = invoke ts.get(this, from)
+    set output[list.len(output)] = value
+    set from = num.add(from, 1)
+  }
   return output
 }
 
@@ -1001,6 +1034,7 @@ body {
   if num.lt(index, 0) { set index = num.add(length, index) }
   if num.lt(index, 0) { throw error.new("RangeError", "Invalid index", null) }
   if num.le(length, index) { throw error.new("RangeError", "Invalid index", null) }
+  if num.lt(4294967295.0, length) { throw error.new("RangeError", "Invalid array length", null) }
   let value = invoke ts.array.argument(args, 1)
   let output = []
   let position = 0.0

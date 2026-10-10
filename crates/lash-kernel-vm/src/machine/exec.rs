@@ -273,6 +273,11 @@ impl KernelMachine {
         args: &[Value],
         result: Option<&Value>,
     ) -> Result<(), Halt> {
+        // Inside a library body nothing is charged (`K-CHG-007`), so the
+        // formula, whose deep sizes walk whole graphs, is not evaluated.
+        if !self.charging {
+            return Ok(());
+        }
         let definition = &exe.libs[lib.0 as usize].definition;
         let units = self.formula(
             &definition.charge,

@@ -412,3 +412,31 @@ fn string_conversion_obeys_own_join_and_keeps_locale_refusal() {
         super::lower("[1].toLocaleString();").expect_err("locale formatting remains refused");
     assert_eq!(lowered.code, crate::DiagnosticCode::MethodUnsupported);
 }
+
+/// ECMA ArrayCreate refuses a length above 2^32 - 1, so slice and the copy
+/// methods raise RangeError on a huge array-like before they read it, and
+/// toSpliced reads only the elements its result keeps. Each used to walk
+/// 2^32 or 2^53 - 1 indices until the memory bound (FIG-5788).
+#[test]
+fn huge_array_likes_are_refused_before_a_walk_and_to_spliced_reads_what_it_keeps() {
+    for call in [
+        "Array.prototype.slice.call(huge, 0, 4294967296)",
+        "Array.prototype.toReversed.call(huge)",
+        "Array.prototype.toSorted.call(huge)",
+        "Array.prototype.with.call(huge, 0, 1)",
+        "Array.prototype.toSpliced.call(huge, 0, 0)",
+    ] {
+        let source = format!(
+            "const huge: any = {{}}; huge[0] = 'x'; huge[4294967295] = 'y'; huge.length = 4294967296; {call}; finish(true);"
+        );
+        assert!(
+            matches!(run(&source), End::Error(lash_kernel_vm::RunError::Uncaught(Datum::Error(error))) if error.kind == "RangeError"),
+            "{source}"
+        );
+    }
+    law(
+        "const like = {'9007199254740989': 1, '9007199254740990': 2, '9007199254740992': 4, length: 2 ** 53 + 20};
+        const kept = Array.prototype.toSpliced.call(like, 0, 2 ** 53 - 3, 'a');
+        finish(kept.length === 3 && kept[0] === 'a' && kept[1] === 1 && kept[2] === 2);",
+    );
+}
