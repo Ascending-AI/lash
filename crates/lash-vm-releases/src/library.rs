@@ -2,10 +2,12 @@
 //! implements it: what the standard embedding holds before a dialect adds
 //! its helpers.
 //!
-//! The build script includes this file too: it defines the TypeScript
-//! helpers against these functions once, when the crate is built, and a
-//! worker registers the functions again at startup beside their native
-//! implementations.
+//! This crate's build script includes this file, and so does
+//! `lash-vm-worker`: the build defines the TypeScript helpers and the
+//! release the tree builds against these functions once, when this crate is
+//! built, and a worker registers the functions again at startup beside
+//! their native implementations. The library of this crate holds data
+//! alone, and does not compile this file.
 
 use std::sync::Arc;
 

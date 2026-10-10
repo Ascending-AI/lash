@@ -32,6 +32,27 @@ journals, tool-intent journals and the parked-loop segment. Synthetic adjacent
 migration steps remain. Review the output against the dry run. Refresh literal
 byte and identity pins through their owning generators or laws before committing.
 
+### Seal helper release 1.0
+
+Until the cut, the build defines helper release 1.0 from the current helper
+sources, and nothing of it is checked in (FIG-5839). Sealing it is one
+generator run: it writes the release as the tree builds it, marked sealed,
+into `crates/lash-vm-releases/src/sealed.rs`. From then on every build holds
+1.0 exactly as it shipped and fails when it cannot, and a helper changes only
+by declaring release 2.0 in `RETAINED_HELPER_RELEASES`. The reset runs the
+generator with the other fixture writers (its output is
+`crates/lash-vm-releases/src/sealed.rs`); to seal on its own:
+
+```sh
+kiln test //crates/lash-vm-releases:lash-vm-releases__unit_test \
+  --local-test-execution --no-test-cache --test_arg=--ignored \
+  --test_arg=--exact --test_arg=tests::seal_helper_release \
+  --test_env=LASH_REGENERATE=1 --test_env=BUILD_WORKSPACE_DIRECTORY=$PWD
+```
+
+Check that `sealed.rs` holds release 1.0 with `"sealed":true` and that the
+build still passes before committing it with the candidate.
+
 The candidate must descend from the checked main tip. Its remaining paths
 must belong to the reset plan, the release channel or gate activation:
 

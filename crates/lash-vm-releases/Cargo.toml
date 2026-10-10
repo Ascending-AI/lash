@@ -1,0 +1,38 @@
+[package]
+name = "lash-internal-vm-releases"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+rust-version.workspace = true
+description = "The helper releases lash's shipped worker holds, as data: the sealed ones as the repository keeps them, and the one the tree builds as its build defines it."
+
+[lib]
+name = "lash_vm_releases"
+doctest = false
+
+[lints]
+workspace = true
+
+# The library holds data alone: a host that only edits links it, and links no
+# dialect or extension (FIG-5812). The build script defines the helpers.
+[dependencies]
+lash-kernel-doc = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+
+[build-dependencies]
+blake3 = { workspace = true }
+lash-kernel-doc = { workspace = true }
+lash-kernel-dialect = { workspace = true }
+lash-kernel-lib = { workspace = true }
+lash-kernel-vm = { workspace = true }
+lash-dialect-typescript = { workspace = true }
+lash-ext-date-ecma = { workspace = true }
+lash-ext-regex-ecma = { workspace = true }
+lash-ext-url-whatwg = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }

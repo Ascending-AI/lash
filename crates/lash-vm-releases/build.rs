@@ -1,6 +1,7 @@
 //! Defines the standard embedding's TypeScript helpers once, when the crate
-//! is built (FIG-5796), and checks the released helper sets it retains
-//! against what it builds (FIG-5799).
+//! is built (FIG-5796), defines the helper release the tree builds from
+//! them until the cut seals it (FIG-5839), and checks the sealed releases
+//! the build holds against what it builds (FIG-5799).
 //!
 //! Every worker is a process of its own, and defining the helpers (reading
 //! their kernel text, validating and identifying each) took most of a
@@ -10,23 +11,36 @@
 //!
 //! A run pins the identities it was written against, so a build also holds
 //! every function of the helper releases it retains that it does not
-//! define itself (`lash-vm-library`, which a parent holds the library
-//! from). The script checks each release against the build
-//! (`src/build/release.rs`, `src/build/probe.rs`), validates the functions
-//! it retains in the registry the worker holds, and writes them, the
-//! releases' index, where the release the tree is still building differs
-//! from the build, and that release frozen for the tree as it stands.
+//! define itself. The script resolves the declared releases
+//! (`src/declared.rs`): each sealed one as the repository keeps it
+//! (`src/sealed.rs`), and the release the tree builds, while it is unsealed,
+//! as the build defines it, with the digest of what each native answers
+//! (`src/build/probe.rs`). It checks every release against the build
+//! (`src/build/release.rs`), validates the functions it retains in the
+//! registry the worker holds, and writes them, the releases, and their
+//! index. A parent and a worker read all of it from this one build.
 
+#[path = "src/declared.rs"]
+mod declared;
 #[path = "src/library.rs"]
 mod library;
 #[path = "src/build/probe.rs"]
 mod probe;
 #[path = "src/build/release.rs"]
 mod release;
+#[expect(
+    dead_code,
+    reason = "the build writes releases; sealing and decoding the held set are the library's"
+)]
+#[path = "src/releases.rs"]
+mod releases;
+#[path = "src/sealed.rs"]
+mod sealed;
 
 use lash_kernel_dialect::NamedLibrary;
 use lash_kernel_doc::FunctionRegistry;
-use lash_vm_library::{HelperRelease, HelperReleaseIndex};
+
+use crate::releases::{HelperRelease, HelperReleaseIndex};
 
 #[expect(
     clippy::disallowed_methods,
@@ -42,35 +56,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let out = std::path::PathBuf::from(std::env::var_os("OUT_DIR").ok_or("OUT_DIR is unset")?);
     std::fs::write(out.join("typescript_helpers.json"), validated.to_json()?)?;
 
-    let releases = lash_vm_library::helper_releases()?;
     let fingerprints = probe::fingerprints(&registry);
-    let building = releases.last().ok_or("no helper release")?;
-    let frozen = if building.sealed {
-        building.clone()
-    } else {
-        release::refreeze(
-            building,
-            releases.iter().rev().nth(1),
-            &registry,
-            &fingerprints,
-        )?
-    };
-    std::fs::write(
-        out.join("helper_release.json"),
-        serde_json::to_vec(&frozen)?,
+    let held = release::resolve(
+        declared::RETAINED_HELPER_RELEASES,
+        declared::RETIRING_HELPER_RELEASES,
+        sealed::SEALED,
+        |name, ordinal, previous| {
+            release::freeze(name, ordinal, previous, &registry, &fingerprints)
+        },
     )?;
-    let kept = release::keep(&releases, &registry, &fingerprints)?;
-    let retained = registry.validate_functions(kept.retained)?;
+    let retained = release::keep(&held.retained, &registry, &fingerprints)?;
+    let retained = registry.validate_functions(retained)?;
     std::fs::write(out.join("retained_functions.json"), retained.to_json()?)?;
-    let index: Vec<HelperReleaseIndex> = releases.iter().map(HelperRelease::index).collect();
+    let index: Vec<HelperReleaseIndex> = held.retained.iter().map(HelperRelease::index).collect();
     std::fs::write(
         out.join("helper_releases.json"),
         serde_json::to_vec(&index)?,
     )?;
-    std::fs::write(
-        out.join("helper_release_divergence.json"),
-        serde_json::to_vec(&kept.divergence)?,
-    )?;
+    std::fs::write(out.join("held_releases.json"), serde_json::to_vec(&held)?)?;
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=src");
     Ok(())

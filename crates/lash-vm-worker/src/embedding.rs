@@ -5,11 +5,11 @@
 //! none of them (kernel spec §9 rule 2), so the registry is fixed before the
 //! first document arrives: the kernel library, the machine's own functions,
 //! each extension crate's, and each dialect's helpers. The standard
-//! embedding's TypeScript helpers are defined once, when the crate is built
-//! (`build.rs`); a worker registers them as built (FIG-5796).
+//! embedding's TypeScript helpers are defined once, when `lash-vm-releases`
+//! is built; a worker registers them as built (FIG-5796).
 //!
 //! The standard embedding also holds every function of the helper releases
-//! it retains that it does not define itself (FIG-5799, `lash-vm-library`): a
+//! it retains that it does not define itself (FIG-5799, `lash-vm-releases`): a
 //! run parked under an earlier release's helpers, and a saved function
 //! written against them, resume on exactly the functions they pin. Names
 //! resolve against the embedding's own functions alone, or, for a writer the
@@ -27,6 +27,7 @@ use lash_kernel_doc::{
 use lash_kernel_vm::PreparedLibrary;
 use lash_vm_client::WorkerTuning;
 use lash_vm_library::{HELPER_RELEASE, HelperReleaseIndex};
+use lash_vm_releases::{HELPER_RELEASE_INDEX, RETAINED_FUNCTIONS, TYPESCRIPT_HELPERS};
 
 /// Why a worker could not assemble what it runs. The worker refuses to
 /// start: it is a defect of the build, never of a document.
@@ -337,21 +338,6 @@ impl Embedder {
     }
 }
 
-/// The TypeScript helpers as the build defined them against the kernel
-/// library and lash's extensions, validated in a registry holding exactly
-/// those (`build.rs`).
-const TYPESCRIPT_HELPERS: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/typescript_helpers.json"));
-
-/// The functions of the helper releases the build retains that it does not
-/// define itself, validated in a registry holding exactly the kernel
-/// library, lash's extensions and the TypeScript helpers (`build.rs`).
-const RETAINED_FUNCTIONS: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/retained_functions.json"));
-
-/// The helper releases the build retains, oldest first (`build.rs`).
-const HELPER_RELEASES: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/helper_releases.json"));
-
 /// The embedding lash ships: the kernel library, lash's extensions and the
 /// TypeScript dialect, whose helpers it registers as the build defined
 /// them. A worker that starts defines none.
@@ -385,7 +371,8 @@ pub fn standard(tuning: &WorkerTuning) -> Result<Embedding, EmbedError> {
 /// [`EmbedError::Registry`] when the build's index does not decode: a
 /// defect of the build.
 fn helper_release_index() -> Result<Vec<HelperReleaseIndex>, EmbedError> {
-    serde_json::from_slice(HELPER_RELEASES).map_err(|error| EmbedError::Registry(error.to_string()))
+    serde_json::from_slice(HELPER_RELEASE_INDEX)
+        .map_err(|error| EmbedError::Registry(error.to_string()))
 }
 
 /// The TypeScript dialect, its helpers defined against `library`.

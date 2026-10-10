@@ -560,6 +560,12 @@ package = "lash-runtime"
 packages = ["transcript-contract"]
 compile_data = ["//crates/lash-core-execution:rust_sources"]
 
+# FIG-5839: the worker registers the library functions lash ships from the
+# file `lash-vm-releases`' build script defines the helpers against.
+[[rule]]
+packages = ["lash-internal-vm-worker"]
+compile_data = ["//crates/lash-vm-releases:rust_sources"]
+
 # The replay-read gate (FIG-4324) reads the production sources of every crate,
 # example and runbook host, and the store trait declarations, at run time.
 [[rule]]

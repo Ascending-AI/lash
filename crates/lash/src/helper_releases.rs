@@ -3,8 +3,9 @@
 //! §2).
 //!
 //! A helper fix is a new function, and so is every helper that calls it.
-//! Each release freezes the functions it ships (`lash-vm-worker`'s
-//! `src/generated/`), and a build holds every function of the releases it
+//! Each release holds the functions it ships (`lash-vm-releases`: sealed at
+//! the cut that ships it, and defined by the build until then), and a build
+//! holds every function of the releases it
 //! retains beside its own, so a run written against an earlier release
 //! resumes on exactly the functions it pins. Its actors' format sets state
 //! the release they were written against (`kernel-helpers`), so a node of a

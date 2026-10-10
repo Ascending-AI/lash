@@ -3,17 +3,14 @@
 //!
 //! A parent links, admits and migrates documents against exactly the
 //! functions its workers hold, and runs none of them (ADR 0123). It reads
-//! them from the helper releases the build retains (FIG-5799): each release
-//! freezes every function a build of it holds, by identity, and the release
-//! the tree builds is held equal to what the worker's build defines
-//! (`lash-vm-worker`'s `the_tree_builds_the_helper_release_it_froze`). So a
-//! parent holds the shipped library, the TypeScript helpers included,
-//! without linking a dialect or an extension: the worker's own build
-//! defines them, and this crate keeps their definitions as data.
+//! them from the helper releases the build holds (FIG-5799,
+//! `lash-vm-releases`): each release holds every function a build of it
+//! holds, by identity, and the release the tree builds is the one the build
+//! defines until the cut seals it (FIG-5839). A worker reads its helpers
+//! from the same build. So a parent holds the shipped library, the
+//! TypeScript helpers included, without linking a dialect or an extension:
+//! the build defines them, and keeps their definitions as data.
 
-#[path = "generated/helpers_1_0.rs"]
-mod helpers_1_0;
-mod releases;
 #[cfg(feature = "synthetic-next")]
 mod synthetic;
 
@@ -22,7 +19,9 @@ use std::sync::{Arc, OnceLock};
 
 use lash_kernel_doc::{FunctionId, FunctionName, FunctionRegistry};
 
-pub use releases::{FREEZE, HelperRelease, HelperReleaseIndex, ReleasedFunction};
+pub use lash_vm_releases::{
+    HelperRelease, HelperReleaseIndex, RETAINED_HELPER_RELEASES, ReleasedFunction,
+};
 
 /// The helper release the standard embedding writes: the version of the
 /// `kernel-helpers` format surface a state its cells and processes write
@@ -33,20 +32,6 @@ pub const HELPER_RELEASE: u32 = 1;
 /// The synthetic successor's helper release.
 #[cfg(feature = "synthetic-next")]
 pub const HELPER_RELEASE: u32 = 2;
-
-/// The name and ordinal of each helper release the standard embedding
-/// retains, oldest first: the last is the release the tree builds
-/// (FIG-5799).
-pub const RETAINED_HELPER_RELEASES: &[(&str, u32)] = &[("1.0", 1)];
-
-/// Each retained release as `src/generated/` keeps it, in the order of
-/// [`RETAINED_HELPER_RELEASES`].
-const RELEASES: &[&str] = &[helpers_1_0::RELEASE];
-
-/// Artifacts removed from the runnable union, kept for the startup retirement
-/// survey. Moving an artifact here declares retirement; it never expires by time.
-/// The retained declarations above must remove the same release.
-const RETIRING_RELEASES: &[&str] = &[];
 
 /// Why the shipped library could not be assembled: a defect of the build,
 /// never of a document.
@@ -62,44 +47,6 @@ impl LibraryError {
             message: message.to_string(),
         }
     }
-}
-
-/// The helper releases the build retains, oldest first, as the repository
-/// keeps them: the last is the release the tree builds.
-///
-/// # Errors
-///
-/// A release that does not decode, or that is not the one
-/// [`RETAINED_HELPER_RELEASES`] names in its place.
-pub fn helper_releases() -> Result<Vec<HelperRelease>, LibraryError> {
-    decode_releases(RELEASES, RETAINED_HELPER_RELEASES)
-}
-
-fn decode_releases(
-    texts: &[&str],
-    declarations: &[(&str, u32)],
-) -> Result<Vec<HelperRelease>, LibraryError> {
-    if texts.len() != declarations.len() {
-        return Err(LibraryError::new(format!(
-            "{} helper release declarations have {} artifacts",
-            declarations.len(),
-            texts.len()
-        )));
-    }
-    texts
-        .iter()
-        .zip(declarations)
-        .map(|(text, (name, ordinal))| {
-            let release = HelperRelease::decode(text).map_err(LibraryError::new)?;
-            if release.release != *name || release.ordinal != *ordinal {
-                return Err(LibraryError::new(format!(
-                    "helper release {} ({}) is kept where {name} ({ordinal}) is named",
-                    release.release, release.ordinal
-                )));
-            }
-            Ok(release)
-        })
-        .collect()
 }
 
 /// The helpers this build changes over the release it retains, each with
@@ -155,7 +102,8 @@ fn standard_in(
 }
 
 fn assemble() -> Result<Standard, LibraryError> {
-    assemble_releases(helper_releases()?, retiring_releases()?)
+    let held = lash_vm_releases::held_releases().map_err(LibraryError::new)?;
+    assemble_releases(held.retained, held.retiring)
 }
 
 fn assemble_releases(
@@ -307,13 +255,6 @@ pub fn standard_helper_releases() -> Result<Vec<HelperReleaseIndex>, LibraryErro
     Ok(standard()?.releases.clone())
 }
 
-fn retiring_releases() -> Result<Vec<HelperRelease>, LibraryError> {
-    RETIRING_RELEASES
-        .iter()
-        .map(|text| HelperRelease::decode(text).map_err(LibraryError::new))
-        .collect()
-}
-
 /// Releases explicitly removed from the runnable union, whose identity indexes
 /// remain available until every dependent has ended or been adopted.
 ///
@@ -427,13 +368,6 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::mpsc;
     use std::time::Duration;
-
-    /// V18: every advertised release has a corresponding artifact; zip must not discard it.
-    #[test]
-    fn a_declared_helper_release_cannot_lack_its_artifact() {
-        assert!(decode_releases(&[], &[("1.0", 1)]).is_err());
-        assert!(decode_releases(&[helpers_1_0::RELEASE], &[]).is_err());
-    }
 
     /// V09: removal from the runnable union must not erase the retirement survey's identities.
     #[test]

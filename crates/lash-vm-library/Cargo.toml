@@ -8,7 +8,7 @@ repository.workspace = true
 homepage.workspace = true
 readme.workspace = true
 rust-version.workspace = true
-description = "The library functions lash's shipped worker holds, as a parent knows them: the frozen helper releases."
+description = "The library functions lash's shipped worker holds, as a parent knows them: the helper releases the build holds."
 
 [lib]
 name = "lash_vm_library"
@@ -28,6 +28,5 @@ workspace = true
 [dependencies]
 lash-kernel-doc = { workspace = true }
 lash-kernel-migrate = { workspace = true }
-serde = { workspace = true, features = ["derive"] }
-serde_json = { workspace = true }
+lash-vm-releases = { workspace = true }
 thiserror = { workspace = true }

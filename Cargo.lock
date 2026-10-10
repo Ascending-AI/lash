@@ -2700,10 +2700,9 @@ dependencies = [
 name = "lash-internal-vm-library"
 version = "0.0.0-dev"
 dependencies = [
+ "lash-internal-vm-releases",
  "lash-kernel-doc",
  "lash-kernel-migrate",
- "serde",
- "serde_json",
  "thiserror",
 ]
 
@@ -2720,6 +2719,23 @@ dependencies = [
  "serde_bytes",
  "serde_json",
  "thiserror",
+]
+
+[[package]]
+name = "lash-internal-vm-releases"
+version = "0.0.0-dev"
+dependencies = [
+ "blake3",
+ "lash-dialect-typescript",
+ "lash-ext-date-ecma",
+ "lash-ext-regex-ecma",
+ "lash-ext-url-whatwg",
+ "lash-kernel-dialect",
+ "lash-kernel-doc",
+ "lash-kernel-lib",
+ "lash-kernel-vm",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -2753,7 +2769,6 @@ dependencies = [
 name = "lash-internal-vm-worker"
 version = "0.0.0-dev"
 dependencies = [
- "blake3",
  "dhat",
  "lash-dialect-typescript",
  "lash-ext-date-ecma",
@@ -2763,6 +2778,7 @@ dependencies = [
  "lash-internal-vm-client",
  "lash-internal-vm-library",
  "lash-internal-vm-protocol",
+ "lash-internal-vm-releases",
  "lash-internal-vm-worker",
  "lash-kernel-dialect",
  "lash-kernel-doc",

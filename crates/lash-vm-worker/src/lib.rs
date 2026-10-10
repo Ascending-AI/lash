@@ -8,6 +8,9 @@
 mod embedding;
 #[cfg(feature = "dhat-heap")]
 mod heap_profile;
+/// The library functions lash ships, as `lash-vm-releases`' build defines
+/// the helpers against them.
+#[path = "../../lash-vm-releases/src/library.rs"]
 mod library;
 pub use embedding::{EmbedError, Embedder, Embedding, standard, typescript};
 
