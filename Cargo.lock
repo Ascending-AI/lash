@@ -1793,7 +1793,10 @@ dependencies = [
 name = "integrator-contract"
 version = "0.0.0-dev"
 dependencies = [
+ "lash-internal-conformance",
+ "lash-internal-sqlite-store",
  "lash-runtime",
+ "tokio",
 ]
 
 [[package]]

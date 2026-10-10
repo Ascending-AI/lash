@@ -65,6 +65,14 @@ service. The storage differential is
 generated law compares SQLite file and PostgreSQL storage rows, not engine
 journal semantics. These are targeted soak recipes, not extra default gates.
 
+`examples/integrator-contract/tests/conformance.rs` demonstrates an unpublished
+external `StoreSet` implementation importing the complete persistence and
+process-registry catalogues, catalog/read/append/retention laws, and attachment
+reopen suite. Its `//examples/integrator-contract:conformance__test` target uses
+SQLite memory. See the example's [certification instructions](../../examples/integrator-contract/README.md)
+for fresh-fixture, reopen and test-hook requirements. This certifies storage
+ports; it adds no engine or backend tier.
+
 ## Engines and effect hosts
 
 | Host | Code and targets | Gate or recipe |
