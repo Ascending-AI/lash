@@ -175,7 +175,7 @@ pub(crate) async fn apply_registration_tx(
         lash_durable::DurableInstant(i64::try_from(now).unwrap_or(i64::MAX)),
     )
     .await
-    .map_err(|error| PluginError::Session(error.to_string()))?;
+    .map_err(lash_core_execution::runtime::actor::process::registry_error)?;
     let process_id = record.id.clone();
     for session_id in observers {
         sqlx::query(process_sql().observer.insert.sql())

@@ -904,7 +904,8 @@ fn note_woken(woken: &mut Vec<Woken>, entry: Woken) {
 /// Lock, in key order, every actor `writes` appends to or wakes, when
 /// there are several: rows locked in write order would let two commits that
 /// name the same actors in opposite orders deadlock. A domain write keeps
-/// its own order (its row, then the actor it wakes) after these.
+/// its own order after these; a process cancel locks the process's actor
+/// before its registry row, as the actor's owner commit does.
 async fn lock_mail_targets(tx: &mut PgConnection, writes: &MailTx) -> Result<(), DurableError> {
     let mut targets: Vec<&str> = writes
         .writes()
@@ -1421,6 +1422,28 @@ BEGIN
 END $$;
 CREATE TRIGGER contend_first_claim BEFORE UPDATE OF epoch ON lash_actors
     FOR EACH ROW EXECUTE FUNCTION contend_first_claim();";
+
+/// The contended-cancel law's one-shot deadlock, on the cancel's mail
+/// append (FIG-5855).
+#[cfg(test)]
+const DEADLOCK_FIRST_CANCEL_MAIL_SQL: &str = "CREATE SEQUENCE cancel_attempts;
+CREATE FUNCTION deadlock_first_cancel_mail() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF NEW.kind = 'cancel' THEN
+        IF nextval('cancel_attempts') = 1 THEN
+            RAISE EXCEPTION 'injected cancel deadlock' USING ERRCODE = '40P01';
+        END IF;
+    END IF;
+    RETURN NEW;
+END $$;
+CREATE TRIGGER deadlock_first_cancel_mail BEFORE INSERT ON lash_actor_mail
+    FOR EACH ROW EXECUTE FUNCTION deadlock_first_cancel_mail();";
+
+/// The lock-order law's owner commit, at its fence: actor `$1`'s row
+/// (FIG-5855).
+#[cfg(test)]
+const OWNER_FENCE_SQL: &str =
+    "UPDATE lash_actors SET state_revision = state_revision + 1 WHERE actor_key = $1";
 
 #[cfg(test)]
 #[path = "../durable_concurrency_tests.rs"]

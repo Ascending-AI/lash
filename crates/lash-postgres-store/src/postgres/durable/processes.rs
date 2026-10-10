@@ -80,6 +80,24 @@ pub(crate) async fn create_actor_within(
     }
 }
 
+/// Lock `process`'s actor row for the rest of the caller's transaction,
+/// ahead of its registry row: the order the actor's owner commit takes them
+/// in (its fence, then its `advance` or terminal), so a cancel and an owner
+/// commit never wait on each other in a cycle (FIG-5855). An actor that
+/// does not exist takes no lock.
+pub(crate) async fn lock_actor_within(
+    tx: &mut PgConnection,
+    process: &ProcessId,
+) -> Result<(), DurableError> {
+    let actor = process_actor(process)?;
+    sqlx::query(SQL.postgres.lock_actors.sql())
+        .bind(vec![actor.as_str()])
+        .execute(crate::observed_sql::executor(&mut *tx))
+        .await
+        .map_err(sqlx_failure)?;
+    Ok(())
+}
+
 /// Control-wake `process` and, for a newly recorded request, append its
 /// cancel mail: the registry's cancel record commits with both.
 pub(crate) async fn cancel_mail_within(
@@ -110,7 +128,8 @@ pub(crate) async fn cancel_mail_within(
 /// Record `origin`'s cancel of `process` unless one stands, append its
 /// cancel mail and control-wake it: what a cancel request and each child of
 /// a cascade batch write. A terminal process is answered `AlreadyEnded`
-/// and written nothing.
+/// and written nothing. The process's actor row is locked before its
+/// registry row ([`lock_actor_within`]).
 pub(crate) async fn cancel_within(
     tx: &mut GuardedTx<'_>,
     process: &ProcessId,
@@ -119,6 +138,7 @@ pub(crate) async fn cancel_within(
     now: DurableInstant,
     fleet: lash_core_execution::FleetFormat,
 ) -> Result<(CancelAnswer, Option<Woken>), DurableError> {
+    lock_actor_within(tx, process).await?;
     let recorded = record_cancel_tx(tx, process, origin, requester, millis(now)?, fleet)
         .await
         .map_err(|error| registry_failure(&error))?;

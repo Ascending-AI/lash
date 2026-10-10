@@ -58,6 +58,32 @@ pub fn scope_index(scope: &ScopeKey) -> Option<(&'static str, String)> {
     scope_id(scope).map(|scope| (scope.storage_kind(), scope.storage_id()))
 }
 
+/// `error`, met by a registry write on the transaction that also writes the
+/// process's actor rows, as the registry's error. A store fault keeps its
+/// class (FIG-5855): contention or an unreachable store rolled the write
+/// back, and the identical write may succeed when it is made again, so it
+/// is never the write's terminal answer. A refusal, or a row that does not
+/// decode, is.
+#[must_use]
+pub fn registry_error(error: DurableError) -> crate::PluginError {
+    use lash_durable::{StoreFailure, StoreFailureKind};
+    match error {
+        DurableError::Store(StoreFailure {
+            kind: StoreFailureKind::Contended,
+            ..
+        }) => crate::PluginError::StoreUnavailable {
+            fault: crate::store::StoreFault::Contended,
+        },
+        DurableError::Store(StoreFailure {
+            kind: StoreFailureKind::Unavailable,
+            message,
+        }) => crate::PluginError::StoreUnavailable {
+            fault: crate::store::StoreFault::Backend { message },
+        },
+        error => crate::PluginError::Session(error.to_string()),
+    }
+}
+
 /// The roots of `scope`'s `Until` subtree, as the live-subtree read binds
 /// them: the scope's own index columns and, for a session, the index-id
 /// prefixes of the turn and session-operation scopes inside it, whose
@@ -221,11 +247,16 @@ impl ActorContext {
             .process_registry()
             .get_process(process)
             .await
-            .map_err(|error| {
-                crate::RuntimeEffectControllerError::new(
+            .map_err(|error| match error {
+                // A fault of the store is its class, not the registry's
+                // absence: the identical read may answer when made again.
+                error @ crate::PluginError::StoreUnavailable { .. } => {
+                    crate::RuntimeEffectControllerError::from(error)
+                }
+                error => crate::RuntimeEffectControllerError::new(
                     crate::RuntimeErrorCode::ProcessRegistryUnavailable,
                     error.to_string(),
-                )
+                ),
             })?;
         Ok(record.is_some_and(|record| record.cancel_request.is_some()))
     }

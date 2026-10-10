@@ -107,3 +107,140 @@ async fn a_deadlock_inside_a_process_terminal_is_retried() {
         "the injected failure and one real terminal commit"
     );
 }
+
+/// FIG-5855: a deterministic 40P01 inside a cancel's commit, where the
+/// cancel appends its mail, is retried as the identical commit, not refused
+/// as a terminal plugin error: the process still ends, cancelled once.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_deadlock_inside_a_cancel_is_retried() {
+    let database_url =
+        crate::postgres_test_support::database_url().expect("hermetic PostgreSQL URL");
+    let database = IsolatedDatabase::create(&database_url).await;
+    let storage = crate::testing::connect(database.url())
+        .await
+        .expect("isolated store");
+    sqlx::raw_sql(super::DEADLOCK_FIRST_CANCEL_MAIL_SQL)
+        .execute(storage.pool())
+        .await
+        .expect("install one-shot deadlock");
+    let backend = Backend::assemble(BackendParts {
+        formats: Vec::new(),
+        stores: Arc::new(PostgresStoreSet::new(
+            &storage,
+            Arc::new(lash_core_execution::attachments::UnavailableAttachmentStore),
+        )),
+        settings: process_laws::settings(),
+        engines: Vec::new(),
+        providers: Arc::new(NoProjectionProviders),
+    })
+    .expect("assemble law backend");
+    process_laws::a_contended_cancel_commit_still_ends_the_process_once(&backend)
+        .await
+        .unwrap_or_else(|broken| panic!("{broken}"));
+    let attempts: i64 = sqlx::query_scalar("SELECT last_value FROM cancel_attempts")
+        .fetch_one(storage.pool())
+        .await
+        .expect("count cancel attempts");
+    assert_eq!(
+        attempts, 2,
+        "the injected failure and one real cancel commit"
+    );
+}
+
+/// FIG-5855: a registry cancel takes its process's actor row before the
+/// process row, the order the actor's owner commit takes them in (its
+/// fence, then its `advance`). While an owner commit holds the actor row,
+/// the waiting cancel holds no lock on the process row, so the owner's next
+/// write never waits on the cancel and the two never deadlock.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_cancel_behind_an_owner_commit_holds_no_lock_on_its_process() {
+    use lash_core_execution::{ProcessLifecycle as _, ProcessRegistrar as _};
+
+    let database_url =
+        crate::postgres_test_support::database_url().expect("hermetic PostgreSQL URL");
+    let database = IsolatedDatabase::create(&database_url).await;
+    let storage = crate::testing::connect(database.url())
+        .await
+        .expect("isolated store");
+    lash_core_execution::testing::process_execution_env_fixture(&storage.process_env_store()).await;
+    let process = storage
+        .process_registry()
+        .register_process(lash_core_execution::testing::held_engine_registration(
+            serde_json::Value::Null,
+            lash_core_execution::ProcessProvenance::host(),
+            lash_core_execution::Lifetime::Detached,
+        ))
+        .await
+        .expect("register the process")
+        .id;
+    let actor = lash_durable::ActorKey::process(process.as_str()).expect("a process actor key");
+
+    // The owner's commit takes the actor row first, as its fence does.
+    let mut owner = storage
+        .pool()
+        .begin()
+        .await
+        .expect("begin the owner commit");
+    sqlx::query(super::OWNER_FENCE_SQL)
+        .bind(actor.as_str())
+        .execute(&mut *owner)
+        .await
+        .expect("the owner's fence");
+    let cancel = tokio::spawn({
+        let registry = storage.process_registry();
+        let process = process.clone();
+        async move {
+            registry
+                .request_process_cancel(
+                    &process,
+                    lash_core_execution::CancelOrigin::OperatorRequested,
+                    "lock-order-law".to_owned(),
+                    None,
+                )
+                .await
+        }
+    });
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    loop {
+        let waiting: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM pg_stat_activity
+             WHERE datname = current_database() AND wait_event_type = 'Lock'",
+        )
+        .fetch_one(storage.pool())
+        .await
+        .expect("count lock waiters");
+        if waiting > 0 {
+            break;
+        }
+        assert!(
+            !cancel.is_finished(),
+            "the cancel finished while the owner held its actor"
+        );
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the cancel never waited on the owner"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+    }
+
+    // The owner's next write takes the process row: the cancel waiting
+    // behind the owner must not hold it.
+    let locked =
+        sqlx::query("SELECT 1 FROM lash_processes WHERE process_id = $1 FOR UPDATE NOWAIT")
+            .bind(process.as_str())
+            .execute(&mut *owner)
+            .await;
+    assert!(
+        locked.is_ok(),
+        "the waiting cancel held the process row ahead of its actor: {locked:?}"
+    );
+    owner.rollback().await.expect("end the owner commit");
+    let record = cancel
+        .await
+        .expect("the cancel task")
+        .expect("the cancel commits once the owner ends");
+    assert!(
+        record.cancel_request.is_some(),
+        "the cancel recorded its request"
+    );
+}

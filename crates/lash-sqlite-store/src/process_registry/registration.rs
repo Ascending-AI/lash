@@ -205,7 +205,7 @@ impl SqliteProcessRegistry {
             lash_durable::DurableInstant(i64::try_from(now).unwrap_or(i64::MAX)),
         )
         .map_err(process_sqlite_error)?
-        .map_err(|error| lash_core_execution::PluginError::Session(error.to_string()))?;
+        .map_err(lash_core_execution::runtime::actor::process::registry_error)?;
         let mut record = record;
         let process_id = record.id.clone();
         for session_id in &observers {

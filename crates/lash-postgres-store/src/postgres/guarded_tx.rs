@@ -798,6 +798,46 @@ where
         .map_err(Attempt::into_error)
 }
 
+/// `attempt`, one registry write from its guarded `BEGIN` through its
+/// `COMMIT`, run again while the database rolls it back for contention,
+/// under the storage's store retry policy and within the ordinary profile's
+/// operation deadline, as [`guarded`] runs its body (FIG-5855). The caller
+/// fixes the write's inputs before the first attempt, so every attempt is
+/// the identical write, and an attempt rolls a failed transaction back
+/// before it answers. A `COMMIT` whose answer was lost is not contention:
+/// it is never run again. After the policy's attempts the contention is the
+/// caller's.
+pub(crate) async fn retry_contended<T, F, Fut>(
+    fence: &WriterFence,
+    attempt: F,
+) -> Result<T, lash_core_execution::PluginError>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<T, lash_core_execution::PluginError>>,
+{
+    let deadline = fence
+        .state
+        .prelude
+        .deadline()
+        .map(|deadline| tokio::time::Instant::now() + deadline);
+    fence
+        .state
+        .retry
+        .run(
+            deadline,
+            |error: &lash_core_execution::PluginError| {
+                matches!(
+                    error,
+                    lash_core_execution::PluginError::StoreUnavailable {
+                        fault: lash_core_execution::store::StoreFault::Contended,
+                    }
+                )
+            },
+            attempt,
+        )
+        .await
+}
+
 /// A store refusal as an attempt's failure: contention rolled the attempt
 /// back, and anything else is the operation's answer.
 fn attempt(error: StoreError) -> Attempt<StoreError> {

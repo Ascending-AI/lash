@@ -116,47 +116,28 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
         requester: String,
         attribution: Option<lash_core_execution::RuntimeReplayAttribution>,
     ) -> Result<(ProcessRecord, lash_core_execution::StoreRealization), PluginError> {
-        let mut tx = begin_guarded(&self.pool, &self.fence)
-            .await
-            .map_err(plugin_store_error)?;
-        let mut record = require_process_tx(&mut tx, process_id).await?;
+        // The request is fixed before the first attempt, so an attempt the
+        // database rolled back for contention runs again as the identical
+        // write (FIG-5855).
         let now = self.clock.timestamp_ms();
         let request = lash_core_execution::CancelRequest::new(origin, requester, now);
-        match lash_core_execution::runtime::prepare_process_transition(
-            &record,
-            ProcessTransition::RequestCancel(request),
-        )? {
-            ProcessTransitionPlan::Unchanged => {
-                tx.commit().await.map_err(plugin_sqlx_error)?;
-                return Ok((record, lash_core_execution::StoreRealization::Coalesced));
-            }
-            ProcessTransitionPlan::Append(mut append) => {
-                if let Some(replay) = append.replay.as_mut() {
-                    replay.attribution = attribution;
+        let (request, attribution) = (&request, &attribution);
+        crate::guarded_tx::retry_contended(&self.fence, || async move {
+            let mut tx = begin_guarded(&self.pool, &self.fence)
+                .await
+                .map_err(plugin_store_error)?;
+            match request_cancel_tx(&mut tx, process_id, request, attribution.clone(), now).await {
+                Ok(answer) => {
+                    tx.commit().await.map_err(plugin_sqlx_error)?;
+                    Ok(answer)
                 }
-                append_process_event_tx(&mut tx, &mut record, *append, now, self.fence.fleet())
-                    .await?;
+                Err(error) => {
+                    let _ = tx.rollback().await;
+                    Err(error)
+                }
             }
-        }
-        // The recorded cancel reaches the process's actor in the same
-        // transaction: its cancel mail and a control wake, which readies even
-        // a parked actor (ADR 0132 §11).
-        if !record.is_terminal()
-            && let Some(request) = record.cancel_request.as_deref()
-        {
-            crate::durable::processes::cancel_mail_within(
-                &mut tx,
-                process_id,
-                request.origin,
-                &request.requester,
-                true,
-                lash_durable::DurableInstant(i64::try_from(now).unwrap_or(i64::MAX)),
-            )
-            .await
-            .map_err(|error| PluginError::Session(error.to_string()))?;
-        }
-        tx.commit().await.map_err(plugin_sqlx_error)?;
-        Ok((record, lash_core_execution::StoreRealization::Realized))
+        })
+        .await
     }
 
     async fn set_process_wait_with_authority(
@@ -225,4 +206,55 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
         tx.commit().await.map_err(plugin_sqlx_error)?;
         Ok(record)
     }
+}
+
+/// Record `request` on `process_id` within `tx`, with its cancel mail and a
+/// control wake of the process's actor. The actor row is locked before the
+/// registry row, the order the actor's owner commit takes them in (its
+/// fence, then its `advance` or terminal), so a cancel and an owner commit
+/// never wait on each other in a cycle (FIG-5855).
+async fn request_cancel_tx(
+    tx: &mut crate::guarded_tx::GuardedTx<'_>,
+    process_id: &ProcessId,
+    request: &lash_core_execution::CancelRequest,
+    attribution: Option<lash_core_execution::RuntimeReplayAttribution>,
+    now: u64,
+) -> Result<(ProcessRecord, lash_core_execution::StoreRealization), PluginError> {
+    let fleet = tx.fleet();
+    crate::durable::processes::lock_actor_within(tx, process_id)
+        .await
+        .map_err(lash_core_execution::runtime::actor::process::registry_error)?;
+    let mut record = require_process_tx(tx, process_id).await?;
+    match lash_core_execution::runtime::prepare_process_transition(
+        &record,
+        ProcessTransition::RequestCancel(request.clone()),
+    )? {
+        ProcessTransitionPlan::Unchanged => {
+            return Ok((record, lash_core_execution::StoreRealization::Coalesced));
+        }
+        ProcessTransitionPlan::Append(mut append) => {
+            if let Some(replay) = append.replay.as_mut() {
+                replay.attribution = attribution;
+            }
+            append_process_event_tx(tx, &mut record, *append, now, fleet).await?;
+        }
+    }
+    // The recorded cancel reaches the process's actor in the same
+    // transaction: its cancel mail and a control wake, which readies even
+    // a parked actor (ADR 0132 §11).
+    if !record.is_terminal()
+        && let Some(request) = record.cancel_request.as_deref()
+    {
+        crate::durable::processes::cancel_mail_within(
+            tx,
+            process_id,
+            request.origin,
+            &request.requester,
+            true,
+            lash_durable::DurableInstant(i64::try_from(now).unwrap_or(i64::MAX)),
+        )
+        .await
+        .map_err(lash_core_execution::runtime::actor::process::registry_error)?;
+    }
+    Ok((record, lash_core_execution::StoreRealization::Realized))
 }

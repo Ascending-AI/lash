@@ -48,6 +48,7 @@ macro_rules! ensure {
 }
 
 mod blockers;
+mod contended_cancel;
 mod engine_keys;
 mod parked_calls;
 
@@ -57,6 +58,8 @@ pub use blockers::{
     a_process_with_two_parked_calls_lists_both_without_their_keys,
     a_sleeping_process_reads_waiting_on_its_sleep_and_its_site,
 };
+
+pub use contended_cancel::a_contended_cancel_commit_still_ends_the_process_once;
 
 pub use engine_keys::{
     a_pinned_engine_key_is_listed_from_its_wait_after_a_restart_and_a_handover,
