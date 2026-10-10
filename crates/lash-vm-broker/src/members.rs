@@ -297,8 +297,9 @@ impl Members {
         }
     }
 
-    /// Settle every open member: each is cancelled, and runs to its own
-    /// outcome (a running body within its stop grace). What an execution
+    /// Settle every open member: each is cancelled for the closing
+    /// ([`MemberBodies::closing`]), and runs to its own outcome (a running
+    /// body within its stop grace). What an execution
     /// does before it records its end, so no member outlives the snapshot
     /// that records it.
     ///
@@ -306,6 +307,11 @@ impl Members {
     ///
     /// As [`drive_by`](Self::drive_by).
     pub(crate) async fn close(&mut self) -> Result<(), RoundError> {
+        // The bodies learn of the closing first: a stop their members meet
+        // is the closing's own.
+        if let Some(bodies) = &self.bodies {
+            bodies.closing();
+        }
         self.lifecycle()?.cancel_runs_before(RunSeq(u64::MAX));
         loop {
             let folded = self.fold().await?;

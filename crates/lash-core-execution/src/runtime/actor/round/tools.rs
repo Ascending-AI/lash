@@ -9,6 +9,8 @@
 //! rows ([`fold`](super::fold)) and re-runs nothing it recorded.
 
 use std::collections::BTreeMap;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use lash_core_store::effect_opener::EffectOpener;
@@ -134,8 +136,15 @@ pub trait RoundTools: Send + Sync {
     /// The body of `execution`, an attempt of `call`: the call's admission
     /// checks, its attempt and its decision, run in memory. Its answer is
     /// the attempt's outcome, the journal-local material it names and the
-    /// store-local effect that commits with a completion.
-    fn body(&self, call: &PendingToolCall, execution: &AdmittedExecution) -> MemberBody;
+    /// store-local effect that commits with a completion. `stop` reads the
+    /// round's owner's accepted stop, which an attempt consults before its
+    /// answer escapes: an answer decided after it is the stop's.
+    fn body(
+        &self,
+        call: &PendingToolCall,
+        execution: &AdmittedExecution,
+        stop: Option<&AcceptedStop>,
+    ) -> MemberBody;
 
     /// The final answer of `execution`, an attempt of `call` that parked as
     /// `parked`, once one of its waits ended with `resolution`: a pure
@@ -296,7 +305,16 @@ pub fn call_draft(
 pub struct RoundCalls {
     tools: Arc<dyn RoundTools>,
     calls: BTreeMap<ToolCallId, PendingToolCall>,
+    stop: Option<AcceptedStop>,
 }
+
+/// A read of a round owner's accepted stop, as of now: whether the turn
+/// accepted an `Immediate` cancel, or its session's close was requested. A
+/// member's attempt reads it before its answer escapes; the read is the
+/// observation's, and the transaction that commits the answer reads the stop
+/// again ([`RoundRunner::fenced_by`](super::RoundRunner::fenced_by)). A read
+/// that fails answers `false`, leaving that commit to decide.
+pub type AcceptedStop = Arc<dyn Fn() -> Pin<Box<dyn Future<Output = bool> + Send>> + Send + Sync>;
 
 impl RoundCalls {
     /// The bodies of `calls` from `tools`.
@@ -308,7 +326,15 @@ impl RoundCalls {
                 .iter()
                 .map(|call| (call.call_id.clone(), call.clone()))
                 .collect(),
+            stop: None,
         }
+    }
+
+    /// These bodies, each attempt reading `stop` before its answer escapes.
+    #[must_use]
+    pub fn stopped_by(mut self, stop: AcceptedStop) -> Self {
+        self.stop = Some(stop);
+        self
     }
 }
 
@@ -376,7 +402,7 @@ impl MemberBodies for RoundCalls {
 
     fn body(&self, execution: &AdmittedExecution) -> MemberBody {
         match self.calls.get(execution.call()) {
-            Some(call) => self.tools.body(call, execution),
+            Some(call) => self.tools.body(call, execution, self.stop.as_ref()),
             // The round admitted only these calls; a body for any other is
             // never asked for. Answer as a stop rather than run anything.
             None => Box::new(|_| {

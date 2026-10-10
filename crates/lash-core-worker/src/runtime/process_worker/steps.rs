@@ -96,7 +96,7 @@ impl DurableProcessWorker {
             args: input,
             replay: None,
         };
-        let result = step.tools.body(&call, &execution)(token).await;
+        let result = step.tools.body(&call, &execution, None)(token).await;
         tool_step_output(&process.id, &call, result)
     }
 

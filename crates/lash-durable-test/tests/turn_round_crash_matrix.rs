@@ -77,8 +77,8 @@ use lash_core::{
 };
 use lash_core::{LlmOutputPart, LlmRequest, LlmResponse};
 use lash_core_execution::runtime::actor::round::{
-    self, AdmittedExecution, CompletedCall, Material, MemberBody, MemberOutcome, MemberPin,
-    PolicyView, RoundTools, RunFold, SettledOutput,
+    self, AcceptedStop, AdmittedExecution, CompletedCall, Material, MemberBody, MemberOutcome,
+    MemberPin, PolicyView, RoundTools, RunFold, SettledOutput,
 };
 use lash_core_execution::runtime::actor::waits::{self, ParkDeadline};
 use lash_core_execution::{ActorContext, Backend, StoreSet};
@@ -798,7 +798,12 @@ impl RoundTools for Catalog {
         )
     }
 
-    fn body(&self, call: &PendingToolCall, execution: &AdmittedExecution) -> MemberBody {
+    fn body(
+        &self,
+        call: &PendingToolCall,
+        execution: &AdmittedExecution,
+        _stop: Option<&AcceptedStop>,
+    ) -> MemberBody {
         let world = Arc::clone(&self.services.world);
         let services = self.services.clone();
         let clock = self.services.clock.lock_recover().clone().expect("a clock");

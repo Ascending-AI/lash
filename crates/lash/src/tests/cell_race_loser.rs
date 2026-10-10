@@ -280,7 +280,6 @@ async fn l06_closing_lets_a_cooperative_loser_finish_its_own_work() -> Result<()
 /// L06: the cooperative loser's record is its own cancellation, attributed
 /// to the run's closing rather than to a turn that never stopped.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "FIG-5379: a closing race loser's record drops its own cancellation and its RunClosing origin"]
 async fn l06_closing_lets_a_cooperative_loser_record_its_own_cancellation() -> Result<()> {
     let (_, completion) = closing_race(Loser::Cooperative).await?;
     let cancelled = cancellation(&completion);
@@ -296,7 +295,6 @@ async fn l06_closing_lets_a_cooperative_loser_record_its_own_cancellation() -> R
 /// L06: a loser that never answers its stop is dropped after the bounded
 /// grace, and its runtime cancellation names closing as its cause.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "FIG-5379: a closing race loser's record drops its own cancellation and its RunClosing origin"]
 async fn l06_closing_records_its_own_cause_for_a_loser_it_drops() -> Result<()> {
     let (settled, completion) = closing_race(Loser::Silent).await?;
     assert!(!settled);
@@ -443,7 +441,6 @@ async fn l17_closing_cuts_a_loser_in_retry_backoff_promptly() -> Result<()> {
 /// L17: closing decides the loser in its backoff cancelled, under its own
 /// cause.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "FIG-5379: a closing race loser's record drops its own cancellation and its RunClosing origin"]
 async fn l17_closing_decides_a_loser_in_retry_backoff_cancelled() -> Result<()> {
     let (_, _, loser) = closing_in_backoff().await?;
     let loser = loser.expect("the loser's completion is recorded");

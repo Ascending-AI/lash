@@ -27,6 +27,14 @@
 //!   never entered again;
 //! - once its run is cancelled, every unfinished member records
 //!   `Cancelled`;
+//! - an owner's fence ([`Lifecycle::fenced_by`]) is read in the
+//!   transaction that commits finished answers: once it holds, every run is
+//!   cancelled, and an answer that is not the member's own cancellation
+//!   commits `Cancelled`, with nothing it staged, so a member that answers
+//!   after its owner's stop was accepted publishes nothing (FIG-5381);
+//! - an outcome a member's body did not answer (a settlement without a
+//!   body, a body dropped at its limit or its stop) is handed to its
+//!   owner's bodies once it commits ([`MemberBodies::unanswered`]);
 //! - a member's plugin-state resolutions commit in its `x_outcome` and
 //!   publish into the resident namespaces from that committed record only:
 //!   once its commit is acknowledged, or, for a record an earlier activation
@@ -196,6 +204,16 @@ pub trait MemberBodies: Send + Sync {
     /// [`run_changes`](Self::run_changes) named.
     fn run_changes_committed(&self, _written: &[lash_durable::domain::TurnNamespaceWrite]) {}
 
+    /// The owner's run is closing: every open member is cancelled for it
+    /// next, and a stop its bodies meet is the closing's own cause.
+    fn closing(&self) {}
+
+    /// `execution` committed `output`, which no body of it answered: a
+    /// settlement without a body, or a body dropped at its limit or its
+    /// stop. Called once its commit is acknowledged; a body that answered
+    /// observed its own outcome.
+    fn unanswered(&self, _execution: &AdmittedExecution, _output: &SettledOutput) {}
+
     /// Release what `execution`'s park launched, once its park ended:
     /// `cancelled` when the call ends cancelled. Runs before the call's
     /// final outcome is recorded, so a crash in between repeats it; it is
@@ -277,6 +295,9 @@ pub struct Lifecycle {
     settlement_label: CommitLabel,
     /// Members of runs before this one are cancelled.
     cancelled_before: RunSeq,
+    /// The owner's stop, read in the transaction that commits finished
+    /// answers.
+    fence: Option<Fence>,
     /// Each run's member cancel, handed to its running bodies.
     tokens: BTreeMap<RunSeq, CancellationToken>,
     fresh: BTreeSet<AdmittedId>,
@@ -312,6 +333,7 @@ impl Lifecycle {
             outcome_label,
             settlement_label: outcome_label,
             cancelled_before: RunSeq(0),
+            fence: None,
             tokens: BTreeMap::new(),
             fresh: BTreeSet::new(),
             running: JoinSet::new(),
@@ -328,6 +350,18 @@ impl Lifecycle {
     #[must_use]
     pub fn with_settlement_label(mut self, label: CommitLabel) -> Self {
         self.settlement_label = label;
+        self
+    }
+
+    /// This lifecycle reading `fence` in every transaction that commits
+    /// finished answers: once it holds on that transaction's open read,
+    /// every run is cancelled, and an answer that is not the member's own
+    /// cancellation commits `Cancelled`, with nothing it staged. The owner's
+    /// accepted stop, not its live watch, decides what a late answer may
+    /// publish.
+    #[must_use]
+    pub fn fenced_by(mut self, fence: Fence) -> Self {
+        self.fence = Some(fence);
         self
     }
 
@@ -541,16 +575,27 @@ impl Lifecycle {
                     .is_some_and(|opened| self.cx.clock().now() >= opened + group.window));
         if batch_due {
             let mut tx = self.cx.begin().await?;
+            if self.fence.as_ref().is_some_and(|fence| fence(&tx)) {
+                self.cancel_runs_before(RunSeq(u64::MAX));
+                for result in self.finished.values_mut() {
+                    discard_answer(result);
+                }
+            }
             let mut retried = false;
             let mut outcomes = BTreeSet::new();
+            let mut unanswered = Vec::new();
             for (id, result) in &self.finished {
                 let Some(execution) = folded.admitted(id) else {
                     continue;
                 };
+                let dropped = result.is_err();
                 match self.record_finished(&mut tx, &execution, result.clone(), now)? {
                     Recorded::Retry => retried = true,
-                    Recorded::Outcome => {
+                    Recorded::Outcome(output) => {
                         outcomes.insert(id.clone());
+                        if dropped {
+                            unanswered.push((execution, *output));
+                        }
                     }
                 }
             }
@@ -569,15 +614,24 @@ impl Lifecycle {
                     }
                 }
                 self.batch_opened = None;
+                for (execution, output) in &unanswered {
+                    self.bodies.unanswered(execution, output);
+                }
             }
             return Ok(Some(act));
         }
         if !settlements.is_empty() {
             let mut tx = self.cx.begin().await?;
-            for (execution, outcome) in settlements {
-                settle(&mut tx, &execution, outcome, Vec::new())?;
+            for (execution, outcome) in &settlements {
+                settle(&mut tx, execution, outcome.clone(), Vec::new())?;
             }
-            return Ok(Some(self.commit(tx, self.settlement_label).await?));
+            let act = self.commit(tx, self.settlement_label).await?;
+            if matches!(act, Act::Committed(_)) {
+                for (execution, outcome) in &settlements {
+                    self.bodies.unanswered(execution, outcome);
+                }
+            }
+            return Ok(Some(act));
         }
         if !due_starts.is_empty() {
             let mut tx = self.cx.begin().await?;
@@ -871,8 +925,8 @@ impl Lifecycle {
             settle_retry(tx, execution, output, due)?;
             return Ok(Recorded::Retry);
         }
-        settle(tx, execution, output, store_local)?;
-        Ok(Recorded::Outcome)
+        settle(tx, execution, output.clone(), store_local)?;
+        Ok(Recorded::Outcome(Box::new(output)))
     }
 
     /// When `outcome` of `execution` is retried: a known failure or a slice
@@ -911,13 +965,37 @@ impl Lifecycle {
 
 enum Recorded {
     Retry,
-    Outcome,
+    /// The call's final outcome, as it was recorded.
+    Outcome(Box<SettledOutput>),
 }
+
+/// An owner's stop, as the open read of one of its transactions says: see
+/// [`Lifecycle::fenced_by`].
+pub type Fence = Arc<dyn Fn(&lash_durable::ActorTx) -> bool + Send + Sync>;
 
 fn cancelled_outcome() -> SettledOutput {
     SettledOutput::Cancelled {
         evidence: AvailableEvidence::default(),
     }
+}
+
+/// `result`, a finished attempt's, as its owner's accepted stop leaves it:
+/// the member's own cancellation stands, and any other answer is
+/// `Cancelled`, with the plugin state it staged discarded and none of its
+/// store-local effects written.
+fn discard_answer(result: &mut Result<MemberOutcome, Stop>) {
+    let Ok(outcome) = result else {
+        return;
+    };
+    if matches!(outcome.output, SettledOutput::Cancelled { .. }) {
+        return;
+    }
+    for effect in std::mem::take(&mut outcome.store_local) {
+        if let StoreLocalEffect::PluginState(staged) = effect {
+            staged.discard();
+        }
+    }
+    *outcome = cancelled_outcome().into();
 }
 
 /// Whether `id` is still `view`'s open attempt of its member, for a

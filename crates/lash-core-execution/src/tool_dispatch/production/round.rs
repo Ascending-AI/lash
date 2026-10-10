@@ -5,9 +5,9 @@
 //! `x_outcome` (ADR 0132 §5).
 use super::*;
 use crate::runtime::actor::round::{
-    AdmittedExecution, CompletedCall, Discharge, Material, MemberBody, MemberOutcome, MemberPin,
-    PolicyView, Presented, RoundTools, SettledOutput, StoreLocalEffect, completed_material,
-    decode_completed,
+    AcceptedStop, AdmittedExecution, CompletedCall, Discharge, Material, MemberBody, MemberOutcome,
+    MemberPin, PolicyView, Presented, RoundTools, SettledOutput, StoreLocalEffect,
+    completed_material, decode_completed,
 };
 use crate::runtime::actor::waits::{self, Resolution};
 use crate::session::tool_execution::ToolInvocation;
@@ -334,12 +334,27 @@ fn retry_failure(
     answered(call, output)
 }
 
+/// What each attempt of a member carries from its owner, beyond its call.
+#[derive(Clone, Default)]
+pub(super) struct MemberAttempts {
+    /// The trace scope each attempt traces the call under, when its fold
+    /// does not: a cell's call, whose cell's admission retained it. A round
+    /// member is traced by its round's fold.
+    pub(super) traced_scope: Option<lash_trace::DurableTraceScope>,
+    /// The closing of a cell's Run: a stop an attempt meets once it closes
+    /// is the closing's own.
+    pub(super) closing: Option<super::RunClosing>,
+    /// The round owner's accepted stop: an answer an attempt decides after
+    /// it is the stop's.
+    pub(super) stop: Option<AcceptedStop>,
+}
+
 /// The body of `execution`, an attempt of the member `call` invoked as
 /// `invocation`, over `context`'s catalog and owned by `owner`'s run: the
 /// call's admission checks, its attempt and its decision, run in memory
 /// between its `x_start` and its `x_outcome`. `policies` are the current
-/// declarations a repeat is vetoed against. `traced_scope` is the scope
-/// each attempt traces the call under, when its fold does not.
+/// declarations a repeat is vetoed against. `attempts` is what each
+/// attempt carries from the member's owner.
 pub(super) fn member_body(
     context: &RuntimeExecutionContext<'static>,
     owner: &crate::EffectOpener,
@@ -347,8 +362,13 @@ pub(super) fn member_body(
     invocation: ToolInvocation,
     execution: &AdmittedExecution,
     policies: &PolicyView,
-    traced_scope: Option<lash_trace::DurableTraceScope>,
+    attempts: MemberAttempts,
 ) -> MemberBody {
+    let MemberAttempts {
+        traced_scope,
+        closing,
+        stop,
+    } = attempts;
     let context = context.clone();
     let owner = owner.clone();
     let tool = execution.draft().tool().clone();
@@ -375,7 +395,8 @@ pub(super) fn member_body(
                     None,
                 )
                 .with_completion_key(key.clone())
-                .with_admitted_declaration(execution.draft().declaration().cloned());
+                .with_admitted_declaration(execution.draft().declaration().cloned())
+                .with_stops(closing.clone(), stop.clone());
                 handlers.traced_scope = traced_scope.clone();
                 let handlers = Arc::new(handlers);
                 match handlers
@@ -830,6 +851,7 @@ impl RoundTools for ProductionRoundTools {
         &self,
         call: &crate::sansio::PendingToolCall,
         execution: &AdmittedExecution,
+        stop: Option<&AcceptedStop>,
     ) -> MemberBody {
         let invocation =
             ToolInvocation::from_pending(call.clone(), execution.draft().tool().clone());
@@ -840,7 +862,10 @@ impl RoundTools for ProductionRoundTools {
             invocation,
             execution,
             &self.policies(),
-            None,
+            MemberAttempts {
+                stop: stop.cloned(),
+                ..MemberAttempts::default()
+            },
         )
     }
 

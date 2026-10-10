@@ -744,8 +744,16 @@ impl SessionActivation {
         drop(tx);
         // An accepted cancel request ends the turn before anything else
         // runs: the live owner stopped its work for it, or a crash left it.
-        // Its stop commits from the turn's last checkpoint.
-        if let Some(request) = row.cancel.clone() {
+        // Its stop commits from the turn's last checkpoint. An `AfterStep`
+        // request lets the round or cell the turn stands in finish, parked
+        // on a wait or cut by a crash: the turn resumes it, and the gate
+        // before its next model call honours the request (ADR 0039,
+        // FIG-5377). A turn not yet started, or between steps with its
+        // model call in flight, stops here.
+        if let Some(request) = row.cancel.clone()
+            && (request.mode == crate::TurnCancelMode::Immediate
+                || !matches!(row.phase, UnfinishedPhase::Tools { .. }))
+        {
             let stopped = turn_cancel::restore(cx, self.services.as_ref(), &row, heads).await?;
             turn_cancel::finalize(cx, self.services.as_ref(), &row, &request, stopped, heads)
                 .await?;
@@ -799,6 +807,17 @@ impl SessionActivation {
             Err(TurnError::Runtime(refusal)) if refusal.is_terminal() => {
                 phases::refuse(cx, self.services.tracing(), &row, refusal).await?;
                 return Ok(Pass::Again);
+            }
+            // The step an after-step request lets finish cannot run on a
+            // build that does not decode its state: the request ends the
+            // turn without it, as a cancel's restore does, so the refusal
+            // never holds the session's one way out (FIG-5601).
+            Err(error) if row.cancel.is_some() && undecodable_state(&error).is_some() => {
+                if let Some(request) = &row.cancel {
+                    turn_cancel::finalize(cx, self.services.as_ref(), &row, request, None, heads)
+                        .await?;
+                }
+                return self.await_stop(cx, session, &row.run).await;
             }
             Err(error) => return Err(error),
         };

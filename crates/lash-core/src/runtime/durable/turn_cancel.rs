@@ -7,7 +7,8 @@
 //!
 //! - before a model call starts, where it honours any accepted request: the
 //!   boundary that closes a step, so an `AfterStep` request lets the step's
-//!   response and the round or cell it asked for finish first;
+//!   response and the round or cell it asked for finish first, and its
+//!   evidence names the protocol iteration that boundary closed;
 //! - before a round is admitted or a cell starts, and before the turn's
 //!   `turn.commit`, where it honours an `Immediate` request only;
 //! - while a model call streams, a round runs or a cell runs, whenever mail
@@ -26,7 +27,10 @@
 //! from the drive it holds, as `turn.commit` commits from it. Only a stop
 //! honoured before `turn.commit`, whose machine has finished, leaves it to
 //! the next activation pass, which finds the request on the row,
-//! [`restore`]s the turn from its last checkpoint and finalizes it. Either
+//! [`restore`]s the turn from its last checkpoint and finalizes it. A pass
+//! that finds an `AfterStep` request on a turn in its round or cell (parked
+//! on a wait, or cut by a crash) resumes it instead: the step finishes, and
+//! the gate before the next model call honours the request (FIG-5377). Either
 //! way the turn ends in one `turn.cancel` commit (ADR 0039): its `Cancelled`
 //! terminal and its stop as the session head's next revision, which keeps
 //! its input, the steps it completed and the steering input it delivered
@@ -118,6 +122,10 @@ pub(super) struct StoppedTurn {
     /// The tool calls of a cell the turn has yet to record: one that
     /// answered, or the one it stopped on (FIG-5330).
     pub(super) cell: Option<AnsweredCell>,
+    /// Whether the turn stopped between steps, before its next model call:
+    /// the boundary an `AfterStep` request is honoured at, which its
+    /// evidence names ([`honoured_evidence`]).
+    pub(super) between_steps: bool,
 }
 
 /// `row`'s turn restored from its last checkpoint for the cancel it
@@ -164,6 +172,9 @@ pub(super) async fn restore(
         drive,
         present: None,
         cell,
+        // A turn restored in its model phase stands before that call: the
+        // step before it closed.
+        between_steps: row.phase.model().is_some(),
     }))
 }
 
@@ -224,11 +235,12 @@ pub(super) async fn finalize(
     services: &dyn TurnServices,
     row: &TurnRow,
     request: &TurnCancelRequest,
-    stopped: Option<StoppedTurn>,
+    mut stopped: Option<StoppedTurn>,
     heads: &mut HeadCache,
 ) -> Result<(), TurnError> {
+    let evidence = honoured_evidence(request, stopped.as_mut());
     let with_head = stopped.is_some();
-    match end(cx, services, row, request, stopped, heads).await {
+    match end(cx, services, row, &evidence, stopped, heads).await {
         Err(TurnError::Runtime(refusal)) if with_head && refusal.is_terminal() => {
             tracing::warn!(
                 session_id = %row.session,
@@ -236,21 +248,38 @@ pub(super) async fn finalize(
                 error = %refusal,
                 "the cancelled turn's stop was refused its head commit; the turn ends without it"
             );
-            end(cx, services, row, request, None, heads).await
+            end(cx, services, row, &evidence, None, heads).await
         }
         ended => ended,
     }
+}
+
+/// The evidence of the cancel `request` the turn accepted, as its stop
+/// records it: an `AfterStep` request honoured between steps names the
+/// protocol iteration whose closing boundary honoured it, the one before the
+/// iteration the turn stands in (ADR 0039, FIG-5364). One honoured before
+/// any step closed, or where only an `Immediate` stop is, names none.
+fn honoured_evidence(
+    request: &TurnCancelRequest,
+    stopped: Option<&mut StoppedTurn>,
+) -> crate::runtime::TurnCancellationEvidence {
+    let mut evidence = cancel_evidence(request);
+    if request.mode == TurnCancelMode::AfterStep
+        && let Some(stopped) = stopped.filter(|stopped| stopped.between_steps)
+    {
+        evidence.honoured_after_step = stopped.drive.machine().protocol_iteration().checked_sub(1);
+    }
+    evidence
 }
 
 async fn end(
     cx: &ActorContext,
     services: &dyn TurnServices,
     row: &TurnRow,
-    request: &TurnCancelRequest,
+    evidence: &crate::runtime::TurnCancellationEvidence,
     stopped: Option<StoppedTurn>,
     heads: &mut HeadCache,
 ) -> Result<(), TurnError> {
-    let evidence = cancel_evidence(request);
     let cause = cancelled_cause(evidence.clone());
     let traced = super::turn_trace::outcome(services.tracing(), &cause);
     let mut tx = cx.begin().await?;
@@ -265,12 +294,14 @@ async fn end(
         drive: mut stopped,
         present,
         mut cell,
+        between_steps: _,
     }) = stopped
     {
         if let Some(cell) = &cell {
             stopped.finishing_cell_calls(&cell.calls);
         }
-        let commit = stop_commit(cx, stopped.as_mut(), evidence, heads, &row.session).await?;
+        let commit =
+            stop_commit(cx, stopped.as_mut(), evidence.clone(), heads, &row.session).await?;
         if let Some(present) = present {
             tx.write(present);
         }

@@ -18,9 +18,18 @@
 //! reconciling the exports of another owner's, and then records so. A node
 //! that takes the cell over after that record exports none of its calls'
 //! admissions again (FIG-5395, FIG-5457).
+//!
+//! When the cell's Run closes with calls still open (a race's loser), each
+//! is stopped for the closing, under its own cause: a body that observes
+//! its stop answers its own cancellation, attributed to the closing
+//! (`CancelOrigin::RunClosing`), and a call the closing settles without its
+//! body's answer (one dropped after the stop grace, one waiting out a
+//! retry's backoff) is observed from its committed outcome, under the same
+//! cause (FIG-5379).
 
+use super::RunClosing;
 use super::round::{
-    catalog_policies, completed_answer, discharge_member, member_body, member_pin,
+    MemberAttempts, catalog_policies, completed_answer, discharge_member, member_body, member_pin,
     present_resolved, resolved_member,
 };
 use super::*;
@@ -150,6 +159,8 @@ impl CellMember {
 pub(crate) struct CellTools {
     context: RuntimeExecutionContext<'static>,
     owner: crate::EffectOpener,
+    /// The closing of the cell's Run, which its calls' attempts read.
+    closing: RunClosing,
 }
 
 impl CellTools {
@@ -192,7 +203,11 @@ impl CellTools {
             call.invocation(),
             execution,
             &self.policies(),
-            execution.draft().trace().cloned(),
+            MemberAttempts {
+                traced_scope: execution.draft().trace().cloned(),
+                closing: Some(self.closing.clone()),
+                stop: None,
+            },
         )
     }
 
@@ -217,12 +232,7 @@ impl CellTools {
         execution: &AdmittedExecution,
         output: SettledOutput,
     ) -> SettledOutput {
-        let mut pending = call.pending();
-        if let Some(definition) = ProductionToolHandlers::new(self.context.clone(), None)
-            .leaf_definition(&call.invocation())
-        {
-            pending.tool_name = definition.manifest.name.clone();
-        }
+        let pending = self.named(call);
         present_resolved(
             &self.context,
             &self.owner,
@@ -231,6 +241,42 @@ impl CellTools {
             output,
         )
         .await
+    }
+}
+
+impl CellTools {
+    /// `call` as its observations name it: under its tool's name.
+    fn named(&self, call: &CellCall) -> crate::sansio::PendingToolCall {
+        let mut pending = call.pending();
+        if let Some(definition) = ProductionToolHandlers::new(self.context.clone(), None)
+            .leaf_definition(&call.invocation())
+        {
+            pending.tool_name = definition.manifest.name.clone();
+        }
+        pending
+    }
+
+    /// Observe `call`'s completion from `output`, its committed outcome,
+    /// which no body of it answered: the Run's closing settled it. Its
+    /// cancellation is the closing's own.
+    fn observe_closed(&self, call: &CellCall, output: &SettledOutput) {
+        let mut completed = completed_answer(&self.named(call), output);
+        if let crate::ToolCallOutcome::Cancelled(cancellation) = &mut completed.output.outcome {
+            *cancellation =
+                crate::ToolCancellation::runtime("the owning Run closed before the call ended")
+                    .with_origin(crate::CancelOrigin::RunClosing);
+        }
+        self.context.emit_tool_call_completed_activity(
+            call.id.as_str(),
+            &ToolCallRecord {
+                call_id: completed.call_id,
+                provider_call_id: completed.provider_call_id,
+                tool: completed.tool_name,
+                args: completed.args,
+                output: completed.output,
+            },
+            0,
+        );
     }
 }
 
@@ -280,7 +326,11 @@ impl CellMembers {
             )
         })?;
         Ok(Self {
-            tools: CellTools { context, owner },
+            tools: CellTools {
+                context,
+                owner,
+                closing: RunClosing::default(),
+            },
             calls: Mutex::default(),
             candidates: Mutex::default(),
         })
@@ -448,6 +498,19 @@ impl MemberBodies for CellMembers {
                 _ => output,
             }
         })
+    }
+
+    fn closing(&self) {
+        self.tools.closing.close();
+    }
+
+    fn unanswered(&self, execution: &AdmittedExecution, output: &SettledOutput) {
+        if !self.tools.closing.is_closing() {
+            return;
+        }
+        if let Some(CellMember::Tool(call)) = self.member(execution) {
+            self.tools.observe_closed(&call, output);
+        }
     }
 
     fn discharge<'a>(

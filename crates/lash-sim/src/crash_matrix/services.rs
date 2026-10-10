@@ -28,8 +28,8 @@ use lash_core::{
 };
 use lash_core_execution::ActorContext;
 use lash_core_execution::runtime::actor::round::{
-    AdmittedExecution, CompletedCall, Material, MemberBody, MemberOutcome, MemberPin, PolicyView,
-    RoundTools, SettledOutput, TraceProposal,
+    AcceptedStop, AdmittedExecution, CompletedCall, Material, MemberBody, MemberOutcome, MemberPin,
+    PolicyView, RoundTools, SettledOutput, TraceProposal,
 };
 use lash_core_store::effect_opener::EffectOpener;
 use lash_core_store::tool_run::{
@@ -850,7 +850,12 @@ impl RoundTools for Catalog {
         )
     }
 
-    fn body(&self, call: &PendingToolCall, execution: &AdmittedExecution) -> MemberBody {
+    fn body(
+        &self,
+        call: &PendingToolCall,
+        execution: &AdmittedExecution,
+        _stop: Option<&AcceptedStop>,
+    ) -> MemberBody {
         let world = Arc::clone(&self.services.world);
         let slow = self.services.slow;
         let tool = Tool::named(&call.tool_name);

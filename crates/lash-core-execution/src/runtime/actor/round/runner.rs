@@ -4,7 +4,9 @@
 //!
 //! It folds the round's committed records, hands the fold to the lifecycle
 //! and folds again after every commit. Once the turn is cancelled, every
-//! unfinished member records `Cancelled`. A round that runs nothing and
+//! unfinished member records `Cancelled`, and once its owner's fence holds
+//! on the transaction that commits an answer, that answer publishes nothing
+//! ([`RoundRunner::fenced_by`]). A round that runs nothing and
 //! waits only on rows (its parked members' waits and its retries' due
 //! times) stays hot for at most `idle_evict`, then ends
 //! [`RoundEnd::Suspended`]: suspension is a state (ADR 0132 §6), and its
@@ -19,7 +21,7 @@ use lash_durable::{CommitLabel, DueSource, DurableError, DurableInstant};
 use tokio_util::sync::CancellationToken;
 
 use super::super::ActorContext;
-use super::lifecycle::{Act, Lifecycle, MemberBodies};
+use super::lifecycle::{Act, Fence, Lifecycle, MemberBodies};
 use super::{
     AdmittedRound, FoldRefusal, PinnedWaits, PolicyView, RoundView, RunFold, SettleRefusal, fold,
 };
@@ -145,6 +147,16 @@ impl RoundRunner {
     #[must_use]
     pub fn cancelled_by(mut self, cancel: CancellationToken) -> Self {
         self.cancel = cancel;
+        self
+    }
+
+    /// Read `fence`, the owner's accepted stop, in every transaction that
+    /// commits the members' answers: once it holds, the round's unfinished
+    /// members record `Cancelled`, and an answer that is not a member's own
+    /// cancellation publishes nothing ([`Lifecycle::fenced_by`]).
+    #[must_use]
+    pub fn fenced_by(mut self, fence: Fence) -> Self {
+        self.lifecycle = self.lifecycle.fenced_by(fence);
         self
     }
 

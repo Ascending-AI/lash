@@ -109,7 +109,7 @@ use lash_core::{
 };
 use lash_core::{LlmOutputPart, LlmRequest, LlmResponse};
 use lash_core_execution::runtime::actor::round::{
-    AdmittedExecution, CompletedCall, MemberBody, MemberPin, PolicyView, RoundTools,
+    AcceptedStop, AdmittedExecution, CompletedCall, MemberBody, MemberPin, PolicyView, RoundTools,
 };
 use lash_core_execution::{ActorContext, Backend};
 use lash_core_store::store::{AdmittedInputIds, AdmittedTurnRows, RunAdmissionRecord};
@@ -959,7 +959,12 @@ impl RoundTools for NoTools {
         PolicyView::default()
     }
 
-    fn body(&self, _call: &PendingToolCall, _execution: &AdmittedExecution) -> MemberBody {
+    fn body(
+        &self,
+        _call: &PendingToolCall,
+        _execution: &AdmittedExecution,
+        _stop: Option<&AcceptedStop>,
+    ) -> MemberBody {
         unreachable!("the L3 scenario calls no tool")
     }
 

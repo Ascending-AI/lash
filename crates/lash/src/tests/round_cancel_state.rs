@@ -296,7 +296,6 @@ async fn l19_native_inline_cancel_discards_the_same_key_unrecorded_sibling() -> 
 /// answer, whether or not the token's delivery reached `A` first: the
 /// accepted request, not the owner's live watch, decides it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "FIG-5381: a round member answering after an accepted cancel is recorded with its own outcome"]
 async fn l03_native_cancel_accepted_before_inline_ack_discards_the_unrecorded_sibling() -> Result<()>
 {
     the_cancelled_member_applies_nothing(Answer::AfterAcceptance).await

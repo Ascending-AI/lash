@@ -212,7 +212,8 @@ pub async fn run_phases(
                 if tx.turn_cancel().is_some() || turn_cancel::close_requested_in(&tx) {
                     let request = tx.turn_cancel().cloned();
                     drop(tx);
-                    let stopped = stopped(drive, &mut carry, &mut answered_cell);
+                    let mut stopped = stopped(drive, &mut carry, &mut answered_cell);
+                    stopped.between_steps = true;
                     return stop(cx, services, &row, request, stopped, heads).await;
                 }
                 if cx.draining() {
@@ -572,7 +573,8 @@ pub async fn run_phases(
     }
 }
 
-/// `drive` where the turn stopped, with what its next commit owed.
+/// `drive` where the turn stopped, with what its next commit owed: within a
+/// step, unless the caller says the turn stands between steps.
 fn stopped(
     drive: Box<dyn TurnDrive>,
     carry: &mut Option<DomainWrite>,
@@ -582,6 +584,7 @@ fn stopped(
         drive,
         present: carry.take(),
         cell: answered_cell.take(),
+        between_steps: false,
     }
 }
 

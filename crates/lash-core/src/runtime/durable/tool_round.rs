@@ -29,7 +29,10 @@
 //!   (FIG-5382, FIG-5395, FIG-5452).
 //! - **Cancel.** An `Immediate` cancel the turn accepted before the round's
 //!   admission admits none of it, and one it accepts while the round runs
-//!   ends its unfinished members `Cancelled`; the turn then ends as every
+//!   ends its unfinished members `Cancelled`. Each commit of members'
+//!   answers reads the request in its own transaction, so a member that
+//!   answers after it was accepted publishes nothing, its state included,
+//!   whether or not its token fired first (FIG-5381); the turn then ends as every
 //!   phase does on a cancel ([`RoundExit::CancelRequested`]). An `AfterStep`
 //!   request lets the round run to its end.
 //! - **Suspension.** A round whose unsettled members are all parked on a
@@ -163,7 +166,17 @@ pub(super) async fn run(
         .collect();
     let waits = round::PinnedWaits::read(reads, &rows).await?;
     let folded = round::fold(&rows, &policies, &waits).map_err(exec)?;
-    let bodies = Arc::new(RoundCalls::new(Arc::clone(&tools), &calls));
+    // Each member's attempt reads the turn's accepted stop before its answer
+    // escapes, so an answer decided after the request was accepted is the
+    // stop's, whether or not this owner fired its token yet (FIG-5381).
+    let stop: round::AcceptedStop = {
+        let cx = cx.clone();
+        Arc::new(move || {
+            let cx = cx.clone();
+            Box::pin(async move { turn_cancel::immediate(&cx).await.unwrap_or(false) })
+        })
+    };
+    let bodies = Arc::new(RoundCalls::new(Arc::clone(&tools), &calls).stopped_by(stop));
     let runner = match folded.round(run) {
         Some(view) => {
             let drafts: Vec<_> = view.members().iter().map(|member| member.draft()).collect();
@@ -272,8 +285,14 @@ pub(super) async fn run(
     // Run the round, watching the turn's row for a cancel whenever mail
     // may have arrived: an accepted `Immediate` request cancels the
     // unfinished members, which then settle.
+    // The transaction that commits a member's answer reads the turn's
+    // accepted stop itself: an answer that lands after the request was
+    // accepted, before this owner saw it, publishes nothing (FIG-5381).
     let cancel = CancellationToken::new();
-    let running = runner.cancelled_by(cancel.clone()).run();
+    let running = runner
+        .cancelled_by(cancel.clone())
+        .fenced_by(Arc::new(turn_cancel::immediate_in))
+        .run();
     tokio::pin!(running);
     let end = loop {
         tokio::select! {

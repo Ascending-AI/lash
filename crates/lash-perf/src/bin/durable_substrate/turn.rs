@@ -26,8 +26,8 @@ use lash_core::{
     facade_support::TurnFinish, facade_support::TurnOutcome, facade_support::shared_parts,
 };
 use lash_core_execution::runtime::actor::round::{
-    AdmittedExecution, CompletedCall, Material, MemberBody, MemberOutcome, MemberPin, PolicyView,
-    RoundTools, SettledOutput,
+    AcceptedStop, AdmittedExecution, CompletedCall, Material, MemberBody, MemberOutcome, MemberPin,
+    PolicyView, RoundTools, SettledOutput,
 };
 use lash_core_execution::{ActorContext, Backend};
 use lash_core_store::effect_opener::EffectOpener;
@@ -680,7 +680,12 @@ impl RoundTools for EchoTools {
         SettledOutput::Interrupted
     }
 
-    fn body(&self, call: &PendingToolCall, _execution: &AdmittedExecution) -> MemberBody {
+    fn body(
+        &self,
+        call: &PendingToolCall,
+        _execution: &AdmittedExecution,
+        _stop: Option<&AcceptedStop>,
+    ) -> MemberBody {
         let output = output_material(&self.session, &self.run, call.args.to_string());
         Box::new(move |_token| {
             Box::pin(async move { MemberOutcome::from(SettledOutput::Completed(output)) })

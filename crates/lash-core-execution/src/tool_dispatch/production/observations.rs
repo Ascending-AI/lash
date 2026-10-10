@@ -134,9 +134,16 @@ pub(super) fn terminal_output(
                 }),
             )
         }
-        _ if matches!(decision, CallDecision::Cancelled) => Ok(ToolCallOutput::cancelled(
-            crate::ToolCancellation::runtime("the owning Run cancelled the call"),
-        )),
+        // A body that met its stop answers its own cancellation, under the
+        // stop's cause, which its capture keeps (FIG-5379).
+        _ if matches!(decision, CallDecision::Cancelled) => match capture {
+            Some(SingletonCapture::Cancelled {
+                evidence: Some(evidence),
+            }) => decode::<Captured>(evidence).map(|captured| captured.output),
+            _ => Ok(ToolCallOutput::cancelled(crate::ToolCancellation::runtime(
+                "the owning Run cancelled the call",
+            ))),
+        },
         _ => Ok(ToolCallOutput::failure(crate::ToolFailure::runtime(
             crate::ToolFailureClass::InvalidRequest,
             "tool_call_denied",

@@ -43,6 +43,31 @@ pub(crate) struct ProductionToolHandlers<'run> {
     /// selected (FIG-5395). A round member is traced by its round's fold,
     /// which holds its retry ladder, and none is set.
     traced_scope: Option<lash_trace::DurableTraceScope>,
+    /// The closing of the Run a cell member's call runs in: once it closes,
+    /// a stop the call's body meets is the closing's own (FIG-5379).
+    run_closing: Option<RunClosing>,
+    /// The round owner's accepted stop, read before a member's answer
+    /// escapes: an answer decided after it is the stop's (FIG-5381).
+    accepted_stop: Option<crate::runtime::actor::round::AcceptedStop>,
+}
+
+/// Whether a cell's Run is closing: set once, before its open calls are
+/// cancelled for it, and read by every attempt of those calls, so a stop
+/// one meets is attributed to the closing rather than to a turn that never
+/// stopped (`CancelOrigin::RunClosing`, FIG-5379).
+#[derive(Clone, Debug, Default)]
+pub(crate) struct RunClosing(Arc<std::sync::atomic::AtomicBool>);
+
+impl RunClosing {
+    /// The Run closes: its calls are cancelled for it next.
+    pub(crate) fn close(&self) {
+        self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Whether the Run is closing.
+    pub(crate) fn is_closing(&self) -> bool {
+        self.0.load(std::sync::atomic::Ordering::SeqCst)
+    }
 }
 
 #[derive(Default)]
@@ -161,6 +186,8 @@ impl<'run> ProductionToolHandlers<'run> {
             completion_key: None,
             admitted_declaration: None,
             traced_scope: None,
+            run_closing: None,
+            accepted_stop: None,
         }
     }
     /// The start of an isolated call in `engine`, the process engine its
@@ -235,7 +262,8 @@ impl<'run> ProductionToolHandlers<'run> {
         stop.token = token;
     }
     /// The true cause of a stop an inline body met, read inside X before its
-    /// state or declarations can escape: the turn's accepted immediate stop,
+    /// state or declarations can escape: the turn's accepted immediate stop
+    /// (its recorded fact, or the round owner's accepted stop, read now),
     /// else the Run's own Closing cancel, else the execution's stop standing
     /// for its turn where there is no gate.
     async fn inline_stop_origin(
@@ -246,11 +274,20 @@ impl<'run> ProductionToolHandlers<'run> {
         if self.context.inline_turn_stop_requested().await? {
             return Ok(Some(crate::CancelOrigin::TurnStopped));
         }
+        if let Some(accepted) = &self.accepted_stop
+            && accepted().await
+        {
+            return Ok(Some(crate::CancelOrigin::TurnStopped));
+        }
         if self
             .inline_stops
             .lock_recover()
             .get(call_id)
             .is_some_and(|stop| stop.cancelled)
+            || self
+                .run_closing
+                .as_ref()
+                .is_some_and(RunClosing::is_closing)
         {
             return Ok(Some(crate::CancelOrigin::RunClosing));
         }
@@ -327,6 +364,18 @@ impl<'run> ProductionToolHandlers<'run> {
     /// its round pinned.
     pub(crate) fn with_completion_key(mut self, key: Option<crate::PinnedKey>) -> Self {
         self.completion_key = key;
+        self
+    }
+
+    /// These handlers, running a call of the Run whose closing `closing`
+    /// says, for an owner whose accepted stop `stop` reads.
+    pub(crate) fn with_stops(
+        mut self,
+        closing: Option<RunClosing>,
+        stop: Option<crate::runtime::actor::round::AcceptedStop>,
+    ) -> Self {
+        self.run_closing = closing;
+        self.accepted_stop = stop;
         self
     }
 

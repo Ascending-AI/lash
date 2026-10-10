@@ -1555,7 +1555,6 @@ async fn a_restored_cell_keeps_its_deferred_grants_and_resolves_nothing_twice_on
 /// An after-step stop during a cell's `processes.await` lets the process
 /// finish and stops the turn at the step's boundary, on SQLite in memory.
 #[tokio::test]
-#[ignore = "FIG-5377: a pass finalizes an after-step request on a parked turn before its wait ends"]
 async fn an_after_step_stop_during_a_process_await_lets_the_process_finish_on_sqlite_memory() {
     after_step_during_a_process_await(Dialect::SqliteMemory, None).await;
 }

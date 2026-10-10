@@ -368,7 +368,6 @@ async fn after_step_stop_mid_tool_call_lets_the_tool_finish_uncancelled() -> Res
 
 /// An after-step stop's evidence names the step it was honoured after.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "FIG-5364: the durable cancel evidence never records honoured_after_step"]
 async fn an_after_step_stop_records_the_step_it_was_honoured_at() -> Result<()> {
     let (evidence, _, _) = after_step_stop_mid_tool("after-step-honoured").await?;
     assert_eq!(evidence.mode, TurnCancelMode::AfterStep);

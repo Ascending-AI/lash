@@ -97,7 +97,9 @@ mod store_local;
 mod tools;
 
 pub use fold::{MemberState, RoundMember, RoundView, fold};
-pub use lifecycle::{Discharge, MemberBodies, MemberBody, MemberOutcome, Presented, member_body};
+pub use lifecycle::{
+    Discharge, Fence, MemberBodies, MemberBody, MemberOutcome, Presented, member_body,
+};
 pub use output::{Material, NamesMaterial, SettledOutput, SettledOutputRefusal};
 pub use parked::{CallOwner, ParkedCall, PinnedWaits, parked};
 pub use records::RUN_RECORD_FORMAT_VERSION;
@@ -106,8 +108,9 @@ pub use rounds::{
 };
 pub use runner::{RoundEnd, RoundError, RoundRunner, SettledRound};
 pub use tools::{
-    CompletedCall, MemberPin, RoundCalls, RoundCallsRefusal, RoundTools, TraceProposal, call_draft,
-    completed_material, decode_completed, request_material, require_admitted, settle_cancelled,
+    AcceptedStop, CompletedCall, MemberPin, RoundCalls, RoundCallsRefusal, RoundTools,
+    TraceProposal, call_draft, completed_material, decode_completed, request_material,
+    require_admitted, settle_cancelled,
 };
 
 use records::{OutcomeBody, append, encode, first_start};
