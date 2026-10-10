@@ -190,7 +190,7 @@ impl ProductionToolHandlers<'_> {
         cancel: &tokio_util::sync::CancellationToken,
     ) -> Result<(MemberEnd, Vec<StoreLocalEffect>), SingletonRunError> {
         let Some(mut definition) = self.leaf_definition(&invocation) else {
-            return Ok((MemberEnd::Final(answered(call, unavailable())), Vec::new()));
+            return Ok((MemberEnd::Final(self.unavailable_call(call)), Vec::new()));
         };
         // Every attempt settles under the declaration the call's admission
         // pinned, on whichever owner runs it: a host that retyped the tool
@@ -283,6 +283,32 @@ impl ProductionToolHandlers<'_> {
             ),
             AttemptEnd::Faulted(fault) => (MemberEnd::Faulted(fault), Vec::new()),
         })
+    }
+
+    /// The answer of `call`, whose tool the catalog does not name. No
+    /// admission observes it, so its activity pair is observed here, in
+    /// order, as an admitted call's is (FIG-5353).
+    fn unavailable_call(&self, call: &crate::sansio::PendingToolCall) -> CompletedCall {
+        let completed = answered(call, unavailable());
+        self.context.emit_tool_call_started(
+            call.call_id.as_str(),
+            &crate::tool_dispatch::ToolCallIds::of_pending(call),
+            &call.tool_name,
+            call.args.clone(),
+            crate::session::tool_execution::tool_activity_id(&call.call_id),
+        );
+        self.context.emit_tool_call_completed_activity(
+            call.call_id.as_str(),
+            &ToolCallRecord {
+                call_id: completed.call_id.clone(),
+                provider_call_id: completed.provider_call_id.clone(),
+                tool: completed.tool_name.clone(),
+                args: completed.args.clone(),
+                output: completed.output.clone(),
+            },
+            0,
+        );
+        completed
     }
 }
 
@@ -688,6 +714,7 @@ impl RoundTools for ProductionRoundTools {
         &self,
         call: &crate::sansio::PendingToolCall,
         member: &crate::runtime::actor::round::RoundMember,
+        admitted_here: bool,
     ) {
         let (start, complete) = {
             let mut traced = self.traced.lock_recover();
@@ -699,15 +726,21 @@ impl RoundTools for ProductionRoundTools {
         };
         // The call was admitted with its round, under the scope its member
         // carries: a successor re-folding the round traces it under that
-        // scope and admits nothing (FIG-5382).
+        // scope and admits nothing (FIG-5382). Its start is the admitting
+        // owner's record; a successor traces only what it observes after.
         if start && let Some(scope) = member.draft().trace() {
-            let start = crate::session::ToolCallStart {
-                call_id: &call.call_id,
-                provider_call_id: call.provider_call_id.as_deref(),
-                tool: &call.tool_name,
-                args: &call.args,
-            };
-            self.context.trace_tool_call_admitted(start, scope.clone());
+            if admitted_here {
+                let start = crate::session::ToolCallStart {
+                    call_id: &call.call_id,
+                    provider_call_id: call.provider_call_id.as_deref(),
+                    tool: &call.tool_name,
+                    args: &call.args,
+                };
+                self.context.trace_tool_call_admitted(start, scope.clone());
+            } else {
+                self.context
+                    .adopt_tool_call_trace(&call.call_id, scope.clone());
+            }
         }
         if complete && let Some(output) = member.outcome() {
             let record = member_record(call, output);

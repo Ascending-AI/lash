@@ -125,7 +125,9 @@ pub fn member_body(body: super::ToolBody) -> MemberBody {
 pub trait MemberBodies: Send + Sync {
     /// Observe the committed state of a round before any member runs.
     /// Observers keep their own live deduplication; this runs after every fold.
-    fn observe(&self, _round: &RoundView) {}
+    /// `admitted_here` holds the members this activation's own commit
+    /// admitted and has not started yet.
+    fn observe(&self, _round: &RoundView, _admitted_here: &BTreeSet<AdmittedId>) {}
 
     /// Export the trace admissions of `members`, an admission that
     /// committed and still owes its exports
@@ -418,7 +420,7 @@ impl Lifecycle {
                     self.publish(view.id_of(member), member.committed_state())?;
                 }
             }
-            self.bodies.observe(view);
+            self.bodies.observe(view, &self.fresh);
         }
         // An outcome the rows already have came back on an unacknowledged
         // commit: it is not written again.

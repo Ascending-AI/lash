@@ -182,8 +182,9 @@ fn composition_tool_contract<'a>(
 /// The composition record is a snapshot written when the composition
 /// changes: an identical composition writes none and serializes no schema,
 /// a route's capacity is not composition, and a changed rendered prompt is.
-#[ignore = "FIG-5353: a node-run turn writes no composition_changed record"]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+// One thread: the schema serialization witness counts on the thread the
+// turn's driver runs on.
+#[tokio::test(flavor = "current_thread")]
 async fn composition_trace_is_snapshot_on_change_and_ignores_route_capacity_noise() -> Result<()> {
     let prompt = Arc::new(StdMutex::new("the first rendered prompt"));
     let seen = Arc::new(StdMutex::new(Vec::<String>::new()));
@@ -297,7 +298,6 @@ async fn composition_trace_is_snapshot_on_change_and_ignores_route_capacity_nois
     Ok(())
 }
 
-#[ignore = "FIG-5353: a node-run turn writes no composition_changed record"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn composition_trace_fires_once_when_tool_membership_changes_with_full_ordered_schemas()
 -> Result<()> {
@@ -410,7 +410,6 @@ impl ToolProvider for SchemaChangingTool {
     }
 }
 
-#[ignore = "FIG-5353: a node-run turn writes no composition_changed record"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn composition_trace_fires_once_when_same_member_tool_schema_changes() -> Result<()> {
     let tool = Arc::new(SchemaChangingTool {
@@ -491,7 +490,6 @@ where
 
 /// A provider's own spans nest under the span of the turn that called it,
 /// so a host's provider instrumentation reads as part of that turn.
-#[ignore = "FIG-5353: a node-run turn's provider work runs under no turn span"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn provider_spans_are_children_of_the_turn_span() -> Result<()> {
     let capture = ProviderSpans::default();
@@ -664,7 +662,6 @@ async fn standard_runtime_emits_single_tool_call_trace_pair_per_call() -> Result
     .await
 }
 
-#[ignore = "FIG-5353: a node-run turn writes no tool_call_started or tool_call_completed record, and an unknown name gets no activity pair"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn unavailable_tool_name_emits_an_ordered_lifecycle_pair() -> Result<()> {
     assert_standard_tool_lifecycle(
@@ -1294,7 +1291,6 @@ async fn resolve_tree_key(core: &LashCore, key: &lash_core::PinnedKey) -> Result
 /// build exactly the golden tree: every record once, under the parent it
 /// has in the golden run, the tool's records under the turn and the model
 /// calls' under the turn.
-#[ignore = "FIG-5353: the node that resumes a parked tool call writes a second tool_call_started"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn golden_tree_survives_a_kill_and_resume_on_another_node() -> Result<()> {
     let send = |session: &crate::LashSession| {

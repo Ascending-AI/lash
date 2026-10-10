@@ -42,6 +42,7 @@ struct TraceRuntimeParts {
     base_context: TraceContext,
     metrics: TelemetryMetrics,
     limits: lash_trace::TraceLimits,
+    compositions: Arc<super::composition::CompositionMemory>,
 }
 
 impl TraceRuntime {
@@ -56,6 +57,7 @@ impl TraceRuntime {
                 base_context: TraceContext::default(),
                 metrics: TelemetryMetrics::default(),
                 limits: lash_trace::TraceLimits::standard(),
+                compositions: Arc::default(),
             }),
         }
     }
@@ -92,6 +94,26 @@ impl TraceRuntime {
     /// Resolved working capacities and evidence cuts.
     pub fn limits(&self) -> lash_trace::TraceLimits {
         self.parts.limits
+    }
+
+    /// The fingerprints of a request's `tools`, in its order, shared by
+    /// every session this runtime traces.
+    pub fn composition_tool_fingerprints(
+        &self,
+        tools: &Arc<Vec<crate::llm::types::LlmToolSpec>>,
+    ) -> Arc<Vec<[u8; 32]>> {
+        self.parts
+            .compositions
+            .tool_fingerprints(tools, self.parts.limits.composition_fingerprint_generations)
+    }
+
+    /// Whether `fingerprint`, `session`'s composition now, is one this
+    /// runtime has not reported as the session's latest: once it returns
+    /// `true`, it is.
+    pub fn report_composition(&self, session: &crate::SessionId, fingerprint: [u8; 32]) -> bool {
+        self.parts
+            .compositions
+            .report(session, fingerprint, self.parts.limits.composition_sessions)
     }
 
     /// Configure capacities and cuts without installing an observer.

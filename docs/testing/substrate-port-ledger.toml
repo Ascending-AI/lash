@@ -1688,7 +1688,7 @@ laws = [
 ]
 disposition = "port"
 status = "ported"
-note = "ported by FIG-5307 to crates/lash/src/tests/tracing.rs: a host's send() on the core's node over SQLite memory with a JSONL trace sink; the model-call and tool-call record laws pass; ignored on their tickets: composition_trace_is_snapshot_on_change_and_ignores_route_capacity_noise (FIG-5353), composition_trace_fires_once_when_tool_membership_changes_with_full_ordered_schemas (FIG-5353), composition_trace_fires_once_when_same_member_tool_schema_changes (FIG-5353), provider_spans_are_children_of_the_turn_span (FIG-5353), unavailable_tool_name_emits_an_ordered_lifecycle_pair (FIG-5353), golden_tree_survives_a_kill_and_resume_on_another_node (FIG-5353) FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired."
+note = "ported by FIG-5307 to crates/lash/src/tests/tracing.rs: a host's send() on the core's node over SQLite memory with a JSONL trace sink; every law passes; the composition, provider-span, unavailable-tool and golden-tree laws since FIG-5331 (the durable turn observes as its own live attempt, its work runs under its span, compositions are remembered by the node's trace runtime). FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired."
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/turn_cancel_modes.rs"
@@ -6254,7 +6254,7 @@ laws = [
 disposition = "replaced-by:crates/lash/src/tests/tracing.rs::golden_tree_survives_a_kill_and_resume_on_another_node"
 status = "deleted"
 owed = "a turn's span tree is the golden tree after a kill and resume on another node"
-note = "FIG-5307 wrote the law at the trace-record layer the OTel adapter projects spans from: a turn parked on a pending tool on node A, A shut down, node B over the same SQLite memory stores resolves and finishes it; A's and B's records build the golden tree of the turn run on one node, no identity repeating. The cut half passes; the law is ignored on FIG-5353 (the node that resumes the parked tool call writes a second tool_call_started; turn_started and turn_completed are written once across both nodes since FIG-5658)"
+note = "FIG-5307 wrote the law at the trace-record layer the OTel adapter projects spans from: a turn parked on a pending tool on node A, A shut down, node B over the same SQLite memory stores resolves and finishes it; A's and B's records build the golden tree of the turn run on one node, no identity repeating. The law passes since FIG-5331: only the owner whose commit admitted a call traces its start, and turn_started and turn_completed are written once across both nodes since FIG-5658"
 
 [[row]]
 path = "crates/lash-restate/src/tests/parent_end_on_the_double.rs"
@@ -10501,7 +10501,7 @@ laws = [
 ]
 disposition = "port"
 status = "ported"
-note = "FIG-5312 ported the file onto facade turns over SQLite memory (rlm_abort_drain_preserves_late_reasoning_replay_and_usage passes since FIG-5328). #[ignore] with tickets: rlm_tool_calls_stream_from_live_exec_boundary and rlm_recovered_tool_failure_remains_in_turn_accounting (FIG-5330: the report omits code-cell tool calls and execution metrics); rlm_native_provider_tool_call_repairs_and_the_next_cell_finishes (FIG-5331: no protocol_step trace record). Its journaled-effect-outcome assertions went with the journal (5ad9641f9e)"
+note = "FIG-5312 ported the file onto facade turns over SQLite memory (rlm_abort_drain_preserves_late_reasoning_replay_and_usage passes since FIG-5328). #[ignore] with tickets: rlm_tool_calls_stream_from_live_exec_boundary and rlm_recovered_tool_failure_remains_in_turn_accounting (FIG-5330: the report omits code-cell tool calls and execution metrics); rlm_native_provider_tool_call_repairs_and_the_next_cell_finishes passes since FIG-5331. Its journaled-effect-outcome assertions went with the journal (5ad9641f9e)"
 
 [[row]]
 path = "crates/lash/src/tests/turn_streaming/rlm_streaming.rs"

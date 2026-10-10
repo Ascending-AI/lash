@@ -42,6 +42,7 @@ use lash_durable::{
 use lash_sansio::SavedTurn;
 use lash_sansio::llm::types::RecordedRequestTemplate;
 use tokio_util::sync::CancellationToken;
+use tracing::Instrument as _;
 
 use super::head::{HeadCache, SessionHead};
 use super::{phases, turn_cancel, turn_trace};
@@ -816,11 +817,16 @@ impl SessionActivation {
             record_turn_traced(cx, session, &row.run).await?;
             return Ok(Pass::Again);
         }
+        // The turn's work on this owner runs under its span: a host's
+        // `tracing` instrumentation of a provider, a tool or a plugin it
+        // calls nests under the turn it serves (FIG-5353).
+        let span = tracing::info_span!("lash.turn", session_id = %session, run_id = %row.run);
         let opened = match row.phase {
             UnfinishedPhase::Admitted => match heads.head(cx, session).await {
                 Ok(head) => self
                     .services
                     .start(cx, &row, head)
+                    .instrument(span.clone())
                     .await
                     .map(|drive| OpenTurn {
                         drive,
@@ -832,6 +838,7 @@ impl SessionActivation {
             UnfinishedPhase::Model { .. } | UnfinishedPhase::Tools { .. } => {
                 self.services
                     .resume(cx, TurnRestore::new(cx, &row, heads))
+                    .instrument(span.clone())
                     .await
             }
         };
@@ -847,7 +854,10 @@ impl SessionActivation {
             }
             Err(error) => return Err(error),
         };
-        let ran = match phases::run_phases(cx, self.services.as_ref(), turn, heads).await {
+        let ran = match phases::run_phases(cx, self.services.as_ref(), turn, heads)
+            .instrument(span)
+            .await
+        {
             // A refusal no pass would clear, met as the turn finishes (an
             // after-turn callback's), ends the run with it, as one met at
             // preparation does: retrying the pass would meet it again.

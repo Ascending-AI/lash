@@ -64,10 +64,28 @@ impl RuntimeTurnDriver<'_> {
                 event_delta,
             )
             .await?;
-        for event in &boundary.protocol_events {
+        self.trace_protocol_steps(&boundary.protocol_events, protocol_iteration);
+        Ok(())
+    }
+
+    /// Applies the records the machine's `Done` delivered to the turn's
+    /// commit draft, tracing each protocol step as a progress boundary does.
+    pub(super) fn apply_final_event_delta(
+        &mut self,
+        event_delta: Vec<crate::SessionHistoryRecord>,
+        protocol_iteration: usize,
+    ) {
+        let protocol_events = self.turn_pipeline.apply_event_delta(event_delta);
+        self.trace_protocol_steps(&protocol_events, protocol_iteration);
+    }
+
+    /// One `protocol_step` record per protocol event the turn records, in
+    /// its order. A takeover re-applies its predecessor's boundaries
+    /// untraced: their steps were traced by the owner that delivered them.
+    fn trace_protocol_steps(&self, events: &[crate::ProtocolEvent], protocol_iteration: usize) {
+        for event in events {
             self.emit_trace(protocol_iteration, || protocol_step_trace_event(event));
         }
-        Ok(())
     }
 }
 

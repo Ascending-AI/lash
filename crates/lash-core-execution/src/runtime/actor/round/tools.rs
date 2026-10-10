@@ -101,8 +101,12 @@ pub struct TraceProposal {
 pub trait RoundTools: Send + Sync {
     /// Observe `call` as its committed member records leave it, before any
     /// body runs, under the trace scope its admission retained. Called
-    /// after every fold; a live observer deduplicates it.
-    fn observe(&self, _call: &PendingToolCall, _member: &super::RoundMember) {}
+    /// after every fold; a live observer deduplicates it. `admitted_here`
+    /// says this activation's own commit admitted the call: only that owner
+    /// observes its start, so a successor that takes the round over writes
+    /// no second one (FIG-5353).
+    fn observe(&self, _call: &PendingToolCall, _member: &super::RoundMember, _admitted_here: bool) {
+    }
 
     /// Propose `call`'s trace admission for its round's admission to
     /// retain. `None` when the catalog traces nothing.
@@ -309,10 +313,15 @@ impl RoundCalls {
 }
 
 impl MemberBodies for RoundCalls {
-    fn observe(&self, round: &super::RoundView) {
+    fn observe(
+        &self,
+        round: &super::RoundView,
+        admitted_here: &std::collections::BTreeSet<lash_durable::domain::AdmittedId>,
+    ) {
         for member in round.members() {
             if let Some(call) = self.calls.get(member.call()) {
-                self.tools.observe(call, member);
+                let here = admitted_here.contains(&round.id_of(member));
+                self.tools.observe(call, member, here);
             }
         }
     }

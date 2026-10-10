@@ -266,6 +266,16 @@ impl LashRuntime {
                 .map_err(RuntimeEffectControllerError::into_runtime_error)?,
             );
         }
+        // A durable turn continues from its committed checkpoint and is
+        // never replayed: what its driver observes is this owner's own work,
+        // so it observes as its own live attempt and needs no journal
+        // frontier (ADR 0132 §2). Behind a frontier no step body crosses,
+        // its protocol steps and compositions were dropped (FIG-5331).
+        let turn_trace = self
+            .host
+            .core
+            .tracing
+            .unreplayed(controller.trace_scope().cloned());
         emit_session_events(observer, std::mem::take(&mut prepared.events));
         self.state.last_prompt_usage = previous_prompt_usage;
         let mut turn_pipeline = TurnBoundary::from_state_with_graph_appends(
@@ -279,12 +289,7 @@ impl LashRuntime {
         .with_fleet_format(self.fleet_format())
         .with_definition_engines(self.host.core.process_engines.clone())
         .with_metrics(self.host.core.tracing.metrics().clone())
-        .with_trace(
-            self.host
-                .core
-                .tracing
-                .shift(controller.trace_scope().cloned(), &controller),
-        );
+        .with_trace(turn_trace.clone());
         turn_pipeline
             .prepared_checkpoint(
                 turn_policy.clone(),
@@ -336,7 +341,7 @@ impl LashRuntime {
             children_stop: CancellationToken::new(),
             model_stop_error: Default::default(),
             turn_observations: turn_observation_cursor(&controller, run, "shift"),
-            trace: self.host.core.tracing.turn_execution(&controller),
+            trace: turn_trace,
             admitted_body: None,
             model_attempt: 1,
         });

@@ -126,13 +126,11 @@ impl RuntimeTurnDriver<'_> {
 
     pub(super) fn trace_before_llm_call(&mut self, machine: &TurnMachine, request: &LlmRequest) {
         if self.trace.is_observed() {
-            let tool_fingerprints = self.session.composition_tool_fingerprints(&request.tools);
+            let runtime = self.trace.runtime();
+            let tool_fingerprints = runtime.composition_tool_fingerprints(&request.tools);
             let fingerprint =
                 crate::trace::trace_composition_key(request, tool_fingerprints.as_slice());
-            if self
-                .session
-                .record_composition_trace_fingerprint(fingerprint)
-            {
+            if runtime.report_composition(&self.session_id, fingerprint) {
                 let snapshot = crate::trace::trace_composition_snapshot(
                     request,
                     fingerprint,

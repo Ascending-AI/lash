@@ -873,7 +873,6 @@ await control.finish("done");"#,
 /// the repair budget dies with it.
 #[cfg(feature = "rlm")]
 #[test]
-#[ignore = "FIG-5331: a durable turn traces no protocol step"]
 pub(super) fn rlm_native_provider_tool_call_repairs_and_the_next_cell_finishes() -> Result<()> {
     run_async_test_on_stack_budget("rlm-native-tool-contract-test", || async {
         let trace_path = std::env::temp_dir().join(format!(
@@ -920,6 +919,7 @@ pub(super) fn rlm_native_provider_tool_call_repairs_and_the_next_cell_finishes()
             explicit_ephemeral_facets(rlm_core_builder_over(sqlite_memory_store_backend().await))
                 .serve_test_llm_profile(provider, mock_llm_profile_spec())
                 .trace_jsonl_path(trace_path.clone())
+                .telemetry_content(lash_trace::TelemetryContent::Captured)
                 .build(crate::testing::runtime_lease_owner())?;
         let session = core
             .session(

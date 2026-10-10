@@ -126,6 +126,23 @@ impl RuntimeExecutionContext<'_> {
             .insert(start.call_id.clone(), TracedToolCall { scope, context });
     }
 
+    /// Trace the rest of `call_id`, whose start the owner that admitted it
+    /// under `scope` observed, under that scope: its completion is this
+    /// execution's to observe.
+    pub(crate) fn adopt_tool_call_trace(
+        &self,
+        call_id: &crate::ToolCallId,
+        scope: lash_trace::DurableTraceScope,
+    ) {
+        let Some(tracing) = &self.tracing else {
+            return;
+        };
+        let context = tracing.scope_context.clone();
+        self.tool_requests
+            .lock_recover()
+            .insert(call_id.clone(), TracedToolCall { scope, context });
+    }
+
     /// Observe the completion of a call whose start this execution traced.
     pub(crate) fn trace_tool_call_completed(
         &self,

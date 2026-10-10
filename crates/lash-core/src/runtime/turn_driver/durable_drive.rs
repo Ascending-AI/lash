@@ -737,7 +737,7 @@ impl TurnDrive for RuntimeDrive {
             RuntimeTurnPhase::CommittedTurn,
         ));
         let driver = &mut self.driver;
-        driver.turn_pipeline.apply_event_delta(done.event_delta);
+        driver.apply_final_event_delta(done.event_delta, done.protocol_iteration);
         driver.turn_pipeline.record_protocol_terminal_output(
             driver.protocol_reply.terminal_output(done.messages.iter()),
         );

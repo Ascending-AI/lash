@@ -187,16 +187,6 @@ pub struct ToolCatalogHandle(Arc<ToolCatalogArtifact>);
 #[derive(Clone)]
 pub struct ToolCatalogHandle(Arc<ToolCatalogArtifact>);
 
-type ToolContractFingerprints = Arc<Vec<[u8; 32]>>;
-type CompositionToolFingerprintCache = Arc<
-    std::sync::Mutex<
-        Vec<(
-            Arc<Vec<crate::llm::types::LlmToolSpec>>,
-            ToolContractFingerprints,
-        )>,
-    >,
->;
-
 impl ToolCatalogHandle {
     pub(crate) fn tool_registry(&self) -> Arc<crate::ToolRegistry> {
         Arc::clone(&self.0.tool_registry)
@@ -440,11 +430,6 @@ pub struct Session {
     services: RuntimeServices,
     tool_registry: Arc<crate::ToolRegistry>,
     tool_catalog_cache: Arc<std::sync::Mutex<Option<(ToolCatalogCacheKey, ToolCatalogHandle)>>>,
-    composition_tool_fingerprint_cache: CompositionToolFingerprintCache,
-    /// Fingerprint of the last model-facing composition emitted to the trace
-    /// sink for this resident session. Effect-driver clones share the slot so
-    /// a mid-turn execution-environment refresh cannot double-emit it.
-    composition_trace_fingerprint: Arc<std::sync::Mutex<Option<[u8; 32]>>>,
 }
 
 impl Session {
@@ -458,8 +443,6 @@ impl Session {
             services,
             tool_registry,
             tool_catalog_cache: Arc::new(std::sync::Mutex::new(None)),
-            composition_tool_fingerprint_cache: Arc::new(std::sync::Mutex::new(Vec::new())),
-            composition_trace_fingerprint: Arc::new(std::sync::Mutex::new(None)),
         };
 
         let protocol_session = Arc::clone(session.plugins().protocol_session());
@@ -479,20 +462,7 @@ impl Session {
             services: self.services.clone(),
             tool_registry: Arc::clone(&self.tool_registry),
             tool_catalog_cache: Arc::clone(&self.tool_catalog_cache),
-            composition_tool_fingerprint_cache: Arc::clone(
-                &self.composition_tool_fingerprint_cache,
-            ),
-            composition_trace_fingerprint: Arc::clone(&self.composition_trace_fingerprint),
         }
-    }
-
-    pub fn record_composition_trace_fingerprint(&self, fingerprint: [u8; 32]) -> bool {
-        let mut last = self.composition_trace_fingerprint.lock_recover();
-        if last.as_ref() == Some(&fingerprint) {
-            return false;
-        }
-        *last = Some(fingerprint);
-        true
     }
 
     pub fn session_id(&self) -> &SessionId {
@@ -732,37 +702,6 @@ impl Session {
 
     pub fn resolved_tool_catalog(&self) -> Result<Arc<crate::ToolCatalog>, crate::PluginError> {
         Ok(self.active_tool_surface_entry()?.tool_catalog())
-    }
-
-    pub fn composition_tool_fingerprints(
-        &self,
-        tools: &Arc<Vec<crate::llm::types::LlmToolSpec>>,
-    ) -> ToolContractFingerprints {
-        let mut cache = self.composition_tool_fingerprint_cache.lock_recover();
-        if let Some((_, fingerprints)) = cache.iter().find(|(cached_tools, _)| {
-            Arc::ptr_eq(cached_tools, tools) || cached_tools.as_slice() == tools.as_slice()
-        }) {
-            return Arc::clone(fingerprints);
-        }
-        let fingerprints = Arc::new(
-            tools
-                .iter()
-                .map(crate::trace::composition_tool_fingerprint)
-                .collect(),
-        );
-        let capacity = self
-            .plugins()
-            .host()
-            .trace_runtime()
-            .limits()
-            .composition_fingerprint_generations;
-        if capacity > 0 {
-            while cache.len() >= capacity {
-                cache.remove(0);
-            }
-            cache.push((Arc::clone(tools), Arc::clone(&fingerprints)));
-        }
-        fingerprints
     }
 
     pub fn shared_tool_catalog(&self) -> Result<Arc<Vec<serde_json::Value>>, crate::PluginError> {
