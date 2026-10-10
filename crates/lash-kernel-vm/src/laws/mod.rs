@@ -7,5 +7,6 @@ mod embedder;
 mod fast;
 mod forms;
 mod layout;
+mod observe;
 mod parked;
 mod tasks;

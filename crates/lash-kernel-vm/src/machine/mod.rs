@@ -8,6 +8,7 @@
 mod actions;
 mod eval;
 mod exec;
+mod observing;
 mod ops;
 mod parked;
 mod session;
@@ -30,6 +31,7 @@ use crate::interface::{
     Machine, MachineError, Meters, Outcome, Park, Program, Request, RunError, Start, StartError,
     Step, WaitId,
 };
+use crate::observe::{Event, GuestPhase, Observer};
 
 /// What a frame is accounted before its variables.
 const FRAME_BYTES: u64 = 64;
@@ -326,6 +328,8 @@ pub struct KernelMachine {
     steps: steps::StepCheck,
     end: Option<End>,
     ended: bool,
+    /// What observes the run, when anything does: never part of its state.
+    observer: Option<Box<Observer>>,
 }
 
 impl std::fmt::Debug for KernelMachine {
@@ -471,6 +475,12 @@ impl KernelMachine {
     /// Frees every object the run cannot reach, and the result of every
     /// ended task whose handle it cannot reach, and recounts its memory.
     fn collect(&mut self) {
+        self.observe(Event::CollectEnter);
+        self.collect_unobserved();
+        self.observe(Event::CollectExit);
+    }
+
+    fn collect_unobserved(&mut self) {
         let mut roots = Roots::default();
         for task in &self.tasks {
             match &task.incoming {
@@ -549,6 +559,9 @@ impl KernelMachine {
 
     /// Runs one statement of `task`, or resumes the one it waits in.
     fn step(&mut self, task: TaskId, host: &mut dyn Host, exe: &Executable) -> Result<(), Halt> {
+        if self.observer.is_some() {
+            self.observe_step(task, exe);
+        }
         self.pins.clear();
         self.fresh.clear();
         if !self.regs.is_empty() {
@@ -600,6 +613,7 @@ impl KernelMachine {
     /// Marks a task ended, wakes what waits on it and, for `main`, ends
     /// the run (`K-TASK-008`, `K-TASK-018`).
     fn end_task(&mut self, task: TaskId, result: Result<Value, Value>) -> Result<(), Halt> {
+        self.observe(Event::TaskEnded(task));
         let ended = self.task(task)?;
         ended.frames.clear();
         ended.failed = result.is_err();
@@ -739,19 +753,10 @@ impl KernelMachine {
         self.ended = true;
         Step::Ended(end)
     }
-}
 
-impl Machine for KernelMachine {
-    type Parked = ParkedRun;
-
-    fn start(program: Program, bounds: Bounds, start: Start) -> Result<Self, StartError> {
-        Self::start_with_layout(program, bounds, start, Layout::default())
-    }
-
-    fn run(&mut self, host: &mut dyn Host, slice: u64) -> Result<Step, MachineError> {
-        if self.ended {
-            return Err(MachineError::Ended);
-        }
+    /// Runs tasks until none is ready, the run ends, or `slice` units of
+    /// charge have passed (`K-MACH-005`).
+    fn run_slice(&mut self, host: &mut dyn Host, slice: u64) -> Result<Step, MachineError> {
         let before = self.charged;
         // The executable is the run's for its whole life.
         let exe = Arc::clone(&self.exe);
@@ -803,6 +808,30 @@ impl Machine for KernelMachine {
                 return Ok(Step::Slice);
             }
         }
+    }
+}
+
+impl Machine for KernelMachine {
+    type Parked = ParkedRun;
+
+    fn start(program: Program, bounds: Bounds, start: Start) -> Result<Self, StartError> {
+        Self::start_with_layout(program, bounds, start, Layout::default())
+    }
+
+    fn run(&mut self, host: &mut dyn Host, slice: u64) -> Result<Step, MachineError> {
+        if self.ended {
+            return Err(MachineError::Ended);
+        }
+        if self.observer.is_none() {
+            return self.run_slice(host, slice);
+        }
+        self.observe_phase(GuestPhase::Interpret);
+        let step = self.run_slice(host, slice);
+        self.observe_phase(match step {
+            Ok(Step::Parked(_)) => GuestPhase::Park,
+            _ => GuestPhase::Inactive,
+        });
+        step
     }
 
     fn deliver(&mut self, wait: WaitId, outcome: Outcome) -> Result<Delivered, DeliverError> {

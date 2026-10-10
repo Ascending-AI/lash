@@ -76,6 +76,7 @@ pub(super) fn start(
         steps: Default::default(),
         end: None,
         ended: false,
+        observer: None,
         program,
     };
     let arguments = |problem: String| StartError::Arguments { problem };

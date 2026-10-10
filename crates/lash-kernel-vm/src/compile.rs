@@ -382,6 +382,34 @@ impl Executable {
     pub(crate) fn block_at(&self, site: &Site) -> Option<BlockId> {
         self.tables_of(&site.unit)?.block_at.get(site).copied()
     }
+
+    /// How many codes, library functions and statements the executable
+    /// numbers.
+    pub(crate) fn code_count(&self) -> usize {
+        self.library.0.tables.codes.len() + self.own.codes.len()
+    }
+
+    pub(crate) fn lib_count(&self) -> usize {
+        self.library.0.libs.len()
+    }
+
+    pub(crate) fn stmt_count(&self) -> usize {
+        self.library.0.tables.stmts.len() + self.own.stmts.len()
+    }
+
+    /// Every block, the library's and the document's.
+    pub(crate) fn blocks(&self) -> impl Iterator<Item = &Block> {
+        self.library.0.tables.blocks.iter().chain(&self.own.blocks)
+    }
+
+    /// The registered name of a library function, listed or not.
+    pub(crate) fn library_name(&self, function: &FunctionId) -> Option<&doc::FunctionName> {
+        self.library
+            .0
+            .registry
+            .get(function)
+            .map(|registered| &registered.definition.name)
+    }
 }
 
 /// One function body: `main`, a declared function, a library body or a

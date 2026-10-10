@@ -46,6 +46,7 @@ results; their old launchers have been retired.
 - [heap-over-time](instruments/heap-over-time.md): which allocation stacks retain bytes over time beside the RSS series.
 - [heap-profiles](instruments/heap-profiles.md): what DHAT attributes to lifecycle, child and worker heap windows.
 - [independent-boundaries](instruments/independent-boundaries.md): what each independent 1.0 boundary case measures.
+- [kernel-guest-profiles](instruments/kernel-guest-profiles.md): which guest functions, helpers and natives do the kernel's work and hold its time, by exact counters and a sampled guest context.
 - [load-models](instruments/load-models.md): how a receipt's operations were generated and which model certifies tails and capacity.
 - [observation-workloads](instruments/observation-workloads.md): what crosses the store boundary under process, session, trace-sink and overlay observation workloads.
 - [offered-load](instruments/offered-load.md): how the scheduled-arrival generator measures offered-load latency and the saturation knee.

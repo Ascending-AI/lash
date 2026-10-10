@@ -21,6 +21,7 @@ impl KernelMachine {
         expr: &Expr,
     ) -> Eval<()> {
         self.charge(1)?;
+        self.observe_expression();
         let out = self.regs.len();
         match expr {
             Expr::Literal(value) => self.regs.push(value.clone()),
@@ -162,10 +163,12 @@ impl KernelMachine {
             match arg {
                 Expr::Literal(value) => {
                     self.charge(1)?;
+                    self.observe_expression();
                     self.regs.push(value.clone());
                 }
                 Expr::Var(var) => {
                     self.charge(1)?;
+                    self.observe_expression();
                     let value = self.read_var(task, exe, var)?;
                     self.regs.push(value);
                 }

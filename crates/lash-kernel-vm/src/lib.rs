@@ -27,6 +27,7 @@ mod functions;
 mod heap;
 mod interface;
 mod machine;
+pub mod observe;
 
 #[cfg(test)]
 mod laws;

@@ -38,6 +38,7 @@ use crate::compile::{Charge, Executable, LibId, LibRun, StmtId};
 use crate::functions::MachineFunction;
 use crate::heap::{Key, MAX_VALUE_DEPTH, NativeView, Obj, object_bytes, value_bytes, within_depth};
 use crate::interface::{Bound, Host};
+use crate::observe::Event;
 
 /// A register: a position in the machine's register stack.
 pub(super) type Reg = usize;
@@ -461,6 +462,12 @@ impl KernelMachine {
         if given < function.arity {
             self.regs.resize(args + function.arity, Value::Absent);
         }
+        // A function that runs its body is observed by its frame; one that
+        // does not, from here to its charge. A halt ends the run and its
+        // observation with it.
+        if self.observer.is_some() && !matches!(function.run, LibRun::Body(_)) {
+            self.observe(Event::NativeEnter { task, lib });
+        }
         let result = match &function.run {
             LibRun::Body(_) => return Ok(false),
             LibRun::Machine(MachineFunction::Deref) => match self.regs.get(args) {
@@ -499,25 +506,29 @@ impl KernelMachine {
                     {
                         // What the general call does with its result: keep
                         // it, then charge the formula.
+                        self.observe(Event::NativeFast);
                         self.pin_value(&value)?;
                         let units = if self.charging && function.native {
-                            let args = &self.regs[args..end];
-                            match fast.charge(&function.charge, args, &value) {
+                            match fast.charge(&function.charge, &self.regs[args..end], &value) {
                                 Charge::Units(units) => units,
-                                Charge::Plan(plan) => self.formula(plan, args, Some(&value)),
+                                Charge::Plan(plan) => self.in_formula(lib, true, |machine| {
+                                    machine.formula(plan, &machine.regs[args..end], Some(&value))
+                                }),
                             }
                         } else {
                             0
                         };
                         self.charge_call(exe, lib, units)?;
+                        self.observe(Event::NativeExit);
                         self.put(out, value);
                         return Ok(true);
                     }
                 }
-                let limit = function
-                    .limit
-                    .as_ref()
-                    .map(|limit| self.formula(limit, &self.regs[args..end], None));
+                let limit = function.limit.as_ref().map(|limit| {
+                    self.in_formula(lib, true, |machine| {
+                        machine.formula(limit, &machine.regs[args..end], None)
+                    })
+                });
                 let mut attempt = 0;
                 loop {
                     let mut counter = WorkCounter::new(limit);
@@ -531,7 +542,9 @@ impl KernelMachine {
                         heap: &mut view,
                         counter: &mut counter,
                     };
-                    match native.call(call) {
+                    let answer = native.call(call);
+                    self.observe(Event::GuardWork(counter.spent()));
+                    match answer {
                         Ok(value) => {
                             if !within_depth(&value, MAX_VALUE_DEPTH) {
                                 break Err(super::error(
@@ -559,6 +572,7 @@ impl KernelMachine {
                         // leaves it no room.
                         Err(NativeError::Memory) if attempt == 0 => {
                             attempt += 1;
+                            self.observe(Event::NativeRetry);
                             self.collect();
                         }
                         Err(NativeError::Memory) => {
@@ -569,8 +583,12 @@ impl KernelMachine {
             }
         };
         let end = self.regs.len();
-        let units = self.call_units(exe, lib, &self.regs[args..end], result.as_ref().ok());
+        let evaluates = self.charging && function.native;
+        let units = self.in_formula(lib, evaluates, |machine| {
+            machine.call_units(exe, lib, &machine.regs[args..end], result.as_ref().ok())
+        });
         self.charge_call(exe, lib, units)?;
+        self.observe(Event::NativeExit);
         match result {
             Ok(value) => {
                 self.put(out, value);

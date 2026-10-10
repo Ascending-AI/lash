@@ -16,6 +16,7 @@ use crate::compile::{
 use crate::data::{Decoder, copy_out, deep_size, magnitude, nested_size, size};
 use crate::heap::{Obj, value_bytes};
 use crate::interface::{Bound, Host, Outcome};
+use crate::observe::Event;
 
 /// How a statement's run ends.
 enum Ran {
@@ -91,6 +92,7 @@ impl KernelMachine {
             .and_then(|task| task.frames.last_mut())
             .ok_or_else(|| fault("a running task has no frame"))?;
         self.charging = exe.code(frame.code).charged;
+        let code = frame.code;
         match frame.control.last_mut() {
             Some(Control::Block { block, next }) => {
                 let stmts = &exe.block(*block).stmts;
@@ -99,6 +101,12 @@ impl KernelMachine {
                         *next += 1;
                         let last = self.steps.verify && *next == stmts.len();
                         self.charge(1)?;
+                        self.observe(Event::Statement {
+                            task,
+                            code,
+                            stmt: id,
+                            charging: self.charging,
+                        });
                         let (stmt, edge) = exe.stmt_edge(id);
                         match self.exec(task, host, exe, id, stmt)? {
                             Ran::Done => {
@@ -289,9 +297,13 @@ impl KernelMachine {
         };
         self.refresh_charging(task, exe);
         if let Some(call) = &frame.library {
-            let units = self.call_units(exe, call.lib, &call.args, result.as_ref().ok());
+            let evaluates = self.charging && exe.lib(call.lib).native;
+            let units = self.in_formula(call.lib, evaluates, |machine| {
+                machine.call_units(exe, call.lib, &call.args, result.as_ref().ok())
+            });
             self.charge_call(exe, call.lib, units)?;
         }
+        self.observe(Event::Pop { task });
         let inline = frame.inline;
         self.recycle(frame);
         if inline {
@@ -461,6 +473,10 @@ impl KernelMachine {
             self.frame(task)?.awaiting = Some(stmt);
         }
         self.task(task)?.frames.push(frame);
+        self.observe(Event::Push {
+            task,
+            code: code_id,
+        });
         for (index, param) in code.params.iter().enumerate() {
             let value = self
                 .regs

@@ -813,6 +813,7 @@ pub(in crate::machine) fn import(
         steps: Default::default(),
         end: None,
         ended: false,
+        observer: None,
     };
     // Accounts the memory of what was put back, as the machine that parked
     // it did when it wrote the state.
