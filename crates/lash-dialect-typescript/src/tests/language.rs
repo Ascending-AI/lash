@@ -15,7 +15,9 @@ fn function_declarations_are_hoisted_and_mutually_reachable() {
          function odd(n) { return n !== 0 && even(n - 1); }",
     );
     assert!(
-        text.starts_with("let odd = absent\nlet even = fn("),
+        text.starts_with(
+            "let odd = absent\nlet own1 = {name: \"even\", length: 1.0}\nlet even = fn("
+        ),
         "{text}"
     );
     assert!(text.contains("\nset odd = fn("), "{text}");
@@ -28,7 +30,7 @@ fn function_declarations_are_hoisted_and_mutually_reachable() {
 fn a_function_without_a_return_gives_undefined() {
     assert_eq!(
         main_text("function f() {}"),
-        "let f = fn(this1, args1) {\n  return absent\n}"
+        "let own1 = {name: \"f\", length: 0.0}\nlet f = fn(this1, args1) {\n  try {\n    let arity1 = list.len(args1)\n  } catch asked1 {\n    return own1\n  }\n  return absent\n}"
     );
 }
 
@@ -281,5 +283,34 @@ fn object_rest_copies_string_indices_into_a_fresh_object() {
             "const {0: first, ...rest} = 'foo'; await finish(first === 'f' && rest[1] === 'o' && rest[2] === 'o' && Object.keys(rest).length === 2 && rest instanceof Object);"
         ),
         Ended::Finished(lash_kernel_doc::Datum::Bool(true)),
+    );
+}
+
+/// A function's `name` is its own or the one named evaluation gives it, and
+/// its `length` counts the parameters before the first default or rest.
+#[test]
+fn a_function_has_the_name_and_length_ecma_gives_it() {
+    super::remaining_builtins::agrees(
+        "function f(a, b,) {} const g = function (a, b = 1, c) {}; const h = (...rest) => rest; const own = function inner() {}; const [d = () => 0] = []; let v: any = 1; v &&= function () {}; const o = { m(x) {} }; async function af(a) {} await finish(f.name === 'f' && f.length === 2 && g.name === 'g' && g.length === 1 && h.name === 'h' && h.length === 0 && own.name === 'inner' && d.name === 'd' && v.name === 'v' && o.m.name === 'm' && o.m.length === 1 && af.name === 'af' && af.length === 1 && (function () {}).name === '');",
+    );
+}
+
+/// A function's `name` and `length` are own, read-only and configurable:
+/// a write raises TypeError, and once deleted the function reads the
+/// values Function.prototype holds.
+#[test]
+fn a_functions_name_and_length_are_read_only_and_configurable() {
+    super::remaining_builtins::agrees(
+        "function f(a) {} let rejected = false; try { (f as any).length = 3; } catch (e) { rejected = e instanceof TypeError; } let listed = false; for (const key in f) { listed = true; } await finish(rejected && f.length === 1 && !listed && Object.hasOwn(f, 'length') && delete (f as any).length && !Object.hasOwn(f, 'length') && f.length === 0 && delete (f as any).name && f.name === '');",
+    );
+}
+
+/// A bound function is named for its target and takes the target's length
+/// less the arguments bound. Reading an iterator method's metadata leaves
+/// the iterator where it was.
+#[test]
+fn bound_functions_and_iterator_methods_have_their_own_name_and_length() {
+    super::remaining_builtins::agrees(
+        "function bar(x, y) {} const once = bar.bind(null, 1); const twice = once.bind(null, 2, 3); const it = [7].values(); await finish(once.name === 'bound bar' && once.length === 1 && twice.name === 'bound bound bar' && twice.length === 0 && Math.max.bind(null).length === 2 && it.next.name === 'next' && it.next.length === 0 && it.next().value === 7);",
     );
 }

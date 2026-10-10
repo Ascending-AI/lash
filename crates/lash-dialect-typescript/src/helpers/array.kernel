@@ -104,8 +104,14 @@ errors "type_error", "RangeError"
 charge 4
 body {
   let receiver = invoke ts.receiver(target)
-  if same(receiver, "brand:regex.match") {
-    throw error.new("TS_ARRAY_LIKE_MATCH_UNSUPPORTED", "match arrays do not take writes", null)
+  if same(receiver, "list") {} else {
+    if same(receiver, "brand:regex.match") {
+      throw error.new("TS_ARRAY_LIKE_MATCH_UNSUPPORTED", "match arrays do not take writes", null)
+    }
+    # A boolean or number receiver stands for the wrapper object ToObject
+    # made for this call: the write succeeds on it, and nothing reads it.
+    if same(receiver, "bool") { return value }
+    if same(receiver, "number") { return value }
   }
   let outcome = invoke ts.set(target, key, value)
   return outcome
@@ -117,8 +123,13 @@ errors "type_error"
 charge 4
 body {
   let receiver = invoke ts.receiver(target)
-  if same(receiver, "brand:regex.match") {
-    throw error.new("TS_ARRAY_LIKE_MATCH_UNSUPPORTED", "match arrays do not take writes", null)
+  if same(receiver, "list") {} else {
+    if same(receiver, "brand:regex.match") {
+      throw error.new("TS_ARRAY_LIKE_MATCH_UNSUPPORTED", "match arrays do not take writes", null)
+    }
+    # As for a write, a deletion lands on the call's wrapper object.
+    if same(receiver, "bool") { return true }
+    if same(receiver, "number") { return true }
   }
   let outcome = invoke ts.delete(target, key)
   return outcome
@@ -1202,7 +1213,9 @@ body {
   do invoke ts.require_object_coercible(this)
   let index = 0.0
   let exhausted = false
+  let own = {name: "next", length: 0.0}
   let next = fn(context, passed) {
+    try { let counted = list.len(passed) } catch asked { return own }
     let length = invoke ts.array.length(this)
     if exhausted { return {value: absent, done: true} }
     if num.le(length, index) {
@@ -1225,7 +1238,9 @@ body {
   do invoke ts.require_object_coercible(this)
   let index = 0.0
   let exhausted = false
+  let own = {name: "next", length: 0.0}
   let next = fn(context, passed) {
+    try { let counted = list.len(passed) } catch asked { return own }
     let length = invoke ts.array.length(this)
     if exhausted { return {value: absent, done: true} }
     if num.le(length, index) {
@@ -1248,7 +1263,9 @@ body {
   do invoke ts.require_object_coercible(this)
   let index = 0.0
   let exhausted = false
+  let own = {name: "next", length: 0.0}
   let next = fn(context, passed) {
+    try { let counted = list.len(passed) } catch asked { return own }
     let length = invoke ts.array.length(this)
     if exhausted { return {value: absent, done: true} }
     if num.le(length, index) {

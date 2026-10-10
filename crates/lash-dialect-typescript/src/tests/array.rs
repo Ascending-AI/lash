@@ -271,6 +271,18 @@ fn generic_receivers_bounds_search_and_reduce_follow_ecma_steps() {
     "#);
 }
 
+/// A boolean or number receiver is the wrapper object ToObject makes for
+/// the call, so a generic method's writes to it succeed and are lost.
+#[test]
+fn generic_methods_write_to_a_primitive_receivers_wrapper() {
+    law(r#"
+        const pushed = Array.prototype.push.call(true) === 0 && Array.prototype.push.call(1, 'x') === 1;
+        const popped = Array.prototype.pop.call(false) === undefined && Array.prototype.shift.call(2) === undefined;
+        const spliced = Array.prototype.splice.call(true).length === 0 && Array.prototype.unshift.call(false) === 0;
+        await finish(pushed && popped && spliced);
+    "#);
+}
+
 /// Array.from interleaves iterator reads with mapping, whereas an array-like
 /// source snapshots ToLength. Flattening skips holes at every flattened level.
 #[test]

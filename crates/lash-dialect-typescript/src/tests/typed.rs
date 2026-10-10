@@ -9,14 +9,20 @@ use lash_kernel_doc::{EffectName, Signature, Type, print_document};
 use super::{lower_against, lower_in_session, main_text};
 
 /// The statements of `source`'s lowered `main` that compute something: a
-/// direct kernel call or a helper call, without the binding's name.
+/// direct kernel call or a helper call, without the binding's name. A
+/// function's calling convention (its closure, its own-properties test and
+/// its padded arguments) is not one.
 fn operations(source: &str) -> Vec<String> {
     main_text(source)
         .lines()
         .filter_map(|line| line.trim().split_once(" = "))
         .map(|(_, value)| value.to_string())
         .filter(|value| value.contains('('))
-        .filter(|value| !value.starts_with("fn(") && !value.starts_with("invoke ts.pad("))
+        .filter(|value| {
+            !value.starts_with("fn(")
+                && !value.starts_with("list.len(args")
+                && !value.starts_with("invoke ts.pad(")
+        })
         .collect()
 }
 

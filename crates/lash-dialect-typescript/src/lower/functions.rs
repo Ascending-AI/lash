@@ -1,10 +1,10 @@
 //! Functions as closures of the dialect's calling convention,
 //! `fn(this, args)`.
 
-use lash_kernel_doc::{Expr, Literal, Stmt};
+use lash_kernel_doc::{Expr, Float, Literal, RecordEntry, Rhs, Stmt};
 
 use super::patterns::Mode;
-use super::{BindingKind, FunctionFrame, Lowerer, Lowering, Operand, Ty};
+use super::{BindingKind, Buf, FunctionFrame, Lowerer, Lowering, Operand, Ty};
 use crate::adapter as ast;
 
 impl Lowerer<'_> {
@@ -45,7 +45,75 @@ impl Lowerer<'_> {
         if function.is_async {
             return self.lower_async_function(function, self.span);
         }
-        self.closure(function)
+        let own = self.own_properties(function);
+        self.closure(function, Some(&own))
+    }
+
+    /// A function's own `name` and `length` (ECMA-262 SetFunctionName and
+    /// SetFunctionLength), made with the function: its name, or the one
+    /// named evaluation gave it, and the count of its parameters before the
+    /// first default or rest. The function gives this record when it is
+    /// called with no argument list, which no JavaScript call does
+    /// (`ts.own`); the helpers read, test and delete the two through it.
+    pub(super) fn own_properties(&mut self, function: &ast::Function) -> Operand {
+        let length = function
+            .params
+            .iter()
+            .take_while(|param| {
+                !matches!(param, ast::Pattern::Rest(_) | ast::Pattern::Assign { .. })
+            })
+            .count();
+        #[expect(clippy::cast_precision_loss, reason = "a function's parameter count")]
+        let length = Float::new(length as f64);
+        let record = Expr::Record(vec![
+            RecordEntry {
+                field: "name".to_owned(),
+                value: Expr::Literal(Literal::Text(function.name.clone().unwrap_or_default())),
+            },
+            RecordEntry {
+                field: "length".to_owned(),
+                value: Expr::Literal(Literal::Float(length)),
+            },
+        ]);
+        let own = self.fresh("own");
+        self.emit(Stmt::Let {
+            name: own.clone(),
+            value: Rhs::Expr(record),
+        });
+        Operand::variable(own, Ty::Unknown)
+    }
+
+    /// Opens a function's `body` with its answer to a call with no argument
+    /// list: `own`, its own properties, before anything else runs. The
+    /// argument list is tested by taking its length, which is charged the
+    /// same whatever the arguments hold and raises only for no list.
+    pub(super) fn answer_own(
+        &mut self,
+        body: &mut Buf,
+        args: &lash_kernel_doc::Name,
+        own: &Operand,
+    ) -> Lowering<()> {
+        let prologue = self.block(|this| {
+            let probe = this.block(|this| {
+                let counted = this.native("list.len", vec![Expr::Variable(args.clone())])?;
+                let name = this.fresh("arity");
+                this.emit(Stmt::Let {
+                    name,
+                    value: Rhs::Expr(counted),
+                });
+                Ok(())
+            })?;
+            let answer = this.block(|this| {
+                this.emit(Stmt::Return { value: own.expr() });
+                Ok(())
+            })?;
+            let asked = this.fresh("asked");
+            this.emit_try(probe, Some((asked, answer)), None);
+            Ok(())
+        })?;
+        body.stmts.splice(0..0, prologue.stmts);
+        body.notes.splice(0..0, prologue.notes);
+        Ok(())
     }
 
     /// Anonymous function definitions receive a name only in named evaluation.
@@ -94,7 +162,12 @@ impl Lowerer<'_> {
     }
 
     /// A function's parameters and body as a closure, whatever runs it.
-    pub(super) fn closure(&mut self, function: &ast::Function) -> Lowering<Operand> {
+    /// The closure that is the function's value answers with `own`.
+    pub(super) fn closure(
+        &mut self,
+        function: &ast::Function,
+        own: Option<&Operand>,
+    ) -> Lowering<Operand> {
         let this = self.fresh("this");
         let args = self.fresh("args");
         let arguments = (!function.is_arrow).then(|| self.fresh("arguments"));
@@ -148,7 +221,10 @@ impl Lowerer<'_> {
         });
         self.span = outer_span;
         self.functions.pop();
-        let body = body?;
+        let mut body = body?;
+        if let Some(own) = own {
+            self.answer_own(&mut body, &args, own)?;
+        }
         if self.in_cell_code() {
             self.written = Some(self.written(function));
         }

@@ -65,6 +65,7 @@ use ts.exotic.set
 use ts.exotic.iterate
 use ts.receiver
 use ts.callable
+use ts.own
 use ts.identity
 use ts.is_primitive
 use ts.is_nullish
@@ -138,6 +139,17 @@ body {
   if same(value, ()) { return value }
   if same(value[0], "ts.function") { return value[4] }
   return value
+}
+
+# A function's own properties, `name` and `length`: the record a closure
+# the dialect made gives when called with no argument list, which no
+# JavaScript call does (`lower/functions.rs`). Deleting one removes it.
+function ts.own(target: Any) -> Any
+kernel 1
+charge sum(4, deep(result))
+body {
+  let own = apply target(absent, absent)
+  return own
 }
 
 # What `===` compares: a built-in function's token by its path, since each
@@ -1019,6 +1031,19 @@ body {
     let name = invoke ts.to_property_key(key)
     if same(name, "caller") { throw error.new("type_error", "Restricted function property", null) }
     if same(name, "arguments") { throw error.new("type_error", "Restricted function property", null) }
+    if same(kind(target), "closure") {
+      # Without its own, a function reads Function.prototype's.
+      if same(name, "name") {
+        let own = invoke ts.own(target)
+        if record.contains(own, name) { return own.name }
+        return ""
+      }
+      if same(name, "length") {
+        let own = invoke ts.own(target)
+        if record.contains(own, name) { return own.length }
+        return 0.0
+      }
+    }
   }
   if same(k, "brand:ts.arguments") {
     let name = invoke ts.to_property_key(key)
@@ -1111,6 +1136,12 @@ body {
     let name = invoke ts.to_property_key(key)
     if same(name, "caller") { throw error.new("type_error", "Restricted function property", null) }
     if same(name, "arguments") { throw error.new("type_error", "Restricted function property", null) }
+    if same(kind(target), "closure") {
+      # Own or inherited from Function.prototype, both are read-only.
+      for described in ["name", "length"] {
+        if same(name, described) { throw error.new("type_error", text.concat("Cannot assign to read only property '", text.concat(name, "' of function")), null) }
+      }
+    }
   }
   if same(k, "brand:ts.arguments") {
     let name = invoke ts.to_property_key(key)
@@ -1180,6 +1211,16 @@ body {
     }
     return true
   }
+  if same(kind(target), "closure") {
+    let name = invoke ts.to_property_key(key)
+    for described in ["name", "length"] {
+      if same(name, described) {
+        let own = invoke ts.own(target)
+        remove own[name]
+        return true
+      }
+    }
+  }
   if same(k, "brand:ts.arguments") {
     let name = invoke ts.to_property_key(key)
     if same(name, "callee") { throw error.new("type_error", "Cannot delete strict arguments.callee", null) }
@@ -1229,8 +1270,16 @@ body {
     throw error.new("TS_REFLECTION_UNSUPPORTED", "Testing a built-in's own properties is outside the TypeScript dialect", null)
   }
   if same(k, "closure") {
-    # A function's own `name`, `length` and `prototype` carry attributes
-    # the dialect does not keep.
+    if same(kind(target), "closure") {
+      for described in ["name", "length"] {
+        if same(name, described) {
+          let own = invoke ts.own(target)
+          return record.contains(own, name)
+        }
+      }
+    }
+    # A function's own `prototype` carries attributes the dialect does not
+    # keep, and so do the `name` and `length` of one it did not make.
     for described in ["name", "length", "prototype"] {
       if same(name, described) { throw error.new("TS_REFLECTION_UNSUPPORTED", "Testing a function's own properties is outside the TypeScript dialect", null) }
     }

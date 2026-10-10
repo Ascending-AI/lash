@@ -60,7 +60,13 @@ fn a_variable_read_before_a_call_is_held_in_a_temporary() {
         main_text("let x = 1; function f() { x = 5; return 1; } x = x + f();"),
         "\
 let x = 1.0
+let own1 = {name: \"f\", length: 0.0}
 let f = fn(this1, args1) {
+  try {
+    let arity1 = list.len(args1)
+  } catch asked1 {
+    return own1
+  }
   set x = 5.0
   return 1.0
 }

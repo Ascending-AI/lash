@@ -50,7 +50,7 @@ impl Lowerer<'_> {
         function: &ast::Function,
         _span: Option<SourceSpan>,
     ) -> Lowering<Operand> {
-        let body = self.closure(function)?;
+        let body = self.closure(function, None)?;
         // The function the source wrote is the one that starts the task,
         // not the closure of its body.
         if let Some(note) = self.buf.notes.last_mut() {
@@ -60,14 +60,16 @@ impl Lowerer<'_> {
         let this = self.fresh("this");
         let args = self.fresh("args");
         let params = vec![this.clone(), args.clone()];
-        let block = self.block(|lowerer| {
+        let own = self.own_properties(function);
+        let mut block = self.block(|lowerer| {
             let promise =
-                lowerer.start_promise(&body, Atom::Variable(this), Atom::Variable(args))?;
+                lowerer.start_promise(&body, Atom::Variable(this), Atom::Variable(args.clone()))?;
             lowerer.emit(Stmt::Return {
                 value: promise.expr(),
             });
             Ok(())
         })?;
+        self.answer_own(&mut block, &args, &own)?;
         self.written = written;
         Ok(self.emit_closure(params, block))
     }

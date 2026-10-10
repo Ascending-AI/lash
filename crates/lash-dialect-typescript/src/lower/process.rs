@@ -252,7 +252,7 @@ impl Lowerer<'_> {
                 debug_assert_eq!(kernel, param.name, "an entry's parameter keeps its name");
                 passed.push(Expr::Variable(kernel));
             }
-            let run = lowerer.closure(function)?;
+            let run = lowerer.closure(function, None)?;
             let Atom::Variable(run) = run.atom else {
                 unreachable!("a closure is bound to a temporary");
             };
