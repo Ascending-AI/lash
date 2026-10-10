@@ -1073,9 +1073,10 @@ impl lash_core::ToolProvider for ArrayAttachmentTool {
 /// FIG-3515: a tool value embedding an attachment commits one resume-safe
 /// result for its call, with the image in its place. An `Immediate` cancel
 /// of the next turn, while its model answers that turn's executed call,
-/// leaves nothing of it half-committed: a cancelled turn ends with no head
-/// commit, so the head is still the first turn's whole result, resume-safe,
-/// and the session's next turn answers over it.
+/// leaves nothing of it half-committed: the cancelled turn's stop commits
+/// the step it checkpointed whole (ADR 0039), its call with its one result
+/// and image, so the head is resume-safe and the session's next turn
+/// answers over it.
 async fn attachment_in_array_tool_value_then_immediate_cancel_loses_nothing(tier: Tier) {
     let (answering_tx, answering_rx) = tokio::sync::oneshot::channel::<()>();
     let answering_tx = Arc::new(Mutex::new(Some(answering_tx)));
@@ -1180,36 +1181,37 @@ async fn attachment_in_array_tool_value_then_immediate_cancel_loses_nothing(tier
         .flat_map(|message| message.parts.iter())
         .collect::<Vec<_>>();
     assert!(
-        !parts.iter().any(|part| part.content() == "turn two input"
-            || part.provider_call_id() == Some("turn-two-call")),
-        "a cancelled turn commits nothing of itself: {parts:?}"
+        parts.iter().any(|part| part.content() == "turn two input"),
+        "the cancelled turn's stop keeps its input: {parts:?}"
     );
-    let turn_one_call = parts
-        .iter()
-        .find(|part| part.provider_call_id() == Some("turn-one-call"))
-        .and_then(|part| part.call_id())
-        .cloned()
-        .expect("turn 1's call is committed");
-    let results = parts
-        .iter()
-        .filter(|part| {
-            part.kind() == lash_core::PartKind::ToolResult && part.call_id() == Some(&turn_one_call)
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(results.len(), 1, "turn 1's call has one result");
-    let blocks = results[0]
-        .tool_result_content()
-        .expect("tool result blocks");
-    let images = blocks
-        .iter()
-        .filter_map(|block| block.attachment())
-        .map(|attachment| attachment.label.clone())
-        .collect::<Vec<_>>();
-    assert_eq!(
-        images,
-        [Some("array.png".to_owned())],
-        "the image stays the result's one attachment: {blocks:?}"
-    );
+    for provider_call in ["turn-one-call", "turn-two-call"] {
+        let call = parts
+            .iter()
+            .find(|part| part.provider_call_id() == Some(provider_call))
+            .and_then(|part| part.call_id())
+            .cloned()
+            .unwrap_or_else(|| panic!("{provider_call} is committed: {parts:?}"));
+        let results = parts
+            .iter()
+            .filter(|part| {
+                part.kind() == lash_core::PartKind::ToolResult && part.call_id() == Some(&call)
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(results.len(), 1, "{provider_call} has one result");
+        let blocks = results[0]
+            .tool_result_content()
+            .expect("tool result blocks");
+        let images = blocks
+            .iter()
+            .filter_map(|block| block.attachment())
+            .map(|attachment| attachment.label.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            images,
+            [Some("array.png".to_owned())],
+            "the image stays {provider_call}'s result's one attachment: {blocks:?}"
+        );
+    }
     assert!(lash_sansio::messages_are_prompt_resume_safe(
         head.messages()
     ));

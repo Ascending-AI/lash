@@ -28,8 +28,11 @@
 //! before a model call starts, so an `AfterStep` request lets the step's
 //! response, round or cell finish first; an `Immediate` one also before a
 //! cell starts, while a call streams or a cell runs, and before
-//! `turn.commit`. The turn's held terminal publishes only once `turn.commit`
-//! is acknowledged ([`TurnDrive::committed`]).
+//! `turn.commit`. The owner commits the stop from the drive it holds; only
+//! one honoured before `turn.commit`, whose machine is finished, leaves its
+//! stop to the next pass, which restores it from its last checkpoint. The
+//! turn's held terminal publishes only once the commit that ends it is
+//! acknowledged ([`TurnDrive::committed`]).
 
 use lash_durable::CommitLabel;
 use lash_durable::DomainWrite;
@@ -41,7 +44,8 @@ use lash_durable::domain::{
 use super::head::HeadCache;
 use super::session::{
     CellExit, CodeCell, ComposedCall, OpenTurn, ParkedTurnState, PhaseCheckpoint, PhaseExit,
-    PreparedCall, TurnDone, TurnDrive, TurnError, TurnRow, TurnServices, UnfinishedPhase,
+    PreparedCall, TurnCancelRequest, TurnDone, TurnDrive, TurnError, TurnRow, TurnServices,
+    UnfinishedPhase,
 };
 use super::session_mail::{agent_frame_switches, follow_on_mail};
 use super::tool_round::{self, RoundExit};
@@ -99,7 +103,11 @@ pub(super) fn write_run_changes(
 /// §4): the first binds the rows, and a later one finds them bound to the run
 /// already. A row no longer open refuses the commit, which the turn then
 /// recomputes without it.
-fn bind_delivered(drive: &dyn TurnDrive, session: &SessionId, run: &TurnId) -> Option<DomainWrite> {
+pub(super) fn bind_delivered(
+    drive: &dyn TurnDrive,
+    session: &SessionId,
+    run: &TurnId,
+) -> Option<DomainWrite> {
     let inputs = drive
         .delivered_inputs()
         .iter()
@@ -198,8 +206,14 @@ pub async fn run_phases(
                 // accepted cancel, a requested close and the store's clock
                 // come with it.
                 let mut tx = cx.begin().await?;
+                // The turn is between steps: the stop an accepted request
+                // asks for commits here, with the step the turn finished
+                // (ADR 0039).
                 if tx.turn_cancel().is_some() || turn_cancel::close_requested_in(&tx) {
-                    return Ok(PhaseExit::CancelRequested);
+                    let request = tx.turn_cancel().cloned();
+                    drop(tx);
+                    let stopped = stopped(drive, &mut carry, &mut answered_cell);
+                    return stop(cx, services, &row, request, stopped, heads).await;
                 }
                 if cx.draining() {
                     return Ok(PhaseExit::Drained);
@@ -330,14 +344,19 @@ pub async fn run_phases(
                     }
                 }
                 if !model_call::send(cx, drive.as_mut(), id, request, &admitted, &start).await? {
-                    return Ok(PhaseExit::CancelRequested);
+                    let request = cx.begin().await?.turn_cancel().cloned();
+                    let stopped = stopped(drive, &mut carry, &mut answered_cell);
+                    return stop(cx, services, &row, request, stopped, heads).await;
                 }
             }
 
             Effect::ExecCode { id, language, code } => {
                 let mut tx = cx.begin().await?;
                 if turn_cancel::immediate_in(&tx) {
-                    return Ok(PhaseExit::CancelRequested);
+                    let request = tx.turn_cancel().cloned();
+                    drop(tx);
+                    let stopped = stopped(drive, &mut carry, &mut answered_cell);
+                    return stop(cx, services, &row, request, stopped, heads).await;
                 }
                 if cx.draining() {
                     return Ok(PhaseExit::Drained);
@@ -384,7 +403,15 @@ pub async fn run_phases(
                     }
                     None => {
                         drive.stop_cell();
-                        return Ok(PhaseExit::CancelRequested);
+                        // The stop records the calls the cell completed:
+                        // the cell never answers.
+                        let calls = drive.stopped_cell_calls(cx, id).await?;
+                        if !calls.is_empty() {
+                            answered_cell = Some(tool_round::AnsweredCell { id, calls });
+                        }
+                        let request = cx.begin().await?.turn_cancel().cloned();
+                        let stopped = stopped(drive, &mut carry, &mut answered_cell);
+                        return stop(cx, services, &row, request, stopped, heads).await;
                     }
                 }
             }
@@ -400,7 +427,11 @@ pub async fn run_phases(
                 };
                 match tool_round::run(cx, drive.as_mut(), &row, id, calls, done).await? {
                     RoundExit::Answered(present) => carry = present,
-                    RoundExit::CancelRequested => return Ok(PhaseExit::CancelRequested),
+                    RoundExit::CancelRequested => {
+                        let request = cx.begin().await?.turn_cancel().cloned();
+                        let stopped = stopped(drive, &mut carry, &mut answered_cell);
+                        return stop(cx, services, &row, request, stopped, heads).await;
+                    }
                     RoundExit::Suspended { due } => return Ok(PhaseExit::Suspended { due }),
                 }
             }
@@ -415,7 +446,10 @@ pub async fn run_phases(
                 model = None;
                 let mut tx = cx.begin().await?;
                 if turn_cancel::immediate_in(&tx) {
-                    return Ok(PhaseExit::CancelRequested);
+                    let request = tx.turn_cancel().cloned();
+                    drop(tx);
+                    let stopped = stopped(drive, &mut carry, &mut answered_cell);
+                    return stop(cx, services, &row, request, stopped, heads).await;
                 }
                 tool_round::record_refused(cx, &mut tx, &row, id, &completed)?;
                 if let Some(present) = carry.take() {
@@ -447,7 +481,9 @@ pub async fn run_phases(
                 protocol_iteration,
             } => {
                 // An `Immediate` request the turn accepted after its last
-                // step still wins over the commit: the turn backtracks.
+                // step still wins over the commit: the turn backtracks to its
+                // last checkpoint, which the next pass restores to commit
+                // its stop from (its machine here is finished).
                 let mut tx = cx.begin().await?;
                 if turn_cancel::immediate_in(&tx) {
                     return Ok(PhaseExit::CancelRequested);
@@ -534,6 +570,37 @@ pub async fn run_phases(
             }
         }
     }
+}
+
+/// `drive` where the turn stopped, with what its next commit owed.
+fn stopped(
+    drive: Box<dyn TurnDrive>,
+    carry: &mut Option<DomainWrite>,
+    answered_cell: &mut Option<tool_round::AnsweredCell>,
+) -> turn_cancel::StoppedTurn {
+    turn_cancel::StoppedTurn {
+        drive,
+        present: carry.take(),
+        cell: answered_cell.take(),
+    }
+}
+
+/// The turn stopped where it honours a cancel: for the `request` it accepted,
+/// its stop commits from `stopped`, the drive that holds it (ADR 0039). With
+/// no request, a requested close stopped it, and the close ends the turn.
+async fn stop(
+    cx: &ActorContext,
+    services: &dyn TurnServices,
+    row: &TurnRow,
+    request: Option<TurnCancelRequest>,
+    stopped: turn_cancel::StoppedTurn,
+    heads: &mut HeadCache,
+) -> Result<PhaseExit, TurnError> {
+    let Some(request) = request else {
+        return Ok(PhaseExit::CancelRequested);
+    };
+    turn_cancel::finalize(cx, services, row, &request, Some(stopped), heads).await?;
+    Ok(PhaseExit::Cancelled)
 }
 
 /// The value schema the turn's accepted finish was validated under, as its

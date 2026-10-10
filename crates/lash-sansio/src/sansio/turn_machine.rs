@@ -499,6 +499,21 @@ impl<M: TurnProtocol> TurnMachine<M> {
         self.finish(outcome);
     }
 
+    /// Finish the turn for the cancel `evidence` names, keeping what it
+    /// reached through its last prompt-resume-safe message (ADR 0039): a
+    /// model response whose tool calls are unanswered, and the records the
+    /// machine appended since its last progress boundary, are the
+    /// uncommitted tail the stop returns to that point. A machine waiting
+    /// on its next model call, between steps, keeps everything.
+    pub fn finish_cancelled(&mut self, evidence: crate::TurnCancellationEvidence) {
+        let safe = crate::session_model::prompt_resume_safe_len(self.messages.iter());
+        if safe < self.messages.len() {
+            self.messages.make_mut().truncate(safe);
+            self.events.truncate(self.progress_event_cursor);
+        }
+        self.finish(TurnOutcome::Stopped(TurnStop::Cancelled { evidence }));
+    }
+
     /// Stop the Run for a tool check's abort: report the plugin's typed
     /// cause, then finish with the plugin-abort stop.
     fn finish_run_abort(&mut self, abort: RunAbort) {

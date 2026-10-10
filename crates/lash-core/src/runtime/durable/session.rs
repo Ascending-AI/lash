@@ -63,8 +63,9 @@ use super::turn_scope::{TurnChildrenStopError, await_turn_children, continue_sco
 
 mod park;
 
+use park::park;
+pub(super) use park::undecodable_state;
 pub use park::{ParkedTurnState, SessionParkReason, SessionPassFailure};
-use park::{park, undecodable_state};
 
 /// What a session's turns run with: the deployment's protocol, model,
 /// environment and code cells. It opens one [`TurnDrive`] per turn an owner
@@ -115,24 +116,6 @@ pub trait TurnServices: Send + Sync {
         cx: &ActorContext,
         admitted: &AdmittedInputs,
     ) -> Result<(), TurnError>;
-
-    /// The tool calls the cell `row`'s turn stopped on completed, with the
-    /// cell's effect, when the turn's phase is a cell whose calls its rows
-    /// do not record yet: what the commit that ends the turn without the
-    /// cell's answer records of it (FIG-5330). `None` for a turn that
-    /// stopped on no cell, and for services that run none.
-    ///
-    /// # Errors
-    ///
-    /// [`TurnError`] when the turn or the cell's records do not read.
-    async fn stopped_cell_calls(
-        &self,
-        _cx: &ActorContext,
-        _row: &TurnRow,
-        _heads: &mut HeadCache,
-    ) -> Result<Option<(crate::EffectId, CellToolCalls)>, TurnError> {
-        Ok(None)
-    }
 
     /// Carry `session`, idle and in the session format set of an earlier
     /// build this one carries forward, to this build's (ADR 0106 §2,
@@ -758,50 +741,12 @@ impl SessionActivation {
         drop(tx);
         // An accepted cancel request ends the turn before anything else
         // runs: the live owner stopped its work for it, or a crash left it.
+        // Its stop commits from the turn's last checkpoint.
         if let Some(request) = row.cancel.clone() {
-            // A turn that stopped on a cell records the calls the cell
-            // completed with its cancel: the cell never answers. A turn
-            // whose parked state this build does not decode records none of
-            // them: its cancel ends it without reading that state, so the
-            // refusal never holds the session's one way out (FIG-5601).
-            let stopped = match self.services.stopped_cell_calls(cx, &row, heads).await {
-                Ok(stopped) => stopped,
-                Err(error) => match undecodable_state(&error) {
-                    Some(refusal) => {
-                        tracing::warn!(
-                            session_id = %session,
-                            run_id = %row.run,
-                            refusal = %refusal.encode(),
-                            "the cancelled turn ends without its stopped cell's calls"
-                        );
-                        None
-                    }
-                    None => return Err(error),
-                },
-            };
-            turn_cancel::finalize(cx, self.services.tracing(), &row, &request, stopped).await?;
-            // The stop then waits for the children its cancel marked (G1b,
-            // L6b): the rest of its cascade first, then their terminals,
-            // bounded by the stop's grace. A child still running at the
-            // grace keeps its cancel, and the stop completes anyway.
-            continue_scope_ends(cx, session).await?;
-            let stop = await_turn_children(
-                cx,
-                session,
-                &row.run,
-                self.services.execution_budgets(session).stop_grace(),
-                self.backend.config().settings().cascade_batch,
-            )
-            .await?;
-            if !stop.may_still_be_running.is_empty() {
-                tracing::warn!(
-                    session_id = %session,
-                    run_id = %row.run,
-                    children = ?stop.may_still_be_running,
-                    "the cancelled turn's children may still be running past its stop grace"
-                );
-            }
-            return Ok(Pass::Again);
+            let stopped = turn_cancel::restore(cx, self.services.as_ref(), &row, heads).await?;
+            turn_cancel::finalize(cx, self.services.as_ref(), &row, &request, stopped, heads)
+                .await?;
+            return self.await_stop(cx, session, &row.run).await;
         }
         // A turn still admitted owes its admission's export until an owner
         // records it: the owner that committed `turn.admit` may have lost
@@ -869,6 +814,7 @@ impl SessionActivation {
         };
         match ran {
             PhaseExit::Committed(_) | PhaseExit::CancelRequested => Ok(Pass::Again),
+            PhaseExit::Cancelled => self.await_stop(cx, session, &row.run).await,
             PhaseExit::Lost => Ok(Pass::Lost),
             PhaseExit::Drained => drain_release(cx).await,
             PhaseExit::Suspended { due } => {
@@ -879,6 +825,36 @@ impl SessionActivation {
                 Ok(Pass::Released)
             }
         }
+    }
+
+    /// After `run`'s cancel committed, wait for the children it marked (G1b,
+    /// L6b): the rest of its cascade first, then their terminals, bounded by
+    /// the stop's grace. A child still running at the grace keeps its
+    /// cancel, and the stop completes anyway.
+    async fn await_stop(
+        &self,
+        cx: &ActorContext,
+        session: &SessionId,
+        run: &TurnId,
+    ) -> Result<Pass, TurnError> {
+        continue_scope_ends(cx, session).await?;
+        let stop = await_turn_children(
+            cx,
+            session,
+            run,
+            self.services.execution_budgets(session).stop_grace(),
+            self.backend.config().settings().cascade_batch,
+        )
+        .await?;
+        if !stop.may_still_be_running.is_empty() {
+            tracing::warn!(
+                session_id = %session,
+                run_id = %run,
+                children = ?stop.may_still_be_running,
+                "the cancelled turn's children may still be running past its stop grace"
+            );
+        }
+        Ok(Pass::Again)
     }
 }
 
@@ -1147,9 +1123,14 @@ pub enum PhaseExit {
     },
     /// Ownership was lost: drop everything held for the actor.
     Lost,
-    /// The turn accepted a cancel request it honours here: its in-memory
-    /// work stopped, and the next pass finalizes it from its row.
+    /// The turn stopped for its session's requested close, or for a cancel
+    /// it accepted once its machine had finished, before `turn.commit`: its
+    /// in-memory work stopped, and the next pass ends it from its rows.
     CancelRequested,
+    /// The turn stopped between steps for the cancel request it accepted,
+    /// and its stop committed with its terminal: the turn is over, and its
+    /// cancel's children are still to be awaited.
+    Cancelled,
     /// The node is draining: the turn stopped at a committed phase, before
     /// starting its next model call or cell, and the actor is released for
     /// the next build to resume from its rows (ADR 0106 §1).

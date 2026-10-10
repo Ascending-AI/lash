@@ -267,7 +267,6 @@ async fn cancelled(
 /// lands while the model call streams, the call's tool runs, and the next
 /// turn's prompt carries that tool call and its result.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "FIG-5373: a cancelled durable turn never commits its checkpointed steps to the head"]
 async fn an_after_step_stop_keeps_its_completed_step_in_the_session() -> Result<()> {
     let tool = TokenWatchingTool::default();
     tool.release();
@@ -619,7 +618,6 @@ async fn a_defer_cancel_keeps_the_turn_s_undelivered_input_for_a_later_turn() ->
 /// A `Drop` cancel never delivers the turn's undelivered input, in either
 /// mode.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "FIG-5365: the durable path never applies a Drop cancel's disposition"]
 async fn a_drop_cancel_never_delivers_the_turn_s_undelivered_input() -> Result<()> {
     undelivered_input_settles_by(TurnCancelUndeliveredInputPolicy::Drop, Witness::Settlement).await
 }
@@ -860,7 +858,6 @@ async fn immediate_stop_tail_after_checkpoint_is_absent_from_next_turn_context()
 /// of the next turn's prompt: only the tail past the checkpoint is
 /// discarded.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "FIG-5373: a cancelled durable turn never commits its checkpointed steps to the head"]
 async fn an_immediate_stop_keeps_the_prose_checkpointed_before_it() -> Result<()> {
     let tail = immediate_stop_after_a_checkpoint("immediate-keeps-checkpoint").await?;
     assert!(
@@ -929,7 +926,6 @@ async fn after_step_stop_during_retry_sleep_lands_at_wake_and_stops_at_the_bound
 /// cancelled with the request's evidence, and the undelivered input
 /// addressed to it is never delivered to any later turn.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "FIG-5365: the durable path never applies a Drop cancel's disposition"]
 async fn drop_request_survives_owner_failure_before_finish_and_prevents_redelivery() -> Result<()> {
     const ID: &str = "drop-cancel-owner-failure";
     let backend = sqlite_memory_store_backend().await;

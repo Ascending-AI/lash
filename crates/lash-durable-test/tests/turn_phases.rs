@@ -19,7 +19,8 @@
 //! - **L-C1:** with a model total shorter than a failover, a call pinned by
 //!   a node that died is never sent again: its deadline is not refreshed.
 //! - **Turn cancel:** a cancel requested while the model streams ends the
-//!   turn `Cancelled` in one `turn.cancel` commit with no head advance, and
+//!   turn `Cancelled` in one `turn.cancel` commit, which publishes its stop
+//!   as the head's next revision and no `turn.commit` beside it, and
 //!   no model call starts after the request, whatever node finalizes it.
 //! - **After-step cancel:** an `AfterStep` cancel requested from outside the
 //!   actor while the model streams lets that call finish, and the turn stops
@@ -1406,7 +1407,8 @@ fn cancel_at_admission(nodes: Arc<SimNodes>, seen: Arc<Mutex<Seen>>) {
 /// Withdraw or cancel (FIG-5262): the cancel sent at the admission cut did
 /// exactly one thing. Withdrawn, no admission of the input landed, its run
 /// never called the model and has no end; a cancelled run, the input's
-/// one admission landed and its run ended `Cancelled` with no head commit.
+/// one admission landed and its run ended `Cancelled` in one `turn.cancel`,
+/// with no `turn.commit`.
 /// A cut that holds the admission out of the store until a failover leaves
 /// the withdraw to win, and an uncut cancel, sent once the admission left
 /// the store, cancels the run.

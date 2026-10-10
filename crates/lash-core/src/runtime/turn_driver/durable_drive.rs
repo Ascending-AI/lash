@@ -449,7 +449,9 @@ impl TurnDrive for RuntimeDrive {
             &self.observer,
         ));
         tokio::pin!(call);
-        let result = tokio::select! {
+        // A cancelled call settles before the turn's stop, which publishes
+        // the sealed call ahead of its terminal.
+        tokio::select! {
             biased;
             result = &mut call => result,
             () = cancel.cancelled() => {
@@ -457,19 +459,7 @@ impl TurnDrive for RuntimeDrive {
                 call.await
             }
         }
-        .map_err(runtime);
-        if cancel.is_cancelled()
-            && stop_error
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .is_none()
-        {
-            // Publish the sealed model call before the turn's cancel terminal:
-            // dropping this drive otherwise aborts its live publisher.
-            self.observer.close();
-            let _ = (&mut self.publisher).await;
-        }
-        result
+        .map_err(runtime)
     }
 
     async fn prepare_call(

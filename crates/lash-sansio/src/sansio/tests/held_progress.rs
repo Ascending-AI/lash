@@ -205,3 +205,53 @@ fn a_record_appended_while_a_call_is_unanswered_rides_the_next_resume_safe_bound
     assert_eq!(progressed_messages.len(), messages.len());
     assert!(holds_note(progressed_delta));
 }
+
+/// A cancel that finishes the turn while its call is unanswered returns the
+/// turn to its last prompt-resume-safe point (ADR 0039): the response that
+/// made the call, and the record appended with it, are its uncommitted tail,
+/// and the turn keeps its input.
+#[test]
+fn a_cancel_while_a_call_is_unanswered_finishes_without_the_call_or_its_record() {
+    let mut machine = TurnMachine::new(
+        test_config(Arc::new(MidCallNoteDriver)),
+        vec![user_message("use the tool")],
+        crate::AppendVec::new(),
+        0,
+    );
+    let effects = drain_effects(&mut machine);
+    let llm_id = *find_llm_call(&effects).expect("llm call").0;
+    machine.handle_response(Response::LlmComplete {
+        id: llm_id,
+        text_streamed: false,
+        result: Ok(LlmResponse::default()),
+    });
+    drain_effects(&mut machine);
+    let evidence = crate::TurnCancellationEvidence::internal("stop");
+    machine.finish_cancelled(evidence.clone());
+    let effects = drain_effects(&mut machine);
+    let outcome = effects.iter().find_map(|effect| match effect {
+        Effect::Emit(SessionStreamEvent::TurnOutcome { outcome }) => Some(outcome),
+        _ => None,
+    });
+    assert_eq!(
+        outcome,
+        Some(&TurnOutcome::Stopped(TurnStop::Cancelled { evidence }))
+    );
+    let Some(Effect::Done {
+        messages,
+        event_delta,
+        ..
+    }) = effects.last()
+    else {
+        panic!("the cancel finishes the turn: {effects:?}");
+    };
+    let ids = messages
+        .iter()
+        .map(|message| message.id.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(ids, ["m0"], "the turn keeps its input and drops the call");
+    assert!(
+        event_delta.is_empty(),
+        "the call's records are its tail: {event_delta:?}"
+    );
+}

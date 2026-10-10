@@ -431,7 +431,6 @@ async fn send_cancel_defaults_to_deferring_undelivered_active_input() -> Result<
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "FIG-5320: a cancelled durable turn commits no head, so its input leaves history"]
 async fn active_steer_after_last_call_defers_to_next_turn_first_call() -> Result<()> {
     let (started_tx, started_rx) = oneshot::channel::<()>();
     let started_tx = Arc::new(StdMutex::new(Some(started_tx)));
@@ -557,7 +556,6 @@ async fn active_steer_after_last_call_defers_to_next_turn_first_call() -> Result
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "FIG-5320: a cancelled durable turn commits no head, so the steer it accepted is not recorded"]
 async fn accepted_active_steer_interrupt_is_not_requeued() -> Result<()> {
     let (first_started_tx, first_started_rx) = oneshot::channel::<()>();
     let (release_first_tx, release_first_rx) = oneshot::channel::<()>();

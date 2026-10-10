@@ -3,7 +3,8 @@
 //! owner ends the turn in one `turn.cancel` commit. A detached idle process
 //! also receives an operator cancellation and must end with that origin.
 //!
-//! Laws: a cancelled turn calls the model no more and publishes no head;
+//! Laws: a cancelled turn calls the model no more and publishes its stop as
+//! the session head's next revision, with its terminal (ADR 0039);
 //! a turn that answered instead did so only because a crash interrupted the
 //! tool before the cancel reached it, so the tool settled `Interrupted`.
 
@@ -112,8 +113,10 @@ impl Workload for CancelCase {
                 if final_call {
                     violations.push("turn cancel: the model was called again".to_owned());
                 }
-                if end.head_revision.is_some() {
-                    violations.push("turn cancel: the cancelled turn published a head".to_owned());
+                if end.head_revision.is_none() {
+                    violations.push(
+                        "turn cancel: the cancelled turn's stop published no head".to_owned(),
+                    );
                 }
                 violations
             }

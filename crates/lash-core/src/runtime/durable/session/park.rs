@@ -117,7 +117,9 @@ pub enum ParkedTurnState {
 
 /// The park of a pass that failed on a state its turn resumes from and this
 /// build does not decode; `None` for every other failure.
-pub(super) fn undecodable_state(error: &TurnError) -> Option<SessionParkReason> {
+pub(in crate::runtime::durable) fn undecodable_state(
+    error: &TurnError,
+) -> Option<SessionParkReason> {
     use lash_sansio::TurnCheckpointRestoreError as Checkpoint;
     let (state, reason) = match error {
         TurnError::UndecodableState { state, reason } => (state.clone(), reason.clone()),

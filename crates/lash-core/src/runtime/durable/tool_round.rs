@@ -64,8 +64,8 @@ pub(super) enum RoundExit {
     /// The machine is answered. The round's presentation commits with the
     /// turn's next commit.
     Answered(Option<DomainWrite>),
-    /// The turn accepted a cancel: the round's unfinished members settled
-    /// `Cancelled`, and the next pass finalizes the turn.
+    /// The turn accepted a cancel: its stop settles the round's unfinished
+    /// members `Cancelled` as it ends the turn.
     CancelRequested,
     /// Nothing in the round runs and only parked waits or retry dues remain:
     /// the session releases as `waiting` until `due`.

@@ -197,6 +197,12 @@ impl RuntimeTurnDriver<'_> {
             .filter(|input| addressed_here(input) && input.ingress().admits_checkpoint(checkpoint))
             .collect::<Vec<_>>();
         steering.truncate(self.host.core.control.pacing.checkpoint_inputs.get());
+        // A turn that accepted a cancel admits nothing more: what is
+        // addressed to it is input it never delivers, which its cancel's
+        // disposition settles (ADR 0039, FIG-5365).
+        if !steering.is_empty() && self.cancel_accepted().await? {
+            steering.clear();
+        }
         Ok(crate::store::CheckpointAdmission {
             inputs: crate::store::plan_checkpoint_input_admission(
                 &self.session_id,
@@ -205,6 +211,24 @@ impl RuntimeTurnDriver<'_> {
                 steering,
             ),
         })
+    }
+
+    /// Whether this turn's row holds a cancel request it accepted.
+    async fn cancel_accepted(&self) -> Result<bool, RuntimeError> {
+        let durable = |error: lash_durable::DurableError| {
+            RuntimeError::new(
+                RuntimeErrorCode::RuntimeStore,
+                format!("the turn's cancel request does not read: {error}"),
+            )
+        };
+        let row = self
+            .scoped_effect_controller
+            .durable_reads()
+            .map_err(durable)?
+            .turn(&self.session_id)
+            .await
+            .map_err(durable)?;
+        Ok(row.is_some_and(|row| row.run == self.turn_id && row.cancel.is_some()))
     }
 
     pub(super) async fn invoke_turn_checkpoint_effect(

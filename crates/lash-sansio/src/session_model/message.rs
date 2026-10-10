@@ -1462,60 +1462,67 @@ pub fn render_prompt(msgs: &[Message]) -> RenderedPrompt {
 pub fn messages_are_prompt_resume_safe<'a>(
     messages: impl IntoIterator<Item = &'a Message>,
 ) -> bool {
+    let mut count = 0;
+    let safe = prompt_resume_safe_len(messages.into_iter().inspect(|_| count += 1));
+    safe == count
+}
+
+/// How many of `messages` lead a prompt-resume-safe prefix, the longest
+/// one: every tool call in it is answered, and it pairs results with calls
+/// as [`messages_are_prompt_resume_safe`] requires.
+pub(crate) fn prompt_resume_safe_len<'a>(messages: impl IntoIterator<Item = &'a Message>) -> usize {
     let mut seen_tool_calls = HashSet::new();
     let mut completed_tool_calls = HashSet::new();
+    let mut safe = 0;
 
-    for message in messages {
+    for (index, message) in messages.into_iter().enumerate() {
         // A cell's assistant context is answered by its cell record, the
         // protocol event committed with it, so its call awaits no tool
         // result.
-        if matches!(
+        let cell_context = matches!(
             message.origin,
             Some(MessageOrigin::TurnOutput {
                 cell_id: Some(_),
                 ..
             })
-        ) {
-            continue;
-        }
-        for part in message.parts.iter() {
-            // Reasoning parts don't participate in tool pairing and are
-            // always safe to resume through.
-            if matches!(part.kind(), PartKind::Reasoning) {
-                continue;
-            }
+        );
+        // Reasoning parts don't participate in tool pairing and are always
+        // safe to resume through.
+        for part in message.parts.iter().filter(|_| !cell_context) {
             match part.kind() {
                 PartKind::ToolCall => {
                     if !matches!(message.role, MessageRole::Assistant) {
-                        return false;
+                        return safe;
                     }
                     let Some(call_id) = part.call_id() else {
-                        return false;
+                        return safe;
                     };
                     if !seen_tool_calls.insert(call_id) {
-                        return false;
+                        return safe;
                     }
                 }
                 PartKind::ToolResult => {
                     if !matches!(message.role, MessageRole::User) {
-                        return false;
+                        return safe;
                     }
                     let Some(call_id) = part.call_id() else {
-                        return false;
+                        return safe;
                     };
                     if !seen_tool_calls.contains(call_id) {
-                        return false;
+                        return safe;
                     }
                     if !completed_tool_calls.insert(call_id) {
-                        return false;
+                        return safe;
                     }
                 }
                 _ => {}
             }
         }
+        if seen_tool_calls.len() == completed_tool_calls.len() {
+            safe = index + 1;
+        }
     }
-
-    seen_tool_calls.len() == completed_tool_calls.len()
+    safe
 }
 
 pub fn render_transcript_prompt(msgs: &[Message]) -> RenderedPrompt {

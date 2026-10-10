@@ -6,6 +6,7 @@ pub use crate::llm::types::{LlmUsage, TokenUsageOverflow};
 pub use failure::{
     FailureCode, HostNamespace, InvalidNamespace, Namespace, TurnFailureCode, TurnFailureKind,
 };
+pub(crate) use message::prompt_resume_safe_len;
 pub use message::{
     BaseRenderCache, InternalPartKind, InvalidPartCombination, Message, MessageRole,
     MessageSequence, Part, PartAttachment, PartKind, RenderedPrompt, append_rendered_prompt,

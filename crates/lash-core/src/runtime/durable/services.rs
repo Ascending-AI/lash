@@ -10,10 +10,10 @@ use super::commit_publication::{CommitBase, announce_head};
 pub use super::commit_publication::{
     PublicationMark, PublicationMarks, PublicationWindow, PublishedHeads,
 };
-use super::head::{HeadCache, SessionHead};
+use super::head::SessionHead;
 use super::session::{
-    AdmittedInputs, CellToolCalls, OpenTurn, RecordedPreparation, TurnDrive, TurnError,
-    TurnRestore, TurnRow, TurnServices, UnfinishedPhase,
+    AdmittedInputs, OpenTurn, RecordedPreparation, TurnDrive, TurnError, TurnRestore, TurnRow,
+    TurnServices,
 };
 use super::session_mail::{InputAdmission, InputBatching, SessionMailError};
 use crate::runtime::logical_turn::LogicalTurnAdmissions;
@@ -243,46 +243,6 @@ impl TurnServices for RuntimeTurnServices {
         let recorded = restore.recorded_preparation()?;
         let (turn, parts) = self.prepare(cx, restore.row(), Some(recorded)).await?;
         RuntimeDrive::resume(cx, turn, parts, restore).await
-    }
-
-    async fn stopped_cell_calls(
-        &self,
-        cx: &ActorContext,
-        row: &TurnRow,
-        heads: &mut HeadCache,
-    ) -> Result<Option<(crate::EffectId, CellToolCalls)>, TurnError> {
-        use lash_durable::domain::{OwnerKey, RunSeq};
-
-        let UnfinishedPhase::Tools { run, .. } = &row.phase else {
-            return Ok(None);
-        };
-        // A round the turn's rows hold at its phase is a tool round, whose
-        // members are recorded already.
-        let owner = OwnerKey::Turn(row.session.clone(), row.run.clone());
-        let rows = cx.durable_reads()?.run_records(&owner).await?;
-        if rows.iter().any(|stored| stored.run == *run) {
-            return Ok(None);
-        }
-        // The restored machine re-delivers the cell, which names its
-        // snapshot. A turn its committed state cannot prepare ran no cell
-        // this owner can read; its cancel still ends it.
-        let turn = match self.resume(cx, TurnRestore::new(cx, row, heads)).await {
-            Ok(turn) => turn,
-            Err(TurnError::Runtime(refusal)) if refusal.is_terminal() => return Ok(None),
-            Err(error) => return Err(error),
-        };
-        let OpenTurn {
-            mut drive, pending, ..
-        } = turn;
-        let redelivered = pending.or_else(|| drive.machine().poll_effect());
-        let Some(crate::Effect::ExecCode { id, .. }) = redelivered else {
-            return Ok(None);
-        };
-        if RunSeq(id.0) != *run {
-            return Ok(None);
-        }
-        let calls = drive.stopped_cell_calls(cx, id).await?;
-        Ok((!calls.is_empty()).then_some((id, calls)))
     }
 
     async fn apply_commands(

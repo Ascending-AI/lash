@@ -1179,7 +1179,7 @@ impl Scenario for L4 {
         violations.extend(publication_laws(
             &seen,
             cut,
-            committed(CommitLabel::TURN_COMMIT),
+            committed(CommitLabel::TURN_COMMIT) + committed(CommitLabel::TURN_CANCEL),
         ));
         if let Some(cut) = cut {
             violations.extend(zombie_laws(cut, &trace));
@@ -1188,14 +1188,15 @@ impl Scenario for L4 {
     }
 }
 
-/// A turn publishes what it held for its commit only once its `turn.commit`
-/// was acknowledged: at most once, never for a commit the store refused, and
-/// exactly once when the turn committed uncut or after a refused attempt.
-/// A commit whose acknowledgement its owner never received publishes
-/// nothing.
+/// A turn publishes what it held for its commit only once the commit that
+/// ends it (`turn.commit`, or a stop's `turn.cancel`) was acknowledged: at
+/// most once, never for a commit the store refused, and exactly once when
+/// the turn ended uncut or after a refused attempt. A commit whose
+/// acknowledgement its owner never received publishes nothing.
 fn publication_laws(seen: &Seen, cut: Option<&Cut>, commits: usize) -> Vec<String> {
     let refused_commit = cut.is_some_and(|cut| {
-        cut.point.label == CommitLabel::TURN_COMMIT && cut.fault == Fault::FailBefore
+        [CommitLabel::TURN_COMMIT, CommitLabel::TURN_CANCEL].contains(&cut.point.label)
+            && cut.fault == Fault::FailBefore
     });
     let must_publish = commits == 1 && (cut.is_none() || refused_commit);
     if seen.published > commits || (must_publish && seen.published != 1) {

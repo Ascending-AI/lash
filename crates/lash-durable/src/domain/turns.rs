@@ -111,7 +111,7 @@ pub struct TurnEnd {
     /// Why the run ended.
     pub cause: RunTerminalCause,
     /// The head revision its commit published; `None` when it published
-    /// none (a cancelled turn).
+    /// none (a refused turn, or a cancelled one with no state to commit).
     pub head_revision: Option<u64>,
 }
 
