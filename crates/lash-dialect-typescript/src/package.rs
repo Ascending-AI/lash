@@ -83,7 +83,7 @@ pub(crate) fn dispatcher(
 ) -> String {
     let method = family == "method";
     let (reader, read) = reader(table, name);
-    let mut source = String::from("use same\nuse ts.receiver\n");
+    let mut source = String::from("use same\nuse kind\nuse text.concat\nuse ts.receiver\n");
     let record_rows = rows
         .iter()
         .any(|(receiver, _)| *receiver == Receiver::Record);
@@ -116,7 +116,7 @@ pub(crate) fn dispatcher(
     };
     source.push_str(&format!(
         "function ts.{family}.{name}({params}) -> Any\nkernel 1\n\
-         errors \"type_error\"\ncharge {}\nbody {{\n  let receiver = invoke ts.receiver(this)\n",
+         errors \"type_error\"\ncharge {}\nbody {{\n{RECEIVER}",
         4 + rows.len()
     ));
     if record_rows {
@@ -145,6 +145,22 @@ pub(crate) fn dispatcher(
     source
 }
 
+/// `let receiver = invoke ts.receiver(this)`, with a plain or branded
+/// object, an array and a text told apart in place: the receivers most
+/// member reads and calls have.
+const RECEIVER: &str = "  let receiver = kind(this)
+  if same(receiver, \"record\") {
+    let brand = this.brand
+    if same(brand, absent) {} else {
+      if same(kind(brand), \"text\") { set receiver = text.concat(\"brand:\", brand) }
+    }
+  } else {
+    if same(receiver, \"list\") {} else {
+      if same(receiver, \"text\") {} else { set receiver = invoke ts.receiver(this) }
+    }
+  }
+";
+
 /// Computed names use the same rows and readers as literal names. The key
 /// is coerced once, preserving its observable conversion. The name is
 /// found among the rows by halving them in name order with
@@ -158,10 +174,10 @@ fn computed_dispatcher(table: &builtins::Table, call: bool) -> String {
     };
     let fallback = if call { "ts.call_member" } else { "ts.read" };
     let mut source = format!(
-        "use same\nuse num.lt\nuse text.compare\nuse ts.to_property_key\nuse ts.require_object_coercible\nuse {fallback}\n"
+        "use same\nuse kind\nuse num.lt\nuse text.compare\nuse ts.to_property_key\nuse ts.require_object_coercible\nuse {fallback}\n"
     );
     if !call {
-        source.push_str("use kind\nuse num.le\nuse num.to_float\nuse list.len\nuse text.utf16_len\nuse ts.number_index\nuse ts.get\n");
+        source.push_str("use num.le\nuse num.to_float\nuse list.len\nuse text.utf16_len\nuse ts.number_index\nuse ts.get\n");
     }
     if call {
         source.push_str("use ts.call_value\n");
@@ -218,7 +234,30 @@ fn computed_dispatcher(table: &builtins::Table, call: bool) -> String {
     } else {
         "this: Any, key: Any"
     };
-    source.push_str(&format!("function ts.{family}({params}) -> Any\nkernel 1\ncharge 4\nbody {{\n  do invoke ts.require_object_coercible(this)\n"));
+    let own = if call {
+        "let outcome = invoke ts.call_value(own, this, key, args)\n    return outcome"
+    } else {
+        "return own"
+    };
+    source.push_str(&format!(
+        "function ts.{family}({params}) -> Any\nkernel 1\ncharge 4\nbody {{\n"
+    ));
+    // A plain object's own field is what every row and reader gives for
+    // its name, so a text key naming one needs neither coercion nor rows.
+    // A key that is no text raises `type_error` reading the field, and an
+    // absent field may be an inherited name: both take the rows.
+    source.push_str(&format!(
+        "  if same(kind(this), \"record\") {{
+    let own = absent
+    try {{
+      if same(this.brand, absent) {{ set own = this[key] }}
+    }} catch generic {{}}
+    if same(own, absent) {{}} else {{
+    {own}
+    }}
+  }}
+  do invoke ts.require_object_coercible(this)\n"
+    ));
     // A number naming an element of a list or a text spells a row's name
     // only if some row's name is all digits; then every key takes the rows.
     if !call
@@ -249,6 +288,11 @@ const ELEMENT_READ: &str = "  if same(kind(key), \"float\") {
     if same(kind(this), \"text\") { set size = num.to_float(text.utf16_len(this)) }
     let position = invoke ts.number_index(key, size)
     if num.le(0, position) {
+      if same(kind(this), \"list\") {
+        let element = this[position]
+        if same(element, ()) { return absent }
+        return element
+      }
       let element = invoke ts.get(this, key)
       return element
     }

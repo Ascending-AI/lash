@@ -94,9 +94,15 @@ kernel 1
 errors \"type_error\", \"TS_METHOD_UNSUPPORTED\", \"TS_REFLECTION_UNSUPPORTED\"
 charge sum(12, deep(key))
 body {
+  # A plain object's field, read in place. Reading the `brand` field raises
+  # `type_error` for a target that is no record or error, and reading the
+  # index for one that is no record or a key that is no text: each takes
+  # the generic read below.
+  try {
+    if same(target.brand, absent) { return target[key] }
+  } catch generic {}
   let receiver = invoke ts.receiver(target)
   if same(receiver, \"record\") {
-    if same(kind(key), \"text\") { return target[key] }
     let name = invoke ts.to_property_key(key)
     return target[name]
   }
@@ -221,6 +227,12 @@ pub(crate) fn member_reader(table: &Table, name: &str) -> String {
         "{}function ts.member.{name}(this: Any) -> Any\nkernel 1\n\
          errors \"type_error\", \"TS_METHOD_UNSUPPORTED\", \"TS_REFLECTION_UNSUPPORTED\"\n\
          charge {}\nbody {{\n\
+         \x20 if same(kind(this), \"record\") {{\n\
+         \x20   let own = this[\"{name}\"]\n\
+         \x20   if same(own, absent) {{}} else {{\n\
+         \x20     if same(this.brand, absent) {{ return own }}\n\
+         \x20   }}\n\
+         \x20 }}\n\
          \x20 let receiver = invoke ts.receiver(this)\n\
          \x20 if same(receiver, \"record\") {{\n\
          \x20   if record.contains(this, \"{name}\") {{ return this[\"{name}\"] }}\n\

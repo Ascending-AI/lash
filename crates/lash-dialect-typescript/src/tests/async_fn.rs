@@ -218,6 +218,26 @@ fn a_tool_call_with_the_wrong_number_of_arguments_is_refused() {
     assert!(lower_with_effects("await echo(1, 2);").is_err());
 }
 
+/// A tool's argument crosses as plain data: a function the program made
+/// or a built-in, at the top or inside an array, an object or a map, is
+/// refused with `not_data` before the tool is asked.
+#[test]
+fn a_function_in_a_tool_argument_is_not_data() {
+    for argument in [
+        "() => 1",
+        "Math",
+        "[1, [2, () => 1]]",
+        "{ a: 1, b: { f: Math.max } }",
+        "new Map([['k', [Math.abs]]])",
+    ] {
+        assert_eq!(
+            super::machine::end(&format!("const value = {argument}; await finish(value);")),
+            super::machine::Ended::Raised("not_data".to_string()),
+            "{argument}"
+        );
+    }
+}
+
 /// `new Promise(executor)` stays refused: a promise is settled by its
 /// task's end, and nothing else can end a task.
 #[test]

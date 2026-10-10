@@ -54,7 +54,8 @@ use record.copy_deep
 use map.copy_deep
 use set.contains
 use set.copy_deep
-use map.entries
+use map.values
+use record.values
 use ts.boundary
 use list.len
 use record.get
@@ -111,6 +112,7 @@ body {
   # The kinds most receivers have come first.
   if same(k, "record") {
     let brand = value.brand
+    if same(brand, absent) { return k }
     if same(kind(brand), "text") {
       return text.concat("brand:", brand)
     }
@@ -197,12 +199,12 @@ kernel 1
 charge 4
 body {
   let k = kind(value)
-  for primitive in ["float", "text", "integer", "bool", "null", "absent"] {
-    if same(k, primitive) {
-      return true
-    }
-  }
-  return false
+  if same(k, "float") { return true }
+  if same(k, "text") { return true }
+  if same(k, "integer") { return true }
+  if same(k, "bool") { return true }
+  if same(k, "null") { return true }
+  return same(k, "absent")
 }
 
 function ts.is_nullish(value: Any) -> Bool
@@ -249,22 +251,22 @@ body {
   if same(k, "bool") {
     return value
   }
-  if same(k, "absent") {
-    return false
+  if same(k, "float") {
+    if num.is_nan(value) {
+      return false
+    }
+    return bool.not(eq(value, 0))
   }
-  if same(k, "null") {
+  if same(k, "absent") {
     return false
   }
   if same(k, "text") {
     return bool.not(same(value, ""))
   }
-  if same(k, "integer") {
-    return bool.not(eq(value, 0))
+  if same(k, "null") {
+    return false
   }
-  if same(k, "float") {
-    if num.is_nan(value) {
-      return false
-    }
+  if same(k, "integer") {
     return bool.not(eq(value, 0))
   }
   return true
@@ -308,10 +310,18 @@ kernel 1
 errors "type_error"
 charge sum(4, size(result))
 body {
-  if same(kind(value), "text") {
+  let k = kind(value)
+  if same(k, "text") {
     return value
   }
-  let k = invoke ts.receiver(value)
+  if same(k, "float") {
+    let spelled = invoke ts.number.to_string(value)
+    return spelled
+  }
+  if same(k, "integer") {
+    let spelled = invoke ts.number.to_string(value)
+    return spelled
+  }
   if same(k, "absent") {
     return "undefined"
   }
@@ -324,10 +334,6 @@ body {
     }
     return "false"
   }
-  if same(k, "number") {
-    let spelled = invoke ts.number.to_string(value)
-    return spelled
-  }
   throw error.new("type_error", "Cannot convert object to primitive value", null)
 }
 
@@ -337,11 +343,11 @@ kernel 1
 errors "type_error"
 charge sum(4, size(value))
 body {
-  if same(kind(value), "float") {
+  let k = kind(value)
+  if same(k, "float") {
     return value
   }
-  let k = invoke ts.receiver(value)
-  if same(k, "number") {
+  if same(k, "integer") {
     return num.to_float(value)
   }
   if same(k, "absent") {
@@ -454,8 +460,18 @@ kernel 1
 errors "type_error"
 charge sum(8, deep(value))
 body {
-  if same(kind(value), "text") {
+  let k = kind(value)
+  if same(k, "text") {
     return value
+  }
+  # ToPrimitive leaves a number as it is.
+  if same(k, "float") {
+    let spelled = invoke ts.number.to_string(value)
+    return spelled
+  }
+  if same(k, "integer") {
+    let spelled = invoke ts.number.to_string(value)
+    return spelled
   }
   let primitive = invoke ts.to_primitive(value, "string")
   let spelled = invoke ts.primitive_to_string(primitive)
@@ -495,6 +511,13 @@ kernel 1
 errors "type_error"
 charge sum(12, deep(left), deep(right))
 body {
+  # Two numbers add and two texts join, whatever their conversions would
+  # say.
+  let left_kind = kind(left)
+  if same(left_kind, kind(right)) {
+    if same(left_kind, "float") { return num.add(left, right) }
+    if same(left_kind, "text") { return text.concat(left, right) }
+  }
   let a = invoke ts.to_primitive(left, "default")
   let b = invoke ts.to_primitive(right, "default")
   let textual = same(kind(a), "text")
@@ -1016,13 +1039,15 @@ kernel 1
 charge 4
 body {
   let k = kind(key)
-  let numeric = same(k, "float")
-  if same(k, "integer") { set numeric = true }
-  if numeric {} else { return -2.0 }
-  if num.is_finite(key) {} else { return -1.0 }
-  if eq(num.floor(key), key) {} else { return -1.0 }
-  if num.lt(key, 0) { return -1.0 }
-  if num.lt(key, length) { return num.add(num.to_float(key), 0.0) }
+  if same(k, "float") {} else {
+    if same(k, "integer") {} else { return -2.0 }
+  }
+  # NaN and the infinities fall outside the range; -0 names 0.
+  if num.le(0, key) {
+    if num.lt(key, length) {
+      if eq(num.floor(key), key) { return num.add(num.to_float(key), 0.0) }
+    }
+  }
   return -1.0
 }
 
@@ -1032,9 +1057,12 @@ function ts.list_index(key: Any, length: Number) -> Number
 kernel 1
 charge sum(6, size(key))
 body {
-  let numbered = invoke ts.number_index(key, length)
-  if num.lt(-2.0, numbered) { return numbered }
-  let name = invoke ts.to_property_key(key)
+  let name = key
+  if same(kind(key), "text") {} else {
+    let numbered = invoke ts.number_index(key, length)
+    if num.lt(-2.0, numbered) { return numbered }
+    set name = invoke ts.to_property_key(key)
+  }
   # The text of an index begins with a digit; no other name is one.
   let first = text.slice(name, 0, 1)
   if same(first, "") { return -1.0 }
@@ -1056,11 +1084,15 @@ kernel 1
 errors "type_error"
 charge sum(12, deep(key))
 body {
-  let k = invoke ts.receiver(target)
-  # A plain object and an array first: the kinds most reads have.
+  let k = kind(target)
+  # A plain object and an array first: the kinds most reads have. An
+  # object without a `brand` field is plain without asking ts.receiver,
+  # and its field is read in place unless the key is no text, which raises
+  # `type_error` and takes the generic read below.
   if same(k, "record") {
-    let name = invoke ts.to_property_key(key)
-    return target[name]
+    try {
+      if same(target.brand, absent) { return target[key] }
+    } catch generic {}
   }
   if same(k, "list") {
     let length = list.len(target)
@@ -1077,6 +1109,11 @@ body {
     let value = target[position]
     if same(value, ()) { return absent }
     return value
+  }
+  set k = invoke ts.receiver(target)
+  if same(k, "record") {
+    let name = invoke ts.to_property_key(key)
+    return target[name]
   }
   if same(k, "closure") {
     let name = invoke ts.to_property_key(key)
@@ -1168,7 +1205,40 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(12, deep(key))
 body {
-  let k = invoke ts.receiver(target)
+  let k = kind(target)
+  # A plain object and an array first, as ts.get takes them.
+  if same(k, "record") {
+    try {
+      if same(target.brand, absent) {
+        set target[key] = value
+        return value
+      }
+    } catch generic {}
+  }
+  if same(k, "list") {
+    let position = invoke ts.number_index(key, 4294967295.0)
+    if same(position, -2.0) {
+    let name = invoke ts.to_property_key(key)
+    if same(name, "length") {
+      let length = invoke ts.to_number(value)
+      if num.is_finite(length) {} else { throw error.new("RangeError", "Invalid array length", null) }
+      if eq(num.floor(length), length) {} else { throw error.new("RangeError", "Invalid array length", null) }
+      if num.lt(length, 0) { throw error.new("RangeError", "Invalid array length", null) }
+      if num.lt(4294967295.0, length) { throw error.new("RangeError", "Invalid array length", null) }
+      while num.lt(length, list.len(target)) { remove target[num.sub(list.len(target), 1)] }
+      while num.lt(list.len(target), length) { set target[list.len(target)] = () }
+      return value
+    }
+    set position = invoke ts.list_index(name, 4294967295.0)
+    }
+    if num.lt(position, 0) {
+      throw error.new("TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED", "arrays do not carry named properties", null)
+    }
+    while num.lt(list.len(target), position) { set target[list.len(target)] = () }
+    set target[position] = value
+    return value
+  }
+  set k = invoke ts.receiver(target)
   if same(k, "closure") {
     let name = invoke ts.to_property_key(key)
     if same(name, "caller") { throw error.new("type_error", "Restricted function property", null) }
@@ -1197,29 +1267,6 @@ body {
   if same(k, "record") {
     let name = invoke ts.to_property_key(key)
     set target[name] = value
-    return value
-  }
-  if same(k, "list") {
-    let position = invoke ts.number_index(key, 4294967295.0)
-    if same(position, -2.0) {
-    let name = invoke ts.to_property_key(key)
-    if same(name, "length") {
-      let length = invoke ts.to_number(value)
-      if num.is_finite(length) {} else { throw error.new("RangeError", "Invalid array length", null) }
-      if eq(num.floor(length), length) {} else { throw error.new("RangeError", "Invalid array length", null) }
-      if num.lt(length, 0) { throw error.new("RangeError", "Invalid array length", null) }
-      if num.lt(4294967295.0, length) { throw error.new("RangeError", "Invalid array length", null) }
-      while num.lt(length, list.len(target)) { remove target[num.sub(list.len(target), 1)] }
-      while num.lt(list.len(target), length) { set target[list.len(target)] = () }
-      return value
-    }
-    set position = invoke ts.list_index(name, 4294967295.0)
-    }
-    if num.lt(position, 0) {
-      throw error.new("TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED", "arrays do not carry named properties", null)
-    }
-    while num.lt(list.len(target), position) { set target[list.len(target)] = () }
-    set target[position] = value
     return value
   }
   if same(kind(target), "tuple") {
@@ -1314,17 +1361,26 @@ kernel 1
 errors "type_error", "TS_REFLECTION_UNSUPPORTED"
 charge sum(12, deep(key))
 body {
-  do invoke ts.require_object_coercible(target)
-  if same(kind(target), "list") {
+  let k = kind(target)
+  if same(k, "record") {
+    if same(target.brand, absent) {
+      if same(kind(key), "text") { return record.contains(target, key) }
+      let name = invoke ts.to_property_key(key)
+      return record.contains(target, name)
+    }
+  }
+  if same(k, "list") {
     let length = list.len(target)
     let position = invoke ts.number_index(key, length)
     if same(position, -2.0) {} else {
       if num.lt(position, 0) { return false }
       return bool.not(same(target[position], ()))
     }
+  } else {
+    do invoke ts.require_object_coercible(target)
   }
   let name = invoke ts.to_property_key(key)
-  let k = invoke ts.receiver(target)
+  set k = invoke ts.receiver(target)
   let token = same(k, "builtin")
   if same(k, "closure") { if same(kind(target), "tuple") { set token = bool.not(same(target[1], "")) } }
   if token {
@@ -1457,7 +1513,12 @@ body {
     let other = []
     for key in record.keys(target) {
       if set.contains(hidden_fields, key) { continue }
-      let index = invoke ts.list_index(key, 4294967295.0)
+      # The text of an index begins with a digit, as ts.list_index reads it.
+      let index = -1.0
+      let first = text.slice(key, 0, 1)
+      if num.lt(text.compare(first, "0"), 0) {} else {
+        if num.lt(0, text.compare(first, "9")) {} else { set index = invoke ts.list_index(key, 4294967295.0) }
+      }
       if num.le(0, index) {
         let position = list.len(numeric)
         set numeric[position] = index
@@ -1528,58 +1589,68 @@ body {
 
 # Guest arrays cross a host boundary as plain data. Copy first: replacing
 # absent slots must never fill the guest's holes or change any guest alias.
+# Each container of the copy is then visited once, without recursion: a
+# hole or absent array slot becomes null, a function or built-in token
+# anywhere is refused, and only a container is visited further.
 function ts.boundary(value: Any) -> Any
 kernel 1
 errors "cyclic_value", "too_deep", "type_error", "not_data"
 charge sum(4, deep(value))
 body {
   let k = kind(value)
+  if same(k, "text") { return value }
+  if same(k, "float") { return value }
+  if same(k, "tuple") {
+    if same(value, ()) { return value }
+    if same(value[0], "ts.function") { throw error.new("not_data", "A function or a built-in object is not data", null) }
+    if same(value[0], "ts.object") { throw error.new("not_data", "A function or a built-in object is not data", null) }
+    return value
+  }
+  if same(k, "set") { return set.copy_deep(value) }
   let copied = value
-  if same(k, "list") { set copied = list.copy_deep(value) }
-  if same(k, "record") { set copied = record.copy_deep(value) }
-  if same(k, "map") { set copied = map.copy_deep(value) }
-  if same(k, "set") { set copied = set.copy_deep(value) }
-  let visit = absent
-  set visit = fn(item) {
-    let k = kind(item)
-    if same(k, "tuple") {
-      let token = invoke ts.receiver(item)
-      for callable in ["closure", "builtin"] {
-        if same(token, callable) { throw error.new("not_data", "A function or a built-in object is not data", null) }
-      }
+  if same(k, "list") { set copied = list.copy_deep(value) } else {
+    if same(k, "record") { set copied = record.copy_deep(value) } else {
+      if same(k, "map") { set copied = map.copy_deep(value) } else { return value }
     }
-    if same(k, "list") {
+  }
+  let pending = [copied]
+  while num.lt(0, list.len(pending)) {
+    let last = num.sub(list.len(pending), 1)
+    let item = pending[last]
+    remove pending[last]
+    # An array's holes and absent slots become null; an object's and a
+    # map's values keep them as they are.
+    let children = item
+    if same(kind(item), "list") {
       let index = 0
       while num.lt(index, list.len(item)) {
         let child = item[index]
-        if same(child, ()) { set child = null }
-        if same(child, absent) { set child = null }
-        set child = apply visit(child)
-        set item[index] = child
+        if same(child, ()) { set item[index] = null }
+        if same(child, absent) { set item[index] = null }
         set index = num.add(index, 1)
       }
+    } else {
+      if same(kind(item), "record") { set children = record.values(item) } else { set children = map.values(item) }
     }
-    if same(k, "record") {
-      for key in record.keys(item) {
-        let child = item[key]
-        set child = apply visit(child)
-        set item[key] = child
-      }
+    for child in children {
+      let ck = kind(child)
+      # Numbers and texts, the most children, first.
+      if same(ck, "float") {} else { if same(ck, "text") {} else {
+        if same(ck, "tuple") {
+          if same(child, ()) {} else {
+            if same(child[0], "ts.function") { throw error.new("not_data", "A function or a built-in object is not data", null) }
+            if same(child[0], "ts.object") { throw error.new("not_data", "A function or a built-in object is not data", null) }
+          }
+        } else {
+          if same(ck, "list") { set pending[list.len(pending)] = child }
+          if same(ck, "record") { set pending[list.len(pending)] = child }
+          if same(ck, "map") { set pending[list.len(pending)] = child }
+        }
+      } }
     }
-    if same(k, "map") {
-      for pair in map.entries(item) {
-        let key = pair[0]
-        let child = pair[1]
-        set child = apply visit(child)
-        set item[key] = child
-      }
-    }
-    return item
   }
-  let outcome = apply visit(copied)
-  return outcome
+  return copied
 }
-
 
 # The strict arguments object owns its indexed properties and independent length.
 function ts.arguments(items: List(Any)) -> Any

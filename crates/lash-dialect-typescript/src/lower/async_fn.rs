@@ -255,6 +255,12 @@ impl Lowerer<'_> {
                 self.performed.insert(effect.clone(), signature);
                 let mut copied = Vec::with_capacity(args.len());
                 for atom in args {
+                    // The boundary gives a literal back as it is: it holds
+                    // no array slot to fill and no function token.
+                    if matches!(atom, Atom::Literal(_)) {
+                        copied.push(atom);
+                        continue;
+                    }
                     let value = Operand {
                         atom,
                         ty: Ty::Unknown,
