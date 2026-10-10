@@ -823,19 +823,17 @@ finish({ baton: baton });
     assert_global_invariants(&engine, "rlm-continue-as").await;
 }
 
-/// FIG-3085: a top-level binding that shadows the `control` module disarms
-/// `control.continue_as` for every later turn of the session. The frame switch
-/// never happens, the driver refuses the same cell until its no-progress budget
-/// is spent, and the turn commits `Stopped(MaxTurns)` with no final value --
-/// which is how the distributed workers E2E surfaced it as
-/// `[500] queued frame-switch follow-on produced no final value`. The budget is
-/// unbounded here, so `MaxTurns` can only come from the no-progress path.
+/// FIG-3085, ADR 0101 §A3: calling a non-callable member of persisted session
+/// data spends the no-progress budget and commits `Stopped(MaxTurns)` without
+/// a final value. Use a user binding: tool namespace roots such as `control`
+/// are reserved top-level names under FIG-5779, rather than legal shadows.
+/// The turn budget is unbounded, so only the no-progress budget can stop it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_shadowed_control_module_stops_the_frame_switch_turn_without_a_final_value() {
+async fn a_persisted_data_member_stops_the_turn_without_a_final_value() {
     let call_index = Arc::new(AtomicUsize::new(0));
     let requests = Arc::new(Mutex::new(Vec::<String>::new()));
     let provider = lash_core::testing::TestProvider::builder()
-        .kind("logical-turn-rlm-shadowed-control")
+        .kind("logical-turn-rlm-non-callable-data")
         .complete({
             let call_index = Arc::clone(&call_index);
             let requests = Arc::clone(&requests);
@@ -849,14 +847,14 @@ async fn a_shadowed_control_module_stops_the_frame_switch_turn_without_a_final_v
                     let text = if call_index.fetch_add(1, Ordering::SeqCst) == 0 {
                         r#"
 <typescript>
-const control = "local shadow";
-finish({ bound: control });
+const local_actions = { continue_as: "local data" };
+finish({ bound: local_actions.continue_as });
 </typescript>
 "#
                     } else {
                         r#"
 <typescript>
-await control.continue_as({
+await local_actions.continue_as({
   task: "finish with the carried baton",
   seed: { baton: "rlm-sim-seed" }
 });
@@ -891,14 +889,14 @@ await control.continue_as({
             lash::persistence::LeaseOwnerId::new("logical-turn-test"),
             lash::persistence::LeaseIncarnationId::new("logical-turn-test-boot"),
         ))
-        .expect("build RLM shadowed-control sim core");
-    let session = created_session(&core, "logical-turn-rlm-shadowed-control")
+        .expect("build RLM non-callable-data sim core");
+    let session = created_session(&core, "logical-turn-rlm-non-callable-data")
         .await
         .durable()
         .await
-        .expect("open shadowed-control session");
+        .expect("open non-callable-data session");
     let bound = session
-        .send(TurnInput::text("bind a local `control`"))
+        .send(TurnInput::text("bind a data member"))
         .output()
         .await
         .expect("binding turn runs");
@@ -907,31 +905,35 @@ await control.continue_as({
             .final_value()
             .and_then(|value| value.get("bound"))
             .and_then(Value::as_str),
-        Some("local shadow")
+        Some("local data")
     );
     let calls_after_binding = call_index.load(Ordering::SeqCst);
 
-    let switched = session
-        .send(TurnInput::text("switch with an RLM seed"))
+    let stopped = session
+        .send(TurnInput::text("call the persisted data member"))
         .output()
         .await
-        .expect("frame-switch turn runs");
+        .expect("non-callable turn runs");
     assert!(
         matches!(
-            switched.result.outcome,
+            stopped.result.outcome,
             lash_core::facade_support::TurnOutcome::Stopped(TurnStop::MaxTurns)
         ),
-        "expected the shadowed frame switch to stop on the no-progress budget, got {:?}",
-        switched.result.outcome
+        "expected the non-callable data call to stop on the no-progress budget, got {:?}",
+        stopped.result.outcome
     );
     assert!(
-        switched.final_value().is_none(),
+        stopped.final_value().is_none(),
         "a stopped turn must not report a final value"
     );
     let refusals = requests
         .lock_recover()
         .iter()
-        .filter(|request| request.contains("uncaught type_error: continue_as is not a function"))
+        .filter(|request| {
+            request.contains(
+                "uncaught type_error: only a closure or a function reference can be called",
+            )
+        })
         .count();
     assert!(
         refusals > 0,
@@ -942,7 +944,7 @@ await control.continue_as({
         12,
         "the stopped turn must spend exactly the default no-progress budget"
     );
-    assert_global_invariants(&engine, "shadowed-control-module").await;
+    assert_global_invariants(&engine, "non-callable-data-member").await;
 }
 
 /// Queued turn work a terminal checkpoint withholds: one process wake.
