@@ -334,21 +334,21 @@ impl CellOutcome {
 /// [`crate::OutputValue`] as a cell result spells it: `{"inline": value}` or
 /// `{"retained": retention}`.
 mod finish_value {
-    use crate::{OutputValue, RetainedOutput};
+    use crate::{OutputValue, RetainedValue};
     use serde::{Deserialize, Serialize};
 
     #[derive(Serialize)]
     #[serde(rename_all = "snake_case")]
     enum Borrowed<'a> {
         Inline(&'a serde_json::Value),
-        Retained(&'a RetainedOutput),
+        Retained(&'a RetainedValue),
     }
 
     #[derive(Deserialize)]
     #[serde(rename_all = "snake_case")]
     enum Owned {
         Inline(serde_json::Value),
-        Retained(RetainedOutput),
+        Retained(RetainedValue),
     }
 
     pub fn serialize<S: serde::Serializer>(
@@ -450,7 +450,7 @@ pub struct CellRecord {
     pub prints: Vec<CellPrint>,
     /// One archive of every print, when they exceeded the inline limit.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub prints_retained: Option<crate::RetainedOutput>,
+    pub prints_retained: Option<crate::RetainedValue>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub images: Vec<AttachmentRef>,
     /// The dispatches the cell executed. An entry's `call_id` is the id of
@@ -478,7 +478,7 @@ pub struct ExecResponse {
     /// The complete ordered prints when their aggregate exceeds the history
     /// limit. Inline prints are empty whenever this is present.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub prints_retained: Option<crate::RetainedOutput>,
+    pub prints_retained: Option<crate::RetainedValue>,
     /// Every source-level dispatch the cell executed, in execution order.
     pub calls: Vec<ExecutedCall>,
     /// The record of each host tool call the cell made, in execution order.
@@ -554,16 +554,19 @@ mod tests {
         assert_eq!(round_trip.reason, ExecCodeFailureReason::RuntimeStopped);
     }
 
-    fn retained(witness: &str) -> crate::RetainedOutput {
-        crate::RetainedOutput {
-            reference: AttachmentRef {
-                id: ("b".repeat(64)).parse().expect("valid attachment id"),
-                media_type: "application/json".parse().expect("valid media type"),
-                byte_len: 90_000,
-                type_metadata: None,
-                label: None,
+    fn retained(witness: &str) -> crate::RetainedValue {
+        crate::RetainedValue {
+            output: crate::RetainedOutput {
+                reference: AttachmentRef {
+                    id: ("b".repeat(64)).parse().expect("valid attachment id"),
+                    media_type: "application/json".parse().expect("valid media type"),
+                    byte_len: 90_000,
+                    type_metadata: None,
+                    label: None,
+                },
+                witness: witness.to_string(),
             },
-            witness: witness.to_string(),
+            shape: crate::ValueShape::String { bytes: 89_998 },
         }
     }
 

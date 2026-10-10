@@ -7,10 +7,14 @@
 //! once, inside a journaled step, under an [`OutputRetentionPolicy`] the step
 //! records beside its result, so a replay serves the recorded witness and
 //! reference verbatim whatever the live policy has become.
+//!
+//! A code mode value is retained as a [`RetainedValue`]: the retention and
+//! the [`ValueShape`] of the value, which the cell's program reads in the
+//! value's place (FIG-1439).
 
 use serde::{Deserialize, Serialize};
 
-use crate::AttachmentRef;
+use crate::{AttachmentRef, ValueShape};
 
 /// The byte policy an output is measured against before it enters history.
 ///
@@ -87,8 +91,18 @@ pub struct RetainedOutput {
     pub witness: String,
 }
 
+/// A code mode value retained out of history (FIG-1439): the retention of
+/// its JSON encoding, and the shape of the value, which history keeps for a
+/// program to read in its place.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RetainedValue {
+    pub output: RetainedOutput,
+    pub shape: ValueShape,
+}
+
 /// A value on its way into history: kept inline, or retained with only its
-/// witness and reference in history.
+/// witness, shape and reference in history.
 ///
 /// It has no serde spelling of its own: each record that carries one spells
 /// an inline value as the bare value its recorded shape always held, and a
@@ -98,7 +112,7 @@ pub enum OutputValue {
     /// The value itself, within the policy's inline limit.
     Inline(serde_json::Value),
     /// The value's encoding was over the inline limit and is retained.
-    Retained(RetainedOutput),
+    Retained(RetainedValue),
 }
 
 impl OutputValue {
@@ -111,7 +125,7 @@ impl OutputValue {
     }
 
     /// The retention, when the value was retained.
-    pub fn retained(&self) -> Option<&RetainedOutput> {
+    pub fn retained(&self) -> Option<&RetainedValue> {
         match self {
             Self::Inline(_) => None,
             Self::Retained(retained) => Some(retained),

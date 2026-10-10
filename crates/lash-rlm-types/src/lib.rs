@@ -1,6 +1,6 @@
 use lash_sansio::{
     CellFailure, CellFailureKind, CellOutcome, CellRecord, ExecutedCall, ExecutedCallOutcome,
-    OutputValue, RetainedOutput, SchemaShape, ShapeKind, TerminationMode, TurnProtocol,
+    OutputValue, RetainedValue, SchemaShape, ShapeKind, TerminationMode, TurnProtocol, ValueShape,
 };
 
 /// Read-only legacy protocol-owned assistant context paired with a code mode
@@ -105,14 +105,16 @@ pub enum HistoryValueTag {
     Retained,
 }
 
-/// A value retained out of history (FIG-1643), as a cell reads it: its
-/// witness, its size, and the attachment that holds it whole — a value the
-/// cell can hand to a tool that reads attachments.
+/// A value retained out of history (FIG-1643), as a cell reads it: the
+/// shape of the value (FIG-1439), the size of its encoding, and the
+/// attachment that holds it whole — what `control.read_output` reads, and a
+/// value the cell can hand to a tool that reads attachments. No cut of the
+/// value's text stands in for it.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, schemars::JsonSchema)]
 pub struct RetainedHistoryValue {
     #[serde(rename = "$lash_history_value")]
     pub tag: HistoryValueTag,
-    pub witness: String,
+    pub shape: ValueShape,
     pub byte_len: u64,
     pub attachment: serde_json::Value,
 }
@@ -136,13 +138,13 @@ impl From<&OutputValue> for HistoryValue {
     }
 }
 
-impl From<&RetainedOutput> for RetainedHistoryValue {
-    fn from(retained: &RetainedOutput) -> Self {
+impl From<&RetainedValue> for RetainedHistoryValue {
+    fn from(retained: &RetainedValue) -> Self {
         Self {
             tag: HistoryValueTag::Retained,
-            witness: retained.witness.clone(),
-            byte_len: retained.reference.byte_len,
-            attachment: lash_sansio::ToolValue::Attachment(retained.reference.clone())
+            shape: retained.shape.clone(),
+            byte_len: retained.output.reference.byte_len,
+            attachment: lash_sansio::ToolValue::Attachment(retained.output.reference.clone())
                 .to_json_value(),
         }
     }
@@ -329,16 +331,19 @@ mod rlm_step_serde_tests {
         }
     }
 
-    fn retained(witness: &str) -> lash_sansio::RetainedOutput {
-        lash_sansio::RetainedOutput {
-            reference: lash_sansio::AttachmentRef {
-                id: ("b".repeat(64)).parse().expect("valid attachment id"),
-                media_type: "application/json".parse().expect("valid media type"),
-                byte_len: 90_000,
-                type_metadata: None,
-                label: None,
+    fn retained(witness: &str) -> lash_sansio::RetainedValue {
+        lash_sansio::RetainedValue {
+            output: lash_sansio::RetainedOutput {
+                reference: lash_sansio::AttachmentRef {
+                    id: ("b".repeat(64)).parse().expect("valid attachment id"),
+                    media_type: "application/json".parse().expect("valid media type"),
+                    byte_len: 90_000,
+                    type_metadata: None,
+                    label: None,
+                },
+                witness: witness.to_string(),
             },
-            witness: witness.to_string(),
+            shape: lash_sansio::ValueShape::of(&serde_json::json!({"rows": [1, 2]})),
         }
     }
 
@@ -374,7 +379,8 @@ mod rlm_step_serde_tests {
         assert!(item.get("final_output_retained").is_none());
         let record = &item["final_output"];
         assert_eq!(record[super::HISTORY_VALUE_TAG_KEY], "retained");
-        assert_eq!(record["witness"], "{\"rows\":[");
+        assert!(record.get("witness").is_none(), "no cut text stands in");
+        assert_eq!(record["shape"]["fields"][0]["key"], "rows");
         assert_eq!(record["byte_len"], 90_000);
         let adopted: lash_sansio::ToolValue = serde_json::from_value(record["attachment"].clone())
             .expect("the attachment decodes as a tool value");

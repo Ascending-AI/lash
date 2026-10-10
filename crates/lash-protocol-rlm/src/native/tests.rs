@@ -1626,15 +1626,21 @@ fn native_user_stop_is_terminal_live_and_after_restore() {
 
 #[test]
 fn a_step_archive_survives_both_driver_checkpoint_paths() {
-    let archive = lash_core::RetainedOutput {
-        reference: lash_core::AttachmentRef {
-            id: lash_core::attachments::content_id(&vec![b'p'; 100_000]),
-            media_type: "application/json".parse().expect("media type"),
-            byte_len: 100_000,
-            type_metadata: None,
-            label: None,
+    let archive = lash_core::RetainedValue {
+        output: lash_core::RetainedOutput {
+            reference: lash_core::AttachmentRef {
+                id: lash_core::attachments::content_id(&vec![b'p'; 100_000]),
+                media_type: "application/json".parse().expect("media type"),
+                byte_len: 100_000,
+                type_metadata: None,
+                label: None,
+            },
+            witness: "bounded preview".into(),
         },
-        witness: "bounded preview".into(),
+        shape: lash_core::ValueShape::Array {
+            length: 1,
+            items: Some(Box::new(lash_core::ValueShape::String { bytes: 99_996 })),
+        },
     };
     for native in [false, true] {
         let mut exec = response(Some(serde_json::json!(1)));

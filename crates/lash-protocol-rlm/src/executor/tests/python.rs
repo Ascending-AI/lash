@@ -289,18 +289,19 @@ async fn prints_are_ordered_and_retained_without_losing_values() {
         .prints_retained
         .expect("the complete aggregate is retained");
     let bytes = attachments
-        .read(&archive.reference)
+        .read(&archive.output.reference)
         .await
         .expect("read retained prints");
-    let prints: Vec<lash_core::CellPrint> =
-        serde_json::from_slice(&bytes).expect("typed print archive");
-    assert_eq!(prints.len(), 3);
-    assert_eq!(prints[0].value, serde_json::json!("before"));
+    let prints: Vec<serde_json::Value> =
+        serde_json::from_slice(&bytes).expect("the print values, in order");
     assert_eq!(
-        prints[1].value,
-        serde_json::json!("x".repeat(size as usize))
+        prints,
+        [
+            serde_json::json!("before"),
+            serde_json::json!("x".repeat(size as usize)),
+            serde_json::json!("after"),
+        ]
     );
-    assert_eq!(prints[2].value, serde_json::json!("after"));
 }
 
 /// FIG-5778: both def and lambda bindings survive two cell boundaries,

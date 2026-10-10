@@ -11,9 +11,16 @@ use super::*;
 struct RecordedCellOutputs {
     policy: lash_core::OutputRetentionPolicy,
     prints: Vec<lash_core::CellPrint>,
-    prints_retained: Option<lash_core::RetainedOutput>,
+    prints_retained: Option<lash_core::RetainedValue>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    finish_retained: Option<lash_core::RetainedOutput>,
+    finish_retained: Option<lash_core::RetainedValue>,
+}
+
+fn encoding_failed(error: &serde_json::Error) -> lash_core::RuntimeEffectControllerError {
+    lash_core::RuntimeEffectControllerError::new(
+        lash_core::RuntimeErrorCode::RecordEncodingFailed,
+        error.to_string(),
+    )
 }
 
 /// Renders the cell's prints and retains their aggregate when too long for history,
@@ -96,29 +103,52 @@ pub(super) async fn record_cell_outputs(
                         observations.push(observation);
                     }
                 }
-                let prints_retained = if observations.is_empty() {
+                // The prints are retained when history could not hold them
+                // inline, and the archive holds what a program reads of
+                // them: their values, in order.
+                let inline_bytes = serde_json::to_vec(&observations)
+                    .map_err(|error| encoding_failed(&error))?
+                    .len();
+                let prints_retained = if observations.is_empty() || !policy.retains(inline_bytes) {
                     None
                 } else {
-                    retain_oversized_value(
-                        &attachments,
-                        policy,
-                        &serde_json::to_value(&observations).map_err(|error| {
-                            lash_core::RuntimeEffectControllerError::new(
-                                lash_core::RuntimeErrorCode::RecordEncodingFailed,
-                                error.to_string(),
-                            )
-                        })?,
-                        &format!("{key}:prints"),
+                    let values = serde_json::Value::Array(
+                        observations
+                            .drain(..)
+                            .map(|observation| observation.value)
+                            .collect(),
+                    );
+                    let encoded =
+                        serde_json::to_string(&values).map_err(|error| encoding_failed(&error))?;
+                    Some(
+                        retain_value(
+                            &attachments,
+                            policy,
+                            &values,
+                            encoded,
+                            &format!("{key}:prints"),
+                        )
+                        .await?,
                     )
-                    .await?
                 };
-                if prints_retained.is_some() {
-                    observations.clear();
-                }
                 let finish_retained = match &recorded_finish {
                     Some(value) => {
-                        retain_oversized_value(&attachments, policy, value, &format!("{key}:final"))
-                            .await?
+                        let encoded = serde_json::to_string(value)
+                            .map_err(|error| encoding_failed(&error))?;
+                        if policy.retains(encoded.len()) {
+                            Some(
+                                retain_value(
+                                    &attachments,
+                                    policy,
+                                    value,
+                                    encoded,
+                                    &format!("{key}:final"),
+                                )
+                                .await?,
+                            )
+                        } else {
+                            None
+                        }
                     }
                     None => None,
                 };
@@ -128,12 +158,7 @@ pub(super) async fn record_cell_outputs(
                     prints_retained,
                     finish_retained,
                 })
-                .map_err(|error| {
-                    lash_core::RuntimeEffectControllerError::new(
-                        lash_core::RuntimeErrorCode::RecordEncodingFailed,
-                        error.to_string(),
-                    )
-                })
+                .map_err(|error| encoding_failed(&error))
             },
         )
         .await;
@@ -163,25 +188,17 @@ pub(super) async fn record_cell_outputs(
     }
 }
 
-/// Retains `value` when its JSON encoding is longer than `policy` allows in
-/// history: the encoding is put as a session attachment, and the answer is
-/// the witness — the encoding's first bytes and a notice naming the
-/// attachment — with its reference. `None` for a value history keeps inline.
-pub(super) async fn retain_oversized_value(
+/// Retains `value` out of history: its JSON `encoded` is put as a session
+/// attachment, and history keeps the value's shape, for a program to read in
+/// its place, and the witness — the encoding's first bytes and a notice
+/// naming the attachment — with its reference.
+async fn retain_value(
     attachments: &lash_core::facade_support::RuntimeAttachmentStore,
     policy: lash_core::OutputRetentionPolicy,
     value: &serde_json::Value,
+    encoded: String,
     label: &str,
-) -> Result<Option<lash_core::RetainedOutput>, lash_core::RuntimeEffectControllerError> {
-    let encoded = serde_json::to_string(value).map_err(|error| {
-        lash_core::RuntimeEffectControllerError::new(
-            lash_core::RuntimeErrorCode::RecordEncodingFailed,
-            error.to_string(),
-        )
-    })?;
-    if !policy.retains(encoded.len()) {
-        return Ok(None);
-    }
+) -> Result<lash_core::RetainedValue, lash_core::RuntimeEffectControllerError> {
     let meta = lash_core::AttachmentCreateMeta::new(
         lash_core::MediaType::parse("application/json").map_err(|error| {
             lash_core::RuntimeEffectControllerError::output_retention_failed(
@@ -204,8 +221,11 @@ pub(super) async fn retain_oversized_value(
         "…[value retained: {byte_len} bytes exceed the {}-byte history limit; full value: attachment {}]",
         policy.inline_limit_bytes, reference.id
     );
-    Ok(Some(lash_core::RetainedOutput {
-        witness: policy.witness(&encoded, &notice),
-        reference,
-    }))
+    Ok(lash_core::RetainedValue {
+        output: lash_core::RetainedOutput {
+            witness: policy.witness(&encoded, &notice),
+            reference,
+        },
+        shape: lash_core::ValueShape::of(value),
+    })
 }

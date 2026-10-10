@@ -36,6 +36,7 @@ mod tool_intents;
 pub mod tool_output;
 pub mod turn;
 pub mod turn_driver;
+pub mod value_shape;
 pub mod worker_limit;
 mod workflow_site;
 
@@ -80,7 +81,7 @@ pub use plugin::{
     ToolCheckVerdictKind,
 };
 pub use redacted::Redacted;
-pub use retained_output::{OutputRetentionPolicy, OutputValue, RetainedOutput};
+pub use retained_output::{OutputRetentionPolicy, OutputValue, RetainedOutput, RetainedValue};
 pub use run_aggregate::RunAggregateWakePolicy;
 pub use sansio::{
     ChatContextProjector, CheckpointContentRef, CheckpointDelivery, CheckpointResumeAction,
@@ -152,6 +153,7 @@ pub use turn_driver::{
     append_assistant_text_part, build_newest_writer_formats, normalized_response_parts,
     reasoning_part, visible_response_parts, visible_response_text_from_parts,
 };
+pub use value_shape::{FieldShape, ValueShape};
 pub use workflow_site::{
     EffectIdentity, LoopIteration, Site, SpawnIdentity, TaskIdentity, Unit, effect_identity_fixture,
 };

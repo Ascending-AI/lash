@@ -313,7 +313,7 @@ await control.finish({ rows });"#,
     for retained in [print, finished] {
         let edges = backend
             .session_store_factory()
-            .attachment_referrers(&retained.reference.id)
+            .attachment_referrers(&retained.output.reference.id)
             .await
             .expect("read the retained output's referrers");
         assert!(
@@ -325,20 +325,20 @@ await control.finish({ rows });"#,
     }
     sweep_without_grace(&backend).await;
     assert_eq!(
-        stored_text(&backend, &finished.reference).await,
+        stored_text(&backend, &finished.output.reference).await,
         serde_json::to_string(&value).expect("encode the final value")
     );
-    let archived: Vec<lash_core::CellPrint> =
-        serde_json::from_str(&stored_text(&backend, &print.reference).await)
-            .expect("the retained archive is JSON");
+    let archived: Vec<serde_json::Value> =
+        serde_json::from_str(&stored_text(&backend, &print.output.reference).await)
+            .expect("the retained archive is the print values");
     // The TypeScript console prints structured data as compact JSON text;
     // retaining that observation must keep every row of the original value.
     let printed: serde_json::Value =
-        serde_json::from_str(archived[0].value.as_str().expect("console text"))
+        serde_json::from_str(archived[0].as_str().expect("console text"))
             .expect("the whole printed value");
     assert_eq!(printed, value["rows"]);
     for retained in [print, finished] {
-        assert!(retained.witness.len() <= 512);
+        assert!(retained.output.witness.len() <= 512);
     }
     Ok(())
 }
@@ -348,15 +348,15 @@ await control.finish({ rows });"#,
 #[cfg(feature = "rlm")]
 fn collect_retained(
     value: &serde_json::Value,
-    prints: &mut Vec<lash_core::RetainedOutput>,
-    finals: &mut Vec<lash_core::RetainedOutput>,
+    prints: &mut Vec<lash_core::RetainedValue>,
+    finals: &mut Vec<lash_core::RetainedValue>,
 ) {
     match value {
         serde_json::Value::Object(entries) => {
             for (key, entry) in entries {
                 let decoded = |retained: &serde_json::Value| {
-                    serde_json::from_value::<lash_core::RetainedOutput>(retained.clone())
-                        .expect("a retained output decodes")
+                    serde_json::from_value::<lash_core::RetainedValue>(retained.clone())
+                        .expect("a retained value decodes")
                 };
                 match key.as_str() {
                     "prints_retained" if !entry.is_null() => prints.push(decoded(entry)),
@@ -488,23 +488,206 @@ for (let i = 0; i < 200; i++) {
         resident <= 16 * 1024,
         "aggregate history grew to {resident} bytes"
     );
-    let retained: lash_core::RetainedOutput =
+    let retained: lash_core::RetainedValue =
         serde_json::from_value(found.pop().unwrap()).expect("archive");
-    assert!(retained.witness.len() <= POLICY.witness_bytes as usize);
+    assert!(retained.output.witness.len() <= POLICY.witness_bytes as usize);
     sweep_without_grace(&backend).await;
-    let observations: Vec<lash_core::CellPrint> =
-        serde_json::from_str(&stored_text(&backend, &retained.reference).await)
-            .expect("full observations");
-    assert_eq!(observations.len(), 200);
-    for (i, observation) in observations.iter().enumerate() {
+    let values: Vec<serde_json::Value> =
+        serde_json::from_str(&stored_text(&backend, &retained.output.reference).await)
+            .expect("full print values");
+    assert_eq!(values.len(), 200);
+    for (i, value) in values.iter().enumerate() {
         let printed: serde_json::Value =
-            serde_json::from_str(observation.value.as_str().expect("console text"))
+            serde_json::from_str(value.as_str().expect("console text"))
                 .expect("the whole printed value");
         assert_eq!(
             printed,
             serde_json::json!({"index": i, "text": "small printed value é🙂"})
         );
     }
+    Ok(())
+}
+
+/// The cell that finishes a turn with 3,000 rows: far past the 4 KiB policy,
+/// so history keeps the final value retained.
+#[cfg(feature = "rlm")]
+const ROWS_CELL: &str = r#"
+const rows = [];
+for (let i = 0; i < 3000; i++) {
+  rows.push({ index: i, text: "a row the cell finishes with" });
+}
+await control.finish({ rows });"#;
+
+/// The prefix of a cell that binds `prior` to the retained final value the
+/// session's earlier turn left in history.
+#[cfg(feature = "rlm")]
+const PRIOR_FINAL_OUTPUT: &str = r#"
+let prior;
+for (const step of history) {
+  if (step.kind === "lash_vm_step" && step.final_output !== undefined) {
+    prior = step.final_output;
+  }
+}
+const rows = prior.shape.fields.find((field) => field.key === "rows").shape;"#;
+
+/// Runs [`ROWS_CELL`] as one turn of a fresh session, lets `between` act on
+/// the backend and the retained value, then runs `reader` as the next turn
+/// and answers its finish value with the records of the tool calls it made.
+#[cfg(feature = "rlm")]
+async fn read_back_retained_rows<F, Fut>(
+    session_id: &str,
+    reader: &str,
+    between: F,
+) -> Result<(serde_json::Value, serde_json::Value)>
+where
+    F: FnOnce(lash_core::Backend, lash_core::RetainedValue) -> Fut,
+    Fut: std::future::Future<Output = ()>,
+{
+    let backend = sqlite_memory_store_backend().await;
+    let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
+        .data_retention(crate::DataRetention {
+            attachments: crate::persistence::AttachmentPolicy {
+                output_retention: POLICY,
+                ..crate::persistence::AttachmentPolicy::standard()
+            },
+            ..crate::DataRetention::standard()
+        })
+        .serve_test_llm_profile(
+            queued_text_provider(vec![
+                typescript_block(ROWS_CELL),
+                typescript_block(&format!("{PRIOR_FINAL_OUTPUT}\n{reader}")),
+            ]),
+            mock_llm_profile_spec(),
+        )
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core
+        .session(crate::SessionId::parse(session_id).expect("nonblank host identity"))
+        .created()
+        .await
+        .open()
+        .await?;
+    session
+        .send(TurnInput::text("finish with the rows"))
+        .output()
+        .await?;
+    let (_, window) = committed_frame(&backend, session_id).await;
+    let mut finals = Vec::new();
+    collect_retained(
+        &serde_json::to_value(&window.window).expect("the frame serializes"),
+        &mut Vec::new(),
+        &mut finals,
+    );
+    let [finished] = finals.as_slice() else {
+        panic!("one retained final value: {finals:#?}");
+    };
+    between(backend, finished.clone()).await;
+    let output = session
+        .send(TurnInput::text("read the rows back"))
+        .output()
+        .await?;
+    let value = output
+        .finished()
+        .map(|(_, value)| value)
+        .cloned()
+        .expect("the reading turn finishes with a value");
+    Ok((
+        value,
+        serde_json::to_value(&output.result.tool_calls).expect("the records serialize"),
+    ))
+}
+
+/// Whether `value` holds `wanted` anywhere: as itself, or below.
+#[cfg(feature = "rlm")]
+fn holds(value: &serde_json::Value, wanted: &serde_json::Value) -> bool {
+    value == wanted
+        || match value {
+            serde_json::Value::Object(entries) => {
+                entries.values().any(|entry| holds(entry, wanted))
+            }
+            serde_json::Value::Array(entries) => entries.iter().any(|entry| holds(entry, wanted)),
+            _ => false,
+        }
+}
+
+/// FIG-1439: a value retained out of history reaches a later cell as its
+/// shape, not as a cut of its text. The cell learns how many rows the value
+/// holds and which keys each row has without reading it, then reads it whole
+/// when it needs it. Before the fix the finishing step was folded out of
+/// `history` behind the turn's reply, a copy of the value's text cut at
+/// 16,384 characters: a later cell found no step holding the value, only a
+/// truncated prefix of its JSON to misread.
+#[cfg(feature = "rlm")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_retained_value_is_read_in_place_as_its_shape_and_whole_on_request_on_sqlite()
+-> Result<()> {
+    let (read, _) = read_back_retained_rows(
+        "retained-shape",
+        r#"
+const whole = await control.read_output({ archive: prior.attachment });
+await control.finish({
+  described: rows.length,
+  keys: rows.items.fields.map((field) => field.key),
+  read: whole.rows.length,
+});"#,
+        |_, _| async {},
+    )
+    .await?;
+    assert_eq!(
+        read,
+        serde_json::json!({"described": 3000, "keys": ["index", "text"], "read": 3000})
+    );
+    Ok(())
+}
+
+/// FIG-1439: asking for a retained value whose bytes are no longer stored
+/// throws in the cell, at the point of asking, as a failure the program
+/// catches — and its shape still answers what the value held. The call's
+/// record keeps the typed cause, naming the attachment.
+#[cfg(feature = "rlm")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn asking_for_a_reclaimed_retained_value_throws_a_catchable_refusal_on_sqlite() -> Result<()>
+{
+    let reclaimed = Arc::new(std::sync::Mutex::new(None));
+    let noted = Arc::clone(&reclaimed);
+    let (read, tool_calls) = read_back_retained_rows(
+        "retained-reclaimed",
+        r#"
+try {
+  await control.read_output({ archive: prior.attachment });
+  await control.finish("read");
+} catch (error) {
+  await control.finish({ name: error.name, described: rows.length });
+}"#,
+        |backend, finished| async move {
+            let attachment = finished.output.reference.id;
+            backend
+                .attachment_store()
+                .delete(&attachment)
+                .await
+                .expect("reclaim the retained value's bytes");
+            *noted.lock().expect("note the attachment") = Some(attachment);
+        },
+    )
+    .await?;
+    assert_eq!(
+        read,
+        serde_json::json!({"name": "tool_failed", "described": 3000})
+    );
+    let attachment = reclaimed
+        .lock()
+        .expect("read the attachment")
+        .clone()
+        .expect("the retained value was reclaimed");
+    assert!(
+        holds(
+            &tool_calls,
+            &serde_json::to_value(lash_core::ToolFailureCause::RetainedValueUnavailable {
+                attachment
+            })
+            .expect("the cause encodes")
+        ),
+        "the read_output call records its typed cause"
+    );
     Ok(())
 }
 
@@ -573,7 +756,7 @@ async fn step_archive_refetch_survives_cold_reopen_branch_and_continue_as_on_sql
     let archive = archive.clone();
     let edges = backend
         .session_store_factory()
-        .attachment_referrers(&archive.reference.id)
+        .attachment_referrers(&archive.output.reference.id)
         .await
         .expect("exact referrers");
     assert!(edges.iter().any(|edge| matches!(edge, lash_core::ArtifactReferrer::Session(id) if id.as_str() == "archive-history")), "commit rooted the archive: {edges:?}");
@@ -670,16 +853,10 @@ for (let i = 0; i < history.length; i++) {
         Some(&serde_json::json!(expected))
     );
     sweep_without_grace(&backend).await;
-    let observations: Vec<lash_core::CellPrint> =
-        serde_json::from_str(&stored_text(&backend, &archive.reference).await)
+    let values: Vec<serde_json::Value> =
+        serde_json::from_str(&stored_text(&backend, &archive.output.reference).await)
             .expect("archive survives frame switch");
-    assert_eq!(
-        observations
-            .into_iter()
-            .map(|observation| observation.value)
-            .collect::<Vec<_>>(),
-        expected
-    );
+    assert_eq!(values, expected);
     session.close().await.expect("close fresh frame");
     delete_session_and_await(&core, "archive-history").await?;
     let factory = backend.session_store_factory();
@@ -690,16 +867,10 @@ for (let i = 0; i < history.length; i++) {
         "a surviving branch protects the source-owned archive edge"
     );
     sweep_without_grace(&backend).await;
-    let shared: Vec<lash_core::CellPrint> =
-        serde_json::from_str(&stored_text(&backend, &archive.reference).await)
+    let shared: Vec<serde_json::Value> =
+        serde_json::from_str(&stored_text(&backend, &archive.output.reference).await)
             .expect("branch-protected archive");
-    assert_eq!(
-        shared
-            .into_iter()
-            .map(|print| print.value)
-            .collect::<Vec<_>>(),
-        expected
-    );
+    assert_eq!(shared, expected);
     delete_session_and_await(&core, "archive-branch").await?;
     assert_eq!(
         factory.session_referrer_state(&source).await?,
@@ -708,7 +879,7 @@ for (let i = 0; i < history.length; i++) {
     );
     // Retirement alone does not delete bytes: the host explicitly releases
     // the source hold, prunes settled execution evidence, and sweeps bytes.
-    stored_text(&backend, &archive.reference).await;
+    stored_text(&backend, &archive.output.reference).await;
     factory
         .end_attachment_referrer(&lash_core::ArtifactReferrer::Session(source))
         .await?;
@@ -724,7 +895,7 @@ for (let i = 0; i < history.length; i++) {
     // release those holds.
     tokio::time::timeout(std::time::Duration::from_secs(30), async {
         while !factory
-            .attachment_referrers(&archive.reference.id)
+            .attachment_referrers(&archive.output.reference.id)
             .await
             .expect("remaining archive holds")
             .is_empty()
@@ -749,7 +920,7 @@ for (let i = 0; i < history.length; i++) {
         matches!(
             backend
                 .attachment_store()
-                .get(&archive.reference.id, 32 * 1024 * 1024)
+                .get(&archive.output.reference.id, 32 * 1024 * 1024)
                 .await,
             Err(lash_core::AttachmentStoreError::NotFound(_))
         ),

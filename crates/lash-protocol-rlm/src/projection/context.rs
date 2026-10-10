@@ -171,8 +171,11 @@ impl RlmHistoryProjection {
 /// Intermediate trajectory entries remain available, while their prose is represented by the
 /// canonical transcript.
 /// A terminal step with an archive stays addressable; its printed values
-/// are independent of the canonical assistant answer. Without a committed
-/// message, every terminal step remains unchanged.
+/// are independent of the canonical assistant answer. So does a terminal
+/// step whose final value was retained out of history: the answer is a cut
+/// text copy of a value that long, and the step holds the value's shape and
+/// its whole bytes (FIG-1439). Without a committed message, every terminal
+/// step remains unchanged.
 fn completed_turn_internal_indices(
     entries: &[lash_core::facade_support::ChronologicalEntry],
 ) -> Result<BTreeSet<usize>, lash_core::StoredDataCorruption> {
@@ -214,9 +217,10 @@ fn completed_turn_internal_indices(
                     terminal_step = step
                         .result
                         .finish()
-                        .is_some()
-                        .then_some(entry.index)
-                        .filter(|_| step.prints_retained.is_none());
+                        .filter(|value| {
+                            value.retained().is_none() && step.prints_retained.is_none()
+                        })
+                        .map(|_| entry.index);
                 }
                 _ => {}
             },

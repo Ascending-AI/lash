@@ -59,20 +59,24 @@ fn read_output_tool_definition() -> ToolDefinition {
     ToolDefinition::raw(
         "tool:read_output",
         "read_output",
-        "Read a step's complete ordered print values. Pass history[N].output_archive.attachment as archive; inline steps already have their full values in history[N].output. Reads are explicit and never expand the prompt automatically.",
+        "Read a value retained out of history whole. Pass history[N].output_archive.attachment for a step's print values, in order, or history[N].final_output.attachment for its final value; the retained record's `shape` already says what the value holds. Inline values are already whole in history. Throws a `retained_value_unavailable` failure when the value's bytes are no longer stored. Reads are explicit and never expand the prompt automatically.",
         json!({
             "type": "object",
             "properties": {"archive": {"type": "object"}},
             "required": ["archive"],
             "additionalProperties": false,
         }),
-        json!({"type": "array", "items": {}}),
+        json!({}),
     ).expect("valid schemas")
     // One store read or write: a short body.
     .with_execution(std::time::Duration::from_secs(30))
     .with_tool_binding(ToolBinding::new(["control"], "read_output"))
 }
 
+/// Reads a retained value whole. A value whose bytes the store no longer
+/// holds is the program's to handle — a typed failure its cell can catch,
+/// at the point it asked for the value (FIG-1439); any other store failure
+/// is the host's.
 async fn read_output(call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
     let source = call.args.get("archive").cloned().unwrap_or(Value::Null);
     let Ok(lash_core::ToolValue::Attachment(attachment_ref)) =
@@ -80,41 +84,41 @@ async fn read_output(call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
     else {
         return ToolOutcome::failure(lash_core::ToolFailure::invalid_request(
             "invalid_output_archive",
-            "archive must be a history attachment ref",
+            "archive must be a retained history value's attachment",
         ))
         .into();
     };
     let bytes = match call.context.attachments().read(&attachment_ref).await {
         Ok(bytes) => bytes,
+        Err(lash_core::AttachmentStoreError::NotFound(attachment)) => {
+            return ToolOutcome::failure(
+                lash_core::ToolFailure::tool(
+                    lash_core::ToolFailureClass::Unavailable,
+                    "retained_value_unavailable",
+                    format!(
+                        "the retained value's attachment {attachment} is no longer stored; its shape is all history keeps of it"
+                    ),
+                )
+                .with_cause(lash_core::ToolFailureCause::RetainedValueUnavailable { attachment }),
+            )
+            .into();
+        }
         Err(error) => {
             return lash_core::ToolAttemptOutcome::host_failed(
                 lash_core::RuntimeEffectControllerError::output_retention_failed(&error),
             );
         }
     };
-    match decode_output_archive(&bytes) {
-        Ok(values) => ToolOutcome::ok(Value::Array(values)).into(),
-        Err(error) => lash_core::ToolAttemptOutcome::host_failed(error),
-    }
-}
-
-pub(crate) fn decode_output_archive(
-    bytes: &[u8],
-) -> Result<Vec<Value>, lash_core::RuntimeEffectControllerError> {
-    serde_json::from_slice::<Vec<lash_core::CellPrint>>(bytes)
-        .map(|observations| {
-            observations
-                .into_iter()
-                .map(|observation| observation.value)
-                .collect()
-        })
-        .map_err(|error| {
+    match serde_json::from_slice::<Value>(&bytes) {
+        Ok(value) => ToolOutcome::ok(value).into(),
+        Err(error) => lash_core::ToolAttemptOutcome::host_failed(
             lash_core::RuntimeEffectControllerError::output_retention_failed(
                 &lash_core::AttachmentStoreError::Contract(format!(
-                    "the step output archive is corrupt: {error}"
+                    "the retained value is not JSON: {error}"
                 )),
-            )
-        })
+            ),
+        ),
+    }
 }
 
 /// The name of Lash's finish control tool: what a turn it ended records as

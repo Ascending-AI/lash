@@ -109,15 +109,21 @@ async fn durable_transcript_projection_fixture() -> Vec<crate::ChatRow> {
         id: "durable-tool-trajectory".to_string(),
         protocol_iteration: 1,
         code: "durable.tool_projection()".to_string(),
-        prints_retained: Some(lash::attachments::RetainedOutput {
-            reference: lash::attachments::AttachmentRef {
-                id: lash::attachments::content_id(b"durable-print-archive"),
-                media_type: "application/json".parse().expect("media type"),
-                byte_len: 90_000,
-                type_metadata: None,
-                label: None,
+        prints_retained: Some(lash::attachments::RetainedValue {
+            output: lash::attachments::RetainedOutput {
+                reference: lash::attachments::AttachmentRef {
+                    id: lash::attachments::content_id(b"durable-print-archive"),
+                    media_type: "application/json".parse().expect("media type"),
+                    byte_len: 90_000,
+                    type_metadata: None,
+                    label: None,
+                },
+                witness: "durable projection".to_string(),
             },
-            witness: "durable projection".to_string(),
+            shape: lash::attachments::ValueShape::Array {
+                length: 1,
+                items: None,
+            },
         }),
         calls: vec![
             lash::persistence::ExecutedCall {

@@ -66,4 +66,10 @@ pub enum ToolFailureCause {
     /// A call beside this control call in its round failed or was
     /// cancelled, so the turn does not end on it. The body did not run.
     ControlSiblingFailed,
+    /// A value retained out of history was asked for whole, and the
+    /// attachment that held it is no longer stored: its shape is all history
+    /// keeps of it (FIG-1439).
+    RetainedValueUnavailable {
+        attachment: crate::AttachmentId,
+    },
 }

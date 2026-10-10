@@ -18,7 +18,8 @@
 //!   followed by a committed assistant transcript message in the same turn,
 //!   the transcript is canonical for assistant prose. Assistant-content events,
 //!   the terminal emission cell, and its never-observed output echo are
-//!   omitted unless it holds a print archive; those values remain addressable.
+//!   omitted unless it holds a print archive or a retained final value; those
+//!   values remain addressable.
 //!   Intermediate trajectory entries remain available. This is
 //!   derived from event/turn ordering, never message content. Without a
 //!   committed transcript, the trajectory renders unchanged.
@@ -38,8 +39,11 @@
 //!   are appended uncached. The host continues that User message with the
 //!   call's CurrentContext sections, outside stored history.
 //! - **Re-fetch handle.** Inline `history[N].output[M]` is the complete value.
-//!   Archived steps expose `history[N].output_archive.attachment`; an explicit
-//!   `control.read_output` reads all of the step's typed values in order.
+//!   A retained print archive or final value is read in place as its shape
+//!   (`history[N].output_archive.shape`, `history[N].final_output.shape`);
+//!   an explicit `control.read_output` of its `attachment` reads the value
+//!   whole — the step's print values in order, or the final value — and
+//!   throws a catchable refusal when its bytes are gone (FIG-1439).
 //!   Rendering never reads archive bytes. Proven by
 //!   `projection::context::tests::history_step_output_resolves_full_untruncated_value`.
 //!   `history[N]` uses compact canonical semantic indices, so omitted internal
@@ -467,8 +471,9 @@ pub(crate) fn step_output_text(
     if let Some(archive) = &entry.prints_retained {
         let _ = write!(
             out,
-            "{}\nFull outputs: await control.read_output({{ archive: history[{index}].output_archive.attachment }})",
-            archive.witness,
+            "{}\n{}",
+            archive.output.witness,
+            retained_value_reading(&format!("history[{index}].output_archive"), archive),
         );
     }
     if !entry.images.is_empty() {
@@ -567,7 +572,12 @@ pub(crate) fn step_output_text(
                 out.push_str("\n\n");
             }
             out.push_str("Final output:\n");
-            out.push_str(&retained.witness);
+            out.push_str(&retained.output.witness);
+            out.push('\n');
+            out.push_str(&retained_value_reading(
+                &format!("history[{index}].final_output"),
+                retained,
+            ));
         }
         lash_core::CellOutcome::Controlled {
             control: lash_core::CellControl::SwitchAgentFrame { .. },
@@ -579,6 +589,16 @@ pub(crate) fn step_output_text(
         out.push_str("(no printed output)");
     }
     out
+}
+
+/// How a cell reads a retained value at `path`: its shape in place, and the
+/// value whole only by asking for it.
+fn retained_value_reading(path: &str, retained: &lash_core::RetainedValue) -> String {
+    let shape = serde_json::to_string(&retained.shape)
+        .unwrap_or_else(|_| "{\"error\":\"unrenderable shape\"}".to_string());
+    format!(
+        "Shape ({path}.shape): {shape}\nFull value: await control.read_output({{ archive: {path}.attachment }})"
+    )
 }
 
 fn message_attachment_refs(parts: &[lash_core::Part]) -> Vec<RlmAttachmentRef> {

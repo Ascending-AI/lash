@@ -485,13 +485,13 @@ impl CodeExecutorPlugin for CodeModeCodeExecutor {
         Ok(cell
             .prints_retained
             .iter()
-            .map(|retained| &retained.reference)
+            .map(|retained| &retained.output.reference)
             .chain(&cell.images)
             .chain(
                 cell.result
                     .finish()
                     .and_then(lash_core::OutputValue::retained)
-                    .map(|retained| &retained.reference),
+                    .map(|retained| &retained.output.reference),
             )
             .map(|reference| reference.id.clone())
             .collect())

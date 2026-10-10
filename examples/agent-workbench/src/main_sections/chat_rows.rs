@@ -170,7 +170,7 @@ fn message_row(message: &TranscriptMessage, is_turn_reply: bool) -> (ChatRowKind
 
 fn cell_row(cell: &CellRecord) -> ChatContent {
     let mut output = match &cell.prints_retained {
-        Some(archive) => archive.witness.clone(),
+        Some(archive) => archive.output.witness.clone(),
         None => cell
             .prints
             .iter()
@@ -187,7 +187,7 @@ fn cell_row(cell: &CellRecord) -> ChatContent {
             lash::attachments::OutputValue::Inline(value) => {
                 serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string())
             }
-            lash::attachments::OutputValue::Retained(value) => value.witness.clone(),
+            lash::attachments::OutputValue::Retained(value) => value.output.witness.clone(),
         };
         if !output.is_empty() {
             output.push('\n');

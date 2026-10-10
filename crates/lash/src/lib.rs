@@ -1126,8 +1126,12 @@ pub mod attachments {
     /// Output kept out of session history (FIG-1643): the byte policy a host
     /// states in [`DataRetention::attachments`](crate::DataRetention::attachments),
     /// the witness and reference history keeps in an oversized output's
-    /// place, and a value that is one or the other.
-    pub use lash_core::{OutputRetentionPolicy, OutputValue, RetainedOutput};
+    /// place, a code mode value retained with its shape (FIG-1439), and a
+    /// value that is inline or retained.
+    pub use lash_core::{
+        OutputRetentionPolicy, OutputValue, RetainedOutput, RetainedValue, ValueShape,
+    };
+    pub use lash_sansio::FieldShape;
     pub use lash_sansio::llm::attachment_delivery::{
         AttachmentPosition, Delivery, DeliveryContext, DeliveryFetchHorizon, DeliveryForms,
         DeliveryLimits, DeliverySecret, ProviderAccepts, ProviderFileScope,

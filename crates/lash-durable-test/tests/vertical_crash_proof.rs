@@ -759,9 +759,9 @@ fn retained_prints(value: &serde_json::Value, found: &mut Vec<lash_core::Attachm
         serde_json::Value::Object(fields) => {
             for (key, value) in fields {
                 if key == "prints_retained" && !value.is_null() {
-                    let retained: lash_core::RetainedOutput =
+                    let retained: lash_core::RetainedValue =
                         serde_json::from_value(value.clone()).expect("a print archive decodes");
-                    found.push(retained.reference.id);
+                    found.push(retained.output.reference.id);
                 } else {
                     retained_prints(value, found);
                 }
