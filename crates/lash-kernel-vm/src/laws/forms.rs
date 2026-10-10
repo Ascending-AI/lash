@@ -314,6 +314,24 @@ fn forms_do_what_their_rules_say() {
             list([text("a"), text("c"), text("a"), text("d")]),
         ),
         (
+            "K-KEY-002, K-KEY-003, K-KEY-005: map and set churn preserves equivalence, spelling and order",
+            "let m = map{0.0: 0, 1: 1, 2: 2, 3: 3} let s = set{0.0, 1, 2, 3} \
+             let i = 0 while num.lt(i, 128) { \
+             remove m[0] remove m[1.0] remove m[2] remove s[0] remove s[1.0] remove s[2] \
+             set m[0] = i set m[1] = i set m[2] = i \
+             set s[0] = true set s[1] = true set s[2] = true set i = num.add(i, 1) } \
+             set m[0.0] = 9 set s[0.0] = true return (m, s)",
+            tuple([
+                Datum::Map(vec![
+                    (int(3), int(3)),
+                    (int(0), int(9)),
+                    (int(1), int(127)),
+                    (int(2), int(127)),
+                ]),
+                Datum::Set(vec![int(3), int(0), int(1), int(2)]),
+            ]),
+        ),
+        (
             "K-CLO-001: a closure and its defining scope share the variable",
             "let make = fn() { let n = 0 let bump = fn() { set n = num.add(n, 1) return n } \
              do apply bump() set n = num.add(n, 10) let seen = apply bump() return (n, seen) } \
@@ -637,6 +655,10 @@ fn charges_follow_the_cost_table() {
     // A loop: the statement, the iterable's nodes, and one test per
     // iteration and one that ends it.
     assert_eq!(charged("for x in (1, 2) { }"), 1 + (1 + 2 + 2) + 3);
+    // Map/set literals charge every written entry, including equivalent
+    // keys; copying out and iteration charge only the surviving entries.
+    assert_eq!(charged("let m = map{1: 2, 1.0: 3} return m"), 8 + 2 + 7);
+    assert_eq!(charged("let s = set{1, 1.0} for k in s { }"), 6 + 2 + 2);
     // A library call: its node, its arguments' nodes, and its formula,
     // `size(result)`: 1 + 4 bytes.
     assert_eq!(charged("let t = text.concat(\"ab\", \"cd\")"), 1 + 3 + 5);

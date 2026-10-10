@@ -187,6 +187,41 @@ main {
 }
 "#;
 
+/// `K-ITER-003`, `K-KEY-003`, `K-KEY-005`: removals on both sides of a
+/// live cursor, including removing every entry and then reinserting.
+const TABLE_CHURN: &str = r#"
+main {
+  let m = map{1.0: "first", 2: "two", 3: "three", 4: "four"}
+  let s = set{1.0, 2, 3, 4}
+  let keys = []
+  let first = true
+  for key in m {
+    set keys[list.len(keys)] = key
+    if first {
+      set first = false
+      remove m[1] remove m[2] remove m[3]
+      set m[1] = "again" set m[4.0] = "updated"
+      remove s[1] remove s[2] remove s[3]
+      set s[1] = true set s[4.0] = true
+    }
+    let row = (key, m, s)
+    do perform echo(row) as Any
+  }
+  set first = true
+  for key in s {
+    set keys[list.len(keys)] = key
+    if first {
+      set first = false
+      remove s[4] remove s[1]
+      set s[2.0] = true set s[2] = true
+    }
+    let row = (key, s)
+    do perform echo(row) as Any
+  }
+  return (keys, m, s)
+}
+"#;
+
 /// The rebuild law (`K-MACH-008`, gate 4 of `docs/kernel/design.md` §11):
 /// park at every safe point, discard the executable, rebuild it under
 /// another layout with a native function swapped for its kernel body, and
@@ -204,6 +239,7 @@ fn a_run_rebuilt_at_every_safe_point_runs_the_same() {
         ("a cleanup block with a wait", CLEANUP_WITH_A_WAIT),
         ("a fan-out with one member ended", FAN_OUT_WITH_ONE_ENDED),
         ("a cancelled task mid-cleanup", CANCELLED_MID_CLEANUP),
+        ("live map and set iteration through removals", TABLE_CHURN),
     ];
     for (name, text) in programs {
         let straight = observe(text, u64::MAX, false);

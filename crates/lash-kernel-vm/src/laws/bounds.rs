@@ -68,6 +68,36 @@ fn the_charge_bound_ends_the_run() {
 /// bound, and memory the run no longer reaches does not.
 #[test]
 fn the_memory_bound_counts_what_is_live() {
+    // A deleted table key releases its referent; indexes and deleted
+    // slots contribute no logical price. A live map/set entry costs two
+    // 16-byte values, and each object costs 32 bytes (K-BND-003).
+    use lash_kernel_doc::{Identity, Value};
+
+    use crate::heap::{Heap, Key, Obj, Table};
+
+    for set in [false, true] {
+        let mut heap = Heap::new(ROOMY.memory);
+        let kept = heap.insert(Obj::List(vec![]));
+        let dropped = heap.insert(Obj::List(vec![]));
+        let mut table = Table::default();
+        for object in [kept, dropped] {
+            let key = Value::Ref(Identity::Object(object));
+            table.insert(Key::of(&key).unwrap(), key, Value::Null);
+        }
+        table.remove(&Key::Ref(Identity::Object(dropped)));
+        let root = heap.insert(if set {
+            Obj::Set(table)
+        } else {
+            Obj::Map(table)
+        });
+        assert_eq!(
+            heap.collect(vec![Identity::Object(root)], &mut |_, _| {}),
+            96
+        );
+        assert!(heap.get(kept).is_some());
+        assert!(heap.get(dropped).is_none());
+    }
+
     let bounds = Bounds {
         memory: 64 << 10,
         ..ROOMY

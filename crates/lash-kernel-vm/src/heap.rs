@@ -12,7 +12,7 @@
 //! place, and a chunk with no object left is dropped, so storage follows
 //! what is live and not how many objects the run has allocated.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, btree_map};
 use std::ops::ControlFlow;
 use std::sync::Arc;
 
@@ -86,24 +86,36 @@ impl Key {
     }
 }
 
-/// The entries of a map or a set, in insertion order.
+/// An insertion's stable sequence and its first-written key and value
+/// (null for a set). Removal drops both values immediately.
+#[derive(Clone, Debug)]
+struct Entry {
+    sequence: u64,
+    pair: Option<(Value, Value)>,
+}
+
+/// The entries of a map or a set, in insertion order. Only live keys have
+/// index slots. The tree bounds lookup even for adversarial keys; the
+/// values themselves occupy one array, rather than a second tree.
+///
+/// Dead slots never outnumber live ones after a removal. Compaction moves
+/// slots, but never sequences: active loops keep their position. Neither
+/// slots nor the index are saved; restore inserts the saved live entries.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Table {
-    index: BTreeMap<Key, u64>,
-    /// Each entry under its sequence number: the key as first written, and
-    /// the value (null for a set).
-    entries: BTreeMap<u64, (Value, Value)>,
+    index: BTreeMap<Key, usize>,
+    entries: Vec<Entry>,
     next: u64,
 }
 
 impl Table {
     pub(crate) fn len(&self) -> usize {
-        self.entries.len()
+        self.index.len()
     }
 
     pub(crate) fn get(&self, key: &Key) -> Option<&Value> {
-        let sequence = self.index.get(key)?;
-        self.entries.get(sequence).map(|(_, value)| value)
+        let slot = *self.index.get(key)?;
+        self.entries[slot].pair.as_ref().map(|(_, value)| value)
     }
 
     pub(crate) fn contains(&self, key: &Key) -> bool {
@@ -113,40 +125,85 @@ impl Table {
     /// Writes `value` under `key`. A key the table holds keeps its first
     /// spelling and its position (`K-KEY-003`).
     pub(crate) fn insert(&mut self, key: Key, written: Value, value: Value) {
-        if let Some(sequence) = self.index.get(&key) {
-            if let Some(entry) = self.entries.get_mut(sequence) {
-                entry.1 = value;
+        match self.index.entry(key) {
+            btree_map::Entry::Occupied(slot) => {
+                if let Some(pair) = &mut self.entries[*slot.get()].pair {
+                    pair.1 = value;
+                }
             }
-            return;
+            btree_map::Entry::Vacant(slot) => {
+                slot.insert(self.entries.len());
+                self.entries.push(Entry {
+                    sequence: self.next,
+                    pair: Some((written, value)),
+                });
+                self.next += 1;
+            }
         }
-        self.index.insert(key, self.next);
-        self.entries.insert(self.next, (written, value));
-        self.next += 1;
     }
 
     pub(crate) fn remove(&mut self, key: &Key) {
-        if let Some(sequence) = self.index.remove(key) {
-            self.entries.remove(&sequence);
+        if let Some(slot) = self.index.remove(key) {
+            self.entries[slot].pair = None;
+            if self.entries.len() - self.len() > self.len() {
+                self.compact();
+            }
         }
+    }
+
+    /// The array has at most twice the live slots plus two at compaction;
+    /// rebuilding offsets is linear too, without comparing or normalizing
+    /// the keys again. Compaction needs more removals than surviving entries, so its work
+    /// is amortized over those removals. Capacity follows live storage,
+    /// rather than the run's historical number of insertions.
+    fn compact(&mut self) {
+        if self.index.is_empty() {
+            self.entries = Vec::new();
+            return;
+        }
+        let mut live = 0;
+        let positions: Vec<usize> = self
+            .entries
+            .iter()
+            .map(|entry| {
+                let position = live;
+                live += usize::from(entry.pair.is_some());
+                position
+            })
+            .collect();
+        for slot in self.index.values_mut() {
+            *slot = positions[*slot];
+        }
+        self.entries.retain(|entry| entry.pair.is_some());
+        self.entries.shrink_to_fit();
     }
 
     /// The first entry after sequence number `last`, with its number.
     pub(crate) fn after(&self, last: Option<u64>) -> Option<(u64, &Value)> {
         let from = last.map_or(0, |last| last.saturating_add(1));
-        self.entries
-            .range(from..)
-            .next()
-            .map(|(sequence, (key, _))| (*sequence, key))
+        let slot = self.entries.partition_point(|entry| entry.sequence < from);
+        self.entries[slot..]
+            .iter()
+            .find_map(|entry| entry.pair.as_ref().map(|(key, _)| (entry.sequence, key)))
     }
 
     /// How many entries sit at or before sequence number `last`: a loop's
     /// position as a count, which outlives the numbering.
     pub(crate) fn passed(&self, last: Option<u64>) -> u64 {
-        last.map_or(0, |last| self.entries.range(..=last).count() as u64)
+        last.map_or(0, |last| {
+            let end = self.entries.partition_point(|entry| entry.sequence <= last);
+            self.entries[..end]
+                .iter()
+                .filter(|entry| entry.pair.is_some())
+                .count() as u64
+        })
     }
 
     pub(crate) fn iter(&self) -> impl Iterator<Item = (&Value, &Value)> {
-        self.entries.values().map(|(key, value)| (key, value))
+        self.entries
+            .iter()
+            .filter_map(|entry| entry.pair.as_ref())
+            .map(|(key, value)| (key, value))
     }
 }
 
