@@ -904,7 +904,11 @@ impl Adapter<'_> {
                     Some(convert_var_kind(decl.kind)),
                 ))
             }
-            swc::ForHead::Pat(pattern) => Ok((self.convert_pattern(pattern)?, None)),
+            swc::ForHead::Pat(pattern) => {
+                let pattern = self.convert_pattern(pattern)?;
+                self.check_assignment_pattern(&pattern, span)?;
+                Ok((pattern, None))
+            }
             swc::ForHead::UsingDecl(_) => Err(reject(
                 DiagnosticCode::UsingUnsupported,
                 "using declarations in for-in/of heads",

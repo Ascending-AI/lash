@@ -48,6 +48,25 @@ impl Lowerer<'_> {
         self.closure(function)
     }
 
+    /// Anonymous function definitions receive a name only in named evaluation.
+    pub(super) fn named_expression(
+        &mut self,
+        expression: &ast::Expr,
+        name: &str,
+    ) -> Lowering<Operand> {
+        if let ast::Expr::Function(function) = expression
+            && function.name.is_none()
+        {
+            let mut function = function.clone();
+            function.name = Some(name.to_owned());
+            // An inferred display name does not create the internal binding
+            // of a named function expression.
+            self.lower_function(&function)
+        } else {
+            self.lower_expr(expression)
+        }
+    }
+
     /// A function expression: its name, if it has one, is a binding only
     /// its own body sees.
     pub(super) fn lower_function_expression(
@@ -78,10 +97,12 @@ impl Lowerer<'_> {
     pub(super) fn closure(&mut self, function: &ast::Function) -> Lowering<Operand> {
         let this = self.fresh("this");
         let args = self.fresh("args");
+        let arguments = (!function.is_arrow).then(|| self.fresh("arguments"));
         self.functions.push(FunctionFrame {
             arrow: function.is_arrow,
             this: Some(this.clone()),
-            args: Some(args.clone()),
+            args: arguments.clone(),
+            arguments_used: false,
             controls: Vec::new(),
         });
         let outer_span = self.span;
@@ -106,6 +127,22 @@ impl Lowerer<'_> {
                 lowerer.emit(Stmt::Return {
                     value: Expr::Literal(Literal::Absent),
                 });
+            }
+            if lowerer.frame().arguments_used {
+                let prefix = lowerer.block(|this| {
+                    let object = this.invoke(
+                        "ts.arguments",
+                        &[Operand::variable(args.clone(), Ty::Unknown)],
+                        Ty::Unknown,
+                    )?;
+                    let Some(arguments) = &arguments else {
+                        unreachable!("only a non-arrow has arguments");
+                    };
+                    this.bind(arguments.clone(), object);
+                    Ok(())
+                })?;
+                lowerer.buf.stmts.splice(0..0, prefix.stmts);
+                lowerer.buf.notes.splice(0..0, prefix.notes);
             }
             Ok(())
         });
@@ -189,11 +226,14 @@ impl Lowerer<'_> {
     }
 
     /// The enclosing function's argument list, which is its `arguments`.
-    pub(super) fn arguments_binding(&self) -> Option<lash_kernel_doc::Name> {
+    pub(super) fn arguments_binding(&mut self) -> Option<lash_kernel_doc::Name> {
         self.functions
-            .iter()
+            .iter_mut()
             .rev()
             .find(|frame| !frame.arrow)
-            .and_then(|frame| frame.args.clone())
+            .and_then(|frame| {
+                frame.arguments_used = true;
+                frame.args.clone()
+            })
     }
 }

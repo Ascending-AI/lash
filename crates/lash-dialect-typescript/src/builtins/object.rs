@@ -5,6 +5,21 @@ pub(super) fn object() -> Object {
         source: include_str!("../helpers/object.kernel"),
         rows: vec![
             Row::Method {
+                receiver: Receiver::Brand("ts.arguments"),
+                name: "hasOwnProperty",
+                function: "ts.object.hasOwnProperty",
+            },
+            Row::Method {
+                receiver: Receiver::Brand("ts.arguments"),
+                name: "toString",
+                function: "ts.object.toString",
+            },
+            Row::Method {
+                receiver: Receiver::Brand("ts.arguments"),
+                name: "valueOf",
+                function: "ts.object.valueOf",
+            },
+            Row::Method {
                 receiver: Receiver::Record,
                 name: "hasOwnProperty",
                 function: "ts.object.hasOwnProperty",

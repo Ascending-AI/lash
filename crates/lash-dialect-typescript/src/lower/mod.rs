@@ -65,6 +65,7 @@ pub(crate) const CORE_OPERATIONS: &[&str] = &[
     "same",
     "text.concat",
     "ts.add",
+    "ts.arguments",
     "ts.await",
     "ts.assign",
     "ts.bit_and",
@@ -243,6 +244,7 @@ struct FunctionFrame {
     arrow: bool,
     this: Option<Name>,
     args: Option<Name>,
+    arguments_used: bool,
     controls: Vec<Control>,
 }
 
@@ -332,6 +334,7 @@ pub(crate) fn lower(
             arrow: false,
             this: None,
             args: None,
+            arguments_used: false,
             controls: Vec::new(),
         }],
         buf: Buf::default(),

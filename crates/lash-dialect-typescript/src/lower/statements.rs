@@ -309,7 +309,10 @@ impl Lowerer<'_> {
                 };
                 self.lower_process(Some(name), function)?
             }
-            Some(init) => self.lower_expr(init)?,
+            Some(init) => match &declaration.pattern {
+                ast::Pattern::Ident(name, _) => self.named_expression(init, name)?,
+                _ => self.lower_expr(init)?,
+            },
             None if kind == VarKind::Var => {
                 // `var x;` makes `x` exist and assigns nothing.
                 let mut names = Vec::new();
@@ -480,33 +483,56 @@ impl Lowerer<'_> {
         body: &ast::Stmt,
     ) -> Lowering<()> {
         let subject = self.lower_expr(subject)?;
+        let subject = self.pin(subject);
         if helper == "ts.iterate" {
-            let iterator = self.invoke("ts.array.iterator", &[subject], Ty::Unknown)?;
-            let body = self.loop_block(Vec::new(), |this| {
-                let empty = this.let_expr(Expr::List(Vec::new()), Ty::Unknown);
-                let step = this.invoke(
-                    "ts.call_member",
-                    &[iterator.clone(), Operand::text("next"), empty],
-                    Ty::Unknown,
-                )?;
-                let done = this.invoke(
-                    "ts.get",
-                    &[step.clone(), Operand::text("done")],
-                    Ty::Unknown,
-                )?;
-                let onward = this.invoke("ts.not", &[done], Ty::Bool)?;
-                this.exit_unless(onward.expr());
-                let element =
-                    this.invoke("ts.get", &[step, Operand::text("value")], Ty::Unknown)?;
-                let mode = match kind {
-                    None => Mode::Assign,
-                    Some(VarKind::Var) => Mode::Declared,
-                    Some(_) => Mode::Local,
-                };
-                this.destructure(pattern, element, mode)?;
-                this.lower_statement(body)
+            // Kernel collection loops retain insertion-sequence cursors. A
+            // snapshot list would lose additions and visit deleted entries.
+            let receiver = self.invoke("ts.receiver", std::slice::from_ref(&subject), Ty::Text)?;
+            let map = self.same(receiver.expr(), Operand::text("map").expr())?;
+            let set = self.same(receiver.expr(), Operand::text("set").expr())?;
+            let map = self.let_expr(map, Ty::Bool);
+            let collection = self
+                .short_circuit(ast::LogicalOp::Or, map, |this| {
+                    Ok(this.let_expr(set, Ty::Bool))
+                })?
+                .expr();
+            let live = self.block(|this| {
+                let key = this.temp();
+                let raw = Operand::variable(key.clone(), Ty::Unknown);
+                let body = this.loop_block(Vec::new(), |this| {
+                    let value =
+                        this.invoke("ts.map.value", std::slice::from_ref(&raw), Ty::Unknown)?;
+                    let element = this.temp();
+                    this.bind(element.clone(), value.clone());
+                    let entry = this.block(|this| {
+                        let read = Expr::Member(Box::new(Member::Index {
+                            target: subject.expr(),
+                            index: raw.expr(),
+                        }));
+                        let read = this.let_expr(read, Ty::Unknown);
+                        let pair = this.let_expr(
+                            Expr::List(vec![Expr::Variable(element.clone()), read.expr()]),
+                            Ty::Unknown,
+                        );
+                        this.store(Place::Variable(element.clone()), pair);
+                        Ok(())
+                    })?;
+                    let map = this.same(receiver.expr(), Operand::text("map").expr())?;
+                    this.emit_if(map, entry, Buf::default());
+                    let mode = match kind {
+                        None => Mode::Assign,
+                        Some(VarKind::Var) => Mode::Declared,
+                        Some(_) => Mode::Local,
+                    };
+                    this.destructure(pattern, Operand::variable(element, Ty::Unknown), mode)?;
+                    this.lower_statement(body)
+                })?;
+                this.emit_for(key, subject.expr(), body);
+                Ok(())
             })?;
-            self.emit_while(truth(), body);
+            let array =
+                self.block(|this| this.lower_for_of_iterator(pattern, kind, subject, body))?;
+            self.emit_if(collection, live, array);
             return Ok(());
         }
         let items = self.invoke(helper, std::slice::from_ref(&subject), Ty::Unknown)?;
@@ -527,6 +553,41 @@ impl Lowerer<'_> {
             Ok(())
         })?;
         self.emit_for(item, items.expr(), body);
+        Ok(())
+    }
+
+    fn lower_for_of_iterator(
+        &mut self,
+        pattern: &ast::Pattern,
+        kind: Option<VarKind>,
+        subject: Operand,
+        body: &ast::Stmt,
+    ) -> Lowering<()> {
+        let iterator = self.invoke("ts.array.iterator", &[subject], Ty::Unknown)?;
+        let body = self.loop_block(Vec::new(), |this| {
+            let empty = this.let_expr(Expr::List(Vec::new()), Ty::Unknown);
+            let step = this.invoke(
+                "ts.call_member",
+                &[iterator.clone(), Operand::text("next"), empty],
+                Ty::Unknown,
+            )?;
+            let done = this.invoke(
+                "ts.get",
+                &[step.clone(), Operand::text("done")],
+                Ty::Unknown,
+            )?;
+            let onward = this.invoke("ts.not", &[done], Ty::Bool)?;
+            this.exit_unless(onward.expr());
+            let element = this.invoke("ts.get", &[step, Operand::text("value")], Ty::Unknown)?;
+            let mode = match kind {
+                None => Mode::Assign,
+                Some(VarKind::Var) => Mode::Declared,
+                Some(_) => Mode::Local,
+            };
+            this.destructure(pattern, element, mode)?;
+            this.lower_statement(body)
+        })?;
+        self.emit_while(truth(), body);
         Ok(())
     }
 

@@ -25,6 +25,7 @@ use num.lt
 use num.le
 use num.trunc
 use num.floor
+use num.min
 use num.is_nan
 use num.is_finite
 use num.to_float
@@ -47,6 +48,7 @@ use text.to_code_points
 use list.copy_deep
 use record.copy_deep
 use map.copy_deep
+use set.contains
 use set.copy_deep
 use map.entries
 use ts.boundary
@@ -81,13 +83,13 @@ use ts.loose_equals
 use ts.relational
 use ts.list_index
 use ts.get
+use ts.has_own
 use ts.require_object_coercible
 use ts.iterate
 use ts.keys
 use ts.set
 use ts.delete
 use ts.hole_value
-use ts.has_own
 
 # What a value is to a dispatcher: "absent", "null", "bool", "number",
 # "text", "list", "record", "closure", "error", "map", "set", "timestamp",
@@ -300,6 +302,7 @@ body {
         return value
       }
     }
+    if same(k, "brand:ts.arguments") { return "[object Arguments]" }
     if same(k, "list") {
       let joined = ""
       let first = true
@@ -871,6 +874,21 @@ errors "type_error"
 charge sum(4, size(target))
 body {
   let k = invoke ts.receiver(target)
+  if same(k, "brand:ts.arguments") {
+    let items = []
+    let index = 0.0
+    while true {
+      let property = target.properties.length
+      let numeric = invoke ts.to_number(property)
+      if num.is_nan(numeric) { break }
+      let length = num.min(num.floor(numeric), 9007199254740991.0)
+      if num.le(length, index) { break }
+      let key = invoke ts.number.to_string(index)
+      set items[list.len(items)] = target.properties[key]
+      set index = num.add(index, 1.0)
+    }
+    return items
+  }
   if same(k, "brand:regex.match") { return target.items }
   if same(k, "list") {
     return target
@@ -931,6 +949,11 @@ body {
     let name = invoke ts.to_property_key(key)
     if same(name, "caller") { throw error.new("type_error", "Restricted function property", null) }
     if same(name, "arguments") { throw error.new("type_error", "Restricted function property", null) }
+  }
+  if same(k, "brand:ts.arguments") {
+    let name = invoke ts.to_property_key(key)
+    if same(name, "callee") { throw error.new("type_error", "Strict arguments.callee is restricted", null) }
+    return target.properties[name]
   }
   if same(k, "text") {
     let length = text.utf16_len(target)
@@ -1009,6 +1032,12 @@ body {
     if same(name, "caller") { throw error.new("type_error", "Restricted function property", null) }
     if same(name, "arguments") { throw error.new("type_error", "Restricted function property", null) }
   }
+  if same(k, "brand:ts.arguments") {
+    let name = invoke ts.to_property_key(key)
+    if same(name, "callee") { throw error.new("type_error", "Strict arguments.callee is restricted", null) }
+    set target.properties[name] = value
+    return value
+  }
   if same(k, "brand:regex.ecma") {
     let name = invoke ts.to_property_key(key)
     if same(name, "lastIndex") { set target.lastIndex = value
@@ -1066,6 +1095,13 @@ body {
     }
     return true
   }
+  if same(k, "brand:ts.arguments") {
+    let name = invoke ts.to_property_key(key)
+    if same(name, "callee") { throw error.new("type_error", "Cannot delete strict arguments.callee", null) }
+    remove target.properties[name]
+    set target.hidden[name] = false
+    return true
+  }
   if same(k, "record") {
     let name = invoke ts.to_property_key(key)
     remove target[name]
@@ -1112,6 +1148,11 @@ body {
   for object_kind in ["map", "set", "timestamp", "closure", "bool", "number", "brand:date.invalid"] {
     if same(k, object_kind) { return false }
   }
+  if same(k, "brand:ts.arguments") {
+    let name = invoke ts.to_property_key(key)
+    if same(name, "callee") { return true }
+    return record.contains(target.properties, name)
+  }
   if same(k, "brand:regex.match") {
     let name = invoke ts.to_property_key(key)
     for field in ["length", "index", "input", "groups"] { if same(name, field) { return true } }
@@ -1150,7 +1191,14 @@ body {
     }
   }
   let own = invoke ts.has_own(target, name)
-  return own
+  if own { return true }
+  for inherited in ["valueOf", "toString", "hasOwnProperty", "constructor", "isPrototypeOf", "propertyIsEnumerable", "toLocaleString"] {
+    if same(name, inherited) { return true }
+  }
+  if same(k, "closure") {
+    for inherited in ["call", "apply", "bind", "caller", "arguments"] { if same(name, inherited) { return true } }
+  }
+  return false
 }
 
 # `target.key(args)` where no built-in row answers: the object's own
@@ -1176,6 +1224,11 @@ kernel 1
 charge sum(4, size(target))
 body {
   let k = kind(target)
+  let hidden_fields = set{}
+  if same(k, "record") { if same(target.brand, "ts.arguments") {
+    set hidden_fields = target.hidden
+    set target = target.properties
+  } }
   let keys = []
   if same(k, "error") {
     if same(kind(target.data), "record") {
@@ -1205,6 +1258,7 @@ body {
     let numeric = []
     let other = []
     for key in record.keys(target) {
+      if set.contains(hidden_fields, key) { continue }
       let index = invoke ts.list_index(key, 4294967295.0)
       if num.le(0, index) {
         let position = list.len(numeric)
@@ -1320,4 +1374,20 @@ body {
   }
   let outcome = apply visit(copied)
   return outcome
+}
+
+
+# The strict arguments object owns its indexed properties and independent length.
+function ts.arguments(items: List(Any)) -> Any
+kernel 1
+charge sum(8, size(items))
+body {
+  let properties = {length: num.to_float(list.len(items))}
+  let index = 0
+  for value in items {
+    let key = invoke ts.number.to_string(index)
+    set properties[key] = value
+    set index = num.add(index, 1)
+  }
+  return {brand: "ts.arguments", properties: properties, hidden: set{"length"}}
 }

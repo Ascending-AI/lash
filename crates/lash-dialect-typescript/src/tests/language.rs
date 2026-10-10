@@ -191,3 +191,93 @@ fn a_built_in_function_is_a_value() {
         "let log = fn(this1, args1) {\n  let t1 = invoke ts.console.log(this1, args1)\n  return t1\n}"
     );
 }
+
+/// A member reference is read before its argument expressions run.
+#[test]
+fn member_reference_failure_precedes_argument_effects() {
+    use super::machine::{Ended, end};
+    assert_eq!(
+        end(
+            "let ran = false; const o = {}; try { o.missing.call(ran = true); } catch (e) {} finish(ran);"
+        ),
+        Ended::Finished(lash_kernel_doc::Datum::Bool(false))
+    );
+}
+
+/// Parentheses around an optional member keep its call receiver.
+#[test]
+fn parenthesized_optional_member_keeps_the_receiver() {
+    use super::machine::{Ended, end};
+    assert_eq!(
+        end("const o = { x: 7, f() { return this.x; } }; finish((o?.f)());"),
+        Ended::Finished(lash_kernel_doc::Datum::Float(lash_kernel_doc::Float::new(
+            7.0
+        )))
+    );
+}
+
+/// Strict arguments are objects with an independent length and poisoned callee.
+#[test]
+fn strict_arguments_have_object_brand_and_restricted_callee() {
+    use super::machine::{Ended, end};
+    assert_eq!(
+        end(
+            "function f(a) { const args = arguments; args.length = 4294967296; let poisoned = false; try { args.callee; } catch(e) { poisoned = e.name === 'TypeError'; } const lexical = () => arguments; const independent = args[0] === a; args[0] = 8; const unmapped = a === 3; const huge = args.length === 4294967296; delete args.length; args.length = 'small'; return !Array.isArray(args) && poisoned && independent && unmapped && huge && args.length === 'small' && lexical() === args; } finish(f(3));"
+        ),
+        Ended::Finished(lash_kernel_doc::Datum::Bool(true))
+    );
+}
+
+/// For-of observes collection mutations before requesting the next item.
+#[test]
+fn for_of_reads_map_and_set_iterators_live() {
+    use super::machine::{Ended, end};
+    assert_eq!(
+        end(
+            "const s = new Set([1]); let n = 0; for (const value of s) { n++; if(value === 1) s.add(2); } const m = new Map([[0, 'a']]); let c = 0; for (var entry of m) { if(entry[0] === 0 && entry[1] === 'a') m.set(1, 'b'); c++; } finish(n === 2 && c === 2);"
+        ),
+        Ended::Finished(lash_kernel_doc::Datum::Bool(true))
+    );
+}
+
+/// Membership includes inherited Object methods; own-property checks do not.
+#[test]
+fn membership_distinguishes_inherited_and_own_properties() {
+    use super::machine::{Ended, end};
+    assert_eq!(
+        end("const o = {}; finish(('valueOf' in o) && !Object.hasOwn(o, 'valueOf'));"),
+        Ended::Finished(lash_kernel_doc::Datum::Bool(true))
+    );
+}
+
+/// Strict destructuring assignment cannot write eval or arguments.
+#[test]
+fn strict_for_of_assignment_checks_restricted_identifiers() {
+    for source in ["for ({eval} of [{}]) ;", "for ({eval = 0} of [{}]) ;"] {
+        assert_eq!(lower(source).unwrap_err().code, DiagnosticCode::SyntaxError);
+    }
+}
+
+/// Primitive global names are values when used as member receivers.
+#[test]
+fn primitive_global_member_access_uses_runtime_semantics() {
+    use super::machine::{Ended, end};
+    assert_eq!(
+        end(
+            "let caught = false; try { undefined.toString(); } catch(e) { caught = e.name === 'TypeError'; } finish(caught);"
+        ),
+        Ended::Finished(lash_kernel_doc::Datum::Bool(true))
+    );
+}
+
+/// Arguments retain their array iterator after acquiring their object brand.
+#[test]
+fn arguments_iteration_reads_live_length_and_indices() {
+    use super::machine::{Ended, end};
+    assert_eq!(
+        end(
+            "function f(a) { const copy = [...arguments]; let sum = 0; for(const value of arguments) { sum += value; if(value === 1) { arguments[1] = 2; arguments.length = 2; } } return copy[0] === 1 && sum === 3; } finish(f(1));"
+        ),
+        Ended::Finished(lash_kernel_doc::Datum::Bool(true))
+    );
+}

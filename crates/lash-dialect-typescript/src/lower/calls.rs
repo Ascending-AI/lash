@@ -26,7 +26,10 @@ impl Key {
 
 /// What an optional chain holds between two of its links.
 enum Link {
-    Value(Operand),
+    Value {
+        value: Operand,
+        receiver: Operand,
+    },
     /// A member not yet read: a call that follows it is a method call on
     /// the object.
     Member {
@@ -252,25 +255,6 @@ impl Lowerer<'_> {
         )
     }
 
-    /// `object.key(args)`: the name's dispatcher when built-in rows know
-    /// the name, else the object's own function.
-    fn call_member(&mut self, object: Operand, key: &Key, args: Operand) -> Lowering<Operand> {
-        if let Key::Static(name) = key
-            && self.table.methods.contains_key(name.as_str())
-        {
-            return self.invoke(&format!("ts.method.{name}"), &[object, args], Ty::Unknown);
-        }
-        self.invoke(
-            if matches!(key, Key::Computed(_)) {
-                "ts.call_computed"
-            } else {
-                "ts.call_member"
-            },
-            &[object, key.operand(), args],
-            Ty::Unknown,
-        )
-    }
-
     pub(super) fn lower_call(
         &mut self,
         callee: &ast::Expr,
@@ -384,8 +368,15 @@ impl Lowerer<'_> {
                 let object = self.lower_expr(object)?;
                 let object = self.pin(object);
                 let key = self.lower_key(property)?;
+                let function = self.get_member(&object, &key)?;
+                let function = self.pin(function);
                 let args = self.arguments(args)?;
-                self.call_member(object, &key, args)
+                Ok(self.apply(function, object, args))
+            }
+            ast::Expr::OptionalChain { base, operations } => {
+                let (function, receiver) = self.optional_reference(base, operations)?;
+                let args = self.arguments(args)?;
+                Ok(self.apply(function, receiver, args))
             }
             _ => {
                 let function = self.lower_expr(callee)?;
@@ -430,8 +421,20 @@ impl Lowerer<'_> {
         base: &ast::Expr,
         operations: &[ast::OptionalOperation],
     ) -> Lowering<Operand> {
+        self.optional_reference(base, operations)
+            .map(|(value, _)| value)
+    }
+
+    /// Parentheses end short-circuiting but retain a member reference's receiver.
+    fn optional_reference(
+        &mut self,
+        base: &ast::Expr,
+        operations: &[ast::OptionalOperation],
+    ) -> Lowering<(Operand, Operand)> {
         let result = self.let_expr(Expr::Literal(Literal::Absent), Ty::Unknown);
         let place = Place::Variable(super::statements::variable_of(&result));
+        let receiver = self.let_expr(Expr::Literal(Literal::Absent), Ty::Unknown);
+        let receiver_place = Place::Variable(super::statements::variable_of(&receiver));
         let link = match base {
             ast::Expr::Member {
                 object, property, ..
@@ -441,13 +444,20 @@ impl Lowerer<'_> {
                 let key = self.lower_key(property)?;
                 Link::Member { object, key }
             }
+            ast::Expr::OptionalChain { base, operations } => {
+                let (value, receiver) = self.optional_reference(base, operations)?;
+                Link::Value { value, receiver }
+            }
             _ => {
                 let value = self.lower_expr(base)?;
-                Link::Value(self.pin(value))
+                Link::Value {
+                    value: self.pin(value),
+                    receiver: Operand::undefined(),
+                }
             }
         };
-        self.chain(link, operations, &place)?;
-        Ok(result)
+        self.chain(link, operations, &place, &receiver_place)?;
+        Ok((result, receiver))
     }
 
     fn chain(
@@ -455,21 +465,24 @@ impl Lowerer<'_> {
         link: Link,
         operations: &[ast::OptionalOperation],
         place: &Place,
+        receiver_place: &Place,
     ) -> Lowering<()> {
         let Some((operation, rest)) = operations.split_first() else {
-            let value = match link {
-                Link::Value(value) => value,
-                Link::Member { object, key } => self.get_member(&object, &key)?,
+            let (value, receiver) = match link {
+                Link::Value { value, receiver } => (value, receiver),
+                Link::Member { object, key } => (self.get_member(&object, &key)?, object),
             };
             self.store(place.clone(), value);
+            self.store(receiver_place.clone(), receiver);
             return Ok(());
         };
         match operation {
             ast::OptionalOperation::Member { property, optional } => {
                 let object = match link {
-                    Link::Value(value) => value,
+                    Link::Value { value, .. } => value,
                     Link::Member { object, key } => self.get_member(&object, &key)?,
                 };
+                let object = self.pin(object);
                 self.unless_nullish(*optional, &object, |this| {
                     let key = this.lower_key(property)?;
                     this.chain(
@@ -479,27 +492,30 @@ impl Lowerer<'_> {
                         },
                         rest,
                         place,
+                        receiver_place,
                     )
                 })
             }
-            ast::OptionalOperation::Call { args, optional } => match link {
-                Link::Member { object, key } if !optional => {
-                    let args = self.arguments(args)?;
-                    let value = self.call_member(object, &key, args)?;
-                    self.chain(Link::Value(value), rest, place)
-                }
-                link => {
-                    let (function, this) = match link {
-                        Link::Value(value) => (value, Operand::undefined()),
-                        Link::Member { object, key } => (self.get_member(&object, &key)?, object),
-                    };
-                    self.unless_nullish(*optional, &function, |lowerer| {
-                        let args = lowerer.arguments(args)?;
-                        let value = lowerer.apply(function.clone(), this, args);
-                        lowerer.chain(Link::Value(value), rest, place)
-                    })
-                }
-            },
+            ast::OptionalOperation::Call { args, optional } => {
+                let (function, receiver) = match link {
+                    Link::Value { value, receiver } => (value, receiver),
+                    Link::Member { object, key } => (self.get_member(&object, &key)?, object),
+                };
+                let function = self.pin(function);
+                self.unless_nullish(*optional, &function, |lowerer| {
+                    let args = lowerer.arguments(args)?;
+                    let value = lowerer.apply(function.clone(), receiver, args);
+                    lowerer.chain(
+                        Link::Value {
+                            value,
+                            receiver: Operand::undefined(),
+                        },
+                        rest,
+                        place,
+                        receiver_place,
+                    )
+                })
+            }
         }
     }
 

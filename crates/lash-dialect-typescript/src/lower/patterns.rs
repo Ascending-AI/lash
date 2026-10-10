@@ -49,7 +49,11 @@ impl Lowerer<'_> {
                 self.set_member(&object, &key, value)
             }
             ast::Pattern::Assign { target, default } => {
-                let value = self.or_default(value, default)?;
+                let name = match target.as_ref() {
+                    ast::Pattern::Ident(name, _) => Some(name.as_str()),
+                    _ => None,
+                };
+                let value = self.or_default(value, default, name)?;
                 self.destructure(target, value, mode)
             }
             ast::Pattern::Array { elements, rest } => {
@@ -105,12 +109,20 @@ impl Lowerer<'_> {
 
     /// `value`, or the default's value when `value` is `undefined`. The
     /// default is evaluated only then.
-    pub(super) fn or_default(&mut self, value: Operand, default: &ast::Expr) -> Lowering<Operand> {
+    pub(super) fn or_default(
+        &mut self,
+        value: Operand,
+        default: &ast::Expr,
+        name: Option<&str>,
+    ) -> Lowering<Operand> {
         let slot = self.temp();
         self.bind(slot.clone(), value);
         let missing = self.same(Expr::Variable(slot.clone()), Expr::Literal(Literal::Absent))?;
         let fill = self.block(|this| {
-            let default = this.lower_expr(default)?;
+            let default = match name {
+                Some(name) => this.named_expression(default, name)?,
+                None => this.lower_expr(default)?,
+            };
             this.store(Place::Variable(slot.clone()), default);
             Ok(())
         })?;

@@ -1,17 +1,14 @@
 //! `K-STMT-005`: the front end hoists in the source's evaluation order.
 //!
-//! `witness/hoisting/cases.tsv` holds one program per expression family.
-//! Each marks its operands with calls `m.<name>(value)`, which have a side
-//! effect, and `order.tsv` holds the order Node evaluated them in
-//! (`record.mjs` writes it). A marked operand lowers to one statement, so
-//! the statements' order in the document is the order the kernel runs them
-//! in, and it must be Node's.
+//! The Node witness records one side-effect order per expression family.
+//! The current execution law observes those effects in guest code rather
+//! than inspecting a particular lowering helper.
 
 use std::collections::BTreeMap;
 
-use lash_kernel_doc::{Action, Atom, Callee, Document, Literal, Node};
+use lash_kernel_doc::Datum;
 
-use super::{lower_in_session, main_text};
+use super::main_text;
 
 fn table(text: &'static str) -> BTreeMap<&'static str, &'static str> {
     text.lines()
@@ -20,53 +17,38 @@ fn table(text: &'static str) -> BTreeMap<&'static str, &'static str> {
         .collect()
 }
 
-/// The names of the marker calls of a document, in statement order.
-fn marked(document: &Document) -> Vec<String> {
-    fn walk(node: Node<'_>, document: &Document, names: &mut Vec<String>) {
-        if let Node::Action(Action::Call {
-            callee: Callee::Library(function),
-            args,
-        }) = node
-        {
-            let helper = document.manifest.functions[function].as_str();
-            if helper == "ts.call_member"
-                && let Some(Atom::Literal(Literal::Text(name))) = args.get(1)
-            {
-                names.push(name.clone());
-            } else if let Some(name) = helper.strip_prefix("ts.method.") {
-                names.push(name.to_string());
-            }
-        }
-        for child in node.children() {
-            walk(child, document, names);
-        }
-    }
-    let mut names = Vec::new();
-    walk(Node::Block(&document.main), document, &mut names);
-    names
-}
-
+/// K-STMT-005: each expression runs its reached operands in Node's order.
 #[test]
-fn operands_are_hoisted_in_the_order_node_evaluates_them() {
+fn expression_side_effects_follow_node_order() {
+    use super::machine::{Ended, end};
+
     let cases = table(include_str!("../../witness/hoisting/cases.tsv"));
     let orders = table(include_str!("../../witness/hoisting/order.tsv"));
     assert_eq!(
         cases.keys().collect::<Vec<_>>(),
-        orders.keys().collect::<Vec<_>>(),
-        "run witness/hoisting/record.mjs"
+        orders.keys().collect::<Vec<_>>()
     );
     for (family, source) in cases {
-        let witness: Vec<&str> = orders[family].split(' ').collect();
-        let lowered = match lower_in_session(source, &["m", "o"]) {
-            Ok(lowered) => lowered,
-            Err(diagnostic) => panic!("{family}: {diagnostic}"),
-        };
-        // An operand Node did not reach sits in a branch the run skips.
-        let order: Vec<String> = marked(&lowered.document)
-            .into_iter()
-            .filter(|name| witness.contains(&name.as_str()))
+        let names: std::collections::BTreeSet<_> = source
+            .split("m.")
+            .skip(1)
+            .map(|suffix| suffix.split('(').next().expect("a marker call"))
             .collect();
-        assert_eq!(order, witness, "{family}: {source}");
+        let methods: Vec<_> = names
+            .into_iter()
+            .map(|name| {
+                format!("{name}(value) {{ order += (order ? ' ' : '') + '{name}'; return value; }}")
+            })
+            .collect();
+        let program = format!(
+            "let order = ''; const m = {{{}}}; const o = {{id(value) {{ return value; }}, n: 0}}; {source} finish(order);",
+            methods.join(",")
+        );
+        assert_eq!(
+            end(&program),
+            Ended::Finished(Datum::Text(orders[family].into())),
+            "{family}: {source}"
+        );
     }
 }
 

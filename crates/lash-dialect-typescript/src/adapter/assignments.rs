@@ -1,11 +1,53 @@
 //! Assignment targets and their early refusals.
 
 use super::prototype_chain::builtin_prototype_mutation;
-use super::{Adapter, AssignTarget, Diagnostic, DiagnosticCode, Expr, source_span, unasserted};
+use super::{
+    Adapter, AssignTarget, Diagnostic, DiagnosticCode, Expr, Pattern, SourceSpan, source_span,
+    unasserted,
+};
 use swc_common::Spanned;
 use swc_ecma_ast as swc;
 
 impl Adapter<'_> {
+    /// IsValidSimpleAssignmentTarget rejects these names in strict code,
+    /// including nested destructuring heads the parser can leave unchecked.
+    pub(super) fn check_assignment_pattern(
+        &self,
+        pattern: &Pattern,
+        span: Option<SourceSpan>,
+    ) -> Result<(), Diagnostic> {
+        match pattern {
+            Pattern::Ident(name, _) if matches!(name.as_str(), "eval" | "arguments") => {
+                Err(super::early_errors::syntax_error(
+                    format!("strict assignment cannot write `{name}`"),
+                    span,
+                ))
+            }
+            Pattern::Rest(inner) | Pattern::Assign { target: inner, .. } => {
+                self.check_assignment_pattern(inner, span)
+            }
+            Pattern::Array { elements, rest } => {
+                for element in elements.iter().flatten() {
+                    self.check_assignment_pattern(element, span)?;
+                }
+                if let Some(rest) = rest {
+                    self.check_assignment_pattern(rest, span)?;
+                }
+                Ok(())
+            }
+            Pattern::Object { properties, rest } => {
+                for property in properties {
+                    self.check_assignment_pattern(&property.value, span)?;
+                }
+                if let Some(rest) = rest {
+                    self.check_assignment_pattern(rest, span)?;
+                }
+                Ok(())
+            }
+            _ => Ok(()),
+        }
+    }
+
     pub(super) fn convert_update_target(
         &self,
         expr: &swc::Expr,
@@ -64,9 +106,9 @@ impl Adapter<'_> {
             }
             swc::AssignTarget::Pat(pattern) => {
                 let pattern: swc::Pat = pattern.clone().into();
-                Ok(AssignTarget::Pattern(Box::new(
-                    self.convert_pattern(&pattern)?,
-                )))
+                let converted = self.convert_pattern(&pattern)?;
+                self.check_assignment_pattern(&converted, Some(source_span(pattern.span())))?;
+                Ok(AssignTarget::Pattern(Box::new(converted)))
             }
             _ => Err(Diagnostic::refusal(
                 DiagnosticCode::UnsupportedExpression,

@@ -406,6 +406,7 @@ body {
   if same(k, "timestamp") { set tag = "Date" }
   if same(k, "error") { set tag = "Error" }
   if same(k, "closure") { set tag = "Function" }
+  if same(k, "brand:ts.arguments") { set tag = "Arguments" }
   if same(k, "brand:regex.ecma") { set tag = "RegExp" }
   if same(k, "brand:date.invalid") { set tag = "Date" }
   return text.concat("[object ", text.concat(tag, "]"))

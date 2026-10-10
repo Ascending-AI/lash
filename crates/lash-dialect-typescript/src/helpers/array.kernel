@@ -1223,6 +1223,7 @@ body {
   }
   let k = invoke ts.receiver(this)
   let array = invoke ts.array.is(this)
+  if same(k, "brand:ts.arguments") { set array = true }
   if array { let array_arg_11 = []
   let iterator = invoke ts.array.values(this, array_arg_11) return iterator }
   let items = invoke ts.iterate(this)

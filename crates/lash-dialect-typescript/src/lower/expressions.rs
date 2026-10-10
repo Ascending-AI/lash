@@ -308,7 +308,19 @@ impl Lowerer<'_> {
             }) {
                 return self.lower_object_with_process(&names, &values, at);
             }
-            let operands = self.operands(&values)?;
+            let mut operands = Vec::with_capacity(values.len());
+            for (index, (name, value)) in names.iter().zip(&values).enumerate() {
+                let value = self.named_expression(value, name)?;
+                let value = if values[index + 1..]
+                    .iter()
+                    .any(|expression| !super::walk::is_inert(expression))
+                {
+                    self.pin(value)
+                } else {
+                    value
+                };
+                operands.push(value);
+            }
             let entries = names
                 .into_iter()
                 .zip(operands)
@@ -332,7 +344,10 @@ impl Lowerer<'_> {
                             Key::Computed(self.invoke("ts.to_property_key", &[key], Ty::Text)?)
                         }
                     };
-                    let value = self.lower_expr(value)?;
+                    let value = match &key {
+                        Key::Static(name) => self.named_expression(value, name)?,
+                        Key::Computed(_) => self.lower_expr(value)?,
+                    };
                     match key {
                         Key::Static(field) => self.store(
                             Place::Member(Member::Field {
@@ -554,9 +569,8 @@ impl Lowerer<'_> {
         value: &ast::Expr,
     ) -> Lowering<Operand> {
         match target {
-            ast::AssignTarget::Ident(name) | ast::AssignTarget::ParenIdent(name) => {
-                self.assign_variable(name, op, value)
-            }
+            ast::AssignTarget::Ident(name) => self.assign_variable(name, op, value, true),
+            ast::AssignTarget::ParenIdent(name) => self.assign_variable(name, op, value, false),
             ast::AssignTarget::Member { object, property } => {
                 // The target's object and key are evaluated, and held,
                 // before the right-hand side.
@@ -604,10 +618,15 @@ impl Lowerer<'_> {
         name: &str,
         op: AssignOp,
         value: &ast::Expr,
+        named: bool,
     ) -> Lowering<Operand> {
         match op {
             AssignOp::Assign => {
-                let value = self.lower_expr(value)?;
+                let value = if named {
+                    self.named_expression(value, name)?
+                } else {
+                    self.lower_expr(value)?
+                };
                 let ty = value.ty.clone();
                 let kernel = self.resolve_for_write(name, self.span)?;
                 self.store(Place::Variable(kernel.clone()), value);
@@ -631,7 +650,11 @@ impl Lowerer<'_> {
                 let current = self.read(name, None)?;
                 let kernel = self.resolve_for_write(name, self.span)?;
                 self.short_circuit(op, current, |this| {
-                    let value = this.lower_expr(value)?;
+                    let value = if named {
+                        this.named_expression(value, name)?
+                    } else {
+                        this.lower_expr(value)?
+                    };
                     let ty = value.ty.clone();
                     this.store(Place::Variable(kernel.clone()), value);
                     Ok(Operand::variable(kernel, ty))
