@@ -43,6 +43,9 @@ pub fn scope_id(scope: &ScopeKey) -> Option<crate::ScopeId> {
             session_id: session_id.clone(),
             turn_id: turn_id.clone(),
         }),
+        ScopeKey::Operation(session_id, operation_id) => crate::ScopeId::Opener(
+            crate::EffectOpener::session_operation(session_id.clone(), operation_id.clone()),
+        ),
         ScopeKey::Session(session_id) => crate::ScopeId::Session(session_id.clone()),
         ScopeKey::Process(process_id) => crate::ScopeId::Opener(crate::EffectOpener::Process {
             process_id: process_id.clone(),
@@ -111,7 +114,10 @@ pub fn subtree_roots(scope: &ScopeKey) -> Option<SubtreeRoots> {
             Some(crate::EffectOpener::session_turn_encoding_range(session_id).0),
             Some(crate::EffectOpener::session_operation_encoding_range(session_id).0),
         ),
-        ScopeKey::Turn(..) | ScopeKey::Process(_) | ScopeKey::Cell(..) => (None, None),
+        ScopeKey::Turn(..)
+        | ScopeKey::Operation(..)
+        | ScopeKey::Process(_)
+        | ScopeKey::Cell(..) => (None, None),
     };
     Some(SubtreeRoots {
         kind,
@@ -137,8 +143,8 @@ pub fn close_scope(tx: &mut ActorTx, scope: &ScopeKey) {
 /// commits. The children are read through `reads` first; a child marked
 /// by an earlier batch, or cancelled by anyone else, is not read again, so
 /// a crash between batches loses and repeats nothing. When `scope` is the
-/// committing process its cursor moves with the batch. A turn's commit, a
-/// session close and a process terminal call it.
+/// committing process its cursor moves with the batch. A turn's commit, an
+/// operation's settlement, a session close and a process terminal call it.
 ///
 /// # Errors
 ///

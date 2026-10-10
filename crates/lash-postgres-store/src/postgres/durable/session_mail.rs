@@ -5,9 +5,10 @@
 //! commit, after the fence; a refusal rolls the whole commit back.
 
 use lash_durable::domain::{
-    DomainRefusal, MailBatch, MailBatchKind, MailInput, SessionMailWrite, SessionMailbox,
-    queued_input_run,
+    DomainRefusal, MailBatch, MailBatchKind, MailInput, OperationCancelAnswer,
+    OperationCancelRequest, SessionMailWrite, SessionMailbox, queued_input_run,
 };
+use lash_durable::{ActorKey, DurableInstant, Woken};
 use lash_durable::{DurableError, StoreFailure, StoreFailureKind};
 use lash_sansio::{BatchId, InputId, SessionId, TurnId};
 use sqlx::PgConnection;
@@ -169,6 +170,7 @@ pub(super) async fn read(
             get(row, 1)?,
             &get::<String>(row, 2)?,
             &get::<String>(row, 3)?,
+            get::<i32>(row, 4)? > 0,
         )?);
     }
     Ok(mailbox)
@@ -202,24 +204,100 @@ fn decode_batch(
     seq: i64,
     policy: &str,
     payload_json: &str,
+    cancel_requested: bool,
 ) -> Result<MailBatch, DurableError> {
-    let payload: lash_core_execution::runtime::QueuedWorkPayload =
-        serde_json::from_str(payload_json).map_err(|error| undecodable("batch payload", error))?;
-    let lash_core_execution::runtime::QueuedWorkPayload::SessionCommand { command } = &payload;
-    let kind = if matches!(
-        **command,
-        lash_core_execution::runtime::SessionCommand::RunPluginTask { .. }
-    ) {
-        MailBatchKind::Operation
-    } else {
-        MailBatchKind::Control
-    };
     Ok(MailBatch {
         batch: BatchId::parse(batch).map_err(|error| undecodable("batch id", error))?,
         enqueue_seq: u64::try_from(seq).map_err(|error| undecodable("batch order", error))?,
-        kind,
+        kind: batch_kind(payload_json)?,
         after_current_turn: policy == "after_current_turn_commit",
+        cancel_requested,
     })
+}
+
+/// What a batch whose payload is `payload_json` asks the session for.
+fn batch_kind(payload_json: &str) -> Result<MailBatchKind, DurableError> {
+    let payload: lash_core_execution::runtime::QueuedWorkPayload =
+        serde_json::from_str(payload_json).map_err(|error| undecodable("batch payload", error))?;
+    let lash_core_execution::runtime::QueuedWorkPayload::SessionCommand { command } = &payload;
+    Ok(
+        if matches!(
+            **command,
+            lash_core_execution::runtime::SessionCommand::RunPluginTask { .. }
+        ) {
+            MailBatchKind::Operation
+        } else {
+            MailBatchKind::Control
+        },
+    )
+}
+
+/// A host's cancel of plugin task `request.batch`'s operation run
+/// (FIG-5343), in one mail transaction: a command no operation run entered
+/// is withdrawn, with a wake; an entered one records the first request,
+/// with a control wake, so its running handler is cancelled. Each write's
+/// `UPDATE` waits on the row an entry holds and then re-reads it, so a
+/// withdrawal never passes an entry.
+pub(super) async fn request_operation_cancel(
+    tx: &mut PgConnection,
+    request: &OperationCancelRequest,
+    now: DurableInstant,
+) -> Result<(OperationCancelAnswer, Option<Woken>), DurableError> {
+    let session = request.session.as_str();
+    let batch = request.batch.as_str();
+    let actor = ActorKey::session(session).map_err(|_| undecodable("session id", session))?;
+    let open: Option<(String, Option<String>)> =
+        sqlx::query_as(SQL.session_mail.open_operation.sql())
+            .bind(session)
+            .bind(batch)
+            .fetch_optional(crate::observed_sql::executor(&mut *tx))
+            .await
+            .map_err(sqlx_failure)?;
+    let Some((payload_json, _)) = open else {
+        return Ok((OperationCancelAnswer::NotOpen, None));
+    };
+    if batch_kind(&payload_json)? != MailBatchKind::Operation {
+        return Ok((OperationCancelAnswer::NotOpen, None));
+    }
+    let withdrawn: Option<String> = sqlx::query_scalar(SQL.session_mail.withdraw_unentered.sql())
+        .bind(session)
+        .bind(batch)
+        .bind(now.0)
+        .fetch_optional(crate::observed_sql::executor(&mut *tx))
+        .await
+        .map_err(sqlx_failure)?;
+    if withdrawn.is_some() {
+        let (woken, _) = super::wake_within(tx, &actor, false, now).await?;
+        return Ok((OperationCancelAnswer::Withdrawn, Some(woken)));
+    }
+    let requested: Option<String> =
+        sqlx::query_scalar(SQL.session_mail.request_operation_cancel.sql())
+            .bind(session)
+            .bind(batch)
+            .bind(&request.request_json)
+            .fetch_optional(crate::observed_sql::executor(&mut *tx))
+            .await
+            .map_err(sqlx_failure)?;
+    if requested.is_some() {
+        let (woken, _) = super::wake_within(tx, &actor, true, now).await?;
+        return Ok((OperationCancelAnswer::Requested, Some(woken)));
+    }
+    // The row moved under the writes: it settled, or a racing request
+    // was accepted first.
+    let open: Option<(String, Option<String>)> =
+        sqlx::query_as(SQL.session_mail.open_operation.sql())
+            .bind(session)
+            .bind(batch)
+            .fetch_optional(crate::observed_sql::executor(&mut *tx))
+            .await
+            .map_err(sqlx_failure)?;
+    Ok((
+        match open.and_then(|(_, accepted)| accepted) {
+            Some(request_json) => OperationCancelAnswer::AlreadyRequested { request_json },
+            None => OperationCancelAnswer::NotOpen,
+        },
+        None,
+    ))
 }
 
 /// Settle what run `run` of `session` still holds as it ends: a turn whose
@@ -304,6 +382,34 @@ pub(super) async fn apply(
             session,
             draft_json,
         } => enqueue(tx, commit, session, draft_json).await,
+        SessionMailWrite::EnterOperation { session, batch } => {
+            enter_operation(tx, commit, session, batch).await
+        }
+    }
+}
+
+/// Enter plugin task `batch`'s operation run, its command still open.
+async fn enter_operation(
+    tx: &mut PgConnection,
+    commit: &Committing<'_>,
+    session: &SessionId,
+    batch: &BatchId,
+) -> Result<(), DurableError> {
+    let entered: Option<String> = sqlx::query_scalar(SQL.session_mail.enter_operation.sql())
+        .bind(session.as_str())
+        .bind(batch.as_str())
+        .bind(commit.now.0)
+        .fetch_optional(crate::observed_sql::executor(&mut *tx))
+        .await
+        .map_err(sqlx_failure)?;
+    match entered {
+        Some(_) => Ok(()),
+        None => Err(DurableError::Domain(
+            DomainRefusal::SessionCommandWithdrawn {
+                session: session.clone(),
+                batch: batch.clone(),
+            },
+        )),
     }
 }
 

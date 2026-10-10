@@ -83,6 +83,9 @@ pub struct MailBatch {
     /// Whether it waits for the current turn's commit rather than the
     /// earliest safe boundary.
     pub after_current_turn: bool,
+    /// Whether a host requested the cancel of the operation run it entered
+    /// ([`OperationCancelRequest`]): its task's handler is to stop.
+    pub cancel_requested: bool,
 }
 
 /// The session's open mail, as one read saw it.
@@ -134,4 +137,52 @@ pub enum SessionMailWrite {
         /// The input's draft, encoded by its owner.
         draft_json: String,
     },
+    /// Enter the operation run of plugin task `batch`, before its handler
+    /// runs (FIG-5343): from this commit on, a host's cancel no longer
+    /// withdraws the command but requests the running task's cancel
+    /// ([`OperationCancelRequest`]). The row must still be open, or the
+    /// commit is refused with
+    /// [`DomainRefusal::SessionCommandWithdrawn`](super::DomainRefusal::SessionCommandWithdrawn).
+    /// Entering an entered operation keeps its first entry: a redrive of the
+    /// unsettled command enters it again.
+    EnterOperation {
+        /// The session.
+        session: SessionId,
+        /// The task's command.
+        batch: BatchId,
+    },
+}
+
+/// A host's cancel of the operation run of plugin task `batch` (FIG-5343),
+/// from outside the session actor: one mail transaction decides, against
+/// the command's row, whether the task never ran or is running.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OperationCancelRequest {
+    /// The session.
+    pub session: SessionId,
+    /// The task's command.
+    pub batch: BatchId,
+    /// The request's evidence, encoded by its owner and kept as the first
+    /// accepted request's.
+    pub request_json: String,
+}
+
+/// The answer to an [`OperationCancelRequest`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum OperationCancelAnswer {
+    /// The operation run was never entered: its command was still open
+    /// session mail, and the request withdrew it. The task never runs, and
+    /// the session was woken.
+    Withdrawn,
+    /// The entered operation's first request: recorded, and the session
+    /// control-woken, so its running handler is cancelled.
+    Requested,
+    /// The entered operation already holds a request; nothing was written.
+    AlreadyRequested {
+        /// The accepted request's evidence, as its owner encoded it.
+        request_json: String,
+    },
+    /// No open plugin task's command is `batch`: it settled, was withdrawn,
+    /// or never existed. Nothing was written.
+    NotOpen,
 }

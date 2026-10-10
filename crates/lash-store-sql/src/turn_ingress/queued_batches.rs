@@ -128,14 +128,16 @@ crate::statements! {
         /// Withdraw open batch `?2` of session `?1` into its `cancelled`
         /// tombstone at `?3`: the host's withdrawal (ADR 0101 §8, §10). Only
         /// an open batch is withdrawn; a batch a run admitted is that run's
-        /// to settle or release.
+        /// to settle or release, and a plugin task whose operation run
+        /// entered is that run's to cancel (FIG-5343).
         withdraw_open = "UPDATE queued_work_batches
              SET terminal_cause = 'cancelled',
                  terminal_at_ms = ?3
              WHERE session_id = ?1
                AND batch_id = ?2
                AND admitted_run IS NULL
-               AND terminal_cause IS NULL";
+               AND terminal_cause IS NULL
+               AND entered_at_ms IS NULL";
 
         /// Cancel batch `?2` of session `?1`, held by a run that ends
         /// unanswered, into its `cancelled` tombstone at `?3`, letting go of

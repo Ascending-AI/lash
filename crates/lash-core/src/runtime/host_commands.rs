@@ -23,9 +23,11 @@
 //!   own operation run (K8, binding Q2): that run's invocation journals the
 //!   task's effects under the command's own session-operation scope and owns
 //!   them until they drained, so a redrive of the unsettled command replays
-//!   them. A host's cancel withdraws the task's command, which stops its
-//!   code ([`task_cancel`]); its commit then finds the row gone and applies
-//!   nothing.
+//!   them. The run is entered, durably, before the task's code runs: a
+//!   host's cancel before that withdraws the command, and one after it
+//!   cancels the running task, which settles `Cancelled` ([`task_cancel`],
+//!   FIG-5343). The commit that settles the task ends its operation scope,
+//!   cancelling its `Until` children (FIG-5345).
 //! - A frame open opens the frame in the commit that settles it and restarts
 //!   the live interpreter from the frame's seed (F5).
 //!
@@ -204,8 +206,10 @@ impl LashRuntime {
     /// read.
     ///
     /// A task runs in its own operation run (K8, binding Q2), under
-    /// `run_controller` rescoped to the task's session-operation scope, and
-    /// a host's withdrawal of its command stops its code ([`task_cancel`]).
+    /// `run_controller` rescoped to the task's session-operation scope. The
+    /// run is entered before its code runs, and a host's cancel of the
+    /// entered run stops that code ([`task_cancel`]). The commit that
+    /// settles the task ends the run's operation scope.
     pub(super) async fn apply_plugin_operation_command(
         &mut self,
         operation: HostPluginOperation,
@@ -216,17 +220,38 @@ impl LashRuntime {
     ) -> Result<bool, RuntimeError> {
         let batch_id = Self::sole_command_batch(&completion)?;
         self.reload_invalidated_resident_session_state().await?;
-        let task = match operation {
-            HostPluginOperation::Command => None,
+        let (task, ending) = match operation {
+            HostPluginOperation::Command => (None, None),
             HostPluginOperation::Task => {
                 let operation = crate::tool_run::OperationRun {
                     session_id: self.state.session_id.clone(),
                     operation_id: batch_id.to_string(),
                 };
-                Some(super::step_controller(
-                    run_controller,
-                    operation.opener().admitted_scope(),
-                )?)
+                // A replay of a settled task finds its row closed, and
+                // runs on to adopt the head its first commit published.
+                let entered =
+                    task_cancel::enter(run_controller, &operation.session_id, &batch_id).await?;
+                let settled = match (entered, self.services.store.as_ref()) {
+                    (false, Some(store)) => {
+                        self.session_command_run_settled(store, &completion).await?
+                    }
+                    _ => false,
+                };
+                if !entered && !settled {
+                    // A host withdrew the command before its run entered:
+                    // nothing of it runs, and the lane is read again.
+                    return Ok(false);
+                }
+                (
+                    Some(super::step_controller(
+                        run_controller,
+                        operation.opener().admitted_scope(),
+                    )?),
+                    Some(lash_durable::domain::ScopeKey::Operation(
+                        operation.session_id.clone(),
+                        operation.operation_id.clone(),
+                    )),
+                )
             }
         };
         let ran =
@@ -260,13 +285,15 @@ impl LashRuntime {
                 }
             }
         };
-        let committed =
-            Box::pin(
-                self.commit_host_command(run_controller, &completion, None, None, |_, _| {
-                    crate::runtime::SessionCommandOutcome::PluginOperation { outcome }
-                }),
-            )
-            .await?;
+        let committed = Box::pin(self.commit_host_command_ending(
+            run_controller,
+            &completion,
+            None,
+            None,
+            ending.as_ref(),
+            |_, _| crate::runtime::SessionCommandOutcome::PluginOperation { outcome },
+        ))
+        .await?;
         Ok(!matches!(committed, CommandCommit::Withdrawn))
     }
 
@@ -274,11 +301,11 @@ impl LashRuntime {
     /// state, and fold what it did into that state: its graph appends, its
     /// runtime events, its plugin state and the turns it queued.
     ///
-    /// A task runs under a watch of its command's row: a host's withdrawal
-    /// stops its code and answers `Cancelled`, with nothing of the task
-    /// folded into resident state, and the command's settling commit finds
-    /// the row gone (FIG-4453). The outer `Err` is the session's fault,
-    /// which settles nothing; the inner one is the operation's failure.
+    /// A task runs under a watch of its command's row: a host's cancel of
+    /// its entered run stops its code and answers `Cancelled`, with nothing
+    /// of the task folded into resident state, and the command settles
+    /// `Cancelled` (FIG-5343). The outer `Err` is the session's fault, which
+    /// settles nothing; the inner one is the operation's failure.
     async fn run_host_plugin_operation(
         &mut self,
         name: &str,
@@ -323,7 +350,7 @@ impl LashRuntime {
             }
             Some(operation_controller) => {
                 // The task's effects run under the command's own scope, and
-                // a host's withdrawal of the command stops its code.
+                // a host's cancel of its run stops its code.
                 let stop = tokio_util::sync::CancellationToken::new();
                 let task = plugins.run_plugin_task(
                     name,
@@ -337,23 +364,12 @@ impl LashRuntime {
                     operation_controller.clone(),
                     stop.clone(),
                 );
-                let ran = match self.services.store.as_ref() {
-                    Some(store) => {
-                        run_until_returned(
-                            task,
-                            task_cancel::watch_withdrawal(
-                                operation_controller,
-                                store,
-                                batch_id,
-                                &stop,
-                            ),
-                        )
-                        .await
-                    }
-                    None => task.await,
-                };
-                // A withdrawn task settles nothing of what it did: its
-                // command's commit finds the row gone.
+                let ran = run_until_returned(
+                    task,
+                    task_cancel::watch_cancel(operation_controller, &session_id, batch_id, &stop),
+                )
+                .await;
+                // A cancelled task settles nothing of what it did.
                 if stop.is_cancelled() {
                     drop(services);
                     return Ok(Ok(crate::runtime::PluginOperationCommandOutcome::Cancelled));
@@ -583,11 +599,38 @@ impl LashRuntime {
             &[crate::NodeId],
         ) -> crate::runtime::SessionCommandOutcome,
     ) -> Result<CommandCommit, RuntimeError> {
+        Box::pin(self.commit_host_command_ending(
+            owner,
+            completion,
+            append_stamp,
+            switch,
+            None,
+            outcome,
+        ))
+        .await
+    }
+
+    /// [`Self::commit_host_command`], ending the operation scope `ending`
+    /// in whichever commit settles the command: a plugin task's settlement
+    /// ends its operation run's lifetime (FIG-5345).
+    async fn commit_host_command_ending(
+        &mut self,
+        owner: &crate::ActorContext,
+        completion: &crate::QueuedWorkCompletion,
+        append_stamp: Option<crate::RuntimeTurnCommitStamp>,
+        switch: Option<CommandFrameSwitch>,
+        ending: Option<&lash_durable::domain::ScopeKey>,
+        outcome: impl FnOnce(
+            &crate::RuntimeSessionState,
+            &[crate::NodeId],
+        ) -> crate::runtime::SessionCommandOutcome,
+    ) -> Result<CommandCommit, RuntimeError> {
         let refusal = match Box::pin(self.commit_host_command_once(
             owner,
             completion,
             append_stamp,
             switch,
+            ending,
             outcome,
         ))
         .await?
@@ -595,15 +638,17 @@ impl LashRuntime {
             Ok(committed) => return Ok(committed),
             Err(refusal) => refusal,
         };
-        let settled =
-            Box::pin(
-                self.commit_host_command_once(owner, completion, None, None, |_, _| {
-                    crate::runtime::SessionCommandOutcome::Failed {
-                        refusal: crate::RecordedRefusal::from(&refusal),
-                    }
-                }),
-            )
-            .await?;
+        let settled = Box::pin(self.commit_host_command_once(
+            owner,
+            completion,
+            None,
+            None,
+            ending,
+            |_, _| crate::runtime::SessionCommandOutcome::Failed {
+                refusal: crate::RecordedRefusal::from(&refusal),
+            },
+        ))
+        .await?;
         match settled {
             Ok(CommandCommit::Landed) => Ok(CommandCommit::Refused),
             Ok(committed) => Ok(committed),
@@ -623,6 +668,7 @@ impl LashRuntime {
         completion: &crate::QueuedWorkCompletion,
         append_stamp: Option<crate::RuntimeTurnCommitStamp>,
         switch: Option<CommandFrameSwitch>,
+        ending: Option<&lash_durable::domain::ScopeKey>,
         outcome: impl FnOnce(
             &crate::RuntimeSessionState,
             &[crate::NodeId],
@@ -672,11 +718,13 @@ impl LashRuntime {
             self.turn_phase_probe.clone(),
             SESSION_COMMAND_STAGED_PHASE,
         ));
-        let committed = super::durable::head_commit::commit(
+        let committed = super::durable::head_commit::commit_in(
             owner,
             commit,
             lash_durable::CommitLabel::SESSION_COMMAND,
             self.host.core.tracing.metrics(),
+            None,
+            ending,
         )
         .await;
         self.invalidate_resident_session_state();

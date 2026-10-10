@@ -221,10 +221,10 @@ pub enum PluginOperationCommandOutcome {
     Refused {
         refusal: crate::runtime_error::RecordedRefusal,
     },
-    /// A host cancelled the task after a shift admitted it, and its shift
-    /// found the cancel requested before or once the task's code returned
-    /// (FIG-4391, FIG-4453): nothing of the task committed, and the command
-    /// is settled, so it is never applied again.
+    /// A host cancelled the task after its operation run entered, and its
+    /// shift found the cancel requested before or once the task's code
+    /// returned (FIG-4391, FIG-4453, FIG-5343): nothing of the task
+    /// committed, and the command is settled, so it is never applied again.
     Cancelled,
 }
 

@@ -125,9 +125,10 @@ pub enum ProcessWrite {
     /// PostgreSQL the write takes the scope's advisory lock first, which a
     /// registration deciding the same scope also holds, so the start either
     /// commits before the closure or reads it. The scope's `Until` children
-    /// are read after that, in the transaction: when a turn scope still has
-    /// one unmarked once this transaction's batch is applied, the turn scope
-    /// is recorded as ending, so the session marks the rest. Closing a
+    /// are read after that, in the transaction: when a turn or operation
+    /// scope still has one unmarked once this transaction's batch is
+    /// applied, the scope is recorded as ending, so the session marks the
+    /// rest. Closing a
     /// closed scope keeps its first fact.
     ScopeClosed {
         /// The closed scope.

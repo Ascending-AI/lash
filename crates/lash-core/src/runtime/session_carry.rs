@@ -86,6 +86,7 @@ impl LashRuntime {
             lash_durable::CommitLabel::SESSION_COMMAND,
             self.host.core.tracing.metrics(),
             Some(formats),
+            None,
         )
         .await;
         // The resident session gives way to the durable head, which a landed

@@ -887,6 +887,13 @@ async fn apply_mail_domain(
                 woken.into_iter().collect(),
             )
         }
+        MailDomainWrite::RequestOperationCancel(request) => {
+            let (answer, woken) = session_mail::request_operation_cancel(tx, request, now).await?;
+            (
+                MailAnswer::RequestOperationCancel(answer),
+                woken.into_iter().collect(),
+            )
+        }
         MailDomainWrite::Redrive(request) => {
             let (answer, woken) = park_events::redrive(tx, request, now).await?;
             (MailAnswer::Redrive(answer), woken.into_iter().collect())

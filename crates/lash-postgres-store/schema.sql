@@ -322,6 +322,9 @@ CREATE TABLE IF NOT EXISTS lash_queued_work_batches (
     terminal_cause TEXT, -- NULL while open or admitted; the tombstone's cause after.
     terminal_at_ms BIGINT,
     trace_cause_json TEXT, -- The batch's trace cause, written once at enqueue; NULL is a root cause.
+    entered_at_ms BIGINT, -- When a plugin task's operation run entered, before its handler ran; NULL while it never ran.
+    cancel_request_json TEXT, -- The first host cancel of the entered operation run; NULL while none.
+    CONSTRAINT ck_queued_work_batches_cancel_after_entry CHECK (cancel_request_json IS NULL OR entered_at_ms IS NOT NULL),
     CONSTRAINT ck_queued_work_batches_payload CHECK ((payload_json::jsonb ->> 'type' = 'session_command') IS TRUE),
     CONSTRAINT ck_queued_work_batches_delivery_policy CHECK (delivery_policy IN ('earliest_safe_boundary', 'after_current_turn_commit')),
     CONSTRAINT ck_queued_work_batches_admission_all_or_none CHECK ((admitted_run IS NULL) = (admitted_by IS NULL)),

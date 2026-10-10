@@ -1031,8 +1031,9 @@ pub trait QueuedWorkStore: Send + Sync {
     /// Returns `None` when the batch is missing, a tombstone, or held by a
     /// run; callers must treat that as "already admitted or completed" and
     /// must not restore any stale local draft state.
-    /// A command the command lane read is being applied and cannot be
-    /// withdrawn.
+    /// A plugin task whose operation run entered is being applied and
+    /// cannot be withdrawn: its run's cancel reaches the running task
+    /// (FIG-5343).
     ///
     async fn cancel_queued_work_batch(
         &self,

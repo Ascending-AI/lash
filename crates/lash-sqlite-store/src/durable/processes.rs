@@ -324,7 +324,7 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &ProcessWri
 /// Write `scope`'s closure fact, then read its unmarked `Until` children in
 /// this transaction: the one writer serializes it with every registration,
 /// so a child that committed first is read here, and any later one is
-/// refused. A turn scope with one left is recorded as ending.
+/// refused. A turn or operation scope with one left is recorded as ending.
 fn close_scope(tx: &Connection, commit: &Committing<'_>, scope: &ScopeKey) -> Answer<()> {
     let Some(closed) = scope_id(scope) else {
         return Ok(Ok(()));
@@ -337,7 +337,7 @@ fn close_scope(tx: &Connection, commit: &Committing<'_>, scope: &ScopeKey) -> An
     ) {
         return Ok(Err(registry_failure(&error)));
     }
-    let ScopeKey::Turn(session, _) = scope else {
+    let (ScopeKey::Turn(session, _) | ScopeKey::Operation(session, _)) = scope else {
         return Ok(Ok(()));
     };
     match until_children(tx, scope, None, 1)? {

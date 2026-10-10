@@ -34,11 +34,49 @@ crate::statements! {
                AND state IN ('deferred_next_turn', 'pending_active')
              ORDER BY enqueue_seq";
 
-        /// Session `?1`'s open, unbound queued work batches, in ingress order.
-        open_batches = "SELECT batch_id, enqueue_seq, delivery_policy, payload_json
+        /// Session `?1`'s open, unbound queued work batches, in ingress
+        /// order, each with whether a host requested its entered operation
+        /// run's cancel.
+        open_batches = "SELECT batch_id, enqueue_seq, delivery_policy, payload_json,
+                    CASE WHEN cancel_request_json IS NULL THEN 0 ELSE 1 END
              FROM queued_work_batches
              WHERE session_id = ?1 AND admitted_run IS NULL AND terminal_cause IS NULL
              ORDER BY enqueue_seq";
+
+        /// Enter the operation run of open plugin task `?2` of session `?1`
+        /// at `?3`, keeping a first entry; no row when it is no longer open.
+        enter_operation = "UPDATE queued_work_batches
+             SET entered_at_ms = COALESCE(entered_at_ms, ?3)
+             WHERE session_id = ?1 AND batch_id = ?2
+               AND admitted_run IS NULL AND terminal_cause IS NULL
+             RETURNING batch_id";
+
+        /// Open command `?2` of session `?1`: its payload, and the request
+        /// its entered operation run accepted, if any.
+        open_operation = "SELECT payload_json, cancel_request_json
+             FROM queued_work_batches
+             WHERE session_id = ?1 AND batch_id = ?2
+               AND admitted_run IS NULL AND terminal_cause IS NULL";
+
+        /// Withdraw open command `?2` of session `?1` into its `cancelled`
+        /// tombstone at `?3` while no operation run entered it; no row once
+        /// one did.
+        withdraw_unentered = "UPDATE queued_work_batches
+             SET terminal_cause = 'cancelled', terminal_at_ms = ?3
+             WHERE session_id = ?1 AND batch_id = ?2
+               AND admitted_run IS NULL AND terminal_cause IS NULL
+               AND entered_at_ms IS NULL
+             RETURNING batch_id";
+
+        /// Record request `?3` as the cancel of the entered operation run of
+        /// open command `?2` of session `?1`; no row when it was not entered
+        /// or already holds a request.
+        request_operation_cancel = "UPDATE queued_work_batches
+             SET cancel_request_json = ?3
+             WHERE session_id = ?1 AND batch_id = ?2
+               AND admitted_run IS NULL AND terminal_cause IS NULL
+               AND entered_at_ms IS NOT NULL AND cancel_request_json IS NULL
+             RETURNING batch_id";
 
         /// Bind input `?2` of session `?1` to run `?3`, its admitting owner,
         /// or keep it bound there: a running run's every phase rebinds the

@@ -5,9 +5,10 @@
 //! commit, after the fence; a refusal rolls the whole commit back.
 
 use lash_durable::domain::{
-    DomainRefusal, MailBatch, MailBatchKind, MailInput, SessionMailWrite, SessionMailbox,
-    queued_input_run,
+    DomainRefusal, MailBatch, MailBatchKind, MailInput, OperationCancelAnswer,
+    OperationCancelRequest, SessionMailWrite, SessionMailbox, queued_input_run,
 };
+use lash_durable::{ActorKey, DurableInstant, Woken};
 use lash_durable::{DurableError, StoreFailure, StoreFailureKind};
 use lash_sansio::{BatchId, InputId, SessionId, TurnId};
 use rusqlite::{Connection, OptionalExtension};
@@ -85,11 +86,12 @@ pub(super) fn read(tx: &Connection, session: &SessionId) -> Answer<SessionMailbo
                 row.get::<_, i64>(1)?,
                 row.get::<_, String>(2)?,
                 row.get::<_, String>(3)?,
+                row.get::<_, i64>(4)?,
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    for (batch, seq, policy, payload_json) in batches {
-        match decode_batch(batch, seq, &policy, &payload_json) {
+    for (batch, seq, policy, payload_json, cancel) in batches {
+        match decode_batch(batch, seq, &policy, &payload_json, count(cancel)) {
             Ok(batch) => mailbox.batches.push(batch),
             Err(error) => return Ok(Err(error)),
         }
@@ -125,24 +127,84 @@ fn decode_batch(
     seq: i64,
     policy: &str,
     payload_json: &str,
+    cancel_requested: bool,
 ) -> Result<MailBatch, DurableError> {
-    let payload: lash_core_execution::runtime::QueuedWorkPayload =
-        serde_json::from_str(payload_json).map_err(|error| undecodable("batch payload", error))?;
-    let lash_core_execution::runtime::QueuedWorkPayload::SessionCommand { command } = &payload;
-    let kind = if matches!(
-        **command,
-        lash_core_execution::runtime::SessionCommand::RunPluginTask { .. }
-    ) {
-        MailBatchKind::Operation
-    } else {
-        MailBatchKind::Control
-    };
     Ok(MailBatch {
         batch: BatchId::parse(batch).map_err(|error| undecodable("batch id", error))?,
         enqueue_seq: u64::try_from(seq).map_err(|error| undecodable("batch order", error))?,
-        kind,
+        kind: batch_kind(payload_json)?,
         after_current_turn: policy == "after_current_turn_commit",
+        cancel_requested,
     })
+}
+
+/// What a batch whose payload is `payload_json` asks the session for.
+fn batch_kind(payload_json: &str) -> Result<MailBatchKind, DurableError> {
+    let payload: lash_core_execution::runtime::QueuedWorkPayload =
+        serde_json::from_str(payload_json).map_err(|error| undecodable("batch payload", error))?;
+    let lash_core_execution::runtime::QueuedWorkPayload::SessionCommand { command } = &payload;
+    Ok(
+        if matches!(
+            **command,
+            lash_core_execution::runtime::SessionCommand::RunPluginTask { .. }
+        ) {
+            MailBatchKind::Operation
+        } else {
+            MailBatchKind::Control
+        },
+    )
+}
+
+/// A host's cancel of plugin task `request.batch`'s operation run
+/// (FIG-5343), in one mail transaction: a command no operation run entered
+/// is withdrawn, with a wake; an entered one records the first request,
+/// with a control wake, so its running handler is cancelled.
+pub(super) fn request_operation_cancel(
+    tx: &Connection,
+    request: &OperationCancelRequest,
+    now: DurableInstant,
+) -> Answer<(OperationCancelAnswer, Option<Woken>)> {
+    let session = request.session.as_str();
+    let batch = request.batch.as_str();
+    let actor = match ActorKey::session(session) {
+        Ok(actor) => actor,
+        Err(_) => return Ok(Err(undecodable("session id", session))),
+    };
+    let open = tx
+        .prepare_cached(SQL.session_mail.open_operation.sql())?
+        .query_row([session, batch], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+        })
+        .optional()?;
+    let Some((payload_json, accepted)) = open else {
+        return Ok(Ok((OperationCancelAnswer::NotOpen, None)));
+    };
+    match batch_kind(&payload_json) {
+        Ok(MailBatchKind::Operation) => {}
+        Ok(MailBatchKind::Control) => return Ok(Ok((OperationCancelAnswer::NotOpen, None))),
+        Err(error) => return Ok(Err(error)),
+    }
+    if let Some(request_json) = accepted {
+        return Ok(Ok((
+            OperationCancelAnswer::AlreadyRequested { request_json },
+            None,
+        )));
+    }
+    let withdrawn = tx
+        .prepare_cached(SQL.session_mail.withdraw_unentered.sql())?
+        .query_row(rusqlite::params![session, batch, now.0], |_| Ok(()))
+        .optional()?;
+    if withdrawn.is_some() {
+        return Ok(super::wake_within(tx, &actor, false, now)?
+            .map(|(woken, _)| (OperationCancelAnswer::Withdrawn, Some(woken))));
+    }
+    tx.prepare_cached(SQL.session_mail.request_operation_cancel.sql())?
+        .query_row(
+            rusqlite::params![session, batch, request.request_json],
+            |_| Ok(()),
+        )?;
+    Ok(super::wake_within(tx, &actor, true, now)?
+        .map(|(woken, _)| (OperationCancelAnswer::Requested, Some(woken))))
 }
 
 /// Settle what run `run` of `session` still holds as it ends: a turn whose
@@ -226,7 +288,35 @@ pub(super) fn apply(
             session,
             draft_json,
         } => enqueue(tx, commit, session, draft_json),
+        SessionMailWrite::EnterOperation { session, batch } => {
+            enter_operation(tx, commit, session, batch)
+        }
     }
+}
+
+/// Enter plugin task `batch`'s operation run, its command still open.
+fn enter_operation(
+    tx: &Connection,
+    commit: &Committing<'_>,
+    session: &SessionId,
+    batch: &BatchId,
+) -> Answer<()> {
+    let entered = tx
+        .prepare_cached(SQL.session_mail.enter_operation.sql())?
+        .query_row(
+            rusqlite::params![session.as_str(), batch.as_str(), commit.now.0],
+            |_| Ok(()),
+        )
+        .optional()?;
+    Ok(match entered {
+        Some(()) => Ok(()),
+        None => Err(DurableError::Domain(
+            DomainRefusal::SessionCommandWithdrawn {
+                session: session.clone(),
+                batch: batch.clone(),
+            },
+        )),
+    })
 }
 
 /// Insert the owner's input as any producer's acceptance does, with the

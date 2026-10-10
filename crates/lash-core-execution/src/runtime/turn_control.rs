@@ -12,8 +12,8 @@
 use std::sync::Arc;
 
 use lash_durable::domain::{
-    MailAnswer, MailDomainWrite, TurnCancelAnswer, TurnCancelRequest as DurableCancelRequest,
-    TurnEnd,
+    MailAnswer, MailDomainWrite, OperationCancelAnswer, OperationCancelRequest, TurnCancelAnswer,
+    TurnCancelRequest as DurableCancelRequest, TurnEnd,
 };
 use lash_durable::{CommitLabel, DurableError, MailTx};
 use serde::{Deserialize, Serialize};
@@ -53,6 +53,21 @@ pub enum TurnCancelOutcome {
     /// The turn already ended: nothing was written.
     CompletionWonRace,
     /// The session holds no such turn, open or queued: nothing was written.
+    UnknownOrRevoked,
+}
+
+/// What a cancel of a plugin task's operation run did (FIG-5343).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum OperationCancelOutcome {
+    /// No run had entered the task: its command was still queued, and the
+    /// request withdrew it. The task never runs.
+    Withdrawn,
+    /// The task's run was entered: the request reached its running handler,
+    /// whose run settles `Cancelled`. The receipt carries the accepted
+    /// request.
+    Cancelled(TurnCancelReceipt),
+    /// No open plugin task's run is addressed: it settled, was withdrawn,
+    /// or never existed. Nothing was written.
     UnknownOrRevoked,
 }
 
@@ -250,6 +265,81 @@ impl TurnWorkDriver {
             }
         };
         Ok(TurnCancelReceipt { outcome })
+    }
+
+    /// Request a cancel of the plugin task operation run `request`
+    /// addresses (FIG-5343): one mailbox transaction against its command's
+    /// row withdraws the command while no run entered it, and otherwise
+    /// records the request (the first wins) and control-wakes the session,
+    /// whose owner cancels the running task's handler.
+    ///
+    /// # Errors
+    ///
+    /// [`RuntimeError`] when the request is invalid or the store refused it;
+    /// nothing was written.
+    pub async fn request_operation_cancel(
+        &self,
+        request: TurnCancelRequest,
+    ) -> Result<OperationCancelOutcome, RuntimeError> {
+        request.validate()?;
+        let Some(batch) = crate::tool_run::OperationRun::for_run_id(
+            request.address.session_id.clone(),
+            &request.address.turn_id,
+        )
+        .and_then(|operation| lash_sansio::BatchId::parse(operation.operation_id).ok()) else {
+            return Ok(OperationCancelOutcome::UnknownOrRevoked);
+        };
+        let evidence = request.evidence();
+        let request_json = serde_json::to_string(&evidence).map_err(|error| {
+            RuntimeError::new(
+                crate::RuntimeErrorCode::RuntimeStore,
+                format!("an operation cancel request does not encode: {error}"),
+            )
+        })?;
+        let mut tx = MailTx::new();
+        tx.write(MailDomainWrite::RequestOperationCancel(
+            OperationCancelRequest {
+                session: request.address.session_id.clone(),
+                batch,
+                request_json,
+            },
+        ));
+        let mut commit = self
+            .backend
+            .commit_mail(tx, CommitLabel::MAIL_SESSION)
+            .await
+            .map_err(store_error)?;
+        let answer = match commit.answers.pop() {
+            Some(MailAnswer::RequestOperationCancel(answer)) if commit.answers.is_empty() => answer,
+            other => {
+                return Err(store_error(DurableError::Store(
+                    lash_durable::StoreFailure {
+                        kind: lash_durable::StoreFailureKind::Corrupt,
+                        message: format!("an operation cancel request was answered with {other:?}"),
+                    },
+                )));
+            }
+        };
+        Ok(match answer {
+            OperationCancelAnswer::Withdrawn => OperationCancelOutcome::Withdrawn,
+            OperationCancelAnswer::Requested => {
+                OperationCancelOutcome::Cancelled(TurnCancelReceipt {
+                    outcome: TurnCancelOutcome::Requested(evidence),
+                })
+            }
+            OperationCancelAnswer::AlreadyRequested { request_json } => {
+                let accepted = serde_json::from_str(&request_json).map_err(|error| {
+                    RuntimeError::new(
+                        crate::RuntimeErrorCode::RuntimeStore,
+                        format!("an accepted operation cancel request does not decode: {error}"),
+                    )
+                })?;
+                OperationCancelOutcome::Cancelled(TurnCancelReceipt {
+                    outcome: TurnCancelOutcome::AlreadyRequested(accepted),
+                })
+            }
+            OperationCancelAnswer::NotOpen => OperationCancelOutcome::UnknownOrRevoked,
+        })
     }
 
     /// The terminal of the turn at `address`, once it ended.

@@ -325,8 +325,8 @@ pub(super) async fn apply(
 /// its unmarked `Until` children in this transaction. A registration under
 /// the scope holds the same lock until it commits, so a child that
 /// committed first is read here (each statement sees what committed before
-/// it), and any later one reads the fact and is refused. A turn scope with
-/// a child left is recorded as ending.
+/// it), and any later one reads the fact and is refused. A turn or
+/// operation scope with a child left is recorded as ending.
 async fn close_scope(
     tx: &mut PgConnection,
     commit: &Committing<'_>,
@@ -338,7 +338,7 @@ async fn close_scope(
     crate::process_registry::parent_end::record_tx(tx, &closed, millis(commit.now)?, commit.fleet)
         .await
         .map_err(|error| registry_failure(&error))?;
-    let ScopeKey::Turn(session, _) = scope else {
+    let (ScopeKey::Turn(session, _) | ScopeKey::Operation(session, _)) = scope else {
         return Ok(());
     };
     if until_children(tx, scope, None, 1).await?.is_empty() {

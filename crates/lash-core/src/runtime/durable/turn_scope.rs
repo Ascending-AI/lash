@@ -25,6 +25,9 @@
 //!   running, and the stop completes anyway. It never waits on a fresh,
 //!   unbound cancellation token.
 //!
+//! An operation's scope ends the same way, with the commit that settles its
+//! plugin task's command ([`end_operation_scope`], FIG-5345).
+//!
 //! A parent's terminal does not mean its children have stopped: the
 //! subtree's ends are not a durable fact. [`await_turn_children`] reads the
 //! whole live subtree (`DurableReads::live_until_descendants`), below ended
@@ -95,6 +98,26 @@ pub async fn end_turn_scope(
         waits::resolve_child_session_waits(tx, &process)?;
     }
     process::close_scope(tx, &scope);
+    Ok(())
+}
+
+/// End the operation scope `scope` on `tx`, the commit that settles its
+/// plugin task's command (FIG-5345; ADR 0132 §11): mark the first batch of
+/// its `Until` children for cancel and close it, so no process registers
+/// under it once `tx` commits. When a child is left unmarked the scope is
+/// recorded as ending, for [`continue_scope_ends`]. Its waits are the
+/// session's, which its end leaves standing.
+///
+/// # Errors
+///
+/// The children's read; nothing is written.
+pub(crate) async fn end_operation_scope(
+    cx: &ActorContext,
+    tx: &mut ActorTx,
+    scope: &ScopeKey,
+) -> Result<(), DurableError> {
+    mark_until_children(cx, tx, scope).await?;
+    process::close_scope(tx, scope);
     Ok(())
 }
 

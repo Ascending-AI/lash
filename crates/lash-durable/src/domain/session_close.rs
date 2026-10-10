@@ -1,17 +1,17 @@
 //! How a session's scopes end (L6b): its closing state, each step its own
 //! fenced, labelled transaction resumed at the step a crash interrupted
-//! (ADR 0132 §12), and the turn scopes whose cascade is still marking their
-//! `Until` children (§11).
+//! (ADR 0132 §12), and the turn and operation scopes whose cascade is still
+//! marking their `Until` children (§11).
 //!
 //! The close row is written by [`SessionCloseWrite::Begin`] when a close
 //! request is drained, and moves one step at a time. After
 //! [`SessionCloseStep::Tombstone`] it is the session's tombstone: the
 //! session's other state is gone and its actor is terminal.
 //!
-//! A turn scope whose first cascade batch did not mark every child is
-//! recorded as ending by its closure
+//! A turn or operation scope whose first cascade batch did not mark every
+//! child is recorded as ending by its closure
 //! ([`ProcessWrite::ScopeClosed`](super::ProcessWrite::ScopeClosed)) in the
-//! transaction that ended the turn, and cleared
+//! transaction that ended the turn or settled the operation, and cleared
 //! ([`SessionCloseWrite::ScopeEnded`]) in the transaction that marks its last
 //! batch, so the session re-drives it on every claim until it is done.
 

@@ -22,7 +22,9 @@ impl CommitLabel {
     // Turns (V0, then L3).
     /// `turn.accept`: A session input accepted into the mailbox (C0).
     pub const TURN_ACCEPT: Self = Self::new("turn.accept");
-    /// `turn.admit`: A turn admitted: inputs bound, deadline recorded (C2).
+    /// `turn.admit`: A turn admitted: inputs bound, deadline recorded (C2);
+    /// or a plugin task's operation run entered, before its handler runs
+    /// (FIG-5343).
     pub const TURN_ADMIT: Self = Self::new("turn.admit");
     /// `turn.traced`: The turn's record that the admission of the trace
     /// scope its admission retained is exported, by the owner that exported

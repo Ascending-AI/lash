@@ -1316,8 +1316,9 @@ impl std::future::IntoFuture for CancelBuilder {
 #[non_exhaustive]
 pub enum CancelReceipt {
     /// The atomic request withdrew queued work before a run applied it.
-    /// An input's send handle answers [`SendOutcome::Withdrawn`]. An operation
-    /// task's command is withdrawn through its own atomic queue transaction.
+    /// An input's send handle answers [`SendOutcome::Withdrawn`]. A plugin
+    /// task's command is withdrawn only while no run entered it; the cancel
+    /// of an entered task is [`Cancelled`](Self::Cancelled) (FIG-5343).
     Withdrawn {
         run: TurnId,
         /// The withdrawn input, or `None` for an operation task command.

@@ -62,12 +62,16 @@ pub enum ExecKey {
 }
 
 /// A scope that owns waits and `Until` children: what a terminal, a turn
-/// commit or a session close ends. Stored as `t/<session>/<run>`,
-/// `s/<session>`, `p/<process>` or `c/<session>/<run>/<cell>`.
+/// commit, an operation's settlement or a session close ends. Stored as
+/// `t/<session>/<run>`, `o/<session>/<operation>`, `s/<session>`,
+/// `p/<process>` or `c/<session>/<run>/<cell>`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum ScopeKey {
     /// A turn.
     Turn(SessionId, TurnId),
+    /// A session operation: a plugin task's operation run, named by its
+    /// command's batch, which its settling commit ends (ADR 0132 §11).
+    Operation(SessionId, String),
     /// A session.
     Session(SessionId),
     /// A process.
@@ -243,6 +247,9 @@ impl ScopeKey {
     pub fn stored(&self) -> String {
         match self {
             Self::Turn(session, run) => stored("t", &[session.as_str(), run.as_str()]),
+            Self::Operation(session, operation) => {
+                stored("o", &[session.as_str(), operation.as_str()])
+            }
             Self::Session(session) => stored("s", &[session.as_str()]),
             Self::Process(process) => stored("p", &[process.as_str()]),
             Self::Cell(session, run, cell) => {
@@ -260,6 +267,9 @@ impl ScopeKey {
         match split(key) {
             ("t", parts) if parts.len() == 2 => {
                 Ok(Self::Turn(session(&parts[0], key)?, turn(&parts[1], key)?))
+            }
+            ("o", parts) if parts.len() == 2 && !parts[1].is_empty() => {
+                Ok(Self::Operation(session(&parts[0], key)?, parts[1].clone()))
             }
             ("s", parts) if parts.len() == 1 => Ok(Self::Session(session(&parts[0], key)?)),
             ("p", parts) if parts.len() == 1 => Ok(Self::Process(process(&parts[0], key)?)),
@@ -299,7 +309,11 @@ mod tests {
         ] {
             assert_eq!(OwnerKey::parse(&key.stored()), Ok(key));
         }
-        let scope = ScopeKey::Session(session);
-        assert_eq!(ScopeKey::parse(&scope.stored()), Ok(scope));
+        for scope in [
+            ScopeKey::Session(session.clone()),
+            ScopeKey::Operation(session, "o/%".to_owned()),
+        ] {
+            assert_eq!(ScopeKey::parse(&scope.stored()), Ok(scope));
+        }
     }
 }

@@ -746,6 +746,14 @@ fn apply_mail_domain(
                     woken.into_iter().collect(),
                 )
             }),
+        MailDomainWrite::RequestOperationCancel(request) => {
+            session_mail::request_operation_cancel(tx, request, now)?.map(|(answer, woken)| {
+                (
+                    MailAnswer::RequestOperationCancel(answer),
+                    woken.into_iter().collect(),
+                )
+            })
+        }
         MailDomainWrite::Redrive(request) => park_events::redrive(tx, request, now)?
             .map(|(answer, woken)| (MailAnswer::Redrive(answer), woken.into_iter().collect())),
     })

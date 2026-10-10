@@ -63,22 +63,27 @@ pub(crate) async fn commit(
     label: CommitLabel,
     metrics: &lash_trace::telemetry::metrics::TelemetryMetrics,
 ) -> Result<(), HeadCommitError> {
-    commit_in(owner, commit, label, metrics, None).await
+    commit_in(owner, commit, label, metrics, None, None).await
 }
 
 /// [`commit`], recording in the same transaction that the session's state
-/// is written in `formats` from it on: the commit that carries a session an
-/// earlier build wrote to this build's formats (FIG-5787).
+/// is written in `formats` from it on (the commit that carries a session an
+/// earlier build wrote to this build's formats, FIG-5787), and ending the
+/// operation scope `ending` in it (ADR 0132 §11): the commit that settles a
+/// plugin task's command closes its operation run's scope and marks the
+/// first batch of its `Until` children (FIG-5345).
 ///
 /// # Errors
 ///
-/// As [`commit`].
+/// As [`commit`]; a failed read of `ending`'s children is
+/// [`HeadCommitError::Owner`].
 pub(crate) async fn commit_in(
     owner: &ActorContext,
     commit: RuntimeCommit,
     label: CommitLabel,
     metrics: &lash_trace::telemetry::metrics::TelemetryMetrics,
     formats: Option<lash_durable::FormatSet>,
+    ending: Option<&lash_durable::domain::ScopeKey>,
 ) -> Result<(), HeadCommitError> {
     crate::store::admit_runtime_commit_budget(&commit, metrics).map_err(HeadCommitError::Store)?;
     let write = SessionCommitWrite {
@@ -89,6 +94,11 @@ pub(crate) async fn commit_in(
     };
     let mut tx = owner.begin().await.map_err(HeadCommitError::Owner)?;
     tx.write(DomainWrite::SessionCommit(write));
+    if let Some(scope) = ending {
+        super::turn_scope::end_operation_scope(owner, &mut tx, scope)
+            .await
+            .map_err(HeadCommitError::Owner)?;
+    }
     if let Some(formats) = formats {
         tx.stamp_formats(formats);
     }

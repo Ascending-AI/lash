@@ -316,9 +316,11 @@ table lash_queued_work_batches
   column admitted_run text nullable
   column authority_json text not-null
   column batch_id text not-null
+  column cancel_request_json text nullable
   column delivery_policy text not-null
   column enqueue_seq bigint not-null
   column enqueued_at_ms bigint not-null
+  column entered_at_ms bigint nullable
   column merge_key text nullable
   column payload_json text not-null
   column session_id text not-null

@@ -1,15 +1,16 @@
 //! Cancel, withdraw (FIG-3600 S5b, D1 §1.6): an input still queued is
 //! withdrawn; an input whose run executes has the run cancelled cooperatively
-//! through its cancellation gate (ADR 0039).
+//! through its cancellation gate (ADR 0039). A plugin task's operation run is
+//! withdrawn while no run entered it, and otherwise cancelled at its running
+//! handler (FIG-5343).
 
 use lash_core::TurnId;
 use lash_core::facade_support::{
-    QueueWithdrawalObservation, TurnAddress, TurnCancelMode, TurnCancelOutcome, TurnCancelRequest,
-    TurnCancelUndeliveredInputPolicy, TurnWorkDriver,
+    OperationCancelOutcome, QueueWithdrawalObservation, TurnAddress, TurnCancelMode,
+    TurnCancelOutcome, TurnCancelRequest, TurnCancelUndeliveredInputPolicy, TurnWorkDriver,
 };
 
 use super::follow::Subject;
-use super::resolve::{self, Resolution};
 use super::{CancelReceipt, SendParts};
 use crate::error::{EmbedError, Result};
 
@@ -74,44 +75,38 @@ async fn cancel_run(
     run: &TurnId,
     request: CancelRequestSpec,
 ) -> Result<CancelReceipt> {
-    if let Some(operation) =
-        lash_core::tool_run::OperationRun::for_run_id(parts.session_id.clone(), run)
-    {
-        // Operation commands own their atomic withdrawal. Keep this dispatch
-        // internal to the same facade entry and receipt as turn cancellation.
-        if matches!(
-            resolve::resolve_run(parts, run).await?,
-            Resolution::OperationSettled { .. }
-        ) {
-            return Ok(CancelReceipt::UnknownOrRevoked);
-        }
-        let task = parts.store.list_queued_work().await?.into_iter().any(|batch| {
-            batch.batch_id.as_str() == operation.operation_id
-                && matches!(&batch.payload, crate::persistence::QueuedWorkPayload::SessionCommand { command }
-                    if matches!(command.as_ref(), lash_core::facade_support::SessionCommand::RunPluginTask { .. }))
-        });
-        return Ok(
-            if task
-                && parts
-                    .ops
-                    .cancel_queued_work_batch(&parts.store, &operation.operation_id)
-                    .await?
-                    .is_some()
-            {
-                CancelReceipt::Withdrawn {
-                    run: run.clone(),
-                    input: None,
-                }
-            } else {
-                CancelReceipt::UnknownOrRevoked
-            },
-        );
-    }
     let request_id = request
         .request_id
         .clone()
         .unwrap_or_else(|| format!("cancel:run:{run}"));
     let backend = parts.effect_host.backend().clone();
+    if lash_core::tool_run::OperationRun::for_run_id(parts.session_id.clone(), run).is_some() {
+        // A plugin task's run: withdrawn while no run entered it, and
+        // otherwise cancelled at its running handler (FIG-5343).
+        let mut cancel = TurnCancelRequest::new(
+            TurnAddress::new(parts.session_id.clone(), run.clone()),
+            request_id,
+            request.origin,
+        )
+        .undelivered(request.undelivered)
+        .mode(request.mode);
+        cancel.reason = request.reason;
+        let outcome = TurnWorkDriver::new(backend)
+            .request_operation_cancel(cancel)
+            .await
+            .map_err(EmbedError::Runtime)?;
+        return Ok(match outcome {
+            OperationCancelOutcome::Withdrawn => CancelReceipt::Withdrawn {
+                run: run.clone(),
+                input: None,
+            },
+            OperationCancelOutcome::Cancelled(receipt) => CancelReceipt::Cancelled {
+                run: run.clone(),
+                receipt: Box::new(receipt),
+            },
+            OperationCancelOutcome::UnknownOrRevoked => CancelReceipt::UnknownOrRevoked,
+        });
+    }
     let withdrawals = QueueWithdrawalObservation::new(
         backend.session_store_factory(),
         std::sync::Arc::clone(&parts.live_replay_store),

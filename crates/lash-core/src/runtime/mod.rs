@@ -354,10 +354,10 @@ pub use scenario_contracts::{RUNTIME_SCENARIO_CONTRACTS, ScenarioContractSpec};
 pub use state::{RuntimeCheckpointComponents, RuntimeSessionAuthority, RuntimeSessionState};
 use state::{append_session_nodes_to_state_with_clock, open_agent_frame_in_state_with_clock};
 pub use turn_control::{
-    QueueWithdrawalPublisher, TurnAddress, TurnAttach, TurnCancelAffectedInput,
-    TurnCancelInputOutcome, TurnCancelMode, TurnCancelOutcome, TurnCancelReceipt,
-    TurnCancelRequest, TurnCancelUndeliveredInputPolicy, TurnCancellationEvidence, TurnTerminal,
-    TurnWorkDriver,
+    OperationCancelOutcome, QueueWithdrawalPublisher, TurnAddress, TurnAttach,
+    TurnCancelAffectedInput, TurnCancelInputOutcome, TurnCancelMode, TurnCancelOutcome,
+    TurnCancelReceipt, TurnCancelRequest, TurnCancelUndeliveredInputPolicy,
+    TurnCancellationEvidence, TurnTerminal, TurnWorkDriver,
 };
 #[cfg(feature = "testing")]
 pub use turn_input_ingress::ingress_message_id;

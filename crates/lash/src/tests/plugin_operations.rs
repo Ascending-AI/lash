@@ -159,7 +159,6 @@ async fn operation_run_follow_returns_the_task_terminal() -> Result<()> {
 /// L03/L10: Run cancellation reaches the task, and a fresh operation with
 /// identical input cannot adopt the cancelled owner's signal or result.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "FIG-5343: a running task's cancel answers Withdrawn and never reaches its handler"]
 async fn operation_run_cancel_does_not_infect_a_fresh_operation() -> Result<()> {
     {
         let entered = Arc::new(tokio::sync::Notify::new());
@@ -242,10 +241,11 @@ async fn operation_run_cancel_does_not_infect_a_fresh_operation() -> Result<()> 
     }
 }
 
-/// L08: operation close ends its own lifetime scope, while a process granted
-/// the session lifetime retains its independent registration and StartKey.
+/// L08: an operation's settlement ends its own lifetime scope (FIG-5345):
+/// its scope is closed and a child it started `Until` it is cancelled, while
+/// a process granted the session lifetime retains its independent
+/// registration and StartKey.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "FIG-5345: an operation's completion never closes its lifetime scope"]
 async fn a_session_lifetime_process_survives_operation_completion() -> Result<()> {
     {
         let spec = lash_core::facade_support::PluginSpec::new()
@@ -256,20 +256,27 @@ async fn a_session_lifetime_process_survives_operation_completion() -> Result<()
                     .start_cx()
                     .map_err(|error| error.to_string())?
                     .expect("an operation is an opener");
-                let request = lash_core::ProcessStartRequest::new(
-                    lash_core::testing::held_engine_input(serde_json::Value::Null),
-                    lash_core::ProcessOriginator::session(lash_core::SessionScope::new(
-                        session.clone(),
-                    )),
-                    lash_core::lifetime::session_or_starter(&cx),
-                )
-                .with_host_start_key("operation-session-process:child");
-                let process = ctx
-                    .processes
-                    .start_from_request(&session, request, scope)
-                    .await
-                    .map_err(|error| error.to_string())?;
-                Ok(PluginOperationOutcome::new(process.process_id.to_string()))
+                let mut started = Vec::new();
+                for (key, lifetime) in [
+                    ("child", lash_core::lifetime::session_or_starter(&cx)),
+                    ("until", lash_core::lifetime::starter(&cx)),
+                ] {
+                    let request = lash_core::ProcessStartRequest::new(
+                        lash_core::testing::held_engine_input(serde_json::Value::Null),
+                        lash_core::ProcessOriginator::session(lash_core::SessionScope::new(
+                            session.clone(),
+                        )),
+                        lifetime,
+                    )
+                    .with_host_start_key(format!("operation-session-process:{key}"));
+                    let process = ctx
+                        .processes
+                        .start_from_request(&session, request, scope.clone())
+                        .await
+                        .map_err(|error| error.to_string())?;
+                    started.push(process.process_id.to_string());
+                }
+                Ok(PluginOperationOutcome::new(started.join(" ")))
             });
         let backend = sqlite_memory_store_backend().await;
         let registry = backend.process_registry();
@@ -300,33 +307,41 @@ async fn a_session_lifetime_process_survives_operation_completion() -> Result<()
         )
         .unwrap();
         let result = run.result().await?;
-        let process_id = serde_json::from_value::<lash_core::ProcessId>(result.output.clone())?;
-        let record = registry.get_process(&process_id).await?.unwrap();
-        assert!(!record.status().is_terminal());
+        let started = result.output.as_str().unwrap_or_default().to_owned();
+        let started_ids = started
+            .split(' ')
+            .map(lash_core::ProcessId::parse)
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .expect("the task answers its processes");
+        let [process_id, until_id] = started_ids.as_slice() else {
+            panic!("the task starts two processes: {started}");
+        };
+        // The settling commit closes the scope and marks its Until children
+        // in one transaction.
+        assert!(
+            registry
+                .get_parent_end_plan(&lash_core::ScopeId::Opener(operation.opener()))
+                .await?
+                .is_some(),
+            "operation completion closes its own scope"
+        );
+        let until = registry.get_process(until_id).await?.unwrap();
+        assert_eq!(
+            until.lifetime.scope(),
+            Some(&lash_core::ScopeId::Opener(operation.opener()))
+        );
+        assert_eq!(
+            until.cancel_request.as_ref().map(|request| request.origin),
+            Some(lash_core::CancelOrigin::ParentEnded),
+            "operation completion cancels its Until child"
+        );
+        let record = registry.get_process(process_id).await?.unwrap();
         assert_eq!(
             record.lifetime.scope(),
             Some(&lash_core::ScopeId::session("operation-session-process"))
         );
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
-        while registry
-            .get_parent_end_plan(&lash_core::ScopeId::Opener(operation.opener()))
-            .await?
-            .is_none()
-        {
-            assert!(
-                tokio::time::Instant::now() < deadline,
-                "operation completion closes its own scope"
-            );
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-        assert!(
-            !registry
-                .get_process(&process_id)
-                .await?
-                .unwrap()
-                .status()
-                .is_terminal()
-        );
+        assert!(record.cancel_request.is_none());
+        assert!(!record.status().is_terminal());
         Ok(())
     }
 }

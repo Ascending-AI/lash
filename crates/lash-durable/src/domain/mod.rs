@@ -47,8 +47,8 @@ pub use prompts::{ModelCallId, PromptCallKey, PromptSnapshotRow, PromptText, Pro
 pub use run_records::{AdmittedId, RunRecordKind, RunRecordRow, RunRecordWrite};
 pub use session_close::{SessionCloseRow, SessionCloseStep, SessionCloseWrite};
 pub use session_mail::{
-    MailBatch, MailBatchKind, MailInput, SESSION_ACTOR_FORMATS, SessionMailWrite, SessionMailbox,
-    queued_input_run,
+    MailBatch, MailBatchKind, MailInput, OperationCancelAnswer, OperationCancelRequest,
+    SESSION_ACTOR_FORMATS, SessionMailWrite, SessionMailbox, queued_input_run,
 };
 pub use snapshots::{SnapshotRev, SnapshotRow, SnapshotWrite};
 pub use turns::{
@@ -116,6 +116,11 @@ pub enum MailDomainWrite {
     /// opened yet, whose input is still queued session mail, has that input
     /// withdrawn instead, with a wake (FIG-5262).
     RequestTurnCancel(TurnCancelRequest),
+    /// L3s: cancel a plugin task's operation run (FIG-5343): a command no
+    /// run entered yet is withdrawn, with a wake; an entered one records the
+    /// request (the first wins) with a control wake, so its running handler
+    /// is cancelled.
+    RequestOperationCancel(OperationCancelRequest),
     /// L6: redrive a parked actor: clear its park and its failed
     /// activations, record the redrive on the park feed, and control-wake
     /// it.
@@ -131,6 +136,8 @@ pub enum MailAnswer {
     RequestProcessCancel(CancelAnswer),
     /// The answer to [`MailDomainWrite::RequestTurnCancel`].
     RequestTurnCancel(TurnCancelAnswer),
+    /// The answer to [`MailDomainWrite::RequestOperationCancel`].
+    RequestOperationCancel(OperationCancelAnswer),
     /// The answer to [`MailDomainWrite::Redrive`].
     Redrive(RedriveAnswer),
 }

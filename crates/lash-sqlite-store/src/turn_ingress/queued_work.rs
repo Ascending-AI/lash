@@ -37,7 +37,8 @@ lash_store_sql::statements! {
              FROM queued_work_batches
              WHERE session_id = ?1
                AND batch_id = ?2
-               AND admitted_run IS NULL AND terminal_cause IS NULL";
+               AND admitted_run IS NULL AND terminal_cause IS NULL
+               AND entered_at_ms IS NULL";
 
         /// Session `?1`'s admission candidates with no turn in progress, up to
         /// `?2` of them.
