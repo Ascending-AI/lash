@@ -74,11 +74,12 @@ pub use crate::kernel_migration::{
 pub use lash_sansio::worker_limit::WorkerFrameKind;
 pub use lash_vm_client::{
     BootstrapFault, CodecRefusal, DecodeLimits, Detail, Exchange, ExecutionClass, ExecutionLease,
-    ExecutionReceipt, FrameEpoch, HeaderRefusal, HostReadKind, InfrastructureOutcome,
-    OpaqueStateRefusal, OpaqueVmState, OwnerEpoch, PayloadKind, PoolCounters, PoolError, PoolFault,
-    PoolMeasurements, ProtocolBounds, ProtocolBreach, ProtocolVersionRefusal, RunBounds, RunInput,
-    RunMeters, RunRefusal, SequenceFault, SupervisorEvidence, TransportSequence, VmOwner,
-    WorkerDeploymentFault, WorkerLimit,
+    ExecutionReceipt, FrameEpoch, GraphStateRefusal, HeaderRefusal, HostReadKind,
+    InfrastructureOutcome, KernelRestoreRefusal, OpaqueStateRefusal, OpaqueVmState, OwnerEpoch,
+    PayloadKind, PoolCounters, PoolError, PoolFault, PoolMeasurements, ProtocolBounds,
+    ProtocolBreach, ProtocolVersionRefusal, RunBounds, RunInput, RunMeters, RunRefusal,
+    SequenceFault, SupervisorEvidence, TransportSequence, VmOwner, WorkerDeploymentFault,
+    WorkerLimit,
 };
 #[cfg(feature = "codemode")]
 pub use lash_vm_client::{StateDigest, StateExpectation};

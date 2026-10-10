@@ -428,6 +428,16 @@ impl Checkout {
             self.discard();
             return Err(InfrastructureOutcome::input_state(error).into());
         }
+        if let StartFrom::ParkedGraph(parked) = &start.from
+            && let Err(error) = parked.state.check(&graph_expectation(
+                &start.owner,
+                Some(document),
+                self.pool.config.protocol.max_vm_state_bytes,
+            ))
+        {
+            self.discard();
+            return Err(InfrastructureOutcome::input_graph_state(error).into());
+        }
         // The host configuration is the ceiling, never a caller's assertion.
         let ceiling = self.pool.config.run_bounds;
         let bounds = &mut start.bounds;
@@ -529,6 +539,24 @@ impl Checkout {
             self.pool.config.protocol.no_response_watchdog,
         )? {
             WorkerMessage::Exported { state } => Ok(state),
+            message => Err(self.unexpected(Exchange::Export, &message)),
+        }
+    }
+
+    /// The run's state at this park as checkpoint graph state, sealed by the
+    /// worker and checked here.
+    pub fn export_graph(
+        &mut self,
+        binding: lash_vm_protocol::EncodedPayload,
+    ) -> Result<lash_vm_protocol::SealedGraphState, PoolError> {
+        if self.pending.is_some() || !self.started {
+            return Err(PoolError::breach(SequenceFault::NoRun));
+        }
+        match self.exchange(
+            ParentMessage::ExportGraph { binding },
+            self.pool.config.protocol.no_response_watchdog,
+        )? {
+            WorkerMessage::ExportedGraph { state } => Ok(state),
             message => Err(self.unexpected(Exchange::Export, &message)),
         }
     }
@@ -828,6 +856,21 @@ impl Checkout {
                     self.resettable = true;
                     return Ok(WorkerMessage::Exported { state });
                 }
+                WorkerMessage::ExportedGraph { state } => {
+                    let owner = self
+                        .owner
+                        .as_ref()
+                        .ok_or_else(|| PoolError::breach(SequenceFault::MissingOwner))?;
+                    state
+                        .check(&graph_expectation(
+                            owner,
+                            self.document.as_deref(),
+                            self.pool.config.protocol.max_vm_state_bytes,
+                        ))
+                        .map_err(InfrastructureOutcome::output_graph_state)?;
+                    self.resettable = true;
+                    return Ok(WorkerMessage::ExportedGraph { state });
+                }
                 // Do not consult exit status after a fully decoded step.
                 message @ (WorkerMessage::Started
                 | WorkerMessage::Parked { .. }
@@ -1071,5 +1114,23 @@ pub mod runtime_ops {
                 state = next;
             }
         }
+    }
+}
+
+/// What a parked run's graph state must be: this owner's, of a kernel this
+/// build reads, under the document, a KernelWhole, within the state bound.
+/// A node takes at least one byte, so the bound bounds the node count too.
+fn graph_expectation<'a>(
+    owner: &'a lash_vm_protocol::VmOwner,
+    document: Option<&'a str>,
+    max_bytes: u64,
+) -> lash_vm_protocol::GraphStateExpectation<'a> {
+    lash_vm_protocol::GraphStateExpectation {
+        owner,
+        kernel: crate::kernel_reads(),
+        document,
+        root_kinds: &[lash_core_store::checkpoint_graph::NodeKind::KERNEL_WHOLE.0],
+        max_nodes: max_bytes,
+        max_bytes,
     }
 }

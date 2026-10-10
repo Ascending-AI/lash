@@ -111,6 +111,20 @@ pub enum KernelRestoreRefusal {
     AdmissionUnresolved { effect: String },
     #[error("the parked state is malformed: {problem}")]
     Malformed { problem: String },
+    /// The run pins a release manifest this worker does not hold exactly.
+    #[error("the run pins release manifest {pinned}, which this worker does not hold")]
+    ReleaseMismatch { pinned: String },
+    /// The pinned release or this worker lacks a function the run calls.
+    #[error("function {function} is not held by the pinned release or this worker")]
+    MissingHelper { function: String },
+    /// The pinned release records a native implementation this worker
+    /// lacks.
+    #[error("function {function} needs a native implementation this worker lacks")]
+    MissingNative { function: String },
+    /// The admission under this execution holds a request of another kind
+    /// than the wait's.
+    #[error("the admission of effect {effect} is not the kind of the parked wait")]
+    AdmissionMismatch { effect: String },
 }
 
 fn seal_of(

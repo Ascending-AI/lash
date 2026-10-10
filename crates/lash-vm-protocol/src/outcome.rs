@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::codec::CodecRefusal;
+use crate::graph_state::{GraphStateRefusal, KernelRestoreRefusal};
 use crate::message::HeaderRefusal;
 use crate::state::OpaqueStateRefusal;
 use crate::version::ProtocolVersionRefusal;
@@ -248,6 +249,9 @@ pub enum ProtocolBreach {
     /// State the worker itself produced fails the parent's structural check.
     #[error("the worker's state is refused: {refusal}")]
     State { refusal: OpaqueStateRefusal },
+    /// Graph state the worker itself produced fails the parent's check.
+    #[error("the worker's graph state is refused: {refusal}")]
+    GraphState { refusal: GraphStateRefusal },
     #[error("the machine refused a step the protocol drove: {detail}")]
     Machine { detail: Detail },
     #[error("{fault}")]
@@ -289,6 +293,12 @@ pub enum RunRefusal {
     },
     #[error("{refusal}")]
     State { refusal: OpaqueStateRefusal },
+    #[error("{refusal}")]
+    GraphState { refusal: GraphStateRefusal },
+    /// The worker will not resume the parked graph state: its pinned
+    /// release, a function or native it needs, or a wait's admission.
+    #[error("{refusal}")]
+    Restore { refusal: KernelRestoreRefusal },
     #[error("the run's {input} does not decode: {detail}")]
     Undecodable { input: RunInput, detail: Detail },
     #[error("a payload of {size} bytes exceeds the {limit}-byte bound")]
@@ -391,6 +401,24 @@ impl InfrastructureOutcome {
             | OpaqueStateRefusal::KernelOutsideReadRange { .. }
             | OpaqueStateRefusal::WrongDocument { .. }
             | OpaqueStateRefusal::HashMismatch) => ProtocolBreach::State { refusal }.into(),
+        }
+    }
+
+    /// Parked graph state the parent holds fails the structural check
+    /// before a worker is handed it.
+    pub fn input_graph_state(refusal: GraphStateRefusal) -> Self {
+        match refusal {
+            GraphStateRefusal::TooLarge { limit, len } => Self::state_limit(limit, len),
+            refusal => RunRefusal::GraphState { refusal }.into(),
+        }
+    }
+
+    /// Graph state a worker produced fails the parent's structural check.
+    /// Its size is the run's limit; anything else is the worker's breach.
+    pub fn output_graph_state(refusal: GraphStateRefusal) -> Self {
+        match refusal {
+            GraphStateRefusal::TooLarge { limit, len } => Self::state_limit(limit, len),
+            refusal => ProtocolBreach::GraphState { refusal }.into(),
         }
     }
 

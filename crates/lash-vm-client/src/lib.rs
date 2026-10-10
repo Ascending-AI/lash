@@ -2,6 +2,7 @@
 //! pooled worker hosts.
 mod config;
 mod error;
+pub mod graph;
 pub mod ipc;
 mod machine;
 mod measurements;
@@ -16,10 +17,11 @@ pub use error::PoolError;
 /// name.
 pub use lash_vm_protocol::{
     BootstrapFault, CodecRefusal, DecodeLimits, Detail, Exchange, ExecutionLease, FrameEpoch,
-    HeaderRefusal, HostReadId, HostReadKind, InfrastructureOutcome, OpaqueStateRefusal,
-    OpaqueVmState, OwnerEpoch, PayloadKind, PoolFault, ProtocolBounds, ProtocolBreach,
-    ProtocolVersionRefusal, RunBounds, RunInput, RunMeters, RunRefusal, SequenceFault,
-    SupervisorEvidence, TransportSequence, VmOwner, WorkerDeploymentFault, WorkerLimit,
+    GraphStateRefusal, HeaderRefusal, HostReadId, HostReadKind, InfrastructureOutcome,
+    KernelRestoreRefusal, OpaqueStateRefusal, OpaqueVmState, OwnerEpoch, PayloadKind, PoolFault,
+    ProtocolBounds, ProtocolBreach, ProtocolVersionRefusal, RunBounds, RunInput, RunMeters,
+    RunRefusal, SequenceFault, SupervisorEvidence, TransportSequence, VmOwner,
+    WorkerDeploymentFault, WorkerLimit,
 };
 /// What an [`OpaqueVmState`] is sealed with and checked against.
 pub use lash_vm_protocol::{StateDigest, StateExpectation};

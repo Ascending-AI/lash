@@ -47,6 +47,7 @@ dhat = { version = "0.3", optional = true }
 lash-vm-client = { workspace = true }
 lash-core-execution = { workspace = true }
 lash-vm-protocol = { workspace = true }
+lash-core-store = { workspace = true }
 lash-kernel-doc = { workspace = true }
 lash-kernel-vm = { workspace = true }
 lash-kernel-lib = { workspace = true }

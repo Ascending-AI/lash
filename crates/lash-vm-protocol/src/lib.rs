@@ -45,8 +45,8 @@ pub use graph_state::{
 };
 pub use message::{
     EncodedPayload, ExecutionLease, FrameEpoch, HeaderRefusal, HostReadId, HostReadKind,
-    MessageFence, MessageHeader, OwnerEpoch, ParentFrame, ParentMessage, RunBounds, RunMeters,
-    Start, StartFrom, TransportSequence, WorkerFrame, WorkerMessage, WorkerPhase,
+    MessageFence, MessageHeader, OwnerEpoch, ParentFrame, ParentMessage, ParkedGraph, RunBounds,
+    RunMeters, Start, StartFrom, TransportSequence, WorkerFrame, WorkerMessage, WorkerPhase,
 };
 pub use outcome::{
     BootstrapFault, Detail, Exchange, InfrastructureOutcome, PayloadKind, PoolFault,

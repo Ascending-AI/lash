@@ -123,6 +123,14 @@ impl RemoteMachines {
             + match &start.from {
                 StartFrom::Fresh(payload) => payload.0.len(),
                 StartFrom::Parked(state) => state.bytes().len(),
+                StartFrom::ParkedGraph(parked) => {
+                    parked.state.byte_len() as usize
+                        + parked
+                            .admissions
+                            .iter()
+                            .map(|admission| admission.0.len())
+                            .sum::<usize>()
+                }
             }
             + 4096;
         let service = self.service.clone();
@@ -184,6 +192,21 @@ impl Machines for RemoteMachines {
     }
 }
 
+impl RemoteMachines {
+    /// Resumes a parked run from its checkpoint graph state and the
+    /// admission of each wait it holds (FIG-5887 §3).
+    ///
+    /// # Errors
+    ///
+    /// The worker's refusal of the state, its release or an admission.
+    pub async fn resume_graph(
+        &self,
+        parked: lash_vm_protocol::ParkedGraph,
+    ) -> Result<RemoteMachine, KernelFailure> {
+        self.checkout(StartFrom::ParkedGraph(parked)).await
+    }
+}
+
 /// One run's machine in a checked-out worker. Dropping it mid-run discards
 /// the worker.
 pub struct RemoteMachine {
@@ -193,6 +216,21 @@ pub struct RemoteMachine {
 }
 
 impl RemoteMachine {
+    /// The run's state at this park as checkpoint graph state, bound to the
+    /// execution `binding` names (FIG-5887 §3).
+    ///
+    /// # Errors
+    ///
+    /// The worker's refusal, or its state failing the parent's check.
+    pub async fn export_graph(
+        &mut self,
+        binding: &lash_core_store::checkpoint_graph::bodies::OwnerBinding,
+    ) -> Result<lash_vm_protocol::SealedGraphState, KernelFailure> {
+        let binding = EncodedPayload(lash_kernel_doc::graph_tokens::encode_body(binding));
+        self.with(move |checkout| checkout.export_graph(binding))
+            .await
+    }
+
     /// One blocking exchange on the checkout, off the async runtime.
     async fn with<T: Send + 'static>(
         &mut self,
