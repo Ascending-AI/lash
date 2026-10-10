@@ -122,12 +122,18 @@ struct Standard {
 }
 
 fn standard() -> Result<&'static Standard, LibraryError> {
-    static STANDARD: OnceLock<Standard> = OnceLock::new();
-    if let Some(standard) = STANDARD.get() {
-        return Ok(standard);
-    }
-    let assembled = assemble()?;
-    Ok(STANDARD.get_or_init(|| assembled))
+    static STANDARD: OnceLock<Result<Standard, LibraryError>> = OnceLock::new();
+    standard_in(&STANDARD, assemble)
+}
+
+fn standard_in(
+    slot: &OnceLock<Result<Standard, LibraryError>>,
+    assemble: impl FnOnce() -> Result<Standard, LibraryError>,
+) -> Result<&Standard, LibraryError> {
+    // Assembly decodes and registers the whole helper catalog. Cold readers
+    // must wait for that work, rather than each allocating their own copy.
+    // A failure is a fixed defect of this build, so retain it as well.
+    slot.get_or_init(assemble).as_ref().map_err(Clone::clone)
 }
 
 fn assemble() -> Result<Standard, LibraryError> {
@@ -297,4 +303,66 @@ pub fn standard_retired_helpers(
         );
     }
     Ok(dropped)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    /// FIG-5821: concurrent cold readers assemble the shipped library once,
+    /// rather than each allocating the entire frozen helper catalog.
+    #[test]
+    fn concurrent_cold_readers_assemble_the_library_once() {
+        let slot = OnceLock::new();
+        let assemblies = AtomicUsize::new(0);
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let (second_tx, second_rx) = mpsc::channel();
+        let (started_tx, started_rx) = mpsc::channel();
+        let empty = || {
+            let functions = Arc::new(FunctionRegistry::declarations());
+            Standard {
+                written: Arc::clone(&functions),
+                interpreted: functions,
+                names: BTreeMap::new(),
+                releases: Vec::new(),
+            }
+        };
+        std::thread::scope(|threads| {
+            let slot = &slot;
+            let assemblies = &assemblies;
+            let first = threads.spawn(move || {
+                standard_in(slot, || {
+                    assemblies.fetch_add(1, Ordering::SeqCst);
+                    entered_tx.send(()).expect("assembly enters");
+                    release_rx.recv().expect("release the first assembly");
+                    Ok(empty())
+                })
+                .expect("the library assembles")
+            });
+            entered_rx.recv().expect("the first assembly is in flight");
+            let second = threads.spawn(move || {
+                started_tx.send(()).expect("the second reader starts");
+                standard_in(slot, || {
+                    assemblies.fetch_add(1, Ordering::SeqCst);
+                    second_tx.send(()).expect("a duplicate assembly enters");
+                    Ok(empty())
+                })
+                .expect("the concurrent reader gets the library")
+            });
+            started_rx
+                .recv()
+                .expect("the second reader reaches the slot");
+            let duplicate = second_rx.recv_timeout(Duration::from_secs(1)).is_ok();
+            release_tx.send(()).expect("finish the first assembly");
+            let first = first.join().expect("the first reader exits");
+            let second = second.join().expect("the second reader exits");
+            assert!(!duplicate, "a cold reader started a duplicate assembly");
+            assert_eq!(assemblies.load(Ordering::SeqCst), 1);
+            assert!(std::ptr::eq(first, second));
+        });
+    }
 }

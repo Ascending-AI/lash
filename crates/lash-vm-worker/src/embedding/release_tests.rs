@@ -13,6 +13,57 @@ use lash_vm_client::WorkerTuning;
 
 use super::{EmbedError, HELPER_RELEASE, standard};
 
+#[path = "../build/release.rs"]
+mod release;
+
+fn helper_registry(result: i64) -> lash_kernel_doc::FunctionRegistry {
+    let definition = lash_kernel_doc::parse_definition(&format!(
+        "function helper() -> Int\nkernel 1\ncharge 1\nbody {{ return {result} }}\n"
+    ))
+    .expect("a helper definition");
+    let mut registry = lash_kernel_doc::FunctionRegistry::declarations();
+    registry
+        .register(definition, None)
+        .expect("register the helper");
+    registry
+}
+
+/// FIG-5821: the unsealed 1.0 baseline holds only today's functions;
+/// superseded pre-release helpers must not grow every worker's catalog.
+#[test]
+fn unsealed_helper_baseline_contains_only_current_functions() {
+    let old = helper_registry(1);
+    let current = helper_registry(2);
+    let fingerprints = Default::default();
+    let previous = release::freeze("1.0", 1, None, &old, &fingerprints);
+    let frozen = release::freeze("1.0", 1, Some(&previous), &current, &fingerprints);
+    assert_eq!(frozen.functions.len(), 1, "no superseded unsealed helper");
+    assert_eq!(frozen.index().functions, frozen.writes);
+    assert!(
+        release::keep(&[frozen], &current, &fingerprints)
+            .expect("the baseline matches the build")
+            .retained
+            .is_empty()
+    );
+}
+
+/// FIG-5799: a sealed release still protects runnable functions a run pins.
+#[test]
+fn sealed_helper_freezes_keep_runnable_functions() {
+    let old = helper_registry(1);
+    let current = helper_registry(2);
+    let fingerprints = Default::default();
+    let mut previous = release::freeze("1.0", 1, None, &old, &fingerprints);
+    previous.sealed = true;
+    let frozen = release::freeze("2.0", 2, Some(&previous), &current, &fingerprints);
+    assert_eq!(frozen.functions.len(), 2, "the sealed helper remains held");
+    assert_eq!(frozen.writes.len(), 1, "only the current helper is named");
+    let kept = release::keep(&[previous], &current, &fingerprints)
+        .expect("the sealed helper remains runnable");
+    assert_eq!(kept.retained.len(), 1);
+    assert!(kept.divergence.is_empty());
+}
+
 /// The helper release the tree builds, frozen for the tree as it stands
 /// (`build.rs`): the source `lash-vm-library`'s `src/generated/` keeps it in.
 const FROZEN: &str = include_str!(concat!(env!("OUT_DIR"), "/helper_release.rs"));

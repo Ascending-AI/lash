@@ -135,9 +135,8 @@ pub(crate) fn keep(
 }
 
 /// Release `release`, ordinal `ordinal`, frozen for `registry`, the build's
-/// own functions: it writes them, and it still holds every function of
-/// `previous`, an earlier freeze of it, whose body this build can run, so
-/// a run written against that freeze resumes.
+/// own functions: it writes them. Only a sealed `previous` protects runnable
+/// functions a shipped run can pin; an unsealed baseline is replaced.
 pub(crate) fn freeze(
     release: &str,
     ordinal: u32,
@@ -157,7 +156,10 @@ pub(crate) fn freeze(
         );
     }
     let writes = listed.clone();
-    for released in previous.map_or(&[][..], |previous| &previous.functions) {
+    for released in previous
+        .filter(|previous| previous.sealed)
+        .map_or(&[][..], |previous| &previous.functions)
+    {
         let runnable = !released.definition.has_native()
             && released
                 .definition
