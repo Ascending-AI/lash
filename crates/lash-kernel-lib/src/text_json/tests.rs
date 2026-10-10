@@ -988,6 +988,14 @@ fn k_lib_006_native_corpus_pins_results_charges_and_determinism() {
             vec![t("a"), t("😀")],
             Ok(t("a😀")),
         ),
+        // NFC composes U+0065 U+0301 into U+00E9 (Python unicodedata.normalize).
+        // Charge: 1 + (1 + 3 input bytes) + (1 + 3 form bytes) + (1 + 2 result bytes) = 12.
+        (
+            "K-LTXT-010",
+            "text.normalize_u17_0_0".to_owned(),
+            vec![t("e\u{301}"), t("NFC")],
+            Ok(t("\u{e9}")),
+        ),
         (
             "K-LTXT-008",
             "text.starts_with".to_owned(),
