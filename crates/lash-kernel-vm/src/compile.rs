@@ -32,6 +32,7 @@ use lash_kernel_doc::{
 use crate::functions::{MachineFunction, machine_function};
 
 mod formula;
+pub(crate) mod pe;
 
 pub(crate) use formula::{Plan, Source};
 
@@ -109,6 +110,19 @@ struct Prepared {
     /// Each function whose body reaches, through the bodies the machine
     /// runs, a function the registry does not hold: that function.
     missing: BTreeMap<FunctionId, FunctionId>,
+    /// The residual variants of each library code, by code id: the first
+    /// whose guards an activation's inputs pass runs instead of the code
+    /// (FIG-5863 spike). Empty unless the library was specialized.
+    variants: Vec<Box<[pe::Variant]>>,
+    /// What partial evaluation made, for the spike's report.
+    report: Vec<pe::CodeReport>,
+    /// Whether activations count the variant they run.
+    counting: bool,
+    /// Whether activations count every variant whose guards they pass and
+    /// run the generic code.
+    profiling: bool,
+    /// The first residual code id: every code before it is generic.
+    generic_codes: u32,
 }
 
 impl fmt::Debug for PreparedLibrary {
@@ -232,7 +246,35 @@ impl PreparedLibrary {
             libs,
             lib_of,
             missing,
+            variants: Vec::new(),
+            report: Vec::new(),
+            counting: false,
+            profiling: false,
+            generic_codes: u32::MAX,
         }))
+    }
+
+    /// This library with residual variants of its hot library bodies and
+    /// closures, made by partial evaluation over the prepared form
+    /// (FIG-5863 spike). The variants are private derivatives of the same
+    /// bodies: a run is the same whichever runs.
+    pub fn specialized(registry: Arc<FunctionRegistry>, options: &pe::Options) -> Self {
+        let plain = Self::with_layout(registry, Layout::default());
+        let Ok(mut prepared) = Arc::try_unwrap(plain.0) else {
+            unreachable!("a library just prepared has one owner");
+        };
+        prepared.generic_codes = prepared.tables.codes.len() as u32;
+        let (variants, report) = pe::specialize(&mut prepared.tables, &prepared.libs, options);
+        prepared.variants = variants;
+        prepared.report = report;
+        prepared.counting = options.count;
+        prepared.profiling = matches!(options.selection, pe::Selection::Profiling);
+        Self(Arc::new(prepared))
+    }
+
+    /// What partial evaluation made (FIG-5863 spike).
+    pub fn pe_report(&self) -> &[pe::CodeReport] {
+        &self.0.report
     }
 }
 
@@ -326,6 +368,30 @@ impl Executable {
         &self.library.0.libs[id.0 as usize]
     }
 
+    /// Whether `code` is a residual variant of a library code.
+    pub(crate) fn is_residual(&self, code: CodeId) -> bool {
+        code.0 >= self.library.0.generic_codes
+            && (code.0 as usize) < self.library.0.tables.codes.len()
+    }
+
+    pub(crate) fn profiles_variants(&self) -> bool {
+        self.library.0.profiling
+    }
+
+    pub(crate) fn counts_variants(&self) -> bool {
+        self.library.0.counting
+    }
+
+    /// The residual variants of `code`, best first.
+    #[inline]
+    pub(crate) fn variants(&self, code: CodeId) -> &[pe::Variant] {
+        self.library
+            .0
+            .variants
+            .get(code.0 as usize)
+            .map_or(&[], |variants| &variants[..])
+    }
+
     /// The library function `function`, when the document lists it.
     pub(crate) fn lib_of(&self, function: &FunctionId) -> Option<LibId> {
         if !self.document.manifest.functions.contains_key(function) {
@@ -378,6 +444,7 @@ pub(crate) struct Code {
     pub(crate) charged: bool,
 }
 
+#[derive(Clone)]
 pub(crate) struct SlotInfo {
     pub(crate) name: Name,
     /// The node that declares the variable: its `let`, the block it is a
@@ -388,6 +455,7 @@ pub(crate) struct SlotInfo {
     pub(crate) shared: bool,
 }
 
+#[derive(Clone)]
 pub(crate) struct Capture {
     /// The slot in the enclosing code.
     pub(crate) outer: Slot,
@@ -425,6 +493,7 @@ pub(crate) enum LibRun {
     Machine(MachineFunction),
 }
 
+#[derive(Clone)]
 pub(crate) enum Var {
     Local(Local),
     /// A session binding, looked up by name when it is read
@@ -434,6 +503,7 @@ pub(crate) enum Var {
     Unbound(Name),
 }
 
+#[derive(Clone)]
 pub(crate) enum Stmt {
     Let {
         target: Target,
@@ -476,31 +546,37 @@ pub(crate) enum Stmt {
     Fail(Expr),
 }
 
+#[derive(Clone)]
 pub(crate) enum Target {
     Slot(Local),
     Session(Name),
 }
 
+#[derive(Clone)]
 pub(crate) enum Rhs {
     Expr(Expr),
     Action(Action),
 }
 
+#[derive(Clone)]
 pub(crate) enum Place {
     Var(Var),
     Member(Member),
 }
 
+#[derive(Clone)]
 pub(crate) enum Member {
     Field(Expr, String),
     Index(Expr, Expr),
 }
 
+#[derive(Clone)]
 pub(crate) struct Action {
     pub(crate) site: Site,
     pub(crate) kind: ActionKind,
 }
 
+#[derive(Clone)]
 pub(crate) enum ActionKind {
     Call {
         callee: Callee,
@@ -522,17 +598,20 @@ pub(crate) enum ActionKind {
     Cancel(Atom),
 }
 
+#[derive(Clone)]
 pub(crate) enum Callee {
     Declared(CodeId),
     Value(Var),
     Library(LibId),
 }
 
+#[derive(Clone)]
 pub(crate) enum Atom {
     Var(Var),
     Literal(Value),
 }
 
+#[derive(Clone)]
 pub(crate) enum Expr {
     Literal(Value),
     Var(Var),
@@ -543,10 +622,42 @@ pub(crate) enum Expr {
     Record(Vec<(String, Expr)>),
     Member(Box<Member>),
     Closure(CodeId),
-    Call { lib: LibId, args: Vec<Expr> },
+    Call {
+        lib: LibId,
+        args: Vec<Expr>,
+    },
     Clock,
     Random,
     Read(Box<(Expr, Expr)>),
+    /// A subexpression partial evaluation computed (FIG-5863 spike): its
+    /// value is known, and evaluating it replays the charges and pins the
+    /// original expression made, in order, without doing its work.
+    Folded(Box<Folded>),
+}
+
+/// What a folded expression does when it is evaluated.
+#[derive(Clone, Debug)]
+pub(crate) struct Folded {
+    pub(crate) events: Box<[Event]>,
+    pub(crate) value: Value,
+}
+
+/// One observable event of a folded expression, in the order the original
+/// expression made it.
+#[derive(Clone, Debug)]
+pub(crate) enum Event {
+    /// Charges `total`, the sum of `parts`, which the original charged one
+    /// at a time: a run that crosses its bound charges them one at a time,
+    /// so it stops at the part that crosses, as the original did. A part
+    /// charged inside a library call names that function when it crosses.
+    Charge {
+        total: u64,
+        parts: Box<[u64]>,
+        lib: Option<LibId>,
+    },
+    /// Keeps a native call's result live until the statement ends, as the
+    /// call did, accounting its bytes.
+    Pin { value: Value, lib: LibId },
 }
 
 /// A program the machine cannot compile: a function the registry lacks.
@@ -1362,7 +1473,7 @@ impl Placer<'_> {
 
     fn expr(&self, expr: &mut Expr, closures: &mut Vec<CodeId>) {
         match expr {
-            Expr::Literal(_) | Expr::Clock | Expr::Random => {}
+            Expr::Literal(_) | Expr::Clock | Expr::Random | Expr::Folded(_) => {}
             Expr::Var(var) => self.var(var),
             Expr::Tuple(items) | Expr::List(items) | Expr::Set(items) => {
                 items.iter_mut().for_each(|item| self.expr(item, closures));

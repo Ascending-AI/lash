@@ -12,7 +12,7 @@ use super::exec::Call;
 use super::{
     Eval, Halt, Interrupt, KernelMachine, MAX_INLINE_DEPTH, TaskState, bound, fault, raise,
 };
-use crate::compile::{Executable, Expr, LibId, LibRun, Member};
+use crate::compile::{Event, Executable, Expr, Folded, LibId, LibRun, Member};
 use crate::functions::MachineFunction;
 use crate::heap::{ClosureObj, Key, MAX_VALUE_DEPTH, NativeView, Obj, Table, within_depth};
 use crate::interface::{Bound, Host};
@@ -44,7 +44,23 @@ pub(super) fn key(value: &Value) -> Eval<Key> {
     }
 }
 
+/// Folded expressions whose charge crossed the bound, and whose pins the
+/// memory bound refused, in this process (FIG-5863 spike evidence).
+pub(super) static FOLDED_CROSSINGS: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+pub(super) static FOLDED_REFUSALS: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+
 impl KernelMachine {
+    /// How many folded expressions crossed the charge bound, and how many
+    /// had a pin the memory bound refused, in this process.
+    pub fn folded_bound_events() -> (u64, u64) {
+        (
+            FOLDED_CROSSINGS.load(std::sync::atomic::Ordering::Relaxed),
+            FOLDED_REFUSALS.load(std::sync::atomic::Ordering::Relaxed),
+        )
+    }
+
     pub(super) fn eval(
         &mut self,
         task: TaskId,
@@ -52,6 +68,9 @@ impl KernelMachine {
         exe: &Executable,
         expr: &Expr,
     ) -> Eval<Value> {
+        if let Expr::Folded(folded) = expr {
+            return self.replay(exe, folded);
+        }
         self.charge(1)?;
         match expr {
             Expr::Literal(value) => Ok(value.clone()),
@@ -132,6 +151,7 @@ impl KernelMachine {
                 let bits = host.random() >> 11;
                 Ok(Value::Float(Float::new(bits as f64 / (1u64 << 53) as f64)))
             }
+            Expr::Folded(folded) => self.replay(exe, folded),
             Expr::Read(read) => {
                 let handle = self.eval(task, host, exe, &read.0)?;
                 let request = self.eval(task, host, exe, &read.1)?;
@@ -152,6 +172,44 @@ impl KernelMachine {
                 }
             }
         }
+    }
+
+    /// Evaluates a folded expression: the charges and pins the original
+    /// made, in its order, and its value (FIG-5863 spike).
+    fn replay(&mut self, exe: &Executable, folded: &Folded) -> Eval<Value> {
+        for event in &folded.events {
+            match event {
+                Event::Charge { total, parts, lib } => {
+                    if !self.charging {
+                        continue;
+                    }
+                    let charged = self.charged.saturating_add(*total);
+                    if charged <= self.bounds.charge {
+                        self.charged = charged;
+                        continue;
+                    }
+                    // The bound is crossed: charge as the original did, part
+                    // by part, so the run stops at the part that crosses.
+                    FOLDED_CROSSINGS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    for part in parts.iter() {
+                        if let Err(halt) = self.charge(*part) {
+                            let halt = match lib {
+                                Some(lib) => halt.in_function(&exe.lib(*lib).definition.name),
+                                None => halt,
+                            };
+                            return Err(halt.into());
+                        }
+                    }
+                }
+                Event::Pin { value, lib } => {
+                    if let Err(halt) = self.pin(value) {
+                        FOLDED_REFUSALS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        return Err(halt.in_function(&exe.lib(*lib).definition.name).into());
+                    }
+                }
+            }
+        }
+        Ok(folded.value.clone())
     }
 
     fn eval_all(

@@ -391,6 +391,16 @@ impl KernelMachine {
         parked::save(self, since)
     }
 
+    /// How many live frames run a residual variant of a library code
+    /// (FIG-5863 spike): what a harness asserts a park sits above.
+    pub fn residual_frames(&self) -> usize {
+        self.tasks
+            .iter()
+            .flat_map(|task| &task.frames)
+            .filter(|frame| self.exe.is_residual(frame.code))
+            .count()
+    }
+
     fn task(&mut self, task: TaskId) -> Result<&mut Task, Halt> {
         self.tasks
             .get_mut(task.0 as usize)
