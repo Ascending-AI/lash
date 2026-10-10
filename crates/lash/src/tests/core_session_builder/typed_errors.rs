@@ -140,12 +140,30 @@ async fn a_native_tool_membership_refusal_preserves_its_cause() {
     core.shutdown().await.expect("shutdown");
 }
 
-/// A plugin whose readiness decodes a stored value it cannot read (mode 1)
-/// or encodes a command value that has no JSON form (mode 2). Mode 0
-/// refuses nothing.
+/// A plugin whose readiness records the value its namespace holds at `k`
+/// (mode 0), decodes that value as a type it cannot read (mode 1), or
+/// encodes a command value that has no JSON form (mode 2).
 #[derive(Clone)]
 struct StateHook {
     mode: Arc<AtomicUsize>,
+    seen: Arc<std::sync::Mutex<Vec<Option<serde_json::Value>>>>,
+}
+
+impl StateHook {
+    fn new() -> Self {
+        Self {
+            mode: Arc::new(AtomicUsize::new(0)),
+            seen: Arc::default(),
+        }
+    }
+
+    fn core(&self, backend: crate::Backend) -> LashCore {
+        explicit_ephemeral_facets(LashCore::standard_builder(backend))
+            .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
+            .plugin(Arc::new(self.clone()))
+            .build(crate::testing::runtime_lease_owner())
+            .expect("core")
+    }
 }
 
 impl PluginFactory for StateHook {
@@ -194,7 +212,10 @@ impl SessionPlugin for StateHook {
                 let keyed = std::collections::BTreeMap::from([((1, 2), 3)]);
                 lash_core::plugin::StateCommands::new().set_as("k", &keyed)?;
             }
-            _ => return Ok(()),
+            _ => {
+                self.seen.lock().expect("seen").push(ctx.state.get("k"));
+                return Ok(());
+            }
         }
         Err(PluginError::Registration(format!(
             "the state codec did not refuse; the namespace held {:?}",
@@ -203,58 +224,64 @@ impl SessionPlugin for StateHook {
     }
 }
 
-/// The typed plugin-state error somewhere in `error`'s source chain.
-fn state_source<'a>(error: &'a (dyn Error + 'static)) -> Option<&'a PluginStateError> {
-    let mut current = Some(error);
-    while let Some(error) = current {
-        if let Some(state) = error.downcast_ref::<PluginStateError>() {
-            return Some(state);
-        }
-        current = error.source();
-    }
-    None
+/// Create session `id` on `backend` and run its first turn on a core that
+/// installs `hook`, then shut that core down.
+async fn run_first_turn(backend: &crate::Backend, hook: &StateHook, id: &str) {
+    let core = hook.core(backend.clone());
+    core.session(crate::SessionId::parse(id).expect("id"))
+        .create(crate::SessionCreation::root(
+            crate::plugins::SessionToolAccess::ambient(),
+            mock_session_spec(),
+        ))
+        .await
+        .expect("created")
+        .send(crate::TurnInput::text("ready"))
+        .output()
+        .await
+        .expect("the session's first turn answers");
+    core.shutdown().await.expect("shutdown");
+}
+
+/// A cold session's readiness reads the namespace its first turn recorded,
+/// which that turn's readiness already read from the factory's initial
+/// values (FIG-5324).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_cold_sessions_readiness_reads_its_recorded_namespace() {
+    let backend = sqlite_memory_store_backend().await;
+    let hook = StateHook::new();
+    run_first_turn(&backend, &hook, "cold-namespace").await;
+    let core = hook.core(backend);
+    core.session(crate::SessionId::parse("cold-namespace").expect("id"))
+        .durable()
+        .await
+        .expect("handle")
+        .send(crate::TurnInput::text("cold"))
+        .output()
+        .await
+        .expect("the cold turn answers");
+    let seen = hook.seen.lock().expect("seen").clone();
+    assert!(seen.len() >= 2, "both turns' readiness ran: {seen:?}");
+    assert!(
+        seen.iter()
+            .all(|value| *value == Some(serde_json::json!("text"))),
+        "every readiness reads the initialized value: {seen:?}"
+    );
+    core.shutdown().await.expect("shutdown");
 }
 
 /// A plugin's state-codec refusal at a cold session's readiness reaches the
 /// host as a typed, terminal plugin-state error naming its key, both for a
-/// value it cannot decode and for one it cannot encode.
+/// command value it cannot encode and for a recorded value it cannot decode
+/// (FIG-5324).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "FIG-5324: a cold session's readiness sees an empty plugin namespace and a readiness refusal loses its typed cause"]
-async fn a_native_cold_open_preserves_state_codec_refusals() {
+async fn a_cold_sessions_readiness_state_refusal_reaches_the_host_typed() {
     let backend = sqlite_memory_store_backend().await;
-    for mode in 1..=2 {
-        let id = format!("native-state-codec-{mode}");
-        let mode_control = Arc::new(AtomicUsize::new(0));
-        let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
-            .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
-            .plugin(Arc::new(StateHook {
-                mode: Arc::clone(&mode_control),
-            }))
-            .build(crate::testing::runtime_lease_owner())
-            .expect("core");
-        let session = core
-            .session(crate::SessionId::parse(&id).expect("id"))
-            .create(crate::SessionCreation::root(
-                crate::plugins::SessionToolAccess::ambient(),
-                mock_session_spec(),
-            ))
-            .await
-            .expect("created");
-        session
-            .send(crate::TurnInput::text("ready"))
-            .output()
-            .await
-            .expect("the session's first turn answers");
-        core.shutdown().await.expect("shutdown");
-
-        mode_control.store(mode, Ordering::SeqCst);
-        let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
-            .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
-            .plugin(Arc::new(StateHook {
-                mode: Arc::clone(&mode_control),
-            }))
-            .build(crate::testing::runtime_lease_owner())
-            .expect("core");
+    for mode in [2, 1] {
+        let id = format!("cold-state-refusal-{mode}");
+        let hook = StateHook::new();
+        run_first_turn(&backend, &hook, &id).await;
+        hook.mode.store(mode, Ordering::SeqCst);
+        let core = hook.core(backend.clone());
         let error = tokio::time::timeout(
             std::time::Duration::from_secs(60),
             core.session(crate::SessionId::parse(&id).expect("id"))
@@ -267,8 +294,9 @@ async fn a_native_cold_open_preserves_state_codec_refusals() {
         .await
         .expect("the cold turn settles")
         .expect_err("readiness refuses");
-        let state = state_source(&error)
-            .unwrap_or_else(|| panic!("the facade keeps the typed state source: {error:?}"));
+        let state = error
+            .plugin_state_refusal()
+            .unwrap_or_else(|| panic!("the facade keeps the typed state refusal: {error:?}"));
         match (mode, state) {
             (1, PluginStateError::Decode { key, .. })
             | (2, PluginStateError::Encode { key, .. }) => assert_eq!(key, "k"),

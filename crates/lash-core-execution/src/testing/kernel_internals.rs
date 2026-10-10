@@ -82,7 +82,7 @@ pub async fn publish_plugin_state(
         crate::RuntimeEffectKind::LanguageRuntimeValue,
         address.clone(),
         async move {
-            crate::plugin::propose(&body_plugins, proposal)?;
+            crate::plugin::propose(&body_plugins, proposal).map_err(crate::PluginError::from)?;
             Ok(crate::RuntimeEffectOutcome::LanguageRuntimeValue {
                 value: serde_json::Value::Null,
             })

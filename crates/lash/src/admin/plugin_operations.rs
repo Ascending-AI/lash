@@ -76,11 +76,12 @@ impl PluginOperations {
         ))
     }
 
-    /// Run query `Op` over the plugin view a run or command published on
-    /// this process. A query is not an admin read: it runs plugin code, so it
-    /// needs the session's built plugins and never builds them (FIG-5139).
-    /// Where none is published here (the session never ran or commanded on
-    /// this process, as on a replica that has not served it) it is refused
+    /// Run query `Op` over the plugin view the session's last run or command
+    /// published, as its head records it. A query is not an admin read: it
+    /// runs plugin code, on the plugins a run built on this handle or else
+    /// on a private build of that recorded view, which installs and appends
+    /// nothing (FIG-5344). Where the head records no published view (the
+    /// session never ran or commanded) it is refused
     /// with [`PluginOperationInvokeError::NotPublished`](lash_core::facade_support::PluginOperationInvokeError::NotPublished):
     /// publish one with a session command, such as
     /// [`SessionCommandAdmin::refresh_tool_catalog`], then retry.

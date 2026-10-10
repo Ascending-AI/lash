@@ -54,6 +54,63 @@ pub enum KeyRejection {
     IllegalCharacter { at: usize, byte: u8 },
 }
 
+/// A typed plugin-state failure.
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    thiserror::Error,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum PluginStateError {
+    #[error("recorded plugin state belongs to another runtime owner")]
+    EffectOwnerMismatch,
+    /// A recorded resolution does not follow its namespace's applied
+    /// frontier: it skips a publication, or a predecessor publishes after
+    /// ownership moved on.
+    #[error("plugin `{plugin}` cannot apply a recorded publication: {refusal}")]
+    Frontier {
+        plugin: String,
+        refusal: crate::tool_run::FrontierRefusal,
+    },
+    /// A reduced publication was abandoned before the engine returned it, so
+    /// whether it is durable is unknown: the namespace publishes nothing
+    /// more until it is rebuilt from durable state.
+    #[error("plugin `{plugin}` has a publication of unknown durability")]
+    PublicationFenced { plugin: String },
+    /// A callback returned commands where no recorded body can carry their
+    /// resolution.
+    #[error("plugin `{plugin}` returned state commands outside a recorded callback")]
+    Unrecorded { plugin: String },
+    #[error("invalid key `{key}`: {reason}")]
+    InvalidKey { key: String, reason: KeyRejection },
+    #[error("value `{key}` is {bytes} bytes, limit {limit}")]
+    ValueTooLarge {
+        key: String,
+        bytes: usize,
+        limit: usize,
+    },
+    #[error("store is {bytes} bytes, limit {limit}")]
+    StoreTooLarge { bytes: usize, limit: usize },
+    #[error("cannot encode `{key}`: {message}")]
+    Encode { key: String, message: String },
+    #[error("cannot decode `{key}`: {message}")]
+    Decode { key: String, message: String },
+}
+
+impl PluginStateError {
+    /// Every state failure is permanent for the same input: a codec or limit
+    /// refusal does not change, and a fenced or out-of-order publication is
+    /// resolved only by rebuilding from durable state.
+    pub fn is_terminal(&self) -> bool {
+        true
+    }
+}
+
 /// Whether `key` may name a namespace value: 1 to 128 bytes of ASCII
 /// alphanumerics, `.`, `_` and `-`.
 ///

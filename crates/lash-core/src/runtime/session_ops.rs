@@ -234,18 +234,16 @@ impl LashRuntime {
             .await
             .map_err(|err| PluginOperationInvokeError::Runtime(Box::new(err)))?;
         let manager = self.runtime_session_services()?;
-        let Some(session) = self.session.as_ref() else {
+        let Some(plugins) = super::observation::QueryPlugins::of(self) else {
             return Err(PluginOperationInvokeError::NotPublished {
                 session_id: self.state.session_id.clone(),
             });
         };
-        session
-            .plugins()
-            .query_plugin(
+        plugins
+            .query(
                 name,
                 args,
                 session_id,
-                true,
                 manager.read_service(),
                 manager.process_read_service(),
             )

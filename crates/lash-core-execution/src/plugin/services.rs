@@ -13,11 +13,11 @@ pub enum PluginOperationInvokeError {
     MissingSession(String),
     #[error("plugin operation `{0}` does not accept a session")]
     UnexpectedSession(String),
-    /// No plugin view of `session_id` is published on this process: a
-    /// query reads the view a run or command published here, and none has
-    /// (FIG-5139). Publish one with a session command, e.g. a tool-catalog
-    /// refresh, then retry the query.
-    #[error("no plugin view of session `{session_id}` is published on this process")]
+    /// No plugin view of `session_id` is published: a query runs on the
+    /// view a run or command published, as the session's head records it,
+    /// and the head records none (FIG-5139, FIG-5344). Publish one with a
+    /// session command, e.g. a tool-catalog refresh, then retry the query.
+    #[error("no plugin view of session `{session_id}` is published")]
     NotPublished { session_id: crate::SessionId },
     #[error("plugin operation failed: {0}")]
     Failed(Box<PluginOperationFailure>),

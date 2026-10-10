@@ -16056,7 +16056,7 @@ laws = [
 disposition = "replaced-by:crates/lash/src/tests/core_session_builder/typed_errors.rs"
 status = "deleted"
 owed = "a native tool membership refusal preserves its cause; and 2 more law(s) of the file, by test name"
-note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift; a_native_cold_open_preserves_state_codec_refusals is ignored on FIG-5324; session_cleanup_failures_preserve_step_and_source is the session actor's close, held by crates/lash-core/src/runtime/durable/scope_end_tests/close_faults.rs::a_failed_close_step_answers_its_typed_cause_and_the_next_claim_resumes_there"
+note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift; FIG-5324 splits a_native_cold_open_preserves_state_codec_refusals into a_cold_sessions_readiness_reads_its_recorded_namespace and a_cold_sessions_readiness_state_refusal_reaches_the_host_typed, both live; session_cleanup_failures_preserve_step_and_source is the session actor's close, held by crates/lash-core/src/runtime/durable/scope_end_tests/close_faults.rs::a_failed_close_step_answers_its_typed_cause_and_the_next_claim_resumes_there"
 
 [[row]]
 path = "crates/lash/src/tests/deployment_and_testing_facade.rs"

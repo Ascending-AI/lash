@@ -243,8 +243,10 @@ impl LashRuntime {
                 "plugin-state reference must be hydrated before runtime construction".into(),
             ));
         }
-        let mut tool_restore_report = None;
-        let mut admitted_capabilities = false;
+        // An open adopts the plugin view its head records as published, and
+        // builds no capabilities (FIG-4857, ADR 0119): its session's next run
+        // builds them, under that run's tool-source policy, and meets a build
+        // refusal typed as its cause (FIG-5324).
         if let Some(bytes) = state.plugin_admission_snapshot() {
             match services.plugins.adopt_native_view(
                 &bytes,
@@ -254,43 +256,19 @@ impl LashRuntime {
                     .map(crate::store::SessionStore::fleet_format)
                     .unwrap_or_else(crate::FleetFormat::current),
             ) {
-                Ok(()) => {
-                    admitted_capabilities =
-                        services
-                            .plugins
-                            .plugin_admission()
-                            .is_some_and(|admission| {
-                                services
-                                    .plugins
-                                    .host()
-                                    .validate_plugin_admission(&admission)
-                                    .is_ok()
-                            });
-                    if admitted_capabilities {
-                        services.plugins.materialize()?;
-                    }
-                }
-                Err(crate::PluginError::Format(_)) => {}
+                Ok(()) | Err(crate::PluginError::Format(_)) => {}
                 Err(error) => return Err(error.into()),
             }
             state.authority.plugin_config =
                 (*services.plugins.admitted_plugin_config().config).clone();
         }
-        let session = if admitted_capabilities && services.plugins.is_materialized() {
-            let (session, report) =
-                Self::restore_constructed_session(&host, &services, &mut state).await?;
-            tool_restore_report = report;
-            Some(session)
-        } else {
-            None
-        };
         let resident_session = ResidentSessionContinuity::fresh();
         let turn_phase_probe = host
             .core
             .turn_phase_probes
             .get_for_scope(&crate::SessionScope::new(state.session_id.clone()));
         Ok(Self {
-            session,
+            session: None,
             host,
             services,
             state,
@@ -299,7 +277,7 @@ impl LashRuntime {
             process_sync_needed: Arc::new(AtomicBool::new(false)),
             turn_phase_probe,
             resident_session,
-            tool_restore_report,
+            tool_restore_report: None,
         })
     }
 

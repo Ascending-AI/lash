@@ -117,7 +117,7 @@ async fn record(
         RuntimeEffectKind::LanguageRuntimeValue,
         address(step),
         async move {
-            propose_all(&body_session, proposals)?;
+            propose_all(&body_session, proposals).map_err(crate::PluginError::from)?;
             Ok(RuntimeEffectOutcome::LanguageRuntimeValue { value: Value::Null })
         },
     )
@@ -206,7 +206,8 @@ async fn an_unrecorded_command_never_reaches_a_durable_sibling() {
                         "a",
                         StateCommands::new().set(a_key, serde_json::json!("from-a")),
                     ),
-                )?;
+                )
+                .map_err(crate::PluginError::from)?;
                 proposed.send(()).unwrap();
                 std::future::pending().await
             },
@@ -233,7 +234,8 @@ async fn an_unrecorded_command_never_reaches_a_durable_sibling() {
                         "b",
                         StateCommands::new().set(b_key, serde_json::json!({ "saw": seen })),
                     ),
-                )?;
+                )
+                .map_err(crate::PluginError::from)?;
                 Ok(RuntimeEffectOutcome::LanguageRuntimeValue { value: Value::Null })
             },
         )
@@ -760,7 +762,8 @@ async fn a_failed_body_publishes_nothing() {
                     "failed",
                     StateCommands::new().set("total", serde_json::json!(1)),
                 ),
-            )?;
+            )
+            .map_err(crate::PluginError::from)?;
             Err(RuntimeEffectControllerError::new(
                 crate::RuntimeErrorCode::Plugin,
                 "the body failed",
@@ -821,7 +824,8 @@ async fn an_abandoned_publication_fences_its_namespace_until_rebuilt() {
                     "after",
                     StateCommands::new().set("total", serde_json::json!(2)),
                 ),
-            )?;
+            )
+            .map_err(crate::PluginError::from)?;
             Ok(RuntimeEffectOutcome::LanguageRuntimeValue { value: Value::Null })
         },
     )
@@ -1027,7 +1031,8 @@ async fn a_callback_keeps_its_publisher_segment_across_handover() {
                     "held",
                     StateCommands::new().set("k", serde_json::json!("a")),
                 ),
-            )?;
+            )
+            .map_err(crate::PluginError::from)?;
             Ok(RuntimeEffectOutcome::LanguageRuntimeValue { value: Value::Null })
         },
     );

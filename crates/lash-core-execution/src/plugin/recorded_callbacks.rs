@@ -56,7 +56,7 @@ impl crate::runtime::effect::executor::RuntimeEffectLocalRunner for PluginCallba
         let Self { plugins, body } = *self;
         let (result, proposals) = super::collect_proposals(&plugins, body).await;
         if result.is_ok() {
-            super::propose_all(&plugins, proposals)?;
+            super::propose_all(&plugins, proposals).map_err(PluginError::from)?;
         }
         Ok(RuntimeEffectOutcome::PluginCallbacks { result })
     }

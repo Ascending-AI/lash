@@ -76,6 +76,20 @@ impl From<PluginError> for RuntimeEffectControllerError {
                 });
                 error
             }
+            PluginError::State(
+                refusal @ (crate::PluginStateError::InvalidKey { .. }
+                | crate::PluginStateError::ValueTooLarge { .. }
+                | crate::PluginStateError::StoreTooLarge { .. }
+                | crate::PluginStateError::Encode { .. }
+                | crate::PluginStateError::Decode { .. }),
+            ) => RuntimeError::new(
+                RuntimeErrorCode::Plugin,
+                PluginError::State(refusal.clone()).to_string(),
+            )
+            .with_cause(crate::RuntimeErrorCause::PluginState {
+                refusal: Box::new(refusal),
+            })
+            .into(),
             PluginError::StoredDataCorrupt {
                 record_kind,
                 message,

@@ -291,6 +291,39 @@ impl PluginSession {
         Ok(())
     }
 
+    /// A private build of the published plugin view `bytes` records, for a
+    /// query on a session whose head records one and whose own plugins no
+    /// run built here (FIG-5344). It registers on no host, installs nothing
+    /// and publishes nothing: this session stays unbuilt.
+    pub fn build_published_view(
+        &self,
+        bytes: &[u8],
+        fleet: crate::FleetFormat,
+    ) -> Result<Arc<Self>, PluginError> {
+        let view = PluginNativeView::decode(bytes, fleet)?;
+        let authority = self.live_authority();
+        let mut plugin_config = authority.plugin_config;
+        plugin_config.config = Arc::new(view.config.clone());
+        let built = self
+            .host
+            .isolated_registry()
+            .defer_session(PluginSessionRequest {
+                owner: self.owner.clone(),
+                materialization: PluginSessionMaterializationRequest::Rematerialization {
+                    snapshot: &view.state,
+                    config: SessionAuthorityContext {
+                        tool_access: authority.tool_access,
+                        plugin_config,
+                    },
+                },
+                tool_catalog_overlay: self.tool_catalog_overlay.clone(),
+                tool_snapshot: self.tool_snapshot.clone(),
+            })?;
+        built.adopt_native_view(bytes, fleet)?;
+        built.materialize()?;
+        Ok(built)
+    }
+
     pub fn native_view(&self, fleet: crate::FleetFormat) -> Result<Option<Arc<[u8]>>, PluginError> {
         if !self.host.export_plugin_namespaces {
             return Ok(None);

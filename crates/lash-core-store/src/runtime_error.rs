@@ -1089,6 +1089,7 @@ impl RuntimeError {
             | RuntimeErrorCause::PluginStateEffectOwnerMismatch
             | RuntimeErrorCause::PluginStateFrontier { .. }
             | RuntimeErrorCause::PluginStatePublicationFenced { .. }
+            | RuntimeErrorCause::PluginState { .. }
             | RuntimeErrorCause::PluginExecution { .. }
             | RuntimeErrorCause::PluginFormat { .. }
             | RuntimeErrorCause::PluginOperation { .. }

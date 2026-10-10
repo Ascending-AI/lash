@@ -33,15 +33,75 @@ pub use replay::{
     SessionQueueEventKind, SessionResume, SessionRevision,
 };
 
-/// The plugin query services one resident session publishes together.
+/// The plugin query services one session publishes together.
 ///
 /// They are captured from a single source during observation construction and
 /// are all present or all absent; they are not independently optional.
 #[derive(Clone)]
 pub struct ObservationPluginServices {
-    session: Arc<crate::PluginSession>,
+    plugins: QueryPlugins,
     read: Arc<dyn crate::plugin::SessionReadService>,
     process_read: Arc<dyn crate::plugin::ProcessReadService>,
+}
+
+/// The plugins a query runs on: the session's own, when a run built them on
+/// this runtime, or else the view its head records as published, built
+/// privately for each query (FIG-5344). A session whose head records no
+/// published view has none, and its queries are refused as not published.
+#[derive(Clone)]
+pub(in crate::runtime) enum QueryPlugins {
+    Built(Arc<crate::PluginSession>),
+    Recorded {
+        plugins: Arc<crate::PluginSession>,
+        view: Arc<[u8]>,
+        fleet: crate::FleetFormat,
+    },
+}
+
+impl QueryPlugins {
+    /// What `runtime`'s queries run on, if anything.
+    pub(in crate::runtime) fn of(runtime: &LashRuntime) -> Option<Self> {
+        match runtime.session.as_ref() {
+            Some(session) => Some(Self::Built(Arc::clone(session.plugins()))),
+            None => runtime
+                .state
+                .plugin_admission_snapshot()
+                .map(|view| Self::Recorded {
+                    plugins: Arc::clone(&runtime.services.plugins),
+                    view,
+                    fleet: runtime.fleet_format(),
+                }),
+        }
+    }
+
+    /// Run query `name` on these plugins. A recorded view that does not
+    /// build answers its build refusal, typed.
+    pub(in crate::runtime) async fn query(
+        &self,
+        name: &str,
+        args: serde_json::Value,
+        session_id: Option<SessionId>,
+        read: Arc<dyn crate::plugin::SessionReadService>,
+        process_read: Arc<dyn crate::plugin::ProcessReadService>,
+    ) -> Result<(String, serde_json::Value), crate::PluginOperationInvokeError> {
+        let plugins = match self {
+            Self::Built(plugins) => Arc::clone(plugins),
+            Self::Recorded {
+                plugins,
+                view,
+                fleet,
+            } => plugins
+                .build_published_view(view, *fleet)
+                .map_err(|error| {
+                    crate::PluginOperationInvokeError::Runtime(Box::new(
+                        crate::RuntimeEffectControllerError::from(error).into_runtime_error(),
+                    ))
+                })?,
+        };
+        plugins
+            .query_plugin(name, args, session_id, true, read, process_read)
+            .await
+    }
 }
 
 #[derive(Clone)]
@@ -128,10 +188,10 @@ impl RuntimeObservation {
                 "observation omits plugin query services until resident state reloads",
             );
             None
-        } else if let Some(session) = runtime.session.as_ref() {
+        } else if let Some(plugins) = QueryPlugins::of(runtime) {
             match runtime.runtime_session_services() {
                 Ok(services) => Some(ObservationPluginServices {
-                    session: Arc::clone(session.plugins()),
+                    plugins,
                     read: services.read_service(),
                     process_read: services.process_read_service(),
                 }),
@@ -214,12 +274,11 @@ impl RuntimeObservation {
             });
         };
         services
-            .session
-            .query_plugin(
+            .plugins
+            .query(
                 name,
                 args,
                 session_id,
-                true,
                 Arc::clone(&services.read),
                 Arc::clone(&services.process_read),
             )

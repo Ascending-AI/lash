@@ -44,6 +44,7 @@ impl RuntimeErrorCause {
             | Self::PluginStateUnrecorded { .. }
             | Self::PluginStateEffectOwnerMismatch
             | Self::PluginStateFrontier { .. }
+            | Self::PluginState { .. }
             | Self::PluginFormat { .. }
             | Self::ProcessParentEnded { .. }
             | Self::ProcessStartKeyConflict { .. }

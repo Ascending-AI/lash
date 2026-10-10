@@ -127,86 +127,76 @@ impl crate::runtime::LashRuntime {
     /// Publish the native plugin view before resolving a run's protocol config.
     /// A deferred session supplies no driver or renderer until this activation.
     ///
-    /// A store-backed session runs the plugins its head recorded: its
-    /// session actor materializes them as admitted, and a build that does
-    /// not serve that admission is refused typed (ADR 0132 §4).
+    /// Every run, store-backed or not, records the transition from its
+    /// head's namespaces to the admitted plugin set before any capability is
+    /// built: a namespace the head does not record takes its factory's
+    /// initial values, so readiness sees what the session's first commit
+    /// records (FIG-5324). A build that does not serve the head's recorded
+    /// admission is refused typed when the session materializes (ADR 0132
+    /// §4), and a refusal there keeps its typed plugin cause.
     async fn materialize_run_session(
         &mut self,
         scoped_effect_controller: &crate::ActorContext,
         policy: crate::ToolSourcePolicy,
     ) -> Result<(), crate::RuntimeError> {
-        if self.session.is_none() {
-            if self.is_store_backed() {
-                self.require_tool_sources(policy)?;
-                return Box::pin(self.materialize_published_session())
-                    .await
-                    .map_err(|error| match error {
-                        crate::SessionError::Plugin(error) => {
-                            crate::RuntimeEffectControllerError::from(error).into_runtime_error()
-                        }
-                        error => crate::RuntimeError::new(
-                            crate::RuntimeErrorCode::SessionHeadRefresh,
-                            error.to_string(),
-                        ),
-                    });
-            }
-            let plugins = &self.services.plugins;
-            let target = match plugins.plugin_admission() {
-                Some(admission) => admission,
-                None => crate::runtime::plugin_transition::native_plugin_admission(plugins.host())
-                    .map_err(|error| {
-                        crate::RuntimeEffectControllerError::from(error).into_runtime_error()
-                    })?,
-            };
-            let address = crate::EffectAddress::new(
-                scoped_effect_controller.execution_scope().clone(),
-                "plugin-transition",
-            )
-            .map_err(crate::RuntimeError::from)?;
-            let request = crate::plugin::PluginTransitionRequest {
-                id: crate::plugin::PluginTransitionId(address),
-                owner: crate::RuntimeOwner::Session(self.state.session_id.clone()),
-                base: crate::plugin::PluginTransitionBase::Session {
-                    head: crate::store::SessionHeadRef {
-                        generation: 0,
-                        revision: self.state.head_revision,
-                        leaf: self.state.session_graph.leaf_node_id.clone(),
-                        checkpoint: self.state.checkpoint_ref.clone(),
-                    },
-                },
-                target,
-            };
-            let record = crate::runtime::plugin_transition::record_native_transition(
-                scoped_effect_controller,
-                plugins.host().clone(),
-                request,
-                plugins.export_state(),
-                self.state.authority.plugin_config.clone(),
-            )
-            .await
-            .map_err(|error| {
-                crate::RuntimeEffectControllerError::from(error).into_runtime_error()
-            })?;
-            plugins.adopt_plugin_transition(&record).map_err(|error| {
-                crate::RuntimeEffectControllerError::from(error).into_runtime_error()
-            })?;
-            if let Some(bytes) = plugins.native_view(self.fleet_format()).map_err(|error| {
-                crate::RuntimeEffectControllerError::from(error).into_runtime_error()
-            })? {
-                self.state.set_plugin_admission_snapshot(bytes);
-            }
-            self.state.authority.plugin_config = (*plugins.admitted_plugin_config().config).clone();
-            self.require_tool_sources(policy)?;
-            Box::pin(self.materialize_published_session())
-                .await
-                .map_err(|error| {
-                    crate::RuntimeError::new(
-                        crate::RuntimeErrorCode::SessionHeadRefresh,
-                        error.to_string(),
-                    )
-                })?;
+        if self.session.is_some() {
+            return Ok(());
         }
-        Ok(())
+        let plugin_error =
+            |error| crate::RuntimeEffectControllerError::from(error).into_runtime_error();
+        let plugins = &self.services.plugins;
+        let target = match plugins.plugin_admission() {
+            Some(admission) => admission,
+            None => crate::runtime::plugin_transition::native_plugin_admission(plugins.host())
+                .map_err(plugin_error)?,
+        };
+        let address = crate::EffectAddress::new(
+            scoped_effect_controller.execution_scope().clone(),
+            "plugin-transition",
+        )
+        .map_err(crate::RuntimeError::from)?;
+        let request = crate::plugin::PluginTransitionRequest {
+            id: crate::plugin::PluginTransitionId(address),
+            owner: crate::RuntimeOwner::Session(self.state.session_id.clone()),
+            base: crate::plugin::PluginTransitionBase::Session {
+                head: crate::store::SessionHeadRef {
+                    generation: 0,
+                    revision: self.state.head_revision,
+                    leaf: self.state.session_graph.leaf_node_id.clone(),
+                    checkpoint: self.state.checkpoint_ref.clone(),
+                },
+            },
+            target,
+        };
+        let record = crate::runtime::plugin_transition::record_native_transition(
+            scoped_effect_controller,
+            plugins.host().clone(),
+            request,
+            plugins.export_state(),
+            self.state.authority.plugin_config.clone(),
+        )
+        .await
+        .map_err(plugin_error)?;
+        plugins
+            .adopt_plugin_transition(&record)
+            .map_err(plugin_error)?;
+        if let Some(bytes) = plugins
+            .native_view(self.fleet_format())
+            .map_err(plugin_error)?
+        {
+            self.state.set_plugin_admission_snapshot(bytes);
+        }
+        self.state.authority.plugin_config = (*plugins.admitted_plugin_config().config).clone();
+        self.require_tool_sources(policy)?;
+        Box::pin(self.materialize_published_session())
+            .await
+            .map_err(|error| match error {
+                crate::SessionError::Plugin(error) => plugin_error(error),
+                error => crate::RuntimeError::new(
+                    crate::RuntimeErrorCode::SessionHeadRefresh,
+                    error.to_string(),
+                ),
+            })
     }
 
     /// Under `Require`, refuse when restoring the session's recorded tool

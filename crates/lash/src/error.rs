@@ -284,6 +284,19 @@ impl EmbedError {
         }
     }
 
+    /// The plugin-state refusal this error carries, when a plugin refused
+    /// its own namespace's key, size or codec: at a session's readiness, in
+    /// a hook or in a tool body (FIG-5324).
+    pub fn plugin_state_refusal(&self) -> Option<&lash_core::PluginStateError> {
+        match self {
+            Self::Runtime(error) | Self::Plugin(lash_core::PluginError::Runtime(error)) => {
+                error.plugin_state_refusal()
+            }
+            Self::Plugin(lash_core::PluginError::State(refusal)) => Some(refusal),
+            _ => None,
+        }
+    }
+
     /// The session-state generations the generation gate refused, when this
     /// is its refusal (FIG-3571, FIG-3619): at a session's open, at a turn's
     /// admission, or at a store call.

@@ -230,10 +230,14 @@ validate against this core. So no admin surface reads an activated runtime
   drops a tool with `set_membership(id, false)`).
 
 A plugin query is not an admin read: it runs plugin code over the plugin
-view a run or command published on this process. Where none is published,
-including a replica that has not run or commanded the session, it is refused
-with the typed `PluginOperationInvokeError::NotPublished`; a host publishes
-one with a session command, such as a tool-catalog refresh, and retries.
+view the session's last run or command published, as its head records it.
+It runs on the plugins a run built on the handle's runtime, or else on a
+private build of that recorded view, which registers, installs and appends
+nothing; an open still builds no capabilities (FIG-5344). Where the head
+records no published view, because the session never ran or commanded, it
+is refused with the typed `PluginOperationInvokeError::NotPublished`; a host
+publishes one with a session command, such as a tool-catalog refresh, and
+retries.
 
 Sources: `crates/lash/src/admin.rs` and
 `crates/lash-core/src/runtime/observation.rs`.

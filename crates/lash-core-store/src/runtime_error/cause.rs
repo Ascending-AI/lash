@@ -50,6 +50,11 @@ pub enum RuntimeErrorCause {
     PluginStatePublicationFenced {
         plugin: String,
     },
+    /// A plugin's own key, size or codec refusal of its namespace, such as
+    /// a readiness hook that cannot decode a value it reads (FIG-5324).
+    PluginState {
+        refusal: Box<crate::plugin_state::PluginStateError>,
+    },
     /// A completed provider call's refusal, retained through plugin and host errors.
     ProviderFailure {
         failure_kind: lash_sansio::llm::types::ProviderFailureKind,
@@ -241,6 +246,16 @@ impl RuntimeEffectControllerError {
 }
 
 impl super::RuntimeError {
+    /// The plugin-state refusal this error carries, if a plugin refused its
+    /// own namespace's key, size or codec (FIG-5324).
+    #[must_use]
+    pub fn plugin_state_refusal(&self) -> Option<&crate::plugin_state::PluginStateError> {
+        match self.cause.as_ref()? {
+            RuntimeErrorCause::PluginState { refusal } => Some(refusal),
+            _ => None,
+        }
+    }
+
     /// The restore report of a run refused under `ToolSourcePolicy::Require`,
     /// if this error is that refusal (FIG-5134).
     #[must_use]
