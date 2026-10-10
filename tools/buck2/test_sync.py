@@ -1335,6 +1335,7 @@ def check_direct_buck_generator() -> None:
     }
     assert build_scripts == {
         "//crates/lash-perf:build_script__build",
+        "//crates/lash-vm-worker:build_script__build",
     }
     bins_units = [
         unit for unit in inventory["feature_lane_units"]
