@@ -854,7 +854,10 @@ PACKAGE_DEPS = {
         "dev": {
             "lash_core_execution": "//crates/lash-core-execution:lash-core-execution",
             "lash_durable_test": "//crates/lash-durable-test:lash-durable-test",
+            "lash_kernel_state": "//crates/lash-kernel-state:lash-kernel-state",
+            "lash_postgres_store": "//crates/lash-postgres-store:lash-postgres-store",
             "lash_sqlite_store": "//crates/lash-sqlite-store:lash-sqlite-store",
+            "sqlx": "//third-party/rust:p0339",
             "tokio": "//third-party/rust:p0378"
         },
         "normal": {

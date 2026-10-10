@@ -44,5 +44,8 @@ tokio-util = { workspace = true }
 # substrate harness at every commit.
 lash-core-execution = { workspace = true, features = ["testing"] }
 lash-durable-test = { workspace = true }
+lash-kernel-state = { workspace = true }
+lash-postgres-store = { workspace = true, features = ["testing"] }
+sqlx = { workspace = true, features = ["postgres", "runtime-tokio-rustls"] }
 lash-sqlite-store = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "test-util"] }

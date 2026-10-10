@@ -1439,6 +1439,7 @@ jobs:
           bash scripts/ci/store-build.sh \
             pg-store \
             pg-facade-laws \
+            pg-broker-park \
             pg-pool-wait \
             pg-sim-backend-faults \
             pg-standard-retention \
@@ -1493,6 +1494,11 @@ jobs:
         run: |
           bash scripts/ci/with-service.sh pg -- \
             bash scripts/ci/store-tests.sh pg-facade-laws
+
+      - name: Test kernel broker parks on Postgres
+        run: |
+          bash scripts/ci/with-service.sh pg -- \
+            bash scripts/ci/store-tests.sh pg-broker-park
 
       - name: Test runtime pool-wait binding
         if: github.event_name != 'pull_request' && github.event_name != 'merge_group'

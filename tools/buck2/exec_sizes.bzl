@@ -761,7 +761,6 @@ BATCH_BUDGETS = {
     "//crates/lash-regress:test_batch": {"cpu_count": 3, "memory_kb": 1048576},
     "//crates/lash-render:test_batch": {"cpu_count": 1, "memory_kb": 262144},
     "//crates/lash-trace:test_batch": {"cpu_count": 1, "memory_kb": 262144},
-    "//crates/lash-vm-broker:test_batch": {"cpu_count": 3, "memory_kb": 786432},
     "//crates/lash-vm-protocol:test_batch": {"cpu_count": 1, "memory_kb": 262144},
 }
 

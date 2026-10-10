@@ -49903,7 +49903,8 @@
     "//crates/lash-trace:test_batch",
     "//crates/lash-trace:trace_schema_generator__bin__unit_test__fv_2fd6b8af",
     "//crates/lash-trace:trace_schema_generator__bin__unit_test__fv_3ea9fe4a",
-    "//crates/lash-vm-broker:test_batch",
+    "//crates/lash-vm-broker:lash-vm-broker__unit_test",
+    "//crates/lash-vm-broker:park_matrix__test",
     "//crates/lash-vm-client:lash-vm-client__unit_test",
     "//crates/lash-vm-client:wire_schema__test",
     "//crates/lash-vm-protocol:lash-vm-protocol__unit_test__fv_7689e7fa",
@@ -54372,13 +54373,16 @@
         "lash-internal-core-store",
         "lash-internal-durable",
         "lash-internal-durable-test",
+        "lash-internal-postgres-store",
         "lash-internal-sansio",
         "lash-internal-sqlite-store",
         "lash-internal-vm-protocol",
         "lash-kernel-doc",
+        "lash-kernel-state",
         "lash-kernel-vm",
         "serde",
         "serde_json",
+        "sqlx",
         "thiserror",
         "tokio",
         "tokio-util"
@@ -54413,15 +54417,14 @@
           "clippy_label": "//crates/lash-vm-broker:park_matrix__test__clippy[clippy.txt]",
           "kind": "test",
           "label": "//crates/lash-vm-broker:park_matrix__test",
-          "tags": []
+          "tags": [
+            "hermetic-postgres"
+          ]
         }
       ],
       "test_batch": {
-        "label": "//crates/lash-vm-broker:test_batch",
-        "members": [
-          "//crates/lash-vm-broker:lash-vm-broker__unit_test",
-          "//crates/lash-vm-broker:park_matrix__test"
-        ]
+        "label": null,
+        "members": []
       }
     },
     {
@@ -55603,7 +55606,8 @@
       "//crates/lash-postgres-store:schema_constraints__test",
       "//crates/lash-postgres-store:schema_constraints__test__fv_8d20835d",
       "//crates/lash-postgres-store:schema_drift__test",
-      "//crates/lash-postgres-store:schema_drift__test__fv_8d20835d"
+      "//crates/lash-postgres-store:schema_drift__test__fv_8d20835d",
+      "//crates/lash-vm-broker:park_matrix__test"
     ],
     "s3": [
       "//crates/lash-s3-store:lash-s3-store__unit_test"
@@ -55907,7 +55911,6 @@
     "//crates/lash-trace:trace_schema_generator__bin__unit_test__fv_3ea9fe4a": 300,
     "//crates/lash-vm-broker:lash-vm-broker__unit_test": 300,
     "//crates/lash-vm-broker:park_matrix__test": 300,
-    "//crates/lash-vm-broker:test_batch": 300,
     "//crates/lash-vm-client:lash-vm-client__unit_test": 300,
     "//crates/lash-vm-client:wire_schema__test": 300,
     "//crates/lash-vm-protocol:codec_bounds__test": 300,
@@ -57769,7 +57772,8 @@
     "//crates/lash-store-sql:lash-store-sql__unit_test",
     "//crates/lash-tool-support:lash-tool-support__unit_test",
     "//crates/lash-trace:test_batch",
-    "//crates/lash-vm-broker:test_batch",
+    "//crates/lash-vm-broker:lash-vm-broker__unit_test",
+    "//crates/lash-vm-broker:park_matrix__test",
     "//crates/lash-vm-client:lash-vm-client__unit_test",
     "//crates/lash-vm-client:wire_schema__test",
     "//crates/lash-vm-protocol:test_batch",
@@ -57933,7 +57937,8 @@
     "//crates/lash-store-sql:lash-store-sql__unit_test",
     "//crates/lash-tool-support:lash-tool-support__unit_test",
     "//crates/lash-trace:test_batch",
-    "//crates/lash-vm-broker:test_batch",
+    "//crates/lash-vm-broker:lash-vm-broker__unit_test",
+    "//crates/lash-vm-broker:park_matrix__test",
     "//crates/lash-vm-client:lash-vm-client__unit_test",
     "//crates/lash-vm-client:wire_schema__test",
     "//crates/lash-vm-protocol:test_batch",
@@ -58367,10 +58372,6 @@
       "//crates/lash-trace:schema__test",
       "//crates/lash-trace:trace_schema_generator__bin__unit_test"
     ],
-    "//crates/lash-vm-broker:test_batch": [
-      "//crates/lash-vm-broker:lash-vm-broker__unit_test",
-      "//crates/lash-vm-broker:park_matrix__test"
-    ],
     "//crates/lash-vm-protocol:test_batch": [
       "//crates/lash-vm-protocol:codec_bounds__test",
       "//crates/lash-vm-protocol:lash-vm-protocol__unit_test"
@@ -58515,7 +58516,8 @@
     "//crates/lash-store-sql:lash-store-sql__unit_test",
     "//crates/lash-tool-support:lash-tool-support__unit_test",
     "//crates/lash-trace:test_batch",
-    "//crates/lash-vm-broker:test_batch",
+    "//crates/lash-vm-broker:lash-vm-broker__unit_test",
+    "//crates/lash-vm-broker:park_matrix__test",
     "//crates/lash-vm-client:lash-vm-client__unit_test",
     "//crates/lash-vm-client:wire_schema__test",
     "//crates/lash-vm-protocol:test_batch",

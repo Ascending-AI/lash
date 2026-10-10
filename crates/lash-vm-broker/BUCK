@@ -70,20 +70,10 @@ lash_rust_integration_test(
     manifest_dir = "crates/lash-vm-broker",
     package_name = "lash-internal-vm-broker",
     rustc_env = {},
-    tags = [],
-    version = "0.0.0-dev",
-)
-
-load("//tools/buck2:test_batch.bzl", "lash_batch_test")
-
-lash_batch_test(
-    name = "test_batch",
-    budget = test_batch_budget("//crates/lash-vm-broker:test_batch"),
-    jobs = 2,
-    tests = [
-        ":lash-vm-broker__unit_test",
-        ":park_matrix__test",
+    tags = [
+        "hermetic-postgres",
     ],
+    version = "0.0.0-dev",
 )
 
 filegroup(

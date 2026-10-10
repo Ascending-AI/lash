@@ -1,7 +1,7 @@
 //! A kernel run's parks on the durable store (kernel spec §2.3, §5; ADR
 //! 0132 §8): three tasks each perform one effect, then `main` performs one
 //! over their results. The run's parks commit to `lash_exec_snapshots` and
-//! `lash_run_records` on SQLite in memory.
+//! `lash_run_records` on SQLite in memory and isolated PostgreSQL databases.
 //!
 //! Crash laws, with every labelled commit cut under every fault and the run
 //! resumed on another node (before the park commits, after it commits and
@@ -48,14 +48,13 @@ use lash_durable::{
 };
 use lash_durable_test::{Matrix, Scenario, SimClock, SimNodes, SimNodesConfig};
 use lash_kernel_doc::{
-    Datum, Document, EffectIdentity, EffectName, ErrorDatum, Float, FunctionRegistry, Handle,
-    Integer, Manifest, Name, NumberPolicy, NumberToken, Site, SpawnIdentity, TaskIdentity,
-    Timestamp, Type, Unit,
+    Datum, EffectIdentity, ErrorDatum, FunctionRegistry, Handle, Integer, Name, NumberPolicy,
+    NumberToken, Site, SpawnIdentity, TaskIdentity, Timestamp, Unit, parse_document,
 };
+use lash_kernel_state::ParkedRun;
 use lash_kernel_vm::{
-    Bindings, Bounds, DeliverError, Delivered, EffectRequest, End, ExportError, Finished, Host,
-    ImportError, Machine, MachineError, Meters, Outcome, Park, Program, Request, Start, StartError,
-    Step, Target, WaitId,
+    Bindings, Bounds, EffectRequest, End, Host, KernelMachine, Machine, Outcome, Program, Request,
+    Start, Step, Target,
 };
 use lash_sansio::{SessionId, ToolCallId, ToolId, TurnId};
 use lash_vm_broker::kernel::{
@@ -66,8 +65,11 @@ use lash_vm_broker::{
     CodeCallIdentities, Driven, DurableSnapshotStore, MemberDraft, OperationId, ParentFault,
 };
 use lash_vm_protocol::EncodedPayload;
-use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
+
+#[path = "support/park_store.rs"]
+mod park_store;
+use park_store::Tier;
 
 const FORMATS: &str = "park-law-v1";
 const SESSION: &str = "park-law";
@@ -94,15 +96,42 @@ fn identities() -> CodeCallIdentities {
     )
 }
 
+/// The matrix's subject is kernel code, including typed decoding at each
+/// perform and guest handling of an interrupted Once execution.
 fn program(numbers: NumberPolicy) -> Program {
+    let numbers = match numbers {
+        NumberPolicy::Float => "float",
+        NumberPolicy::BySpelling => "by_spelling",
+    };
+    let text = format!(
+        r#"kernel 1
+numbers {numbers}
+effect tools.work(index: Int) -> Any
+effect tools.sum(values: List(Any)) -> Any
+fn worker(index) {{
+  try {{
+    let reply = perform tools.work(index) as Record{{token: Int, n: Union(Int, List(Float))}}
+    return reply
+  }} catch e {{ return {{error: e, n: null}} }}
+}}
+main {{
+  let hs = []
+  for index in [0, 1, 2] {{
+    let h = spawn call worker(index)
+    set hs[index] = h
+  }}
+  let results = join all hs
+  let values = [results[0].n, results[1].n, results[2].n]
+  let sum = null
+  try {{
+    set sum = perform tools.sum(values) as Record{{token: Int, n: Any}}
+  }} catch e {{ set sum = e }}
+  return [results[0], results[1], results[2], sum]
+}}
+"#
+    );
     Program {
-        document: Arc::new(Document {
-            manifest: Manifest::new(numbers),
-            functions: BTreeMap::new(),
-            entries: BTreeMap::new(),
-            private_bindings: Default::default(),
-            main: Vec::new(),
-        }),
+        document: Arc::new(parse_document(&text).expect("a valid kernel fan-out document")),
         registry: Arc::new(FunctionRegistry::new()),
     }
 }
@@ -132,10 +161,10 @@ fn worker_identity(index: u64) -> EffectIdentity {
     EffectIdentity {
         task: TaskIdentity::Spawned(SpawnIdentity {
             parent: Arc::new(TaskIdentity::Main),
-            site: Site::new(Unit::Main, [0]),
+            site: Site::new(Unit::Main, [1, 1, 0, 0]),
             occurrence: index,
         }),
-        site: Site::new(Unit::Function(Name::new("worker")), [0]),
+        site: Site::new(Unit::Function(Name::new("worker")), [0, 0, 0, 0]),
         occurrence: 0,
         loops: Vec::new(),
     }
@@ -144,147 +173,9 @@ fn worker_identity(index: u64) -> EffectIdentity {
 fn sum_identity() -> EffectIdentity {
     EffectIdentity {
         task: TaskIdentity::Main,
-        site: Site::new(Unit::Main, [2]),
+        site: Site::new(Unit::Main, [5, 0, 0, 0]),
         occurrence: 0,
         loops: Vec::new(),
-    }
-}
-
-/// What a machine that decodes by spelling makes of a result's number
-/// tokens, so the results can leave again as arguments.
-fn decoded(value: &Datum) -> Datum {
-    match value {
-        Datum::Number(token) if token.is_integer_spelling() => {
-            Datum::Int(Integer::parse(token.as_str()).expect("integer digits"))
-        }
-        Datum::Number(token) => Datum::Float(Float::new(
-            token.as_str().parse().expect("a JSON number is a float"),
-        )),
-        Datum::List(items) => Datum::List(items.iter().map(decoded).collect()),
-        Datum::Record(fields) => Datum::Record(
-            fields
-                .iter()
-                .map(|(key, value)| (key.clone(), decoded(value)))
-                .collect(),
-        ),
-        other => other.clone(),
-    }
-}
-
-/// The run as a machine: `main` spawns [`WORKERS`] tasks that each perform
-/// `tools.work`, joins them all, performs `tools.sum` over what they
-/// answered, and finishes with all four results.
-struct FanOut {
-    state: FanState,
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-struct FanState {
-    /// The waits handed out so far.
-    waits: u64,
-    /// Each wait's outcome, once delivered.
-    results: BTreeMap<u64, Datum>,
-    /// The order the outcomes were delivered in.
-    order: Vec<u64>,
-    ended: bool,
-}
-
-impl FanOut {
-    fn request(&mut self, identity: EffectIdentity, effect: &str, args: Vec<Datum>) -> Request {
-        let wait = WaitId(self.state.waits);
-        self.state.waits += 1;
-        Request::Effect(EffectRequest {
-            wait,
-            identity,
-            effect: EffectName::new(effect).expect("an effect name"),
-            args,
-            result: Type::Any,
-        })
-    }
-}
-
-impl Machine for FanOut {
-    type Parked = FanState;
-
-    fn start(_: Program, _: Bounds, _: Start) -> Result<Self, StartError> {
-        Ok(Self {
-            state: FanState::default(),
-        })
-    }
-
-    fn run(&mut self, _: &mut dyn Host, _: u64) -> Result<Step, MachineError> {
-        if self.state.ended {
-            return Err(MachineError::Ended);
-        }
-        let mut park = Park::default();
-        let delivered = self.state.results.len() as u64;
-        if self.state.waits == 0 {
-            for index in 0..WORKERS {
-                let request = self.request(
-                    worker_identity(index),
-                    "tools.work",
-                    vec![Datum::Int(Integer::from(index as i64))],
-                );
-                park.requests.push(request);
-            }
-        } else if self.state.waits == WORKERS && delivered == WORKERS {
-            let answers = (0..WORKERS)
-                .map(|wait| match &self.state.results[&wait] {
-                    Datum::Record(fields) => fields
-                        .iter()
-                        .find(|(key, _)| key == "n")
-                        .map_or(Datum::Null, |(_, value)| decoded(value)),
-                    _ => Datum::Null,
-                })
-                .collect();
-            let request = self.request(sum_identity(), "tools.sum", vec![Datum::List(answers)]);
-            park.requests.push(request);
-        } else if delivered == WORKERS + 1 {
-            self.state.ended = true;
-            return Ok(Step::Ended(End::Finished(Finished {
-                result: Datum::List(self.state.results.values().cloned().collect()),
-                finish: true,
-                bindings: Bindings::default(),
-                not_carried: Vec::new(),
-                closures: Bindings::default(),
-            })));
-        }
-        Ok(Step::Parked(park))
-    }
-
-    fn deliver(&mut self, wait: WaitId, outcome: Outcome) -> Result<Delivered, DeliverError> {
-        if self.state.ended {
-            return Err(DeliverError::Ended);
-        }
-        if wait.0 >= self.state.waits {
-            return Err(DeliverError::UnknownWait { wait });
-        }
-        if self.state.results.contains_key(&wait.0) {
-            return Err(DeliverError::AlreadyDelivered { wait });
-        }
-        let result = match outcome {
-            Outcome::Completed(result) => result,
-            Outcome::Failed(error) => Datum::Error(Box::new(error)),
-            Outcome::Elapsed => return Err(DeliverError::WrongOutcome { wait }),
-        };
-        self.state.results.insert(wait.0, result);
-        self.state.order.push(wait.0);
-        Ok(Delivered::Accepted)
-    }
-
-    fn export(&mut self) -> Result<FanState, ExportError> {
-        if self.state.ended {
-            return Err(ExportError::Ended);
-        }
-        Ok(self.state.clone())
-    }
-
-    fn import(_: Program, _: Bounds, state: FanState) -> Result<Self, ImportError> {
-        Ok(Self { state })
-    }
-
-    fn meters(&self) -> Meters {
-        Meters::default()
     }
 }
 
@@ -364,18 +255,16 @@ enum Drive {
 struct ParkScenario {
     shared: Arc<Shared>,
     drive: Drive,
-    numbers: NumberPolicy,
+    program: Program,
+    tier: Tier,
+    keep: Mutex<Option<lash_postgres_store::testing::IsolatedDatabase>>,
 }
 
 #[async_trait::async_trait]
 impl Scenario for ParkScenario {
     async fn database(&self, clock: Arc<SimClock>) -> Arc<dyn DurableStore> {
-        let stores = lash_sqlite_store::SqliteStoreSet::memory_with_clock(clock)
-            .await
-            .expect("an in-memory store set opens");
-        let durable: Arc<dyn DurableStore> = Arc::new(stores.durable_store());
-        *self.shared.backend.lock().expect("backend") =
-            Some(Backend::for_testing(Arc::new(stores)));
+        let (stores, durable) = park_store::open(self.tier, clock, &self.keep).await;
+        *self.shared.backend.lock().expect("backend") = Some(Backend::for_testing(stores));
         durable
     }
 
@@ -391,7 +280,7 @@ impl Scenario for ParkScenario {
         Arc::new(ParkActivation {
             shared: Arc::clone(&self.shared),
             drive: self.drive,
-            numbers: self.numbers,
+            program: self.program.clone(),
         })
     }
 
@@ -478,8 +367,11 @@ impl Scenario for ParkScenario {
                     key == "token"
                         && bodies.iter().any(|body| {
                             Some(&body.call) == call
-                                && *value == Datum::Number(token(&body.token.to_string()))
+                                && *value == Datum::Int(Integer::from(body.token as i64))
                         })
+                }) || fields.iter().any(|(key, value)| {
+                    key == "error"
+                        && matches!(value, Datum::Error(error) if error.kind == EFFECT_INTERRUPTED)
                 }),
                 Datum::Error(error) => error.kind == EFFECT_INTERRUPTED,
                 _ => false,
@@ -492,7 +384,7 @@ impl Scenario for ParkScenario {
         }
         match nodes.database().snapshot(&exec()).await {
             Ok(Some(row)) => {
-                match serde_json::from_str::<ParkedCheckpoint<FanState>>(&row.snapshot_ref) {
+                match serde_json::from_str::<ParkedCheckpoint<ParkedRun>>(&row.snapshot_ref) {
                     Ok(checkpoint) => {
                         if checkpoint.end.is_none()
                             || checkpoint.state.is_some()
@@ -524,7 +416,7 @@ fn token(text: &str) -> NumberToken {
 struct ParkActivation {
     shared: Arc<Shared>,
     drive: Drive,
-    numbers: NumberPolicy,
+    program: Program,
 }
 
 impl ParkActivation {
@@ -585,7 +477,7 @@ impl Activation for ParkActivation {
         };
         for _ in 0..8 {
             if let Drive::TwoOrders = self.drive
-                && let Err(why) = two_orders(&self.shared, &store, &host, self.numbers).await
+                && let Err(why) = two_orders(&self.shared, &store, &host, &self.program).await
             {
                 self.stop(&why);
                 if lost(&owned).await {
@@ -593,9 +485,13 @@ impl Activation for ParkActivation {
                 }
                 continue;
             }
-            let machines =
-                InProcess::<FanOut, _>::new(program(self.numbers), bounds(), start(), NoReads)
-                    .expect("the document has an identity");
+            let machines = InProcess::<KernelMachine, _>::new(
+                self.program.clone(),
+                bounds(),
+                start(),
+                NoReads,
+            )
+            .expect("the document has an identity");
             let run = broker.run(&machines, &CancellationToken::new()).await;
             match run {
                 Ok(KernelEnd::Ended(End::Finished(finished))) => {
@@ -631,11 +527,11 @@ async fn two_orders(
     shared: &Shared,
     store: &DurableSnapshotStore,
     host: &LawHost,
-    numbers: NumberPolicy,
+    program: &Program,
 ) -> Result<(), String> {
     let refused = |error: &dyn std::fmt::Display| error.to_string();
     if store
-        .latest_park::<FanState>()
+        .latest_park::<ParkedRun>()
         .await
         .map_err(|error| refused(&error))?
         .is_some()
@@ -644,13 +540,12 @@ async fn two_orders(
         // committed, and the broker resumes from it.
         return Ok(());
     }
-    let program = program(numbers);
     let document = program
         .document
         .identity()
         .map_err(|error| refused(&error))?;
-    let mut machine =
-        FanOut::start(program.clone(), bounds(), start()).map_err(|error| refused(&error))?;
+    let mut machine = KernelMachine::start(program.clone(), bounds(), start())
+        .map_err(|error| refused(&error))?;
     let Step::Parked(park) = machine
         .run(&mut NoReads, u64::MAX)
         .map_err(|error| refused(&error))?
@@ -714,7 +609,7 @@ async fn two_orders(
     };
     let mut parked = Vec::new();
     for order in [[0_usize, 1, 2], [2, 1, 0]] {
-        let mut machine = FanOut::import(program.clone(), bounds(), state.clone())
+        let mut machine = KernelMachine::import(program.clone(), bounds(), state.clone())
             .map_err(|error| refused(&error))?;
         let mut ledger = saved.ledger.clone();
         for index in order {
@@ -745,9 +640,6 @@ async fn two_orders(
         return Err("both delivery orders park".into());
     };
     let state = machine.export().map_err(|error| refused(&error))?;
-    if state.order != [2, 1, 0] {
-        shared.violation(format!("delivery: the saved order is {:?}", state.order));
-    }
     store
         .commit_park(ParkSave {
             document,
@@ -856,7 +748,7 @@ impl MemberBodies for LawBodies {
                 // admission stood.
                 let admitted_first = match database.snapshot(&exec()).await {
                     Ok(Some(row)) => {
-                        serde_json::from_str::<ParkedCheckpoint<FanState>>(&row.snapshot_ref)
+                        serde_json::from_str::<ParkedCheckpoint<ParkedRun>>(&row.snapshot_ref)
                             .is_ok_and(|checkpoint| {
                                 checkpoint
                                     .ledger
@@ -963,17 +855,19 @@ impl KernelEffects for LawHost {
     }
 }
 
-/// P1 to P5 hold on SQLite in memory with every labelled commit of the
+/// P1 to P5 hold on each store tier with every labelled commit of the
 /// run cut under every fault: the park commits (`cell.snapshot+admit`),
 /// each effect's outcome (`round.outcome`), an interrupted effect's
 /// settlement (`cell.inject`) and the end (`cell.snapshot`).
-#[tokio::test]
-async fn a_run_of_three_tasks_resumes_from_its_parks_at_every_cut_on_sqlite_memory() {
+async fn a_kernel_run_of_three_tasks_resumes_from_its_parks_at_every_cut(tier: Tier) {
+    let program = program(NumberPolicy::Float);
     let report = Matrix::new()
         .run(|| ParkScenario {
             shared: Arc::default(),
             drive: Drive::Broker,
-            numbers: NumberPolicy::Float,
+            program: program.clone(),
+            tier,
+            keep: Mutex::default(),
         })
         .await;
     report.assert_held();
@@ -1001,17 +895,57 @@ async fn a_run_of_three_tasks_resumes_from_its_parks_at_every_cut_on_sqlite_memo
 
 /// The delivery law and the number law, under each bare-number policy: the
 /// effect-value path is the same under both, because it decodes nothing.
-#[tokio::test]
-async fn committed_outcomes_delivered_in_either_order_resume_and_keep_their_numbers() {
+async fn committed_outcomes_delivered_in_either_order_resume_and_keep_their_numbers(tier: Tier) {
     for numbers in [NumberPolicy::Float, NumberPolicy::BySpelling] {
+        let program = program(numbers);
         Matrix::new()
             .faults(&[])
             .run(|| ParkScenario {
                 shared: Arc::default(),
                 drive: Drive::TwoOrders,
-                numbers,
+                program: program.clone(),
+                tier,
+                keep: Mutex::default(),
             })
             .await
             .assert_held();
+    }
+}
+
+// Each tier mounts the same kernel laws; PostgreSQL selection requires a service.
+mod sqlite_memory {
+    #[tokio::test]
+    async fn a_kernel_run_of_three_tasks_resumes_from_its_parks_at_every_cut() {
+        super::a_kernel_run_of_three_tasks_resumes_from_its_parks_at_every_cut(
+            super::Tier::SqliteMemory,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn committed_outcomes_delivered_in_either_order_resume_and_keep_their_numbers() {
+        super::committed_outcomes_delivered_in_either_order_resume_and_keep_their_numbers(
+            super::Tier::SqliteMemory,
+        )
+        .await;
+    }
+}
+mod postgres {
+    #[tokio::test]
+    #[ignore = "requires hermetic PostgreSQL through kiln gate"]
+    async fn a_kernel_run_of_three_tasks_resumes_from_its_parks_at_every_cut() {
+        super::a_kernel_run_of_three_tasks_resumes_from_its_parks_at_every_cut(
+            super::Tier::Postgres,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    #[ignore = "requires hermetic PostgreSQL through kiln gate"]
+    async fn committed_outcomes_delivered_in_either_order_resume_and_keep_their_numbers() {
+        super::committed_outcomes_delivered_in_either_order_resume_and_keep_their_numbers(
+            super::Tier::Postgres,
+        )
+        .await;
     }
 }
