@@ -260,7 +260,20 @@ impl DirectCompletionCapability {
             budgets: current.host.core.control.execution_budgets.clone(),
         }
         .admit();
-        let admission = Box::pin(admit).await?;
+        // A fault the admission meets inside a tool attempt (a recorded
+        // model this worker cannot bind) is the attempt's, as one its send
+        // meets is: the tool never receives it as an error to act on.
+        let admission = match (Box::pin(admit).await, context.position) {
+            (
+                Err(crate::PluginError::RuntimeEffectController(fault)),
+                DirectExecutionPosition::ToolAttempt,
+            ) if fault.is_attempt_fault()
+                && let Some(attempt) = &context.effect_attempt =>
+            {
+                match attempt.end_at(fault).await {}
+            }
+            (admission, _) => admission?,
+        };
         let (request, admitted) = match admission {
             crate::runtime::owned_call::OwnedAdmission::Send { request, admitted } => {
                 (*request, admitted)

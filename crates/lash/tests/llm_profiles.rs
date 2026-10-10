@@ -1188,117 +1188,153 @@ fn ask_twice_provider(calls: &Arc<AtomicUsize>, completions: usize) -> ProviderH
         .into_handle()
 }
 
+/// An [`AskTwice`] session over `double` whose tool retires the session's
+/// key at `retire`, with the transport counting its calls in `calls`: the
+/// run's first model call, then `completions` direct completions.
+struct AskTwiceRun {
+    core: LashCore,
+    catalog: Arc<LiveCatalog>,
+    calls: Arc<AtomicUsize>,
+    completions: usize,
+    entered: Arc<AtomicUsize>,
+    acted_past_a_fault: Arc<AtomicUsize>,
+}
+
+impl AskTwiceRun {
+    async fn start(
+        double: &Double,
+        session_id: &str,
+        retire: Retire,
+        completions: usize,
+    ) -> (Self, lash::SendHandle) {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let catalog = LiveCatalog::serving(registry_of(
+            KIMI,
+            "kimi-k3",
+            ask_twice_provider(&calls, completions),
+        ));
+        let entered = Arc::new(AtomicUsize::new(0));
+        let acted_past_a_fault = Arc::new(AtomicUsize::new(0));
+        let tools: Arc<dyn lash::plugins::PluginFactory> =
+            Arc::new(lash::plugins::StaticPluginFactory::new(
+                lash::plugins::PluginDeclaration::initial("keys-ask-twice"),
+                lash::plugins::PluginSpec::new().with_tool_provider(Arc::new(AskTwice {
+                    catalog: Arc::clone(&catalog),
+                    retire,
+                    retired: AtomicBool::new(false),
+                    entered: Arc::clone(&entered),
+                    acted_past_a_fault: Arc::clone(&acted_past_a_fault),
+                })),
+            ));
+        let core = core_over(double, &catalog, vec![tools]);
+        let session = created_on(&core, session_id, KIMI).await;
+        let handle = session
+            .send(TurnInput::text("ask the model through the tool"))
+            .id(lash::TurnId::parse(format!("{session_id}-run")).expect("nonblank host identity"))
+            .await
+            .expect("the session accepts the input");
+        let run = Self {
+            core,
+            catalog,
+            calls,
+            completions,
+            entered,
+            acted_past_a_fault,
+        };
+        (run, handle)
+    }
+
+    /// Once the faulted attempt was entered again, the key served again:
+    /// the answer of `handle`, the run's.
+    async fn answer_once_retried_and_served(&self, handle: lash::SendHandle) -> String {
+        tokio::time::timeout(std::time::Duration::from_secs(60), async {
+            while self.entered.load(Ordering::SeqCst) < 2 {
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("the faulted attempt is attempted again");
+        self.catalog.serve(registry_of(
+            KIMI,
+            "kimi-k3",
+            ask_twice_provider(&self.calls, self.completions),
+        ));
+        tokio::time::timeout(std::time::Duration::from_secs(60), answer_of(handle))
+            .await
+            .expect("the run answers once the key is served again")
+    }
+}
+
 /// A bind fault inside a tool attempt ends the attempt where it is met
-/// (FIG-4632). The direct completion that cannot bind the session's recorded
-/// model hands its tool no error to catch: the tool's body is dropped there,
-/// so what the tool would do with the failure never runs, on the first
-/// attempt or on any retry of it. Before, every retry ran the tool to its
-/// end and repeated that side effect.
+/// (FIG-4632, FIG-5368). The direct completion that cannot bind the
+/// session's recorded model hands its tool no error to catch: the tool's
+/// body is dropped there, so what the tool would do with the failure never
+/// runs, and nothing records the fault as the call's result. The attempt
+/// runs again; once the key is served, it completes and the run answers on
+/// the tool's own result. Before, the tool caught the fault, recorded it as
+/// its failed result, and the run answered past it.
 async fn a_tool_is_not_run_past_a_bind_fault_of_its_direct_completion(tier: Tier) {
     let Some(double) = double(tier).await else {
         return;
     };
-    let session_id = "keys-attempt-ends-at-fault";
-    let calls = Arc::new(AtomicUsize::new(0));
-    let catalog = LiveCatalog::serving(registry_of(KIMI, "kimi-k3", ask_twice_provider(&calls, 0)));
-    let entered = Arc::new(AtomicUsize::new(0));
-    let acted_past_a_fault = Arc::new(AtomicUsize::new(0));
-    let tools: Arc<dyn lash::plugins::PluginFactory> =
-        Arc::new(lash::plugins::StaticPluginFactory::new(
-            lash::plugins::PluginDeclaration::initial("keys-ask-twice"),
-            lash::plugins::PluginSpec::new().with_tool_provider(Arc::new(AskTwice {
-                catalog: Arc::clone(&catalog),
-                retire: Retire::BeforeTheFirstCompletion,
-                retired: AtomicBool::new(false),
-                entered: Arc::clone(&entered),
-                acted_past_a_fault: Arc::clone(&acted_past_a_fault),
-            })),
-        ));
-    let core = core_over(&double, &catalog, vec![tools]);
-    let session = created_on(&core, session_id, KIMI).await;
-    session
-        .send(TurnInput::text("ask the model through the tool"))
-        .id(lash::TurnId::parse("keys-attempt-ends-at-fault-run").expect("nonblank host identity"))
-        .await
-        .expect("the session accepts the input");
-
-    let failure = double.parked(session_id).await;
-    assert!(
-        failure.contains("llm_profile_unavailable"),
-        "the session parked on the typed bind fault: {failure}"
-    );
-    assert!(
-        entered.load(Ordering::SeqCst) > 1,
-        "the attempt was retried before the session parked: {failure}"
-    );
+    let (run, handle) = AskTwiceRun::start(
+        &double,
+        "keys-attempt-ends-at-fault",
+        Retire::BeforeTheFirstCompletion,
+        2,
+    )
+    .await;
+    let answer = run.answer_once_retried_and_served(handle).await;
+    assert_eq!(answer, "kimi answers");
     assert_eq!(
-        acted_past_a_fault.load(Ordering::SeqCst),
+        run.acted_past_a_fault.load(Ordering::SeqCst),
         0,
         "no attempt ran its tool past the bind fault, of {} attempts",
-        entered.load(Ordering::SeqCst)
+        run.entered.load(Ordering::SeqCst)
     );
     assert_eq!(
-        calls.load(Ordering::SeqCst),
-        1,
-        "only the run's model call reached the transport"
+        run.calls.load(Ordering::SeqCst),
+        4,
+        "the run's two model calls and the completing attempt's two completions reached \
+         the transport: no faulted attempt sent one, and no recorded failure ended the tool"
     );
-    core.shutdown().await.expect("the core shuts down");
+    run.core.shutdown().await.expect("the core shuts down");
 }
 
 /// A completion a tool attempt dispatched before a later completion's bind
-/// fault keeps its usage (FIG-4632). The fault ends the attempt and nothing
-/// records it, so the usage of the completion already dispatched and billed
-/// is settled when the attempt ends, under the run that spent it. The retry
-/// that completes once the key is served dispatches both completions again:
-/// the opaque attempt had recorded no result. Hosts own receipts for this
-/// unrecorded retry window.
+/// fault is dispatched again by the attempt's retry (FIG-4632, FIG-5368).
+/// The fault ends the attempt and nothing records it, so the opaque attempt
+/// recorded no result for the completion it already sent: the retry that
+/// completes once the key is served sends both completions again. Hosts own
+/// receipts for this unrecorded retry window.
 async fn a_completion_before_a_bind_fault_is_retried_only_while_unrecorded(tier: Tier) {
     let Some(double) = double(tier).await else {
         return;
     };
-    let session_id = "keys-usage-before-fault";
-    let calls = Arc::new(AtomicUsize::new(0));
     // Three direct completions reach the transport: the first attempt's
     // first, and both of the attempt that completes.
-    let catalog = LiveCatalog::serving(registry_of(KIMI, "kimi-k3", ask_twice_provider(&calls, 3)));
-    let entered = Arc::new(AtomicUsize::new(0));
-    let acted_past_a_fault = Arc::new(AtomicUsize::new(0));
-    let tools: Arc<dyn lash::plugins::PluginFactory> =
-        Arc::new(lash::plugins::StaticPluginFactory::new(
-            lash::plugins::PluginDeclaration::initial("keys-ask-twice"),
-            lash::plugins::PluginSpec::new().with_tool_provider(Arc::new(AskTwice {
-                catalog: Arc::clone(&catalog),
-                retire: Retire::BetweenTheCompletions,
-                retired: AtomicBool::new(false),
-                entered: Arc::clone(&entered),
-                acted_past_a_fault: Arc::clone(&acted_past_a_fault),
-            })),
-        ));
-    let core = core_over(&double, &catalog, vec![tools]);
-    let session = created_on(&core, session_id, KIMI).await;
-    session
-        .send(TurnInput::text("ask the model through the tool"))
-        .id(lash::TurnId::parse("keys-usage-before-fault-run").expect("nonblank host identity"))
-        .await
-        .expect("the session accepts the input");
-
-    double.parked(session_id).await;
+    let (run, handle) = AskTwiceRun::start(
+        &double,
+        "keys-usage-before-fault",
+        Retire::BetweenTheCompletions,
+        3,
+    )
+    .await;
+    let answer = run.answer_once_retried_and_served(handle).await;
+    assert_eq!(answer, "kimi answers");
     assert_eq!(
-        calls.load(Ordering::SeqCst),
-        2,
-        "the run's model call and the first attempt's first completion reached the transport; \
-         every retry met the bind fault at its first completion"
+        run.calls.load(Ordering::SeqCst),
+        5,
+        "the run's two model calls, the first attempt's first completion, and both \
+         completions of the attempt that completed reached the transport"
     );
-    // The opaque attempt recorded nothing; its completed call may retry
-    // once the run is redriven with the key served again.
-    let park = park_of(&session, "keys-usage-before-fault-run").await;
-    assert_eq!(park.session_id.as_str(), session_id);
     assert_eq!(
-        acted_past_a_fault.load(Ordering::SeqCst),
+        run.acted_past_a_fault.load(Ordering::SeqCst),
         0,
         "no attempt ran its tool past the bind fault, of {} attempts",
-        entered.load(Ordering::SeqCst)
+        run.entered.load(Ordering::SeqCst)
     );
+    run.core.shutdown().await.expect("the core shuts down");
 }
 
 /// Retrying a lost acceptance answers the original submission, even when
@@ -1452,13 +1488,7 @@ tiered!(
 tiered!(an_unsupported_reasoning_selection_is_refused_where_it_is_stated);
 tiered!(a_replay_after_the_key_left_the_catalog_completes_with_zero_resolver_calls);
 tiered!(an_unjournaled_bind_fault_seals_nothing_and_recovers_after_the_park);
-tiered!(
-    a_tool_is_not_run_past_a_bind_fault_of_its_direct_completion,
-    ignore = "FIG-5368: a direct completion's bind fault reaches its tool, which records it as its result"
-);
-tiered!(
-    a_completion_before_a_bind_fault_is_retried_only_while_unrecorded,
-    ignore = "FIG-5368, FIG-5367: the bind fault reaches the tool instead of parking the session, which no host can redrive"
-);
+tiered!(a_tool_is_not_run_past_a_bind_fault_of_its_direct_completion);
+tiered!(a_completion_before_a_bind_fault_is_retried_only_while_unrecorded);
 
 tiered!(a_send_retry_after_its_model_key_left_the_catalog_returns_its_receipt);

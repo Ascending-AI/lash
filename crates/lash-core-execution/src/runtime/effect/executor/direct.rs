@@ -100,14 +100,12 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             controller.trace_scope().cloned(),
         );
         let outcome = Box::pin(executor.run_body(envelope, effect_attempt.clone())).await;
-        if let (Err(fault), Some(attempt)) = (&outcome, &effect_attempt)
-            && fault.code == crate::RuntimeErrorCode::LlmProfileUnavailable
-            && fault.is_attempt_fault()
-        {
-            attempt.fault_attempt(fault.clone());
-            return std::future::pending().await;
+        match (outcome, effect_attempt) {
+            (Err(fault), Some(attempt)) if fault.is_attempt_fault() => {
+                match attempt.end_at(fault).await {}
+            }
+            (outcome, _) => outcome,
         }
-        outcome
     }
 
     pub async fn execute(

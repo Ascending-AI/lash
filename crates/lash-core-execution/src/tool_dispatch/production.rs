@@ -653,14 +653,15 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                 self.context.record_nested_effect_error(error.clone());
                 return Err(error.to_string());
             }
-            futures_util::future::Either::Right((error, _)) => {
-                self.context.record_nested_effect_error(error.clone());
-                return Err(error.to_string());
+            // A fault latched on the attempt ended its body where the body
+            // met it: it took no effect, so the attempt runs again, and
+            // nothing of it reaches the enclosing execution (FIG-5368).
+            futures_util::future::Either::Right((fault, _)) => {
+                return Ok(SingletonBodyOutcome::Faulted(Box::new(fault)));
             }
         };
-        if let Some(error) = effect_attempt.attempt_fault() {
-            self.context.record_nested_effect_error(error.clone());
-            return Err(error.to_string());
+        if let Some(fault) = effect_attempt.attempt_fault() {
+            return Ok(SingletonBodyOutcome::Faulted(Box::new(fault)));
         }
 
         if let Some(origin) = origin {

@@ -36,6 +36,16 @@ impl EffectAttempt {
         }
     }
 
+    /// End the attempt at `fault`, its own
+    /// ([`RuntimeEffectControllerError::is_attempt_fault`]): latch it and
+    /// never answer, so the work that met it is dropped there and nothing
+    /// it would do with the failure runs. The attempt's owner answers the
+    /// fault, never the attempt's body (FIG-4632, FIG-5368).
+    pub async fn end_at(&self, fault: RuntimeEffectControllerError) -> std::convert::Infallible {
+        self.fault_attempt(fault);
+        std::future::pending().await
+    }
+
     pub fn attempt_fault(&self) -> Option<RuntimeEffectControllerError> {
         self.fault.lock_recover().clone()
     }
