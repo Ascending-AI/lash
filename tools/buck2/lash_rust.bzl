@@ -123,8 +123,19 @@ def _clippy_attrs(exec_properties):
         int(exec_properties.get("clippy.memory_kb", str(_DEFAULT_MEMORY_KB))) * MEMORY_SCALE,
     )
 
+def _metadata_attrs(exec_properties):
+    request = {}
+    for field, default in [("cpu_count", str(_DEFAULT_CPU)), ("memory_kb", str(_DEFAULT_MEMORY_KB))]:
+        full = exec_properties.get(field, default)
+        request[field] = exec_properties.get("metadata." + field, full)
+        request["optimized." + field] = exec_properties.get(
+            "metadata.optimized." + field,
+            exec_properties.get("optimized." + field, full),
+        )
+    return _resource_attrs(request)
+
 def _rust_rule(rule, name, clippy_name, exec_properties, **attrs):
-    """Declares a Rust target and its Clippy twin, `clippy_name`.
+    """Declares a Rust target, its Clippy twin and its metadata-check twin.
 
     Buck2 resolves one execution platform per target, so every action a
     target runs reserves its compile request, Clippy included, though Clippy
@@ -139,6 +150,16 @@ def _rust_rule(rule, name, clippy_name, exec_properties, **attrs):
     twin.update(_clippy_attrs(exec_properties))
     twin["visibility"] = ["PUBLIC"]
     rule(name = clippy_name, **twin)
+    metadata = dict(attrs)
+    metadata.update(_metadata_attrs(exec_properties))
+    metadata["visibility"] = ["PUBLIC"]
+    # Workspace Rust dependencies are libraries; third-party dependencies
+    # (including proc macros) keep their original targets and reservations.
+    metadata["named_deps"] = {
+        extern: label + "__metadata" if (label.startswith("//crates/") or label.startswith("//examples/") or label.startswith(":")) else label
+        for extern, label in attrs.get("named_deps", {}).items()
+    }
+    rule(name = name + "__metadata", **metadata)
 
 def _named_deps(package_name, include_dev = False, build = False):
     groups = PACKAGE_DEPS[package_name]

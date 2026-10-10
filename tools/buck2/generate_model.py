@@ -202,6 +202,8 @@ def action_sizes() -> dict[str, dict[str, int]]:
 ACTION_SIZES = action_sizes()
 TARGET_KIND_SIZES = json.loads(TARGET_KIND_SIZES_PATH.read_text(encoding="utf-8"))
 CLIPPY_SIZES = json.loads(CLIPPY_SIZES_PATH.read_text(encoding="utf-8"))
+METADATA_SIZES_PATH = ROOT / "tools/buck2/metadata-sizes.json"
+METADATA_SIZES = json.loads(METADATA_SIZES_PATH.read_text(encoding="utf-8"))
 OPTIMIZED_SIZES = json.loads(OPTIMIZED_SIZES_PATH.read_text(encoding="utf-8"))
 TEST_RUN_SIZES = json.loads(TEST_RUN_SIZES_PATH.read_text(encoding="utf-8"))
 
@@ -225,6 +227,15 @@ def compile_request(
         "cpu_count": entry.get("cpu_count", DEFAULT_CPU_COUNT),
         "memory_kb": entry.get("memory_kb", DEFAULT_MEMORY_KB),
     }
+
+
+def metadata_request(package_name: str, crate_name: str, kind: str, optimized: bool = False) -> dict[str, int]:
+    """A measured metadata phase, otherwise its full compile reservation."""
+    fallback = (optimized_request if optimized else compile_request)(package_name, crate_name, kind)
+    row = METADATA_SIZES.get("optimized" if optimized else "dev", {}).get(
+        f"{package_name}/{crate_name}", {}
+    ).get(kind, fallback)
+    return {field: row[field] for field in ("cpu_count", "memory_kb")}
 
 
 def test_run_request(
@@ -374,9 +385,20 @@ def exec_sizes_bzl() -> str:
         key: {"cpu_count": row["cpu_count"], "memory_kb": row["memory_kb"]}
         for key, row in sorted(CLIPPY_SIZES.items())
     }
+    metadata_requests = {
+        profile: {
+            key: {kind: metadata_request(*key.split("/", 1), kind, profile == "optimized")
+                  for kind in kinds}
+            for key, kinds in sorted(rows.items())
+        }
+        for profile, rows in METADATA_SIZES.items()
+    }
     pool_budgets = [UNSIZED_ACTION_BUDGET] + sorted(
         (
             set(FIXED_POOL_BUDGETS)
+            | {(request["cpu_count"], request["memory_kb"])
+               for rows in metadata_requests.values() for kinds in rows.values()
+               for request in kinds.values()}
             | {
                 (request["cpu_count"], request["memory_kb"])
                 for requests in list(compile_requests.values())
@@ -467,6 +489,8 @@ def exec_sizes_bzl() -> str:
             for key, request in clippy_requests.items()
         ),
         "}\n\n",
+        "# Metadata twins inherit full requests until their phase is measured.\n",
+        "METADATA_REQUESTS = " + json.dumps(metadata_requests, indent=4, sort_keys=True) + "\n\n",
         "TEST_RUN_REQUESTS = {\n",
         "".join(
             f"    {quote(label)}: {{"
@@ -501,6 +525,12 @@ def exec_sizes_bzl() -> str:
         '        properties["optimized." + key] = str(value)\n',
         "    for key, value in CLIPPY_REQUESTS.get(crate, {}).items():\n",
         '        properties["clippy." + key] = str(value)\n',
+        '    metadata = METADATA_REQUESTS.get("dev", {}).get(crate, {}).get(kind, {})\n',
+        "    for key, value in metadata.items():\n",
+        '        properties["metadata." + key] = str(value)\n',
+        '    metadata = METADATA_REQUESTS.get("optimized", {}).get(crate, {}).get(kind, {})\n',
+        "    for key, value in metadata.items():\n",
+        '        properties["metadata.optimized." + key] = str(value)\n',
         "    if test_label != None:\n",
         "        run = TEST_RUN_REQUESTS.get(\n",
         "            test_label,\n",
@@ -548,7 +578,8 @@ def validate_action_sizes(metadata: dict) -> None:
         if "custom-build" not in target["kind"]
     }
     stale = sorted(
-        (set(ACTION_SIZES) | set(TARGET_KIND_SIZES) | set(OPTIMIZED_SIZES) | set(LARGE_TEST_RUNS))
+        (set(ACTION_SIZES) | set(TARGET_KIND_SIZES) | set(OPTIMIZED_SIZES) | set(LARGE_TEST_RUNS)
+         | {key for rows in METADATA_SIZES.values() for key in rows})
         - crates
     )
     if stale:
@@ -558,14 +589,14 @@ def validate_action_sizes(metadata: dict) -> None:
         )
     unknown = sorted(
         f"{key}: {kind}"
-        for table in (TARGET_KIND_SIZES, OPTIMIZED_SIZES)
+        for table in (TARGET_KIND_SIZES, OPTIMIZED_SIZES, *METADATA_SIZES.values())
         for key, rows in table.items()
         for kind in rows
         if kind not in TARGET_KINDS
     )
     empty = sorted(
         key
-        for table in (TARGET_KIND_SIZES, OPTIMIZED_SIZES)
+        for table in (TARGET_KIND_SIZES, OPTIMIZED_SIZES, *METADATA_SIZES.values())
         for key, rows in table.items()
         if not rows
     )

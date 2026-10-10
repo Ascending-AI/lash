@@ -360,6 +360,16 @@ capacity and an undersized one is a throttled or killed action. The rule, in
   of its own, and `kiln clippy` builds the twin's `[clippy.txt]`. Its request
   is the crate's row in `tools/buck2/clippy-sizes.json` (the anonymous compile rule
   over Clippy's own records, with a 512 MiB floor), else 512 MiB.
+  Check commands select metadata twins, `<rust target>__metadata[check]`,
+  whose first-party library dependencies also use metadata twins.
+  `metadata-sizes.json` separates dev and optimized profiles and library versus
+  test compilation. Only joined metadata/check records contribute, with at
+  least 20 successful samples. Their anonymous compile formula retains the
+  512 MiB allowance and hysteresis, with a 512 MiB admission floor; OOM
+  evidence refuses refresh. Missing rows inherit full compile requests,
+  including optimized requests. Full builds keep their original targets and
+  reservations; test-runtime sizing and the five execution properties remain
+  independent of this split.
   First-party build-script runs and the schema actions are helper targets
   and request 512 MiB (`HELPER_ACTION_BUDGET`); a third-party build-script
   run also requests 512 MiB. Changing its request rekeys that run and can
@@ -402,7 +412,7 @@ python3 tools/buck2/action_sizes_from_log.py --report --since <unix seconds> usa
 
 `--refresh` rewrites `action-sizes.json`, `target-kind-sizes.json`,
 `optimized-sizes.json`, `clippy-sizes.json`, `category-sizes.json`,
-`test-run-sizes.json` and `compile-memory-evidence.json`, then runs `sync.py`, which
+`test-run-sizes.json`, `metadata-sizes.json` and `compile-memory-evidence.json`, then runs `sync.py`, which
 regenerates `exec_sizes.bzl`, including the execution platforms. `--report`
 prints reserved against used CPU and memory per Buck2 category. The usage log
 names an action's category and crate but not its target or what it emitted,

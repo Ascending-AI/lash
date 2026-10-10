@@ -228,6 +228,31 @@ CLIPPY_REQUESTS = {
     "workflow-graph-roundtrip/workflow_graph_roundtrip": {"cpu_count": 1, "memory_kb": 524288},
 }
 
+# Metadata twins inherit full requests until their phase is measured.
+METADATA_REQUESTS = {
+    "dev": {
+        "lash-internal-plugin-mcp/lash_plugin_mcp": {
+            "target": {
+                "cpu_count": 1,
+                "memory_kb": 1048576
+            }
+        },
+        "lash-internal-protocol-rlm/lash_protocol_rlm": {
+            "target": {
+                "cpu_count": 1,
+                "memory_kb": 1048576
+            }
+        },
+        "lash-internal-vm-runtime/lash_vm_runtime": {
+            "target": {
+                "cpu_count": 1,
+                "memory_kb": 786432
+            }
+        }
+    },
+    "optimized": {}
+}
+
 TEST_RUN_REQUESTS = {
     "//crates/lash-conformance:lash-conformance__unit_test": {"cpu_count": 1, "memory_kb": 262144},
     "//crates/lash-core-effect:lash-core-effect__unit_test": {"cpu_count": 1, "memory_kb": 262144},
@@ -804,6 +829,12 @@ def sized_exec_properties(package_name, crate_name, test_label = None):
         properties["optimized." + key] = str(value)
     for key, value in CLIPPY_REQUESTS.get(crate, {}).items():
         properties["clippy." + key] = str(value)
+    metadata = METADATA_REQUESTS.get("dev", {}).get(crate, {}).get(kind, {})
+    for key, value in metadata.items():
+        properties["metadata." + key] = str(value)
+    metadata = METADATA_REQUESTS.get("optimized", {}).get(crate, {}).get(kind, {})
+    for key, value in metadata.items():
+        properties["metadata.optimized." + key] = str(value)
     if test_label != None:
         run = TEST_RUN_REQUESTS.get(
             test_label,

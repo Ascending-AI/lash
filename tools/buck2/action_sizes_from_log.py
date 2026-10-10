@@ -51,9 +51,10 @@ What counts as a sample:
 
 Rows are keyed `<package>/<crate>`, not by kind. The `kind` field cannot key
 them: the compiler wrapper and argument files hide `--crate-type` from the
-supervisor, so records may say `kind=-`. The compile and metadata actions
-share the Cargo identity and compile reservation. One row per crate matches the
-generator's sizing key. Clippy runs on a target of its own and is sized apart
+supervisor, so records may say `kind=-`. Full-build compile and metadata actions share the Cargo identity and
+reservation. Check commands select metadata twins sized by joined phase, target
+kind and profile in `metadata-sizes.json`; an unmeasured phase keeps its full
+compile request. One row per crate remains the full-build sizing key. Clippy runs on a target of its own and is sized apart
 (see "Clippy" below), so a record of category `clippy` is never a compile
 sample.
 
@@ -120,6 +121,18 @@ dev request; the generated rules select it on the profile constraint, so a
 dev build's requests do not depend on it. The rule is `optimized_table`'s: a row only raises, one optimized sample is
 evidence, and a dev request that a refresh lowers leaves the optimized
 request where it was until 20 optimized samples say otherwise.
+
+Metadata checks
+---------------
+
+`--metadata-only --events ... -o tools/buck2/metadata-sizes.json` generates
+phase requests; run `kiln sync` afterwards. `--phase-report --events ...`
+reports per-crate phase peaks, wall time, failures and kills. Only unambiguously
+joined metadata/check actions supply the phase table, separated by target
+kind and dev/optimized profile. Twenty successful samples are required. The
+anonymous compile formula, fixed 512 MiB allowance, rounding and hysteresis
+apply with a 512 MiB admission floor; executor cgroup floors stay unchanged.
+OOM evidence refuses refresh. Missing rows inherit full compile requests.
 
 Clippy
 ------
@@ -488,6 +501,73 @@ def collect_optimized(labelled, *, include_killed: bool = False) -> dict[tuple[s
         if optimized and kind in TARGET_KINDS and category != "clippy":
             observe_compile(measured[(key, TARGET_KINDS[kind])], record)
     return {group: samples for group, samples in measured.items() if samples.records or (include_killed and samples.oom_kills)}
+
+
+# The prelude names metadata-fast with infallible diagnostics `diag`.
+METADATA_EMITS = {"metadata", "metadata-fast", "check", "diag"}
+
+
+def collect_metadata(labelled) -> dict[tuple[str, str, bool], Samples]:
+    """Only joined metadata actions, separated by target kind and profile.
+
+    Unjoined records cannot prove a phase and never lower its reservation.
+    Killed actions remain evidence even when no successful sample survives.
+    """
+    from action_categories_from_events import TARGET_KINDS
+
+    measured = collections.defaultdict(Samples)
+    for key, kind, category, emit, optimized, record in labelled:
+        if category == "rustc" and emit in METADATA_EMITS and kind in TARGET_KINDS:
+            observe_compile(measured[(key, TARGET_KINDS[kind], optimized)], record)
+    return dict(measured)
+
+
+def metadata_table(measured, current, inherited) -> dict:
+    """Measured phase requests; missing rows inherit full compile requests.
+
+    Metadata uses the anonymous compile formula and allowance, with the
+    512 MiB admission floor used by Clippy. Its cgroup floor is unchanged.
+    Twenty samples and the compile hysteresis still apply. OOM evidence
+    refuses a refresh rather than pricing a row from survivors alone.
+    """
+    rows = {profile: {key: dict(kinds) for key, kinds in current.get(profile, {}).items()}
+            for profile in ("dev", "optimized")}
+    for (key, kind, optimized), samples in sorted(measured.items()):
+        if samples.oom_kills:
+            raise ValueError(f"metadata OOM evidence for {key}/{kind}/{optimized}")
+        if len(samples.records) < MIN_SAMPLES:
+            continue
+        profile = "optimized" if optimized else "dev"
+        previous = rows[profile].get(key, {}).get(kind)
+        request = request_of(previous) if previous else inherited(key, kind, optimized)
+        row = compile_row(samples, request, floor_kb=CLIPPY_FLOOR_KB)
+        row.update(compile_evidence({key: samples})[key])
+        check_compile_memory(row, row["memory_kb"], key)
+        rows[profile].setdefault(key, {})[kind] = row
+    return rows
+
+
+def phase_report(labelled) -> dict:
+    """Per-crate phase peaks and time, retaining failed and killed actions."""
+    groups = collections.defaultdict(list)
+    for key, kind, category, emit, optimized, record in labelled:
+        phase = "metadata" if category == "rustc" and emit in METADATA_EMITS else emit or category
+        groups[(key, kind, "optimized" if optimized else "dev", phase)].append(record)
+    rows = {}
+    for group, records in sorted(groups.items()):
+        successes = [r for r in records if r.get("exit") == "0"]
+        peaks = [held_bytes(r) for r in records if held_bytes(r) is not None]
+        anon = [as_int(r.get("anon_peak_bytes")) for r in successes]
+        anon = [peak for peak in anon if peak is not None]
+        rows["|".join(group)] = {
+            "actions": len(records), "successful": len(successes),
+            "failed": len(records) - len(successes),
+            "oom_kills": sum(oom_killed(r) for r in records),
+            "peak_bytes": max(peaks, default=0),
+            "p99_anon_peak_bytes": percentile(anon, MEMORY_PERCENTILE) if anon else 0,
+            "wall_ms": sum(as_int(r.get("wall_ms")) or 0 for r in records),
+        }
+    return rows
 
 
 TEST_MIN_SAMPLES = 3
@@ -1038,6 +1118,16 @@ def refresh(lines, crates: set[tuple[str, str]], inventory: dict, events: list) 
         collect(lines, crates, optimized_ops, clippy=True),
         {key: row for key, row in stored("clippy-sizes.json").items() if key in keys},
     )
+    metadata_rows = metadata_table(
+        collect_metadata(labelled),
+        {profile: {key: rows for key, rows in by_key.items() if key in keys}
+         for profile, by_key in stored("metadata-sizes.json").items()},
+        lambda key, kind, optimized: (
+            request_of(optimized_rows.get(key, {}).get(kind))
+            if optimized and kind in optimized_rows.get(key, {})
+            else resolved_request(key, kind, crate_rows, kind_rows)
+        ),
+    )
     test_rows = test_run_table(
         collect_test_runs(lines, labels),
         {label: row for label, row in stored("test-run-sizes.json").items() if label in labels},
@@ -1060,6 +1150,7 @@ def refresh(lines, crates: set[tuple[str, str]], inventory: dict, events: list) 
         ("target-kind-sizes.json", kind_rows),
         ("optimized-sizes.json", optimized_rows),
         ("clippy-sizes.json", clippy_rows),
+        ("metadata-sizes.json", metadata_rows),
         ("category-sizes.json", category_table(lines, crates)),
         ("test-run-sizes.json", test_rows),
     ):
@@ -1150,11 +1241,41 @@ def main() -> int:
         metavar="UNIX_SECONDS",
         help="ignore records older than this",
     )
+    parser.add_argument("--phase-report", action="store_true", help="report per-crate phase peaks and time from --events")
+    parser.add_argument("--metadata-only", action="store_true", help="generate measured metadata-sizes.json from --events; run kiln sync afterwards")
     args = parser.parse_args()
     lines = read_lines(args.logs, args.since)
     inventory = json.loads(
         (ROOT / "tools/buck2/target-inventory.json").read_text(encoding="utf-8")
     )
+    if args.phase_report or args.metadata_only:
+        if not args.events:
+            parser.error("phase reporting and metadata sizing require --events")
+        import action_categories_from_events as joined
+        import generate_model
+
+        actions = [action for group in args.events for path in group
+                   for action in joined.executed_actions(joined.event_lines(path))]
+        labelled = list(joined.labelled_records(actions, lines, inventory))
+        if args.phase_report:
+            rendered = render(phase_report(labelled))
+        else:
+            keys = {key for key, _kind in joined.target_identities(inventory).values()}
+            rendered = render(metadata_table(
+                collect_metadata(labelled),
+                {profile: {key: kinds for key, kinds in rows.items() if key in keys}
+                 for profile, rows in generate_model.METADATA_SIZES.items()},
+                lambda key, kind, optimized: tuple(
+                    (generate_model.optimized_request if optimized else generate_model.compile_request)(
+                        *key.split("/", 1), kind
+                    )[field] for field in ("cpu_count", "memory_kb")
+                ),
+            ))
+        if args.output is None:
+            sys.stdout.write(rendered)
+        else:
+            args.output.write_text(rendered, encoding="utf-8")
+        return 0
     if args.refresh or args.report:
         crates = first_party_crates(cargo_metadata())
         if args.report:

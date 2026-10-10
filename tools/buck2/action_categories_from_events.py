@@ -115,7 +115,7 @@ def executed_actions(lines):
                 # `root//crates/lash:lash__unit_test__rust_test` is the binary
                 # of the generated `//crates/lash:lash__unit_test`.
                 "label": "//{}:{}".format(
-                    package.partition("//")[2], label.get("name", "").removesuffix("__rust_test")
+                    package.partition("//")[2], label.get("name", "").removesuffix("__metadata").removesuffix("__rust_test")
                 ),
                 "end": seconds + nanoseconds / 1e9 + wall,
                 "wall": wall,

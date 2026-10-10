@@ -66,9 +66,12 @@ def check_inventory() -> None:
             assert label.endswith("[static]") == (kinds[base] == "lib")
     checks = inventory["feature_lane_check_targets"]
     assert len(checks) == len(inventory["feature_lane_compile_targets"])
-    assert checks == [label + "[check]" for label in inventory["feature_lane_compile_targets"]]
+    def metadata_check(label, kind):
+        binary = label + "__rust_test" if kind in {"unit-test", "bin-unit-test", "test"} else label
+        return binary + "__metadata[check]"
+    assert checks == [metadata_check(label, kinds[label]) for label in inventory["feature_lane_compile_targets"]]
     for unit in inventory["feature_lane_units"]:
-        assert unit["check_label"] == unit["label"] + "[check]"
+        assert unit["check_label"] == metadata_check(unit["label"], unit["kind"])
 
     for unit in [
         target
@@ -348,6 +351,21 @@ def check_sizing() -> None:
             memory_kb = max(model.DEFAULT_MEMORY_KB, sizes.ACTION_MEMORY_FLOOR_KB)
         sizes.check_compile_memory(measured, memory_kb, ("clippy", key))
 
+    metadata_requests = bzl_value(text, "METADATA_REQUESTS")
+    measured_metadata = load_json("metadata-sizes.json")
+    assert set(metadata_requests) == set(measured_metadata) == {"dev", "optimized"}
+    for profile, rows in measured_metadata.items():
+        assert metadata_requests[profile] == {
+            key: {kind: request(row) for kind, row in kinds.items()}
+            for key, kinds in rows.items()
+        }
+        for key, kinds in rows.items():
+            assert key in crates and kinds and set(kinds) <= {"target", "test"}, key
+            for kind, row in kinds.items():
+                assert row["samples"] >= sizes.MIN_SAMPLES, (profile, key, kind)
+                assert row["memory_kb"] >= sizes.CLIPPY_FLOOR_KB, (profile, key, kind)
+                sizes.check_compile_memory(row, row["memory_kb"], ("metadata", profile, key, kind))
+
     # Compile requests resolve through one registered platform each; a test
     # run or batch states its request to the test executor directly.
     budgets = [tuple(budget) for budget in bzl_value(text, "POOL_BUDGETS")]
@@ -357,6 +375,7 @@ def check_sizing() -> None:
         for value in list(compile_requests.values())
         + list(test_compile_requests.values())
         + list(clippy_requests.values())
+        + [request for rows in metadata_requests.values() for kinds in rows.values() for request in kinds.values()]
         + [request for kinds in optimized_requests.values() for request in kinds.values()]
     } | {(model.DEFAULT_CPU_COUNT, model.DEFAULT_MEMORY_KB), (2, 3145728), helper}
     assert requested <= set(budgets), f"unregistered pool budgets: {sorted(requested - set(budgets))}"

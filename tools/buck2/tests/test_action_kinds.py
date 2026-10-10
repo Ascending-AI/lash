@@ -451,5 +451,62 @@ class CategoryTableTest(unittest.TestCase):
         )
 
 
+class MetadataSizingTest(unittest.TestCase):
+    def test_unmeasured_kinds_and_profiles_keep_full_compile_requests(self) -> None:
+        from unittest.mock import patch
+        import generate_model as model
+
+        full = {"cpu_count": 2, "memory_kb": 3 * 1024 * 1024}
+        optimized = {"cpu_count": 3, "memory_kb": 4 * 1024 * 1024}
+        metadata = {"cpu_count": 1, "memory_kb": 1024 * 1024}
+        with patch.object(model, "ACTION_SIZES", {KEY: full}), \
+             patch.object(model, "TARGET_KIND_SIZES", {}), \
+             patch.object(model, "OPTIMIZED_SIZES", {KEY: {"target": optimized}}), \
+             patch.object(model, "METADATA_SIZES", {"dev": {KEY: {"target": metadata}}, "optimized": {}}):
+            self.assertEqual(model.metadata_request(*KEY.split("/"), "target"), metadata)
+            self.assertEqual(model.metadata_request(*KEY.split("/"), "test"), full)
+            self.assertEqual(model.metadata_request(*KEY.split("/"), "target", True), optimized)
+
+    def test_metadata_twins_join_the_original_identity_and_feature_variant(self) -> None:
+        events = [event(name="lash-core__metadata", identifier="check"),
+                  event(name="lash-core__unit_test__rust_test__metadata", identifier="check", end=2000),
+                  event(name="lash-core__fv_0f5f2ec4__metadata", identifier="metadata", end=3000)]
+        self.assertEqual(labelled(events, [usage(), usage(stamp=2000), usage(stamp=3000)]), [
+            (KEY, "lib", "rustc", "check"),
+            (KEY, "unit-test", "rustc", "check"),
+            (KEY, "lib", "rustc", "metadata"),
+        ])
+
+    def test_metadata_reservations_use_only_their_phase_kind_and_profile(self) -> None:
+        records = [
+            (KEY, "lib", "rustc", "check", False, sizes.parse_record(usage(anon_peak_bytes=GIB // 4))),
+            (KEY, "unit-test", "rustc", "metadata", True, sizes.parse_record(usage(anon_peak_bytes=GIB))),
+            (KEY, "lib", "rustc", "rlib", False, sizes.parse_record(usage(anon_peak_bytes=4 * GIB))),
+            (KEY, "lib", "clippy", "", False, sizes.parse_record(usage(category="clippy"))),
+        ]
+        measured = sizes.collect_metadata(records)
+        self.assertEqual(set(measured), {(KEY, "target", False), (KEY, "test", True)})
+        self.assertEqual(measured[(KEY, "target", False)].peak_bytes(), GIB // 4)
+        records.append((KEY, "lib", "rustc", "diag", False, sizes.parse_record(usage(anon_peak_bytes=GIB // 8))))
+        self.assertEqual(len(sizes.collect_metadata(records)[(KEY, "target", False)].records), 2)
+
+    def test_metadata_request_requires_twenty_samples_and_bounds_the_work(self) -> None:
+        inherited = lambda key, kind, optimized: (1, 2 * 1024 * 1024)
+        group = (KEY, "target", False)
+        sample = sizes.Samples()
+        for _ in range(19):
+            sample.observe(1.0, GIB // 4, 1, anon_peak_bytes=GIB // 4)
+        self.assertEqual(sizes.metadata_table({group: sample}, {}, inherited), {"dev": {}, "optimized": {}})
+        sample.observe(1.0, GIB // 4, 1, anon_peak_bytes=GIB // 4)
+        rows = sizes.metadata_table({group: sample}, {}, inherited)
+        row = rows["dev"][KEY]["target"]
+        self.assertEqual(row["memory_kb"], 1024 * 1024)
+        sizes.check_compile_memory(sizes.compile_evidence({KEY: sample})[KEY], row["memory_kb"], KEY)
+        self.assertEqual(rows["optimized"], {})
+        sample.oom_kills = 1
+        with self.assertRaisesRegex(ValueError, "metadata.*OOM"):
+            sizes.metadata_table({group: sample}, {}, inherited)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -155,6 +155,7 @@ def is_content_input(relative: str) -> bool:
             "tools/buck2/feature_variants.py",
             "tools/buck2/generate_model.py",
             "tools/buck2/optimized-sizes.json",
+            "tools/buck2/metadata-sizes.json",
             "tools/buck2/package-policy.toml",
             "tools/buck2/reindeer-lock.json",
             "tools/buck2/reindeer.toml",
@@ -865,6 +866,10 @@ def inventory_payload(model_payload: dict, workspace_bzl: str, feature_bzl: str)
     def output_label(label: str, kind: str) -> str:
         return label + "[static]" if kind == "lib" else label
 
+    def check_label(label: str, kind: str) -> str:
+        binary = label + "__rust_test" if kind in {"unit-test", "bin-unit-test", "test"} else label
+        return binary + "__metadata[check]"
+
     def clippy_label(label: str) -> str:
         # The Clippy twin lash_rust.bzl declares beside every Rust target: the
         # same rule on its own execution platform, sized for Clippy.
@@ -880,13 +885,13 @@ def inventory_payload(model_payload: dict, workspace_bzl: str, feature_bzl: str)
                 if target["kind"] != "custom-build":
                     target["clippy_label"] = clippy_label(target["label"])
                 if target["kind"] != "custom-build":
-                    target["check_label"] = target["label"] + "[check]"
+                    target["check_label"] = check_label(target["label"], target["kind"])
                 kinds[target["label"]] = target["kind"]
     for unit in result["feature_lane_units"]:
         unit["build_label"] = output_label(unit["label"], unit["kind"])
         if unit["kind"] == "lib":
             unit["doc_label"] = unit["label"] + "[doc]"
-        unit["check_label"] = unit["label"] + "[check]"
+        unit["check_label"] = check_label(unit["label"], unit["kind"])
         unit["clippy_label"] = clippy_label(unit["label"])
         kinds[unit["label"]] = unit["kind"]
     result["workspace_build_targets"] = [
@@ -905,7 +910,7 @@ def inventory_payload(model_payload: dict, workspace_bzl: str, feature_bzl: str)
         if label in checks
     ]
     result["facade_production_check_targets"] = [
-        label + "[check]" for label in result["feature_lanes"]["facade-production"]
+        check_label(label, kinds[label]) for label in result["feature_lanes"]["facade-production"]
     ]
     result["workspace_check_targets"] = sorted(set(
         result["workspace_check_targets"] + result["facade_production_check_targets"]
@@ -915,8 +920,13 @@ def inventory_payload(model_payload: dict, workspace_bzl: str, feature_bzl: str)
         for label in result["feature_lane_compile_targets"]
     ]
     result["feature_lane_check_targets"] = [
-        label + "[check]" for label in result["feature_lane_compile_targets"]
+        check_label(label, kinds[label]) for label in result["feature_lane_compile_targets"]
     ]
+    result["metadata_target_count"] = len({
+        target["check_label"].split("[", 1)[0]
+        for package in result["packages"] for target in package["targets"]
+        if "check_label" in target
+    } | {unit["check_label"].split("[", 1)[0] for unit in result["feature_lane_units"]})
     result["workspace_clippy_build_targets"] = [
         clippy_label(label) for label in result["workspace_clippy_targets"]
     ]
