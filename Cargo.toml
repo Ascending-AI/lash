@@ -43,6 +43,7 @@ members = [
     "crates/lash-vm-protocol",
     "crates/lash-vm-broker",
     "crates/lash-vm-worker",
+    "crates/lash-vm-library",
     "crates/lash-vm-client",
     "crates/lash-dialect-python",
     "crates/lash-dialect-typescript",
@@ -226,6 +227,7 @@ channel = "0.1.0-alpha"
 [workspace.dependencies]
 lash-vm-client = { package = "lash-internal-vm-client", path = "crates/lash-vm-client", version = "=0.0.0-dev" }
 lash-vm-worker = { package = "lash-internal-vm-worker", path = "crates/lash-vm-worker", version = "=0.0.0-dev" }
+lash-vm-library = { package = "lash-internal-vm-library", path = "crates/lash-vm-library", version = "=0.0.0-dev" }
 lash-vm-protocol = { package = "lash-internal-vm-protocol", path = "crates/lash-vm-protocol", version = "=0.0.0-dev" }
 lash-vm-broker = { package = "lash-internal-vm-broker", path = "crates/lash-vm-broker", version = "=0.0.0-dev" }
 lash-render = { package = "lash-internal-render", path = "crates/lash-render", version = "=0.0.0-dev" }

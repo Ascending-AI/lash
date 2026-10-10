@@ -38,7 +38,7 @@ workspace = true
 [dependencies]
 lash-sansio = { workspace = true }
 lash-vm-client = { workspace = true, features = ["perf-witness"] }
-lash-vm-worker = { workspace = true }
+lash-vm-worker = { workspace = true, features = ["testing"] }
 libc = { workspace = true }
 lash-core = { workspace = true, features = ["perf-witness", "testing"] }
 lash-core-execution = { workspace = true, features = ["testing"] }

@@ -229,7 +229,7 @@ fn a_typescript_cell_lowered_in_the_worker_parks_and_resumes() {
         tool_roots: Default::default(),
         bindings: Default::default(),
         functions: Default::default(),
-        helpers: lash_vm_worker::HELPER_RELEASE,
+        helpers: lash_vm_library::HELPER_RELEASE,
     };
     let mut worker = checkout(&pool);
     let response = worker

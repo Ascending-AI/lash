@@ -19,12 +19,12 @@ doctest = false
 [features]
 # Prints a workflow document as TypeScript.
 typescript = ["dep:lash-dialect-typescript"]
-testing = ["lash-vm-client/testing", "lash-vm-worker/testing", "lash-core/testing"]
-# The worker this crate links and the client it drives move protocol
+testing = ["lash-vm-client/testing", "lash-core/testing"]
+# The client this crate drives and the library its workers hold move
 # versions together.
 synthetic-next = [
     "lash-vm-client/synthetic-next",
-    "lash-vm-worker/synthetic-next",
+    "lash-vm-library/synthetic-next",
     "lash-kernel-doc/synthetic-next",
     "lash-kernel-migrate/synthetic-next",
     "lash-kernel-state/synthetic-next",
@@ -45,7 +45,7 @@ lash-kernel-doc = { workspace = true }
 lash-kernel-vm = { workspace = true }
 lash-kernel-migrate = { workspace = true }
 lash-kernel-state = { workspace = true }
-lash-vm-worker = { workspace = true }
+lash-vm-library = { workspace = true }
 lash-kernel-check = { workspace = true }
 lash-kernel-dialect = { workspace = true }
 lash-dialect-typescript = { workspace = true, optional = true }

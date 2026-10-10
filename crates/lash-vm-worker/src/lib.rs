@@ -9,14 +9,7 @@ mod embedding;
 #[cfg(feature = "dhat-heap")]
 mod heap_profile;
 mod library;
-mod releases;
-#[cfg(feature = "synthetic-next")]
-mod synthetic;
-pub use embedding::{
-    EmbedError, Embedder, Embedding, HELPER_RELEASE, RETAINED_HELPER_RELEASES, standard,
-    standard_functions, standard_helper_releases, standard_retired_helpers, typescript,
-};
-pub use releases::HelperReleaseIndex;
+pub use embedding::{EmbedError, Embedder, Embedding, standard, typescript};
 
 #[cfg(unix)]
 mod entry;

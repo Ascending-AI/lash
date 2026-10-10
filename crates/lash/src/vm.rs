@@ -15,10 +15,12 @@
 /// [`WorkerService::default`] explicitly defaults to the helper beside the host
 /// executable and does not search PATH or a repository.
 ///
-/// A single-binary host calls [`worker_entry`] (or [`worker_entry_with`], for
-/// its own functions and dialects) as its first action, before runtime
-/// creation, credentials, stores or providers, and returns from main when
-/// that call returns `true`. It selects [`WorkerEntry::reexec`].
+/// A single-binary host enables the `worker` feature and calls
+/// `worker_entry` (or `worker_entry_with`, for its own functions and
+/// dialects) as its first action, before runtime creation, credentials,
+/// stores or providers, and returns from main when that call returns
+/// `true`. It selects [`WorkerEntry::reexec`]. A host that runs the shipped
+/// worker executable links no worker embedding and no dialect.
 /// `examples/worker_host.rs` proves this bootstrap.
 /// The child starts with an empty environment and closes inherited descriptors.
 /// The language bounds guest authority; the process contains native crashes.
@@ -33,9 +35,10 @@ pub use lash_vm_client::{
     Deadlines as WorkerDeadlines, PoolConfig as WorkerPoolConfig, WorkerEntry, WorkerTuning,
 };
 /// A helper release a worker retains beside its own functions (FIG-5799).
-pub use lash_vm_worker::HelperReleaseIndex;
+pub use lash_vm_runtime::HelperReleaseIndex;
 /// What a worker registers when it starts: the kernel library, extension
 /// functions and the dialects it lowers and prints.
+#[cfg(feature = "worker")]
 pub use lash_vm_worker::{
     Embed as WorkerEmbed, EmbedError as WorkerEmbedError, Embedder as WorkerEmbedder,
     Embedding as WorkerEmbedding, standard as standard_worker_embedding,
@@ -71,6 +74,9 @@ pub use lash_vm_client::{
 };
 #[cfg(feature = "rlm")]
 pub use lash_vm_client::{StateDigest, StateExpectation};
+/// Why lash's shipped library did not assemble: a defect of the build.
+#[cfg(feature = "rlm")]
+pub use lash_vm_runtime::LibraryError;
 #[cfg(feature = "rlm")]
 pub use lash_vm_runtime::{
     DocumentRefusal as KernelDocumentRefusal, DocumentStoreError as KernelDocumentStoreError,

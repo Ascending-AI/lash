@@ -69,7 +69,6 @@ tracing = { workspace = true }
 default = []
 rlm = [
     "dep:lash-vm-client",
-    "dep:lash-vm-worker",
     "dep:lash-vm-runtime",
     "dep:lash-kernel-doc",
     "dep:lash-kernel-check",
@@ -81,6 +80,11 @@ rlm = [
     "dep:lash-rlm-types",
     "lash-plugin-mcp?/lash-vm",
 ]
+# The worker embedding (`lash::vm::worker_entry` and what a worker
+# registers): a single-binary host is its own worker, so it links the
+# kernel library, lash's extensions and the TypeScript dialect. A host that
+# runs the shipped worker executable leaves it off and links no dialect.
+worker = ["rlm", "dep:lash-vm-worker"]
 
 # Host-wired extension features (ADR 0079 section 1). Each gates one
 # `lash::<name>` module that re-exports the matching internal crate's
@@ -119,6 +123,9 @@ synthetic-next = [
 ]
 
 [dev-dependencies]
+# The dev-dependencies' testing client is paired with a testing worker when
+# the `worker` feature links one (FIG-4409).
+lash-vm-worker = { workspace = true, features = ["testing"] }
 lash-dialect-python = { workspace = true }
 lash-conformance.workspace = true
 insta = "1"
@@ -140,5 +147,5 @@ opentelemetry_sdk = { version = "0.33", features = ["metrics", "testing"] }
 [[example]]
 name = "worker_host"
 path = "examples/worker_host.rs"
-required-features = ["rlm", "typescript"]
+required-features = ["worker"]
 test = false

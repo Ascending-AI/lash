@@ -9,7 +9,7 @@
 //! (`build.rs`); a worker registers them as built (FIG-5796).
 //!
 //! The standard embedding also holds every function of the helper releases
-//! it retains that it does not define itself (FIG-5799, `releases.rs`): a
+//! it retains that it does not define itself (FIG-5799, `lash-vm-library`): a
 //! run parked under an earlier release's helpers, and a saved function
 //! written against them, resume on exactly the functions they pin. Names
 //! resolve against the embedding's own functions alone, or, for a writer the
@@ -26,8 +26,7 @@ use lash_kernel_doc::{
 };
 use lash_kernel_vm::PreparedLibrary;
 use lash_vm_client::WorkerTuning;
-
-use crate::releases::HelperReleaseIndex;
+use lash_vm_library::{HELPER_RELEASE, HelperReleaseIndex};
 
 /// Why a worker could not assemble what it runs. The worker refuses to
 /// start: it is a defect of the build, never of a document.
@@ -44,16 +43,6 @@ pub enum EmbedError {
     #[error("helper release {release} is not held by this embedding")]
     HelperReleaseNotHeld { release: u32 },
 }
-
-/// The helper release the standard embedding writes: the version of the
-/// `kernel-helpers` format surface a state its cells and processes write
-/// holds (FIG-5799). The synthetic successor changes a helper, so it writes
-/// the release after the one this tree builds, and retains that one.
-#[cfg(not(feature = "synthetic-next"))]
-pub const HELPER_RELEASE: u32 = 1;
-/// The synthetic successor's helper release.
-#[cfg(feature = "synthetic-next")]
-pub const HELPER_RELEASE: u32 = 2;
 
 /// Everything a worker registered at startup.
 pub struct Embedding {
@@ -210,7 +199,7 @@ pub struct Embedder {
     dialects: BTreeMap<String, Package>,
     /// The functions registered as an earlier release's, which no name
     /// resolves to.
-    pub(crate) retained: BTreeSet<FunctionId>,
+    retained: BTreeSet<FunctionId>,
     writes: u32,
     releases: Vec<HelperReleaseIndex>,
 }
@@ -267,6 +256,32 @@ impl Embedder {
             .register_validated(functions)
             .map_err(|error| EmbedError::Registry(error.to_string()))?;
         self.releases = releases;
+        Ok(())
+    }
+
+    /// Registers the helpers this build changes over the release it
+    /// retains under their names, keeping the functions they replace under
+    /// none: the change its parent makes too
+    /// ([`lash_vm_library::changed_helpers`]).
+    ///
+    /// # Errors
+    ///
+    /// [`EmbedError::Registry`]: a defect of the build.
+    fn change_helpers(&mut self) -> Result<(), EmbedError> {
+        let named = self
+            .registry
+            .iter()
+            .map(|(function, _)| *function)
+            .filter(|function| !self.retained.contains(function))
+            .collect();
+        let changed = lash_vm_library::changed_helpers(named, &self.registry)
+            .map_err(|error| EmbedError::Registry(error.to_string()))?;
+        for function in changed {
+            self.registry
+                .register(function.definition, None)
+                .map_err(|error| EmbedError::Registry(error.to_string()))?;
+            self.retained.insert(function.from);
+        }
         Ok(())
     }
 
@@ -351,128 +366,22 @@ pub fn standard(tuning: &WorkerTuning) -> Result<Embedding, EmbedError> {
         .map_err(|error| EmbedError::Registry(error.to_string()))?;
     let retained = ValidatedFunctions::from_json(RETAINED_FUNCTIONS)
         .map_err(|error| EmbedError::Registry(error.to_string()))?;
-    embedder.retain(retained, standard_helper_releases()?)?;
-    #[cfg(feature = "synthetic-next")]
-    crate::synthetic::change_helpers(&mut embedder)?;
+    embedder.retain(retained, helper_release_index()?)?;
+    embedder.change_helpers()?;
     embedder.install(typescript_package(tuning, Vec::new()))?;
     embedder.finish()
 }
 
-/// The name and ordinal of each helper release the standard embedding
-/// retains, oldest first: the last is the release the tree builds
+/// The helper releases the standard embedding retains, oldest first, as
+/// the build indexed them: the last is the release the tree builds
 /// (FIG-5799).
-pub const RETAINED_HELPER_RELEASES: &[(&str, u32)] =
-    include!(concat!(env!("OUT_DIR"), "/helper_release_names.rs"));
-
-/// The helper releases the standard embedding retains, oldest first: the
-/// last is the release the tree builds (FIG-5799).
 ///
 /// # Errors
 ///
 /// [`EmbedError::Registry`] when the build's index does not decode: a
 /// defect of the build.
-pub fn standard_helper_releases() -> Result<Vec<HelperReleaseIndex>, EmbedError> {
+fn helper_release_index() -> Result<Vec<HelperReleaseIndex>, EmbedError> {
     serde_json::from_slice(HELPER_RELEASES).map_err(|error| EmbedError::Registry(error.to_string()))
-}
-
-/// The functions a build of [`standard`] would stop holding were it to stop
-/// retaining helper release `release`, each with its counterpart: the
-/// function of the same name and kernel version the embedding writes, when
-/// it has one (FIG-5799). A function no newer retained release holds and
-/// the embedding does not write is listed, and so is each function a kernel
-/// version this build interprets redeclares it as. Empty when the
-/// embedding retains no such release.
-///
-/// # Errors
-///
-/// [`EmbedError::Registry`]: a defect of the build.
-pub fn standard_retired_helpers(
-    release: u32,
-) -> Result<BTreeMap<FunctionId, Option<FunctionId>>, EmbedError> {
-    let embedding = standard(&WorkerTuning::standard())?;
-    let Some(retired) = embedding
-        .helper_releases()
-        .find(|index| index.ordinal == release)
-    else {
-        return Ok(BTreeMap::new());
-    };
-    let named: BTreeMap<&lash_kernel_doc::FunctionName, FunctionId> = embedding
-        .library()
-        .iter()
-        .map(|(name, function)| (name, *function))
-        .collect();
-    let mut kept: BTreeSet<FunctionId> = named.values().copied().collect();
-    for newer in embedding
-        .helper_releases()
-        .filter(|index| index.ordinal > release)
-    {
-        kept.extend(newer.functions.iter().copied());
-    }
-    let mut level: BTreeMap<FunctionId, Option<FunctionId>> = retired
-        .functions
-        .iter()
-        .filter(|function| !kept.contains(function))
-        .map(|function| {
-            let counterpart = embedding
-                .written
-                .get(function)
-                .and_then(|registered| named.get(&registered.definition.name).copied());
-            (*function, counterpart)
-        })
-        .collect();
-    let mut dropped = level.clone();
-    let interpreted = embedding.registry()?;
-    let refused =
-        |error: lash_kernel_migrate::DocumentRefusal| EmbedError::Registry(error.to_string());
-    for version in lash_kernel_doc::KernelVersion::ALL {
-        let Some(migration) = lash_kernel_migrate::migration_from(*version) else {
-            continue;
-        };
-        let redeclared = |functions: Vec<FunctionId>| {
-            lash_kernel_migrate::redeclare(migration.definition, functions, &**interpreted)
-                .map(|all| {
-                    all.into_iter()
-                        .map(|function| (function.from, function.to))
-                        .collect::<BTreeMap<_, _>>()
-                })
-                .map_err(refused)
-        };
-        let old = redeclared(level.keys().copied().collect())?;
-        let new = redeclared(level.values().flatten().copied().collect())?;
-        level = level
-            .iter()
-            .filter_map(|(function, counterpart)| {
-                let to = *old.get(function)?;
-                Some((
-                    to,
-                    counterpart.and_then(|counterpart| new.get(&counterpart).copied()),
-                ))
-            })
-            .collect();
-        dropped.extend(
-            level
-                .iter()
-                .map(|(function, counterpart)| (*function, *counterpart)),
-        );
-    }
-    Ok(dropped)
-}
-
-/// The function registry of [`standard`], assembled once in this process:
-/// what a parent links and admits documents against for workers assembled
-/// as lash ships them. The registry is the same under every tuning, which
-/// sizes only the parser's stack.
-///
-/// # Errors
-///
-/// [`EmbedError`].
-pub fn standard_functions() -> Result<Arc<FunctionRegistry>, EmbedError> {
-    static FUNCTIONS: OnceLock<Arc<FunctionRegistry>> = OnceLock::new();
-    if let Some(functions) = FUNCTIONS.get() {
-        return Ok(Arc::clone(functions));
-    }
-    let functions = Arc::clone(standard(&WorkerTuning::standard())?.registry()?);
-    Ok(Arc::clone(FUNCTIONS.get_or_init(|| functions)))
 }
 
 /// The TypeScript dialect, its helpers defined against `library`.
@@ -648,23 +557,44 @@ mod tests {
         assert!(embedding.dialects.contains_key("typescript"));
     }
 
-    /// A parent assembles the shipped registry once: every session it
-    /// opens links against the same one, however many it opens (FIG-5759).
+    /// A parent holds exactly the functions a worker holds, without
+    /// linking a dialect or an extension (FIG-5812): the registry it reads
+    /// from the retained helper releases is the standard embedding's, every
+    /// function under the same identity and definition, for every kernel
+    /// version the build interprets. It is the union of every retained
+    /// release, so a run parked on an earlier release's helpers resolves on
+    /// the parent too (FIG-5799). The parent assembles it once in a process:
+    /// every session it opens links against the same one (FIG-5759).
     #[test]
-    fn the_standard_functions_are_assembled_once_in_a_process() {
-        let first = standard_functions().expect("the standard functions");
-        let again = standard_functions().expect("the standard functions");
-        assert!(Arc::ptr_eq(&first, &again));
+    fn a_parent_holds_exactly_the_functions_a_worker_holds() {
+        let parent = lash_vm_library::standard_functions().expect("the parent's functions");
+        let again = lash_vm_library::standard_functions().expect("the parent's functions");
+        assert!(Arc::ptr_eq(&parent, &again), "assembled once in a process");
         let embedding = standard(&WorkerTuning::standard()).expect("the standard embedding");
-        assert_eq!(
-            first.iter().count(),
-            embedding
-                .registry()
-                .expect("every version's functions")
-                .iter()
-                .count(),
-            "the registry a worker assembles"
+        let worker = embedding.registry().expect("every version's functions");
+        let definitions =
+            |registry: &FunctionRegistry| -> BTreeMap<FunctionId, FunctionDefinition> {
+                registry
+                    .iter()
+                    .map(|(function, registered)| {
+                        (*function, FunctionDefinition::clone(&registered.definition))
+                    })
+                    .collect()
+            };
+        let held = definitions(&parent);
+        assert!(
+            held == definitions(worker),
+            "the parent's functions differ from the worker's"
         );
+        for release in lash_vm_library::standard_helper_releases().expect("the releases") {
+            for function in &release.functions {
+                assert!(
+                    held.contains_key(function),
+                    "the parent holds {function} of helper release {}",
+                    release.release
+                );
+            }
+        }
     }
 
     /// A worker that starts redeclares nothing for a successor version: a

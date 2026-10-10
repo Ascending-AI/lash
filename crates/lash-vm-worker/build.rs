@@ -1,6 +1,6 @@
 //! Defines the standard embedding's TypeScript helpers once, when the crate
-//! is built (FIG-5796), and assembles the released helper sets it retains
-//! (FIG-5799).
+//! is built (FIG-5796), and checks the released helper sets it retains
+//! against what it builds (FIG-5799).
 //!
 //! Every worker is a process of its own, and defining the helpers (reading
 //! their kernel text, validating and identifying each) took most of a
@@ -10,12 +10,12 @@
 //!
 //! A run pins the identities it was written against, so a build also holds
 //! every function of the helper releases it retains that it does not
-//! define itself (`src/releases.rs`). The script checks each release
-//! against the build (`src/build/release.rs`, `src/build/probe.rs`),
-//! validates the functions it retains in the registry the worker holds,
-//! and writes them, the releases' index, where the release the tree is
-//! still building differs from the build, and that release frozen for the
-//! tree as it stands.
+//! define itself (`lash-vm-library`, which a parent holds the library
+//! from). The script checks each release against the build
+//! (`src/build/release.rs`, `src/build/probe.rs`), validates the functions
+//! it retains in the registry the worker holds, and writes them, the
+//! releases' index, where the release the tree is still building differs
+//! from the build, and that release frozen for the tree as it stands.
 
 #[path = "src/library.rs"]
 mod library;
@@ -23,18 +23,10 @@ mod library;
 mod probe;
 #[path = "src/build/release.rs"]
 mod release;
-#[path = "src/releases.rs"]
-mod releases;
-
-#[path = "src/generated/helpers_1_0.rs"]
-mod helpers_1_0;
 
 use lash_kernel_dialect::NamedLibrary;
 use lash_kernel_doc::FunctionRegistry;
-
-/// The helper releases this build retains, oldest first. The last is the
-/// release the tree builds.
-const RELEASES: &[&str] = &[helpers_1_0::RELEASE];
+use lash_vm_library::{HelperRelease, HelperReleaseIndex};
 
 #[expect(
     clippy::disallowed_methods,
@@ -50,10 +42,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let out = std::path::PathBuf::from(std::env::var_os("OUT_DIR").ok_or("OUT_DIR is unset")?);
     std::fs::write(out.join("typescript_helpers.json"), validated.to_json()?)?;
 
-    let releases = RELEASES
-        .iter()
-        .map(|text| release::HelperRelease::decode(text))
-        .collect::<Result<Vec<_>, _>>()?;
+    let releases = lash_vm_library::helper_releases()?;
     let fingerprints = probe::fingerprints(&registry);
     let building = releases.last().ok_or("no helper release")?;
     let frozen = release::freeze(
@@ -67,19 +56,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let kept = release::keep(&releases, &registry, &fingerprints)?;
     let retained = registry.validate_functions(kept.retained)?;
     std::fs::write(out.join("retained_functions.json"), retained.to_json()?)?;
-    let index: Vec<releases::HelperReleaseIndex> =
-        releases.iter().map(release::HelperRelease::index).collect();
+    let index: Vec<HelperReleaseIndex> = releases.iter().map(HelperRelease::index).collect();
     std::fs::write(
         out.join("helper_releases.json"),
         serde_json::to_vec(&index)?,
-    )?;
-    let names: Vec<String> = releases
-        .iter()
-        .map(|release| format!("({:?}, {})", release.release, release.ordinal))
-        .collect();
-    std::fs::write(
-        out.join("helper_release_names.rs"),
-        format!("&[{}]", names.join(", ")),
     )?;
     std::fs::write(
         out.join("helper_release_divergence.json"),

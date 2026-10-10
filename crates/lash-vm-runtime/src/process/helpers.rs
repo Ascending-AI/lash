@@ -33,7 +33,7 @@ use super::{DocumentStoreError, KernelDocuments, KernelMigrationSurveyError, adv
 
 /// The functions a build stops holding when it stops retaining a helper
 /// release, each with the build's function of the same name and kernel
-/// version, when it has one (`lash_vm_worker::standard_retired_helpers`).
+/// version, when it has one (`lash_vm_library::standard_retired_helpers`).
 pub type RetiredHelpers = BTreeMap<FunctionId, Option<FunctionId>>;
 
 /// The functions of every helper release before this build's own that the
@@ -42,12 +42,12 @@ pub type RetiredHelpers = BTreeMap<FunctionId, Option<FunctionId>>;
 ///
 /// # Errors
 ///
-/// The embedding's: the shipped library does not assemble.
-pub fn retained_earlier_helpers() -> Result<RetiredHelpers, lash_vm_worker::EmbedError> {
+/// The library's: the shipped library does not assemble.
+pub fn retained_earlier_helpers() -> Result<RetiredHelpers, lash_vm_library::LibraryError> {
     let mut retired = RetiredHelpers::new();
-    for (_, release) in lash_vm_worker::RETAINED_HELPER_RELEASES {
-        if *release < lash_vm_worker::HELPER_RELEASE {
-            retired.extend(lash_vm_worker::standard_retired_helpers(*release)?);
+    for (_, release) in lash_vm_library::RETAINED_HELPER_RELEASES {
+        if *release < lash_vm_library::HELPER_RELEASE {
+            retired.extend(lash_vm_library::standard_retired_helpers(*release)?);
         }
     }
     Ok(retired)

@@ -2696,6 +2696,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "lash-internal-vm-library"
+version = "0.0.0-dev"
+dependencies = [
+ "lash-kernel-doc",
+ "lash-kernel-migrate",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "lash-internal-vm-protocol"
 version = "0.0.0-dev"
 dependencies = [
@@ -2722,7 +2733,7 @@ dependencies = [
  "lash-internal-trace",
  "lash-internal-vm-broker",
  "lash-internal-vm-client",
- "lash-internal-vm-worker",
+ "lash-internal-vm-library",
  "lash-kernel-check",
  "lash-kernel-dialect",
  "lash-kernel-doc",
@@ -2749,6 +2760,7 @@ dependencies = [
  "lash-ext-url-whatwg",
  "lash-internal-core-execution",
  "lash-internal-vm-client",
+ "lash-internal-vm-library",
  "lash-internal-vm-protocol",
  "lash-internal-vm-worker",
  "lash-kernel-dialect",

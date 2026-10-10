@@ -20,7 +20,7 @@ crates/lash-regress/src/unicodetables.rs::<module>::RGI_EMOJI_MODIFIER_SEQUENCE 
 crates/lash-regress/src/unicodetables.rs::<module>::RGI_EMOJI_TAG_SEQUENCE  # Unicode property data table; no guest input
 crates/lash-regress/src/unicodetables.rs::<module>::RGI_EMOJI_ZWJ_SEQUENCE  # Unicode property data table; no guest input
 crates/lash-regress/src/unicodetables.rs::<module>::RGI_EMOJI  # Unicode property data table; no guest input
-crates/lash-vm-worker/src/embedding.rs::standard_functions::FUNCTIONS  # the shipped function registry, assembled from constant definitions; no guest input
+crates/lash-vm-library/src/lib.rs::standard::STANDARD  # the shipped function registry, assembled from the constant helper releases; no guest input
 crates/lash-vm-worker/src/embedding.rs::<module>::HELPER_DEFINITIONS  # cfg(test) thread-local count of TypeScript helper definitions; never compiled into a worker
 crates/lash-vm-worker/src/heap_profile.rs::<module>::WINDOW  # opt-in dhat profiler window of the worker process; holds no guest value
 crates/lash-vm-worker/src/main.rs::<module>::ALLOCATOR  # dhat-heap feature global allocator; holds no guest value

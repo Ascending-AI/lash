@@ -1,9 +1,10 @@
 //! RLM frame evidence for ADR 0113: which frames, executions and host pins
 //! hold a definition's module. Every law runs on the core's own node over
 //! SQLite or PostgreSQL stores; the core's cleanup relay reclaims what an
-//! ended frame held.
+//! ended frame held. The Python laws run this binary as their worker, so
+//! it links the worker embedding (`worker`).
 
-#![cfg(all(feature = "rlm", feature = "sqlite", feature = "testing"))]
+#![cfg(all(feature = "worker", feature = "sqlite", feature = "testing"))]
 #![allow(clippy::disallowed_methods)]
 #![expect(
     clippy::expect_used,

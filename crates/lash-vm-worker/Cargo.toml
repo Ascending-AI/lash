@@ -29,6 +29,7 @@ synthetic-next = [
     "lash-kernel-migrate/synthetic-next",
     "lash-kernel-state/synthetic-next",
     "lash-kernel-vm/synthetic-next",
+    "lash-vm-library/synthetic-next",
 ]
 testing = ["lash-vm-client/testing"]
 
@@ -52,6 +53,7 @@ lash-kernel-lib = { workspace = true }
 lash-kernel-migrate = { workspace = true }
 lash-kernel-state = { workspace = true }
 lash-kernel-dialect = { workspace = true }
+lash-vm-library = { workspace = true }
 lash-dialect-typescript = { workspace = true }
 lash-ext-date-ecma = { workspace = true }
 lash-ext-regex-ecma = { workspace = true }
@@ -67,11 +69,11 @@ lash-kernel-doc = { workspace = true }
 lash-kernel-dialect = { workspace = true }
 lash-kernel-lib = { workspace = true }
 lash-kernel-vm = { workspace = true }
+lash-vm-library = { workspace = true }
 lash-dialect-typescript = { workspace = true }
 lash-ext-date-ecma = { workspace = true }
 lash-ext-regex-ecma = { workspace = true }
 lash-ext-url-whatwg = { workspace = true }
-serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]

@@ -264,13 +264,13 @@ impl KernelProcessEngine {
     ///
     /// # Errors
     ///
-    /// The embedding's own error: the shipped library does not assemble.
+    /// The library's own error: the shipped library does not assemble.
     pub fn new(
         documents: KernelDocuments,
         workers: lash_vm_client::service::Service,
         bounds: lash_kernel_vm::Bounds,
-    ) -> Result<Self, lash_vm_worker::EmbedError> {
-        let functions = lash_vm_worker::standard_functions()?;
+    ) -> Result<Self, lash_vm_library::LibraryError> {
+        let functions = lash_vm_library::standard_functions()?;
         Ok(Self::with_functions(documents, functions, workers, bounds))
     }
 

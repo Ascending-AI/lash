@@ -36,11 +36,11 @@ ROOT = Path(__file__).resolve().parents[1]
 ALLOWLIST = Path("scripts/vm-static-state-allowlist.txt")
 
 # The crates whose code runs inside a VM worker: the kernel set (machine,
-# library, dialects, extensions and the engines they fork) and lash's side of
-# the machine's host boundary. A new kernel crate joins the list by its name,
+# library, dialects, extensions and the engines they fork), lash's side of
+# the machine's host boundary and the shipped library both sides hold. A new kernel crate joins the list by its name,
 # so its first static is reviewed like any other.
 VM_CRATE_PATTERN = re.compile(r"^lash-(kernel|dialect|ext)-|^lash-regress$")
-VM_CRATES = ("crates/lash-vm-runtime",)
+VM_CRATES = ("crates/lash-vm-runtime", "crates/lash-vm-library")
 WORKER_CRATE = "crates/lash-vm-worker"
 
 STATIC_ITEM = re.compile(r"(?<![\w'])static\s+(?:mut\s+|ref\s+)?([A-Za-z_]\w*)\s*:")

@@ -1,0 +1,33 @@
+[package]
+name = "lash-internal-vm-library"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+rust-version.workspace = true
+description = "The library functions lash's shipped worker holds, as a parent knows them: the frozen helper releases."
+
+[lib]
+name = "lash_vm_library"
+doctest = false
+
+[features]
+# The synthetic successor's kernel version and helper change, made by a
+# worker and its parent alike.
+synthetic-next = [
+    "lash-kernel-doc/synthetic-next",
+    "lash-kernel-migrate/synthetic-next",
+]
+
+[lints]
+workspace = true
+
+[dependencies]
+lash-kernel-doc = { workspace = true }
+lash-kernel-migrate = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }

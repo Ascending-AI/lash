@@ -1,122 +1,23 @@
-//! A released helper set as the repository keeps it, and what a build makes
-//! of the ones it retains (FIG-5799).
+//! What a build makes of the helper releases it retains (FIG-5799).
 //!
-//! A release is frozen as data: every function a build of it holds, by
-//! identity, with its definition and, for a native implementation, the
-//! digest of what the code behind it answers (`probe.rs`). The build checks
-//! each definition's identity, holds every body a run may still pin that
-//! the build does not define itself, and compares each native digest with
-//! the build's own: a native that answers otherwise under the same identity
-//! fails the build, since its code is not in its definition and it is
-//! stated anew under its next native version (`K-LIB-011`). A sealed
-//! release, one that has shipped, fails the build on any other difference;
-//! the release the tree is still building records it for its law, which
-//! names the generator that freezes it again.
+//! A release is frozen as data (`lash-vm-library`): every function a build
+//! of it holds, by identity, with its definition and, for a native
+//! implementation, the digest of what the code behind it answers
+//! (`probe.rs`). The build checks each definition's identity, holds every
+//! body a run may still pin that the build does not define itself, and
+//! compares each native digest with the build's own: a native that answers
+//! otherwise under the same identity fails the build, since its code is not
+//! in its definition and it is stated anew under its next native version
+//! (`K-LIB-011`). A sealed release, one that has shipped, fails the build on
+//! any other difference; the release the tree is still building records it
+//! for its law, which names the generator that freezes it again.
 //!
 //! The build script includes this file.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::fmt::Write as _;
 
 use lash_kernel_doc::{FunctionDefinition, FunctionId, FunctionRegistry};
-use serde::{Deserialize, Serialize};
-
-use crate::releases::HelperReleaseIndex;
-
-/// The generator that freezes the release the tree builds again.
-pub(crate) const FREEZE: &str = "kiln test //crates/lash-vm-worker:lash-vm-worker__unit_test --local-test-execution --no-test-cache --test_arg=--ignored --test_arg=--exact --test_arg=embedding::release_tests::regenerate_helper_release --test_env=LASH_REGENERATE=1 --test_env=BUILD_WORKSPACE_DIRECTORY=$PWD";
-
-/// One released helper set, as `src/generated/` keeps it.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct HelperRelease {
-    pub(crate) release: String,
-    pub(crate) ordinal: u32,
-    /// The release has shipped: what it holds is fixed, and a build that
-    /// cannot hold it exactly fails.
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub(crate) sealed: bool,
-    /// The functions a build of the release resolves names against.
-    pub(crate) writes: BTreeSet<FunctionId>,
-    /// Every function the release holds, each after the functions its body
-    /// calls.
-    pub(crate) functions: Vec<ReleasedFunction>,
-}
-
-/// A function of a released set.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct ReleasedFunction {
-    pub(crate) function: FunctionId,
-    pub(crate) definition: FunctionDefinition,
-    /// The digest of what its native implementation answered when the
-    /// release was frozen.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) fingerprint: Option<String>,
-}
-
-fn is_false(value: &bool) -> bool {
-    !*value
-}
-
-impl HelperRelease {
-    /// Reads a release as `src/generated/` keeps it. A body nests as deep as
-    /// its definition does.
-    pub(crate) fn decode(text: &str) -> Result<Self, String> {
-        let mut decoder = serde_json::Deserializer::from_str(text);
-        decoder.disable_recursion_limit();
-        let release = Self::deserialize(&mut decoder).map_err(|error| error.to_string())?;
-        decoder.end().map_err(|error| error.to_string())?;
-        Ok(release)
-    }
-
-    /// The Rust source `src/generated/` keeps the release in: its JSON, one
-    /// function to a line, as a string constant.
-    pub(crate) fn source(&self) -> Result<String, String> {
-        let mut text = format!(
-            "{{\"release\":{},\"ordinal\":{},",
-            json(&self.release)?,
-            self.ordinal
-        );
-        if self.sealed {
-            text.push_str("\"sealed\":true,");
-        }
-        let _ = write!(text, "\"writes\":{},\"functions\":[", json(&self.writes)?);
-        for (index, function) in self.functions.iter().enumerate() {
-            text.push_str(if index == 0 { "\n" } else { ",\n" });
-            text.push_str(&json(function)?);
-        }
-        text.push_str("\n]}\n");
-        let mut hashes = String::from("#");
-        while text.contains(&format!("\"{hashes}")) {
-            hashes.push('#');
-        }
-        Ok(format!(
-            "// @generated by `{FREEZE}`; do not edit.\n\
-             //! Helper release {release}: every function a build of it holds (FIG-5799).\n\n\
-             pub(crate) const RELEASE: &str = r{hashes}\"{text}\"{hashes};\n",
-            release = self.release,
-        ))
-    }
-
-    /// What the worker keeps of the release.
-    pub(crate) fn index(&self) -> HelperReleaseIndex {
-        HelperReleaseIndex {
-            release: self.release.clone(),
-            ordinal: self.ordinal,
-            writes: self.writes.clone(),
-            functions: self
-                .functions
-                .iter()
-                .map(|function| function.function)
-                .collect(),
-        }
-    }
-}
-
-fn json(value: &impl Serialize) -> Result<String, String> {
-    serde_json::to_string(value).map_err(|error| error.to_string())
-}
+use lash_vm_library::{FREEZE, HelperRelease, ReleasedFunction};
 
 /// What a build holds of the releases it retains.
 #[derive(Debug, Default)]

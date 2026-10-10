@@ -29,16 +29,17 @@ pub use formats::{
 pub use host::ParentHost;
 /// Why a kernel migration does not carry a document or a parked run.
 pub use lash_kernel_migrate::{DocumentRefusal, ParkedRefusal};
-/// The library functions lash's shipped worker holds: what a kernel
-/// document is linked, admitted and migrated against when the host
-/// assembled no worker of its own.
-pub use lash_vm_worker::standard_functions;
 /// The helper releases lash's shipped worker retains beside its own
 /// functions (FIG-5799).
-pub use lash_vm_worker::{
+pub use lash_vm_library::{
     HelperReleaseIndex, RETAINED_HELPER_RELEASES, standard_helper_releases,
     standard_retired_helpers,
 };
+/// The library functions lash's shipped worker holds: what a kernel
+/// document is linked, admitted and migrated against when the host
+/// assembled no worker of its own. The parent reads them from the helper
+/// releases the build retains, so it links no dialect (FIG-5812).
+pub use lash_vm_library::{LibraryError, standard_functions};
 pub use projection::{ProjectionCatalog, ProjectionProvider, ProjectionRefusal};
 
 /// The machine a worker hosts, as the broker drives it, and the run's

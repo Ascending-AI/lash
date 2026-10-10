@@ -213,11 +213,25 @@ pub enum RegistryError {
 #[derive(Clone, Debug, Default)]
 pub struct FunctionRegistry {
     functions: BTreeMap<FunctionId, RegisteredFunction>,
+    /// The registry holds definitions alone ([`FunctionRegistry::declarations`]).
+    declarations: bool,
 }
 
 impl FunctionRegistry {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// A registry of definitions alone: what an embedder that runs none of
+    /// them links, admits and migrates documents against, such as a parent
+    /// whose workers run its documents. A native definition is registered
+    /// without its implementation, and a machine handed this registry
+    /// cannot call it.
+    pub fn declarations() -> Self {
+        Self {
+            functions: BTreeMap::new(),
+            declarations: true,
+        }
     }
 
     /// Registers a function and returns its identity.
@@ -240,7 +254,9 @@ impl FunctionRegistry {
             &native,
         ) {
             (false, _, Some(_)) => return Err(RegistryError::NativeNotStated { name }),
-            (true, false, None) => return Err(RegistryError::NativeMissing { name }),
+            (true, false, None) if !self.declarations => {
+                return Err(RegistryError::NativeMissing { name });
+            }
             _ => {}
         }
         let function = definition.identity()?;

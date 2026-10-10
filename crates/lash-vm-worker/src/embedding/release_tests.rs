@@ -14,7 +14,7 @@ use lash_vm_client::WorkerTuning;
 use super::{EmbedError, HELPER_RELEASE, standard};
 
 /// The helper release the tree builds, frozen for the tree as it stands
-/// (`build.rs`): the source `src/generated/` keeps it in.
+/// (`build.rs`): the source `lash-vm-library`'s `src/generated/` keeps it in.
 const FROZEN: &str = include_str!(concat!(env!("OUT_DIR"), "/helper_release.rs"));
 
 /// Where the release the tree builds and the build part (`build.rs`).
@@ -25,13 +25,14 @@ const DIVERGENCE: &[u8] =
 /// it writes the build's functions and keeps every function of its earlier
 /// freeze the build can still run (FIG-5799).
 #[test]
-#[ignore = "regenerates crates/lash-vm-worker/src/generated/helpers_1_0.rs"]
+#[ignore = "regenerates crates/lash-vm-library/src/generated/helpers_1_0.rs"]
 fn regenerate_helper_release() {
     assert_eq!(std::env::var("LASH_REGENERATE").as_deref(), Ok("1"));
     let workspace =
         std::env::var_os("BUILD_WORKSPACE_DIRECTORY").expect("the regeneration workspace");
     std::fs::write(
-        std::path::Path::new(&workspace).join("crates/lash-vm-worker/src/generated/helpers_1_0.rs"),
+        std::path::Path::new(&workspace)
+            .join("crates/lash-vm-library/src/generated/helpers_1_0.rs"),
         FROZEN,
     )
     .expect("the release is written");

@@ -262,6 +262,8 @@ features = [
   "lash-runtime/typescript:off",
   "lash-runtime/http-transport:on",
   "lash-runtime/http-transport:off",
+  "lash-runtime/worker:on",
+  "lash-runtime/worker:off",
 ]
 commands = [
   # Production host witnesses (FIG-5097): --lib excludes dev-dependencies,
@@ -295,11 +297,14 @@ commands = [
   ["cargo", "check", "-p", "lash-runtime", "--all-targets", "--no-default-features", "--features", "mcp", "--locked"],
   ["cargo", "check", "-p", "lash-runtime", "--all-targets", "--no-default-features", "--features", "typescript", "--locked"],
   ["cargo", "check", "-p", "lash-runtime", "--all-targets", "--no-default-features", "--features", "http-transport", "--locked"],
+  # The worker embedding (FIG-5812): `rlm` hosts link no dialect; `worker`
+  # adds the single-binary host's worker entry and what a worker registers.
+  ["cargo", "check", "-p", "lash-runtime", "--all-targets", "--no-default-features", "--features", "worker", "--locked"],
   # The figments facade request (FIG-4423): `rlm,testing` in one resolution,
-  # which compiles the `lash-seam-proof-worker` bin too and pairs the
-  # `lash-vm-worker?/testing` forward with the worker's own
-  # `lash-vm-client/testing` forward -- a testing worker with a testing
-  # client, the pairing FIG-4409's invariant checks.
+  # which compiles the `lash-seam-proof-worker` bin too. It links no worker;
+  # a host that adds `worker` gets the `lash-vm-worker?/testing` forward
+  # beside the worker's own `lash-vm-client/testing` forward -- a testing
+  # worker with a testing client, the pairing FIG-4409's invariant checks.
   ["cargo", "check", "-p", "lash-runtime", "--all-targets", "--no-default-features", "--features", "rlm,testing", "--locked"],
 ]
 
@@ -492,6 +497,8 @@ features = [
   "lash-kernel-conformance/synthetic-next:off",
   "lash-internal-vm-runtime/synthetic-next:on",
   "lash-internal-vm-runtime/synthetic-next:off",
+  "lash-internal-vm-library/synthetic-next:on",
+  "lash-internal-vm-library/synthetic-next:off",
 ]
 commands = [
   ["cargo", "check", "-p", "lash-kernel-doc", "--lib", "--no-default-features", "--locked"],
@@ -507,6 +514,8 @@ commands = [
   ["cargo", "test", "-p", "lash-kernel-conformance", "--lib", "--no-default-features", "--features", "synthetic-next", "--locked"],
   ["cargo", "check", "-p", "lash-internal-vm-runtime", "--lib", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-vm-runtime", "--lib", "--no-default-features", "--features", "synthetic-next", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-vm-library", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-vm-library", "--lib", "--no-default-features", "--features", "synthetic-next", "--locked"],
   ["cargo", "test", "-p", "lash-runtime", "--test", "kernel_two_build_claim", "--no-default-features", "--features", "rlm,sqlite,testing,typescript,synthetic-next", "--locked"],
 ]
 

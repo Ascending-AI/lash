@@ -97,7 +97,7 @@ const _: () = assert!(KERNEL_SAVED_FUNCTION_VERSION == lash_kernel_doc::KERNEL_V
 /// those wrote, and a node of a build that holds only an earlier release
 /// never claims what a build of this one wrote. A format set without the
 /// surface is release 1's, the 1.0 baseline's.
-pub const KERNEL_HELPER_RELEASE: u32 = lash_vm_worker::HELPER_RELEASE;
+pub const KERNEL_HELPER_RELEASE: u32 = lash_vm_library::HELPER_RELEASE;
 
 /// The version of each kernel format the previous build wrote, when this
 /// build still interprets it: what a process that build parked is stored

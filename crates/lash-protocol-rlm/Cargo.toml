@@ -18,18 +18,20 @@ doctest = false
 
 [features]
 default = []
-testing = ["dep:lash-vm-worker", "lash-vm-client/testing", "lash-core/testing"]
+testing = ["lash-vm-client/testing", "lash-core/testing", "lash-vm-worker?/testing"]
 # Phase A's synthetic N+1 build (ADR 0115 §6): the blocks beside the
 # constants it moves, and the store's lift and pin tables they rely on. Only
-# lash-upgrade-harness enables it; no production build does.
-synthetic-next = ["lash-core/synthetic-next", "lash-vm-client/synthetic-next", "lash-vm-runtime/synthetic-next", "lash-vm-worker?/synthetic-next"]
+# lash-upgrade-harness enables it; no production build does. It links the
+# worker its laws run cells in at the synthetic successor, paired with the
+# client it drives (FIG-4409).
+synthetic-next = ["lash-core/synthetic-next", "lash-vm-client/synthetic-next", "lash-vm-runtime/synthetic-next", "dep:lash-vm-worker", "lash-vm-worker/synthetic-next"]
 
 [lints]
 workspace = true
 
 [dependencies]
 lash-vm-client = { workspace = true }
-lash-vm-worker = { workspace = true, optional = true, features = ["testing"] }
+lash-vm-worker = { workspace = true, optional = true }
 lash-vm-broker = { workspace = true }
 lash-vm-protocol = { workspace = true }
 lash-kernel-doc = { workspace = true }
