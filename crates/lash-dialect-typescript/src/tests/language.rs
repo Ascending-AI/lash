@@ -182,16 +182,6 @@ fn spans_and_labels_annotate_sites() {
     assert_eq!(last.data["span"][0], source.find("let z").unwrap());
 }
 
-/// A built-in function used as a value is a closure of the calling
-/// convention that calls it.
-#[test]
-fn a_built_in_function_is_a_value() {
-    assert_eq!(
-        main_text("const log = console.log;"),
-        "let log = fn(this1, args1) {\n  let t1 = invoke ts.console.log(this1, args1)\n  return t1\n}"
-    );
-}
-
 /// A member reference is read before its argument expressions run.
 #[test]
 fn member_reference_failure_precedes_argument_effects() {

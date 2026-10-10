@@ -1,6 +1,7 @@
 # JavaScript Array semantics on kernel collections.
 # Empty tuple slots are holes; JS values never use tuples.
 
+use ts.callable
 use kind
 use same
 use eq
@@ -27,7 +28,7 @@ use ts.require_object_coercible
 use ts.get
 use ts.set
 use ts.delete
-use ts.has
+use ts.has_own
 use ts.to_number
 use ts.to_string
 use ts.to_boolean
@@ -179,6 +180,8 @@ errors "type_error", "RangeError"
 charge 8
 body {
   let value = invoke ts.array.argument(args, 0)
+  # Array.prototype is itself an array, though no array's class.
+  if same(value, ("ts.object", "Array.prototype", "Array")) { return true }
   let output = invoke ts.array.is(value)
   return output
 }
@@ -189,7 +192,10 @@ errors "type_error", "RangeError"
 charge 8
 body {
   let receiver = invoke ts.receiver(callback)
-  if same(receiver, "closure") { return callback }
+  if same(receiver, "closure") {
+    let made = invoke ts.callable(callback)
+    return made
+  }
   throw error.new("type_error", "callback is not a function", null)
 }
 
@@ -329,7 +335,7 @@ body {
   if num.lt(4294967295.0, num.sub(end, start)) { throw error.new("RangeError", "Invalid array length", null) }
   let output = []
   while num.lt(start, end) {
-    let present = invoke ts.has(this, start)
+    let present = invoke ts.has_own(this, start)
     let value = ()
     if present { set value = invoke ts.get(this, start) }
     set output[list.len(output)] = value
@@ -353,7 +359,7 @@ body {
       let length = invoke ts.array.length(source)
       let index = 0.0
       while num.lt(index, length) {
-        let present = invoke ts.has(source, index)
+        let present = invoke ts.has_own(source, index)
         let value = ()
         if present { set value = invoke ts.get(source, index) }
         set output[list.len(output)] = value
@@ -404,7 +410,7 @@ body {
     }
   }
   while num.lt(0, count) {
-    let present = invoke ts.has(this, start)
+    let present = invoke ts.has_own(this, start)
     if present {
       let value = invoke ts.get(this, start)
       do invoke ts.array.set(this, target, value)
@@ -430,7 +436,7 @@ body {
   if num.lt(from, 0) { set index = num.max(num.add(length, from), 0) }
   while num.lt(index, length) {
     if num.lt(index, 0) { break }
-    let present = invoke ts.has(this, index)
+    let present = invoke ts.has_own(this, index)
     if present {
       let value = invoke ts.get(this, index)
       let equal = invoke ts.strict_equals(value, search)
@@ -456,7 +462,7 @@ body {
   if num.lt(from, 0) { set index = num.add(length, from) }
   while num.lt(index, length) {
     if num.lt(index, 0) { break }
-    let present = invoke ts.has(this, index)
+    let present = invoke ts.has_own(this, index)
     if present {
       let value = invoke ts.get(this, index)
       let equal = invoke ts.strict_equals(value, search)
@@ -481,7 +487,7 @@ body {
   if num.lt(from, 0) { set index = num.max(num.add(length, from), 0) }
   while num.lt(index, length) {
     if num.lt(index, 0) { break }
-    let present = invoke ts.has(this, index)
+    let present = invoke ts.has_own(this, index)
     set present = true
     if present {
       let value = invoke ts.get(this, index)
@@ -514,7 +520,7 @@ body {
   let index = 0.0
   while num.lt(index, length) {
     if num.lt(index, 0) { break }
-    let present = invoke ts.has(this, index)
+    let present = invoke ts.has_own(this, index)
     if present {
       let value = invoke ts.get(this, index)
       let passed = [value, num.to_float(index), this]
@@ -539,7 +545,7 @@ body {
   let index = 0.0
   while num.lt(index, length) {
     if num.lt(index, 0) { break }
-    let present = invoke ts.has(this, index)
+    let present = invoke ts.has_own(this, index)
     if present {
       let value = invoke ts.get(this, index)
       let passed = [value, num.to_float(index), this]
@@ -565,7 +571,7 @@ body {
   let index = 0.0
   while num.lt(index, length) {
     if num.lt(index, 0) { break }
-    let present = invoke ts.has(this, index)
+    let present = invoke ts.has_own(this, index)
     if present {
       let value = invoke ts.get(this, index)
       let passed = [value, num.to_float(index), this]
@@ -589,7 +595,7 @@ body {
   let index = 0.0
   while num.lt(index, length) {
     if num.lt(index, 0) { break }
-    let present = invoke ts.has(this, index)
+    let present = invoke ts.has_own(this, index)
     if present {
       let value = invoke ts.get(this, index)
       let passed = [value, num.to_float(index), this]
@@ -615,7 +621,7 @@ body {
   let index = 0.0
   while num.lt(index, length) {
     if num.lt(index, 0) { break }
-    let present = invoke ts.has(this, index)
+    let present = invoke ts.has_own(this, index)
     if present {
       let value = invoke ts.get(this, index)
       let passed = [value, num.to_float(index), this]
@@ -641,7 +647,7 @@ body {
   let index = 0.0
   while num.lt(index, length) {
     if num.lt(index, 0) { break }
-    let present = invoke ts.has(this, index)
+    let present = invoke ts.has_own(this, index)
     set present = true
     if present {
       let value = invoke ts.get(this, index)
@@ -668,7 +674,7 @@ body {
   let index = 0.0
   while num.lt(index, length) {
     if num.lt(index, 0) { break }
-    let present = invoke ts.has(this, index)
+    let present = invoke ts.has_own(this, index)
     set present = true
     if present {
       let value = invoke ts.get(this, index)
@@ -695,7 +701,7 @@ body {
   let index = num.sub(length, 1)
   while num.lt(index, length) {
     if num.lt(index, 0) { break }
-    let present = invoke ts.has(this, index)
+    let present = invoke ts.has_own(this, index)
     set present = true
     if present {
       let value = invoke ts.get(this, index)
@@ -722,7 +728,7 @@ body {
   let index = num.sub(length, 1)
   while num.lt(index, length) {
     if num.lt(index, 0) { break }
-    let present = invoke ts.has(this, index)
+    let present = invoke ts.has_own(this, index)
     set present = true
     if present {
       let value = invoke ts.get(this, index)
@@ -749,7 +755,7 @@ body {
   let index = 0.0
   while num.lt(index, length) {
     if num.lt(index, 0) { break }
-    let present = invoke ts.has(this, index)
+    let present = invoke ts.has_own(this, index)
     if present {
       let value = invoke ts.get(this, index)
       if initialised {
@@ -779,7 +785,7 @@ body {
   let index = num.sub(length, 1)
   while num.lt(index, length) {
     if num.lt(index, 0) { break }
-    let present = invoke ts.has(this, index)
+    let present = invoke ts.has_own(this, index)
     if present {
       let value = invoke ts.get(this, index)
       if initialised {
@@ -835,6 +841,7 @@ body {
     return output
   }
   let method = invoke ts.get(this, "join")
+  set method = invoke ts.callable(method)
   if same(kind(method), "closure") {
     let output = apply method(this, arguments)
     return output
@@ -868,8 +875,8 @@ body {
   let lower = 0.0
   while num.lt(lower, num.floor(num.div(length, 2))) {
     let upper = num.sub(num.sub(length, lower), 1)
-    let a_present = invoke ts.has(this, lower)
-    let b_present = invoke ts.has(this, upper)
+    let a_present = invoke ts.has_own(this, lower)
+    let b_present = invoke ts.has_own(this, upper)
     let a = invoke ts.get(this, lower)
     let b = invoke ts.get(this, upper)
     if b_present { do invoke ts.array.set(this, lower, b) } else { do invoke ts.array.remove(this, lower) }
@@ -916,7 +923,7 @@ body {
     while num.lt(index, num.sub(length, removed_count)) {
       let from = num.add(index, removed_count)
       let to = num.add(index, inserted_count)
-      let present = invoke ts.has(this, from)
+      let present = invoke ts.has_own(this, from)
       if present {
         let value = invoke ts.get(this, from)
         do invoke ts.array.set(this, to, value)
@@ -935,7 +942,7 @@ body {
       set index = num.sub(index, 1)
       let from = num.add(index, removed_count)
       let to = num.add(index, inserted_count)
-      let present = invoke ts.has(this, from)
+      let present = invoke ts.has_own(this, from)
       if present {
         let value = invoke ts.get(this, from)
         do invoke ts.array.set(this, to, value)
@@ -1054,12 +1061,12 @@ charge 8
 body {
   let length = invoke ts.array.length(this)
   let callback = invoke ts.array.argument(args, 0)
-  if same(callback, absent) {} else { do invoke ts.array.callback(callback) }
+  if same(callback, absent) {} else { set callback = invoke ts.array.callback(callback) }
   let values = []
   let undefined_count = 0
   let index = 0.0
   while num.lt(index, length) {
-    let present = invoke ts.has(this, index)
+    let present = invoke ts.has_own(this, index)
     if present {
       let value = invoke ts.get(this, index)
       if same(value, absent) { set undefined_count = num.add(undefined_count, 1) }
@@ -1117,7 +1124,7 @@ body {
     let length = invoke ts.array.length(source)
     let index = 0.0
     while num.lt(index, length) {
-      let present = invoke ts.has(source, index)
+      let present = invoke ts.has_own(source, index)
       if present {
         let value = invoke ts.get(source, index)
         let array = invoke ts.array.is(value)
@@ -1160,7 +1167,7 @@ body {
   let output = []
   let index = 0.0
   while num.lt(index, length) {
-    let present = invoke ts.has(this, index)
+    let present = invoke ts.has_own(this, index)
     if present {
       let value = invoke ts.get(this, index)
       let passed = [value, num.to_float(index), this]
@@ -1275,7 +1282,7 @@ body {
   do invoke ts.require_object_coercible(source)
   let mapping = invoke ts.array.argument(args, 1)
   let mapped = bool.not(same(mapping, absent))
-  if mapped { do invoke ts.array.callback(mapping) }
+  if mapped { set mapping = invoke ts.array.callback(mapping) }
   let context = invoke ts.array.argument(args, 2)
   let output = []
   let k = invoke ts.receiver(source)

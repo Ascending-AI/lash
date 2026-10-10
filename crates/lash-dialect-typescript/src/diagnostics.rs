@@ -22,6 +22,10 @@ pub enum DiagnosticCode {
     RegexIteratorPosition,
     AccessorUnsupported,
     PrototypeMutationUnsupported,
+    /// Property descriptors, own-property tests, property writes and
+    /// prototypes of a function or a built-in object (Sam 2026-10-10,
+    /// option B).
+    ReflectionUnsupported,
     ThisUnsupported,
     ArgumentsUnsupported,
     NamespaceUnsupported,
@@ -101,6 +105,7 @@ impl DiagnosticCode {
         Self::RegexIteratorPosition,
         Self::AccessorUnsupported,
         Self::PrototypeMutationUnsupported,
+        Self::ReflectionUnsupported,
         Self::ThisUnsupported,
         Self::ArgumentsUnsupported,
         Self::NamespaceUnsupported,
@@ -199,6 +204,9 @@ impl DiagnosticCode {
             }
             Self::PrototypeMutationUnsupported => {
                 "return a new object with the properties you want instead of reaching through the prototype"
+            }
+            Self::ReflectionUnsupported => {
+                "call the built-in, or keep the data in a plain object of your own and read that"
             }
             Self::ThisUnsupported => {
                 "pass the value in as a parameter; `globalThis.name` holds durable session state"
@@ -324,6 +332,7 @@ impl DiagnosticCode {
             | Self::RegexUnicodeSetsFlagUnsupported
             | Self::AccessorUnsupported
             | Self::PrototypeMutationUnsupported
+            | Self::ReflectionUnsupported
             | Self::ThisUnsupported
             | Self::ArgumentsUnsupported
             | Self::NamespaceUnsupported
@@ -412,6 +421,7 @@ impl DiagnosticCode {
             Self::RegexIteratorPosition => "TS_REGEX_ITERATOR_POSITION",
             Self::AccessorUnsupported => "TS_ACCESSOR_UNSUPPORTED",
             Self::PrototypeMutationUnsupported => "TS_PROTOTYPE_MUTATION_UNSUPPORTED",
+            Self::ReflectionUnsupported => "TS_REFLECTION_UNSUPPORTED",
             Self::ThisUnsupported => "TS_THIS_UNSUPPORTED",
             Self::ArgumentsUnsupported => "TS_ARGUMENTS_UNSUPPORTED",
             Self::NamespaceUnsupported => "TS_NAMESPACE_UNSUPPORTED",
@@ -763,7 +773,6 @@ mod tests {
                 vec!["CustomInvoice", "`Array`"],
             ),
             ("Math.extra();", vec!["Math.extra"]),
-            ("Math;", vec!["Math"]),
             (
                 "const loadInvoice = () => 1; delete loadInvoice();",
                 vec!["loadInvoice()"],
@@ -809,6 +818,10 @@ mod tests {
                 "function region() { while (true) { return 1; } } region();",
             ),
             (RegexFlagUnsupported, "const r = /x/gimsuy; r.exec('x');"),
+            (
+                ReflectionUnsupported,
+                "const limits = { max: Math.max }; limits.max(1, 2);",
+            ),
             (
                 RegexIndicesFlagUnsupported,
                 "const match = /x/.exec('x'); if (match) { match.index; match[0]; }",

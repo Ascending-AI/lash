@@ -73,12 +73,14 @@ pub(crate) const CORE_OPERATIONS: &[&str] = &[
     "ts.bit_or",
     "ts.bit_xor",
     "ts.call_member",
+    "ts.callable",
     "ts.delete",
     "ts.div",
     "ts.ge",
     "ts.get",
     "ts.gt",
     "ts.has",
+    "ts.in",
     "ts.is_nullish",
     "ts.iterate",
     "ts.join",
@@ -95,6 +97,7 @@ pub(crate) const CORE_OPERATIONS: &[&str] = &[
     "ts.pow",
     "ts.promise.pending",
     "ts.promise.run",
+    "ts.read",
     "ts.rem",
     "ts.require_object_coercible",
     "ts.rest",
@@ -289,6 +292,8 @@ pub(crate) struct Lowerer<'a> {
     /// What the closure just emitted is, as its source wrote it, until the
     /// statement that binds it takes it.
     written: Option<serde_json::Value>,
+    /// Every name the source assigns to.
+    assigned: &'a BTreeSet<String>,
 }
 
 /// Session names are checked before either source or saved state can mask a built-in.
@@ -366,6 +371,7 @@ pub(crate) fn lower(
         used: BTreeMap::new(),
         private: BTreeSet::new(),
         facts: Facts::analyse(program, environment.bindings),
+        assigned: &program.assigned,
         narrowed: Vec::new(),
         declared: BTreeMap::new(),
         entries: BTreeMap::new(),
@@ -570,6 +576,17 @@ impl Lowerer<'_> {
             .enumerate()
             .rev()
             .find_map(|(index, scope)| scope.bindings.get_mut(name).map(|binding| (index, binding)))
+    }
+
+    /// Whether `name` is a function declaration that nothing assigns to,
+    /// which therefore always holds the closure it declares.
+    pub(crate) fn holds_declared_function(&self, name: &str) -> bool {
+        self.scopes
+            .iter()
+            .rev()
+            .find_map(|scope| scope.bindings.get(name))
+            .is_some_and(|binding| binding.kind == BindingKind::Function)
+            && !self.assigned.contains(name)
     }
 
     pub(crate) fn is_bound(&self, name: &str) -> bool {

@@ -62,7 +62,7 @@ fn declared_types_choose_the_kernel_function() {
     // A property read keeps JavaScript's meaning; what it gives is believed.
     assert_eq!(
         operations("function f(o: { n: number }) { return o.n + 1; }"),
-        ["invoke ts.get(o, \"n\")", "num.add(num.to_float(t3), 1.0)"]
+        ["invoke ts.read(o, \"n\")", "num.add(num.to_float(t3), 1.0)"]
     );
 }
 

@@ -1,4 +1,5 @@
 # JavaScript map behavior, expressed in kernel code.
+use ts.callable
 use deref
 use eq
 use error.new
@@ -51,6 +52,13 @@ body {
     if same(k, object) { return ref(value) }
   }
   if same(k, "error") { return ("error", ref(value.data), value.kind, value.message) }
+  if same(k, "tuple") {
+    if same(value, ()) {} else {
+      # A built-in function's token holds the closure that calls it, which
+      # is keyed as the object it is.
+      if same(value[0], "ts.function") { return ("ts.function", value[1], value[2], value[3], ref(value[4])) }
+    }
+  }
   if same(k, "float") { if eq(value, 0) { return 0.0 } }
   return value
 }
@@ -63,7 +71,10 @@ body {
   if same(kind(key), "ref") { return deref(key) }
   if same(kind(key), "tuple") {
     if same(key[0], "error") { return error.new(key[2], key[3], deref(key[1])) }
-    return absent
+    if same(key[0], "undefined") { return absent }
+    if same(key[0], "ts.function") { return ("ts.function", key[1], key[2], key[3], deref(key[4])) }
+    # A built-in object's token is its own key.
+    return key
   }
   return key
 }
@@ -225,6 +236,7 @@ body {
   if same(kind(this), "map") {} else { throw error.new("type_error", "Map receiver required", null) }
   let args = invoke ts.pad(args, 2)
   let callback = args[0]
+  set callback = invoke ts.callable(callback)
   let receiver = args[1]
   for map_key in this {
     let builtin_arg_7 = map_key
@@ -242,6 +254,7 @@ charge sum(8, deep(result))
 body {
   let args = invoke ts.pad(args, 2)
   let callback = args[1]
+  set callback = invoke ts.callable(callback)
   if same(kind(callback), "closure") {} else { throw error.new("type_error", "GroupBy callback must be callable", null) }
   let builtin_arg_8 = args[0]
 let source = invoke ts.iterate(builtin_arg_8)

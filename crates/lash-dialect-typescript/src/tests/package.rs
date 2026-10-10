@@ -22,7 +22,7 @@ fn the_helper_package_is_defined_against_the_kernel_library() {
 }
 
 /// A method name's dispatcher chooses a row by the receiver's kind and
-/// falls back to the receiver's own property.
+/// falls back to calling the receiver's own member by that name.
 #[test]
 fn a_dispatcher_is_generated_from_a_names_rows() {
     let mut library = super::library().clone();
@@ -30,7 +30,7 @@ fn a_dispatcher_is_generated_from_a_names_rows() {
         (Receiver::List, "ts.console.log"),
         (Receiver::Brand("RegExp"), "ts.console.log"),
     ];
-    let source = crate::package::dispatcher("method", "probe", &rows, "ts.call_member", "args");
+    let source = crate::package::dispatcher(crate::builtins::table(), "method", "probe", &rows);
     let definitions = match define_functions(&source, &mut library) {
         Ok(definitions) => definitions,
         Err(error) => panic!("{error}\n{source}"),
@@ -45,10 +45,14 @@ fn a_dispatcher_is_generated_from_a_names_rows() {
         "{text}"
     );
     assert!(
-        text.contains("let outcome = invoke ts.call_member(this, \"probe\", args)"),
+        text.contains("let member = invoke ts.read(this, \"probe\")"),
         "{text}"
     );
-    let fallback = library.resolve("ts.call_member").unwrap();
+    assert!(
+        text.contains("let outcome = invoke ts.call_value(member, this, \"probe\", args)"),
+        "{text}"
+    );
+    let fallback = library.resolve("ts.call_value").unwrap();
     let body = definitions[0].body().unwrap();
     assert!(body.functions.contains_key(&fallback));
     assert!(library.definition(&fallback).is_some());

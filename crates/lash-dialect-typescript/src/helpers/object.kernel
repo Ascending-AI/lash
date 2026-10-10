@@ -1,4 +1,5 @@
 # JavaScript object behavior, expressed in kernel code.
+use ts.callable
 use eq
 use text.concat
 use ts.receiver
@@ -239,6 +240,7 @@ charge sum(8, deep(result))
 body {
   let args = invoke ts.pad(args, 2)
   let callback = args[1]
+  set callback = invoke ts.callable(callback)
   if same(kind(callback), "closure") {} else { throw error.new("type_error", "GroupBy callback must be callable", null) }
   let builtin_arg_7 = args[0]
 let source = invoke ts.iterate(builtin_arg_7)
@@ -261,7 +263,7 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
-  throw error.new("TS_METHOD_UNSUPPORTED", "Descriptors and prototype surgery are outside the dialect", null)
+  throw error.new("TS_REFLECTION_UNSUPPORTED", "Property descriptors and prototypes are reflection, which is outside the TypeScript dialect", null)
 }
 
 function ts.object.defineProperties(this: Any, args: List(Any)) -> Any
@@ -269,7 +271,7 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
-  throw error.new("TS_METHOD_UNSUPPORTED", "Descriptors and prototype surgery are outside the dialect", null)
+  throw error.new("TS_REFLECTION_UNSUPPORTED", "Property descriptors and prototypes are reflection, which is outside the TypeScript dialect", null)
 }
 
 function ts.object.getOwnPropertyDescriptor(this: Any, args: List(Any)) -> Any
@@ -277,7 +279,7 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
-  throw error.new("TS_METHOD_UNSUPPORTED", "Descriptors and prototype surgery are outside the dialect", null)
+  throw error.new("TS_REFLECTION_UNSUPPORTED", "Property descriptors and prototypes are reflection, which is outside the TypeScript dialect", null)
 }
 
 function ts.object.getOwnPropertyDescriptors(this: Any, args: List(Any)) -> Any
@@ -285,7 +287,7 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
-  throw error.new("TS_METHOD_UNSUPPORTED", "Descriptors and prototype surgery are outside the dialect", null)
+  throw error.new("TS_REFLECTION_UNSUPPORTED", "Property descriptors and prototypes are reflection, which is outside the TypeScript dialect", null)
 }
 
 function ts.object.getOwnPropertyNames(this: Any, args: List(Any)) -> Any
@@ -309,7 +311,7 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
-  throw error.new("TS_METHOD_UNSUPPORTED", "Descriptors and prototype surgery are outside the dialect", null)
+  throw error.new("TS_REFLECTION_UNSUPPORTED", "Property descriptors and prototypes are reflection, which is outside the TypeScript dialect", null)
 }
 
 function ts.object.getPrototypeOf(this: Any, args: List(Any)) -> Any
@@ -317,7 +319,7 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
-  throw error.new("TS_METHOD_UNSUPPORTED", "Descriptors and prototype surgery are outside the dialect", null)
+  throw error.new("TS_REFLECTION_UNSUPPORTED", "Property descriptors and prototypes are reflection, which is outside the TypeScript dialect", null)
 }
 
 function ts.object.setPrototypeOf(this: Any, args: List(Any)) -> Any
@@ -325,7 +327,7 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
-  throw error.new("TS_METHOD_UNSUPPORTED", "Descriptors and prototype surgery are outside the dialect", null)
+  throw error.new("TS_REFLECTION_UNSUPPORTED", "Property descriptors and prototypes are reflection, which is outside the TypeScript dialect", null)
 }
 
 function ts.object.freeze(this: Any, args: List(Any)) -> Any
@@ -407,6 +409,7 @@ body {
   if same(k, "error") { set tag = "Error" }
   if same(k, "closure") { set tag = "Function" }
   if same(k, "brand:ts.arguments") { set tag = "Arguments" }
+  if same(k, "builtin") { set tag = this[2] }
   if same(k, "brand:regex.ecma") { set tag = "RegExp" }
   if same(k, "brand:date.invalid") { set tag = "Date" }
   return text.concat("[object ", text.concat(tag, "]"))
@@ -436,6 +439,7 @@ body {
   if same(receiver, "record") {
     if record.contains(this, "toString") {
       let method = this.toString
+      set method = invoke ts.callable(method)
       let none = []
       let output = apply method(this, none)
       return output
@@ -450,7 +454,7 @@ body {
 
 function ts.object.isPrototypeOf(this: Any, args: List(Any)) -> Bool
 kernel 1
-errors "type_error", "TS_METHOD_UNSUPPORTED"
+errors "type_error", "TS_REFLECTION_UNSUPPORTED"
 charge sum(12, deep(args))
 body {
   let args = invoke ts.pad(args, 1)
@@ -466,7 +470,7 @@ body {
   }
   # Ordinary guest objects cannot become another object's prototype:
   # creation with a prototype and prototype surgery are refused.
-  throw error.new("TS_METHOD_UNSUPPORTED", "Reflection on built-in prototypes is outside the dialect", null)
+  throw error.new("TS_REFLECTION_UNSUPPORTED", "Reflection on built-in prototypes is outside the dialect", null)
 }
 
 function ts.object.valueOf(this: Any, args: List(Any)) -> Any

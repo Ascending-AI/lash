@@ -64,6 +64,8 @@ use ts.exotic.get
 use ts.exotic.set
 use ts.exotic.iterate
 use ts.receiver
+use ts.callable
+use ts.identity
 use ts.is_primitive
 use ts.is_nullish
 use ts.to_boolean
@@ -93,7 +95,9 @@ use ts.hole_value
 
 # What a value is to a dispatcher: "absent", "null", "bool", "number",
 # "text", "list", "record", "closure", "error", "map", "set", "timestamp",
-# or "brand:<b>" for a record whose `brand` field is the text <b>.
+# or "brand:<b>" for a record whose `brand` field is the text <b>. A
+# built-in function's token is a "closure" and a built-in namespace's or
+# prototype's token is a "builtin" (`builtins/mod.rs`).
 function ts.receiver(value: Any) -> Text
 kernel 1
 charge 3
@@ -114,7 +118,64 @@ body {
       return text.concat("brand:", brand)
     }
   }
+  if same(k, "tuple") {
+    if same(value, ()) {} else {
+      if same(value[0], "ts.function") { return "closure" }
+      if same(value[0], "ts.object") { return "builtin" }
+    }
+  }
   return k
+}
+
+# A function value as what calls it: a built-in function's token as the
+# closure it carries, and any other value as itself. A helper that calls a
+# function the program gave it calls what this gives.
+function ts.callable(value: Any) -> Any
+kernel 1
+charge 4
+body {
+  if same(kind(value), "tuple") {} else { return value }
+  if same(value, ()) { return value }
+  if same(value[0], "ts.function") { return value[4] }
+  return value
+}
+
+# What `===` compares: a built-in function's token by its path, since each
+# read of a built-in makes a new token, and any other value as itself.
+function ts.identity(value: Any) -> Any
+kernel 1
+charge 4
+body {
+  if same(kind(value), "tuple") {} else { return value }
+  if same(value, ()) { return value }
+  if same(value[0], "ts.function") { return ("ts.function", value[1]) }
+  return value
+}
+
+# What a built-in class called without `new` does when only `new` builds it.
+function ts.requires_new(name: Text) -> Any
+kernel 1
+errors "type_error"
+charge 4
+body {
+  throw error.new("type_error", text.concat("Constructor ", text.concat(name, " requires 'new'")), null)
+}
+
+# `Function(...)`: code built from text.
+function ts.function_from_text(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "TS_FUNCTION_CONSTRUCTOR_UNSUPPORTED"
+charge 4
+body {
+  throw error.new("TS_FUNCTION_CONSTRUCTOR_UNSUPPORTED", "The Function constructor builds code from text, which the TypeScript dialect does not", null)
+}
+
+# `Function.prototype(...)`, which accepts anything and returns undefined.
+function ts.nothing(this: Any, args: List(Any)) -> Any
+kernel 1
+charge 2
+body {
+  return absent
 }
 
 function ts.is_primitive(value: Any) -> Bool
@@ -334,6 +395,7 @@ body {
           if same(name, "toString") { return "[object Object]" }
         }
         let method = record.get(value, name)
+        set method = invoke ts.callable(method)
         if same(kind(method), "closure") {
           let none = []
           let outcome = apply method(value, none)
@@ -349,7 +411,16 @@ body {
       return text.concat(value.kind, text.concat(": ", value.message))
     }
     if same(k, "closure") {
+      if same(kind(value), "tuple") {
+        return text.concat("function ", text.concat(value[2], "() { [native code] }"))
+      }
       throw error.new("type_error", "A function has no string or number form", null)
+    }
+    if same(k, "builtin") {
+      if text.ends_with(value[1], ".prototype") {
+        throw error.new("TS_REFLECTION_UNSUPPORTED", "A built-in prototype as a primitive is outside the TypeScript dialect", null)
+      }
+      return text.concat("[object ", text.concat(value[2], "]"))
     }
     let exotic = invoke ts.exotic.to_primitive(value, hint)
     return exotic
@@ -650,10 +721,9 @@ body {
   if same(a, "number") {
     return eq(left, right)
   }
-  if same(a, "error") {
-    return same(left, right)
-  }
-  return same(left, right)
+  let x = invoke ts.identity(left)
+  let y = invoke ts.identity(right)
+  return same(x, y)
 }
 
 function ts.strict_not_equals(left: Any, right: Any) -> Bool
@@ -1011,6 +1081,16 @@ body {
     let element_value = invoke ts.hole_value(value)
     return element_value
   }
+  if same(kind(target), "tuple") {
+    if same(k, "closure") {
+      let name = invoke ts.to_property_key(key)
+      if same(name, "name") { return target[2] }
+      if same(name, "length") { return target[3] }
+    }
+    if same(k, "tuple") {} else {
+      throw error.new("TS_REFLECTION_UNSUPPORTED", "Reading a built-in's properties generically is outside the TypeScript dialect", null)
+    }
+  }
   let nullish = invoke ts.is_nullish(target)
   if nullish {
     let name = invoke ts.to_property_key(key)
@@ -1069,6 +1149,11 @@ body {
     set target[position] = value
     return value
   }
+  if same(kind(target), "tuple") {
+    if same(k, "tuple") {} else {
+      throw error.new("TS_REFLECTION_UNSUPPORTED", "Assigning a property of a built-in is outside the TypeScript dialect", null)
+    }
+  }
   let nullish = invoke ts.is_nullish(target)
   if nullish {
     let name = invoke ts.to_property_key(key)
@@ -1115,6 +1200,11 @@ body {
     if num.le(0, position) { set target[position] = () }
     return true
   }
+  if same(kind(target), "tuple") {
+    if same(k, "tuple") {} else {
+      throw error.new("TS_REFLECTION_UNSUPPORTED", "Deleting a property of a built-in is outside the TypeScript dialect", null)
+    }
+  }
   let nullish = invoke ts.is_nullish(target)
   if nullish {
     throw error.new("type_error", "Cannot convert undefined or null to object", null)
@@ -1122,15 +1212,33 @@ body {
   throw error.new("type_error", "Only a property of a plain object can be deleted", null)
 }
 
-# HasOwnProperty after conceptual ToObject; no wrapper escapes.
+# HasOwnProperty after conceptual ToObject; no wrapper escapes. A
+# built-in's own properties are reflection, which the dialect refuses with a
+# typed error.
 function ts.has_own(target: Any, key: Any) -> Bool
 kernel 1
-errors "type_error"
+errors "type_error", "TS_REFLECTION_UNSUPPORTED"
 charge sum(12, deep(key))
 body {
   do invoke ts.require_object_coercible(target)
   let name = invoke ts.to_property_key(key)
   let k = invoke ts.receiver(target)
+  let token = same(k, "builtin")
+  if same(k, "closure") { set token = same(kind(target), "tuple") }
+  if token {
+    throw error.new("TS_REFLECTION_UNSUPPORTED", "Testing a built-in's own properties is outside the TypeScript dialect", null)
+  }
+  if same(k, "closure") {
+    # A function's own `name`, `length` and `prototype` carry attributes
+    # the dialect does not keep.
+    for described in ["name", "length", "prototype"] {
+      if same(name, described) { throw error.new("TS_REFLECTION_UNSUPPORTED", "Testing a function's own properties is outside the TypeScript dialect", null) }
+    }
+  }
+  if same(k, "brand:regex.ecma") {
+    throw error.new("TS_REFLECTION_UNSUPPORTED", "Testing a RegExp's own properties is outside the TypeScript dialect", null)
+  }
+  if same(k, "brand:ts.iterator") { return record.contains(target, name) }
   if same(k, "text") {
     if same(name, "length") { return true }
     let length = text.utf16_len(target)
@@ -1178,7 +1286,7 @@ body {
 
 function ts.has(target: Any, key: Any) -> Bool
 kernel 1
-errors "type_error"
+errors "type_error", "TS_REFLECTION_UNSUPPORTED"
 charge sum(12, deep(key))
 body {
   let primitive = invoke ts.is_primitive(target)
@@ -1199,23 +1307,6 @@ body {
     for inherited in ["call", "apply", "bind", "caller", "arguments"] { if same(name, inherited) { return true } }
   }
   return false
-}
-
-# `target.key(args)` where no built-in row answers: the object's own
-# function, called with the object as `this`.
-function ts.call_member(target: Any, key: Any, args: List(Any)) -> Any
-kernel 1
-errors "type_error"
-charge sum(16, deep(key))
-body {
-  let method = invoke ts.get(target, key)
-  let k = invoke ts.receiver(method)
-  if same(k, "closure") {
-    let outcome = apply method(target, args)
-    return outcome
-  }
-  let name = invoke ts.to_property_key(key)
-  throw error.new("type_error", text.concat(name, " is not a function"), null)
 }
 
 # The keys `for...in` visits, as a new list.
@@ -1332,7 +1423,7 @@ body {
 # absent slots must never fill the guest's holes or change any guest alias.
 function ts.boundary(value: Any) -> Any
 kernel 1
-errors "cyclic_value", "too_deep", "type_error"
+errors "cyclic_value", "too_deep", "type_error", "not_data"
 charge sum(4, deep(value))
 body {
   let k = kind(value)
@@ -1344,6 +1435,12 @@ body {
   let visit = absent
   set visit = fn(item) {
     let k = kind(item)
+    if same(k, "tuple") {
+      let token = invoke ts.receiver(item)
+      for callable in ["closure", "builtin"] {
+        if same(token, callable) { throw error.new("not_data", "A built-in function or object is not data", null) }
+      }
+    }
     if same(k, "list") {
       let index = 0
       while num.lt(index, list.len(item)) {
@@ -1390,4 +1487,20 @@ body {
     set index = num.add(index, 1)
   }
   return {brand: "ts.arguments", properties: properties, hidden: set{"length"}}
+}
+
+# Calls `member`, read as `target`'s member `key`, with `target` as `this`.
+function ts.call_value(member: Any, target: Any, key: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error"
+charge 8
+body {
+  let method = invoke ts.callable(member)
+  let k = invoke ts.receiver(method)
+  if same(k, "closure") {
+    let outcome = apply method(target, args)
+    return outcome
+  }
+  let name = invoke ts.to_property_key(key)
+  throw error.new("type_error", text.concat(name, " is not a function"), null)
 }

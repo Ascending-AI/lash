@@ -1,4 +1,6 @@
 # JavaScript function behavior, expressed in kernel code.
+use text.concat
+use ts.callable
 use error.new
 use kind
 use list.len
@@ -24,7 +26,8 @@ body {
   let args = invoke ts.pad(args, 1)
   let receiver = args[0]
   let passed = invoke ts.rest(args, 1)
-  let output = apply this(receiver, passed)
+  let target = invoke ts.callable(this)
+  let output = apply target(receiver, passed)
   return output
 }
 
@@ -50,7 +53,8 @@ body {
       }
     }
   }
-  let output = apply this(receiver, passed)
+  let target = invoke ts.callable(this)
+  let output = apply target(receiver, passed)
   return output
 }
 
@@ -59,11 +63,11 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
-  if same(kind(this), "closure") {} else { throw error.new("type_error", "Bind target must be callable", null) }
+  let original = invoke ts.callable(this)
+  if same(kind(original), "closure") {} else { throw error.new("type_error", "Bind target must be callable", null) }
   let args = invoke ts.pad(args, 1)
   let receiver = args[0]
   let prefix = invoke ts.rest(args, 1)
-  let original = this
   return fn(ignored, tail) {
     let builtin_arg_0 = [prefix, tail]
 let passed = invoke ts.spread(builtin_arg_0)
@@ -77,6 +81,8 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
-  if same(kind(this), "closure") {} else { throw error.new("type_error", "Function receiver required", null) }
+  let target = invoke ts.callable(this)
+  if same(kind(target), "closure") {} else { throw error.new("type_error", "Function receiver required", null) }
+  if same(kind(this), "tuple") { return text.concat("function ", text.concat(this[2], "() { [native code] }")) }
   throw error.new("TS_FUNCTION_STRING_COERCION", "Function source is unavailable", null)
 }

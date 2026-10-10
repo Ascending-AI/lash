@@ -33,7 +33,7 @@ fn binary_helper(op: BinaryOp) -> &'static str {
         BinaryOp::LessEqual => "ts.le",
         BinaryOp::Greater => "ts.gt",
         BinaryOp::GreaterEqual => "ts.ge",
-        BinaryOp::In => "ts.has",
+        BinaryOp::In => "ts.in",
         BinaryOp::InstanceOf => unreachable!("`instanceof` is resolved by its class"),
     }
 }
@@ -157,6 +157,9 @@ impl Lowerer<'_> {
                 })
             }
             ast::Expr::Delete { object, property } => {
+                if let Some(refused) = self.reflection_on(object, "deleting a property of") {
+                    return Err(refused);
+                }
                 let object = self.lower_expr(object)?;
                 let object = self.pin(object);
                 let key = self.lower_key(property)?;
@@ -188,8 +191,18 @@ impl Lowerer<'_> {
             }
             _ => {}
         }
-        self.read_global(name, span)
-            .unwrap_or_else(|| Err(unknown_binding(name, span)))
+        self.read_global(name, span).unwrap_or_else(|| {
+            Err(if name == "Reflect" {
+                // The global the language gives reflection by.
+                Diagnostic::refusal(
+                    DiagnosticCode::ReflectionUnsupported,
+                    "Unsupported: `Reflect`, which is reflection",
+                    span,
+                )
+            } else {
+                unknown_binding(name, span)
+            })
+        })
     }
 
     fn lower_array(&mut self, elements: &[ast::ArrayElement]) -> Lowering<Operand> {
@@ -376,7 +389,8 @@ impl Lowerer<'_> {
             (UnaryOp::TypeOf, ast::Expr::Ident(name, _))
                 if !self.is_bound(name)
                     && !crate::builtins::is_global(name)
-                    && name != "arguments" =>
+                    && name != "arguments"
+                    && name != "Reflect" =>
             {
                 // `typeof` of a name nothing binds is "undefined", not an
                 // error.
@@ -442,6 +456,11 @@ impl Lowerer<'_> {
             };
             let value = self.lower_expr(left)?;
             return self.invoke(test, &[value], Ty::Bool);
+        }
+        if op == BinaryOp::In
+            && let Some(refused) = self.reflection_on(right, "`in` on")
+        {
+            return Err(refused);
         }
         let mut operands = self.operands(&[left, right])?.into_iter();
         let (Some(left), Some(right)) = (operands.next(), operands.next()) else {
@@ -572,6 +591,9 @@ impl Lowerer<'_> {
             ast::AssignTarget::Ident(name) => self.assign_variable(name, op, value, true),
             ast::AssignTarget::ParenIdent(name) => self.assign_variable(name, op, value, false),
             ast::AssignTarget::Member { object, property } => {
+                if let Some(refused) = self.reflection_on(object, "assigning a property of") {
+                    return Err(refused);
+                }
                 // The target's object and key are evaluated, and held,
                 // before the right-hand side.
                 let object = self.lower_expr(object)?;
@@ -685,6 +707,9 @@ impl Lowerer<'_> {
                 })
             }
             ast::AssignTarget::Member { object, property } => {
+                if let Some(refused) = self.reflection_on(object, "updating a property of") {
+                    return Err(refused);
+                }
                 let object = self.lower_expr(object)?;
                 let object = self.pin(object);
                 let key = self.lower_key(property)?;

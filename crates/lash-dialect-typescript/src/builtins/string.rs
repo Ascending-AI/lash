@@ -4,6 +4,33 @@ pub(super) fn object() -> Object {
     Object {
         source: include_str!("../helpers/string.kernel"),
         rows: vec![
+            Row::Method {
+                receiver: Receiver::Text,
+                name: "localeCompare",
+                function: "ts.string.locale_unsupported",
+            },
+            Row::Function {
+                path: "String.prototype.localeCompare",
+                function: "ts.string.locale_unsupported",
+            },
+            Row::Method {
+                receiver: Receiver::Text,
+                name: "toLocaleLowerCase",
+                function: "ts.string.locale_unsupported",
+            },
+            Row::Function {
+                path: "String.prototype.toLocaleLowerCase",
+                function: "ts.string.locale_unsupported",
+            },
+            Row::Method {
+                receiver: Receiver::Text,
+                name: "toLocaleUpperCase",
+                function: "ts.string.locale_unsupported",
+            },
+            Row::Function {
+                path: "String.prototype.toLocaleUpperCase",
+                function: "ts.string.locale_unsupported",
+            },
             Row::Function {
                 path: "String.prototype.normalize",
                 function: "ts.string.normalize",

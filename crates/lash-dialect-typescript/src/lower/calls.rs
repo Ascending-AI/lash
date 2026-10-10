@@ -1,10 +1,24 @@
 //! Members, calls and the globals a built-in row answers for.
 
-use lash_kernel_doc::{Action, Atom, Callee, Expr, Literal, Place};
+use lash_kernel_doc::{Action, Atom, Callee, Expr, Literal, Place, Stmt};
 
 use super::{Buf, Lowerer, Lowering, Operand, Ty};
 use crate::adapter as ast;
 use crate::{Diagnostic, DiagnosticCode, DiagnosticKind, SourceSpan};
+
+/// The methods every built-in function or object inherits, which a call of
+/// a built-in path may name although no row has the whole path.
+const INHERITED: &[&str] = &[
+    "call",
+    "apply",
+    "bind",
+    "toString",
+    "hasOwnProperty",
+    "valueOf",
+    "propertyIsEnumerable",
+    "isPrototypeOf",
+    "toLocaleString",
+];
 
 /// A property key, already evaluated.
 #[derive(Clone, Debug)]
@@ -106,18 +120,18 @@ impl Lowerer<'_> {
             );
         }
         if let Key::Static(name) = key
-            && self.table.methods.contains_key(name.as_str())
+            && self.table.member_names.contains(name.as_str())
         {
             return self.invoke(
                 &format!("ts.member.{name}"),
                 std::slice::from_ref(object),
-                Ty::Unknown,
+                ty,
             );
         }
         let function = if matches!(key, Key::Computed(_)) {
             "ts.get_computed"
         } else {
-            "ts.get"
+            "ts.read"
         };
         self.invoke(function, &[object.clone(), key.operand()], ty)
     }
@@ -136,6 +150,21 @@ impl Lowerer<'_> {
         )?;
         self.discard(written);
         Ok(())
+    }
+
+    /// The refusal of reflection on a built-in the source names: an
+    /// own-property test, a descriptor, or a write or `delete` of one of its
+    /// properties. `None` when `subject` is not a built-in value.
+    pub(super) fn reflection_on(&self, subject: &ast::Expr, what: &str) -> Option<Diagnostic> {
+        let path = self.global_path(subject)?;
+        self.table.builtins.contains_key(path.as_str()).then(|| {
+            Diagnostic::with_repair(
+                DiagnosticCode::ReflectionUnsupported,
+                format!("Unsupported: {what} `{path}`, which is reflection on a built-in"),
+                format!("call `{path}` or read the value it gives; keep data of your own in a plain object"),
+                self.span,
+            )
+        })
     }
 
     /// The dotted path of an expression rooted at a name the source does
@@ -160,9 +189,10 @@ impl Lowerer<'_> {
         }
     }
 
-    /// A read of a global path: its value row, a function row as a closure,
-    /// or `globalThis.name` as the name itself. `None` when no row knows
-    /// the path's root.
+    /// A read of a global path: its value row, the token of the built-in
+    /// it names (`builtins/mod.rs`), or `globalThis.name` as the name
+    /// itself. `None` when no row knows the path, which is then read as a
+    /// member of the value before it.
     pub(super) fn read_global(
         &mut self,
         path: &str,
@@ -176,11 +206,10 @@ impl Lowerer<'_> {
         if let Some(function) = self.table.values.get(path).copied() {
             return Some(self.invoke(function, &[], Ty::Unknown));
         }
-        if let Some(function) = self.table.functions.get(path).copied() {
-            return Some(self.builtin_closure(function));
+        if let Some(token) = self.token(path) {
+            return Some(token);
         }
-        let root = path.split('.').next().unwrap_or(path);
-        crate::builtins::is_global(root).then(|| {
+        (!path.contains('.') && crate::builtins::is_global(path)).then(|| {
             Err(Diagnostic {
                 kind: DiagnosticKind::Refusal,
                 ..Diagnostic::with_repair(
@@ -191,6 +220,64 @@ impl Lowerer<'_> {
                 )
             })
         })
+    }
+
+    /// The token a built-in path is as a value (`builtins/mod.rs`), with
+    /// the closure that calls it when it is a function.
+    fn token(&mut self, path: &str) -> Option<Lowering<Operand>> {
+        let path = crate::builtins::canonical(path);
+        let builtin = *self.table.builtins.get(path)?;
+        Some(self.make_token(path, builtin))
+    }
+
+    fn make_token(&mut self, path: &str, builtin: crate::builtins::Builtin) -> Lowering<Operand> {
+        let text = |value: &str| Expr::Literal(Literal::Text(value.to_string()));
+        let items = match builtin {
+            crate::builtins::Builtin::Function { call, length } => {
+                let (helper, class) = call.callee(path);
+                let function = self.function(helper)?;
+                let this = self.fresh("this");
+                let args = self.fresh("args");
+                let body = self.block(|lowerer| {
+                    let passed = match class {
+                        Some(class) => vec![lash_kernel_doc::Atom::Literal(Literal::Text(
+                            class.to_string(),
+                        ))],
+                        None => vec![
+                            lash_kernel_doc::Atom::Variable(this.clone()),
+                            lash_kernel_doc::Atom::Variable(args.clone()),
+                        ],
+                    };
+                    let result = lowerer.emit_action(
+                        Action::Call {
+                            callee: Callee::Library(function),
+                            args: passed,
+                        },
+                        Ty::Unknown,
+                    );
+                    lowerer.emit(Stmt::Return {
+                        value: result.expr(),
+                    });
+                    Ok(())
+                })?;
+                let call = self.emit_closure(vec![this, args], body);
+                vec![
+                    text("ts.function"),
+                    text(path),
+                    text(crate::builtins::function_name(path)),
+                    Expr::Literal(Literal::Float(lash_kernel_doc::Float::new(f64::from(
+                        length,
+                    )))),
+                    call.expr(),
+                ]
+            }
+            crate::builtins::Builtin::Object => vec![
+                text("ts.object"),
+                text(path),
+                text(crate::builtins::object_tag(path)),
+            ],
+        };
+        Ok(self.let_expr(Expr::Tuple(items), Ty::Unknown))
     }
 
     pub(super) fn lower_member(
@@ -233,12 +320,24 @@ impl Lowerer<'_> {
         })
     }
 
-    /// Calls a function value: `apply f(this, args)`.
-    fn apply(&mut self, function: Operand, this: Operand, args: Operand) -> Operand {
+    /// Calls a function value: `apply f(this, args)`. A value that may be
+    /// a built-in's token is first made callable by `ts.callable`; a
+    /// function declaration nothing assigns to always holds its closure.
+    fn apply(
+        &mut self,
+        function: Operand,
+        this: Operand,
+        args: Operand,
+        declared: bool,
+    ) -> Lowering<Operand> {
         // A call gives what the function's declared return type says.
         let returned = function.ty.returned();
         let function = match function.atom {
-            Atom::Variable(name) => name,
+            Atom::Variable(name) if declared => name,
+            Atom::Variable(_) => {
+                let callable = self.invoke("ts.callable", &[function], Ty::Unknown)?;
+                super::statements::variable_of(&callable)
+            }
             Atom::Literal(_) => {
                 // Calling a literal raises the kernel's `type_error`, which
                 // is what the language asks for.
@@ -246,13 +345,13 @@ impl Lowerer<'_> {
                 super::statements::variable_of(&held)
             }
         };
-        self.emit_action(
+        Ok(self.emit_action(
             Action::Call {
                 callee: Callee::Value(function),
                 args: vec![this.atom, args.atom],
             },
             returned,
-        )
+        ))
     }
 
     pub(super) fn lower_call(
@@ -289,6 +388,9 @@ impl Lowerer<'_> {
         if let Some(wait) = self.wait_of(callee) {
             return self.lower_wait_call(wait, args, span);
         }
+        if let Some(refused) = self.reflective_call(callee, args) {
+            return Err(refused);
+        }
         if let Some(path) = self.global_path(callee) {
             // The dialect admits reads of the existing built-in prototype
             // methods. Calling their inherited call/apply needs no prototype
@@ -320,12 +422,32 @@ impl Lowerer<'_> {
                     Operand::number(0.0)
                 } else if path.starts_with("Boolean.prototype.") {
                     Operand::bool(false)
+                } else if let Some((prototype, _)) = path.rsplit_once('.')
+                    && prototype.ends_with(".prototype")
+                    && let Some(token) = self.token(prototype)
+                {
+                    token?
                 } else {
                     Operand::undefined()
                 };
                 return self.invoke(function, &[receiver, args], Ty::Unknown);
             }
-            if !path.starts_with("globalThis.") && !self.table.values.contains_key(path.as_str()) {
+            // A method every function or object inherits is called on the
+            // built-in's token; any other name a built-in lacks is refused.
+            let inherited = path.rsplit_once('.').is_some_and(|(base, method)| {
+                self.table.builtins.contains_key(base) && INHERITED.contains(&method)
+            });
+            // A namespace or a prototype called is the TypeError of calling
+            // any object, raised when the call runs.
+            let object = matches!(
+                self.table.builtins.get(path.as_str()),
+                Some(crate::builtins::Builtin::Object)
+            );
+            if !inherited
+                && !object
+                && !path.starts_with("globalThis.")
+                && !self.table.values.contains_key(path.as_str())
+            {
                 return Err(Diagnostic {
                     kind: DiagnosticKind::Refusal,
                     ..Diagnostic::with_repair(
@@ -351,14 +473,15 @@ impl Lowerer<'_> {
                 let function = self.get_member(&object, &key)?;
                 let function = self.pin(function);
                 let args = self.arguments(args)?;
-                Ok(self.apply(function, object, args))
+                self.apply(function, object, args, false)
             }
             ast::Expr::OptionalChain { base, operations } => {
                 let (function, receiver) = self.optional_reference(base, operations)?;
                 let args = self.arguments(args)?;
-                Ok(self.apply(function, receiver, args))
+                self.apply(function, receiver, args, false)
             }
             _ => {
+                let declared = matches!(callee, ast::Expr::Ident(name, _) if self.holds_declared_function(name));
                 let function = self.lower_expr(callee)?;
                 let function = if Self::args_are_inert(args) {
                     function
@@ -366,8 +489,41 @@ impl Lowerer<'_> {
                     self.pin(function)
                 };
                 let args = self.arguments(args)?;
-                Ok(self.apply(function, Operand::undefined(), args))
+                self.apply(function, Operand::undefined(), args, declared)
             }
+        }
+    }
+
+    /// `Object.hasOwn(Math, k)`, `Math.hasOwnProperty(k)` and the like: a
+    /// call whose only subject is a built-in's own properties.
+    fn reflective_call(&self, callee: &ast::Expr, args: &[ast::CallArg]) -> Option<Diagnostic> {
+        let ast::Expr::Member {
+            object,
+            property: ast::MemberProperty::Field(method),
+            ..
+        } = callee
+        else {
+            return None;
+        };
+        if matches!(method.as_str(), "hasOwnProperty" | "propertyIsEnumerable") {
+            return self.reflection_on(object, "testing an own property of");
+        }
+        let function = self.global_path(callee)?;
+        let reflective = matches!(
+            function.as_str(),
+            "Object.hasOwn"
+                | "Object.getOwnPropertyDescriptor"
+                | "Object.getOwnPropertyDescriptors"
+                | "Object.defineProperty"
+                | "Object.defineProperties"
+                | "Object.getPrototypeOf"
+                | "Object.setPrototypeOf"
+        );
+        match args.first() {
+            Some(ast::CallArg::Value(subject)) if reflective => {
+                self.reflection_on(subject, &format!("`{function}` of"))
+            }
+            _ => None,
         }
     }
 
@@ -484,7 +640,7 @@ impl Lowerer<'_> {
                 let function = self.pin(function);
                 self.unless_nullish(*optional, &function, |lowerer| {
                     let args = lowerer.arguments(args)?;
-                    let value = lowerer.apply(function.clone(), receiver, args);
+                    let value = lowerer.apply(function.clone(), receiver, args, false)?;
                     lowerer.chain(
                         Link::Value {
                             value,

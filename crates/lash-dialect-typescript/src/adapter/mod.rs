@@ -40,6 +40,10 @@ pub(crate) struct Program {
     /// Inside that function the name is the parameter, whatever `type` or
     /// `interface` shares it.
     pub(crate) type_parameters: BTreeSet<String>,
+    /// Every name an assignment or an update writes, anywhere in the
+    /// source: a function declaration none of them names always holds the
+    /// function it declares.
+    pub(crate) assigned: BTreeSet<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -476,6 +480,7 @@ fn parse_from_goal(source: &str, first: Goal) -> Result<Program, Diagnostic> {
     let program = Program {
         statements: converted?,
         type_parameters: adapter.type_parameters.take(),
+        assigned: adapter.assigned.take(),
     };
     declarations::check(&program)?;
     Ok(program)
@@ -493,6 +498,8 @@ struct Adapter<'a> {
     /// The respelled words the adapter has read as identifiers or names.
     validated_respellings: RefCell<BTreeSet<u32>>,
     type_parameters: RefCell<BTreeSet<String>>,
+    /// The names assignments and updates write, for [`Program::assigned`].
+    assigned: RefCell<BTreeSet<String>>,
     /// Whether the adapter stands in an async function's body or parameters.
     in_async_function: Cell<bool>,
     /// Set when `await` was refused as an identifier only because the Module
@@ -907,6 +914,7 @@ impl Adapter<'_> {
             swc::ForHead::Pat(pattern) => {
                 let pattern = self.convert_pattern(pattern)?;
                 self.check_assignment_pattern(&pattern, span)?;
+                assignments::written_names(&pattern, &mut self.assigned.borrow_mut());
                 Ok((pattern, None))
             }
             swc::ForHead::UsingDecl(_) => Err(reject(

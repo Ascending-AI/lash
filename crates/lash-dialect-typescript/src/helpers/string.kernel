@@ -669,3 +669,14 @@ body {
   }
   return output_value
 }
+
+# A comparison or case mapping by the host's locale, which the dialect does
+# not have. A receiver that cannot be a string is still a TypeError.
+function ts.string.locale_unsupported(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "TS_METHOD_UNSUPPORTED"
+charge 8
+body {
+  do invoke ts.require_object_coercible(this)
+  throw error.new("TS_METHOD_UNSUPPORTED", "Locale-dependent string operations are outside the TypeScript dialect; use toLowerCase, toUpperCase or a comparison", null)
+}

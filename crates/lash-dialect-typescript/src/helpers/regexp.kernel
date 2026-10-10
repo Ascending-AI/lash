@@ -1,5 +1,6 @@
 # RegExp is an extension record. Only these helpers update lastIndex; the native matcher never mutates guest data.
 
+use ts.callable
 use eq
 use error.new
 use kind
@@ -523,6 +524,7 @@ body {
   let padded = invoke ts.pad(args, 2)
   let search = padded[0]
   let replacement = padded[1]
+  set replacement = invoke ts.callable(replacement)
   let callback = same(kind(replacement), "closure")
   let regex = invoke ts.regexp.is(search)
   if regex {

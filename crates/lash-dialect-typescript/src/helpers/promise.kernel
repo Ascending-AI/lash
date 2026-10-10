@@ -16,6 +16,7 @@
 # (`K-TASK-007`), resolving a promise with a promise, and an aggregate that
 # is decided when it is called.
 
+use ts.callable
 use same
 use eq
 use error.new
@@ -185,6 +186,7 @@ body {
     }
     let handled = invoke ts.promise.callable(handler)
     if handled {
+      set handler = invoke ts.callable(handler)
       let values = [outcome]
       let handled_to = apply handler(absent, values)
       return handled_to
@@ -232,7 +234,8 @@ body {
     let handled = invoke ts.promise.callable(on_finally)
     if handled {
       let none = []
-      let waited = apply on_finally(absent, none)
+      let settle = invoke ts.callable(on_finally)
+      let waited = apply settle(absent, none)
       do invoke ts.await(waited)
       do yield
     }

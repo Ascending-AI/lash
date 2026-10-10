@@ -1,4 +1,5 @@
 # JavaScript json behavior, expressed in kernel code.
+use ts.callable
 use date.ecma.format
 use eq
 use error.new
@@ -19,6 +20,7 @@ use ref
 use same
 use set.contains
 use text.concat
+use text.ends_with
 use text.repeat
 use text.utf16_len
 use text.utf16_slice
@@ -47,6 +49,7 @@ let text = invoke ts.to_string(builtin_arg_0)
     throw error.new("SyntaxError", "Invalid JSON", null)
   }
   let reviver = args[1]
+  set reviver = invoke ts.callable(reviver)
   if same(kind(reviver), "closure") {
     let visit = absent
     set visit = fn(holder, key) {
@@ -79,6 +82,7 @@ charge sum(8, deep(result))
 body {
   let args = invoke ts.pad(args, 3)
   let replacer = args[1]
+  set replacer = invoke ts.callable(replacer)
   let allowed = absent
   if same(kind(replacer), "list") {
     set allowed = []
@@ -110,6 +114,7 @@ body {
     let k = kind(value)
     if same(k, "record") {
       let to_json = value.toJSON
+      set to_json = invoke ts.callable(to_json)
       if same(kind(to_json), "closure") {
         let passed = [key]
         set value = apply to_json(value, passed)
@@ -124,6 +129,10 @@ body {
     let k = invoke ts.receiver(value)
     if same(k, "absent") { return absent }
     if same(k, "closure") { return absent }
+    if same(k, "builtin") {
+      if text.ends_with(value[1], ".prototype") { throw error.new("TS_REFLECTION_UNSUPPORTED", "A built-in prototype as JSON is outside the TypeScript dialect", null) }
+      return "{}"
+    }
     if same(k, "number") {
       if num.is_finite(value) { let rendered = invoke ts.number.to_string(value) return rendered }
       return "null"

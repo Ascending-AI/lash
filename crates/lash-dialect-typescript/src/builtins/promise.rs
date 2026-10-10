@@ -40,10 +40,23 @@ pub(super) fn object() -> Object {
             ("catch", "ts.promise.catch"),
             ("finally", "ts.promise.finally"),
         ]
-        .map(|(name, function)| Row::Method {
-            receiver: Receiver::Brand("Promise"),
-            name,
-            function,
+        .into_iter()
+        .flat_map(|(name, function)| {
+            [
+                Row::Method {
+                    receiver: Receiver::Brand("Promise"),
+                    name,
+                    function,
+                },
+                Row::Function {
+                    path: match name {
+                        "then" => "Promise.prototype.then",
+                        "catch" => "Promise.prototype.catch",
+                        _ => "Promise.prototype.finally",
+                    },
+                    function,
+                },
+            ]
         }),
     );
     Object {

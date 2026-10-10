@@ -1,6 +1,8 @@
 //! Assignment targets and their early refusals.
 
 use super::prototype_chain::builtin_prototype_mutation;
+use std::collections::BTreeSet;
+
 use super::{
     Adapter, AssignTarget, Diagnostic, DiagnosticCode, Expr, Pattern, SourceSpan, source_span,
     unasserted,
@@ -59,7 +61,10 @@ impl Adapter<'_> {
             return Err(diagnostic);
         }
         match unasserted(self.convert_expr(expr)?) {
-            Expr::Ident(name, _) => Ok(AssignTarget::Ident(name)),
+            Expr::Ident(name, _) => {
+                self.assigned.borrow_mut().insert(name.clone());
+                Ok(AssignTarget::Ident(name))
+            }
             Expr::Member {
                 object, property, ..
             } => Ok(AssignTarget::Member { object, property }),
@@ -77,7 +82,9 @@ impl Adapter<'_> {
     ) -> Result<AssignTarget, Diagnostic> {
         match target {
             swc::AssignTarget::Simple(swc::SimpleAssignTarget::Ident(name)) => {
-                Ok(AssignTarget::Ident(self.identifier(&name.id)?))
+                let name = self.identifier(&name.id)?;
+                self.assigned.borrow_mut().insert(name.clone());
+                Ok(AssignTarget::Ident(name))
             }
             swc::AssignTarget::Simple(swc::SimpleAssignTarget::Member(member)) => {
                 if let Some(diagnostic) = builtin_prototype_mutation(self, member) {
@@ -93,7 +100,10 @@ impl Adapter<'_> {
             }
             swc::AssignTarget::Simple(swc::SimpleAssignTarget::Paren(paren)) => {
                 match unasserted(self.convert_expr(&paren.expr)?) {
-                    Expr::Ident(name, _) => Ok(AssignTarget::ParenIdent(name)),
+                    Expr::Ident(name, _) => {
+                        self.assigned.borrow_mut().insert(name.clone());
+                        Ok(AssignTarget::ParenIdent(name))
+                    }
                     Expr::Member {
                         object, property, ..
                     } => Ok(AssignTarget::Member { object, property }),
@@ -108,6 +118,7 @@ impl Adapter<'_> {
                 let pattern: swc::Pat = pattern.clone().into();
                 let converted = self.convert_pattern(&pattern)?;
                 self.check_assignment_pattern(&converted, Some(source_span(pattern.span())))?;
+                written_names(&converted, &mut self.assigned.borrow_mut());
                 Ok(AssignTarget::Pattern(Box::new(converted)))
             }
             _ => Err(Diagnostic::refusal(
@@ -115,6 +126,35 @@ impl Adapter<'_> {
                 "Unsupported: this assignment target. Assign to an identifier, member, index, or destructuring pattern.",
                 Some(source_span(target.span())),
             )),
+        }
+    }
+}
+
+/// The names a destructuring assignment writes.
+pub(super) fn written_names(pattern: &Pattern, names: &mut BTreeSet<String>) {
+    match pattern {
+        Pattern::Ident(name, _) => {
+            names.insert(name.clone());
+        }
+        Pattern::Member { .. } => {}
+        Pattern::Rest(inner) | Pattern::Assign { target: inner, .. } => {
+            written_names(inner, names);
+        }
+        Pattern::Array { elements, rest } => {
+            for element in elements.iter().flatten() {
+                written_names(element, names);
+            }
+            if let Some(rest) = rest {
+                written_names(rest, names);
+            }
+        }
+        Pattern::Object { properties, rest } => {
+            for property in properties {
+                written_names(&property.value, names);
+            }
+            if let Some(rest) = rest {
+                written_names(rest, names);
+            }
         }
     }
 }

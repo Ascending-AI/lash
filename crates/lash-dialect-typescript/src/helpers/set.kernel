@@ -1,4 +1,5 @@
 # JavaScript set behavior, expressed in kernel code.
+use ts.callable
 use error.new
 use kind
 use list.len
@@ -178,6 +179,7 @@ body {
   if same(kind(this), "set") {} else { throw error.new("type_error", "Set receiver required", null) }
   let args = invoke ts.pad(args, 2)
   let callback = args[0]
+  set callback = invoke ts.callable(callback)
   let receiver = args[1]
   for key in this {
     let value = invoke ts.map.value(key)
@@ -199,8 +201,10 @@ body {
   let size = invoke ts.to_number(size)
   if num.is_nan(size) { throw error.new("type_error", "size property is not a number", null) }
   let has = invoke ts.get(other, "has")
+  set has = invoke ts.callable(has)
   if same(kind(has), "closure") {} else { throw error.new("type_error", "has property is not callable", null) }
   let keys = invoke ts.get(other, "keys")
+  set keys = invoke ts.callable(keys)
   if same(kind(keys), "closure") {} else { throw error.new("type_error", "keys property is not callable", null) }
   throw error.new("TS_METHOD_UNSUPPORTED", "Set algebra accepts a Set or Map, not guest has/keys callbacks", null)
 }

@@ -10,6 +10,7 @@ use crate::Diagnostic;
 
 mod array;
 mod async_fn;
+mod builtin_values;
 mod controls;
 mod deviations;
 mod hoisting;

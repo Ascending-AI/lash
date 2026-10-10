@@ -3,7 +3,7 @@ use super::machine::{self, Ended};
 use lash_kernel_doc::{Datum, Name, Value};
 use lash_kernel_vm::Bindings;
 
-fn agrees(source: &str) {
+pub(super) fn agrees(source: &str) {
     agrees_with_bindings(source, Bindings::default());
 }
 

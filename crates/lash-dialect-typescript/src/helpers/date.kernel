@@ -1,4 +1,5 @@
 # JavaScript date behavior, expressed in kernel code.
+use ts.callable
 use date.ecma.format
 use date.ecma.milliseconds
 use date.ecma.parse
@@ -325,6 +326,7 @@ body {
   let date = invoke ts.date.is(this)
   if date { return date.ecma.format(this, "iso") }
   let method = invoke ts.get(this, "toISOString")
+  set method = invoke ts.callable(method)
   if same(kind(method), "closure") {} else { throw error.new("type_error", "toISOString must be callable", null) }
   let passed = []
   let output = apply method(this, passed)
@@ -545,4 +547,17 @@ errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
   throw error.new("TS_DATE_IMMUTABLE", "Construct a new Date", null)
+}
+
+# A method that reads or formats the host's local time or locale. The
+# dialect runs the same on every host, so it has neither; a receiver that is
+# no Date is still the TypeError ECMAScript gives.
+function ts.date.local_unsupported(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "TS_METHOD_UNSUPPORTED"
+charge 8
+body {
+  let date = invoke ts.date.is(this)
+  if date {} else { throw error.new("type_error", "this is not a Date object.", null) }
+  throw error.new("TS_METHOD_UNSUPPORTED", "Local time and locale formatting depend on the host, which the TypeScript dialect does not; use toISOString or toUTCString", null)
 }

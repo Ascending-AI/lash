@@ -136,7 +136,9 @@ body {
       let key = map_key
       if same(kind(key), "ref") { set key = deref(key) }
       if same(kind(key), "tuple") {
-        if same(key[0], "error") { set key = error.new(key[2], key[3], deref(key[1])) } else { set key = absent }
+        if same(key[0], "error") { set key = error.new(key[2], key[3], deref(key[1])) } else {
+          if same(key[0], "undefined") { set key = absent }
+        }
       }
       set items[list.len(items)] = [key, target[map_key]]
     }
@@ -146,7 +148,9 @@ body {
     for key in target {
       if same(kind(key), "ref") { set key = deref(key) }
       if same(kind(key), "tuple") {
-        if same(key[0], "error") { set key = error.new(key[2], key[3], deref(key[1])) } else { set key = absent }
+        if same(key[0], "error") { set key = error.new(key[2], key[3], deref(key[1])) } else {
+          if same(key[0], "undefined") { set key = absent }
+        }
       }
       set items[list.len(items)] = key
     }

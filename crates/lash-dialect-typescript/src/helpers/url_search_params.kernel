@@ -1,4 +1,5 @@
 # JavaScript url_search_params behavior, expressed in kernel code.
+use ts.callable
 use eq
 use error.new
 use kind
@@ -294,6 +295,7 @@ charge sum(8, deep(result))
 body {
   let args = invoke ts.pad(args, 2)
   let callback = args[0]
+  set callback = invoke ts.callable(callback)
   let receiver = args[1]
   let i = 0
   while num.lt(i, list.len(this.pairs)) {

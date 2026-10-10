@@ -1,7 +1,7 @@
 //! Functions as closures of the dialect's calling convention,
 //! `fn(this, args)`.
 
-use lash_kernel_doc::{Action, Callee, Expr, Literal, Stmt};
+use lash_kernel_doc::{Expr, Literal, Stmt};
 
 use super::patterns::Mode;
 use super::{BindingKind, FunctionFrame, Lowerer, Lowering, Operand, Ty};
@@ -188,31 +188,6 @@ impl Lowerer<'_> {
             self.destructure(param, value, Mode::Local)?;
         }
         Ok(())
-    }
-
-    /// A built-in function as a value: a closure that calls it.
-    pub(super) fn builtin_closure(&mut self, function: &str) -> Lowering<Operand> {
-        let function = self.function(function)?;
-        let this = self.fresh("this");
-        let args = self.fresh("args");
-        let params = vec![this.clone(), args.clone()];
-        let body = self.block(|lowerer| {
-            let result = lowerer.emit_action(
-                Action::Call {
-                    callee: Callee::Library(function),
-                    args: vec![
-                        lash_kernel_doc::Atom::Variable(this),
-                        lash_kernel_doc::Atom::Variable(args),
-                    ],
-                },
-                Ty::Unknown,
-            );
-            lowerer.emit(Stmt::Return {
-                value: result.expr(),
-            });
-            Ok(())
-        })?;
-        Ok(self.emit_closure(params, body))
     }
 
     /// The enclosing function's `this`, which an arrow shares with the

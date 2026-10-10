@@ -10,8 +10,8 @@ use crate::builtins::{self, Receiver};
 /// returns them in the order an embedder registers them.
 ///
 /// The core operations come first, then each built-in object's helpers,
-/// then one generated dispatcher per method and property name the built-in
-/// rows mention.
+/// then the functions that make built-ins values, then one generated
+/// dispatcher per method and property name the built-in rows mention.
 pub fn define_helpers(library: &mut NamedLibrary) -> Result<Vec<FunctionDefinition>, SourceError> {
     let mut definitions =
         define_functions(include_str!("helpers/number_primitive.kernel"), library)?;
@@ -31,15 +31,21 @@ pub fn define_helpers(library: &mut NamedLibrary) -> Result<Vec<FunctionDefiniti
         definitions.extend(define_functions(object.source, library)?);
     }
     let table = builtins::table();
-    for (name, rows) in &table.methods {
-        let source = dispatcher("method", name, rows, "ts.call_member", "args");
+    for source in builtins::value_sources(table) {
         definitions.extend(define_functions(&source, library)?);
     }
+    for name in &table.member_names {
+        definitions.extend(define_functions(
+            &builtins::member_reader(table, name),
+            library,
+        )?);
+    }
     for (name, rows) in &table.methods {
-        definitions.extend(define_functions(&method_reader(name, rows), library)?);
+        let source = dispatcher(table, "method", name, rows);
+        definitions.extend(define_functions(&source, library)?);
     }
     for (name, rows) in &table.properties {
-        let source = dispatcher("property", name, rows, "ts.get", "");
+        let source = dispatcher(table, "property", name, rows);
         definitions.extend(define_functions(&source, library)?);
     }
     for call in [false, true] {
@@ -51,15 +57,32 @@ pub fn define_helpers(library: &mut NamedLibrary) -> Result<Vec<FunctionDefiniti
     Ok(definitions)
 }
 
+/// The function that reads the member `name` where no row answers, and the
+/// kernel text of that read of `this`.
+fn reader(table: &builtins::Table, name: &str) -> (String, String) {
+    if table.member_names.contains(name) {
+        let reader = format!("ts.member.{name}");
+        let read = format!("invoke {reader}(this)");
+        (reader, read)
+    } else {
+        (
+            "ts.read".to_string(),
+            format!("invoke ts.read(this, \"{name}\")"),
+        )
+    }
+}
+
 /// The kernel text of `ts.<family>.<name>`: the receiver's kind chooses the
-/// row, and a receiver no row names falls back to its own property.
+/// row, and a receiver no row names, or a record with a field of that name,
+/// gives its member by that name, which a method then calls.
 pub(crate) fn dispatcher(
+    table: &builtins::Table,
     family: &str,
     name: &str,
     rows: &[(Receiver, &'static str)],
-    fallback: &str,
-    fallback_args: &str,
 ) -> String {
+    let method = family == "method";
+    let (reader, read) = reader(table, name);
     let mut source = String::from("use same\nuse ts.receiver\n");
     let record_rows = rows
         .iter()
@@ -67,7 +90,10 @@ pub(crate) fn dispatcher(
     if record_rows {
         source.push_str("use record.contains\n");
     }
-    source.push_str(&format!("use {fallback}\n"));
+    source.push_str(&format!("use {reader}\n"));
+    if method {
+        source.push_str("use ts.call_value\n");
+    }
     let mut named: Vec<&str> = rows.iter().map(|(_, function)| *function).collect();
     named.sort_unstable();
     named.dedup();
@@ -76,10 +102,17 @@ pub(crate) fn dispatcher(
     }
     // A method's rows take the receiver and the argument list; a property's
     // rows take the receiver alone.
-    let (params, passed) = if fallback_args.is_empty() {
-        ("this: Any", "this")
-    } else {
+    let (params, passed) = if method {
         ("this: Any, args: List(Any)", "this, args")
+    } else {
+        ("this: Any", "this")
+    };
+    let member = if method {
+        format!(
+            "let member = {read}\n    let outcome = invoke ts.call_value(member, this, \"{name}\", args)"
+        )
+    } else {
+        format!("let outcome = {read}")
     };
     source.push_str(&format!(
         "function ts.{family}.{name}({params}) -> Any\nkernel 1\n\
@@ -87,8 +120,7 @@ pub(crate) fn dispatcher(
         4 + rows.len()
     ));
     if record_rows {
-        let separator = if fallback_args.is_empty() { "" } else { ", " };
-        source.push_str(&format!("  if same(receiver, \"record\") {{\n    if record.contains(this, \"{name}\") {{\n      let outcome = invoke {fallback}(this, \"{name}\"{separator}{fallback_args})\n      return outcome\n    }}\n  }}\n"));
+        source.push_str(&format!("  if same(receiver, \"record\") {{\n    if record.contains(this, \"{name}\") {{\n      {}\n      return outcome\n    }}\n  }}\n", member.replace("\n    ", "\n      ")));
     }
     for (receiver, function) in rows {
         source.push_str(&format!(
@@ -101,89 +133,61 @@ pub(crate) fn dispatcher(
         .iter()
         .find(|(receiver, _)| *receiver == Receiver::List)
     {
-        let passed = if fallback_args.is_empty() {
-            "items"
-        } else {
-            "items, args"
-        };
+        let passed = if method { "items, args" } else { "items" };
         source.push_str(&format!(
             "  if same(receiver, \"brand:regex.match\") {{\n    let items = this.items\n    let outcome = invoke {function}({passed})\n    return outcome\n  }}\n"
         ));
     }
-    let separator = if fallback_args.is_empty() { "" } else { ", " };
     source.push_str(&format!(
-        "  let outcome = invoke {fallback}(this, \"{name}\"{separator}{fallback_args})\n  \
-         return outcome\n}}\n"
+        "  {}\n  return outcome\n}}\n",
+        member.replace("\n    ", "\n  ")
     ));
     source
 }
 
-/// Reading an existing method gives an unbound callable. An own callable
-/// field on a record is resolved through ts.get instead.
-fn method_reader(name: &str, rows: &[(Receiver, &'static str)]) -> String {
-    let mut source = format!("use same\nuse ts.receiver\nuse ts.get\nuse ts.method.{name}\n");
-    let record_rows = rows
-        .iter()
-        .any(|(receiver, _)| *receiver == Receiver::Record);
-    if record_rows {
-        source.push_str("use record.contains\n");
-    }
-    source.push_str(&format!(
-        "function ts.member.{name}(this: Any) -> Any\nkernel 1\ncharge {}\nbody {{\n  let receiver = invoke ts.receiver(this)\n",
-        4 + rows.len()
-    ));
-    if record_rows {
-        source.push_str(&format!("  if same(receiver, \"record\") {{\n    if record.contains(this, \"{name}\") {{\n      let outcome = invoke ts.get(this, \"{name}\")\n      return outcome\n    }}\n  }}\n"));
-    }
-    for (receiver, _) in rows {
-        source.push_str(&format!(
-            "  if same(receiver, \"{}\") {{\n    return fn(this, args) {{\n      let outcome = invoke ts.method.{name}(this, args)\n      return outcome\n    }}\n  }}\n",
-            receiver.tag()
-        ));
-    }
-    if rows.iter().any(|(receiver, _)| *receiver == Receiver::List) {
-        source.push_str(&format!(
-            "  if same(receiver, \"brand:regex.match\") {{\n    return fn(this, args) {{\n      let outcome = invoke ts.method.{name}(this, args)\n      return outcome\n    }}\n  }}\n"
-        ));
-    }
-    source.push_str(&format!(
-        "  let outcome = invoke ts.get(this, \"{name}\")\n  return outcome\n}}\n"
-    ));
-    source
-}
-
-/// Computed names use the same rows as literal names. The key is coerced
-/// once, preserving its observable conversion.
+/// Computed names use the same rows and readers as literal names. The key
+/// is coerced once, preserving its observable conversion.
 fn computed_dispatcher(table: &builtins::Table, call: bool) -> String {
     let family = if call {
         "call_computed"
     } else {
         "get_computed"
     };
-    let fallback = if call { "ts.call_member" } else { "ts.get" };
+    let fallback = if call { "ts.call_member" } else { "ts.read" };
     let mut source = format!(
         "use same\nuse ts.to_property_key\nuse ts.require_object_coercible\nuse {fallback}\n"
     );
-    let mut rows = Vec::new();
-    if !call {
+    if call {
+        source.push_str("use ts.call_value\n");
+    }
+    // A name may carry a property row, a method row and a reader. A read
+    // takes the property row, as get_member does for a literal name; a
+    // call takes the method row.
+    let mut rows: Vec<(&str, String, bool)> = Vec::new();
+    if call {
+        rows.extend(
+            table
+                .methods
+                .keys()
+                .map(|name| (*name, format!("ts.method.{name}"), false)),
+        );
+    } else {
         rows.extend(
             table
                 .properties
                 .keys()
-                .map(|name| (*name, format!("ts.property.{name}"))),
+                .map(|name| (*name, format!("ts.property.{name}"), false)),
         );
     }
-    rows.extend(table.methods.keys().map(|name| {
-        (
-            *name,
-            format!("ts.{}.{name}", if call { "method" } else { "member" }),
-        )
-    }));
-    // A name may carry both a property row and a method row. Property reads
-    // take the property row, as get_member does for a literal name.
+    rows.extend(
+        table
+            .member_names
+            .iter()
+            .map(|name| (name.as_str(), format!("ts.member.{name}"), call)),
+    );
     let mut seen = std::collections::BTreeSet::new();
-    rows.retain(|(name, _)| seen.insert(*name));
-    for (_, function) in &rows {
+    rows.retain(|(name, _, _)| seen.insert(*name));
+    for (_, function, _) in &rows {
         source.push_str(&format!("use {function}\n"));
     }
     let params = if call {
@@ -191,10 +195,20 @@ fn computed_dispatcher(table: &builtins::Table, call: bool) -> String {
     } else {
         "this: Any, key: Any"
     };
-    let args = if call { "this, args" } else { "this" };
     source.push_str(&format!("function ts.{family}({params}) -> Any\nkernel 1\ncharge {}\nbody {{\n  do invoke ts.require_object_coercible(this)\n  let name = invoke ts.to_property_key(key)\n", 4 + rows.len()));
-    for (name, function) in &rows {
-        source.push_str(&format!("  if same(name, \"{name}\") {{\n    let outcome = invoke {function}({args})\n    return outcome\n  }}\n"));
+    for (name, function, read_then_call) in &rows {
+        let outcome = if *read_then_call {
+            format!(
+                "let member = invoke {function}(this)\n    let outcome = invoke ts.call_value(member, this, name, args)"
+            )
+        } else if call {
+            format!("let outcome = invoke {function}(this, args)")
+        } else {
+            format!("let outcome = invoke {function}(this)")
+        };
+        source.push_str(&format!(
+            "  if same(name, \"{name}\") {{\n    {outcome}\n    return outcome\n  }}\n"
+        ));
     }
     let args = if call {
         "this, name, args"

@@ -4,6 +4,76 @@ pub(super) fn object() -> Object {
     Object {
         source: include_str!("../helpers/date.kernel"),
         rows: vec![
+            Row::Method {
+                receiver: Receiver::Timestamp,
+                name: "getTimezoneOffset",
+                function: "ts.date.local_unsupported",
+            },
+            Row::Method {
+                receiver: Receiver::Brand("date.invalid"),
+                name: "getTimezoneOffset",
+                function: "ts.date.local_unsupported",
+            },
+            Row::Function {
+                path: "Date.prototype.getTimezoneOffset",
+                function: "ts.date.local_unsupported",
+            },
+            Row::Method {
+                receiver: Receiver::Timestamp,
+                name: "toDateString",
+                function: "ts.date.local_unsupported",
+            },
+            Row::Method {
+                receiver: Receiver::Brand("date.invalid"),
+                name: "toDateString",
+                function: "ts.date.local_unsupported",
+            },
+            Row::Function {
+                path: "Date.prototype.toDateString",
+                function: "ts.date.local_unsupported",
+            },
+            Row::Method {
+                receiver: Receiver::Timestamp,
+                name: "toLocaleDateString",
+                function: "ts.date.local_unsupported",
+            },
+            Row::Method {
+                receiver: Receiver::Brand("date.invalid"),
+                name: "toLocaleDateString",
+                function: "ts.date.local_unsupported",
+            },
+            Row::Function {
+                path: "Date.prototype.toLocaleDateString",
+                function: "ts.date.local_unsupported",
+            },
+            Row::Method {
+                receiver: Receiver::Timestamp,
+                name: "toLocaleTimeString",
+                function: "ts.date.local_unsupported",
+            },
+            Row::Method {
+                receiver: Receiver::Brand("date.invalid"),
+                name: "toLocaleTimeString",
+                function: "ts.date.local_unsupported",
+            },
+            Row::Function {
+                path: "Date.prototype.toLocaleTimeString",
+                function: "ts.date.local_unsupported",
+            },
+            Row::Method {
+                receiver: Receiver::Timestamp,
+                name: "toTimeString",
+                function: "ts.date.local_unsupported",
+            },
+            Row::Method {
+                receiver: Receiver::Brand("date.invalid"),
+                name: "toTimeString",
+                function: "ts.date.local_unsupported",
+            },
+            Row::Function {
+                path: "Date.prototype.toTimeString",
+                function: "ts.date.local_unsupported",
+            },
             Row::Constructor {
                 class: "Date",
                 function: "ts.date.construct",
