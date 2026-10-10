@@ -22,10 +22,13 @@ assembled, and before it reads a frame, the entry confines the process
 (`RLIMIT_AS`, soft and hard) and a seccomp filter on every thread. The filter
 admits the system calls a serving worker was measured to make: its socket,
 memory that is never writable and executable at once, threads of its own
-process, clocks, entropy, its own CPU ceiling and an abort's signal. `openat`
-and `clone3` are refused with an error, for the C library's fallbacks; any
-other call kills the process, which the parent reports as
-`WorkerCrashed { evidence: ForbiddenSyscall }`. x86-64 and aarch64 only; a
+process, clocks, entropy, its own CPU ceiling and an abort's signal. `openat`,
+`clone3` and `getcwd` are refused with an error, for the runtime's fallbacks
+(`getcwd` for a panic that prints a backtrace); any other call kills the
+process, which the parent reports as
+`WorkerCrashed { evidence: ForbiddenSyscall }`. A `dhat-heap` build also
+admits `openat`, `statx` and `lseek`, which its profile flush needs to
+symbolize and write the profile. x86-64 and aarch64 only; a
 worker that cannot confine itself refuses with `BootstrapFault::Confinement`.
 Before guest work an owned child installs a CPU ceiling (`RLIMIT_CPU`) from
 the configured execution budget.

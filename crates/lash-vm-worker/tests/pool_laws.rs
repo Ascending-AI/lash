@@ -508,6 +508,29 @@ fn a_forbidden_syscall_kills_the_worker_with_typed_evidence() {
     }
 }
 
+/// FIG-5876: a worker that panics with RUST_BACKTRACE=1 reports the typed
+/// panic. Printing the backtrace asks for the working directory, which the
+/// confinement refuses rather than kills on, so the panic still reaches the
+/// parent.
+#[test]
+fn a_panic_with_a_backtrace_requested_is_typed_not_a_forbidden_syscall() {
+    let pool = WorkerPool::new(config("panic_backtrace")).expect("pool");
+    let (identity, document) = document(TOOL_LOOP);
+    let mut worker = checkout(&pool);
+    let started = worker.start(
+        fresh(&document, Target::Main, Vec::new()),
+        &identity,
+        ExecutionClass::Cell,
+    );
+    let Err(PoolError::Infrastructure(InfrastructureOutcome::ProtocolViolation {
+        breach: ProtocolBreach::Panicked { detail },
+    })) = started
+    else {
+        panic!("a typed panic: {started:?}")
+    };
+    assert_eq!(detail, Detail::new("a panic with a backtrace requested"));
+}
+
 /// FIG-5858: a worker's address space has a ceiling, which bounds what a
 /// run can allocate even where the run's memory bound would allow more.
 /// The allocation is refused as the run's memory bound, and the worker,
@@ -544,6 +567,64 @@ main {
     assert_eq!(exceeded.bound, Bound::Memory);
     worker.release().expect("reset");
     assert_eq!(checkout(&pool).pid(), Some(pid), "the worker is reused");
+}
+
+/// FIG-5876: a heap-profiled worker serves under the same confinement as
+/// any other, and still writes its DHAT profile and receipt when its first
+/// clean reset ends the window: the flush acknowledges the reset instead of
+/// killing the worker, which then serves on.
+#[cfg(feature = "dhat-heap")]
+#[test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the law hands the worker a fresh profile directory and reads what it wrote"
+)]
+fn a_heap_profiled_worker_writes_its_profile_under_confinement_across_a_reset() {
+    let directory = std::env::temp_dir().join(format!("lash-heap-profile-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&directory);
+    let mut entry = WorkerEntry::helper(env!("CARGO_BIN_EXE_lash-vm-worker"));
+    entry.args = vec![
+        "--heap-profile-dir".into(),
+        directory.to_str().expect("utf-8 directory").into(),
+    ];
+    let mut config = PoolConfig::standard(entry);
+    config.max_workers = 1;
+    let pool = WorkerPool::new(config).expect("pool");
+    let (identity, document) = document("main { return num.add(1, 2) }");
+    let mut worker = checkout(&pool);
+    let pid = worker.pid().expect("pid");
+    worker
+        .start(
+            fresh(&document, Target::Main, Vec::new()),
+            &identity,
+            ExecutionClass::Cell,
+        )
+        .expect("start");
+    let End::Finished(finished) = ended(worker.run(SLICE, false).expect("run")) else {
+        panic!("the run finishes")
+    };
+    assert_eq!(finished.result, int(3));
+    worker
+        .release()
+        .expect("the reset flushes the profile and is acknowledged");
+    let profile = directory.join(format!("vm-worker-{pid}.dhat.json"));
+    let written: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&profile).expect("the profile")).expect("json");
+    assert_eq!(written["mode"], "rust-heap", "{profile:?}");
+    assert!(
+        written["pps"]
+            .as_array()
+            .is_some_and(|sites| !sites.is_empty())
+    );
+    let receipt: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(profile.with_extension("receipt.json")).expect("the receipt"),
+    )
+    .expect("json");
+    assert_eq!(receipt["completed"], true);
+    let next = checkout(&pool);
+    assert_eq!(next.pid(), Some(pid), "the profiled worker serves on");
+    next.release().expect("a second reset after the window");
+    let _ = std::fs::remove_dir_all(&directory);
 }
 
 /// The kernel worker's live protocol is admitted before any guest request.

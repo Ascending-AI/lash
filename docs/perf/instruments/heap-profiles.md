@@ -35,7 +35,11 @@ It writes `vm-worker-<pid>.dhat.json`, covering bootstrap validation after the
 empty-environment check through
 the **first clean reset**, and flushes before `ResetDone`. The pool kills and
 reaps retired workers, so waiting for process-exit destructors would lose the
-profile. Abruptly failed workers do not promise a profile.
+profile. Abruptly failed workers do not promise a profile. The profiled worker
+serves under the same confinement as any other; its seccomp filter also admits
+`openat`, `statx` and `lseek`, which the flush needs, and the production build
+admits none of them
+(`a_heap_profiled_worker_writes_its_profile_under_confinement_across_a_reset`).
 
 DHAT's `tb`, `gb` and `eb` are cumulative requested bytes, site live bytes at
 the simultaneous process heap peak, and site live bytes at profile end.

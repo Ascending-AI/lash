@@ -93,6 +93,21 @@ fn main() {
                 _ => {}
             }
         }
+        // `panic_backtrace` panics as a worker started with RUST_BACKTRACE=1
+        // would: the pool clears the environment, so the fixture sets it
+        // here, once confined and before the panic hook first reads it.
+        if mode == "panic_backtrace" && matches!(message, lash_vm_protocol::ParentMessage::Start(_))
+        {
+            // SAFETY: the serving thread is the fixture's only thread here.
+            #[expect(
+                unsafe_code,
+                reason = "the fixture asks for a backtrace before it panics"
+            )]
+            unsafe {
+                std::env::set_var("RUST_BACKTRACE", "1");
+            }
+            panic!("a panic with a backtrace requested");
+        }
         if mode == "hang" && matches!(message, lash_vm_protocol::ParentMessage::Start(_)) {
             std::thread::sleep(std::time::Duration::from_secs(60));
         }

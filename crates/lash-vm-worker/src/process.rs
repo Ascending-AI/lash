@@ -144,11 +144,19 @@ const fn errno(code: i32) -> u32 {
 /// and its threads made after bootstrap, and nothing for files, sockets,
 /// processes or credentials. A call that is not listed kills the process.
 ///
-/// Two calls are refused rather than fatal, because the C library tries
+/// Three calls are refused rather than fatal, because the runtime tries
 /// them and has a fallback: `openat` (the allocator probes
-/// `/proc/sys/vm/overcommit_memory` before trimming a thread's arena) and
+/// `/proc/sys/vm/overcommit_memory` before trimming a thread's arena),
 /// `clone3` (thread creation falls back to `clone`, whose flags a filter can
-/// read).
+/// read) and `getcwd` (a panic that prints a backtrace shortens its paths
+/// against the working directory, and prints them whole without it;
+/// FIG-5876).
+///
+/// A heap-profiled build (`dhat-heap`) admits what its profile flush needs
+/// and nothing more (FIG-5876, measured by tracing the flush): `openat` to
+/// read `/proc/self/maps` and the executable it symbolizes against and to
+/// write the profile, and `statx` and `lseek`, with which the standard
+/// library sizes a file it reads. The production build admits none of them.
 fn syscall_filter(pid: u32) -> Option<Vec<libc::sock_filter>> {
     let own_process = [load(arg(0)), unless_equal(pid, 1), ret(ALLOW), ret(KILL)];
     // Memory may be writable or executable, never both at once (W^X).
@@ -187,13 +195,9 @@ fn syscall_filter(pid: u32) -> Option<Vec<libc::sock_filter>> {
     let allow = [ret(ALLOW)];
     let eacces = [ret(errno(libc::EACCES))];
     let enosys = [ret(errno(libc::ENOSYS))];
-    // An instrumented worker writes its heap profile when it ends.
-    let open: &[libc::sock_filter] = if cfg!(feature = "dhat-heap") {
-        &allow
-    } else {
-        &eacces
-    };
-    let rules: [(libc::c_long, &[libc::sock_filter]); 40] = [
+    let profiled = cfg!(feature = "dhat-heap");
+    let open: &[libc::sock_filter] = if profiled { &allow } else { &eacces };
+    let mut rules: Vec<(libc::c_long, &[libc::sock_filter])> = vec![
         // The parent's socket.
         (libc::SYS_recvfrom, &allow),
         (libc::SYS_sendto, &allow),
@@ -204,6 +208,7 @@ fn syscall_filter(pid: u32) -> Option<Vec<libc::sock_filter>> {
         (libc::SYS_fcntl, &allow),
         (libc::SYS_close, &allow),
         (libc::SYS_openat, open),
+        (libc::SYS_getcwd, &eacces),
         // Memory.
         (libc::SYS_futex, &allow),
         (libc::SYS_brk, &allow),
@@ -240,6 +245,9 @@ fn syscall_filter(pid: u32) -> Option<Vec<libc::sock_filter>> {
         (libc::SYS_restart_syscall, &allow),
         (libc::SYS_tgkill, &own_process),
     ];
+    if profiled {
+        rules.extend([(libc::SYS_statx, &allow[..]), (libc::SYS_lseek, &allow[..])]);
+    }
     let mut filter = vec![
         load(ARCH),
         unless_equal(AUDIT_ARCH?, 1),
