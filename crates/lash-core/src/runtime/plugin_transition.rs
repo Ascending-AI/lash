@@ -136,6 +136,12 @@ impl crate::runtime::LashRuntime {
     /// namespace this build does not serve stays byte-for-byte, and a tool
     /// it owned is lost under the run's tool-source policy (FIG-5897). A
     /// build refusal keeps its typed plugin cause.
+    ///
+    /// Only a session without a store keeps the transition as a native view
+    /// in its head. A store-backed head records the namespaces as their own
+    /// components and the config in its authority, which every commit keeps
+    /// current: a view would copy every namespace into every commit, so a
+    /// steady turn would rewrite namespaces it never changed (FIG-5896).
     async fn materialize_run_session(
         &mut self,
         scoped_effect_controller: &crate::ActorContext,
@@ -183,14 +189,20 @@ impl crate::runtime::LashRuntime {
         )
         .await
         .map_err(plugin_error)?;
-        plugins
-            .adopt_plugin_transition(&record)
-            .map_err(plugin_error)?;
-        if let Some(bytes) = plugins
-            .native_view(self.fleet_format())
-            .map_err(plugin_error)?
-        {
-            self.state.set_plugin_admission_snapshot(bytes);
+        if self.is_store_backed() {
+            plugins
+                .install_plugin_transition(&record)
+                .map_err(plugin_error)?;
+        } else {
+            plugins
+                .adopt_plugin_transition(&record)
+                .map_err(plugin_error)?;
+            if let Some(bytes) = plugins
+                .native_view(self.fleet_format())
+                .map_err(plugin_error)?
+            {
+                self.state.set_plugin_admission_snapshot(bytes);
+            }
         }
         self.state.authority.plugin_config = (*plugins.admitted_plugin_config().config).clone();
         self.require_tool_sources(policy)?;

@@ -244,11 +244,15 @@ impl LashRuntime {
             ));
         }
         // An open adopts the plugin view its head records as published, and
-        // builds no capabilities (FIG-4857, ADR 0119): its session's next run
-        // builds them, under that run's tool-source policy, and meets a build
-        // refusal typed as its cause (FIG-5324). The head's own config stays
-        // the session's: the view holds the config of the run that recorded
-        // it, which a later config transaction supersedes (FIG-5897).
+        // restores that session when this build serves the view's admission.
+        // A run records a view only on a head without a store, so a
+        // store-backed head's open builds no capabilities (FIG-4857, ADR
+        // 0119): its session's next run builds them, under that run's
+        // tool-source policy, and meets a build refusal typed as its cause
+        // (FIG-5324). The head's own config stays the session's: a view holds
+        // the config of the run that recorded it, which a later config
+        // transaction supersedes (FIG-5897).
+        let mut admitted_capabilities = false;
         if let Some(bytes) = state.plugin_admission_snapshot() {
             match services.plugins.adopt_native_view(
                 &bytes,
@@ -258,17 +262,30 @@ impl LashRuntime {
                     .map(crate::store::SessionStore::fleet_format)
                     .unwrap_or_else(crate::FleetFormat::current),
             ) {
-                Ok(()) | Err(crate::PluginError::Format(_)) => {}
+                Ok(()) => {
+                    admitted_capabilities = services.plugins.validate_recorded_admission().is_ok();
+                    if admitted_capabilities {
+                        services.plugins.materialize()?;
+                    }
+                }
+                Err(crate::PluginError::Format(_)) => {}
                 Err(error) => return Err(error.into()),
             }
         }
+        let (session, tool_restore_report) = if admitted_capabilities {
+            let (session, report) =
+                Self::restore_constructed_session(&host, &services, &mut state).await?;
+            (Some(session), report)
+        } else {
+            (None, None)
+        };
         let resident_session = ResidentSessionContinuity::fresh();
         let turn_phase_probe = host
             .core
             .turn_phase_probes
             .get_for_scope(&crate::SessionScope::new(state.session_id.clone()));
         Ok(Self {
-            session: None,
+            session,
             host,
             services,
             state,
@@ -277,7 +294,7 @@ impl LashRuntime {
             process_sync_needed: Arc::new(AtomicBool::new(false)),
             turn_phase_probe,
             resident_session,
-            tool_restore_report: None,
+            tool_restore_report,
         })
     }
 

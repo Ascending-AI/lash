@@ -233,8 +233,10 @@ A plugin query is not an admin read: it runs plugin code over the plugin
 view the session's last run or command published, as its head records it.
 It runs on the plugins a run built on the handle's runtime, or else on a
 private build of that recorded view, which registers, installs and appends
-nothing; an open still builds no capabilities (FIG-5344). Where the head
-records no published view, because the session never ran or commanded, it
+nothing; an open still builds no capabilities (FIG-5344). A store-backed head
+records that view as its namespace components, config and tool state, never
+as a native view copy that every commit would rewrite (FIG-5896). Where the
+head records no published view, because the session never ran or commanded, it
 is refused with the typed `PluginOperationInvokeError::NotPublished`; a host
 publishes one with a session command, such as a tool-catalog refresh, and
 retries.

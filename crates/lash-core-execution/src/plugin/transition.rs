@@ -168,29 +168,43 @@ impl PluginSession {
         Ok(candidate)
     }
 
-    /// Install a journaled complete result without calling a converter.
+    /// Install a journaled complete result without calling a converter, and
+    /// keep it as the native view this session's checkpoints carry.
     pub fn adopt_plugin_transition(
         &self,
         record: &PluginTransitionRecord,
     ) -> Result<(), PluginError> {
-        if record.request.owner != self.owner {
-            return Err(PluginStateError::EffectOwnerMismatch.into());
-        }
-        let (candidate, config) = record.candidate()?;
+        let (state, config) = self.install_plugin_transition(record)?;
         *self.native_view.lock_recover() = Some(PluginNativeView {
             request: record.request.clone(),
             source: record.source.clone(),
             generation: record.generation.clone(),
-            state: candidate.clone(),
-            config: config.clone(),
+            state,
+            config,
         });
+        Ok(())
+    }
+
+    /// Install a journaled complete result without calling a converter, and
+    /// keep no native view of it. A store-backed session's head records its
+    /// namespaces as their own components and its config in its authority,
+    /// so a view would copy every namespace into every commit and could
+    /// outlive a later commit's state or config.
+    pub fn install_plugin_transition(
+        &self,
+        record: &PluginTransitionRecord,
+    ) -> Result<(PluginState, PluginConfig), PluginError> {
+        if record.request.owner != self.owner {
+            return Err(PluginStateError::EffectOwnerMismatch.into());
+        }
+        let (candidate, config) = record.candidate()?;
         let mut live = self.state.lock_recover();
         live.hydrate_live(&candidate);
         live.source = Some(record.source.clone());
         drop(live);
         self.adopt_plugin_admission(record.request.target.clone());
-        self.authority.write_recover().plugin_config.config = Arc::new(config);
-        Ok(())
+        self.authority.write_recover().plugin_config.config = Arc::new(config.clone());
+        Ok((candidate, config))
     }
 }
 
@@ -301,16 +315,39 @@ impl PluginSession {
         fleet: crate::FleetFormat,
     ) -> Result<Arc<Self>, PluginError> {
         let view = PluginNativeView::decode(bytes, fleet)?;
+        let built = self.defer_private_build(&view.state, Some(view.config.clone()))?;
+        built.adopt_native_view(bytes, fleet)?;
+        built.materialize()?;
+        Ok(built)
+    }
+
+    /// A private build of the namespaces and config this unbuilt session
+    /// hydrated from its store-backed head, for a query on a session whose
+    /// last run or command published them there (FIG-5344). Like
+    /// [`Self::build_published_view`], it registers, installs and publishes
+    /// nothing.
+    pub fn build_recorded_head(&self) -> Result<Arc<Self>, PluginError> {
+        let built = self.defer_private_build(&self.capture_state(), None)?;
+        built.materialize()?;
+        Ok(built)
+    }
+
+    fn defer_private_build(
+        &self,
+        state: &PluginState,
+        config: Option<PluginConfig>,
+    ) -> Result<Arc<Self>, PluginError> {
         let authority = self.live_authority();
         let mut plugin_config = authority.plugin_config;
-        plugin_config.config = Arc::new(view.config.clone());
-        let built = self
-            .host
+        if let Some(config) = config {
+            plugin_config.config = Arc::new(config);
+        }
+        self.host
             .isolated_registry()
             .defer_session(PluginSessionRequest {
                 owner: self.owner.clone(),
                 materialization: PluginSessionMaterializationRequest::Rematerialization {
-                    snapshot: &view.state,
+                    snapshot: state,
                     config: SessionAuthorityContext {
                         tool_access: authority.tool_access,
                         plugin_config,
@@ -318,10 +355,7 @@ impl PluginSession {
                 },
                 tool_catalog_overlay: self.tool_catalog_overlay.clone(),
                 tool_snapshot: self.tool_snapshot.clone(),
-            })?;
-        built.adopt_native_view(bytes, fleet)?;
-        built.materialize()?;
-        Ok(built)
+            })
     }
 
     pub fn native_view(&self, fleet: crate::FleetFormat) -> Result<Option<Arc<[u8]>>, PluginError> {

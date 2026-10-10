@@ -45,9 +45,12 @@ pub struct ObservationPluginServices {
 }
 
 /// The plugins a query runs on: the session's own, when a run built them on
-/// this runtime, or else the view its head records as published, built
-/// privately for each query (FIG-5344). A session whose head records no
-/// published view has none, and its queries are refused as not published.
+/// this runtime, or else what its head records as published, built privately
+/// for each query (FIG-5344). A head without a store records the published
+/// view; a store-backed head records the namespaces, config and tool state
+/// its last run or command committed. A session whose head records neither,
+/// because it never ran or commanded, has none, and its queries are refused
+/// as not published.
 #[derive(Clone)]
 pub(in crate::runtime) enum QueryPlugins {
     Built(Arc<crate::PluginSession>),
@@ -56,26 +59,29 @@ pub(in crate::runtime) enum QueryPlugins {
         view: Arc<[u8]>,
         fleet: crate::FleetFormat,
     },
+    Head(Arc<crate::PluginSession>),
 }
 
 impl QueryPlugins {
     /// What `runtime`'s queries run on, if anything.
     pub(in crate::runtime) fn of(runtime: &LashRuntime) -> Option<Self> {
-        match runtime.session.as_ref() {
-            Some(session) => Some(Self::Built(Arc::clone(session.plugins()))),
-            None => runtime
-                .state
-                .plugin_admission_snapshot()
-                .map(|view| Self::Recorded {
-                    plugins: Arc::clone(&runtime.services.plugins),
-                    view,
-                    fleet: runtime.fleet_format(),
-                }),
+        if let Some(session) = runtime.session.as_ref() {
+            return Some(Self::Built(Arc::clone(session.plugins())));
+        }
+        let plugins = Arc::clone(&runtime.services.plugins);
+        match runtime.state.plugin_admission_snapshot() {
+            Some(view) => Some(Self::Recorded {
+                plugins,
+                view,
+                fleet: runtime.fleet_format(),
+            }),
+            None => (runtime.is_store_backed() && runtime.state.tool_state_ref().is_some())
+                .then_some(Self::Head(plugins)),
         }
     }
 
-    /// Run query `name` on these plugins. A recorded view that does not
-    /// build answers its build refusal, typed.
+    /// Run query `name` on these plugins. A recorded view or head that does
+    /// not build answers its build refusal, typed.
     pub(in crate::runtime) async fn query(
         &self,
         name: &str,
@@ -84,20 +90,20 @@ impl QueryPlugins {
         read: Arc<dyn crate::plugin::SessionReadService>,
         process_read: Arc<dyn crate::plugin::ProcessReadService>,
     ) -> Result<(String, serde_json::Value), crate::PluginOperationInvokeError> {
-        let plugins = match self {
-            Self::Built(plugins) => Arc::clone(plugins),
+        let built = match self {
+            Self::Built(plugins) => Ok(Arc::clone(plugins)),
             Self::Recorded {
                 plugins,
                 view,
                 fleet,
-            } => plugins
-                .build_published_view(view, *fleet)
-                .map_err(|error| {
-                    crate::PluginOperationInvokeError::Runtime(Box::new(
-                        crate::RuntimeEffectControllerError::from(error).into_runtime_error(),
-                    ))
-                })?,
+            } => plugins.build_published_view(view, *fleet),
+            Self::Head(plugins) => plugins.build_recorded_head(),
         };
+        let plugins = built.map_err(|error| {
+            crate::PluginOperationInvokeError::Runtime(Box::new(
+                crate::RuntimeEffectControllerError::from(error).into_runtime_error(),
+            ))
+        })?;
         plugins
             .query_plugin(name, args, session_id, true, read, process_read)
             .await
