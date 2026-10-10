@@ -268,6 +268,9 @@ pub(crate) struct Lowerer<'a> {
     /// Every word of the source, every session binding and every name
     /// issued so far: a generated name is none of them.
     taken: HashSet<String>,
+    /// For each base `fresh` was given, the number its search resumes at:
+    /// every lower one is taken, and `taken` only grows.
+    next_fresh: HashMap<String, usize>,
     temporaries: HashSet<Name>,
     scopes: Vec<Scope>,
     functions: Vec<FunctionFrame>,
@@ -359,6 +362,7 @@ pub(crate) fn lower(
         session: environment.bindings,
         table: builtins::table(),
         taken,
+        next_fresh: HashMap::new(),
         temporaries: HashSet::new(),
         scopes: Vec::new(),
         functions: vec![FunctionFrame {
@@ -492,13 +496,14 @@ impl Lowerer<'_> {
 
     /// A name the source does not spell and nothing has taken.
     fn fresh(&mut self, base: &str) -> Name {
-        let mut number = 1usize;
+        let mut number = self.next_fresh.get(base).copied().unwrap_or(1);
         loop {
             let candidate = format!("{base}{number}");
+            number += 1;
             if self.taken.insert(candidate.clone()) {
+                self.next_fresh.insert(base.to_string(), number);
                 return Name::new(candidate);
             }
-            number += 1;
         }
     }
 

@@ -25,12 +25,23 @@ const INHERITED: &[&str] = &[
 /// Arrays use the dialect predicate because they include branded records.
 fn declared_receiver(ty: &Ty) -> Option<(Receiver, Option<&'static str>)> {
     match ty {
-        Ty::List(_) => Some((Receiver::List, None)),
+        Ty::List(_) | Ty::Array => Some((Receiver::List, None)),
         Ty::Text => Some((Receiver::Text, Some("text.len"))),
         Ty::Float | Ty::Number => Some((Receiver::Number, Some("num.to_float"))),
         Ty::Bool => Some((Receiver::Bool, Some("bool.not"))),
         _ => None,
     }
+}
+
+/// A member read in place, and what must hold for it to read what the
+/// helper would.
+struct Direct {
+    tests: Vec<Expr>,
+    read: Expr,
+    /// Whether the read may find a list's hole, which reads `undefined`.
+    hole: bool,
+    /// What the read gives where no test is needed.
+    ty: Ty,
 }
 
 /// A property key, already evaluated.
@@ -104,6 +115,12 @@ impl Lowerer<'_> {
     /// the kernel's own `list.get` and `list.len`. Branded arrays and other reads keep
     /// JavaScript's meaning, and what it gives is believed to be what the
     /// object's type says.
+    ///
+    /// Any other object's member is read in place where the value turns out
+    /// to be what the read is plainly answered by: a plain record's own
+    /// field, a list's length, and a list's element at an index it has.
+    /// Every other value, and a field a plain record lacks but a built-in
+    /// might answer for, takes the helper (`direct_read`).
     pub(super) fn get_member(&mut self, object: &Operand, key: &Key) -> Lowering<Operand> {
         if let Ty::List(element) = &object.ty {
             match key {
@@ -143,6 +160,51 @@ impl Lowerer<'_> {
             Key::Static(name) => object.ty.property(name),
             Key::Computed(_) => Ty::Unknown,
         };
+        if let Some(direct) = self.direct_read(object, key)? {
+            if direct.tests.is_empty() && !direct.hole {
+                return Ok(self.let_expr(direct.read, direct.ty));
+            }
+            let result = self.let_expr(Expr::Literal(Literal::Absent), Ty::Unknown);
+            let place = Place::Variable(super::statements::variable_of(&result));
+            let read = direct.read;
+            self.guard(
+                &direct.tests,
+                &mut |this| {
+                    this.emit(Stmt::Assign {
+                        place: place.clone(),
+                        value: lash_kernel_doc::Rhs::Expr(read.clone()),
+                    });
+                    if direct.hole {
+                        let hole = this.same(result.expr(), Expr::Tuple(Vec::new()))?;
+                        let absent = this.block(|this| {
+                            this.emit(Stmt::Assign {
+                                place: place.clone(),
+                                value: lash_kernel_doc::Rhs::Expr(Expr::Literal(Literal::Absent)),
+                            });
+                            Ok(())
+                        })?;
+                        this.emit_if(hole, absent, Buf::default());
+                    }
+                    Ok(())
+                },
+                &mut |this| {
+                    let value = this.read_member(object, key, Ty::Unknown)?;
+                    this.store(place.clone(), value);
+                    Ok(())
+                },
+            )?;
+            let ty = if direct.tests.is_empty() {
+                direct.ty
+            } else {
+                ty
+            };
+            return Ok(Operand { ty, ..result });
+        }
+        self.read_member(object, key, ty)
+    }
+
+    /// The helper that reads `object.key` with JavaScript's meaning.
+    fn read_member(&mut self, object: &Operand, key: &Key, ty: Ty) -> Lowering<Operand> {
         if let Key::Static(name) = key
             && self.table.properties.contains_key(name.as_str())
         {
@@ -167,6 +229,197 @@ impl Lowerer<'_> {
             "ts.read"
         };
         self.invoke(function, &[object.clone(), key.operand()], ty)
+    }
+
+    /// The in-place form of a read of `object.key`, and the tests under
+    /// which it gives what the helper would: `None` where no value of the
+    /// object's type has one.
+    ///
+    /// A plain record, a record whose `brand` is no text, answers a name no
+    /// built-in has with its field by that name, `undefined` when it has
+    /// none (`ts.read`); a name some built-in has, or a computed text, only
+    /// when the record holds a field by it (`ts.member.<name>`,
+    /// `ts.property.<name>`, `ts.get_computed`). A
+    /// list answers `length` with its length, and a number that is one of
+    /// its positions with its element there, a hole being `undefined`
+    /// (`ts.get`). Each test is a kernel expression that cannot raise once
+    /// the tests before it held.
+    fn direct_read(&mut self, object: &Operand, key: &Key) -> Lowering<Option<Direct>> {
+        match key {
+            Key::Static(name)
+                if name == "length" && !matches!(object.ty, Ty::Object | Ty::Record(_)) =>
+            {
+                let Some(tests) = self.list_tests(object)? else {
+                    return Ok(None);
+                };
+                let length = self.native("list.len", vec![object.expr()])?;
+                let read = self.native("num.to_float", vec![length])?;
+                Ok(Some(Direct {
+                    tests,
+                    read,
+                    hole: false,
+                    ty: Ty::Float,
+                }))
+            }
+            Key::Static(name) => {
+                let Some(mut tests) = self.record_tests(object)? else {
+                    return Ok(None);
+                };
+                if self.table.properties.contains_key(name.as_str())
+                    || self.table.member_names.contains(name.as_str())
+                {
+                    let contains = self.native(
+                        "record.contains",
+                        vec![object.expr(), Operand::text(name.clone()).expr()],
+                    )?;
+                    tests.push(contains);
+                }
+                let read = Expr::Member(Box::new(Member::Field {
+                    target: object.expr(),
+                    field: name.clone(),
+                }));
+                Ok(Some(Direct {
+                    tests,
+                    read,
+                    hole: false,
+                    ty: Ty::Unknown,
+                }))
+            }
+            Key::Computed(key) if !key.ty.is_number() => {
+                let Some(mut tests) = self.record_tests(object)? else {
+                    return Ok(None);
+                };
+                tests.extend(self.own_field_tests(object, key)?);
+                let read = Expr::Member(Box::new(Member::Index {
+                    target: object.expr(),
+                    index: key.expr(),
+                }));
+                Ok(Some(Direct {
+                    tests,
+                    read,
+                    hole: false,
+                    ty: Ty::Unknown,
+                }))
+            }
+            Key::Computed(index) => {
+                let Some(mut tests) = self.list_tests(object)? else {
+                    return Ok(None);
+                };
+                let Some(position) = self.position_tests(object, index, false)? else {
+                    return Ok(None);
+                };
+                tests.extend(position);
+                let read = Expr::Member(Box::new(Member::Index {
+                    target: object.expr(),
+                    index: index.expr(),
+                }));
+                Ok(Some(Direct {
+                    tests,
+                    read,
+                    hole: true,
+                    ty: Ty::Unknown,
+                }))
+            }
+        }
+    }
+
+    /// The tests that `object` is a plain record: none when it is a record
+    /// the source built, and `None` when its type says it is no record.
+    fn record_tests(&mut self, object: &Operand) -> Lowering<Option<Vec<Expr>>> {
+        let mut tests = Vec::new();
+        match object.ty {
+            Ty::Object => {}
+            Ty::Unknown | Ty::Record(_) | Ty::Union(_) => {
+                let kind = self.native("kind", vec![object.expr()])?;
+                tests.push(self.same(kind, Operand::text("record").expr())?);
+            }
+            _ => return Ok(None),
+        }
+        let brand = Expr::Member(Box::new(Member::Field {
+            target: object.expr(),
+            field: "brand".to_string(),
+        }));
+        let kind = self.native("kind", vec![brand])?;
+        let branded = self.same(kind, Operand::text("text").expr())?;
+        tests.push(self.native("bool.not", vec![branded])?);
+        Ok(Some(tests))
+    }
+
+    /// The tests that `key` is a text that names a field the plain record
+    /// `object` holds, which every reader of a computed name gives before
+    /// any built-in's member by that name (`ts.get_computed`).
+    fn own_field_tests(&mut self, object: &Operand, key: &Operand) -> Lowering<Vec<Expr>> {
+        let kind = self.native("kind", vec![key.expr()])?;
+        let text = self.same(kind, Operand::text("text").expr())?;
+        let contains = self.native("record.contains", vec![object.expr(), key.expr()])?;
+        Ok(vec![text, contains])
+    }
+
+    /// The tests that `object` is a kernel list: none when the source built
+    /// it, and `None` when its type says it is no list.
+    fn list_tests(&mut self, object: &Operand) -> Lowering<Option<Vec<Expr>>> {
+        match object.ty {
+            Ty::Array => Ok(Some(Vec::new())),
+            Ty::Unknown | Ty::Union(_) => {
+                let kind = self.native("kind", vec![object.expr()])?;
+                Ok(Some(vec![self.same(kind, Operand::text("list").expr())?]))
+            }
+            _ => Ok(None),
+        }
+    }
+
+    /// The tests that `index`, a float, names a position of the list
+    /// `object` holds: `ts.number_index`'s, an integer that is not negative
+    /// and below the length. `append` admits the length itself, where a
+    /// write appends. `None` when no such float can: the index may be no
+    /// float, or is a literal that is no position.
+    fn position_tests(
+        &mut self,
+        object: &Operand,
+        index: &Operand,
+        append: bool,
+    ) -> Lowering<Option<Vec<Expr>>> {
+        if index.ty != Ty::Float {
+            return Ok(None);
+        }
+        let mut tests = Vec::new();
+        match &index.atom {
+            Atom::Literal(Literal::Float(value)) => {
+                let value = value.get();
+                if !(value >= 0.0 && value.fract() == 0.0) {
+                    return Ok(None);
+                }
+            }
+            Atom::Literal(_) => return Ok(None),
+            Atom::Variable(_) => {
+                // Only a whole number that is not negative is its own
+                // absolute value rounded down; NaN is not, and -0 is 0.
+                let floor = self.native("num.floor", vec![index.expr()])?;
+                let magnitude = self.native("num.abs", vec![index.expr()])?;
+                tests.push(self.native("eq", vec![floor, magnitude])?);
+            }
+        }
+        let length = self.native("list.len", vec![object.expr()])?;
+        let bound = if append { "num.le" } else { "num.lt" };
+        tests.push(self.native(bound, vec![index.expr(), length])?);
+        Ok(Some(tests))
+    }
+
+    /// Lowers `fast` under `tests`, each tested only once those before it
+    /// held, and `slow` wherever one fails.
+    fn guard(
+        &mut self,
+        tests: &[Expr],
+        fast: &mut dyn FnMut(&mut Self) -> Lowering<()>,
+        slow: &mut dyn FnMut(&mut Self) -> Lowering<()>,
+    ) -> Lowering<()> {
+        let Some((test, rest)) = tests.split_first() else {
+            return fast(self);
+        };
+        let then_block = self.block(|this| this.guard(rest, fast, slow))?;
+        let else_block = self.block(|this| slow(this))?;
+        self.emit_if(test.clone(), then_block, else_block);
+        Ok(())
     }
 
     /// Admit every dialect array while reserving kernel list operations for
@@ -222,20 +475,72 @@ impl Lowerer<'_> {
         Ok(Operand { ty, ..result })
     }
 
-    /// `object[key] = value`.
+    /// `object[key] = value`. A plain record's field by a name the source
+    /// spells or a text key gives, and a list's element at one of its positions or just past
+    /// them, are written in place, as `ts.set` writes them; any other write
+    /// is the helper.
     pub(super) fn set_member(
         &mut self,
         object: &Operand,
         key: &Key,
         value: Operand,
     ) -> Lowering<()> {
-        let written = self.invoke(
-            "ts.set",
-            &[object.clone(), key.operand(), value],
-            Ty::Unknown,
-        )?;
-        self.discard(written);
-        Ok(())
+        let direct = match key {
+            Key::Static(name) => self.record_tests(object)?.map(|tests| {
+                let place = Place::Member(Member::Field {
+                    target: object.expr(),
+                    field: name.clone(),
+                });
+                (tests, place)
+            }),
+            Key::Computed(key) if !key.ty.is_number() => match self.record_tests(object)? {
+                Some(mut tests) => {
+                    // A text key writes the field it names (`ts.set`).
+                    let kind = self.native("kind", vec![key.expr()])?;
+                    tests.push(self.same(kind, Operand::text("text").expr())?);
+                    let place = Place::Member(Member::Index {
+                        target: object.expr(),
+                        index: key.expr(),
+                    });
+                    Some((tests, place))
+                }
+                None => None,
+            },
+            Key::Computed(index) => match self.list_tests(object)? {
+                Some(mut tests) => self.position_tests(object, index, true)?.map(|position| {
+                    tests.extend(position);
+                    let place = Place::Member(Member::Index {
+                        target: object.expr(),
+                        index: index.expr(),
+                    });
+                    (tests, place)
+                }),
+                None => None,
+            },
+        };
+        let mut helper = |this: &mut Self| {
+            let written = this.invoke(
+                "ts.set",
+                &[object.clone(), key.operand(), value.clone()],
+                Ty::Unknown,
+            )?;
+            this.discard(written);
+            Ok(())
+        };
+        let Some((tests, place)) = direct else {
+            return helper(self);
+        };
+        self.guard(
+            &tests,
+            &mut |this| {
+                this.emit(Stmt::Assign {
+                    place: place.clone(),
+                    value: lash_kernel_doc::Rhs::Expr(value.expr()),
+                });
+                Ok(())
+            },
+            &mut helper,
+        )
     }
 
     /// The refusal of reflection on a built-in the source names: an
@@ -419,6 +724,9 @@ impl Lowerer<'_> {
     ) -> Lowering<Operand> {
         // A call gives what the function's declared return type says.
         let returned = function.ty.returned();
+        // A function the source made, held where nothing else is ever
+        // assigned, is its token (`types::facts`).
+        let declared = declared || matches!(function.ty, Ty::Function(_));
         let function = match function.atom {
             Atom::Variable(_) if declared => {
                 let closure = self.let_expr(Self::element(&function, 4), Ty::Unknown);
@@ -614,6 +922,19 @@ impl Lowerer<'_> {
         else {
             return Ok(None);
         };
+        let fresh = crate::types::FRESH_LIST_METHODS.contains(&name);
+        if object.ty == Ty::Array {
+            // A list the source built takes its row without the test.
+            let result = self.call_list_method(object, name, function, args)?;
+            return Ok(Some(if fresh {
+                Operand {
+                    ty: Ty::Array,
+                    ..result
+                }
+            } else {
+                result
+            }));
+        }
         if receiver == Receiver::List {
             return self
                 .array_branch(
@@ -630,7 +951,18 @@ impl Lowerer<'_> {
                         this.apply(method, object.clone(), args, false)
                     },
                 )
-                .map(Some);
+                .map(|result| {
+                    // Either way the method is the built-in one, which
+                    // makes a new list.
+                    Some(if fresh {
+                        Operand {
+                            ty: Ty::Array,
+                            ..result
+                        }
+                    } else {
+                        result
+                    })
+                });
         }
         if let Some(check) = check {
             let checked = self.native(check, vec![object.expr()])?;

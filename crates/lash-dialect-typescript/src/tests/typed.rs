@@ -61,7 +61,8 @@ fn declared_types_choose_the_kernel_function() {
     let chain = operations("function f(a: number, b: number) { return a * b / 2; }");
     assert!(chain[1].starts_with("num.div("), "{chain:?}");
     assert!(!chain[1].contains("num.to_float("), "{chain:?}");
-    // A property read keeps JavaScript's meaning; what it gives is believed.
+    // A property read keeps JavaScript's meaning, in place where the
+    // value is a plain record; what it gives is believed.
     let property = operations("function f(o: { n: number }) { return o.n + 1; }");
     assert_eq!(property[0], "invoke ts.read(o, \"n\")");
     assert!(
@@ -230,4 +231,138 @@ fn a_tools_declared_result_type_is_stated_and_known() {
     );
     assert!(computed("r").starts_with("num.mul(t"), "{text}");
     assert!(computed("a").starts_with("invoke ts.add(t"), "{text}");
+}
+
+/// What a cell finishes with, which every law below finishes as JSON text.
+fn finished(source: &str) -> String {
+    match super::machine::end(source) {
+        super::machine::Ended::Finished(lash_kernel_doc::Datum::Text(text)) => text,
+        other => panic!("{source}: {other:?}"),
+    }
+}
+
+/// An object or an array the source built is a kernel record or list, so
+/// a member the value plainly answers for is read and written in place:
+/// a plain record's own field by a spelled name, and a list's length and
+/// its element at one of its positions. Everything else keeps the helper:
+/// a missing field is `undefined`, a field a record lacks reads what a
+/// built-in gives (an own field of that name comes first), a hole and an
+/// index the list lacks read `undefined`, and a write past the end leaves
+/// holes.
+#[test]
+fn built_values_are_read_and_written_in_place_with_javascripts_answers() {
+    let text =
+        main_text("const o = { a: 1 }; const xs = [1, 2]; o.b = o.a; xs[2] = xs[0] + xs.length;");
+    for direct in [
+        "= o.a",
+        ".b = t",
+        "num.lt(0.0, list.len(xs))",
+        "[2.0] = t",
+        "num.to_float(list.len(xs))",
+    ] {
+        assert!(text.contains(direct), "missing `{direct}` in\n{text}");
+    }
+    assert_eq!(
+        finished(
+            "const o = { a: 1, toString: 5 }; const p = {}; const xs = [1, , 3]; \
+             const holes = []; for (let i = -1; i < 5; i = i + 0.5) { holes.push(xs[i] === undefined); } \
+             const ys = []; ys[0] = 'a'; ys[2] = 'c'; p.a = o.missing; \
+             const named = ['x', 'toString', 'y']; const c = {}; c[named[0]] = 1; \
+             await finish(JSON.stringify([o.a, o.b === undefined, o.toString, typeof p.toString, \
+             p.valueOf === Object.prototype.valueOf, xs[1] === undefined, xs.length, 1 in xs, \
+             holes.join(','), ys.length, 1 in ys, 'a' in p, p.a === undefined, \
+             c[named[0]], typeof c[named[1]], o[named[1]], c[named[2]] === undefined]));"
+        ),
+        "[1,true,5,\"function\",true,true,3,false,\
+         \"true,true,false,true,true,true,false,true,true,true,true,true\",3,false,true,true,\
+         1,\"function\",5,true]"
+    );
+}
+
+/// A representation is proof of the kind of value, never of what it holds:
+/// a field or an element written through an alias reads what it now holds,
+/// whatever kind that is.
+#[test]
+fn a_value_changed_through_an_alias_reads_what_it_now_holds() {
+    assert_eq!(
+        finished(
+            "const a = { inner: { v: 1 } }; const b = a; const read = () => a.inner; \
+             b.inner = 5; const r1 = read(); b.inner = [10, 20]; const r2 = a.inner[1]; \
+             b.inner = 'str'; const r3 = a.inner.length; b.inner = null; let r4 = 'none'; \
+             try { a.inner.v; } catch (e) { r4 = e.name; } \
+             const xs = [1, 2]; const ys = xs; ys.length = 0; \
+             await finish(JSON.stringify([r1, r2, r3, r4, xs.length, xs[0] === undefined]));"
+        ),
+        "[5,20,3,\"TypeError\",0,true]"
+    );
+}
+
+/// A method is read from its object before the call's arguments run, so
+/// an argument that replaces the method does not change the call.
+#[test]
+fn a_method_is_read_before_its_arguments_run() {
+    assert_eq!(
+        finished(
+            "const o = { f: (x) => 'old' + x }; \
+             const replace = () => { o.f = (x) => 'new' + x; return 1; }; \
+             const first = o.f(replace()); const second = o.f(2); \
+             await finish(first + ',' + second);"
+        ),
+        "old1,new2"
+    );
+}
+
+/// A binding that only ever holds functions the source made holds their
+/// tokens, so a call of it calls the token's closure without
+/// `ts.callable`; a binding that may hold anything else keeps it.
+#[test]
+fn a_function_binding_nothing_else_is_assigned_calls_its_closure() {
+    let text =
+        main_text("const f = (x) => x; let g = function () { return 1; }; g = () => 2; f(g());");
+    assert!(!text.contains("ts.callable"), "{text}");
+    let text = main_text("let h = (x) => x; h = 3; h(1);");
+    assert!(text.contains("ts.callable"), "{text}");
+    assert_eq!(
+        finished(
+            "const add = (a, b) => a + b; let pick = function () { return 'a'; }; \
+             const before = pick(); pick = () => 'b'; \
+             await finish(String(add(1, 2)) + before + pick());"
+        ),
+        "3ab"
+    );
+}
+
+/// A float in a template is spelled as `String` spells it: it has no
+/// `toString` of its own to run.
+#[test]
+fn a_float_in_a_template_is_spelled_as_javascript_spells_it() {
+    assert!(
+        main_text("const n = 1 + 1; const s = `${n}`;").contains("invoke ts.number.to_string(n)")
+    );
+    assert_eq!(
+        finished(
+            "const n = 0.1 + 0.2; \
+             await finish(`${n}|${-0}|${1 / 0}|${-1 / 0}|${0 / 0}|${1e21}|${2 ** 53}|${1e-7}|${-5}`);"
+        ),
+        "0.30000000000000004|0|Infinity|-Infinity|NaN|1e+21|9007199254740992|1e-7|-5"
+    );
+}
+
+/// `concat`, `filter`, `map` and `slice` of an array make a new list, so
+/// what they give is a list the source can use in place.
+#[test]
+fn a_built_in_array_methods_new_array_is_a_list() {
+    let text = main_text("const xs = [1, 2]; const ys = xs.map((x) => x); ys.push(3);");
+    assert!(
+        !text.contains("ts.method.push") && !text.contains("ts.array.push"),
+        "{text}"
+    );
+    assert_eq!(
+        finished(
+            "const xs = [1, , 3]; const ys = xs.map((x) => x * 2); ys.push(8); \
+             const zs = xs.slice(1).concat([4]).filter((x) => x !== undefined); \
+             await finish(JSON.stringify([ys.length, 1 in ys, ys[3], zs]));"
+        ),
+        "[4,false,8,[3,4]]"
+    );
 }

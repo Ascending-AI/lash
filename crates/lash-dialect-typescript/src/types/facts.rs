@@ -18,7 +18,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use lash_kernel_doc::Name;
 
-use super::{Ty, believed, binary_result, unary_result};
+use super::{FRESH_LIST_METHODS, Ty, believed, binary_result, unary_result};
 use crate::adapter::{
     ArrayElement, AssignOp, AssignTarget, BinaryOp, CallArg, Catch, Expr, Function, FunctionBody,
     MemberProperty, ObjectProperty, OptionalOperation, Pattern, Program, PropertyKey, Stmt,
@@ -222,8 +222,20 @@ impl Facts {
             },
             Expr::Update { .. } => Ty::Float,
             Expr::Delete { .. } => Ty::Bool,
+            // A cell's `const` of an `async` arrow may name a process, which
+            // is no function token.
+            Expr::Function(function) if function.is_async && function.is_arrow => Ty::Unknown,
             Expr::Function(function) => self.function(function.return_ty.as_ref()),
             Expr::Call { callee, .. } => match callee.as_ref() {
+                Expr::Member {
+                    object,
+                    property: MemberProperty::Field(name),
+                    ..
+                } if FRESH_LIST_METHODS.contains(&name.as_str())
+                    && matches!(self.type_of(object), Ty::List(_) | Ty::Array) =>
+                {
+                    Ty::Array
+                }
                 Expr::Member { .. } => Ty::Unknown,
                 callee => self.type_of(callee).returned(),
             },
@@ -240,10 +252,10 @@ impl Facts {
                     },
                 }
             }
+            Expr::Array(_) => Ty::Array,
+            Expr::Object(_) => Ty::Object,
             Expr::RegExp { .. }
             | Expr::This
-            | Expr::Array(_)
-            | Expr::Object(_)
             | Expr::New { .. }
             | Expr::OptionalChain { .. }
             | Expr::Await { .. }

@@ -16,6 +16,12 @@
 //! takes exactly that type, so a wrong belief raises a typed error where
 //! JavaScript would have coerced. Each such place is a `TS_TYPED_*` row of
 //! the crate's deviation register, `deviations.md`.
+//!
+//! A representation is only ever proof: [`Ty::Object`] and [`Ty::Array`]
+//! say which kernel value the source built, never what it holds, and no
+//! annotation gives either. A kernel value keeps its kind for its whole
+//! life, so the proof survives every write through every alias; what the
+//! value holds does not, and a read of it is still checked where it runs.
 
 use std::collections::BTreeMap;
 
@@ -28,6 +34,11 @@ mod narrow;
 
 pub(crate) use facts::Facts;
 pub(crate) use narrow::{Narrowing, narrow};
+
+/// The array methods whose result is a new kernel list whatever array they
+/// are called on: each returns a list it builds, from `[]` or by
+/// `list.slice` (`helpers/array.kernel`).
+pub(crate) const FRESH_LIST_METHODS: &[&str] = &["concat", "filter", "map", "slice"];
 
 /// What a value is known or believed to be.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -49,6 +60,13 @@ pub(crate) enum Ty {
     List(Box<Ty>),
     /// An object, with the properties its type names.
     Record(BTreeMap<String, Ty>),
+    /// An object the source built: a kernel record, whatever fields it
+    /// later gains or loses. A text `brand` written to it makes it read as
+    /// the branded value it then is, so its reads still test that.
+    Object,
+    /// An array the source built, or one a built-in array method made: a
+    /// kernel list, of any elements, holes among them.
+    Array,
     /// A function, with what a call of it gives.
     Function(Box<Ty>),
     /// One of several types, none of them unknown and none a union.
@@ -87,6 +105,7 @@ impl Ty {
         match self {
             Self::Record(fields) => fields.get(name).cloned().unwrap_or(Self::Unknown),
             Self::List(_) | Self::Text if name == "length" => Self::Number,
+            Self::Array if name == "length" => Self::Float,
             Self::Never => Self::Never,
             _ => Self::Unknown,
         }

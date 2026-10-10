@@ -238,7 +238,7 @@ impl Lowerer<'_> {
             parts.push(part.expr());
         }
         let parts = self.let_expr(Expr::List(parts), Ty::Unknown);
-        self.invoke("ts.spread", &[parts], Ty::Unknown)
+        self.invoke("ts.spread", &[parts], Ty::Array)
     }
 
     /// A new list of values, some of them spread.
@@ -248,7 +248,7 @@ impl Lowerer<'_> {
             let operands = self.operands(&exprs)?;
             return Ok(self.let_expr(
                 Expr::List(operands.iter().map(Operand::expr).collect()),
-                Ty::Unknown,
+                Ty::Array,
             ));
         }
         let mut parts = Vec::new();
@@ -262,7 +262,7 @@ impl Lowerer<'_> {
             parts.push(part.expr());
         }
         let parts = self.let_expr(Expr::List(parts), Ty::Unknown);
-        self.invoke("ts.spread", &[parts], Ty::Unknown)
+        self.invoke("ts.spread", &[parts], Ty::Array)
     }
 
     /// A plain object whose `at`-th property is a process: the process is
@@ -288,7 +288,7 @@ impl Lowerer<'_> {
                 value: value.expr(),
             });
         }
-        Ok(self.let_expr(Expr::Record(entries), Ty::Unknown))
+        Ok(self.let_expr(Expr::Record(entries), Ty::Object))
     }
 
     fn lower_object(&mut self, properties: &[ast::ObjectProperty]) -> Lowering<Operand> {
@@ -342,11 +342,11 @@ impl Lowerer<'_> {
                     value: value.expr(),
                 })
                 .collect();
-            return Ok(self.let_expr(Expr::Record(entries), Ty::Unknown));
+            return Ok(self.let_expr(Expr::Record(entries), Ty::Object));
         }
         // A computed key, a repeated key or a spread: the object is built
         // one property at a time, in source order.
-        let object = self.let_expr(Expr::Record(Vec::new()), Ty::Unknown);
+        let object = self.let_expr(Expr::Record(Vec::new()), Ty::Object);
         for property in properties {
             match property {
                 ast::ObjectProperty::KeyValue(key, value) => {
@@ -569,11 +569,12 @@ impl Lowerer<'_> {
             };
             let value = self.lower_expr(expression)?;
             // Each value is converted where the source evaluates it: a
-            // conversion may run the value's own `toString`.
-            let spelled = if value.ty == Ty::Text {
-                self.pin(value)
-            } else {
-                self.invoke("ts.to_string", &[value], Ty::Text)?
+            // conversion may run the value's own `toString`. A float has
+            // no `toString` of its own to run, so it is spelled directly.
+            let spelled = match value.ty {
+                Ty::Text => self.pin(value),
+                Ty::Float => self.invoke("ts.number.to_string", &[value], Ty::Text)?,
+                _ => self.invoke("ts.to_string", &[value], Ty::Text)?,
             };
             parts.push(spelled.expr());
         }
