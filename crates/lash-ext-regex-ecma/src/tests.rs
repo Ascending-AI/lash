@@ -76,7 +76,7 @@ impl Heap {
     /// A value's size (`K-CHG-004`).
     fn size(&self, value: &Value) -> u64 {
         match value {
-            Value::Int(integer) => 1 + integer.as_bigint().bits().div_ceil(64),
+            Value::Int(integer) => 1 + integer.bits().div_ceil(64),
             Value::Text(text) => 1 + text.len() as u64,
             Value::List(_) | Value::Record(_) => 1 + self.len(value.object().unwrap()) as u64,
             _ => 1,

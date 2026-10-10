@@ -1,18 +1,33 @@
 //! The two number kinds, and the number token an effect result carries.
 
+use std::borrow::Cow;
+use std::cmp::Ordering;
 use std::fmt;
 use std::str::FromStr;
+use std::sync::Arc;
 
-use num_bigint::BigInt;
+use num_bigint::{BigInt, Sign};
+use num_traits::ToPrimitive;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::name::string_schema;
 
 /// An arbitrary-precision integer. Its stored form is its decimal spelling.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+///
+/// Cloning is cheap: an integer that fits in 64 bits is held in place, and a
+/// larger one is shared.
+#[derive(Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
-pub struct Integer(BigInt);
+pub struct Integer(Repr);
+
+/// An integer's one representation: `Big` holds only what `Small` cannot,
+/// so two equal integers are always the same variant.
+#[derive(Clone, PartialEq, Eq, Hash)]
+enum Repr {
+    Small(i64),
+    Big(Arc<BigInt>),
+}
 
 string_schema!(Integer, "Integer", "^(0|-?[1-9][0-9]*)$");
 
@@ -25,15 +40,42 @@ pub struct InvalidInteger {
 
 impl Integer {
     pub fn new(value: impl Into<BigInt>) -> Self {
-        Self(value.into())
+        let value = value.into();
+        Self(match value.to_i64() {
+            Some(small) => Repr::Small(small),
+            None => Repr::Big(Arc::new(value)),
+        })
     }
 
-    pub fn as_bigint(&self) -> &BigInt {
-        &self.0
+    /// How many bits the integer's magnitude takes; zero takes none.
+    pub fn bits(&self) -> u64 {
+        match &self.0 {
+            Repr::Small(small) => u64::from(64 - small.unsigned_abs().leading_zeros()),
+            Repr::Big(big) => big.bits(),
+        }
+    }
+
+    pub fn is_negative(&self) -> bool {
+        match &self.0 {
+            Repr::Small(small) => *small < 0,
+            Repr::Big(big) => big.sign() == Sign::Minus,
+        }
+    }
+
+    /// The integer as a `BigInt`, which one that fits in 64 bits is built
+    /// as.
+    pub fn as_bigint(&self) -> Cow<'_, BigInt> {
+        match &self.0 {
+            Repr::Small(small) => Cow::Owned(BigInt::from(*small)),
+            Repr::Big(big) => Cow::Borrowed(big),
+        }
     }
 
     pub fn into_bigint(self) -> BigInt {
-        self.0
+        match self.0 {
+            Repr::Small(small) => BigInt::from(small),
+            Repr::Big(big) => Arc::unwrap_or_clone(big),
+        }
     }
 
     /// Reads the canonical decimal spelling: no `+`, no leading zero, no
@@ -49,25 +91,91 @@ impl Integer {
         if !canonical {
             return Err(invalid());
         }
-        BigInt::from_str(text).map(Self).map_err(|_| invalid())
+        match text.parse::<i64>() {
+            Ok(small) => Ok(Self(Repr::Small(small))),
+            Err(_) => BigInt::from_str(text).map(Self::new).map_err(|_| invalid()),
+        }
+    }
+}
+
+impl ToPrimitive for Integer {
+    fn to_i64(&self) -> Option<i64> {
+        match &self.0 {
+            Repr::Small(small) => Some(*small),
+            Repr::Big(_) => None,
+        }
+    }
+
+    fn to_u64(&self) -> Option<u64> {
+        match &self.0 {
+            Repr::Small(small) => u64::try_from(*small).ok(),
+            Repr::Big(big) => big.to_u64(),
+        }
+    }
+
+    fn to_i128(&self) -> Option<i128> {
+        match &self.0 {
+            Repr::Small(small) => Some(i128::from(*small)),
+            Repr::Big(big) => big.to_i128(),
+        }
+    }
+
+    fn to_u128(&self) -> Option<u128> {
+        match &self.0 {
+            Repr::Small(small) => u128::try_from(*small).ok(),
+            Repr::Big(big) => big.to_u128(),
+        }
+    }
+
+    fn to_f64(&self) -> Option<f64> {
+        match &self.0 {
+            Repr::Small(small) => small.to_f64(),
+            Repr::Big(big) => big.to_f64(),
+        }
+    }
+}
+
+impl Ord for Integer {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match (&self.0, &other.0) {
+            (Repr::Small(a), Repr::Small(b)) => a.cmp(b),
+            _ => self.as_bigint().cmp(&other.as_bigint()),
+        }
+    }
+}
+
+impl PartialOrd for Integer {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
     }
 }
 
 impl fmt::Display for Integer {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
+        match &self.0 {
+            Repr::Small(small) => small.fmt(f),
+            Repr::Big(big) => big.fmt(f),
+        }
+    }
+}
+
+impl fmt::Debug for Integer {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("Integer")
+            .field(&format_args!("{self}"))
+            .finish()
     }
 }
 
 impl From<BigInt> for Integer {
     fn from(value: BigInt) -> Self {
-        Self(value)
+        Self::new(value)
     }
 }
 
 impl From<i64> for Integer {
     fn from(value: i64) -> Self {
-        Self(value.into())
+        Self(Repr::Small(value))
     }
 }
 

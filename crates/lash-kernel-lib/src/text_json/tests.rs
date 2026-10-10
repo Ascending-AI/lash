@@ -892,7 +892,7 @@ fn dump(heap: &Heap, value: &Value) -> lash_kernel_doc::Datum {
 fn deep(datum: &lash_kernel_doc::Datum) -> u64 {
     use lash_kernel_doc::Datum;
     match datum {
-        Datum::Int(integer) => 1 + integer.as_bigint().bits().div_ceil(64),
+        Datum::Int(integer) => 1 + integer.bits().div_ceil(64),
         Datum::Text(text) => 1 + u64::try_from(text.len()).unwrap(),
         Datum::Bytes(bytes) => 1 + u64::try_from(bytes.as_slice().len()).unwrap(),
         Datum::List(items) => {
@@ -1310,7 +1310,7 @@ fn dump_input(heap: &Heap, value: &Value) -> lash_kernel_doc::Datum {
 fn held(heap: &Heap, value: &Value) -> u64 {
     match value {
         Value::Text(text) => text.len() as u64,
-        Value::Int(integer) => integer.as_bigint().bits().div_ceil(8),
+        Value::Int(integer) => integer.bits().div_ceil(8),
         Value::List(id) => heap.len(*id) as u64 * Room::VALUE,
         other => panic!("no amplifier returns {other:?}"),
     }

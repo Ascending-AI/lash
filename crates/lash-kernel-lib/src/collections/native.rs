@@ -370,7 +370,7 @@ fn arg<'a>(call: &'a NativeCall<'_>, index: usize) -> Result<&'a Value, NativeEr
 }
 fn integer(value: &Value) -> Result<BigInt, NativeError> {
     match value {
-        Value::Int(n) => Ok(n.as_bigint().clone()),
+        Value::Int(n) => Ok(n.as_bigint().into_owned()),
         Value::Float(n) if n.get().is_finite() && n.get().fract() == 0.0 => {
             BigInt::from_f64(n.get())
                 .ok_or_else(|| raise("index_out_of_range", "index must be integral"))

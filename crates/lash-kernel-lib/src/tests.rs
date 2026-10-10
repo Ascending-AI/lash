@@ -12,7 +12,7 @@ use lash_kernel_doc::{
     WorkCounter,
 };
 use num_bigint::BigInt;
-use num_traits::One;
+use num_traits::{One, Zero};
 
 use crate::{
     Key, compare, equal, float_to_integer, integer_to_float, numbers, register_numbers, same,
@@ -189,6 +189,37 @@ fn k_num_001_integer_arithmetic_is_arbitrary_precision() {
         big(&a * &a)
     );
     assert_eq!(invoke("int.neg", &[big(a.clone())]).unwrap(), big(-a));
+}
+#[test]
+fn k_num_001_integer_arithmetic_is_exact_across_the_64_bit_word() {
+    // An integer that fits in 64 bits is held in place; an operation whose
+    // result leaves that range gives the exact integer, and one whose
+    // result comes back is the same integer as one written in range.
+    let (max, min) = (BigInt::from(i64::MAX), BigInt::from(i64::MIN));
+    let cases: [(&str, &[Value], BigInt); 11] = [
+        ("int.add", &[int(i64::MAX), int(1)], &max + 1),
+        ("int.sub", &[int(i64::MIN), int(1)], &min - 1),
+        ("int.mul", &[int(i64::MIN), int(-1)], -&min),
+        ("int.mul", &[int(i64::MAX), int(i64::MAX)], &max * &max),
+        ("int.neg", &[int(i64::MIN)], -&min),
+        ("abs", &[int(i64::MIN)], -&min),
+        ("div_trunc", &[int(i64::MIN), int(-1)], -&min),
+        ("div_floor", &[int(i64::MIN), int(-1)], -&min),
+        ("rem_trunc", &[int(i64::MIN), int(-1)], BigInt::zero()),
+        ("rem_floor", &[int(i64::MIN), int(-1)], BigInt::zero()),
+        ("int.sub", &[big(&max + 1), int(1)], max.clone()),
+    ];
+    for (name, args, expected) in cases {
+        assert_eq!(invoke(name, args).unwrap(), big(expected), "{name}");
+    }
+    assert_eq!(
+        invoke("int.sub", &[big(&max + 1), int(1)]).unwrap(),
+        int(i64::MAX)
+    );
+    assert_eq!(
+        invoke("compare", &[big(&max + 1), int(i64::MAX)]).unwrap(),
+        int(1)
+    );
 }
 #[test]
 fn k_num_002_binary64_rounds_ties_to_even() {
@@ -755,7 +786,7 @@ fn n_pow_reserves_each_product_before_it_multiplies() {
     let Ok(Value::Int(power)) = invoke_heap("int.pow", &args, &mut heap) else {
         panic!("the power fits a roomy heap");
     };
-    assert!(heap.1.reserved >= power.as_bigint().bits().div_ceil(8));
+    assert!(heap.1.reserved >= power.bits().div_ceil(8));
 }
 #[test]
 fn n_abs_neg_and_min_max_preserve_pinned_zero_and_nan_edges() {

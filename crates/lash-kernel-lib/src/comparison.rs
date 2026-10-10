@@ -15,9 +15,12 @@ type Pair = (ValueKind, ObjectId, ObjectId);
 /// Structural equality (`K-VAL-020..026`), including cyclic objects.
 /// It has no guest error. Numeric NaNs are unequal, even inside one object.
 pub fn equal(a: &Value, b: &Value, heap: &dyn NativeHeap) -> bool {
-    let mut pending = vec![(a.clone(), b.clone())];
+    // The pair in hand is not pushed, so that comparing two values that
+    // hold nothing allocates nothing.
+    let mut next = Some((a.clone(), b.clone()));
+    let mut pending = Vec::new();
     let mut seen = HashSet::new();
-    while let Some((a, b)) = pending.pop() {
+    while let Some((a, b)) = next.take().or_else(|| pending.pop()) {
         let kind = a.kind();
         match (&a, &b) {
             (Value::Int(_) | Value::Float(_), Value::Int(_) | Value::Float(_)) => {
@@ -107,8 +110,9 @@ fn elements(heap: &dyn NativeHeap, object: ObjectId) -> Vec<OwnedElement> {
 
 /// Identity (`K-VAL-027`): immutable members retain their kinds and float bits.
 pub fn same(a: &Value, b: &Value) -> bool {
-    let mut pending = vec![(a, b)];
-    while let Some((a, b)) = pending.pop() {
+    let mut next = Some((a, b));
+    let mut pending = Vec::new();
+    while let Some((a, b)) = next.take().or_else(|| pending.pop()) {
         match (a, b) {
             (Value::Tuple(a), Value::Tuple(b)) => {
                 if a.len() != b.len() {
@@ -147,9 +151,10 @@ pub fn compare(
         Length(usize, usize),
         Leave(Pair),
     }
-    let mut pending = vec![Step::Values(a.clone(), b.clone())];
+    let mut next = Some(Step::Values(a.clone(), b.clone()));
+    let mut pending = Vec::new();
     let mut active = HashSet::new();
-    while let Some(step) = pending.pop() {
+    while let Some(step) = next.take().or_else(|| pending.pop()) {
         let (a, b) = match step {
             Step::Length(a, b) => {
                 let order = a.cmp(&b);

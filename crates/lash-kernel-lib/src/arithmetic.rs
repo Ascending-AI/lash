@@ -4,7 +4,7 @@ use std::cmp::Ordering;
 
 use lash_kernel_doc::{Float, Integer, NativeError, NativeHeap, Value, WorkCounter};
 use num_bigint::BigInt;
-use num_traits::{One, Signed, Zero};
+use num_traits::{One, Signed, ToPrimitive, Zero};
 
 use crate::numeric::{as_float, number_cmp, ratio_to_float};
 use crate::raised;
@@ -49,8 +49,13 @@ pub(crate) fn binary(
     heap: &mut dyn NativeHeap,
 ) -> Result<Value, NativeError> {
     if let (Value::Int(a), Value::Int(b)) = (a, b) {
-        let a = a.as_bigint();
-        let b = b.as_bigint();
+        if let (Some(a), Some(b)) = (a.to_i64(), b.to_i64())
+            && let Some(result) = in_word(op, a, b)
+        {
+            return Ok(Value::Int(Integer::from(result)));
+        }
+        let (a, b) = (a.as_bigint(), b.as_bigint());
+        let (a, b) = (&*a, &*b);
         let result = match op {
             Binary::Add => a + b,
             Binary::Sub => a - b,
@@ -210,18 +215,64 @@ impl Room<'_> {
     }
 }
 
+/// The integer operations whose operands and result fit in 64 bits, done
+/// there. `None` is an operation the arbitrary-precision path does.
+fn in_word(op: Binary, a: i64, b: i64) -> Option<i64> {
+    // A floored quotient is one less than the truncated one when the
+    // remainder's sign differs from the divisor's; the remainder then
+    // takes the divisor once more.
+    let floored = |r: i64| r != 0 && (r < 0) != (b < 0);
+    match op {
+        Binary::Add => a.checked_add(b),
+        Binary::Sub => a.checked_sub(b),
+        Binary::Mul => a.checked_mul(b),
+        Binary::DivTrunc => a.checked_div(b),
+        Binary::RemTrunc => a.checked_rem(b),
+        Binary::DivFloor => {
+            let (q, r) = (a.checked_div(b)?, a.checked_rem(b)?);
+            if floored(r) {
+                q.checked_sub(1)
+            } else {
+                Some(q)
+            }
+        }
+        Binary::RemFloor => {
+            let r = a.checked_rem(b)?;
+            if floored(r) {
+                r.checked_add(b)
+            } else {
+                Some(r)
+            }
+        }
+        Binary::Min => Some(a.min(b)),
+        Binary::Max => Some(a.max(b)),
+        Binary::Div | Binary::Pow => None,
+    }
+}
+
 pub(crate) fn unary(op: Unary, value: &Value) -> Result<Value, NativeError> {
     if let Value::Int(value) = value {
+        let word = value.to_i64();
         return Ok(match op {
-            Unary::Neg => Value::Int(Integer::new(-value.as_bigint())),
-            Unary::Abs => Value::Int(Integer::new(value.as_bigint().abs())),
+            Unary::Neg => match word.and_then(i64::checked_neg) {
+                Some(negated) => Value::Int(Integer::from(negated)),
+                None => Value::Int(Integer::new(-value.as_bigint().into_owned())),
+            },
+            Unary::Abs => match word.and_then(i64::checked_abs) {
+                Some(magnitude) => Value::Int(Integer::from(magnitude)),
+                None => Value::Int(Integer::new(value.as_bigint().abs())),
+            },
             Unary::Floor
             | Unary::Ceil
             | Unary::Trunc
             | Unary::RoundEven
             | Unary::RoundAway
             | Unary::RoundUp => Value::Int(value.clone()),
-            Unary::Sign => Value::Int(Integer::new(value.as_bigint().signum())),
+            Unary::Sign => Value::Int(Integer::from(if value.is_negative() {
+                -1
+            } else {
+                i64::from(value.bits() > 0)
+            })),
             Unary::IsFinite | Unary::IsInteger => Value::Bool(true),
             Unary::IsInfinite | Unary::IsNan => Value::Bool(false),
         });

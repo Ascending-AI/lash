@@ -11,7 +11,8 @@ use std::ops::ControlFlow;
 use std::sync::Arc;
 
 use lash_kernel_doc::{
-    Bytes, Element, ErrorValue, Identity, NativeError, NativeHeap, Object, ObjectId, TaskId, Value,
+    Bytes, Element, ErrorValue, Identity, Integer, NativeError, NativeHeap, Object, ObjectId,
+    TaskId, Value,
 };
 use num_bigint::BigInt;
 use num_traits::FromPrimitive;
@@ -36,13 +37,13 @@ const MIN_COLLECT_BYTES: u64 = 1 << 20;
 pub(crate) enum Key {
     Null,
     Bool(bool),
-    Int(BigInt),
+    Int(Integer),
     /// A finite float with a fraction, or an infinity, by its bits.
     Float(u64),
     Nan,
     Text(Arc<str>),
     Bytes(Bytes),
-    Timestamp(BigInt),
+    Timestamp(Integer),
     Ref(Identity),
     Tuple(Vec<Key>),
 }
@@ -54,22 +55,20 @@ impl Key {
         Some(match value {
             Value::Null => Self::Null,
             Value::Bool(flag) => Self::Bool(*flag),
-            Value::Int(integer) => Self::Int(integer.as_bigint().clone()),
+            Value::Int(integer) => Self::Int(integer.clone()),
             Value::Float(float) => {
                 let float = float.get();
                 if float.is_nan() {
                     Self::Nan
                 } else if float.is_finite() && float.fract() == 0.0 {
-                    Self::Int(BigInt::from_f64(float)?)
+                    Self::Int(Integer::new(BigInt::from_f64(float)?))
                 } else {
                     Self::Float(float.to_bits())
                 }
             }
             Value::Text(text) => Self::Text(Arc::clone(text)),
             Value::Bytes(bytes) => Self::Bytes(bytes.clone()),
-            Value::Timestamp(timestamp) => {
-                Self::Timestamp(timestamp.nanoseconds.as_bigint().clone())
-            }
+            Value::Timestamp(timestamp) => Self::Timestamp(timestamp.nanoseconds.clone()),
             Value::Ref(identity) => Self::Ref(*identity),
             Value::Tuple(members) => {
                 Self::Tuple(members.iter().map(Self::of).collect::<Option<_>>()?)
@@ -165,8 +164,8 @@ pub(crate) enum Obj {
 /// The bytes a value is accounted where it is held.
 pub(crate) fn value_bytes(value: &Value) -> u64 {
     let payload = match value {
-        Value::Int(integer) => integer.as_bigint().bits().div_ceil(8),
-        Value::Timestamp(timestamp) => timestamp.nanoseconds.as_bigint().bits().div_ceil(8),
+        Value::Int(integer) => integer.bits().div_ceil(8),
+        Value::Timestamp(timestamp) => timestamp.nanoseconds.bits().div_ceil(8),
         Value::Text(text) => text.len() as u64,
         Value::Bytes(bytes) => bytes.as_slice().len() as u64,
         Value::Function(name) => name.as_str().len() as u64,

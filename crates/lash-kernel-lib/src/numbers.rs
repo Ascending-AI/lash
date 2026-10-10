@@ -543,7 +543,6 @@ impl NativeFunction for NumericFunction {
 fn radix(value: &Value) -> Result<u32, NativeError> {
     match value {
         Value::Int(value) => value
-            .as_bigint()
             .to_u32()
             .filter(|value| (2..=36).contains(value))
             .ok_or_else(|| raised("number_range", "radix must be between 2 and 36")),

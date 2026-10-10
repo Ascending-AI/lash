@@ -8,7 +8,7 @@ use lash_kernel_doc::{
     EffectIdentity, ErrorValue, JoinMode, LoopIteration, ObjectId, Site, SpawnIdentity, TaskId,
     TaskIdentity, Value,
 };
-use num_traits::{Signed, ToPrimitive};
+use num_traits::ToPrimitive;
 
 use super::exec::Call;
 use super::{
@@ -45,29 +45,21 @@ impl KernelMachine {
         match &action.kind {
             ActionKind::Call { callee, args } => {
                 let target = self.callee(task, exe, callee)?;
-                let args = self.atoms(task, exe, args)?;
-                self.frame(task)?.awaiting = Some(stmt);
-                match target {
-                    Target::Code(code, captures) => {
-                        self.push_frame(task, exe, Call::new(code, args).sharing(&captures))?;
-                        Ok(None)
-                    }
-                    Target::Library(lib) => match self.call_library(task, exe, lib, args)? {
-                        Ok(value) => Ok(Some(value)),
-                        Err(args) => {
-                            let LibRun::Body(code) = &exe.lib(lib).run else {
-                                return Err(fault("a function with no body was run as one").into());
-                            };
-                            self.push_frame(task, exe, Call::new(*code, args).of_library(lib))?;
-                            Ok(None)
-                        }
-                    },
-                }
+                let base = self.storage.args.len();
+                let called = self
+                    .push_atoms(task, exe, args)
+                    .and_then(|()| self.call(task, exe, stmt, target, base));
+                self.storage.args.truncate(base);
+                called
             }
             ActionKind::Spawn { callee, args } => {
                 let target = self.callee(task, exe, callee)?;
-                let args = self.atoms(task, exe, args)?;
-                self.spawn(task, exe, stmt, &action.site, target, args)
+                let base = self.storage.args.len();
+                let spawned = self
+                    .push_atoms(task, exe, args)
+                    .and_then(|()| self.spawn(task, exe, stmt, &action.site, target, base));
+                self.storage.args.truncate(base);
+                spawned
             }
             ActionKind::Perform {
                 effect,
@@ -95,8 +87,8 @@ impl KernelMachine {
             }
             ActionKind::Sleep(duration) => {
                 let duration = match self.atom(task, exe, duration)? {
-                    Value::Int(integer) if !integer.as_bigint().is_negative() => {
-                        Duration::from_millis(integer.as_bigint().to_u64().unwrap_or(u64::MAX))
+                    Value::Int(integer) if !integer.is_negative() => {
+                        Duration::from_millis(integer.to_u64().unwrap_or(u64::MAX))
                     }
                     Value::Float(float) if float.get().is_finite() && float.get() >= 0.0 => {
                         Duration::try_from_secs_f64(float.get() / 1000.0).unwrap_or(Duration::MAX)
@@ -225,6 +217,45 @@ impl KernelMachine {
         }
     }
 
+    /// A call action, its arguments the argument stack from `base`. The
+    /// caller takes them off.
+    fn call(
+        &mut self,
+        task: TaskId,
+        exe: &Executable,
+        stmt: StmtId,
+        target: Target,
+        base: usize,
+    ) -> Eval<Option<Value>> {
+        self.frame(task)?.awaiting = Some(stmt);
+        match target {
+            Target::Code(code, captures) => {
+                self.push_frame(task, exe, Call::new(code, base).sharing(&captures))?;
+                Ok(None)
+            }
+            Target::Library(lib) => match self.call_library(task, exe, lib, base)? {
+                Some(value) => Ok(Some(value)),
+                None => {
+                    let LibRun::Body(code) = &exe.lib(lib).run else {
+                        return Err(fault("a function with no body was run as one").into());
+                    };
+                    self.push_frame(task, exe, Call::new(*code, base).of_library(lib))?;
+                    Ok(None)
+                }
+            },
+        }
+    }
+
+    /// Reads an action's atoms onto the argument stack, left to right
+    /// (`K-EVAL-004`).
+    fn push_atoms(&mut self, task: TaskId, exe: &Executable, atoms: &[Atom]) -> Eval<()> {
+        for atom in atoms {
+            let value = self.atom(task, exe, atom)?;
+            self.storage.args.push(value);
+        }
+        Ok(())
+    }
+
     /// Reads an action's atoms, left to right (`K-EVAL-004`).
     fn atoms(&mut self, task: TaskId, exe: &Executable, atoms: &[Atom]) -> Eval<Vec<Value>> {
         atoms
@@ -332,7 +363,7 @@ impl KernelMachine {
 
     /// `spawn`: the new task runs at once, and the spawning task goes on
     /// when it first waits or ends, before any other ready task
-    /// (`K-TASK-002`).
+    /// (`K-TASK-002`). Its arguments are the argument stack from `base`.
     fn spawn(
         &mut self,
         task: TaskId,
@@ -340,10 +371,10 @@ impl KernelMachine {
         stmt: StmtId,
         site: &Site,
         target: Target,
-        args: Vec<Value>,
+        base: usize,
     ) -> Eval<Option<Value>> {
         if let Target::Code(code, _) = &target
-            && args.len() > exe.code(*code).params.len()
+            && self.storage.args.len() - base > exe.code(*code).params.len()
         {
             return raise(
                 "arity",
@@ -376,17 +407,17 @@ impl KernelMachine {
         let handle = Value::Task(child);
         let started = match target {
             Target::Code(code, captures) => {
-                self.push_frame(child, exe, Call::new(code, args).sharing(&captures))
+                self.push_frame(child, exe, Call::new(code, base).sharing(&captures))
             }
-            Target::Library(lib) => match self.call_library(child, exe, lib, args) {
+            Target::Library(lib) => match self.call_library(child, exe, lib, base) {
                 // A function with no frame has run to its end already.
-                Ok(Ok(value)) => {
+                Ok(Some(value)) => {
                     self.end_task(child, Ok(value))?;
                     return Ok(Some(handle));
                 }
-                Ok(Err(args)) => match &exe.lib(lib).run {
+                Ok(None) => match &exe.lib(lib).run {
                     LibRun::Body(code) => {
-                        self.push_frame(child, exe, Call::new(*code, args).of_library(lib))
+                        self.push_frame(child, exe, Call::new(*code, base).of_library(lib))
                     }
                     _ => Err(fault("a function with no body was run as one").into()),
                 },

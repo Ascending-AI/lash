@@ -8,7 +8,7 @@ use lash_kernel_doc::{
     Datum, ErrorValue, FunctionId, FunctionRegistry, Measure, NativeCall, NativeError, NativeHeap,
     Object, ObjectId, Operand, Value, WorkCounter,
 };
-use num_traits::{Signed, ToPrimitive};
+use num_traits::ToPrimitive;
 
 use crate::register_numbers;
 use crate::tests::Heap;
@@ -104,9 +104,7 @@ fn decode(datum: Datum, heap: &mut dyn NativeHeap) -> Value {
 
 fn magnitude(value: &Value) -> u64 {
     match value {
-        Value::Int(value) if !value.as_bigint().is_negative() => {
-            value.as_bigint().to_u64().unwrap_or(u64::MAX)
-        }
+        Value::Int(value) if !value.is_negative() => value.to_u64().unwrap_or(u64::MAX),
         Value::Float(value) if value.get().is_finite() && value.get() >= 0.0 => value.get() as u64,
         _ => 0,
     }
@@ -114,7 +112,7 @@ fn magnitude(value: &Value) -> u64 {
 
 fn size(value: &Value, heap: &dyn NativeHeap) -> u64 {
     match value {
-        Value::Int(value) => 1 + value.as_bigint().bits().div_ceil(64),
+        Value::Int(value) => 1 + value.bits().div_ceil(64),
         Value::Text(value) => 1 + value.len() as u64,
         Value::Bytes(value) => 1 + value.as_slice().len() as u64,
         Value::Tuple(values) => 1 + values.len() as u64,

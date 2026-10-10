@@ -73,7 +73,7 @@ fn raise(kind: &str, message: &str) -> NativeError {
 }
 fn milliseconds(value: &Value, call: &NativeCall<'_>) -> Result<f64, NativeError> {
     match value {
-        Value::Timestamp(time) => (time.nanoseconds.as_bigint() / 1_000_000_i64)
+        Value::Timestamp(time) => (&*time.nanoseconds.as_bigint() / 1_000_000_i64)
             .to_f64()
             .ok_or_else(|| raise("RangeError", "Timestamp out of range")),
         Value::Record(id)
@@ -108,7 +108,7 @@ impl NativeFunction for Op {
                 let integer = Integer::parse(&format!("{clipped:.0}"))
                     .map_err(|_| raise("RangeError", "Invalid time"))?;
                 Ok(Value::Timestamp(Timestamp {
-                    nanoseconds: Integer::new(integer.as_bigint() * 1_000_000),
+                    nanoseconds: Integer::new(&*integer.as_bigint() * 1_000_000),
                 }))
             }
             Self::Milliseconds => Ok(Value::Float(Float::new(milliseconds(first, &call)?))),

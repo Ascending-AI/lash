@@ -8,7 +8,7 @@ use lash_kernel_doc::{
     Datum, ErrorValue, Identity, Object, ObjectId, TaskId, TaskIdentity, Value, validate_document,
 };
 
-use super::{Interrupt, KernelMachine, Task, TaskState};
+use super::{Interrupt, KernelMachine, Storage, Task, TaskState};
 use crate::Layout;
 use crate::compile::compile;
 use crate::heap::{Heap, Key, Obj, Table, object_bytes, value_bytes};
@@ -71,6 +71,7 @@ pub(super) fn start(
         live_tasks: 1,
         inline_depth: 0,
         inline_result: None,
+        storage: Storage::default(),
         end: None,
         ended: false,
         program,
@@ -124,9 +125,11 @@ pub(super) fn start(
             (*code, args)
         }
     };
+    machine.storage.args = args;
     machine
-        .push_frame(TaskId::MAIN, &exe, super::exec::Call::new(code, args))
+        .push_frame(TaskId::MAIN, &exe, super::exec::Call::new(code, 0))
         .map_err(|interrupt| arguments(describe("the start", interrupt)))?;
+    machine.storage.args.clear();
     Ok(machine)
 }
 

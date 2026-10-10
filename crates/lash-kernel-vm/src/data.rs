@@ -8,7 +8,7 @@ use lash_kernel_doc::{
     Datum, ErrorDatum, Float, Integer, Name, NumberPolicy, NumberToken, ObjectId, Type, Value,
 };
 use num_bigint::BigInt;
-use num_traits::{FromPrimitive, Signed, ToPrimitive, Zero};
+use num_traits::{FromPrimitive, ToPrimitive, Zero};
 
 use crate::heap::{Heap, MAX_VALUE_DEPTH, Obj};
 
@@ -36,14 +36,10 @@ pub(crate) fn raised(kind: &'static str, message: impl Into<String>) -> Raised {
     }
 }
 
-fn words(integer: &BigInt) -> u64 {
-    integer.bits().div_ceil(64)
-}
-
 /// A value's size (`K-CHG-004`).
 pub(crate) fn size(heap: &Heap, value: &Value) -> u64 {
     let extent = match value {
-        Value::Int(integer) => words(integer.as_bigint()),
+        Value::Int(integer) => integer.bits().div_ceil(64),
         Value::Text(text) => text.len() as u64,
         Value::Bytes(bytes) => bytes.as_slice().len() as u64,
         Value::Tuple(members) => members.len() as u64,
@@ -111,9 +107,7 @@ fn measure(
 /// A value's magnitude (`K-CHG-006`).
 pub(crate) fn magnitude(value: &Value) -> u64 {
     match value {
-        Value::Int(integer) if !integer.as_bigint().is_negative() => {
-            integer.as_bigint().to_u64().unwrap_or(u64::MAX)
-        }
+        Value::Int(integer) if !integer.is_negative() => integer.to_u64().unwrap_or(u64::MAX),
         Value::Float(float) if float.get().is_finite() && float.get() >= 0.0 => {
             // A float-to-integer cast rounds toward zero and saturates.
             float.get() as u64
@@ -329,10 +323,9 @@ impl Decoder<'_> {
             (Type::Int, Datum::Number(token)) => integral(token)
                 .map(|integer| Datum::Int(Integer::new(integer)))
                 .ok_or_else(|| format!("{} is not an integer", token.as_str())),
-            (Type::Float, Datum::Int(integer)) => finite(
-                integer.as_bigint().to_f64().unwrap_or(f64::INFINITY),
-                "the integer",
-            ),
+            (Type::Float, Datum::Int(integer)) => {
+                finite(integer.to_f64().unwrap_or(f64::INFINITY), "the integer")
+            }
             (Type::Float, Datum::Number(token)) => nearest(token),
             (Type::Number, Datum::Number(token)) => self.bare(token),
             (Type::Error, Datum::Error(error)) => Ok(Datum::Error(Box::new(ErrorDatum {

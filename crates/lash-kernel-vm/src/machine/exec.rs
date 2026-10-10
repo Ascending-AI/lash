@@ -5,8 +5,8 @@ use std::sync::Arc;
 use lash_kernel_doc::{Formula, Measure, ObjectId, Operand, TaskId, Value};
 
 use super::{
-    Completion, Control, Cursor, Eval, Frame, Halt, Incoming, Interrupt, KernelMachine,
-    LibraryCall, SlotState, TaskState, TryPhase, bound, fault, raise,
+    Completion, Control, Cursor, Eval, Frame, FrameStorage, Halt, Incoming, Interrupt,
+    KernelMachine, LibraryCall, SlotState, TaskState, TryPhase, bound, fault, raise,
 };
 use crate::compile::{
     BlockId, CodeId, Executable, LibId, Member, Place, Rhs, Slot, Stmt, StmtId, Target, Var,
@@ -18,7 +18,9 @@ use crate::interface::{Bound, Host, Outcome};
 /// A function about to run in a new frame.
 pub(super) struct Call<'a> {
     pub(super) code: CodeId,
-    pub(super) args: Vec<Value>,
+    /// Where the call's arguments start on the argument stack; they run to
+    /// its top.
+    pub(super) args: usize,
     /// The cells of the variables a closure shares, in its code's order.
     pub(super) captures: &'a [ObjectId],
     /// The library function the code is the body of.
@@ -28,7 +30,7 @@ pub(super) struct Call<'a> {
 }
 
 impl<'a> Call<'a> {
-    pub(super) fn new(code: CodeId, args: Vec<Value>) -> Self {
+    pub(super) fn new(code: CodeId, args: usize) -> Self {
         Self {
             code,
             args,
@@ -240,9 +242,12 @@ impl KernelMachine {
         };
         self.refresh_charging(task, exe);
         if let Some(call) = &frame.library {
-            self.charge_call(exe, call.lib, &call.args, result.as_ref().ok())?;
+            let units = self.call_units(exe, call.lib, &call.args, result.as_ref().ok());
+            self.charge_call(exe, call.lib, units)?;
         }
-        if frame.inline {
+        let inline = frame.inline;
+        self.recycle(frame);
+        if inline {
             self.inline_result = Some(result);
             return Ok(None);
         }
@@ -264,29 +269,57 @@ impl KernelMachine {
         })
     }
 
-    /// Charges a library call its definition's formula (`K-CHG-003`). A
-    /// call that raised has a result of size 0.
-    pub(super) fn charge_call(
-        &mut self,
+    /// What a library call is charged by its definition's formula
+    /// (`K-CHG-003`). A call that raised has a result of size 0.
+    pub(super) fn call_units(
+        &self,
         exe: &Executable,
         lib: LibId,
         args: &[Value],
         result: Option<&Value>,
-    ) -> Result<(), Halt> {
+    ) -> u64 {
         // Inside a library body nothing is charged (`K-CHG-007`), so the
         // formula, whose deep sizes walk whole graphs, is not evaluated.
         if !self.charging {
-            return Ok(());
+            return 0;
         }
         let definition = &exe.lib(lib).definition;
-        let units = self.formula(
+        self.formula(
             &definition.charge,
             &definition.signature.params,
             args,
             result,
-        );
+        )
+    }
+
+    /// Charges a library call what [`Self::call_units`] gave.
+    pub(super) fn charge_call(
+        &mut self,
+        exe: &Executable,
+        lib: LibId,
+        units: u64,
+    ) -> Result<(), Halt> {
         self.charge(units)
-            .map_err(|halt| halt.in_function(&definition.name))
+            .map_err(|halt| halt.in_function(&exe.lib(lib).definition.name))
+    }
+
+    /// Keeps an ended frame's vectors for the next frame.
+    fn recycle(&mut self, frame: Frame) {
+        let Frame {
+            mut slots,
+            mut control,
+            library,
+            ..
+        } = frame;
+        slots.clear();
+        control.clear();
+        let mut args = library.map(|call| call.args).unwrap_or_default();
+        args.clear();
+        self.storage.frames.push(FrameStorage {
+            slots,
+            control,
+            args,
+        });
     }
 
     pub(super) fn formula(
@@ -313,9 +346,10 @@ impl KernelMachine {
         })
     }
 
-    /// Pushes a frame that runs `code` with `args` bound to its
-    /// parameters, in order; a parameter with no argument is absent
-    /// (`K-FN-004`).
+    /// Pushes a frame that runs `code` with the call's arguments bound to
+    /// its parameters, in order; a parameter with no argument is absent
+    /// (`K-FN-004`). The arguments are moved out of the argument stack,
+    /// and the caller takes what is left there off.
     pub(super) fn push_frame(
         &mut self,
         task: TaskId,
@@ -324,19 +358,20 @@ impl KernelMachine {
     ) -> Eval<()> {
         let Call {
             code: code_id,
-            args,
+            args: base,
             captures,
             library,
             inline,
         } = call;
         let code = exe.code(code_id);
-        if args.len() > code.params.len() {
+        let given = self.storage.args.len() - base;
+        if given > code.params.len() {
             return raise(
                 "arity",
                 format!(
                     "the function takes {} argument(s); {} given",
                     code.params.len(),
-                    args.len()
+                    given
                 ),
             );
         }
@@ -347,17 +382,24 @@ impl KernelMachine {
             return Err(bound(Bound::CallDepth, u64::from(self.bounds.call_depth)).into());
         }
         self.reserve(super::FRAME_BYTES.saturating_add(code.slots.len() as u64 * 8))?;
+        let FrameStorage {
+            mut slots,
+            mut control,
+            mut args,
+        } = self.storage.frames.pop().unwrap_or_default();
+        slots.resize(code.slots.len(), SlotState::Empty);
+        control.push(Control::Block {
+            block: code.body,
+            next: 0,
+        });
         let mut frame = Frame {
             code: code_id,
-            slots: vec![SlotState::Empty; code.slots.len()],
-            control: vec![Control::Block {
-                block: code.body,
-                next: 0,
-            }],
+            slots,
+            control,
             awaiting: None,
-            library: library.map(|lib| LibraryCall {
-                lib,
-                args: args.clone(),
+            library: library.map(|lib| {
+                args.extend_from_slice(&self.storage.args[base..]);
+                LibraryCall { lib, args }
             }),
             inline,
         };
@@ -365,9 +407,12 @@ impl KernelMachine {
             frame.slots[code.positions[capture.inner as usize] as usize] = SlotState::Cell(*cell);
         }
         self.task(task)?.frames.push(frame);
-        let mut args = args.into_iter();
-        for param in &code.params {
-            let value = args.next().unwrap_or(Value::Absent);
+        for (index, param) in code.params.iter().enumerate() {
+            let value = self
+                .storage
+                .args
+                .get_mut(base + index)
+                .map_or(Value::Absent, |arg| std::mem::replace(arg, Value::Absent));
             self.bind(task, exe, *param, value)?;
         }
         Ok(())

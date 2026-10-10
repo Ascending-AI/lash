@@ -271,7 +271,7 @@ fn utf16_len(call: NativeCall<'_>) -> Result<Value, NativeError> {
 
 fn get(call: NativeCall<'_>) -> Result<Value, NativeError> {
     let text = text_arg(call.args, 0)?;
-    let index = element_position(integer_arg(call.args, 1)?, text.chars().count())?;
+    let index = element_position(&*integer_arg(call.args, 1)?, text.chars().count())?;
     text.chars()
         .nth(index)
         .map(|c| Value::text(c.to_string()))
@@ -280,7 +280,7 @@ fn get(call: NativeCall<'_>) -> Result<Value, NativeError> {
 
 fn utf16_get(call: NativeCall<'_>) -> Result<Value, NativeError> {
     let text = text_arg(call.args, 0)?;
-    let index = element_position(integer_arg(call.args, 1)?, text.encode_utf16().count())?;
+    let index = element_position(&*integer_arg(call.args, 1)?, text.encode_utf16().count())?;
     text.encode_utf16()
         .nth(index)
         .map(int)
@@ -324,8 +324,8 @@ fn slice_by(call: NativeCall<'_>, units: bool) -> Result<Value, NativeError> {
     } else {
         text.chars().count()
     };
-    let start = position(integer_arg(call.args, 1)?, len);
-    let end = position(integer_arg(call.args, 2)?, len);
+    let start = position(&*integer_arg(call.args, 1)?, len);
+    let end = position(&*integer_arg(call.args, 2)?, len);
     let (start, end) = if units {
         (byte_at_unit(text, start)?, byte_at_unit(text, end)?)
     } else {
@@ -341,7 +341,7 @@ fn slice_by(call: NativeCall<'_>, units: bool) -> Result<Value, NativeError> {
 fn find(call: NativeCall<'_>) -> Result<Value, NativeError> {
     let text = text_arg(call.args, 0)?;
     let needle = text_arg(call.args, 1)?;
-    let start = position(integer_arg(call.args, 2)?, text.chars().count());
+    let start = position(&*integer_arg(call.args, 2)?, text.chars().count());
     let suffix = &text[byte_at_point(text, start)..];
     Ok(suffix.find(needle).map_or_else(
         || int(-1),
@@ -352,7 +352,7 @@ fn find(call: NativeCall<'_>) -> Result<Value, NativeError> {
 fn utf16_find(call: NativeCall<'_>) -> Result<Value, NativeError> {
     let text: Vec<_> = text_arg(call.args, 0)?.encode_utf16().collect();
     let needle: Vec<_> = text_arg(call.args, 1)?.encode_utf16().collect();
-    let start = position(integer_arg(call.args, 2)?, text.len());
+    let start = position(&*integer_arg(call.args, 2)?, text.len());
     if needle.is_empty() {
         return Ok(int(start));
     }
@@ -566,8 +566,7 @@ fn from_code_points(call: NativeCall<'_>) -> Result<Value, NativeError> {
             let Value::Int(i) = v else {
                 return Err(raise("type_error", "expected integer code point"));
             };
-            i.as_bigint()
-                .to_u32()
+            i.to_u32()
                 .and_then(char::from_u32)
                 .ok_or_else(|| raise("invalid_scalar", "code point is not a Unicode scalar"))
         })
@@ -582,8 +581,7 @@ fn from_utf16_units(call: NativeCall<'_>) -> Result<Value, NativeError> {
             let Value::Int(i) = v else {
                 return Err(raise("type_error", "expected integer UTF-16 unit"));
             };
-            i.as_bigint()
-                .to_u16()
+            i.to_u16()
                 .ok_or_else(|| raise("invalid_utf16", "UTF-16 unit is outside 0..65535"))
         })
         .collect();

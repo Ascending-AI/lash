@@ -121,7 +121,7 @@ fn hash_value<H: Hasher>(value: &Value, state: &mut H) {
         Value::Int(value) => {
             2u8.hash(state);
             0u8.hash(state);
-            hash_number(value.as_bigint().clone(), 0, state);
+            hash_number(value.as_bigint().into_owned(), 0, state);
         }
         Value::Float(value) => {
             2u8.hash(state);

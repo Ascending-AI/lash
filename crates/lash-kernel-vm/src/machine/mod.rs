@@ -173,6 +173,25 @@ struct LibraryCall {
     args: Vec<Value>,
 }
 
+/// The vectors of a frame that has ended, kept for the next frame.
+#[derive(Debug, Default)]
+struct FrameStorage {
+    slots: Vec<SlotState>,
+    control: Vec<Control>,
+    args: Vec<Value>,
+}
+
+/// Storage the machine reuses from call to call, so that a call allocates
+/// nothing of its own.
+#[derive(Debug, Default)]
+struct Storage {
+    /// The arguments of the calls being made, innermost last. A call's
+    /// arguments are evaluated onto it, its function reads them there, and
+    /// the call takes them off when it returns.
+    args: Vec<Value>,
+    frames: Vec<FrameStorage>,
+}
+
 #[derive(Debug)]
 struct Frame {
     code: CodeId,
@@ -301,6 +320,7 @@ pub struct KernelMachine {
     live_tasks: u32,
     inline_depth: u32,
     inline_result: Option<Result<Value, Value>>,
+    storage: Storage,
     end: Option<End>,
     ended: bool,
 }

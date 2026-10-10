@@ -71,8 +71,7 @@ fn from_octets(call: NativeCall<'_>) -> Result<Value, NativeError> {
             let Value::Int(i) = value else {
                 return Err(raise("type_error", "expected integer octet"));
             };
-            i.as_bigint()
-                .to_u8()
+            i.to_u8()
                 .ok_or_else(|| raise("number_range", "octet is outside 0..255"))
         })
         .collect();
@@ -81,8 +80,8 @@ fn from_octets(call: NativeCall<'_>) -> Result<Value, NativeError> {
 
 fn slice(call: NativeCall<'_>) -> Result<Value, NativeError> {
     let bytes = bytes_arg(call.args, 0)?;
-    let start = position(integer_arg(call.args, 1)?, bytes.len());
-    let end = position(integer_arg(call.args, 2)?, bytes.len());
+    let start = position(&*integer_arg(call.args, 1)?, bytes.len());
+    let end = position(&*integer_arg(call.args, 2)?, bytes.len());
     Ok(Value::Bytes(Bytes::new(if start > end {
         Vec::new()
     } else {

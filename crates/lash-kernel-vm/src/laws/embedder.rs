@@ -12,6 +12,7 @@ use lash_kernel_doc::{
     parse_definition, parse_document,
 };
 use lash_kernel_state::{Baseline, ParkedRun};
+use num_traits::ToPrimitive;
 
 use crate::{
     Bounds, Delivered, End, Host, KernelMachine, Layout, Machine, Outcome, PreparedLibrary,
@@ -37,7 +38,7 @@ impl NativeFunction for Add {
     fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
         match call.args {
             [Value::Int(a), Value::Int(b)] => {
-                Ok(Value::Int(Integer::new(a.as_bigint() + b.as_bigint())))
+                Ok(Value::Int(Integer::new(&*a.as_bigint() + &*b.as_bigint())))
             }
             _ => Err(type_error("num.add takes two integers")),
         }
@@ -81,7 +82,7 @@ impl NativeFunction for Spin {
         let [Value::Int(steps)] = call.args else {
             return Err(type_error("work.spin takes an integer"));
         };
-        let steps = u64::try_from(steps.as_bigint()).unwrap_or(0);
+        let steps = steps.to_u64().unwrap_or(0);
         for _ in 0..steps {
             call.counter.spend(1)?;
         }
@@ -96,7 +97,7 @@ impl NativeFunction for Fill {
         let [Value::Int(length)] = call.args else {
             return Err(type_error("work.fill takes an integer"));
         };
-        let length = usize::try_from(length.as_bigint()).unwrap_or(0);
+        let length = length.to_usize().unwrap_or(0);
         call.heap
             .allocate(Object::List(vec![Value::Null; length]))
             .map(Value::List)
@@ -113,7 +114,7 @@ impl NativeFunction for Repeat {
         let [Value::Int(length)] = call.args else {
             return Err(type_error("work.repeat takes an integer"));
         };
-        let length = u64::try_from(length.as_bigint()).unwrap_or(0);
+        let length = length.to_u64().unwrap_or(0);
         call.heap.reserve(0, length)?;
         REPEAT_BUILDS.fetch_add(1, Ordering::Relaxed);
         Ok(Value::text("x".repeat(length as usize)))

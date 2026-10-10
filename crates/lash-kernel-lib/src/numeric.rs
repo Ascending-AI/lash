@@ -12,7 +12,7 @@ use crate::raised;
 /// Converts an integer to the nearest binary64, ties to even. A result
 /// that rounds to infinity raises `number_range` (`K-NUM-003`).
 pub fn integer_to_float(value: &Integer) -> Result<Float, NativeError> {
-    ratio_to_float(value.as_bigint(), &BigInt::one()).map(Float::new)
+    ratio_to_float(&value.as_bigint(), &BigInt::one()).map(Float::new)
 }
 
 /// Converts a finite, integral binary64 exactly to an arbitrary integer.
@@ -78,9 +78,9 @@ pub(crate) fn number_cmp(a: &Value, b: &Value) -> Result<Option<Ordering>, Nativ
     match (a, b) {
         (Value::Int(a), Value::Int(b)) => Ok(Some(a.cmp(b))),
         (Value::Float(a), Value::Float(b)) => Ok(a.get().partial_cmp(&b.get())),
-        (Value::Int(a), Value::Float(b)) => Ok(int_float_cmp(a.as_bigint(), b.get())),
+        (Value::Int(a), Value::Float(b)) => Ok(int_float_cmp(&a.as_bigint(), b.get())),
         (Value::Float(a), Value::Int(b)) => {
-            Ok(int_float_cmp(b.as_bigint(), a.get()).map(Ordering::reverse))
+            Ok(int_float_cmp(&b.as_bigint(), a.get()).map(Ordering::reverse))
         }
         _ => Err(raised("type_error", "expected two numbers")),
     }

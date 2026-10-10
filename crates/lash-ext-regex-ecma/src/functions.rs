@@ -17,7 +17,7 @@ use lash_kernel_doc::{
     ErrorValue, Integer, NativeCall, NativeError, NativeFunction, NativeHeap, Object, Value,
     WorkCounter,
 };
-use num_traits::{Signed, ToPrimitive};
+use num_traits::ToPrimitive;
 
 use crate::definitions::{BRAND, LONE_SURROGATE_ERROR, Operation, SYNTAX_ERROR};
 use crate::matcher::{Found, Search};
@@ -105,13 +105,13 @@ impl NativeFunction for Function {
             Operation::Split => {
                 let limit = match arg(2) {
                     Value::Absent => usize::MAX,
-                    Value::Int(limit) if limit.as_bigint().is_negative() => {
+                    Value::Int(limit) if limit.is_negative() => {
                         return Err(raised(
                             "number_range",
                             "`limit` is negative: give the most pieces to return",
                         ));
                     }
-                    Value::Int(limit) => limit.as_bigint().to_usize().unwrap_or(usize::MAX),
+                    Value::Int(limit) => limit.to_usize().unwrap_or(usize::MAX),
                     other => return Err(wrong_type("limit", "an integer", other)),
                 };
                 let pieces = subject.split(limit, heap, counter)?;
@@ -161,7 +161,7 @@ impl Regex {
         if brand.as_ref() != BRAND || heap.len(*record) != 4 {
             return Err(not_a_regex());
         }
-        if last_index.as_bigint().is_negative() {
+        if last_index.is_negative() {
             return Err(raised(
                 "number_range",
                 "the regex's `lastIndex` is negative: it counts UTF-16 code units from the start of the input",
@@ -202,7 +202,6 @@ impl Subject<'_> {
         let start = self
             .regex
             .last_index
-            .as_bigint()
             .to_usize()
             .filter(|start| *start <= self.units().len());
         let found = match start {
@@ -227,7 +226,6 @@ impl Subject<'_> {
         let start = self
             .regex
             .last_index
-            .as_bigint()
             .to_usize()
             .filter(|start| *start <= self.units().len());
         let mut matches = Kept::new(heap);

@@ -121,7 +121,10 @@ fn text_arg(args: &[Value], index: usize) -> Result<&str, NativeError> {
     }
 }
 
-fn integer_arg(args: &[Value], index: usize) -> Result<&num_bigint::BigInt, NativeError> {
+fn integer_arg(
+    args: &[Value],
+    index: usize,
+) -> Result<std::borrow::Cow<'_, num_bigint::BigInt>, NativeError> {
     match arg(args, index)? {
         Value::Int(integer) => Ok(integer.as_bigint()),
         _ => Err(raise("type_error", "expected integer")),

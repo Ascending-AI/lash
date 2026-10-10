@@ -21,7 +21,7 @@ use crate::interface::{Bound, Host};
 /// not negative (`K-FORM-006`). `None` is a number that is no position.
 pub(super) fn position(index: &Value) -> Eval<Option<usize>> {
     match index {
-        Value::Int(integer) => Ok(integer.as_bigint().to_usize()),
+        Value::Int(integer) => Ok(integer.to_usize()),
         Value::Float(float) => {
             let float = float.get();
             Ok(
@@ -122,11 +122,10 @@ impl KernelMachine {
                 Ok(Value::Closure(self.alloc(Obj::Closure(closure))?))
             }
             Expr::Call { lib, args } => {
-                let args = self.eval_all(task, host, exe, args)?;
-                match self.call_library(task, exe, *lib, args)? {
-                    Ok(value) => Ok(value),
-                    Err(args) => self.call_inline(task, host, exe, *lib, args),
-                }
+                let base = self.storage.args.len();
+                let value = self.call_expr(task, host, exe, *lib, args, base);
+                self.storage.args.truncate(base);
+                value
             }
             Expr::Clock => Ok(Value::Timestamp(host.clock())),
             Expr::Random => {
@@ -167,6 +166,27 @@ impl KernelMachine {
             .iter()
             .map(|expr| self.eval(task, host, exe, expr))
             .collect()
+    }
+
+    /// Evaluates a call's arguments onto the argument stack from `base`
+    /// and calls the function. The caller takes the arguments off.
+    fn call_expr(
+        &mut self,
+        task: TaskId,
+        host: &mut dyn Host,
+        exe: &Executable,
+        lib: LibId,
+        args: &[Expr],
+        base: usize,
+    ) -> Eval<Value> {
+        for arg in args {
+            let value = self.eval(task, host, exe, arg)?;
+            self.storage.args.push(value);
+        }
+        match self.call_library(task, exe, lib, base)? {
+            Some(value) => Ok(value),
+            None => self.call_inline(task, host, exe, lib, base),
+        }
     }
 
     /// Reads a field or an index (`K-FORM-009`, `K-FORM-010`).
@@ -242,16 +262,17 @@ impl KernelMachine {
     }
 
     /// Calls a library function that needs no frame: a native
-    /// implementation or one of the machine's own. `Err` hands the
-    /// arguments back for a function that runs its kernel body.
+    /// implementation or one of the machine's own. Its arguments are the
+    /// argument stack from `base`; `None` leaves them there, one per
+    /// parameter, for a function that runs its kernel body.
     pub(super) fn call_library(
         &mut self,
         task: TaskId,
         exe: &Executable,
         lib: LibId,
-        args: Vec<Value>,
-    ) -> Eval<Result<Value, Vec<Value>>> {
-        self.call_library_inner(task, exe, lib, args)
+        base: usize,
+    ) -> Eval<Option<Value>> {
+        self.call_library_inner(task, exe, lib, base)
             .map_err(|interrupt| interrupt.in_function(&exe.lib(lib).definition.name))
     }
 
@@ -260,25 +281,28 @@ impl KernelMachine {
         task: TaskId,
         exe: &Executable,
         lib: LibId,
-        mut args: Vec<Value>,
-    ) -> Eval<Result<Value, Vec<Value>>> {
+        base: usize,
+    ) -> Eval<Option<Value>> {
         let function = exe.lib(lib);
         let params = &function.definition.signature.params;
-        if args.len() > params.len() {
+        let given = self.storage.args.len() - base;
+        if given > params.len() {
             return raise(
                 "arity",
                 format!(
                     "`{}` takes {} argument(s); {} given",
                     function.definition.name,
                     params.len(),
-                    args.len()
+                    given
                 ),
             );
         }
-        args.resize(params.len(), Value::Absent);
+        if given < params.len() {
+            self.storage.args.resize(base + params.len(), Value::Absent);
+        }
         let result = match &function.run {
-            LibRun::Body(_) => return Ok(Err(args)),
-            LibRun::Machine(MachineFunction::Deref) => match args.first() {
+            LibRun::Body(_) => return Ok(None),
+            LibRun::Machine(MachineFunction::Deref) => match self.storage.args.get(base) {
                 Some(Value::Ref(Identity::Task(task))) => Ok(Value::Task(*task)),
                 Some(Value::Ref(Identity::Object(object))) => self
                     .heap
@@ -299,11 +323,9 @@ impl KernelMachine {
                 Ok(Value::List(self.alloc(Obj::List(unfinished))?))
             }
             LibRun::Native(native) => {
-                let limit = function
-                    .definition
-                    .guard
-                    .as_ref()
-                    .map(|guard| self.formula(&guard.limit, params, &args, None));
+                let limit = function.definition.guard.as_ref().map(|guard| {
+                    self.formula(&guard.limit, params, &self.storage.args[base..], None)
+                });
                 let mut attempt = 0;
                 loop {
                     let mut counter = WorkCounter::new(limit);
@@ -313,7 +335,7 @@ impl KernelMachine {
                         reserved: 0,
                     };
                     let call = NativeCall {
-                        args: &args,
+                        args: &self.storage.args[base..],
                         heap: &mut view,
                         counter: &mut counter,
                     };
@@ -354,9 +376,10 @@ impl KernelMachine {
                 }
             }
         };
-        self.charge_call(exe, lib, &args, result.as_ref().ok())?;
+        let units = self.call_units(exe, lib, &self.storage.args[base..], result.as_ref().ok());
+        self.charge_call(exe, lib, units)?;
         match result {
-            Ok(value) => Ok(Ok(value)),
+            Ok(value) => Ok(Some(value)),
             Err(value) => Err(Interrupt::Raise(value)),
         }
     }
@@ -370,7 +393,7 @@ impl KernelMachine {
         host: &mut dyn Host,
         exe: &Executable,
         lib: LibId,
-        args: Vec<Value>,
+        base: usize,
     ) -> Eval<Value> {
         let LibRun::Body(code) = &exe.lib(lib).run else {
             return Err(fault("a function with no body was run as one").into());
@@ -378,7 +401,7 @@ impl KernelMachine {
         if self.inline_depth >= MAX_INLINE_DEPTH {
             return Err(bound(Bound::CallDepth, u64::from(self.bounds.call_depth)).into());
         }
-        self.push_frame(task, exe, Call::new(*code, args).of_library(lib).inline())
+        self.push_frame(task, exe, Call::new(*code, base).of_library(lib).inline())
             .map_err(|halt| halt.in_function(&exe.lib(lib).definition.name))?;
         self.inline_depth += 1;
         let result = loop {

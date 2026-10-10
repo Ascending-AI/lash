@@ -2,6 +2,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use num_traits::ToPrimitive;
+
 use super::lexer::{Spanned, Token, lex};
 use super::{ParseError, ParseErrorReason, is_keyword};
 use crate::ast::{
@@ -386,8 +388,9 @@ impl Parser {
 
     fn version(&mut self) -> Parsed<u32> {
         match self.advance() {
-            Token::Int(version) => u32::try_from(version.as_bigint())
-                .map_err(|_| self.unexpected_previous("a kernel version")),
+            Token::Int(version) => version
+                .to_u32()
+                .ok_or_else(|| self.unexpected_previous("a kernel version")),
             _ => Err(self.unexpected_previous("a kernel version")),
         }
     }
@@ -1034,8 +1037,9 @@ impl Parser {
     fn formula(&mut self) -> Parsed<Formula> {
         self.nested(|parser| {
             if let Token::Int(amount) = parser.peek() {
-                let amount = u64::try_from(amount.as_bigint())
-                    .map_err(|_| parser.unexpected("an amount that fits 64 bits"))?;
+                let amount = amount
+                    .to_u64()
+                    .ok_or_else(|| parser.unexpected("an amount that fits 64 bits"))?;
                 parser.position += 1;
                 return Ok(Formula::Constant(amount));
             }
