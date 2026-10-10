@@ -284,6 +284,12 @@ pub(super) fn functions() -> Result<Vec<NativeDefinition>, CollectionError> {
         )).map_err(CollectionError::Parse)?;
         functions.push((definition, Arc::new(Aux(function)) as _));
     }
+    // Range and NaN equivalence are explicit caller choices. No dialect's
+    // coercion, missing-slot convention or index normalization lives here.
+    let definition = parse_definition(
+        "function list.index_of_range(xs: List(Any), value: Any, start: Number, end: Number, reverse: Bool, nan_equal: Bool) -> Int\nkernel 1\nerrors \"type_error\", \"index_out_of_range\"\ncharge sum(8, deep(xs), product(size(xs), deep(value)), size(start), size(end))\nnative\n",
+    ).map_err(CollectionError::Parse)?;
+    functions.push((definition, Arc::new(Aux(index_of_range)) as _));
     for (signature, function, charge) in [
         (
             "bool.not(x: Bool) -> Bool",
@@ -744,4 +750,52 @@ impl NativeFunction for Native {
             }
         }
     }
+}
+
+/// Searches an absolute half-open range using kernel equality, optionally
+/// equating floating NaNs. Reverse selects the last match in the range.
+fn index_of_range(call: NativeCall<'_>) -> Result<Value, NativeError> {
+    let Value::List(id) = arg(&call, 0)? else {
+        return Err(raise("type_error", "expected list"));
+    };
+    let needle = arg(&call, 1)?;
+    let length = call.heap.len(*id);
+    let start = integer(arg(&call, 2)?)?;
+    let end = integer(arg(&call, 3)?)?;
+    let (Some(start), Some(end)) = (start.to_usize(), end.to_usize()) else {
+        return Err(raise(
+            "index_out_of_range",
+            "range requires nonnegative indices",
+        ));
+    };
+    if start > end || end > length {
+        return Err(raise("index_out_of_range", "range is outside the list"));
+    }
+    let (Value::Bool(reverse), Value::Bool(nan_equal)) = (arg(&call, 4)?, arg(&call, 5)?) else {
+        return Err(raise("type_error", "search options require booleans"));
+    };
+    let mut index = 0;
+    let mut found = None;
+    call.heap.visit(*id, &mut |element| {
+        if let Element::Item(value) = element {
+            if index >= start && index < end {
+                let equal = crate::equal(value, needle, call.heap)
+                    || (*nan_equal && matches!((value, needle),
+                        (Value::Float(a), Value::Float(b)) if a.get().is_nan() && b.get().is_nan()));
+                if equal {
+                    found = Some(index);
+                    if !reverse { return ControlFlow::Break(()); }
+                }
+            }
+            index += 1;
+        }
+        ControlFlow::Continue(())
+    });
+    // Even the scalar result uses the run's remaining room before its
+    // integer digits are allocated. Zero has no magnitude bytes; -1 has one.
+    let bytes = found.map_or(1, |index| {
+        u64::from(usize::BITS - index.leading_zeros()).div_ceil(8)
+    });
+    call.heap.reserve(0, bytes)?;
+    Ok(found.map_or_else(|| Value::Int(Integer::from(-1)), int))
 }
