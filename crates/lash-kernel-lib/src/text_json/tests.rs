@@ -892,6 +892,143 @@ fn k_lfmt_001_precision_is_explicit_and_preserves_exact_integers() {
     );
 }
 
+/// K-LFMT-003: special values retain their kind/sign; finite extremes
+/// retain the existing shortest digits, with no layout policy applied.
+#[test]
+fn k_lfmt_003_decimal_parts_preserve_specials_and_binary64_edges() {
+    for (number, kind, negative, digits, exponent) in [
+        (0.0, "finite", false, "0", 0),
+        (-0.0, "finite", true, "0", 0),
+        (f64::NAN, "nan", false, "", 0),
+        (f64::INFINITY, "infinity", false, "", 0),
+        (f64::NEG_INFINITY, "infinity", true, "", 0),
+        (f64::from_bits(1), "finite", false, "5", -324),
+        (
+            f64::from_bits((1 << 52) - 1),
+            "finite",
+            false,
+            "2225073858507201",
+            -323,
+        ),
+        (
+            f64::MIN_POSITIVE,
+            "finite",
+            false,
+            "22250738585072014",
+            -324,
+        ),
+        (f64::MAX, "finite", false, "17976931348623157", 292),
+        (0.1 + 0.2, "finite", false, "30000000000000004", -17),
+        (-0.125, "finite", true, "125", -3),
+        (1e20, "finite", false, "1", 20),
+    ] {
+        assert_eq!(
+            unary("format.decimal_parts", Value::Float(Float::new(number))),
+            Value::Tuple(vec![s(kind), Value::Bool(negative), s(digits), int(exponent)].into()),
+        );
+    }
+    assert_eq!(
+        error_kind(call(
+            &mut Heap::default(),
+            "format.decimal_parts",
+            &[int(1)]
+        )),
+        "type_error"
+    );
+    assert_eq!(
+        error_kind(call(&mut Heap::default(), "format.decimal_parts", &[])),
+        "arity"
+    );
+}
+
+/// K-LFMT-003, K-CHG-005 and K-BND-001: shortest digits round trip;
+/// neither nearest shorter significand does. Conversion uses bounded
+/// scratch, copying is charged by result size, and output is reserved.
+#[test]
+fn k_lfmt_003_shortest_digits_are_bounded_charged_and_reserved() {
+    use lash_kernel_doc::Operand;
+    let mut registry = FunctionRegistry::new();
+    register_text_json(&mut registry).unwrap();
+    let (_, registered) = registry
+        .iter()
+        .find(|(_, f)| f.definition.name.as_str() == "format.decimal_parts")
+        .unwrap();
+    let mut bits = 1_u64;
+    for _ in 0..4096 {
+        bits = bits
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        let number = f64::from_bits(bits);
+        if !number.is_finite() || number == 0.0 {
+            continue;
+        }
+        let mut heap = Heap::default();
+        let value = call(
+            &mut heap,
+            "format.decimal_parts",
+            &[Value::Float(Float::new(number))],
+        )
+        .unwrap();
+        let Value::Tuple(parts) = &value else {
+            panic!("decimal tuple");
+        };
+        let Value::Text(digits) = &parts[2] else {
+            panic!("decimal digits");
+        };
+        let Value::Int(exponent) = &parts[3] else {
+            panic!("decimal exponent");
+        };
+        let exponent: i32 = exponent.to_string().parse().unwrap();
+        assert!((1..=17).contains(&digits.len()));
+        assert!(!digits.starts_with('0'));
+        assert!(!digits.ends_with('0'));
+        assert_eq!(
+            format!("{digits}e{exponent}")
+                .parse::<f64>()
+                .unwrap()
+                .to_bits(),
+            number.abs().to_bits()
+        );
+        assert_eq!(parts[1], Value::Bool(number.is_sign_negative()));
+        if digits.len() > 1 {
+            let shorter: u64 = digits[..digits.len() - 1].parse().unwrap();
+            for candidate in [shorter, shorter + 1] {
+                assert_ne!(
+                    format!("{candidate}e{}", exponent + 1)
+                        .parse::<f64>()
+                        .unwrap()
+                        .to_bits(),
+                    number.abs().to_bits()
+                );
+            }
+        }
+        let result_size = deep(&dump(&heap, &value));
+        let charged = registered
+            .definition
+            .charge
+            .evaluate(&mut |operand, _| match operand {
+                Operand::Param(_) => 1,
+                Operand::Result => result_size,
+            });
+        assert_eq!(charged, 66 + result_size);
+        // At most 17 mantissa digits, three exponent digits and separators
+        // are consumed; trimming and copying visit at most 17 digits each.
+        assert!(charged >= 24 + 2 * digits.len() as u64);
+        let held = 4 * Room::VALUE + 6 + digits.len() as u64 + 2;
+        assert_eq!(heap.1.reserved, held);
+        let mut too_small = Heap(BTreeMap::new(), Room::of(held - 1));
+        assert!(matches!(
+            call(
+                &mut too_small,
+                "format.decimal_parts",
+                &[Value::Float(Float::new(number))]
+            ),
+            Err(NativeError::Memory)
+        ));
+        assert!(too_small.0.is_empty());
+    }
+}
+
 #[test]
 fn k_lfmt_002_radix_and_padding_are_language_neutral() {
     let mut heap = Heap::default();
@@ -991,6 +1128,9 @@ fn dump(heap: &Heap, value: &Value) -> lash_kernel_doc::Datum {
         Value::Float(value) => Datum::Float(*value),
         Value::Text(value) => Datum::Text(value.to_string()),
         Value::Bytes(value) => Datum::Bytes(value.clone()),
+        Value::Tuple(values) => {
+            Datum::Tuple(values.iter().map(|value| dump(heap, value)).collect())
+        }
         Value::List(id) => Datum::List(
             (0..heap.len(*id))
                 .map(|i| dump(heap, &heap.list_get(*id, i).unwrap()))
@@ -1017,7 +1157,7 @@ fn deep(datum: &lash_kernel_doc::Datum) -> u64 {
         Datum::Int(integer) => 1 + integer.bits().div_ceil(64),
         Datum::Text(text) => 1 + u64::try_from(text.len()).unwrap(),
         Datum::Bytes(bytes) => 1 + u64::try_from(bytes.as_slice().len()).unwrap(),
-        Datum::List(items) => {
+        Datum::Tuple(items) | Datum::List(items) => {
             1 + u64::try_from(items.len()).unwrap() + items.iter().map(deep).sum::<u64>()
         }
         Datum::Record(fields) => {
@@ -1289,6 +1429,17 @@ fn k_lib_006_native_corpus_pins_results_charges_and_determinism() {
             Err("not_data"),
         ),
         (
+            "K-LFMT-003",
+            "format.decimal_parts".to_owned(),
+            vec![f(-0.125)],
+            Ok(Datum::Tuple(vec![
+                t("finite"),
+                Datum::Bool(true),
+                t("125"),
+                i(-3),
+            ])),
+        ),
+        (
             "K-LFMT-001",
             "format.fixed".to_owned(),
             vec![f(2.5), i(0)],
@@ -1374,7 +1525,12 @@ fn k_lib_006_native_corpus_pins_results_charges_and_determinism() {
             });
         assert_eq!(
             charged,
-            1 + args.iter().map(deep).sum::<u64>() + result_size
+            (if name == "format.decimal_parts" {
+                65
+            } else {
+                1
+            }) + args.iter().map(deep).sum::<u64>()
+                + result_size
         );
         assert_eq!(counter.spent(), 0);
         // A second call on the same implementation and heap must agree, and

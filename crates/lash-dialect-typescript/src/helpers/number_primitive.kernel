@@ -6,12 +6,13 @@ use text.utf16_get
 use text.utf16_len
 use text.utf16_slice
 use float.parse
+use format.decimal_parts
 use float.to_int
 use int.div_trunc
-use int.parse
 use int.pow
 use int.rem_trunc
 use int.to_text
+use kind
 use num.abs
 use num.add
 use num.floor
@@ -23,7 +24,6 @@ use num.neg
 use num.sub
 use num.to_float
 use num.to_int
-use num.to_text
 use same
 use text.concat
 use text.len
@@ -31,7 +31,6 @@ use text.repeat
 use text.slice
 use ts.string.is_space
 use ts.string.trim_value
-use text.utf16_find
 use ts.number.digit
 use ts.number.layout
 use ts.number.parse
@@ -224,36 +223,24 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
-  # The spelling is ASCII: a mantissa, maybe with a point, then maybe an
-  # exponent after "e".
-  let raw = num.to_text(num.abs(value))
-  let mantissa = raw
-  let exponent = 0
-  let marker = text.utf16_find(raw, "e", 0)
-  if num.le(0, marker) {
-    set exponent = int.parse(text.utf16_slice(raw, num.add(marker, 1), text.utf16_len(raw)), 10)
-    set mantissa = text.utf16_slice(raw, 0, marker)
+  # Exact kernel integers have exact decimal digits, without binary64
+  # rounding. All JavaScript floats use the shortest converter below.
+  if same(kind(value), "integer") {
+    let digits = int.to_text(num.abs(value), 10)
+    let last = text.len(digits)
+    let exponent = 0
+    while num.lt(1, last) {
+      if eq(text.utf16_get(digits, num.sub(last, 1)), 48) {
+        set last = num.sub(last, 1)
+        set exponent = num.add(exponent, 1)
+      } else { break }
+    }
+    return (text.slice(digits, 0, last), exponent)
   }
-  let digits = mantissa
-  let point = text.utf16_find(mantissa, ".", 0)
-  if num.le(0, point) {
-    let fraction = text.utf16_slice(mantissa, num.add(point, 1), text.utf16_len(mantissa))
-    set digits = text.concat(text.utf16_slice(mantissa, 0, point), fraction)
-    set exponent = num.sub(exponent, text.utf16_len(fraction))
-  }
-  # Leading zeros go; trailing zeros move into the exponent. One digit stays.
-  let first = 0
-  let last = text.utf16_len(digits)
-  while num.lt(num.add(first, 1), last) {
-    if eq(text.utf16_get(digits, first), 48) { set first = num.add(first, 1) } else { break }
-  }
-  while num.lt(num.add(first, 1), last) {
-    if eq(text.utf16_get(digits, num.sub(last, 1)), 48) {
-      set last = num.sub(last, 1)
-      set exponent = num.add(exponent, 1)
-    } else { break }
-  }
-  return (text.utf16_slice(digits, first, last), exponent)
+  # The neutral primitive obtains shortest digits once. JavaScript's layout
+  # and precision rounding stay in the consumers below.
+  let parts = format.decimal_parts(value)
+  return (parts[2], parts[3])
 }
 
 function ts.number.layout(digits: Text, point: Int, scientific: Bool) -> Text

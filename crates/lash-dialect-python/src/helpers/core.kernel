@@ -20,6 +20,7 @@ use le
 use bool.not
 use error.new
 use add
+use abs
 use sub
 use mul
 use div
@@ -30,12 +31,15 @@ use neg
 use is_finite
 use num.to_float
 use num.to_text
+use format.decimal_parts
+use int.to_text
+use num.neg
+use text.repeat
 use text.concat
 use text.len
 use text.get
 use text.slice
 use text.find
-use text.repeat
 use text.split
 use text.join
 use text.replace
@@ -112,22 +116,35 @@ function py.float_text(value: Float) -> Text
 kernel 1
 charge 8
 body {
-  let digits = num.to_text(value)
-  let mark = text.find(digits, "e", 0)
-  if lt(mark, 0) {
-    return digits
+  let parts = format.decimal_parts(value)
+  let kind = parts[0]
+  if same(kind, "nan") { return "nan" }
+  let sign = ""
+  if parts[1] { set sign = "-" }
+  if same(kind, "infinity") { return text.concat(sign, "inf") }
+  let digits = parts[2]
+  let point = add(text.len(digits), parts[3])
+  if lt(point, -3) {} else {
+    if lt(16, point) {} else {
+      if le(point, 0) {
+        return text.join([sign, "0.", text.repeat("0", num.neg(point)), digits], "")
+      }
+      if le(text.len(digits), point) {
+        return text.join([sign, digits, text.repeat("0", sub(point, text.len(digits))), ".0"], "")
+      }
+      return text.join([sign, text.slice(digits, 0, point), ".", text.slice(digits, point, text.len(digits))], "")
+    }
   }
-  let mantissa = text.slice(digits, 0, mark)
-  let exponent = text.slice(digits, add(mark, 1), text.len(digits))
-  let sign = "+"
-  if text.starts_with(exponent, "-") {
-    set sign = "-"
-    set exponent = text.slice(exponent, 1, text.len(exponent))
+  let mantissa = text.slice(digits, 0, 1)
+  if lt(1, text.len(digits)) {
+    set mantissa = text.join([mantissa, ".", text.slice(digits, 1, text.len(digits))], "")
   }
-  if lt(text.len(exponent), 2) {
-    set exponent = text.concat("0", exponent)
-  }
-  return text.join([mantissa, "e", sign, exponent], "")
+  let exponent = sub(point, 1)
+  let exponent_sign = "+"
+  if lt(exponent, 0) { set exponent_sign = "-" }
+  let exponent_digits = int.to_text(abs(exponent), 10)
+  if lt(text.len(exponent_digits), 2) { set exponent_digits = text.concat("0", exponent_digits) }
+  return text.join([sign, mantissa, "e", exponent_sign, exponent_digits], "")
 }
 
 # `repr` of a str: single quotes unless the text holds one and no double

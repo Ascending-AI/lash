@@ -249,6 +249,45 @@ impl Float {
                 text: text.to_string(),
             })
     }
+
+    /// The finite float as `(negative, digits, exponent)`, with
+    /// `abs(self) = digits * 10^exponent` when the decimal is read back.
+    /// The digits are shortest round-trip ASCII, with no point, leading
+    /// zeros or trailing zeros. Zero is `"0"` with exponent zero, retaining
+    /// its sign. Non-finite values return `None`.
+    ///
+    /// The caller owns the bounded scratch space. Layout and precision
+    /// rounding are separate policies; this computes neither of them.
+    pub fn decimal_parts(self, digits: &mut [u8; 17]) -> Option<(bool, &str, i32)> {
+        if !self.0.is_finite() {
+            return None;
+        }
+        let mut parts = DecimalWriter {
+            digits,
+            len: 0,
+            exponent: 0,
+            in_exponent: false,
+            negative_exponent: false,
+        };
+        // Keep Rust's existing shortest algorithm, including its tie choice.
+        // The writer consumes its digits/exponent directly, without a text
+        // allocation or a decimal-to-binary conversion.
+        if fmt::write(&mut parts, format_args!("{:e}", self.0.abs())).is_err() {
+            unreachable!("binary64 shortest output has at most 17 digits");
+        }
+        let mut exponent = if parts.negative_exponent {
+            -parts.exponent
+        } else {
+            parts.exponent
+        } - i32::try_from(parts.len - 1).ok()?;
+        while parts.len > 1 && parts.digits[parts.len - 1] == b'0' {
+            parts.len -= 1;
+            exponent += 1;
+        }
+        let len = parts.len;
+        let digits = std::str::from_utf8(&digits[..len]).ok()?;
+        Some((self.0.is_sign_negative(), digits, exponent))
+    }
 }
 
 impl fmt::Display for Float {
@@ -270,30 +309,71 @@ impl fmt::Display for Float {
                 "0.0"
             });
         }
-        // `{:e}` writes the shortest round-trip digits as `d[.ddd]e<exp>`.
-        let scientific = format!("{:e}", value.abs());
-        let Some((mantissa, exponent)) = scientific.split_once('e') else {
+        let mut scratch = [0; 17];
+        let Some((negative, digits, decimal_exponent)) = self.decimal_parts(&mut scratch) else {
             return Err(fmt::Error);
         };
-        let exponent: i32 = exponent.parse().map_err(|_| fmt::Error)?;
-        if value < 0.0 {
+        let exponent = decimal_exponent + i32::try_from(digits.len()).map_err(|_| fmt::Error)? - 1;
+        if negative {
             f.write_str("-")?;
         }
         if !(-4..16).contains(&exponent) {
-            return write!(f, "{mantissa}e{exponent}");
+            f.write_str(&digits[..1])?;
+            if digits.len() > 1 {
+                f.write_str(".")?;
+                f.write_str(&digits[1..])?;
+            }
+            return write!(f, "e{exponent}");
         }
-        let digits: String = mantissa.chars().filter(|c| *c != '.').collect();
         if exponent < 0 {
-            let zeros = "0".repeat(usize::try_from(-exponent - 1).map_err(|_| fmt::Error)?);
-            return write!(f, "0.{zeros}{digits}");
+            f.write_str("0.")?;
+            for _ in 0..-exponent - 1 {
+                f.write_str("0")?;
+            }
+            return f.write_str(digits);
         }
         let whole = usize::try_from(exponent).map_err(|_| fmt::Error)? + 1;
         if digits.len() <= whole {
-            let zeros = "0".repeat(whole - digits.len());
-            write!(f, "{digits}{zeros}.0")
+            f.write_str(digits)?;
+            for _ in digits.len()..whole {
+                f.write_str("0")?;
+            }
+            f.write_str(".0")
         } else {
             write!(f, "{}.{}", &digits[..whole], &digits[whole..])
         }
+    }
+}
+
+/// Consumes the shortest formatter's ASCII stream as decimal parts. An
+/// exponent has at most three digits for binary64; the mantissa at most 17.
+struct DecimalWriter<'a> {
+    digits: &'a mut [u8; 17],
+    len: usize,
+    exponent: i32,
+    in_exponent: bool,
+    negative_exponent: bool,
+}
+
+impl fmt::Write for DecimalWriter<'_> {
+    fn write_str(&mut self, text: &str) -> fmt::Result {
+        for byte in text.bytes() {
+            match byte {
+                b'e' => self.in_exponent = true,
+                b'-' if self.in_exponent => self.negative_exponent = true,
+                b'0'..=b'9' if self.in_exponent => {
+                    self.exponent = self.exponent * 10 + i32::from(byte - b'0');
+                }
+                b'0'..=b'9' => {
+                    let digit = self.digits.get_mut(self.len).ok_or(fmt::Error)?;
+                    *digit = byte;
+                    self.len += 1;
+                }
+                b'.' => {}
+                _ => return Err(fmt::Error),
+            }
+        }
+        Ok(())
     }
 }
 

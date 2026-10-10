@@ -132,6 +132,15 @@ fn number_parsers_and_decimal_formatters_keep_ecmascript_edges() {
     );
 }
 
+/// ECMA Number::toString and precision formatting keep their separate
+/// layouts, signed-zero rules and exact halfway rounding.
+#[test]
+fn decimal_parts_keep_javascript_layout_and_precision_rounding() {
+    agrees(
+        "await finish(String(-0) === '0' && String(NaN) === 'NaN' && String(Infinity) === 'Infinity' && String(-Infinity) === '-Infinity' && String(5e-324) === '5e-324' && String(2.2250738585072014e-308) === '2.2250738585072014e-308' && String(1.7976931348623157e308) === '1.7976931348623157e+308' && String(0.1 + 0.2) === '0.30000000000000004' && String(1e-7) === '1e-7' && String(1e-6) === '0.000001' && String(1e20) === '100000000000000000000' && String(1e21) === '1e+21' && (-0).toExponential() === '0e+0' && (-0).toPrecision(2) === '0.0' && (1.25).toFixed(1) === '1.3' && (2.55).toFixed(1) === '2.5' && (1.25).toExponential(1) === '1.3e+0' && (9.99).toPrecision(2) === '10' && (0.001).toPrecision(3) === '0.00100');",
+    );
+}
+
 #[test]
 fn number_constant_receivers_use_number_methods_and_validate_radix() {
     agrees(

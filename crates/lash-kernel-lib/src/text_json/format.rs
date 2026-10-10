@@ -1,12 +1,28 @@
 use std::fmt::Write as _;
 
-use lash_kernel_doc::{NativeCall, NativeError, NativeHeap, Type, Value};
+use lash_kernel_doc::{Formula, NativeCall, NativeError, NativeHeap, Type, Value};
 use num_traits::ToPrimitive;
 
 use super::{Function, arg, count_arg, definition, integer_arg, raise, text_arg, text_buffer};
 
 pub(super) fn functions() -> Vec<Function> {
+    let mut parts = definition(
+        "format.decimal_parts",
+        &[("number", Type::Float)],
+        Type::Tuple(vec![
+            Type::Enum(vec!["finite".into(), "infinity".into(), "nan".into()]),
+            Type::Bool,
+            Type::Text,
+            Type::Int,
+        ]),
+        &[],
+        decimal_parts,
+    );
+    // Binary64 shortest conversion is bounded independently of the value;
+    // traversing/copying its digits is priced by the result's deep size.
+    parts.0.charge = Formula::Sum(vec![Formula::Constant(64), parts.0.charge]);
     vec![
+        parts,
         definition(
             "format.fixed",
             &[("number", Type::Number), ("precision", Type::Int)],
@@ -41,6 +57,30 @@ pub(super) fn functions() -> Vec<Function> {
             pad,
         ),
     ]
+}
+
+/// K-LFMT-003: decimal parts, without a source language's layout policy.
+fn decimal_parts(call: NativeCall<'_>) -> Result<Value, NativeError> {
+    let Value::Float(number) = arg(call.args, 0)? else {
+        return Err(raise("type_error", "expected float"));
+    };
+    let mut scratch = [0; 17];
+    let (kind, negative, digits, exponent) = match number.decimal_parts(&mut scratch) {
+        Some((negative, digits, exponent)) => ("finite", negative, digits, exponent),
+        None if number.get().is_nan() => ("nan", false, "", 0),
+        None => ("infinity", number.get().is_sign_negative(), "", 0),
+    };
+    // Both texts and the four tuple members are reserved before allocation.
+    super::reserve_list(call.heap, 4, kind.len() + digits.len() + 2)?;
+    Ok(Value::Tuple(
+        vec![
+            Value::text(kind),
+            Value::Bool(negative),
+            Value::text(digits),
+            Value::Int(i64::from(exponent).into()),
+        ]
+        .into(),
+    ))
 }
 
 /// A float's digits before the point, its sign and its point: what a

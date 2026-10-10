@@ -4,7 +4,7 @@ These native definitions live in `lash-kernel-lib::text_json` and are installed
 with `register_text_json`. They perform no I/O, invoke no callbacks and mutate
 no existing object (`K-LIB-006`, `K-LIB-007`). All arguments are required. Wrong
 arity raises `arity`; wrong operand or collection-member kinds raise
-`type_error`; nothing coerces. Each definition charges **1 plus the deep size
+`type_error`; nothing coerces. Except for the bounded conversion in `format.decimal_parts`, each definition charges **1 plus the deep size
 of every argument plus the deep size of the result**, in the units of
 `K-CHG-004` and `K-CHG-005`. No function here uses a cache or a work guard.
 
@@ -134,6 +134,23 @@ the baseline needs a new definition identity (`K-VER-002`).
   in radix 2..36 using lowercase digits, no prefix; other radices raise
   `number_range`. `format.pad(text, width, fill, side)` uses scalar padding,
   with side `start` or `end` and no dialect-specific sign or alignment policy.
+
+- **K-LFMT-003.** `format.decimal_parts(float)` returns a tuple
+  `(kind, negative, digits, exponent)`. Kind is `finite`, `infinity` or `nan`.
+  For a finite value, ASCII `digits` contain its shortest round-trip decimal
+  significand, with no point, leading zeros or trailing zeros. Reading
+  `digits * 10^exponent` with the stated sign rounds back to the same binary64.
+  Both zeros have digits `"0"` and exponent 0, retaining their sign. Infinity
+  retains its sign; NaN has sign false. Both special kinds have empty digits
+  and exponent 0. No notation threshold, decimal point, exponent padding or
+  precision rounding is chosen here. TypeScript and Python apply their own
+  layout in their helpers.
+  The existing shortest algorithm writes directly into 17 bytes of scratch
+  digits; the binary64 exponent is in -324..308 before digit normalization.
+  Charge is **65 plus the deep sizes of the argument and result**: the bounded
+  binary64 conversion has 64 fixed units, with scanning/copying proportional
+  to the produced digits priced by the result size. The tuple's four values,
+  its kind/digit bytes and exponent magnitude are reserved before allocation.
 
 The named laws are in `crates/lash-kernel-lib/src/text_json/tests.rs`.
 Direct native corpus shards supplement kernel-document cases; they do not

@@ -181,3 +181,19 @@ except ValueError as error:
         ["could not convert string to float: '1e400'"]
     );
 }
+
+/// K-LFMT-003 supplies neutral parts; Python retains its sign, plain
+/// fraction and at-least-two-digit signed exponent layout.
+#[test]
+fn decimal_parts_keep_python_float_repr_layout() {
+    assert_eq!(
+        lines(
+            "print(repr(0.0), repr(-0.0), repr(float('nan')), repr(float('inf')), repr(float('-inf')))\nprint(repr(1e-4), repr(1e-5), repr(1e15), repr(1e16))\nprint(repr(5e-324), repr(2.2250738585072014e-308), repr(1.7976931348623157e308))\n"
+        ),
+        [
+            "0.0 -0.0 nan inf -inf",
+            "0.0001 1e-05 1000000000000000.0 1e+16",
+            "5e-324 2.2250738585072014e-308 1.7976931348623157e+308"
+        ]
+    );
+}
