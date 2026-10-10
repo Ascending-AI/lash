@@ -1,5 +1,5 @@
 use lash_core::{SessionAppendNode, ToolArgumentProjectionPolicy};
-use lash_rlm_types::{PROJECTED_JSON_TAG, RlmProjectedSeedEntry};
+use lash_rlm_types::{CodeModeProjectedSeedEntry, PROJECTED_JSON_TAG};
 use serde_json::Value;
 
 #[derive(Debug, thiserror::Error)]
@@ -10,7 +10,7 @@ pub(crate) enum ProjectionTransportError {
 
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct RlmSeed {
-    pub projected: lash_rlm_types::RlmProjectedSeedSnapshot,
+    pub projected: lash_rlm_types::CodeModeProjectedSeedSnapshot,
     pub globals: serde_json::Map<String, Value>,
     /// The saved functions the session is created with, by the binding
     /// each is called through: each value is a kernel saved function
@@ -37,10 +37,10 @@ impl RlmSeed {
         for (name, value) in raw.iter() {
             let name = decode_seed_name(name, &out)?;
             if let Some(entry) = projected_entry(value).map_err(|error| error.to_string())? {
-                let RlmProjectedSeedEntry::Materialized(value) = entry;
+                let CodeModeProjectedSeedEntry::Materialized(value) = entry;
                 out.projected.push(
                     name,
-                    RlmProjectedSeedEntry::Materialized(decode_escaped_json(value)?),
+                    CodeModeProjectedSeedEntry::Materialized(decode_escaped_json(value)?),
                 );
             } else {
                 out.globals
@@ -126,8 +126,8 @@ fn normalize_projected_seed(seed: Value) -> Result<Value, ProjectionTransportErr
     let mut normalized = serde_json::Map::with_capacity(seed.len());
     for (key, value) in seed {
         let value = if let Some(entry) = projected_entry(&value)? {
-            let RlmProjectedSeedEntry::Materialized(value) = entry;
-            projected_wrapper(RlmProjectedSeedEntry::Materialized(
+            let CodeModeProjectedSeedEntry::Materialized(value) = entry;
+            projected_wrapper(CodeModeProjectedSeedEntry::Materialized(
                 materialize_projected_json_preserving_escapes(value)?,
             ))
         } else {
@@ -159,7 +159,7 @@ fn materialize_projected_json_with_keys(
     key_mode: TransportKeyMode,
 ) -> Result<Value, ProjectionTransportError> {
     if let Some(entry) = projected_entry(&value)? {
-        let RlmProjectedSeedEntry::Materialized(value) = entry;
+        let CodeModeProjectedSeedEntry::Materialized(value) = entry;
         return materialize_projected_json_with_keys(value, key_mode);
     }
     match value {
@@ -230,7 +230,7 @@ fn decode_seed_name(name: &str, seed: &RlmSeed) -> Result<String, String> {
 
 fn projected_entry(
     value: &Value,
-) -> Result<Option<RlmProjectedSeedEntry>, ProjectionTransportError> {
+) -> Result<Option<CodeModeProjectedSeedEntry>, ProjectionTransportError> {
     let Some(object) = value.as_object() else {
         return Ok(None);
     };
@@ -249,7 +249,7 @@ fn projected_entry(
         })
 }
 
-fn projected_wrapper(entry: RlmProjectedSeedEntry) -> Value {
+fn projected_wrapper(entry: CodeModeProjectedSeedEntry) -> Value {
     serde_json::json!({ PROJECTED_JSON_TAG: entry })
 }
 

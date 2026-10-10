@@ -413,7 +413,7 @@ fn provider_cells_stream_to_the_sampled_latency() {
                 witnessed.insert("process");
             }
         } else {
-            panic!("every primary turn needs an RLM cell");
+            panic!("every primary turn needs a code mode cell");
         }
         if plan.auxiliary_llm_requests > 0 {
             let request = generator.llm_request(&plan, 0).unwrap();

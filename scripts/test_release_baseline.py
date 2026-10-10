@@ -366,7 +366,7 @@ const RAW: &str = r#"// const V: u32 = 66;"#;
             after = baseline.inventory(repo)
             self.assertEqual(baseline.table_mismatches(repo, after), [])
             pins = (repo / baseline.PREDECESSOR_TABLE).read_text()
-            for name in ("KERNEL_PARKED_STATE_VERSION", "RLM_SNAPSHOT_VERSION", "RLM_DRIVER_STATE_VERSION",
+            for name in ("KERNEL_PARKED_STATE_VERSION", "CODEMODE_SNAPSHOT_VERSION", "RLM_DRIVER_STATE_VERSION",
                          "SCOPE_STORAGE_PAYLOAD_VERSION", "KERNEL_DOCUMENT_SCHEMA_VERSION"):
                 self.assertIn(f'("{name}", 1),', pins)
             floor = repo / "crates/lash-core-store/src/store/state_version.rs"

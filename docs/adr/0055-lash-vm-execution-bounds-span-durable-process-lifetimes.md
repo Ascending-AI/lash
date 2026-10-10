@@ -7,7 +7,7 @@ Accepted.
 ## Context
 
 TypeScript lowers into the Lash VM IR and VM. Execution can be a foreground
-RLM cell or a durable process that parks at effects and resumes from persisted
+code mode cell or a durable process that parks at effects and resumes from persisted
 continuations. Hosts need bounds on instruction work and logical heap size,
 and those bounds need a defined lifetime across snapshots and resumes.
 
@@ -98,7 +98,7 @@ or upcasters.
 
 ## Consequences
 
-- Hosts explicitly choose the RLM instruction and memory policy.
+- Hosts explicitly choose the code mode instruction and memory policy.
 - Snapshots and resumes preserve cumulative instruction accounting.
 - Logical memory is a reproducible accounting schedule, not a promise about
   physical resident memory.

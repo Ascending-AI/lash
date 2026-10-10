@@ -450,7 +450,7 @@ pub const GUARDED_SURFACES: &[GuardedSurface] = &[
         reads: SurfaceReads::History { floor: 1 },
     },
     GuardedSurface {
-        constant: "RLM_SNAPSHOT_VERSION",
+        constant: "CODEMODE_SNAPSHOT_VERSION",
         owner: "lash-protocol-rlm",
         reads: SurfaceReads::History { floor: 1 },
     },

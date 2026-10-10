@@ -4,7 +4,7 @@ use super::RlmProtocolPluginConfig;
 use super::prose_projector::RlmAssistantProseProjector;
 use super::protocol_driver::RlmProtocolDriver;
 use super::protocol_session::RlmProtocolSession;
-use super::runtime_state::{RlmCodeExecutor, RlmRuntimeState};
+use super::runtime_state::{CodeModeCodeExecutor, RlmRuntimeState};
 use super::tool_args::normalize_projected_tool_args;
 use crate::dialect::SessionDialect;
 use crate::stream_mask;
@@ -24,7 +24,7 @@ pub(super) fn register_rlm_protocol_plugin(
         RlmRuntimeState::new(Arc::clone(&dialect))
             .map_err(|err| PluginError::Session(err.to_string()))?,
     );
-    let code_executor = Arc::new(RlmCodeExecutor::new(Arc::clone(&runtime_state)));
+    let code_executor = Arc::new(CodeModeCodeExecutor::new(Arc::clone(&runtime_state)));
     let protocol_session = Arc::new(RlmProtocolSession::new(
         config.clone(),
         Arc::clone(&runtime_state),

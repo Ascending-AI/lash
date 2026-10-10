@@ -38,7 +38,7 @@ Count-based runs partition deterministically with `--shard <i>/<n>`: shard
 shards covers the configured seed space exactly once. The summary records
 `mode`, `shard`, and `configured_seeds`.
 
-A generated run executes RLM cells in the `lash-vm-worker` helper. `kiln run`
+A generated run executes Code mode cells in the `lash-vm-worker` helper. `kiln run`
 builds and materializes the matching worker and supplies its path at runtime.
 An explicit `LASH_VM_WORKER` in the caller's environment takes precedence.
 

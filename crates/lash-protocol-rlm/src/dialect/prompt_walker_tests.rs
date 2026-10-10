@@ -492,7 +492,7 @@ async fn assembled_prompt_fragments_with_projection(
     ));
 
     // Per-turn live extension handles are not part of the durable facade contract.
-    let projected = crate::projection::RlmProjectedBindings::new()
+    let projected = crate::projection::CodeModeProjectedBindings::new()
         .bind_json("current_file", projected_value)
         .expect("seed one projected binding");
     fragments.push((

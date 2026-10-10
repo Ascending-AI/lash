@@ -15,7 +15,7 @@ pub use python::PythonPrompts;
 pub use typescript::TypescriptPrompts;
 
 use crate::deferred::SharedDeferredToolResolver;
-use crate::executor::{CellServices, RlmExecutionState, execute_cell};
+use crate::executor::{CellServices, CodeModeExecutionState, execute_cell};
 use crate::rlm_support::{BoundVariableRenderCache, render_bound_variables};
 
 /// The language a code-mode session's model writes: an installed kernel
@@ -254,7 +254,7 @@ impl DialectPromptVocabulary {
 /// workers, resolvers, bounds and transport. Source semantics belong to the
 /// dialect's kernel package.
 #[derive(Clone)]
-pub(crate) struct RlmDialectServices {
+pub(crate) struct CodeModeDialectServices {
     pub(crate) presentation: crate::RlmPresentationConfig,
     pub(crate) workers: lash_vm_client::service::Service,
     pub(crate) code_renderer: crate::render::CodeRendererSlot,
@@ -285,18 +285,18 @@ pub(crate) fn cell_response_shape(tags: CellTags) -> String {
 #[derive(Clone)]
 pub(crate) struct SessionDialect {
     dialect: CellDialect,
-    services: RlmDialectServices,
+    services: CodeModeDialectServices,
 }
 
 impl SessionDialect {
     pub(crate) fn read_only_variables_prompt(
         &self,
-        bindings: &crate::projection::RlmProjectedBindings,
+        bindings: &crate::projection::CodeModeProjectedBindings,
     ) -> Option<String> {
         crate::projection::read_only_variables_prompt(bindings, self.language())
     }
 
-    pub(crate) fn new(dialect: CellDialect, services: RlmDialectServices) -> Self {
+    pub(crate) fn new(dialect: CellDialect, services: CodeModeDialectServices) -> Self {
         Self { dialect, services }
     }
 
@@ -306,7 +306,7 @@ impl SessionDialect {
     pub(crate) fn prompt_only(dialect: CellDialect) -> Self {
         Self {
             dialect,
-            services: RlmDialectServices {
+            services: CodeModeDialectServices {
                 workers: lash_vm_client::service::Service::default(),
                 deferred_tool_resolver: None,
                 execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
@@ -676,21 +676,21 @@ impl BoundVariablesPromptRender {
     }
 }
 
-/// One RLM execution session: the session's bindings, and the cells that
+/// One code mode execution session: the session's bindings, and the cells that
 /// run from them.
 ///
 /// The state records the session's dialect, and a restore of a state
 /// another dialect recorded is refused.
 pub(crate) struct DialectSession {
     dialect: CellDialect,
-    state: RlmExecutionState,
-    services: RlmDialectServices,
+    state: CodeModeExecutionState,
+    services: CodeModeDialectServices,
     bound_variable_render_cache: Arc<std::sync::Mutex<BoundVariableRenderCache>>,
 }
 
 impl DialectSession {
-    pub(crate) fn new(dialect: CellDialect, services: RlmDialectServices) -> Self {
-        let state = RlmExecutionState::new(dialect.name(), dialect.numbers())
+    pub(crate) fn new(dialect: CellDialect, services: CodeModeDialectServices) -> Self {
+        let state = CodeModeExecutionState::new(dialect.name(), dialect.numbers())
             .carrying(services.kernel.clone());
         Self {
             dialect,
@@ -706,7 +706,7 @@ impl DialectSession {
         &mut self,
         ctx: RuntimeExecutionContext<'_>,
         request: ExecRequest,
-        session_projected_bindings: crate::projection::RlmProjectedBindings,
+        session_projected_bindings: crate::projection::CodeModeProjectedBindings,
     ) -> Result<ExecResponse, SessionError> {
         // The state is borrowed, never moved out: a cell that is cancelled
         // mid-flight leaves the session holding the same state it started
@@ -1060,7 +1060,7 @@ mod tests {
                     ExecRequest {
                         code: "const payload = `".to_string(),
                     },
-                    crate::projection::RlmProjectedBindings::default(),
+                    crate::projection::CodeModeProjectedBindings::default(),
                 )
                 .await
                 .expect("report the extension's parse failure");
@@ -1102,7 +1102,7 @@ mod tests {
                     ExecRequest {
                         code: "const payload = `".to_string(),
                     },
-                    crate::projection::RlmProjectedBindings::default(),
+                    crate::projection::CodeModeProjectedBindings::default(),
                 )
                 .await
                 .expect("the cell runs and reports its own failure");
@@ -1125,8 +1125,8 @@ mod tests {
 }
 
 #[cfg(test)]
-pub(crate) fn test_dialect_services() -> RlmDialectServices {
-    RlmDialectServices {
+pub(crate) fn test_dialect_services() -> CodeModeDialectServices {
+    CodeModeDialectServices {
         kernel: crate::executor::KernelCarry::default(),
         presentation: crate::RlmPresentationConfig::standard(),
         workers: lash_vm_client::service::Service::default(),

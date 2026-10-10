@@ -1032,7 +1032,7 @@ impl LashCoreBuilder {
     /// hard total, the control-phase bound, stop grace, provider attempt limits
     /// and agent frame-switch limit. Tool and engine body bounds and park
     /// bounds belong to their own execution contracts. The
-    /// stop grace also bounds how long a protocol-owned stream abort (an RLM
+    /// stop grace also bounds how long a protocol-owned stream abort (a code mode
     /// cell boundary ending the model's turn) keeps draining the provider
     /// stream, so a cooperative provider's trailing usage lands on the
     /// aborted attempt.

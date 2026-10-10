@@ -93,75 +93,75 @@
               "budget_ms": 19.555,
               "required": true
             },
-            "rlm_lash_vm.cell_tool_bindings": {
+            "codemode_lash_vm.cell_tool_bindings": {
               "budget_ms": 1.233,
               "required": true
             },
-            "rlm_lash_vm.compile_link": {
+            "codemode_lash_vm.compile_link": {
               "budget_ms": 11.578,
               "required": true
             },
-            "rlm_lash_vm.deferred_resolve": {
+            "codemode_lash_vm.deferred_resolve": {
               "budget_ms": 11.382,
               "required": false
             },
-            "rlm_lash_vm.deferred_resolve.after_durable_record": {
+            "codemode_lash_vm.deferred_resolve.after_durable_record": {
               "budget_ms": 0.056,
               "required": false
             },
-            "rlm_lash_vm.deferred_resolve.after_resolver_return": {
+            "codemode_lash_vm.deferred_resolve.after_resolver_return": {
               "budget_ms": 0.11,
               "required": false
             },
-            "rlm_lash_vm.deferred_trigger_resolve": {
+            "codemode_lash_vm.deferred_trigger_resolve": {
               "budget_ms": 0.094,
               "required": false
             },
-            "rlm_lash_vm.execute": {
+            "codemode_lash_vm.execute": {
               "budget_ms": 202.915,
               "required": true
             },
-            "rlm_lash_vm.print_project": {
+            "codemode_lash_vm.print_project": {
               "budget_ms": 0.25,
               "required": false
             },
-            "rlm_lash_vm.resolve_projected_bindings": {
+            "codemode_lash_vm.resolve_projected_bindings": {
               "budget_ms": 5.235,
               "required": false
             },
-            "rlm_lash_vm.store_module_artifact": {
+            "codemode_lash_vm.store_module_artifact": {
               "budget_ms": 0.293,
               "required": false
             },
-            "rlm_process.await_handle": {
+            "codemode_process.await_handle": {
               "budget_ms": 194.872,
               "required": true
             },
-            "rlm_process.build_context": {
+            "codemode_process.build_context": {
               "budget_ms": 0.736,
               "required": false
             },
-            "rlm_process.close_groups": {
+            "codemode_process.close_groups": {
               "budget_ms": 0.136,
               "required": true
             },
-            "rlm_process.compile": {
+            "codemode_process.compile": {
               "budget_ms": 0.415,
               "required": false
             },
-            "rlm_process.execute": {
+            "codemode_process.execute": {
               "budget_ms": 170.041,
               "required": false
             },
-            "rlm_process.load_artifact": {
+            "codemode_process.load_artifact": {
               "budget_ms": 0.253,
               "required": false
             },
-            "rlm_process.resolve_environment": {
+            "codemode_process.resolve_environment": {
               "budget_ms": 1.514,
               "required": false
             },
-            "rlm_process.shutdown": {
+            "codemode_process.shutdown": {
               "budget_ms": 0.478,
               "required": false
             },
@@ -233,63 +233,63 @@
               "budget_ms": 1.27,
               "required": true
             },
-            "rlm_lash_vm.compile_link": {
+            "codemode_lash_vm.compile_link": {
               "budget_ms": 2.622,
               "required": false
             },
-            "rlm_lash_vm.deferred_resolve": {
+            "codemode_lash_vm.deferred_resolve": {
               "budget_ms": 17.078,
               "required": false
             },
-            "rlm_lash_vm.deferred_resolve.after_durable_record": {
+            "codemode_lash_vm.deferred_resolve.after_durable_record": {
               "budget_ms": 0.916,
               "required": false
             },
-            "rlm_lash_vm.deferred_resolve.after_resolver_return": {
+            "codemode_lash_vm.deferred_resolve.after_resolver_return": {
               "budget_ms": 1.268,
               "required": false
             },
-            "rlm_lash_vm.deferred_trigger_resolve": {
+            "codemode_lash_vm.deferred_trigger_resolve": {
               "budget_ms": 1.054,
               "required": false
             },
-            "rlm_lash_vm.execute": {
+            "codemode_lash_vm.execute": {
               "budget_ms": 732.956,
               "required": false
             },
-            "rlm_lash_vm.resolve_projected_bindings": {
+            "codemode_lash_vm.resolve_projected_bindings": {
               "budget_ms": 1.082,
               "required": false
             },
-            "rlm_lash_vm.store_module_artifact": {
+            "codemode_lash_vm.store_module_artifact": {
               "budget_ms": 0.9,
               "required": false
             },
-            "rlm_process.await_handle": {
+            "codemode_process.await_handle": {
               "budget_ms": 671.426,
               "required": false
             },
-            "rlm_process.build_context": {
+            "codemode_process.build_context": {
               "budget_ms": 1.576,
               "required": false
             },
-            "rlm_process.compile": {
+            "codemode_process.compile": {
               "budget_ms": 0.874,
               "required": false
             },
-            "rlm_process.execute": {
+            "codemode_process.execute": {
               "budget_ms": 543.604,
               "required": false
             },
-            "rlm_process.load_artifact": {
+            "codemode_process.load_artifact": {
               "budget_ms": 4.952,
               "required": false
             },
-            "rlm_process.resolve_environment": {
+            "codemode_process.resolve_environment": {
               "budget_ms": 4.766,
               "required": false
             },
-            "rlm_process.shutdown": {
+            "codemode_process.shutdown": {
               "budget_ms": 3.86,
               "required": false
             },
@@ -445,31 +445,31 @@
               "budget_ms": 1.126,
               "required": true
             },
-            "rlm_lash_vm.compile_link": {
+            "codemode_lash_vm.compile_link": {
               "budget_ms": 1.39,
               "required": false
             },
-            "rlm_lash_vm.deferred_resolve": {
+            "codemode_lash_vm.deferred_resolve": {
               "budget_ms": 15.238,
               "required": false
             },
-            "rlm_lash_vm.deferred_resolve.after_durable_record": {
+            "codemode_lash_vm.deferred_resolve.after_durable_record": {
               "budget_ms": 0.862,
               "required": false
             },
-            "rlm_lash_vm.deferred_resolve.after_resolver_return": {
+            "codemode_lash_vm.deferred_resolve.after_resolver_return": {
               "budget_ms": 1.048,
               "required": false
             },
-            "rlm_lash_vm.deferred_trigger_resolve": {
+            "codemode_lash_vm.deferred_trigger_resolve": {
               "budget_ms": 1.086,
               "required": false
             },
-            "rlm_lash_vm.execute": {
+            "codemode_lash_vm.execute": {
               "budget_ms": 28.068,
               "required": false
             },
-            "rlm_lash_vm.resolve_projected_bindings": {
+            "codemode_lash_vm.resolve_projected_bindings": {
               "budget_ms": 1.004,
               "required": false
             },
@@ -583,23 +583,23 @@
               "budget_ms": 4.106,
               "required": false
             },
-            "rlm_lash_vm.compile_link": {
+            "codemode_lash_vm.compile_link": {
               "budget_ms": 4.811,
               "required": false
             },
-            "rlm_lash_vm.deferred_resolve": {
+            "codemode_lash_vm.deferred_resolve": {
               "budget_ms": 8.383,
               "required": false
             },
-            "rlm_lash_vm.execute": {
+            "codemode_lash_vm.execute": {
               "budget_ms": 6.213,
               "required": true
             },
-            "rlm_lash_vm.print_project": {
+            "codemode_lash_vm.print_project": {
               "budget_ms": 2.21,
               "required": false
             },
-            "rlm_lash_vm.resolve_projected_bindings": {
+            "codemode_lash_vm.resolve_projected_bindings": {
               "budget_ms": 6.639,
               "required": false
             },
@@ -939,19 +939,19 @@
               "budget_ms": 5.523,
               "required": true
             },
-            "rlm_lash_vm.compile_link": {
+            "codemode_lash_vm.compile_link": {
               "budget_ms": 3.052,
               "required": false
             },
-            "rlm_lash_vm.deferred_resolve": {
+            "codemode_lash_vm.deferred_resolve": {
               "budget_ms": 5.324,
               "required": true
             },
-            "rlm_lash_vm.execute": {
+            "codemode_lash_vm.execute": {
               "budget_ms": 2.601,
               "required": false
             },
-            "rlm_lash_vm.resolve_projected_bindings": {
+            "codemode_lash_vm.resolve_projected_bindings": {
               "budget_ms": 2.837,
               "required": true
             },
@@ -999,35 +999,35 @@
               "budget_ms": 12.73,
               "required": true
             },
-            "rlm_lash_vm.cell_tool_bindings": {
+            "codemode_lash_vm.cell_tool_bindings": {
               "budget_ms": 6.336,
               "required": true
             },
-            "rlm_lash_vm.compile_link": {
+            "codemode_lash_vm.compile_link": {
               "budget_ms": 3.315,
               "required": true
             },
-            "rlm_lash_vm.deferred_resolve": {
+            "codemode_lash_vm.deferred_resolve": {
               "budget_ms": 8.58,
               "required": false
             },
-            "rlm_lash_vm.deferred_resolve.after_durable_record": {
+            "codemode_lash_vm.deferred_resolve.after_durable_record": {
               "budget_ms": 0.777,
               "required": false
             },
-            "rlm_lash_vm.deferred_resolve.after_resolver_return": {
+            "codemode_lash_vm.deferred_resolve.after_resolver_return": {
               "budget_ms": 1.225,
               "required": false
             },
-            "rlm_lash_vm.deferred_trigger_resolve": {
+            "codemode_lash_vm.deferred_trigger_resolve": {
               "budget_ms": 0.951,
               "required": false
             },
-            "rlm_lash_vm.execute": {
+            "codemode_lash_vm.execute": {
               "budget_ms": 44.348,
               "required": true
             },
-            "rlm_lash_vm.resolve_projected_bindings": {
+            "codemode_lash_vm.resolve_projected_bindings": {
               "budget_ms": 2.024,
               "required": false
             },
@@ -1075,19 +1075,19 @@
               "budget_ms": 4.224,
               "required": true
             },
-            "rlm_lash_vm.compile_link": {
+            "codemode_lash_vm.compile_link": {
               "budget_ms": 3.137,
               "required": false
             },
-            "rlm_lash_vm.deferred_resolve": {
+            "codemode_lash_vm.deferred_resolve": {
               "budget_ms": 2.16,
               "required": false
             },
-            "rlm_lash_vm.execute": {
+            "codemode_lash_vm.execute": {
               "budget_ms": 69.435,
               "required": false
             },
-            "rlm_lash_vm.resolve_projected_bindings": {
+            "codemode_lash_vm.resolve_projected_bindings": {
               "budget_ms": 8.963,
               "required": false
             },
@@ -1135,39 +1135,39 @@
               "budget_ms": 3.137,
               "required": true
             },
-            "rlm_lash_vm.cell_tool_bindings": {
+            "codemode_lash_vm.cell_tool_bindings": {
               "budget_ms": 7.769,
               "required": true
             },
-            "rlm_lash_vm.compile_link": {
+            "codemode_lash_vm.compile_link": {
               "budget_ms": 3.319,
               "required": true
             },
-            "rlm_lash_vm.deferred_resolve": {
+            "codemode_lash_vm.deferred_resolve": {
               "budget_ms": 7.862,
               "required": false
             },
-            "rlm_lash_vm.deferred_resolve.after_durable_record": {
+            "codemode_lash_vm.deferred_resolve.after_durable_record": {
               "budget_ms": 0.651,
               "required": false
             },
-            "rlm_lash_vm.deferred_resolve.after_resolver_return": {
+            "codemode_lash_vm.deferred_resolve.after_resolver_return": {
               "budget_ms": 1.164,
               "required": false
             },
-            "rlm_lash_vm.deferred_trigger_resolve": {
+            "codemode_lash_vm.deferred_trigger_resolve": {
               "budget_ms": 1.09,
               "required": false
             },
-            "rlm_lash_vm.execute": {
+            "codemode_lash_vm.execute": {
               "budget_ms": 70.239,
               "required": true
             },
-            "rlm_lash_vm.print_project": {
+            "codemode_lash_vm.print_project": {
               "budget_ms": 3.853,
               "required": true
             },
-            "rlm_lash_vm.resolve_projected_bindings": {
+            "codemode_lash_vm.resolve_projected_bindings": {
               "budget_ms": 2.318,
               "required": false
             },
@@ -1215,19 +1215,19 @@
               "budget_ms": 10.123,
               "required": true
             },
-            "rlm_lash_vm.compile_link": {
+            "codemode_lash_vm.compile_link": {
               "budget_ms": 7.321,
               "required": false
             },
-            "rlm_lash_vm.deferred_resolve": {
+            "codemode_lash_vm.deferred_resolve": {
               "budget_ms": 147.059,
               "required": false
             },
-            "rlm_lash_vm.execute": {
+            "codemode_lash_vm.execute": {
               "budget_ms": 2.32,
               "required": false
             },
-            "rlm_lash_vm.resolve_projected_bindings": {
+            "codemode_lash_vm.resolve_projected_bindings": {
               "budget_ms": 3.277,
               "required": false
             },
@@ -1275,35 +1275,35 @@
               "budget_ms": 7.083,
               "required": true
             },
-            "rlm_lash_vm.cell_tool_bindings": {
+            "codemode_lash_vm.cell_tool_bindings": {
               "budget_ms": 8.41,
               "required": true
             },
-            "rlm_lash_vm.compile_link": {
+            "codemode_lash_vm.compile_link": {
               "budget_ms": 5.05,
               "required": false
             },
-            "rlm_lash_vm.deferred_resolve": {
+            "codemode_lash_vm.deferred_resolve": {
               "budget_ms": 10.057,
               "required": false
             },
-            "rlm_lash_vm.deferred_resolve.after_durable_record": {
+            "codemode_lash_vm.deferred_resolve.after_durable_record": {
               "budget_ms": 0.805,
               "required": false
             },
-            "rlm_lash_vm.deferred_resolve.after_resolver_return": {
+            "codemode_lash_vm.deferred_resolve.after_resolver_return": {
               "budget_ms": 1.189,
               "required": false
             },
-            "rlm_lash_vm.deferred_trigger_resolve": {
+            "codemode_lash_vm.deferred_trigger_resolve": {
               "budget_ms": 0.978,
               "required": false
             },
-            "rlm_lash_vm.execute": {
+            "codemode_lash_vm.execute": {
               "budget_ms": 50.408,
               "required": false
             },
-            "rlm_lash_vm.resolve_projected_bindings": {
+            "codemode_lash_vm.resolve_projected_bindings": {
               "budget_ms": 4.012,
               "required": false
             },
@@ -1355,75 +1355,75 @@
               "budget_ms": 5.863,
               "required": true
             },
-            "rlm_lash_vm.cell_tool_bindings": {
+            "codemode_lash_vm.cell_tool_bindings": {
               "budget_ms": 29.114,
               "required": true
             },
-            "rlm_lash_vm.compile_link": {
+            "codemode_lash_vm.compile_link": {
               "budget_ms": 5.395,
               "required": true
             },
-            "rlm_lash_vm.deferred_resolve": {
+            "codemode_lash_vm.deferred_resolve": {
               "budget_ms": 11.061,
               "required": false
             },
-            "rlm_lash_vm.deferred_resolve.after_durable_record": {
+            "codemode_lash_vm.deferred_resolve.after_durable_record": {
               "budget_ms": 0.717,
               "required": false
             },
-            "rlm_lash_vm.deferred_resolve.after_resolver_return": {
+            "codemode_lash_vm.deferred_resolve.after_resolver_return": {
               "budget_ms": 1.179,
               "required": false
             },
-            "rlm_lash_vm.deferred_trigger_resolve": {
+            "codemode_lash_vm.deferred_trigger_resolve": {
               "budget_ms": 1.261,
               "required": false
             },
-            "rlm_lash_vm.execute": {
+            "codemode_lash_vm.execute": {
               "budget_ms": 3100.198,
               "required": true
             },
-            "rlm_lash_vm.print_project": {
+            "codemode_lash_vm.print_project": {
               "budget_ms": 11.46,
               "required": true
             },
-            "rlm_lash_vm.resolve_projected_bindings": {
+            "codemode_lash_vm.resolve_projected_bindings": {
               "budget_ms": 2.954,
               "required": false
             },
-            "rlm_lash_vm.store_module_artifact": {
+            "codemode_lash_vm.store_module_artifact": {
               "budget_ms": 0.204,
               "required": false
             },
-            "rlm_process.await_handle": {
+            "codemode_process.await_handle": {
               "budget_ms": 1884.945,
               "required": true
             },
-            "rlm_process.build_context": {
+            "codemode_process.build_context": {
               "budget_ms": 15.85,
               "required": true
             },
-            "rlm_process.close_groups": {
+            "codemode_process.close_groups": {
               "budget_ms": 1.913,
               "required": true
             },
-            "rlm_process.compile": {
+            "codemode_process.compile": {
               "budget_ms": 3.29,
               "required": true
             },
-            "rlm_process.execute": {
+            "codemode_process.execute": {
               "budget_ms": 1708.063,
               "required": true
             },
-            "rlm_process.load_artifact": {
+            "codemode_process.load_artifact": {
               "budget_ms": 2.565,
               "required": true
             },
-            "rlm_process.resolve_environment": {
+            "codemode_process.resolve_environment": {
               "budget_ms": 72.388,
               "required": true
             },
-            "rlm_process.shutdown": {
+            "codemode_process.shutdown": {
               "budget_ms": 9.304,
               "required": true
             },
@@ -1475,71 +1475,71 @@
               "budget_ms": 4.728,
               "required": true
             },
-            "rlm_lash_vm.cell_tool_bindings": {
+            "codemode_lash_vm.cell_tool_bindings": {
               "budget_ms": 11.392,
               "required": true
             },
-            "rlm_lash_vm.compile_link": {
+            "codemode_lash_vm.compile_link": {
               "budget_ms": 6.299,
               "required": true
             },
-            "rlm_lash_vm.deferred_resolve": {
+            "codemode_lash_vm.deferred_resolve": {
               "budget_ms": 13.349,
               "required": false
             },
-            "rlm_lash_vm.deferred_resolve.after_durable_record": {
+            "codemode_lash_vm.deferred_resolve.after_durable_record": {
               "budget_ms": 0.843,
               "required": false
             },
-            "rlm_lash_vm.deferred_resolve.after_resolver_return": {
+            "codemode_lash_vm.deferred_resolve.after_resolver_return": {
               "budget_ms": 1.365,
               "required": false
             },
-            "rlm_lash_vm.deferred_trigger_resolve": {
+            "codemode_lash_vm.deferred_trigger_resolve": {
               "budget_ms": 1.313,
               "required": false
             },
-            "rlm_lash_vm.execute": {
+            "codemode_lash_vm.execute": {
               "budget_ms": 631.875,
               "required": true
             },
-            "rlm_lash_vm.resolve_projected_bindings": {
+            "codemode_lash_vm.resolve_projected_bindings": {
               "budget_ms": 2.809,
               "required": false
             },
-            "rlm_lash_vm.store_module_artifact": {
+            "codemode_lash_vm.store_module_artifact": {
               "budget_ms": 0.298,
               "required": true
             },
-            "rlm_process.await_handle": {
+            "codemode_process.await_handle": {
               "budget_ms": 279.391,
               "required": true
             },
-            "rlm_process.build_context": {
+            "codemode_process.build_context": {
               "budget_ms": 44.013,
               "required": true
             },
-            "rlm_process.close_groups": {
+            "codemode_process.close_groups": {
               "budget_ms": 2.314,
               "required": true
             },
-            "rlm_process.compile": {
+            "codemode_process.compile": {
               "budget_ms": 7.046,
               "required": true
             },
-            "rlm_process.execute": {
+            "codemode_process.execute": {
               "budget_ms": 80.633,
               "required": true
             },
-            "rlm_process.load_artifact": {
+            "codemode_process.load_artifact": {
               "budget_ms": 13.87,
               "required": true
             },
-            "rlm_process.resolve_environment": {
+            "codemode_process.resolve_environment": {
               "budget_ms": 101.282,
               "required": true
             },
-            "rlm_process.shutdown": {
+            "codemode_process.shutdown": {
               "budget_ms": 17.243,
               "required": true
             },
@@ -1591,71 +1591,71 @@
               "budget_ms": 8.395,
               "required": true
             },
-            "rlm_lash_vm.cell_tool_bindings": {
+            "codemode_lash_vm.cell_tool_bindings": {
               "budget_ms": 14.041,
               "required": true
             },
-            "rlm_lash_vm.compile_link": {
+            "codemode_lash_vm.compile_link": {
               "budget_ms": 5.041,
               "required": true
             },
-            "rlm_lash_vm.deferred_resolve": {
+            "codemode_lash_vm.deferred_resolve": {
               "budget_ms": 9.087,
               "required": false
             },
-            "rlm_lash_vm.deferred_resolve.after_durable_record": {
+            "codemode_lash_vm.deferred_resolve.after_durable_record": {
               "budget_ms": 0.721,
               "required": false
             },
-            "rlm_lash_vm.deferred_resolve.after_resolver_return": {
+            "codemode_lash_vm.deferred_resolve.after_resolver_return": {
               "budget_ms": 1.279,
               "required": false
             },
-            "rlm_lash_vm.deferred_trigger_resolve": {
+            "codemode_lash_vm.deferred_trigger_resolve": {
               "budget_ms": 1.034,
               "required": false
             },
-            "rlm_lash_vm.execute": {
+            "codemode_lash_vm.execute": {
               "budget_ms": 644.048,
               "required": true
             },
-            "rlm_lash_vm.resolve_projected_bindings": {
+            "codemode_lash_vm.resolve_projected_bindings": {
               "budget_ms": 3.243,
               "required": false
             },
-            "rlm_lash_vm.store_module_artifact": {
+            "codemode_lash_vm.store_module_artifact": {
               "budget_ms": 0.289,
               "required": true
             },
-            "rlm_process.await_handle": {
+            "codemode_process.await_handle": {
               "budget_ms": 175.078,
               "required": true
             },
-            "rlm_process.build_context": {
+            "codemode_process.build_context": {
               "budget_ms": 151.375,
               "required": true
             },
-            "rlm_process.close_groups": {
+            "codemode_process.close_groups": {
               "budget_ms": 2.333,
               "required": true
             },
-            "rlm_process.compile": {
+            "codemode_process.compile": {
               "budget_ms": 8.526,
               "required": true
             },
-            "rlm_process.execute": {
+            "codemode_process.execute": {
               "budget_ms": 74.029,
               "required": true
             },
-            "rlm_process.load_artifact": {
+            "codemode_process.load_artifact": {
               "budget_ms": 15.6,
               "required": true
             },
-            "rlm_process.resolve_environment": {
+            "codemode_process.resolve_environment": {
               "budget_ms": 158.804,
               "required": true
             },
-            "rlm_process.shutdown": {
+            "codemode_process.shutdown": {
               "budget_ms": 47.78,
               "required": true
             },
@@ -1703,19 +1703,19 @@
               "budget_ms": 3.881,
               "required": true
             },
-            "rlm_lash_vm.compile_link": {
+            "codemode_lash_vm.compile_link": {
               "budget_ms": 2.884,
               "required": true
             },
-            "rlm_lash_vm.deferred_resolve": {
+            "codemode_lash_vm.deferred_resolve": {
               "budget_ms": 4.316,
               "required": false
             },
-            "rlm_lash_vm.execute": {
+            "codemode_lash_vm.execute": {
               "budget_ms": 2.175,
               "required": true
             },
-            "rlm_lash_vm.resolve_projected_bindings": {
+            "codemode_lash_vm.resolve_projected_bindings": {
               "budget_ms": 2.267,
               "required": false
             },
@@ -1767,71 +1767,71 @@
               "budget_ms": 4.672,
               "required": true
             },
-            "rlm_lash_vm.cell_tool_bindings": {
+            "codemode_lash_vm.cell_tool_bindings": {
               "budget_ms": 17.235,
               "required": true
             },
-            "rlm_lash_vm.compile_link": {
+            "codemode_lash_vm.compile_link": {
               "budget_ms": 3.75,
               "required": false
             },
-            "rlm_lash_vm.deferred_resolve": {
+            "codemode_lash_vm.deferred_resolve": {
               "budget_ms": 13.371,
               "required": false
             },
-            "rlm_lash_vm.deferred_resolve.after_durable_record": {
+            "codemode_lash_vm.deferred_resolve.after_durable_record": {
               "budget_ms": 0.778,
               "required": false
             },
-            "rlm_lash_vm.deferred_resolve.after_resolver_return": {
+            "codemode_lash_vm.deferred_resolve.after_resolver_return": {
               "budget_ms": 1.383,
               "required": false
             },
-            "rlm_lash_vm.deferred_trigger_resolve": {
+            "codemode_lash_vm.deferred_trigger_resolve": {
               "budget_ms": 1.276,
               "required": false
             },
-            "rlm_lash_vm.execute": {
+            "codemode_lash_vm.execute": {
               "budget_ms": 2330.295,
               "required": false
             },
-            "rlm_lash_vm.resolve_projected_bindings": {
+            "codemode_lash_vm.resolve_projected_bindings": {
               "budget_ms": 3.27,
               "required": false
             },
-            "rlm_lash_vm.store_module_artifact": {
+            "codemode_lash_vm.store_module_artifact": {
               "budget_ms": 0.313,
               "required": false
             },
-            "rlm_process.await_handle": {
+            "codemode_process.await_handle": {
               "budget_ms": 1994.297,
               "required": false
             },
-            "rlm_process.build_context": {
+            "codemode_process.build_context": {
               "budget_ms": 10.947,
               "required": false
             },
-            "rlm_process.close_groups": {
+            "codemode_process.close_groups": {
               "budget_ms": 1.685,
               "required": true
             },
-            "rlm_process.compile": {
+            "codemode_process.compile": {
               "budget_ms": 1.895,
               "required": false
             },
-            "rlm_process.execute": {
+            "codemode_process.execute": {
               "budget_ms": 1676.023,
               "required": false
             },
-            "rlm_process.load_artifact": {
+            "codemode_process.load_artifact": {
               "budget_ms": 3.478,
               "required": false
             },
-            "rlm_process.resolve_environment": {
+            "codemode_process.resolve_environment": {
               "budget_ms": 31.803,
               "required": false
             },
-            "rlm_process.shutdown": {
+            "codemode_process.shutdown": {
               "budget_ms": 12.298,
               "required": false
             },
@@ -1879,35 +1879,35 @@
               "budget_ms": 3.786,
               "required": true
             },
-            "rlm_lash_vm.cell_tool_bindings": {
+            "codemode_lash_vm.cell_tool_bindings": {
               "budget_ms": 6.859,
               "required": true
             },
-            "rlm_lash_vm.compile_link": {
+            "codemode_lash_vm.compile_link": {
               "budget_ms": 3.218,
               "required": false
             },
-            "rlm_lash_vm.deferred_resolve": {
+            "codemode_lash_vm.deferred_resolve": {
               "budget_ms": 9.95,
               "required": false
             },
-            "rlm_lash_vm.deferred_resolve.after_durable_record": {
+            "codemode_lash_vm.deferred_resolve.after_durable_record": {
               "budget_ms": 0.895,
               "required": false
             },
-            "rlm_lash_vm.deferred_resolve.after_resolver_return": {
+            "codemode_lash_vm.deferred_resolve.after_resolver_return": {
               "budget_ms": 1.346,
               "required": false
             },
-            "rlm_lash_vm.deferred_trigger_resolve": {
+            "codemode_lash_vm.deferred_trigger_resolve": {
               "budget_ms": 1.103,
               "required": false
             },
-            "rlm_lash_vm.execute": {
+            "codemode_lash_vm.execute": {
               "budget_ms": 33.979,
               "required": false
             },
-            "rlm_lash_vm.resolve_projected_bindings": {
+            "codemode_lash_vm.resolve_projected_bindings": {
               "budget_ms": 2.484,
               "required": false
             },
@@ -1955,19 +1955,19 @@
               "budget_ms": 9.024,
               "required": true
             },
-            "rlm_lash_vm.compile_link": {
+            "codemode_lash_vm.compile_link": {
               "budget_ms": 6.578,
               "required": false
             },
-            "rlm_lash_vm.deferred_resolve": {
+            "codemode_lash_vm.deferred_resolve": {
               "budget_ms": 129.268,
               "required": true
             },
-            "rlm_lash_vm.execute": {
+            "codemode_lash_vm.execute": {
               "budget_ms": 2.155,
               "required": false
             },
-            "rlm_lash_vm.resolve_projected_bindings": {
+            "codemode_lash_vm.resolve_projected_bindings": {
               "budget_ms": 2.791,
               "required": false
             },
@@ -2015,19 +2015,19 @@
               "budget_ms": 10.743,
               "required": true
             },
-            "rlm_lash_vm.compile_link": {
+            "codemode_lash_vm.compile_link": {
               "budget_ms": 7.104,
               "required": false
             },
-            "rlm_lash_vm.deferred_resolve": {
+            "codemode_lash_vm.deferred_resolve": {
               "budget_ms": 154.351,
               "required": true
             },
-            "rlm_lash_vm.execute": {
+            "codemode_lash_vm.execute": {
               "budget_ms": 2.355,
               "required": false
             },
-            "rlm_lash_vm.resolve_projected_bindings": {
+            "codemode_lash_vm.resolve_projected_bindings": {
               "budget_ms": 3.382,
               "required": false
             },
@@ -2575,19 +2575,19 @@
               "budget_ms": 5.736,
               "required": true
             },
-            "rlm_lash_vm.compile_link": {
+            "codemode_lash_vm.compile_link": {
               "budget_ms": 5.452,
               "required": false
             },
-            "rlm_lash_vm.deferred_resolve": {
+            "codemode_lash_vm.deferred_resolve": {
               "budget_ms": 3.997,
               "required": false
             },
-            "rlm_lash_vm.execute": {
+            "codemode_lash_vm.execute": {
               "budget_ms": 3.736,
               "required": false
             },
-            "rlm_lash_vm.resolve_projected_bindings": {
+            "codemode_lash_vm.resolve_projected_bindings": {
               "budget_ms": 2.449,
               "required": false
             },
@@ -2719,7 +2719,7 @@
         "advisory_duration": {
           "ms_max": 99.541,
           "phases": {
-            "rlm_exec_checkpoint": {
+            "codemode_exec_checkpoint": {
               "budget_ms": 39.768,
               "required": true
             },

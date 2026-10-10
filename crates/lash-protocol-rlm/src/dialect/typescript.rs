@@ -261,14 +261,14 @@ An `async` function starts running when it is called, and async callbacks run co
 
 #[cfg(test)]
 mod tests {
-    use crate::dialect::{RlmDialectServices, SessionDialect};
+    use crate::dialect::{CodeModeDialectServices, SessionDialect};
     use lash_vm_runtime::{ToolBinding, ToolDefinitionBindingExt};
 
     #[test]
     fn the_process_section_follows_the_catalogue_and_teaches_the_argument_convention() {
         let dialect = SessionDialect::new(
             crate::dialect::CellDialect::typescript(),
-            RlmDialectServices {
+            CodeModeDialectServices {
                 kernel: crate::executor::KernelCarry::default(),
                 presentation: crate::RlmPresentationConfig::standard(),
                 workers: lash_vm_client::service::Service::default(),

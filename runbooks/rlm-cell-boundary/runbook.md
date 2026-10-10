@@ -1,7 +1,7 @@
 # E2E Scenario: RLM Cell Boundary Ownership
 
 > **Read [../RULES.md](../RULES.md) first**. This scenario uses real provider
-> tokens and adds only the RLM cell-boundary gates.
+> tokens and adds only the code mode cell-boundary gates.
 
 **Purpose.** Prove that a live Workbench RLM turn sends no provider stop
 sequences, records stop-sequence disposition honestly (`not_requested`), accepts

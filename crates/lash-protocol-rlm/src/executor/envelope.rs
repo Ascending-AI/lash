@@ -24,8 +24,8 @@ use lash_vm_runtime::{HostBoundary, HostEffect};
 use super::host::CellHostLedgers;
 
 /// version_surface = "coexist"
-/// version_guard(items(LASH_RLM_CELL_SEGMENT_CODE_DOMAIN_VERSION, code_digest))
-const LASH_RLM_CELL_SEGMENT_CODE_DOMAIN_VERSION: &str = "lash-rlm-cell-segment-code/v1";
+/// version_guard(items(LASH_CODEMODE_CELL_SEGMENT_CODE_DOMAIN_VERSION, code_digest))
+const LASH_CODEMODE_CELL_SEGMENT_CODE_DOMAIN_VERSION: &str = "lash-codemode-cell-segment-code/v1";
 
 /// One effect the cell was lowered against.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -108,7 +108,7 @@ impl TryFrom<CellSegmentStateWire> for CellSegmentState {
 impl CellEnvelope {
     pub(super) fn code_digest(code: &str) -> String {
         lash_sansio::core_support::blake3_domain_hash_hex(
-            LASH_RLM_CELL_SEGMENT_CODE_DOMAIN_VERSION,
+            LASH_CODEMODE_CELL_SEGMENT_CODE_DOMAIN_VERSION,
             code.as_bytes(),
         )
     }
@@ -294,5 +294,5 @@ pub(super) async fn resumed_cell(
 
 impl lash_core::store::DurableRecord for CellSegmentState {
     const SURFACE: lash_core::store::SurfaceFormat =
-        lash_core::surface_format!(crate::executor::RLM_SNAPSHOT_VERSION);
+        lash_core::surface_format!(crate::executor::CODEMODE_SNAPSHOT_VERSION);
 }

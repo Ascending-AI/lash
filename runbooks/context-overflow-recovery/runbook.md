@@ -37,7 +37,7 @@ LASH_CONTEXT_OVERFLOW_ARTIFACT_DIR=<fresh-dir> just context-overflow-recovery-e2
 It writes the RLM TypeScript row to
 `<artifact-dir>/context-overflow-recovery/typescript/` and the standard-protocol
 checkpoint to `<artifact-dir>/context-overflow-recovery/standard/`. **Do not set
-`LASH_RUNBOOK_DIALECT`.** The companion rejects it. The RLM cell delimiters and
+`LASH_RUNBOOK_DIALECT`.** The companion rejects it. The code mode cell delimiters and
 checkpoint's `"dialect"` field both use the fixed TypeScript dialect. ADR 0096
 leaves no second RLM dialect to select. It emits
 `context-overflow-recovery e2e passed: rows=N` only after the focused contract test and

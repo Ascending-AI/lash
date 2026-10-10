@@ -140,10 +140,10 @@ impl PoolConfig {
         }
     }
 
-    /// RLM/process preset: 64 MiB state, 128 MiB frames and queued bytes,
+    /// code mode/process preset: 64 MiB state, 128 MiB frames and queued bytes,
     /// 256 MiB decode allocations; other values follow `standard`.
     /// These larger allowances have no workload measurement behind them.
-    pub fn rlm(entry: WorkerEntry) -> Self {
+    pub fn codemode(entry: WorkerEntry) -> Self {
         let mut config = Self::standard(entry);
         config.protocol.max_vm_state_bytes = 64 * 1024 * 1024;
         config.protocol.decode.max_frame_bytes = 128 * 1024 * 1024;

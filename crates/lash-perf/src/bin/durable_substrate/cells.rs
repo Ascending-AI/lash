@@ -1,5 +1,5 @@
-//! The RLM cell turn (H5): a cell session runs behind the lash facade, on
-//! the production turn driver, the RLM worker path, its durable snapshot
+//! The code mode cell turn (H5): a cell session runs behind the lash facade, on
+//! the production turn driver, the code mode worker path, its durable snapshot
 //! store and the production tool dispatch. Only the model and `ext_echo`'s
 //! body are the bench's.
 //!

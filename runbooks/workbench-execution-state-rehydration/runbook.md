@@ -24,7 +24,7 @@ was amended by FIG-1728: snapshot v14 removed guest scratch files and file-body 
 The current root retains globals and deferred resolutions. Do not interpret the ADR's
 historical file paragraphs as a supported file checkpoint API. The ticket's binary-file
 gate is obsolete for the same reason (see the version history in
-`crates/lash-protocol-rlm/src/executor/snapshot.rs`, under the `RLM_SNAPSHOT_VERSION` constant).
+`crates/lash-protocol-rlm/src/executor/snapshot.rs`, under the `CODEMODE_SNAPSHOT_VERSION` constant).
 
 **Why this is not the session-resume scenario.** `workbench-session-resume` proves
 committed *transcript* nodes return after a process replacement. Transcript survival is

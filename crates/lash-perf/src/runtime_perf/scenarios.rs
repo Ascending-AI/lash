@@ -563,7 +563,7 @@ impl RuntimePerfScenario {
             "checkpoint_state_hot_paths",
             Rlm,
             RuntimeScenario,
-            "Measures RLM execution-state capture plus keyed checkpoint hydration, budget accounting, and commit below protocol and facade ownership."
+            "Measures code mode execution-state capture plus keyed checkpoint hydration, budget accounting, and commit below protocol and facade ownership."
         ),
         runtime_perf_metadata!(
             LiveReplayPressure,

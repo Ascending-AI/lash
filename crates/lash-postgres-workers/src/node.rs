@@ -171,7 +171,7 @@ pub async fn run(config: NodeConfig) -> Result<Stopped, String> {
     let recorded = RecordedStores::new(stores, &config.node);
     let store = recorded.store();
     let backend = Backend::assemble(BackendParts {
-        // Its cells run on the RLM worker path: actors hold the VM's state.
+        // Its cells run on the code mode worker path: actors hold the VM's state.
         formats: lash::formats::actor_state_surfaces(),
         stores: Arc::new(recorded),
         settings,

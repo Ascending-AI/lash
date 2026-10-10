@@ -200,7 +200,7 @@ impl Script {
     }
 }
 
-/// An RLM cell of `code`.
+/// A code mode cell of `code`.
 fn cell(code: &str) -> String {
     format!("<typescript>\n{code}\n</typescript>")
 }
@@ -822,7 +822,7 @@ async fn uncut(script: Script) {
     );
 }
 
-/// The crash scripts' complete owner sequence, including the RLM cell writes.
+/// The crash scripts' complete owner sequence, including the code mode cell writes.
 fn uncut_labels(script: Script) -> Vec<CommitLabel> {
     if script == Script::ContinueAs {
         vec![

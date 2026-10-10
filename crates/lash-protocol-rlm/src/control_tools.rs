@@ -676,7 +676,7 @@ mod tests {
         assert_eq!(seed.projected.entries[0].0, "proj");
         assert_eq!(
             seed.projected.entries[0].1,
-            lash_rlm_types::RlmProjectedSeedEntry::Materialized(json!("carry-over"))
+            lash_rlm_types::CodeModeProjectedSeedEntry::Materialized(json!("carry-over"))
         );
         assert!(manager.created.lock_recover().is_empty());
     }

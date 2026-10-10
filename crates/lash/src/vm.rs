@@ -8,7 +8,7 @@
 //! worker registers every library function when it starts; a document names
 //! functions by identity and carries none.
 
-/// One shared pool for RLM cells, process bodies, and pure language work.
+/// One shared pool for Code mode cells, process bodies, and pure language work.
 ///
 /// SDK releases attach `lash-sdk-worker-VERSION-TARGET.tar.gz` and its SHA256.
 /// Pass the extracted `bin/lash-vm-worker` path to [`WorkerService::subprocess`]

@@ -16,8 +16,8 @@ The same geometry applies to `rlm_large_tool_catalog`,
 state export finish; the session handle alone does not own the serving node.
 
 Large print retains its 70-line text and sixteen repeated rows. Its receipt's
-`rlm.configured_instruction_limit_per_cell` is the configured bound, not a
-measured charge: every RLM fixture runs under the standard instruction budget,
+`codemode.configured_instruction_limit_per_cell` is the configured bound, not a
+measured charge: every code mode fixture runs under the standard instruction budget,
 `rlm::InstructionBound::standard()` (20,000,000 units). The catalog fixtures retain the full tool population and
 configure their session prompt plan for it. The receipt labels the configured
 limits as `prompt.configured_section_bytes_limit_per_call` (524,288 bytes per

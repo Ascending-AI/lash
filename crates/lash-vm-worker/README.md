@@ -71,7 +71,7 @@ Checkout is five seconds, compute thirty seconds, serialization five seconds,
 cancellation grace 100 ms and cumulative CPU ten seconds. An invocation allows
 three attempts; the pool permits eight failed replacements per minute. These
 are host bounds, not latency targets or guarantees for arbitrary guests.
-`PoolConfig::rlm` raises parked state to 64 MiB, frames and queued input to
+`PoolConfig::codemode` raises parked state to 64 MiB, frames and queued input to
 128 MiB and charged decode allocation to 256 MiB. Hosts can supply a smaller
 `PoolConfig` for their own admitted workload.
 
@@ -115,6 +115,6 @@ The native bootstrap lives in `entry.rs`. The core boundary gate allows only
 its argv read and empty-environment probe; every other ambient read in the
 worker library remains refused.
 
-RLM and process hosts share `lash_vm_client::service::Service`. The facade
+Code mode and process hosts share `lash_vm_client::service::Service`. The facade
 names its configuration as `lash::vm::WorkerService`, `WorkerPoolConfig`,
 `WorkerEntry` and `WorkerDeadlines`.

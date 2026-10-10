@@ -168,7 +168,7 @@ async fn session_globals_survive_cells_and_reload_and_private_slots_never_do(tie
         .protocol()
         .apply_session_extension(
             lash::rlm::rlm_session_projection_extension(
-                lash::rlm::RlmProjectedBindings::new()
+                lash::rlm::CodeModeProjectedBindings::new()
                     .bind_json("host_config", serde_json::json!({ "label": "from-host" }))
                     .expect("the projected binding is unique"),
             ),

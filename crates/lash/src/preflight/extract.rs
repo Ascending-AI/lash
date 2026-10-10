@@ -274,7 +274,7 @@ fn session_checkpoint(payload: Payload<'_>) -> Vec<Extraction> {
 }
 
 fn session_execution_state(payload: Payload<'_>) -> Vec<Extraction> {
-    let format = DurableFormat::RlmSnapshotEnvelope;
+    let format = DurableFormat::CodeModeSnapshotEnvelope;
     let bytes = match payload.messagepack(format) {
         Ok(bytes) => bytes,
         Err(extraction) => return vec![extraction],

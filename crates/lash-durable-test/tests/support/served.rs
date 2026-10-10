@@ -279,7 +279,7 @@ pub fn call(call_id: &str, tool: &str, args: serde_json::Value) -> LlmOutputPart
     }
 }
 
-/// One RLM cell of `source`.
+/// One code mode cell of `source`.
 pub fn cell(source: &str) -> LlmResponse {
     response(vec![LlmOutputPart::Text {
         text: format!("<typescript>\n{source}\n</typescript>"),

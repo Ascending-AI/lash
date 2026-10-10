@@ -166,7 +166,7 @@ pub struct RunOverrides {
     pub reasoning: Option<ReasoningSelection>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub generation: Option<GenerationOptions>,
-    /// The options this run states for the session's protocol (an RLM
+    /// The options this run states for the session's protocol (a code mode
     /// render, say): the protocol owner's typed run options,
     /// which that owner alone applies to its recorded namespace. A snapshot
     /// that records no protocol plugin refuses them.

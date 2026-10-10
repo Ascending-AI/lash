@@ -37,7 +37,7 @@ and f-string formatting are helpers.
 
 A source is a cell of a session: the names its top level binds are session
 bindings, which the next cell sees, and a cell may `await` at its top
-level. In an RLM session, a top-level `def` or lambda is saved as a
+level. In a code mode session, a top-level `def` or lambda is saved as a
 self-contained function when the cell succeeds. Captures are frozen then;
 later cells copy the definition into their own documents. Captures must be
 data or other saved functions; a task capture prevents saving. Saved functions

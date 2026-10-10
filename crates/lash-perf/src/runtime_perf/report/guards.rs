@@ -457,7 +457,7 @@ mod tests {
         push_max_budget(
             &mut budgets,
             summary,
-            "phase:rlm_process.load_artifact:duration_ms",
+            "phase:codemode_process.load_artifact:duration_ms",
             "median",
             RuntimePerfGuardClass::Duration,
             Some(7.67),

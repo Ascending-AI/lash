@@ -6,7 +6,7 @@
 //! tool's body writes its witness entry, may hold, and answers what it
 //! wrote. Only the model and the tool's body are the runbook's: the session,
 //! its turn, the cell and the tool call run behind the lash facade on the
-//! production session activation, RLM worker path and tool dispatch, and the
+//! production session activation, code mode worker path and tool dispatch, and the
 //! turn commits the session's real head.
 
 use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};

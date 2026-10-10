@@ -3,7 +3,7 @@ use lash_sansio::{
     OutputValue, RetainedOutput, SchemaShape, ShapeKind, TerminationMode, TurnProtocol,
 };
 
-/// Read-only legacy protocol-owned assistant context paired with an RLM
+/// Read-only legacy protocol-owned assistant context paired with a code mode
 /// trajectory entry.
 ///
 /// New sessions persist this context as ordinary durable assistant messages so
@@ -699,26 +699,26 @@ impl From<&RlmSessionConfig> for RlmCreateExtras {
     rename_all = "snake_case",
     deny_unknown_fields
 )]
-pub enum RlmProjectedSeedEntry {
+pub enum CodeModeProjectedSeedEntry {
     Materialized(serde_json::Value),
 }
 
 /// Wire-format snapshot of a set of projected bindings. Pairs of
 /// `(name, entry)` get re-projected as host bindings on the child session at
 /// creation time. This is the serializable form of
-/// `lash_protocol_rlm::RlmProjectedBindings`; lash-rlm-types stays free of any
+/// `lash_protocol_rlm::CodeModeProjectedBindings`; lash-rlm-types stays free of any
 /// runtime dependency on lash_vm itself.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct RlmProjectedSeedSnapshot {
-    pub entries: Vec<(String, RlmProjectedSeedEntry)>,
+pub struct CodeModeProjectedSeedSnapshot {
+    pub entries: Vec<(String, CodeModeProjectedSeedEntry)>,
 }
 
-impl RlmProjectedSeedSnapshot {
+impl CodeModeProjectedSeedSnapshot {
     pub fn new() -> Self {
         Self::default()
     }
 
-    pub fn push(&mut self, name: impl Into<String>, entry: RlmProjectedSeedEntry) {
+    pub fn push(&mut self, name: impl Into<String>, entry: CodeModeProjectedSeedEntry) {
         self.entries.push((name.into(), entry));
     }
 
@@ -731,8 +731,11 @@ impl RlmProjectedSeedSnapshot {
 pub struct RlmSeedPluginBody {
     #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
     pub globals: serde_json::Map<String, serde_json::Value>,
-    #[serde(default, skip_serializing_if = "RlmProjectedSeedSnapshot::is_empty")]
-    pub projected: RlmProjectedSeedSnapshot,
+    #[serde(
+        default,
+        skip_serializing_if = "CodeModeProjectedSeedSnapshot::is_empty"
+    )]
+    pub projected: CodeModeProjectedSeedSnapshot,
     /// The saved functions the session is created with, by binding: each
     /// value is a kernel saved function as the RLM protocol stores one.
     #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
@@ -756,7 +759,7 @@ mod projected_seed_tests {
 
     #[test]
     fn projected_seed_entry_serde_is_tagged_and_rejects_the_legacy_shape() {
-        let entry = RlmProjectedSeedEntry::Materialized(serde_json::json!({
+        let entry = CodeModeProjectedSeedEntry::Materialized(serde_json::json!({
             "__projection_ref__": {
                 "kind": "memory",
                 "key": "data",
@@ -776,7 +779,7 @@ mod projected_seed_tests {
             })
         );
         assert!(
-            serde_json::from_value::<RlmProjectedSeedEntry>(serde_json::json!({
+            serde_json::from_value::<CodeModeProjectedSeedEntry>(serde_json::json!({
                 "__projection_ref__": {
                     "kind": "memory",
                     "key": "data",
@@ -786,7 +789,7 @@ mod projected_seed_tests {
             "the untagged legacy seed entry must not decode"
         );
         assert!(
-            serde_json::from_value::<RlmProjectedSeedEntry>(serde_json::json!({
+            serde_json::from_value::<CodeModeProjectedSeedEntry>(serde_json::json!({
                 "kind": "ref",
                 "value": {
                     "kind": "memory",

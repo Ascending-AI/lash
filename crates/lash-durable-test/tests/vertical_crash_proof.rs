@@ -11,7 +11,7 @@
 //!
 //! - **Code:** the RLM protocol. The model answers with a TypeScript cell
 //!   that calls `tools.ext_write({ x: 7 })` and prints the answer; the cell
-//!   runs through the RLM worker path on the durable snapshot store, and
+//!   runs through the code mode worker path on the durable snapshot store, and
 //!   once its printout is in the transcript the model answers in prose.
 //! - **Tools:** the standard protocol. The model calls `ext_write`
 //!   natively, the turn's tool round runs it, and once its result is in the

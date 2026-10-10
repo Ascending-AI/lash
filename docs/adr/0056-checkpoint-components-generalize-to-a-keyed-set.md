@@ -27,12 +27,12 @@ contract with one opaque execution-state body.
 A protocol captures `ExecutionStateCapture::Clear` or `Replace { root, leaves }`.
 A replacement requires its root and keys leaves by `ExecutionLeafName`.
 `CheckpointComponentKey` interprets stored manifest keys; the core leaf name
-owns the execution-state namespace spelling. Manifests and RLM root leaf
+owns the execution-state namespace spelling. Manifests and code mode root leaf
 references retain their existing string encodings.
 
 ### Runtime roots and heap fragments
 
-The RLM root contains the engine ID, a durable state header, globals, deferred
+The code mode root contains the engine ID, a durable state header, globals, deferred
 tool resolutions and deferred-call resolutions. Each global body is a
 durable fragment containing its value and its assigned heap objects. The
 header carries format and heap-accounting information. Guest scratch files are

@@ -1,7 +1,7 @@
 //! Output kept out of history (FIG-1643).
 //!
 //! A producer about to put an oversized output into session history — a tool
-//! presentation, an RLM step's print array or final value — retains its complete bytes as a
+//! presentation, a code mode step's print array or final value — retains its complete bytes as a
 //! session attachment first and puts a [`RetainedOutput`] in its place: a
 //! bounded witness and the attachment's typed reference. The decision is made
 //! once, inside a journaled step, under an [`OutputRetentionPolicy`] the step
@@ -34,7 +34,7 @@ impl OutputRetentionPolicy {
     /// 4 KiB witness. The standard renderer's default cut (16,000 characters)
     /// stays inline under it, so the policy retains what no renderer bounded:
     /// failures a renderer passed through, plugin additions after the cut,
-    /// and RLM values. No measurement backs the witness size.
+    /// and code mode values. No measurement backs the witness size.
     pub const STANDARD: Self = Self {
         inline_limit_bytes: 64 * 1024,
         witness_bytes: 4 * 1024,

@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 use crate::support;
 use crate::workbench;
 
-/// An RLM cell that finishes with `value`, as the provider's text deltas.
+/// A code mode cell that finishes with `value`, as the provider's text deltas.
 fn cell(value: &str) -> Vec<String> {
     vec![
         "<typescript>\n".to_owned(),

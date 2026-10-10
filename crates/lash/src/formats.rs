@@ -70,7 +70,7 @@ pub use lash_core::{
 };
 #[cfg(feature = "rlm")]
 pub use lash_protocol_rlm::{
-    RLM_DRIVER_STATE_VERSION, RLM_PROTOCOL_EVENT_VERSION, RLM_SNAPSHOT_VERSION,
+    CODEMODE_SNAPSHOT_VERSION, RLM_DRIVER_STATE_VERSION, RLM_PROTOCOL_EVENT_VERSION,
 };
 pub use lash_sansio::TURN_CHECKPOINT_SCHEMA_VERSION;
 #[cfg(feature = "codemode")]
@@ -133,10 +133,10 @@ pub enum DurableFormat {
     /// from, stamped with the kernel version it was parked under.
     KernelParkedState,
     /// A saved function: a function a session keeps between cells, held in
-    /// the RLM snapshot and given to a session at its creation.
+    /// the code mode snapshot and given to a session at its creation.
     KernelSavedFunction,
-    /// The RLM snapshot envelope stored behind a checkpoint component.
-    RlmSnapshotEnvelope,
+    /// The code mode snapshot envelope stored behind a checkpoint component.
+    CodeModeSnapshotEnvelope,
     /// The RLM driver state parked in the protocol driver-state slot.
     RlmDriverState,
     /// A durable format the build's effect engine registers of its own
@@ -196,7 +196,7 @@ impl DurableFormat {
             DurableFormat::KernelDocument => "kernel document",
             DurableFormat::KernelParkedState => "kernel parked state",
             DurableFormat::KernelSavedFunction => "kernel saved function",
-            DurableFormat::RlmSnapshotEnvelope => "RLM snapshot envelope",
+            DurableFormat::CodeModeSnapshotEnvelope => "code mode snapshot envelope",
             DurableFormat::RlmDriverState => "RLM driver state",
             DurableFormat::Engine(format) => format.name,
             DurableFormat::KernelVersion => "kernel version",
@@ -233,7 +233,7 @@ impl DurableFormat {
             DurableFormat::KernelDocument => UpgradePolicy::Migrate,
             DurableFormat::KernelParkedState => UpgradePolicy::Migrate,
             DurableFormat::KernelSavedFunction => UpgradePolicy::Migrate,
-            DurableFormat::RlmSnapshotEnvelope => UpgradePolicy::Migrate,
+            DurableFormat::CodeModeSnapshotEnvelope => UpgradePolicy::Migrate,
             DurableFormat::RlmDriverState => UpgradePolicy::Migrate,
             DurableFormat::Engine(format) => format.upgrade_policy,
             DurableFormat::KernelVersion => UpgradePolicy::Migrate,
@@ -456,10 +456,10 @@ pub fn durable_formats() -> impl Iterator<Item = DurableFormatEntry> {
         },
         #[cfg(feature = "rlm")]
         DurableFormatEntry {
-            format: DurableFormat::RlmSnapshotEnvelope,
-            version: FormatVersion::Counter(RLM_SNAPSHOT_VERSION),
+            format: DurableFormat::CodeModeSnapshotEnvelope,
+            version: FormatVersion::Counter(CODEMODE_SNAPSHOT_VERSION),
             owning_crate: "lash-protocol-rlm",
-            constant: "RLM_SNAPSHOT_VERSION",
+            constant: "CODEMODE_SNAPSHOT_VERSION",
             probe: FormatProbe::Comparable,
         },
         #[cfg(feature = "rlm")]
@@ -501,7 +501,7 @@ pub fn durable_format(format: DurableFormat) -> Option<DurableFormatEntry> {
 
 /// The durable formats actor state holds beyond the runtime core's own
 /// (ADR 0106 §1): with `codemode`, the parked kernel run a process body
-/// resumes from; with `rlm`, also the snapshot envelope a REPL cell uses.
+/// resumes from; with `rlm`, also the code mode snapshot envelope a REPL cell uses.
 /// [`DurableBackendBuilder`] adds them to every actor kind's format set,
 /// beside the turn checkpoint, run records,
 /// wait rows, outcome materials and engine states the core declares.
@@ -563,7 +563,7 @@ pub fn kernel_actor_state_surfaces(
         FormatSurface::new("kernel-parked-state", kernel),
         FormatSurface::new("kernel-saved-function", KERNEL_SAVED_FUNCTION_VERSION),
         #[cfg(feature = "rlm")]
-        FormatSurface::new("rlm-snapshot", RLM_SNAPSHOT_VERSION),
+        FormatSurface::new("codemode-snapshot", CODEMODE_SNAPSHOT_VERSION),
     ];
     if helpers > 1 {
         surfaces.push(FormatSurface::new(KERNEL_HELPERS_SURFACE, helpers));

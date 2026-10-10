@@ -802,7 +802,7 @@ async fn rendered_live_and_after_recovery(
 
 /// ADR 0129 (FIG-5430): a host renders committed history from lash's typed
 /// transcript alone, live from the observation feed and after recovery: a
-/// Standard turn's tool call, its result and its sealed reply, and an RLM
+/// Standard turn's tool call, its result and its sealed reply, and a code mode
 /// turn's cells, one of whose calls were partly omitted from its record,
 /// with the cell that finished the turn and its sealed reply.
 async fn a_host_renders_standard_and_rlm_history_from_typed_entries_live_and_after_recovery(

@@ -5,7 +5,7 @@ use lash_core::{
 };
 use lash_rlm_types::{RlmAttachmentRef, RlmHistoryItem, RlmHistoryRole, RlmProtocolEvent};
 
-use super::bindings::RlmProjectedBindings;
+use super::bindings::CodeModeProjectedBindings;
 
 /// The name of the binding a cell reads the session's history through.
 /// Reserved: no host binding may take it.
@@ -273,7 +273,7 @@ fn mentions(source: &str, name: &str) -> bool {
 /// value is the same on every drive of the cell.
 pub(crate) async fn cell_host_bindings(
     ctx: &RuntimeExecutionContext<'_>,
-    session_bindings: RlmProjectedBindings,
+    session_bindings: CodeModeProjectedBindings,
     source: &str,
 ) -> Result<BTreeMap<String, serde_json::Value>, HostBindingsError> {
     let recorded = match ctx

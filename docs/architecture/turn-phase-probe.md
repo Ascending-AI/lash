@@ -43,8 +43,8 @@ current naming forms:
 
 - Runtime operations use dotted owner and operation names, with snake-case
   components, such as `turn_cancel.start_gate`,
-  `commit_admission.product_attempt`, `rlm_process.await_handle` and
-  `rlm_lash_vm.cell_tool_bindings`. `RuntimeNamedPhase::begin` accepts a
+  `commit_admission.product_attempt`, `codemode_process.await_handle` and
+  `codemode_lash_vm.cell_tool_bindings`. `RuntimeNamedPhase::begin` accepts a
   static string; dropping its guard emits the corresponding end, including
   when an async future is cancelled or unwinds.
 - Plugin dispatch uses `plugin_hook.{hook_kind}.{plugin_id}`. The current

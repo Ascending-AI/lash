@@ -44,7 +44,7 @@ impl CallCounts {
 }
 
 impl Generator<'_> {
-    /// Every primary turn finishes through an RLM cell, including turns without tools or processes.
+    /// Every primary turn finishes through a code mode cell, including turns without tools or processes.
     ///
     /// The response is padded to the sampled output size. A cell whose planned
     /// work does not fit the sampled bucket is served whole and unpadded: the

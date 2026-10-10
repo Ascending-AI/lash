@@ -336,7 +336,7 @@ pub fn assemble(stores: Arc<dyn lash_core_execution::StoreSet>) -> Result<Backen
         settings: settings(),
         engines: vec![Arc::new(SimProcessEngine)],
         providers: Arc::new(NoProjectionProviders),
-        // Its cells run on the RLM worker path: actors hold the VM's state.
+        // Its cells run on the code mode worker path: actors hold the VM's state.
         formats: lash::formats::actor_state_surfaces(),
     })
     .map_err(|error| error.to_string())

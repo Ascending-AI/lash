@@ -5,7 +5,7 @@
 //! alive by referrer edges, and never decodes them: the kernel process engine
 //! owns the encoding and wraps this port in its typed `KernelDocuments`. The
 //! port sits here, below the engine, so [`StoreSet`](crate::StoreSet) can
-//! supply it like every other persistence port, and the documents an RLM
+//! supply it like every other persistence port, and the documents a code mode
 //! session writes live in the storage that reopens the session.
 
 use serde::{Deserialize, Serialize};

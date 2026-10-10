@@ -163,7 +163,7 @@ impl Deployment {
             settings: self.settings,
             engines: vec![Arc::new(BenchEngine::new(Arc::clone(&self.board)))],
             providers: Arc::new(NoProjectionProviders),
-            // Its cells run on the RLM worker path: actors hold the VM's state.
+            // Its cells run on the code mode worker path: actors hold the VM's state.
             formats: lash::formats::actor_state_surfaces(),
         })
         .map_err(|error| anyhow::anyhow!("assemble the backend: {error}"))?;

@@ -4,7 +4,7 @@
 
 Accepted. The parent client owns the bounded pool and transport in
 `lash-vm-client`. `lash-vm-worker` hosts the kernel machine and lowers and
-prints dialect source. RLM cells, durable process bodies and process creation
+prints dialect source. Code mode cells, durable process bodies and process creation
 use the worker service.
 
 ## Context
@@ -82,7 +82,7 @@ against the admitted execution context: a worker's identity, the bytes it
 returns or a claimed site confer nothing. This is lash's internal authority
 model, not host policy.
 
-- An RLM cell's envelope (`crates/lash-protocol-rlm/src/executor/envelope.rs`)
+- A code mode cell's envelope (`crates/lash-protocol-rlm/src/executor/envelope.rs`)
   is the host's half of its parked run: the document the cell was lowered to,
   the effects it was lowered against with the tool each is, the grants its
   deferred resolutions recorded, its prints and its admitted calls. It is
@@ -149,7 +149,7 @@ transport or pool:
   retried. `RunRefused` carries a `RunRefusal`: an input of the run the
   worker reads when it starts (its state, document or bounds, or a payload
   over its bound) is refused the same way on every attempt, so it is
-  terminal: the RLM cell records a Host failure and the process ends
+  terminal: the code mode cell records a Host failure and the process ends
   `process_run_refused` with the refusal as its failure data. A worker's
   `Refused` frame carries one of the two and nothing else; it cannot name a
   crash, silence or limit. The diagnostic beside a cause is a `Detail` cut to
@@ -247,7 +247,7 @@ processes, two queued inputs and eight MiB queued bytes, over
 per park and 1,024 `join` members. Checkout and IPC silence are five
 seconds, compute thirty seconds, serialization five seconds, cancellation
 grace 100 ms, cumulative CPU ten seconds, and attempts three. The restart
-window admits eight failed replacements per minute. `PoolConfig::rlm()`
+window admits eight failed replacements per minute. `PoolConfig::codemode()`
 raises parked state to 64 MiB, frames and queued bytes to 128 MiB and decode
 allocation to 256 MiB; these allowances have no workload measurement behind
 them.
@@ -281,7 +281,7 @@ A verdict of the host's worker budget, pool capacity or recovery store (a
 deadline, the cumulative CPU or attempt bound, a full queue, a checkout
 timeout or a restart storm) is never an execution's recorded outcome, since
 another node with capacity would not reach it. A process body fails its
-attempt retryably. An RLM cell fails its attempt retryably too: it commits
+attempt retryably. A code mode cell fails its attempt retryably too: it commits
 nothing, the model never sees the verdict, and the retry runs the cell again
 from the last committed park. Only a limit the run itself exhausted (charge,
 memory, call depth, what it prints, or its encoded effect values, parked
@@ -310,7 +310,7 @@ guest values. A reset drops all guest-derived state by construction.
 Field-by-field cleanup could miss a newly added state owner; keeping grants
 in returned guest state would let that state replace parent-owned bindings.
 
-RLM cells, durable process bodies, process creation and dialect lowering and
+Code mode cells, durable process bodies, process creation and dialect lowering and
 printing run through the shared worker service. Parent adapters retain
 opaque parked state and the document identities it names.
 

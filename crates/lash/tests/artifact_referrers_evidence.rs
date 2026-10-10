@@ -910,7 +910,7 @@ fn create_definition_cell(binding: &str) -> String {
     format!("const {binding} = {CREATED_SOURCE}; await control.finish('created');")
 }
 
-/// FIG-3116: the definition of a process a cell wrote is an RLM value like
+/// FIG-3116: the definition of a process a cell wrote is a code mode value like
 /// any other (ADR 0113 §6). The call's realization publishes its module under
 /// the realizing execution, the cell's global holds it in the frame, and a
 /// later turn in the same frame starts it by value after a cold reopen.
@@ -1286,5 +1286,5 @@ fn python_process_workers() -> lash::vm::WorkerService {
         "--".into(),
         "python_saved_function_worker_entry".into(),
     ];
-    lash::vm::WorkerService::new(lash::vm::WorkerPoolConfig::rlm(entry))
+    lash::vm::WorkerService::new(lash::vm::WorkerPoolConfig::codemode(entry))
 }

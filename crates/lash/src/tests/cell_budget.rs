@@ -23,7 +23,7 @@ await control.finish({ lines: report.split("\n").length, rows: rows.length });"#
 
 /// The costliest of the cells `InstructionBound::standard()` was measured
 /// over, at 9,097,832 units: it builds 3,000 rows, prints them and finishes
-/// with them (`output_retention`'s RLM cell).
+/// with them (`output_retention`'s code mode cell).
 const COSTLIEST: &str = r#"
 const rows = [];
 for (let i = 0; i < 3000; i++) {

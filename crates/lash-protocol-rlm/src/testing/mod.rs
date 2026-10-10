@@ -66,7 +66,7 @@ pub(crate) fn cell_services(
 /// Run one cell through the production executor entry and settle it as
 /// its turn would: accepted.
 pub(crate) async fn run_cell(
-    state: &mut crate::executor::RlmExecutionState,
+    state: &mut crate::executor::CodeModeExecutionState,
     ctx: lash_core::RuntimeExecutionContext<'_>,
     services: &crate::executor::CellServices,
     code: &str,
@@ -78,7 +78,7 @@ pub(crate) async fn run_cell(
             code: code.to_string(),
         },
         services,
-        crate::projection::RlmProjectedBindings::default(),
+        crate::projection::CodeModeProjectedBindings::default(),
     ))
     .await;
     if !response.suspended {
@@ -233,5 +233,5 @@ pub(crate) fn python_workers() -> lash_vm_client::service::Service {
         "--".to_owned(),
         PYTHON_WORKER_ENTRY.to_owned(),
     ];
-    lash_vm_client::service::Service::new(lash_vm_client::PoolConfig::rlm(entry))
+    lash_vm_client::service::Service::new(lash_vm_client::PoolConfig::codemode(entry))
 }

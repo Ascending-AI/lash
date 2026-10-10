@@ -1,7 +1,7 @@
-# 0138: An RLM session's cells are kernel programs
+# 0138: Code mode cells are kernel programs
 
 Status: Accepted. Amends ADR 0096 (the dialect selection contract and the
-shared IR), ADR 0061 (session pinning) and ADR 0056 (the RLM snapshot
+shared IR), ADR 0061 (session pinning) and ADR 0056 (the code mode snapshot
 root). Design: the kernel workflow spec, rev 4.
 
 ## Decision

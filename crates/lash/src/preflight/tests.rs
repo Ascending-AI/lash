@@ -27,7 +27,8 @@ use lash_core::{
 
 use super::*;
 use crate::formats::{
-    CHECKPOINT_COMPONENT_ENCODING_VERSION, RLM_SNAPSHOT_VERSION, SESSION_CHECKPOINT_SCHEMA_VERSION,
+    CHECKPOINT_COMPONENT_ENCODING_VERSION, CODEMODE_SNAPSHOT_VERSION,
+    SESSION_CHECKPOINT_SCHEMA_VERSION,
 };
 
 /// A handle whose surfaces are exactly what a test declares.
@@ -261,7 +262,7 @@ fn healthy_store() -> FakeStore {
         )
         .with_items(
             DurableSurface::SessionExecutionState,
-            vec![execution_state_item("s-1", RLM_SNAPSHOT_VERSION)],
+            vec![execution_state_item("s-1", CODEMODE_SNAPSHOT_VERSION)],
         )
 }
 
@@ -274,7 +275,7 @@ async fn a_store_this_build_wrote_is_ready_with_an_empty_drain_list() {
     assert!(report.drain.is_empty(), "{:?}", report.drain);
     assert_eq!(report.refusal_message(), None);
     assert_eq!(
-        component(&report, DurableFormat::RlmSnapshotEnvelope).verdict,
+        component(&report, DurableFormat::CodeModeSnapshotEnvelope).verdict,
         ComponentVerdict::AllReadable
     );
     assert_eq!(
@@ -296,8 +297,8 @@ async fn a_state_from_another_build_refuses_and_lands_on_the_drain_list() {
         .with_items(
             DurableSurface::SessionExecutionState,
             vec![
-                execution_state_item("s-1", RLM_SNAPSHOT_VERSION - 1),
-                execution_state_item("s-2", RLM_SNAPSHOT_VERSION),
+                execution_state_item("s-1", CODEMODE_SNAPSHOT_VERSION - 1),
+                execution_state_item("s-2", CODEMODE_SNAPSHOT_VERSION),
             ],
         );
     let report = probe_store(&store, PreflightOptions::deep())
@@ -305,18 +306,18 @@ async fn a_state_from_another_build_refuses_and_lands_on_the_drain_list() {
         .expect("the probe reads the store");
 
     assert_eq!(report.outcome, PreflightOutcome::Refused);
-    let envelope = component(&report, DurableFormat::RlmSnapshotEnvelope);
+    let envelope = component(&report, DurableFormat::CodeModeSnapshotEnvelope);
     assert_eq!(envelope.verdict, ComponentVerdict::Refused);
     assert_eq!(envelope.scanned, 2);
     assert_eq!(
         envelope.found,
         vec![
             FoundVersion {
-                version: RLM_SNAPSHOT_VERSION - 1,
+                version: CODEMODE_SNAPSHOT_VERSION - 1,
                 count: 1
             },
             FoundVersion {
-                version: RLM_SNAPSHOT_VERSION,
+                version: CODEMODE_SNAPSHOT_VERSION,
                 count: 1
             },
         ],
@@ -326,7 +327,7 @@ async fn a_state_from_another_build_refuses_and_lands_on_the_drain_list() {
     assert_eq!(report.drain.len(), 1, "{:?}", report.drain);
     let blocker = &report.drain[0];
     assert_eq!(blocker.session_id.as_deref(), Some("s-1"));
-    assert_eq!(blocker.found, Some(RLM_SNAPSHOT_VERSION - 1));
+    assert_eq!(blocker.found, Some(CODEMODE_SNAPSHOT_VERSION - 1));
 
     let message = report.refusal_message().expect("a refusal has a message");
     assert!(message.contains("Drain 1 affected item(s)"), "{message}");
@@ -401,7 +402,7 @@ async fn an_unreadable_database_is_undecided_rather_than_ready() {
 
 #[tokio::test]
 async fn a_payload_nobody_can_decode_is_undecided_and_never_panics() {
-    let mut item = execution_state_item("s-1", RLM_SNAPSHOT_VERSION);
+    let mut item = execution_state_item("s-1", CODEMODE_SNAPSHOT_VERSION);
     item.payload = DurablePayload::MessagePack(vec![0xc1, 0xc1]);
     let store = FakeStore::default().with_items(DurableSurface::SessionExecutionState, vec![item]);
     let report = probe_store(
@@ -410,7 +411,7 @@ async fn a_payload_nobody_can_decode_is_undecided_and_never_panics() {
     )
     .await
     .expect("the probe reads the store");
-    let envelope = component(&report, DurableFormat::RlmSnapshotEnvelope);
+    let envelope = component(&report, DurableFormat::CodeModeSnapshotEnvelope);
     assert_eq!(envelope.verdict, ComponentVerdict::Undecodable);
     assert_eq!(envelope.undecodable, 1);
     assert_eq!(envelope.undecodable_reasons.len(), 0);
@@ -456,7 +457,7 @@ async fn a_deep_probe_reads_the_surfaces_summary_skipped() {
         "{skipped:?}"
     );
     assert_eq!(
-        component(&report, DurableFormat::RlmSnapshotEnvelope).verdict,
+        component(&report, DurableFormat::CodeModeSnapshotEnvelope).verdict,
         ComponentVerdict::AllReadable
     );
     assert_eq!(
@@ -517,14 +518,14 @@ async fn paging_reads_every_item_exactly_once() {
     // A walk that dropped or double-counted items would report drain lists an
     // operator cannot reconcile with the store.
     let items: Vec<DurableItem> = (0..7)
-        .map(|index| execution_state_item(&format!("s-{index}"), RLM_SNAPSHOT_VERSION - 1))
+        .map(|index| execution_state_item(&format!("s-{index}"), CODEMODE_SNAPSHOT_VERSION - 1))
         .collect();
     let store = FakeStore::default().with_items(DurableSurface::SessionExecutionState, items);
     let report = probe_store(&store, PreflightOptions::deep().with_page_size(2))
         .await
         .expect("the probe reads the store");
     assert_eq!(
-        component(&report, DurableFormat::RlmSnapshotEnvelope).scanned,
+        component(&report, DurableFormat::CodeModeSnapshotEnvelope).scanned,
         7
     );
     assert_eq!(report.drain.len(), 7);
@@ -553,14 +554,14 @@ async fn a_page_that_contributes_nothing_does_not_abandon_the_surface() {
             ("session-2", None),
             (
                 "session-3",
-                Some(execution_state_item("session-3", RLM_SNAPSHOT_VERSION)),
+                Some(execution_state_item("session-3", CODEMODE_SNAPSHOT_VERSION)),
             ),
         ],
     );
     let report = probe_store(&store, PreflightOptions::deep().with_page_size(2))
         .await
         .expect("the probe reads the store");
-    let envelope = component(&report, DurableFormat::RlmSnapshotEnvelope);
+    let envelope = component(&report, DurableFormat::CodeModeSnapshotEnvelope);
     assert_eq!(
         envelope.scanned, 1,
         "the item behind the empty page is read"
@@ -607,7 +608,7 @@ async fn the_serialized_report_carries_every_field_a_gate_asserts_on() {
         .with_database("durable core", 37, StoreSchemaVerdict::Matches)
         .with_items(
             DurableSurface::SessionExecutionState,
-            vec![execution_state_item("s-1", RLM_SNAPSHOT_VERSION - 1)],
+            vec![execution_state_item("s-1", CODEMODE_SNAPSHOT_VERSION - 1)],
         );
     let report = probe_store(&store, PreflightOptions::deep())
         .await
@@ -619,7 +620,7 @@ async fn the_serialized_report_carries_every_field_a_gate_asserts_on() {
     assert_eq!(json["backend"], "sqlite (/srv/lash/durable-core.db)");
     assert_eq!(json["schema"]["outcome"], "ready");
     assert_eq!(json["drain"][0]["session_id"], "s-1");
-    assert_eq!(json["drain"][0]["found"], RLM_SNAPSHOT_VERSION - 1);
+    assert_eq!(json["drain"][0]["found"], CODEMODE_SNAPSHOT_VERSION - 1);
     assert!(
         json["not_scanned"]
             .as_array()
@@ -629,7 +630,7 @@ async fn the_serialized_report_carries_every_field_a_gate_asserts_on() {
         .as_array()
         .expect("components is a list")
         .iter()
-        .find(|row| row["format"] == DurableFormat::RlmSnapshotEnvelope.name())
+        .find(|row| row["format"] == DurableFormat::CodeModeSnapshotEnvelope.name())
         .expect("the envelope row is present");
     assert_eq!(envelope["verdict"], "refused");
     assert_eq!(envelope["probe"], "comparable");

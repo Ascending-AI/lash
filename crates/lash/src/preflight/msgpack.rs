@@ -2,7 +2,7 @@
 //! deliberately not enough to decode anything.
 //!
 //! Two of the durable formats a preflight has to report — the session
-//! checkpoint manifest and the RLM snapshot envelope — are stored as
+//! checkpoint manifest and the code mode snapshot envelope — are stored as
 //! MessagePack. A probe cannot decode them into their real types: those types
 //! belong to builds that fail closed, so a typed decode of state written by
 //! another build is exactly the refusal the probe exists to predict, and a

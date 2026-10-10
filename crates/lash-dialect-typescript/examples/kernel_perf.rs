@@ -326,7 +326,7 @@ const acc: number[] = [];
 for (let n = 0; n < 300; n++) { for (const x of other) { acc.push(x); } }
 await finish({ total: acc.length, head: acc[0] });
 "#.to_string()),
-        // The costliest model-written cell the RLM standard instruction
+        // The costliest model-written cell the code mode standard instruction
         // budget was measured over (`InstructionBound::standard`).
         ("rows_print_3000", r#"
 const rows = [];

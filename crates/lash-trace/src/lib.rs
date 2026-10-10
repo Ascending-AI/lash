@@ -142,7 +142,7 @@ pub use workflow_overlay::{
 /// carrying its policy, program, or host kind.
 /// Version 16 removes the two unemitted lifecycle and standalone usage events;
 /// turn starts and completed LLM calls retain lifecycle and per-call usage evidence.
-/// Version 17 adds compile/link outcomes for every RLM program step.
+/// Version 17 adds compile/link outcomes for every code mode program step.
 /// Version 18 carries attachment sources through request blocks.
 /// Version 19 adds the attempt usage disposition to retry attempts so an
 /// aborted or failed call whose usage never arrived is distinguishable from

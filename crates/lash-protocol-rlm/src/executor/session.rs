@@ -43,11 +43,12 @@ use lash_kernel_state::{Baseline, ParkedRun, Root, Run, SavedFragment};
 use lash_kernel_vm::Bindings;
 use serde::{Deserialize, Serialize};
 
-use super::snapshot::{RLM_SNAPSHOT_VERSION, RlmSnapshotError};
+use super::snapshot::{CODEMODE_SNAPSHOT_VERSION, CodeModeSnapshotError};
 
 /// version_surface = "coexist"
-/// version_guard(items(LASH_RLM_EXECUTION_STATE_LEAF_DOMAIN_VERSION, leaf_component_key))
-const LASH_RLM_EXECUTION_STATE_LEAF_DOMAIN_VERSION: &str = "lash-rlm-execution-state-leaf/v2";
+/// version_guard(items(LASH_CODEMODE_EXECUTION_STATE_LEAF_DOMAIN_VERSION, leaf_component_key))
+const LASH_CODEMODE_EXECUTION_STATE_LEAF_DOMAIN_VERSION: &str =
+    "lash-codemode-execution-state-leaf/v2";
 
 /// The reserved binding the history projection answers; no cell binds it.
 pub(crate) const HISTORY_BINDING: &str = "history";
@@ -658,7 +659,7 @@ fn rename_object(object: &Object, rename: &dyn Fn(&ObjectId) -> ObjectId) -> Obj
 /// The stored root of a session's execution state.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct RlmSnapshotRoot {
+pub(super) struct CodeModeSnapshotRoot {
     version: u32,
     /// The dialect the session's cells are written in.
     dialect: String,
@@ -691,7 +692,7 @@ fn leaf_component_key(body: &[u8]) -> ExecutionLeafName {
     ExecutionLeafName::new(format!(
         "blake3/{}",
         lash_sansio::core_support::blake3_domain_hash_hex(
-            LASH_RLM_EXECUTION_STATE_LEAF_DOMAIN_VERSION,
+            LASH_CODEMODE_EXECUTION_STATE_LEAF_DOMAIN_VERSION,
             body,
         )
     ))
@@ -726,7 +727,7 @@ struct PreparedCapture {
 
 /// The session as it stood before the active cell, with the capture
 /// bookkeeping that cell may move.
-struct RlmExecutionCheckpoint {
+struct CodeModeExecutionCheckpoint {
     bindings: SessionBindings,
     persisted_leaf_keys: BTreeSet<ExecutionLeafName>,
     capture_dirty: bool,
@@ -734,9 +735,9 @@ struct RlmExecutionCheckpoint {
     pending_snapshot: Option<ExecutionStateCapture>,
 }
 
-/// One RLM session's execution state: its bindings, the dialect its cells
+/// One code mode session's execution state: its bindings, the dialect its cells
 /// are written in, and the bookkeeping its durable captures are built from.
-pub struct RlmExecutionState {
+pub struct CodeModeExecutionState {
     dialect: Arc<str>,
     numbers: NumberPolicy,
     bindings: SessionBindings,
@@ -748,7 +749,7 @@ pub struct RlmExecutionState {
     /// settlement: what an aborted commit goes back to.
     capture_rollback: Option<BTreeSet<ExecutionLeafName>>,
     pending_snapshot: Option<ExecutionStateCapture>,
-    active_execution_checkpoint: Option<RlmExecutionCheckpoint>,
+    active_execution_checkpoint: Option<CodeModeExecutionCheckpoint>,
     execution_response_returned: bool,
     /// What a saved function stored in an earlier kernel version is
     /// carried forward with.
@@ -757,7 +758,7 @@ pub struct RlmExecutionState {
     written_leaves_in_last_snapshot: usize,
 }
 
-impl RlmExecutionState {
+impl CodeModeExecutionState {
     /// The state of a session that has run no cell, whose cells are written
     /// in `dialect` and decode a host's bare numbers by `numbers`.
     pub(crate) fn new(dialect: impl Into<Arc<str>>, numbers: NumberPolicy) -> Self {
@@ -797,9 +798,9 @@ impl RlmExecutionState {
     /// be decoded or loaded just to check namespace collisions (FIG-5824).
     pub(crate) fn persisted_binding_names(
         state: &HydratedExecutionState,
-    ) -> Result<BTreeSet<String>, RlmSnapshotError> {
-        let root: RlmSnapshotRoot = serde_json::from_slice(&state.root).map_err(|error| {
-            RlmSnapshotError::FormatMismatch {
+    ) -> Result<BTreeSet<String>, CodeModeSnapshotError> {
+        let root: CodeModeSnapshotRoot = serde_json::from_slice(&state.root).map_err(|error| {
+            CodeModeSnapshotError::FormatMismatch {
                 details: error.to_string(),
             }
         })?;
@@ -885,7 +886,7 @@ impl RlmExecutionState {
             !self.execution_response_returned,
             "a returned code execution must be settled before another cell starts"
         );
-        self.active_execution_checkpoint = Some(RlmExecutionCheckpoint {
+        self.active_execution_checkpoint = Some(CodeModeExecutionCheckpoint {
             bindings: self.bindings.clone(),
             persisted_leaf_keys: self.persisted_leaf_keys.clone(),
             capture_dirty: self.capture_dirty,
@@ -984,7 +985,7 @@ impl RlmExecutionState {
         let prepared = self.build_capture(CaptureMode::Complete, fleet_format)?;
         let ExecutionStateCapture::Replace { root, leaves } = prepared.snapshot else {
             return Err(SessionError::Protocol(
-                "RLM root was not encoded".to_string(),
+                "code mode root was not encoded".to_string(),
             ));
         };
         let mut components = BTreeMap::new();
@@ -995,7 +996,7 @@ impl RlmExecutionState {
                 }
                 LeafChange::Unchanged => {
                     return Err(SessionError::Protocol(format!(
-                        "complete RLM execution state referenced leaf `{key:?}` without its body"
+                        "complete code mode execution state referenced leaf `{key:?}` without its body"
                     )));
                 }
             }
@@ -1009,7 +1010,9 @@ impl RlmExecutionState {
         fleet_format: lash_core::FleetFormat,
     ) -> Result<PreparedCapture, SessionError> {
         let encode = |error: &dyn std::fmt::Display| {
-            SessionError::Protocol(format!("failed to encode RLM session bindings: {error}"))
+            SessionError::Protocol(format!(
+                "failed to encode code mode session bindings: {error}"
+            ))
         };
         // Every fragment is written, and compared with what the store holds
         // by its content address: a binding's bytes are a function of the
@@ -1070,8 +1073,9 @@ impl RlmExecutionState {
             };
             bindings.insert(name.to_string(), persisted);
         }
-        let root = RlmSnapshotRoot {
-            version: fleet_format.writer_version(lash_core::surface_format!(RLM_SNAPSHOT_VERSION)),
+        let root = CodeModeSnapshotRoot {
+            version: fleet_format
+                .writer_version(lash_core::surface_format!(CODEMODE_SNAPSHOT_VERSION)),
             dialect: self.dialect.to_string(),
             header: String::from_utf8(saved.header).map_err(|error| encode(&error))?,
             bindings,
@@ -1135,19 +1139,20 @@ impl RlmExecutionState {
         &mut self,
         state: &HydratedExecutionState,
         fleet_format: lash_core::FleetFormat,
-    ) -> Result<(), RlmSnapshotError> {
-        let format = |details: String| RlmSnapshotError::FormatMismatch { details };
-        let window = fleet_format.read_window(lash_core::surface_format!(RLM_SNAPSHOT_VERSION));
-        let parsed: RlmSnapshotRoot =
+    ) -> Result<(), CodeModeSnapshotError> {
+        let format = |details: String| CodeModeSnapshotError::FormatMismatch { details };
+        let window =
+            fleet_format.read_window(lash_core::surface_format!(CODEMODE_SNAPSHOT_VERSION));
+        let parsed: CodeModeSnapshotRoot =
             serde_json::from_slice(&state.root).map_err(|error| format(error.to_string()))?;
         if !window.admits(parsed.version) {
-            return Err(RlmSnapshotError::VersionMismatch {
+            return Err(CodeModeSnapshotError::VersionMismatch {
                 expected: window.newest(),
                 found: parsed.version,
             });
         }
         if parsed.dialect != self.dialect.as_ref() {
-            return Err(RlmSnapshotError::DialectMismatch {
+            return Err(CodeModeSnapshotError::DialectMismatch {
                 expected: self.dialect.to_string(),
                 found: parsed.dialect,
             });
@@ -1155,7 +1160,7 @@ impl RlmExecutionState {
         let expected_leaf_keys = root_leaf_keys(&parsed.bindings);
         let supplied_leaf_keys = state.components.keys().cloned().collect::<BTreeSet<_>>();
         if expected_leaf_keys != supplied_leaf_keys {
-            return Err(RlmSnapshotError::LeafSetMismatch {
+            return Err(CodeModeSnapshotError::LeafSetMismatch {
                 missing: expected_leaf_keys
                     .difference(&supplied_leaf_keys)
                     .cloned()
@@ -1172,14 +1177,14 @@ impl RlmExecutionState {
                 PersistedValue::Inline { body } => body.as_bytes(),
                 PersistedValue::Leaf { component } => {
                     let body = state.components.get(component).ok_or_else(|| {
-                        RlmSnapshotError::MissingLeaf {
+                        CodeModeSnapshotError::MissingLeaf {
                             logical_key: name.clone(),
                             component: component.clone(),
                         }
                     })?;
                     let actual_component = leaf_component_key(body);
                     if &actual_component != component {
-                        return Err(RlmSnapshotError::LeafHashMismatch {
+                        return Err(CodeModeSnapshotError::LeafHashMismatch {
                             logical_key: name.clone(),
                             component: component.clone(),
                             actual_component,
@@ -1194,7 +1199,7 @@ impl RlmExecutionState {
             parsed.header.as_bytes(),
             fragments.iter().map(|(root, body)| (root, *body)),
         )
-        .map_err(RlmSnapshotError::Kernel)?;
+        .map_err(CodeModeSnapshotError::Kernel)?;
         if !parked.tasks.is_empty() {
             return Err(format(
                 "a session's stored state holds a task; only bindings are a session's".to_string(),
@@ -1346,12 +1351,12 @@ impl RlmExecutionState {
 ///
 /// # Errors
 ///
-/// [`RlmSnapshotError::FormatMismatch`] when `root` is not one.
+/// [`CodeModeSnapshotError::FormatMismatch`] when `root` is not one.
 pub fn saved_function_pins(
     root: &[u8],
-) -> Result<BTreeMap<String, BTreeSet<lash_kernel_doc::FunctionId>>, RlmSnapshotError> {
-    let parsed: RlmSnapshotRoot =
-        serde_json::from_slice(root).map_err(|error| RlmSnapshotError::FormatMismatch {
+) -> Result<BTreeMap<String, BTreeSet<lash_kernel_doc::FunctionId>>, CodeModeSnapshotError> {
+    let parsed: CodeModeSnapshotRoot =
+        serde_json::from_slice(root).map_err(|error| CodeModeSnapshotError::FormatMismatch {
             details: error.to_string(),
         })?;
     Ok(parsed

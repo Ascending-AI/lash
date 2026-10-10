@@ -104,7 +104,7 @@ pub const BATCH_MEMBER_CEILING: usize = 64;
 /// the step's one tool group beside the response's native calls, so every
 /// member starts before any finishes, and folds the members' results into one
 /// batch result. It is not a Tool Catalog entry, so tool membership does not
-/// apply to it and RLM cells and processes cannot call it.
+/// apply to it and Code mode cells and processes cannot call it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BatchSugar {

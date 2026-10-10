@@ -2,9 +2,9 @@
 
 use super::*;
 
-fn state() -> RlmExecutionState {
+fn state() -> CodeModeExecutionState {
     let dialect = CellDialect::python();
-    RlmExecutionState::new(dialect.name(), dialect.numbers())
+    CodeModeExecutionState::new(dialect.name(), dialect.numbers())
 }
 
 fn python_services() -> super::super::CellServices {
@@ -206,7 +206,7 @@ async fn committed_cells_report_binding_changes() {
         &mut state, ctx, lash_core::ExecRequest {
             code: "import asyncio\nrows = [len(kept)]\ncount = 2\njob = asyncio.create_task(echo_say({'text': 'second'}))\nawait job".into(),
         }, &services,
-        crate::projection::RlmProjectedBindings::new()
+        crate::projection::CodeModeProjectedBindings::new()
             .bind_json("scratch", serde_json::json!(99)).expect("projected scratch"),
     )).await;
     assert!(second.error().is_none(), "{:?}", second.error());
@@ -339,7 +339,7 @@ async fn a_function_a_cell_defines_is_called_two_cells_later() {
 }
 
 async fn saved_cell(
-    state: &mut RlmExecutionState,
+    state: &mut CodeModeExecutionState,
     host: &crate::testing::DurableHost,
     key: &'static str,
     tools: Arc<dyn lash_core::ToolProvider>,

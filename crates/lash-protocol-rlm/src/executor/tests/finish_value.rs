@@ -50,7 +50,7 @@ async fn submit_cell(dialect: &CellDialect, code: &str) -> lash_core::ExecRespon
         cell_services(dialect, lash_vm_client::service::Service::default(), None)
     };
     run_cell(
-        &mut RlmExecutionState::new(dialect.name(), dialect.numbers()),
+        &mut CodeModeExecutionState::new(dialect.name(), dialect.numbers()),
         cell_context(&host, SESSION, TURN, "exec-code:0", Arc::new(SubmitTool)),
         &services,
         code,

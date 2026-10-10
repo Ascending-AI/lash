@@ -315,7 +315,7 @@ pub(crate) async fn run_once_durable_checkpoint_curve(
                     let execution_state = loaded_state
                         .execution_state_hydration()?
                         .ok_or_else(|| anyhow::anyhow!("{prefix} load omitted execution state"))?;
-                    lash_protocol_rlm::RlmCheckpointPerfFixture::restore(
+                    lash_protocol_rlm::CodeModeCheckpointPerfFixture::restore(
                         &lash_protocol_rlm::CellDialect::typescript(),
                         &execution_state,
                     )

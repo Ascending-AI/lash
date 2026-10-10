@@ -108,7 +108,7 @@ wrong. Read the value from the constant:
 | Trace schema | `TRACE_SCHEMA_VERSION` | `crates/lash-trace/src/lib.rs` |
 | PostgreSQL component | `SCHEMA_VERSION` | `crates/lash-postgres-store/src/lib.rs` |
 | SQLite durable core | `SCHEMA_VERSION` | `crates/lash-sqlite-store/src/schema.rs` |
-| RLM snapshot | `RLM_SNAPSHOT_VERSION` | `crates/lash-protocol-rlm/src/executor/snapshot.rs` |
+| code mode snapshot | `CODEMODE_SNAPSHOT_VERSION` | `crates/lash-protocol-rlm/src/executor/snapshot.rs` |
 | Process wake-delivery format | `PROCESS_WAKE_DELIVERY_FORMAT_VERSION` | `crates/lash-core-store/src/process_identity.rs` |
 | Append-request identity encoding | `APPEND_REQUEST_IDENTITY_ENCODING_VERSION` | `crates/lash-core-store/src/store/commit_identity.rs` |
 | Session-node body | `SESSION_NODE_BODY_SCHEMA_VERSION` | `crates/lash-core-store/src/session_graph.rs` |

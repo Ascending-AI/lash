@@ -145,7 +145,7 @@ impl MemoryBound {
 
 nonzero_bound_serde!(MemoryBound);
 
-/// The two independent bounds every RLM execution must choose explicitly.
+/// The two independent bounds every code mode execution must choose explicitly.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ExecutionBounds {
     pub instruction_limit: InstructionBound,

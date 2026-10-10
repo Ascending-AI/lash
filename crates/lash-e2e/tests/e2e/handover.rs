@@ -79,7 +79,7 @@ case!(
     s12
 );
 
-/// An RLM cell awaits a deferred source after an inline gate, and a source
+/// A code mode cell awaits a deferred source after an inline gate, and a source
 /// process awaits its own pinned key. Their node N drains while both are
 /// unresolved and is retired by an orderly
 /// stop: it released the session `ready` and then its lease. N+1 claims
@@ -296,7 +296,7 @@ async fn s11_deferred(case: &mut Case) -> Result<()> {
     s11(case, Loser::Deferred).await
 }
 
-/// An RLM cell races a winner against a loser, then calls `after`. The
+/// A code mode cell races a winner against a loser, then calls `after`. The
 /// winner wins; `after` runs while the loser is still live, so the race's
 /// winner progresses without the loser being cancelled for losing. The
 /// work then moves while the loser is outstanding: live, its node drains;

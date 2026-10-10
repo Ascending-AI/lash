@@ -77,7 +77,7 @@ pub(super) async fn run_once_turn_checkpoint(
                     })?;
                 phase_profile.insert(tools_phase.0, tools_phase.1);
 
-                let exec_phase = measure_checkpoint_phase("rlm_exec_checkpoint", || {
+                let exec_phase = measure_checkpoint_phase("codemode_exec_checkpoint", || {
                     checkpoint_pending_exec(&configs, &seed_messages, turn_index)
                 })?;
                 phase_profile.insert(exec_phase.0, exec_phase.1);
@@ -114,7 +114,7 @@ const CHECKPOINT_STATE_BODY_BYTES: usize = 3 * 1024 + 512;
 /// A checkpoint fixture edited by a plugin task on the served session actor.
 /// Capture remains outside the task so the curve measures each structural step.
 pub(super) struct CheckpointBindingFixture {
-    fixture: Arc<tokio::sync::Mutex<lash_protocol_rlm::RlmCheckpointPerfFixture>>,
+    fixture: Arc<tokio::sync::Mutex<lash_protocol_rlm::CodeModeCheckpointPerfFixture>>,
     backend: lash::Backend,
     factory: Arc<dyn lash_core::plugin::PluginFactory>,
     session_id: SessionId,
@@ -164,7 +164,7 @@ impl CheckpointBindingFixture {
     ) -> anyhow::Result<Self> {
         let backend = durable_backend(Arc::new(sqlite_memory_stores().await?))?;
         let fixture = Arc::new(tokio::sync::Mutex::new(
-            lash_protocol_rlm::RlmCheckpointPerfFixture::new(
+            lash_protocol_rlm::CodeModeCheckpointPerfFixture::new(
                 &dialect,
                 lash_vm_client::service::Service::default(),
                 bindings,
@@ -434,7 +434,7 @@ pub(super) async fn run_once_checkpoint_state_hot_paths(
                 .sum::<usize>()) as u64;
 
         let (_, phase) = measure_runtime_perf_async_phase("checkpoint_state.execution_restore", async {
-            lash_protocol_rlm::RlmCheckpointPerfFixture::restore(&lash_protocol_rlm::CellDialect::typescript(), &loaded_execution_state).await
+            lash_protocol_rlm::CodeModeCheckpointPerfFixture::restore(&lash_protocol_rlm::CellDialect::typescript(), &loaded_execution_state).await
                 .map_err(anyhow::Error::from)
         }).await?;
         phase_profile.insert(phase.0, phase.1);

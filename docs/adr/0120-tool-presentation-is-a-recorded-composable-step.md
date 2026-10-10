@@ -87,7 +87,7 @@ text. `AttachmentStoreError::is_retryable()` is the retry authority:
 transient cause. A permanent refusal records `OutputRetentionRefused` and
 ends presentation. Byte limits and ended referrers never retry.
 
-RLM cell prints and final values follow the same policy in the recorded
+code mode cell prints and final values follow the same policy in the recorded
 `{cell}:outputs` value: history carries `OutputValue::Retained` for oversized
 JSON, while the host receives the full final value. Referrer acquisition and
 boundary commits follow [ADR 0124](0124-attachments-are-kept-alive-only-by-their-referrers.md).

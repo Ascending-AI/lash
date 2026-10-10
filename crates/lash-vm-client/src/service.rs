@@ -125,9 +125,9 @@ pub struct Service {
     pub(crate) budget: Option<ExecutionBudget>,
 }
 impl Service {
-    /// Select the helper executable explicitly, using the RLM/process bounds.
+    /// Select the helper executable explicitly, using the code mode/process bounds.
     pub fn subprocess(executable: impl Into<std::path::PathBuf>) -> Self {
-        Self::new(PoolConfig::rlm(WorkerEntry::helper(executable)))
+        Self::new(PoolConfig::codemode(WorkerEntry::helper(executable)))
     }
 
     pub fn new(config: PoolConfig) -> Self {

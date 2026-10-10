@@ -1641,7 +1641,7 @@ async fn transcript_totally_projects_a_really_committed_rlm_trajectory() {
     core.shutdown().await.expect("shutdown");
 }
 
-/// One record per tool call under every protocol (FIG-5521): an RLM cell
+/// One record per tool call under every protocol (FIG-5521): a code mode cell
 /// that calls two host tools reports two tool calls, each under its own
 /// `call_id`, and the cell's executed calls, read back from the durable
 /// transcript after a reopen, name those records by that `call_id`.

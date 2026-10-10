@@ -6,11 +6,11 @@ use lash_core::{SessionError, SessionHistoryRecord};
 use lash_rlm_types::{RlmGlobalsPatchPluginBody, RlmProtocolEvent};
 
 use crate::dialect::{DialectSession, SessionDialect};
-use crate::projection::{RlmProjectedBindings, decode_rlm_protocol_event};
+use crate::projection::{CodeModeProjectedBindings, decode_rlm_protocol_event};
 
 pub(crate) struct RlmRuntimeState {
     dialect: Arc<SessionDialect>,
-    session_projected_bindings: tokio::sync::Mutex<RlmProjectedBindings>,
+    session_projected_bindings: tokio::sync::Mutex<CodeModeProjectedBindings>,
     execution: tokio::sync::Mutex<DialectSession>,
 }
 
@@ -19,7 +19,7 @@ impl RlmRuntimeState {
         Ok(Self {
             execution: tokio::sync::Mutex::new(dialect.create_session()),
             dialect,
-            session_projected_bindings: tokio::sync::Mutex::new(RlmProjectedBindings::new()),
+            session_projected_bindings: tokio::sync::Mutex::new(CodeModeProjectedBindings::new()),
         })
     }
 
@@ -38,7 +38,7 @@ impl RlmRuntimeState {
     fn new_for_tests_with_resolver(
         deferred_tool_resolver: Option<crate::SharedDeferredToolResolver>,
     ) -> Result<Self, SessionError> {
-        let services = crate::dialect::RlmDialectServices {
+        let services = crate::dialect::CodeModeDialectServices {
             kernel: crate::executor::KernelCarry::default(),
             presentation: crate::RlmPresentationConfig::standard(),
             workers: lash_vm_client::service::Service::default(),
@@ -68,7 +68,7 @@ impl RlmRuntimeState {
             })?;
             let mut names = snapshot
                 .as_ref()
-                .map(crate::executor::RlmExecutionState::persisted_binding_names)
+                .map(crate::executor::CodeModeExecutionState::persisted_binding_names)
                 .transpose()
                 .map_err(|error| lash_core::PluginError::Session(error.to_string()))?
                 .unwrap_or_default();
@@ -206,11 +206,11 @@ impl RlmRuntimeState {
         let mut execution_guard = self.execution.lock().await;
         let execution = &mut *execution_guard;
         let snapshot = state.execution_state.map_err(|error| SessionError::Store {
-            context: "failed to hydrate RLM execution-state components".to_string(),
+            context: "failed to hydrate code mode execution-state components".to_string(),
             source: error,
         })?;
         *execution = self.dialect.create_session();
-        *self.session_projected_bindings.lock().await = RlmProjectedBindings::new();
+        *self.session_projected_bindings.lock().await = CodeModeProjectedBindings::new();
         let protected_names = self.protected_projected_binding_names().await;
         if let Some(snapshot) = snapshot {
             execution
@@ -378,13 +378,13 @@ impl RlmRuntimeState {
 
     fn install_initial_projected_seed(
         &self,
-        snapshot: lash_rlm_types::RlmProjectedSeedSnapshot,
+        snapshot: lash_rlm_types::CodeModeProjectedSeedSnapshot,
     ) -> Result<(), SessionError> {
-        let bindings = match RlmProjectedBindings::from_snapshot(&snapshot) {
+        let bindings = match CodeModeProjectedBindings::from_snapshot(&snapshot) {
             Ok(bindings) => bindings,
             Err(err) => {
                 return Err(SessionError::Protocol(format!(
-                    "rlm projected seed snapshot rejected: {err}"
+                    "code mode projected seed snapshot rejected: {err}"
                 )));
             }
         };
@@ -392,7 +392,7 @@ impl RlmRuntimeState {
         let mut guard = match self.session_projected_bindings.try_lock() {
             Ok(guard) => guard,
             Err(_) => return Err(SessionError::Protocol(
-                "rlm projected seed snapshot could not be installed because session bindings were contended".to_string(),
+                "code mode projected seed snapshot could not be installed because session bindings were contended".to_string(),
             )),
         };
         let merged = guard
@@ -404,18 +404,18 @@ impl RlmRuntimeState {
     }
 }
 
-pub(crate) struct RlmCodeExecutor {
+pub(crate) struct CodeModeCodeExecutor {
     state: Arc<RlmRuntimeState>,
 }
 
-impl RlmCodeExecutor {
+impl CodeModeCodeExecutor {
     pub(crate) fn new(state: Arc<RlmRuntimeState>) -> Self {
         Self { state }
     }
 }
 
 #[async_trait::async_trait]
-impl CodeExecutorPlugin for RlmCodeExecutor {
+impl CodeExecutorPlugin for CodeModeCodeExecutor {
     async fn execute_code(
         &self,
         ctx: lash_core::RuntimeExecutionContext<'_>,
@@ -542,7 +542,7 @@ impl CodeExecutorPlugin for RlmCodeExecutor {
 }
 
 pub(crate) fn reject_reserved_projected_binding_names(
-    bindings: &RlmProjectedBindings,
+    bindings: &CodeModeProjectedBindings,
 ) -> Result<(), SessionError> {
     if bindings.names().any(|name| name == "history") {
         return Err(SessionError::Protocol(
@@ -845,7 +845,7 @@ mod tests {
                 .expect("seed value");
         seed.projected.push(
             format!("projected_{label}"),
-            lash_rlm_types::RlmProjectedSeedEntry::Materialized(serde_json::json!({
+            lash_rlm_types::CodeModeProjectedSeedEntry::Materialized(serde_json::json!({
                 "value": label
             })),
         );
@@ -872,7 +872,7 @@ mod tests {
         let mut seed = crate::projection::RlmSeed::default();
         seed.projected.push(
             format!("projected_{label}"),
-            lash_rlm_types::RlmProjectedSeedEntry::Materialized(serde_json::json!({
+            lash_rlm_types::CodeModeProjectedSeedEntry::Materialized(serde_json::json!({
                 "value": label
             })),
         );
@@ -1318,7 +1318,7 @@ mod tests {
                     .hydrated_execution_state(lash_core::FleetFormat::current())
                     .await
                     .expect("capture")
-                    .expect("the RLM executor always holds a snapshotable state");
+                    .expect("the code mode executor always holds a snapshotable state");
 
                 let mutated = execute_cell(
                     &state,

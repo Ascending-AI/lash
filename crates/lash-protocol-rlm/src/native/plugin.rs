@@ -3,7 +3,7 @@ use std::sync::Arc;
 use crate::dialect::SessionDialect;
 use crate::plugin::RlmProtocolPluginConfig;
 use crate::plugin::protocol_session::RlmProtocolSession;
-use crate::plugin::runtime_state::{RlmCodeExecutor, RlmRuntimeState};
+use crate::plugin::runtime_state::{CodeModeCodeExecutor, RlmRuntimeState};
 use crate::plugin::tool_args::normalize_projected_tool_args;
 use lash_core::plugin::{PluginError, PluginRegistrar};
 
@@ -21,7 +21,7 @@ pub(super) fn register_native_plugin(
         RlmRuntimeState::new(Arc::clone(&dialect))
             .map_err(|err| PluginError::Session(err.to_string()))?,
     );
-    let code_executor = Arc::new(RlmCodeExecutor::new(Arc::clone(&runtime_state)));
+    let code_executor = Arc::new(CodeModeCodeExecutor::new(Arc::clone(&runtime_state)));
     let protocol_session = Arc::new(RlmProtocolSession::new(
         config.clone(),
         Arc::clone(&runtime_state),

@@ -413,7 +413,7 @@ async fn run_once_inner(
     let extra_counters = std::sync::Mutex::new(BTreeMap::new());
     if matches!(scenario, RuntimePerfScenario::RlmLargePrint) {
         extra_counters.lock_recover().insert(
-            "rlm.configured_instruction_limit_per_cell".into(),
+            "codemode.configured_instruction_limit_per_cell".into(),
             lash_protocol_rlm::InstructionBound::standard()
                 .limit()
                 .map_or(0, std::num::NonZeroU64::get),

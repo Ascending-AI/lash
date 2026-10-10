@@ -3009,7 +3009,7 @@ laws = [
 ]
 disposition = "port"
 status = "ported"
-note = "FIG-5378: covered-by:crates/lash-durable-test/tests/rlm_execution_documents.rs::production_rlm_document_is_the_compiled_inventory_for_every_loop_kind; covered-by:crates/lash-durable-test/tests/rlm_execution_documents.rs::production_process_document_is_the_compiled_inventory_after_a_store_round_trip; covered-by:crates/lash-durable-test/tests/rlm_execution_documents.rs::durable_language_trace_continues_once_across_quiet_points; covered-by:crates/lash-durable-test/tests/rlm_execution_documents.rs::every_model_code_path_runs_in_a_worker. The stored process-map law is enabled. FIG-5406 verified its exact selectors on PostgreSQL, SQLite memory and SQLite file at 47167f2431 (3 executed, 3 passed). FIG-5378 commit e168fca836 fixed the known arrival-order-dependent fixture bug: the worker is identified by its limit parameter, rather than the lifted main path it shares with the nested process. The reported full-run red at ea51af0029 has no retained failure log and did not reproduce; its culprit remains unproven. assert_skipped retains its worker-never marker check. The continuation law also checks distinct admitted call bindings at repeated occurrences of one node."
+note = "FIG-5378: covered-by:crates/lash-durable-test/tests/codemode_execution_documents.rs::production_rlm_document_is_the_compiled_inventory_for_every_loop_kind; covered-by:crates/lash-durable-test/tests/codemode_execution_documents.rs::production_process_document_is_the_compiled_inventory_after_a_store_round_trip; covered-by:crates/lash-durable-test/tests/codemode_execution_documents.rs::durable_language_trace_continues_once_across_quiet_points; covered-by:crates/lash-durable-test/tests/codemode_execution_documents.rs::every_model_code_path_runs_in_a_worker. The stored process-map law is enabled. FIG-5406 verified its exact selectors on PostgreSQL, SQLite memory and SQLite file at 47167f2431 (3 executed, 3 passed). FIG-5378 commit e168fca836 fixed the known arrival-order-dependent fixture bug: the worker is identified by its limit parameter, rather than the lifted main path it shares with the nested process. The reported full-run red at ea51af0029 has no retained failure log and did not reproduce; its culprit remains unproven. assert_skipped retains its worker-never marker check. The continuation law also checks distinct admitted call bindings at repeated occurrences of one node."
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/executor/tests/projections_and_snapshots.rs"
@@ -3285,7 +3285,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
-note = "FIG-5309 re-wrote the law through a host's send() on the core's served node: an RLM cell starts a process whose body lists triggers. It exposed a bug: the worker refused a process body's trigger operation as a tool its catalog does not hold. FIG-5313 runs it as a host step the Lash VM engine declares, and the law runs on every tier FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
+note = "FIG-5309 re-wrote the law through a host's send() on the core's served node: a code mode cell starts a process whose body lists triggers. It exposed a bug: the worker refused a process body's trigger operation as a tool its catalog does not hold. FIG-5313 runs it as a host step the Lash VM engine declares, and the law runs on every tier FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/executor/tests/triggers.rs"
@@ -3299,7 +3299,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
-note = "FIG-5309 re-wrote the law through a host's send() on the core's served node: an RLM cell starts a process whose body lists triggers. It exposed a bug: the worker refused a process body's trigger operation as a tool its catalog does not hold. FIG-5313 runs it as a host step the Lash VM engine declares, and the law runs on every tier FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
+note = "FIG-5309 re-wrote the law through a host's send() on the core's served node: a code mode cell starts a process whose body lists triggers. It exposed a bug: the worker refused a process body's trigger operation as a tool its catalog does not hold. FIG-5313 runs it as a host step the Lash VM engine declares, and the law runs on every tier FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/executor/tests/triggers.rs"
@@ -16604,7 +16604,7 @@ laws = ["rlm_active_input_reaches_the_next_provider_iteration"]
 disposition = "replaced-by:crates/lash-durable-test/tests/steering_crash_laws.rs::a_steer_at_a_work_checkpoint_killed_at_every_label_is_delivered_once_on_sqlite_memory"
 status = "deleted"
 owed = "active input addressed to a running turn reaches its next provider iteration"
-note = "FIG-5293, FIG-5294: on the production session activation, a steer sent during a round is delivered by the next work checkpoint and the model's next request holds it, on SQLite memory, SQLite file and PostgreSQL, also killed at every label (fail-before, ack-hidden, zombie, abort, commit-then-abort). The checkpoint admission is the turn driver's and does not depend on the protocol; the law runs the standard protocol's tool rounds, not RLM cells."
+note = "FIG-5293, FIG-5294: on the production session activation, a steer sent during a round is delivered by the next work checkpoint and the model's next request holds it, on SQLite memory, SQLite file and PostgreSQL, also killed at every label (fail-before, ack-hidden, zombie, abort, commit-then-abort). The checkpoint admission is the turn driver's and does not depend on the protocol; the law runs the standard protocol's tool rounds, not Code mode cells."
 
 [[row]]
 path = "crates/lash/src/tests/turn_streaming/control_and_cancel.rs"
@@ -25639,7 +25639,7 @@ laws = [
 disposition = "replaced-by:crates/lash-durable-test/tests/process_tool_call_crash_laws.rs::tool_call_limit_counts_what_a_process_holds_across_a_worker_kill"
 status = "deleted"
 owed = "the tool-call limit admits the limit and refuses past it, staged and across a crash or a worker kill, through send()"
-note = "FIG-5216 re-wrote it through a host's send() on the core's served node, on SQLite memory, SQLite file and PostgreSQL 18: an RLM cell's Lash VM process races max_tool_calls calls and asks one more, cut by a FaultStore matrix at every write under its labels, under fail-before, ack-hidden, zombie, abort and commit-then-abort, recovered on the other node (process.advance, step.outcome, process.terminal). The process is detached: a cell's processes.start is admitted Once until FIG-5174, so a kill inside it ends the turn"
+note = "FIG-5216 re-wrote it through a host's send() on the core's served node, on SQLite memory, SQLite file and PostgreSQL 18: a code mode cell's Lash VM process races max_tool_calls calls and asks one more, cut by a FaultStore matrix at every write under its labels, under fail-before, ack-hidden, zombie, abort and commit-then-abort, recovered on the other node (process.advance, step.outcome, process.terminal). The process is detached: a cell's processes.start is admitted Once until FIG-5174, so a kill inside it ends the turn"
 
 [[row]]
 path = "crates/lash-conformance/src/conformance/tool_batch_parallelism/budget.rs"

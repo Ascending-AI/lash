@@ -1,4 +1,4 @@
-//! Seeded plans now execute as RLM cells through send() on a served durable
+//! Seeded plans now execute as Code mode cells through send() on a served durable
 //! node. The receipt names the executed subset; it is not the open-loop fault
 //! and maintenance study described by the complete workload specification.
 use super::{Args, Case, Meter, Receipt, facade};

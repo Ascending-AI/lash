@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-/// Version of the durable RLM snapshot envelope stored behind a session
+/// Version of the durable code mode snapshot envelope stored behind a session
 /// checkpoint component.
 ///
 /// Re-exported by the facade's `formats` manifest so a host can read it before
@@ -12,9 +12,9 @@ use thiserror::Error;
 ///     shapes(
 ///         path = "crates/lash-protocol-rlm/src/executor/session.rs",
 ///         path = "crates/lash-protocol-rlm/src/deferred.rs",
-///         cover(RlmSnapshotRoot),
+///         cover(CodeModeSnapshotRoot),
 ///     ),
-///     roots(path = "crates/lash-rlm-types/src/lib.rs", RlmProjectedSeedEntry),
+///     roots(path = "crates/lash-rlm-types/src/lib.rs", CodeModeProjectedSeedEntry),
 ///     roots(path = "crates/lash-sansio/src/causal.rs", CausalRef),
 /// )
 // The root is a session's bindings in the kernel's parked-run terms: a
@@ -23,43 +23,43 @@ use thiserror::Error;
 // is the kernel's own; this version covers the root that carries it.
 #[cfg(not(feature = "synthetic-next"))]
 /// version_surface = "migrate"
-/// format_manifest = "RlmSnapshotEnvelope"
-pub const RLM_SNAPSHOT_VERSION: u32 = 1;
+/// format_manifest = "CodeModeSnapshotEnvelope"
+pub const CODEMODE_SNAPSHOT_VERSION: u32 = 1;
 
 /// Phase A's synthetic N+1 (ADR 0115 §6) moves the surface one version on
 /// with version 26's shape; its `Lift::Decoder` row admits N's
 /// roots, which the canonical decoder reads natively.
 #[cfg(feature = "synthetic-next")]
 /// version_surface = "migrate"
-/// format_manifest = "RlmSnapshotEnvelope"
-pub const RLM_SNAPSHOT_VERSION: u32 = 2;
+/// format_manifest = "CodeModeSnapshotEnvelope"
+pub const CODEMODE_SNAPSHOT_VERSION: u32 = 2;
 
 const CUTOVER_REMEDY: &str = "drain in-flight sessions on the old build before deploying this build, or recreate development/test stores";
 
-/// Why a saved RLM session could not be restored. No bindings are adopted
+/// Why a saved code mode session could not be restored. No bindings are adopted
 /// when any check fails: fragments can share objects across bindings.
 ///
 /// [`lash_core::SessionError::ExecutionStateRestore`] retains this error as
 /// its source, which hosts can downcast to inspect the failed check.
 #[derive(Debug, Error)]
 #[non_exhaustive]
-pub enum RlmSnapshotError {
+pub enum CodeModeSnapshotError {
     /// The root cannot decode as this build's snapshot envelope.
-    #[error("RLM snapshot root is not this build's: {details}; {CUTOVER_REMEDY}")]
+    #[error("code mode snapshot root is not this build's: {details}; {CUTOVER_REMEDY}")]
     FormatMismatch { details: String },
     /// The snapshot envelope version is outside the reader's window.
     #[error(
-        "RLM snapshot version {found} is incompatible with version {expected}; {CUTOVER_REMEDY}"
+        "code mode snapshot version {found} is incompatible with version {expected}; {CUTOVER_REMEDY}"
     )]
     VersionMismatch { expected: u32, found: u32 },
     /// The recorded dialect differs from the session's dialect.
     #[error(
-        "RLM snapshot was recorded by a `{found}` session; this session's dialect is `{expected}`"
+        "code mode snapshot was recorded by a `{found}` session; this session's dialect is `{expected}`"
     )]
     DialectMismatch { expected: String, found: String },
     /// A binding's content-addressed fragment was not supplied.
     #[error(
-        "RLM snapshot binding `{logical_key}` references missing leaf component `{component:?}`"
+        "code mode snapshot binding `{logical_key}` references missing leaf component `{component:?}`"
     )]
     MissingLeaf {
         logical_key: String,
@@ -67,7 +67,7 @@ pub enum RlmSnapshotError {
     },
     /// A binding's fragment bytes do not match their content address.
     #[error(
-        "RLM snapshot binding `{logical_key}` references leaf component `{component:?}` whose content address is `{actual_component:?}`"
+        "code mode snapshot binding `{logical_key}` references leaf component `{component:?}` whose content address is `{actual_component:?}`"
     )]
     LeafHashMismatch {
         logical_key: String,
@@ -76,19 +76,19 @@ pub enum RlmSnapshotError {
     },
     /// The supplied leaf set differs from the set the root references.
     #[error(
-        "RLM snapshot root/leaf set is inconsistent; missing={missing:?}, unexpected={unexpected:?}"
+        "code mode snapshot root/leaf set is inconsistent; missing={missing:?}, unexpected={unexpected:?}"
     )]
     LeafSetMismatch {
         missing: Vec<lash_core::plugin::ExecutionLeafName>,
         unexpected: Vec<lash_core::plugin::ExecutionLeafName>,
     },
     /// The kernel refuses the decoded fragments as stored state.
-    #[error("RLM session bindings are not a kernel state this build reads: {0}")]
+    #[error("code mode session bindings are not a kernel state this build reads: {0}")]
     Kernel(#[from] lash_kernel_state::LoadError),
 }
 
-impl From<RlmSnapshotError> for lash_core::SessionError {
-    fn from(error: RlmSnapshotError) -> Self {
+impl From<CodeModeSnapshotError> for lash_core::SessionError {
+    fn from(error: CodeModeSnapshotError) -> Self {
         Self::ExecutionStateRestore {
             source: Box::new(error),
         }

@@ -178,7 +178,7 @@ mod tests {
 
     use super::*;
     use crate::plugin::budget_warning::BUDGET_WARNING_STATUS;
-    use crate::projection::RlmProjectedBindings;
+    use crate::projection::CodeModeProjectedBindings;
 
     struct NoopPromptManager;
 
@@ -218,7 +218,7 @@ mod tests {
     /// append does: its durable nodes, through `append_session_nodes`.
     async fn extend(
         session: &RlmProtocolSession,
-        bindings: RlmProjectedBindings,
+        bindings: CodeModeProjectedBindings,
     ) -> Result<(), SessionError> {
         let fleet = lash_core::FleetFormat::current();
         let session_id = SessionId::from("rlm-session-extension");
@@ -241,7 +241,7 @@ mod tests {
         );
         extend(
             &session,
-            RlmProjectedBindings::new()
+            CodeModeProjectedBindings::new()
                 .bind_json("current_query", serde_json::json!("first"))
                 .expect("first bind"),
         )
@@ -250,7 +250,7 @@ mod tests {
 
         let duplicate = extend(
             &session,
-            RlmProjectedBindings::new()
+            CodeModeProjectedBindings::new()
                 .bind_json("current_query", serde_json::json!("second"))
                 .expect("second bind"),
         )
@@ -275,7 +275,7 @@ mod tests {
         );
         extend(
             &session,
-            RlmProjectedBindings::new()
+            CodeModeProjectedBindings::new()
                 .bind_json("current_query", serde_json::json!("open issues"))
                 .expect("bind"),
         )

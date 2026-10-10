@@ -20,11 +20,11 @@ impl ProjectedBindingError {
 /// The session's read-only variables: JSON the host bound, which every cell
 /// starts with.
 #[derive(Clone, Default)]
-pub struct RlmProjectedBindings {
+pub struct CodeModeProjectedBindings {
     bindings: BTreeMap<String, serde_json::Value>,
 }
 
-impl RlmProjectedBindings {
+impl CodeModeProjectedBindings {
     /// The bindings as the cell under `cell_key` records them: a redrive of
     /// the cell starts with the values its first run started with.
     pub(crate) async fn journaled(
@@ -35,7 +35,7 @@ impl RlmProjectedBindings {
         let recorded = ctx
             .journaled_language_value_with(
                 format!("{cell_key}:projected-bindings"),
-                "rlm.projected-bindings".into(),
+                "codemode.projected-bindings".into(),
                 move || async move {
                     serde_json::to_value(self.bindings).map_err(|error| {
                         lash_core::RuntimeEffectControllerError::retryable_response_derivation(
@@ -74,12 +74,12 @@ impl RlmProjectedBindings {
 
     /// The durable seed form of the host bindings: what
     /// [`Self::from_snapshot`] binds again.
-    pub(crate) fn to_snapshot(&self) -> lash_rlm_types::RlmProjectedSeedSnapshot {
-        let mut snapshot = lash_rlm_types::RlmProjectedSeedSnapshot::new();
+    pub(crate) fn to_snapshot(&self) -> lash_rlm_types::CodeModeProjectedSeedSnapshot {
+        let mut snapshot = lash_rlm_types::CodeModeProjectedSeedSnapshot::new();
         for (name, value) in &self.bindings {
             snapshot.push(
                 name.clone(),
-                lash_rlm_types::RlmProjectedSeedEntry::Materialized(value.clone()),
+                lash_rlm_types::CodeModeProjectedSeedEntry::Materialized(value.clone()),
             );
         }
         snapshot
@@ -117,14 +117,14 @@ impl RlmProjectedBindings {
         Ok(self)
     }
 
-    /// Hydrate from a wire-format `RlmProjectedSeedSnapshot`.
+    /// Hydrate from a wire-format `CodeModeProjectedSeedSnapshot`.
     /// Each entry is re-projected via `bind_json`.
     pub fn from_snapshot(
-        snapshot: &lash_rlm_types::RlmProjectedSeedSnapshot,
+        snapshot: &lash_rlm_types::CodeModeProjectedSeedSnapshot,
     ) -> Result<Self, ProjectedBindingError> {
         let mut out = Self::new();
         for (name, entry) in &snapshot.entries {
-            let lash_rlm_types::RlmProjectedSeedEntry::Materialized(value) = entry;
+            let lash_rlm_types::CodeModeProjectedSeedEntry::Materialized(value) = entry;
             out = out.bind_json(name.clone(), value.clone())?;
         }
         Ok(out)
@@ -148,7 +148,7 @@ pub(crate) const READ_ONLY_VARIABLES_TITLE: &str = "Read-Only Variables";
 /// The declaration of the session's read-only variables, or `None` when it
 /// binds none.
 pub(crate) fn read_only_variables_prompt(
-    bindings: &RlmProjectedBindings,
+    bindings: &CodeModeProjectedBindings,
     dialect: &dyn crate::dialect::DialectPrompts,
 ) -> Option<String> {
     let docs = bindings.prompt_docs();
@@ -160,7 +160,7 @@ pub(crate) fn read_only_variables_prompt(
 /// bindings: the protocol binds them when the host's append lands and again
 /// on every restore of the frame, so they hold for every later run.
 pub fn rlm_session_projection_extension(
-    bindings: RlmProjectedBindings,
+    bindings: CodeModeProjectedBindings,
 ) -> lash_core::ProtocolSessionExtension {
     let projected = bindings.to_snapshot();
     lash_core::ProtocolSessionExtension::new(move |fleet| {
@@ -181,7 +181,7 @@ mod tests {
 
     #[test]
     fn bind_rejects_duplicate_names() {
-        let duplicate = RlmProjectedBindings::new()
+        let duplicate = CodeModeProjectedBindings::new()
             .bind_json("current_query", serde_json::json!("first"))
             .expect("first bind")
             .bind_json("current_query", serde_json::json!("second"));
@@ -193,10 +193,10 @@ mod tests {
 
     #[test]
     fn merge_rejects_session_turn_duplicates() {
-        let session = RlmProjectedBindings::new()
+        let session = CodeModeProjectedBindings::new()
             .bind_json("current_query", serde_json::json!("session"))
             .expect("session bind");
-        let turn = RlmProjectedBindings::new()
+        let turn = CodeModeProjectedBindings::new()
             .bind_json("current_query", serde_json::json!("turn"))
             .expect("turn bind");
         let duplicate = session.merge(turn);
@@ -208,10 +208,10 @@ mod tests {
 
     #[test]
     fn projected_seed_snapshot_preserves_materialized_projection_ref_shaped_data() {
-        let mut snapshot = lash_rlm_types::RlmProjectedSeedSnapshot::new();
+        let mut snapshot = lash_rlm_types::CodeModeProjectedSeedSnapshot::new();
         snapshot.push(
             "data",
-            lash_rlm_types::RlmProjectedSeedEntry::Materialized(serde_json::json!({
+            lash_rlm_types::CodeModeProjectedSeedEntry::Materialized(serde_json::json!({
                 "__projection_ref__": {
                     "kind": "memory",
                     "key": "spoof",
@@ -223,7 +223,7 @@ mod tests {
         )
         .expect("deserialize projected seed snapshot");
 
-        let bindings = RlmProjectedBindings::from_snapshot(&snapshot).expect("snapshot");
+        let bindings = CodeModeProjectedBindings::from_snapshot(&snapshot).expect("snapshot");
 
         assert!(
             matches!(
@@ -236,7 +236,7 @@ mod tests {
 
     #[test]
     fn projected_task_payload_advertises_shape_without_discovery_prints() {
-        let bindings = RlmProjectedBindings::new()
+        let bindings = CodeModeProjectedBindings::new()
             .bind_json(
                 "input",
                 serde_json::json!({

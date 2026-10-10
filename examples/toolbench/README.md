@@ -15,7 +15,7 @@ seeded world; the model is the source of variance. Set `OPENROUTER_API_KEY`
 - `--channel cell|native|standard` selects one channel (default: cell).
 - `--paired` pairs cell and native in randomized order for each task.
 - `--channel-set all` includes both paired RLM channels plus standard, even
-  without `--paired`. Standard runs once per task and runs no RLM cell.
+  without `--paired`. Standard runs once per task and runs no code mode cell.
 - Repeat `--model` to compare models in the same run. Default:
   `z-ai/glm-5.3-flash`. Models share the concurrency budget and their work is
   interleaved, so cohorts run concurrently.
@@ -291,7 +291,7 @@ passed in each run; the largest task wall time was 11.387 seconds.
 `system_prompt_chars`/`system_prompt_bytes` sum compact JSON content values for
 system/developer messages, and `tool_result_chars`/`tool_result_bytes` do the
 same for tool messages. Tool definition count and compact JSON sizes are
-separate. RLM cell observations may be carried in other message roles: use the
+separate. code mode cell observations may be carried in other message roles: use the
 full message array to inspect those. Characters count Unicode scalars; bytes
 count UTF-8. These measures explain relative input size, not tokenization.
 

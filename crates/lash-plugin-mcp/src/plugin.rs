@@ -193,7 +193,7 @@ impl McpToolProvider {
     }
 }
 
-/// Non-resident MCP catalog provider for explicit RLM execution grants.
+/// Non-resident MCP catalog provider for explicit code mode execution grants.
 ///
 /// It advertises no catalog members, but resolves and executes known MCP tools
 /// by id for explicit grants. Its attempts complete inline; the grant supplies

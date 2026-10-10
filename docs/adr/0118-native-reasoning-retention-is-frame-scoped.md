@@ -48,7 +48,7 @@ frame.
 
 ## Consequences
 
-The policy behaves identically in standard, RLM cell, RLM native-tool,
+The policy behaves identically in standard, code mode cell, RLM native-tool,
 and cold-reopened execution because those paths share the durable model
 capability and explicit message-boundary marker. Unsupported choices fail
 deterministically before transport.

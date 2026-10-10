@@ -7,7 +7,7 @@ use std::collections::BTreeSet;
 use lash_kernel_doc::NumberPolicy;
 use lash_rlm_types::RlmGlobalsPatchPluginBody;
 
-use super::RlmExecutionState;
+use super::CodeModeExecutionState;
 
 fn bind(name: &str, value: serde_json::Value) -> RlmGlobalsPatchPluginBody {
     RlmGlobalsPatchPluginBody {
@@ -20,7 +20,7 @@ fn large(tag: &str) -> serde_json::Value {
     serde_json::json!([format!("{tag}-{}", "x".repeat(2_000))])
 }
 
-async fn capture(state: &mut RlmExecutionState) -> usize {
+async fn capture(state: &mut CodeModeExecutionState) -> usize {
     state
         .snapshot_execution_state(lash_core::FleetFormat::current())
         .await
@@ -35,7 +35,7 @@ async fn capture(state: &mut RlmExecutionState) -> usize {
 /// rest unchanged.
 #[tokio::test]
 async fn a_capture_writes_only_the_bindings_that_changed() {
-    let mut state = RlmExecutionState::new("typescript", NumberPolicy::Float);
+    let mut state = CodeModeExecutionState::new("typescript", NumberPolicy::Float);
     let none = BTreeSet::new();
     for (name, tag) in [("first", "a"), ("second", "b"), ("third", "c")] {
         state
@@ -64,7 +64,7 @@ async fn a_capture_writes_only_the_bindings_that_changed() {
         .hydrated_execution_state(lash_core::FleetFormat::current())
         .await
         .expect("the saved session state");
-    let mut reloaded = RlmExecutionState::new("typescript", NumberPolicy::Float);
+    let mut reloaded = CodeModeExecutionState::new("typescript", NumberPolicy::Float);
     reloaded
         .restore_execution_state(&saved, lash_core::FleetFormat::current())
         .await
@@ -83,7 +83,7 @@ async fn a_capture_writes_only_the_bindings_that_changed() {
 /// session of one dialect are refused by a state of another.
 #[tokio::test]
 async fn bindings_recorded_in_another_dialect_are_refused() {
-    let mut state = RlmExecutionState::new("typescript", NumberPolicy::Float);
+    let mut state = CodeModeExecutionState::new("typescript", NumberPolicy::Float);
     state
         .patch_globals(&bind("answer", serde_json::json!(42)), &BTreeSet::new())
         .await
@@ -94,14 +94,14 @@ async fn bindings_recorded_in_another_dialect_are_refused() {
         .await
         .expect("the saved session state");
 
-    let error = RlmExecutionState::new("python", NumberPolicy::BySpelling)
+    let error = CodeModeExecutionState::new("python", NumberPolicy::BySpelling)
         .restore_execution_state(&saved, lash_core::FleetFormat::current())
         .await
         .expect_err("another dialect's bindings are refused");
     assert!(
         matches!(
             &error,
-            super::RlmSnapshotError::DialectMismatch { expected, found }
+            super::CodeModeSnapshotError::DialectMismatch { expected, found }
                 if expected == "python" && found == "typescript"
         ),
         "{error}"
@@ -121,7 +121,7 @@ async fn a_seeded_token_that_is_no_callable_wrapper_is_refused() {
         let mut function = saved("f", lash_kernel_doc::KERNEL_VERSION);
         function["token"] = token.clone();
         let functions = [("f".to_string(), function)].into_iter().collect();
-        let error = RlmExecutionState::new("typescript", NumberPolicy::Float)
+        let error = CodeModeExecutionState::new("typescript", NumberPolicy::Float)
             .seed_functions(&functions, &none)
             .await
             .expect_err("the token is refused");
@@ -196,7 +196,7 @@ fn saved(name: &str, kernel: u32) -> serde_json::Value {
 async fn a_saved_function_the_migration_refuses_is_listed_and_not_held() {
     let none = BTreeSet::new();
     let unknown = lash_kernel_doc::KERNEL_VERSION + 98;
-    let listed = |state: &RlmExecutionState| {
+    let listed = |state: &CodeModeExecutionState| {
         let why = state
             .bindings
             .not_carried()
@@ -220,7 +220,7 @@ async fn a_saved_function_the_migration_refuses_is_listed_and_not_held() {
     };
 
     // Seeded: the session is created with both.
-    let mut seeded = RlmExecutionState::new("typescript", NumberPolicy::Float);
+    let mut seeded = CodeModeExecutionState::new("typescript", NumberPolicy::Float);
     let functions = [
         (
             "kept".to_string(),
@@ -237,7 +237,7 @@ async fn a_saved_function_the_migration_refuses_is_listed_and_not_held() {
     listed(&seeded);
 
     // Restored: a stored state holds both.
-    let mut stored = RlmExecutionState::new("typescript", NumberPolicy::Float);
+    let mut stored = CodeModeExecutionState::new("typescript", NumberPolicy::Float);
     let both = [
         (
             "kept".to_string(),
@@ -265,7 +265,7 @@ async fn a_saved_function_the_migration_refuses_is_listed_and_not_held() {
     saved_state.root = serde_json::to_vec(&root)
         .expect("the stored root encodes")
         .into();
-    let mut restored = RlmExecutionState::new("typescript", NumberPolicy::Float);
+    let mut restored = CodeModeExecutionState::new("typescript", NumberPolicy::Float);
     restored
         .restore_execution_state(&saved_state, lash_core::FleetFormat::current())
         .await

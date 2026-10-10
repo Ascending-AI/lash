@@ -480,8 +480,8 @@ fn materially_different_shared_phases_use_scenario_budgets() {
     assert!(
         phase_wall_clock_budget_ms(
             RuntimePerfScenario::RlmObliqueStackMix,
-            "rlm_lash_vm.execute",
-        ) > phase_wall_clock_budget_ms(RuntimePerfScenario::Rlm, "rlm_lash_vm.execute")
+            "codemode_lash_vm.execute",
+        ) > phase_wall_clock_budget_ms(RuntimePerfScenario::Rlm, "codemode_lash_vm.execute")
     );
     assert!(
         phase_wall_clock_budget_ms(RuntimePerfScenario::RlmLargeToolCatalog, "effect_loop")

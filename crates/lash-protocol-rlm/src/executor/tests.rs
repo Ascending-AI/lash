@@ -94,7 +94,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use lash_vm_runtime::ToolDefinitionBindingExt as _;
 
-use super::RlmExecutionState;
+use super::CodeModeExecutionState;
 use crate::CellDialect;
 use crate::testing::{DurableHost, cell_context, cell_services, python_workers, run_cell};
 
@@ -103,9 +103,9 @@ mod saved_functions;
 const SESSION: &str = "cell-laws";
 const TURN: &str = "turn-1";
 
-fn typescript_state() -> RlmExecutionState {
+fn typescript_state() -> CodeModeExecutionState {
     let dialect = CellDialect::typescript();
-    RlmExecutionState::new(dialect.name(), dialect.numbers())
+    CodeModeExecutionState::new(dialect.name(), dialect.numbers())
 }
 
 fn typescript_services(resolver: Option<crate::SharedDeferredToolResolver>) -> super::CellServices {
@@ -199,7 +199,7 @@ async fn a_corrupt_fragment_reports_its_binding_as_a_typed_restore_cause() {
     use std::collections::BTreeSet;
     use std::error::Error as _;
 
-    use super::snapshot::RlmSnapshotError;
+    use super::snapshot::CodeModeSnapshotError;
 
     let fleet = lash_core::FleetFormat::current();
     let mut state = typescript_state();
@@ -235,11 +235,11 @@ async fn a_corrupt_fragment_reports_its_binding_as_a_typed_restore_cause() {
         .expect_err("a corrupt fragment refuses the restore");
     let cause = error
         .source()
-        .and_then(|source| source.downcast_ref::<RlmSnapshotError>())
+        .and_then(|source| source.downcast_ref::<CodeModeSnapshotError>())
         .expect("the public restore error retains its typed cause");
     assert!(matches!(
         cause,
-        RlmSnapshotError::LeafHashMismatch {
+        CodeModeSnapshotError::LeafHashMismatch {
             logical_key,
             component: expected,
             actual_component,
@@ -777,7 +777,7 @@ async fn a_cell_that_ends_with_an_unjoined_task_observes_the_typed_error() {
 async fn a_python_session_runs_a_cell_end_to_end() {
     let host = open_host().await;
     let dialect = CellDialect::python();
-    let mut state = RlmExecutionState::new(dialect.name(), dialect.numbers());
+    let mut state = CodeModeExecutionState::new(dialect.name(), dialect.numbers());
     let services = cell_services(&dialect, python_workers(), None);
     let tools = Arc::new(CellTools::default());
 

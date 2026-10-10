@@ -180,7 +180,7 @@ async fn a_saved_function_is_a_map_key_and_set_member_in_a_later_cell() {
 
 /// One cell of `state`, which must complete.
 async fn cell(
-    state: &mut super::RlmExecutionState,
+    state: &mut super::CodeModeExecutionState,
     host: &crate::testing::DurableHost,
     key: &'static str,
     tools: Arc<dyn lash_core::ToolProvider>,

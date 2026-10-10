@@ -1,4 +1,4 @@
-//! FIG-5302: a response carrying an RLM cell either runs it or is refused with
+//! FIG-5302: a response carrying a code mode cell either runs it or is refused with
 //! a correction the model sees, and no shape of it is committed as the turn's
 //! reply with the cell unexecuted. Each law answers one scripted provider
 //! response on a natural turn, where prose may end the turn, through the real

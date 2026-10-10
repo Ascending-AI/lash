@@ -28,8 +28,8 @@ pub use carry::{cell_migration_refusal, cell_snapshot_functions};
 pub(crate) use envelope::{check_cell_snapshot, snapshot_tool_calls};
 pub(crate) use host::site_label;
 pub use host::{CONTROL_REFUSED, TOOL_ARGUMENTS, TOOL_CALL_LIMIT, TOOL_FAILED, UNKNOWN_EFFECT};
-pub use session::{RlmExecutionState, saved_function_pins};
-pub use snapshot::{RLM_SNAPSHOT_VERSION, RlmSnapshotError};
+pub use session::{CodeModeExecutionState, saved_function_pins};
+pub use snapshot::{CODEMODE_SNAPSHOT_VERSION, CodeModeSnapshotError};
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
@@ -47,7 +47,7 @@ use self::envelope::CellEnvelope;
 use self::host::{CellHost, CellHostLedgers};
 use crate::cell_value::datum_json;
 use crate::feedback::CellObservation;
-use crate::projection::RlmProjectedBindings;
+use crate::projection::CodeModeProjectedBindings;
 
 /// What a cell needs of the session that runs it, beside its state.
 #[derive(Clone)]
@@ -68,11 +68,11 @@ pub(crate) struct CellServices {
 
 /// Runs one cell of `state`'s session, or resumes it from its parked state.
 pub(crate) async fn execute_cell(
-    state: &mut RlmExecutionState,
+    state: &mut CodeModeExecutionState,
     ctx: RuntimeExecutionContext<'_>,
     request: ExecRequest,
     services: &CellServices,
-    session_projected_bindings: RlmProjectedBindings,
+    session_projected_bindings: CodeModeProjectedBindings,
 ) -> ExecResponse {
     let clean_code = clean_model_code(&request.code);
     let opened = cell_run::CellRun::open(&ctx);
@@ -251,11 +251,11 @@ fn host_failure(message: impl Into<String>) -> Refused {
 /// Lowers a fresh cell against what the session offers now, or takes a
 /// resumed cell as its first activation recorded it.
 async fn link_cell(
-    state: &RlmExecutionState,
+    state: &CodeModeExecutionState,
     ctx: &RuntimeExecutionContext<'_>,
     code: &str,
     services: &CellServices,
-    session_projected_bindings: RlmProjectedBindings,
+    session_projected_bindings: CodeModeProjectedBindings,
     resumed: Option<envelope::ResumedCell>,
 ) -> Result<LinkedCell, Refused> {
     if let Some(resumed) = resumed {
@@ -287,7 +287,7 @@ async fn link_cell(
     // The host's read-only bindings are recorded under the cell's effect
     // before it runs, so a redrive of the cell starts with the same ones.
     let projected = {
-        let _phase = ctx.named_phase("rlm_lash_vm.resolve_projected_bindings");
+        let _phase = ctx.named_phase("codemode_lash_vm.resolve_projected_bindings");
         crate::projection::cell_host_bindings(ctx, session_projected_bindings, code)
             .await
             .map_err(|error| match error {
@@ -329,7 +329,7 @@ async fn link_cell(
     // and each granted tool is offered as an effect.
     let grants = match &services.deferred_tool_resolver {
         Some(_) if ctx.parent_invocation().is_some() => {
-            let _phase = ctx.named_phase("rlm_lash_vm.deferred_resolve");
+            let _phase = ctx.named_phase("codemode_lash_vm.deferred_resolve");
             let offered = boundary.signatures();
             let candidates = crate::deferred::called_paths(code)
                 .into_iter()
@@ -504,11 +504,11 @@ pub(crate) fn cell_generation() -> lash_core::ExecutableGeneration {
 
 #[expect(clippy::too_many_arguments, reason = "one cell's whole run")]
 async fn run_cell(
-    state: &mut RlmExecutionState,
+    state: &mut CodeModeExecutionState,
     ctx: RuntimeExecutionContext<'_>,
     code: &str,
     services: &CellServices,
-    session_projected_bindings: RlmProjectedBindings,
+    session_projected_bindings: CodeModeProjectedBindings,
     identities: lash_vm_broker::CodeCallIdentities,
     prints: Arc<Mutex<Vec<Datum>>>,
     snapshots: &Arc<lash_vm_broker::DurableSnapshotStore>,
@@ -613,7 +613,7 @@ async fn run_cell(
         }
     };
     let owner = lash_vm_protocol::VmOwner::new(format!(
-        "rlm:{}:{:?}",
+        "codemode:{}:{:?}",
         scope.session_id, scope.agent_frame_id
     ));
     let LinkedCell {
@@ -880,7 +880,7 @@ async fn run_cell(
 /// How a broker failure answers the cell. Nothing about the guest: the
 /// cell's last checkpoint stands.
 fn broker_failure(
-    state: &mut RlmExecutionState,
+    state: &mut CodeModeExecutionState,
     ctx: &RuntimeExecutionContext<'_>,
     failure: KernelFailure,
     runs_on: bool,
@@ -985,7 +985,7 @@ fn exec_setup_failure(error: lash_core::CellFailure) -> ExecResponse {
 }
 
 fn exec_setup_failure_or_stop(
-    state: &mut RlmExecutionState,
+    state: &mut CodeModeExecutionState,
     ctx: &RuntimeExecutionContext<'_>,
     failure: lash_core::CellFailure,
 ) -> ExecResponse {
@@ -1005,7 +1005,7 @@ fn exec_setup_failure_or_stop(
 /// differently: it fails the attempt retryably, so the cell seals nothing
 /// and the model never sees it. Any other fault is the cell's host failure.
 fn worker_setup_failure(
-    state: &mut RlmExecutionState,
+    state: &mut CodeModeExecutionState,
     ctx: &RuntimeExecutionContext<'_>,
     error: lash_vm_client::PoolError,
 ) -> ExecResponse {
@@ -1097,18 +1097,18 @@ fn emit_step_trace(ctx: &RuntimeExecutionContext<'_>, result: Result<(), &str>) 
 }
 
 /// Feature-gated fixture that lets the repository's performance harness
-/// shift the production RLM execution-state capture without exposing
+/// shift the production code mode execution-state capture without exposing
 /// executor internals as public protocol API.
 #[cfg(feature = "testing")]
-pub struct RlmCheckpointPerfFixture {
+pub struct CodeModeCheckpointPerfFixture {
     services: CellServices,
-    state: RlmExecutionState,
+    state: CodeModeExecutionState,
     binding_count: usize,
     payload_bytes: usize,
 }
 
 #[cfg(feature = "testing")]
-impl RlmCheckpointPerfFixture {
+impl CodeModeCheckpointPerfFixture {
     /// A fixture whose session holds `binding_count` bindings of
     /// `payload_bytes` each.
     pub async fn new(
@@ -1117,7 +1117,7 @@ impl RlmCheckpointPerfFixture {
         binding_count: usize,
         payload_bytes: usize,
     ) -> Result<Self, lash_core::SessionError> {
-        let mut state = RlmExecutionState::new(dialect.name(), dialect.numbers());
+        let mut state = CodeModeExecutionState::new(dialect.name(), dialect.numbers());
         let mut patch = lash_rlm_types::RlmGlobalsPatchPluginBody::default();
         for index in 0..binding_count {
             patch.set_default.insert(
@@ -1174,13 +1174,13 @@ impl RlmCheckpointPerfFixture {
             ctx,
             ExecRequest { code },
             &self.services,
-            RlmProjectedBindings::default(),
+            CodeModeProjectedBindings::default(),
         )
         .await;
         self.state.accept_code_execution();
         if let Some(error) = response.error() {
             return Err(lash_core::SessionError::Protocol(format!(
-                "RLM checkpoint perf assignment failed: {}",
+                "code mode checkpoint perf assignment failed: {}",
                 error.message,
             )));
         }
@@ -1191,7 +1191,7 @@ impl RlmCheckpointPerfFixture {
         dialect: &crate::CellDialect,
         state: &lash_core::plugin::HydratedExecutionState,
     ) -> Result<(), lash_core::SessionError> {
-        let mut restored = RlmExecutionState::new(dialect.name(), dialect.numbers());
+        let mut restored = CodeModeExecutionState::new(dialect.name(), dialect.numbers());
         restored
             .restore_execution_state(state, lash_core::FleetFormat::current())
             .await

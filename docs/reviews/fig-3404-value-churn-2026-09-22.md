@@ -87,7 +87,7 @@ It runs far more often than "per catalog build":
   environment **twice per cell** with deferred resolutions (deferred.rs:394 for
   ambient classification, deferred.rs:408 for the final environment).
 
-Measured: `rlm_lash_vm.deferred_resolve` allocates ~262 MB per turn
+Measured: `codemode_lash_vm.deferred_resolve` allocates ~262 MB per turn
 (stats_alloc counters, dhat mode) on the large catalog — identical in cold and
 warm measured turns, because the session catalog cache
 (`tool_catalog_cache_entry`, session.rs:389) only covers the preamble artifact

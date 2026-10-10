@@ -28,7 +28,7 @@ moving its Serde decode ahead of that check.
 
 A typed plugin writer move records one validated map of plugin ranges with
 the fleet epoch it accompanies. Suspended cell state declares the enclosing
-RLM snapshot surface; typed bindings need no independent inner version.
+code mode snapshot surface; typed bindings need no independent inner version.
 
 Payload stamps protect stored representations, and each reader checks its
 stamp before decoding its body. Changing kernel code changes no surface and

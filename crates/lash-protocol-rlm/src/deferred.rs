@@ -305,8 +305,8 @@ pub(crate) async fn journal_deferred_outcomes(
                     );
                 }
             }
-            let _phase =
-                phase_context.named_phase("rlm_lash_vm.deferred_resolve.after_resolver_return");
+            let _phase = phase_context
+                .named_phase("codemode_lash_vm.deferred_resolve.after_resolver_return");
             serde_json::to_value(outcomes).map_err(|error| {
                 lash_core::RuntimeEffectControllerError::new(
                     lash_core::RuntimeErrorCode::RecordEncodingFailed,
@@ -317,7 +317,7 @@ pub(crate) async fn journal_deferred_outcomes(
         .await
         .map_err(DeferredResolutionError::Journal)?;
     {
-        let _phase = ctx.named_phase("rlm_lash_vm.deferred_resolve.after_durable_record");
+        let _phase = ctx.named_phase("codemode_lash_vm.deferred_resolve.after_durable_record");
     }
     serde_json::from_value(journaled).map_err(DeferredResolutionError::InvalidJournaledOutcome)
 }
@@ -352,7 +352,7 @@ pub(crate) fn offer_deferred_grants(
                 source: Box::new(source),
             })?;
         if let Some(resolver) = resolver {
-            let _phase = ctx.named_phase("rlm_lash_vm.deferred_resolve.before_registration");
+            let _phase = ctx.named_phase("codemode_lash_vm.deferred_resolve.before_registration");
             resolver
                 .install_recorded_grant(path, grant)
                 .map_err(|source| DeferredResolutionError::Install {

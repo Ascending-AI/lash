@@ -1,6 +1,6 @@
 # TypeScript host flows
 
-These are the flagship host flows as RLM cells. They are source examples, not
+These are the flagship host flows as Code mode cells. They are source examples, not
 language tutorials: the host API and lifecycle are the point.
 
 - `turn.ts`: inspect two host results and finish a compact value.

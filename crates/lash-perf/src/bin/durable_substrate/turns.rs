@@ -1,6 +1,6 @@
 //! Turn scenarios: L12a's round and concurrency shapes, the cold resume of
 //! a turn at different sizes and after different prior-turn counts (H2),
-//! and the RLM cell's snapshot per block (H5).
+//! and the code mode cell's snapshot per block (H5).
 
 use std::time::{Duration, Instant};
 
@@ -378,7 +378,7 @@ struct BlockSample {
     cycle_us: Option<u64>,
 }
 
-/// The RLM cell (H5): a turn whose cell awaits `ext.echo` `cell_calls`
+/// The code mode cell (H5): a turn whose cell awaits `ext.echo` `cell_calls`
 /// times, keeping each answer; each await blocks the VM, which commits its
 /// snapshot with the operation's admission.
 pub async fn cell(run: &Run<'_>, case: &Case) -> Result<()> {

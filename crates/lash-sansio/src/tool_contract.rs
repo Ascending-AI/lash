@@ -920,7 +920,7 @@ impl ToolContract {
 ///
 /// Composes the runtime [`ToolManifest`] and [`ToolContract`] projections. They
 /// serialize under the explicit `manifest` and `contract` keys: the definition
-/// is reachable from the persisted RLM execution-state envelope, whose
+/// is reachable from the persisted code mode execution-state envelope, whose
 /// canonical-encoding invariant bans `#[serde(flatten)]` because a flattened
 /// subtree has no declaration order a structural pre-pass can validate.
 #[derive(

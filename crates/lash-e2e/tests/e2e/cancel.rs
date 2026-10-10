@@ -23,7 +23,7 @@ case!(
     s18
 );
 
-/// A host process sleeps for ten minutes on its durable timer, and an RLM
+/// A host process sleeps for ten minutes on its durable timer, and a code mode
 /// cell awaits it with `processes.await`. Once the session actor released
 /// itself while the process is still running, the turn is cancelled through
 /// the host's public cancel. The terminal cancellation lands long before

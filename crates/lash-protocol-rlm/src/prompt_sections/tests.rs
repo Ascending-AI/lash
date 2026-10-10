@@ -64,7 +64,7 @@ fn sections(catalog: &lash_core::ToolCatalog) -> RlmSections {
 }
 
 fn facts() -> RlmPromptFacts {
-    let bindings = crate::projection::RlmProjectedBindings::new()
+    let bindings = crate::projection::CodeModeProjectedBindings::new()
         .bind_json("current_query", serde_json::json!("open issues"))
         .expect("bind");
     RlmPromptFacts {

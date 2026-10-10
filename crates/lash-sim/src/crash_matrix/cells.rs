@@ -1,6 +1,6 @@
 //! The deployment's code cells: a [`TurnScript::Cell`] or
 //! [`TurnScript::CellKilled`] session runs behind the lash facade, on the
-//! production turn driver, the RLM worker path and the production tool
+//! production turn driver, the code mode worker path and the production tool
 //! dispatch. Only the model and `ext_write`'s body are the simulator's.
 //!
 //! The scripted model answers a turn's first call with a TypeScript cell that

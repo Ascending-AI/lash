@@ -495,7 +495,7 @@ pub struct Diagnostic {
     /// What the dialect refused. The refusal only.
     pub message: String,
     pub span: Option<SourceSpan>,
-    /// Whose fault this is. Read by the RLM feedback layer to choose between
+    /// Whose fault this is. Read by the code mode feedback layer to choose between
     /// "the runtime refused this" and "the defect is in the program".
     pub kind: DiagnosticKind,
     /// What to write instead: the structured repair channel.

@@ -5,7 +5,7 @@
 //!
 //! Each law creates a session on a core that serves its own node and sends
 //! it one parent turn whose model calls `spawn_agent` natively (or, for the
-//! `Promise.all` width, from an RLM cell), or the law's own declaring probe.
+//! `Promise.all` width, from a code mode cell), or the law's own declaring probe.
 //! The core's node runs the parent's turn, each child's `SessionTurn`
 //! process and its child session; the model is the law's script, so a law
 //! can hold a child mid-turn, count its steps and see which parent step saw
@@ -95,7 +95,7 @@ enum Producer {
     /// declaration and keeps its bytes without launching it; the second
     /// submits those bytes as its own.
     ReusedIdentity,
-    /// Concurrent deferring calls from one RLM cell.
+    /// Concurrent deferring calls from one code mode cell.
     PromiseAll,
 }
 

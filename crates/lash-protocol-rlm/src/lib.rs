@@ -48,10 +48,10 @@ pub use dialect::{
 };
 pub use driver::{RlmProjectorConfig, build_rlm_preamble};
 #[cfg(feature = "testing")]
-pub use executor::RlmCheckpointPerfFixture;
+pub use executor::CodeModeCheckpointPerfFixture;
 pub use executor::{
-    CONTROL_REFUSED, RLM_SNAPSHOT_VERSION, RlmSnapshotError, TOOL_ARGUMENTS, TOOL_CALL_LIMIT,
-    TOOL_FAILED, UNKNOWN_EFFECT, cell_migration_refusal, cell_snapshot_functions,
+    CODEMODE_SNAPSHOT_VERSION, CONTROL_REFUSED, CodeModeSnapshotError, TOOL_ARGUMENTS,
+    TOOL_CALL_LIMIT, TOOL_FAILED, UNKNOWN_EFFECT, cell_migration_refusal, cell_snapshot_functions,
     saved_function_pins,
 };
 /// The kernel's typed snapshot validation causes and fragment roots.
@@ -76,11 +76,11 @@ pub use plugin::{
     RlmSessionConfigDecodeError, SetRlmRender, UnsetBound, UnsetChannel, rlm_session_config,
 };
 pub use projection::{
-    HISTORY_PROJECTION, RLM_PROTOCOL_EVENT_VERSION, RlmHistoryProjection, RlmSeed,
-    is_rlm_protocol_output, rlm_history_projection, rlm_protocol_event, rlm_seed_initial_nodes,
+    CodeModeProjectedBindings, ProjectedBindingError, rlm_session_projection_extension,
 };
 pub use projection::{
-    ProjectedBindingError, RlmProjectedBindings, rlm_session_projection_extension,
+    HISTORY_PROJECTION, RLM_PROTOCOL_EVENT_VERSION, RlmHistoryProjection, RlmSeed,
+    is_rlm_protocol_output, rlm_history_projection, rlm_protocol_event, rlm_seed_initial_nodes,
 };
 // Harnesses read recorded RLM events through the protocol's own decoder; the
 // `lash::rlm` facade keeps decoding sealed (FIG-1530).

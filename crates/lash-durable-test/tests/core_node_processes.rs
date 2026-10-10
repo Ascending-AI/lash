@@ -1828,7 +1828,7 @@ fn isolated_engine() -> Arc<dyn lash_core::ProcessEngine> {
     })
 }
 
-/// A core whose RLM cell calls the isolated tool once and finishes with its
+/// A core whose code mode cell calls the isolated tool once and finishes with its
 /// answer.
 fn isolated_core(backend: &lash::Backend, tools: &Arc<IsolatedTools>) -> lash::LashCoreBuilder {
     let model = scripted(|request, _| {
@@ -1864,7 +1864,7 @@ async fn isolated_processes(backend: &lash::Backend) -> Vec<lash_core::ProcessRe
     .collect()
 }
 
-/// L08/D04: an RLM cell's call of a tool isolated in a registered engine
+/// L08/D04: a code mode cell's call of a tool isolated in a registered engine
 /// starts exactly one lash process under an isolated start key, before any
 /// body runs: no ordinary body runs, the engine runs the process, and the
 /// call answers its descriptor.

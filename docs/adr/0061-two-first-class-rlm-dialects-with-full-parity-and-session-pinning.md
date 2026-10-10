@@ -11,7 +11,7 @@ One linker, compiler, heap VM, continuation family and durable runtime execute
 that IR. A dialect does not emulate another language.
 
 TypeScript is the shipped dialect. Its language ID is `typescript`, used in
-prompt vocabulary, execution reporting and persisted RLM execution state.
+prompt vocabulary, execution reporting and persisted code mode execution state.
 A host selects it by passing `TypescriptDialect` where it constructs the RLM
 protocol; a session records the selected language id and resumes only under
 it (ADR 0096).
@@ -52,5 +52,5 @@ languages is not required by the shared IR.
 - [Dialect and direct selection](../../crates/lash-protocol-rlm/src/dialect.rs#L33).
 - [Shared services and session](../../crates/lash-protocol-rlm/src/dialect.rs#L82).
 - [TypeScript parse/lower/link path](../../crates/lash-typescript/src/lib.rs#L70).
-- [RLM engine identity in durable root](../../crates/lash-protocol-rlm/src/executor/state.rs#L891).
+- [Code mode engine identity in durable root](../../crates/lash-protocol-rlm/src/executor/state.rs#L891).
 - [Workflow-graph lens](../../crates/lash-typescript/src/workflow_graph/mod.rs).

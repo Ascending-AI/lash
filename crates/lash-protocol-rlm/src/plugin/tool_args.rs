@@ -20,7 +20,7 @@ mod tests {
 
     fn projected(value: serde_json::Value) -> serde_json::Value {
         serde_json::json!({
-            "__projected__": lash_rlm_types::RlmProjectedSeedEntry::Materialized(value),
+            "__projected__": lash_rlm_types::CodeModeProjectedSeedEntry::Materialized(value),
         })
     }
 
@@ -136,7 +136,7 @@ mod tests {
             seed.projected.entries.as_slice(),
             &[(
                 "problem".to_string(),
-                lash_rlm_types::RlmProjectedSeedEntry::Materialized(serde_json::json!(
+                lash_rlm_types::CodeModeProjectedSeedEntry::Materialized(serde_json::json!(
                     "large parent context"
                 ))
             )]

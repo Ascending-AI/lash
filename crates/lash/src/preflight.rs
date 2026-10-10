@@ -203,7 +203,7 @@ const PRIMARY_FORMATS: [DurableFormat; 4] = [
     DurableFormat::KernelDocument,
     DurableFormat::KernelVersion,
     DurableFormat::SessionCheckpointManifest,
-    DurableFormat::RlmSnapshotEnvelope,
+    DurableFormat::CodeModeSnapshotEnvelope,
 ];
 
 /// The single format-to-surface relation used by the preflight.
@@ -272,10 +272,10 @@ fn format_surface(format: DurableFormat) -> SurfaceRelation {
              activation resumes it rather than at rest",
         ),
         DurableFormat::KernelSavedFunction => SurfaceRelation::Unwalkable(
-            "no surface of its own: a saved function is a field of the RLM snapshot root, which \
+            "no surface of its own: a saved function is a field of the code mode snapshot root, which \
              the session execution state's walk decodes",
         ),
-        DurableFormat::RlmSnapshotEnvelope => SurfaceRelation::Walk {
+        DurableFormat::CodeModeSnapshotEnvelope => SurfaceRelation::Walk {
             surface: DurableSurface::SessionExecutionState,
             primary: true,
         },

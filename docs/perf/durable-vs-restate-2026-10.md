@@ -1,6 +1,6 @@
 # Durable substrate against the Restate baseline, 2026-10-07
 
-**H1 passes at engine level, and H5 passes for the specified RLM cell. H2 passes as restated by FIG-5206: a cold resume costs a fresh turn plus O(current turn), and its checkpoint no longer grows with prior turns. Since FIG-5207 a turn reads its session window from the store once, not twice.** H5 also fails outside its scenario, once a cell keeps about 16 KiB per tool result.
+**H1 passes at engine level, and H5 passes for the specified code mode cell. H2 passes as restated by FIG-5206: a cold resume costs a fresh turn plus O(current turn), and its checkpoint no longer grows with prior turns. Since FIG-5207 a turn reads its session window from the store once, not twice.** H5 also fails outside its scenario, once a cell keeps about 16 KiB per tool result.
 
 FIG-5188 / substrate L12b. Every number here comes from a run recorded below,
 on the same machine and the same default developer build profile as L12a's
@@ -41,7 +41,7 @@ pass the gate.
   before the 2× gate fails on the worst row. A round commits two transactions: `model.done`, then
   `round.outcome`. A third, `round.present+model.start`, opens the next model
   call. That is design-opus §6's "about 3 PG transactions per round".
-- **H5 (VM snapshot per block <5 ms p99 for the RLM cell): pass for the
+- **H5 (VM snapshot per block <5 ms p99 for the code mode cell): pass for the
   specified cell; fail for heaps of 16 KiB per result.** The cell awaits ten
   host operations (design §6 (c)) and keeps every answer. With answers up to
   1 KiB, a block's snapshot is 5.9–25.4 KB. The transaction that commits it

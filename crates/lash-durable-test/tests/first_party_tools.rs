@@ -1,4 +1,4 @@
-//! Every registered first-party tool succeeds from a production RLM cell on
+//! Every registered first-party tool succeeds from a production code mode cell on
 //! the durable engine (ported by FIG-5308 from the deleted engine crate's
 //! `tool_context_conformance.rs`).
 //!

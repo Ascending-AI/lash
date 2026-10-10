@@ -72,7 +72,7 @@ and completion order do not renumber members.
 |---|---|
 | Model call | Admitted run, continuation, iteration, effect ordinal, full content index |
 | Batch member | Wrapper id and original member index |
-| RLM cell command | Opener admission, code opener, cell admission key, command ordinal, and aggregate index for a leaf |
+| code mode cell command | Opener admission, code opener, cell admission key, command ordinal, and aggregate index for a leaf |
 | Process-body command | Process admission, code opener, command ordinal, and aggregate index for a leaf |
 | Host submission | Submission admission and any content position assigned by its caller |
 

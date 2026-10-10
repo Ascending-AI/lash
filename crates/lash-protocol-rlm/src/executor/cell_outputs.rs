@@ -79,7 +79,7 @@ pub(super) async fn record_cell_outputs(
     let outcome = ctx
         .journaled_language_value_with(
             key.clone(),
-            format!("rlm.outputs:{}", renderer.id()),
+            format!("codemode.outputs:{}", renderer.id()),
             move || async move {
                 let policy = attachments.output_retention();
                 let mut observations = Vec::new();

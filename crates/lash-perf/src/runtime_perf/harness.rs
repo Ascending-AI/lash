@@ -520,7 +520,7 @@ pub(crate) fn validate_runtime_perf_turn(
     let diagnostics = runtime_perf_turn_diagnostics(turn);
     if !rlm_trajectory_errors(turn).is_empty() {
         anyhow::bail!(
-            "runtime perf scenario {} turn {} surfaced RLM execution error:\n{}",
+            "runtime perf scenario {} turn {} surfaced code mode execution error:\n{}",
             scenario.name(),
             turn_index + 1,
             diagnostics
@@ -672,7 +672,7 @@ fn runtime_perf_turn_diagnostics(turn: &lash::TurnReport) -> String {
         })
         .collect::<Vec<_>>();
     if !errors.is_empty() {
-        let _ = writeln!(out, "rlm_execution_errors:");
+        let _ = writeln!(out, "codemode_execution_errors:");
         for entry in errors {
             let _ = writeln!(
                 out,
@@ -701,7 +701,7 @@ fn runtime_perf_turn_diagnostics(turn: &lash::TurnReport) -> String {
             )
         );
         if !entry.code.trim().is_empty() {
-            let _ = writeln!(out, "last_rlm_code={}", preview(&entry.code, 900));
+            let _ = writeln!(out, "last_codemode_code={}", preview(&entry.code, 900));
         }
     }
 

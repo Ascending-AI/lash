@@ -3,7 +3,9 @@ mod context;
 pub(crate) mod transcript;
 mod transport;
 
-pub use bindings::{ProjectedBindingError, RlmProjectedBindings, rlm_session_projection_extension};
+pub use bindings::{
+    CodeModeProjectedBindings, ProjectedBindingError, rlm_session_projection_extension,
+};
 pub use context::HISTORY_PROJECTION;
 pub use context::{
     RLM_PROTOCOL_EVENT_VERSION, RlmHistoryProjection, is_rlm_protocol_output,

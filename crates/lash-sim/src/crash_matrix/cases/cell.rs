@@ -124,7 +124,7 @@ impl Workload for CellCase {
         violations
     }
 
-    /// A cell runs on the RLM worker subprocess, whose compute and respawn
+    /// A cell runs on the code mode worker subprocess, whose compute and respawn
     /// after a node's death the virtual clock does not see: every step the
     /// nodes take while the worker works moves time on. The cell is bounded
     /// by the matrix horizon alone, which its run must still end within.

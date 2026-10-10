@@ -38,7 +38,7 @@ time and the target is `dev-deferred`: two cases wait out a 15 s node lease.
 | Part | Where | Real or scripted |
 |---|---|---|
 | Node process | [`src/bin/node.rs`](src/bin/node.rs), [`src/node.rs`](src/node.rs) | real: `DurableBackendBuilder` over `PostgresStoreSet` and one `LashCore` built on it, whose node is the production runner, session activation, process worker, fences, notifier and liveness lock, with the default `DurableSettings`. The host shuts the core down on `stop`, and learns how the node stopped from `LashCore::node_stopped` |
-| Turn | [`src/turn.rs`](src/turn.rs) | real: the facade's session and send, the production turn driver, model pins, and a TypeScript cell on the RLM worker path with its durable snapshots; the model is scripted (`lash::testing::TestProvider`) |
+| Turn | [`src/turn.rs`](src/turn.rs) | real: the facade's session and send, the production turn driver, model pins, and a TypeScript cell on the code mode worker path with its durable snapshots; the model is scripted (`lash::testing::TestProvider`) |
 | `ext_write` | [`src/turn.rs`](src/turn.rs) | a `Once` host tool (`StaticToolProvider`) called from the cell through the production tool dispatch; its body is the runbook's |
 | Reports | [`src/recorded.rs`](src/recorded.rs), [`src/events.rs`](src/events.rs) | decorators over the facade's `StoreSet`, durable store and node wakes that forward every call and print what the store answered; the partition's heartbeat hold is the one fault they inject |
 | Server, nodes, faults | [`tests/support/`](tests/support/) | the test owns the server and the node processes (SIGKILL, stop on stdin, heartbeat hold); its operator core admits the turn and serves no node |

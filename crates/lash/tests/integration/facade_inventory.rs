@@ -187,8 +187,8 @@ mod host_wrapping_inventory {
 /// RLM factory and resolvers name.
 #[cfg(feature = "rlm")]
 mod rlm_host_wrapping_inventory {
-    use lash::rlm::RlmProjectedSeedEntry as _;
-    use lash::rlm::RlmProjectedSeedSnapshot as _;
+    use lash::rlm::CodeModeProjectedSeedEntry as _;
+    use lash::rlm::CodeModeProjectedSeedSnapshot as _;
     use lash::rlm::RlmPromptFeatures as _;
     use lash::rlm::RlmSeedPluginBody as _;
     use lash::rlm::UnsetChannel as _;

@@ -10,5 +10,5 @@ main still cites this file.
 This decision kept one IR and VM for every dialect, with TypeScript the only
 one shipped. The kernel is that one language, TypeScript and Python both lower
 to it (ADR 0139, "Dialects lower to the kernel"), and [ADR
-0138](0138-rlm-cells-are-kernel-programs.md) owns how a session selects its
+0138](0138-codemode-cells-are-kernel-programs.md) owns how a session selects its
 dialect.

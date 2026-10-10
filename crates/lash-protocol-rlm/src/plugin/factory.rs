@@ -9,7 +9,7 @@ use super::{
     RLM_PROTOCOL_PLUGIN_ID, RlmProtocolPluginConfig, RlmRecordedBehaviour, RlmRecordedConfig,
 };
 use crate::deferred::SharedDeferredToolResolver;
-use crate::dialect::{CellDialect, RlmDialectServices, SessionDialect};
+use crate::dialect::{CellDialect, CodeModeDialectServices, SessionDialect};
 
 pub struct RlmProtocolPluginFactory {
     config: RlmProtocolPluginConfig,
@@ -312,7 +312,7 @@ impl PluginFactory for RlmProtocolPluginFactory {
         let writes = self.kernel_writes;
         #[cfg(not(feature = "synthetic-next"))]
         let writes = None;
-        let services = RlmDialectServices {
+        let services = CodeModeDialectServices {
             presentation: config.presentation,
             workers: self.workers.clone(),
             code_renderer: config.code_renderer.clone(),

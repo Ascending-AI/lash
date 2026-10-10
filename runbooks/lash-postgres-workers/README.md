@@ -55,7 +55,7 @@ and `bin/pg_ctl`).
 | Part | Where | Real or scripted |
 |---|---|---|
 | Node process | [`src/bin/node.rs`](../../crates/lash-postgres-workers/src/bin/node.rs), [`src/node.rs`](../../crates/lash-postgres-workers/src/node.rs) | real: `lash_core::runtime::durable::node::serve` over `PostgresStoreSet` or a file `SqliteStoreSet`, the production runner, session activation, process activation, fences, notifier and liveness lock, with the default `DurableSettings` |
-| Turn | [`src/turn.rs`](../../crates/lash-postgres-workers/src/turn.rs) | real: the lash facade's session and send, the production turn driver, model pins, and a TypeScript cell on the RLM worker path with its durable snapshots; the model is scripted |
+| Turn | [`src/turn.rs`](../../crates/lash-postgres-workers/src/turn.rs) | real: the lash facade's session and send, the production turn driver, model pins, and a TypeScript cell on the code mode worker path with its durable snapshots; the model is scripted |
 | `ext_write` | [`src/turn.rs`](../../crates/lash-postgres-workers/src/turn.rs) | a `Once` tool called from the cell through the production tool dispatch; its body is the runbook's |
 | Process | [`src/process.rs`](../../crates/lash-postgres-workers/src/process.rs) | a host engine (`advance`) with two `Once` steps and a pinned key with a deadline |
 | Reports | [`src/recorded.rs`](../../crates/lash-postgres-workers/src/recorded.rs), [`src/events.rs`](../../crates/lash-postgres-workers/src/events.rs) | decorators over the durable store and signals that forward every call and print what the store answered; the partition's heartbeat hold is the one fault they inject |

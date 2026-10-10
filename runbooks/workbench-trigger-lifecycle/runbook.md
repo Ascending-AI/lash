@@ -147,7 +147,7 @@ These are definition-linking claims only. Explicit authored registration remains
 first operation allowed to create a subscription. Provider activation and route use
 belong to registration and delivery, not discovery.
 
-**RLM snapshot cutover.** Snapshot version 19 adds the separate deferred-trigger
+**code mode snapshot cutover.** Snapshot version 19 adds the separate deferred-trigger
 resolution record, including captured provider identity and route. Version 18 snapshots
 cannot preserve that authority boundary and are rejected. Drain in-flight RLM sessions
 on the old build before deploying, or recreate development/test stores; do not add a

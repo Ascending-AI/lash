@@ -67,7 +67,7 @@ impl RlmSessionExt for crate::LashSession {
     }
 }
 
-// RLM-specific Lash VM host vocabulary. The catalogue-preview, tool-binding,
+// REPL protocol and code mode host vocabulary. The catalogue-preview, tool-binding,
 // and process-input names are single-homed under `lash::tools` and
 // `lash::process`; they are not re-exported here.
 /// How a session's turns may end.
@@ -102,6 +102,15 @@ pub use lash_protocol_rlm::{
     DialectRefusalKind, ExecutionSection, ExecutionSectionRequest, PythonPrompts,
     ResolvedToolBinding, TypescriptPrompts,
 };
+/// Projection vocabulary: bind projected values to the active session via
+/// [`rlm_session_projection_extension`], a durable session extension the
+/// session's command lane records as an [`RlmSeed`] event (FIG-5134).
+pub use lash_protocol_rlm::{
+    CodeModeProjectedBindings, ProjectedBindingError, RlmSeed, rlm_session_projection_extension,
+};
+/// Restore checks retained as the source of
+/// [`crate::SessionError::ExecutionStateRestore`].
+pub use lash_protocol_rlm::{CodeModeSnapshotError, snapshot};
 /// The schema shapes a [`DialectPrompts`] is handed to spell: one reading of a tool's
 /// JSON Schemas, shared by every prompt surface.
 pub use lash_protocol_rlm::{
@@ -111,12 +120,6 @@ pub use lash_protocol_rlm::{
 /// Lash's two control tools, as a session advertises them.
 pub use lash_protocol_rlm::{
     FINISH_TOOL_NAME, continue_as_tool_definition, finish_tool_definition,
-};
-/// Projection vocabulary: bind projected values to the active session via
-/// [`rlm_session_projection_extension`], a durable session extension the
-/// session's command lane records as an [`RlmSeed`] event (FIG-5134).
-pub use lash_protocol_rlm::{
-    ProjectedBindingError, RlmProjectedBindings, RlmSeed, rlm_session_projection_extension,
 };
 /// The RLM protocol's config owner and its command (FIG-4379).
 pub use lash_protocol_rlm::{
@@ -129,10 +132,10 @@ pub use lash_protocol_rlm::{RlmProjectorConfig, section_id, section_keys as rlm_
 /// The config groups and builder state an [`RlmProtocolPluginConfig`] is
 /// assembled from.
 pub use lash_protocol_rlm::{RlmPromptFeatures, UnsetChannel};
-/// Restore checks retained as the source of
-/// [`crate::SessionError::ExecutionStateRestore`].
-pub use lash_protocol_rlm::{RlmSnapshotError, snapshot};
 pub use lash_render::{RenderParams, RenderParamsPatch};
+pub use lash_rlm_types::{
+    CodeModeProjectedSeedEntry, CodeModeProjectedSeedSnapshot, RlmSeedPluginBody,
+};
 /// The committed RLM event variants the protocol owns and
 /// the record types their fields name.
 pub use lash_rlm_types::{
@@ -140,6 +143,5 @@ pub use lash_rlm_types::{
     RlmProtocolEvent,
 };
 pub use lash_rlm_types::{RlmCreateExtras, RlmRenderPatch, RlmSessionConfig, RlmTurnOptions};
-pub use lash_rlm_types::{RlmProjectedSeedEntry, RlmProjectedSeedSnapshot, RlmSeedPluginBody};
 
 pub use lash_protocol_rlm::recorded_extraction_decisions;

@@ -23,7 +23,7 @@ Key features:
 5. **Two main execution modes, as plugins**
     1. Standard: native provider tool calling
     2. RLM: the model works in a persistent REPL
-6. **RLM, a custom code mode**
+6. **RLM, a persistent REPL over code mode**
     1. The model writes code cells in a persistent REPL: state carries from cell to cell, and printed values come back as observations
     2. Tools are typed functions the code calls, so one cell can loop over and combine many calls, and run them concurrently as tasks
     3. Runs on the Lash VM, a small kernel language built for it; a cell saves its state whenever it waits, and a crashed cell resumes from there without re-running finished tool calls

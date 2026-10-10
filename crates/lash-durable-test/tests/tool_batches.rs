@@ -16,7 +16,7 @@
 //!
 //! The product surfaces that spell a group (the producers): parallel native
 //! calls, one `batch` wrapper, `batch` wrappers beside native calls, and an
-//! RLM cell's `Promise.all` and `Promise.allSettled`. A leaf takes one of
+//! code mode cell's `Promise.all` and `Promise.allSettled`. A leaf takes one of
 //! the routes the surface reaches: a listed catalog tool, a round member
 //! that parks on its completion key and is resolved out of band, or (on a
 //! cell) an unlisted tool a deferred resolver grants. A group issued from inside a
