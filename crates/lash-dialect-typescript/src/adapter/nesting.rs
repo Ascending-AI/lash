@@ -40,12 +40,11 @@ struct SourceNestingState {
     current_operators: usize,
     open_statement_forms: usize,
     open_conditionals: usize,
-    /// The deepest charge the scan has reached; the measuring entry point
-    /// below reports it, so the number a test reads is the charge the guard
-    /// itself enforces.
+    /// The deepest charge the scan has reached, including operators whose
+    /// recursion is not represented by open delimiters.
     peak_depth: usize,
-    /// The charge at which the scan stops. Only the measuring entry point
-    /// lifts it; every other scan runs at `MAX_SOURCE_NESTING_DEPTH`.
+    /// The charge at which the scan stops. Kernel text measures without the
+    /// ordinary cell's limit; the cell guard keeps `MAX_SOURCE_NESTING_DEPTH`.
     limit: usize,
 }
 
@@ -430,11 +429,20 @@ fn continues_previous_statement(byte: u8, word: Option<&str>) -> bool {
 // which makes the next line a tagged template, and `as`/`satisfies`, which make
 // it a cast — or a newline-separated chain would slip through uncharged.
 pub(super) fn guard_source_nesting(source: &str) -> Result<(), Diagnostic> {
-    SourceNestingVisitor::new(source)
-        .scan()
-        .map_err(|error| match error {
-            SourceScanError::NestingLimit(span) => source_nesting_diagnostic(Some(span)),
-        })
+    source_nesting_depth(source, MAX_SOURCE_NESTING_DEPTH)
+        .map(|_| ())
+        .map_err(|span| source_nesting_diagnostic(Some(span)))
+}
+
+/// Measures the same recursive grammar families the cell guard charges. Width,
+/// comments and literal contents do not accumulate parser recursion.
+pub(crate) fn source_nesting_depth(source: &str, limit: usize) -> Result<usize, SourceSpan> {
+    let mut visitor = SourceNestingVisitor::new(source);
+    visitor.nesting.limit = limit;
+    visitor.scan().map_err(|error| match error {
+        SourceScanError::NestingLimit(span) => span,
+    })?;
+    Ok(visitor.nesting.peak_depth)
 }
 
 enum SourceScanError {

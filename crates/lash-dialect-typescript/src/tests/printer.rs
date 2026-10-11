@@ -345,6 +345,37 @@ main {
 }
 
 #[test]
+fn kernel_source_nesting_is_refused_before_recursive_parsing() {
+    let effects = BTreeMap::new();
+    let bindings = BTreeSet::new();
+    let environment = Environment {
+        library: super::library(),
+        effects: &effects,
+        controls: &BTreeMap::new(),
+        tool_roots: &BTreeSet::new(),
+        bindings: &bindings,
+        functions: &BTreeMap::new(),
+    };
+    // Kernel text keeps its own limit, rather than the ordinary cell's 28.
+    // The block and finish statement consume two levels before the value.
+    let depth = k::MAX_NESTING_DEPTH - 2;
+    let source =
+        "k.finish(".to_owned() + &"k.tuple(".repeat(depth) + "null" + &")".repeat(depth + 1) + ";";
+    crate::lower_kernel_text(&source, &environment)
+        .expect("a kernel value at its depth limit lowers");
+
+    let limit = k::MAX_NESTING_DEPTH * 4 + 16;
+    for source in [
+        "k.finish(".to_owned() + &"(".repeat(limit),
+        "k.finish(".to_owned() + &"k.tuple(".repeat(limit) + "null" + &")".repeat(limit + 1),
+    ] {
+        let error = crate::lower_kernel_text(&source, &environment).unwrap_err();
+        assert_eq!(error.code, crate::DiagnosticCode::InvalidAst);
+        assert_eq!(error.message, "kernel source exceeds its nesting limit");
+    }
+}
+
+#[test]
 fn reserved_operations_obey_the_kernel_statement_rule() {
     let library = super::library();
     let effects = BTreeMap::new();

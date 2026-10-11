@@ -104,12 +104,37 @@ pub(crate) fn lower(
             None,
         )));
     }
+    // Include operators and postfix chains as well as open delimiters: even
+    // syntax the kernel reader will reject can recurse in SWC first. Measuring
+    // does not impose the ordinary cell's much smaller nesting limit.
+    let parse_depth = match crate::adapter::nesting::source_nesting_depth(source, usize::MAX) {
+        Ok(depth) => depth,
+        Err(span) => {
+            return Some(Err(Diagnostic::new(
+                DiagnosticCode::ParseResourcesUnavailable,
+                "kernel parser nesting exceeds address space",
+                Some(span),
+            )));
+        }
+    };
     let parsed = std::thread::scope(|scope| {
         // The kernel's depth limit exceeds the ordinary dialect's source
-        // limit. Reserve parser stack here, then validate the resulting tree.
+        // limit. The 40,000-byte allowance per recursive level retains the
+        // measured parser-frame margin of adapter::parser_stack, without
+        // reserving stack for every byte of a wide printed document.
+        let stack_size = parse_depth
+            .checked_mul(40_000)
+            .and_then(|bytes| bytes.checked_add(8 * 1024 * 1024))
+            .ok_or_else(|| {
+                Diagnostic::new(
+                    DiagnosticCode::ParseResourcesUnavailable,
+                    "kernel parser stack reservation exceeds address space",
+                    None,
+                )
+            })?;
         let handle = std::thread::Builder::new()
             .name("kernel-typescript-parse".into())
-            .stack_size(8 * 1024 * 1024 + source.len().saturating_mul(40_000))
+            .stack_size(stack_size)
             .spawn_scoped(scope, || parse_module(source))
             .map_err(|error| {
                 Diagnostic::new(
