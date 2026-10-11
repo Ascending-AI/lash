@@ -17,19 +17,19 @@ use crate::support::database_url;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn postgres_commit_waits_for_delete_then_refuses_missing_component_when_configured() {
-    commit_waits_for_delete_then_refuses(ReuseBranch::UnchangedComponent).await;
+    commit_waits_for_delete(ReuseBranch::UnchangedComponent).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn postgres_commit_with_changed_component_waits_for_delete_then_refuses_missing_component_when_configured()
  {
-    commit_waits_for_delete_then_refuses(ReuseBranch::ChangedComponent).await;
+    commit_waits_for_delete(ReuseBranch::ChangedComponent).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_commit_with_existing_root_waits_for_delete_then_refuses_missing_root_when_configured()
- {
-    commit_waits_for_delete_then_refuses(ReuseBranch::ExistingRoot).await;
+async fn postgres_commit_with_existing_root_waits_for_delete_then_reinstalls_root_when_configured()
+{
+    commit_waits_for_delete(ReuseBranch::ExistingRoot).await;
 }
 
 #[derive(Clone, Copy)]
@@ -49,7 +49,7 @@ impl ReuseBranch {
     }
 }
 
-async fn commit_waits_for_delete_then_refuses(branch: ReuseBranch) {
+async fn commit_waits_for_delete(branch: ReuseBranch) {
     let Some(database_url) = database_url() else {
         eprintln!("skipping Postgres commit-vs-delete law: database URL is not set");
         return;
@@ -230,23 +230,48 @@ async fn commit_waits_for_delete_then_refuses(branch: ReuseBranch) {
         .await
         .expect("commit controlled component delete");
 
-    let error = tokio::time::timeout(Duration::from_secs(10), commit_task)
+    let published = tokio::time::timeout(Duration::from_secs(10), commit_task)
         .await
         .expect("blocked checkpoint publication did not resume")
-        .expect("join checkpoint publication")
-        .expect_err("publication must refuse a component deleted before its edge");
-    match (branch, error) {
-        (
-            ReuseBranch::UnchangedComponent | ReuseBranch::ChangedComponent,
-            StoreError::CheckpointComponentMissing { key, blob_ref },
-        ) => {
-            assert_eq!(key, "law/commit-delete-shared");
-            assert_eq!(blob_ref, shared.blob_ref);
+        .expect("join checkpoint publication");
+    if matches!(branch, ReuseBranch::ExistingRoot) {
+        // The commit supplies the root it lost, so it installs it again
+        // from its own bytes, edges and all: every node it reaches exists.
+        let receipt = published.expect("publication re-installs a root it supplies");
+        assert_eq!(receipt.checkpoint_ref, victim_receipt.checkpoint_ref);
+        let reached: Vec<(String, bool)> = sqlx::query_as(
+            "WITH RECURSIVE reach AS (
+                 SELECT $1::text AS hash
+                 UNION
+                 SELECT edge.child_hash FROM lash_blob_edges AS edge
+                 JOIN reach ON edge.parent_hash = reach.hash
+             )
+             SELECT reach.hash, EXISTS (SELECT 1 FROM lash_blobs WHERE hash = reach.hash)
+             FROM reach",
+        )
+        .bind(receipt.checkpoint_ref.as_str())
+        .fetch_all(storage.pool())
+        .await
+        .expect("walk the re-installed checkpoint");
+        assert!(
+            reached.iter().all(|(_, stored)| *stored),
+            "a re-installed checkpoint reaches an absent node: {reached:?}"
+        );
+        for reachable in [&receipt.checkpoint_ref, &shared.blob_ref] {
+            assert!(
+                reached.iter().any(|(hash, _)| hash == reachable.as_str()),
+                "the re-installed checkpoint does not reach {reachable}: {reached:?}"
+            );
         }
-        (ReuseBranch::ExistingRoot, StoreError::CheckpointRootMissing { blob_ref }) => {
-            assert_eq!(blob_ref, victim_receipt.checkpoint_ref);
+    } else {
+        // A component the commit names without supplying is refused.
+        match published.expect_err("publication must refuse a component deleted before its edge") {
+            StoreError::CheckpointComponentMissing { key, blob_ref } => {
+                assert_eq!(key, "law/commit-delete-shared");
+                assert_eq!(blob_ref, shared.blob_ref);
+            }
+            other => panic!("the losing commit returned the wrong typed error: {other}"),
         }
-        (_, other) => panic!("the losing commit returned the wrong typed error: {other}"),
     }
     commit_pool.close().await;
 }

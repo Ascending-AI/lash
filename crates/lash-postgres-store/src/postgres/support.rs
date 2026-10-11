@@ -429,8 +429,10 @@ pub(crate) async fn put_checkpoint_tx(
     crate::durable::install_staged(tx, &nodes)
         .await
         .map_err(graph_store_error)?;
-    // An install skips a root that is already stored without locking it:
-    // the root is held like a component, so a reclaim that wins first is a
+    // An install that names a node locks a root already stored, and
+    // installs again, whole, one a reclaim removed while it waited; one
+    // that names none skips a stored root without locking it. The root is
+    // held like a component, so a reclaim that wins after the install is a
     // typed missing root, never a later foreign-key error.
     lock_checkpoint_blob_tx(tx, checkpoint_ref.as_str(), None).await?;
     Ok((checkpoint_ref, manifest))

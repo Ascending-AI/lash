@@ -506,7 +506,7 @@
   "//crates/lash-postgres-store:integration__test": {
     "checkpoint_commit_delete_race::postgres_commit_waits_for_delete_then_refuses_missing_component_when_configured": 587,
     "checkpoint_commit_delete_race::postgres_commit_with_changed_component_waits_for_delete_then_refuses_missing_component_when_configured": 975,
-    "checkpoint_commit_delete_race::postgres_commit_with_existing_root_waits_for_delete_then_refuses_missing_root_when_configured": 690,
+    "checkpoint_commit_delete_race::postgres_commit_with_existing_root_waits_for_delete_then_reinstalls_root_when_configured": 690,
     "fleet_format::a_select_only_role_reads_the_fleet_format_and_is_refused_on_write": 728,
     "fleet_format::postgres_fleet_format_conformance": 364,
     "fleet_format::postgres_session_meta_stamps_the_version_the_fleet_format_selects": 635,
