@@ -2,48 +2,29 @@
 //!
 //! The format itself (envelopes, kinds, encoding, decoding, refusals) is
 //! `lash_core_store::checkpoint_graph`. This module is what a durable commit
-//! does with it: the closed set of root owners, the prepared graph a commit
-//! publishes, the graph-reference rows that own roots, the fenced commit and
+//! does with it: the closed set of root owners, the graph-reference rows
+//! that own roots, the owner transaction and
 //! the read-pin contract every store implements.
 //!
 //! # Contracts
 //!
-//! - **One fenced transaction.** [`GraphStore::commit_graph`] runs inside a
-//!   transaction opened through the lock-order prelude ([`LockStep`]): the
-//!   graph gate first, then the fleet guard, node liveness, session history
-//!   in sorted session order, the owner fence and revision compare-and-set,
-//!   read-pin rows in sorted order, blob inserts in digest order, and only
-//!   then edges, roots and domain rows. Every key it will lock is named in
-//!   its [`FencedCommit`] before it opens; no category is acquired after a
-//!   later one is held.
-//! - **Commit order.** Within it: validate revisions, commit identity and
-//!   budget; validate hashes, closure, acyclicity and body owners; insert
-//!   unique blobs comparing bytes on conflict; insert every child edge once
-//!   all blobs exist; append admission, start, wait and outcome facts;
-//!   acquire destination roots, update namespace, phase and execution rows,
-//!   retire source roots and prune consumed records; commit, then
-//!   acknowledge and dispatch. A park is never split across visible commits.
-//! - **Root changes are a projection.** [`PreparedGraph::publications`] is
-//!   derived from the commit's [`DomainWrite`]s by
-//!   [`DomainWrite::publications`]; the commit refuses a batch whose
-//!   publications are not exactly that projection
-//!   ([`PreparedGraph::check_projection`]), and the owning domain adapter
-//!   writes each column once.
-//! - **Retry by identity.** The same [`CommitId`] with the same batch digest
-//!   is an idempotent retry answered from its receipt; with another digest
-//!   it is refused. A receipt never authorizes hydrating a retired root.
+//! An owner's [`ActorTx`](crate::ActorTx) stages its graph and publishes it
+//! in one fenced transaction. The graph gate precedes the owner fence;
+//! nodes are checked for hashes, closure, acyclicity and body ownership,
+//! then installed before edges and domain rows publish their roots. A
+//! refusal rolls back the nodes, edges and domain rows together.
 //!
-//! An owner's [`ActorTx`](crate::ActorTx) carries the same graph: the nodes
-//! it stages are installed in its fenced commit before its domain writes,
-//! which publish their roots.
+//! Root changes are derived directly from [`DomainWrite::publications`],
+//! and the owning domain adapter writes each column once. A park is never
+//! split across visible commits. Streaming readers use [`GraphStore`]'s
+//! read pins; graph hydration and collection share the graph gate.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use lash_core_store::checkpoint_graph::{
-    BatchDigest, BlobEncoding, CommitId, DecodeLimits, EncodedCommitMeasurement, EncodedNode,
-    GraphCommitBudget, GraphRefusal, InstalledGraphMeasurement, NodeId, NodeSource, RootSource,
-    StoredNode,
+    BlobEncoding, CommitId, DecodeLimits, EncodedNode, GraphRefusal, NodeId, NodeSource,
+    RootSource, StoredNode,
 };
 use lash_sansio::{SessionId, ToolCallId, TurnId};
 
@@ -51,7 +32,7 @@ use super::DomainWrite;
 use super::keys::{ExecKey, Ordinal, OwnerKey, RunSeq};
 use super::snapshots::SnapshotRev;
 use super::turns::{StoredValues, TurnWrite};
-use crate::ids::{ActorKey, CommitLabel, DurableInstant, Epoch};
+use crate::ids::{DurableInstant, Epoch};
 
 /// The PostgreSQL transaction advisory key of the graph gate: the one bigint
 /// `0x4c41534847524150` ("LASHGRAP"). Ordinary graph transactions take it
@@ -179,128 +160,6 @@ pub enum RootChange {
     Retire { owner: RootOwner, expected: NodeId },
 }
 
-/// The owner revisions a commit expects, and after it the ones it produced:
-/// each expected revision plus one (none becomes 1).
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct OwnerRevisionSet {
-    revisions: BTreeMap<RootOwner, Option<u64>>,
-}
-
-impl OwnerRevisionSet {
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Expects `owner` at `revision` (none when it has no row yet).
-    #[must_use]
-    pub fn expect(mut self, owner: RootOwner, revision: Option<u64>) -> Self {
-        self.revisions.insert(owner, revision);
-        self
-    }
-
-    #[must_use]
-    pub fn get(&self, owner: &RootOwner) -> Option<Option<u64>> {
-        self.revisions.get(owner).copied()
-    }
-
-    pub fn iter(&self) -> impl Iterator<Item = (&RootOwner, Option<u64>)> {
-        self.revisions
-            .iter()
-            .map(|(owner, revision)| (owner, *revision))
-    }
-
-    /// The revisions a successful commit leaves: each expected one plus one.
-    ///
-    /// # Errors
-    ///
-    /// [`GraphRefusal::LengthOverflow`] at `u64::MAX`.
-    pub fn advanced(&self) -> Result<Self, GraphRefusal> {
-        let mut revisions = BTreeMap::new();
-        for (owner, revision) in &self.revisions {
-            let next = revision
-                .unwrap_or(0)
-                .checked_add(1)
-                .ok_or(GraphRefusal::LengthOverflow)?;
-            revisions.insert(owner.clone(), Some(next));
-        }
-        Ok(Self { revisions })
-    }
-}
-
-/// Everything one commit publishes, frozen before the commit opens: new
-/// requests, whole kernel metadata, host summaries and envelope references
-/// all encoded already. Every root is a complete graph.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct PreparedGraph {
-    /// Unique nodes, staged until the commit is acknowledged. A node an
-    /// acknowledged root already installed may be omitted; the commit
-    /// rechecks every reference and refuses a missing one
-    /// ([`GraphRefusal::MissingNode`]) so the caller resends its bytes.
-    pub nodes: BTreeMap<NodeId, EncodedNode>,
-    /// Existing nodes the commit requires: a requirement, not a proof that
-    /// they exist.
-    pub reads: BTreeSet<NodeId>,
-    /// The root changes, exactly the projection of the commit's writes.
-    pub publications: Vec<RootChange>,
-    pub encoded: EncodedCommitMeasurement,
-}
-
-impl PreparedGraph {
-    /// Refuses publications that are not exactly the projection of `writes`,
-    /// in order.
-    ///
-    /// # Errors
-    ///
-    /// [`GraphRefusal::PublicationMismatch`].
-    pub fn check_projection(&self, writes: &[DomainWrite]) -> Result<(), GraphRefusal> {
-        let projected: Vec<RootChange> =
-            writes.iter().flat_map(DomainWrite::publications).collect();
-        if projected == self.publications {
-            Ok(())
-        } else {
-            Err(GraphRefusal::PublicationMismatch)
-        }
-    }
-}
-
-/// One graph commit: identity, expected revisions, the prepared graph, the
-/// domain rows it writes, and its explicit budget.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct GraphCommitBatch {
-    pub commit_id: CommitId,
-    pub expected: OwnerRevisionSet,
-    pub graph: PreparedGraph,
-    /// The domain writes the commit carries: the graph-reference rows that
-    /// publish its roots, and any other owner rows.
-    pub domain_writes: Vec<DomainWrite>,
-    pub budget: GraphCommitBudget,
-}
-
-/// What a successful graph commit published.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PublishedGraph {
-    pub commit_id: CommitId,
-    /// The expected revisions, each advanced by one.
-    pub revisions: OwnerRevisionSet,
-    pub roots: Vec<(RootOwner, NodeId)>,
-    pub installed: InstalledGraphMeasurement,
-}
-
-/// The transaction a graph commit runs in: the owner fence and every key
-/// the prelude locks, known before it opens.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct FencedCommit {
-    pub actor: ActorKey,
-    pub epoch: Epoch,
-    pub label: CommitLabel,
-    /// Sessions whose history the commit locks, locked in this order.
-    pub history_sessions: BTreeSet<SessionId>,
-    /// Read pins the commit acquires, renews or releases, locked in this
-    /// order.
-    pub read_pins: BTreeSet<ReadPinId>,
-}
-
 /// One stored blob a hydration or pinned fetch read.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HydratedNode {
@@ -363,20 +222,12 @@ impl NodeSource for PinnedBatch {
 }
 
 /// The graph half of a durable store beyond the owner commit and hydration
-/// every [`DurableStore`](crate::DurableStore) answers: the batch commit
-/// with its retry receipt, and streaming read pins. Every method takes the
+/// every [`DurableStore`](crate::DurableStore) answers: streaming read pins.
+/// Every method takes the
 /// graph gate on PostgreSQL; none is sequenced by its caller from smaller
 /// operations.
 #[async_trait::async_trait]
 pub trait GraphStore: Send + Sync {
-    /// Applies one graph commit atomically in the order of this module's
-    /// contracts, or refuses with nothing written.
-    async fn commit_graph(
-        &self,
-        tx: FencedCommit,
-        batch: GraphCommitBatch,
-    ) -> Result<PublishedGraph, GraphRefusal>;
-
     /// Pins `owner`'s current root under the gate and the owner's check.
     async fn acquire_read_pin(
         &self,
@@ -674,19 +525,6 @@ pub enum ReleasePinWrite {
     Retire { release: String, expected: NodeId },
 }
 
-/// One commit receipt (`graph_commit_receipts`): kept for the owner's retry
-/// lifetime. It owns no root and authorizes no hydration.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CommitReceiptRow {
-    /// The stored key of the owner whose retries it answers.
-    pub owner: String,
-    pub commit_id: CommitId,
-    pub batch_digest: BatchDigest,
-    /// The canonical encoding of the [`PublishedGraph`] it answers with.
-    pub result_bytes: Arc<[u8]>,
-    pub written_epoch: Epoch,
-}
-
 fn change(owner: RootOwner, expected: Option<NodeId>, next: Option<NodeId>) -> Option<RootChange> {
     match (expected, next) {
         (expected, Some(root)) => Some(RootChange::Put {
@@ -843,23 +681,4 @@ impl DomainWrite {
             | Self::Prompt(_) => Vec::new(),
         }
     }
-
-    /// Whether this write is one of the graph-reference rows a batch commit
-    /// may carry: an execution root, a run fact, an admission, a read pin or
-    /// a release pin.
-    #[must_use]
-    pub fn is_graph_reference(&self) -> bool {
-        matches!(
-            self,
-            Self::ExecRoot(_)
-                | Self::RunFact(_)
-                | Self::EffectAdmission(_)
-                | Self::ReadPin(_)
-                | Self::ReleasePin(_)
-        )
-    }
 }
-
-#[cfg(test)]
-#[path = "graph_tests.rs"]
-mod tests;

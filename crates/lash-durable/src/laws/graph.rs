@@ -16,15 +16,14 @@ use lash_sansio::{SessionId, ToolCallId, TurnId};
 
 use super::{LABEL, LawBroken, LawOutcome, create, ensure, node, session};
 use crate::domain::graph::{
-    EffectAdmissionWrite, EffectKey, ExecRootWrite, FencedCommit, GraphCommitBatch, GraphStore,
-    HydratedGraph, OwnerRevisionSet, PreparedGraph, ReadLease, ReadPin, ReleasePinWrite, RootOwner,
-    RunFactKind, RunFactWrite,
+    EffectAdmissionWrite, EffectKey, ExecRootWrite, GraphStore, HydratedGraph, ReadLease, ReadPin,
+    ReleasePinWrite, RootOwner, RunFactKind, RunFactWrite,
 };
-use crate::domain::graph_commit::{CollectionLimits, GraphCollection, encode_commit};
+use crate::domain::graph_commit::{CollectionLimits, GraphCollection, measure_owner_commit};
 use crate::domain::namespace_value::NamespaceValue;
 use crate::domain::{
-    CellId, ExecKey, Ordinal, OwnerKey, RunSeq, SnapshotRev, StoredNamespaceWrite, StoredValues,
-    TurnWrite, UnfinishedPhase,
+    CellId, DomainRefusal, ExecKey, Ordinal, OwnerKey, RunSeq, SnapshotRev, StoredNamespaceWrite,
+    StoredValues, TurnWrite, UnfinishedPhase,
 };
 use crate::{ActorKey, DomainWrite, DurableError, DurableStore, Epoch};
 
@@ -87,7 +86,7 @@ pub trait GraphTier: Send + Sync {
     async fn foreign(&self, write: ForeignWrite);
 }
 
-fn refused(what: &str, error: GraphRefusal) -> LawBroken {
+fn refused(what: &str, error: impl std::fmt::Display) -> LawBroken {
     LawBroken(format!("{what}: unexpected refusal {error}"))
 }
 
@@ -133,25 +132,11 @@ fn roomy() -> GraphCommitBudget {
     }
 }
 
-fn batch(nodes: BTreeMap<NodeId, EncodedNode>, writes: Vec<DomainWrite>) -> GraphCommitBatch {
-    GraphCommitBatch {
-        commit_id: CommitId::mint(),
-        expected: OwnerRevisionSet::new(),
-        graph: PreparedGraph {
-            nodes,
-            reads: Default::default(),
-            publications: writes.iter().flat_map(DomainWrite::publications).collect(),
-            encoded: Default::default(),
-        },
-        domain_writes: writes,
-        budget: roomy(),
-    }
-}
-
 /// A graph refusal as the port carried it.
 fn graph_refusal(error: DurableError) -> GraphRefusal {
     match error {
         DurableError::Graph(refusal) => refusal,
+        DurableError::OwnershipLost(_) => GraphRefusal::FenceLost,
         DurableError::Store(failure) => GraphRefusal::Backend(failure),
         other => GraphRefusal::Backend(crate::StoreFailure {
             kind: crate::StoreFailureKind::Corrupt,
@@ -180,21 +165,14 @@ async fn owner_commit(
     owner: &Owned,
     nodes: BTreeMap<NodeId, EncodedNode>,
     writes: Vec<DomainWrite>,
-) -> Result<(), GraphRefusal> {
+) -> Result<(), DurableError> {
     let store = tier.store();
-    let mut tx = store
-        .begin(&owner.actor, owner.epoch)
-        .await
-        .map_err(graph_refusal)?;
+    let mut tx = store.begin(&owner.actor, owner.epoch).await?;
     tx.stage(nodes.into_values());
     for write in writes {
         tx.write(write);
     }
-    store
-        .commit(tx, LABEL)
-        .await
-        .map(|_| ())
-        .map_err(graph_refusal)
+    store.commit(tx, LABEL).await.map(|_| ())
 }
 
 /// A session actor the law owns, and its fence.
@@ -205,17 +183,6 @@ struct Owned {
 }
 
 impl Owned {
-    fn fence(&self) -> FencedCommit {
-        FencedCommit {
-            actor: self.actor.clone(),
-            epoch: self.epoch,
-            label: LABEL,
-            // The owner's own session history, as a session commit locks it.
-            history_sessions: std::iter::once(self.session.clone()).collect(),
-            read_pins: Default::default(),
-        }
-    }
-
     fn exec(&self, cell: &str) -> ExecKey {
         ExecKey::Cell(self.session.clone(), turn("graph-turn"), CellId::new(cell))
     }
@@ -243,29 +210,6 @@ async fn owned(tier: &dyn GraphTier, id: &str) -> Result<Owned, LawBroken> {
     })
 }
 
-async fn commit(
-    tier: &dyn GraphTier,
-    owner: &Owned,
-    batch: GraphCommitBatch,
-) -> Result<crate::domain::graph::PublishedGraph, GraphRefusal> {
-    tier.graph().commit_graph(owner.fence(), batch).await
-}
-
-/// Commits `writes` as a batch when each is a graph-reference row, and
-/// through the owner's transaction otherwise.
-async fn commit_any(
-    tier: &dyn GraphTier,
-    owner: &Owned,
-    nodes: BTreeMap<NodeId, EncodedNode>,
-    writes: Vec<DomainWrite>,
-) -> Result<(), GraphRefusal> {
-    if writes.iter().all(DomainWrite::is_graph_reference) {
-        commit(tier, owner, batch(nodes, writes)).await.map(|_| ())
-    } else {
-        owner_commit(tier, owner, nodes, writes).await
-    }
-}
-
 async fn present(tier: &dyn GraphTier, node: &NodeId) -> bool {
     tier.blob(&node.to_hex()).await.is_some()
 }
@@ -281,13 +225,12 @@ fn put_exec(exec: &ExecKey, expected: Option<(u64, NodeId)>, root: NodeId) -> Do
 }
 
 /// PC-ATOMIC: a refused commit leaves no node, edge, fact, admission or
-/// root behind, whatever refused it, and leaves no receipt either: the same
-/// commit identity is still free for the batch that succeeds.
+/// root behind, whatever refused it.
 ///
 /// # Errors
 ///
 /// The first rule broken.
-pub async fn a_refused_graph_commit_writes_nothing(tier: &dyn GraphTier) -> LawOutcome {
+pub async fn a_refused_owner_graph_commit_writes_nothing(tier: &dyn GraphTier) -> LawOutcome {
     let owner = owned(tier, "graph-atomic").await?;
     let exec = &owner.exec("cell");
     let facts = OwnerKey::Cell(
@@ -321,6 +264,7 @@ pub async fn a_refused_graph_commit_writes_nothing(tier: &dyn GraphTier) -> LawO
     };
     let assert_untouched = |what: &'static str| {
         let nodes = nodes.clone();
+        let facts = facts.clone();
         async move {
             for id in nodes.keys() {
                 ensure!(
@@ -332,46 +276,47 @@ pub async fn a_refused_graph_commit_writes_nothing(tier: &dyn GraphTier) -> LawO
                     "{what}: edges of {id} were installed by a refused commit"
                 );
             }
-            let hydrated = hydrate(
-                tier,
+            for root_owner in [
                 RootOwner::Exec(exec.clone()),
-                None,
-                DecodeLimits::within_total(1 << 30),
-            )
-            .await;
-            ensure!(
-                hydrated == Err(GraphRefusal::RootRetired),
-                "{what}: a refused commit published the execution root: {hydrated:?}"
-            );
+                RootOwner::RunFact {
+                    owner: facts.clone(),
+                    run: RunSeq(0),
+                    ordinal: Ordinal(0),
+                },
+                RootOwner::EffectAdmission {
+                    exec: exec.clone(),
+                    effect: EffectKey(vec![1, 2, 3].into()),
+                },
+            ] {
+                let hydrated = hydrate(
+                    tier,
+                    root_owner.clone(),
+                    None,
+                    DecodeLimits::within_total(1 << 30),
+                )
+                .await;
+                ensure!(
+                    hydrated == Err(GraphRefusal::RootRetired),
+                    "{what}: a refused commit published {root_owner:?}: {hydrated:?}"
+                );
+            }
             Ok::<_, LawBroken>(())
         }
     };
 
     // The last write conflicts, after every blob, edge, fact and admission
     // was written in the transaction.
-    let late = batch(nodes.clone(), writes(Some((7, root))));
-    let commit_id = late.commit_id;
-    let answer = commit(tier, &owner, late).await;
+    let answer = owner_commit(tier, &owner, nodes.clone(), writes(Some((7, root)))).await;
     ensure!(
-        answer == Err(GraphRefusal::RevisionConflict),
+        answer
+            == Err(DurableError::Domain(DomainRefusal::SnapshotRevConflict {
+                exec: exec.clone(),
+                expected: Some(SnapshotRev(7)),
+                found: None,
+            })),
         "a stale execution revision answered {answer:?}"
     );
     assert_untouched("a late conflict").await?;
-
-    // A stale owner fence.
-    let stale = FencedCommit {
-        epoch: Epoch(owner.epoch.0 - 1),
-        ..owner.fence()
-    };
-    let answer = tier
-        .graph()
-        .commit_graph(stale, batch(nodes.clone(), writes(None)))
-        .await;
-    ensure!(
-        answer == Err(GraphRefusal::FenceLost),
-        "a stale fence answered {answer:?}"
-    );
-    assert_untouched("a stale fence").await?;
 
     // A child neither supplied nor stored.
     let mut orphan = staging();
@@ -386,12 +331,29 @@ pub async fn a_refused_graph_commit_writes_nothing(tier: &dyn GraphTier) -> LawO
         release: "dangling".into(),
         root: dangling,
     }));
-    let answer = commit(tier, &owner, batch(orphan_nodes, orphan_writes)).await;
+    let answer = owner_commit(tier, &owner, orphan_nodes, orphan_writes).await;
     ensure!(
-        answer == Err(GraphRefusal::MissingNode(absent)),
+        answer == Err(DurableError::Graph(GraphRefusal::MissingNode(absent))),
         "a dangling child answered {answer:?}"
     );
     assert_untouched("a dangling child").await?;
+    ensure!(
+        !present(tier, &dangling).await && tier.edges(&dangling).await.is_empty(),
+        "a refused owner commit installed the dangling node or its edges"
+    );
+    let released = hydrate(
+        tier,
+        RootOwner::ReleasePin {
+            release: "dangling".into(),
+        },
+        None,
+        DecodeLimits::within_total(1 << 30),
+    )
+    .await;
+    ensure!(
+        released == Err(GraphRefusal::RootRetired),
+        "a refused owner commit published a dangling pin"
+    );
 
     // An opaque blob stored under a node's identity is never reclassified.
     tier.foreign(ForeignWrite::OpaqueBlob {
@@ -399,26 +361,17 @@ pub async fn a_refused_graph_commit_writes_nothing(tier: &dyn GraphTier) -> LawO
         bytes: b"opaque".to_vec(),
     })
     .await;
-    let answer = commit(tier, &owner, batch(nodes.clone(), writes(None))).await;
+    let answer = owner_commit(tier, &owner, nodes.clone(), writes(None)).await;
     ensure!(
-        answer == Err(GraphRefusal::EncodingConflict(fact)),
+        answer == Err(DurableError::Graph(GraphRefusal::EncodingConflict(fact))),
         "an opaque blob under a node's identity answered {answer:?}"
     );
     tier.foreign(ForeignWrite::DeleteBlob { node: fact }).await;
     assert_untouched("an encoding conflict").await?;
 
-    // The refused identity left no receipt: it commits the valid batch.
-    let mut valid = batch(nodes.clone(), writes(None));
-    valid.commit_id = commit_id;
-    let published = commit(tier, &owner, valid)
+    owner_commit(tier, &owner, nodes.clone(), writes(None))
         .await
-        .map_err(|error| refused("the valid batch", error))?;
-    ensure!(
-        published.installed.new_nodes == nodes.len() as u64,
-        "the valid batch installed {} of {} nodes",
-        published.installed.new_nodes,
-        nodes.len()
-    );
+        .map_err(|error| refused("the valid graph", error))?;
     for (id, node) in &nodes {
         ensure!(
             tier.edges(id).await == node.children().map_err(|e| refused("children", e))?,
@@ -428,16 +381,13 @@ pub async fn a_refused_graph_commit_writes_nothing(tier: &dyn GraphTier) -> LawO
     Ok(())
 }
 
-/// PC-ATOMIC: a retry of an acknowledged commit under its identity answers
-/// the first result and writes nothing again; another batch under that
-/// identity is refused.
+/// PC-ATOMIC: an owner cannot append a second outcome for one call;
+/// the refused transaction publishes no second fact.
 ///
 /// # Errors
 ///
 /// The first rule broken.
-pub async fn a_lost_ack_retry_answers_once_and_a_reused_identity_refuses(
-    tier: &dyn GraphTier,
-) -> LawOutcome {
+pub async fn an_owner_refuses_a_second_outcome_for_one_call(tier: &dyn GraphTier) -> LawOutcome {
     let owner = owned(tier, "graph-retry").await?;
     let facts = OwnerKey::Cell(
         owner.session.clone(),
@@ -458,33 +408,18 @@ pub async fn a_lost_ack_retry_answers_once_and_a_reused_identity_refuses(
             record,
         })
     };
-    let first = batch(nodes.into_nodes(), vec![append(0, outcome)]);
-    let published = commit(tier, &owner, first.clone())
+    let nodes = nodes.into_nodes();
+    owner_commit(tier, &owner, nodes.clone(), vec![append(0, outcome)])
         .await
-        .map_err(|error| refused("the first commit", error))?;
-    let retried = commit(tier, &owner, first.clone())
-        .await
-        .map_err(|error| refused("the retry", error))?;
+        .map_err(|error| refused("the first outcome", error))?;
+    let answer = owner_commit(tier, &owner, nodes, vec![append(1, outcome)]).await;
     ensure!(
-        retried == published,
-        "a retry answered {retried:?}, not the first result {published:?}"
-    );
-    let mut other = batch(first.graph.nodes.clone(), vec![append(1, outcome)]);
-    other.commit_id = first.commit_id;
-    let answer = commit(tier, &owner, other).await;
-    ensure!(
-        answer == Err(GraphRefusal::CommitIdentityConflict),
-        "another batch under a used identity answered {answer:?}"
-    );
-    // A second outcome for the call under a fresh identity is a duplicate.
-    let answer = commit(
-        tier,
-        &owner,
-        batch(first.graph.nodes.clone(), vec![append(1, outcome)]),
-    )
-    .await;
-    ensure!(
-        answer == Err(GraphRefusal::DuplicateOutcome(call.clone())),
+        answer
+            == Err(DurableError::Domain(DomainRefusal::OutcomeExists {
+                owner: facts.clone(),
+                run: RunSeq(0),
+                call: call.clone()
+            })),
         "a second outcome for one call answered {answer:?}"
     );
     let hydrated = hydrate(
@@ -531,10 +466,11 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
         release: "anchor".into(),
         root: anchor,
     });
-    commit(
+    owner_commit(
         tier,
         &owner,
-        batch(anchor_nodes.into_nodes(), vec![install_anchor]),
+        anchor_nodes.into_nodes(),
+        vec![install_anchor],
     )
     .await
     .map_err(|error| refused("the anchor", error))?;
@@ -704,7 +640,7 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
                 root,
             }));
         }
-        commit_any(tier, &owner, nodes.clone(), writes)
+        owner_commit(tier, &owner, nodes.clone(), writes)
             .await
             .map_err(|error| refused(source.catalog_name(), error))?;
         let mut pin = None;
@@ -766,16 +702,14 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
                 | RootSource::ArtifactBridge
                 | RootSource::RunTerminalWindow
         ) {
-            commit(
+            owner_commit(
                 tier,
                 &owner,
-                batch(
-                    BTreeMap::new(),
-                    vec![DomainWrite::ReleasePin(ReleasePinWrite::Retire {
-                        release: "carrier".into(),
-                        expected: root,
-                    })],
-                ),
+                BTreeMap::new(),
+                vec![DomainWrite::ReleasePin(ReleasePinWrite::Retire {
+                    release: "carrier".into(),
+                    expected: root,
+                })],
             )
             .await
             .map_err(|error| refused("the carrier", error))?;
@@ -795,7 +729,7 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
         // leaf stays with the anchor.
         match (source, retire, pin) {
             (_, Some(retire), _) => {
-                commit_any(tier, &owner, BTreeMap::new(), vec![retire])
+                owner_commit(tier, &owner, BTreeMap::new(), vec![retire])
                     .await
                     .map_err(|error| refused("a retirement", error))?;
             }
@@ -869,16 +803,14 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
         );
     }
     // The last owner goes: so does the shared leaf.
-    commit(
+    owner_commit(
         tier,
         &owner,
-        batch(
-            BTreeMap::new(),
-            vec![DomainWrite::ReleasePin(ReleasePinWrite::Retire {
-                release: "anchor".into(),
-                expected: anchor,
-            })],
-        ),
+        BTreeMap::new(),
+        vec![DomainWrite::ReleasePin(ReleasePinWrite::Retire {
+            release: "anchor".into(),
+            expected: anchor,
+        })],
     )
     .await
     .map_err(|error| refused("the anchor's retirement", error))?;
@@ -914,30 +846,25 @@ pub async fn a_collection_sweeps_only_what_it_proved_unreachable(
             root,
         })
     };
-    commit(
+    owner_commit(tier, &owner, nodes.into_nodes(), vec![pin("live", live)])
+        .await
+        .map_err(|error| refused("the live graph", error))?;
+    owner_commit(
         tier,
         &owner,
-        batch(nodes.into_nodes(), vec![pin("live", live)]),
-    )
-    .await
-    .map_err(|error| refused("the live graph", error))?;
-    commit(
-        tier,
-        &owner,
-        batch(dead_nodes.into_nodes(), vec![pin("dead", dead)]),
+        dead_nodes.into_nodes(),
+        vec![pin("dead", dead)],
     )
     .await
     .map_err(|error| refused("the dead graph", error))?;
-    commit(
+    owner_commit(
         tier,
         &owner,
-        batch(
-            BTreeMap::new(),
-            vec![DomainWrite::ReleasePin(ReleasePinWrite::Retire {
-                release: "dead".into(),
-                expected: dead,
-            })],
-        ),
+        BTreeMap::new(),
+        vec![DomainWrite::ReleasePin(ReleasePinWrite::Retire {
+            release: "dead".into(),
+            expected: dead,
+        })],
     )
     .await
     .map_err(|error| refused("the dead graph's retirement", error))?;
@@ -1043,10 +970,11 @@ pub async fn a_collection_sweeps_only_what_it_proved_unreachable(
     let mut repaired = staging();
     let child = value(&mut repaired, &[&big("gc-child")], &[]);
     let live = value(&mut repaired, &[&big("gc-live")], &[child]);
-    commit(
+    owner_commit(
         tier,
         &owner,
-        batch(repaired.into_nodes(), vec![pin("repaired", live)]),
+        repaired.into_nodes(),
+        vec![pin("repaired", live)],
     )
     .await
     .map_err(|error| refused("the repaired graph", error))?;
@@ -1087,23 +1015,17 @@ pub async fn a_collection_sweeps_only_what_it_proved_unreachable(
     // A source that cannot enumerate sweeps nothing.
     let mut more = staging();
     let doomed = value(&mut more, &[&big("gc-doomed")], &[]);
-    commit(
+    owner_commit(tier, &owner, more.into_nodes(), vec![pin("doomed", doomed)])
+        .await
+        .map_err(|error| refused("the doomed graph", error))?;
+    owner_commit(
         tier,
         &owner,
-        batch(more.into_nodes(), vec![pin("doomed", doomed)]),
-    )
-    .await
-    .map_err(|error| refused("the doomed graph", error))?;
-    commit(
-        tier,
-        &owner,
-        batch(
-            BTreeMap::new(),
-            vec![DomainWrite::ReleasePin(ReleasePinWrite::Retire {
-                release: "doomed".into(),
-                expected: doomed,
-            })],
-        ),
+        BTreeMap::new(),
+        vec![DomainWrite::ReleasePin(ReleasePinWrite::Retire {
+            release: "doomed".into(),
+            expected: doomed,
+        })],
     )
     .await
     .map_err(|error| refused("the doomed graph's retirement", error))?;
@@ -1135,10 +1057,11 @@ pub async fn a_read_is_one_protected_root(tier: &dyn GraphTier) -> LawOutcome {
     let mut first = staging();
     let old_root = value(&mut first, &[&big("read-a"), &big("read-b")], &[]);
     let old_nodes = first.into_nodes();
-    commit(
+    owner_commit(
         tier,
         &owner,
-        batch(old_nodes.clone(), vec![put_exec(exec, None, old_root)]),
+        old_nodes.clone(),
+        vec![put_exec(exec, None, old_root)],
     )
     .await
     .map_err(|error| refused("the first root", error))?;
@@ -1174,13 +1097,11 @@ pub async fn a_read_is_one_protected_root(tier: &dyn GraphTier) -> LawOutcome {
 
     let mut second = staging();
     let new_root = value(&mut second, &[&big("read-c")], &[]);
-    commit(
+    owner_commit(
         tier,
         &owner,
-        batch(
-            second.into_nodes(),
-            vec![put_exec(exec, Some((1, old_root)), new_root)],
-        ),
+        second.into_nodes(),
+        vec![put_exec(exec, Some((1, old_root)), new_root)],
     )
     .await
     .map_err(|error| refused("the replacement", error))?;
@@ -1257,16 +1178,14 @@ pub async fn a_read_is_one_protected_root(tier: &dyn GraphTier) -> LawOutcome {
     }
     ensure!(present(tier, &new_root).await, "the current root was swept");
 
-    commit(
+    owner_commit(
         tier,
         &owner,
-        batch(
-            BTreeMap::new(),
-            vec![DomainWrite::ExecRoot(ExecRootWrite::Retire {
-                exec: exec.clone(),
-                expected: new_root,
-            })],
-        ),
+        BTreeMap::new(),
+        vec![DomainWrite::ExecRoot(ExecRootWrite::Retire {
+            exec: exec.clone(),
+            expected: new_root,
+        })],
     )
     .await
     .map_err(|error| refused("the retirement", error))?;
@@ -1286,103 +1205,109 @@ pub async fn a_read_is_one_protected_root(tier: &dyn GraphTier) -> LawOutcome {
     Ok(())
 }
 
-/// The budget that admits `batch` exactly: its whole encoding (which names
-/// the budget itself) plus the reserve.
-fn exact_budget(batch: &mut GraphCommitBatch, reserve: u64) -> Result<u64, LawBroken> {
-    batch.budget.failure_reserve_bytes = reserve;
-    for _ in 0..8 {
-        let measured = encode_commit(batch)
-            .map_err(|error| refused("a measurement", error))?
-            .measurement;
-        let limit = measured.full_encoded_commit_bytes + reserve;
-        if batch.budget.encoded_bytes.get() == limit {
-            return Ok(limit);
-        }
-        batch.budget.encoded_bytes = ExplicitLimit::new(limit);
-    }
-    Err(LawBroken("the budget's own encoding did not settle".into()))
-}
-
-/// PC-SIZE: a commit is admitted on its whole encoding, whatever part is
-/// large: a tiny root with large host material is measured whole. The limit
-/// is admitted and one byte or one row less refuses with nothing written,
-/// and the store refuses exactly where the preparer's count says.
+/// PC-SIZE: an owner's whole graph encoding and reserve fit exactly at
+/// the byte and row limits; one byte or row less publishes nothing.
 ///
 /// # Errors
 ///
 /// The first rule broken.
-pub async fn a_commit_is_admitted_on_its_whole_encoding(tier: &dyn GraphTier) -> LawOutcome {
+pub async fn an_owner_commit_is_admitted_on_its_whole_encoding(tier: &dyn GraphTier) -> LawOutcome {
     let owner = owned(tier, "graph-size").await?;
-    let exec = &owner.exec("size");
-    let prepare = |tag: &str| {
-        let mut nodes = staging();
-        // A small root naming large host material: three 20 KB texts.
-        let history: Vec<String> = (0..3)
-            .map(|index| format!("{tag}-{index}:{}", "h".repeat(20_000)))
-            .collect();
-        let texts: Vec<&str> = history.iter().map(String::as_str).collect();
-        let host = value(&mut nodes, &texts, &[]);
-        let root = value(&mut nodes, &["root"], &[host]);
-        let size = nodes.nodes().get(&root).map_or(0, EncodedNode::len);
-        (nodes.into_nodes(), root, size)
-    };
-
-    let (nodes, root, root_size) = prepare("over");
-    let mut over = batch(nodes.clone(), vec![put_exec(exec, None, root)]);
-    let limit = exact_budget(&mut over, 512)?;
+    let exec = owner.exec("size");
+    let mut staging = staging();
+    let history: Vec<String> = (0..3)
+        .map(|index| format!("host-{index}:{}", "h".repeat(20_000)))
+        .collect();
+    let texts: Vec<&str> = history.iter().map(String::as_str).collect();
+    let host = value(&mut staging, &texts, &[]);
+    let root = value(&mut staging, &["root"], &[host]);
+    let root_size = staging.get(&root).map_or(0, EncodedNode::len);
+    let nodes = staging.into_nodes();
+    let writes = vec![put_exec(&exec, None, root)];
+    let measured = measure_owner_commit(&nodes, &writes)
+        .map_err(|error| refused("the owner measurement", error))?;
+    let reserve = 512;
+    let limit = measured.full_encoded_commit_bytes + reserve;
     ensure!(
         root_size < 512 && limit > 60_000,
         "the law's root is not small beside its host material"
     );
-    over.budget.encoded_bytes = ExplicitLimit::new(limit - 1);
-    let measured = encode_commit(&over)
-        .map_err(|error| refused("a measurement", error))?
-        .measurement;
-    let answer = commit(tier, &owner, over).await;
-    ensure!(
-        answer
-            == Err(GraphRefusal::CommitTooLarge {
-                bytes: measured.full_encoded_commit_bytes + 512,
+    let planned = measured.planned_mutation_rows;
+    let budgets = [
+        (
+            limit - 1,
+            planned,
+            Some(GraphRefusal::CommitTooLarge {
+                bytes: limit,
                 limit: limit - 1,
-            })
-            && measured.full_encoded_commit_bytes + 512 == limit,
-        "one byte under the whole encoding answered {answer:?} (measured {measured:?}, limit {limit})"
-    );
-    for id in nodes.keys() {
-        ensure!(!present(tier, id).await, "a refused commit installed {id}");
-    }
-
-    let mut rows = batch(nodes.clone(), vec![put_exec(exec, None, root)]);
-    exact_budget(&mut rows, 0)?;
-    let planned = encode_commit(&rows)
-        .map_err(|error| refused("a measurement", error))?
-        .measurement
-        .planned_mutation_rows;
-    rows.budget.mutation_rows = ExplicitLimit::new(planned - 1);
-    exact_budget(&mut rows, 0)?;
-    let answer = commit(tier, &owner, rows).await;
-    ensure!(
-        answer
-            == Err(GraphRefusal::TooManyMutations {
+            }),
+        ),
+        (
+            limit,
+            planned - 1,
+            Some(GraphRefusal::TooManyMutations {
                 rows: planned,
                 limit: planned - 1,
             }),
-        "one row under the plan answered {answer:?}"
-    );
-
-    let mut exact = batch(nodes.clone(), vec![put_exec(exec, None, root)]);
-    exact.budget.mutation_rows = ExplicitLimit::new(planned);
-    exact_budget(&mut exact, 512)?;
-    let published = commit(tier, &owner, exact)
-        .await
-        .map_err(|error| refused("the commit at its limit", error))?;
-    let installed: u64 = nodes.values().map(EncodedNode::len).sum();
-    ensure!(
-        published.installed.newly_installed_canonical_bytes == installed
-            && published.installed.new_nodes == nodes.len() as u64,
-        "the commit at its limit reported {:?}, not {installed} bytes in {} nodes",
-        published.installed,
-        nodes.len()
-    );
+        ),
+        (limit, planned, None),
+    ];
+    for (bytes, rows, refusal) in budgets {
+        let store = tier.store();
+        let mut tx = store.begin(&owner.actor, owner.epoch).await?;
+        tx.stage(nodes.values().cloned());
+        for write in &writes {
+            tx.write(write.clone());
+        }
+        tx.within(GraphCommitBudget {
+            encoded_bytes: ExplicitLimit::new(bytes),
+            mutation_rows: ExplicitLimit::new(rows),
+            failure_reserve_bytes: reserve,
+            ..roomy()
+        });
+        let answer = store
+            .commit(tx, LABEL)
+            .await
+            .map(|_| ())
+            .map_err(graph_refusal);
+        ensure!(
+            answer == refusal.clone().map_or(Ok(()), Err),
+            "owner byte limit {bytes} and row limit {rows} answered {answer:?}"
+        );
+        for (id, node) in &nodes {
+            let stored = tier.blob(&id.to_hex()).await;
+            if refusal.is_some() {
+                ensure!(
+                    stored.is_none() && tier.edges(id).await.is_empty(),
+                    "a refused owner commit installed node or edges {id}"
+                );
+            } else {
+                ensure!(
+                    stored.is_some_and(
+                        |(bytes, encoding)| bytes == node.bytes.as_ref() && encoding == 1
+                    ),
+                    "the admitted owner commit did not install {id}"
+                );
+            }
+        }
+        let hydrated = hydrate(
+            tier,
+            RootOwner::Exec(exec.clone()),
+            None,
+            DecodeLimits::within_total(1 << 30),
+        )
+        .await;
+        if refusal.is_some() {
+            ensure!(
+                hydrated == Err(GraphRefusal::RootRetired),
+                "a refused owner commit published a root"
+            );
+        } else {
+            ensure!(
+                hydrated.is_ok_and(|graph| graph.root == root && graph.nodes.len() == nodes.len()),
+                "the admitted owner commit did not publish its whole graph"
+            );
+        }
+    }
     Ok(())
 }

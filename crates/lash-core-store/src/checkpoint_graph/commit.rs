@@ -2,7 +2,7 @@
 //!
 //! A commit's admission is measured over its whole canonical encoding: every
 //! supplied node, root key, expected revision, admission, namespace body,
-//! prune key, edge row and receipt it writes, not only the new root. The
+//! prune key and edge row it writes, not only the new root. The
 //! measured total plus the reserved failure capacity must fit the host's
 //! explicit budget. There is no implicit default budget.
 
@@ -10,12 +10,9 @@ use std::fmt;
 
 use super::node::NodeId;
 use super::refusal::GraphRefusal;
-use crate::store::BlobRef;
 
-/// A commit's host-minted retry identity, retained before submission. The
-/// same identity with the same batch digest is an idempotent retry; with a
-/// different digest it is refused
-/// ([`GraphRefusal::CommitIdentityConflict`]).
+/// The identity of an execution snapshot's publication, retained in its
+/// root row with the owner's epoch and revision.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct CommitId(pub [u8; 32]);
 
@@ -33,26 +30,6 @@ impl CommitId {
 impl fmt::Debug for CommitId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "CommitId({})", NodeId(self.0).to_hex())
-    }
-}
-
-/// The digest of a commit's canonical intended batch: expected revisions and
-/// budget included; derived measurements, results and the digest itself
-/// excluded.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct BatchDigest(pub [u8; 32]);
-
-impl BatchDigest {
-    /// The digest of a batch's canonical token encoding.
-    #[must_use]
-    pub fn of_canonical(encoding: &[u8]) -> Self {
-        Self(BlobRef::digest_for_content(encoding))
-    }
-}
-
-impl fmt::Debug for BatchDigest {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "BatchDigest({})", NodeId(self.0).to_hex())
     }
 }
 

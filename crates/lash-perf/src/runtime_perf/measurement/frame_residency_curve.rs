@@ -13,7 +13,7 @@ struct FramePoint {
     decoded_rows: usize,
     commit_median_ms: f64,
     commit_samples_ms: Vec<f64>,
-    commit_graph_rows: Vec<usize>,
+    graph_rows_at_commit: Vec<usize>,
 }
 
 fn check_reopened_frame_residency(points: &[FramePoint]) -> anyhow::Result<()> {
@@ -50,14 +50,14 @@ fn check_frame_curve(points: &[FramePoint]) -> anyhow::Result<()> {
     check_reopened_frame_residency(points)?;
     for point in points {
         if point
-            .commit_graph_rows
+            .graph_rows_at_commit
             .iter()
             .any(|rows| *rows != CURRENT_FRAME_ROWS)
         {
             anyhow::bail!(
                 "{} prior rows changed submitted graph rows per commit: {:?}, expected {}",
                 point.prior_rows,
-                point.commit_graph_rows,
+                point.graph_rows_at_commit,
                 CURRENT_FRAME_ROWS
             );
         }
@@ -211,12 +211,12 @@ async fn point(
         );
     }
     let mut commit_samples_ms = Vec::with_capacity(commit_samples);
-    let mut commit_graph_rows = Vec::with_capacity(commit_samples);
+    let mut graph_rows_at_commit = Vec::with_capacity(commit_samples);
     for sample in 1..=commit_samples {
         open_next_frame(&mut state, prior_rows, sample)?;
         let (elapsed, graph_rows) = commit_state(catalog.as_ref(), &state).await?;
         commit_samples_ms.push(elapsed);
-        commit_graph_rows.push(graph_rows);
+        graph_rows_at_commit.push(graph_rows);
         state = load_frame(catalog.clone(), &session_id).await?;
         if state.session_graph.nodes.len() != CURRENT_FRAME_ROWS {
             anyhow::bail!("commit sample {sample} changed the current-frame row count");
@@ -230,7 +230,7 @@ async fn point(
         decoded_rows,
         commit_median_ms,
         commit_samples_ms,
-        commit_graph_rows,
+        graph_rows_at_commit,
     })
 }
 
@@ -312,11 +312,11 @@ pub(super) async fn run_once_frame_residency_curve(
         );
         counters.insert(
             format!(
-                "frame_residency.prior_{}.commit_graph_rows_max",
+                "frame_residency.prior_{}.graph_rows_at_commit_max",
                 measured.prior_rows
             ),
             measured
-                .commit_graph_rows
+                .graph_rows_at_commit
                 .iter()
                 .copied()
                 .max()
@@ -348,7 +348,7 @@ mod tests {
             decoded_rows: CURRENT_FRAME_ROWS,
             commit_median_ms: if prior_rows == 32_000 { 10_000.0 } else { 1.0 },
             commit_samples_ms: vec![1.0],
-            commit_graph_rows: vec![CURRENT_FRAME_ROWS],
+            graph_rows_at_commit: vec![CURRENT_FRAME_ROWS],
         });
         check_frame_curve(&points).expect("fixed counted work passes despite descheduling");
         points[3].decoded_rows += 1;
@@ -357,12 +357,12 @@ mod tests {
             "extra decoded rows remain a regression"
         );
         points[3].decoded_rows = CURRENT_FRAME_ROWS;
-        points[3].commit_graph_rows[0] += 1;
+        points[3].graph_rows_at_commit[0] += 1;
         assert!(
             check_frame_curve(&points).is_err(),
             "extra submitted graph rows remain a regression"
         );
-        points[3].commit_graph_rows[0] = CURRENT_FRAME_ROWS;
+        points[3].graph_rows_at_commit[0] = CURRENT_FRAME_ROWS;
         points[3].live_heap_bytes += 100_000;
         assert!(
             check_frame_curve(&points).is_err(),

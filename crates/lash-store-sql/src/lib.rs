@@ -112,7 +112,6 @@ pub const TABLES: &[&str] = &[
     durable::graph::CATALOG_VIEW,
     durable::graph::EDGES_TABLE,
     durable::graph::READ_PINS_TABLE,
-    durable::graph::RECEIPTS_TABLE,
     durable::graph::RELEASE_PINS_TABLE,
     durable::park_events::TABLE,
     durable::prompts::EDGES_TABLE,

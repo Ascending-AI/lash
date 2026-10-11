@@ -7,12 +7,12 @@ use std::collections::BTreeMap;
 use lash_core_store::checkpoint_graph::{DecodeLimits, EncodedNode, GraphRefusal, NodeId};
 
 use super::{
-    GraphTier, batch, big, commit, hydrate, leaf, owned, present, put_exec, refused, staging, value,
+    GraphTier, big, hydrate, leaf, owned, owner_commit, present, put_exec, refused, staging, value,
 };
 use crate::domain::graph::{ExecRootWrite, ReadLease, ReleasePinWrite, RootOwner};
 use crate::domain::graph_commit::CollectionLimits;
 use crate::laws::{LawBroken, LawOutcome, ensure};
-use crate::{ActorKey, DomainWrite};
+use crate::{ActorKey, DomainWrite, DurableError};
 
 /// A held graph gate, taken outside any store operation.
 #[async_trait::async_trait]
@@ -64,13 +64,11 @@ pub async fn the_graph_gate_orders_collection_against_every_guarded_transaction(
     let mut nodes = staging();
     let read = value(&mut nodes, &[&big("gate-read")], &[]);
     let retired = value(&mut nodes, &[&big("gate-retired")], &[]);
-    commit(
+    owner_commit(
         tier,
         &owner,
-        batch(
-            nodes.into_nodes(),
-            vec![release_pin("read", read), release_pin("retired", retired)],
-        ),
+        nodes.into_nodes(),
+        vec![release_pin("read", read), release_pin("retired", retired)],
     )
     .await
     .map_err(|error| refused("the gated graph", error))?;
@@ -81,10 +79,11 @@ pub async fn the_graph_gate_orders_collection_against_every_guarded_transaction(
     let released = AtomicBool::new(false);
     let (committed, hydrated, unlocked) = tokio::join!(
         async {
-            let answer = commit(
+            let answer = owner_commit(
                 tier,
                 &owner,
-                batch(BTreeMap::new(), vec![retire_release("retired", retired)]),
+                BTreeMap::new(),
+                vec![retire_release("retired", retired)],
             )
             .await;
             (answer, released.load(Ordering::SeqCst))
@@ -131,10 +130,11 @@ pub async fn the_graph_gate_orders_collection_against_every_guarded_transaction(
         async {
             let mut more = staging();
             let root = value(&mut more, &[&big("gate-shared")], &[]);
-            let answer = commit(
+            let answer = owner_commit(
                 tier,
                 &owner,
-                batch(more.into_nodes(), vec![release_pin("shared", root)]),
+                more.into_nodes(),
+                vec![release_pin("shared", root)],
             )
             .await;
             (answer, released.load(Ordering::SeqCst))
@@ -186,23 +186,20 @@ pub async fn a_read_racing_replacement_and_collection_reads_one_whole_root(
         (nodes.into_nodes(), root)
     };
     let (nodes, first) = graph(0);
-    commit(
-        tier,
-        &owner,
-        batch(nodes, vec![put_exec(&exec, None, first)]),
-    )
-    .await
-    .map_err(|error| refused("the first root", error))?;
+    owner_commit(tier, &owner, nodes, vec![put_exec(&exec, None, first)])
+        .await
+        .map_err(|error| refused("the first root", error))?;
     let done = AtomicBool::new(false);
     let writer = async {
         let rounds = async {
             let mut current = first;
             for round in 1..=RACE_ROUNDS {
                 let (nodes, root) = graph(round);
-                commit(
+                owner_commit(
                     tier,
                     &owner,
-                    batch(nodes, vec![put_exec(&exec, Some((round, current)), root)]),
+                    nodes,
+                    vec![put_exec(&exec, Some((round, current)), root)],
                 )
                 .await
                 .map_err(|error| refused("a racing replacement", error))?;
@@ -286,7 +283,7 @@ pub async fn a_collection_racing_commits_sweeps_nothing_they_rely_on(
                 if let (Some(previous), Some(before)) = (previous, round.checked_sub(1)) {
                     writes.push(retire_release(&release(before), previous));
                 }
-                commit(tier, &owner, batch(nodes.into_nodes(), writes))
+                owner_commit(tier, &owner, nodes.into_nodes(), writes)
                     .await
                     .map_err(|error| refused("a racing commit", error))?;
                 let hydrated = hydrate(
@@ -363,10 +360,11 @@ pub async fn a_reference_racing_its_roots_retirement_installs_whole_or_refuses(
         let fork_exec = fork.exec(&cell);
         let mut nodes = staging();
         let base = value(&mut nodes, &[&big(&format!("fork-base-{round}"))], &[]);
-        commit(
+        owner_commit(
             tier,
             &source,
-            batch(nodes.into_nodes(), vec![put_exec(&source_exec, None, base)]),
+            nodes.into_nodes(),
+            vec![put_exec(&source_exec, None, base)],
         )
         .await
         .map_err(|error| refused("a fork's base", error))?;
@@ -380,16 +378,14 @@ pub async fn a_reference_racing_its_roots_retirement_installs_whole_or_refuses(
             .collect();
         let (retired, published) = tokio::join!(
             async {
-                commit(
+                owner_commit(
                     tier,
                     &source,
-                    batch(
-                        BTreeMap::new(),
-                        vec![DomainWrite::ExecRoot(ExecRootWrite::Retire {
-                            exec: source_exec.clone(),
-                            expected: base,
-                        })],
-                    ),
+                    BTreeMap::new(),
+                    vec![DomainWrite::ExecRoot(ExecRootWrite::Retire {
+                        exec: source_exec.clone(),
+                        expected: base,
+                    })],
                 )
                 .await
                 .map_err(|error| refused("the base's retirement", error))?;
@@ -397,10 +393,11 @@ pub async fn a_reference_racing_its_roots_retirement_installs_whole_or_refuses(
                     .await
                     .map_err(|error| refused("a collection racing a fork", error))
             },
-            commit(
+            owner_commit(
                 tier,
                 &fork,
-                batch(carried, vec![put_exec(&fork_exec, None, forked)]),
+                carried,
+                vec![put_exec(&fork_exec, None, forked)],
             ),
         );
         retired?;
@@ -416,7 +413,7 @@ pub async fn a_reference_racing_its_roots_retirement_installs_whole_or_refuses(
                     hydrated.nodes.len()
                 );
             }
-            Err(GraphRefusal::MissingNode(missing)) if missing == base => {}
+            Err(DurableError::Graph(GraphRefusal::MissingNode(missing))) if missing == base => {}
             Err(error) => return Err(refused("a fork racing its base's retirement", error)),
         }
     }

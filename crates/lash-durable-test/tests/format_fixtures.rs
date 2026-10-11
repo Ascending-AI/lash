@@ -7,9 +7,9 @@
 //! node of this build, which claims the actor, decodes its state and
 //! reaches the expected next commit:
 //!
-//! - `lashvm` (here): a kernel process whose entry `worker()` sleeps 5,
-//!   sleeps 7 and returns `"done"`, parked on its first sleep and released
-//!   `ready` by a draining node. Its state is the kernel engine's state
+//! - `lashvm` (here): a kernel process whose entry `worker()` sleeps 5,000 ms,
+//!   sleeps 7,000 ms and returns `"done"`, parked on its first sleep and released
+//!   by a draining node, then woken `ready`. Its state is the kernel engine's state
 //!   around the machine's parked run.
 //! - `session` (`vertical_crash_proof.rs`): V0's turn, cut by a crash right
 //!   after its cell's `Once` operation's outcome committed: the turn
@@ -40,9 +40,12 @@ use lash_core_execution::runtime::process::steps::{ProcessSteps, StepAdmission, 
 use lash_core_execution::{
     Backend, EngineStepRun, EngineSteps as _, LifetimeDecision, ProcessId, ProcessIdMint,
     ProcessInput, ProcessProvenance, ProcessRecord, ProcessRegistration, StepRequest, StoreSet,
+    WaitKind,
 };
 use lash_durable::runner::{Activation, Stopped};
-use lash_durable::{ActorKey, ActorKind, ActorState, CommitLabel, DurableStore, LeaseConfig};
+use lash_durable::{
+    ActorKey, ActorKind, ActorState, CommitLabel, DurableStore, LeaseConfig, MailTx,
+};
 use lash_durable_test::{Script, SimClock, SimNodes, SimNodesConfig, Tripwire};
 use lash_sansio::sync::MutexExt as _;
 use lash_sansio::{ExecutionLimit, ExecutionPolicy};
@@ -71,8 +74,8 @@ numbers float
 entry worker() -> Any
 
 fn worker() {
-  do sleep 5
-  do sleep 7
+  do sleep 5000
+  do sleep 7000
   return "done"
 }
 
@@ -335,7 +338,7 @@ async fn state(database: &dyn DurableStore, actor: &ActorKey) -> Option<ActorSta
 }
 
 /// Re-record the kernel process image: the process runs on node A to its
-/// first sleep, A drains, and the store A leaves is the fixture.
+/// first committed sleep, A drains, and a mailbox wake readies the fixture.
 #[tokio::test(flavor = "current_thread")]
 #[ignore = "regenerates crates/lash-durable-test/tests/fixtures/formats/lashvm"]
 async fn regenerate_kernel_process_format_fixture() {
@@ -360,11 +363,22 @@ async fn regenerate_kernel_process_format_fixture() {
     let (nodes, backend, entered) = deployment(stores, Arc::clone(&database), &clock);
     seed(&backend).await;
     nodes.start("a");
-    // The machine parks on its first sleep: one kernel_run, and the process
-    // waits.
+    // The sleep outlasts the simulated worker's polling. Record the
+    // committed blocker, rather than racing the entry body's outcome or
+    // the owner's release to waiting.
     run_until(&nodes, || async {
+        let record = backend
+            .process_registry()
+            .get_process(&process())
+            .await
+            .expect("the process reads")
+            .expect("the process is registered");
         entered.lock_recover().as_slice() == ["kernel_run:entry"]
-            && state(&*database, &actor()).await == Some(ActorState::Owned)
+            && record
+                .waits()
+                .iter()
+                .any(|wait| matches!(wait.kind, WaitKind::Sleep { .. }))
+            && state(&*database, &actor()).await == Some(ActorState::Waiting)
     })
     .await;
     nodes.drain("a");
@@ -372,6 +386,15 @@ async fn regenerate_kernel_process_format_fixture() {
         matches!(nodes.stopped("a").await, Some(Ok(Stopped::Drained)))
     })
     .await;
+    assert_eq!(state(&*database, &actor()).await, Some(ActorState::Waiting));
+    // With the old node stopped, waking makes the saved process claimable
+    // without running it past the first sleep before the image is copied.
+    let mut wake = MailTx::new();
+    wake.wake(actor());
+    database
+        .commit_mail(wake, CommitLabel::new("fixture.wake"))
+        .await
+        .expect("the saved process wakes");
     assert_eq!(state(&*database, &actor()).await, Some(ActorState::Ready));
     images::regenerate(&path, images::LASH_VM.name);
 }

@@ -179,13 +179,6 @@ table lash_fork_lineage
   column fork_node_id text not-null
   column session_id text not-null
   primary-key (session_id, ancestor_session_id)
-table lash_graph_commit_receipts
-  column batch_digest bytea not-null
-  column commit_id bytea not-null
-  column owner_key text not-null
-  column result_bytes bytea not-null
-  column written_epoch bigint not-null
-  primary-key (owner_key, commit_id)
 table lash_graph_nodes
   column body_bytes bigint not-null
   column frame_node_id text not-null

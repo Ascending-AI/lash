@@ -5,7 +5,7 @@ The engine's tables (`nodes`, `actors`, `actor_mail`, and the domain tables
 the runtime lanes add to the fenced commit: `run_records`, `exec_snapshots`,
 `waits`, `park_events`, `turn_phases`, `turn_namespaces`, `session_close`, `session_scope_ends`,
 `prompt_snapshots`, `prompt_texts`, `prompt_snapshot_texts`, and the checkpoint graph's
-`effect_admissions`, `blob_read_pins`, `graph_release_pins`, `graph_commit_receipts`;
+`effect_admissions`, `blob_read_pins`, `graph_release_pins`;
 `lash_`-prefixed on PostgreSQL) are written by one
 neutral statement set and one module per dialect. Since I0 (FIG-5194) each
 of those is a directory: the core in `durable/mod.rs` and one file per
@@ -79,7 +79,6 @@ TABLES = (
     "effect_admissions",
     "blob_read_pins",
     "graph_release_pins",
-    "graph_commit_receipts",
 )
 
 ENGINE_SQL = re.compile(

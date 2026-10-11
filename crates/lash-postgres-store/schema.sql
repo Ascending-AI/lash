@@ -1141,19 +1141,6 @@ CREATE TABLE IF NOT EXISTS lash_graph_release_pins (
 CREATE INDEX IF NOT EXISTS idx_lash_graph_release_pins_root_ref
     ON lash_graph_release_pins (root_ref);
 
--- A commit's retry identity and the result it answered. It owns no root and
--- authorizes no hydration.
-CREATE TABLE IF NOT EXISTS lash_graph_commit_receipts (
-    owner_key TEXT COLLATE "C" NOT NULL,
-    commit_id BYTEA NOT NULL CONSTRAINT ck_graph_commit_receipts_commit_id
-        CHECK (octet_length(commit_id) = 32),
-    batch_digest BYTEA NOT NULL CONSTRAINT ck_graph_commit_receipts_batch_digest
-        CHECK (octet_length(batch_digest) = 32),
-    result_bytes BYTEA NOT NULL,
-    written_epoch BIGINT NOT NULL,
-    PRIMARY KEY (owner_key, commit_id)
-);
-
 -- Every root of every source: a view of the owning columns, never a cache.
 CREATE OR REPLACE VIEW lash_graph_root_catalog AS
     SELECT 'exec' AS source, root_ref FROM lash_exec_snapshots WHERE root_ref IS NOT NULL

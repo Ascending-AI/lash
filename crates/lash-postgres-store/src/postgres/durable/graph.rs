@@ -1,4 +1,4 @@
-//! The checkpoint graph on PostgreSQL: the [`GraphStore`] commit, hydration
+//! The checkpoint graph on PostgreSQL: owner graph installation, hydration
 //! and read pins, and the reachability collector (FIG-5887 §5, §8; lane G,
 //! FIG-5890). The DDL is in `schema.sql`.
 //!
@@ -42,14 +42,11 @@ use lash_core_store::checkpoint_graph::{
 };
 use lash_durable::domain::DomainRefusal;
 use lash_durable::domain::graph::{
-    EffectAdmissionWrite, FencedCommit, GraphCommitBatch, GraphStore, HydratedGraph, HydratedNode,
-    PinnedBatch, PublishedGraph, ReadLease, ReadPin, ReadPinId, ReadPinWrite, ReleasePinWrite,
-    RootChange, RootOwner,
+    EffectAdmissionWrite, GraphStore, HydratedGraph, HydratedNode, PinnedBatch, ReadLease, ReadPin,
+    ReadPinId, ReadPinWrite, ReleasePinWrite, RootOwner,
 };
 use lash_durable::domain::graph_commit::{
-    CheckedBatch, CheckedGraph, CollectionLimits, EDGE_ROW_LOGICAL_BYTES, GraphCollection,
-    blob_row_logical_bytes, check_batch, decode_published, encode_published,
-    graph_write_logical_bytes,
+    CheckedGraph, CollectionLimits, EDGE_ROW_LOGICAL_BYTES, GraphCollection, blob_row_logical_bytes,
 };
 use lash_durable::{CommitLabel, DurableError, DurableInstant, StoreFailure, StoreFailureKind};
 use lash_store_sql::Dialect;
@@ -59,7 +56,7 @@ use lash_store_sql::durable::snapshots::SnapshotStatements;
 use lash_store_sql::durable::turns::TurnStatements;
 use sqlx::{PgConnection, Row};
 
-use super::{Committing, PostgresDurableStore, Tx, apply_domain, integer, sqlx_failure};
+use super::{Committing, PostgresDurableStore, Tx, integer, sqlx_failure};
 use crate::guarded_tx::begin_collecting;
 
 lash_store_sql::statements! {
@@ -75,10 +72,6 @@ lash_store_sql::statements! {
         /// Read pin `?1`'s row, locked for the rest of the fetch.
         pin_row = "SELECT lease_owner, generation, root_ref, expires_at_ms
              FROM blob_read_pins WHERE pin_id = ?1 FOR UPDATE";
-
-        /// Lock read pins `?1` in pin order for the rest of the commit.
-        lock_pins = "SELECT pin_id FROM blob_read_pins WHERE pin_id = ANY(?1::text[])
-             ORDER BY pin_id FOR UPDATE";
 
         /// The encodings of every stored blob in `?1`, key-share locked in
         /// digest order against a targeted reclaim.
@@ -875,127 +868,6 @@ async fn retire_pin(tx: &mut PgConnection, pin: &ReadPin) -> Answer<bool> {
     .await
 }
 
-/// The whole commit, in its guarded transaction.
-async fn commit_in(
-    tx: &mut Tx,
-    fence: &FencedCommit,
-    batch: &GraphCommitBatch,
-    checked: &CheckedBatch,
-    now: DurableInstant,
-    checkpoint_ref_chunk: usize,
-) -> Answer<Settled<PublishedGraph>> {
-    // The owner's epoch fence: the first row lock, under the gate and the
-    // writer fence the `BEGIN` took.
-    let actor = fence.actor.as_str();
-    let fenced = crate::observed_sql::query(super::SQL.actor.fence.sql())
-        .bind(actor)
-        .bind(fence.epoch.0)
-        .fetch_optional(crate::observed_sql::executor(&mut ***tx))
-        .await
-        .map_err(db)?;
-    if fenced.is_none() {
-        return Err(GraphRefusal::FenceLost);
-    }
-    // Then the fence's declared keys: each session's write authority in
-    // session order (its actor row, then its history, as every session
-    // writer takes them), then the read pins in pin order.
-    for session in &fence.history_sessions {
-        PostgresDurableStore::lock_session_writes(tx, session)
-            .await
-            .map_err(|error| from_durable(super::store_failure(error)))?;
-    }
-    if !fence.read_pins.is_empty() {
-        crate::observed_sql::query(SQL.postgres.lock_pins.sql())
-            .bind(
-                fence
-                    .read_pins
-                    .iter()
-                    .map(|pin| pin.0.clone())
-                    .collect::<Vec<_>>(),
-            )
-            .execute(crate::observed_sql::executor(&mut ***tx))
-            .await
-            .map_err(db)?;
-    }
-    // A retry of an acknowledged commit is answered from its receipt; the
-    // fence bump above rolls back with it.
-    let receipt: Option<(Vec<u8>, Vec<u8>)> =
-        crate::observed_sql::query_as(SQL.graph.receipt.sql())
-            .bind(actor)
-            .bind(batch.commit_id.0.to_vec())
-            .fetch_optional(crate::observed_sql::executor(&mut ***tx))
-            .await
-            .map_err(db)?;
-    if let Some((digest, result)) = receipt {
-        if digest != checked.encoded.digest.0 {
-            return Err(GraphRefusal::CommitIdentityConflict);
-        }
-        return decode_published(&result)
-            .map(Settled::Rollback)
-            .map_err(|error| corrupt("commit receipt", &error.to_string()));
-    }
-    batch.budget.admit(&checked.encoded.measurement)?;
-    for (owner, expected) in batch.expected.iter() {
-        let found = match owner {
-            RootOwner::Exec(exec) => {
-                let rev: Option<i64> = crate::observed_sql::query_scalar(SQL.snapshots.root.sql())
-                    .bind(exec.stored())
-                    .fetch_optional(crate::observed_sql::executor(&mut ***tx))
-                    .await
-                    .map_err(db)?;
-                rev.map(number::<u64>).transpose()?
-            }
-            // Only an execution's row carries a stored revision; every other
-            // owner is compared by its expected root.
-            _ => None,
-        };
-        if found != expected {
-            return Err(GraphRefusal::RevisionConflict);
-        }
-    }
-    let mut installed = install(tx, &checked.graph).await?;
-    let committing = Committing {
-        checkpoint_ref_chunk,
-        actor: &fence.actor,
-        epoch: fence.epoch,
-        now,
-        fleet: tx.fleet(),
-    };
-    for write in &batch.domain_writes {
-        apply_domain(tx, &committing, write)
-            .await
-            .map_err(from_durable)?;
-        installed.sql_logical_bytes += graph_write_logical_bytes(write);
-    }
-    let revisions = batch.expected.advanced()?;
-    let published = PublishedGraph {
-        commit_id: batch.commit_id,
-        revisions,
-        roots: batch
-            .graph
-            .publications
-            .iter()
-            .filter_map(|change| match change {
-                RootChange::Put { owner, root, .. } => Some((owner.clone(), *root)),
-                RootChange::Retire { .. } => None,
-            })
-            .collect(),
-        installed,
-    };
-    // The receipt records the result, so its own row is not in the result's
-    // SQL bytes.
-    crate::observed_sql::query(SQL.graph.receipt_insert.sql())
-        .bind(actor)
-        .bind(batch.commit_id.0.to_vec())
-        .bind(checked.encoded.digest.0.to_vec())
-        .bind(encode_published(&published))
-        .bind(fence.epoch.0)
-        .execute(crate::observed_sql::executor(&mut ***tx))
-        .await
-        .map_err(db)?;
-    Ok(Settled::Commit(published))
-}
-
 /// Reads read pin `pin`'s row, locked, and checks it is exactly `pin` and
 /// unexpired at `now`.
 async fn check_pin(tx: &mut PgConnection, pin: &ReadPin, now: DurableInstant) -> Answer<()> {
@@ -1332,23 +1204,6 @@ impl PostgresDurableStore {
 
 #[async_trait::async_trait]
 impl GraphStore for PostgresDurableStore {
-    async fn commit_graph(
-        &self,
-        fence: FencedCommit,
-        batch: GraphCommitBatch,
-    ) -> Result<PublishedGraph, GraphRefusal> {
-        let checked = check_batch(&batch)?;
-        let label = fence.label;
-        let chunk = self.pools.maintenance.checkpoint_ref_chunk as usize;
-        self.within(label.capacity(), async {
-            let (mut tx, now) = self.open(label).await?;
-            let outcome = commit_in(&mut tx, &fence, &batch, &checked, now, chunk).await;
-            Ok(Self::settle_graph(tx, outcome).await)
-        })
-        .await
-        .map_err(from_durable)?
-    }
-
     async fn acquire_read_pin(
         &self,
         owner: RootOwner,

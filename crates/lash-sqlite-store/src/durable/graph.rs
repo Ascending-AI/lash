@@ -1,5 +1,5 @@
 //! The checkpoint graph on SQLite: the `graph` domain's DDL, the
-//! [`GraphStore`] commit, hydration and read pins, and the reachability
+//! owner graph installation, hydration and read pins, and the reachability
 //! collector (FIG-5887 §5, §7, §8; lane G, FIG-5890).
 //!
 //! # One transaction, one lock
@@ -35,14 +35,11 @@ use lash_core_store::checkpoint_graph::{
 };
 use lash_durable::domain::DomainRefusal;
 use lash_durable::domain::graph::{
-    EffectAdmissionWrite, FencedCommit, GraphCommitBatch, GraphStore, HydratedGraph, HydratedNode,
-    PinnedBatch, PublishedGraph, ReadLease, ReadPin, ReadPinId, ReadPinWrite, ReleasePinWrite,
-    RootChange, RootOwner,
+    EffectAdmissionWrite, GraphStore, HydratedGraph, HydratedNode, PinnedBatch, ReadLease, ReadPin,
+    ReadPinId, ReadPinWrite, ReleasePinWrite, RootOwner,
 };
 use lash_durable::domain::graph_commit::{
-    CheckedBatch, CheckedGraph, CollectionLimits, EDGE_ROW_LOGICAL_BYTES, GraphCollection,
-    blob_row_logical_bytes, check_batch, decode_published, encode_published,
-    graph_write_logical_bytes,
+    CheckedGraph, CollectionLimits, EDGE_ROW_LOGICAL_BYTES, GraphCollection, blob_row_logical_bytes,
 };
 use lash_durable::{CommitLabel, DurableError, DurableInstant, StoreFailure, StoreFailureKind};
 use lash_store_sql::durable::graph::GraphStatements;
@@ -51,7 +48,7 @@ use lash_store_sql::durable::snapshots::SnapshotStatements;
 use lash_store_sql::durable::turns::TurnStatements;
 use rusqlite::{Connection, OptionalExtension};
 
-use super::{Answer, Committing, SqliteDurableStore, apply_domain, integer};
+use super::{Answer, Committing, SqliteDurableStore, integer};
 use crate::conn::{FencedTx, TxOutcome, cached_execute};
 
 /// The graph tables and the root catalog, created after every table the
@@ -102,19 +99,6 @@ CREATE TABLE IF NOT EXISTS graph_release_pins (
     root_ref TEXT NOT NULL REFERENCES blobs(hash) ON DELETE RESTRICT
 );
 CREATE INDEX IF NOT EXISTS idx_graph_release_pins_root_ref ON graph_release_pins (root_ref);
-
--- A commit's retry identity and the result it answered. It owns no root and
--- authorizes no hydration.
-CREATE TABLE IF NOT EXISTS graph_commit_receipts (
-    owner_key TEXT NOT NULL,
-    commit_id BLOB NOT NULL CONSTRAINT ck_graph_commit_receipts_commit_id
-        CHECK (length(commit_id) = 32),
-    batch_digest BLOB NOT NULL CONSTRAINT ck_graph_commit_receipts_batch_digest
-        CHECK (length(batch_digest) = 32),
-    result_bytes BLOB NOT NULL,
-    written_epoch INTEGER NOT NULL,
-    PRIMARY KEY (owner_key, commit_id)
-);
 
 -- Every root of every source: a view of the owning columns, never a cache.
 CREATE VIEW IF NOT EXISTS graph_root_catalog AS
@@ -884,116 +868,6 @@ fn retire_pin(tx: &Connection, pin: &ReadPin) -> rusqlite::Result<bool> {
         .is_some())
 }
 
-/// The whole commit, in its fenced transaction.
-fn commit_in(
-    tx: &FencedTx<'_>,
-    fence: &FencedCommit,
-    batch: &GraphCommitBatch,
-    checked: &CheckedBatch,
-    now: DurableInstant,
-    blob_profile: crate::BuiltinBlobProfile,
-) -> rusqlite::Result<TxOutcome<Result<PublishedGraph, GraphRefusal>>> {
-    let refuse = |refusal| Ok(TxOutcome::Rollback(Err(refusal)));
-    macro_rules! answer {
-        ($answer:expr) => {
-            match $answer? {
-                Ok(value) => value,
-                Err(refusal) => return refuse(refusal),
-            }
-        };
-    }
-    // The owner's epoch fence: the transaction's first engine statement.
-    let actor = fence.actor.as_str();
-    let fenced = tx
-        .prepare_cached(super::SQL.actor.fence.sql())?
-        .query_row(rusqlite::params![actor, fence.epoch.0], |row| {
-            row.get::<_, i64>(0)
-        })
-        .optional()?;
-    if fenced.is_none() {
-        return refuse(GraphRefusal::FenceLost);
-    }
-    // A retry of an acknowledged commit is answered from its receipt; the
-    // fence bump above rolls back with it.
-    let receipt = tx
-        .prepare_cached(SQL.graph.receipt.sql())?
-        .query_row(rusqlite::params![actor, &batch.commit_id.0[..]], |row| {
-            Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, Vec<u8>>(1)?))
-        })
-        .optional()?;
-    if let Some((digest, result)) = receipt {
-        if digest != checked.encoded.digest.0 {
-            return refuse(GraphRefusal::CommitIdentityConflict);
-        }
-        return Ok(TxOutcome::Rollback(
-            decode_published(&result)
-                .map_err(|error| corrupt("commit receipt", &error.to_string())),
-        ));
-    }
-    answer!(Ok::<_, rusqlite::Error>(
-        batch.budget.admit(&checked.encoded.measurement)
-    ));
-    for (owner, expected) in batch.expected.iter() {
-        let found = match owner {
-            RootOwner::Exec(exec) => tx
-                .prepare_cached(SQL.snapshots.root.sql())?
-                .query_row([exec.stored()], |row| row.get::<_, i64>(0))
-                .optional()?
-                .map(integer::<u64>)
-                .transpose()?,
-            // Only an execution's row carries a stored revision; every other
-            // owner is compared by its expected root.
-            _ => None,
-        };
-        if found != expected {
-            return refuse(GraphRefusal::RevisionConflict);
-        }
-    }
-    let mut installed = answer!(install(tx, &checked.graph));
-    let committing = Committing {
-        actor: &fence.actor,
-        epoch: fence.epoch,
-        now,
-        fleet: tx.fleet(),
-        blob_profile,
-    };
-    for write in &batch.domain_writes {
-        if let Err(error) = apply_domain(tx, &committing, write)? {
-            return refuse(from_durable(error));
-        }
-        installed.sql_logical_bytes += graph_write_logical_bytes(write);
-    }
-    let revisions = answer!(Ok::<_, rusqlite::Error>(batch.expected.advanced()));
-    let published = PublishedGraph {
-        commit_id: batch.commit_id,
-        revisions,
-        roots: batch
-            .graph
-            .publications
-            .iter()
-            .filter_map(|change| match change {
-                RootChange::Put { owner, root, .. } => Some((owner.clone(), *root)),
-                RootChange::Retire { .. } => None,
-            })
-            .collect(),
-        installed,
-    };
-    // The receipt records the result, so its own row is not in the result's
-    // SQL bytes.
-    cached_execute(
-        tx,
-        SQL.graph.receipt_insert.sql(),
-        rusqlite::params![
-            actor,
-            &batch.commit_id.0[..],
-            &checked.encoded.digest.0[..],
-            encode_published(&published),
-            fence.epoch.0
-        ],
-    )?;
-    Ok(TxOutcome::Commit(Ok(published)))
-}
-
 /// Reads read pin `pin`'s row under the write lock and checks it is exactly
 /// `pin` and unexpired at `now`.
 fn check_pin(tx: &Connection, pin: &ReadPin, now: DurableInstant) -> GraphAnswer<()> {
@@ -1265,20 +1139,6 @@ impl SqliteDurableStore {
 
 #[async_trait::async_trait]
 impl GraphStore for SqliteDurableStore {
-    async fn commit_graph(
-        &self,
-        tx: FencedCommit,
-        batch: GraphCommitBatch,
-    ) -> Result<PublishedGraph, GraphRefusal> {
-        let checked = check_batch(&batch)?;
-        let blob_profile = self.blob_profile;
-        let label = tx.label;
-        self.graph_write(label, move |connection, now| {
-            commit_in(connection, &tx, &batch, &checked, now, blob_profile)
-        })
-        .await
-    }
-
     async fn acquire_read_pin(
         &self,
         owner: RootOwner,

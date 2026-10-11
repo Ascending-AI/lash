@@ -84,14 +84,11 @@ pub enum GraphRefusal {
     RevisionConflict,
     #[error("the writer's fence was lost")]
     FenceLost,
-    #[error("the commit identity names a different batch")]
-    CommitIdentityConflict,
     #[error("root source {0:?} did not enumerate completely")]
     RootSourceIncomplete(RootSource),
     #[error("the root was retired")]
     RootRetired,
-    /// A commit's root changes are not exactly the projection of its
-    /// domain writes. (Added by the seam lane.)
+    /// A publication does not match the domain record it names.
     #[error("the commit's root changes are not the projection of its writes")]
     PublicationMismatch,
     #[error("the read pin expired")]

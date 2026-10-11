@@ -1,124 +1,21 @@
-//! A graph commit's canonical encoding (FIG-5887 §5, §9): the batch digest a
-//! retry is recognized by, the full encoded measurement a commit is admitted
-//! on, and the receipt's result bytes.
+//! Owner graph validation and full commit measurement (FIG-5887 §5, §9).
 //!
-//! Both backends call these, so a batch measures and digests the same on
-//! SQLite and PostgreSQL, and a preparer measures exactly what the store
-//! rechecks inside its fence.
-//!
-//! The encoding uses the graph token grammar. Every node, root key,
-//! expected revision, publication and graph-reference row of the batch is
-//! in it, with its table tag; derived measurements and the digest itself
-//! are not. Supplied nodes are keyed by identity, so a duplicate is encoded
-//! once; a reference to an existing node is its 32-byte digest, never its
-//! body again. A batch carries graph-reference rows only
-//! ([`DomainWrite::is_graph_reference`]); an owner's other rows commit
-//! through its [`ActorTx`](crate::ActorTx), whose graph the same check
-//! ([`check_graph`]) validates.
+//! Both backends validate the graph staged in an [`ActorTx`](crate::ActorTx)
+//! and measure its supplied nodes and domain writes inside the owner fence.
+//! Nodes are keyed by identity, and references to stored nodes carry only
+//! their digest. The same measurement admits a commit on either backend.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash_core_store::checkpoint_graph::{
-    BatchDigest, CommitId, EncodedCommitMeasurement, GraphRefusal, InstalledGraphMeasurement,
-    NodeId, TokenError, TokenReader, TokenWriter,
+    EncodedCommitMeasurement, GraphRefusal, NodeId, TokenWriter,
 };
-use lash_sansio::{SessionId, TurnId};
 
 use super::DomainWrite;
 use super::graph::{
-    AdmissionMember, EffectAdmissionWrite, EffectKey, ExecRootWrite, GraphCommitBatch,
-    OwnerRevisionSet, PublishedGraph, ReadPin, ReadPinId, ReadPinWrite, ReleasePinWrite,
+    AdmissionMember, EffectAdmissionWrite, ExecRootWrite, ReadPin, ReadPinWrite, ReleasePinWrite,
     RootChange, RootOwner, RunFactWrite,
 };
-use super::keys::{ExecKey, OwnerKey};
-
-/// The canonical encoding of everything `batch` intends, measured and
-/// digested.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct EncodedCommit {
-    pub digest: BatchDigest,
-    pub measurement: EncodedCommitMeasurement,
-}
-
-/// Encodes `batch` once: its digest and its measurement.
-///
-/// # Errors
-///
-/// A supplied node whose envelope does not parse (its children are counted
-/// as edge rows), or [`GraphRefusal::InvalidBody`] for a domain write that
-/// is not a graph-reference row.
-pub fn encode_commit(batch: &GraphCommitBatch) -> Result<EncodedCommit, GraphRefusal> {
-    let mut nodes = TokenWriter::new();
-    let mut supplied_node_bytes = 0_u64;
-    let mut edge_rows = 0_u64;
-    nodes.seq(batch.graph.nodes.len() as u64);
-    for (id, node) in &batch.graph.nodes {
-        nodes.seq(2);
-        nodes.bytes(&id.0);
-        nodes.bytes(&node.bytes);
-        supplied_node_bytes += node.len();
-        edge_rows += node.children()?.len() as u64;
-    }
-
-    let mut mutations = TokenWriter::new();
-    mutations.seq(6);
-    mutations.bytes(&batch.commit_id.0);
-    encode_revisions(&mut mutations, &batch.expected);
-    mutations.seq(batch.graph.reads.len() as u64);
-    for read in &batch.graph.reads {
-        mutations.bytes(&read.0);
-    }
-    mutations.seq(batch.graph.publications.len() as u64);
-    for change in &batch.graph.publications {
-        encode_change(&mut mutations, change);
-    }
-    mutations.seq(batch.domain_writes.len() as u64);
-    for write in &batch.domain_writes {
-        encode_graph_write(&mut mutations, write)?;
-    }
-    mutations.seq(4);
-    mutations.unsigned(batch.budget.encoded_bytes.get());
-    mutations.unsigned(batch.budget.mutation_rows.get());
-    mutations.unsigned(batch.budget.encode_memory.get());
-    mutations.unsigned(batch.budget.failure_reserve_bytes);
-
-    let mut whole = TokenWriter::with_capacity(nodes.len() + mutations.len() + 2);
-    whole.seq(2);
-    whole.raw(nodes.as_bytes());
-    whole.raw(mutations.as_bytes());
-
-    // One row per supplied blob and per child edge, per graph-reference
-    // write, and the receipt.
-    let planned_mutation_rows = (batch.graph.nodes.len() as u64)
-        .saturating_add(edge_rows)
-        .saturating_add(batch.domain_writes.len() as u64)
-        .saturating_add(1);
-    Ok(EncodedCommit {
-        digest: BatchDigest::of_canonical(whole.as_bytes()),
-        measurement: EncodedCommitMeasurement {
-            supplied_node_bytes,
-            mutation_encoding_bytes: mutations.len() as u64,
-            full_encoded_commit_bytes: whole.len() as u64,
-            planned_mutation_rows,
-        },
-    })
-}
-
-fn encode_revisions(out: &mut TokenWriter, revisions: &OwnerRevisionSet) {
-    let entries: Vec<_> = revisions.iter().collect();
-    out.seq(entries.len() as u64);
-    for (owner, revision) in entries {
-        out.seq(2);
-        encode_owner(out, owner);
-        match revision {
-            None => out.none(),
-            Some(revision) => {
-                out.some();
-                out.unsigned(revision);
-            }
-        }
-    }
-}
 
 fn encode_node(out: &mut TokenWriter, node: Option<&NodeId>) {
     match node {
@@ -354,178 +251,6 @@ pub fn encode_owner(out: &mut TokenWriter, owner: &RootOwner) {
     }
 }
 
-fn invalid(what: &str) -> TokenError {
-    TokenError::Invalid(format!("not a stored {what}"))
-}
-
-fn session(input: &mut TokenReader<'_>) -> Result<SessionId, TokenError> {
-    SessionId::try_from(input.text()?.to_owned()).map_err(|_| invalid("session id"))
-}
-
-fn turn(input: &mut TokenReader<'_>) -> Result<TurnId, TokenError> {
-    TurnId::try_from(input.text()?.to_owned()).map_err(|_| invalid("turn id"))
-}
-
-fn digest(input: &mut TokenReader<'_>) -> Result<[u8; 32], TokenError> {
-    <[u8; 32]>::try_from(input.bytes()?).map_err(|_| invalid("32-byte digest"))
-}
-
-fn expect(found: u64, expected: u64) -> Result<(), TokenError> {
-    TokenReader::expect_fields(found, expected)
-}
-
-/// Reads back [`encode_owner`].
-///
-/// # Errors
-///
-/// Any token refusal, or a key no owner stores.
-pub fn decode_owner(input: &mut TokenReader<'_>) -> Result<RootOwner, TokenError> {
-    let (variant, fields) = input.sum()?;
-    let owner = match variant {
-        0 => {
-            expect(fields, 1)?;
-            RootOwner::Exec(ExecKey::parse(input.text()?).map_err(|_| invalid("exec key"))?)
-        }
-        1 => {
-            expect(fields, 3)?;
-            RootOwner::RunFact {
-                owner: OwnerKey::parse(input.text()?).map_err(|_| invalid("owner key"))?,
-                run: super::keys::RunSeq(input.unsigned()?),
-                ordinal: super::keys::Ordinal(input.unsigned()?),
-            }
-        }
-        2 => {
-            expect(fields, 2)?;
-            RootOwner::EffectAdmission {
-                exec: ExecKey::parse(input.text()?).map_err(|_| invalid("exec key"))?,
-                effect: EffectKey(input.bytes()?.into()),
-            }
-        }
-        3 => {
-            expect(fields, 2)?;
-            RootOwner::TurnPhase {
-                session: session(input)?,
-                run: turn(input)?,
-            }
-        }
-        4 => {
-            expect(fields, 2)?;
-            RootOwner::WorkingExecution {
-                session: session(input)?,
-                run: turn(input)?,
-            }
-        }
-        5 => {
-            expect(fields, 3)?;
-            RootOwner::TurnNamespace {
-                session: session(input)?,
-                run: turn(input)?,
-                plugin: input.text()?.to_owned(),
-            }
-        }
-        6 => {
-            expect(fields, 2)?;
-            RootOwner::SessionRevision {
-                session: session(input)?,
-                revision: input.unsigned()?,
-            }
-        }
-        7 => {
-            expect(fields, 1)?;
-            RootOwner::SessionAdmissionBase {
-                session: session(input)?,
-            }
-        }
-        8 => {
-            expect(fields, 1)?;
-            RootOwner::ReadPin(ReadPinId(input.text()?.to_owned()))
-        }
-        9 => {
-            expect(fields, 2)?;
-            RootOwner::ArtifactBridge {
-                namespace: input.text()?.to_owned(),
-                artifact: input.text()?.to_owned(),
-            }
-        }
-        10 => {
-            expect(fields, 1)?;
-            RootOwner::ReleasePin {
-                release: input.text()?.to_owned(),
-            }
-        }
-        variant => return Err(TokenError::UnsupportedVariant { variant }),
-    };
-    Ok(owner)
-}
-
-/// A receipt's result bytes: the canonical encoding of what the commit
-/// published.
-#[must_use]
-pub fn encode_published(published: &PublishedGraph) -> Vec<u8> {
-    let mut out = TokenWriter::new();
-    out.seq(4);
-    out.bytes(&published.commit_id.0);
-    encode_revisions(&mut out, &published.revisions);
-    out.seq(published.roots.len() as u64);
-    for (owner, root) in &published.roots {
-        out.seq(2);
-        encode_owner(&mut out, owner);
-        out.bytes(&root.0);
-    }
-    let installed = &published.installed;
-    out.seq(4);
-    out.unsigned(installed.newly_installed_canonical_bytes);
-    out.unsigned(installed.new_nodes);
-    out.unsigned(installed.new_edges);
-    out.unsigned(installed.sql_logical_bytes);
-    out.into_bytes()
-}
-
-/// Reads back [`encode_published`].
-///
-/// # Errors
-///
-/// [`GraphRefusal::Backend`]-free token refusals: a receipt that does not
-/// decode is corrupt storage.
-pub fn decode_published(bytes: &[u8]) -> Result<PublishedGraph, TokenError> {
-    let mut input = TokenReader::new(bytes);
-    input.expect_struct(4)?;
-    let commit_id = CommitId(digest(&mut input)?);
-    let count = input.seq()?;
-    let mut revisions = OwnerRevisionSet::new();
-    for _ in 0..count {
-        input.expect_struct(2)?;
-        let owner = decode_owner(&mut input)?;
-        let revision = if input.option()? {
-            Some(input.unsigned()?)
-        } else {
-            None
-        };
-        revisions = revisions.expect(owner, revision);
-    }
-    let count = input.seq()?;
-    let mut roots = Vec::new();
-    for _ in 0..count {
-        input.expect_struct(2)?;
-        let owner = decode_owner(&mut input)?;
-        roots.push((owner, NodeId(digest(&mut input)?)));
-    }
-    input.expect_struct(4)?;
-    let installed = InstalledGraphMeasurement {
-        newly_installed_canonical_bytes: input.unsigned()?,
-        new_nodes: input.unsigned()?,
-        new_edges: input.unsigned()?,
-        sql_logical_bytes: input.unsigned()?,
-    };
-    input.finish()?;
-    Ok(PublishedGraph {
-        commit_id,
-        revisions,
-        roots,
-        installed,
-    })
-}
-
 /// A commit's graph checked before its transaction writes anything: every
 /// supplied node's envelope and the closure it relies on.
 #[derive(Clone, Debug, Default)]
@@ -541,42 +266,12 @@ pub struct CheckedGraph {
     pub external_roots: BTreeSet<NodeId>,
 }
 
-/// A batch checked before its transaction writes anything: its graph and
-/// its measurement.
-#[derive(Clone, Debug)]
-pub struct CheckedBatch {
-    pub encoded: EncodedCommit,
-    pub graph: CheckedGraph,
-}
-
 /// One supplied node.
 #[derive(Clone, Debug)]
 pub struct CheckedNode {
     pub id: NodeId,
     pub bytes: std::sync::Arc<[u8]>,
     pub children: Vec<NodeId>,
-}
-
-/// Checks `batch` without a store: it carries graph-reference rows only;
-/// its publications are exactly the projection of its writes; its graph
-/// passes [`check_graph`]. It measures the whole batch once.
-///
-/// # Errors
-///
-/// [`GraphRefusal::PublicationMismatch`], [`GraphRefusal::InvalidBody`] for
-/// a write that is not a graph-reference row, or any refusal of
-/// [`check_graph`].
-pub fn check_batch(batch: &GraphCommitBatch) -> Result<CheckedBatch, GraphRefusal> {
-    batch.graph.check_projection(&batch.domain_writes)?;
-    let graph = check_graph(
-        &batch.graph.nodes,
-        &batch.graph.reads,
-        &batch.graph.publications,
-    )?;
-    Ok(CheckedBatch {
-        encoded: encode_commit(batch)?,
-        graph,
-    })
 }
 
 /// Checks a commit's graph without a store: every supplied node hashes to
@@ -755,74 +450,6 @@ pub const fn blob_row_logical_bytes(content: u64) -> u64 {
 
 /// See [`blob_row_logical_bytes`].
 pub const EDGE_ROW_LOGICAL_BYTES: u64 = 128;
-
-/// The logical SQL bytes a graph-reference write puts in its row: text as
-/// UTF-8, blobs raw, integers 8, NULL 0, each column once; a delete counts
-/// its key.
-#[must_use]
-pub fn graph_write_logical_bytes(write: &DomainWrite) -> u64 {
-    const HASH: u64 = 64;
-    const INT: u64 = 8;
-    let text = |value: &str| value.len() as u64;
-    let opt = |node: Option<&NodeId>| node.map_or(0, |_| HASH);
-    match write {
-        DomainWrite::ExecRoot(ExecRootWrite::Put { exec, .. }) => {
-            // exec_key, rev, root_ref, commit_id, written_epoch.
-            text(&exec.stored()) + INT + HASH + 32 + INT
-        }
-        DomainWrite::ExecRoot(ExecRootWrite::Retire { exec, expected: _ }) => {
-            text(&exec.stored()) + HASH
-        }
-        DomainWrite::ExecRoot(ExecRootWrite::Clear { exec }) => text(&exec.stored()),
-        DomainWrite::RunFact(RunFactWrite::Append {
-            owner, kind, call, ..
-        }) => {
-            text(&owner.stored())
-                + INT
-                + INT
-                + text(kind.as_str())
-                + call.as_ref().map_or(0, |call| text(call.as_str()))
-                + HASH
-                + INT
-        }
-        DomainWrite::RunFact(RunFactWrite::Prune { owner, .. }) => text(&owner.stored()) + INT,
-        DomainWrite::EffectAdmission(EffectAdmissionWrite::Put {
-            exec,
-            effect,
-            member,
-            ..
-        }) => {
-            text(&exec.stored())
-                + effect.0.len() as u64
-                + member
-                    .as_ref()
-                    .map_or(0, |member| text(&member.owner.stored()) + INT + INT)
-                + HASH
-                + INT
-        }
-        DomainWrite::EffectAdmission(EffectAdmissionWrite::Remove { exec, effect, .. }) => {
-            text(&exec.stored()) + effect.0.len() as u64
-        }
-        DomainWrite::Turn(super::TurnWrite::Advance { phase, .. }) => {
-            opt(phase.checkpoint().as_ref())
-        }
-        DomainWrite::Turn(super::TurnWrite::Working { working, .. }) => opt(working.as_ref()),
-        DomainWrite::Turn(super::TurnWrite::Namespaces { namespaces, .. }) => namespaces
-            .iter()
-            .map(|namespace| match &namespace.values {
-                super::StoredValues::Root(root) => opt(Some(root)),
-                super::StoredValues::Base | super::StoredValues::Held => 0,
-            })
-            .sum(),
-        DomainWrite::ReadPin(ReadPinWrite::Acquire { pin }) => {
-            text(&pin.pin_id.0) + text(&pin.lease_owner) + INT + HASH + INT
-        }
-        DomainWrite::ReadPin(ReadPinWrite::Retire { pin }) => text(&pin.pin_id.0),
-        DomainWrite::ReleasePin(ReleasePinWrite::Install { release, .. }) => text(release) + HASH,
-        DomainWrite::ReleasePin(ReleasePinWrite::Retire { release, .. }) => text(release),
-        _ => 0,
-    }
-}
 
 /// What a collector may spend before it gives up with nothing swept.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

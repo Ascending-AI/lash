@@ -38,7 +38,7 @@ kiln run --config=optimized //crates/lash-perf:lash-perf__bin -- \
 The SQLite frame curve sweeps 0, 1,000, 8,000 and 32,000 prior-history rows with
 64 current-frame rows. Its verdict requires exactly 64 decoded rows per reopen,
 bounded retained heap bytes, and exactly 64 submitted graph rows in every
-sampled commit. `frame_residency.prior_<n>.commit_graph_rows_max` counts the
+sampled commit. `frame_residency.prior_<n>.graph_rows_at_commit_max` counts the
 maximum submitted graph rows per commit in that point's measured commit window;
 it does not claim to count SQL statements or database rows written. Raw
 `frame_residency.prior_<n>.commit_ms` samples and their medians remain elapsed

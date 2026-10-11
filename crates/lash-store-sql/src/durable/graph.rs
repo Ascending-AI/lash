@@ -5,7 +5,7 @@
 //! (`blob_edges`), the graph-reference rows a commit owns roots through
 //! (`effect_admissions`, `blob_read_pins`, `graph_release_pins`; the graph
 //! columns of `exec_snapshots`, `run_records`, `turn_phases` and
-//! `turn_namespaces` are their own domains' statements), the commit receipts (`graph_commit_receipts`), and
+//! `turn_namespaces` are their own domains' statements), and
 //! the root catalog view (`graph_root_catalog`) that names every root of
 //! every source. This file and the matching file in each dialect are the
 //! only places their SQL may appear (`scripts/check-durable-sql.py`).
@@ -27,10 +27,6 @@ pub const READ_PINS_TABLE: &str = "blob_read_pins";
 
 /// `graph_release_pins`: an installed runnable release manifest.
 pub const RELEASE_PINS_TABLE: &str = "graph_release_pins";
-
-/// `graph_commit_receipts`: a commit's retry identity, batch digest and
-/// result, for the owner's retry lifetime. It owns no root.
-pub const RECEIPTS_TABLE: &str = "graph_commit_receipts";
 
 /// `graph_root_catalog`: the view of every root of every source.
 pub const CATALOG_VIEW: &str = "graph_root_catalog";
@@ -122,19 +118,6 @@ crate::statements! {
 
         /// Retire every read pin that expired before `?1`.
         pins_retire_expired = "DELETE FROM blob_read_pins WHERE expires_at_ms < ?1";
-
-        /// Owner `?1`'s receipt of commit `?2`.
-        receipt = "SELECT batch_digest, result_bytes FROM graph_commit_receipts
-             WHERE owner_key = ?1 AND commit_id = ?2";
-
-        /// Record owner `?1`'s commit `?2` of digest `?3` answering `?4` at
-        /// epoch `?5`.
-        receipt_insert = "INSERT INTO graph_commit_receipts
-                 (owner_key, commit_id, batch_digest, result_bytes, written_epoch)
-             VALUES (?1, ?2, ?3, ?4, ?5)";
-
-        /// Drop owner `?1`'s receipts: its retry lifetime ended.
-        receipts_retire = "DELETE FROM graph_commit_receipts WHERE owner_key = ?1";
 
         /// Every root of source `?1`, as the catalog names it.
         catalog_source = "SELECT root_ref FROM graph_root_catalog WHERE source = ?1";

@@ -31,8 +31,8 @@ pub const SESSION: Image = Image {
     wal: include_bytes!("../fixtures/formats/session/db-wal.gz"),
 };
 
-/// A kernel process parked on its first sleep, released `ready` by a
-/// draining node (`format_fixtures.rs`).
+/// A kernel process parked on its first sleep, left waiting by a draining
+/// node and woken `ready` (`format_fixtures.rs`).
 pub const LASH_VM: Image = Image {
     name: "lashvm",
     db: include_bytes!("../fixtures/formats/lashvm/db.gz"),

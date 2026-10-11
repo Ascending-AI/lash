@@ -146,6 +146,4 @@ DROP TABLE IF EXISTS lash_blob_read_pins CASCADE;
 
 DROP TABLE IF EXISTS lash_graph_release_pins CASCADE;
 
-DROP TABLE IF EXISTS lash_graph_commit_receipts CASCADE;
-
 DROP VIEW IF EXISTS lash_graph_root_catalog CASCADE;

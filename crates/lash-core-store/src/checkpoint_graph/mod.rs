@@ -53,8 +53,8 @@ pub mod vectors;
 mod tests;
 
 pub use commit::{
-    BatchDigest, CommitId, EncodeBudget, EncodedCommitMeasurement, ExplicitLimit,
-    GraphCommitBudget, InstalledGraphMeasurement,
+    CommitId, EncodeBudget, EncodedCommitMeasurement, ExplicitLimit, GraphCommitBudget,
+    InstalledGraphMeasurement,
 };
 pub use decode::{BlobEncoding, GraphDecoder, NodeSource, StoredNode, closure};
 pub use encode::{GraphStaging, TypedBody, encode_node};
