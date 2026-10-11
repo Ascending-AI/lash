@@ -760,7 +760,7 @@ fn native_reasoning_only_is_provider_error() {
         effect,
         Effect::Emit(lash_core::session_model::SessionStreamEvent::TurnOutcome {
             outcome: lash_core::facade_support::TurnOutcome::Stopped(
-                lash_core::facade_support::TurnStop::ProviderError
+                lash_core::facade_support::TurnStop::ProviderError { .. }
             )
         })
     )));

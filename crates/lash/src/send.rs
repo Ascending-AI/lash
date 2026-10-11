@@ -607,7 +607,11 @@ pub enum SendOutcome {
 #[non_exhaustive]
 pub enum TurnStatus {
     Answered,
-    Failed,
+    Failed {
+        /// Cause recorded in the terminal. Other failure categories and
+        /// admission refusals retain their own typed evidence.
+        cause: Option<crate::TurnErrorCause>,
+    },
     Cancelled,
     Parked(ParkedTurn),
     /// The input was accepted, but its delivery to the engine stalled (ADR
@@ -661,13 +665,13 @@ impl SendOutcome {
                 }
                 lash_core::runtime::PluginOperationCommandOutcome::Failed { .. }
                 | lash_core::runtime::PluginOperationCommandOutcome::Refused { .. } => {
-                    TurnStatus::Failed
+                    TurnStatus::Failed { cause: None }
                 }
             },
             Self::Settled { output, .. } => output.status(),
             Self::Parked { parked, .. } => TurnStatus::Parked(parked.clone()),
             Self::Stalled { stalled, .. } => TurnStatus::Stalled(stalled.clone()),
-            Self::Refused { .. } => TurnStatus::Failed,
+            Self::Refused { .. } => TurnStatus::Failed { cause: None },
             Self::Withdrawn { .. } => TurnStatus::Cancelled,
             Self::NotAccepted { .. } => TurnStatus::NotAccepted,
         }
@@ -756,7 +760,9 @@ impl TurnStatus {
             TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled { .. }) => {
                 TurnStatus::Cancelled
             }
-            TurnOutcome::Stopped(_) => TurnStatus::Failed,
+            TurnOutcome::Stopped(_) => TurnStatus::Failed {
+                cause: outcome.error_cause().cloned(),
+            },
         }
     }
 }
@@ -1371,12 +1377,18 @@ mod tests {
                 TurnStatus::Cancelled,
             ),
             (
-                TurnOutcome::Stopped(TurnStop::RuntimeError),
-                TurnStatus::Failed,
+                TurnOutcome::Stopped(TurnStop::RuntimeError {
+                    cause: crate::TurnErrorCause::new(crate::TurnErrorCode::RuntimeRefused),
+                }),
+                TurnStatus::Failed {
+                    cause: Some(crate::TurnErrorCause::new(
+                        crate::TurnErrorCode::RuntimeRefused,
+                    )),
+                },
             ),
             (
                 TurnOutcome::Stopped(TurnStop::AgentFrameSwitchLimit),
-                TurnStatus::Failed,
+                TurnStatus::Failed { cause: None },
             ),
         ] {
             assert_eq!(TurnStatus::of_outcome(&outcome), expected);

@@ -329,10 +329,12 @@ impl TurnCommitOutcome {
                 TurnStop::ToolFailure | TurnStop::ToolPanicked { .. } => {
                     Self::Failed(TurnCommitFailureCause::ToolFailure)
                 }
-                TurnStop::ProviderError => Self::Failed(TurnCommitFailureCause::ProviderError),
+                TurnStop::ProviderError { .. } => {
+                    Self::Failed(TurnCommitFailureCause::ProviderError)
+                }
                 TurnStop::ContextOverflow => Self::Failed(TurnCommitFailureCause::ContextOverflow),
                 TurnStop::PluginAbort => Self::Failed(TurnCommitFailureCause::PluginAbort),
-                TurnStop::RuntimeError => Self::Failed(TurnCommitFailureCause::RuntimeError),
+                TurnStop::RuntimeError { .. } => Self::Failed(TurnCommitFailureCause::RuntimeError),
                 TurnStop::AgentFrameSwitchLimit => {
                     Self::Failed(TurnCommitFailureCause::AgentFrameSwitchLimit)
                 }

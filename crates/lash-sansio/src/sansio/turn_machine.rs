@@ -642,8 +642,12 @@ impl<M: TurnProtocol> TurnMachine<M> {
     }
 
     pub fn fail_turn(&mut self, event: SessionStreamEvent) {
+        let cause = crate::TurnErrorCause::runtime(match &event {
+            SessionStreamEvent::Error(failure) => failure.envelope.as_ref(),
+            _ => None,
+        });
         self.emit(event);
-        self.finish(TurnOutcome::Stopped(TurnStop::RuntimeError));
+        self.finish(TurnOutcome::Stopped(TurnStop::RuntimeError { cause }));
     }
 
     pub fn finish_with_outcome(&mut self, outcome: TurnOutcome) {
@@ -1097,8 +1101,12 @@ impl<M: TurnProtocol> TurnMachine<M> {
             }
             LlmTerminalReason::OutputLimit => TurnOutcome::Stopped(TurnStop::Incomplete),
             LlmTerminalReason::ContextOverflow => TurnOutcome::Stopped(TurnStop::ContextOverflow),
-            LlmTerminalReason::ContentFilter => TurnOutcome::Stopped(TurnStop::ProviderError),
-            LlmTerminalReason::ProviderError => TurnOutcome::Stopped(TurnStop::ProviderError),
+            LlmTerminalReason::ContentFilter => TurnOutcome::Stopped(TurnStop::ProviderError {
+                cause: crate::TurnErrorCause::new(crate::TurnErrorCode::ContentFiltered),
+            }),
+            LlmTerminalReason::ProviderError => TurnOutcome::Stopped(TurnStop::ProviderError {
+                cause: crate::TurnErrorCause::new(crate::TurnErrorCode::ProviderRejected),
+            }),
             LlmTerminalReason::Cancelled => TurnOutcome::Stopped(TurnStop::Cancelled {
                 evidence: self.cancellation_evidence(),
             }),
@@ -1252,7 +1260,13 @@ impl<M: TurnProtocol> TurnMachine<M> {
         // reason keeps stopping as `ProviderError`.
         self.finish(TurnOutcome::Stopped(match error.terminal_reason {
             LlmTerminalReason::ContextOverflow => TurnStop::ContextOverflow,
-            _ => TurnStop::ProviderError,
+            _ => TurnStop::ProviderError {
+                cause: crate::TurnErrorCause::provider(
+                    error.kind,
+                    error.terminal_reason,
+                    error.code.as_ref(),
+                ),
+            },
         }));
     }
 

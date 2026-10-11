@@ -740,7 +740,7 @@ async fn rlm_provider_failure_after_prose_is_not_retried_or_committed() -> Resul
     );
     assert!(matches!(
         first.result.outcome,
-        TurnOutcome::Stopped(lash_core::facade_support::TurnStop::ProviderError)
+        TurnOutcome::Stopped(lash_core::facade_support::TurnStop::ProviderError { .. })
     ));
     assert!(first.activities.iter().any(|activity| matches!(
         &activity.event,

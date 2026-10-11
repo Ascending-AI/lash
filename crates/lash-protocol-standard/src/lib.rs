@@ -1310,7 +1310,9 @@ fn invalid_turn_options_actions(error: String) -> Vec<DriverAction> {
             Some(error),
             lash_sansio::session_model::RuntimeOutputCuts::standard(),
         )),
-        DriverAction::Finish(TurnOutcome::Stopped(TurnStop::RuntimeError)),
+        DriverAction::Finish(TurnOutcome::Stopped(TurnStop::RuntimeError {
+            cause: lash_sansio::TurnErrorCause::new(lash_sansio::TurnErrorCode::InvalidTurnOptions),
+        })),
     ]
 }
 

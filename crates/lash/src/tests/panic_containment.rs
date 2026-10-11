@@ -288,7 +288,7 @@ async fn provider_panic_records_the_typed_attempt_releases_the_lease_and_next_tu
     assert!(
         matches!(
             failed.result.outcome,
-            crate::TurnOutcome::Stopped(lash_core::facade_support::TurnStop::ProviderError)
+            crate::TurnOutcome::Stopped(lash_core::facade_support::TurnStop::ProviderError { .. })
         ),
         "{:?}",
         failed.result.outcome

@@ -142,7 +142,11 @@ impl lash_sansio::ProtocolDriverHandle<lash_core::HostTurnProtocol> for TestDriv
             self.0.lock_recover().push(encoded);
         }
         actions.push(lash_core::DriverAction::Finish(TurnOutcome::Stopped(
-            TurnStop::RuntimeError,
+            TurnStop::RuntimeError {
+                cause: lash_sansio::TurnErrorCause::new(
+                    lash_sansio::TurnErrorCode::ExecutorUnavailable,
+                ),
+            },
         )));
         actions
     }
@@ -188,7 +192,7 @@ async fn start_exec_without_code_executor_stops_as_runtime_error() -> Result<()>
     assert!(
         matches!(
             output.result.outcome,
-            TurnOutcome::Stopped(TurnStop::RuntimeError)
+            TurnOutcome::Stopped(TurnStop::RuntimeError { .. })
         ),
         "{:?}",
         output.result.outcome
@@ -212,5 +216,71 @@ async fn the_driver_s_reported_exec_failure_is_the_turn_s_error() -> Result<()> 
         .find_map(|issue| serde_json::from_str::<serde_json::Value>(&issue.message).ok())
         .unwrap_or_else(|| panic!("the driver reports the failure: {:?}", output.result.errors));
     assert_eq!(reported, executor_unavailable());
+    Ok(())
+}
+
+/// A typed runtime refusal belongs to the terminal, even after a new node opens it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn runtime_stop_cause_survives_owner_replacement() -> Result<()> {
+    fn core(backend: lash_core::Backend) -> Result<LashCore> {
+        explicit_ephemeral_facets(LashCore::builder(backend).protocol_plugin(Arc::new(
+            TestProtocolFactory(Arc::new(std::sync::Mutex::new(Vec::new()))),
+        )))
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
+        .build(crate::testing::runtime_lease_owner())
+    }
+    let backend = sqlite_memory_store_backend().await;
+    let running = core(backend.clone())?;
+    let id = crate::SessionId::from("runtime-stop-cause");
+    let run = crate::TurnId::from("runtime-stop-cause-run");
+    let session = running
+        .session(id.clone())
+        .create(crate::SessionCreation::root(
+            crate::plugins::SessionToolAccess::ambient(),
+            mock_session_spec(),
+        ))
+        .await?;
+    let live = session
+        .send(crate::TurnInput::text("run code"))
+        .id(run.clone())
+        .output()
+        .await?
+        .result;
+    drop(session);
+    running.shutdown().await?;
+    let reopened = core(backend)?;
+    let report = reopened
+        .session(id)
+        .open()
+        .await?
+        .attach_id(run)
+        .output()
+        .await?
+        .result;
+    assert_eq!(report.source, crate::ReportSource::Durable);
+    assert_eq!(report.outcome, live.outcome);
+    assert_eq!(report.error_cause(), live.error_cause());
+    assert_eq!(
+        report.status(),
+        crate::TurnStatus::Failed {
+            cause: live.error_cause().cloned(),
+        }
+    );
+    assert!(
+        report.errors.is_empty(),
+        "the new follower observed no failure"
+    );
+    let encoded = serde_json::to_value(&report.outcome)?;
+    assert_eq!(
+        encoded.pointer("/stopped/runtime_error/cause/code"),
+        Some(&serde_json::json!("executor_unavailable"))
+    );
+    assert_eq!(
+        encoded.pointer("/stopped/runtime_error/cause/detail"),
+        Some(&serde_json::json!(
+            "code execution is not available in this session"
+        ))
+    );
+    reopened.shutdown().await?;
     Ok(())
 }

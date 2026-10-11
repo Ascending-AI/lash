@@ -362,7 +362,7 @@ async fn retryable_mid_stream_failure_preserves_durable_charge_safety_evidence()
     assert_eq!(requests.lock_recover().len(), 1, "no regeneration");
     assert!(matches!(
         output.result.outcome,
-        crate::TurnOutcome::Stopped(crate::TurnStop::ProviderError)
+        crate::TurnOutcome::Stopped(crate::TurnStop::ProviderError { .. })
     ));
     assert!(output.activities.iter().any(|activity| matches!(
         &activity.event,
@@ -512,7 +512,7 @@ async fn authentication_failure_stops_unretried_and_permits_the_next_turn() {
     assert!(
         matches!(
             first.result.outcome,
-            crate::TurnOutcome::Stopped(crate::TurnStop::ProviderError)
+            crate::TurnOutcome::Stopped(crate::TurnStop::ProviderError { .. })
         ),
         "a 401 stops as a provider failure: {:?}",
         first.result.outcome
@@ -1229,4 +1229,97 @@ async fn a_live_model_deadline_reports_the_interrupted_attempt_and_its_typed_fai
     );
     core.shutdown().await.expect("shutdown");
     hold_time.abort();
+}
+
+/// The terminal owns its provider cause across replacement of the serving node.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn provider_stop_cause_survives_owner_replacement() {
+    let model = crate::testing::TestProvider::builder()
+        .kind("mock")
+        .complete(|_: LlmRequest| async {
+            Err(LlmTransportError::new("provider body: sk-secret-6013")
+                .with_kind(lash_core::ProviderFailureKind::Auth)
+                .with_http_status(401))
+        })
+        .build()
+        .into_handle();
+    let backend = sqlite_memory_store_backend().await;
+    let running = core_over(backend.clone(), model.clone());
+    let session = created(&running, "provider-stop-cause").await;
+    let run = crate::TurnId::from("provider-stop-cause-run");
+    let live = session
+        .send(crate::TurnInput::text("fail"))
+        .id(run.clone())
+        .output()
+        .await
+        .expect("settled")
+        .result;
+    drop(session);
+    running.shutdown().await.expect("shutdown");
+    let reopened = core_over(backend, model);
+    let report = reopened
+        .session(crate::SessionId::from("provider-stop-cause"))
+        .open()
+        .await
+        .expect("open")
+        .attach_id(run)
+        .output()
+        .await
+        .expect("report")
+        .result;
+    assert_eq!(report.source, crate::ReportSource::Durable);
+    assert_eq!(report.outcome, live.outcome);
+    assert_eq!(report.error_cause(), live.error_cause());
+    assert_eq!(
+        report.status(),
+        crate::TurnStatus::Failed {
+            cause: live.error_cause().cloned(),
+        }
+    );
+    assert!(
+        report.errors.is_empty(),
+        "the new follower observed no failure"
+    );
+    let encoded = serde_json::to_value(&report.outcome).expect("outcome");
+    assert_eq!(
+        encoded.pointer("/stopped/provider_error/cause/code"),
+        Some(&serde_json::json!("auth_rejected"))
+    );
+    assert_eq!(
+        encoded.pointer("/stopped/provider_error/cause/detail"),
+        Some(&serde_json::json!("provider authentication rejected"))
+    );
+    reopened.shutdown().await.expect("shutdown");
+}
+
+/// Provider-owned error text never enters the durable stop detail.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn provider_stop_detail_excludes_secret_body() {
+    let model = crate::testing::TestProvider::builder()
+        .kind("mock")
+        .complete(|_: LlmRequest| async {
+            Err(LlmTransportError::new("provider authentication failed")
+                .with_raw("{\"message\":\"sk-secret-6013 and user content\"}")
+                .with_kind(lash_core::ProviderFailureKind::Auth)
+                .with_http_status(401))
+        })
+        .build()
+        .into_handle();
+    let core = core_over(sqlite_memory_store_backend().await, model);
+    let session = created(&core, "provider-stop-secret").await;
+    let report = session
+        .send(crate::TurnInput::text("fail"))
+        .output()
+        .await
+        .expect("settled")
+        .result;
+    let encoded = serde_json::to_value(&report.outcome).expect("outcome");
+    let detail = encoded
+        .pointer("/stopped/provider_error/cause/detail")
+        .and_then(serde_json::Value::as_str)
+        .expect("durable detail");
+    assert_eq!(detail, "provider authentication rejected");
+    assert!(!detail.contains("sk-secret-6013"));
+    assert!(detail.len() <= 512);
+    core.shutdown().await.expect("shutdown");
 }

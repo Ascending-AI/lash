@@ -449,7 +449,9 @@ pub(crate) fn effects_include_runtime_error(effects: &[Effect], message_fragment
         matches!(
             effect,
             Effect::Emit(SessionStreamEvent::TurnOutcome {
-                outcome: lash_sansio::TurnOutcome::Stopped(lash_sansio::TurnStop::RuntimeError)
+                outcome: lash_sansio::TurnOutcome::Stopped(
+                    lash_sansio::TurnStop::RuntimeError { .. }
+                )
             })
         )
     });

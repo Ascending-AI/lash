@@ -107,10 +107,10 @@ pub fn settled(outcome: &Value) -> (String, Option<String>) {
                 TurnStop::MaxTurns => "max_turns",
                 TurnStop::ToolFailure => "tool_failure",
                 TurnStop::ToolPanicked { .. } => "tool_panicked",
-                TurnStop::ProviderError => "provider_error",
+                TurnStop::ProviderError { .. } => "provider_error",
                 TurnStop::ContextOverflow => "context_overflow",
                 TurnStop::PluginAbort => "plugin_abort",
-                TurnStop::RuntimeError => "runtime_error",
+                TurnStop::RuntimeError { .. } => "runtime_error",
                 TurnStop::AgentFrameSwitchLimit => "agent_frame_switch_limit",
                 TurnStop::SubmittedError { .. } => "submitted_error",
                 TurnStop::ToolError { .. } => "tool_error",
@@ -176,7 +176,9 @@ fn settled_reads_the_host_native_turn_outcome() {
             None,
         ),
         (
-            TurnOutcome::Stopped(TurnStop::ProviderError),
+            TurnOutcome::Stopped(TurnStop::ProviderError {
+                cause: lash::TurnErrorCause::new(lash::TurnErrorCode::ProviderRejected),
+            }),
             "failed:provider_error",
             None,
         ),

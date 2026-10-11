@@ -28,10 +28,14 @@ fn every_non_cancelled_child_stop_is_distinguishable_to_the_parent() {
         crate::TurnStop::InvalidInput,
         crate::TurnStop::MaxTurns,
         crate::TurnStop::ToolFailure,
-        crate::TurnStop::ProviderError,
+        crate::TurnStop::ProviderError {
+            cause: lash_sansio::TurnErrorCause::new(lash_sansio::TurnErrorCode::ProviderRejected),
+        },
         crate::TurnStop::ContextOverflow,
         crate::TurnStop::PluginAbort,
-        crate::TurnStop::RuntimeError,
+        crate::TurnStop::RuntimeError {
+            cause: lash_sansio::TurnErrorCause::new(lash_sansio::TurnErrorCode::RuntimeRefused),
+        },
         crate::TurnStop::AgentFrameSwitchLimit,
         crate::TurnStop::SubmittedError {
             value: serde_json::json!({ "reason": "missing shard amber" }),
@@ -101,7 +105,9 @@ fn a_child_authored_stop_reason_reaches_the_parent_verbatim() {
 #[test]
 fn a_category_stop_carries_the_child_turn_blocking_issue() {
     let mut turn = crate::testing::mock_assembled_turn(&SessionId::from("failing-child"), "unused");
-    turn.outcome = crate::TurnOutcome::Stopped(crate::TurnStop::ProviderError);
+    turn.outcome = crate::TurnOutcome::Stopped(crate::TurnStop::ProviderError {
+        cause: lash_sansio::TurnErrorCause::new(lash_sansio::TurnErrorCode::ProviderRejected),
+    });
     turn.errors = vec![crate::TurnIssue {
         severity: crate::TurnIssueSeverity::Blocking,
         kind: crate::TurnFailureKind::LlmProvider,

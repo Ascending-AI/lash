@@ -334,7 +334,11 @@ fn a_cell_in_the_reasoning_channel_alone_runs_nothing_and_is_never_replied() {
         let next = answer(native, vec![reasoning(LONE_BLOCK)], LlmTerminalReason::Stop);
         assert_no_cell_replied("reasoning-only cell", native, &next);
         let expected = if native {
-            Next::Stopped(TurnStop::ProviderError)
+            Next::Stopped(TurnStop::ProviderError {
+                cause: lash_sansio::TurnErrorCause::new(
+                    lash_sansio::TurnErrorCode::InvalidResponse,
+                ),
+            })
         } else {
             Next::Replied(String::new())
         };

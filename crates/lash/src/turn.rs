@@ -21,7 +21,9 @@ pub struct TurnReport {
     /// Final runtime state for the turn.
     pub state: SessionSnapshot,
     /// Cancellation evidence, when the turn was cancelled, rides this outcome
-    /// — read it with [`TurnReport::cancellation`].
+    /// — read it with [`TurnReport::cancellation`]. Runtime and provider
+    /// stop causes ride the same terminal: read [`TurnReport::error_cause`].
+    /// This evidence survives crashes and owner replacement.
     pub outcome: TurnOutcome,
     /// This session's own LLM tokens for the turn. Every session owns its
     /// usage; child-session tokens live on each child's own turn report.
@@ -50,6 +52,7 @@ pub struct TurnReport {
     pub execution: TurnExecutionMetrics,
     /// Typed errors this follower observed while settling the turn. An
     /// observation gap can leave this list incomplete, as with `llm_calls`.
+    /// Read [`TurnReport::error_cause`] for the authoritative terminal cause.
     pub errors: Vec<TurnIssue>,
     /// Durable acceptance identity of the input this turn was executed from.
     ///
@@ -99,6 +102,12 @@ impl TurnReport {
     /// a settled turn, so it is never [`Parked`](crate::TurnStatus::Parked).
     pub fn status(&self) -> crate::TurnStatus {
         crate::TurnStatus::of_outcome(&self.outcome)
+    }
+
+    /// Error cause committed with the terminal, available to live and durable
+    /// readers even when this follower observed no errors.
+    pub fn error_cause(&self) -> Option<&crate::TurnErrorCause> {
+        self.outcome.error_cause()
     }
 
     /// Durable cancellation evidence, present exactly when this turn was

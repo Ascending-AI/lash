@@ -241,7 +241,11 @@ impl lash_sansio::ProtocolDriverHandle<lash_core::HostTurnProtocol> for EffectCo
                         envelope: None,
                     }),
                 ),
-                lash_core::DriverAction::Finish(TurnOutcome::Stopped(TurnStop::RuntimeError)),
+                lash_core::DriverAction::Finish(TurnOutcome::Stopped(TurnStop::RuntimeError {
+                    cause: lash_sansio::TurnErrorCause::new(
+                        lash_sansio::TurnErrorCode::RuntimeRefused,
+                    ),
+                })),
             ],
         }
     }

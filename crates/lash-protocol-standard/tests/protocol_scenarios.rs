@@ -708,7 +708,11 @@ fn standard_protocol_scenario_provider_error_stops_without_checkpoint() {
             llm_call_count: Some(1),
             done: Some(true),
             error_contains: vec!["LLM error: upstream provider unavailable"],
-            turn_outcome: Some(TurnOutcome::Stopped(TurnStop::ProviderError)),
+            turn_outcome: Some(TurnOutcome::Stopped(TurnStop::ProviderError {
+                cause: lash_sansio::TurnErrorCause::new(
+                    lash_sansio::TurnErrorCode::ProviderRejected,
+                ),
+            })),
             ..StandardProtocolExpectations::default()
         })
         .run();

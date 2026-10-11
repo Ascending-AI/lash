@@ -99,10 +99,10 @@ pub(super) fn outcome(
                 TurnStop::ToolFailure | TurnStop::ToolPanicked { .. } => {
                     failed(TraceTurnFailureReason::ToolFailure)
                 }
-                TurnStop::ProviderError => failed(TraceTurnFailureReason::ProviderError),
+                TurnStop::ProviderError { .. } => failed(TraceTurnFailureReason::ProviderError),
                 TurnStop::ContextOverflow => failed(TraceTurnFailureReason::ContextOverflow),
                 TurnStop::PluginAbort => failed(TraceTurnFailureReason::PluginAbort),
-                TurnStop::RuntimeError => failed(TraceTurnFailureReason::RuntimeError),
+                TurnStop::RuntimeError { .. } => failed(TraceTurnFailureReason::RuntimeError),
                 TurnStop::AgentFrameSwitchLimit => {
                     failed(TraceTurnFailureReason::AgentFrameSwitchLimit)
                 }

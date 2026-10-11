@@ -1199,8 +1199,8 @@ fn provider_prompt_subtotal_overflow_fails_the_turn_at_ingress() {
     assert!(effects.iter().any(|effect| matches!(
         effect,
         Effect::Emit(SessionStreamEvent::TurnOutcome {
-            outcome: TurnOutcome::Stopped(TurnStop::RuntimeError)
-        })
+            outcome: TurnOutcome::Stopped(TurnStop::RuntimeError { cause })
+        }) if cause.code == crate::TurnErrorCode::TokenUsageOverflow
     )));
     // Nothing about the rejected response reaches a usage consumer.
     assert!(
@@ -1382,7 +1382,13 @@ fn non_overflow_llm_errors_still_stop_as_provider_error() {
             .collect::<Vec<_>>();
         assert_eq!(
             outcomes,
-            vec![&TurnOutcome::Stopped(TurnStop::ProviderError)],
+            vec![&TurnOutcome::Stopped(TurnStop::ProviderError {
+                cause: crate::TurnErrorCause::provider(
+                    crate::ProviderFailureKind::Unknown,
+                    reason,
+                    None
+                )
+            })],
             "{reason:?} must still stop as ProviderError"
         );
     }
@@ -1417,7 +1423,7 @@ fn content_filter_and_provider_error_still_stop_as_provider_error() {
             effects.iter().any(|effect| matches!(
                 effect,
                 Effect::Emit(SessionStreamEvent::TurnOutcome {
-                    outcome: TurnOutcome::Stopped(TurnStop::ProviderError)
+                    outcome: TurnOutcome::Stopped(TurnStop::ProviderError { .. })
                 })
             )),
             "{reason:?} must still stop as ProviderError"

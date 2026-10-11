@@ -68,7 +68,7 @@ fn opaque_reasoning_only_response_stops_as_empty_provider_response() {
     assert!(effects.iter().any(|effect| matches!(
         effect,
         Effect::Emit(SessionStreamEvent::TurnOutcome {
-            outcome: lash_sansio::TurnOutcome::Stopped(lash_sansio::TurnStop::ProviderError)
+            outcome: lash_sansio::TurnOutcome::Stopped(lash_sansio::TurnStop::ProviderError { .. })
         })
     )));
     assert!(

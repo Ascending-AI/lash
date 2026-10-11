@@ -947,7 +947,7 @@ impl TurnDrive for RuntimeDrive {
             TurnOutcome::Stopped(TurnStop::ToolPanicked { message, .. }) => {
                 Some(("tool_panicked", message.clone()))
             }
-            TurnOutcome::Stopped(TurnStop::ProviderError) => driver
+            TurnOutcome::Stopped(TurnStop::ProviderError { .. }) => driver
                 .provider_panic
                 .take()
                 .map(|message| ("provider_panicked", message)),

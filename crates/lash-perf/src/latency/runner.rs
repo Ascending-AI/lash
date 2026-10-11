@@ -799,7 +799,7 @@ async fn measure_send(
 pub(crate) fn status_name(status: &lash::TurnStatus) -> String {
     match status {
         lash::TurnStatus::Answered => "answered".to_string(),
-        lash::TurnStatus::Failed => "failed".to_string(),
+        lash::TurnStatus::Failed { .. } => "failed".to_string(),
         lash::TurnStatus::Cancelled => "cancelled".to_string(),
         lash::TurnStatus::Parked(_) => "parked".to_string(),
         lash::TurnStatus::Stalled(_) => "stalled".to_string(),

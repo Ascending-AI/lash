@@ -767,7 +767,11 @@ async fn overflow_after_turn_queues_marker_for_context_overflow_outcome_only() {
         writer_formats: lash_sansio::build_newest_writer_formats(),
         session_id: SessionId::from("root"),
         turn: overflow_turn_report(lash_core::facade_support::TurnOutcome::Stopped(
-            lash_core::facade_support::TurnStop::ProviderError,
+            lash_core::facade_support::TurnStop::ProviderError {
+                cause: lash_sansio::TurnErrorCause::new(
+                    lash_sansio::TurnErrorCode::ProviderRejected,
+                ),
+            },
         )),
         sessions,
         plugin_config: Default::default(),

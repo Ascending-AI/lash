@@ -333,7 +333,7 @@ fn process_turn_stop_classification(
             "process_session_turn_tool_failure",
             "background session turn stopped on a failed tool call",
         ),
-        crate::TurnStop::ProviderError => (
+        crate::TurnStop::ProviderError { .. } => (
             Class::External,
             "process_session_turn_provider_error",
             "background session turn stopped on a provider error",
@@ -353,7 +353,7 @@ fn process_turn_stop_classification(
             "process_session_turn_agent_frame_switch_limit",
             "background session turn reached its agent frame switch limit",
         ),
-        crate::TurnStop::RuntimeError => (
+        crate::TurnStop::RuntimeError { .. } => (
             Class::Internal,
             "process_session_turn_runtime_error",
             "background session turn stopped on a runtime error",

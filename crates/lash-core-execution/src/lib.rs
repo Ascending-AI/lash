@@ -369,7 +369,6 @@ pub mod facade_support {
     pub use lash_sansio::ToolCatalogBuildError;
     pub use lash_sansio::TurnFinish;
     pub use lash_sansio::TurnOutcome;
-    pub use lash_sansio::TurnStop;
     pub use lash_sansio::append_assistant_text_part;
     pub use lash_sansio::build_tool_catalog;
     pub use lash_sansio::head_tail_truncate;
@@ -378,6 +377,7 @@ pub mod facade_support {
     pub use lash_sansio::resolve_schema;
     pub use lash_sansio::shared_parts;
     pub use lash_sansio::visible_response_text_from_parts;
+    pub use lash_sansio::{TurnErrorCause, TurnErrorCode, TurnStop};
     pub use lash_trace::JsonlTraceSink;
     pub use lash_trace::TraceBranchSelection;
     pub use lash_trace::TraceLevel;

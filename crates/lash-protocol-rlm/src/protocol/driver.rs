@@ -366,7 +366,11 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                 lash_sansio::session_model::RuntimeOutputCuts::standard(),
             )));
             actions.push(DriverAction::Finish(TurnOutcome::Stopped(
-                TurnStop::ProviderError,
+                TurnStop::ProviderError {
+                    cause: lash_sansio::TurnErrorCause::new(
+                        lash_sansio::TurnErrorCode::InvalidResponse,
+                    ),
+                },
             )));
             return actions;
         }

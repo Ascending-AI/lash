@@ -707,7 +707,9 @@ pub enum TurnStop {
         call_id: crate::ToolCallId,
         message: String,
     },
-    ProviderError,
+    ProviderError {
+        cause: TurnErrorCause,
+    },
     /// The model refused the request because the assembled context exceeded
     /// the model's window. Distinct from [`TurnStop::ProviderError`] because
     /// the cause is known and recoverable: a host or plugin that observes this
@@ -715,7 +717,9 @@ pub enum TurnStop {
     /// restarting. The kernel states the outcome and chooses no policy.
     ContextOverflow,
     PluginAbort,
-    RuntimeError,
+    RuntimeError {
+        cause: TurnErrorCause,
+    },
     /// The durable follow-on reached its chain's configured frame-switch
     /// bound. No model call ran for this input.
     AgentFrameSwitchLimit,
@@ -726,6 +730,191 @@ pub enum TurnStop {
         tool_name: String,
         value: serde_json::Value,
     },
+}
+
+/// Lash-owned classification of an error that ended a turn. The code and
+/// safe detail are terminal evidence, independent of a follower's observations.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum TurnErrorCode {
+    Transport,
+    Timeout,
+    Http,
+    InvalidResponse,
+    AuthRejected,
+    Quota,
+    RequestRejected,
+    Unsupported,
+    ProviderRejected,
+    ContentFiltered,
+    ProviderPanicked,
+    PluginFailed,
+    WorkerCrashed,
+    ExecutionEnvironment,
+    TokenUsageOverflow,
+    InvalidTurnOptions,
+    StoredDataCorrupt,
+    EffectRefused,
+    RuntimeRefused,
+    ExecutorUnavailable,
+}
+
+impl TurnErrorCode {
+    /// Stable snake_case classification owned by Lash.
+    pub const fn code(self) -> &'static str {
+        match self {
+            Self::Transport => "transport",
+            Self::Timeout => "timeout",
+            Self::Http => "http",
+            Self::InvalidResponse => "invalid_response",
+            Self::AuthRejected => "auth_rejected",
+            Self::Quota => "quota",
+            Self::RequestRejected => "request_rejected",
+            Self::Unsupported => "unsupported",
+            Self::ProviderRejected => "provider_rejected",
+            Self::ContentFiltered => "content_filtered",
+            Self::ProviderPanicked => "provider_panicked",
+            Self::PluginFailed => "plugin_failed",
+            Self::WorkerCrashed => "worker_crashed",
+            Self::ExecutionEnvironment => "execution_environment",
+            Self::TokenUsageOverflow => "token_usage_overflow",
+            Self::InvalidTurnOptions => "invalid_turn_options",
+            Self::StoredDataCorrupt => "stored_data_corrupt",
+            Self::EffectRefused => "effect_refused",
+            Self::RuntimeRefused => "runtime_refused",
+            Self::ExecutorUnavailable => "executor_unavailable",
+        }
+    }
+
+    const fn detail(self) -> &'static str {
+        match self {
+            Self::Transport => "provider transport failed",
+            Self::Timeout => "provider call timed out",
+            Self::Http => "provider HTTP request failed",
+            Self::InvalidResponse => "provider response was invalid",
+            Self::AuthRejected => "provider authentication rejected",
+            Self::Quota => "provider quota or rate limit exceeded",
+            Self::RequestRejected => "provider request validation failed",
+            Self::Unsupported => "provider capability is unsupported",
+            Self::ProviderRejected => "provider call failed",
+            Self::ContentFiltered => "provider content filter refused the call",
+            Self::ProviderPanicked => "provider implementation panicked",
+            Self::PluginFailed => "plugin hook failed",
+            Self::WorkerCrashed => "driver task failed to join",
+            Self::ExecutionEnvironment => "execution environment refresh failed",
+            Self::TokenUsageOverflow => "turn token usage accounting overflowed",
+            Self::InvalidTurnOptions => "protocol turn options were refused",
+            Self::StoredDataCorrupt => "stored turn history was corrupt",
+            Self::EffectRefused => "runtime effect controller refused the operation",
+            Self::RuntimeRefused => "runtime refused to continue the turn",
+            Self::ExecutorUnavailable => "code execution is not available in this session",
+        }
+    }
+}
+
+/// The error recorded with a stopped turn. Detail contains only Lash's typed
+/// error text, never provider bodies, headers, credentials or user content.
+/// Constructors use the same free-text redaction as journaled provider errors:
+/// discard foreign text and render the typed classification instead.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct TurnErrorCause {
+    pub code: TurnErrorCode,
+    #[serde(deserialize_with = "deserialize_turn_error_detail")]
+    detail: Option<String>,
+}
+
+impl TurnErrorCause {
+    /// Build terminal evidence from a typed classification. No free text enters
+    /// this constructor, including through protocol and plugin boundaries.
+    pub fn new(code: TurnErrorCode) -> Self {
+        Self {
+            code,
+            detail: Some(code.detail().to_owned()),
+        }
+    }
+
+    /// Lash-owned diagnostic text, bounded to 512 UTF-8 bytes.
+    pub fn detail(&self) -> Option<&str> {
+        self.detail.as_deref()
+    }
+
+    /// Classify the typed envelope at the runtime stop decision. Observed
+    /// messages and raw evidence never contribute to the terminal detail.
+    pub fn runtime(envelope: Option<&ErrorEnvelope>) -> Self {
+        let code = match envelope {
+            Some(envelope) => match envelope.code.as_ref().and_then(FailureCode::turn_code) {
+                Some(TurnFailureCode::InvalidTurnOptions) => TurnErrorCode::InvalidTurnOptions,
+                Some(TurnFailureCode::TokenUsageOverflow) => TurnErrorCode::TokenUsageOverflow,
+                _ => match envelope.kind {
+                    TurnFailureKind::ExecutionEnvironment => TurnErrorCode::ExecutionEnvironment,
+                    TurnFailureKind::Plugin | TurnFailureKind::ProtocolBeforeLlmCall => {
+                        TurnErrorCode::PluginFailed
+                    }
+                    TurnFailureKind::RuntimeEffectController => TurnErrorCode::EffectRefused,
+                    _ => TurnErrorCode::RuntimeRefused,
+                },
+            },
+            None => TurnErrorCode::RuntimeRefused,
+        };
+        Self::new(code)
+    }
+
+    /// Classify a failed provider call without interpreting provider-owned
+    /// spellings or copying its message, raw body, or request.
+    pub fn provider(
+        kind: crate::ProviderFailureKind,
+        reason: crate::LlmTerminalReason,
+        code: Option<&FailureCode>,
+    ) -> Self {
+        use crate::{LlmTerminalReason as Reason, ProviderFailureKind as Kind};
+        let code = match code.and_then(FailureCode::turn_code) {
+            Some(TurnFailureCode::ProviderPanicked) => TurnErrorCode::ProviderPanicked,
+            Some(TurnFailureCode::PluginAssistantStream) => TurnErrorCode::PluginFailed,
+            Some(TurnFailureCode::TaskJoinFailed) => TurnErrorCode::WorkerCrashed,
+            Some(TurnFailureCode::EmptyResponse) => TurnErrorCode::InvalidResponse,
+            _ if reason == Reason::ContentFilter => TurnErrorCode::ContentFiltered,
+            _ => match kind {
+                Kind::Transport => TurnErrorCode::Transport,
+                Kind::Timeout => TurnErrorCode::Timeout,
+                Kind::Http => TurnErrorCode::Http,
+                Kind::Stream => TurnErrorCode::InvalidResponse,
+                Kind::Auth => TurnErrorCode::AuthRejected,
+                Kind::Validation => TurnErrorCode::RequestRejected,
+                Kind::Quota => TurnErrorCode::Quota,
+                Kind::Unsupported => TurnErrorCode::Unsupported,
+                Kind::Unknown => TurnErrorCode::ProviderRejected,
+            },
+        };
+        Self::new(code)
+    }
+}
+
+fn deserialize_turn_error_detail<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error> {
+    use serde::Deserialize as _;
+    let mut detail = Option::<String>::deserialize(deserializer)?;
+    if let Some(text) = &mut detail {
+        let mut end = text.len().min(512);
+        while !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        text.truncate(end);
+    }
+    Ok(detail)
+}
+
+impl TurnOutcome {
+    /// The cause recorded in this turn's terminal, independent of observed errors.
+    pub fn error_cause(&self) -> Option<&TurnErrorCause> {
+        match self {
+            Self::Stopped(TurnStop::RuntimeError { cause } | TurnStop::ProviderError { cause }) => {
+                Some(cause)
+            }
+            _ => None,
+        }
+    }
 }
 
 /// What cancellation does with active-turn input the cancelled turn did not

@@ -174,7 +174,7 @@ async fn retryable_llm_failures_exhaust_and_fail_turn() {
     assert!(
         matches!(
             output.result.outcome,
-            crate::TurnOutcome::Stopped(crate::TurnStop::ProviderError)
+            crate::TurnOutcome::Stopped(crate::TurnStop::ProviderError { .. })
         ),
         "{:?}",
         output.result.outcome
@@ -248,7 +248,7 @@ async fn provider_failure_surfaces_typed_kind_and_retryability_on_turn_issue() {
         .expect("the turn settles");
     assert!(matches!(
         output.result.outcome,
-        crate::TurnOutcome::Stopped(crate::TurnStop::ProviderError)
+        crate::TurnOutcome::Stopped(crate::TurnStop::ProviderError { .. })
     ));
     let [call] = output.result.llm_calls.as_slice() else {
         panic!("one logical model call: {:?}", output.result.llm_calls);
