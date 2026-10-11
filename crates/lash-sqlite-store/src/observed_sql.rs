@@ -61,6 +61,17 @@ impl WriteWitness {
         }
     }
 
+    /// Record the rows changed since the witness started or last recorded:
+    /// a batch member's own rows (FIG-5968).
+    pub(crate) fn member(&mut self, connection: &rusqlite::Connection) {
+        let changes = connection.total_changes();
+        lash_core_execution::perf_witness::record_sql_writes(
+            changes.saturating_sub(self.changes),
+            0,
+        );
+        self.changes = changes;
+    }
+
     pub(crate) fn finish(self, connection: &rusqlite::Connection) {
         lash_core_execution::perf_witness::record_sql_writes(
             connection.total_changes().saturating_sub(self.changes),

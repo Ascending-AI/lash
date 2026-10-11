@@ -382,6 +382,17 @@ fails every member. Nothing waits for a batch to fill, and a lone write runs as
 a plain transaction. The synchronous mode stays the connection's, fixed before
 any transaction begins.
 
+SQLite may end the whole transaction on an error inside a statement
+(`SQLITE_FULL`, an I/O error, `SQLITE_NOMEM`), not only the member's savepoint,
+so the writer checks for autocommit after every member (FIG-5968). A member's
+failure then affects another member only where SQLite took that member's work
+with it. A member keeps its own answer when it kept no writes and no member
+before it kept any, since its answer was decided against committed state alone;
+the member whose own error ended the transaction keeps that error. Every other
+member that ran fails with a storage failure naming the ended transaction and
+is never answered committed. Members not yet run lead the next batch untouched.
+Member bodies run once, so a lost member is failed, not re-run.
+
 PostgreSQL requires `fsync=on` and synchronous commit (`synchronous_commit=on`
 or a synchronous level that waits for local WAL flush). Asynchronous commit
 can lose acknowledged starts; disabling fsync also risks corruption. Every

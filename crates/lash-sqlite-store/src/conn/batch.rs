@@ -15,9 +15,22 @@
 //! siblings still commit. No member answers before the outer `COMMIT`
 //! returns: an answer never reports writes, or a refusal decided against
 //! writes, that a power loss could still take back. A failed `COMMIT`
-//! fails every member, which their owners treat as a crash. The synchronous
-//! level is the connection's, fixed at open and never changed per batch:
-//! SQLite refuses to change it inside a transaction.
+//! fails every member, which their owners treat as a crash.
+//!
+//! SQLite may end the whole transaction on an error inside a statement
+//! (`SQLITE_FULL`, an I/O error, `SQLITE_NOMEM`), not just the member's
+//! savepoint, so the batch checks for autocommit after every member and
+//! never assumes the savepoint survived (FIG-5968). The writes of every
+//! member so far are then gone. A member keeps its own answer when it kept
+//! no writes and no member before it kept any: its refusal or error was
+//! decided against committed state alone, and stays true. The member whose
+//! own error ended the transaction keeps that error too. Every other member
+//! that ran fails with a storage failure naming the ended transaction, so
+//! none is answered committed; the members not yet run lead the next batch,
+//! untouched. Bodies run once, so a lost member is failed, not re-run.
+//!
+//! The synchronous level is the connection's, fixed at open and never
+//! changed per batch: SQLite refuses to change it inside a transaction.
 
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex, RwLock};
@@ -26,6 +39,23 @@ use lash_core_execution::facade_support::sql::Window;
 use rusqlite::{Connection, TransactionBehavior};
 
 use super::{CheckpointState, FencedTx, TxOutcome, WriterFence, timed_gate};
+#[cfg(feature = "perf-witness")]
+use crate::observed_sql::WriteWitness as Writes;
+
+/// Without the perf witness, a batch counts no writes.
+#[cfg(not(feature = "perf-witness"))]
+struct Writes;
+
+#[cfg(not(feature = "perf-witness"))]
+impl Writes {
+    fn start(_: &Connection) -> Self {
+        Self
+    }
+
+    fn member(&mut self, _: &Connection) {}
+
+    fn finish(self, _: &Connection) {}
+}
 
 /// Everything a queued write needs on the connection thread, shared by the
 /// connection's clones: writes on one writer may share a transaction.
@@ -109,9 +139,9 @@ enum Kept {
     Writes,
     /// It chose to roll back: its savepoint is undone.
     Nothing,
-    /// It failed with this error (a replica; the member keeps the
-    /// original to answer with): its savepoint is undone.
-    Failed(rusqlite::Error),
+    /// It failed with an error, which it keeps to answer with: its
+    /// savepoint is undone.
+    Failed,
 }
 
 trait Body: Send {
@@ -141,10 +171,7 @@ where
         let (result, kept) = match body(tx) {
             Ok(TxOutcome::Commit(value)) => (Ok(value), Kept::Writes),
             Ok(TxOutcome::Rollback(value)) => (Ok(value), Kept::Nothing),
-            Err(error) => {
-                let replica = replicate(&error);
-                (Err(error), Kept::Failed(replica))
-            }
+            Err(error) => (Err(error), Kept::Failed),
         };
         self.result = Some(result);
         kept
@@ -162,6 +189,14 @@ where
     }
 }
 
+/// A member that ran, and whether its own answer survives the end of the
+/// transaction: it kept no writes and none before it did, so its answer was
+/// decided against committed state alone.
+struct Ran {
+    member: Member,
+    standalone: bool,
+}
+
 /// A batch's end: each member it answers, with the failure that replaces
 /// its own result, and the members it never ran.
 struct Settled {
@@ -173,11 +208,29 @@ struct Settled {
 
 impl Settled {
     /// `ran` all fail with `failure`; `rest` were never run.
-    fn failed(ran: Vec<Member>, failure: &rusqlite::Error, rest: Vec<Member>) -> Self {
+    fn failed(ran: Vec<Ran>, failure: &rusqlite::Error, rest: Vec<Member>) -> Self {
         Self {
             answered: ran
                 .into_iter()
-                .map(|member| (member, Some(replicate(failure))))
+                .map(|ran| (ran.member, Some(replicate(failure))))
+                .collect(),
+            unrun: rest,
+            ended: false,
+        }
+    }
+
+    /// SQLite ended the transaction itself: the standalone members of `ran`
+    /// keep their own answers, the rest fail; `rest` were never run.
+    fn ended(ran: Vec<Ran>, rest: Vec<Member>) -> Self {
+        Self {
+            answered: ran
+                .into_iter()
+                .map(|ran| {
+                    let failure = (!ran.standalone).then(|| {
+                        storage_failure("the write transaction ended inside a batch member")
+                    });
+                    (ran.member, failure)
+                })
                 .collect(),
             unrun: rest,
             ended: false,
@@ -215,7 +268,13 @@ pub(super) fn run(c: &mut Connection, mut members: Vec<Member>) -> Vec<Member> {
             gate.lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
         });
-        transact(c, &writer, std::mem::take(&mut members))
+        // The witness counts each member's rows as it runs and the pages
+        // the batch wrote, so a batch counts what its members' plain
+        // transactions did (FIG-5968).
+        let mut writes = Writes::start(c);
+        let settled = transact(c, &writer, std::mem::take(&mut members), &mut writes);
+        writes.finish(c);
+        settled
     });
     if observed {
         c.trace_v2(rusqlite::trace::TraceEventCodes::empty(), None);
@@ -248,7 +307,12 @@ fn gate<'g, G, T>(gate: &'g G, _site: &'static str, take: impl FnOnce(&'g G) -> 
 
 /// The batch's transaction: `BEGIN IMMEDIATE`, the writer fence once, each
 /// member (in a savepoint when it has siblings), then one `COMMIT`.
-fn transact(c: &mut Connection, writer: &Writer, members: Vec<Member>) -> Settled {
+fn transact(
+    c: &mut Connection,
+    writer: &Writer,
+    members: Vec<Member>,
+    writes: &mut Writes,
+) -> Settled {
     let mut members = members.into_iter();
     #[cfg(feature = "perf-witness")]
     let witness = lash_core_execution::perf_witness::latency::Transaction::begin();
@@ -284,7 +348,7 @@ fn transact(c: &mut Connection, writer: &Writer, members: Vec<Member>) -> Settle
         fleet,
         writable: writer.fence.writable(),
     };
-    let mut ran: Vec<Member> = Vec::with_capacity(members.len());
+    let mut ran: Vec<Ran> = Vec::with_capacity(members.len());
     let mut kept = 0_usize;
     let mut unrun = Vec::new();
     let rows_before = tx.total_changes();
@@ -298,33 +362,36 @@ fn transact(c: &mut Connection, writer: &Writer, members: Vec<Member>) -> Settle
             break;
         }
         if !solo && let Err(error) = tx.execute_batch("SAVEPOINT lash_batch_member") {
-            ran.push(member);
+            ran.push(Ran {
+                member,
+                standalone: false,
+            });
             return Settled::failed(ran, &error, members.collect());
         }
         #[cfg(feature = "perf-witness")]
         let staged = witness.as_ref().map(|witness| witness.staged());
         let outcome = member.run(&tx);
+        writes.member(&tx);
         if tx.is_autocommit() {
             // SQLite ended the transaction itself (SQLITE_FULL, an I/O
-            // error): the writes of every member so far went with it. The
-            // member that ended it keeps its own error.
-            let (failure, own) = match outcome {
-                Kept::Failed(error) => (error, true),
-                Kept::Writes | Kept::Nothing => (
-                    storage_failure("the write transaction ended inside a batch member"),
-                    false,
-                ),
+            // error): the writes of every member so far went with it. A
+            // member whose error ended it keeps that error; one that kept
+            // nothing keeps its answer while no member before it kept writes.
+            let standalone = match outcome {
+                Kept::Failed => true,
+                Kept::Nothing => kept == 0,
+                Kept::Writes => false,
             };
-            let mut settled = Settled::failed(ran, &failure, members.collect());
-            settled.answered.push((member, (!own).then_some(failure)));
-            return settled;
+            ran.push(Ran { member, standalone });
+            return Settled::ended(ran, members.collect());
         }
+        let standalone = kept == 0 && !matches!(outcome, Kept::Writes);
         let undo = match outcome {
             Kept::Writes => {
                 kept += 1;
                 false
             }
-            Kept::Nothing | Kept::Failed(_) => true,
+            Kept::Nothing | Kept::Failed => true,
         };
         #[cfg(feature = "perf-witness")]
         if undo && let (Some(witness), Some(staged)) = (witness.as_ref(), staged) {
@@ -337,11 +404,11 @@ fn transact(c: &mut Connection, writer: &Writer, members: Vec<Member>) -> Settle
                 "RELEASE lash_batch_member"
             };
             if let Err(error) = tx.execute_batch(end) {
-                ran.push(member);
+                ran.push(Ran { member, standalone });
                 return Settled::failed(ran, &error, members.collect());
             }
         }
-        ran.push(member);
+        ran.push(Ran { member, standalone });
     }
     let FencedTx { tx, .. } = tx;
     let ended = if kept == 0 {
@@ -371,7 +438,7 @@ fn transact(c: &mut Connection, writer: &Writer, members: Vec<Member>) -> Settle
     };
     match ended {
         Ok(()) => Settled {
-            answered: ran.into_iter().map(|member| (member, None)).collect(),
+            answered: ran.into_iter().map(|ran| (ran.member, None)).collect(),
             unrun,
             ended: true,
         },

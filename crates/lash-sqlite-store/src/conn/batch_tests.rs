@@ -316,6 +316,88 @@ async fn an_outer_commit_failure_fails_every_member() {
     assert_eq!(world.committed(), vec!["after".to_owned()]);
 }
 
+/// Exhaust the database's pages inside `tx`: the one-row insert keeps no
+/// statement journal, so SQLite answers `SQLITE_FULL` by ending the whole
+/// transaction, not only the member's savepoint. Capacity is restored before
+/// the body returns, so the members after it can commit.
+fn exhaust(tx: &FencedTx<'_>) -> rusqlite::Result<String> {
+    let pages: u64 = tx.query_row("PRAGMA page_count", [], |row| row.get(0))?;
+    tx.query_row(&format!("PRAGMA max_page_count = {pages}"), [], |row| {
+        row.get::<_, u64>(0)
+    })?;
+    let full = insert(tx, &"x".repeat(524_288)).expect_err("SQLite must exhaust its pages");
+    let ended = tx.is_autocommit();
+    tx.query_row("PRAGMA max_page_count = 2147483646", [], |row| {
+        row.get::<_, u64>(0)
+    })?;
+    Ok(format!("ended={ended} {full}"))
+}
+
+/// A member's page exhaustion inside a batch of several (FIG-5968): SQLite
+/// ends the whole transaction, so the members before it lose their writes.
+/// A member that kept nothing, with no kept writes before it, keeps its own
+/// answer, and so does the exhausting member's own refusal; a member whose
+/// writes went with the transaction, or whose refusal was decided against
+/// them, fails and is never answered committed. The members after it lead
+/// the next batch and commit exactly once.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_member_page_exhaustion_answers_its_siblings_by_what_they_kept() {
+    let world = world(32, 4_096).await;
+    let answers = Answers::default();
+    let full = || |tx: &FencedTx<'_>| exhaust(tx).map(TxOutcome::Rollback);
+    let release = world.hold().await;
+    world.queue(
+        |tx| insert(tx, "refused").map(|()| TxOutcome::Rollback("refused")),
+        reply(&answers, &world.outside, "refused"),
+    );
+    world.queue(full(), reply(&answers, &world.outside, "full-first"));
+    world.queue(
+        |tx| insert(tx, "after-first").map(|()| TxOutcome::Commit("kept")),
+        reply(&answers, &world.outside, "after-first"),
+    );
+    drop(release);
+    settled(&answers, 3).await;
+    let release = world.hold().await;
+    world.queue(
+        |tx| insert(tx, "lost").map(|()| TxOutcome::Commit("kept")),
+        reply(&answers, &world.outside, "lost"),
+    );
+    world.queue(full(), reply(&answers, &world.outside, "full-second"));
+    world.queue(
+        |tx| insert(tx, "after-second").map(|()| TxOutcome::Commit("kept")),
+        reply(&answers, &world.outside, "after-second"),
+    );
+    drop(release);
+    let answered = settled(&answers, 6).await;
+    let outcome = |name: &str| {
+        answered
+            .iter()
+            .find(|(member, ..)| member == name)
+            .map(|(_, result, _)| result.clone())
+            .expect("member answered")
+    };
+    let refusal = Ok("\"ended=true database or disk is full\"".to_owned());
+    let ended = |name: &str| {
+        outcome(name)
+            .is_err_and(|error| error.contains("the write transaction ended inside a batch member"))
+    };
+    assert_eq!(outcome("refused"), Ok("\"refused\"".to_owned()));
+    assert_eq!(outcome("full-first"), refusal, "nothing was kept before it");
+    assert_eq!(outcome("after-first"), Ok("\"kept\"".to_owned()));
+    assert!(ended("lost"), "its writes went with the transaction");
+    assert!(
+        ended("full-second"),
+        "its refusal was decided against writes that are gone: {:?}",
+        outcome("full-second")
+    );
+    assert_eq!(outcome("after-second"), Ok("\"kept\"".to_owned()));
+    assert_eq!(
+        world.committed(),
+        vec!["after-first".to_owned(), "after-second".to_owned()],
+        "the members after the exhaustion commit exactly once"
+    );
+}
+
 /// BATCH-BOUNDS: a batch holds at most `write_batch_members` writes, and no
 /// write starts in a batch that already changed `write_batch_rows` rows; the
 /// writes past either bound lead the next batch, in queue order.
