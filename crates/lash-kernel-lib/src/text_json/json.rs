@@ -451,7 +451,7 @@ pub fn parse_json(
 struct Out<'a> {
     text: String,
     heap: &'a mut dyn NativeHeap,
-    parts: Vec<Value>,
+    layout: Option<DecimalLayout>,
     verbatim_kinds: u8,
     verbatim_field: Option<String>,
 }
@@ -464,30 +464,98 @@ impl Out<'_> {
     }
 
     fn quote(&mut self, text: &str) -> Result<(), NativeError> {
-        self.push(&serde_json::to_string(text).map_err(|_| syntax())?)
-    }
-
-    fn flush(&mut self) -> Result<(), NativeError> {
-        if !self.text.is_empty() {
-            self.heap.reserve(1, 0)?;
-            self.parts.push(Value::text(std::mem::take(&mut self.text)));
+        self.push("\"")?;
+        let mut start = 0;
+        for (index, byte) in text.bytes().enumerate() {
+            let escape = match byte {
+                b'"' => "\\\"",
+                b'\\' => "\\\\",
+                b'\n' => "\\n",
+                b'\r' => "\\r",
+                b'\t' => "\\t",
+                8 => "\\b",
+                12 => "\\f",
+                0..=31 => "",
+                _ => continue,
+            };
+            self.push(&text[start..index])?;
+            if escape.is_empty() {
+                const HEX: &[u8; 16] = b"0123456789abcdef";
+                let bytes = [
+                    b'\\',
+                    b'u',
+                    b'0',
+                    b'0',
+                    HEX[usize::from(byte / 16)],
+                    HEX[usize::from(byte % 16)],
+                ];
+                // Every byte is ASCII.
+                self.push(std::str::from_utf8(&bytes).map_err(|_| syntax())?)?;
+            } else {
+                self.push(escape)?;
+            }
+            start = index + 1;
         }
-        Ok(())
+        self.push(&text[start..])?;
+        self.push("\"")
     }
 
-    fn number(
-        &mut self,
-        value: &Value,
-        raw: bool,
-        spelling: impl FnOnce() -> String,
-    ) -> Result<(), NativeError> {
-        if raw {
-            self.flush()?;
-            self.heap.reserve(1, 0)?;
-            self.parts.push(value.clone());
-            Ok(())
-        } else {
-            self.push(&spelling())
+    fn number(&mut self, value: &Value, selected: bool) -> Result<(), NativeError> {
+        if let Some(layout) = self.layout.filter(|_| selected) {
+            match value {
+                Value::Float(number) => {
+                    let value = number.get();
+                    // Below 2^53 an integral binary64 has exact integer
+                    // digits. Spell these directly instead of invoking the
+                    // shortest floating-point converter for every row index.
+                    if value.trunc() == value && value.abs() < 9007199254740992.0 {
+                        return layout.small_integer(
+                            value.abs() as u64,
+                            value.is_sign_negative(),
+                            self,
+                        );
+                    }
+                    let mut scratch = [0; 17];
+                    let (negative, digits, exponent) = number
+                        .decimal_parts(&mut scratch)
+                        .ok_or_else(|| raise("json_number", "JSON refuses NaN and infinity"))?;
+                    return layout.write(negative, digits, i64::from(exponent), self);
+                }
+                Value::Int(number) => {
+                    if let Some(value) = number.to_i64() {
+                        return layout.small_integer(value.unsigned_abs(), value < 0, self);
+                    }
+                    // Reserve decimal scratch before converting arbitrary-precision
+                    // integers; three digits per byte bounds their decimal extent.
+                    self.heap.reserve(
+                        0,
+                        number
+                            .bits()
+                            .div_ceil(8)
+                            .saturating_mul(3)
+                            .saturating_add(1),
+                    )?;
+                    let text = number.to_string();
+                    let digits = text.strip_prefix('-').unwrap_or(&text);
+                    let trimmed = digits.trim_end_matches('0');
+                    let (digits, exponent) = if trimmed.is_empty() {
+                        ("0", 0)
+                    } else {
+                        (
+                            trimmed,
+                            i64::try_from(digits.len() - trimmed.len())
+                                .map_err(|_| NativeError::Memory)?,
+                        )
+                    };
+                    return layout.write(text.starts_with('-'), digits, exponent, self);
+                }
+                _ => unreachable!("the JSON writer selects only numbers"),
+            }
+        }
+        match value {
+            Value::Int(number) => self.push(&number.to_string()),
+            Value::Float(number) => self.push(&number.to_string()),
+            _ => unreachable!("the JSON writer selects only numbers"),
         }
     }
 
@@ -519,9 +587,9 @@ fn write(
     match value {
         Value::Null => out.push("null")?,
         Value::Bool(value) => out.push(if *value { "true" } else { "false" })?,
-        Value::Int(integer) => out.number(value, raw_numbers, || integer.to_string())?,
+        Value::Int(_) => out.number(value, raw_numbers)?,
         Value::Float(float) if float.get().is_finite() => {
-            out.number(value, raw_numbers, || float.to_string())?;
+            out.number(value, raw_numbers)?;
         }
         Value::Text(text) => out.quote(text)?,
         Value::Tuple(items) => {
@@ -624,7 +692,7 @@ pub fn stringify_json(value: &Value, heap: &mut dyn NativeHeap) -> Result<String
     let mut out = Out {
         text: String::new(),
         heap,
-        parts: Vec::new(),
+        layout: None,
         verbatim_kinds: 0,
         verbatim_field: None,
     };
@@ -658,20 +726,7 @@ pub(super) fn functions() -> Vec<Function> {
             &["json_number", "json_key", "json_depth"],
             stringify,
         ),
-        definition(
-            "json.render_parts",
-            &[
-                ("value", Type::Any),
-                ("verbatim_kinds", Type::Set(Box::new(Type::Text))),
-                (
-                    "verbatim_field",
-                    Type::Union(vec![Type::Text, Type::Absent]),
-                ),
-            ],
-            Type::List(Box::new(Type::Union(vec![Type::Text, Type::Number]))),
-            &["json_number", "json_key", "json_depth"],
-            render_parts,
-        ),
+        render_definition(),
     ]
 }
 
@@ -726,7 +781,7 @@ fn stringify(call: NativeCall<'_>) -> Result<Value, NativeError> {
     stringify_json(arg(call.args, 0)?, call.heap).map(Value::text)
 }
 
-fn render_parts(call: NativeCall<'_>) -> Result<Value, NativeError> {
+fn render(call: NativeCall<'_>) -> Result<Value, NativeError> {
     let Some(Value::Set(kinds)) = call.args.get(1) else {
         return Err(raise("type_error", "JSON verbatim kinds must be a set"));
     };
@@ -757,12 +812,162 @@ fn render_parts(call: NativeCall<'_>) -> Result<Value, NativeError> {
     let mut out = Out {
         text: String::new(),
         heap: call.heap,
-        parts: Vec::new(),
+        layout: Some(DecimalLayout::read(arg(call.args, 3)?)?),
         verbatim_kinds,
         verbatim_field,
     };
     write(arg(call.args, 0)?, &mut BTreeSet::new(), 0, true, &mut out)?;
-    out.flush()?;
-    let parts = std::mem::take(&mut out.parts);
-    Ok(Value::List(out.heap.allocate(Object::List(parts))?))
+    Ok(Value::text(out.text))
+}
+
+/// Shortest decimal layout is caller policy, not a language in the codec.
+#[derive(Clone, Copy)]
+struct DecimalLayout {
+    fixed_from: i64,
+    fixed_until: i64,
+    exponent_plus: bool,
+    negative_zero: bool,
+}
+
+impl DecimalLayout {
+    fn small_integer(
+        self,
+        mut value: u64,
+        negative: bool,
+        out: &mut Out<'_>,
+    ) -> Result<(), NativeError> {
+        let mut scratch = [0u8; 20];
+        let mut start = scratch.len();
+        loop {
+            start -= 1;
+            scratch[start] = b'0' + (value % 10) as u8;
+            value /= 10;
+            if value == 0 {
+                break;
+            }
+        }
+        let mut end = scratch.len();
+        while end > start + 1 && scratch[end - 1] == b'0' {
+            end -= 1;
+        }
+        let digits = std::str::from_utf8(&scratch[start..end]).map_err(|_| syntax())?;
+        self.write(negative, digits, (scratch.len() - end) as i64, out)
+    }
+
+    fn read(value: &Value) -> Result<Self, NativeError> {
+        let Value::Tuple(items) = value else {
+            return Err(raise("type_error", "expected decimal layout tuple"));
+        };
+        let [
+            Value::Int(from),
+            Value::Int(until),
+            Value::Bool(exponent_plus),
+            Value::Bool(negative_zero),
+        ] = items.as_ref()
+        else {
+            return Err(raise(
+                "type_error",
+                "expected decimal layout bounds and flags",
+            ));
+        };
+        let from = from.to_i64().filter(|value| (-324..=309).contains(value));
+        let until = until.to_i64().filter(|value| (-324..=309).contains(value));
+        let (Some(fixed_from), Some(fixed_until)) = (from, until) else {
+            return Err(raise(
+                "number_range",
+                "decimal layout bounds must be in -324..309",
+            ));
+        };
+        if fixed_from > fixed_until {
+            return Err(raise("number_range", "decimal layout bounds are reversed"));
+        }
+        Ok(Self {
+            fixed_from,
+            fixed_until,
+            exponent_plus: *exponent_plus,
+            negative_zero: *negative_zero,
+        })
+    }
+
+    fn write(
+        self,
+        negative: bool,
+        digits: &str,
+        exponent: i64,
+        out: &mut Out<'_>,
+    ) -> Result<(), NativeError> {
+        if negative && (digits != "0" || self.negative_zero) {
+            out.push("-")?;
+        }
+        let point = i64::try_from(digits.len())
+            .map_err(|_| NativeError::Memory)?
+            .saturating_add(exponent);
+        if point < self.fixed_from || point > self.fixed_until {
+            out.push(&digits[..1])?;
+            if digits.len() > 1 {
+                out.push(".")?;
+                out.push(&digits[1..])?;
+            }
+            out.push("e")?;
+            let exponent = point - 1;
+            if exponent >= 0 && self.exponent_plus {
+                out.push("+")?;
+            }
+            if exponent < 0 {
+                out.push("-")?;
+            }
+            let mut scratch = [0u8; 20];
+            let mut rest = exponent.unsigned_abs();
+            let mut start = scratch.len();
+            loop {
+                start -= 1;
+                scratch[start] = b'0' + (rest % 10) as u8;
+                rest /= 10;
+                if rest == 0 {
+                    break;
+                }
+            }
+            out.push(std::str::from_utf8(&scratch[start..]).map_err(|_| syntax())?)
+        } else if point <= 0 {
+            out.push("0.")?;
+            for _ in 0..-point {
+                out.push("0")?;
+            }
+            out.push(digits)
+        } else {
+            let point = usize::try_from(point).map_err(|_| NativeError::Memory)?;
+            if point >= digits.len() {
+                out.push(digits)?;
+                for _ in digits.len()..point {
+                    out.push("0")?;
+                }
+                Ok(())
+            } else {
+                out.push(&digits[..point])?;
+                out.push(".")?;
+                out.push(&digits[point..])
+            }
+        }
+    }
+}
+
+fn render_definition() -> Function {
+    definition(
+        "json.render",
+        &[
+            ("value", Type::Any),
+            ("verbatim_kinds", Type::Set(Box::new(Type::Text))),
+            (
+                "verbatim_field",
+                Type::Union(vec![Type::Text, Type::Absent]),
+            ),
+            (
+                "layout",
+                Type::Tuple(vec![Type::Int, Type::Int, Type::Bool, Type::Bool]),
+            ),
+        ],
+        Type::Text,
+        &["json_number", "json_key", "json_depth", "number_range"],
+        render,
+    )
 }

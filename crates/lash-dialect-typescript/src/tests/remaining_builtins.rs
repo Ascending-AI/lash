@@ -240,18 +240,31 @@ fn console_json_is_strict_and_keeps_guest_spelling_and_print_order() {
         let second = "";
         try { console.log({a: NaN, b: undefined}); } catch (error) { second = error.name; }
         console.log(first, second, !(0 in holes), holes[1] === undefined);
+        const numbers = [0, -0, 1e-6, 1e-7, 1e20, 1e21, 5e-324, Number.MAX_VALUE,
+                         1000000000000000100, 1.0000000000000002, 9007199254740992, -1.25];
+        console.log(numbers);
+        console.log(JSON.stringify(numbers));
         "#,
         &[],
     );
     assert_eq!(recorded.end, "ok");
+    let lines = recorded.lines();
     assert_eq!(
-        recorded.lines(),
+        &lines[..4],
         [
             r#"{"z":{"n":0,"fraction":1.25,"small":1e-7,"big":1e+21},"a":{"n":0,"fraction":1.25,"small":1e-7,"big":1e+21},"holes":[null,null,2],"quoted":"\"\n"}"#,
             r#"{"nested":{"brand":"opaque","n":2}}"#,
             r#"{"brand":2,"n":3}"#,
             "not_data json_number true true",
         ]
+    );
+    // The direct console writer and the generic guest JSON walk share the
+    // dialect's spelling even at shortest-conversion and notation edges.
+    assert_eq!(lines.len(), 6);
+    assert_eq!(lines[4], lines[5]);
+    assert_eq!(
+        lines[4],
+        "[0,0,0.000001,1e-7,100000000000000000000,1e+21,5e-324,1.7976931348623157e+308,1000000000000000100,1.0000000000000002,9007199254740992,-1.25]"
     );
 }
 

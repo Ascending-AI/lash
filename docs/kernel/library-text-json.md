@@ -123,16 +123,6 @@ the baseline needs a new definition identity (`K-VER-002`).
   anywhere in the graph. NaN and infinities raise `json_number`; non-text map
   keys raise `json_key`. No omission, coercion or host-resource read occurs.
 
-`json.render_parts(value, verbatim_kinds, verbatim_field)` uses the same
-strict traversal and returns a flat list of escaped text fragments and raw
-finite numbers. A caller supplies number spelling and joins the fragments.
-Inside a container whose kind is in the text set, or a record whose named
-field holds text, numbers retain their kernel spelling in text fragments.
-`verbatim_field` is text or `absent`; `absent` disables the record-field policy.
-The selection is inherited by descendants. Depth, cycle, key and data
-checks retain the strict writer's order. Text buffers and each fragment
-slot are reserved before allocation; the charge uses the standard native
-argument/result deep-size formula.
 
 - **K-LJSON-005.** Stringify copies shared objects each time and refuses an
   active-path cycle with `cycle`. Shared acyclic graphs are allowed.
@@ -156,6 +146,26 @@ argument/result deep-size formula.
   `1 + magnitude(result)`, bounding the actual walk without pricing or reading
   the unvisited input. Key/value contents irrelevant to classification are
   not scanned. Resource-bound errors during rendering remain the renderer's.
+
+- **K-LJSON-008.** `json.render(value, verbatim_kinds, verbatim_field, layout)`
+  writes compact strict JSON directly into one output buffer. The explicit
+  layout tuple `(fixed_from, fixed_until, exponent_plus, negative_zero)`
+  selects shortest decimal notation: a decimal point position outside the
+  inclusive bounds uses scientific notation, with the stated positive
+  exponent sign and signed-zero policy. Bounds are in -324..309 and ordered;
+  invalid bounds raise `number_range`. Integers retain exact significant
+  digits; floats use the same shortest converter as `format.decimal_parts`.
+  Inside a container whose kind is in the text set, or a record whose named
+  field holds text, numbers retain kernel spelling. `verbatim_field` is text
+  or `absent`; selection is inherited by descendants. The strict writer's
+  depth, cycle, key and data checks retain their order. Output bytes and
+  integer conversion scratch are reserved before allocation. Charge is one
+  plus argument deep sizes plus result size, as in the strict JSON writer:
+  traversal, bounded shortest conversion, escaping and decimal expansion
+  remain linear in input and output work. Every numeric occurrence has at
+  least one output byte, including shared subtrees copied repeatedly; input
+  deep size alone counts a shared object once. The TypeScript console passes
+  `(-5, 21, true, false)`; no language policy or callback lives in the writer.
 
 ## Neutral formatting
 

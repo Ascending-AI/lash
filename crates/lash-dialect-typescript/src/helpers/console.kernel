@@ -2,31 +2,21 @@ use ts.boundary
 use same
 use text.join
 use list.len
-use json.render_parts
-use kind
-use ts.number.to_string
+use json.render
 use ts.console.json
 use ts.receiver
 use ts.to_string
 
-# Strict JSON is visited once by the neutral codec. Text fragments are
-# already escaped; numeric fragments keep their value for guest spelling.
-# Maps and kernel tuples retain kernel spelling.
+# The shared strict writer uses the dialect's decimal-point limits,
+# positive exponent sign and unsigned zero. Maps and kernel tuples retain
+# kernel spelling; no fragments cross back into guest code.
 function ts.console.json(value: Any) -> Text
 kernel 1
-errors "type_error", "cycle", "json_number", "json_key", "json_depth", "not_data"
+errors "type_error", "cycle", "json_number", "json_key", "json_depth", "not_data", "number_range"
 charge sum(8, deep(value), size(result))
 body {
   let verbatim = set{"map", "tuple"}
-  let parts = json.render_parts(value, verbatim, absent)
-  let out = []
-  for part in parts {
-    if same(kind(part), "text") { set out[list.len(out)] = part } else {
-      let spelled = invoke ts.number.to_string(part)
-      set out[list.len(out)] = spelled
-    }
-  }
-  return text.join(out, "")
+  return json.render(value, verbatim, absent, (-5, 21, true, false))
 }
 
 # `console.log` and its siblings: one print of the arguments joined by a
