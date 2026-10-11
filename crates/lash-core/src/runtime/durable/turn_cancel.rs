@@ -338,6 +338,10 @@ async fn end(
     // The turn's scope ends with its cancel (L6b): its waits are revoked and
     // its first batch of `Until` children marked; the next pass marks the rest.
     super::turn_scope::end_turn_scope(cx, &mut tx, &row.session, &row.run).await?;
+    // A turn cancelled before its first phase commit still owes its
+    // admission's export: it is made before the commit that ends the turn
+    // (FIG-5998).
+    super::session::export_owed_admission(services.tracing(), current.unwrap_or(row));
     // A head commit the session store refuses for its content is the stop's
     // runtime refusal, as it is `turn.commit`'s (FIG-5352).
     cx.commit(tx, CommitLabel::TURN_CANCEL)

@@ -899,12 +899,16 @@ pub trait TraceAdmissionCandidate: Send {
     /// outcome.
     fn settle(self: Box<Self>, outcome: TraceCandidateOutcome);
 
-    /// Hands the candidate to its adapter when its admission may have
+    /// Hands the candidate to its adapter when its admission's export waits
+    /// for a reconcile: the admission committed and its owner exports it
+    /// with a later commit (a turn's first phase commit), or it may have
     /// committed but its owner cannot tell (the commit's acknowledgement was
-    /// lost). The adapter selects it when a reader reconciles its anchor's
-    /// admission ([`TraceScopeFactory::export_admitted`]), and refuses it
-    /// once another candidate of its scope is selected. Without an adapter
-    /// that holds candidates, it is refused now.
+    /// lost). The attempt is over: the adapter ends the candidate's span at
+    /// this instant, whenever it exports it. It selects the candidate when a
+    /// reader reconciles its anchor's admission
+    /// ([`TraceScopeFactory::export_admitted`]), and refuses it once another
+    /// candidate of its scope is selected. Without an adapter that holds
+    /// candidates, it is refused now.
     fn defer(self: Box<Self>) {
         self.settle(TraceCandidateOutcome::Refused);
     }

@@ -472,8 +472,9 @@ impl TurnServices for SimServices {
         }
     }
 
-    /// A [`TurnScript::Round`] turn is traced, so its admission's export is
-    /// recorded under `turn.traced`, which the matrix cuts (FIG-5457).
+    /// A [`TurnScript::Round`] turn is traced, so its first `model.start`
+    /// carries the record of its admission's export, which the matrix cuts
+    /// (FIG-5998).
     fn propose_turn_trace(&self, cx: &ActorContext, run: &TurnId) -> Option<TraceProposal> {
         let session = session_id(cx.actor().id());
         if TurnScript::of(&session) != Some(TurnScript::Round) {

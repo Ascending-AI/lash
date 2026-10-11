@@ -355,10 +355,6 @@ impl TurnServices for RuntimeTurnServices {
         })
     }
 
-    fn export_turn_admission(&self, scope: &lash_trace::DurableTraceScope) {
-        self.runtimes.tracing().scopes().export_admitted(scope);
-    }
-
     fn tracing(&self) -> Option<&crate::trace::TraceRuntime> {
         Some(self.runtimes.tracing())
     }

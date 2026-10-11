@@ -17,16 +17,10 @@ const CELL_BOUNDARIES: [(CommitLabel, &str); 3] = [
         "the turn consumes only a recorded cell end",
     ),
 ];
-const TRACE_BOUNDARIES: [(CommitLabel, &str); 2] = [
-    (
-        CommitLabel::TURN_TRACED,
-        "FIG-5457: acknowledge the exported turn admission across owner replacement",
-    ),
-    (
-        CommitLabel::ROUND_TRACED,
-        "FIG-5452: acknowledge exported tool admissions across owner replacement",
-    ),
-];
+const TRACE_BOUNDARIES: [(CommitLabel, &str); 1] = [(
+    CommitLabel::ROUND_TRACED,
+    "FIG-5452: acknowledge exported tool admissions across owner replacement",
+)];
 
 async fn counted(turn: Turn, traced: bool, cell: &[(CommitLabel, &str)]) {
     let fixtures = Mutex::new(Vec::new());
@@ -64,8 +58,10 @@ async fn counted(turn: Turn, traced: bool, cell: &[(CommitLabel, &str)]) {
     let outputs = models + bodies + 1; // actual provider sends, body entries, host answer
     assert_eq!(models, if turn == Turn::Plain { 1 } else { 2 });
     assert_eq!(bodies, usize::from(turn != Turn::Plain));
-    let trace = if traced {
-        &TRACE_BOUNDARIES[..if turn == Turn::Plain { 1 } else { 2 }]
+    // A traced turn's own admission export rides its first phase commit
+    // (FIG-5998): only a traced call's keeps a boundary.
+    let trace: &[(CommitLabel, &str)] = if traced && turn != Turn::Plain {
+        &TRACE_BOUNDARIES
     } else {
         &[]
     };

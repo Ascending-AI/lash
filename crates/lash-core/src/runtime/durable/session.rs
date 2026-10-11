@@ -162,13 +162,6 @@ pub trait TurnServices: Send + Sync {
         None
     }
 
-    /// Reconcile the admission of `scope`, the trace scope a turn's
-    /// admission retained, whose export that admission still owes: the
-    /// owner that committed `turn.admit` may have lost its life or the
-    /// commit's acknowledgement before it selected the candidate. The
-    /// adapter dedupes the identity (FIG-5395, FIG-5457).
-    fn export_turn_admission(&self, _scope: &lash_trace::DurableTraceScope) {}
-
     /// The trace runtime a turn's `turn_started` and `turn_completed`
     /// records are emitted through, once the commit each reports is
     /// acknowledged. `None` when the services trace nothing.
@@ -178,8 +171,8 @@ pub trait TurnServices: Send + Sync {
 }
 
 mod trace;
-use trace::record_turn_traced;
-pub(super) use trace::settle_trace_admission;
+use trace::defer_turn_admission;
+pub(super) use trace::{export_owed_admission, settle_trace_admission};
 
 /// One admitted model attempt's ordinal, execution bound and cooperative stop.
 #[derive(Clone, Debug)]
@@ -683,9 +676,10 @@ impl SessionActivation {
             return match drain.admit {
                 Some(admitted) if admitted.admission.is_turn() => {
                     // The turn's trace scope is retained by its admission,
-                    // and its candidate is selected once that commits: a
-                    // pass that starts the turn reads the scope back
-                    // (FIG-5395).
+                    // and its candidate is handed to its adapter once that
+                    // commits: a pass that starts the turn reads the scope
+                    // back, and the turn's first phase commit exports the
+                    // admission (FIG-5395, FIG-5998).
                     let (trace, candidate) = self
                         .services
                         .propose_turn_trace(cx, &admitted.run)
@@ -702,12 +696,9 @@ impl SessionActivation {
                     // from now only a node that decodes it claims the
                     // session.
                     tx.stamp_formats(cx.backend().formats().session().clone());
-                    let exports = candidate
-                        .as_ref()
-                        .is_some_and(|candidate| candidate.anchor().context().is_some());
                     let committed = cx.commit(tx, CommitLabel::TURN_ADMIT).await;
                     if let Some(candidate) = candidate {
-                        settle_trace_admission(candidate, &committed);
+                        defer_turn_admission(candidate, &committed);
                     }
                     committed?;
                     turn_trace::started(
@@ -717,12 +708,6 @@ impl SessionActivation {
                         trace.as_ref(),
                         inputs,
                     );
-                    // The candidate is selected: the admission's export is
-                    // discharged before the turn starts, so an owner that
-                    // takes the turn over exports it no more (FIG-5457).
-                    if exports {
-                        record_turn_traced(cx, session, &run).await?;
-                    }
                     Ok(Pass::Again)
                 }
                 // A command run binds nothing: the commit that applies it
@@ -761,20 +746,6 @@ impl SessionActivation {
             turn_cancel::finalize(cx, self.services.as_ref(), &row, &request, stopped, heads)
                 .await?;
             return self.await_stop(cx, session, &row.run).await;
-        }
-        // A turn still admitted owes its admission's export until an owner
-        // records it: the owner that committed `turn.admit` may have lost
-        // its life or the commit's acknowledgement before it selected the
-        // candidate. This owner reconciles it and records so, before the
-        // turn starts (FIG-5395, FIG-5457).
-        if row.phase == UnfinishedPhase::Admitted
-            && !row.trace_exported
-            && let Some(scope) = row.admission.trace()
-            && scope.anchor.context().is_some()
-        {
-            self.services.export_turn_admission(scope);
-            record_turn_traced(cx, session, &row.run).await?;
-            return Ok(Pass::Again);
         }
         // The turn's work on this owner runs under its span: a host's
         // `tracing` instrumentation of a provider, a tool or a plugin it

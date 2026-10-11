@@ -2016,15 +2016,16 @@ async fn a_turns_puts_are_held_by_its_execution_across_a_crash(tier: Tier) {
 /// exactly once on that trace, also when its owner was killed after the
 /// round's admission committed, before it learned so (FIG-5382, FIG-5395),
 /// and when the record of its export (`round.traced`) is cut (FIG-5452). The
-/// turn's admission is exported once too when the record of its export
-/// (`turn.traced`) is cut (FIG-5457).
+/// turn's admission is exported once too when the commit that carries the
+/// record of its export, its first `model.start`, is cut: the export is
+/// made before that commit is submitted, so one that lands with its owner
+/// killed is exported already (FIG-5998).
 async fn a_turns_and_its_calls_trace_admissions_are_exported_once_across_a_crash(tier: Tier) {
     prove_at(
         Turn::Trace,
         tier,
         &[
             CommitLabel::TURN_ADMIT,
-            CommitLabel::TURN_TRACED,
             CommitLabel::MODEL_START,
             CommitLabel::MODEL_DONE,
             CommitLabel::ROUND_TRACED,

@@ -159,10 +159,16 @@ per adapter, and at least once under one identity across owners.
 An adapter's dedupe lives in its process, so an obligation is discharged
 durably by the owner that exported it (FIG-5452, FIG-5457):
 
-- A turn's owner records `turn.traced` on the turn's phase row once its
-  admission's candidate is selected, before the turn starts. An owner that
-  finds the turn still admitted without that record reconciles the export
-  and then records it.
+- A turn's admission defers its candidate to the adapter and records
+  nothing. The turn's next commit that advances or ends it (its first
+  `model.start`, or a refusal, cancel or close that ends it first)
+  reconciles the export immediately before it is submitted, and a
+  `model.start` carries the record on the turn's phase row. The owner that
+  admitted the turn and one that took it over take the same path. An owner
+  lost before that commit exported nothing; one lost between the export and
+  the commit's acknowledgement leaves at most one more export, a window
+  one commit long with no host code in it. The admission span keeps its
+  start and ends when it was deferred (FIG-5998).
 - A round's owner records the decision `round.traced` once its calls'
   candidates are selected, before any body runs. An owner that resumes the
   round without that record reconciles the exports and then records it.

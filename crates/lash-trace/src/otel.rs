@@ -116,9 +116,12 @@ fn identity(anchor: &TraceAnchor) -> Option<AdmissionIdentity> {
         .map(|context| (context.trace_id(), context.span_id()))
 }
 
-/// A candidate whose admission's fate its owner could not tell.
+/// A candidate whose admission's export waits for a reconcile of its
+/// anchor.
 struct Deferred {
     span: BoxedSpan,
+    /// When it was deferred: its span ends here, whenever it is exported.
+    ended: SystemTime,
     identity: AdmissionIdentity,
     scope: TraceScopeId,
 }
@@ -407,10 +410,10 @@ impl TraceScopeFactory for OtelTelemetry {
         };
         let kind = scope.scope.kind();
         for deferred in lost {
-            end_candidate(deferred.span, kind, TraceCandidateOutcome::Refused);
+            deferred.end(TraceCandidateOutcome::Refused);
         }
         if let Some(deferred) = selected {
-            end_candidate(deferred.span, kind, TraceCandidateOutcome::Selected);
+            deferred.end(TraceCandidateOutcome::Selected);
             return;
         }
         let Some(context) = span_context(anchor) else {
@@ -488,19 +491,34 @@ struct AdmissionCandidate {
 impl AdmissionCandidate {
     fn finish(&mut self, outcome: TraceCandidateOutcome) {
         if let Some(span) = self.span.take() {
-            end_candidate(span, self.scope.kind(), outcome);
+            end_candidate(span, self.scope.kind(), outcome, None);
         }
     }
 }
-/// Ends a candidate's span: a selected one takes its scope's admitted name.
-fn end_candidate(mut span: BoxedSpan, kind: TraceScopeKind, outcome: TraceCandidateOutcome) {
+impl Deferred {
+    /// Ends the held candidate's span at the instant it was deferred.
+    fn end(self, outcome: TraceCandidateOutcome) {
+        end_candidate(self.span, self.scope.kind(), outcome, Some(self.ended));
+    }
+}
+/// Ends a candidate's span, at `ended` or now: a selected one takes its
+/// scope's admitted name.
+fn end_candidate(
+    mut span: BoxedSpan,
+    kind: TraceScopeKind,
+    outcome: TraceCandidateOutcome,
+    ended: Option<SystemTime>,
+) {
     if span.is_recording() {
         span.set_attribute(A::AdmissionOutcome.value(outcome.as_str()));
         if outcome == TraceCandidateOutcome::Selected {
             span.update_name(admitted(kind).definition().name);
         }
     }
-    span.end();
+    match ended {
+        Some(ended) => span.end_with_timestamp(ended),
+        None => span.end(),
+    }
 }
 impl TraceAdmissionCandidate for AdmissionCandidate {
     fn anchor(&self) -> TraceAnchor {
@@ -521,11 +539,7 @@ impl TraceAdmissionCandidate for AdmissionCandidate {
                 admissions.select(&self.scope, identity).1
             };
             for deferred in lost {
-                end_candidate(
-                    deferred.span,
-                    self.scope.kind(),
-                    TraceCandidateOutcome::Refused,
-                );
+                deferred.end(TraceCandidateOutcome::Refused);
             }
         }
         self.finish(outcome);
@@ -544,15 +558,12 @@ impl TraceAdmissionCandidate for AdmissionCandidate {
             .unwrap_or_else(PoisonError::into_inner)
             .defer(Deferred {
                 span,
+                ended: SystemTime::now(),
                 identity,
                 scope: self.scope.clone(),
             });
         if let Some(evicted) = evicted {
-            end_candidate(
-                evicted.span,
-                evicted.scope.kind(),
-                TraceCandidateOutcome::Refused,
-            );
+            evicted.end(TraceCandidateOutcome::Refused);
         }
     }
 }

@@ -153,6 +153,34 @@ fn reconciled_admissions_are_exported_once_by_identity() {
     assert_eq!(spans[3].start_time, epoch_ms(1000));
 }
 
+/// A deferred candidate's attempt ended when it was deferred: selected by a
+/// later reconcile, its admission span ends at that instant, not at the
+/// reconcile's (FIG-5998).
+#[test]
+fn a_deferred_admission_ends_when_it_was_deferred() {
+    let (provider, meter, exporter, _) = providers(Sampler::AlwaysOn);
+    let adapter = OtelTelemetry::new(&provider, &meter, OtelOptions::default());
+    let candidate = adapter.propose(&scope_id(), &TraceCause::Root, 1000);
+    let anchor = candidate.anchor();
+    candidate.defer();
+    let deferred = SystemTime::now();
+    std::thread::sleep(Duration::from_millis(5));
+    adapter.export_admitted(&DurableTraceScope {
+        scope: scope_id(),
+        cause: TraceCause::Root,
+        anchor,
+        started_at_ms: 1000,
+    });
+    let spans = exporter.get_finished_spans().unwrap();
+    assert_eq!(spans.len(), 1);
+    assert_eq!(spans[0].name, "lash.turn.admitted");
+    assert!(
+        spans[0].end_time <= deferred,
+        "the admission ended at {:?}, after it was deferred at {deferred:?}",
+        spans[0].end_time
+    );
+}
+
 #[test]
 fn explicit_run_ignores_ambient_context() {
     let (provider, meter, exporter, _) = providers(Sampler::AlwaysOn);

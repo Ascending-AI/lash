@@ -24,13 +24,16 @@
 //!   another process, whose adapter remembers nothing the parking node
 //!   exported: the call's admission export is owed only until an owner
 //!   discharged it, and the takeover reconciles nothing (FIG-5452).
-//! - **Admissions across a lost node (FIG-5457):** a node that loses its
-//!   life with an admission it exported but no phase or outcome after it is
-//!   taken over by another process, whose adapter remembers nothing the
+//! - **Admissions across a lost node (FIG-5457, FIG-5998):** a node that
+//!   loses its life after an admission, with no phase or outcome after it,
+//!   is taken over by another process, whose adapter remembers nothing the
 //!   lost node exported. A turn whose node is lost between `turn.admit` and
 //!   `model.start`, and a code cell's call whose node is lost while its
-//!   body runs, are each admitted exactly once: the lost node discharged
-//!   the admission's export durably, so the takeover reconciles nothing.
+//!   body runs, are each admitted exactly once. The turn's admission is
+//!   exported with its first phase commit: the lost node exported nothing,
+//!   and the takeover exports it once. The cell's call was exported and
+//!   durably recorded so by the lost node, so the takeover reconciles
+//!   nothing.
 //!
 //! The crash half, a turn cut at a phase commit and resumed on the other
 //! node, is `Turn::Trace` in `tool_crash_laws.rs`.
@@ -347,7 +350,7 @@ impl lash::plugins::SessionPlugin for Hold {
 #[derive(Clone, Copy, Debug)]
 enum Lost {
     /// In the turn's before-turn callback: after `turn.admit` committed and
-    /// its candidate was selected, before `model.start`.
+    /// its candidate was deferred, before `model.start`.
     BeforeModelStart,
     /// In the body of the call a code cell's quiet point admitted, once its
     /// candidate was selected.
@@ -378,9 +381,9 @@ fn held_builder(
     }
 }
 
-/// A turn whose node is lost where `lost` says, once the admission there
-/// was exported, and which a node of another process takes over, is
-/// admitted once, as is its cell's call (FIG-5457).
+/// A turn whose node is lost where `lost` says, after the admission there,
+/// and which a node of another process takes over, is admitted once, as is
+/// its cell's call (FIG-5457, FIG-5998).
 async fn a_lost_nodes_admission_is_exported_once(tier: Tier, lost: Lost) {
     let telemetry = Telemetry::default();
     let (held, mut holding) = tokio::sync::mpsc::unbounded_channel();
