@@ -263,6 +263,20 @@ impl RunTerminalCause {
     }
 }
 
+/// An accepted input's status as one read answers it
+/// ([`RunStore::input_status`]).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct InputStatus {
+    /// The run the input is bound to: the run its admission bound it to, the
+    /// run whose commit applied it, or the run a fork rebound it to.
+    pub run: Option<TurnId>,
+    /// Whether the input's row is still open: neither completed nor
+    /// cancelled. An input with no row is not open.
+    pub open: bool,
+    /// The session's standing fault.
+    pub fault: Option<super::SessionFault>,
+}
+
 /// A logical run's terminal evidence, as the store answers it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RunTerminal {
@@ -521,6 +535,17 @@ pub trait RunStore: Send + Sync {
         session_id: &SessionId,
         input: &InputId,
     ) -> Result<Option<TurnId>, StoreError>;
+
+    /// What a follower of accepted input `input` reads, in one statement
+    /// and so one snapshot: its run, whether its row is still open, and the
+    /// session's standing fault (ADR 0109 §9). A claim binds an input and
+    /// moves its row in one transaction, so the snapshot never shows the row
+    /// taken and the binding missing.
+    async fn input_status(
+        &self,
+        session_id: &SessionId,
+        input: &InputId,
+    ) -> Result<InputStatus, StoreError>;
 
     /// The run input `input` is bound to, if any: admission executes a bound
     /// input under that run (a fork binds held inputs to its new run).

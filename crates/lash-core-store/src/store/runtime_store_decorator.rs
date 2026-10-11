@@ -125,6 +125,7 @@ macro_rules! runtime_store_operations {
                 [session] fn end_refused_run(&self, session_id: &SessionId, run: &crate::TurnId, refusal: &crate::RuntimeError, at_ms: u64) -> Result<RunEndOutcome, StoreError>;
                 [session] fn end_command_run(&self, session_id: &SessionId, run: &crate::TurnId, at_ms: u64) -> Result<RunEndOutcome, StoreError>;
                 [session] fn run_of_input(&self, session_id: &SessionId, input: &crate::InputId) -> Result<Option<crate::TurnId>, StoreError>;
+                [session] fn input_status(&self, session_id: &SessionId, input: &crate::InputId) -> Result<InputStatus, StoreError>;
                 [session] fn run_binding(&self, session_id: &SessionId, input: &crate::InputId) -> Result<Option<crate::TurnId>, StoreError>;
                 [session] fn bound_turn_scopes(&self, session_id: &SessionId, run: &crate::TurnId) -> Result<Vec<crate::TurnId>, StoreError>;
                 [session] fn bind_run_inputs(&self, session_id: &SessionId, run: &crate::TurnId, inputs: &[crate::InputId]) -> Result<(), StoreError>;

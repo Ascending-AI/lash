@@ -161,10 +161,11 @@ pub use recovery_leader::*;
 pub use retention::{RetentionBound, RetentionReport};
 pub use run::{
     AdmittedHead, AdmittedInputIds, AdmittedTurnRows, CheckpointAdmission,
-    CheckpointAdmissionRequest, EmptyInputAdmission, InMemoryRunLedger, RunAdmissionRecord,
-    RunCommittedOutcome, RunEndOutcome, RunStore, RunTerminal, RunTerminalCause, RunTerminalKind,
-    RunTerminalWrite, RunTerminalWriteDecision, RunTurns, StoredRunTerminal, TurnCommitId,
-    UnfinishedRun, decide_run_terminal_write, run_binding_conflict,
+    CheckpointAdmissionRequest, EmptyInputAdmission, InMemoryRunLedger, InputStatus,
+    RunAdmissionRecord, RunCommittedOutcome, RunEndOutcome, RunStore, RunTerminal,
+    RunTerminalCause, RunTerminalKind, RunTerminalWrite, RunTerminalWriteDecision, RunTurns,
+    StoredRunTerminal, TurnCommitId, UnfinishedRun, decide_run_terminal_write,
+    run_binding_conflict,
 };
 pub use runtime_commit::{
     AppendRequestIdentity, EncodedSessionCommit, FrameTransition,

@@ -672,6 +672,34 @@ pub(crate) async fn run_binding_conn(
         .map_err(StoreError::from)
 }
 
+/// What a follower of `input` of `session_id` reads, in one statement on
+/// `conn`: its binding, whether its row is open, and the session's fault.
+async fn input_status_conn(
+    conn: &mut PgConnection,
+    session_id: &SessionId,
+    input: &InputId,
+) -> Result<lash_core_execution::store::InputStatus, StoreError> {
+    let row = sqlx::query(session_runs_sql().inputs.select_status.sql())
+        .bind(session_id.as_str())
+        .bind(input.as_str())
+        .fetch_one(crate::observed_sql::executor(&mut *conn))
+        .await
+        .map_err(store_sqlx_error)?;
+    let run: Option<String> = row.try_get(0).map_err(store_sqlx_error)?;
+    Ok(lash_core_execution::store::InputStatus {
+        run: run
+            .map(TurnId::parse)
+            .transpose()
+            .map_err(StoreError::from)?,
+        open: row.try_get(1).map_err(store_sqlx_error)?,
+        fault: lash_core_execution::store::SessionFault::from_stored_columns(
+            session_id,
+            row.try_get(2).map_err(store_sqlx_error)?,
+            row.try_get(3).map_err(store_sqlx_error)?,
+        )?,
+    })
+}
+
 /// Bind `input` to `run` in the caller's transaction, set-if-absent: the
 /// commit that applies a checkpoint-admitted input records the run that
 /// applied it. A run admission already wrote the same binding for its own
@@ -979,6 +1007,15 @@ impl RunStore for PostgresStore {
         // commit whose checkpoint delivery applied it, or the fork that
         // rebound it.
         self.run_binding(session_id, input).await
+    }
+
+    async fn input_status(
+        &self,
+        session_id: &SessionId,
+        input: &InputId,
+    ) -> Result<lash_core_execution::store::InputStatus, StoreError> {
+        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
+        input_status_conn(&mut connection, session_id, input).await
     }
 
     async fn run_binding(

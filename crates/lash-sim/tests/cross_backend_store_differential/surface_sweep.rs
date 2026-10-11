@@ -94,6 +94,10 @@ pub(super) enum SurfaceMethod {
     /// [`RunStore::run_of_input`](lash_core::store::RunStore::run_of_input)
     /// of the sweep's next-turn input.
     RunOfInput,
+    /// [`RunStore::input_status`](lash_core::store::RunStore::input_status)
+    /// of the sweep's next-turn input: its binding, open row and the
+    /// session's fault, in one read.
+    InputStatus,
     /// [`RunStore::bound_turn_scopes`](lash_core::store::RunStore::bound_turn_scopes)
     /// of the sweep's run: the turn scopes its bound inputs name.
     BoundTurnScopes,
@@ -196,6 +200,7 @@ impl SurfaceMethod {
             Self::EndCommandRun => "surface:end_command_run",
             Self::RunBinding => "surface:run_binding",
             Self::RunOfInput => "surface:run_of_input",
+            Self::InputStatus => "surface:input_status",
             Self::BoundTurnScopes => "surface:bound_turn_scopes",
             Self::EnqueueRunSpecInput => "surface:enqueue_run_spec_input",
             Self::TurnInputSubmissionDigest => "surface:turn_input_submission_digest",
@@ -366,10 +371,12 @@ pub(super) fn surface_sweep_case() -> GeneratedCase {
             // An input's run binding: unbound, bound once, read back, and a
             // second binding to another run refused.
             surface(SurfaceMethod::RunBinding),
+            surface(SurfaceMethod::InputStatus),
             surface(SurfaceMethod::BoundTurnScopes),
             surface(SurfaceMethod::BindRunInputs { conflicting: false }),
             surface(SurfaceMethod::RunBinding),
             surface(SurfaceMethod::RunOfInput),
+            surface(SurfaceMethod::InputStatus),
             surface(SurfaceMethod::BoundTurnScopes),
             surface(SurfaceMethod::BindRunInputs { conflicting: false }),
             surface(SurfaceMethod::BindRunInputs { conflicting: true }),
@@ -898,6 +905,16 @@ impl BackendRunner {
                     Some(run) => format!("run={run}"),
                     None => "run=none".to_string(),
                 }
+            }
+            SurfaceMethod::InputStatus => {
+                let input = lash_core::InputId::fixture(format!("{session_id}:input"));
+                let status = store.input_status(&session_id, &input).await?;
+                format!(
+                    "run={:?} open={} fault={:?}",
+                    status.run.map(|run| run.to_string()),
+                    status.open,
+                    status.fault.map(|fault| fault.record.code)
+                )
             }
             SurfaceMethod::BoundTurnScopes => {
                 let run = lash_core::TurnId::from(SURFACE_RUN_ID);

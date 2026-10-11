@@ -676,8 +676,9 @@ pub mod persistence {
     /// control intent a session's close records.
     pub use lash_core::store::{
         CONTROL_INTENT_FORMAT, ControlIntent, ControlIntentId, ControlIntentKind,
-        ControlIntentState, ControlIntentStore, EnginePark, RunCommittedOutcome, RunEndOutcome,
-        RunStore, RunTerminal, RunTerminalCause, RunTerminalKind, RunTerminalWrite, TurnCommitId,
+        ControlIntentState, ControlIntentStore, EnginePark, InputStatus, RunCommittedOutcome,
+        RunEndOutcome, RunStore, RunTerminal, RunTerminalCause, RunTerminalKind, RunTerminalWrite,
+        TurnCommitId,
     };
     /// The multi-session store's catalog and bounded history segments, the
     /// one-session view runtime code holds, and the window loaders (ADR 0112).

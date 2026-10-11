@@ -10,7 +10,7 @@ use std::sync::LazyLock;
 
 use lash_core_execution::store::{
     CONTROL_INTENT_FORMAT, ControlIntent, ControlIntentId, ControlIntentKind, ControlIntentState,
-    RunAdmissionRecord, RunEndOutcome, RunStore, RunTerminal, RunTerminalCause,
+    InputStatus, RunAdmissionRecord, RunEndOutcome, RunStore, RunTerminal, RunTerminalCause,
     RunTerminalWriteDecision, RunTurns, UnfinishedRun, decide_run_terminal_write,
     run_binding_conflict, stored_intent_kind, stored_intent_state,
 };
@@ -691,6 +691,40 @@ pub(crate) fn run_binding_conn(
     .map_err(sqlite_error)
 }
 
+/// What a follower of `input` of `session_id` reads, in one statement on
+/// `conn`: its binding, whether its row is open, and the session's fault.
+fn input_status_conn(
+    conn: &Connection,
+    session_id: &SessionId,
+    input: &InputId,
+) -> Result<InputStatus, StoreError> {
+    let (run, open, fault_json, fault_at_ms) = conn
+        .prepare_cached(session_runs_sql().inputs.select_status.sql())
+        .and_then(|mut stmt| {
+            stmt.query_row(params![session_id.as_str(), input.as_str()], |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, bool>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<i64>>(3)?,
+                ))
+            })
+        })
+        .map_err(sqlite_error)?;
+    Ok(InputStatus {
+        run: run
+            .map(TurnId::parse)
+            .transpose()
+            .map_err(StoreError::from)?,
+        open,
+        fault: lash_core_execution::store::SessionFault::from_stored_columns(
+            session_id,
+            fault_json,
+            fault_at_ms,
+        )?,
+    })
+}
+
 /// Bind `input` to `run` in the caller's transaction, set-if-absent: the
 /// commit that applies a checkpoint-admitted input records the run that
 /// applied it. A run admission already wrote the same binding for its own
@@ -1034,6 +1068,19 @@ impl RunStore for crate::SqliteStore {
         // commit whose checkpoint delivery applied it, or the fork that
         // rebound it.
         self.run_binding(session_id, input).await
+    }
+
+    async fn input_status(
+        &self,
+        session_id: &SessionId,
+        input: &InputId,
+    ) -> Result<InputStatus, StoreError> {
+        let session_id = session_id.clone();
+        let input = input.clone();
+        self.conn
+            .call(move |conn| Ok(input_status_conn(conn, &session_id, &input)))
+            .await
+            .map_err(sqlite_error)?
     }
 
     async fn run_binding(

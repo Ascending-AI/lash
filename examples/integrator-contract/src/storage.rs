@@ -473,6 +473,13 @@ impl RunStore for Integrator {
     ) -> Result<Option<TurnId>, StoreError> {
         unreachable!("external signature witness")
     }
+    async fn input_status(
+        &self,
+        session_id: &SessionId,
+        input: &InputId,
+    ) -> Result<InputStatus, StoreError> {
+        unreachable!("external signature witness")
+    }
     async fn run_binding(
         &self,
         session_id: &SessionId,

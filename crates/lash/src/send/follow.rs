@@ -3,13 +3,15 @@
 //! A follower subscribes to the session's live replay from its cursor, adopts
 //! the activity of the run that applies its subject, and resolves the
 //! subject from the store on every wake: a commit or queue change on the
-//! observation, and a bounded poll. Once it knows its run, it
-//! also holds one open wait on the run's published terminal, which wakes it
-//! as soon as a run that ran in another process settles; a follower with no
-//! resident runtime probes for that run at the poll floor (FIG-3981). It
-//! never answers from events or from the wait: a follower whose replay window
-//! is gone still answers from the store, and so does one whose engine cannot
-//! answer the wait (FIG-4345).
+//! observation, and a bounded poll. Events the replay already holds wake one
+//! resolution between them, not one each: a follower that replays a
+//! session's retained history reads the store once for all of it (FIG-5915).
+//! Once it knows its run, it also holds one open wait on the run's published
+//! terminal, which wakes it as soon as a run that ran in another process
+//! settles; until then, a follower with no resident runtime resolves its
+//! input at the poll floor (FIG-3981). It never answers from events or from
+//! the wait: a follower whose replay window is gone still answers from the
+//! store, and so does one whose engine cannot answer the wait (FIG-4345).
 //!
 //! That a run ended is the store's fact alone: its terminal. A follower that
 //! reads it answers at once, with what the replay holds past its cursor, and
@@ -25,15 +27,15 @@
 use std::collections::{HashSet, VecDeque};
 use std::time::Duration;
 
-use futures_util::StreamExt;
 use futures_util::future::BoxFuture;
+use futures_util::{FutureExt as _, StreamExt};
 use lash_core::facade_support::LiveReplayGap;
 use lash_core::facade_support::{TurnAddress, TurnOutcome, TurnTerminal, TurnWorkDriver};
 use lash_core::runtime::TurnInputAcceptanceReceipt;
 use lash_core::store::PhysicalTurn;
 use lash_core::{
-    InputId, LiveReplayGapReason, LiveReplayOutcome, LiveReplaySubscribeOutcome,
-    LiveReplaySubscription, LlmCallRecord, LlmUsage, SessionCursor, SessionObservationEvent,
+    LiveReplayGapReason, LiveReplayOutcome, LiveReplaySubscribeOutcome, LiveReplaySubscription,
+    LlmCallRecord, LlmUsage, SessionCursor, SessionObservationEvent,
     SessionObservationEventPayload, SessionRevision, TurnActivity, TurnEvent, TurnId,
 };
 use tokio::sync::mpsc;
@@ -410,6 +412,38 @@ impl Observation {
         };
     }
 
+    /// Observe every event the replay already holds, without waiting for
+    /// another: what a resolution about to read the store would otherwise
+    /// be woken by, one event at a time. A lost subscription is resubscribed
+    /// once, and its replay is left to the next wake.
+    async fn take_ready(&mut self, ctx: &SendContext, adoption: &mut Adoption, tap: &mut Tap<'_>) {
+        loop {
+            let Replay::Live(subscription) = &mut self.replay else {
+                return;
+            };
+            match subscription.next().now_or_never() {
+                Some(Some(Ok(event))) => {
+                    self.last_cursor = event.cursor.clone();
+                    let _ = adoption.observe(&event, tap).await;
+                }
+                Some(Some(Err(error))) => {
+                    tracing::debug!(
+                        session_id = %ctx.parts.session_id,
+                        error = %error,
+                        "send handle's live replay lost events; resubscribing past the gap"
+                    );
+                    self.lost(ctx, tap).await;
+                    return;
+                }
+                Some(None) => {
+                    self.replay = Replay::Ended;
+                    return;
+                }
+                None => return,
+            }
+        }
+    }
+
     async fn report(&mut self, gap: LiveReplayGap, tap: &mut Tap<'_>) {
         tap.gap(&gap).await;
         self.gaps.push(gap);
@@ -449,17 +483,17 @@ pub(super) async fn follow(
     let mut terminal = TerminalWait::new();
     let pacing = ctx.parts.observer_pacing.follow;
     let mut poll = pacing.initial();
-    // The store poll is due `poll` after the last resolve, and the run probe
-    // ticks at the floor, whatever wakes in between: a wake that resolves
-    // nothing (a probe that found no run, another run's activity) delays
-    // neither.
+    // The store poll is due `poll` after the last resolve, and the floor
+    // read ticks at the floor, whatever wakes in between: a wake that
+    // resolves nothing (another run's activity) delays neither.
     let mut poll_at = tokio::time::Instant::now() + poll;
-    let mut probe_ticks = tokio::time::interval_at(poll_at, pacing.initial());
-    probe_ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut floor_ticks = tokio::time::interval_at(poll_at, pacing.initial());
+    floor_ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut resolve_now = true;
     let mut last_pass = false;
     loop {
         if resolve_now {
+            observation.take_ready(ctx, &mut adoption, tap).await;
             let resolution = match subject {
                 Subject::Input(receipt) => resolve::resolve_input(&ctx.parts, receipt).await?,
                 Subject::Run(run) => resolve::resolve_run(&ctx.parts, run).await?,
@@ -562,15 +596,21 @@ pub(super) async fn follow(
             poll_at = tokio::time::Instant::now() + poll;
         }
         resolve_now = true;
-        // Wait for the first wake.
-        let probed = run_probe(ctx, subject, &adoption);
-        let probe = async {
-            match probed {
-                Some(input) => {
-                    probe_ticks.tick().await;
-                    ctx.parts.store.run_of_input(input).await
-                }
-                None => std::future::pending().await,
+        // Wait for the first wake. A follower that resolves at the floor
+        // has no slower poll to wait for.
+        let floor = at_floor(ctx, subject, &adoption);
+        let tick = async {
+            if floor {
+                floor_ticks.tick().await;
+            } else {
+                std::future::pending::<()>().await;
+            }
+        };
+        let polled = async {
+            if floor {
+                std::future::pending::<()>().await;
+            } else {
+                tokio::time::sleep_until(poll_at).await;
             }
         };
         let closes = async {
@@ -603,21 +643,8 @@ pub(super) async fn follow(
             answer = terminal.next() => {
                 terminal.answered(ctx, answer);
             }
-            bound = probe => {
-                // A run the probe finds is read at once, which holds its
-                // terminal wait while the run is undecided.
-                resolve_now = matches!(bound, Ok(Some(_)));
-                match bound {
-                    Ok(Some(run)) => adoption.adopt(run, tap).await,
-                    Ok(None) => {}
-                    Err(error) => tracing::debug!(
-                        session_id = %ctx.parts.session_id,
-                        error = %error,
-                        "send handle's run probe failed; the store poll goes on"
-                    ),
-                }
-            }
-            () = tokio::time::sleep_until(poll_at) => {
+            () = tick => {}
+            () = polled => {
                 poll = pacing.next(poll);
             }
             () = closes => {
@@ -627,26 +654,17 @@ pub(super) async fn follow(
     }
 }
 
-/// The input whose run a follower probes for at the poll floor: an input
-/// subject's, until its run is known, on a follower with no resident
-/// runtime. Such a follower reads a run that may run in another process,
-/// which publishes nothing on this process's replay, so without the probe it
-/// learns the run, and holds the run's terminal wait, only on a store
-/// poll that backs off to a second (FIG-3981). The probe is one keyed read
-/// of the input's run binding: the admission that writes the binding runs
-/// in the worker's process and announces it to no other, so there is no
-/// event to wait on instead.
-fn run_probe<'a>(
-    ctx: &SendContext,
-    subject: &'a Subject,
-    adoption: &Adoption,
-) -> Option<&'a InputId> {
-    match subject {
-        Subject::Input(receipt) if adoption.run.is_none() && ctx.live.is_none() => {
-            Some(&receipt.input_id)
-        }
-        _ => None,
-    }
+/// Whether a follower resolves at the poll floor: an input subject, until
+/// its run is known, on a follower with no resident runtime. Such a
+/// follower reads a run that may run in another process, which publishes
+/// nothing on this process's replay, so on a poll that backs off to a second
+/// it would learn the run, and hold the run's terminal wait, that late
+/// (FIG-3981). The admission that writes the binding runs in the worker's
+/// process and announces it to no other, so there is no event to wait on
+/// instead. Each floor read is one keyed read of the input's status, which
+/// answers its binding, its withdrawal and its session's fault at once.
+fn at_floor(ctx: &SendContext, subject: &Subject, adoption: &Adoption) -> bool {
+    matches!(subject, Subject::Input(_)) && adoption.run.is_none() && ctx.live.is_none()
 }
 
 async fn next_event(

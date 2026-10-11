@@ -54,41 +54,28 @@ fn store_error(error: lash_core::StoreError) -> crate::EmbedError {
 }
 
 /// Resolve an accepted input through the durable binding made by its claim.
+///
+/// One keyed read answers the binding, whether the input's row is open, and
+/// the session's fault, from one snapshot: the claim that binds an input
+/// moves its row in the same transaction, so a row no longer open with no
+/// binding beside it is no claim racing the read (FIG-5915).
 pub(super) async fn resolve_input(
     parts: &SendParts,
     receipt: &TurnInputAcceptanceReceipt,
 ) -> Result<Resolution> {
-    if let Some(run) = parts
+    let status = parts
         .store
-        .run_of_input(&receipt.input_id)
+        .input_status(&receipt.input_id)
         .await
-        .map_err(store_error)?
-    {
+        .map_err(store_error)?;
+    if let Some(run) = status.run {
         return resolve_run(parts, &run).await;
     }
-    let open = parts
-        .store
-        .pending_turn_input(&receipt.input_id)
-        .await
-        .map_err(store_error)?
-        .is_some();
-    // Claim and settlement can race the pending read. Re-read the binding
-    // before interpreting a missing row as a withdrawal.
-    if let Some(run) = parts
-        .store
-        .run_of_input(&receipt.input_id)
-        .await
-        .map_err(store_error)?
-    {
-        return resolve_run(parts, &run).await;
-    }
-    if !open {
+    if !status.open {
         return unbound_input(parts, &receipt.input_id).await;
     }
-    match parts.store.session_fault().await {
-        Ok(Some(fault)) => return Ok(Resolution::Faulted(fault.record.runtime_error())),
-        Ok(None) | Err(lash_core::StoreError::UnsupportedStoreOperation { .. }) => {}
-        Err(error) => return Err(store_error(error)),
+    if let Some(fault) = status.fault {
+        return Ok(Resolution::Faulted(fault.record.runtime_error()));
     }
     Ok(Resolution::Undecided { run: None })
 }
@@ -96,7 +83,7 @@ pub(super) async fn resolve_input(
 /// An input with no run binding and no open row: a withdrawal on record, or
 /// no record at all. The input target's resolution reads the row in any
 /// state: a terminal row no run is bound to is a withdrawal, and nothing
-/// recorded is pending. A run that took the input since the reads above
+/// recorded is pending. A run that took the input since the read above
 /// answers it instead, on the next resolution.
 async fn unbound_input(parts: &SendParts, input: &InputId) -> Result<Resolution> {
     let resolution = match parts

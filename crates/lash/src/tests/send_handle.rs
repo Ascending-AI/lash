@@ -419,17 +419,15 @@ async fn fixture_with_stores(batch: usize, map: StoreMap) -> Result<Fixture> {
     .await
 }
 
-/// The reads one input's followers make while its run binding is awaited:
-/// keyed reads of the binding, and full store polls (each reads the input's
-/// open row).
+/// The store reads one input's followers make while its run binding is
+/// awaited: everything a resolution of the input reads.
 #[derive(Default)]
-struct BindingReads {
+struct StatusReads {
     input: std::sync::Mutex<Option<lash_core::InputId>>,
-    keyed: AtomicUsize,
-    polls: AtomicUsize,
+    reads: AtomicUsize,
 }
 
-impl BindingReads {
+impl StatusReads {
     fn watch(&self, input: &lash_core::InputId) {
         *self.input.lock_recover() = Some(input.clone());
     }
@@ -437,18 +435,26 @@ impl BindingReads {
     fn watches(&self, input: &lash_core::InputId) -> bool {
         self.input.lock_recover().as_ref() == Some(input)
     }
+
+    fn watching(&self) -> bool {
+        self.input.lock_recover().is_some()
+    }
+
+    fn count(&self) {
+        self.reads.fetch_add(1, Ordering::SeqCst);
+    }
 }
 
-/// A deployment store counting [`BindingReads`].
-struct CountedBindingReads {
+/// A deployment store counting [`StatusReads`].
+struct CountedStatusReads {
     inner: Arc<dyn lash_core::DeploymentStore>,
-    reads: Arc<BindingReads>,
+    reads: Arc<StatusReads>,
 }
 
-impl lash_core::DeploymentStoreDecorator for CountedBindingReads {}
+impl lash_core::DeploymentStoreDecorator for CountedStatusReads {}
 
 #[async_trait]
-impl lash_core::RuntimeStoreDecorator for CountedBindingReads {
+impl lash_core::RuntimeStoreDecorator for CountedStatusReads {
     type Inner = dyn lash_core::DeploymentStore;
 
     fn inner(&self) -> &Self::Inner {
@@ -461,7 +467,7 @@ impl lash_core::RuntimeStoreDecorator for CountedBindingReads {
         input: &lash_core::InputId,
     ) -> std::result::Result<Option<lash_core::TurnId>, lash_core::StoreError> {
         if self.reads.watches(input) {
-            self.reads.keyed.fetch_add(1, Ordering::SeqCst);
+            self.reads.count();
         }
         self.inner.run_of_input(session_id, input).await
     }
@@ -472,26 +478,48 @@ impl lash_core::RuntimeStoreDecorator for CountedBindingReads {
         input: &lash_core::InputId,
     ) -> std::result::Result<Option<lash_core::PendingTurnInputRead>, lash_core::StoreError> {
         if self.reads.watches(input) {
-            self.reads.polls.fetch_add(1, Ordering::SeqCst);
+            self.reads.count();
         }
         self.inner.pending_turn_input(session_id, input).await
     }
+
+    async fn session_fault(
+        &self,
+        session_id: &SessionId,
+    ) -> std::result::Result<Option<lash_core::store::SessionFault>, lash_core::StoreError> {
+        if self.reads.watching() {
+            self.reads.count();
+        }
+        self.inner.session_fault(session_id).await
+    }
+
+    async fn input_status(
+        &self,
+        session_id: &SessionId,
+        input: &lash_core::InputId,
+    ) -> std::result::Result<lash_core::store::InputStatus, lash_core::StoreError> {
+        if self.reads.watches(input) {
+            self.reads.count();
+        }
+        self.inner.input_status(session_id, input).await
+    }
 }
 
-/// A follower with no resident runtime learns its input's run by one keyed
-/// read of the binding at the poll floor, while its full store poll backs
-/// off as before: a run that runs on another worker announces its binding
-/// to no event this process sees (FIG-3981). Waking on the probe delays
-/// neither the probe nor the poll. Before, the follower read the binding
-/// only on the backed-off poll.
-async fn an_unbound_inputs_durable_follower_probes_its_binding_while_its_poll_backs_off()
--> Result<()> {
-    let reads = Arc::new(BindingReads::default());
+/// A follower with no resident runtime reads its unbound input's status at
+/// the poll floor, one keyed read per tick, however much retained activity
+/// its replay delivers first. A run that runs on another worker announces
+/// its binding to no event this process sees, so the floor read is how the
+/// follower learns its run (FIG-3981); the session's retained events wake
+/// one read between them, not one each (FIG-5915). Before, each retained
+/// commit and queue change cost the follower four reads (binding, pending
+/// input, binding again, fault) beside a separate binding probe at the floor.
+async fn an_unbound_inputs_durable_follower_reads_its_status_once_per_floor_tick() -> Result<()> {
+    let reads = Arc::new(StatusReads::default());
     let counted = Arc::clone(&reads);
     let fixture = fixture_with_stores(
         1,
         Arc::new(move |inner| {
-            Arc::new(CountedBindingReads {
+            Arc::new(CountedStatusReads {
                 inner,
                 reads: Arc::clone(&counted),
             }) as Arc<_>
@@ -500,15 +528,26 @@ async fn an_unbound_inputs_durable_follower_probes_its_binding_while_its_poll_ba
     .await?;
     let session = fixture
         .core
-        .session(crate::SessionId::parse("send-run-probe").expect("nonblank host identity"))
+        .session(crate::SessionId::parse("send-floor-read").expect("nonblank host identity"))
         .created()
         .await
         .open()
         .await?;
 
-    // The held run keeps the second input queued, bound to no run.
+    // Settled sends leave their queue changes and commits in the replay a
+    // durable follower replays from the session's start.
+    const RETAINED: usize = 16;
+    for turn in 0..RETAINED {
+        let outcome = session
+            .send(TurnInput::text(format!("retained {turn}")))
+            .await?
+            .outcome()
+            .await?;
+        assert_eq!(outcome.status(), crate::TurnStatus::Answered);
+    }
+    // The held run keeps the next input queued, bound to no run.
     let held = session.send(TurnInput::text(HELD)).await?;
-    provider_called(&fixture, 1).await;
+    provider_called(&fixture, RETAINED + 1).await;
     let queued = session
         .send(TurnInput::text("queued behind the held run"))
         .await?;
@@ -520,8 +559,7 @@ async fn an_unbound_inputs_durable_follower_probes_its_binding_while_its_poll_ba
             .outcome(),
     );
     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-    let keyed = reads.keyed.load(Ordering::SeqCst);
-    let polls = reads.polls.load(Ordering::SeqCst);
+    let made = reads.reads.load(Ordering::SeqCst);
 
     fixture.release.notify_one();
     assert_eq!(held.outcome().await?.status(), crate::TurnStatus::Answered);
@@ -531,18 +569,57 @@ async fn an_unbound_inputs_durable_follower_probes_its_binding_while_its_poll_ba
         .expect("the follower task completes")?;
     assert_eq!(outcome.status(), crate::TurnStatus::Answered);
 
-    // Each poll of an unbound input reads the binding twice; every other
-    // keyed read is the probe's. The poll backs off 25 ms, 50 ms, .. to a
-    // second, so two seconds hold about seven polls and eighty probe ticks.
-    let probes = keyed.saturating_sub(2 * polls);
+    // The floor is 25 ms: two seconds hold eighty ticks, beside the first
+    // read and the one the replayed events wake.
     assert!(
-        (4..=20).contains(&polls),
-        "the store poll backs off, and a probe that found no run delays it: {polls} polls"
+        (20..=84).contains(&made),
+        "the follower reads its status once per floor tick, and its replayed events wake one read: {made} reads"
     );
-    assert!(
-        probes >= 20,
-        "the follower probes its binding at the floor: {probes} probes beside {polls} polls"
+    Ok(())
+}
+
+/// A send to a faulted session answers the fault's typed error while its
+/// input stays open: a faulted session admits nothing until an operator
+/// clears the fault (ADR 0109 §9), and its follower reads the fault in the
+/// same read as the input's binding (FIG-5915).
+async fn a_faulted_sessions_open_input_answers_the_fault() -> Result<()> {
+    let fixture = fixture(1).await?;
+    let id = crate::SessionId::parse("send-faulted").expect("nonblank host identity");
+    let session = fixture
+        .core
+        .session(id.clone())
+        .created()
+        .await
+        .open()
+        .await?;
+    let record = crate::SessionFaultRecord::new(
+        crate::SessionFaultOrigin::DriveAdmission,
+        &crate::runtime::RuntimeError::new(
+            crate::runtime::RuntimeErrorCode::RuntimeStoreCorrupt,
+            "corrupt session data",
+        ),
     );
+    fixture
+        .core
+        .store_factory
+        .record_session_fault(&id, &record, 1)
+        .await?;
+
+    let handle = session.send(TurnInput::text("after the fault")).await?;
+    let answer = tokio::time::timeout(std::time::Duration::from_secs(20), handle.outcome())
+        .await
+        .expect("the faulted session's send answers");
+    match answer {
+        Err(crate::EmbedError::Runtime(error)) => {
+            assert_eq!(
+                error.code,
+                crate::runtime::RuntimeErrorCode::RuntimeStoreCorrupt
+            );
+            assert_eq!(error.message, "corrupt session data");
+        }
+        other => panic!("a faulted session's open input answers its fault, not {other:?}"),
+    }
+    assert_eq!(fixture.calls.load(Ordering::SeqCst), 0, "nothing ran");
     Ok(())
 }
 
@@ -1656,10 +1733,15 @@ macro_rules! send_handle_laws {
             }
 
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn an_unbound_inputs_durable_follower_probes_its_binding_while_its_poll_backs_off()
+            async fn an_unbound_inputs_durable_follower_reads_its_status_once_per_floor_tick()
             -> Result<()> {
-                super::an_unbound_inputs_durable_follower_probes_its_binding_while_its_poll_backs_off()
+                super::an_unbound_inputs_durable_follower_reads_its_status_once_per_floor_tick()
                     .await
+            }
+
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn a_faulted_sessions_open_input_answers_the_fault() -> Result<()> {
+                super::a_faulted_sessions_open_input_answers_the_fault().await
             }
 
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -1670,9 +1752,9 @@ macro_rules! send_handle_laws {
 
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
             /// A cancel addressed to a queued input that a merging drain bound to
-/// another input's run, before that run applied it, reaches that run, and
-/// both inputs answer Cancelled.
-async fn cancel_finds_the_consuming_run_before_application() -> Result<()> {
+            /// another input's run, before that run applied it, reaches that run, and
+            /// both inputs answer Cancelled.
+            async fn cancel_finds_the_consuming_run_before_application() -> Result<()> {
                 super::cancel_finds_the_consuming_run_before_application().await
             }
 
@@ -1682,7 +1764,8 @@ async fn cancel_finds_the_consuming_run_before_application() -> Result<()> {
             }
 
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn all_ingress_entries_preserve_receipts_caps_and_cancel_outcomes() -> Result<()> {
+            async fn all_ingress_entries_preserve_receipts_caps_and_cancel_outcomes() -> Result<()>
+            {
                 super::all_ingress_entries_preserve_receipts_caps_and_cancel_outcomes().await
             }
 
@@ -1702,7 +1785,8 @@ async fn cancel_finds_the_consuming_run_before_application() -> Result<()> {
             }
 
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn a_send_under_an_unserved_profile_key_is_refused_before_acceptance() -> Result<()> {
+            async fn a_send_under_an_unserved_profile_key_is_refused_before_acceptance()
+            -> Result<()> {
                 super::a_send_under_an_unserved_profile_key_is_refused_before_acceptance().await
             }
 
@@ -1714,8 +1798,7 @@ async fn cancel_finds_the_consuming_run_before_application() -> Result<()> {
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
             async fn an_input_answered_inside_another_run_resolves_answered_with_that_run()
             -> Result<()> {
-                super::an_input_answered_inside_another_run_resolves_answered_with_that_run()
-                    .await
+                super::an_input_answered_inside_another_run_resolves_answered_with_that_run().await
             }
         }
     };
