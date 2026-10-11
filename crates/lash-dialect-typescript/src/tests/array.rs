@@ -769,3 +769,35 @@ fn observe_array_path(method: &str, setup: &str, generic: bool) -> (String, Vec<
         }
     }
 }
+
+/// ECMA-262 CreateUnmappedArgumentsObject and rest binding own their slots,
+/// even when array callbacks share the internal invocation buffer (FIG-5919).
+#[test]
+fn callback_arguments_and_rest_outlive_their_invocation() {
+    law(r#"
+        const a = [1, , 3]; const saved = []; const tails = []; const readers = [];
+        const result = a.map(function(value, ...rest) {
+            saved.push(arguments); tails.push(rest);
+            readers.push(() => arguments[0] + rest[0]);
+            arguments[0] = value * 10; rest[0] += 10;
+            return value;
+        });
+        const promises = [4, 5].map(async function(value, ...rest) {
+            const args = arguments; await sleep(1);
+            return args[0] + rest[0] + (args[2] === rest[1] ? 0 : 100);
+        });
+        const asyncResult = await Promise.all(promises);
+        const bound = [6, 7].map(function(prefix, value, index, receiver) {
+            return prefix + value + index + (receiver.length === 2 ? 0 : 100);
+        }.bind(null, 10));
+        const slots = result.length === 3 && !(1 in result) && result[0] === 1 && result[2] === 3;
+        const distinct = saved[0] !== saved[1] && saved[0].length === 3 && saved[1].length === 3;
+        const values = saved[0][0] === 10 && saved[1][0] === 30;
+        const indices = saved[0][1] === 0 && saved[1][1] === 2;
+        const receivers = saved[0][2] === a && saved[1][2] === a && tails[0] !== tails[1];
+        const captured = readers[0]() === 20 && readers[1]() === 42;
+        const asyncAndBound = asyncResult.join(',') === '4,6' && bound.join(',') === '16,18';
+        const sync = slots && distinct && values && indices;
+        await finish(sync && receivers && captured && asyncAndBound);
+    "#);
+}

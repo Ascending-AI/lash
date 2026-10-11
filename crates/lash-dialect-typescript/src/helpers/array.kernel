@@ -48,6 +48,7 @@ use ts.array.length_property
 use ts.array.is
 use ts.array.is_array
 use ts.array.callback
+use ts.array.reusable_callback
 use ts.array.bound
 use ts.array.dense
 use ts.array.spread
@@ -228,6 +229,31 @@ body {
     return made
   }
   throw error.new("type_error", "callback is not a function", null)
+}
+
+# The lowerer's function convention never exposes its input list: positional
+# bindings read slots, and arguments/rest/bind make their own containers. Async
+# entry snapshots it before spawning. Raw kernel callbacks and built-ins may
+# retain or mutate the list, so give those an owned copy on every invocation.
+function ts.array.reusable_callback(input: Any) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge 8
+body {
+  if same(kind(input), "tuple") {
+    if same(input, ()) {} else {
+      if same(input[0], "ts.function") {
+        if same(input[1], "") { return input[4] }
+      }
+    }
+  }
+  let callback = invoke ts.array.callback(input)
+  let owned = fn(context, passed) {
+    let args = list.copy(passed)
+    let answer = apply callback(context, args)
+    return answer
+  }
+  return owned
 }
 
 function ts.array.bound(value: Any, length: Number, fallback: Number) -> Number
@@ -715,8 +741,9 @@ charge 8
 body {
   let length = invoke ts.array.length(this)
   let input = invoke ts.array.argument(args, 0)
-  let callback = invoke ts.array.callback(input)
+  let callback = invoke ts.array.reusable_callback(input)
   let context = invoke ts.array.argument(args, 1)
+  let passed = [absent, 0.0, this]
   let index = 0.0
   if same(kind(this), "list") {
     # The result starts as a copy, of the source's length and with its
@@ -727,9 +754,9 @@ body {
     for value in this {
       if same(index, length) { break }
       if same(value, ()) { set output[index] = () } else {
-        let passed = [value, index, this]
-        let answer = apply callback(context, passed)
-        set output[index] = answer
+        set passed[0] = value
+        set passed[1] = index
+        set output[index] = apply callback(context, passed)
       }
       set index = num.add(index, 1.0)
     }
@@ -746,9 +773,9 @@ body {
     let present = invoke ts.has_own(this, index)
     if present {
       let value = invoke ts.get(this, index)
-      let passed = [value, index, this]
-      let answer = apply callback(context, passed)
-      set output[index] = answer
+      set passed[0] = value
+      set passed[1] = index
+      set output[index] = apply callback(context, passed)
     }
     set index = num.add(index, 1.0)
   }
@@ -767,15 +794,17 @@ charge 8
 body {
   let length = invoke ts.array.length(this)
   let input = invoke ts.array.argument(args, 0)
-  let callback = invoke ts.array.callback(input)
+  let callback = invoke ts.array.reusable_callback(input)
   let context = invoke ts.array.argument(args, 1)
+  let passed = [absent, 0.0, this]
   let output = []
   let index = 0.0
   if same(kind(this), "list") {
     for value in this {
       if same(index, length) { break }
       if same(value, ()) {} else {
-        let passed = [value, index, this]
+        set passed[0] = value
+        set passed[1] = index
         let answer = apply callback(context, passed)
         if same(answer, true) { set output[list.len(output)] = value } else {
           if same(answer, false) {} else {
@@ -791,7 +820,8 @@ body {
     let present = invoke ts.has_own(this, index)
     if present {
       let value = invoke ts.get(this, index)
-      let passed = [value, index, this]
+      set passed[0] = value
+      set passed[1] = index
       let answer = apply callback(context, passed)
       let truth = invoke ts.to_boolean(answer)
       if truth { set output[list.len(output)] = value }
@@ -808,14 +838,16 @@ charge 8
 body {
   let length = invoke ts.array.length(this)
   let input = invoke ts.array.argument(args, 0)
-  let callback = invoke ts.array.callback(input)
+  let callback = invoke ts.array.reusable_callback(input)
   let context = invoke ts.array.argument(args, 1)
+  let passed = [absent, 0.0, this]
   let index = 0.0
   if same(kind(this), "list") {
     for value in this {
       if same(index, length) { break }
       if same(value, ()) {} else {
-        let passed = [value, index, this]
+        set passed[0] = value
+        set passed[1] = index
         do apply callback(context, passed)
       }
       set index = num.add(index, 1.0)
@@ -825,7 +857,8 @@ body {
     let present = invoke ts.has_own(this, index)
     if present {
       let value = invoke ts.get(this, index)
-      let passed = [value, index, this]
+      set passed[0] = value
+      set passed[1] = index
       do apply callback(context, passed)
     }
     set index = num.add(index, 1.0)
@@ -840,14 +873,16 @@ charge 8
 body {
   let length = invoke ts.array.length(this)
   let input = invoke ts.array.argument(args, 0)
-  let callback = invoke ts.array.callback(input)
+  let callback = invoke ts.array.reusable_callback(input)
   let context = invoke ts.array.argument(args, 1)
+  let passed = [absent, 0.0, this]
   let index = 0.0
   if same(kind(this), "list") {
     for value in this {
       if same(index, length) { break }
       if same(value, ()) {} else {
-        let passed = [value, index, this]
+        set passed[0] = value
+        set passed[1] = index
         let answer = apply callback(context, passed)
         if same(answer, true) {} else {
           if same(answer, false) { return false }
@@ -862,7 +897,8 @@ body {
     let present = invoke ts.has_own(this, index)
     if present {
       let value = invoke ts.get(this, index)
-      let passed = [value, index, this]
+      set passed[0] = value
+      set passed[1] = index
       let answer = apply callback(context, passed)
       let truth = invoke ts.to_boolean(answer)
       if truth {} else { return false }
@@ -879,14 +915,16 @@ charge 8
 body {
   let length = invoke ts.array.length(this)
   let input = invoke ts.array.argument(args, 0)
-  let callback = invoke ts.array.callback(input)
+  let callback = invoke ts.array.reusable_callback(input)
   let context = invoke ts.array.argument(args, 1)
+  let passed = [absent, 0.0, this]
   let index = 0.0
   if same(kind(this), "list") {
     for value in this {
       if same(index, length) { break }
       if same(value, ()) {} else {
-        let passed = [value, index, this]
+        set passed[0] = value
+        set passed[1] = index
         let answer = apply callback(context, passed)
         if same(answer, true) { return true }
         if same(answer, false) {} else {
@@ -901,7 +939,8 @@ body {
     let present = invoke ts.has_own(this, index)
     if present {
       let value = invoke ts.get(this, index)
-      let passed = [value, index, this]
+      set passed[0] = value
+      set passed[1] = index
       let answer = apply callback(context, passed)
       let truth = invoke ts.to_boolean(answer)
       if truth { return true }
@@ -922,14 +961,16 @@ charge 8
 body {
   let length = invoke ts.array.length(this)
   let input = invoke ts.array.argument(args, 0)
-  let callback = invoke ts.array.callback(input)
+  let callback = invoke ts.array.reusable_callback(input)
   let context = invoke ts.array.argument(args, 1)
+  let passed = [absent, 0.0, this]
   let index = 0.0
   if same(kind(this), "list") {
     for value in this {
       if same(index, length) { break }
       if same(value, ()) { set value = absent }
-      let passed = [value, index, this]
+      set passed[0] = value
+      set passed[1] = index
       let answer = apply callback(context, passed)
       if same(answer, true) { return value }
       if same(answer, false) {} else {
@@ -942,7 +983,8 @@ body {
   while num.lt(index, length) {
     do invoke ts.has_own(this, index)
     let value = invoke ts.get(this, index)
-    let passed = [value, index, this]
+    set passed[0] = value
+    set passed[1] = index
     let answer = apply callback(context, passed)
     let truth = invoke ts.to_boolean(answer)
     if truth { return value }
@@ -958,14 +1000,16 @@ charge 8
 body {
   let length = invoke ts.array.length(this)
   let input = invoke ts.array.argument(args, 0)
-  let callback = invoke ts.array.callback(input)
+  let callback = invoke ts.array.reusable_callback(input)
   let context = invoke ts.array.argument(args, 1)
+  let passed = [absent, 0.0, this]
   let index = 0.0
   if same(kind(this), "list") {
     for value in this {
       if same(index, length) { break }
       if same(value, ()) { set value = absent }
-      let passed = [value, index, this]
+      set passed[0] = value
+      set passed[1] = index
       let answer = apply callback(context, passed)
       if same(answer, true) { return index }
       if same(answer, false) {} else {
@@ -978,7 +1022,8 @@ body {
   while num.lt(index, length) {
     do invoke ts.has_own(this, index)
     let value = invoke ts.get(this, index)
-    let passed = [value, index, this]
+    set passed[0] = value
+    set passed[1] = index
     let answer = apply callback(context, passed)
     let truth = invoke ts.to_boolean(answer)
     if truth { return index }
@@ -998,8 +1043,9 @@ charge 8
 body {
   let length = invoke ts.array.length(this)
   let input = invoke ts.array.argument(args, 0)
-  let callback = invoke ts.array.callback(input)
+  let callback = invoke ts.array.reusable_callback(input)
   let context = invoke ts.array.argument(args, 1)
+  let passed = [absent, 0.0, this]
   let index = num.sub(length, 1.0)
   let actual_list = same(kind(this), "list")
   while num.le(0, index) {
@@ -1013,7 +1059,8 @@ body {
       do invoke ts.has_own(this, index)
       set value = invoke ts.get(this, index)
     }
-    let passed = [value, index, this]
+    set passed[0] = value
+    set passed[1] = index
     let answer = apply callback(context, passed)
     if same(answer, true) { return value }
     if same(answer, false) {} else {
@@ -1032,8 +1079,9 @@ charge 8
 body {
   let length = invoke ts.array.length(this)
   let input = invoke ts.array.argument(args, 0)
-  let callback = invoke ts.array.callback(input)
+  let callback = invoke ts.array.reusable_callback(input)
   let context = invoke ts.array.argument(args, 1)
+  let passed = [absent, 0.0, this]
   let index = num.sub(length, 1.0)
   let actual_list = same(kind(this), "list")
   while num.le(0, index) {
@@ -1047,7 +1095,8 @@ body {
       do invoke ts.has_own(this, index)
       set value = invoke ts.get(this, index)
     }
-    let passed = [value, index, this]
+    set passed[0] = value
+    set passed[1] = index
     let answer = apply callback(context, passed)
     if same(answer, true) { return index }
     if same(answer, false) {} else {
@@ -1066,8 +1115,9 @@ charge 8
 body {
   let length = invoke ts.array.length(this)
   let input = invoke ts.array.argument(args, 0)
-  let callback = invoke ts.array.callback(input)
+  let callback = invoke ts.array.reusable_callback(input)
   let accumulator = invoke ts.array.argument(args, 1)
+  let passed = [absent, absent, 0.0, this]
   let initialised = num.lt(1, list.len(args))
   let index = 0.0
   if same(kind(this), "list") {
@@ -1075,7 +1125,9 @@ body {
       if same(index, length) { break }
       if same(value, ()) {} else {
         if initialised {
-          let passed = [accumulator, value, index, this]
+          set passed[0] = accumulator
+          set passed[1] = value
+          set passed[2] = index
           set accumulator = apply callback(absent, passed)
         } else {
           set accumulator = value
@@ -1090,7 +1142,9 @@ body {
     if present {
       let value = invoke ts.get(this, index)
       if initialised {
-        let passed = [accumulator, value, index, this]
+        set passed[0] = accumulator
+        set passed[1] = value
+        set passed[2] = index
         set accumulator = apply callback(absent, passed)
       } else {
         set accumulator = value
@@ -1110,8 +1164,9 @@ charge 8
 body {
   let length = invoke ts.array.length(this)
   let input = invoke ts.array.argument(args, 0)
-  let callback = invoke ts.array.callback(input)
+  let callback = invoke ts.array.reusable_callback(input)
   let accumulator = invoke ts.array.argument(args, 1)
+  let passed = [absent, absent, 0.0, this]
   let initialised = num.lt(1, list.len(args))
   let index = num.sub(length, 1.0)
   let actual_list = same(kind(this), "list")
@@ -1129,7 +1184,9 @@ body {
     }
     if present {
       if initialised {
-        let passed = [accumulator, value, index, this]
+        set passed[0] = accumulator
+        set passed[1] = value
+        set passed[2] = index
         set accumulator = apply callback(absent, passed)
       } else {
         set accumulator = value

@@ -438,7 +438,7 @@ fn a_callback_that_parks_inside_a_method_resumes_identically() {
                  let xs = [1, (), 3, 4, 5]\n\
                  let f = fn(receiver, passed) {{\n\
                    let r = perform echo(passed) as Any\n\
-                   set log[list.len(log)] = r\n\
+                   set log[list.len(log)] = (passed, r)\n\
                    if same(list.len(log), 2) {{ set xs[3] = () }}\n\
                    return {answer}\n\
                  }}\n\

@@ -61,8 +61,12 @@ impl Lowerer<'_> {
         let args = self.fresh("args");
         let params = vec![this.clone(), args.clone()];
         let block = self.block(|lowerer| {
-            let promise =
-                lowerer.start_promise(&body, Atom::Variable(this), Atom::Variable(args))?;
+            // The caller may reuse its invocation buffer once this task waits,
+            // including during a default parameter's call. Own the slots before
+            // spawning; values in them retain their original shared identities.
+            let owned = lowerer.native("list.copy", vec![Expr::Variable(args)])?;
+            let owned = lowerer.let_expr(owned, Ty::Unknown);
+            let promise = lowerer.start_promise(&body, Atom::Variable(this), owned.atom)?;
             lowerer.emit(Stmt::Return {
                 value: promise.expr(),
             });
