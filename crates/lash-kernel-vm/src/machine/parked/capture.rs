@@ -122,8 +122,7 @@ impl KernelMachine {
             Some(document) => document,
             None => {
                 let document = self
-                    .program
-                    .document
+                    .exe
                     .identity()
                     .map_err(|error| fault(error.to_string()))?;
                 self.document = Some(document);

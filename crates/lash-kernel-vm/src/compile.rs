@@ -9,8 +9,9 @@
 //!
 //! It is compiled in two parts. A [`PreparedLibrary`] holds every library
 //! body of a registry, compiled once for all the runs that use the
-//! registry. A run compiles only its document's own code, numbered after
-//! the library's, so its start does not grow with the library. A
+//! registry. Each immutable document's admission and own code are reused
+//! at start and import against that library. Its code is numbered after
+//! the library's, so preparation does not grow with the library. A
 //! function's identity is its content, so the body compiled under it is
 //! the one every document that lists it runs, and the one a parked run
 //! that pins it resumes in.
@@ -34,6 +35,7 @@ use lash_kernel_exec::{BoundaryKind, StepEdge};
 use crate::functions::{MachineFunction, machine_function};
 
 mod formula;
+mod preparation;
 
 pub(crate) use formula::{Charge, Fast, Plan, Source};
 
@@ -95,7 +97,8 @@ struct Tables {
 /// A function registry with every library body in it compiled, once, for
 /// all the runs of all the documents that use it. An embedder prepares
 /// its registry once and hands the same library to every [`Program`]
-/// (`crate::Program`); a run's start then compiles only its document.
+/// (`crate::Program`); each document is admitted and compiled once against
+/// that library, then shared by its starts and imports.
 ///
 /// Like the executable it is a cache: derived deterministically from the
 /// registry and never saved. A body is found by its function's identity,
@@ -114,6 +117,7 @@ struct Prepared {
     /// Each function whose body reaches, through the bodies the machine
     /// runs, a function the registry does not hold: that function.
     missing: BTreeMap<FunctionId, FunctionId>,
+    documents: std::sync::Mutex<preparation::Documents>,
 }
 
 impl fmt::Debug for PreparedLibrary {
@@ -245,6 +249,7 @@ impl PreparedLibrary {
             libs,
             lib_of,
             missing,
+            documents: Default::default(),
         }))
     }
 }
@@ -287,9 +292,23 @@ fn missing(registry: &FunctionRegistry) -> BTreeMap<FunctionId, FunctionId> {
 pub(crate) struct Executable {
     library: PreparedLibrary,
     document: Arc<Document>,
-    own: Tables,
+    own: Arc<DocumentCode>,
+    admission: Arc<preparation::Admission>,
+}
+
+/// Immutable document tables, independent of any run or owning document.
+pub(crate) struct DocumentCode {
+    tables: Tables,
     pub(crate) main: CodeId,
     pub(crate) declared: BTreeMap<Name, CodeId>,
+}
+
+impl std::ops::Deref for Executable {
+    type Target = DocumentCode;
+
+    fn deref(&self) -> &Self::Target {
+        &self.own
+    }
 }
 
 /// The entry `index` names in a library's table followed by a document's.
@@ -303,11 +322,11 @@ fn entry<'t, T>(library: &'t [T], own: &'t [T], index: u32) -> Option<&'t T> {
 
 impl Executable {
     pub(crate) fn get_code(&self, id: CodeId) -> Option<&Code> {
-        entry(&self.library.0.tables.codes, &self.own.codes, id.0)
+        entry(&self.library.0.tables.codes, &self.own.tables.codes, id.0)
     }
 
     pub(crate) fn get_stmt(&self, id: StmtId) -> Option<&Stmt> {
-        entry(&self.library.0.tables.stmts, &self.own.stmts, id.0)
+        entry(&self.library.0.tables.stmts, &self.own.tables.stmts, id.0)
     }
 
     #[expect(
@@ -323,7 +342,7 @@ impl Executable {
         reason = "every block id the machine holds was handed out by this executable"
     )]
     pub(crate) fn block(&self, id: BlockId) -> &Block {
-        entry(&self.library.0.tables.blocks, &self.own.blocks, id.0)
+        entry(&self.library.0.tables.blocks, &self.own.tables.blocks, id.0)
             .expect("a block of this executable")
     }
 
@@ -342,7 +361,7 @@ impl Executable {
         let index = id.0 as usize;
         let (tables, at) = match index.checked_sub(library.stmts.len()) {
             None => (library, index),
-            Some(own) => (&self.own, own),
+            Some(own) => (&self.own.tables, own),
         };
         (&tables.stmts[at], tables.edges[at])
     }
@@ -369,7 +388,7 @@ impl Executable {
                 .functions
                 .contains_key(function)
                 .then_some(&self.library.0.tables),
-            Unit::Main | Unit::Function(_) => Some(&self.own),
+            Unit::Main | Unit::Function(_) => Some(&self.own.tables),
         }
     }
 
@@ -386,7 +405,7 @@ impl Executable {
     /// How many codes, library functions and statements the executable
     /// numbers.
     pub(crate) fn code_count(&self) -> usize {
-        self.library.0.tables.codes.len() + self.own.codes.len()
+        self.library.0.tables.codes.len() + self.own.tables.codes.len()
     }
 
     pub(crate) fn lib_count(&self) -> usize {
@@ -394,12 +413,17 @@ impl Executable {
     }
 
     pub(crate) fn stmt_count(&self) -> usize {
-        self.library.0.tables.stmts.len() + self.own.stmts.len()
+        self.library.0.tables.stmts.len() + self.own.tables.stmts.len()
     }
 
     /// Every block, the library's and the document's.
     pub(crate) fn blocks(&self) -> impl Iterator<Item = &Block> {
-        self.library.0.tables.blocks.iter().chain(&self.own.blocks)
+        self.library
+            .0
+            .tables
+            .blocks
+            .iter()
+            .chain(&self.own.tables.blocks)
     }
 
     /// The registered name of a library function, listed or not.
@@ -607,6 +631,7 @@ pub(crate) enum Expr {
 }
 
 /// A program the machine cannot compile: a function the registry lacks.
+#[derive(Clone, Copy)]
 pub(crate) struct Missing(pub(crate) FunctionId);
 
 /// A small deterministic generator for layouts (splitmix64).
@@ -706,10 +731,10 @@ enum UnitSource<'a> {
 
 /// Compiles `document`'s own code over `library`, which holds every
 /// library body it reaches.
-pub(crate) fn compile(
-    document: &Arc<Document>,
+fn compile_document(
+    document: &Document,
     library: &PreparedLibrary,
-) -> Result<Executable, Missing> {
+) -> Result<DocumentCode, Missing> {
     let prepared = &library.0;
     if !prepared.missing.is_empty() {
         for function in document.manifest.functions.keys() {
@@ -759,10 +784,8 @@ pub(crate) fn compile(
         }
     }
     let declared = std::mem::take(&mut compiler.declared);
-    Ok(Executable {
-        library: library.clone(),
-        document: Arc::clone(document),
-        own: compiler.finish(),
+    Ok(DocumentCode {
+        tables: compiler.finish(),
         main,
         declared,
     })

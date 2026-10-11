@@ -1,10 +1,10 @@
-//! Rebuilding a run from a parked state, against an executable compiled
-//! afresh.
+//! Rebuilding a run from a parked state, against the prepared executable
+//! for its admitted document and registry.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::Arc;
 
-use lash_kernel_doc::{Identity, Object, ObjectId, Site, TaskId, Unit, Value, validate_document};
+use lash_kernel_doc::{Identity, Object, ObjectId, Site, TaskId, Unit, Value};
 use lash_kernel_state as state;
 use lash_kernel_state::{ParkedCall, ParkedRun};
 
@@ -14,7 +14,7 @@ use super::super::{
 };
 use super::action_of;
 use crate::Layout;
-use crate::compile::{ActionKind, BlockId, CodeId, Executable, Stmt, compile};
+use crate::compile::{ActionKind, BlockId, CodeId, Executable, Stmt};
 use crate::heap::{ClosureObj, Heap, Key, MAX_VALUE_DEPTH, Obj, Table, within_depth};
 use crate::interface::{
     Bounds, EffectRequest, ImportError, Outcome, Program, Request, SleepRequest, WaitId,
@@ -475,16 +475,10 @@ pub(in crate::machine) fn import(
     }
     let costs = crate::costs::Costs::of_document(&program.document);
     let manifest = &program.document.manifest.functions;
-    let registry = program.library.registry();
-    if let Some(function) = manifest.keys().find(|id| registry.get(id).is_none()) {
-        return Err(ImportError::MissingFunction {
-            function: *function,
-        });
-    }
-    validate_document(&program.document, registry.as_ref())?;
-    let document = program
-        .document
-        .identity()
+    let library = program.library.in_layout(layout);
+    let admitted = library.admit(&program.document)?;
+    let document = admitted
+        .identity(&program.document)
         .map_err(|error| malformed(error.to_string()))?;
     if run.document != document {
         return Err(ImportError::DocumentMismatch {
@@ -501,12 +495,11 @@ pub(in crate::machine) fn import(
     // A call parked inside a library function's kernel body goes on there,
     // whichever implementation this registry runs new calls with: the
     // prepared library holds every body.
-    let library = program.library.in_layout(layout);
-    let exe =
-        compile(&program.document, &library).map_err(|missing| ImportError::MissingFunction {
+    let exe = admitted
+        .executable(&program.document, &library)
+        .map_err(|missing| ImportError::MissingFunction {
             function: missing.0,
         })?;
-    let exe = Arc::new(exe);
 
     let mut heap = Heap::new(bounds.memory);
     for (id, object) in objects {

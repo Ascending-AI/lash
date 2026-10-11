@@ -51,9 +51,9 @@ use lash_kernel_doc::{
 
 /// What a machine runs: an admitted document and the library functions the
 /// embedder registered, prepared once for every program that uses them.
-/// The machine compiles the document to an executable of its own over the
-/// prepared library; both are caches: derived deterministically, never
-/// saved.
+/// The prepared library also shares each live document's admission and
+/// executable across starts and imports. These are derived caches, never
+/// saved. Replacing the document or library requires a fresh admission.
 #[derive(Clone, Debug)]
 pub struct Program {
     pub document: Arc<Document>,
@@ -383,8 +383,8 @@ pub trait Machine: Sized {
     /// `lash-kernel-state`.
     type Parked;
 
-    /// Compiles `program`'s document and creates a run that has executed
-    /// nothing.
+    /// Admits and prepares `program`'s document, reusing immutable preparation
+    /// when available, and creates a run that has executed nothing.
     fn start(program: Program, bounds: Bounds, start: Start) -> Result<Self, StartError>;
 
     /// Runs ready tasks, first in first out, until no task is ready, the
@@ -400,9 +400,9 @@ pub trait Machine: Sized {
     /// (`K-MACH-007`).
     fn export(&mut self) -> Result<Self::Parked, ExportError>;
 
-    /// Rebuilds a run from a parked state. The document's executable is
-    /// compiled afresh; resuming continues the computation and its effect ownership
-    /// exactly (`K-MACH-008`).
+    /// Rebuilds a run from a parked state against its document's prepared
+    /// executable. Every parked-state refusal is checked; resuming continues
+    /// the computation and its effect ownership exactly (`K-MACH-008`).
     fn import(program: Program, bounds: Bounds, parked: Self::Parked) -> Result<Self, ImportError>;
 
     /// What the run has used so far.

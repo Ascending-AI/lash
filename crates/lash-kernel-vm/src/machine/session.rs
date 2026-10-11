@@ -4,13 +4,10 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::Arc;
 
-use lash_kernel_doc::{
-    Datum, ErrorValue, Identity, Object, ObjectId, TaskId, TaskIdentity, Value, validate_document,
-};
+use lash_kernel_doc::{Datum, ErrorValue, Identity, Object, ObjectId, TaskId, TaskIdentity, Value};
 
 use super::{Interrupt, KernelMachine, Storage, Task, TaskState};
 use crate::Layout;
-use crate::compile::compile;
 use crate::heap::{Heap, Key, Obj, Table, object_bytes, value_bytes};
 use crate::interface::{Bindings, Bounds, Finished, Program, Start, StartError, Target};
 
@@ -20,21 +17,13 @@ pub(super) fn start(
     start: Start,
     layout: Layout,
 ) -> Result<KernelMachine, StartError> {
-    let registry = program.library.registry();
-    for function in program.document.manifest.functions.keys() {
-        if registry.get(function).is_none() {
-            return Err(StartError::MissingFunction {
-                function: *function,
-            });
-        }
-    }
-    validate_document(&program.document, registry.as_ref())?;
     let library = program.library.in_layout(layout);
-    let exe =
-        compile(&program.document, &library).map_err(|missing| StartError::MissingFunction {
+    let admitted = library.admit(&program.document)?;
+    let exe = admitted
+        .executable(&program.document, &library)
+        .map_err(|missing| StartError::MissingFunction {
             function: missing.0,
         })?;
-    let exe = Arc::new(exe);
     let costs = crate::costs::Costs::of_document(&program.document);
     let mut machine = KernelMachine {
         heap: Heap::new(bounds.memory),
@@ -390,4 +379,136 @@ fn rename(value: &Value, ids: &BTreeMap<ObjectId, ObjectId>) -> Option<Value> {
         })),
         other => other.clone(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Machine, PreparedLibrary};
+    use lash_kernel_doc::{FunctionRegistry, parse_document};
+
+    const BOUNDS: Bounds = Bounds {
+        charge: 10_000,
+        memory: 1 << 20,
+        call_depth: 100,
+        live_tasks: 100,
+        requests_per_park: 100,
+        join_members: 100,
+    };
+
+    fn main() -> Start {
+        Start {
+            target: Target::Main,
+            args: Vec::new(),
+            bindings: Bindings::default(),
+        }
+    }
+
+    /// FIG-5916: one immutable admission supplies the code for every start
+    /// and resume, even after the original run is dropped.
+    #[test]
+    fn a_cell_reuses_its_admitted_document_at_start_and_resume() {
+        let program = Program {
+            document: Arc::new(
+                parse_document("kernel 1\nnumbers float\nmain { do yield return 1 }").unwrap(),
+            ),
+            library: PreparedLibrary::new(Arc::new(FunctionRegistry::new())),
+        };
+        let mut first = KernelMachine::start(program.clone(), BOUNDS, main()).unwrap();
+        let parked = first.export().unwrap();
+        let second = KernelMachine::start(program.clone(), BOUNDS, main()).unwrap();
+        assert!(
+            std::ptr::eq(
+                first.exe.code(first.exe.main),
+                second.exe.code(second.exe.main)
+            ),
+            "a second start must reuse the admitted code"
+        );
+        drop(first);
+        let resumed = KernelMachine::import(program, BOUNDS, parked).unwrap();
+        assert!(
+            std::ptr::eq(
+                second.exe.code(second.exe.main),
+                resumed.exe.code(resumed.exe.main)
+            ),
+            "resume must reuse the admitted code after its original run is dropped"
+        );
+    }
+    /// Admission belongs to an immutable document and registry, never just
+    /// the document's address or its former contents (K-DOC-001, K-MACH-008).
+    #[test]
+    fn document_edits_and_registry_replacements_require_fresh_admission() {
+        let mut registry = FunctionRegistry::new();
+        let function = registry
+            .register(
+                lash_kernel_doc::parse_definition(
+                    "function one() -> Any\nkernel 1\ncharge 1\nbody { return 1 }",
+                )
+                .unwrap(),
+                None,
+            )
+            .unwrap();
+        let program = Program {
+            document: Arc::new(parse_document(&format!(
+                "kernel 1\nnumbers float\nuse one = @{function}\nmain {{ let n = invoke one() return n }}"
+            )).unwrap()),
+            library: PreparedLibrary::new(Arc::new(registry)),
+        };
+        let mut first = KernelMachine::start(program.clone(), BOUNDS, main()).unwrap();
+        let parked = first.export().unwrap();
+        let mut edited = program.clone();
+        Arc::make_mut(&mut edited.document).manifest.kernel = 999;
+        assert!(matches!(
+            KernelMachine::start(edited.clone(), BOUNDS, main()),
+            Err(StartError::NotAdmitted(_))
+        ));
+        let mut edited_state = parked.clone();
+        edited_state.run.kernel = 999;
+        assert!(matches!(
+            KernelMachine::import(edited, BOUNDS, edited_state),
+            Err(crate::ImportError::NotAdmitted(_))
+        ));
+        let replaced = Program {
+            document: Arc::clone(&program.document),
+            library: PreparedLibrary::new(Arc::new(FunctionRegistry::new())),
+        };
+        assert!(
+            matches!(KernelMachine::start(replaced.clone(), BOUNDS, main()),
+            Err(StartError::MissingFunction { function: missing }) if missing == function)
+        );
+        assert!(
+            matches!(KernelMachine::import(replaced, BOUNDS, parked.clone()),
+            Err(crate::ImportError::MissingFunction { function: missing }) if missing == function)
+        );
+        let resumed = KernelMachine::import(program, BOUNDS, parked).unwrap();
+        assert!(std::ptr::eq(
+            first.exe.code(first.exe.main),
+            resumed.exe.code(resumed.exe.main)
+        ));
+    }
+
+    /// FIG-5916: cached preparation must not retain discarded documents or
+    /// form a library/executable ownership cycle.
+    #[test]
+    fn prepared_code_does_not_keep_a_discarded_document_alive() {
+        let library = PreparedLibrary::new(Arc::new(FunctionRegistry::new()));
+        let document =
+            Arc::new(parse_document("kernel 1\nnumbers float\nmain { return 1 }").unwrap());
+        let discarded = Arc::downgrade(&document);
+        let program = Program {
+            document,
+            library: library.clone(),
+        };
+        drop(KernelMachine::start(program, BOUNDS, main()).unwrap());
+        assert!(discarded.upgrade().is_none());
+        // The next admission can reclaim the dead document's preparation.
+        let replacement = Program {
+            document: Arc::new(
+                parse_document("kernel 1\nnumbers float\nmain { return 2 }").unwrap(),
+            ),
+            library,
+        };
+        let mut machine = KernelMachine::start(replacement, BOUNDS, main()).unwrap();
+        machine.export().unwrap();
+    }
 }

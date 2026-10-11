@@ -310,6 +310,7 @@ TEST_RUN_REQUESTS = {
     "//crates/lash-core:turn_event_schema__test__fv_171a8f92": {"cpu_count": 1, "memory_kb": 262144},
     "//crates/lash-core:turn_event_schema__test__fv_30b4ae55": {"cpu_count": 1, "memory_kb": 262144},
     "//crates/lash-dialect-python:lash-dialect-python__unit_test": {"cpu_count": 2, "memory_kb": 524288},
+    "//crates/lash-dialect-typescript:document_preparation__test": {"cpu_count": 2, "memory_kb": 524288},
     "//crates/lash-dialect-typescript:lash-dialect-typescript__unit_test": {"cpu_count": 2, "memory_kb": 524288},
     "//crates/lash-dialect-typescript:test262_kernel__test": {"cpu_count": 2, "memory_kb": 524288},
     "//crates/lash-durable-test:after_turn_crash_laws__test": {"cpu_count": 2, "memory_kb": 524288},
@@ -805,6 +806,7 @@ TEST_RUN_REQUESTS = {
 BATCH_BUDGETS = {
     "//crates/lash-core-execution:test_batch": {"cpu_count": 5, "memory_kb": 1310720},
     "//crates/lash-core:test_batch": {"cpu_count": 3, "memory_kb": 262144},
+    "//crates/lash-dialect-typescript:test_batch": {"cpu_count": 4, "memory_kb": 1048576},
     "//crates/lash-kernel-doc:test_batch": {"cpu_count": 4, "memory_kb": 1048576},
     "//crates/lash-kernel-edit:test_batch": {"cpu_count": 4, "memory_kb": 1048576},
     "//crates/lash-kernel-state:test_batch": {"cpu_count": 4, "memory_kb": 1048576},

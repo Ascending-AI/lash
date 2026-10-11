@@ -138,7 +138,7 @@ A dialect is a package of a front end, a printer and the functions (helpers and 
 
 ## 5. Execution
 
-- The engine compiles an admitted document to an internal executable. It is a cache: derived deterministically, never edited, rebuilt at will. The library's part of it is compiled once per registry and shared by every run that uses the registry, keyed by function identity; a run's start compiles only its document, so it does not grow with the library.
+- The engine compiles an admitted document to an internal executable. It is a cache: derived deterministically, never edited, rebuilt at will. The library's part of it is compiled once per registry and shared by every run that uses the registry, keyed by function identity; each live immutable document is admitted and compiled once against that prepared library and layout, then reused at start and import. Weak document references isolate replacement and copy-on-write edits, and unused preparation is reclaimed on the next admission. Parked-state refusals are checked on every import.
 - Charges come from a cost table for kernel forms and from each function's charge formula; both are pinned (§6). Bounds are explicit, as today.
 - **After a crash** a run resumes from its last saved state. Whatever ran after that save runs again. An effect whose outcome committed is never executed again: its `perform` is answered from the committed outcome.
 - Worker processes, worker reset, effect admission before execution and the host boundary stay as they are.

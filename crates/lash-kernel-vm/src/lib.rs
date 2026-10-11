@@ -10,11 +10,11 @@
 //!
 //! A run that is not executing is a `ParkedRun` of `lash-kernel-state`:
 //! [`Machine::export`] writes one at any safe point and [`Machine::import`]
-//! resumes it against an executable compiled afresh.
+//! resumes it against its admitted document preparation.
 //!
 //! An embedder prepares its registry once as a [`PreparedLibrary`], which
 //! compiles every library body, and hands it to every [`Program`]: a run's
-//! start compiles only its document.
+//! starts and imports reuse each live document's admission and compiled code.
 //!
 //! [`KernelMachine`] is the machine; [`Machine`] is the interface an embedder
 //! and the conformance harness drive it through. Its rules are the `K-MACH` rules of
