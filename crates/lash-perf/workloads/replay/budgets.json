@@ -249,20 +249,6 @@
     },
     {
       "workload": "chat-short",
-      "metric": "sql_rows_read",
-      "check": "history_slope",
-      "owner": "FIG-5930",
-      "why": "each send hydrates the whole window several times (FIG-5506 rank, F-T3)"
-    },
-    {
-      "workload": "chat-long-compacting",
-      "metric": "sql_rows_read",
-      "check": "frame_slope",
-      "owner": "FIG-5930",
-      "why": "each send hydrates the whole window several times (FIG-5506 rank, F-T3)"
-    },
-    {
-      "workload": "chat-short",
       "metric": "allocated_bytes",
       "check": "history_slope",
       "owner": "FIG-5930",

@@ -27,6 +27,7 @@ pub(crate) struct RecoverySlot {
     started: std::sync::atomic::AtomicBool,
     shutdown: tokio_util::sync::CancellationToken,
     clock: Arc<dyn lash_core::Clock>,
+    cleanup: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl RecoverySlot {
@@ -64,6 +65,7 @@ impl RecoverySlot {
             started: std::sync::atomic::AtomicBool::new(false),
             shutdown: tokio_util::sync::CancellationToken::new(),
             clock,
+            cleanup: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 
@@ -99,6 +101,7 @@ impl RecoverySlot {
         self.spawn_election(&runtime);
         let clock = Arc::clone(&self.clock);
         let shutdown = self.shutdown.clone();
+        let cleanup = Arc::clone(&self.cleanup);
         runtime.spawn(async move {
             let mut interval = RecoveryInterval::new(Arc::clone(&clock), pacing.interval());
             loop {
@@ -106,11 +109,22 @@ impl RecoverySlot {
                     () = shutdown.cancelled() => break,
                     _ = interval.tick() => {}
                 }
+                let _pass = tokio::select! {
+                    () = shutdown.cancelled() => break,
+                    guard = cleanup.lock() => guard,
+                };
                 if let Err(error) = relay_due(relay.as_ref(), clock.as_ref(), pacing.cleanup_page).await {
                     tracing::warn!(%error, "artifact cleanup pass failed; the next tick retries it");
                 }
             }
         });
+    }
+
+    /// Wait for an active cleanup pass and hold periodic passes at their
+    /// admission boundary until this guard is dropped.
+    #[cfg(any(test, feature = "testing"))]
+    pub(crate) async fn quiesce_cleanup(&self) -> tokio::sync::OwnedMutexGuard<()> {
+        Arc::clone(&self.cleanup).lock_owned().await
     }
 
     /// Give the lease up now, and stop the slot's background work.

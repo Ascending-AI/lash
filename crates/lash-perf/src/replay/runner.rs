@@ -180,6 +180,7 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
         .then(|| super::workers::service(workload.protocol == Protocol::Python))
         .transpose()?;
     let core = build_core(workload, &backend, Arc::clone(&book), workers.as_ref())?;
+    let cleanup = lash::testing::quiesce_artifact_cleanup(&core).await;
     let pool = workers
         .as_ref()
         .map(lash::vm::WorkerService::pool)
@@ -220,6 +221,10 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
     let mut frame_depth = 0;
     let mut model_calls = 0_u64;
     for turn in 0..turns {
+        cleanup
+            .settle()
+            .await
+            .context("settle between-round artifact cleanup")?;
         let before = meter.read(model_calls).await;
         let started = Instant::now();
         let outcomes = tokio::time::timeout(

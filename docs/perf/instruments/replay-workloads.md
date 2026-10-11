@@ -54,8 +54,12 @@ its script digest (SHA-256), backend, sessions and turns.
 
 `rounds[*].metrics` are differences of cumulative counters read before a
 round's first send and after its last outcome, summed over the round's
-sessions. Background work that settles after an outcome lands in the next
-round. Summaries divide by sessions, so every statistic is per session turn:
+sessions. The runner holds periodic artifact-cleanup passes at their admission
+boundary and drains due cleanup through the real relay between rounds. These
+maintenance passes are outside the turn window; immediate producer cleanup
+still belongs to its turn. This gives each round the same settled artifact
+referrers, independent of the recovery worker's ten-second cadence. Summaries
+divide by sessions, so every statistic is per session turn:
 
 | Metric | Unit | Counted by |
 |---|---|---|

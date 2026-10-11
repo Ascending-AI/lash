@@ -331,3 +331,56 @@ impl LanguageObservationDispatcher {
         self.publisher.shutdown().await;
     }
 }
+
+/// Holds a core's periodic artifact cleanup at its pass boundary. Immediate
+/// producer deliveries still run with the turn that owns them.
+///
+/// A replay can settle due maintenance between rounds while keeping it out
+/// of the send-to-outcome measurement window. Dropping this guard resumes
+/// the periodic worker; production cores keep their normal cadence.
+pub struct ArtifactCleanupFence {
+    _guard: tokio::sync::OwnedMutexGuard<()>,
+    relay: lash_core::runtime::artifact_cleanup::ArtifactCleanupRelay,
+    clock: std::sync::Arc<dyn lash_core::Clock>,
+}
+
+/// Wait for any active periodic cleanup pass, then hold later passes until
+/// the returned guard is dropped. Use one guard for the whole replay.
+pub async fn quiesce_artifact_cleanup(core: &crate::LashCore) -> ArtifactCleanupFence {
+    let guard = core.recovery.quiesce_cleanup().await;
+    ArtifactCleanupFence {
+        _guard: guard,
+        relay: lash_core::runtime::artifact_cleanup::ArtifactCleanupRelay::over_backend(
+            core.backend(),
+            core.host_process_engines.clone(),
+        ),
+        clock: core.backend().clock(),
+    }
+}
+
+impl ArtifactCleanupFence {
+    /// Drain due maintenance to an empty page, using the real relay and its
+    /// guards. A cleanup not owed yet remains deferred by its authority.
+    ///
+    /// # Errors
+    ///
+    /// A store operation failed, or a claimed cleanup retried or stalled.
+    pub async fn settle(&self) -> crate::Result<()> {
+        loop {
+            let pass = lash_core::runtime::obligations::relay::relay_due(
+                &self.relay,
+                self.clock.as_ref(),
+                crate::RecoveryPacing::standard().cleanup_page,
+            )
+            .await?;
+            if pass.retried != 0 || pass.stalled != 0 {
+                return Err(crate::EmbedError::Store(lash_core::StoreError::Backend(
+                    format!("artifact cleanup did not settle: {pass:?}"),
+                )));
+            }
+            if pass.claimed == 0 {
+                return Ok(());
+            }
+        }
+    }
+}
