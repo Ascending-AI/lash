@@ -38,6 +38,7 @@ use std::sync::LazyLock;
 
 use futures_util::TryStreamExt;
 
+use lash_core_store::checkpoint_graph::node::{immutable_catalog_heads, immutable_closure};
 use lash_core_store::checkpoint_graph::{
     BlobEncoding, DecodeDimension, DecodeLimits, GraphRefusal, InstalledGraphMeasurement, NodeId,
     NodeSource, RootSource, StoredNode, check_envelope,
@@ -75,36 +76,47 @@ lash_store_sql::statements! {
         pin_row = "SELECT lease_owner, generation, root_ref, expires_at_ms
              FROM blob_read_pins WHERE pin_id = ?1 FOR UPDATE";
 
-        /// The encodings of every stored blob in `?1`, key-share locked in
-        /// digest order against a targeted reclaim.
-        lock_nodes = "SELECT hash, encoding FROM blobs WHERE hash = ANY(?1::text[])
+        /// The encoding of every stored blob among the nodes `?1` a commit
+        /// names and the nodes it supplies (`?2`, raw digests: never one it
+        /// names), key-share locked in digest order against a targeted
+        /// reclaim, with the bytes of each supplied one: what the commit
+        /// compares instead of supplying it again.
+        lock_nodes = "SELECT hash, encoding, CASE WHEN hash = ANY(?1::text[]) THEN NULL ELSE content END
+             FROM blobs
+             WHERE hash = ANY(?1::text[])
+                OR hash = ANY(ARRAY(SELECT encode(digest, 'hex') FROM UNNEST(?2::bytea[]) AS digest))
              ORDER BY hash FOR KEY SHARE";
 
-        /// Installs every staged graph node `?1` (digests) with its bytes
-        /// `?2`, in digest order, and returns the digests it inserted: a
-        /// node already stored is left as it is.
+        /// Installs every graph node `?1` (raw digests) with its bytes `?2`,
+        /// in digest order, and returns the digests it inserted: a node
+        /// already stored is left as it is.
         insert_nodes = "INSERT INTO blobs (hash, content, encoding)
-             SELECT staged.hash, staged.content, 1
-             FROM UNNEST(?1::text[], ?2::bytea[]) AS staged(hash, content)
-             ORDER BY staged.hash
+             SELECT encode(staged.digest, 'hex'), staged.content, 1
+             FROM UNNEST(?1::bytea[], ?2::bytea[]) AS staged(digest, content)
+             ORDER BY staged.digest
              ON CONFLICT (hash) DO NOTHING
              RETURNING hash";
 
         /// The bytes and encoding of every stored blob in `?1`.
         stored_nodes = "SELECT hash, content, encoding FROM blobs WHERE hash = ANY(?1::text[])";
 
-        /// Every edge of freshly installed parents `?1` to children `?2`.
+        /// Every edge of freshly installed parents `?1` to children `?2`
+        /// (raw digests).
         insert_edges = "INSERT INTO blob_edges (parent_hash, child_hash)
-             SELECT parent, child FROM UNNEST(?1::text[], ?2::text[]) AS staged(parent, child)";
+             SELECT encode(parent, 'hex'), encode(child, 'hex')
+             FROM UNNEST(?1::bytea[], ?2::bytea[]) AS staged(parent, child)";
 
         /// Every blob the roots `?1` reach along stored edges, the roots
-        /// included, with its encoding and bytes: one read of a whole
-        /// graph, whose child tables a walk still checks.
+        /// included, with its encoding and bytes, short of the build
+        /// catalog's heads `?2`: one read of a whole graph, whose child
+        /// tables a walk still checks. Nothing a head reaches is read.
         walk_reach = "WITH RECURSIVE reach AS (
                  SELECT UNNEST(?1::text[]) AS hash
                  UNION
                  SELECT edge.child_hash FROM blob_edges AS edge
                  JOIN reach ON edge.parent_hash = reach.hash
+                 WHERE NOT (reach.hash = ANY(?2::text[]))
+                   AND NOT (edge.child_hash = ANY(?2::text[]))
              )
              SELECT blobs.hash, blobs.encoding, blobs.content
              FROM blobs JOIN reach ON blobs.hash = reach.hash";
@@ -116,6 +128,8 @@ lash_store_sql::statements! {
                  UNION
                  SELECT edge.child_hash FROM blob_edges AS edge
                  JOIN reach ON edge.parent_hash = reach.hash
+                 WHERE NOT (reach.hash = ANY(?2::text[]))
+                   AND NOT (edge.child_hash = ANY(?2::text[]))
              )
              SELECT blobs.hash, blobs.encoding,
                     CASE WHEN blobs.encoding = 1 OR blobs.hash = ANY(?1::text[]) THEN blobs.content END
@@ -436,7 +450,23 @@ async fn walk_within(
     }
     // One recursive query seeds every selected fact root. Bound the
     // retained closure as rows arrive, before buffering its material.
+    // A stored node's edges keep every child it names stored, and the
+    // child's own edges keep its children: a member of the build's catalog
+    // a stored node reaches is stored with all it reaches, under the
+    // build's bytes. The query stops at the catalog's heads, and the walk
+    // takes each member it meets, and all it reaches, from the build.
     let roots_hex: Vec<_> = roots.iter().map(NodeId::to_hex).collect();
+    let heads: Vec<_> = immutable_catalog_heads()
+        .iter()
+        .map(NodeId::to_hex)
+        .collect();
+    let member = |id: &NodeId| {
+        if roots.contains(id) {
+            None
+        } else {
+            immutable_closure(*id)
+        }
+    };
     let reach = if skipped.is_some() {
         SQL.postgres.walk_reach_graph.sql()
     } else {
@@ -448,6 +478,7 @@ async fn walk_within(
     {
         let mut rows = crate::observed_sql::query_as::<_, (String, i16, Option<Vec<u8>>)>(reach)
             .bind(&roots_hex)
+            .bind(&heads)
             .fetch(crate::observed_sql::executor(&mut *tx));
         while let Some((hash, encoding, bytes)) = rows.try_next().await.map_err(db)? {
             let id = node_of(&hash)?;
@@ -473,7 +504,7 @@ async fn walk_within(
         }
         let unread: Vec<_> = level
             .iter()
-            .filter(|id| !found.contains_key(id))
+            .filter(|id| !found.contains_key(id) && member(id).is_none())
             .map(NodeId::to_hex)
             .collect();
         if !unread.is_empty() {
@@ -497,6 +528,33 @@ async fn walk_within(
         }
         let mut next = BTreeSet::new();
         for id in level {
+            if let Some(closure) = member(&id) {
+                for node in closure.nodes() {
+                    if !visited.insert(node.id) {
+                        continue;
+                    }
+                    // A row the query read for it was charged as it arrived.
+                    if !matches!(found.remove(&node.id), Some((_, Some(_)))) {
+                        charge_node(limits, &mut count, &mut total, node.bytes.len())?;
+                    }
+                    let len = node.bytes.len() as u64;
+                    if len > limits.node_bytes {
+                        return Err(GraphRefusal::DecodeLimit {
+                            dimension: DecodeDimension::NodeBytes,
+                            actual: len,
+                            limit: limits.node_bytes,
+                        });
+                    }
+                    nodes.insert(
+                        node.id,
+                        HydratedNode {
+                            encoding: BlobEncoding::Graph,
+                            bytes: std::sync::Arc::clone(&node.bytes),
+                        },
+                    );
+                }
+                continue;
+            }
             if !visited.insert(id) {
                 continue;
             }
@@ -723,64 +781,82 @@ pub(super) async fn apply_release_pin(
     }
 }
 
-/// Installs a checked graph in the caller's guarded transaction: every node
+/// Installs a checked graph in the caller's guarded transaction. Every node
 /// it names without supplying is locked in digest order against a targeted
-/// reclaim and must exist (a published root as a graph node), then each
-/// supplied blob in digest order, compared on conflict, then every new
-/// node's edges once every blob exists.
+/// reclaim and must exist (a published root as a graph node); the same
+/// statement locks every supplied node already stored and reads its bytes
+/// back for comparison, so only the others are bound to the insert and a
+/// node the store holds never crosses the wire twice. A graph that names no
+/// node offers every supplied node to the insert without that read, and
+/// compares those already stored after it. One statement writes the fresh
+/// nodes' edges. Supplied digests are bound as their 32 raw bytes.
 pub(crate) async fn install(
     tx: &mut PgConnection,
     graph: &CheckedGraph,
 ) -> Answer<InstalledGraphMeasurement> {
-    let named: BTreeSet<&NodeId> = graph
+    let named: Vec<String> = graph
         .external
         .iter()
         .chain(graph.external_roots.iter())
+        .collect::<BTreeSet<&NodeId>>()
+        .into_iter()
+        .map(NodeId::to_hex)
         .collect();
+    let supplied: Vec<String> = graph.nodes.iter().map(|node| node.id.to_hex()).collect();
+    let mut installed = InstalledGraphMeasurement::default();
+    let mut present = BTreeMap::new();
     if !named.is_empty() {
-        let rows: Vec<(String, i16)> = crate::observed_sql::query_as(SQL.postgres.lock_nodes.sql())
-            .bind(named.iter().map(|node| node.to_hex()).collect::<Vec<_>>())
-            .fetch_all(crate::observed_sql::executor(&mut *tx))
-            .await
-            .map_err(db)?;
-        let mut present = BTreeMap::new();
-        for (hash, encoding) in rows {
-            present.insert(hash, encoding_of(encoding)?);
-        }
-        for node in &graph.external {
-            if !present.contains_key(&node.to_hex()) {
-                return Err(GraphRefusal::MissingNode(*node));
-            }
-        }
-        for root in &graph.external_roots {
-            match present.get(&root.to_hex()) {
-                None => return Err(GraphRefusal::MissingNode(*root)),
-                Some(BlobEncoding::Opaque) => return Err(GraphRefusal::EncodingConflict(*root)),
-                Some(BlobEncoding::Graph) => {}
-            }
+        let digests: Vec<&[u8]> = graph.nodes.iter().map(|node| &node.id.0[..]).collect();
+        let rows: Vec<(String, i16, Option<Vec<u8>>)> =
+            crate::observed_sql::query_as(SQL.postgres.lock_nodes.sql())
+                .bind(&named)
+                .bind(&digests)
+                .fetch_all(crate::observed_sql::executor(&mut *tx))
+                .await
+                .map_err(db)?;
+        for (hash, encoding, bytes) in rows {
+            present.insert(hash, (encoding_of(encoding)?, bytes));
         }
     }
-    let mut installed = InstalledGraphMeasurement::default();
-    if graph.nodes.is_empty() {
+    for node in &graph.external {
+        if !present.contains_key(&node.to_hex()) {
+            return Err(GraphRefusal::MissingNode(*node));
+        }
+    }
+    for root in &graph.external_roots {
+        match present.get(&root.to_hex()) {
+            None => return Err(GraphRefusal::MissingNode(*root)),
+            Some((BlobEncoding::Opaque, _)) => return Err(GraphRefusal::EncodingConflict(*root)),
+            Some((BlobEncoding::Graph, _)) => {}
+        }
+    }
+    let mut absent = Vec::new();
+    for (node, hash) in graph.nodes.iter().zip(&supplied) {
+        match present.get(hash) {
+            None => absent.push((node, hash)),
+            Some((encoding, bytes)) => compare(node.id, &node.bytes, *encoding, bytes.as_deref())?,
+        }
+    }
+    if absent.is_empty() {
         return Ok(installed);
     }
-    // One statement installs every node, one reads back those already
-    // stored and one writes the fresh nodes' edges, whatever their number.
-    let hashes: Vec<String> = graph.nodes.iter().map(|node| node.id.to_hex()).collect();
-    let contents: Vec<&[u8]> = graph.nodes.iter().map(|node| &node.bytes[..]).collect();
+    let digests: Vec<&[u8]> = absent.iter().map(|(node, _)| &node.id.0[..]).collect();
+    let contents: Vec<&[u8]> = absent.iter().map(|(node, _)| &node.bytes[..]).collect();
     let inserted: BTreeSet<String> =
         crate::observed_sql::query_scalar(SQL.postgres.insert_nodes.sql())
-            .bind(&hashes)
+            .bind(&digests)
             .bind(&contents)
             .fetch_all(crate::observed_sql::executor(&mut *tx))
             .await
             .map_err(db)?
             .into_iter()
             .collect();
-    let held: Vec<String> = hashes
+    // A node stored before the insert that the lock did not read is
+    // compared now.
+    let held: Vec<&str> = absent
         .iter()
+        .map(|(_, hash)| hash.as_str())
         .filter(|hash| !inserted.contains(*hash))
-        .cloned()
         .collect();
     if !held.is_empty() {
         let rows: Vec<(String, Vec<u8>, i16)> =
@@ -793,35 +869,28 @@ pub(crate) async fn install(
             .into_iter()
             .map(|(hash, bytes, encoding)| (hash, (bytes, encoding)))
             .collect();
-        for node in &graph.nodes {
-            let hash = node.id.to_hex();
-            if inserted.contains(&hash) {
+        for (node, hash) in &absent {
+            if inserted.contains(*hash) {
                 continue;
             }
-            let Some((bytes, encoding)) = stored.get(&hash) else {
+            let Some((bytes, encoding)) = stored.get(*hash) else {
                 return Err(GraphRefusal::MissingNode(node.id));
             };
-            if encoding_of(*encoding)? != BlobEncoding::Graph {
-                return Err(GraphRefusal::EncodingConflict(node.id));
-            }
-            if bytes[..] != node.bytes[..] {
-                return Err(GraphRefusal::ContentConflict(node.id));
-            }
+            compare(node.id, &node.bytes, encoding_of(*encoding)?, Some(bytes))?;
         }
     }
     let mut parents = Vec::new();
     let mut children = Vec::new();
-    for node in &graph.nodes {
-        let parent = node.id.to_hex();
-        if !inserted.contains(&parent) {
+    for (node, hash) in &absent {
+        if !inserted.contains(*hash) {
             continue;
         }
         installed.newly_installed_canonical_bytes += node.bytes.len() as u64;
         installed.new_nodes += 1;
         installed.sql_logical_bytes += blob_row_logical_bytes(node.bytes.len() as u64);
         for child in &node.children {
-            parents.push(parent.clone());
-            children.push(child.to_hex());
+            parents.push(&node.id.0[..]);
+            children.push(&child.0[..]);
             installed.new_edges += 1;
             installed.sql_logical_bytes += EDGE_ROW_LOGICAL_BYTES;
         }
@@ -838,6 +907,23 @@ pub(crate) async fn install(
         window.installed_graph(installed.newly_installed_canonical_bytes);
     }
     Ok(installed)
+}
+
+/// A supplied node against the blob stored under its digest: a graph node
+/// of exactly its bytes, or a conflict.
+fn compare(
+    id: NodeId,
+    supplied: &[u8],
+    encoding: BlobEncoding,
+    stored: Option<&[u8]>,
+) -> Answer<()> {
+    if encoding != BlobEncoding::Graph {
+        return Err(GraphRefusal::EncodingConflict(id));
+    }
+    if stored != Some(supplied) {
+        return Err(GraphRefusal::ContentConflict(id));
+    }
+    Ok(())
 }
 
 /// Installs the staged `nodes` in the caller's guarded transaction (the

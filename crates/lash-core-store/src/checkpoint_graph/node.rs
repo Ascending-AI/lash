@@ -433,6 +433,34 @@ pub fn immutable_closure(id: NodeId) -> Option<&'static CatalogClosure> {
     IMMUTABLE_CATALOG.get()?.closure(id)
 }
 
+/// The members of the build catalog that no member names and whose
+/// closures check: where a stored graph enters the catalog. A reader that
+/// stops at them reads none of what they reach. Empty until a catalog is
+/// registered; computed once, checking every member.
+#[must_use]
+pub fn immutable_catalog_heads() -> &'static [NodeId] {
+    static HEADS: OnceLock<Vec<NodeId>> = OnceLock::new();
+    let Some(catalog) = IMMUTABLE_CATALOG.get() else {
+        return &[];
+    };
+    HEADS.get_or_init(|| {
+        let mut named = std::collections::BTreeSet::new();
+        for envelope in catalog
+            .0
+            .values()
+            .filter_map(|entry| entry.envelope(&entry.bytes))
+        {
+            named.extend(envelope.children.iter());
+        }
+        catalog
+            .0
+            .keys()
+            .copied()
+            .filter(|id| !named.contains(id) && catalog.closure(*id).is_some())
+            .collect()
+    })
+}
+
 /// Parses an envelope without hashing it: magic, minimal varints, a
 /// strictly ascending child table, an exact body length, and a body of
 /// canonical tokens whose every slot is in range and every child referenced.
@@ -546,7 +574,8 @@ mod catalog_tests {
     /// FIG-5894: memoized build envelopes cannot certify changed bytes under
     /// an old digest or conceal an out-of-range child slot under a new one.
     /// FIG-5912: registration checks nothing, so a member whose bytes do not
-    /// check is never reused, and no closure reaches through it.
+    /// check is never reused, and no closure reaches through it. FIG-5924:
+    /// nor is it a head a reader stops at.
     #[test]
     fn a_catalog_only_reuses_byte_identical_verified_envelopes() {
         let child = NodeId([1; 32]);
@@ -602,6 +631,7 @@ mod catalog_tests {
         assert!(immutable_closure(forged).is_none());
         assert!(immutable_closure(forged_parent_id).is_none());
         assert!(immutable_closure(id).is_none(), "its child is no member");
+        assert_eq!(immutable_catalog_heads(), &[parent_id]);
         let copied = bytes.to_vec();
         let limits = DecodeLimits::within_total(u64::MAX);
         let envelope = check_envelope(&copied, id, &limits).expect("identical copied bytes");

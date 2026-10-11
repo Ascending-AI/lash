@@ -1,16 +1,21 @@
 //! The checkpoint graph's store laws (`lash_durable::laws::graph`) over
 //! PostgreSQL, each on its own isolated database: PC-ATOMIC, PC-ROOTS,
 //! PC-GC, PC-READ, PC-SIZE, PC-GATE and the read, collection and fork
-//! races.
+//! races; and what PostgreSQL's graph traffic costs.
 
 // FIG-2971: this file is test code; ambient env access is sanctioned here
 // (the workspace clippy ban targets production library code).
 #![allow(clippy::disallowed_methods)]
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
+use lash_core_execution::facade_support::sql;
 use lash_core_execution::testing::TestClock;
-use lash_core_store::checkpoint_graph::{GraphRefusal, NodeId};
+use lash_core_store::checkpoint_graph::{
+    EncodeBudget, EncodedNode, ExplicitLimit, GraphRefusal, GraphStaging, NodeId, NodeKind,
+    TokenWriter, TypedBody,
+};
 use lash_durable::domain::graph::{GraphStore, ReadPin};
 use lash_durable::domain::graph_commit::{CollectionLimits, GraphCollection};
 use lash_durable::laws::graph::{self as laws, ForeignWrite, GateControl, GateHold, GraphTier};
@@ -302,4 +307,209 @@ async fn the_graph_gate_orders_collection_against_every_guarded_transaction() {
     laws::the_graph_gate_orders_collection_against_every_guarded_transaction(&tier, &tier)
         .await
         .unwrap_or_else(|broken| panic!("{broken}"));
+}
+
+/// Runs `work` on this task, with the SQL it sent and read.
+async fn counted<T>(work: impl std::future::Future<Output = T>) -> (T, sql::Receipt) {
+    let (value, receipt) = sql::collect("graph-traffic-law", "postgres", work).await;
+    assert_eq!(receipt.unmeasured_bound_statements, 0, "{receipt:?}");
+    (value, receipt)
+}
+
+/// A body of `text`, or of `child` and then `text`.
+fn frozen(staging: &mut GraphStaging, child: Option<NodeId>, text: &str) -> NodeId {
+    let mut body = TokenWriter::new();
+    if let Some(child) = child {
+        body.seq(2);
+        body.child(child.child_ref());
+    }
+    body.text(text);
+    staging
+        .encode(
+            NodeKind::FROZEN_VALUE,
+            TypedBody::logical(&body.into_bytes()),
+        )
+        .expect("a node stages")
+}
+
+/// Installs `nodes`, naming `reads`, in a transaction of its own,
+/// committed when they install.
+async fn install(
+    tier: &Tier,
+    nodes: &BTreeMap<NodeId, EncodedNode>,
+    reads: &BTreeSet<NodeId>,
+) -> Result<(), GraphRefusal> {
+    let checked = lash_durable::domain::graph_commit::check_graph(nodes, reads, &[])?;
+    let mut tx = tier.pool.begin().await.expect("a transaction");
+    let answer = super::install(&mut tx, &checked).await.map(drop);
+    if answer.is_ok() {
+        tx.commit().await.expect("the install commits");
+    }
+    answer
+}
+
+/// FIG-5924: a commit that names a stored node, as a park names its
+/// release, and supplies nodes the store already holds binds only the
+/// bodies it adds; each held body crosses the wire once, read back with the
+/// lock and compared byte for byte, so a stored body that differs still
+/// refuses, as it does after the insert of a commit that names none.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_held_node_crosses_the_wire_once_and_still_compares_exactly() {
+    let Some(tier) = tier().await else {
+        eprintln!("skipping the held-node law: database URL is not set");
+        return;
+    };
+    let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
+    let anchor = frozen(&mut staging, None, "anchor");
+    let held = frozen(&mut staging, None, &"h".repeat(8 * 1024));
+    let parent = frozen(&mut staging, Some(held), "parent");
+    let first = staging.nodes().clone();
+    let added = frozen(&mut staging, Some(parent), "added");
+    let mut again = staging.into_nodes();
+    again.remove(&anchor);
+    let named = BTreeSet::from([anchor]);
+    install(&tier, &first, &BTreeSet::new())
+        .await
+        .expect("the first graph installs");
+
+    let (answer, receipt) = counted(install(&tier, &again, &named)).await;
+    answer.expect("the graph installs again with one node added");
+    eprintln!(
+        "install naming a stored node: {} statements, {} bound bytes, {} result bytes, {} installed bytes",
+        receipt.statements,
+        receipt.bound_bytes,
+        receipt.result_bytes,
+        receipt.newly_installed_graph_bytes
+    );
+    let new_bytes = again[&added].len();
+    assert_eq!(receipt.newly_installed_graph_bytes, new_bytes);
+    assert!(receipt.bound_bytes < new_bytes + 1024, "{receipt:?}");
+    let held_bytes: u64 = again
+        .values()
+        .filter(|node| node.id != added)
+        .map(EncodedNode::len)
+        .sum();
+    assert!(
+        receipt.result_bytes >= held_bytes && receipt.result_bytes < held_bytes + 1024,
+        "{receipt:?} for {held_bytes} held bytes"
+    );
+
+    let mut changed = first[&held].bytes.to_vec();
+    *changed.last_mut().expect("a body") ^= 1;
+    tier.foreign(ForeignWrite::OverwriteBlob {
+        node: held,
+        bytes: changed,
+    })
+    .await;
+    for reads in [&named, &BTreeSet::new()] {
+        assert_eq!(
+            install(&tier, &again, reads).await,
+            Err(GraphRefusal::ContentConflict(held))
+        );
+    }
+}
+
+/// FIG-5924: a stored graph that reaches the build catalog hydrates whole,
+/// byte for byte, within every limit, and reads none of what the catalog
+/// holds back from the server: not below a stored node that reaches a
+/// member, nor below a root that is one.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_build_catalog_closure_hydrates_whole_without_reading_it_back() {
+    use lash_core_store::checkpoint_graph::{DecodeDimension, DecodeLimits};
+    use lash_durable::domain::graph::RootOwner;
+    use lash_durable::{DurableError, DurableReads as _};
+
+    let Some(tier) = tier().await else {
+        eprintln!("skipping the catalog hydration law: database URL is not set");
+        return;
+    };
+    let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
+    let leaf = frozen(&mut staging, None, &"x".repeat(8 * 1024));
+    let member = frozen(&mut staging, Some(leaf), "member");
+    lash_core_store::checkpoint_graph::node::register_immutable_catalog(&staging.nodes().clone());
+    let root = frozen(&mut staging, Some(member), "root");
+    let nodes = staging.into_nodes();
+    install(&tier, &nodes, &BTreeSet::new())
+        .await
+        .expect("the graph installs");
+    let session = lash_sansio::SessionId::parse("catalog-law").expect("a session id");
+    for (revision, top) in [(1, root), (2, member)] {
+        tier.foreign(ForeignWrite::RevisionRoot {
+            session: session.clone(),
+            revision,
+            root: Some(top),
+        })
+        .await;
+    }
+    let hydrate = |revision: u64, top: NodeId, limits: DecodeLimits| {
+        let owner = RootOwner::SessionRevision {
+            session: session.clone(),
+            revision,
+        };
+        let store = &tier.store;
+        async move { store.hydrate(owner, Some(top), limits).await }
+    };
+
+    let largest = nodes.values().map(EncodedNode::len).max().expect("nodes");
+    for (revision, top) in [(1, root), (2, member)] {
+        let reached: BTreeMap<_, _> = nodes
+            .iter()
+            .filter(|(id, _)| **id != root || top == root)
+            .collect();
+        let total: u64 = reached.values().map(|node| node.len()).sum();
+        let (graph, receipt) =
+            counted(hydrate(revision, top, DecodeLimits::within_total(total))).await;
+        let graph = graph.expect("the whole graph hydrates");
+        eprintln!(
+            "hydrating revision {revision}: {} statements, {} bound bytes, {} result bytes",
+            receipt.statements, receipt.bound_bytes, receipt.result_bytes
+        );
+        assert_eq!(graph.nodes.len(), reached.len());
+        for (id, node) in &reached {
+            assert_eq!(&*graph.nodes[*id].bytes, &*node.bytes, "node {id:?}");
+        }
+        // The catalog holds over 8 KiB; the read returns one small row.
+        assert!(receipt.result_bytes < 1024, "{receipt:?} reading {top:?}");
+
+        let limit = |dimension, actual, limit| {
+            Err::<(), _>(DurableError::Graph(GraphRefusal::DecodeLimit {
+                dimension,
+                actual,
+                limit,
+            }))
+        };
+        let count = reached.len() as u64;
+        assert_eq!(
+            hydrate(
+                revision,
+                top,
+                DecodeLimits {
+                    nodes: count - 1,
+                    ..DecodeLimits::within_total(total)
+                }
+            )
+            .await
+            .map(drop),
+            limit(DecodeDimension::Nodes, count, count - 1)
+        );
+        assert_eq!(
+            hydrate(revision, top, DecodeLimits::within_total(total - 1))
+                .await
+                .map(drop),
+            limit(DecodeDimension::TotalBytes, total, total - 1)
+        );
+        assert_eq!(
+            hydrate(
+                revision,
+                top,
+                DecodeLimits {
+                    node_bytes: largest - 1,
+                    ..DecodeLimits::within_total(total)
+                }
+            )
+            .await
+            .map(drop),
+            limit(DecodeDimension::NodeBytes, largest, largest - 1)
+        );
+    }
 }
