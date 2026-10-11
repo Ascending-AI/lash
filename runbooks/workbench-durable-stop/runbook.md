@@ -17,8 +17,30 @@ keyed-promise cancellation primitive end to end. Stop one live turn normally, th
 another, restart only the workbench web process while the durable engine owns the turn, and Stop it
 from the reconstructed UI. Finally, exercise Stop while a foreground turn awaits an
 independent process and distinguish that cooperative cancellation from session
-revocation. Stop must commit `Cancelled` for both the turn and awaited process; deleting
-the session must unwind the dead turn as `SessionDeleted` without cancelling the process.
+revocation. Stop must commit `Cancelled` for both the turn and awaited process through the
+workbench's explicit operator-cancellation policy. Deleting
+the session closes its scope and cancels processes recorded `Until(session)`; a
+`Detached` process would survive that close. Finished-record retention is separate.
+
+**Declared lifetimes and operator cancellation.**
+[ADR 0108](../../docs/adr/0108-a-process-lives-until-a-scope-its-start-could-reach.md)
+is the lifetime contract. In
+`examples/agent-workbench/src/main_sections/bootstrap.rs`,
+`SessionProcessAdminPluginFactory` uses `lifetime::session_or_starter`: every VM
+process this runbook starts through `processes.start` records `Until(session)`.
+`DelegationPluginFactory` uses `lifetime::starter`: a foreground `spawn_agent`
+records `Until(turn)`. Host-trigger deliveries explicitly use `Until(owner_session)`
+in `examples/agent-workbench/src/host_triggers.rs`.
+
+The current host exposes no Detached start. `processes.await` uses
+`CancelHint::Ignore` in `crates/lash-plugin-process-controls/src/lib.rs`: dropping
+that wait does not itself cancel an Until(session) process. Workbench Stop and Abort
+separately call `cancel_processes_parented_by_turn` from `cancel_turn_with_driver`
+in `examples/agent-workbench/src/main_sections/turn_cancel.rs`, requesting
+cancellation of each live process whose recorded starter is the addressed turn.
+This operator policy explains the two cancelled terminals in Phases 3 and 4; the
+process's declared lifetime explains its cancellation on session close in Phase 5.
+A process started by another turn or another session is outside this Stop policy.
 
 **Why this matters.** A web-process-local token cannot survive this scenario. The workbench
 persists only the routing address, the durable engine owns the running turn, and
@@ -44,12 +66,12 @@ quality. This runbook is authored for a deliberate token-spending browser run.
    reports the exact active turn before it is pressed. A fast completion that wins first
    is a retry of that phase, not cancellation evidence.
 2. **HTTP terminal is authoritative.** `POST /api/turn/cancel` must return a cancellation
-   receipt whose terminal is committed as stopped/cancelled and whose `cancellation`
+   receipt whose `terminal.stop.cancelled.evidence` is committed and
    contains a non-empty `request_id`, `origin: "user"`, and the workbench `reason`.
 3. **UI and receipt agree.** The UI renders `turn stopped · request <id>` using the same
-   request id returned in `terminal.cancellation`; the transcript/API converges on the
+   request id returned in `terminal.stop.cancelled.evidence`; the transcript/API converges on the
    interrupted terminal. Any disagreement is a contract violation → Abort/RCA.
-   Note which receipt that is: **one press of the page's Stop control sends two cancels** —
+   Note which receipt that is: **a Stop still pending after the escalation window sends two cancels** —
    `mode=stop` immediately, then `mode=abort` after `STOP_ESCALATION_MS` (20 s) — and the
    rendered `turn stopped · request <id>` carries the escalated **abort's** id, not the first
    receipt's. Capture both receipts and compare the rendered id against the escalated one. The
@@ -64,14 +86,15 @@ quality. This runbook is authored for a deliberate token-spending browser run.
 5. **Break-glass is not success.** Never kill the turn out of band to pass a gate. If
    cleanup requires it after an Abort, record that separately; it must not be reported as
    a Lash `Cancelled` terminal.
-6. **Revocation is not Stop, and it is not survival either.** `DELETE /api/session`
-   aborts the session's own foreground turn — a committed `Cancelled` terminal carrying the
-   delete evidence, reason `workbench Abort control` — and prunes the processes in the
-   deleted session's retention scope.
-   Processes owned by *other* sessions are untouched: they receive no
-   `process.cancel_requested`, stay visible in `/api/work`, and reach their own terminal.
-   Revocation therefore unwinds the deleted session's own work and nothing else; a judge
-   proves the split across two sessions, never inside one.
+6. **Session close follows the recorded lifetime.** `DELETE /api/session`
+   first cancels that session's foreground turn with the workbench Abort evidence,
+   reason `workbench Abort control`, then closes the session scope. Each live
+   `Until(session)` process receives `process.cancel_requested` and ends cancelled.
+   A `Detached` process receives no scope-close cancel and stays in host-wide
+   `/api/work` until it ends. Processes `Until` another live session are untouched.
+   Only after the tombstone does `prune_processes_originated_by` reclaim finished
+   records the deleted session started. It does not prune live Detached records or
+   other originators' work. Missing rail rows alone are not cancellation evidence.
 7. **Distinguish shallow vs deep durable-sleep cancellation (FIG-1445).** The shallow arm
    issues Stop immediately after the process starts (~0.3s in). The deep-dwell arm
    mandates that the process is genuinely parked in durable sleep for ≥120s before Stop
@@ -114,7 +137,7 @@ quality. This runbook is authored for a deliberate token-spending browser run.
   `/api/state.active_turns` exposes routing addresses so reload can restore the Stop
   affordance. The cancel response contains `accepted` and `cancellations[]`, each with
   `address`, gate `outcome`, and authoritative `terminal`. The cancel route is
-  `POST /api/turn/cancel` (`POST /api/turn/stop` is not a route).
+  `POST /api/turn/cancel`.
 - Disk evidence: `<data-dir>/session-id` and `<data-dir>/active-turns.json` retain routing
   state across the web-process restart; `trace.jsonl` records
   `agent_workbench.turn.cancel_requested` with the same evidence.
@@ -173,7 +196,7 @@ show the recovered request against the pre-restart turn id. Screenshot
 Submit a prompt that makes the agent declare and start a process with a long sleep (e.g.
 `sleep for "300s"`), then foreground-await its handle. This phase is valid only if
 `/api/state` shows one active turn and `/api/work` shows that named process as
-non-terminal (`lifecycle: "running"`) before Stop. If the model does not produce that
+non-terminal (`lifecycle.state` is `running` or `waiting`) before Stop. If the model does not produce that
 shape, retry the phase; ordinary model or tool work is not process-await evidence.
 
 Issue Stop immediately once the process-await is running — the shallow dwell gate is
@@ -200,7 +223,7 @@ spawned process-await shape.
 
 Poll `/api/state` and `/api/work` until:
 - `/api/state.active_turns` contains exactly one active address;
-- `/api/work` contains the named process with `lifecycle: "running"`;
+- `/api/work` contains the named process with `lifecycle.state` is `running` or `waiting`;
 - the process is genuinely parked inside its durable sleep.
 
 **Gate the deep dwell before pressing Stop.** The process must genuinely remain parked in
@@ -228,32 +251,65 @@ latency:
 
 Save `06b-deep-dwell-cancelled.json` and screenshot `06b-deep-dwell-cancelled.png`.
 
-## Phase 5 — Revocation unwinds the deleted session's work and nothing else
+## Phase 5 — Session deletion cancels Until(session), then reclaims finished records
 
-This phase needs **two** sessions, because the property is a boundary, not a survival
-claim (golden rule 6).
+This phase uses two sessions to distinguish their scope lifetimes. Neither process
+is Detached: both are VM definitions started through `processes.start` with the
+workbench's `lifetime::session_or_starter` policy. Record each stored lifetime scope
+before deleting anything.
 
-1. In a second session, start a process-await whose process completes soon enough to
-   observe, and record that session id and process id. This is the bystander.
-2. In the first session, start its own process-await and leave the foreground turn
-   suspended. Record that session id, its turn id, and its process id.
-3. Call `DELETE /api/session?session_id=<first-session-id>` instead of Stop.
+1. In a second session, start a named VM process with a bounded wait and success
+   marker, without foreground-awaiting it. Record its session id, process id and
+   `Until(second-session)` lifetime. This is the bystander.
+2. In the first session, start a named long-sleep VM process and foreground-await
+   its handle. Record the session id, turn id, process id and `Until(first-session)`
+   lifetime. Require both processes non-terminal before proceeding.
+3. Arm API/trace/store observation before the delete, since finished records can
+   be pruned before the delete response. Call
+   `DELETE /api/session?session_id=<first-session-id>` instead of Stop.
 
 Gate the split:
 
-- the first session's turn commits a `Cancelled` terminal carrying the delete evidence
-  with reason `workbench Abort control` — not a success, and not a stranded turn;
-- the first session's process is pruned: it is absent from `/api/work`;
-- no `process.cancel_requested` is emitted for the bystander's process;
-- the bystander's process stays visible in `/api/work` across the delete and reaches its
-  own terminal with the expected value.
+- the first session's turn commits `Cancelled` carrying the delete's Abort evidence,
+  reason `workbench Abort control`, with no stranded active address;
+- its process receives `process.cancel_requested` from the session scope close and
+  commits `Cancelled` before deletion completes. Capture both facts before pruning;
+- the tombstone commits, observer edges are removed, and the workbench's retention
+  pass prunes finished first-session-originated records. Quote the
+  `api.session.delete.deleted` trace's `process_retention.pruned_processes`; absence
+  from `/api/work` by itself cannot prove which lifetime or outcome the process had;
+- the second session stays live. Its `Until(second-session)` process receives no
+  scope-close cancel, stays in host-wide `GET /api/work` without `session_id`, and
+  reaches its expected success marker. Capture the terminal in the rail's 10-second
+  visibility window and retain its durable completion evidence.
 
-Save the work snapshots as `07-revoked-process-running.json` (both processes running,
-before the delete) and `08-revoked-process-survived.json` (after the delete: the deleted
-session's process gone, the bystander's process present and then terminal), and retain the
-delete response plus the `session_deleted` trace record. A cancelled or missing bystander
-process, a `process.cancel_requested` on the bystander, a deleted-session process that
-outlives the delete, or a stranded first turn is Abort/RCA.
+Save `07-revoked-process-running.json` (both live ids and recorded lifetimes),
+`08-revoked-process-settled.json` (first process cancellation and retention;
+second process still live, then completed), the delete response, and trace/store
+extracts. Screenshot `08-session-scope-split.png`. A cancelled bystander, missing
+first-process cancellation evidence, successful first process after close, or a
+stranded first turn is Abort/RCA. Detached survival is covered by the deterministic companion laws below; the
+workbench exposes no Detached start and this judged phase makes no such claim.
+
+## Companion laws — existing full test paths
+
+Run each once on SQLite, with executed counts, sharing receipts with process-lifecycle
+when judging both runbooks together:
+
+```sh
+. ./env.sh
+kiln test //crates/lash-core:lash-core__unit_test --test_arg=runtime::durable::scope_end_tests::a_session_close_cut_at_any_step_resumes_there_and_deletes_nothing_while_a_process_lives
+kiln test //crates/lash-durable-test:core_node_processes__test --test_arg=process_endstates::a_detached_process_outlives_its_deleted_session_and_accepts_host_cancellation::on_sqlite_memory
+kiln test //examples/agent-workbench:agent-workbench__unit_test --test_arg=process_work_tests::session_delete_reclaims_the_deleted_sessions_terminal_work
+kiln test //examples/agent-workbench:agent-workbench__unit_test --test_arg=process_work_tests::work_rail_keeps_a_nonterminal_process_past_the_retirement_window
+kiln test //examples/agent-workbench:agent-workbench__unit_test --test_arg=turn_control_timeout_tests::stop_over_real_process_await_commits_cancelled_terminal
+kiln test //crates/lash-sqlite-store:lash-sqlite-store__unit_test --test_arg=durable::tests::a_turn_cancel_is_a_first_winner_row_with_a_wake::memory
+```
+
+These pin scope-close cancellation/settlement, Detached survival, finished-record
+retention, host rail visibility, explicit operator cancellation over a VM process
+await, and first-winner cancellation policy, respectively.
+They cannot establish a browser start surface that the workbench does not expose.
 
 ## Phase 6 — Teardown and score
 
@@ -263,14 +319,14 @@ Run `just agent-workbench-down <port>` and confirm the workbench process is gone
 |------|----------------|---------|----------|
 | Boot | `/healthz` 200; rendered/API session ids agree | | `00-ready.png` |
 | Normal Stop | committed Cancelled terminal + evidence | | `01-cancelled.png`, `01-cancel-receipt.json` |
-| Repeated Stop policy (rule 9) | matching repeat `already_requested`; conflicting repeat `policy_conflict` naming both policies; durable request row, intent revision and queued inputs unchanged | | law `a_turn_cancel_is_a_first_winner_row_with_a_wake` (`crates/lash-durable/src/laws.rs`) |
+| Repeated Stop policy (rule 9) | matching repeat `already_requested`; conflicting repeat `policy_conflict` naming both policies; durable request row, intent revision and queued inputs unchanged | | `durable::tests::a_turn_cancel_is_a_first_winner_row_with_a_wake::memory` (`crates/lash-sqlite-store/src/durable_tests.rs`) |
 | Routing persistence | same session/turn address before and after restart | | `02-restored-running.png`, state files/API |
 | Restored Stop affordance | running pill + Stop restored from `/api/state.active_turns` | | `02-restored-running.png` |
 | Post-restart Stop | committed Cancelled terminal + evidence for original address | | `03-restored-cancelled.png`, `03-cancel-receipt.json` |
 | Shallow-stop latency (process await) | pre-Stop dwell < 5s (press Stop as soon as the await is running); turn and awaited process both commit Cancelled within 10s of the request that owns the terminal, and before the original deadline | | `04-process-await-running.json`, `05-process-await-cancelled.json`, `05-process-await-cancelled.png` |
 | Deep-stop latency (FIG-1445 durable sleep ≥120s) | Stop issued while process is ≥120s parked in durable sleep; turn and process commit Cancelled within 10s of Stop request; durable dwell ≥120s recorded in work events/trace | | `06a-deep-dwell-running.json`, `06b-deep-dwell-cancelled.json`, `06b-deep-dwell-cancelled.png` |
 | Revoked turn settlement | the deleted session's turn commits `Cancelled` with the delete evidence, reason `workbench Abort control` | | delete response + terminal evidence + trace |
-| Retention scope is the boundary | the deleted session's process is pruned (absent from `/api/work`, counted in `process_retention.pruned_processes`) while a second session's process gets no `process.cancel_requested`, stays visible, and reaches its own terminal | | `07-revoked-process-running.json`, `08-revoked-process-survived.json`, `session_deleted` trace record |
+| Declared lifetime and retention | first Until(session) process gets cancel_requested then Cancelled before finished-record pruning; second Until(other-session) process stays live and completes | | `07-revoked-process-running.json`, `08-revoked-process-settled.json`, `08-session-scope-split.png`, delete trace/store |
 | UI/API agreement | rendered request ids equal terminal evidence ids; active addresses clear | | screenshots + receipts + `/api/state` |
 | No break-glass substitution | no Admin cancel/kill used as a passing action | | command log |
 
@@ -278,8 +334,9 @@ Run `just agent-workbench-down <port>` and confirm the workbench process is gone
 normally, after reconstructing the entire web process, under shallow process await, and
 deep inside durable sleep (refereeing FIG-1445); did a repeated request preserve the
 first accepted policy and report a conflict instead of silently substituting it; and did
-session revocation unwind exactly the deleted session's own turn and processes while
-another session's process was left untouched?
+session deletion close the declared Until(session) lifetime before finished-record
+retention, while another live session's process remained untouched? Record the
+explicit operator-cancellation requests separately from the session-scope close.
 
 ---
 
