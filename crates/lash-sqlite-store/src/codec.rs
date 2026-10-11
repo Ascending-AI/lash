@@ -215,12 +215,9 @@ pub(crate) fn try_load_session_head_meta_from_conn(
     else {
         return Ok(None);
     };
-    let head_json = head_json.ok_or_else(|| {
-        stored_data_corrupt("SessionHeadMeta", "head pointer names a missing revision")
-    })?;
     assemble_session_head_meta(
         session_id,
-        &head_json,
+        head_json.as_deref(),
         head_revision,
         leaf_node_id,
         checkpoint_ref,
@@ -236,7 +233,7 @@ pub(crate) fn try_load_session_head_meta_from_conn(
 /// this way.
 pub(crate) fn assemble_session_head_meta(
     session_id: &SessionId,
-    head_json: &str,
+    head_json: Option<&str>,
     head_revision: i64,
     leaf_node_id: Option<String>,
     checkpoint_ref: Option<String>,
@@ -248,6 +245,9 @@ pub(crate) fn assemble_session_head_meta(
             "SessionHeadMeta",
             format!("head_revision must be non-negative, got {head_revision}"),
         )
+    })?;
+    let head_json = head_json.ok_or_else(|| {
+        stored_data_corrupt("SessionHeadMeta", "head pointer names a missing revision")
     })?;
     let payload: SessionHeadPayload =
         lash_core_execution::store::decode_versioned_json_record_for_fleet(

@@ -21,6 +21,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use served::{Tier, World};
 
 /// V07: a run is wholly open or wholly terminal on every SQL substrate.
+/// Its optional window reference needs a revision and head document; its
+/// leaf and checkpoint may be absent, as on a session's initial head.
 async fn run_terminal_columns_have_one_presence_state(tier: Tier) {
     let dir = tempfile::tempdir().unwrap();
     let sqlite = match tier {
@@ -37,12 +39,28 @@ async fn run_terminal_columns_have_one_presence_state(tier: Tier) {
         None
     };
     if let Some(conn) = &sqlite {
-        conn.execute_batch(lash_sqlite_store::testing::database_table_ddl(
-            "session_runs",
-        ))
+        for statements in lash_sqlite_store::testing::database_provisioning_statements() {
+            conn.execute_batch(statements).unwrap();
+        }
+        conn.execute_batch(
+            "INSERT INTO blobs (hash, content, encoding) VALUES ('checkpoint', X'', 0);
+             INSERT INTO session_run_window_heads (session_id, head_digest, head_json)
+             VALUES ('s', 'head', '{}');",
+        )
+        .unwrap();
+    } else {
+        sqlx::raw_sql(
+            "INSERT INTO lash_blobs (hash, content, encoding) VALUES ('checkpoint', ''::bytea, 0);
+             INSERT INTO lash_session_run_window_heads (session_id, head_digest, head_json)
+             VALUES ('s', 'head', '{}');",
+        )
+        .execute(&postgres.as_ref().unwrap().1)
+        .await
         .unwrap();
     }
-    for bits in 0..8 {
+    // The first three bits are the required terminal evidence; the rest
+    // select the optional terminal revision and four window columns.
+    for bits in 0..256 {
         let kind = if bits & 4 != 0 { "'answered'" } else { "NULL" };
         let cause = if bits & 2 != 0 {
             "'{\"cause\":\"commands_applied\"}'"
@@ -50,26 +68,46 @@ async fn run_terminal_columns_have_one_presence_state(tier: Tier) {
             "NULL"
         };
         let time = if bits & 1 != 0 { "1" } else { "NULL" };
+        let head_revision = if bits & 8 != 0 { "1" } else { "NULL" };
+        let window_revision = if bits & 16 != 0 { "1" } else { "NULL" };
+        let leaf = if bits & 32 != 0 { "'leaf'" } else { "NULL" };
+        let checkpoint = if bits & 64 != 0 {
+            "'checkpoint'"
+        } else {
+            "NULL"
+        };
+        let head = if bits & 128 != 0 { "'head'" } else { "NULL" };
         let table = if sqlite.is_some() {
             "session_runs"
         } else {
             "lash_session_runs"
         };
         let sql = format!(
-            "INSERT INTO {table} (session_id, run, terminal_kind, terminal_cause_json, terminal_at_ms) VALUES ('s', '{bits}', {kind}, {cause}, {time})"
+            "INSERT INTO {table} (session_id, run, terminal_kind, terminal_cause_json,
+                 terminal_at_ms, terminal_head_revision, terminal_window_revision,
+                 terminal_window_leaf_node_id, terminal_window_checkpoint_ref,
+                 terminal_window_head_digest)
+             VALUES ('s', '{bits}', {kind}, {cause}, {time}, {head_revision},
+                 {window_revision}, {leaf}, {checkpoint}, {head})"
         );
-        let admitted = if let Some(conn) = &sqlite {
-            conn.execute(&sql, []).is_ok()
+        let inserted = if let Some(conn) = &sqlite {
+            conn.execute(&sql, [])
+                .map(|_| ())
+                .map_err(|error| error.to_string())
         } else {
             sqlx::query(&sql)
                 .execute(&postgres.as_ref().unwrap().1)
                 .await
-                .is_ok()
+                .map(|_| ())
+                .map_err(|error| error.to_string())
         };
+        let terminal = bits & 7 == 7;
+        let no_window = bits & 240 == 0;
+        let window = bits & 144 == 144;
         assert_eq!(
-            admitted,
-            bits == 0 || bits == 7,
-            "{tier:?} presence bits {bits:03b}"
+            inserted.is_ok(),
+            bits == 0 || (terminal && (no_window || window)),
+            "{tier:?} presence bits {bits:08b}: {inserted:?}"
         );
     }
     if let Some((database, pool)) = postgres {

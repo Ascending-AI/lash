@@ -271,7 +271,13 @@ fn terminal_head(
     .map_err(sqlite_error)?
     .map(|(head_json, revision, leaf, checkpoint, frame)| {
         crate::codec::assemble_session_head_meta(
-            session, &head_json, revision, leaf, checkpoint, frame, fleet,
+            session,
+            Some(&head_json),
+            revision,
+            leaf,
+            checkpoint,
+            frame,
+            fleet,
         )
     })
     .transpose()

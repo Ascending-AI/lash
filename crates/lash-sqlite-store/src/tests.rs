@@ -1009,8 +1009,9 @@ async fn a_commit_sqlite_refuses_is_a_storage_failure_that_leaves_nothing_behind
 #[test]
 fn partial_run_terminals_are_corruption_at_decode() {
     let conn = rusqlite::Connection::open_in_memory().unwrap();
-    conn.execute_batch(crate::schema_fragments::SESSION_RUNS_TABLES)
-        .unwrap();
+    for statements in crate::schema::provisioning_statements() {
+        conn.execute_batch(statements).unwrap();
+    }
     conn.pragma_update(None, "ignore_check_constraints", true)
         .unwrap();
     let session = SessionId::try_from("s".to_owned()).unwrap();
