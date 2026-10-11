@@ -153,6 +153,8 @@ def run_case(source, deliveries):
     finally:
         asyncio.sleep = REAL_SLEEP
         loop.close()
+    if next(recorder.script, None) is not None:
+        raise RuntimeError("unused delivery batches")
     recorder.epochs.append(recorder.epoch)
     return {"epochs": recorder.epochs, "end": end}
 

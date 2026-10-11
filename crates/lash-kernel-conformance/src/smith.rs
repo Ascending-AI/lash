@@ -37,7 +37,7 @@ pub struct Schedule {
 pub const MAX_FRAGMENTS: u8 = 12;
 pub const MAX_WIDTH: u8 = 16;
 pub const MAX_TRIPS: u8 = 8;
-const FRAGMENT_KINDS: u8 = 22;
+const FRAGMENT_KINDS: u8 = 23;
 
 struct Library {
     registry: Arc<FunctionRegistry>,
@@ -90,6 +90,7 @@ impl<'a> Arbitrary<'a> for Smith {
         // available to every fragment. These definitions are themselves bounded.
         text.push_str(
             "fn worker(x) { let y = perform echo(x) as Any do sleep 1 return y }\n\
+             fn delayed(x) { do yield let y = perform echo(x) as Any return y }\n\
              fn quick(x) { return x }\n\
              fn depart(mode) { try {\n\
              if eq(mode, 0) { return 7 }\n\
@@ -182,6 +183,9 @@ fn fragment(kind: u8, width: u8, trips: u8, value: i16, mode: u8) -> String {
         18 => format!("let xs = [{xs}] do invoke list.insert(xs, 0, {value}) let old = invoke list.pop(xs) print old do invoke list.clear(xs) print xs"),
         19 => "print clock print random try { print read(projection, \"request\") } catch e { print e }".into(),
         20 => "let f = &quick let h = spawn apply f(7) let joined = join h print joined".into(),
+        // The child yields before asking, so the spawner's own request is
+        // issued first. Slicing must preserve that request order (G1).
+        21 => format!("let h = spawn call delayed({value}) let own = perform echo(2) as Any let child = join h print (own, child)"),
         // Admitted error-producing expressions, including native errors.
         _ => format!("try {{ print num.div({value}, 0) }} catch e {{ print e.kind }} try {{ print [1][9] }} catch e {{ print e.kind }}"),
     }
@@ -190,6 +194,26 @@ fn fragment(kind: u8, width: u8, trips: u8, value: i16, mode: u8) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// K-MACH-008 and K-TASK-024, including a child asking after its spawner.
+    #[test]
+    fn fixed_seed_programs_agree_across_slices() {
+        for seed in 0..64u64 {
+            let mut state = seed + 1;
+            let bytes: Vec<u8> = (0..512)
+                .map(|_| {
+                    state ^= state << 13;
+                    state ^= state >> 7;
+                    state ^= state << 17;
+                    state as u8
+                })
+                .collect();
+            let smith = Smith::arbitrary(&mut Unstructured::new(&bytes)).unwrap();
+            runner::check_slices(&smith)
+                .unwrap_or_else(|error| panic!("seed {seed}: {error}\n{:?}", smith.document));
+        }
+        println!("kernel-smith slice agreement: executed=64 slices=1,7,max");
+    }
 
     /// K-ADM-001 and SC-DESIGN §9.2: generation constructs admitted
     /// documents rather than silently discarding ill-typed inputs.

@@ -134,6 +134,7 @@ fn observe<M: Machine<Parked = ParkedRun>>(
     smith: &Smith,
     slices: &[u64],
     rebuild: bool,
+    save: bool,
 ) -> Result<Execution<Observation>, HarnessError> {
     if slices.is_empty() || slices.contains(&0) || smith.schedule.rebuild.is_empty() {
         return Err(HarnessError(
@@ -159,7 +160,7 @@ fn observe<M: Machine<Parked = ParkedRun>>(
             .map_err(fault)?;
         let meters = machine.meters();
         let ended = matches!(step, Step::Ended(_));
-        let parked = if ended {
+        let parked = if ended || !save {
             None
         } else {
             Some(machine.export().map_err(fault)?)
@@ -206,12 +207,19 @@ fn observe<M: Machine<Parked = ParkedRun>>(
                     .deliveries
                     .push(machine.deliver(wait, outcome).map_err(fault)?);
             }
-            let parked = machine.export().map_err(fault)?;
-            if rebuild && smith.schedule.rebuild[index % smith.schedule.rebuild.len()] {
+            let parked = if save {
+                Some(machine.export().map_err(fault)?)
+            } else {
+                None
+            };
+            if rebuild
+                && smith.schedule.rebuild[index % smith.schedule.rebuild.len()]
+                && let Some(parked) = &parked
+            {
                 machine = M::import(program.clone(), smith.schedule.bounds, parked.clone())
                     .map_err(fault)?;
             }
-            observation.after_deliveries = Some(parked);
+            observation.after_deliveries = parked;
         }
         observations.push(observation);
         if ended {
@@ -230,8 +238,8 @@ pub fn compare<A: Machine<Parked = ParkedRun>, B: Machine<Parked = ParkedRun>>(
     smith: &Smith,
 ) -> Result<(), HarnessError> {
     smith.admit().map_err(fault)?;
-    let a = observe::<A>(smith, &smith.schedule.slices, false)?;
-    let b = observe::<B>(smith, &smith.schedule.slices, true)?;
+    let a = observe::<A>(smith, &smith.schedule.slices, false, true)?;
+    let b = observe::<B>(smith, &smith.schedule.slices, true, true)?;
     if a != b {
         return Err(HarnessError(format!(
             "same-schedule mismatch:\n{a:#?}\n{b:#?}"
@@ -246,14 +254,35 @@ pub fn compare<A: Machine<Parked = ParkedRun>, B: Machine<Parked = ParkedRun>>(
 /// observations across slices and compares at parks and at the terminal.
 pub fn check_interpreter(smith: &Smith) -> Result<(), HarnessError> {
     compare::<KernelMachine, KernelMachine>(smith)?;
-    let a = observe::<KernelMachine>(smith, &[u64::MAX], false)?;
-    let b = observe::<KernelMachine>(smith, &smith.schedule.slices, true)?;
-    let a = without_slices(a);
-    let b = without_slices(b);
+    let a = without_slices(observe::<KernelMachine>(smith, &[u64::MAX], false, true)?);
+    let b = without_slices(observe::<KernelMachine>(
+        smith,
+        &smith.schedule.slices,
+        true,
+        true,
+    )?);
     if a != b {
         return Err(HarnessError(format!(
             "cross-slice mismatch:\n{a:#?}\n{b:#?}"
         )));
+    }
+    Ok(())
+}
+
+/// K-MACH-008 and K-TASK-024: changing the slice changes neither the
+/// observable parks, deliveries, host calls nor the terminal outcome.
+/// This law never saves or rebuilds state.
+#[cfg(test)]
+pub(super) fn check_slices(smith: &Smith) -> Result<(), HarnessError> {
+    smith.admit().map_err(fault)?;
+    let unbounded = without_slices(observe::<KernelMachine>(smith, &[u64::MAX], false, false)?);
+    for slice in [1, 7] {
+        let sliced = without_slices(observe::<KernelMachine>(smith, &[slice], false, false)?);
+        if unbounded != sliced {
+            return Err(HarnessError(format!(
+                "cross-slice mismatch (slice {slice}):\n{unbounded:#?}\n{sliced:#?}"
+            )));
+        }
     }
     Ok(())
 }

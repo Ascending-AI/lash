@@ -5,6 +5,10 @@ from __future__ import annotations
 
 import importlib.util
 import subprocess
+import tempfile
+import contextlib
+import io
+import sys
 import unittest
 import unittest.mock
 from pathlib import Path
@@ -36,11 +40,47 @@ class RatchetTest(unittest.TestCase):
 
     def test_a_newly_registered_refusal_may_demote_a_pass(self):
         head = dict(self.base, **{"a.js": ("refused", "TS_NEW_CODE")})
-        self.assertEqual(ratchet.regressions(self.base, head, frozenset({"TS_NEW_CODE"})), [])
-        self.assertEqual(len(ratchet.regressions(self.base, head, frozenset({"TS_OTHER"}))), 1)
+        self.assertEqual(ratchet.regressions(self.base, head, {"a.js": "TS_NEW_CODE"}), [])
+        self.assertEqual(len(ratchet.regressions(self.base, head, {"a.js": "TS_OTHER"})), 1)
         self.assertEqual(len(ratchet.regressions(self.base, head)), 1)
         failed = dict(self.base, **{"a.js": ("fail", "TS_NEW_CODE")})
-        self.assertEqual(len(ratchet.regressions(self.base, failed, frozenset({"TS_NEW_CODE"}))), 1)
+        self.assertEqual(len(ratchet.regressions(self.base, failed, {"a.js": "TS_NEW_CODE"})), 1)
+
+    def test_unreadable_base_and_unrelated_demotions_fail_closed(self):
+        with tempfile.TemporaryDirectory(dir=ratchet.ROOT) as directory:
+            root = Path(directory)
+            def git(*args):
+                return subprocess.run(["git", *args], cwd=root, check=True,
+                                      capture_output=True, text=True).stdout.strip()
+            git("init", "-q")
+            outcomes = root / ratchet.OUTCOMES
+            outcomes.parent.mkdir(parents=True)
+            outcomes.write_text("test/a.js\tpass\t-\ntest/b.js\tpass\t-\n")
+            git("add", ".")
+            git("-c", "user.name=Test", "-c", "user.email=test@example.org",
+                "commit", "-qm", "Base record")
+            base = git("rev-parse", "HEAD")
+            census = root / ratchet.CENSUS
+            census.write_text("feature\tx\trejected\tTS_NEW_CODE\tprobe\n")
+            skip = root / ratchet.TEST262 / "skip-register/feature/x.tsv"
+            skip.parent.mkdir(parents=True)
+            skip.write_text("test/a.js\tfeature:x\n")
+            outcomes.write_text("test/a.js\trefused\tTS_NEW_CODE\ntest/b.js\trefused\tTS_NEW_CODE\n")
+            results = []
+            for ref in ["no-such-ref-xyz", base]:
+                with unittest.mock.patch.object(ratchet, "ROOT", root), \
+                     unittest.mock.patch.object(sys, "argv", ["ratchet", "--base", ref]), \
+                     contextlib.redirect_stdout(io.StringIO()), \
+                     contextlib.redirect_stderr(io.StringIO()):
+                    try:
+                        results.append(ratchet.main())
+                    except SystemExit as error:
+                        results.append(int(error.code) if isinstance(error.code, int) else 1)
+            self.assertEqual(results, [1, 1], "bad refs and unnamed paths must be refused")
+            outcomes.write_text("test/a.js\trefused\tTS_NEW_CODE\ntest/b.js\tpass\t-\n")
+            with unittest.mock.patch.object(ratchet, "ROOT", root):
+                self.assertEqual(ratchet.regressions(ratchet.base_outcomes(base),
+                    ratchet.parse(outcomes.read_text()), ratchet.new_refusals(base)), [])
 
     def test_tallies_derive_the_record_counts(self):
         self.assertEqual(
@@ -124,7 +164,7 @@ class RatchetTest(unittest.TestCase):
 
     def test_outcome_paths_picks_up_both_record_layouts(self):
         listed = lambda ref, *paths: subprocess.CompletedProcess(
-            args=[], returncode=0, stdout="\n".join(paths) + "\n"
+            args=[], returncode=0, stdout="\n".join(paths) + "\n", stderr=""
         )
         with unittest.mock.patch.object(ratchet.subprocess, "run") as run:
             run.return_value = listed("ref", "legacy/outcomes.tsv")
@@ -139,7 +179,8 @@ class RatchetTest(unittest.TestCase):
             self.assertEqual(ratchet.outcome_paths("deadbeef"), [ratchet.OUTCOMES])
             run.return_value.returncode = 1
             run.return_value.stdout = ""
-            self.assertEqual(ratchet.outcome_paths("deadbeef"), [])
+            with self.assertRaises(SystemExit):
+                ratchet.outcome_paths("deadbeef")
 
 
 if __name__ == "__main__":

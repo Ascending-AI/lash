@@ -177,11 +177,13 @@ fn k_lib_006_recorded_native_edges_and_charges_match() {
     let mut registry = FunctionRegistry::new();
     register_numbers(&mut registry).unwrap();
     let mut count = 0;
+    let mut exercised = std::collections::BTreeSet::new();
     for shard in NATIVE_SHARDS {
         let shard: serde_json::Value = serde_json::from_str(shard).unwrap();
         for case in shard["cases"].as_array().unwrap() {
             let name = case["name"].as_str().unwrap();
             let function: FunctionId = serde_json::from_value(case["function"].clone()).unwrap();
+            exercised.insert(function);
             let registered = registry
                 .get(&function)
                 .unwrap_or_else(|| panic!("{name}: missing function {function}"));
@@ -257,9 +259,59 @@ fn k_lib_006_recorded_native_edges_and_charges_match() {
                 case["expected"]["work"].as_u64().unwrap(),
                 "{name} work"
             );
+            let mut warm_counter = WorkCounter::new(limit);
+            let warm = registered.native.as_ref().unwrap().call(NativeCall {
+                args: &args,
+                heap: &mut heap,
+                counter: &mut warm_counter,
+            });
+            assert_eq!(warm, result, "{name} cold/warm outcome");
+            assert_eq!(
+                warm_counter.spent(),
+                counter.spent(),
+                "{name} cold/warm work"
+            );
             count += 1;
         }
     }
+    // `ref` is an identity value, not a serializable Datum. Its independent
+    // named case derives the answer from the object allocated as its input.
+    let (id, reference) = registry
+        .iter()
+        .find(|(_, function)| function.definition.name.as_str() == "ref")
+        .unwrap();
+    let mut heap = Heap::default();
+    let object = heap.allocate(Object::List(vec![])).unwrap();
+    for _ in 0..2 {
+        let mut counter = WorkCounter::new(None);
+        assert_eq!(
+            reference
+                .native
+                .as_ref()
+                .unwrap()
+                .call(NativeCall {
+                    args: &[Value::List(object)],
+                    heap: &mut heap,
+                    counter: &mut counter,
+                })
+                .unwrap(),
+            Value::Ref(lash_kernel_doc::Identity::Object(object)),
+            "ref object identity cold/warm"
+        );
+        assert_eq!(counter.spent(), 0);
+    }
+    exercised.insert(*id);
+    count += 1;
+    let missing: Vec<_> = registry
+        .iter()
+        .filter(|(id, _)| !exercised.contains(id))
+        .map(|(_, function)| function.definition.name.as_str())
+        .collect();
+    assert_eq!(
+        exercised.len(),
+        registry.len(),
+        "every numeric native needs a named corpus case: {missing:?}"
+    );
     println!("recorded native rule cases executed: {count}");
 }
 

@@ -18,7 +18,8 @@ regress.
 
 One exception is a ruling, not a regression: a test that passed may become
 `refused <code>` when the same change adds a `rejected` row to the census
-(`census/<kind>/<name>.tsv`, or the legacy `census.tsv`) that names `<code>`.
+(`census/<kind>/<name>.tsv`, or the legacy `census.tsv`) that names `<code>`,
+and its skip-register shard names that exact path.
 A new refusal class (an unsupported feature the dialect used to accept by
 accident, or a construct `tsc --strict` rejects) can demote tests that
 passed only incidentally, and the census row that registers it is the
@@ -85,7 +86,7 @@ def tree_paths(ref: str | None, legacy_file: str, directory: str) -> list[str]:
         text=True,
     )
     if listed.returncode != 0:
-        return []
+        raise SystemExit(f"check_test262_ratchet: cannot read base {ref}: {listed.stderr.strip()}")
     return [line for line in listed.stdout.splitlines() if line.endswith(".tsv")]
 
 
@@ -120,12 +121,12 @@ def rejected_rows(text: str) -> dict[tuple[str, str], str]:
 def regressions(
     base: dict[str, tuple[str, str]],
     head: dict[str, tuple[str, str]],
-    new_refusal_codes: frozenset[str] = frozenset(),
+    new_refusals: dict[str, str] | None = None,
 ) -> list[str]:
     problems = []
     for path, (head_class, head_qualifier) in sorted(head.items()):
         base_class = base.get(path, (None, None))[0]
-        if base_class == "pass" and head_class == "refused" and head_qualifier in new_refusal_codes:
+        if base_class == "pass" and head_class == "refused" and (new_refusals or {}).get(path) == head_qualifier:
             continue
         if base_class == "pass" and head_class != "pass":
             problems.append(f"{path}: passed at the base, now `{head_class} {head_qualifier}`")
@@ -137,14 +138,16 @@ def regressions(
     return problems
 
 
-def show(base: str, path: str) -> str | None:
+def show(base: str, path: str) -> str:
     shown = subprocess.run(
         ["git", "show", f"{base}:{path}"],
         cwd=ROOT,
         capture_output=True,
         text=True,
     )
-    return shown.stdout if shown.returncode == 0 else None
+    if shown.returncode != 0:
+        raise SystemExit(f"check_test262_ratchet: cannot read {base}:{path}: {shown.stderr.strip()}")
+    return shown.stdout
 
 
 def base_outcomes(base: str) -> dict[str, tuple[str, str]] | None:
@@ -152,7 +155,7 @@ def base_outcomes(base: str) -> dict[str, tuple[str, str]] | None:
     if not paths:
         return None
     texts = [(path, show(base, path)) for path in paths]
-    return parse_shards([(name, text) for name, text in texts if text is not None])
+    return parse_shards(texts)
 
 
 def census_rows(ref: str | None) -> str:
@@ -160,18 +163,28 @@ def census_rows(ref: str | None) -> str:
     `census.tsv` or every `census/<kind>/<name>.tsv` shard, concatenated."""
     if ref is None:
         return "".join((ROOT / path).read_text() for path in tree_paths(None, CENSUS, CENSUS_DIR))
-    return "".join(
-        text
-        for path in tree_paths(ref, CENSUS, CENSUS_DIR)
-        if (text := show(ref, path)) is not None
-    )
+    return "".join(show(ref, path) for path in tree_paths(ref, CENSUS, CENSUS_DIR))
 
 
-def new_refusal_codes(base: str) -> frozenset[str]:
-    """The codes named by rejection rows the head's census adds over the base's."""
+def new_refusals(base: str) -> dict[str, str]:
+    """Only paths in a newly rejected census row's own skip-register shard."""
     head = rejected_rows(census_rows(None))
     base_rows = rejected_rows(census_rows(base))
-    return frozenset(code for row, code in head.items() if base_rows.get(row) != code)
+    ruled = {}
+    for (kind, name), code in head.items():
+        if base_rows.get((kind, name)) == code:
+            continue
+        shard = ROOT / TEST262 / "skip-register" / kind / f"{name}.tsv"
+        if not shard.is_file():
+            continue
+        for line in shard.read_text().splitlines():
+            if not line.strip() or line.startswith("#"):
+                continue
+            path, row = line.split("\t")
+            if row != f"{kind}:{name}":
+                raise SystemExit(f"check_test262_ratchet: {shard}: unexpected census row {row}")
+            ruled[path] = code
+    return ruled
 
 
 def kernel_exclusions(register: str) -> dict[str, str]:
@@ -260,10 +273,10 @@ def main() -> int:
         print("check_test262_ratchet: the outcomes record is new at this head; nothing to compare")
         return 0
     head = parse_shards([(path, (ROOT / path).read_text()) for path in outcome_paths(None)])
-    ruled = new_refusal_codes(args.base)
+    ruled = new_refusals(args.base)
     problems = regressions(base, head, ruled)
     for path, (head_class, head_qualifier) in sorted(head.items()):
-        if base.get(path, (None, None))[0] == "pass" and head_class == "refused" and head_qualifier in ruled:
+        if base.get(path, (None, None))[0] == "pass" and head_class == "refused" and ruled.get(path) == head_qualifier:
             print(f"check_test262_ratchet: {path} passed at the base and is now refused by {head_qualifier}, which a new census rejection row registers")
     if problems:
         print("The Test262 record regressed against its base:", file=sys.stderr)

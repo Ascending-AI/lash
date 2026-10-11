@@ -965,3 +965,213 @@ fn index_of_range_charge_bounds_search_and_numeric_equivalence() {
         int(0)
     );
 }
+
+/// K-LIB-006/007: each collection native has a named, hand-derived case;
+/// a second run with the same prepared native implementations agrees.
+#[test]
+fn every_collection_native_has_a_named_cold_and_warm_case() {
+    let inputs = [
+        ("list", "[7]", Datum::List(vec![int(7)])),
+        ("tuple", "(7,)", tuple(vec![int(7)])),
+        ("map", "map{7: 9}", Datum::Map(vec![(int(7), int(9))])),
+        ("set", "set{7}", Datum::Set(vec![int(7)])),
+        (
+            "record",
+            "{a: 7}",
+            Datum::Record(vec![("a".into(), int(7))]),
+        ),
+    ];
+    let mut cases = Vec::new();
+    for (kind, input, copied) in inputs {
+        cases.push((format!("{kind}.len"), input.to_owned(), Ok(int(1))));
+        for op in ["copy", "copy_deep", "check"] {
+            if kind == "tuple" && op == "check" {
+                continue;
+            }
+            cases.push((format!("{kind}.{op}"), input.to_owned(), Ok(copied.clone())));
+        }
+        let (keys, values, entries) = match kind {
+            "list" | "tuple" => (
+                list(&[0]),
+                list(&[7]),
+                Datum::List(vec![tuple(vec![int(0), int(7)])]),
+            ),
+            "map" => (
+                list(&[7]),
+                list(&[9]),
+                Datum::List(vec![tuple(vec![int(7), int(9)])]),
+            ),
+            "set" => (
+                list(&[7]),
+                list(&[7]),
+                Datum::List(vec![tuple(vec![int(7), int(7)])]),
+            ),
+            "record" => (
+                Datum::List(vec![text("a")]),
+                list(&[7]),
+                Datum::List(vec![tuple(vec![text("a"), int(7)])]),
+            ),
+            _ => unreachable!(),
+        };
+        for (op, expected) in [("keys", keys), ("values", values), ("entries", entries)] {
+            cases.push((format!("{kind}.{op}"), input.to_owned(), Ok(expected)));
+        }
+        match kind {
+            "list" | "tuple" => {
+                for op in ["get", "at"] {
+                    cases.push((format!("{kind}.{op}"), format!("{input}, 0"), Ok(int(7))));
+                }
+                if kind == "list" {
+                    cases.push((
+                        "list.insert_index".into(),
+                        format!("{input}, 1"),
+                        Ok(int(1)),
+                    ));
+                }
+                cases.push((
+                    format!("{kind}.slice"),
+                    format!("{input}, 0, 1"),
+                    Ok(copied.clone()),
+                ));
+                let twice = if kind == "list" {
+                    list(&[7, 7])
+                } else {
+                    tuple(vec![int(7), int(7)])
+                };
+                cases.push((
+                    format!("{kind}.concat"),
+                    format!("{input}, {input}"),
+                    Ok(twice),
+                ));
+                cases.push((
+                    format!("{kind}.contains"),
+                    format!("{input}, 7"),
+                    Ok(Datum::Bool(true)),
+                ));
+                cases.push((
+                    format!("{kind}.index_of"),
+                    format!("{input}, 7"),
+                    Ok(int(0)),
+                ));
+                if kind == "list" {
+                    cases.push((
+                        "list.index_of_range".into(),
+                        format!("{input}, 7, 0, 1, false, false"),
+                        Ok(int(0)),
+                    ));
+                }
+            }
+            "map" => {
+                cases.push(("map.get".into(), format!("{input}, 7"), Ok(int(9))));
+                cases.push((
+                    "map.contains".into(),
+                    format!("{input}, 7"),
+                    Ok(Datum::Bool(true)),
+                ));
+            }
+            "set" => {
+                cases.push((
+                    "set.contains".into(),
+                    format!("{input}, 7"),
+                    Ok(Datum::Bool(true)),
+                ));
+            }
+            "record" => {
+                cases.push(("record.get".into(), format!("{input}, \"a\""), Ok(int(7))));
+                cases.push((
+                    "record.contains".into(),
+                    format!("{input}, \"a\""),
+                    Ok(Datum::Bool(true)),
+                ));
+                cases.push((
+                    "record.with".into(),
+                    format!("{input}, \"b\", 9"),
+                    Ok(Datum::Record(vec![
+                        ("a".into(), int(7)),
+                        ("b".into(), int(9)),
+                    ])),
+                ));
+                cases.push((
+                    "record.without".into(),
+                    format!("{input}, \"a\""),
+                    Ok(Datum::Record(vec![])),
+                ));
+            }
+            _ => unreachable!(),
+        }
+    }
+    cases.extend([
+        ("bool.not".into(), "true".into(), Ok(Datum::Bool(false))),
+        (
+            "error.new".into(),
+            "\"k\", \"m\", 7".into(),
+            Ok(Datum::Error(Box::new(ErrorDatum {
+                kind: "k".into(),
+                message: "m".into(),
+                data: int(7),
+            }))),
+        ),
+        (
+            "collection.unordered".into(),
+            "null".into(),
+            Err("unordered"),
+        ),
+        ("collection.zero_step".into(), "0".into(), Err("zero_step")),
+        ("collection.int_check".into(), "7".into(), Ok(int(7))),
+        (
+            "collection.function_check".into(),
+            "null".into(),
+            Err("type_error"),
+        ),
+        (
+            "collection.holds_none".into(),
+            "[7], set{\"text\"}".into(),
+            Ok(Datum::Bool(true)),
+        ),
+    ]);
+    let mut registered = FunctionRegistry::new();
+    register_machine_functions(&mut registered).unwrap();
+    crate::register_numbers(&mut registered).unwrap();
+    let collection_ids = register_collections(&mut registered).unwrap();
+    let natives: std::collections::BTreeSet<_> = collection_ids
+        .into_values()
+        .filter(|id| registered.get(id).unwrap().native.is_some())
+        .collect();
+    let mut exercised = std::collections::BTreeSet::new();
+    for (name, args, expected) in cases {
+        let (id, _) = registered
+            .iter()
+            .find(|(_, function)| function.definition.name.as_str() == name)
+            .unwrap();
+        exercised.insert(*id);
+        let program = program(&format!("main {{ return {name}({args}) }}"));
+        for temperature in ["cold", "warm"] {
+            let mut machine = KernelMachine::start(
+                program.clone(),
+                BOUNDS,
+                Start {
+                    target: Target::Main,
+                    args: vec![],
+                    bindings: Default::default(),
+                },
+            )
+            .unwrap();
+            let Step::Ended(end) = machine.run(&mut World::default(), u64::MAX).unwrap() else {
+                panic!("{name} must end")
+            };
+            match (end, &expected) {
+                (End::Finished(finished), Ok(value)) => {
+                    assert_eq!(&finished.result, value, "{name} {temperature}")
+                }
+                (End::Error(RunError::Uncaught(Datum::Error(error))), Err(kind)) => {
+                    assert_eq!(&error.kind, kind, "{name} {temperature}")
+                }
+                (end, expected) => panic!("{name} {temperature}: {end:?} != {expected:?}"),
+            }
+        }
+    }
+    assert_eq!(
+        exercised, natives,
+        "every collection native needs a named corpus case"
+    );
+}

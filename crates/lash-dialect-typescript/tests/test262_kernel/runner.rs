@@ -111,8 +111,13 @@ fn registry() -> &'static Arc<FunctionRegistry> {
     })
 }
 
+pub(crate) struct Execution {
+    end: End,
+    prints: Vec<Datum>,
+}
+
 pub(crate) trait Executor: Sync {
-    fn run(&self, lowered: &Lowered) -> Result<End, String>;
+    fn run(&self, lowered: &Lowered) -> Result<Execution, String>;
 }
 
 /// Runs a document on any implementation of the kernel's machine interface.
@@ -166,7 +171,7 @@ impl Host for TestHost {
 }
 
 impl<M: Machine> Executor for OnMachine<M> {
-    fn run(&self, lowered: &Lowered) -> Result<End, String> {
+    fn run(&self, lowered: &Lowered) -> Result<Execution, String> {
         let program = Program {
             document: Arc::new(lowered.document.clone()),
             library: self.library.clone(),
@@ -189,7 +194,10 @@ impl<M: Machine> Executor for OnMachine<M> {
                     if let (End::Finished(finished), Some(value)) = (&mut end, finished_with) {
                         finished.result = value;
                     }
-                    return Ok(end);
+                    return Ok(Execution {
+                        end,
+                        prints: host.prints,
+                    });
                 }
                 Step::Slice => {}
                 Step::Parked(park) => match park.requests.as_slice() {
@@ -288,7 +296,24 @@ fn completed(finished: &lash_kernel_vm::Finished) -> bool {
         == Some(&lash_kernel_doc::Value::Bool(true))
 }
 
-fn judge(end: End, meta: &Metadata) -> Observed {
+fn judge(execution: Execution, meta: &Metadata) -> Observed {
+    let Execution { end, prints } = execution;
+    if meta.flags.contains(&TestFlag::Async) {
+        // doneprintHandle.js is Test262's completion protocol. A successful
+        // script end without $DONE, a failure, or repeated completion fails.
+        let completions: Vec<_> = prints
+            .iter()
+            .filter_map(|value| match value {
+                Datum::Text(text) if text.starts_with("Test262:AsyncTest") => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        return if matches!(end, End::Finished(_)) && completions == ["Test262:AsyncTestComplete"] {
+            Observed::Pass
+        } else {
+            Observed::Diverged(format!("async completion {completions:?}; end {end:?}"))
+        };
+    }
     match (end, &meta.negative) {
         (End::Error(RunError::Uncaught(error)), Some(negative))
             if thrown_name(&error).as_deref() == Some(negative.error_type.as_str()) =>
@@ -597,6 +622,7 @@ fn execute(source: &str) -> End {
     executor()
         .run(&lowered)
         .expect("the kernel executes the witness")
+        .end
 }
 
 #[cfg(test)]
@@ -914,4 +940,32 @@ fn object_group_by_checks_the_callback_before_iteration() {
         ),
         Datum::Float(lash_kernel_doc::Float::new(3.0)),
     );
+}
+
+/// Test262's doneprintHandle.js reports $DONE() as AsyncTestComplete and
+/// $DONE(error) as AsyncTestFailure. Script completion alone proves neither.
+#[test]
+fn async_tests_are_judged_by_done_completion() {
+    let meta = Metadata {
+        includes: Box::new([]),
+        flags: Box::new([TestFlag::Async]),
+        negative: None,
+    };
+    for (prints, expected) in [
+        ("print \"Test262:AsyncTestComplete\"", true),
+        ("print \"Test262:AsyncTestFailure:Error: bad\"", false),
+        ("", false),
+        (
+            "print \"Test262:AsyncTestComplete\" print \"Test262:AsyncTestFailure:Error: bad\"",
+            false,
+        ),
+    ] {
+        let document = lash_kernel_doc::parse_document(&format!("kernel 1\nnumbers by_spelling\nmain {{ {prints} let __test262Completed = true return null }}")).unwrap();
+        let lowered = Lowered {
+            annotations: lash_kernel_doc::Annotations::new(document.identity().unwrap()),
+            document,
+        };
+        let end = executor().run(&lowered).unwrap();
+        assert_eq!(judge(end, &meta) == Observed::Pass, expected, "{prints}");
+    }
 }

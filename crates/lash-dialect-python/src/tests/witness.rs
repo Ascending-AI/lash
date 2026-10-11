@@ -39,8 +39,12 @@ fn case(name: &str) -> Case {
 }
 
 /// The case runs on the kernel as CPython ran it.
-fn agrees(name: &str) {
+fn agrees(name: &str, source: &str) {
     let case = case(name);
+    assert_eq!(
+        case.source, source,
+        "stale witness source `{name}`; run record.py"
+    );
     let cpython = Recorded {
         epochs: case.epochs,
         end: case.end,
@@ -59,7 +63,7 @@ macro_rules! witness {
         $(
             #[test]
             fn $name() {
-                agrees(stringify!($name));
+                agrees(stringify!($name), include_str!(concat!("../../witness/cases/", stringify!($name), ".py")));
             }
         )*
     };

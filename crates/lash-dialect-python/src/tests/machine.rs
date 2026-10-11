@@ -406,6 +406,7 @@ fn run_cell(
         delivered = batch;
         outcomes
     });
+    assert!(script.next().is_none(), "unused delivery batches");
     epochs.push(Epoch {
         delivered,
         asked: Vec::new(),
@@ -422,4 +423,12 @@ fn run_cell(
         },
         carried,
     )
+}
+
+/// A witness must consume every declared arrival; otherwise it tested a
+/// different schedule from the one its reference recorder was given.
+#[test]
+#[should_panic(expected = "unused delivery batches")]
+fn witness_rejects_unused_delivery_batches() {
+    run("print('done')", &[vec!["echo:unused".into()]]);
 }

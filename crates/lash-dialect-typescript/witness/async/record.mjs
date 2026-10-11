@@ -10,7 +10,7 @@
 // used up, the oldest pending call is answered.
 //
 // Run from this directory with Node: `node record.mjs`.
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { cases } from "./cases.mjs";
 
 const AsyncFunction = (async () => {}).constructor;
@@ -67,6 +67,7 @@ async function record({ name, source, deliveries, deviation }) {
       pending.splice(index, 1)[0].settle();
     }
   }
+  if (script.length > 0) throw new Error(`${name}: unused delivery batches`);
   epochs.push(epoch);
   await drained();
   if (unhandled.length > 0) {
@@ -79,7 +80,12 @@ const recorded = [];
 for (const witness of cases) {
   recorded.push(await record(witness));
 }
-writeFileSync(
-  new URL("recorded.json", import.meta.url),
-  `${JSON.stringify({ node: process.version, cases: recorded }, null, 1)}\n`,
-);
+const target = new URL("recorded.json", import.meta.url);
+const output = `${JSON.stringify({ node: process.version, cases: recorded }, null, 1)}\n`;
+if (process.argv.includes("--check")) {
+  if (readFileSync(target, "utf8") !== output) {
+    throw new Error("recorded.json is not what Node gives; run record.mjs");
+  }
+} else {
+  writeFileSync(target, output);
+}

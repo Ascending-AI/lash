@@ -31,4 +31,11 @@ for (const line of lines) {
   new Function("m", "o", `"use strict";\n${source}`)(m, o);
   out += `${family}\t${order.join(" ")}\n`;
 }
-writeFileSync(new URL("order.tsv", here), out);
+const target = new URL("order.tsv", here);
+if (process.argv.includes("--check")) {
+  if (readFileSync(target, "utf8") !== out) {
+    throw new Error("order.tsv is not what Node gives; run record.mjs");
+  }
+} else {
+  writeFileSync(target, out);
+}
