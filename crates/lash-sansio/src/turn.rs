@@ -13,7 +13,12 @@ pub struct SansIoTurnInput<M: TurnProtocol = UnitTurnProtocol> {
     pub agent_frame_id: String,
     pub turn_id: TurnId,
     pub model: crate::llm_profile::LlmProfileConfig,
+    /// The committed window the turn starts from, which its checkpoints
+    /// name instead of holding.
+    pub window: crate::TurnWindow<M::Event>,
+    /// The turn's messages, led by the window's.
     pub messages: MessageSequence,
+    /// The turn's history, led by the window's records.
     pub events: crate::AppendVec<crate::SessionHistoryRecord<M::Event>>,
     pub protocol_run_offset: usize,
     pub turn_driver_preamble: Arc<TurnDriverPreamble<M>>,
@@ -33,7 +38,13 @@ pub struct PreparedTurnMachine<M: TurnProtocol = UnitTurnProtocol> {
 }
 
 pub fn build_turn<M: TurnProtocol>(input: SansIoTurnInput<M>) -> PreparedTurnMachine<M> {
-    let machine = TurnMachine::new_shared(
+    let turn_events = input
+        .events
+        .as_slice()
+        .get(input.window.events().len()..)
+        .unwrap_or_default()
+        .to_vec();
+    let machine = TurnMachine::in_window(
         TurnMachineConfig {
             model_tool_calls: input.model_tool_calls,
             protocol_driver: input.turn_driver_preamble.config.protocol.clone(),
@@ -50,8 +61,9 @@ pub fn build_turn<M: TurnProtocol>(input: SansIoTurnInput<M>) -> PreparedTurnMac
             emit_llm_trace: input.emit_llm_trace,
             termination: input.termination,
         },
+        input.window,
         input.messages,
-        input.events,
+        turn_events,
         input.protocol_run_offset,
     );
 

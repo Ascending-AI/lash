@@ -10,6 +10,11 @@ use super::*;
 /// machine starts from, and its before-turn callbacks' decisions.
 pub(in crate::runtime) struct DurableTurn {
     pub(in crate::runtime) driver: Box<RuntimeTurnDriver<'static>>,
+    /// The committed window the turn starts from: the head the runtime
+    /// stands at once its context pressure ran, pinned by that head, which
+    /// the turn's checkpoints name instead of holding (FIG-5206, FIG-5955).
+    pub(in crate::runtime) window: crate::runtime::durable::head::TurnWindow,
+    /// The turn's messages, led by the window's.
     pub(in crate::runtime) messages: crate::MessageSequence,
     /// What the before-turn callbacks decided: run for a fresh turn, served
     /// from the checkpoint for a resumed one. Every phase commits them.
@@ -187,9 +192,19 @@ impl LashRuntime {
             leaf: self.state.session_graph.leaf_node_id.clone(),
             checkpoint: self.state.checkpoint_ref.clone(),
         };
-        let messages =
-            crate::MessageSequence::from_base_and_delta(base_read_model.messages, turn_delta)
-                .with_base_render_cache(base_read_model.prompt_render_cache);
+        let pin = crate::runtime::durable::head::window_pin(&self.state).map_err(|error| {
+            RuntimeError::new(
+                RuntimeErrorCode::RuntimeStoreCorrupt,
+                format!("the turn's window pin does not encode: {error}"),
+            )
+        })?;
+        let window = crate::runtime::durable::head::TurnWindow::new(
+            pin,
+            base_read_model.messages,
+            base_read_model.active_events,
+        )
+        .with_render_cache(base_read_model.prompt_render_cache);
+        let messages = window.then(turn_delta);
         // The attachment-omission history policies (ADR 0133) narrow the
         // request's view only: `messages` stays the turn's history.
         let context_transform = crate::runtime::RuntimeNamedPhase::begin(
@@ -372,6 +387,7 @@ impl LashRuntime {
         });
         Ok(DurableTurn {
             driver,
+            window,
             messages,
             before_turn,
             trace_scope: turn_boundary.scope,

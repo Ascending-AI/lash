@@ -223,29 +223,29 @@
       "workload": "chat-short",
       "metric": "store_bytes_written",
       "check": "history_slope",
-      "owner": "FIG-5946, FIG-5940",
-      "why": "every model call stores its whole rendered prompt in prompt_texts (FIG-5946), and each turn writes about seven history-sized message-list blobs ({\"prev\":null,\"items\":[...]}, every message since turn 1) to the graph (FIG-5940); the FIG-5501 window copy is gone (FIG-5931)"
+      "owner": "FIG-5946",
+      "why": "every model call stores its whole rendered prompt in prompt_texts (FIG-5946); a turn's checkpoint content holds only the items it adds (FIG-5955), its prelude references committed history (FIG-5961), and the FIG-5501 window copy is gone (FIG-5931)"
     },
     {
       "workload": "ts-codemode",
       "metric": "store_bytes_written",
       "check": "history_slope",
-      "owner": "FIG-5946, FIG-5940",
-      "why": "every model call stores its whole rendered prompt in prompt_texts (FIG-5946), and each turn writes about seven history-sized message-list blobs ({\"prev\":null,\"items\":[...]}, every message since turn 1) to the graph (FIG-5940); the FIG-5501 window copy is gone (FIG-5931)"
+      "owner": "FIG-5946",
+      "why": "every model call stores its whole rendered prompt in prompt_texts (FIG-5946); a turn's checkpoint content holds only the items it adds (FIG-5955), its prelude references committed history (FIG-5961), and the FIG-5501 window copy is gone (FIG-5931)"
     },
     {
       "workload": "py-codemode",
       "metric": "store_bytes_written",
       "check": "history_slope",
-      "owner": "FIG-5946, FIG-5940",
-      "why": "every model call stores its whole rendered prompt in prompt_texts (FIG-5946), and each turn writes about seven history-sized message-list blobs ({\"prev\":null,\"items\":[...]}, every message since turn 1) to the graph (FIG-5940); the FIG-5501 window copy is gone (FIG-5931)"
+      "owner": "FIG-5946",
+      "why": "every model call stores its whole rendered prompt in prompt_texts (FIG-5946); a turn's checkpoint content holds only the items it adds (FIG-5955), its prelude references committed history (FIG-5961), and the FIG-5501 window copy is gone (FIG-5931)"
     },
     {
       "workload": "chat-long-compacting",
       "metric": "store_bytes_written",
       "check": "frame_slope",
-      "owner": "FIG-5946, FIG-5940",
-      "why": "every model call stores its whole rendered prompt in prompt_texts (FIG-5946), and each turn writes about seven history-sized message-list blobs ({\"prev\":null,\"items\":[...]}, every message since turn 1) to the graph (FIG-5940); the FIG-5501 window copy is gone (FIG-5931)"
+      "owner": "FIG-5946",
+      "why": "every model call stores its whole rendered prompt in prompt_texts (FIG-5946); a turn's checkpoint content holds only the items it adds (FIG-5955), its prelude references committed history (FIG-5961), and the FIG-5501 window copy is gone (FIG-5931)"
     },
     {
       "workload": "chat-short",

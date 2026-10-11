@@ -46,13 +46,19 @@ pub use turn_protocol::{
     stored_history_refusal_actions,
 };
 mod checkpoint_content;
-pub use checkpoint_content::{CheckpointContentRef, TurnCheckpointContent};
+pub use checkpoint_content::{CheckpointContentPin, CheckpointContentRef, TurnCheckpointContent};
+mod checkpoint_ledger;
+pub use checkpoint_ledger::CheckpointDelta;
+use checkpoint_ledger::{
+    CheckpointMessages, CheckpointPrompt, ContentLedger, Floors, Sequence, StoredChains,
+    StoredRequest,
+};
 mod turn_window;
 pub use turn_window::{TurnWindow, TurnWindowPin};
 mod machine_state;
 use machine_state::{
-    CheckpointMessages, CheckpointState, CheckpointWindow, EffectDeliveryStatus, MachineState,
-    ProgressBoundary, RunAbort,
+    CheckpointState, CheckpointWindow, EffectDeliveryStatus, MachineState, ProgressBoundary,
+    RunAbort,
 };
 pub use machine_state::{
     SavedTurn, TURN_CHECKPOINT_SCHEMA_VERSION, TurnCheckpoint, TurnCheckpointRestoreError,

@@ -9,14 +9,15 @@ pub(super) struct PreparedExecutionEnvironment {
 }
 
 impl RuntimeTurnDriver<'_> {
-    /// The turn's machine over `messages`, counting its protocol iterations
-    /// on from `run_offset`.
+    /// The turn's machine over `messages`, which lead with `window`'s,
+    /// counting its protocol iterations on from `run_offset`.
     #[expect(
         clippy::expect_used,
         reason = "an admitted turn has a committed active agent frame and an opener scope"
     )]
     pub(super) fn prepare_machine(
         &mut self,
+        window: crate::runtime::durable::head::TurnWindow,
         messages: crate::MessageSequence,
         run_offset: usize,
     ) -> TurnMachine {
@@ -47,6 +48,7 @@ impl RuntimeTurnDriver<'_> {
                 .into_inner(),
             turn_id: self.turn_id.clone(),
             model: session_policy.llm_profile_config().clone(),
+            window,
             messages,
             events: self.turn_pipeline.active_events(),
             protocol_run_offset: run_offset,

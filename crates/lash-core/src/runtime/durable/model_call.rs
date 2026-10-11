@@ -67,9 +67,9 @@ pub(super) enum ModelStart {
 /// The pinned reference of the model request `checkpoint` waits on: the
 /// digest of how the checkpoint names it, which is the window it pins, how
 /// many of the request's leading messages are that window's render, and the
-/// content digest of the rest. The window at a pin is immutable and the
-/// checkpoint already hashed the rest, so the reference costs no pass over
-/// the prompt.
+/// content digests of the request's frame and of the chain of its other
+/// messages. The window at a pin is immutable and the checkpoint already
+/// hashed the rest, so the reference costs no pass over the prompt.
 ///
 /// # Errors
 ///
@@ -77,11 +77,17 @@ pub(super) enum ModelStart {
 pub(super) fn request_ref(
     checkpoint: &TurnCheckpoint<HostTurnProtocol>,
 ) -> Result<String, TurnError> {
-    let (request, rendered_from_window) = checkpoint.pending_request().ok_or_else(|| {
-        TurnError::Exec("the turn's checkpoint waits on no model call".to_owned())
-    })?;
-    let named = serde_json::to_vec(&(checkpoint.window_pin(), rendered_from_window, request))
-        .map_err(|error| TurnError::Exec(format!("the model request does not encode: {error}")))?;
+    let (request, messages, rendered_from_window) =
+        checkpoint.pending_request().ok_or_else(|| {
+            TurnError::Exec("the turn's checkpoint waits on no model call".to_owned())
+        })?;
+    let named = serde_json::to_vec(&(
+        checkpoint.window_pin(),
+        rendered_from_window,
+        request,
+        messages,
+    ))
+    .map_err(|error| TurnError::Exec(format!("the model request does not encode: {error}")))?;
     Ok(format!(
         "b3:{}",
         lash_core_ids::stable_hash::blake3_hex(MODEL_REQUEST_PIN_DOMAIN, &named)

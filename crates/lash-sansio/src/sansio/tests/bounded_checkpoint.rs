@@ -63,23 +63,35 @@ fn encode(saved: &SavedTurn) -> (Vec<u8>, Vec<u8>) {
 /// pending model request inline in the body.
 fn inline_encoding_bytes(saved: &SavedTurn) -> usize {
     let mut body = serde_json::to_value(&saved.checkpoint).expect("checkpoint body");
-    for (field, head) in [
-        ("messages", &body["messages"]["rest"]),
-        ("prompt_messages", &body["prompt_messages"]["rest"]),
-        ("events", &body["events"]),
-    ]
-    .map(|(field, head)| (field, head.clone()))
-    {
+    let items = |head: &serde_json::Value| -> Vec<serde_json::Value> {
         let head: super::checkpoint_content::CheckpointContentRef =
-            serde_json::from_value(head).expect("content digest");
-        let items: Vec<serde_json::Value> = saved.content.sequence(&head).expect("stored sequence");
-        body[field] = serde_json::Value::Array(items);
-    }
+            serde_json::from_value(head.clone()).expect("content digest");
+        saved.content.sequence(&head).expect("stored sequence").0
+    };
+    let messages = items(&body["messages"]["rest"]);
+    let mut prompt = items(&body["prompt_messages"]["rest"]);
+    let shared_from = body["prompt_messages"]["messages_from"]
+        .as_u64()
+        .expect("the prompt's shared messages") as usize;
+    let from_window = body["messages"]["from_window"]
+        .as_u64()
+        .expect("the window's messages") as usize;
+    prompt.extend(
+        messages
+            .iter()
+            .skip(shared_from.saturating_sub(from_window))
+            .cloned(),
+    );
+    let events = items(&body["events"]);
+    body["messages"] = serde_json::Value::Array(messages);
+    body["prompt_messages"] = serde_json::Value::Array(prompt);
+    body["events"] = serde_json::Value::Array(events);
     let work = &mut body["state"]["Waiting"]["work"];
     if work["kind"] == "llm" {
         let head: super::checkpoint_content::CheckpointContentRef =
             serde_json::from_value(work["request"].clone()).expect("request digest");
-        let request: serde_json::Value = saved.content.value(&head).expect("stored request");
+        let mut request: serde_json::Value = saved.content.value(&head).expect("stored request");
+        request["messages"] = serde_json::Value::Array(items(&work["messages"]));
         *work =
             serde_json::json!({"Llm": {"request": request, "driver_state": work["driver_state"]}});
     }
@@ -461,4 +473,273 @@ fn decided_completion_candidates_are_checkpoint_content_not_body() {
     )
     .expect("the checkpoint restores");
     assert_eq!(restored.decided_completions(), decided.as_slice());
+}
+
+/// What a host stored of a turn's phases: every blob, by digest.
+#[derive(Default)]
+struct PhaseStore {
+    blobs: std::collections::BTreeMap<super::checkpoint_content::CheckpointContentRef, Vec<u8>>,
+}
+
+impl PhaseStore {
+    /// The host's pin of `digest`: its first 32 bytes.
+    fn pin(digest: &super::checkpoint_content::CheckpointContentRef) -> CheckpointContentPin {
+        let mut pin = [0; 32];
+        pin.copy_from_slice(&digest.as_str().as_bytes()[..32]);
+        CheckpointContentPin::new(pin)
+    }
+
+    /// Store `machine`'s phase checkpoint as a host does and answer how many
+    /// items it encoded. The checkpoint is the one a full checkpoint takes;
+    /// its content holds every blob of that one it does not hold by a pin,
+    /// and it holds only blobs an earlier phase stored, by their pins.
+    fn phase(&mut self, machine: &mut TurnMachine, phase: &str) -> usize {
+        let full = machine.checkpoint();
+        let delta = machine.checkpoint_delta();
+        assert_eq!(
+            serde_json::to_vec(&delta.saved.checkpoint).expect("delta body"),
+            serde_json::to_vec(&full.checkpoint).expect("full body"),
+            "{phase}: the delta is the full checkpoint"
+        );
+        for (digest, pin) in &delta.held {
+            assert!(
+                self.blobs.contains_key(digest) && *pin == Self::pin(digest),
+                "{phase}: held blob {digest} was stored under its pin"
+            );
+            assert!(
+                !delta.saved.content.contains(digest),
+                "{phase}: held blob {digest} is not stored again"
+            );
+        }
+        for (digest, bytes) in full.content.iter() {
+            let held = delta.held.iter().any(|(held, _)| held == digest);
+            if !held {
+                assert!(
+                    delta.saved.content.contains(digest),
+                    "{phase}: new blob {digest} is in the delta"
+                );
+            }
+            if let Some(stored) = self.blobs.get(digest) {
+                assert_eq!(stored, bytes, "{phase}: blob {digest} is the stored bytes");
+            }
+        }
+        let mut pins = Vec::new();
+        for (digest, bytes) in delta.saved.content.iter() {
+            assert!(
+                full.content.contains(digest),
+                "{phase}: the delta's blob {digest} is the full checkpoint's"
+            );
+            self.blobs.insert(digest.clone(), bytes.to_vec());
+            pins.push((digest.clone(), Self::pin(digest)));
+        }
+        machine.checkpoint_stored(pins);
+        delta.encoded
+    }
+}
+
+/// The items each phase of `rounds` tool rounds and two more encodes, over
+/// a window of `count` messages: at each round's model call and at its tool
+/// batch. A machine restored from the checkpoint after `rounds` and pinned
+/// to what was stored runs the two more rounds beside the uncut machine;
+/// from its first tool batch on it encodes what the uncut one does.
+fn encoded_per_phase(count: usize, rounds: usize) -> Vec<usize> {
+    let window = window(count);
+    let mut machine = TurnMachine::in_window(
+        test_config(Arc::new(ToolBatchDriver)),
+        window.clone(),
+        window.then(vec![user_message("the turn's own input")]),
+        Vec::new(),
+        0,
+    );
+    let mut store = PhaseStore::default();
+    let mut encoded = Vec::new();
+    let round = |machine: &mut TurnMachine, store: &mut PhaseStore, index: usize| {
+        let effects = drain_effects(machine);
+        let llm_id = *find_llm_call(&effects).expect("the round's model call").0;
+        let start = store.phase(machine, &format!("round {index} model call"));
+        machine.handle_response(Response::LlmComplete {
+            id: llm_id,
+            text_streamed: false,
+            result: Ok(LlmResponse::default()),
+        });
+        let effects = drain_effects(machine);
+        let Some(Effect::ToolCalls { id, .. }) = effects.last() else {
+            panic!("round {index} waits on its tools: {effects:?}");
+        };
+        let tools = *id;
+        let done = store.phase(machine, &format!("round {index} tool batch"));
+        machine.handle_response(Response::ToolResults {
+            id: tools,
+            results: ["call-read", "call-search", "call-slow"]
+                .into_iter()
+                .map(|call| {
+                    completed_tool(
+                        call,
+                        "read_file",
+                        serde_json::json!({}),
+                        ToolCallOutput::success(serde_json::json!("result ".repeat(40))),
+                    )
+                })
+                .collect(),
+        });
+        let effects = drain_effects(machine);
+        let (checkpoint, _) = find_checkpoint(&effects).expect("the round's checkpoint");
+        machine.handle_response(Response::Checkpoint {
+            id: checkpoint,
+            delivery: CheckpointDelivery::default(),
+        });
+        [start, done]
+    };
+    for index in 0..rounds {
+        encoded.extend(round(&mut machine, &mut store, index));
+    }
+    // A cold owner restores the stored checkpoint, learns the pins of what
+    // it is stored as, and builds on it as the uncut owner does.
+    let saved = machine.checkpoint();
+    let mut cold_store = PhaseStore {
+        blobs: store.blobs.clone(),
+    };
+    for (digest, bytes) in saved.content.iter() {
+        cold_store.blobs.insert(digest.clone(), bytes.to_vec());
+    }
+    let mut cold = restored(&saved, Some(window.clone()));
+    cold.checkpoint_stored(
+        saved
+            .content
+            .iter()
+            .map(|(digest, _)| (digest.clone(), PhaseStore::pin(digest))),
+    );
+    let uncut = round(&mut machine, &mut store, rounds);
+    let resumed = round(&mut cold, &mut cold_store, rounds);
+    // Its first model call stores the request whole once: the request an
+    // ended call left is kept only by the owner that stored it.
+    assert_eq!(
+        resumed[1], uncut[1],
+        "a restored machine's tool batch encodes what the uncut one's does"
+    );
+    let next = round(&mut machine, &mut store, rounds + 1);
+    assert_eq!(
+        round(&mut cold, &mut cold_store, rounds + 1),
+        next,
+        "after its first model call a restored machine encodes what the uncut one does"
+    );
+    encoded.extend(uncut);
+    encoded.extend(next);
+    encoded
+}
+
+/// FIG-5955: a phase checkpoint encodes only the items the turn appended
+/// since its last stored phase, plus a constant: the same at a window of 4
+/// messages and of 400, and the same at every round after the first,
+/// however many rounds came before it. The full checkpoint it equals would
+/// encode every item the turn holds.
+#[test]
+fn a_phase_checkpoint_encodes_only_its_new_items() {
+    let rounds = 12;
+    let shallow = encoded_per_phase(4, rounds);
+    let deep = encoded_per_phase(400, rounds);
+    eprintln!("items encoded per phase: {shallow:?}");
+    assert_eq!(
+        shallow, deep,
+        "the items a phase encodes do not depend on the window"
+    );
+    let steady = &shallow[2..4];
+    for (round, phases) in shallow.chunks(2).enumerate().skip(1) {
+        assert_eq!(
+            phases, steady,
+            "round {round} encodes what round 1 did: only its new items"
+        );
+    }
+    let mut full = TurnMachine::in_window(
+        test_config(Arc::new(ToolBatchDriver)),
+        window(4),
+        window(4).then(vec![user_message("the turn's own input")]),
+        Vec::new(),
+        0,
+    );
+    let mut first = PhaseStore::default();
+    drain_effects(&mut full);
+    let first_phase = first.phase(&mut full, "the first model call");
+    assert_eq!(
+        first_phase, shallow[0],
+        "the first phase encodes everything the turn holds"
+    );
+    assert!(
+        steady.iter().all(|&count| count < 16),
+        "a round's phases encode a bounded count: {steady:?}"
+    );
+}
+
+/// FIG-5955: a prompt view the attachment-omission policies narrowed inside
+/// the window (ADR 0133) differs from the turn's messages there, and only
+/// there. Its checkpoint stores the view's own message and names the rest:
+/// the window's messages before it and the turn's messages after it, which
+/// are stored once, as the turn's. The view, the messages and the model
+/// request restore byte-identical, and later phases store only what they
+/// add.
+#[test]
+fn a_narrowed_prompt_view_stores_only_where_it_differs() {
+    let window = window(10);
+    let mut machine = TurnMachine::in_window(
+        test_config(Arc::new(ToolBatchDriver)),
+        window.clone(),
+        window.then(vec![user_message("the turn's own input")]),
+        Vec::new(),
+        0,
+    );
+    let mut view = machine
+        .prompt_message_sequence()
+        .iter()
+        .cloned()
+        .collect::<Vec<_>>();
+    view[3].parts = vec![Part::text("w3.p0".to_owned(), "[omitted]".to_owned(), None)].into();
+    machine.adopt_prepared_messages(MessageSequence::from_owned(view));
+    let mut store = PhaseStore::default();
+    let effects = drain_effects(&mut machine);
+    let (llm_id, request) = find_llm_call(&effects).expect("the model call");
+    let (llm_id, request) = (*llm_id, request.clone());
+    assert!(
+        serde_json::to_string(&request)
+            .expect("request")
+            .contains("[omitted]"),
+        "the request is projected from the narrowed view"
+    );
+    store.phase(&mut machine, "the model call");
+    let saved = machine.checkpoint();
+    let body = serde_json::to_value(&saved.checkpoint).expect("checkpoint body");
+    assert_eq!(body["prompt_messages"]["from_window"], 3);
+    assert_eq!(
+        body["prompt_messages"]["messages_from"], 4,
+        "the view continues with the turn's messages after its own"
+    );
+    let rest: super::checkpoint_content::CheckpointContentRef =
+        serde_json::from_value(body["prompt_messages"]["rest"].clone()).expect("digest");
+    let (own, _): (Vec<Message>, _) = saved.content.sequence(&rest).expect("the view's own");
+    assert_eq!(own.len(), 1, "the view stores only its narrowed message");
+
+    let mut restored = restored(&saved, Some(window.clone()));
+    assert_eq!(encode(&restored.checkpoint()), encode(&saved));
+    assert_eq!(
+        serde_json::to_value(restored.prompt_message_sequence().as_slice()).expect("view"),
+        serde_json::to_value(machine.prompt_message_sequence().as_slice()).expect("view"),
+    );
+    let effects = drain_effects(&mut restored);
+    let (_, redelivered) = find_llm_call(&effects).expect("re-delivered model call");
+    assert_eq!(
+        serde_json::to_vec(redelivered).expect("request"),
+        serde_json::to_vec(&request).expect("request"),
+        "the re-delivered request is the narrowed one"
+    );
+
+    machine.handle_response(Response::LlmComplete {
+        id: llm_id,
+        text_streamed: false,
+        result: Ok(LlmResponse::default()),
+    });
+    drain_effects(&mut machine);
+    assert_eq!(
+        store.phase(&mut machine, "the tool batch"),
+        0,
+        "a phase that adds nothing encodes nothing"
+    );
 }

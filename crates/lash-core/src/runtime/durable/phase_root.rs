@@ -4,16 +4,20 @@
 //!
 //! The machine's checkpoint is bounded state; the transcript it would
 //! otherwise copy is content the checkpoint names by digest, in chains whose
-//! full chunks keep their digests as the turn appends. Each content blob is
-//! one TurnContent node, so a phase installs only the chunks no earlier
-//! phase installed, and the PhaseRoot names every blob its checkpoint needs.
+//! closed chunks keep their digests as the turn appends. Each content blob
+//! is one TurnContent node, and the PhaseRoot names every blob its
+//! checkpoint needs. A phase stages only the blobs its machine's checkpoint
+//! added (FIG-5955): the others an earlier phase of the turn stored, and the
+//! root requires them by the node the machine was told each is stored as.
 //! The root's checkpoint text is the phase's JSON without its content.
 
 use lash_core_store::checkpoint_graph::{
     EncodeBudget, ExplicitLimit, GraphDecoder, GraphRefusal, GraphStaging, NodeId, NodeKind,
     NodeSource, TokenCodec, TokenError, TokenReader, TokenWriter,
 };
-use lash_sansio::{CheckpointContentRef, SavedTurn, TurnCheckpoint, TurnCheckpointContent};
+use lash_sansio::{
+    CheckpointContentPin, CheckpointContentRef, SavedTurn, TurnCheckpoint, TurnCheckpointContent,
+};
 
 use super::session::PhaseCheckpoint;
 use crate::HostTurnProtocol;
@@ -97,16 +101,35 @@ impl TokenCodec for ContentText {
 pub(super) struct StagedPhase {
     root: NodeId,
     staging: GraphStaging,
+    held: Vec<NodeId>,
+    stored: PhaseStored,
+}
+
+/// The blobs a staged phase added, each by the node it is stored as: what
+/// its machine is told once the phase's commit is acknowledged
+/// ([`lash_sansio::TurnMachine::checkpoint_stored`]).
+#[must_use = "the machine is told what its committed phase stored"]
+pub(super) struct PhaseStored(Vec<(CheckpointContentRef, CheckpointContentPin)>);
+
+impl PhaseStored {
+    /// Tell `machine` the phase is stored.
+    pub(super) fn committed(self, machine: &mut crate::TurnMachine) {
+        machine.checkpoint_stored(self.0);
+    }
 }
 
 impl StagedPhase {
-    /// Stages `checkpoint`: a TurnContent node per content blob and the
-    /// PhaseRoot over them.
+    /// Stages `checkpoint`: a TurnContent node per content blob it holds
+    /// and the PhaseRoot over them and over `held`, the blobs an earlier
+    /// phase stored, by their nodes.
     ///
     /// # Errors
     ///
     /// The account of a checkpoint that does not encode.
-    pub(super) fn of(checkpoint: &PhaseCheckpoint) -> Result<Self, String> {
+    pub(super) fn of(
+        checkpoint: &PhaseCheckpoint,
+        held: &[(CheckpointContentRef, CheckpointContentPin)],
+    ) -> Result<Self, String> {
         let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
         let text = serde_json::to_string(&PhaseText {
             checkpoint: &checkpoint.saved.checkpoint,
@@ -117,6 +140,7 @@ impl StagedPhase {
         .map_err(|error| format!("the turn checkpoint does not encode: {error}"))?;
         let refused = |error: GraphRefusal| format!("the turn checkpoint does not stage: {error}");
         let mut content = Vec::new();
+        let mut stored = Vec::new();
         for (digest, bytes) in checkpoint.saved.content.iter() {
             let text = std::str::from_utf8(bytes)
                 .map_err(|error| format!("turn content {digest} is not text: {error}"))?;
@@ -124,7 +148,12 @@ impl StagedPhase {
                 .encode_value(NodeKind::TURN_CONTENT, &ContentText(text.to_owned()))
                 .map_err(refused)?;
             content.push((digest.as_str().to_owned(), node));
+            stored.push((digest.clone(), CheckpointContentPin::new(node.0)));
         }
+        for (digest, pin) in held {
+            content.push((digest.as_str().to_owned(), NodeId(*pin.as_bytes())));
+        }
+        content.sort_by(|left, right| left.0.cmp(&right.0));
         let root = staging
             .encode_value(
                 NodeKind::PHASE_ROOT,
@@ -134,13 +163,25 @@ impl StagedPhase {
                 },
             )
             .map_err(refused)?;
-        Ok(Self { root, staging })
+        Ok(Self {
+            root,
+            staging,
+            held: held
+                .iter()
+                .map(|(_, pin)| NodeId(*pin.as_bytes()))
+                .collect(),
+            stored: PhaseStored(stored),
+        })
     }
 
-    /// Stages the nodes in `tx` and returns the PhaseRoot the phase names.
-    pub(super) fn staged_in(self, tx: &mut lash_durable::ActorTx) -> NodeId {
+    /// Stages the nodes in `tx`, requiring the held ones, and returns the
+    /// PhaseRoot the phase names with what it stored.
+    pub(super) fn staged_in(self, tx: &mut lash_durable::ActorTx) -> (NodeId, PhaseStored) {
+        for node in self.held {
+            tx.require(node);
+        }
         tx.stage_all(self.staging);
-        self.root
+        (self.root, self.stored)
     }
 }
 
@@ -175,35 +216,44 @@ pub(super) fn restaged_text(
 }
 
 /// Reads PhaseRoot `root` from `source` back into the phase checkpoint it
-/// was staged from.
+/// was staged from, with the node each content blob is stored as.
 ///
 /// # Errors
 ///
 /// The account of a node that does not read, a checkpoint text that does
 /// not decode, or content that is not the bytes its digest names.
-pub(super) fn load(source: &dyn NodeSource, root: NodeId) -> Result<PhaseCheckpoint, String> {
+pub(super) fn load(
+    source: &dyn NodeSource,
+    root: NodeId,
+) -> Result<(PhaseCheckpoint, PhaseStored), String> {
     let mut decoder = GraphDecoder::new(source, lash_durable::domain::graph::OWNER_READ_LIMITS);
     let text = |error: GraphRefusal| error.to_string();
     let body: PhaseRootBody = decoder.decode(root, NodeKind::PHASE_ROOT).map_err(text)?;
     let read: PhaseRead = serde_json::from_str(&body.checkpoint)
         .map_err(|error| format!("the turn checkpoint does not decode: {error}"))?;
     let mut content = TurnCheckpointContent::default();
+    let mut stored = Vec::new();
     for (digest, node) in body.content {
         decoder
             .child_kind(root, node, &[NodeKind::TURN_CONTENT])
             .map_err(text)?;
         let ContentText(blob) = decoder.decode(node, NodeKind::TURN_CONTENT).map_err(text)?;
+        let digest = CheckpointContentRef::stored(digest);
         content
-            .insert_stored(CheckpointContentRef::stored(digest), blob.into_bytes())
+            .insert_stored(digest.clone(), blob.into_bytes())
             .map_err(|error| error.to_string())?;
+        stored.push((digest, CheckpointContentPin::new(node.0)));
     }
-    Ok(PhaseCheckpoint {
-        saved: SavedTurn {
-            checkpoint: read.checkpoint,
-            content,
+    Ok((
+        PhaseCheckpoint {
+            saved: SavedTurn {
+                checkpoint: read.checkpoint,
+                content,
+            },
+            delivered: read.delivered,
+            before_turn: read.before_turn,
+            trace: read.trace,
         },
-        delivered: read.delivered,
-        before_turn: read.before_turn,
-        trace: read.trace,
-    })
+        PhaseStored(stored),
+    ))
 }

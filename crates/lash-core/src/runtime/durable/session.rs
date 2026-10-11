@@ -1154,7 +1154,9 @@ impl PhaseCheckpoint {
         &self,
         tx: &mut lash_durable::ActorTx,
     ) -> Result<lash_durable::domain::checkpoint_graph::NodeId, String> {
-        Ok(super::phase_root::StagedPhase::of(self)?.staged_in(tx))
+        Ok(super::phase_root::StagedPhase::of(self, &[])?
+            .staged_in(tx)
+            .0)
     }
 
     /// Stages in `tx` the PhaseRoot `root` of `graph` with its checkpoint
@@ -1380,8 +1382,9 @@ pub struct TurnRestore<'a> {
     cx: &'a ActorContext,
     row: &'a TurnRow,
     heads: &'a mut HeadCache,
-    /// The phase checkpoint, once read.
-    phase: Option<PhaseCheckpoint>,
+    /// The phase checkpoint, once read, with the nodes its content is
+    /// stored as.
+    phase: Option<(PhaseCheckpoint, super::phase_root::PhaseStored)>,
 }
 
 impl<'a> TurnRestore<'a> {
@@ -1429,7 +1432,7 @@ impl<'a> TurnRestore<'a> {
                 })?
             }
         };
-        Ok(self.phase.insert(phase))
+        Ok(&self.phase.insert(phase).0)
     }
 
     /// The turn's row.
@@ -1470,9 +1473,12 @@ impl<'a> TurnRestore<'a> {
     ) -> Result<RestoredTurn, TurnRestoreError> {
         let row = self.row;
         self.phase().await?;
-        let Some(PhaseCheckpoint {
-            saved, delivered, ..
-        }) = self.phase.take()
+        let Some((
+            PhaseCheckpoint {
+                saved, delivered, ..
+            },
+            stored,
+        )) = self.phase.take()
         else {
             return Err(TurnRestoreError::NoCheckpoint(row.run.clone()));
         };
@@ -1495,6 +1501,8 @@ impl<'a> TurnRestore<'a> {
             .await?;
         self.cx.probe().checkpoint_restored(&row.session, &row.run);
         let mut machine = TurnMachine::restore_from_checkpoint(config, saved, window)?;
+        // The turn's next phase builds on the content this one stored.
+        stored.committed(&mut machine);
         let pending = next_work(&mut machine);
         Ok(RestoredTurn {
             machine,

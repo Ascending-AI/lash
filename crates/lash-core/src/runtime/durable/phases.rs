@@ -55,27 +55,30 @@ use super::{model_call, turn_cancel, turn_trace};
 use crate::plugin::prompt::{admission_record, load_admitted_call};
 use crate::{ActorContext, Effect, HostTurnProtocol, SessionStreamEvent, TurnMachine};
 use lash_sansio::llm::types::AdmittedSend;
-use lash_sansio::{SavedTurn, SessionId, TurnId};
+use lash_sansio::{CheckpointDelta, SessionId, TurnId};
 use std::sync::Arc;
 
 /// The phase checkpoint of `drive` as it stands: its machine's checkpoint
 /// and the input its checkpoints delivered, staged as its PhaseRoot.
 fn encode_checkpoint(drive: &mut dyn TurnDrive) -> Result<StagedPhase, TurnError> {
-    let saved = drive.machine().checkpoint();
-    encode_phase(drive, saved)
+    let delta = drive.machine().checkpoint_delta();
+    encode_phase(drive, delta)
 }
 
+/// `delta`, a checkpoint of `drive`'s machine, staged as its PhaseRoot: the
+/// content the machine's checkpoint added, over the content an earlier
+/// phase of the turn stored.
 fn encode_phase(
     drive: &mut dyn TurnDrive,
-    saved: SavedTurn<HostTurnProtocol>,
+    delta: CheckpointDelta<HostTurnProtocol>,
 ) -> Result<StagedPhase, TurnError> {
     let checkpoint = PhaseCheckpoint {
-        saved,
+        saved: delta.saved,
         delivered: drive.delivered_inputs(),
         before_turn: drive.before_turn(),
         trace: drive.trace_scope(),
     };
-    StagedPhase::of(&checkpoint).map_err(TurnError::Exec)
+    StagedPhase::of(&checkpoint, &delta.held).map_err(TurnError::Exec)
 }
 
 /// The plugin namespaces `drive`'s run changed that its rows do not record
@@ -305,14 +308,14 @@ pub async fn run_phases(
                 // The checkpoint `model.start` commits names the request by
                 // content digest; its pin reuses that digest, beside where
                 // the live replay stands before the call streams.
-                let saved = drive.machine().checkpoint();
+                let delta = drive.machine().checkpoint_delta();
                 let start = model_call::start(
                     &services.execution_budgets(&session),
                     tx.opened_at(),
                     row.turn_deadline,
                     pinned,
                     calls.saturating_add(1),
-                    model_call::request_ref(&saved.checkpoint)?,
+                    model_call::request_ref(&delta.saved.checkpoint)?,
                     drive.live_stream_cursor(),
                 )?;
                 if let model_call::ModelStart::Send { pin, resent, .. } = &start {
@@ -348,7 +351,8 @@ pub async fn run_phases(
                         tx.write(bind);
                     }
                     let written = write_run_changes(drive.as_ref(), &mut tx, &session, &run);
-                    let checkpoint = encode_phase(drive.as_mut(), saved)?.staged_in(&mut tx);
+                    let (checkpoint, stored) =
+                        encode_phase(drive.as_mut(), delta)?.staged_in(&mut tx);
                     tx.write(DomainWrite::Turn(TurnWrite::Advance {
                         session: session.clone(),
                         run: run.clone(),
@@ -359,6 +363,7 @@ pub async fn run_phases(
                         iteration: current,
                     }));
                     cx.commit(tx, label).await?;
+                    stored.committed(drive.machine());
                     drive.run_changes_committed(&written);
                     drive.phase_committed().await;
                     unsettled = true;
@@ -409,7 +414,8 @@ pub async fn run_phases(
                         tx.write(bind);
                     }
                     let written = write_run_changes(drive.as_ref(), &mut tx, &session, &run);
-                    let checkpoint = encode_checkpoint(drive.as_mut())?.staged_in(&mut tx);
+                    let (checkpoint, stored) =
+                        encode_checkpoint(drive.as_mut())?.staged_in(&mut tx);
                     tx.write(DomainWrite::Turn(TurnWrite::Advance {
                         session: session.clone(),
                         run: run.clone(),
@@ -423,6 +429,7 @@ pub async fn run_phases(
                         settle_model_calls(&mut tx, &session, &run, None);
                     }
                     cx.commit(tx, CommitLabel::MODEL_DONE).await?;
+                    stored.committed(drive.machine());
                     drive.run_changes_committed(&written);
                     drive.phase_committed().await;
                 }
@@ -506,7 +513,7 @@ pub async fn run_phases(
                     tx.write(bind);
                 }
                 let written = write_run_changes(drive.as_ref(), &mut tx, &session, &run);
-                let checkpoint = encode_checkpoint(drive.as_mut())?.staged_in(&mut tx);
+                let (checkpoint, stored) = encode_checkpoint(drive.as_mut())?.staged_in(&mut tx);
                 tx.write(DomainWrite::Turn(TurnWrite::Advance {
                     session: session.clone(),
                     run: run.clone(),
@@ -520,6 +527,7 @@ pub async fn run_phases(
                     settle_model_calls(&mut tx, &session, &run, None);
                 }
                 cx.commit(tx, CommitLabel::MODEL_DONE).await?;
+                stored.committed(drive.machine());
                 drive.run_changes_committed(&written);
                 drive.phase_committed().await;
                 drive

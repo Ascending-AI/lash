@@ -1674,6 +1674,14 @@ fn turn_checkpoint_pins_the_waiting_state_encoding() {
     );
     let effects = drain_effects(&mut machine);
     let (llm_id, request) = find_llm_call(&effects).expect("llm call");
+    // The request is its frame, the request without its messages, and the
+    // one chunk of its messages.
+    let mut frame = request.clone();
+    frame.messages.clear();
+    let chunk = format!(
+        "{{\"prev\":null,\"items\":{}}}",
+        serde_json::to_string(&request.messages).expect("request messages json")
+    );
     assert_pinned(
         &mut machine,
         || Arc::new(SyncThenAdvanceDriver),
@@ -1681,8 +1689,9 @@ fn turn_checkpoint_pins_the_waiting_state_encoding() {
         serde_json::json!({"Waiting": {"effect_id": 2, "work": {
             "kind": "llm",
             "request": super::checkpoint_content::CheckpointContentRef::of_bytes(
-                serde_json::to_string(request).expect("request json").as_bytes(),
+                serde_json::to_string(&frame).expect("request json").as_bytes(),
             ),
+            "messages": super::checkpoint_content::CheckpointContentRef::of_bytes(chunk.as_bytes()),
             "rendered_from_window": 0,
             "driver_state": null,
         }}}),

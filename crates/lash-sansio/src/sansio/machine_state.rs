@@ -100,10 +100,13 @@ pub(super) enum CheckpointState<M: TurnProtocol = UnitTurnProtocol> {
 #[derive(Debug, Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub(super) enum CheckpointWork<M: TurnProtocol = UnitTurnProtocol> {
-    /// A model call: its request is content-addressed, without its leading
-    /// `rendered_from_window` messages, which are the window's own render.
+    /// A model call: its request's frame, the request without its
+    /// messages, and the chain of its messages after the leading
+    /// `rendered_from_window`, which are the window's own render, are
+    /// content-addressed.
     Llm {
         request: CheckpointContentRef,
+        messages: CheckpointContentRef,
         rendered_from_window: usize,
         driver_state: Option<M::DriverState>,
     },
@@ -121,10 +124,12 @@ impl<M: TurnProtocol> Clone for CheckpointState<M> {
                 work: match work {
                     CheckpointWork::Llm {
                         request,
+                        messages,
                         rendered_from_window,
                         driver_state,
                     } => CheckpointWork::Llm {
                         request: request.clone(),
+                        messages: messages.clone(),
                         rendered_from_window: *rendered_from_window,
                         driver_state: driver_state.clone(),
                     },
@@ -138,55 +143,57 @@ impl<M: TurnProtocol> Clone for CheckpointState<M> {
 
 impl<M: TurnProtocol> CheckpointState<M> {
     /// Record `state`, storing a pending model request in `content` without
-    /// the messages `window` renders.
+    /// the messages `window` renders, building on `base`, the request an
+    /// earlier checkpoint stored. Answers the request it stored.
     pub(super) fn record(
         state: &MachineState<M>,
         content: &mut TurnCheckpointContent,
         window: Option<&TurnWindow<M::Event>>,
-    ) -> Self {
-        match state {
+        base: Option<&StoredRequest>,
+        encoded: &mut usize,
+    ) -> (Self, Option<StoredRequest>) {
+        let recorded = match state {
             MachineState::PreparingProtocol => Self::PreparingProtocol,
             MachineState::PrepareIteration => Self::PrepareIteration,
             MachineState::Waiting {
                 effect_id, work, ..
-            } => Self::Waiting {
-                effect_id: *effect_id,
-                work: match work {
-                    PendingWork::Llm {
-                        request,
-                        driver_state,
-                    } => {
-                        let shared =
-                            window.map_or(0, |window| window.shared_render(&request.messages));
-                        let request = if shared == 0 {
-                            content.put_value(request.as_ref())
-                        } else {
-                            let mut own = LlmRequest::clone(request);
-                            own.messages.drain(..shared);
-                            content.put_value(&own)
-                        };
-                        CheckpointWork::Llm {
-                            request,
-                            rendered_from_window: shared,
+            } => match work {
+                PendingWork::Llm {
+                    request,
+                    driver_state,
+                } => {
+                    let stored = StoredRequest::record(request, window, base, content, encoded);
+                    let recorded = Self::Waiting {
+                        effect_id: *effect_id,
+                        work: CheckpointWork::Llm {
+                            request: stored.frame.clone(),
+                            messages: stored.messages.head().clone(),
+                            rendered_from_window: stored.rendered_from_window,
                             driver_state: driver_state.clone(),
-                        }
-                    }
-                    work => CheckpointWork::Work { work: work.clone() },
+                        },
+                    };
+                    return (recorded, Some(stored));
+                }
+                work => Self::Waiting {
+                    effect_id: *effect_id,
+                    work: CheckpointWork::Work { work: work.clone() },
                 },
             },
             MachineState::Finished => Self::Finished,
-        }
+        };
+        (recorded, None)
     }
 
     /// The machine state this records, its model request read back from
-    /// `content` after the part `window` renders. A restored wait is always
-    /// re-delivered.
+    /// `content` after the part `window` renders, with the request as it
+    /// is stored. A restored wait is always re-delivered.
     pub(super) fn restore(
         self,
         content: &TurnCheckpointContent,
         window: Option<&TurnWindow<M::Event>>,
-    ) -> Result<MachineState<M>, TurnCheckpointRestoreError> {
-        Ok(match self {
+    ) -> Result<(MachineState<M>, Option<StoredRequest>), TurnCheckpointRestoreError> {
+        let mut stored = None;
+        let state = match self {
             Self::PreparingProtocol => MachineState::PreparingProtocol,
             Self::PrepareIteration => MachineState::PrepareIteration,
             Self::Waiting { effect_id, work } => MachineState::Waiting {
@@ -194,30 +201,23 @@ impl<M: TurnProtocol> CheckpointState<M> {
                 work: match work {
                     CheckpointWork::Llm {
                         request,
+                        messages,
                         rendered_from_window,
                         driver_state,
                     } => {
-                        let mut request: LlmRequest = content.value(&request)?;
-                        if rendered_from_window > 0 {
-                            let render = window.map(TurnWindow::render).ok_or_else(|| {
-                                outside_window("a model request starts with the window's render")
-                            })?;
-                            let mut messages = render
-                                .as_slice()
-                                .get(..rendered_from_window)
-                                .ok_or_else(|| {
-                                    outside_window(
-                                        "a model request starts with more of the window's render than it has",
-                                    )
-                                })?
-                                .to_vec();
-                            messages.append(&mut request.messages);
-                            request.messages = messages;
-                        }
-                        PendingWork::Llm {
-                            request: Arc::new(request),
+                        let request = StoredRequest::restore(
+                            &request,
+                            &messages,
+                            rendered_from_window,
+                            content,
+                            window,
+                        )?;
+                        let work = PendingWork::Llm {
+                            request: Arc::clone(&request.request),
                             driver_state,
-                        }
+                        };
+                        stored = Some(request);
+                        work
                     }
                     CheckpointWork::Work {
                         work: PendingWork::Llm { .. },
@@ -231,7 +231,8 @@ impl<M: TurnProtocol> CheckpointState<M> {
                 delivery: EffectDeliveryStatus::Pending,
             },
             Self::Finished => MachineState::Finished,
-        })
+        };
+        Ok((state, stored))
     }
 
     /// Whether this waits on driver work other than the environment sync.
@@ -265,8 +266,10 @@ pub struct TurnCheckpoint<M: TurnProtocol = UnitTurnProtocol> {
     /// handed again; `None` for a machine started without one.
     pub(super) window: Option<CheckpointWindow>,
     pub(super) messages: CheckpointMessages,
-    /// The ephemeral model-call view, retained independently for resume.
-    pub(super) prompt_messages: CheckpointMessages,
+    /// The ephemeral model-call view, retained independently for resume:
+    /// it names the turn's messages it shares rather than storing them
+    /// again.
+    pub(super) prompt_messages: CheckpointPrompt,
     /// The history records after the window's.
     pub(super) events: CheckpointContentRef,
     #[serde(default)]
@@ -354,50 +357,6 @@ impl CheckpointWindow {
     }
 }
 
-/// A message sequence a checkpoint names: its first `from_window` messages
-/// are the window's, and the rest is content.
-#[derive(Clone, Debug, Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(super) struct CheckpointMessages {
-    pub(super) from_window: usize,
-    pub(super) rest: CheckpointContentRef,
-}
-
-impl CheckpointMessages {
-    /// Record `sequence`, storing what it does not share with `window`.
-    pub(super) fn record<E: Clone>(
-        sequence: &MessageSequence,
-        content: &mut TurnCheckpointContent,
-        window: Option<&TurnWindow<E>>,
-    ) -> Self {
-        let from_window = window.map_or(0, |window| window.shared_messages(sequence));
-        Self {
-            from_window,
-            rest: content.put_sequence(sequence.iter().skip(from_window)),
-        }
-    }
-
-    /// The sequence this records, its leading messages read from `window`.
-    pub(super) fn restore<E: Clone>(
-        &self,
-        content: &TurnCheckpointContent,
-        window: Option<&TurnWindow<E>>,
-    ) -> Result<MessageSequence, TurnCheckpointRestoreError> {
-        let rest = content.sequence(&self.rest)?;
-        if self.from_window == 0 {
-            return Ok(MessageSequence::from_owned(rest));
-        }
-        match window {
-            Some(window) if self.from_window <= window.messages().len() => {
-                Ok(window.messages_then(self.from_window, rest))
-            }
-            _ => Err(outside_window(
-                "a message sequence starts with more of the window than it has",
-            )),
-        }
-    }
-}
-
 pub(super) fn outside_window(message: &str) -> TurnCheckpointRestoreError {
     TurnCheckpointRestoreError::WindowMismatch {
         message: message.to_owned(),
@@ -417,20 +376,21 @@ impl<M: TurnProtocol> TurnCheckpoint<M> {
     }
 
     /// The model request the checkpoint waits on, as it names it: the
-    /// content digest of the request after its leading messages, and how
-    /// many of those are the render of the window it pins. `None` when it
-    /// waits on no model call.
-    pub fn pending_request(&self) -> Option<(&CheckpointContentRef, usize)> {
+    /// content digests of the request's frame and of the chain of its
+    /// messages after the leading ones, and how many of those are the
+    /// render of the window it pins. `None` when it waits on no model call.
+    pub fn pending_request(&self) -> Option<(&CheckpointContentRef, &CheckpointContentRef, usize)> {
         match &self.state {
             CheckpointState::Waiting {
                 work:
                     CheckpointWork::Llm {
                         request,
+                        messages,
                         rendered_from_window,
                         ..
                     },
                 ..
-            } => Some((request, *rendered_from_window)),
+            } => Some((request, messages, *rendered_from_window)),
             _ => None,
         }
     }
@@ -640,6 +600,10 @@ pub struct TurnMachine<M: TurnProtocol = UnitTurnProtocol> {
     pub(super) run_abort: Option<RunAbort>,
     /// The turn's decided completion candidates, in decision order.
     pub(super) decided_completions: Vec<crate::DecidedCompletion>,
+    /// What the turn's last committed checkpoint stored, which the next
+    /// builds on (FIG-5955). Runtime-only: a restore starts it from the
+    /// content it reads.
+    pub(super) content: ContentLedger,
 }
 
 /// The Run control a tool result carried: the namespaced code and message

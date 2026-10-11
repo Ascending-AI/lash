@@ -38,7 +38,7 @@ async fn effect_executor_allocations_are_independent_of_history_depth() {
         .await
         .expect("prepare the fixture's turn");
     let mut driver = turn.driver;
-    let mut machine = driver.turn_machine(turn.messages);
+    let mut machine = driver.turn_machine(turn.window, turn.messages);
     // Warm the session projection and executor's fixed setup before either
     // cohort; their first-use work is unrelated to sequence history depth.
     drop(super::super::local_effects::turn_effect_executor(

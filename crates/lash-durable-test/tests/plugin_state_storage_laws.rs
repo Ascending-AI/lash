@@ -1,4 +1,5 @@
-//! The storage laws of plugin state per namespace (FIG-5301).
+//! The storage laws of plugin state per namespace (FIG-5301), and of a
+//! turn's checkpoint content per phase (FIG-5955).
 //!
 //! A session holds one immutable body per plugin namespace, by content
 //! address; its head holds the map of them. A run records the namespaces it
@@ -23,6 +24,9 @@
 //! - **Frontier:** however many turns publish, a head's namespace frontier
 //!   holds every publication's ordinal and only the receipts of the turn
 //!   that wrote it (FIG-5393).
+//! - **Turn content:** a turn of ten tool rounds after 2 and after 12 history
+//!   turns stages the same checkpoint content at every phase, and no phase
+//!   stages more than what it adds plus each chain's open tail.
 
 // Test code: the PostgreSQL leg reads its database URL from the environment.
 #![allow(clippy::disallowed_methods, clippy::expect_used, clippy::unwrap_used)]
@@ -1137,6 +1141,209 @@ async fn a_run_reverting_to_base_clears_its_overlay_body(tier: Tier) {
     world.shutdown().await;
 }
 
+/// What one owner commit of [`DEPTH_TURN`] stages of the turn's checkpoint
+/// content: its TurnContent nodes and every node beneath them it stages.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct StagedContent {
+    label: CommitLabel,
+    nodes: usize,
+    bytes: usize,
+}
+
+/// The input of the turn [`phases_stage_only_their_new_items`] measures.
+const DEPTH_TURN: &str = "turn-content-depth";
+/// The tool rounds of [`DEPTH_TURN`].
+const DEPTH_ROUNDS: usize = 10;
+/// The bytes of each round's tool argument, which its result echoes.
+const ROUND_BYTES: usize = 1_500;
+/// The bytes of each history turn's input.
+const HISTORY_BYTES: usize = 2_000;
+
+/// The staged content of every commit of [`DEPTH_TURN`], in commit order,
+/// after `history` committed turns before it on `tier`.
+async fn depth_turn_phases(tier: Tier, history: usize) -> Option<Vec<StagedContent>> {
+    let (dialect, postgres_url) = match tier {
+        Tier::SqliteMemory => (Dialect::SqliteMemory, None),
+        Tier::SqliteFile => (Dialect::SqliteFile, None),
+        Tier::Postgres => {
+            let Some(url) = dialect::postgres_url() else {
+                eprintln!("skipping: LASH_POSTGRES_DATABASE_URL is not set");
+                return None;
+            };
+            (Dialect::Postgres, Some(url))
+        }
+    };
+    let storage = Storage::new(Shape::Step, dialect, postgres_url);
+    storage.scripts.register(
+        DEPTH_TURN,
+        (0..DEPTH_ROUNDS)
+            .map(|round| {
+                let label = format!("{round:02}").repeat(ROUND_BYTES / 2);
+                served::response(vec![served::call(
+                    &format!("call-depth-{round:02}"),
+                    NOTE,
+                    serde_json::json!({ "label": label }),
+                )])
+            })
+            .collect(),
+    );
+    let clock = SimClock::new();
+    let database = storage.database(Arc::clone(&clock)).await;
+    let measuring = Arc::new(AtomicBool::new(false));
+    let staged = Arc::new(Mutex::new(Vec::new()));
+    let script = lash_durable_test::Script::new();
+    script.observe_commits({
+        let measuring = Arc::clone(&measuring);
+        let staged = Arc::clone(&staged);
+        Arc::new(move |label, tx| {
+            if measuring.load(Ordering::SeqCst) {
+                staged.lock_recover().push(staged_content(label, tx));
+            }
+        })
+    });
+    let nodes = SimNodes::new(
+        database,
+        clock,
+        script,
+        storage.config(),
+        storage.activation(),
+    );
+    let host = storage
+        .core()
+        .session(session())
+        .create(lash::SessionCreation::root(
+            lash::plugins::SessionToolAccess::ambient(),
+            served::spec(64),
+        ))
+        .await
+        .expect("the session is created");
+    *storage.host.lock_recover() = Some(host);
+    nodes.start("a");
+    for turn in 0..=history {
+        if turn == history {
+            measuring.store(true, Ordering::SeqCst);
+            storage
+                .send(DEPTH_TURN)
+                .await
+                .expect("the measured turn is sent");
+        } else {
+            let filler = format!("history turn {turn:03} ").repeat(HISTORY_BYTES / 17);
+            storage.send(&filler).await.expect("a history turn is sent");
+        }
+        loop {
+            nodes.quiesce().await;
+            let committed = nodes
+                .script()
+                .trace()
+                .iter()
+                .filter(|write| write.point.label == CommitLabel::TURN_COMMIT && write.committed())
+                .count();
+            if committed > turn && matches!(nodes.database().turn(&session()).await, Ok(None)) {
+                break;
+            }
+            assert!(nodes.step().await.is_some(), "turn {turn} stalled");
+        }
+    }
+    let staged = staged.lock_recover().clone();
+    Some(staged)
+}
+
+/// What `tx` stages of the turn's checkpoint content.
+fn staged_content(label: CommitLabel, tx: &lash_durable::ActorTx) -> StagedContent {
+    use lash_core_store::checkpoint_graph::NodeKind;
+    let graph = tx.graph();
+    let mut seen = std::collections::BTreeSet::new();
+    let mut pending: Vec<_> = graph
+        .values()
+        .filter(|node| {
+            node.envelope()
+                .is_ok_and(|envelope| envelope.kind == NodeKind::TURN_CONTENT)
+        })
+        .map(|node| node.id)
+        .collect();
+    let mut bytes = 0;
+    while let Some(id) = pending.pop() {
+        let Some(node) = graph.get(&id) else {
+            continue;
+        };
+        if !seen.insert(id) {
+            continue;
+        }
+        bytes += node.bytes.len();
+        pending.extend(node.children().unwrap_or_default());
+    }
+    StagedContent {
+        label,
+        nodes: seen.len(),
+        bytes,
+    }
+}
+
+/// The bytes any one phase of [`DEPTH_TURN`] may stage of its checkpoint
+/// content, independent of the session's history and of the rounds before
+/// the phase: what the phase adds (a round's tool call and result, each
+/// over [`ROUND_BYTES`], in the messages, the history records and the next
+/// request's messages), the request's frame, and each of those chains'
+/// re-stored open tail, which closes past 4 KiB.
+const PHASE_CONTENT_CEILING: usize = 24 * 1024;
+
+/// FIG-5955: a turn phase stores only its new items. At two history depths
+/// the measured turn's phases stage the same checkpoint content, node for
+/// node, so none of it is the session's history; and no phase stages more
+/// than what it adds plus a constant tail, however many rounds came before
+/// it, so none of it is the turn's earlier phases either.
+async fn phases_stage_only_their_new_items(tier: Tier) {
+    let Some(shallow) = depth_turn_phases(tier, 2).await else {
+        return;
+    };
+    let deep = depth_turn_phases(tier, 12).await.expect("the same tier");
+    eprintln!("label            shallow nodes/bytes   deep nodes/bytes");
+    for (shallow, deep) in shallow.iter().zip(&deep) {
+        eprintln!(
+            "{:<16} {:>5} {:>8}          {:>5} {:>8}",
+            shallow.label.as_str(),
+            shallow.nodes,
+            shallow.bytes,
+            deep.nodes,
+            deep.bytes
+        );
+    }
+    let labels =
+        |phases: &[StagedContent]| phases.iter().map(|phase| phase.label).collect::<Vec<_>>();
+    assert_eq!(
+        labels(&shallow),
+        labels(&deep),
+        "both turns commit the same phases"
+    );
+    assert!(
+        shallow.iter().any(|phase| phase.nodes > 0),
+        "the turn's phases stage checkpoint content"
+    );
+    for (index, (shallow, deep)) in shallow.iter().zip(&deep).enumerate() {
+        assert_eq!(
+            shallow.nodes, deep.nodes,
+            "phase {index} ({}) stages a node count that grows with the session's history",
+            shallow.label
+        );
+        assert!(
+            shallow.bytes.abs_diff(deep.bytes) <= 64,
+            "phase {index} ({}) stages {} bytes after 2 turns and {} after 12: the \
+             session's history is in it",
+            shallow.label,
+            shallow.bytes,
+            deep.bytes
+        );
+        assert!(
+            deep.bytes <= PHASE_CONTENT_CEILING,
+            "phase {index} ({}) stages {} bytes of checkpoint content, over the {} a \
+             phase's new items and tail may take: the turn's earlier phases are in it",
+            deep.label,
+            deep.bytes,
+            PHASE_CONTENT_CEILING
+        );
+    }
+}
+
 tiered_laws!(
     current_thread:
     a_run_reverting_to_base_clears_its_overlay_body,
@@ -1144,4 +1351,5 @@ tiered_laws!(
     a_cells_pruned_calls_keep_their_changes_and_never_rewrite_an_unchanged_namespace,
     a_fork_copies_and_resets_namespaces_as_declared_at_its_revision,
     a_heads_frontier_keeps_only_the_receipts_of_the_run_that_wrote_it,
+    phases_stage_only_their_new_items,
 );

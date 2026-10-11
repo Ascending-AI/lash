@@ -85,13 +85,14 @@ pub use redacted::Redacted;
 pub use retained_output::{OutputRetentionPolicy, OutputValue, RetainedOutput, RetainedValue};
 pub use run_aggregate::RunAggregateWakePolicy;
 pub use sansio::{
-    ChatContextProjector, CheckpointContentRef, CheckpointDelivery, CheckpointResumeAction,
-    CompletedToolCall, ContextProjector, DriverAction, DriverContextView, Effect, EffectId,
-    ExpandedRow, ExpandedWrapper, LlmCallError, ModelToolCalls, PendingToolCall, PendingWork,
-    ProjectorContext, ProtocolDriverHandle, Response, ResponseToolCalls, SavedTurn,
-    TURN_CHECKPOINT_SCHEMA_VERSION, ToolExpansionPlan, ToolWave, TurnCheckpoint,
-    TurnCheckpointContent, TurnCheckpointRestoreError, TurnMachine, TurnMachineConfig,
-    TurnProtocol, TurnWindow, TurnWindowPin, UndecodableDriverState, UnitTurnProtocol,
+    ChatContextProjector, CheckpointContentPin, CheckpointContentRef, CheckpointDelivery,
+    CheckpointDelta, CheckpointResumeAction, CompletedToolCall, ContextProjector, DriverAction,
+    DriverContextView, Effect, EffectId, ExpandedRow, ExpandedWrapper, LlmCallError,
+    ModelToolCalls, PendingToolCall, PendingWork, ProjectorContext, ProtocolDriverHandle, Response,
+    ResponseToolCalls, SavedTurn, TURN_CHECKPOINT_SCHEMA_VERSION, ToolExpansionPlan, ToolWave,
+    TurnCheckpoint, TurnCheckpointContent, TurnCheckpointRestoreError, TurnMachine,
+    TurnMachineConfig, TurnProtocol, TurnWindow, TurnWindowPin, UndecodableDriverState,
+    UnitTurnProtocol,
 };
 pub use schema_contract::{
     OmissionNullPath, OmissionNullPathSegment, ProjectionMode, ProviderSchemaCapabilities,

@@ -1,3 +1,4 @@
+use super::checkpoint_content::Chain;
 use super::*;
 use crate::ReportedFailure;
 use crate::llm::types::{StreamBlockEvent, StreamBlockKind};
@@ -5,12 +6,51 @@ use crate::llm::types::{StreamBlockEvent, StreamBlockKind};
 impl<M: TurnProtocol> TurnMachine<M> {
     /// Restore only the Prompt View retained by the environment prelude.
     pub fn adopt_prepared_messages(&mut self, messages: crate::MessageSequence) {
+        let messages = self.rebased(messages);
+        let agreed = self.agreed_prefix(&self.prompt_messages, &messages);
+        self.content.rewrote(Sequence::Prompt, agreed);
         self.prompt_messages = messages;
     }
 
     /// Adopt the real inputs and outputs retained by a recorded sync.
     pub fn adopt_committed_messages(&mut self, messages: crate::MessageSequence) {
+        let messages = self.rebased(messages);
+        let agreed = self.agreed_prefix(&self.messages, &messages);
+        self.content.rewrote(Sequence::Messages, agreed);
         self.messages = messages;
+    }
+
+    /// `messages` over the machine's window: the messages it shares with
+    /// the window are the window's own, so a checkpoint finds them shared
+    /// without comparing them.
+    fn rebased(&self, messages: crate::MessageSequence) -> crate::MessageSequence {
+        let Some(window) = &self.window else {
+            return messages;
+        };
+        let shared = window.shared_messages(&messages);
+        if shared == 0 || messages.has_base(window.messages()) {
+            return messages;
+        }
+        window.messages_then(shared, messages.iter().skip(shared).cloned().collect())
+    }
+
+    /// How many leading messages `before` and `now` agree on: those `now`
+    /// keeps of `before`'s. The window's messages both lead with agree by
+    /// construction.
+    fn agreed_prefix(&self, before: &MessageSequence, now: &MessageSequence) -> usize {
+        let from = self
+            .window
+            .as_ref()
+            .filter(|window| before.has_base(window.messages()) && now.has_base(window.messages()))
+            .map_or(0, |window| window.messages().len());
+        from + before
+            .iter()
+            .skip(from)
+            .zip(now.iter().skip(from))
+            .take_while(|(before, now)| {
+                crate::session_model::message::message_content_equal(*before, *now)
+            })
+            .count()
     }
 
     /// Whether this machine's projector contributes a dedicated User prefix
@@ -64,6 +104,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
             observed_cancellation: None,
             resume_work: None,
             run_abort: None,
+            content: ContentLedger::default(),
         }
     }
 
@@ -259,12 +300,113 @@ impl<M: TurnProtocol> TurnMachine<M> {
     /// The machine's bounded checkpoint, with the transcript content it
     /// names by digest: what the turn added to the window it started from.
     pub fn checkpoint(&self) -> SavedTurn<M> {
+        let (checkpoint, content, _, _) = self.record(None, Floors::default());
+        SavedTurn {
+            checkpoint,
+            content,
+        }
+    }
+
+    /// The machine's checkpoint as a phase stores it (FIG-5955): the same
+    /// checkpoint [`Self::checkpoint`] takes, its content only the blobs no
+    /// committed checkpoint of the turn stored, which it names by the pins
+    /// the host gave them. It encodes only the items it does not keep from
+    /// the committed checkpoint. The host stores it, and once its commit is
+    /// acknowledged reports the pins of what it added
+    /// ([`Self::checkpoint_stored`]); until then the turn's checkpoints
+    /// still build on the committed one.
+    pub fn checkpoint_delta(&mut self) -> CheckpointDelta<M> {
+        let (base, floors) = self.content.base();
+        let (checkpoint, mut content, chains, encoded) = self.record(base, floors);
+        let held = self.content.stage(chains, &mut content);
+        CheckpointDelta {
+            saved: SavedTurn {
+                checkpoint,
+                content,
+            },
+            held,
+            encoded,
+        }
+    }
+
+    /// The checkpoint [`Self::checkpoint_delta`] took last, or the one the
+    /// machine was restored from, is stored, each blob it added under the
+    /// host's pin in `stored`: later checkpoints build on it.
+    pub fn checkpoint_stored(
+        &mut self,
+        stored: impl IntoIterator<Item = (CheckpointContentRef, CheckpointContentPin)>,
+    ) {
+        self.content.stored(stored);
+    }
+
+    /// The checkpoint over `base`, the chains a committed checkpoint stored,
+    /// whose sequences are unchanged through `floors`; its content every
+    /// blob it did not keep from `base`, the chains it is stored as and how
+    /// many items it encoded.
+    fn record(
+        &self,
+        base: Option<&StoredChains>,
+        floors: Floors,
+    ) -> (
+        TurnCheckpoint<M>,
+        TurnCheckpointContent,
+        StoredChains,
+        usize,
+    ) {
         let mut content = TurnCheckpointContent::default();
+        let mut encoded = 0;
         let window = self.window.as_ref();
         let window_events = window.map_or(0, |window| window.events().len());
+        let (state, request) = CheckpointState::record(
+            &self.state,
+            &mut content,
+            window,
+            base.and_then(|base| base.request.as_ref()),
+            &mut encoded,
+        );
+        let (messages, stored_messages) = CheckpointMessages::record(
+            &self.messages,
+            window,
+            base.map(|base| &base.messages),
+            floors.messages,
+            &mut content,
+            &mut encoded,
+        );
+        let (prompt_messages, stored_prompt) = CheckpointPrompt::record(
+            &self.prompt_messages,
+            &self.messages,
+            window,
+            base.map(|base| &base.prompt),
+            floors.prompt,
+            &mut content,
+            &mut encoded,
+        );
+        // The machine only appends to its history, so the window's records
+        // lead it.
+        let turn_events = self
+            .events
+            .as_slice()
+            .get(window_events..)
+            .unwrap_or_default();
+        let events = Chain::of(
+            turn_events.iter(),
+            turn_events.len(),
+            base.map(|base| &base.events),
+            floors.events.saturating_sub(window_events),
+            &mut content,
+            &mut encoded,
+        );
+        let completions = Chain::of(
+            self.decided_completions.iter(),
+            self.decided_completions.len(),
+            base.map(|base| &base.completions),
+            usize::MAX,
+            &mut content,
+            &mut encoded,
+        );
         let checkpoint = TurnCheckpoint {
             schema_version: TURN_CHECKPOINT_SCHEMA_VERSION,
-            state: CheckpointState::record(&self.state, &mut content, window),
+            state,
             pending_effects: self
                 .side_effect_outbox
                 .iter()
@@ -290,20 +432,9 @@ impl<M: TurnProtocol> TurnMachine<M> {
                 .collect(),
             next_effect_id: self.next_effect_id,
             window: window.map(CheckpointWindow::of),
-            messages: CheckpointMessages::record(&self.messages, &mut content, window),
-            prompt_messages: CheckpointMessages::record(
-                &self.prompt_messages,
-                &mut content,
-                window,
-            ),
-            // The machine only appends to its history, so the window's
-            // records lead it.
-            events: content.put_sequence(
-                self.events
-                    .as_slice()
-                    .get(window_events..)
-                    .unwrap_or_default(),
-            ),
+            messages,
+            prompt_messages,
+            events: events.head().clone(),
             progress_event_cursor: self.progress_event_cursor,
             progress_boundaries: self.progress_boundaries.clone(),
             protocol_iteration: self.protocol_iteration,
@@ -311,12 +442,18 @@ impl<M: TurnProtocol> TurnMachine<M> {
             cumulative_usage: self.cumulative_usage.clone(),
             last_call_usage: self.last_call_usage.clone(),
             environment: self.environment.clone(),
-            decided_completions: content.put_sequence(&self.decided_completions),
+            decided_completions: completions.head().clone(),
         };
-        SavedTurn {
-            checkpoint,
-            content,
-        }
+        let chains = StoredChains {
+            messages: stored_messages,
+            prompt: stored_prompt,
+            events,
+            completions,
+            // A turn between model calls keeps its last request stored: the
+            // next one builds on it.
+            request: request.or_else(|| base.and_then(|base| base.request.clone())),
+        };
+        (checkpoint, content, chains, encoded)
     }
 
     /// Re-hydrate a machine from a checkpoint, the content it names and the
@@ -352,20 +489,33 @@ impl<M: TurnProtocol> TurnMachine<M> {
             .pending_effects
             .into_iter()
             .collect::<VecDeque<_>>();
-        let messages = checkpoint.messages.restore(&content, window.as_ref())?;
-        let prompt_messages = checkpoint
-            .prompt_messages
-            .restore(&content, window.as_ref())?;
+        let (messages, stored_messages) = checkpoint.messages.restore(&content, window.as_ref())?;
+        let (prompt_messages, stored_prompt) =
+            checkpoint
+                .prompt_messages
+                .restore(&content, window.as_ref(), &messages)?;
         let mut events = window
             .as_ref()
             .map(|window| window.events().clone())
             .unwrap_or_default();
-        for event in content.sequence(&checkpoint.events)? {
+        let (turn_events, stored_events) = content.sequence(&checkpoint.events)?;
+        for event in turn_events {
             events.push(event);
         }
+        let (decided_completions, stored_completions) =
+            content.sequence(&checkpoint.decided_completions)?;
+        let (state, request) = checkpoint.state.restore(&content, window.as_ref())?;
+        let mut ledger = ContentLedger::default();
+        ledger.restored(StoredChains {
+            messages: stored_messages,
+            prompt: stored_prompt,
+            events: stored_events,
+            completions: stored_completions,
+            request,
+        });
         let machine = Self {
             config,
-            state: checkpoint.state.restore(&content, window.as_ref())?,
+            state,
             side_effect_outbox,
             next_effect_id: checkpoint.next_effect_id,
             window,
@@ -379,10 +529,11 @@ impl<M: TurnProtocol> TurnMachine<M> {
             cumulative_usage: checkpoint.cumulative_usage,
             last_call_usage: checkpoint.last_call_usage,
             environment: checkpoint.environment,
-            decided_completions: content.sequence(&checkpoint.decided_completions)?,
+            decided_completions,
             observed_cancellation: None,
             resume_work: None,
             run_abort: None,
+            content: ledger,
         };
         machine.check_parked_state()?;
         Ok(machine)
@@ -510,6 +661,9 @@ impl<M: TurnProtocol> TurnMachine<M> {
         if safe < self.messages.len() {
             self.messages.make_mut().truncate(safe);
             self.events.truncate(self.progress_event_cursor);
+            self.content.rewrote(Sequence::Messages, safe);
+            self.content
+                .rewrote(Sequence::Events, self.progress_event_cursor);
         }
         self.finish(TurnOutcome::Stopped(TurnStop::Cancelled { evidence }));
     }
@@ -531,6 +685,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
         self.emit(SessionStreamEvent::TurnOutcome { outcome });
         self.emit(SessionStreamEvent::Done);
         let msgs = std::mem::take(&mut self.messages);
+        self.content.rewrote(Sequence::Messages, 0);
         let event_delta = self.next_event_delta();
         let protocol_iteration = self.protocol_iteration;
         self.state = MachineState::Finished;

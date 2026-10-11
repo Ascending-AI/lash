@@ -229,7 +229,7 @@ pub(super) async fn run(
             }
             consume_answered_cell(cx, drive, &mut tx, row, answered_cell, true).await?;
             let written = super::phases::write_run_changes(&*drive, &mut tx, &session, &row.run);
-            let checkpoint = checkpoint.staged_in(&mut tx);
+            let (checkpoint, stored) = checkpoint.staged_in(&mut tx);
             tx.write(DomainWrite::Turn(TurnWrite::Advance {
                 session: session.clone(),
                 run: row.run.clone(),
@@ -273,6 +273,7 @@ pub(super) async fn run(
             }
             committed?;
             *unsettled = false;
+            stored.committed(drive.machine());
             drive.run_changes_committed(&written);
             drive.phase_committed().await;
             // The candidates are selected: their exports are discharged

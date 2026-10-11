@@ -97,12 +97,13 @@ impl RuntimeDrive {
     ) -> Result<Self, TurnError> {
         let DurableTurn {
             mut driver,
+            window,
             messages,
             before_turn,
             trace_scope,
             attachments,
         } = turn;
-        let machine = fresh_machine(&mut driver, messages)?;
+        let machine = fresh_machine(&mut driver, window, messages)?;
         Ok(Self::assemble(
             driver,
             machine,
@@ -130,12 +131,13 @@ impl RuntimeDrive {
     ) -> Result<OpenTurn, TurnError> {
         let DurableTurn {
             mut driver,
+            window,
             messages,
             before_turn,
             trace_scope,
             attachments,
         } = turn;
-        let config = fresh_machine(&mut driver, messages)?.into_config();
+        let config = fresh_machine(&mut driver, window, messages)?.into_config();
         let RestoredTurn {
             machine,
             namespaces,
@@ -374,11 +376,12 @@ async fn stored_cell(
 /// selection is refused.
 fn fresh_machine(
     driver: &mut RuntimeTurnDriver<'static>,
+    window: crate::runtime::durable::head::TurnWindow,
     messages: crate::MessageSequence,
 ) -> Result<TurnMachine, TurnError> {
     driver.protocol_reply.mark_run_start(messages.iter());
     let refused = driver.validate_recorded_selection().err();
-    let mut machine = driver.turn_machine(messages);
+    let mut machine = driver.turn_machine(window, messages);
     if let Some(event) = refused {
         machine.fail_turn(*event);
     }
@@ -1069,9 +1072,13 @@ impl RuntimeTurnDriver<'static> {
             .map_err(RuntimeEffectControllerError::into_runtime_error)
     }
 
-    /// The machine a fresh turn starts from `messages`.
-    fn turn_machine(&mut self, messages: crate::MessageSequence) -> TurnMachine {
-        self.prepare_machine(messages, 0)
+    /// The machine a fresh turn starts from `messages`, in `window`.
+    fn turn_machine(
+        &mut self,
+        window: crate::runtime::durable::head::TurnWindow,
+        messages: crate::MessageSequence,
+    ) -> TurnMachine {
+        self.prepare_machine(window, messages, 0)
     }
 
     /// Pin the session's live tool surface again, as the turn's sync did.

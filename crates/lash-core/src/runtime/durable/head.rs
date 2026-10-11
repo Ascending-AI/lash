@@ -83,16 +83,8 @@ impl SessionHead {
     ///
     /// [`TurnError::Exec`] when the pin does not encode.
     pub fn pin(&self) -> Result<TurnWindowPin, TurnError> {
-        let head = SessionHeadRef {
-            generation: 0,
-            revision: self.state.head_revision,
-            leaf: self.state.session_graph.leaf_node_id.clone(),
-            checkpoint: self.state.checkpoint_ref.clone(),
-        };
-        let pin = serde_json::to_string(&head).map_err(|error| {
-            TurnError::Exec(format!("the window's pin does not encode: {error}"))
-        })?;
-        Ok(TurnWindowPin::new(pin))
+        window_pin(&self.state)
+            .map_err(|error| TurnError::Exec(format!("the window's pin does not encode: {error}")))
     }
 
     /// The head's window, pinned by this head: what a turn that starts here
@@ -282,6 +274,17 @@ pub async fn load_window(
     let store = session_store(backend, session).await?;
     let state = load_state(&store, session, WindowSelector::Admitted(head)).await?;
     Ok(window_of(&state, pin.clone()))
+}
+
+/// The pin of the window of `state`, a committed head: the head itself.
+pub(crate) fn window_pin(state: &RuntimeSessionState) -> Result<TurnWindowPin, serde_json::Error> {
+    let head = SessionHeadRef {
+        generation: 0,
+        revision: state.head_revision,
+        leaf: state.session_graph.leaf_node_id.clone(),
+        checkpoint: state.checkpoint_ref.clone(),
+    };
+    Ok(TurnWindowPin::new(serde_json::to_string(&head)?))
 }
 
 /// `state`'s window under `pin`.
