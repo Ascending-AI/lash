@@ -1,16 +1,15 @@
 //! A turn's recorded preparation, stored content-addressed beside the turn
 //! (FIG-5133).
 //!
-//! The environment sync records the prelude so a replay never re-runs the
-//! transforms that produced it, but the prelude carries the whole history,
-//! so journaling it verbatim grows every turn's journal with its
-//! transcript. The sync's step body writes the prelude's bytes to the store
-//! set before its outcome completes, and the outcome journals only their
-//! digest. The bytes are held by the turn journal's `execution` referrer
-//! under a journal guard (ADR 0113 §2.1), so the cleanup relay releases
-//! them once the turn's run settles and the journal cannot replay.
+//! The sync journals only the prelude digest. The stored prelude names the
+//! committed history window and records only changes to its two views
+//! (FIG-5961): real history over that window, then the prepared prompt over
+//! that history. Restore reads the named window; it never reruns preparation
+//! hooks or attachment policies. The journal's guarded execution edge keeps
+//! the prelude until settlement (ADR 0113 §2.1).
 
 use crate::runtime::effect::RuntimeEffectControllerError;
+use lash_sansio::core_support::{MessageCoreSupport as _, MessageSequenceCoreSupport as _};
 
 /// version_surface = "coexist"
 /// version_guard(items(TURN_PRELUDE_DOMAIN, of_store_bytes))
@@ -22,10 +21,78 @@ const TURN_PRELUDE_DOMAIN: &str = "lash-turn-prelude/v1";
 pub struct TurnPrelude {
     pub configuration: crate::EffectAddress,
     pub pressure: Vec<crate::plugin::DecidedContextPressure>,
-    /// Real turn history, independent of the ephemeral Prompt View.
-    pub history: crate::MessageSequence,
-    pub context: crate::session_model::context::PreparedContext,
+    /// The committed graph window preparation started from. Its leaf stays
+    /// on the active ancestry while the run can resume; checkpoint tails
+    /// are recorded in the history view rather than naming a collectable
+    /// checkpoint.
+    pub history: crate::store::SessionHeadRef,
+    history_view: MessageView,
+    prompt_view: MessageView,
     pub before_turn: Option<crate::EffectAddress>,
+}
+
+/// Changes to one message view. Unchanged messages stay in the referenced
+/// window. A prompt records its omissions against real history, avoiding a
+/// second copy of both the committed prefix and the turn's additions.
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+struct MessageView {
+    truncate_to: Option<usize>,
+    replacements: Vec<(usize, crate::Message)>,
+    appended: Vec<crate::Message>,
+}
+
+impl MessageView {
+    fn between(base: &crate::MessageSequence, next: &crate::MessageSequence) -> Self {
+        if let Some(delta) = base.preserved_extension_delta(next) {
+            return Self {
+                appended: delta.to_vec(),
+                ..Self::default()
+            };
+        }
+        Self {
+            truncate_to: (next.len() < base.len()).then_some(next.len()),
+            replacements: base
+                .iter()
+                .zip(next.iter())
+                .enumerate()
+                .filter(|(_, (before, after))| !before.content_equals(after))
+                .map(|(index, (_, message))| (index, message.clone()))
+                .collect(),
+            appended: next.iter().skip(base.len()).cloned().collect(),
+        }
+    }
+
+    fn restore(
+        &self,
+        base: &crate::MessageSequence,
+    ) -> Result<crate::MessageSequence, RuntimeEffectControllerError> {
+        let retained = self.truncate_to.unwrap_or(base.len());
+        if retained > base.len()
+            || self
+                .replacements
+                .iter()
+                .any(|(index, _)| *index >= retained)
+            || self
+                .replacements
+                .windows(2)
+                .any(|pair| pair[0].0 >= pair[1].0)
+        {
+            return Err(RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::RuntimeStoreCorrupt,
+                "the recorded prelude's message edits do not address its window",
+            ));
+        }
+        let mut messages = base.clone();
+        if self.truncate_to.is_some() || !self.replacements.is_empty() {
+            let changed = messages.make_mut();
+            changed.truncate(retained);
+            for (index, message) in &self.replacements {
+                changed[*index] = message.clone();
+            }
+        }
+        messages.extend(self.appended.clone());
+        Ok(messages)
+    }
 }
 
 /// The digest of one recorded prelude's store bytes: the only part of the
@@ -91,6 +158,92 @@ pub trait TurnPreludeStore: Send + Sync {
 }
 
 impl TurnPrelude {
+    /// Start preparation over the named committed window. Capture the live
+    /// views with [`Self::capture_messages`] before recording it.
+    #[must_use]
+    pub fn new(
+        configuration: crate::EffectAddress,
+        pressure: Vec<crate::plugin::DecidedContextPressure>,
+        mut history: crate::store::SessionHeadRef,
+        before_turn: Option<crate::EffectAddress>,
+    ) -> Self {
+        // Only graph facts are the base. A phase checkpoint can be retired
+        // after the head advances, independently of the prelude's lifetime.
+        history.checkpoint = None;
+        Self {
+            configuration,
+            pressure,
+            history,
+            history_view: MessageView::default(),
+            prompt_view: MessageView::default(),
+            before_turn,
+        }
+    }
+
+    /// Retain only the changes preparation made over the committed window,
+    /// and the prepared prompt's changes over real history.
+    pub fn capture_messages(
+        &mut self,
+        base: &crate::MessageSequence,
+        history: &crate::MessageSequence,
+        prompt: &crate::MessageSequence,
+    ) {
+        self.history_view = MessageView::between(base, history);
+        self.prompt_view = MessageView::between(history, prompt);
+    }
+
+    /// Reconstruct the pinned base, recorded history and prepared context
+    /// from the named window. No preparation hook or policy runs on restore.
+    ///
+    /// # Errors
+    /// Missing or corrupt window state refuses restore; store faults retain
+    /// their typed cause and retry classification.
+    pub async fn restore(
+        &self,
+        store: &crate::store::SessionStore,
+    ) -> Result<
+        (
+            crate::MessageSequence,
+            crate::MessageSequence,
+            crate::session_model::context::PreparedContext,
+        ),
+        RuntimeEffectControllerError,
+    > {
+        if self.configuration.execution_scope.session_id() != Some(store.session_id()) {
+            return Err(RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::RuntimeStoreCorrupt,
+                "the recorded prelude names another session's history",
+            ));
+        }
+        let base = crate::store::load_session_window_state(
+            store,
+            crate::store::WindowSelector::Admitted(self.history.clone()),
+        )
+        .await
+        .map_err(|error| {
+            let settled = RuntimeEffectControllerError::from(crate::PluginError::from(error));
+            if settled.turn_failure_cause() == crate::TurnFailureCause::LiveFault {
+                settled.retryable_uncommitted_derivation()
+            } else {
+                settled
+            }
+        })?
+        .ok_or_else(|| {
+            RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::ArtifactMissing,
+                "the recorded prelude's history window is not stored",
+            )
+        })?;
+        let base = crate::MessageSequence::from_base(base.state.read_model().messages);
+        let history = self.history_view.restore(&base)?;
+        let prompt = self.prompt_view.restore(&history)?;
+        Ok((
+            base,
+            history,
+            crate::session_model::context::PreparedContext { messages: prompt },
+        ))
+    }
+
     /// Write this prelude to `store`, held by the journal of `scope`, and
     /// answer the reference the outcome journals. The write completes before
     /// the step's outcome does, so a recorded reference always names stored

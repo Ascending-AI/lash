@@ -312,8 +312,20 @@ impl RuntimeTurnDriver<'_> {
             .read(self.host.core.durability.turn_prelude_store.as_ref())
             .await
             .map_err(RuntimeEffectControllerError::into_runtime_error)?;
-        machine.adopt_committed_messages(prelude.history.clone());
-        machine.adopt_prepared_messages(prelude.context.messages.clone());
+        let store = self.session.history_store().ok_or_else(|| {
+            RuntimeError::new(
+                RuntimeErrorCode::ArtifactMissing,
+                "the recorded turn prelude has no history store",
+            )
+        })?;
+        let (base, history, context) = prelude
+            .restore(&store)
+            .await
+            .map_err(RuntimeEffectControllerError::into_runtime_error)?;
+        machine.adopt_committed_messages(history);
+        machine.adopt_prepared_messages(context.messages.clone());
+        self.prelude_base_messages = base;
+        self.prepared_context = context;
         self.prelude = prelude;
         // The surface the sync recorded is the one the iteration's tool calls
         // resolve against, whether the sync ran here or was served from the

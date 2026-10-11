@@ -181,6 +181,12 @@ impl LashRuntime {
                 .plugins(),
         );
         let base_read_model = self.state.read_model();
+        let prelude_history = crate::store::SessionHeadRef {
+            generation: 0,
+            revision: self.state.head_revision,
+            leaf: self.state.session_graph.leaf_node_id.clone(),
+            checkpoint: self.state.checkpoint_ref.clone(),
+        };
         let messages =
             crate::MessageSequence::from_base_and_delta(base_read_model.messages, turn_delta)
                 .with_base_render_cache(base_read_model.prompt_render_cache);
@@ -218,18 +224,35 @@ impl LashRuntime {
             messages: request_messages,
         };
         drop(context_transform);
-        let mut prelude = Box::new(crate::runtime::effect::TurnPrelude {
-            configuration: crate::EffectAddress::new(
+        let mut prelude = Box::new(crate::runtime::effect::TurnPrelude::new(
+            crate::EffectAddress::new(
                 controller.execution_scope().clone(),
                 format!("turn-config:{run}"),
             )
             .map_err(RuntimeEffectControllerError::from)
             .map_err(RuntimeEffectControllerError::into_runtime_error)?,
-            pressure: pressure.decisions,
-            history: messages.clone(),
-            context: prepared_context.clone(),
-            before_turn: None,
-        });
+            pressure.decisions,
+            prelude_history,
+            None,
+        ));
+        let store = self.services.store.as_ref().ok_or_else(|| {
+            RuntimeError::new(
+                RuntimeErrorCode::ArtifactMissing,
+                "turn preparation has no history store",
+            )
+        })?;
+        // The runtime's read model may include a phase checkpoint's tail.
+        // Read the immutable graph base the prelude names; the tail belongs
+        // to the recorded view edits and needs no separate checkpoint root.
+        let (prelude_base_messages, _, _) = prelude
+            .restore(store)
+            .await
+            .map_err(RuntimeEffectControllerError::into_runtime_error)?;
+        prelude.capture_messages(
+            &prelude_base_messages,
+            &messages,
+            &prepared_context.messages,
+        );
         self.state.last_prompt_usage = None;
 
         // The before-turn hooks: their session changes and events.
@@ -319,6 +342,8 @@ impl LashRuntime {
             session,
             policy: resolved_turn_policy,
             prelude,
+            prelude_base_messages,
+            prepared_context,
             answered_cell_calls: Default::default(),
             host: self.host.clone(),
             turn_id: run.clone(),

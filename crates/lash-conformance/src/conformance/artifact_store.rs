@@ -264,27 +264,34 @@ pub async fn process_env_survives_reopen(reopenable: ReopenableProcessExecutionE
     reason = "conformance fixture validates its setup"
 )]
 fn sample_turn_prelude(turn: &'static str, text: &str) -> crate::TurnPrelude {
-    crate::TurnPrelude {
-        configuration: crate::EffectAddress::new(
+    let mut prelude = crate::TurnPrelude::new(
+        crate::EffectAddress::new(
             crate::ExecutionScope::turn("prelude-session", turn),
             format!("turn-config:{turn}"),
         )
         .expect("turn config address"),
-        pressure: Vec::new(),
-        history: crate::MessageSequence::from(vec![crate::Message {
-            id: format!("{turn}-input"),
-            role: crate::MessageRole::User,
-            parts: Arc::new(vec![crate::Part::text(
-                format!("{turn}-input-part"),
-                text.to_owned(),
-                None,
-            )]),
-            origin: None,
-            reply_marker: None,
-        }]),
-        context: Default::default(),
-        before_turn: None,
-    }
+        Vec::new(),
+        crate::store::SessionHeadRef {
+            generation: 0,
+            revision: 0,
+            leaf: None,
+            checkpoint: None,
+        },
+        None,
+    );
+    let history = crate::MessageSequence::from(vec![crate::Message {
+        id: format!("{turn}-input"),
+        role: crate::MessageRole::User,
+        parts: Arc::new(vec![crate::Part::text(
+            format!("{turn}-input-part"),
+            text.to_owned(),
+            None,
+        )]),
+        origin: None,
+        reply_marker: None,
+    }]);
+    prelude.capture_messages(&crate::MessageSequence::default(), &history, &history);
+    prelude
 }
 
 #[expect(

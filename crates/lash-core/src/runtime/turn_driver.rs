@@ -40,6 +40,8 @@ pub(super) struct RuntimeTurnDriver<'a> {
     pub(super) turn_index: usize,
     pub(super) turn_pipeline: TurnBoundary,
     pub(super) prelude: Box<crate::runtime::effect::TurnPrelude>,
+    pub(super) prelude_base_messages: crate::MessageSequence,
+    pub(super) prepared_context: crate::session_model::context::PreparedContext,
     /// Parent-session calls only. Child runtimes assemble their own ledgers.
     pub(super) llm_calls: Vec<crate::LlmCallRecord>,
     /// Contained provider panic, deferred until the terminal turn commits.

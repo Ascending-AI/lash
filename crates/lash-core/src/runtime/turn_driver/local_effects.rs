@@ -183,8 +183,11 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                         }
                     };
                 let mut prelude = runner.driver.prelude.clone();
-                prelude.history = runner.messages.clone();
-                prelude.context.messages = runner.prompt_messages.clone();
+                prelude.capture_messages(
+                    &runner.driver.prelude_base_messages,
+                    &runner.messages,
+                    &runner.prompt_messages,
+                );
                 // The prelude is stored before this outcome completes, and
                 // the outcome journals only its digest (FIG-5133).
                 let prelude = prelude
@@ -244,6 +247,8 @@ pub(super) fn turn_effect_executor(
         session: driver.session.clone_for_effect(),
         policy: driver.policy.clone(),
         prelude: driver.prelude.clone(),
+        prelude_base_messages: driver.prelude_base_messages.clone(),
+        prepared_context: driver.prepared_context.clone(),
         answered_cell_calls: Default::default(),
         host: driver.host.clone(),
         scoped_effect_controller,

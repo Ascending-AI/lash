@@ -6,10 +6,16 @@ use super::*;
 #[tokio::test]
 async fn effect_executor_allocations_are_independent_of_history_depth() {
     let backend = crate::testing::sqlite_recording_backend().await;
+    let session_id = crate::SessionId::fixture("sequence-sharing");
+    let store =
+        crate::testing::runtime_helpers::recording_session_store(&backend, session_id.clone())
+            .await;
     let mut runtime = crate::testing::runtime_helpers::TestRuntime::new(
         &backend,
         crate::testing::TestProvider::builder().build(),
     )
+    .store(store)
+    .with_session_id(session_id)
     .build()
     .await;
     let run = crate::TurnId::from("sequence-sharing");
@@ -64,8 +70,8 @@ async fn effect_executor_allocations_are_independent_of_history_depth() {
         // Owned history occurs after a cold restore or a plugin rewrite.
         // Both sequences and the recorded prelude are copied by the actual
         // executor constructor, including for effects that never read them.
-        driver.prelude.history = history.clone();
-        driver.prelude.context.messages = history.clone();
+        driver.prelude_base_messages = history.clone();
+        driver.prepared_context.messages = history.clone();
         machine.adopt_committed_messages(history.clone());
         machine.adopt_prepared_messages(history);
         let measurement = allocation_counter::Measurement::start();
