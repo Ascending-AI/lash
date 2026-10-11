@@ -274,7 +274,7 @@ impl Provider for DevFailureProvider {
     fn serialize_config(&self) -> serde_json::Value {
         serde_json::json!({
             "scenario": self.scenario.as_str(),
-            "dialect": crate::RLM_LANGUAGE_ID
+            "dialect": "typescript"
         })
     }
 
@@ -414,9 +414,9 @@ impl DevFailureProvider {
     }
 }
 
-/// One scripted TypeScript cell (ADR 0096).
+/// These dev scenarios script TypeScript cells (ADR 0139).
 fn cell(body: &str) -> String {
-    let tag = crate::RLM_LANGUAGE_ID;
+    let tag = "typescript";
     format!("<{tag}>\n{body}\n</{tag}>")
 }
 

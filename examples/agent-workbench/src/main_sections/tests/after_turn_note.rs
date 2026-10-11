@@ -76,6 +76,7 @@ async fn the_after_turn_note_commits_with_the_turn_after_the_one_it_summarizes()
         "agent_workbench",
         workbench_session_prompt(
             crate::session_protocol::SessionProtocol::Standard,
+            WorkbenchDialect::TypeScript,
             &mail_world,
         ),
     )

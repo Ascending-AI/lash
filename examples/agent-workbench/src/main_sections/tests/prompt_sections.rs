@@ -119,6 +119,7 @@ fn workbench_prompt_sections_render_its_recorded_host_text_and_the_context_budge
 
     let recorded = workbench_session_prompt(
         crate::session_protocol::SessionProtocol::Rlm,
+        WorkbenchDialect::TypeScript,
         &factory.mail_world,
     );
     let rendered = |prompt: &WorkbenchPrompt| {
@@ -148,7 +149,7 @@ fn workbench_prompt_sections_render_its_recorded_host_text_and_the_context_budge
             ),
             SectionText::Text(format!(
                 "{}\n\n{}",
-                workbench_prompt().trim(),
+                workbench_prompt(WorkbenchDialect::TypeScript).trim(),
                 deferred_tools::prompt_preview().trim()
             )),
             SectionText::Text(connected_accounts_prompt(&factory.mail_world)),
@@ -238,6 +239,7 @@ async fn workbench_prompt_sections_shape_the_prompt_the_provider_receives() {
         "agent_workbench",
         workbench_session_prompt(
             crate::session_protocol::SessionProtocol::Standard,
+            WorkbenchDialect::TypeScript,
             &mail_world,
         ),
     )

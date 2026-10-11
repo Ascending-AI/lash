@@ -40,34 +40,37 @@ fn foreign_words_in(text: &str, markers: &[&str]) -> Vec<String> {
 /// The substrate's own walker cannot see a word of this, because none of it is
 /// substrate copy.
 ///
-/// ADR 0096: the half that read the Lash VM prompt against the TypeScript
-/// marker list is gone with the second dialect, and with it the marker list's
-/// own non-vacuity check.
+/// ADR 0139: both shipped dialects lower to the same kernel.
 #[test]
 fn the_workbench_tutorials_are_written_in_the_session_dialect() {
-    let prompt = workbench_prompt();
-    let violations = foreign_words_in(prompt, HOST_FOREIGN_MARKERS);
-    // Non-vacuity: the prompt must actually contain worked programs, or an
-    // empty constant would pass every marker check.
-    assert!(
-        prompt.matches("<typescript>").count() >= 3,
-        "the workbench prompt must carry its own worked programs"
-    );
-    assert!(
-        violations.is_empty(),
-        "the workbench tutorials carry foreign words: {violations:#?}"
-    );
+    for dialect in [WorkbenchDialect::TypeScript, WorkbenchDialect::Python] {
+        let prompt = workbench_prompt(dialect);
+        let violations = foreign_words_in(prompt, HOST_FOREIGN_MARKERS);
+        // Non-vacuity: the prompt must actually contain worked programs, or an
+        // empty constant would pass every marker check.
+        assert!(
+            prompt_programs(dialect).len() >= 3,
+            "the workbench prompt must carry its own worked programs"
+        );
+        assert!(
+            violations.is_empty(),
+            "the workbench tutorials carry foreign words: {violations:#?}"
+        );
+    }
 }
 
-/// Every `<typescript>` program in the prompt, in prompt order.
-fn typescript_prompt_programs() -> Vec<String> {
-    let prompt = workbench_prompt();
+/// Every program in the selected dialect, in prompt order.
+fn prompt_programs(dialect: WorkbenchDialect) -> Vec<String> {
+    let prompt = workbench_prompt(dialect);
+    let name = dialect.cell_dialect();
+    let open_tag = format!("<{}>", name.name());
+    let close_tag = format!("</{}>", name.name());
     let mut programs = Vec::new();
     let mut rest = prompt;
-    while let Some(open) = rest.find("<typescript>") {
-        let body = &rest[open + "<typescript>".len()..];
+    while let Some(open) = rest.find(&open_tag) {
+        let body = &rest[open + open_tag.len()..];
         let close = body
-            .find("</typescript>")
+            .find(&close_tag)
             .expect("every opened cell closes in the prompt");
         programs.push(body[..close].to_string());
         rest = &body[close..];
@@ -78,7 +81,7 @@ fn typescript_prompt_programs() -> Vec<String> {
 /// The effects the tutorials call, at the paths the real bindings produce.
 /// `workbench.register_trigger` and the process controls carry the shipped
 /// tools' own contracts.
-fn workbench_effects() -> lash::vm::HostBoundary {
+fn workbench_effects(dialect: WorkbenchDialect) -> lash::vm::HostBoundary {
     let mut boundary = lash::vm::HostBoundary::new();
     let mut offer = |path: String, definition: Option<&lash::tools::ToolDefinition>| {
         let (id, input, output) = match definition {
@@ -98,7 +101,10 @@ fn workbench_effects() -> lash::vm::HostBoundary {
         };
         boundary
             .offer_tool(
-                &path,
+                &match dialect {
+                    WorkbenchDialect::TypeScript => path.clone(),
+                    WorkbenchDialect::Python => path.replace('.', "_"),
+                },
                 id,
                 &input,
                 &output,
@@ -145,52 +151,63 @@ fn workbench_effects() -> lash::vm::HostBoundary {
 /// every program the prompt shows lowers against the Workbench's own
 /// declared effects, as a worker would lower it.
 #[test]
-fn the_workbench_typescript_tutorials_lower() {
+fn the_workbench_tutorials_lower_in_each_dialect() {
     let embedding =
         lash::vm::standard_worker_embedding(&lash::vm::WorkerTuning::default()).expect("embedding");
-    let boundary = workbench_effects();
-    let effects = boundary.signatures();
-    let controls = boundary.controls();
-    let lower = |program: &str| {
-        embedding
-            .lower(
-                "typescript",
-                program,
-                &lash::dialect::Environment {
-                    library: embedding.library(),
-                    effects: &effects,
-                    tool_roots: &Default::default(),
-                    controls: &controls,
-                    bindings: &Default::default(),
-                    functions: &Default::default(),
-                },
-            )
-            .expect("the TypeScript dialect is installed")
-    };
-    let programs = typescript_prompt_programs();
-    assert_eq!(
-        programs.len(),
-        3,
-        "the TypeScript prompt must carry all three tutorials"
-    );
-    let refused = programs
-        .iter()
-        .enumerate()
-        .filter_map(|(index, program)| {
-            lower(program)
-                .err()
-                .map(|error| format!("tutorial {}: {error}", index + 1))
-        })
-        .collect::<Vec<_>>();
-    assert!(
-        refused.is_empty(),
-        "prompt programs that do not lower: {refused:#?}"
-    );
-    // The front end must be able to refuse, or an empty list proves nothing.
-    assert!(
-        lower("class Unsupported {} await chat.reply(1);").is_err(),
-        "the control must be refused"
-    );
+    for dialect in [WorkbenchDialect::TypeScript, WorkbenchDialect::Python] {
+        let boundary = workbench_effects(dialect);
+        let effects = boundary.signatures();
+        let controls = boundary.controls();
+        // Python lowering is independent of the worker integration in FIG-5990.
+        let mut library = embedding.library().clone();
+        if dialect == WorkbenchDialect::Python {
+            lash_dialect_python::define_helpers(&mut library).expect("Python helpers");
+        }
+        let lower = |program: &str| {
+            let environment = lash::dialect::Environment {
+                library: &library,
+                effects: &effects,
+                tool_roots: &Default::default(),
+                controls: &controls,
+                bindings: &Default::default(),
+                functions: &Default::default(),
+            };
+            match dialect {
+                WorkbenchDialect::TypeScript => embedding
+                    .lower("typescript", program, &environment)
+                    .expect("TypeScript is installed"),
+                WorkbenchDialect::Python => lash_dialect_python::lower(program, &environment),
+            }
+        };
+        let programs = prompt_programs(dialect);
+        assert_eq!(
+            programs.len(),
+            3,
+            "the prompt must carry all three tutorials"
+        );
+        let refused = programs
+            .iter()
+            .enumerate()
+            .filter_map(|(index, program)| {
+                lower(program)
+                    .err()
+                    .map(|error| format!("tutorial {}: {error}", index + 1))
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            refused.is_empty(),
+            "prompt programs that do not lower: {refused:#?}"
+        );
+        // The front end must be able to refuse, or an empty list proves nothing.
+        assert!(
+            lower(match dialect {
+                WorkbenchDialect::TypeScript => "class Unsupported {} await chat.reply(1);",
+                WorkbenchDialect::Python => "class Unsupported: pass",
+            })
+            .is_err(),
+            "the control must be refused"
+        );
+    }
 }
 
 /// The tutorials are what the model copies, so a registration key a tutorial
@@ -199,33 +216,32 @@ fn the_workbench_typescript_tutorials_lower() {
 /// a registration by what it watches, never by its machine key.
 #[test]
 fn the_workbench_tutorials_never_print_a_registration_key() {
-    let programs = typescript_prompt_programs();
-    let finishes = programs
-        .iter()
-        .flat_map(|program| program.lines())
-        .filter(|line| line.trim_start().starts_with("await chat.reply("))
-        .collect::<Vec<_>>();
-    assert!(
-        finishes.len() >= 3,
-        "every tutorial ends in a visible answer: {finishes:#?}"
-    );
-    let quoting = finishes
-        .iter()
-        .filter(|line| line.contains("subscription_id") || line.contains("handle"))
-        .collect::<Vec<_>>();
-    assert!(
-        quoting.is_empty(),
-        "tutorial answers that quote a registration identity: {quoting:#?}"
-    );
+    for dialect in [WorkbenchDialect::TypeScript, WorkbenchDialect::Python] {
+        let programs = prompt_programs(dialect);
+        let finishes = programs
+            .iter()
+            .flat_map(|program| program.lines())
+            .filter(|line| {
+                let line = line.trim_start();
+                line.starts_with("await chat.reply(") || line.starts_with("await chat_reply(")
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            finishes.len() >= 3,
+            "every tutorial ends in a visible answer: {finishes:#?}"
+        );
+        let quoting = finishes
+            .iter()
+            .filter(|line| line.contains("subscription_id") || line.contains("handle"))
+            .collect::<Vec<_>>();
+        assert!(
+            quoting.is_empty(),
+            "tutorial answers that quote a registration identity: {quoting:#?}"
+        );
+    }
 }
 
-// ADR 0096: the fixtures that resolved a recorded dialect from the session bag
-// and refused a malformed one are gone with `RlmDialect`.
-
 // The workbench, executed end to end.
-
-// ADR 0096: the control fixture that served the same turn on the default
-// dialect is gone with the second dialect.
 
 // The laws below run through the workbench's chat route on the in-process
 // durable workbench, whose engine runs every turn.
@@ -353,4 +369,67 @@ async fn the_code_failure_scenario_renders_a_failed_cell_and_terminates() {
         "the scenario must recover and finish within the turn budget: {answers:?}"
     );
     workbench.shutdown().await;
+}
+
+/// The boot selector and executed transcript agree; Python tutorials and cell
+/// execution never inherit TypeScript source from the host.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "FIG-5990: explicit Python worker feature and sealed helper release"]
+async fn a_python_workbench_serves_python_turns_and_records_the_dialect() {
+    let served_prompts: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let provider = {
+        let served_prompts = Arc::clone(&served_prompts);
+        lash::testing::TestProvider::builder()
+            .kind("workbench-harness")
+            .complete(move |request: lash::provider::LlmRequest| {
+                served_prompts.lock_recover().push(format!("{request:?}"));
+                async {
+                    Ok(text_response(
+                        "<python>\nawait chat_reply('canonical answer')\n</python>",
+                    ))
+                }
+            })
+            .build()
+            .into_handle()
+    };
+    let dialect = WorkbenchDialect::configured(Some("python")).expect("Python boot choice");
+    let workbench = Workbench::builder(provider).dialect(dialect).build().await;
+    run_turn(&workbench.state, "say the canonical answer").await;
+    let prompts = served_prompts.lock_recover().clone();
+    assert!(!prompts.is_empty());
+    assert!(
+        prompts
+            .iter()
+            .all(|prompt| prompt.contains("## Python execution")
+                && prompt.contains("<python>")
+                && !prompt.contains("<typescript>")),
+        "Python served prompts: {prompts:#?}"
+    );
+    let projected = read_state(&workbench.state, None)
+        .await
+        .expect("project the session");
+    assert_eq!(
+        transcript_code_languages(&projected),
+        vec![dialect.cell_dialect().name().to_string()]
+    );
+    assert!(
+        transcript_answers(&projected)
+            .iter()
+            .any(|answer| answer.contains("canonical answer"))
+    );
+    workbench.shutdown().await;
+}
+
+#[test]
+fn the_host_dialect_selector_defaults_to_typescript_and_refuses_unknown_names() {
+    assert_eq!(
+        WorkbenchDialect::configured(None).expect("default"),
+        WorkbenchDialect::TypeScript
+    );
+    assert_eq!(
+        WorkbenchDialect::configured(Some("typescript")).expect("TypeScript"),
+        WorkbenchDialect::TypeScript
+    );
+    assert!(WorkbenchDialect::configured(Some("lashvm")).is_err());
+    assert!(WorkbenchDialect::configured(Some("")).is_err());
 }

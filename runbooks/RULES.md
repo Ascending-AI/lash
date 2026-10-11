@@ -5,7 +5,8 @@ Read this before running any scenario in `runbooks/`. Each runbook links here an
 phases, and scorecard.
 
 `runbooks/` has **two layers**. Scripted deterministic harnesses
-(`runbooks/rlm-smoke/` and the `scripts/*-e2e.sh` runners) are gate **evidence**: they boot real hosts or infrastructure
+(`runbooks/rlm-smoke/`, `runbooks/lash-facade-failover/`,
+`runbooks/lash-postgres-workers/` and the `scripts/*-e2e.sh` runners) are gate **evidence**: they boot real hosts or infrastructure
 and assert exact outcomes, and they stay scripts. Runbooks are the **agent-judged semantic
 layer** on top: you (the agent) shift browser scenarios or inspect a deterministic companion's
 artifact bundle, then judge the observed behavior with your own reasoning. A deterministic
@@ -26,7 +27,7 @@ judged. **Manual judged** is the semantic browser or artifact-judgment runbook l
 
 | Example | Deterministic CI coverage | Full-host CI coverage | Manual judged coverage |
 | --- | --- | --- | --- |
-| `agent-workbench` | `Test Buck2 partition tail` runs its unit tests on trusted non-PR events; `Test Buck2 partition` covers them through its affected selection when a trusted pull request touches the package, and `Test Cargo workspace partition` runs them on untrusted pull requests. `Feature lanes (${{ matrix.shard }}/4)` compiles its feature variants and runs their tests. | No live engine leg until L9h (FIG-5186) rebuilds it. | [`workbench-process-lifecycle`](workbench-process-lifecycle/runbook.md), [`workbench-session-resume`](workbench-session-resume/runbook.md), and [`workbench-deferred-tools`](workbench-deferred-tools/runbook.md), plus the other `workbench-*` runbooks. The deterministic, operator-only [`workbench-attachment-reclamation`](workbench-attachment-reclamation/runbook.md) rehearsal of the condemn/vacuum/reclaim levers is inventoried separately and is never a judged browser row: the workbench renders no affordance for either lever, so `curl` against the admin route is the operator surface. |
+| `agent-workbench` | `Test Buck2 partition tail` runs its unit tests on trusted non-PR events; `Test Buck2 partition` covers them through its affected selection when a trusted pull request touches the package, and `Test Cargo workspace partition` runs them on untrusted pull requests. `Feature lanes (${{ matrix.shard }}/4)` compiles its feature variants and runs their tests. | None. | [`workbench-process-lifecycle`](workbench-process-lifecycle/runbook.md), [`workbench-session-resume`](workbench-session-resume/runbook.md), and [`workbench-deferred-tools`](workbench-deferred-tools/runbook.md), plus the other `workbench-*` runbooks. The deterministic, operator-only [`workbench-attachment-reclamation`](workbench-attachment-reclamation/runbook.md) rehearsal of the condemn/vacuum/reclaim levers is inventoried separately and is never a judged browser row: the workbench renders no affordance for either lever, so `curl` against the admin route is the operator surface. |
 | `rlm-smoke` | `Test Buck2 partition` runs `rlm-smoke`'s unit tests on trusted events (the package sits in the core suite) and `Test Cargo workspace partition` covers untrusted pull requests; the focused tests prove path, symlink, and command jail refusals. | `just rlm-smoke-e2e` runs the three separately funded matrix rows `rlm-smoke-file-edit-bugfix`, `rlm-smoke-missing-helper-file` and `rlm-smoke-config-contract-edit` against exact shell oracles after live OpenRouter turns; this one line describes the gate, the three matrix rows are the inventory. It is a local/manual paid gate, not per-PR CI. | None. These are scripted deterministic-oracle rows, never judged browser rows. |
 | `toolbench` | `Test Buck2 partition tail` runs its unit tests on trusted non-PR events; `Test Buck2 partition` covers them through its affected selection when a trusted pull request touches the package, and `Test Cargo workspace partition` runs them on untrusted pull requests. | None. The benchmark is an operator-run paid pass against real OpenRouter models; CI does not fund it. | None. It is a self-scoring measurement harness: its `results-file` task rows are the evidence, not a judged browser journey. |
 | `workflow-graph-roundtrip` | `Test Buck2 partition tail` runs its unit tests on trusted non-PR events; `Test Buck2 partition` covers them through its affected selection when a trusted pull request touches the package, and `Test Cargo workspace partition` runs them on untrusted pull requests. | None. Its one law drives the HTTP surface over SQLite in the unit partition; nothing scripted judges the browser journey. | [`workflow-editor-authoring`](workflow-editor-authoring/runbook.md). |
@@ -37,15 +38,23 @@ example a host would read; `typescript-host-flows` is a collection of TypeScript
 cells exercised by its own judged row. The sibling witness `transcript-contract`
 lives under `crates/`, beside the file it checks.
 
-## One judged row per scenario, served in TypeScript today
+## One judged row per scenario and served dialect
 
-[ADR 0096](../docs/adr/0096-typescript-is-the-sole-rlm-dialect.md) defines one IR
-and VM with extensible dialects. TypeScript is the only shipped dialect today.
-Each judged scenario **that runs an RLM session** therefore has one row served
-in `typescript`. The machine-readable inventory is
-[`judged-matrix.toml`](judged-matrix.toml), whose top-level `language` key names
-the dialect these rows exercise. Future dialects own their semantics and
-coverage; they need not duplicate another dialect's scenarios.
+[ADR 0139](../docs/adr/0139-the-lash-vm-is-a-dialect-free-kernel.md) defines
+one dialect-free Lash VM kernel. TypeScript and Python are shipped dialects
+that lower to it. [`judged-matrix.toml`](judged-matrix.toml) schema 4 declares
+`dialects = ["typescript", "python"]`. An RLM scenario emits once per dialect
+in its own `dialects` list, which defaults to `["typescript"]`. Rows judging
+host, UI or store behaviour may need only one dialect; rows judging cell
+fluency exercise both.
+
+Python execution is **pending FIG-5990**: hosts will name explicit dialect build
+features with no worker default, and each dialect will have its own sealed helper
+release. Python inventory rows carry `pending = "FIG-5990"`; do not execute or
+certify them until that prerequisite lands. The three Python smoke entries carry
+`pending_dialects = { python = "FIG-5990" }`, and their runner skips them.
+The selectors and Python tutorial front-end checks are present; they do not
+claim that a Python worker is installed.
 
 Each row still gets a fresh session id, data directory, ports, trace offset, and artifact
 directory. A carried-over store serves a previous row's processes, leases and
@@ -59,32 +68,52 @@ language. A standard-mode host using `LashCore::standard_builder` is one example
 predicate is whether the scenario opens an RLM session, and the claim is checkable in its
 runbook binary or driver.
 
-There is nothing to pin. The RLM session-creation contract carries no language, so
-`LASH_RUNBOOK_DIALECT` is inert: nothing reads it, and the companions that still
-name it reject it outright. A row that served anything but a
-TypeScript prompt, cell tag, execution event or restored engine id is still a contract
-violation that triggers the normal Abort/RCA rule — it just cannot be caused by
-configuration any more. This includes a subagent's prompt: children read the same
-TypeScript prompt their parent does.
+The dialect is a host choice, read once at boot: use
+`AGENT_WORKBENCH_DIALECT=typescript|python` for the workbench and `--dialect`
+for the rlm-smoke host. Both default to TypeScript. Session creation stays
+dialect-free. Confirm the served dialect from the row's **own evidence**:
+the startup record's `dialect`, the prompt, cell tag and transcript code-block
+`content.language`. The environment records what you requested; the evidence
+records what the host served. Children use the same host dialect. Existing
+workbench dev-provider scenarios script TypeScript cells; a Python row needs
+a provider that supplies Python source.
 
-Confirm the served language from the row's **own evidence** — prompt, cell tag, execution
-events — never from the environment. The environment is what you asked for; the evidence
-is what you got, and the gap between them is the whole reason the label exists.
+Scenario examples use TypeScript notation unless they name Python. On a Python
+row, author equivalent Python: `async def` processes, dict access on tool
+results, `asyncio.gather` for fan-out, and Python exceptions. Python tool paths
+join module and operation with `_`, such as `chat_reply`, `processes_start`,
+`control_continue_as` and `tools_search`. TypeScript-only
+rules such as `const` reassignment refusal apply to its TypeScript row; the
+Python row instead checks its own binding and scope rules. Keep structural
+outcomes, errors and effect counts exact in each dialect.
 
-Runbook prose predating this ruling may say "Lash VM cell/program/source". Read that as
-the TypeScript cell and its source unless it names a stable product API, artifact
-filename, trace field, or historical term (for example `/api/lash-vm-graphs` or
-`lash-vm-execution.jsonl`), which keep their spellings because they name the IR and the
-VM, which are not retired. Prompts ask for outcomes, not ready-made source. A
-deterministic provider must expose a TypeScript program its scenario can actually run;
-serving a program in the retired surface is a failed harness, not a skipped row.
+Read "RLM" as the REPL protocol and "code mode" as kernel execution
+(FIG-5834). Stable product APIs, filenames and trace fields such as
+`/api/lash-vm-graphs` and `lash-vm-execution.jsonl` keep their spellings:
+they are stable product names for the Lash VM kernel's execution records.
+Prompts ask for outcomes, not ready-made source. A deterministic provider
+must expose a program in the row's dialect that its scenario can execute.
+
+**The workbench's finish is `chat.reply`.** It replaces Lash's declared
+`control.finish`; workbench scenario prose must ask for `await chat.reply(text)`
+to reply and end the turn (`await chat_reply(text)` in Python).
+`control.continue_as` (`control_continue_as` in Python) remains available.
+
+**`/api/state` has no `messages`.** Read chat rows from
+`/api/state.transcript[]` and product evidence from
+`/api/state.product_events.events[]`. Reconcile the transcript with the
+rendered DOM and replay; never gate a workbench row on a removed state field.
 
 Independent scenario rows may execute concurrently from the start, subject to the
 repository's two-heavy-job limit and each runbook's port/container isolation rules.
 Judging is a separate sharded phase over completed evidence bundles, so a judge never owns
 or mutates the app it scores. `python3 scripts/judged_runbook_matrix.py --shard I/N` emits a
-stable JSON work shard. The matrix currently expands to **25 rows**: 22 RLM scenarios, two
-no-RLM-session rows, and one composite that exercises host-language surface. The arithmetic
+stable JSON work shard. The matrix currently expands to **32 rows**: 22 RLM scenarios (including `host-flows`),
+eight additional Python rows, and two no-RLM-session rows. The three smoke
+cases declare six scripted rows outside the judged shard; three Python rows
+are pending FIG-5990. Of the 32 judged inventory rows, eight Python rows are
+pending and 24 rows are runnable.
+Every `runbooks/*/` directory is a row or a declared `scripted_harness`. The arithmetic
 is asserted by `scripts/test_judged_runbook_matrix.py`, so a reclassification cannot leave
 this number stale without turning CI red.
 
@@ -110,9 +139,10 @@ concrete `model` slug per scenario, and the emitted shard carries both on every 
   needs the driver to author a non-trivial durable program or discover an affordance rather
   than follow an instruction the runbook states outright. Every gate is still a count, an id,
   a durable fact, or a literal the operator supplied.
-- **`frontier`** — `openai/gpt-5.6-sol`. Reserved for rows where model **behaviour is the
+- **`frontier`** — `openai/gpt-6.1-sol`, with `openai/gpt-5.6-sol` as the
+  named fallback (both listed by the OpenRouter availability probe). Reserved for rows where model **behaviour is the
   judged subject**, so a weaker driver changes the verdict rather than the prose: the organic
-  `continue_as` lever, first-shot codemode fluency, and the pinned-program-shape rows whose
+  `continue_as` lever, first-shot code mode fluency, and the pinned-program-shape rows whose
   documented failure mode is an Abort rather than a retry.
 
 Four rules keep the tiers honest:
@@ -138,7 +168,8 @@ Where a runbook is half mechanics and half behaviour, the mechanical half runs d
 and only the residue is funded: `judged-matrix.toml` records that split per scenario in
 `deterministic_phases`.
 
-The judge is separate and unchanged: `judge_model_floor` stays `gpt-5.6-sol`. A cheap driver
+The judge is separate: `judge_model_floor = "gpt-6-sol"`. Record a judge below
+that floor as a substitution. A cheap driver
 producing the evidence does not license a cheap reader of it.
 
 ## What you're testing
@@ -257,7 +288,8 @@ workspace feature resolution the generated BUCK files describe, so no Buck2 labe
 that shape.
 
 This exists because a judged run scores what the host ships. A `dev` build turns
-in-contract outcomes into opaque failures: an exhausted Lash VM execution bound is a
+in-contract outcomes into opaque failures: an exhausted kernel instruction or memory bound (`InstructionBound`,
+`MemoryBound`) is a
 `Policy` observation the runtime hands back to the agent, but under the workbench's old
 `testing`-feature build it tripped an assertion inside the effect task and the turn
 surfaced as `effect_panicked` → "turn could not be completed" — a permanently

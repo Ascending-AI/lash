@@ -437,7 +437,7 @@ impl AppState {
         let protocol = crate::session_protocol::selected().map_err(serde::de::Error::custom)?;
         let spec = spec.plugin(
             "agent_workbench",
-            workbench_session_prompt(protocol, &self.mail_world),
+            workbench_session_prompt(protocol, self.dialect, &self.mail_world),
         )?;
         let spec = match protocol {
             crate::session_protocol::SessionProtocol::Standard => spec,
@@ -474,18 +474,19 @@ pub(crate) fn chat_reply_tool() -> lash::tools::ToolDefinition {
 
 /// The workbench's host prompt, stated in each session's creation spec. On
 /// the RLM protocol it carries the standing instructions (ADR 0063: worked
-/// examples in the session's own language, and TypeScript is the sole RLM
-/// language, ADR 0096) with the deferred catalogue's advertisement; on the
+/// examples in the session's own dialect, ADR 0139) with the deferred
+/// catalogue's advertisement; on the
 /// standard protocol the workbench's identity replaces the protocol's intro
 /// instead. Every session states the connected accounts as context.
 pub(crate) fn workbench_session_prompt(
     protocol: crate::session_protocol::SessionProtocol,
+    dialect: WorkbenchDialect,
     mail_world: &mail::MailWorld,
 ) -> WorkbenchPrompt {
     let instructions = match protocol {
         crate::session_protocol::SessionProtocol::Standard => Vec::new(),
         crate::session_protocol::SessionProtocol::Rlm => vec![
-            workbench_prompt().to_string(),
+            workbench_prompt(dialect).to_string(),
             deferred_tools::prompt_preview(),
         ],
     };

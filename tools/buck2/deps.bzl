@@ -5,6 +5,7 @@ PACKAGE_DEPS = {
         "dev": {
             "http": "//third-party/rust:p0147",
             "lash": "//crates/lash:lash",
+            "lash_dialect_python": "//crates/lash-dialect-python:lash-dialect-python",
             "lash_sim": "//crates/lash-sim:lash-sim",
             "tempfile": "//third-party/rust:p0370",
             "tokio": "//third-party/rust:p0379"

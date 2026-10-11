@@ -60,10 +60,20 @@ sandbox_image="${RLM_SMOKE_SANDBOX_IMAGE:-alpine:3.22}"
 docker pull "$sandbox_image" >"$artifact_root/sandbox-image.log" 2>&1
 
 scenarios=(file-edit-bugfix missing-helper-file config-contract-edit)
-# TypeScript is the sole RLM language (ADR 0096): one row per scenario. The
-# `dialect` path segment stays so the artifact layout the matrix declares is
-# unchanged.
-dialects=(typescript)
+# ADR 0139: each scripted case runs once per matrix dialect, with its own store.
+dialect_list="$(python3 - <<'PY_DIALECTS'
+import tomllib
+from pathlib import Path
+config = tomllib.loads(Path("runbooks/judged-matrix.toml").read_text())
+entries = list(config["scripted_live_model"].values())
+dialects = entries[0].get("dialects", ["typescript"])
+assert all(entry.get("dialects", ["typescript"]) == dialects for entry in entries)
+pending = entries[0].get("pending_dialects", {})
+assert all(entry.get("pending_dialects", {}) == pending for entry in entries)
+print("\n".join(dialect for dialect in dialects if dialect not in pending))
+PY_DIALECTS
+)"
+mapfile -t dialects <<<"$dialect_list"
 model="${OPENROUTER_MODEL:-deepseek/deepseek-v4-flash}"
 run_nonce="$(date +%s)-$$"
 row_index=0
@@ -85,6 +95,7 @@ for scenario in "${scenarios[@]}"; do
 
     "$smoke_host_bin" \
         --scenario "$scenario" \
+        --dialect "$dialect" \
         --scenario-dir "$scenario_dir" \
         --workspace "$workspace" \
         --data-dir "$data_dir" \

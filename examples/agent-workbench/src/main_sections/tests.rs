@@ -128,7 +128,7 @@ fn mail_received_account_contract_uses_slugs() {
     const ACCOUNT_SLUG_CONTRACT: &str = "`account` carries the account SLUG, not its display name: use the slug from the account enumeration (for example `work` or `personal`), not a display name such as `Work`, when filtering deliveries.";
 
     assert!(
-        workbench_prompt().contains(ACCOUNT_SLUG_CONTRACT),
+        workbench_prompt(WorkbenchDialect::TypeScript).contains(ACCOUNT_SLUG_CONTRACT),
         "the workbench prompt must state the mail account slug contract"
     );
 }

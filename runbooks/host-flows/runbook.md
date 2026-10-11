@@ -1,34 +1,40 @@
-# E2E Scenario: TypeScript host flows
+# E2E Scenario: Host flows
+
+Python execution is pending **FIG-5990** (explicit worker features and separate
+sealed helper releases). The Python matrix row is inventory only until it lands.
 
 > **Read [../RULES.md](../RULES.md) first.** This runbook adds the surface no
 > other row covers: the process lifecycle authored first-shot against the
 > plugin-tool contract. It still obeys the real-token, screenshot,
 > objective-gate, Abort/RCA, and teardown rules.
 
-**Purpose.** Prove first-shot TypeScript fluency for aggregate settlement,
-`for...of` agent work, and the complete durable process lifecycle authored on
+**Purpose.** Prove first-shot fluency in the row's served dialect for aggregate settlement,
+ordered agent loops, and the complete durable process lifecycle authored on
 the shipped `processes.*` leaf tools, including suspension across a real
 Workbench worker restart.
 
 ## The contract this row judges
 
-TypeScript is the only shipped cell dialect
+TypeScript and Python are shipped cell dialects
 ([ADR 0139](../../docs/adr/0139-the-lash-vm-is-a-dialect-free-kernel.md)).
-This row judges whether the model can author the catalogue's host flows first-shot.
+Python tool paths join the binding's module and operation with `_`: `processes_start`,
+`workbench_register_trigger`, `chat_reply` and `control_continue_as`.
+Each dialect row judges whether the model can author the catalogue's host flows first-shot.
 
-A process is an ordinary uncalled `async` arrow, which the dialect lowers to
+A process is an uncalled top-level `async` arrow (TypeScript) or `async def`
+function (Python), which the dialect lowers to
 an entry of the cell's document, and every control is an effect the catalogue
 declares
 ([ADR 0139](../../docs/adr/0139-the-lash-vm-is-a-dialect-free-kernel.md)):
 
-| Intent | Shipped spelling |
-| --- | --- |
-| Define a process | `const approval = async (request) => { ... };` (uncalled, top level) |
-| Start one | `await processes.start({ definition: approval, args: { request } })` |
-| Wait for its terminal | `await handle`, or `await processes.await({ handle })` |
-| List running ones | `await processes.list({})` |
-| Wait inside the process for a decision | call a deferring host tool, here the Workbench's approval-gated `workbench_ops_apply_change` |
-| Sleep durably | `await sleep(25)` |
+| Intent | TypeScript | Python |
+| --- | --- | --- |
+| Define a process | `const approval = async (request) => { ... };` | `async def approval(request): ...` |
+| Start one | `await processes.start({ definition: approval, args: { request } })` | `await processes_start({"definition": approval, "args": {"request": request}})` |
+| Wait for its terminal | `await handle`, or `await processes.await({ handle })` | `await handle`, or `await processes_await({"handle": handle})` |
+| List running ones | `await processes.list({})` | `await processes_list({})` |
+| Wait inside the process for a decision | call the approval-gated `workbench_ops_apply_change` | call the same deferring host tool |
+| Sleep durably | `await sleep(25)` | `await asyncio.sleep(0.025)` |
 
 `defineProcess`, a bare `start` and `wake` are **deleted**, and lash has no
 process signals, emitted progress or triggers: a decision reaches a process as
@@ -43,14 +49,13 @@ judging the wrong contract. Pass the handle itself to `processes.await` or
 
 ## Golden rules
 
-1. There is nothing to pin. The session-creation contract carries no language
-   (RULES.md), so confirm `typescript` from the row's **own** evidence — the
-   rendered prompt, the cell tag, the execution events, the restored engine id
-   — never from configuration.
-2. Use `gpt-5.6-sol` or newer for every RLM step. Record the actual execution
-   and judge models in `00-models.json`; substitutions are evidence, not prose.
+1. Set `AGENT_WORKBENCH_DIALECT` to the row's dialect at boot. Session creation
+   carries no dialect. Confirm the startup `dialect`, prompt, cell tag and
+   `/api/state.transcript[].content.language` from the row's own evidence.
+2. Use the matrix's frontier model; record the served execution and judge
+   models in `00-models.json`, including any substitution.
 3. Ask for outcomes and constraints, not source. The model authors every cell
-   first-shot. A missing method, a named `TS_*` rejection, or a reach for a
+   first-shot. A missing method, a named dialect rejection, or a reach for a
    deleted form is recorded verbatim in `fluency-hits.json` and fails that row;
    do not extend the dialect or the catalogue during the judged run.
 4. Restart with the repository helper and the exact original run/data
@@ -81,7 +86,7 @@ There are no delayed-rejecting A/B test tools in this shipped catalogue, so
 the row must not require an operator to add them.
 
 Ask the model to call the Parallel web-search and web-fetch tools with
-deliberately invalid arguments in one `Promise.all`, catch the aggregate
+deliberately invalid arguments in one aggregate (`Promise.all` in TypeScript, `asyncio.gather` in Python), catch the aggregate
 failure, and finish with the fixed marker `aggregate-rejected`. Both are real
 host authorities and validate their arguments before making a network request.
 Require one aggregate execution, two completed tool attempts, two structured
@@ -96,12 +101,12 @@ winner or an A/B marker. Save `01-promise-{dom,state,trace}.json` and
 slice including both `tool_call_completed` records. An artifact whose contents are left to
 the driver's guess is a screenshot of prose, not reproducible evidence.
 
-## Phase 2 — `for...of` agent loop
+## Phase 2 — Ordered agent loop
 
 Ask the model to fetch one array of three work items, iterate that returned
-array with `for...of`, and finish with an ordered summary. The loop body may
+collection with `for...of` (TypeScript) or `for` (Python), and finish with an ordered summary. The loop body may
 call helpers, and it may also change the iterable, which the loop follows
-live as ECMA-262 does (FIG-3625). Require one tool outcome and all three
+live under the served dialect's iteration rules. Require one tool outcome and all three
 ordered items. Save
 `02-for-of-{dom,state,trace}.json` and `02-for-of.png`.
 
@@ -113,19 +118,19 @@ approval-gated tool, sleeps durably, and returns the decision it was given.
 
 Require, from the executed cell and the trace:
 
-* the process is an uncalled top-level `async` arrow and the start went through
+* the process is an uncalled top-level async function and the start went through
   `processes.start`, with the definition passed as a value;
 * the answered handle is the one handle kind, and the cell holds it rather than
   spelling an id;
 * the wait is the approval tool's call, parked in the process: `/api/work` shows
   the process `waiting` on that call (`call_id`, `tool_id`) and the Workbench
   approvals panel lists it;
-* the cell that created the process artifact is TypeScript: read
-  `/api/state.transcript[].language`, which is the **only** observable language evidence.
+* the creating cell matches the row's dialect: read
+  `/api/state.transcript[].content.language` and the startup `dialect`.
   There is no dialect or language field on the process artifact itself — the `/api/work`
   process record carries `input.kind = "lashvm"` (the engine kind) and a `process_name`
   lift hash, and no `trace.jsonl` record carries a `dialect`/`language` field — so the
-  artifact is dialect-neutral IR, while the creating cell proves the source dialect;
+  artifact is a dialect-free kernel document, while the creating cell proves the source dialect;
 * a running handle and a visible waiting state.
 
 Any reach for `defineProcess`, a bare `start(...)` or `wake(...)` is a
@@ -137,15 +142,15 @@ fluency hit: record the verbatim text in
 
 Restart the Workbench worker while the process is waiting, using the same run
 and data directories. Gate readiness, reopen the same session, and require the
-restored execution engine id to remain `typescript`.
+restored cell language to remain the row's served dialect.
 
 Approve the parked call in the Workbench approvals panel: the host resolves its
-completion key, which resumes the process. In a new full judged codemode turn,
+completion key, which resumes the process. In a new full judged code mode turn,
 ask the model to find the process, await it, and finish with the returned
 payload. Require that the approval was resolved once through the host's
 completion, the handle was recovered through `processes.list` (not rebuilt from
 a spelled id), one durable run (not a replacement), terminal success, the
-pre-restart process id, and a TypeScript cell in the resumed turn.
+pre-restart process id, and a cell in the row's dialect in the resumed turn.
 "One durable run, not a replacement" is read off the **process count and id in
 `/api/work`** — one process row, same id across the restart — not off the number of cell
 executions: a resumption legitimately redrives the turn and runs another cell without creating
@@ -158,11 +163,11 @@ Stop everything started by this row. Write `fluency-hits.json` even when empty.
 
 | Gate | Result | Evidence |
 | --- | --- | --- |
-| Served language is TypeScript by the row's own evidence | | `00-state.json`, trace |
+| Served language matches the row label by the row's own evidence | | `00-state.json`, trace |
 | Shipped-host aggregate rejection is handled | | `01-promise-*` |
-| `for...of` agent loop completes in order | | `02-for-of-*` |
-| Process is a lifted arrow started through `processes.start` | | `03-suspended-*` |
-| Creating cell and restored execution state identify TypeScript | | `03-suspended-*` |
+| Dialect's agent loop completes in order | | `02-for-of-*` |
+| Process is a lifted async function started through `processes.start` | | `03-suspended-*` |
+| Creating cell and restored execution state identify the served dialect | | `03-suspended-*` |
 | Worker restart preserves process id and execution state | | `04-resumed-*` |
 | Resume is delivered by resolving the parked approval call | | `04-resumed-*` |
 | Full resumed judged turn finishes correctly | | `04-resumed-judge.json` |

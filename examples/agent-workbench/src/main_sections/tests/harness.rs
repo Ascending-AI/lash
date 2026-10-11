@@ -21,6 +21,7 @@ pub(crate) struct Workbench {
 /// the binary's own composition.
 pub(crate) struct WorkbenchBuilder {
     provider: ProviderHandle,
+    dialect: WorkbenchDialect,
     session_delete_faults: Option<Arc<super::session_delete_faults::SessionDeleteFaults>>,
     stores: Option<Arc<dyn lash::StoreSet>>,
     live_replay: Option<Arc<dyn lash::observe::LiveReplayStore>>,
@@ -38,6 +39,7 @@ impl Workbench {
     pub(crate) fn builder(provider: ProviderHandle) -> WorkbenchBuilder {
         WorkbenchBuilder {
             provider,
+            dialect: WorkbenchDialect::TypeScript,
             session_delete_faults: None,
             stores: None,
             live_replay: None,
@@ -74,6 +76,11 @@ impl Workbench {
 }
 
 impl WorkbenchBuilder {
+    pub(crate) fn dialect(mut self, dialect: WorkbenchDialect) -> Self {
+        self.dialect = dialect;
+        self
+    }
+
     /// Decorate the real store ports before building the engine.
     pub(crate) fn session_delete_faults(
         mut self,
@@ -178,6 +185,7 @@ impl WorkbenchBuilder {
             .await
             .expect("an MCP factory with no servers");
         let plugins = WorkbenchCorePlugins {
+            dialect: self.dialect,
             rlm_workers: workbench_rlm_workers().expect("the VM worker deployment"),
             tool_provider: self.tool_provider,
             mail_world: self.mail_world.clone(),
@@ -215,6 +223,7 @@ impl WorkbenchBuilder {
             core,
             stores.as_ref(),
             WorkbenchHost {
+                dialect: self.dialect,
                 session_defaults,
                 sessions: self.sessions.unwrap_or_else(WorkbenchSessions::fresh),
                 event_tx: self

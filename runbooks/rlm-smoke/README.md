@@ -5,7 +5,7 @@ These three live-model scenarios belong to the scripted deterministic layer gove
 then the checked-in shell oracle alone decides pass or fail. They are not browser journeys
 and receive no agent judgement.
 
-They are three separate rows, one per scenario, and `judged-matrix.toml`'s
+They are six scripted rows, one per scenario and dialect, and `judged-matrix.toml`'s
 `rlm-smoke-file-edit-bugfix`, `rlm-smoke-missing-helper-file` and
 `rlm-smoke-config-contract-edit` are the inventory a shard counts. Read the single
 `rlm-smoke` line in `RULES.md`'s coverage matrix as a description of the gate, never as a
@@ -17,14 +17,21 @@ the oracle before the model's terminal finish: a model that claims success witho
 it. So `turn_succeeded` is not the verdict — score the row on the oracle's exit alone, and
 do not read a succeeded turn as a passing row.
 
-Run the three-row gate with:
+The three Python rows are pending **FIG-5990**, which supplies explicit worker
+dialect features and separate sealed helper releases. The runner skips entries
+in `pending_dialects`; the selector accepts Python but Python execution is blocked.
+
+Run the three currently runnable TypeScript rows with:
 
 ```sh
 just rlm-smoke-e2e
 ```
 
-The runner executes every scenario once: TypeScript is the sole RLM language
-([ADR 0096](../../docs/adr/0096-typescript-is-the-sole-rlm-dialect.md)). Every row gets a fresh workspace copy, durable data
+The runner executes each case in the non-pending dialects declared by its
+matrix entry's `dialects` ([ADR 0139](../../docs/adr/0139-the-lash-vm-is-a-dialect-free-kernel.md)).
+The host selects the dialect with `--dialect typescript|python` (default:
+TypeScript) and requires its executed cell languages to match that selection.
+Every row gets a fresh workspace copy, durable data
 directory, session id, reserved port, trace offset, and artifact directory. Ports come from
 the gate's own `LASH_E2E_PORT_BASE` allocation, not from a band a shift pins for its rows.
 Each row's host builds its durable engine over its SQLite store set and serves on the row's

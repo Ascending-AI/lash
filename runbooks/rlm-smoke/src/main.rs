@@ -22,9 +22,6 @@ const DEFAULT_MODEL: &str = "deepseek/deepseek-v4-flash";
 const MAX_FILE_BYTES: usize = 64 * 1024;
 const TURN_TIMEOUT: Duration = Duration::from_secs(180);
 
-/// TypeScript is the sole RLM language (ADR 0096).
-const RLM_LANGUAGE_ID: &str = "typescript";
-
 #[path = "../../../examples/shared/e2e_live_budget.rs"]
 mod e2e_live_budget;
 
@@ -33,6 +30,8 @@ mod e2e_live_budget;
 struct Args {
     #[arg(long)]
     scenario: String,
+    #[arg(long, default_value = "typescript", value_parser = ["typescript", "python"])]
+    dialect: String,
     #[arg(long)]
     scenario_dir: PathBuf,
     #[arg(long)]
@@ -487,7 +486,10 @@ async fn main() -> Result<()> {
             .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
             .build(),
-        lash::rlm::CellDialect::typescript(),
+        match args.dialect.as_str() {
+            "python" => lash::rlm::CellDialect::python(),
+            _ => lash::rlm::CellDialect::typescript(),
+        },
     );
     let trace_path = args.artifact_dir.join("trace.jsonl");
     let mut trace_context = lash::tracing::TraceContext {
@@ -599,10 +601,11 @@ async fn main() -> Result<()> {
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect::<Vec<_>>();
-    // TypeScript is the sole RLM language (ADR 0096).
+    // ADR 0139: the row proves the dialect selected for this host.
     ensure!(
-        code_languages == vec![RLM_LANGUAGE_ID.to_string()],
-        "row emitted code languages {code_languages:?}, expected only `{RLM_LANGUAGE_ID}`"
+        code_languages == vec![args.dialect.clone()],
+        "row emitted code languages {code_languages:?}, expected only `{}`",
+        args.dialect
     );
     core.flush_trace_sink().context("flush row trace")?;
     // The README points a judge at the row's own trace records rather than at
@@ -617,7 +620,7 @@ async fn main() -> Result<()> {
 
     let evidence = HostEvidence {
         scenario: args.scenario,
-        dialect: RLM_LANGUAGE_ID.to_string(),
+        dialect: args.dialect,
         requested_model: args.model,
         served_models,
         session_id: args.session_id,
@@ -649,6 +652,37 @@ mod tests {
 
     fn tools(root: &Path) -> WorkspaceTools {
         WorkspaceTools::new(root, "unused:test".to_string()).expect("workspace tools")
+    }
+
+    #[test]
+    fn the_cli_selects_only_shipped_dialects_and_defaults_to_typescript() {
+        let required = [
+            "rlm-smoke",
+            "--scenario",
+            "test",
+            "--scenario-dir",
+            ".",
+            "--workspace",
+            ".",
+            "--data-dir",
+            ".",
+            "--artifact-dir",
+            ".",
+            "--session-id",
+            "test",
+            "--port",
+            "1234",
+            "--trace-offset",
+            "0",
+        ];
+        let defaults = Args::try_parse_from(required).expect("default args");
+        assert_eq!(defaults.dialect, "typescript");
+        for dialect in ["typescript", "python"] {
+            let args = Args::try_parse_from(required.into_iter().chain(["--dialect", dialect]))
+                .expect("shipped dialect");
+            assert_eq!(args.dialect, dialect);
+        }
+        assert!(Args::try_parse_from(required.into_iter().chain(["--dialect", "lashvm"])).is_err());
     }
 
     #[test]

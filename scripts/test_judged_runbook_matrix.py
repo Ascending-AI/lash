@@ -90,15 +90,14 @@ def workflow_ci_names() -> set:
 
 
 class JudgedRunbookMatrixTests(unittest.TestCase):
-    def test_typescript_host_flows_keep_their_cells_and_judged_row(self) -> None:
+    def test_host_flows_keep_their_typescript_cells_and_dialect_rows(self) -> None:
         with MATRIX.MATRIX.open("rb") as handle:
             config = MATRIX.tomllib.load(handle)
         emitted = [
             row for row in MATRIX.rows(config)
-            if row["scenario"] == "typescript-host-flows"
+            if row["scenario"] == "host-flows"
         ]
-        self.assertEqual(len(emitted), 1)
-        self.assertEqual(emitted[0]["label"], "typescript")
+        self.assertEqual([row["label"] for row in emitted], ["typescript", "python"])
         self.assertTrue((ROOT / emitted[0]["runbook"]).is_file())
         for cell in ("turn.ts", "durable-process.ts"):
             self.assertTrue((ROOT / "examples" / "typescript-host-flows" / cell).is_file())
@@ -109,45 +108,57 @@ class JudgedRunbookMatrixTests(unittest.TestCase):
         )
         self.assertEqual(MATRIX.MATRIX.name, "judged-matrix.toml")
 
-    def test_every_existing_runbook_has_exactly_one_typescript_row(self) -> None:
-        # Discovery plus the row shape in one test: a runbook directory that
-        # nobody classified is as invisible as a scenario that quietly emits a
-        # second paid row under a language the tree no longer has.
+    def test_every_runbook_directory_is_a_row_or_a_declared_harness(self) -> None:
+        with MATRIX.MATRIX.open("rb") as handle:
+            config = MATRIX.tomllib.load(handle)
+        classified = set().union(*(
+            set(config[group])
+            for group, policy in config["groups"].items()
+            if policy.get("referent") != "harness_case"
+        ))
+        discovered = {
+            path.name for path in (ROOT / "runbooks").glob("*/") if path.is_dir()
+        }
+        self.assertEqual(discovered, classified)
+
+    def test_rlm_rows_emit_once_per_declared_dialect(self) -> None:
+        # ADR 0139: each label claims the source dialect actually served.
+        with MATRIX.MATRIX.open("rb") as handle:
+            config = MATRIX.tomllib.load(handle)
+        self.assertEqual(config["schema_version"], 4)
+        self.assertEqual(config["dialects"], ["typescript", "python"])
+        self.assertEqual(MATRIX.dialect_violations(config), [])
+        rows = MATRIX.rows(config)
+        for scenario, entry in config["scenarios"].items():
+            self.assertEqual(
+                [row["label"] for row in rows if row["scenario"] == scenario],
+                entry.get("dialects", ["typescript"]),
+            )
+        self.assertEqual({row["label"] for row in rows}, {"typescript", "python", "standard"})
+
+    def test_pending_dialects_remain_inventory_without_claiming_execution(self) -> None:
         with MATRIX.MATRIX.open("rb") as handle:
             config = MATRIX.tomllib.load(handle)
         rows = MATRIX.rows(config)
-        ordinary = set(config["scenarios"])
-        excluded = set().union(
-            *(
-                set(config[group])
-                for group in config["groups"]
-                if group != "scenarios"
-            )
-        )
-        discovered = {
-            path.parent.name
-            for path in (ROOT / "runbooks").glob("*/runbook.md")
-            if path.parent.name not in excluded
-        }
-        self.assertEqual(discovered, ordinary)
-        self.assertEqual(config["language"], "typescript")
-        for scenario in ordinary:
-            self.assertEqual(
-                [row["label"] for row in rows if row["scenario"] == scenario],
-                ["typescript"],
-                f"`{scenario}` must emit exactly one row, labelled typescript",
-            )
+        pending = [row for row in rows if "pending" in row]
+        self.assertEqual(len(pending), 8)
+        self.assertTrue(all(row["label"] == "python" and row["pending"] == "FIG-5990" for row in pending))
+        self.assertTrue(all("pending" not in row for row in rows if row["label"] != "python"))
+        for entry in config["scripted_live_model"].values():
+            self.assertEqual(entry["pending_dialects"], {"python": "FIG-5990"})
+        entry = config["scenarios"]["workbench-weather"]
+        for invalid in ({"ruby": "FIG-5990"}, {"python": ""}, ["python"]):
+            entry["pending_dialects"] = invalid
+            self.assertTrue(MATRIX.dialect_violations(config))
 
-    def test_no_row_carries_a_retired_language_id(self) -> None:
-        # ADR 0096 leaves one language id. A row labelled with the retired
-        # surface would claim a session pin no host can serve, and the artifact
-        # directory it names would be evidence of nothing.
+    def test_undeclared_or_duplicate_dialects_are_rejected(self) -> None:
         with MATRIX.MATRIX.open("rb") as handle:
             config = MATRIX.tomllib.load(handle)
-        labels = {row["label"] for row in MATRIX.rows(config)}
-        self.assertEqual(labels, {"typescript", "standard"})
-        self.assertNotIn("dialects", config)
-        self.assertNotIn("lashvm", MATRIX.MATRIX.read_text())
+        entry = config["scenarios"]["workbench-weather"]
+        for invalid in (["lashvm"], ["python", "python"], [], "python"):
+            with self.subTest(dialects=invalid):
+                entry["dialects"] = invalid
+                self.assertTrue(MATRIX.dialect_violations(config))
 
     def test_the_matrix_lists_no_scenario_twice(self) -> None:
         # A scenario in two groups is invisible to a per-group check while the
@@ -181,20 +192,18 @@ class JudgedRunbookMatrixTests(unittest.TestCase):
             )
             self.assertNotIn(scenario, config["scenarios"])
 
-    def test_scripted_live_model_scenarios_name_their_runner_and_no_language(
-        self,
-    ) -> None:
-        # These rows are owned by a shell oracle, not by the judged shard, so
-        # the runner is the only thing the matrix can be trusted on. A
-        # per-entry language list would be a second source of truth for a
-        # choice ADR 0096 removed.
+    def test_scripted_live_model_cases_declare_their_runner_and_dialects(self) -> None:
+        # ADR 0139 applies to the scripted host too; the shell oracle owns its verdict.
         with MATRIX.MATRIX.open("rb") as handle:
             config = MATRIX.tomllib.load(handle)
         emitted = {row["scenario"] for row in MATRIX.rows(config)}
         for scenario, entry in config["scripted_live_model"].items():
             self.assertEqual(entry["runner"], "just rlm-smoke-e2e")
-            self.assertNotIn("dialects", entry)
+            self.assertEqual(entry["dialects"], ["typescript", "python"])
             self.assertNotIn(scenario, emitted)
+        self.assertEqual(set(config["scripted_harness"]), {"rlm-smoke", "lash-facade-failover", "lash-postgres-workers"})
+        self.assertNotIn("context-overflow-recovery", emitted)
+        self.assertIn("context-overflow-recovery", config["deterministic_only"])
 
     def test_the_row_total_is_the_stated_arithmetic(self) -> None:
         # The count is cited in the report, the runbook rules and the shard
@@ -203,12 +212,17 @@ class JudgedRunbookMatrixTests(unittest.TestCase):
         with MATRIX.MATRIX.open("rb") as handle:
             config = MATRIX.tomllib.load(handle)
         expected = sum(
-            len(config[group])
+            sum(
+                len(entry.get("dialects", ["typescript"]))
+                if policy["label"] == "dialect"
+                else 1
+                for entry in config[group].values()
+            )
             for group, policy in config["groups"].items()
             if policy["emits"]
         )
         self.assertEqual(len(MATRIX.rows(config)), expected)
-        self.assertEqual(expected, 25)
+        self.assertEqual(expected, 32)
 
     def test_every_scenario_declares_a_valid_tier_and_its_tier_model(self) -> None:
         # The tier word is what a reader trusts; the slug is what the bill is

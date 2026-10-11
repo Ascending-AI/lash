@@ -33,6 +33,7 @@ dependencies = [
  "dotenvy",
  "futures-util",
  "http",
+ "lash-dialect-python",
  "lash-runtime",
  "lash-sim",
  "percent-encoding",

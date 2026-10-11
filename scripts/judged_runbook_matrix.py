@@ -28,11 +28,9 @@ def parse_shard(value: str) -> tuple[int, int]:
 def row(config: dict[str, object], group: str, scenario: str, label: str) -> dict[str, str]:
     """One judged row, carrying its artifact label and the tier it is funded at.
 
-    `label` is the row's artifact directory and the claim its evidence has to
-    support: `typescript` says an RLM session served in TypeScript produced it, `standard`
-    says the scenario opened none. TypeScript is the only shipped dialect today
-    (ADR 0096), so the current inventory reads one `language` rather than
-    iterating a paired-language battery.
+    `label` is the row's artifact directory and evidence claim: a declared
+    dialect says an RLM session served that dialect (ADR 0139); `standard`
+    says the scenario opened none.
 
     The tier and model travel *on the row* rather than being looked up by the
     runner, because a row's evidence bundle has to record which model produced
@@ -40,13 +38,17 @@ def row(config: dict[str, object], group: str, scenario: str, label: str) -> dic
     nobody can read off the artifacts.
     """
     entry = config[group][scenario]
-    return {
+    result = {
         "scenario": scenario,
         "label": label,
         "runbook": f"runbooks/{scenario}/runbook.md",
         "tier": entry["tier"],
         "model": entry["model"],
     }
+    pending = entry.get("pending_dialects", {}).get(label)
+    if pending:
+        result["pending"] = pending
+    return result
 
 
 def rows(config: dict[str, object]) -> list[dict[str, str]]:
@@ -54,9 +56,57 @@ def rows(config: dict[str, object]) -> list[dict[str, str]]:
     for group, policy in config["groups"].items():
         if not policy["emits"]:
             continue
-        label = config["language"] if policy["label"] == "language" else policy["label"]
-        result.extend(row(config, group, scenario, label) for scenario in config[group])
+        for scenario, entry in config[group].items():
+            labels = (
+                entry.get("dialects", ["typescript"])
+                if policy["label"] == "dialect"
+                else [policy["label"]]
+            )
+            result.extend(row(config, group, scenario, label) for label in labels)
     return result
+
+
+def dialect_violations(config: dict[str, object]) -> list[str]:
+    """A dialect label must name one declared host dialect, exactly once."""
+    declared = config["dialects"]
+    problems = []
+    for group, policy in config["groups"].items():
+        for scenario, entry in config[group].items():
+            if policy.get("label") == "standard":
+                if "dialects" in entry:
+                    problems.append(f"`{scenario}` opens no RLM session but declares dialects")
+                continue
+            if policy.get("referent") in ("harness", "runbook"):
+                continue
+            dialects = entry.get("dialects", ["typescript"])
+            pending = entry.get("pending_dialects", {})
+            if not isinstance(pending, dict) or any(
+                dialect not in dialects or not isinstance(reason, str) or not reason
+                for dialect, reason in pending.items()
+            ):
+                problems.append(f"`{scenario}` has invalid pending dialects: {pending}")
+            if not isinstance(dialects, list) or not dialects:
+                problems.append(f"`{scenario}` needs a nonempty dialect list")
+            elif any(dialect not in declared for dialect in dialects) or len(
+                set(dialects)
+            ) != len(dialects):
+                problems.append(f"`{scenario}` has undeclared or duplicate dialects: {dialects}")
+    return problems
+
+
+def discovery_violations(config: dict[str, object]) -> list[str]:
+    """README-only harnesses also need an explicit inventory disposition."""
+    classified = {
+        name
+        for group, policy in config["groups"].items()
+        if policy.get("referent") != "harness_case"
+        for name in config[group]
+    }
+    discovered = {path.name for path in (ROOT / "runbooks").glob("*/") if path.is_dir()}
+    return [
+        f"runbooks/{name}/ has no row or declared harness"
+        for name in sorted(discovered - classified)
+    ]
 
 
 def tier_violations(config: dict[str, object]) -> list[str]:
@@ -70,6 +120,8 @@ def tier_violations(config: dict[str, object]) -> list[str]:
     tiers = config["tiers"]
     problems = []
     for group in config["groups"]:
+        if config["groups"][group].get("referent") == "harness":
+            continue
         for scenario, entry in config[group].items():
             tier = entry.get("tier")
             if tier not in tiers:
@@ -89,20 +141,8 @@ def tier_violations(config: dict[str, object]) -> list[str]:
 def referent_violations(config: dict[str, object]) -> list[str]:
     """Every non-emitting row, checked against the thing it names.
 
-    The emitted groups get their referent checked in `main` because a missing
-    `runbook.md` breaks the shard. The non-emitting groups get nothing: they are
-    excluded from discovery *and* never emitted, so `deterministic_only` and
-    `scripted_live_model` keys are the one part of the matrix no assertion
-    reads. Listing a harness "keeps discovery honest" only while the listing
-    still points at something, and a renamed case directory would leave the row
-    dangling on green CI.
-
-    A `deterministic_only` key names `runbooks/<key>/runbook.md`, the same
-    referent the emitted groups use. A `scripted_live_model` key names a case of
-    a scripted harness, spelled `<harness>-<case>` for
-    `runbooks/<harness>/cases/<case>` -- the shape RULES.md documents for
-    `rlm-smoke`. Both are resolved here rather than special-cased by name so a
-    second harness needs no change.
+    A runbook names its Markdown procedure, a harness names its directory,
+    and a harness case names `runbooks/<harness>/cases/<case>`.
     """
     problems = []
     for group, policy in config["groups"].items():
@@ -115,6 +155,9 @@ def referent_violations(config: dict[str, object]) -> list[str]:
                         f"`{scenario}` is listed in `{group}` but "
                         f"runbooks/{scenario}/runbook.md does not exist"
                     )
+            elif policy["referent"] == "harness":
+                if not (ROOT / "runbooks" / scenario).is_dir():
+                    problems.append(f"`{scenario}` is listed in `{group}` but its harness directory does not exist")
             elif policy["referent"] == "harness_case":
                 for split in range(len(scenario) - 1, 0, -1):
                     if scenario[split] != "-":
@@ -188,6 +231,10 @@ def main() -> int:
     args = parser.parse_args()
     with MATRIX.open("rb") as handle:
         config = tomllib.load(handle)
+    violations = dialect_violations(config) + discovery_violations(config)
+    if violations:
+        print(f"matrix violations: {'; '.join(violations)}", file=sys.stderr)
+        return 2
     violations = tier_violations(config)
     if violations:
         print(f"tier violations: {'; '.join(violations)}", file=sys.stderr)
@@ -210,7 +257,7 @@ def main() -> int:
     print(
         json.dumps(
             {
-                "schema": "lash.judged-runbook-shard.v3",
+                "schema": "lash.judged-runbook-shard.v4",
                 "shard": f"{index}/{count}",
                 "tiers": config["tiers"],
                 "judge_model_floor": config["judge_model_floor"],

@@ -1,15 +1,38 @@
-// The Workbench's own share of the system prompt.
-//
-// ADR 0063 binds the substrate: every fragment of an assembled RLM prompt is
-// written in the session's own language. A host that injects worked code
-// examples owns the same rule for its own copy, and this file is where the
-// Workbench holds up its end. TypeScript is the sole RLM language (ADR 0096),
-// so the tutorials below are injected unconditionally and always name the same
-// language as the execution section.
+use super::*;
 
-/// The Workbench's tutorial share of the system prompt.
-pub(crate) fn workbench_prompt() -> &'static str {
-    WORKBENCH_PROMPT_TYPESCRIPT
+/// A host choice read once at boot, shared by the protocol and host prompt.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum WorkbenchDialect {
+    #[default]
+    TypeScript,
+    Python,
+}
+
+impl WorkbenchDialect {
+    pub(crate) fn configured(value: Option<&str>) -> AnyhowResult<Self> {
+        match value {
+            None | Some("typescript") => Ok(Self::TypeScript),
+            Some("python") => Ok(Self::Python),
+            Some(value) => Err(anyhow!(
+                "invalid AGENT_WORKBENCH_DIALECT `{value}`; expected typescript or python"
+            )),
+        }
+    }
+
+    pub(crate) fn cell_dialect(self) -> lash::rlm::CellDialect {
+        match self {
+            Self::TypeScript => lash::rlm::CellDialect::typescript(),
+            Self::Python => lash::rlm::CellDialect::python(),
+        }
+    }
+}
+
+/// ADR 0063: host tutorials use the same dialect as the execution section.
+pub(crate) fn workbench_prompt(dialect: WorkbenchDialect) -> &'static str {
+    match dialect {
+        WorkbenchDialect::TypeScript => WORKBENCH_PROMPT_TYPESCRIPT,
+        WorkbenchDialect::Python => WORKBENCH_PROMPT_PYTHON,
+    }
 }
 
 pub(crate) const WORKBENCH_PROMPT_TYPESCRIPT: &str = r###"You are running inside the Agent Workbench demo.
@@ -84,4 +107,51 @@ A registration's `subscription_id` is a machine identity. Never quote it to the 
 
 Reference only the `inbox.<account>` authorities that actually exist; if the user has not connected an account yet, ask them to add one from the Accounts tab first.
 
+Use background processes or subagents only when they clarify the user's request or make parallel progress. Keep the visible answer concise and mention any background work you started."###;
+
+const WORKBENCH_PROMPT_PYTHON: &str = r###"You are running inside the Agent Workbench demo.
+
+Available host features:
+- Web access is provided by the free Parallel Search MCP server (`parallel`): use its web search and web fetch tools. The server is attached without an API key, and its tools are simply absent while the connection is down.
+- You may call `agents_spawn(...)` for independent investigation.
+- Define durable processes as uncalled top-level `async def` functions. Pass the function as `definition` to `processes_start` or `workbench_register_trigger`. `processes_get({"definition_id": id})` resolves a stored definition.
+- `await processes_start({"definition": research, "args": {"task": "..."}})` returns a handle. Start all handles before awaiting any; `await handle` gives the returned value directly. Tool results are dicts: use `result["summary"]`, not attribute access. `asyncio.gather` joins tool calls; await process handles directly:
+
+<python>
+async def research(task):
+    return await agents_spawn({"task": task, "output": {"summary": "str", "key_metrics": "list[str]"}})
+
+first = await processes_start({"definition": research, "args": {"task": "Research the first topic"}})
+second = await processes_start({"definition": research, "args": {"task": "Research the second topic"}})
+first_result = await first
+second_result = await second
+await chat_reply("## Results\n\n" + first_result["summary"] + "\n\n" + second_result["summary"])
+</python>
+
+- For schedules, register a cron source with `expr` and optional `tz` (UTC by default). `event_arg` names the argument receiving `{"fired_at": str}`; `args` fixes other arguments. Use `*/10 * * * * *` for a quick smoke test. A process-end notice arrives in this chat when a started process ends:
+
+<python>
+async def on_tick(tick):
+    return tick["fired_at"]
+
+await workbench_register_trigger({"source": {"kind": "cron", "expr": "0 8 * * *"}, "definition": on_tick, "event_arg": "tick", "name": "morning check"})
+await chat_reply("Scheduled morning check for 08:00 UTC every day.")
+</python>
+
+- Connected mock email accounts are authorities at `inbox.<account>`, such as `inbox.work` and `inbox.personal`. `await inbox_work_send({"title": t, "text": b})` returns `{"account": ..., "id": ...}`; `await inbox_work_list({})` returns `{"account": ..., "messages": [...]}`; `await inbox_work_delete({"id": id})` removes one message. There is no recipient address.
+- On delivery from the Accounts tab or `inbox_<account>_send`, the workbench starts every definition registered on the mail source with `{"account": str, "title": str, "text": str}`. `account` carries the account SLUG, not its display name: use the slug from the account enumeration (for example `work` or `personal`), not a display name such as `Work`, when filtering deliveries.
+
+<python>
+import asyncio
+
+async def on_mail(event):
+    boxes = await asyncio.gather(inbox_work_list({}), inbox_personal_list({}))
+    return {"arrived_in": event["account"], "title": event["title"], "waiting": len(boxes[0]["messages"]) + len(boxes[1]["messages"])}
+
+await workbench_register_trigger({"source": {"kind": "mail"}, "definition": on_mail, "event_arg": "event", "name": "inbox concierge"})
+await chat_reply("Inbox concierge is watching every delivery.")
+</python>
+
+A registration's `subscription_id` is a machine identity. Never quote it to the user: name a registration by its `name` and what it watches.
+Reference only connected `inbox.<account>` authorities; ask the user to connect an account from the Accounts tab when none exist.
 Use background processes or subagents only when they clarify the user's request or make parallel progress. Keep the visible answer concise and mention any background work you started."###;

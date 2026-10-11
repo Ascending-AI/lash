@@ -238,6 +238,7 @@ pub(crate) fn workbench_rlm_workers() -> AnyhowResult<Option<lash::vm::WorkerSer
 
 /// Everything the workbench plugin stack is configured with.
 pub(crate) struct WorkbenchCorePlugins {
+    pub(crate) dialect: WorkbenchDialect,
     pub(crate) rlm_workers: Option<lash::vm::WorkerService>,
     pub(crate) tool_provider: Option<Arc<dyn lash::tools::ToolProvider>>,
     pub(crate) mail_world: mail::MailWorld,
@@ -266,6 +267,7 @@ pub(crate) async fn workbench_core_builder(
     plugins: WorkbenchCorePlugins,
 ) -> AnyhowResult<lash::LashCoreBuilder> {
     let WorkbenchCorePlugins {
+        dialect,
         rlm_workers,
         tool_provider,
         mail_world,
@@ -305,12 +307,10 @@ pub(crate) async fn workbench_core_builder(
             {
                 rlm_config.continue_as_soft_warn_tokens = Some(warn_tokens);
             }
-            let factory = lash::rlm::RlmProtocolPluginFactory::new(
-                rlm_config,
-                lash::rlm::CellDialect::typescript(),
-            )
-            .with_worker_service(rlm_workers.context("RLM worker was not prewarmed")?)
-            .with_deferred_tool_resolver(deferred_tools.resolver());
+            let factory =
+                lash::rlm::RlmProtocolPluginFactory::new(rlm_config, dialect.cell_dialect())
+                    .with_worker_service(rlm_workers.context("RLM worker was not prewarmed")?)
+                    .with_deferred_tool_resolver(deferred_tools.resolver());
             // The chat's own finish tool takes the place of Lash's.
             LashCore::rlm_builder(host_backend, factory).tools(Arc::new(
                 lash::tools::FinishToolProvider::new([plugins::chat_reply_tool()]),
@@ -420,6 +420,7 @@ pub(crate) async fn build_workbench_core(
 /// product events, turn routing, mail world, approvals, trigger tables, model
 /// selection and tracing.
 pub(crate) struct WorkbenchHost {
+    pub(crate) dialect: WorkbenchDialect,
     pub(crate) session_defaults: lash::SessionSpec,
     pub(crate) sessions: WorkbenchSessions,
     pub(crate) event_tx: SessionEventRegistry,
@@ -445,6 +446,7 @@ pub(crate) fn workbench_app_state(
     host.host_triggers.bind_core(core.clone());
     Ok(AppState {
         core,
+        dialect: host.dialect,
         session_defaults: host.session_defaults,
         attachment_store: stores.attachment_store(),
         session_store_factory: stores.session_store_factory(),
@@ -492,6 +494,8 @@ pub(crate) async fn start_workbench(state: &AppState) -> AnyhowResult<()> {
 pub(crate) async fn async_main() -> AnyhowResult<()> {
     let _ = dotenvy::dotenv();
     tracing_subscriber::fmt::init();
+    let dialect =
+        WorkbenchDialect::configured(std::env::var("AGENT_WORKBENCH_DIALECT").ok().as_deref())?;
     let rlm_workers = workbench_rlm_workers()?;
     let context_window_tokens = context_window_tokens_from_environment()?;
     WORKBENCH_CONTEXT_WINDOW_TOKENS
@@ -503,6 +507,11 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
     #[cfg(feature = "e2e-tools")]
     let tool_fixture = crate::e2e_tools::Fixture::from_env("AGENT_WORKBENCH_TOOL_FIXTURE")?;
     let dev_provider_scenario = failure_provider::DevProviderScenario::from_environment()?;
+    if dialect == WorkbenchDialect::Python && dev_provider_scenario.is_some() {
+        return Err(anyhow!(
+            "the selected dev-provider scenario scripts TypeScript cells; use AGENT_WORKBENCH_DIALECT=typescript"
+        ));
+    }
     let api_key = std::env::var(OPENROUTER_API_KEY_ENV).unwrap_or_default();
     let rlm_channel = workbench_rlm_channel()?;
     // A case's tool fixture brings its own scripted provider.
@@ -664,6 +673,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
     #[cfg(feature = "e2e-tools")]
     let operation_controls = Arc::new(crate::e2e_operation::Controls::default());
     let plugins = WorkbenchCorePlugins {
+        dialect,
         rlm_workers,
         tool_provider,
         mail_world: mail_world.clone(),
@@ -775,6 +785,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
             core,
             stores.stores.as_ref(),
             WorkbenchHost {
+                dialect,
                 session_defaults,
                 sessions,
                 event_tx,
@@ -799,11 +810,8 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
                 "data_dir": data_dir.display().to_string(),
                 "trace_path": trace_path_display,
                 "lash_vm_execution_path": lash_vm_execution_path.display().to_string(),
-                // The served RLM language, read from the constant the session
-                // list, the settings panel and the rendered system prompt all
-                // select from, so the record cannot disagree with what the host
-                // actually serves (FIG-3165).
-                "dialect": RLM_LANGUAGE_ID,
+                // The same boot selection builds the protocol and its host tutorials.
+                "dialect": dialect.cell_dialect().name(),
                 "model": serde_json::to_value(state.selected_llm_profile()).unwrap_or(Value::Null),
                 "dev_provider_scenario": dev_provider_scenario.map(|scenario| scenario.as_str()),
                 "store_backend": stores.backend,

@@ -3,15 +3,10 @@ use lash::ProcessId;
 use lash::SessionId;
 use lash::TurnId;
 
-/// The RLM language every session runs.
-///
-/// TypeScript is the sole RLM language (ADR 0096); the UI still reports a
-/// language id so the settings panel and the session list keep their shape.
-pub(crate) const RLM_LANGUAGE_ID: &str = "typescript";
-
 #[derive(Clone)]
 pub(crate) struct AppState {
     pub(crate) core: LashCore,
+    pub(crate) dialect: WorkbenchDialect,
     /// The workbench's default session spec, stated at boot: turn and
     /// no-progress budgets, generation, attachment acceptance and the RLM
     /// prompt. A core keeps no session defaults, so the host keeps this
