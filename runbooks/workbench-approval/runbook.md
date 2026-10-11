@@ -39,8 +39,8 @@ tool failure, and a parked wait survives a workbench process restart.
    arguments, requesting session, and cardinality. The session graph must show
    the same one active turn with no premature assistant commit.
 5. At every terminal checkpoint, reconcile rendered user/assistant rows,
-   `/api/state` messages/product events, the session graph, and exactly one
-   completed turn execution in `trace.jsonl`.
+   `/api/state.transcript` and `/api/state.product_events.events`, the session
+   graph, and exactly one completed turn execution in `trace.jsonl`.
 6. Poll gates; never decide completion with a fixed sleep. Capture every named
    screenshot under the scenario artifact directory.
 
@@ -60,7 +60,7 @@ obey the structural request):
 
 > In one TypeScript cell call `ops.apply_change` with target `demo-cluster` and
 > change `enable safe mode`, awaiting it so a failure propagates, then
-> `control.finish` the returned record. Do not merely explain the call.
+> `chat.reply` the returned record. Do not merely explain the call.
 
 1. Poll until exactly one approval card renders. Save
    `01-approve-parked.png`, `01-approve-state.json`, and
@@ -79,14 +79,17 @@ Reset to a fresh session and submit:
 
 > In one TypeScript cell call `ops.apply_change` with target `demo-cluster` and
 > change `disable audit log`, catching the failure instead of letting it
-> propagate. Inspect the thrown error and `control.finish` a record carrying the code from
-> `error.cause.code` and the message from `error.message`. Do not retry it.
+> propagate. Inspect the thrown error and `chat.reply` a record carrying
+> `error.name` and `error.message`. Do not retry it.
 
 1. Gate on one matching approval across DOM, `/api/state`, and
    `/api/approvals`; save `03-deny-parked.png`, `03-deny-state.json`, and
    `03-deny-approvals.json`.
-2. Click **deny**. Poll for terminal completion. Require the recorded tool
-   failure the cell observed to expose `ok=false`, code `approval_denied`, message
+2. Click **deny**. Poll for terminal completion. A host tool failure surfaces
+   in TypeScript with `error.name == "tool_failed"` and a working `.message`;
+   every other key, `cause` included, is absent, so the typed code is gated on
+   the recorded tool failure in the trace, not the cell's error object. Require
+   that recorded failure to expose `ok=false`, code `approval_denied`, message
    `the operator denied this change`, source `tool`, and retry disposition
    `never` as typed fields rather than a serialized string. Require no second
    `workbench_ops_apply_change` execution. Save `04-denied-handled.png`,
@@ -99,7 +102,7 @@ Reset to a fresh session and submit:
 Reset to a fresh session and submit:
 
 > In one TypeScript cell call `ops.apply_change` with target `restart-demo` and
-> change `rotate workers`, awaiting it so a failure propagates, then `control.finish`
+> change `rotate workers`, awaiting it so a failure propagates, then `chat.reply`
 > its status. Do not merely explain the call.
 
 1. Gate on one approval across all three host projections and record the

@@ -90,8 +90,8 @@ cross-surface identity, not the quality of the model's image description.
   the stored blob, and `<data-dir>/trace.jsonl`. SQLite keeps both in
   `<data-dir>/lash-sessions.db` — the edge in `attachment_referrer_edges`,
   the bytes as the `attachment_blobs` row under the same id — while Postgres names the
-  edge table `lash_attachment_referrer_edges` and keeps bytes at
-  `<data-dir>/attachments/blake3/<first-two-id-characters>/<attachment-id>`.
+  edge table `lash_attachment_referrer_edges` and still keeps the bytes in SQLite at
+  `<data-dir>/attachments/attachments.db`.
 
 ## Phase 0 — Boot and identify the session
 
@@ -126,7 +126,7 @@ box no larger than 640 × 420 CSS pixels. GET that image URL independently and r
 200. Screenshot the scrolled row as `02-rendered-image.png`.
 
 Then poll until the UI is idle, `/api/state.active_turns` is empty, and the committed
-user/assistant pair is rendered. Require the matching `/api/state.messages` user message
+user/assistant pair is rendered. Require the matching `/api/state.transcript` user row
 to carry exactly one `attachments` entry with the same `attachment_id` and `retrieve_url`.
 Re-check that the settled row still contains exactly one loaded image; this is the FIG-972
 handoff from the UI-owned row to committed backfill, not a second row.
@@ -172,7 +172,7 @@ route must return 200 and must not inherit the 409 semantics of session-scoped a
 
 Poll the reconstructed committed user row until its linked image is complete with positive
 natural dimensions. Re-run the same DOM/API/durable three-layer cross-check: the reloaded
-DOM has one image, `/api/state.messages` has the same committed attachment reference, the
+DOM has one image, `/api/state.transcript` has the same committed attachment reference, the
 session referrer edge remains, and the blob still has the source hash and length. Save the
 state as `03-state.json` and screenshot the reconstructed transcript and usage rail as
 `03-restarted.png`.

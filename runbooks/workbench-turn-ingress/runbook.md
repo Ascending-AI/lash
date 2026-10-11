@@ -32,9 +32,9 @@ structure rather than exact assistant wording.
    admitted checkpoint and starts another provider iteration, that next request must contain
    the injected input as an ordinary user message. The same message must appear exactly once
    in the durable session graph, `GET /api/state`, and the rendered transcript, then flow
-   through normal assembled history exactly once in later turns. An `ingress.settled`
-   trace record naming the input proves settlement but does not replace provider and
-   transcript evidence. If
+   through normal assembled history exactly once in later turns. An admitted
+   `pending_turn_inputs` row — `admitted_run` and `admitted_by` populated —
+   proves settlement but does not replace provider and transcript evidence. If
    the input arrives after the turn's last checkpoint, it must become the next turn's first
    committed user input instead of being stranded.
 5. **Queued means a full committed turn.** The queued marker must be absent from provider
@@ -63,9 +63,9 @@ structure rather than exact assistant wording.
 - Disk truth: `<data-dir>/lash-sessions.db`, table `pending_turn_inputs` — note
   an ordinary composer **send** also lands there, with `ingress {"scope":"next_turn"}`, so a
   one-send run holds three rows, not two — and
-  `<data-dir>/trace.jsonl` events named `agent_workbench.turn_input.enqueued` and
-  `ingress.settled` (payload `run` and `input_ids`, settled by run and turn per ADR 0101's
-  FIG-3927 amendment). An admitted row names its run in `admitted_run` and `admitted_by`;
+  `<data-dir>/trace.jsonl` events named `turn_input.enqueued`,
+  `turn_input.cancelled` and `turn_input.settle_cancelled`. An admitted row names its run in
+  `admitted_run` and `admitted_by`;
   there are no claim columns and no `claimed_turn_id` column, and selecting one fails with
   `no such column`.
 - Provider truth is the `llm_call_started` trace record, **not** `provider_event` (direction `request`). A
@@ -75,9 +75,10 @@ structure rather than exact assistant wording.
   0 count across every iteration means the evidence was omitted, not that the marker was
   absent; re-read the same iterations from `llm_call_started`, which carries the assembled
   messages, before scoring any exactly-once gate.
-- ADR 0101 defines current run admission and shift-fence settlement; its store-law
+- ADR 0101 defines current run admission; its store-law
   evidence lives in
-  `crates/lash-conformance/src/conformance/runtime_persistence/run_admissions.rs`.
+  `crates/lash-conformance/src/conformance/runtime_persistence/ingress_integrity.rs` and
+  `turn_input_batches.rs`.
 
 ## Phase 0 — Boot and pre-flight
 
@@ -116,7 +117,7 @@ Gate the response: `accepted: true`, non-empty `input_id`, state `pending_active
 `active_turn` ingress whose `turn_id` equals Phase 1 and whose minimum boundary is
 `after_work`. Gate the page renders an `injected now` row with the marker and the same
 input id in its element data. Reconcile the receipt with `/api/state.pending_turn_inputs`
-or, if already claimed, its SQLite row and `agent_workbench.turn_input.enqueued` trace.
+or, if already claimed, its SQLite row and `turn_input.enqueued` trace.
 
 Save `02-inject-receipt.json`, the matching disk row as
 `02-inject-store.json`, and screenshot `02-injected.png`.
@@ -139,7 +140,8 @@ a fixed delay. Gate in this order:
 1. the first provider request after the admitted checkpoint — read from `llm_call_started`,
    per Working material — contains the injected marker exactly once as a user message,
    proving the model received it during the initial turn;
-   exactly one `ingress.settled` record also places its input id under that turn id and run;
+   the SQLite `pending_turn_inputs` row is admitted under that run — `admitted_run` and
+   `admitted_by` populated rather than open;
 2. the injected marker appears exactly once as a committed user message in the durable
    session graph, `GET /api/state`, and the rendered page; capture all three surfaces and
    require their message text and ordering to agree;
@@ -181,7 +183,7 @@ It does not certify Phases 2–4's live-provider assertions.
    `DELETE /api/turn/input/<input_id>`: its typed receipt must say `cancelled`.
    Only this row disappears; the running turn and the other three stay.
    The row on disk becomes `cancelled`, and the session trace carries
-   `agent_workbench.turn_input.cancelled` with that input id.
+   `turn_input.cancelled` with that input id.
 3. Click **edit** on `EDIT`. The inline editor must contain its text and warn
    that this input **and all later pending inputs** are cancelled, and later
    inputs are not resubmitted. **keep queued** closes the editor without any
@@ -219,7 +221,7 @@ Run `just agent-workbench-down <port>` and confirm the workbench is gone.
 | Queue intent | UI label and receipt agree on `next_turn` | | `03-queued.png`, receipt/store JSON |
 | Exactly-once injection | input reaches the next initial-turn provider iteration, commits once as a normal user message, and appears once in later assembled history | | `04-provider-order.json`, session store |
 | Post-settle dispatch | queue marker first appears after initial terminal in its own turn | | provider/trace ordering |
-| Transcript fidelity | injected and queued user messages agree across rendered page, `/api/state`, and durable session graph | | `04-two-turns-settled.png`, history JSON |
+| Transcript fidelity | injected and queued user inputs agree across rendered page, `/api/state`, and durable session graph | | `04-two-turns-settled.png`, history JSON |
 | Queue management (FIG-995) | ordered list; one single cancellation; honest suffix withdrawal; fresh replacement; reload and two-tab reconciliation agree with API, SQLite and trace | | `05-management.json`, queue/editor screenshots |
 | Claim settlement | both durable input ids settle with no duplicate or stranded row | | SQLite evidence |
 

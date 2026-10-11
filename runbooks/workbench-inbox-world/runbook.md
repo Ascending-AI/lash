@@ -32,7 +32,7 @@ prose and the exact TypeScript it writes are its own; gate on structural outcome
    work. If you have to prompt the agent to make the copy appear, the trigger chain is
    broken: that is the finding, do not "help".
 3. **The forwarding processes are durable and visible.** After the trigger fires, the
-   process registry (`GET /api/work`, the right rail) must show the concierge run, and
+   process registry (`GET /api/work`, the `#workPane` drawer) must show the concierge run, and
    `GET /api/lash-vm-graphs` must know its graph. Invisible background work is a finding.
 4. **Instruct outcomes, not code.** Ask the agent *what to do* ("register a trigger
    that forwards…"); never paste a ready-made `<typescript>` cell into the chat. The
@@ -49,16 +49,15 @@ prose and the exact TypeScript it writes are its own; gate on structural outcome
   `bash scripts/agent-workbench-dev.sh down --port <port>` with the same env at the end,
   success or Abort. (`just agent-workbench <port>` / `just agent-workbench-down <port>` name
   the same operations but do not carry this row's environment.)
-- **UI affordances**: the center pane **chat / accounts** tab switch
-  (`button.view-tab[data-view="chat"]` / `button.view-tab[data-view="accounts"]`); the chat
+- **UI affordances**: the left-nav view links
+  (`button.view-link[data-view="accounts"]` opens accounts; return to chat through the
+  `button.page-back[data-view-back]` "back to chat" link); the chat
   input and
-  send control; the transcript stream; the right rail process registry; the accounts tab's
+  send control; the transcript stream; the `#workPane` drawer's process registry, opened
+  by `#workToggle`; the accounts view's
   account-name field (`#accountNameInput`) inside `#accountAddForm`, per-account inbox cards
   each with a compose
   (title/text) form (`form.account-compose`) and per-message delete.
-- Two `.view-tabs` containers exist in the DOM and one of them is zero-sized, so
-  `button.view-tab[data-view=…]` resolves to **two** elements; a naive click times out on the
-  invisible one. Select the visible one explicitly.
 - The **add account** submit button cannot be clicked: the name input overlays it and
   intercepts pointer events. Press **Enter** in `#accountNameInput` — that is the only
   working submit. A driver following the prose alone stalls here.
@@ -144,7 +143,8 @@ Gates, in order:
 2. Within a generous poll window (~120s), `GET /api/accounts/personal/inbox` gains the
    forwarded copy — a message whose title/text traces to `Quarterly report`.
 3. `GET /api/work` shows the concierge process run(s) for this delivery (golden rule 3),
-   and the right rail renders them. Expect **possibly more than one run**: the
+   and the `#workPane` drawer renders them once `#workToggle` opens it. Expect
+   **possibly more than one run**: the
    concierge's own `inbox.personal.send` re-emits `mail.received` (account `personal`),
    which matches the same subscription and starts a second run that no-ops on the
    account filter — the filter is the loop-breaker. One user delivery, exactly one
@@ -160,17 +160,9 @@ Gates, in order:
 5. `GET /api/lash-vm-graphs` includes the concierge's graph;
    `lash-vm-execution.jsonl` grew.
 
-Sink freshness is **evidence, never a gate**: when a run appends non-terminal
-events, the workbench log (in the dev script's state dir — see Working material)
-gains `agent-workbench process event:` lines from the best-effort
-`ProcessEventSink` feed (ADR 0017). A quick concierge run may legitimately append
-none, absence alone is not a finding, and completion never arrives through it —
-that is what gate 4 is for.
-
 Screenshot `05-forwarded.png` showing **both** inbox cards (original + copy). The process
-registry is the right rail of the same view, not a tab of its own, so capture it in that
-same shot rather than as a separate `06-process-rail.png`; a screenshot taken while
-"switching to the process rail" is just the chat view again.
+registry lives in the `#workPane` drawer on the chat view — return through "back to chat",
+open `#workToggle`, and capture it as `05-process.png` rather than hunting for a rail.
 
 ## Phase 6 — Teardown and score
 
@@ -184,7 +176,7 @@ workbench is gone. Then fill:
 | Accounts world | `/api/accounts` lists `work`, `personal` | | `02-accounts.png` |
 | Agent-sent mail | chosen title in `/api/accounts/work/inbox` | | `03-agent-mail.png` |
 | Trigger registration | assistant confirms; fires in Phase 5 | | `04-registered.png` |
-| Forwarding (the chain) | copy in `/api/accounts/personal/inbox`, **no chat turn involved**: count `role: "user"` and `role: "assistant"` rows in `/api/state.messages` across the delivery and require no increase. A delivery does add two rows, but they carry `role: "event"`, and `event` rows do not count as turns. | | `05-forwarded.png` |
+| Forwarding (the chain) | copy in `/api/accounts/personal/inbox`, **no chat turn involved**: count `kind == "user"` and `kind == "assistant_reply"` rows in `/api/state.transcript` across the delivery and require no increase; the delivery surfaces the triggered process and its `process-end` notice row instead. | | `05-forwarded.png` |
 | Durable process visibility | concierge in `/api/work` + graphs API | | `05-forwarded.png` |
 | Work-item await seam | `/api/work/{id}/await` returns `success` outcome + reconciled events | | API output |
 | UI/API agreement throughout | cards match inbox API at every gate | | screenshots + API output |

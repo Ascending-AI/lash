@@ -50,10 +50,10 @@ quality. This runbook is authored for a deliberate token-spending browser run.
    request id returned in `terminal.cancellation`; the transcript/API converges on the
    interrupted terminal. Any disagreement is a contract violation → Abort/RCA.
    Note which receipt that is: **one press of the page's Stop control sends two cancels** —
-   `mode=stop` immediately, then `mode=abort` after `STOP_ESCALATION_MS` (15 s) — and the
+   `mode=stop` immediately, then `mode=abort` after `STOP_ESCALATION_MS` (20 s) — and the
    rendered `turn stopped · request <id>` carries the escalated **abort's** id, not the first
    receipt's. Capture both receipts and compare the rendered id against the escalated one. The
-   escalation also puts a hard 15 s floor under every process-await latency gate in this
+   escalation also puts a hard 20 s floor under every process-await latency gate in this
    runbook: a gate that reads "within 10 seconds of the Stop request" means the request that
    owns the terminal, and a full UI-driven cancel of a process await cannot beat the
    escalation window.
@@ -143,8 +143,8 @@ Press **stop turn** while capturing the `POST /api/turn/cancel` response. Gates:
    later receipt for the same request id. Follow the request id, not the response body;
 4. the UI renders `turn stopped · request <id>` with the same id, returns to idle, and
    hides Stop;
-5. `GET /api/state` no longer lists that address and its messages agree with the rendered
-   interrupted terminal.
+5. `GET /api/state` no longer lists that address and `/api/state.transcript` agrees with
+   the rendered interrupted terminal.
 
 Screenshot `01-cancelled.png`; save the cancel response as `01-cancel-receipt.json`.
 After `/api/state` no longer lists the address, another workbench Stop must return
@@ -263,7 +263,7 @@ Run `just agent-workbench-down <port>` and confirm the workbench process is gone
 |------|----------------|---------|----------|
 | Boot | `/healthz` 200; rendered/API session ids agree | | `00-ready.png` |
 | Normal Stop | committed Cancelled terminal + evidence | | `01-cancelled.png`, `01-cancel-receipt.json` |
-| Repeated Stop policy (rule 9) | matching repeat `already_requested`; conflicting repeat `policy_conflict` naming both policies; durable request row, intent revision and queued inputs unchanged | | `LASH_E2E_TURN_CONTROL_ONLY=1` run log |
+| Repeated Stop policy (rule 9) | matching repeat `already_requested`; conflicting repeat `policy_conflict` naming both policies; durable request row, intent revision and queued inputs unchanged | | law `a_turn_cancel_is_a_first_winner_row_with_a_wake` (`crates/lash-durable/src/laws.rs`) |
 | Routing persistence | same session/turn address before and after restart | | `02-restored-running.png`, state files/API |
 | Restored Stop affordance | running pill + Stop restored from `/api/state.active_turns` | | `02-restored-running.png` |
 | Post-restart Stop | committed Cancelled terminal + evidence for original address | | `03-restored-cancelled.png`, `03-cancel-receipt.json` |

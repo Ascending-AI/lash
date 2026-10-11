@@ -14,7 +14,7 @@ manifests, and the next provider request's current catalogue instructions.
 ## Boot and evidence
 
 Choose a free port and fresh data/run directories under the run's artifact
-root. Source `env.sh` and the keys from `/workspace/code/lash/.env`, export
+root. Source `env.sh` and the keys from the repo `.env`, export
 `OPENROUTER_MODEL=deepseek/deepseek-v4-flash`, `AGENT_WORKBENCH_OPEN=0`,
 `AGENT_WORKBENCH_DATA_DIR` and `AGENT_WORKBENCH_RUN_DIR`, then launch
 `just agent-workbench <port>`. Use SQLite file storage and gate readiness on
@@ -27,9 +27,9 @@ Use these three authorities at every checkpoint:
 - API: `/api/tools?session_id=<S>` (retained entries and pending changes),
   `/api/state?session_id=<S>`, and `/api/accounts/test/inbox`.
 - Disk: read `lash-sessions.db` without writing it. Follow `session_head`
-  into `session_revisions.checkpoint_ref`, decode that `blobs.content`
-  checkpoint (unwrap its version-1 blob envelope and decompress zlib when
-  declared) and its `components.tool_state.blob_ref`, then decode the
+  into `session_revisions.checkpoint_ref` and read that `blobs` row, whose
+  content is one checkpoint-graph node's encoded envelope. The node's
+  component set maps `tool_state` to the component blob ref; decode the
   referenced tool-state blob. Its entry and `member` bit must agree with the
   API. An omitted `member` means true. Save the extracted entry with its head
   revision, and save each phase's new `trace.jsonl` slice.

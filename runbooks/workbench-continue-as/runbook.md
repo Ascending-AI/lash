@@ -48,7 +48,7 @@ node. The seed is a protocol event in the new frame, not a chat row.
 
 Therefore the expected post-switch shape is:
 
-- **DOM and `/api/state.messages`:** all product-event-backed user rows persist; old-frame
+- **DOM and `/api/state.transcript`:** all product-event-backed user rows persist; old-frame
   assistant rows disappear; the coherent assistant reply produced by the follow frame is
   present exactly once.
 - **Current-frame read model:** no pre-switch conversation rows; it contains the new-frame
@@ -248,7 +248,7 @@ Record whether `pressure/organic` or `explicit guidance` fired the switch. Scree
 
 With the answer key already fixed, settle the live projection and capture the post-switch row
 multiset. Require every pre-switch product-event-backed user row to remain in the DOM and
-`/api/state.messages`, every pre-switch assistant row to be absent from both, and the new
+`/api/state.transcript`, every pre-switch assistant row to be absent from both, and the new
 frame's coherent assistant reply to appear once. Require the product-event log, current-frame
 read model, raw graph, and trace to show their respective answer-key shapes exactly. Record
 the pairwise comparison, including the intentional raw-history/current-projection asymmetry.

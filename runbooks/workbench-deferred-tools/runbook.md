@@ -17,7 +17,7 @@ resident `tools.search` capability returns a non-resident utility and persists i
 the model calls that utility in a separate next TypeScript cell, and the same grant remains
 callable after the Workbench process restarts against the same SQLite state.
 
-**Deterministic companion.** `kiln test --test_output=all //examples/agent-workbench:agent-workbench__unit_test --test_arg=deferred_ --test_arg=--nocapture`
+**Deterministic companion.** `kiln test --test_output=all //examples/agent-workbench:agent-workbench__unit_test --test_arg=deferred_search_observation_enables_next_block_call --test_arg=same_block_discovery_cannot_relink_and_unknown_paths_report_link_errors --test_arg=unavailable_resolution_is_typed_and_deterministic --test_arg=search_ranking_and_preview_truncation_are_deterministic --test_arg=grants_persist_across_turn_boundaries_and_sqlite_reopen --test_arg=--nocapture`
 gates ranking, capped preview rendering, typed unavailable outcomes, the scripted-provider
 search-observation → call round trip, and SQLite reopen. This browser run judges the real
 model, rendered product surface, app API, traces, and on-disk grant database together.
@@ -108,7 +108,7 @@ order:
    observation. Save it as `01-deferred-call.json`.
 4. The structural gate is `outcome.payload.digest` on the completed deferred call, which must
    equal the locally computed SHA-256 of `FIG-1116 before restart`; that is what proves the
-   path. Keep the prose check — the rendered assistant row and `/api/state.messages` contain
+   path. Keep the prose check — the rendered assistant row and `/api/state.transcript` contain
    the exact digest — as a **secondary** gate: it reads model prose, which this runbook
    elsewhere tells the judge not to gate on, and a re-prompt may satisfy it. A run that meets
    the structural gate but renders the digest badly — or whose cell finishes with
@@ -149,13 +149,13 @@ Poll for `turn_completed`, idle, and stable counts. Gate:
 
 1. The post-Phase-2 trace slice contains a completed
    `workbench_deferred_text_sha256` call and contains no `search_tools` call.
-2. The rendered assistant row and `/api/state.messages` contain the independently
+2. The rendered assistant row and `/api/state.transcript` contain the independently
    computed exact digest.
 3. SQLite still contains the byte-identical `text.sha256` grant.
 4. The trace contains exactly one new completed turn.
 
 Run the cumulative three-layer cross-check: 2 user rows, 2 assistant rows, 2 committed
-messages of each role in `/api/state` and the session graph, and 2 completed turn
+transcript rows of each role in `/api/state` and the session graph, and 2 completed turn
 executions. Save `03-post-restart-trace.json`, `03-crosscheck.json`, and `03-grants.json`.
 Screenshot `03-persisted-grant-call.png` with the second result visible.
 

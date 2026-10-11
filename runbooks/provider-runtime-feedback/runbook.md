@@ -20,18 +20,17 @@ Source the fork's `env.sh`, then run:
 kiln test --test_output=all \
   //crates/lash-core-execution:lash-core-execution__unit_test \
   //crates/lash-core-execution:store_backed__test \
-  //crates/lash-protocol-rlm:lash-protocol-rlm__unit_test \
   //crates/lash-provider-anthropic:lash-provider-anthropic__unit_test \
   //crates/lash-provider-openai:lash-provider-openai__unit_test \
   //crates/lash-sim:lash-sim__unit_test \
   --test_arg=runtime_feedback_
 ```
 
-Expect **44 executed tests** in total across the six targets — the sim binary
+Expect **16 executed tests** in total across the five targets — the sim binary
 runs sharded, so sum the per-target `passed` counts — covering Responses, Codex,
 Chat, both Anthropic modes, Gemini, Code Assist, real RLM output-limit retries,
 and checkpoint contributions. Pin the count, not "nonzero": a filter that has
-drifted to select two of the forty-four still reports a nonzero pass and reads
+drifted to select two of the sixteen still reports a nonzero pass and reads
 as green.
 The Anthropic witnesses must include native/fallback
 wire equality after a partial answer and a request containing both a legal and
@@ -60,16 +59,16 @@ it does not substitute for the judged browser row.
    `/api/state` is not an error: it resolves to the host's own *current* session pointer,
    a process-local value the page moves whenever it selects a session. A row whose browser
    opened or selected a different session therefore gets a small, well-formed, entirely
-   empty document back — `messages: []` — from a host that is working perfectly. Read the
+   empty document back — `transcript: []` — from a host that is working perfectly. Read the
    session id off the page (or off the state document saved here) and pass it on every
    later read, or step 4's settlement poll reads "no messages" as "not settled yet", and
    then as a missing-turn defect.
 2. Workbench enables `TraceLevel::Extended` at bootstrap, so its trace carries
    the outgoing provider request. **Gate it on what that record can actually
-   show you.** Exact request JSON is retained only up to
-   `MAX_PROVIDER_REQUEST_BODY_JSON_BYTES` (2 KiB, a compile-time constant in
-   `crates/lash-core/src/runtime/turn_driver/streaming.rs` with no capture
-   selector), and a judged Workbench request carrying the host prompt and its
+   show you.** Exact request JSON is retained only up to the trace limit
+   `provider_request_body_json_bytes` (default 2048,
+   `crates/lash-trace/src/limits.rs`), and a judged Workbench request carrying
+   the host prompt and its
    tool contracts is an order of magnitude larger, so every real row records
    `raw_json_omitted_reason: "size_limit"` with `raw_len` and `raw_sha256`
    instead of the text. Save the first `provider_event` (direction `request`) event as

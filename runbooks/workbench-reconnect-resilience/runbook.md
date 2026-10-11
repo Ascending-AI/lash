@@ -43,7 +43,7 @@ rejection, exponential state retry, and the manual "retry now" affordance.
   subscriber lags the broadcast), and `replay_gap` + `terminal_replacement` on the observation
   stream (from `SessionObservationStreamItem` in
   [`host_streams.rs`](../../examples/agent-workbench/src/main_sections/routes/host_streams.rs)). All three funnel into
-  the same `recoverFromState` single-flight snapshot recovery. `resident_replacement` takes a
+  the same `recoverFromSnapshot` single-flight snapshot recovery. `resident_replacement` takes a
   narrower path: it refetches resident authority while preserving provisional transcript rows.
 - **Snapshot recovery with staleness rejection.** `beginStateRecovery` /
   `recoveryResponseIsCurrent` / `snapshotApplication` decide whether a `/api/state` response
@@ -183,7 +183,7 @@ relative to the turn's commit. The answer key is **convergence** — the phase r
   — `m_ingress_ti:*` for user rows and `workbench-assistant:<turn>` for assistant rows.
   Without the id qualifier the role filter also counts RLM iteration state and over-counts
   assistant rows several-fold. The app projection is
-  `GET /api/state?session_id=<S>.messages`. The product-event log
+  `GET /api/state?session_id=<S>.transcript`. The product-event log
   `<data-dir>/product-events.json` is shaped
   `{"format_version": 2, "histories": {"<S>": {"cursor": …, "events": [...]}}}` — keyed under
   `histories`, not by `<S>` at top level — and its `message` events are **user rows only**, so
@@ -218,7 +218,7 @@ Send one short turn with a unique literal marker, e.g.
 
 Gate, in order: one `turn_completed` for `<S>`; the `idle` pill with `#shellStatus` still
 hidden; then the settle gate. Require **exactly** 1 `.message.user` + 1 `.message.assistant`
-row, 1 `user` + 1 `assistant` in `/api/state.messages`, 1 `User` + 1 `Assistant` in the
+row, 1 `user` + 1 `assistant_reply` in `/api/state.transcript`, 1 `User` + 1 `Assistant` in the
 session graph, and 1 `turn_completed`. The phase must have stayed `live` throughout — a
 banner that appeared during an ordinary turn is a false-positive outage and a finding.
 Screenshot `01-baseline-live.png`; save `01-baseline-{dom,state,store,trace}.json`.
@@ -256,7 +256,7 @@ the sampler timeline as `04-phase-timeline.json`.
 **2d — resolve the in-flight turn from durable truth.** Per golden rule 6, read the trace
 first: does `<S>` have a `turn_completed` for the Phase 2a turn id? Then require the rendered
 transcript to agree with that answer, and run the **three-layer cross-check** on the final
-transcript — rendered DOM vs durable state (`graph_nodes` + `/api/state.messages` +
+transcript — rendered DOM vs durable state (`graph_nodes` + `/api/state.transcript` +
 product-event log) vs trace executions — pairwise, as counts *and* identities. Row-identical,
 no duplicates, no losses. `active-turns.json` and `/api/state.active_turns` must not still
 carry a turn the trace has terminated. Save

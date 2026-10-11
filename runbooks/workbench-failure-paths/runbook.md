@@ -6,9 +6,10 @@
 
 **Purpose.** Judge what a user sees when provider authentication fails mid-turn, a
 pre-output rate limit causes an attempt reset, paid partial output makes regeneration unsafe,
-and a durable Runtime Process fails. The rate-limit phase also judges the persisted execution
-scorecard: an evidence-less failed attempt must remain visible before its successful retry,
-including after cursor replay and snapshot hydration. Each fault is deterministic so the
+and a durable Runtime Process fails. The rate-limit phase also judges the persisted
+model-call evidence: an evidence-less failed attempt must remain recorded before its
+successful retry in `/api/state.product_events.events[]`, including after cursor replay
+and snapshot hydration. Each fault is deterministic so the
 visible wording and final state are objective gates.
 
 **Deterministic companion.** `kiln test --test_output=all //crates/lash-core-llm:lash-core-llm__unit_test --test_arg=charge_safety` asserts the
@@ -18,7 +19,7 @@ paid-output refusal and the charge-safety decision surface — six tests; requir
 Cargo command that named it passed vacuously; under `kiln test` an unmatched selector fails
 the target outright.) `kiln test
 //examples/agent-workbench:agent-workbench__unit_test --test_arg=process_work_tests`
-asserts the failed-process `/api/work` projection and UI error rendering — seven tests.
+asserts the failed-process `/api/work` projection and UI error rendering — four tests.
 The browser run judges the actual transcript and work rail; it does not reproduce those
 internal assertions.
 
@@ -33,17 +34,19 @@ internal assertions.
 2. Use a fresh data directory and a fresh port-derived stack for each scenario. Never
    carry provider call counts, sessions, or processes between phases.
 3. A provider error is a stopped `ProviderError`, never `Cancelled`. The public transcript
-   must settle to `turn could not be completed`, while the typed scorecard and trace retain
+   must settle to `turn could not be completed`, while the typed `model_call_recorded`
+   product events and trace retain
    the provider classification; the active route clears and the same session remains usable.
 4. Retry output is replace-not-append. The final rendered assistant response and
-   `/api/state.messages` contain `retry observer single-copy marker` exactly once.
-5. **Every provider attempt is a scorecard row.** A pre-response failure has no provider
-   response metadata by definition; that absence must leave its provider columns empty, not
-   remove the row. Reconcile scorecard rows to the `/api/state` `model_call_recorded`
-   product-event records by call id and attempt ordinal, and require the same order and facts
-   after replay and reload.
+   `/api/state.transcript` contain `retry observer single-copy marker` exactly once.
+5. **Every provider attempt is a `model_call_recorded` attempt.** A pre-response failure
+   has no provider
+   response metadata by definition; that absence must leave its provider fields empty, not
+   drop the attempt. Reconcile the attempts on the `/api/state.product_events.events[]`
+   `model_call_recorded` records by call id and attempt ordinal, and require the same
+   order and facts after replay and reload.
 6. Paid partial output is preview evidence only. It must stop with a non-retryable
-   `unwith_suggested_delay_after_output_started`, make exactly one provider attempt, and never purchase
+   `lash:unsafe_retry_after_output_started`, make exactly one provider attempt, and never purchase
    or render the fixture's second-generation sentinel.
 7. Process failure remains process failure. The work rail must show `failed` plus the
    durable error; a successful parent turn must not make the process look successful.
@@ -60,7 +63,7 @@ internal assertions.
   `CARGO_TARGET_DIR`, so source the fork's `env.sh` first).
   No provider key is required. Gate `GET /healthz` → 200 and retain the startup log.
 - Browser affordances: model selector, session id, composer, running/idle pill,
-  transcript, the **execution evidence** scorecard, and **work** rail.
+  transcript, and the **work** drawer (`#workToggle`).
 - Backend truth: `GET /api/state`, `POST /api/turn`, `GET /api/work` (which returns a bare
   JSON array, not an object with an `items` or `work` key), and the observation
   stream used by the page. Disk truth: `<fresh-data-dir>/trace.jsonl` and
@@ -82,7 +85,8 @@ Boot with `auth-failure-once`. Submit `trigger deterministic auth failure`. Poll
 page is idle and Stop is hidden, then gate all of:
 
 - the transcript visibly renders the public event `turn could not be completed`, with no
-  assistant success bubble for that turn; the execution scorecard retains `dev_auth_rejected`
+  assistant success bubble for that turn; the `model_call_recorded` product event retains
+  `dev_auth_rejected`
   and HTTP 401 without leaking the provider message into the product transcript;
 - `/api/state.active_turns` is empty and `active-turns.json` contains no route;
 - the trace's `turn_completed` record carries `outcome: {"status": "failed", "done_reason":
@@ -108,7 +112,7 @@ Boot fresh with `rate-limit-once`. Start browser network/event capture before su
 using a fixed sleep. Poll until the exact terminal assistant text
 `provider retry succeeded` is rendered and the page is idle.
 
-Require the final rendered assistant response and `/api/state.messages` each contain
+Require the final rendered assistant response and `/api/state.transcript` each contain
 `retry observer single-copy marker` exactly once. In captured observations or trace
 evidence require one retry caused by `dev_rate_limited` and one
 `model_attempt_reset`; after applying that reset by its correlation ids, one marker
@@ -122,23 +126,23 @@ evidence. Its retry decision must be `scheduled: true`. The provider's advertise
 `retry_after_ms` is `0`; the scheduled `delay_ms` is the runtime's own backoff and is a small
 nonzero number (45-279 ms observed), so gate on `scheduled: true` plus `retry_after_ms: 0`,
 never on a zero `delay_ms`. Attempt 2 is a successful protocol-boundary
-`interrupted` attempt at `output_started` and comes second. In the rendered
-**execution evidence** scorecard require two rows for that same call id in the same ordinal
-order. The first row must visibly name attempt 1, `failed`, `response_observed`,
-`dev_rate_limited`, HTTP 429, and `retry scheduled`; its empty provider facts must not hide
-it. The second must visibly name attempt 2, `interrupted`, and `output_started`.
+`interrupted` attempt at `output_started` and comes second. The `model_call_recorded`
+record for that call id must carry the same two attempts in the same ordinal order: the
+first names attempt 1, `failed`, `response_observed`, `dev_rate_limited`, HTTP 429, and
+`retry scheduled`, and its empty provider facts must not drop it; the second names
+attempt 2, `interrupted`, and `output_started`.
 
 Force a cursor replay by reconnecting the observation stream with its last acknowledged
-cursor and require the scorecard to stay at those same two row identities and facts: no
-duplicate row and no dropped failed attempt. Then reload the page so `/api/state` hydrates a
-fresh shell, and require the identical ordered two-row scorecard before teardown. Save the
-normalized API attempts and the scorecard text before replay, after replay, and after reload.
+cursor and require the recorded attempts to stay at those same two identities and facts:
+no duplicate attempt and no dropped failed attempt. Then reload the page so `/api/state`
+hydrates a fresh shell, and require the identical ordered two-attempt record before
+teardown. Save the normalized API attempts before replay, after replay, and after reload.
 
 Screenshot `03-rate-limit-recovered.png`; save state, observations, and trace rows as
 `03-rate-limit-state.json`, `03-rate-limit-observations.jsonl`, and
-`03-rate-limit-trace.json`. Save the new scorecard evidence as
-`03-rate-limit-attempts.json` and `03-rate-limit-scorecard-{live,replay,reload}.txt`, and
-capture `03-rate-limit-scorecard-reload.png`. Teardown before Phase 3.
+`03-rate-limit-trace.json`. Save the attempt evidence as
+`03-rate-limit-attempts.json` and `03-rate-limit-model-calls-{live,replay,reload}.json`, and
+capture `03-rate-limit-reload.png`. Teardown before Phase 3.
 
 ## Phase 3 — Paid partial output refuses regeneration
 
@@ -148,22 +152,21 @@ is hidden.
 
 Require the rendered turn to show the public event `turn could not be completed`, with no
 assistant success bubble. In the captured observations require the safe-regeneration error
-text, and in the trace require the typed issue `unwith_suggested_delay_after_output_started`. Also
+text, and in the trace require the typed issue `lash:unsafe_retry_after_output_started`. Also
 require in captured observations
 `paid partial output marker` as preview activity, but require that marker to be absent from
-`/api/state.messages` and the settled transcript. Require `UNSAFE second generation was
+`/api/state.transcript` and the settled transcript. Require `UNSAFE second generation was
 purchased` to be absent everywhere.
 
 Require exactly one LLM call attempt. The structured attempt fields —
 `protocol_position` equal to `output_started` and retry decision `scheduled: false` with
 reason `output_started_without_retry_guarantee` — live on the `model_call_recorded` product
-event in `/api/state.product_events` and, verbatim, in the rendered `#executionScorecard`
-(`position output_started`, `retry reason output_started_without_retry_guarantee`), which is
-the cheaper witness; they are not in the trace, whose `llm_call_failed` record
+event in `/api/state.product_events`;
+they are not in the trace, whose `llm_call_failed` record
 carries the same facts as prose (`reason` ending `retry: output_started_without_retry_guarantee`),
 plus `charge_safety` (`outcome: denied`, `tokens_at_stake: 4`) and the attempt `usage`. Gate
 each field where it is actually emitted: output usage equal to 4 in either record, and
-terminal issue code `unwith_suggested_delay_after_output_started` with `retryable: false` on the trace
+terminal issue code `lash:unsafe_retry_after_output_started` with `retryable: false` on the trace
 record's `error`. Require no attempt reset or
 retry-status event and no active route.
 
@@ -186,8 +189,8 @@ in no API payload. What reaches `/api/work` and the rail is the compiled process
 `__process_<64-hex>`; identify the row by its terminal failure and its error text, then carry
 its process id forward.
 
-The `#workList` rail is always rendered in the right-hand rail — there is no work tab or view
-control to open (`[data-view=…]` exists only for `chat` and `accounts`). Poll it until that
+The `#workList` lives in the `#workPane` drawer, which `#workToggle` opens; it is closed by
+default (localStorage `workbench.workOpen`). Open the drawer and poll `#workList` until that
 same row visibly shows both the failed status and `error: deterministic durable process
 failure`. Compare the status **case-insensitively**: the rail applies `text-transform`, so
 `innerText` returns `FAILED` and a literal match on `failed` fails against a correct UI. The
@@ -203,10 +206,10 @@ confirm those retrospectively from the per-phase teardown logs.
 | Item | Objective gate | Verdict | Evidence |
 |------|----------------|---------|----------|
 | Dev-only fixture | exact scenario warning + `dev/failure-paths`; no network provider | | `00-*-ready.png`, startup logs |
-| Auth failure | public terminal; typed auth scorecard/ProviderError trace; no Cancelled evidence | | `01-auth-failed.*` |
+| Auth failure | public terminal; typed auth record/ProviderError trace; no Cancelled evidence | | `01-auth-failed.*` |
 | Session recovery | same session commits the exact recovery response | | `02-auth-session-recovered.*` |
 | Retry convergence | one reset and one surviving marker in UI/API/observations | | `03-rate-limit-*` |
-| Retry scorecard | failed evidence-less attempt then successful protocol-boundary retry, exact row identity/order/facts through replay and reload | | `03-rate-limit-attempts.json`, `03-rate-limit-scorecard-*` |
+| Retry attempts | failed evidence-less attempt then successful protocol-boundary retry, exact identity/order/facts through replay and reload | | `03-rate-limit-attempts.json`, `03-rate-limit-model-calls-*` |
 | Paid-output refusal | one output-started attempt; typed non-retryable error; preview not committed | | `04-paid-output-*` |
 | Durable failure | work rail and `/api/work` agree on failed + exact error | | `05-failed-process-*` |
 | Route hygiene | every settled phase has no active route | | saved state and `active-turns.json` |

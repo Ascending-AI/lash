@@ -83,11 +83,10 @@ while (elapsedSeconds < 240) {
 
 `sleep` takes milliseconds and must be awaited, and `run` is `async`, so the loop body is
 a durable step boundary rather than a busy wait. Count the iterations as above rather than
-timing the loop against the clock: `Date.now()` lowers to the journaled runtime operation
-`lash_vm.runtime.now`, which the durable process engine does not serve, so a
-clock-driven loop fails the process on its first iteration instead of waiting. If a run
-produces that failure, the prompt did not pin the shape hard enough — say the loop shape
-again, do not raise the driver tier.
+timing the loop against the clock: `Date.now()` lowers to `ts.date.now`, which reads the
+kernel `clock` effect (`date.kernel:173`). What the durable process engine serves for it
+is unverified against that lowering, so pin the iteration-count shape in the prompt — say
+the loop shape again if a run drifts, do not raise the driver tier.
 
 Poll `/api/work` until both named rows are non-terminal, capture their full process ids,
 and require matching running cards in the rendered work rail. Verify `lash-sessions.db`

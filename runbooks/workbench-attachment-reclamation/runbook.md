@@ -168,14 +168,14 @@ curl -s -X POST "http://127.0.0.1:$port/api/turn" \
   -H 'content-type: application/json' -d '{"text":"hello"}'
 sqlite3 "$work/data/lash-sessions.db" \
   "SELECT (SELECT count(*) FROM attachment_blobs),
-          (SELECT count(*) FROM attachment_referrers WHERE committed_at_ms IS NOT NULL)"
+          (SELECT count(*) FROM attachment_referrer_edges)"
 curl -s -w '\n%{http_code}\n' -X POST "http://127.0.0.1:$port/api/admin/store-maintenance" \
   -H 'content-type: application/json' \
   -d '{"reclaim_attachments":{"grace_period_ms":0,"empty_root_set":"refuse"}}'
 ```
 
-**Judge.** The catalog counts must read `1|0` — one stored blob, zero committed
-manifest rows — so the mark phase below is enumerating a real catalog, not the
+**Judge.** The catalog counts must read `1|0` — one stored blob, zero referrer
+edges — so the mark phase below is enumerating a real catalog, not the
 absent one Phase 2 staged. `409` again, and it must be a *different* refusal from
 Phase 2: the root authority enumerated successfully and found zero live refs
 while a deletion-eligible blob was present, so proceeding would have deleted
@@ -216,12 +216,11 @@ Phase 3 request.
 curl -s -X POST "http://127.0.0.1:$port/api/turn" -H 'content-type: application/json' \
   -d '{"text":"describe this","attachment_id":"<id>"}'
 # Wait for the COMMITTED reference, not the in-flight user row: poll until
-# /api/state.active_turns is empty and the attachment manifest row carries a
-# non-null committed_at_ms —
+# /api/state.active_turns is empty and an edge row names the attachment —
 #   sqlite3 "$work/data/lash-sessions.db" \
-#     "SELECT committed_at_ms FROM attachment_referrers WHERE attachment_id = '<id>'"
+#     "SELECT referrer_kind, referrer_id FROM attachment_referrer_edges WHERE attachment_id = '<id>'"
 # (equivalently, until the attachment appears as a
-# graph_nodes reference). committed_at_ms is what promotes the blob to a root.
+# graph_nodes reference). The edge is the liveness fact that promotes the blob to a root.
 # Waiting on the in-flight row instead produces a false Abort here.
 curl -s -w '\n%{http_code}\n' -X POST "http://127.0.0.1:$port/api/admin/store-maintenance" \
   -H 'content-type: application/json' \

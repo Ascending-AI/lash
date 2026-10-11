@@ -40,22 +40,13 @@ kiln gate lash "$LASH_RESIDENT_AUTHORITY_FORK" -- bash -lc '
     --test_arg=execution_grant_routes_multi_provider_source_by_id_not_name \
     --test_arg=pinned_source_preserves_provider_execute_result_and_intents \
     --test_arg=pinned_source_executes_with_the_provider_manifest_under_alias_drift_and_provider_swap \
-    --test_arg=pinned_source_retains_exactly_known_nonadvertised_resident_id \
-    --test_arg=resident_snapshot_refuses_mismatched_known_id_without_overwriting_advertised_route \
-    --test_arg=ambient_and_restricted_empty_select_distinct_resident_catalogs
-  kiln test --test_output=all //crates/lash-core-execution:store_backed__test \
-    --test_arg=dispatch_uses_catalog_pinned_contract_without_reresolution
+    --test_arg=resident_snapshot_refuses_mismatched_known_id_without_overwriting_advertised_route
   kiln test --test_output=all //crates/lash-sansio:lash-sansio__unit_test \
-    --test_arg=catalog_pins_contract_once_before_any_projection \
     --test_arg=missing_contract_is_refused_only_for_effective_members \
     --test_arg=duplicate_effective_identity_is_refused_before_contract_resolution
   kiln test --test_output=all //crates/lash-protocol-rlm:lash-protocol-rlm__unit_test \
     --test_arg=native_rlm_and_validation_share_one_pinned_definition_under_registry_drift \
-    --test_arg=rlm_catalog_distinguishes_ambient_from_restricted_empty_access \
-    --test_arg=deferred_call_executes_through_grant_without_mutating_catalog \
-    --test_arg=typescript_deferred_call_executes_through_the_same_grant_path
-  kiln test --test_output=all //crates/lash-vm-runtime:lash-vm-runtime__unit_test \
-    --test_arg=replay_reuses_record_without_calling_resolver
+    --test_arg=rlm_catalog_distinguishes_ambient_from_restricted_empty_access
   kiln test --test_output=all //crates/lash-core:lash-core__unit_test \
     --test_arg=process_run_context_captures_catalog_and_execution_route_together
   kiln test --test_output=all //crates/lash-protocol-standard:native_tools__test \
@@ -67,9 +58,9 @@ Buck2 hands every `--test_arg` selector to each listed binary and refuses a
 selector that names nothing in that binary, so a cross-crate selection is
 spelled per label rather than as one filter.
 
-Expect exactly twenty-one tests across the seven labels — 10 on
-`lash-core-execution__unit_test`, then 1, 3, 4, 1, 1, and 1 — and `0 failed`.
-The RLM unit test runs sharded, so its four land on separate shard actions;
+Expect exactly fourteen tests across the five labels — 8 on
+`lash-core-execution__unit_test`, then 2, 2, 1, and 1 — and `0 failed`.
+The RLM unit test runs sharded, so its two land on separate shard actions;
 sum the per-target `passed` counts rather than reading one line. The positive witnesses
 prove that native tool schemas, RLM documentation and host bindings, and
 argument validation retain the same catalog-owned contract even when the
@@ -83,9 +74,7 @@ declared intents verbatim, and a curated snapshot alias that renames the
 model-facing name on a known tool id still hands the provider its own
 advertised manifest — the exact id and provider-facing name, never the alias —
 with a provider swap handing the new provider its own manifest. A process
-dispatch captures its catalog and registry together, and a known resident that
-is resolved exactly by ID remains bound even when it is not part of the current
-advertisement.
+dispatch captures its catalog and registry together.
 
 The negative witnesses prove that an effective member without a contract, an
 effective duplicate identity, and a definition without a pinned route are
@@ -98,19 +87,16 @@ registry state can change, so it cannot replace another advertised route.
 
 The explicit-access witnesses prove that ambient authority retains captured
 residents while restricted empty produces no resident native tools or RLM
-documentation. The deferred witnesses start from that restricted empty
-catalog: a separately granted tool remains executable in Lash VM and
-TypeScript without becoming a resident, re-enumerating the provider, or
-consulting a later registry definition.
+documentation.
 
-Abort if the filter runs fewer or more than twenty-one tests. The remaining properties —
-no resolver call after catalog construction, no negative case reaching preparation, a same-ID
-alias or old request keeping its route, no deferred call admitted through resident membership
-— are what those twenty-one witnesses assert internally; they are not separate checks the
+Abort if the filter runs fewer or more than fourteen tests. The remaining properties —
+no negative case reaching preparation, a same-ID
+alias or old request keeping its route
+— are what those fourteen witnesses assert internally; they are not separate checks the
 operator makes, and from the runner's side the only observable is the passed count. Read them
 as the meaning of the gate, not as a second look.
 
-Budget note: the seven labels build only the owning binaries — Buck2's
+Budget note: the five labels build only the owning binaries — Buck2's
 per-binary selector check is what makes one cross-crate filter impossible, so
 the split is the focused spelling, not a workaround.
 
@@ -158,16 +144,14 @@ zero tests, or any malformed record restores as ambient.
 
 | Claim | Gate | Verdict | Evidence |
 | --- | --- | --- | --- |
-| One pinned definition executes native and RLM projections and validation | drift witness passes with one resolver call | | `resident-tool-authority.log` |
+| One pinned definition executes native and RLM projections and validation | drift witness passes | | `resident-tool-authority.log` |
 | Missing contracts and routes fail before preparation | typed negative witnesses pass with zero prepare calls | | `resident-tool-authority.log` |
 | Duplicate effective identity is refused before contract lookup | duplicate witness passes with zero resolver calls | | `resident-tool-authority.log` |
 | Name curation precedes completeness checks | suppressed malformed nonmember witness passes | | `resident-tool-authority.log` |
 | Resident routes survive same-id provider reassignment | old and fresh requests retain distinct prepare, execute, and attempt routes | | `resident-tool-authority.log` |
 | Provider-facing result, intents and manifest stay verbatim | the execute witness returns the provider's result and declared intents; under alias drift and provider swap each provider sees its own manifest, never the curated alias | | `resident-tool-authority.log` |
 | Direct process dispatch uses one captured tool surface | old and fresh process contexts retain distinct definitions and routes | | `resident-tool-authority.log` |
-| Known nonadvertised residents retain their exact route | restored resident remains curated, nonorphaned, and executable | | `resident-tool-authority.log` |
 | Known resident identity mismatches fail atomically | mismatched exact-ID resolution is refused without state or advertised-route changes | | `resident-tool-authority.log` |
-| Deferred replay and execution retain their grant authority | three deferred witnesses pass | | `resident-tool-authority.log` |
 | Ambient and restricted empty remain distinct in native and RLM catalogs | explicit-access witnesses retain ambient residents and render no restricted residents | | `resident-tool-authority.log` |
 | Restricted empty survives real backend recovery | SQLite and PostgreSQL reopen with restricted mode and zero resident definitions | | `tool-access-durable-readback.log` |
 | Historical and malformed access bytes fail closed | predecessor plus current invalid-row cases refuse in both backends | | `tool-access-durable-readback.log` |

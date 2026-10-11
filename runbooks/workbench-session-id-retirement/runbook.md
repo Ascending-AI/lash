@@ -74,8 +74,9 @@ receipts, the rotated id, and the typed retirement response — never on model p
 - Browser affordances: the rendered session id, chat composer and timeline, running/idle
   pill, **stop turn**, Red/Blue trigger buttons, registrations rail, and work rail. Two
   rendered literals are gates: the empty timeline reads
-  `no turns yet. ask the agent something below, or click red or blue to fire a trigger
-  occurrence.` and an empty registrations rail reads `none in this session`.
+  `no turns yet. ask the agent something below, or see what it can watch on the triggers
+  page.` and an empty registrations list reads
+  `Nothing is registered yet. Ask the agent to watch a source above.`
 - Backend truth for id `<S>`: `GET /api/state?session_id=<S>`,
   `GET /api/observations?session_id=<S>`, `POST /api/turn?session_id=<S>`,
   `POST /api/turn/input?session_id=<S>`, `GET /api/triggers?session_id=<S>`,
@@ -212,9 +213,9 @@ conditions at once:
 
 - the URL, rendered id, `/api/state.settings.session_id`, and
   `<data-dir>/session-id` all equal `<rotated-id>`;
-- the timeline renders the empty-state literal and `/api/state.messages` is empty;
-- `/api/triggers?session_id=<rotated-id>` is empty and the registrations rail renders
-  `none in this session`;
+- the timeline renders the empty-state literal and `/api/state.transcript` is empty;
+- `/api/triggers?session_id=<rotated-id>` is empty and the registrations list renders
+  `Nothing is registered yet. Ask the agent to watch a source above.`;
 - `GET /api/work?session_id=<rotated-id>` is empty;
 - `FIG754-RETIRED-<run-id>`, registration A's identity fields, and the retired process id
   are absent from every rendered and scoped API surface.

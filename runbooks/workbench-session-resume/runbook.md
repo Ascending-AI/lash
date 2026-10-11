@@ -38,7 +38,7 @@ shift it. Retain the executing prompt and verdict with the run artifacts.
 3. **The store is authoritative.** Before and after restart, the active `graph_nodes`
    path must contain every committed user and assistant nonce: use
    `<data-dir>/lash-sessions.db` in SQLite mode or `lash_graph_nodes` in the managed
-   database in Postgres mode. `/api/state.messages` and the rendered transcript must
+   database in Postgres mode. `/api/state.transcript` and the rendered transcript must
    project the same ordered rows.
 4. **Continuity reaches the provider.** The first post-restart `llm_call_started` record
    in `trace.jsonl` must contain both earlier user nonces and their committed assistant
@@ -94,9 +94,10 @@ shift it. Retain the executing prompt and verdict with the run artifacts.
   Postgres.
 - Browser affordances: chat composer, transcript, idle/running pill, rendered session id.
 - Backend truth: `GET /api/state`; `POST /api/turn`. The state endpoint returns a
-  flattened `StateReadSnapshot`: `.messages`, `.settings.session_id`, and `.transcript`
-  are top-level fields. Use `.messages` for committed chat rows and `.transcript` for
-  execution-disclosure rows such as settled reasoning and code blocks.
+  flattened `StateReadSnapshot`: `.settings.session_id`, `.transcript`, `.product_events`,
+  `.active_turns`, `.pending_turn_inputs`, and `.pending_approvals` are top-level fields.
+  `.transcript` carries the committed rows — `user`/`assistant_reply` chat rows plus
+  disclosure rows such as settled reasoning and code blocks.
 - Durable truth: `<data-dir>/session-id`, `<data-dir>/trace.jsonl`, and either the SQLite
   `graph_nodes` table in `<data-dir>/lash-sessions.db` or Postgres
   `lash_graph_nodes` (`node_json`, excluding tombstoned rows), selected by the boot mode.
@@ -104,8 +105,8 @@ shift it. Retain the executing prompt and verdict with the run artifacts.
 - `trace.jsonl` records use serde-flattened payloads: fields such as `type` and `request`
   are at the record's top level, and request messages have the shape
   `{ "role": ..., "blocks": [{ "kind": ..., "text": ... }] }`. Role vocabulary also
-  differs by surface: store rows use `User`/`Assistant`, API rows use
-  `user`/`assistant`, and the DOM renders `YOU`/`AGENT`. Normalize roles before comparing
+  differs by surface: store rows use `User`/`Assistant`, API transcript rows use
+  `user`/`assistant_reply` as `kind`, and the DOM renders `YOU`/`AGENT`. Normalize roles before comparing
   ordered transcripts; do not treat casing or presentation labels as content drift.
 - Route endpoints in replay-drop rows are operator-visible routing metadata. URL userinfo is
   rejected; do not put credentials in endpoint paths or query strings because those bytes are
@@ -114,8 +115,8 @@ shift it. Retain the executing prompt and verdict with the run artifacts.
 ## Phase 0 — Boot and identify the durable session
 
 Boot with the exact deterministic-provider environment above, poll `/healthz`, and open the
-browser. The model control is the text input `#profileInput` (there is no `#model` element and
-the page never renders the model id anywhere else). Require `#profileInput` to render
+browser. The model control is the text input `#modelInput` inside `#modelPicker` (opened by
+`#modelButton`; the page never renders the model id anywhere else). Require `#modelInput` to render
 `dev/replay-route-a` and retain the startup log row
 that names `replay-route-change`; any other provider/model is a harness gap → Abort. Record the
 workbench PID, rendered session id,
@@ -126,7 +127,7 @@ match. Screenshot `00-ready.png`.
 
 Submit two short turns sequentially with unique literal markers such as
 `FIG425-RESUME-ONE-<run-id>` and `FIG425-RESUME-TWO-<run-id>`. After each submission, poll until the UI is idle,
-`active_turns` is empty, and `/api/state.messages` has gained an ordered user/assistant
+`active_turns` is empty, and `/api/state.transcript` has gained an ordered user/assistant
 pair. Require the assistant rows to be exactly `FIG-1374 replay-route response 1` and
 `FIG-1374 replay-route response 2`.
 
@@ -145,7 +146,7 @@ Require a new PID, the unchanged rendered/API/disk session id, and the same idle
 browser and gate all of the following before sending another turn:
 
 - the transcript renders all four pre-restart rows in their original order;
-- `/api/state.messages` exactly matches `01-before-restart-state.json` for role and text;
+- `/api/state.transcript` exactly matches `01-before-restart-state.json` for role and text;
 - a fresh `graph_nodes` extraction exactly matches the saved committed message sequence.
 
 Any missing row, reordered row, or UI/API/store disagreement is a contract violation →
@@ -178,7 +179,7 @@ Also extract any `provider_replay_dropped` records after the boundary to
 same-route continuation was minted by the selected route. A non-empty array is typed evidence
 of a route/configuration mismatch, not harmless trace noise, and requires Abort/RCA.
 
-Finally require the store's active path and `/api/state.messages` to contain all six
+Finally require the store's active path and `/api/state.transcript` to contain all six
 committed rows in identical order. Save them as `03-continuity-state.json` and
 `03-continuity-store.json`; screenshot the fully scrolled transcript as
 `03-continuity-transcript.png`.
@@ -194,13 +195,13 @@ provider-owned signature starts with `FIG1374-OPAQUE-REPLAY-` to
 provider `workbench-dev-failure`, endpoint `workbench-dev-failure`, and model
 `dev/replay-route-a`. Record the current end offset or record count of `trace.jsonl`.
 
-Type `dev/replay-route-b` into `#profileInput`, pause at least two seconds so a projection
+Type `dev/replay-route-b` into `#modelInput`, pause at least two seconds so a projection
 snapshot lands on the typed value, and then submit the turn, leaving the provider kind and
-endpoint unchanged. The control is read at send time (`selectedProfilePayload()`), and a typed
+endpoint unchanged. The control is read at send time (`selectedModelPayload()`), and a typed
 value that has not been sent yet is held locally against the projection: while it differs
-from `state.settings.model` the page shows the pending marker `#profilePending`
+from `state.settings.model` the page shows the pending marker `#modelPending`
 (`edited · sends with the next turn`) beside the control and no snapshot overwrites it.
-Require `#profileInput` to still read `dev/replay-route-b` after the pause and `#profilePending`
+Require `#modelInput` to still read `dev/replay-route-b` after the pause and `#modelPending`
 to be visible before the submit; a reverted input or a hidden marker is a product defect →
 Abort. The witness that the switch landed is the `POST
 /api/turn` request body — capture it and require it to name `dev/replay-route-b`. Submit a
@@ -222,12 +223,11 @@ From trace rows after the Phase 4 boundary:
   `04-model-call-record.json` and require its `replay_drops` contains the same foreign-route
   evidence. It lives at `/api/state.product_events.events[]` filtered to
   `type == "model_call_recorded"` — `product_events` is an object with `cursor` and `events`,
-  not a top-level list — and the rendered `#executionScorecard` does **not** show replay
-  drops, so do not look for them there.
+  not a top-level list.
 
 Any missing minted carrier, missing pre-filter candidate, absent trace drop, absent operator-surface
 drop, or route mismatch is a contract violation → Abort/RCA. Screenshot the model control,
-terminal response, and execution scorecard as `04-route-filtered.png`.
+terminal response, and model-call evidence as `04-route-filtered.png`.
 
 ## Phase 5 — Teardown and score
 

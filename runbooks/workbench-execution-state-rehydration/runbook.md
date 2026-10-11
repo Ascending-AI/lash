@@ -13,25 +13,21 @@
 
 **Purpose.** Prove that a replacement Workbench process rehydrates the session's **RLM
 execution state** — the TypeScript variables bound by earlier code — from the durable
-checkpoint, and that it does so identically on SQLite and PostgreSQL. The checkpoint is a keyed component set: the execution-state root holds logical
-binding names and inline small values or content-addressed leaf references. Large values
-live in separate typed MessagePack leaves. A changed root and changed leaves commit in
-one transaction; unchanged leaves carry references without bodies. Cold open must resolve
-the complete root-plus-leaves set, not merely recover the transcript.
-
-**Current format boundary.** [ADR 0056](../../docs/adr/0056-checkpoint-components-generalize-to-a-keyed-set.md)
-was amended by FIG-1728: snapshot v14 removed guest scratch files and file-body leaves.
-The current root retains globals and deferred resolutions. Do not interpret the ADR's
-historical file paragraphs as a supported file checkpoint API. The ticket's binary-file
-gate is obsolete for the same reason (see the version history in
-`crates/lash-protocol-rlm/src/executor/snapshot.rs`, under the `CODEMODE_SNAPSHOT_VERSION` constant).
+checkpoint, and that it does so identically on SQLite and PostgreSQL. The checkpoint is a
+content-addressed graph of `LASH` envelope nodes rooted at the session's execution node
+(FIG-5887, FIG-5894): the root holds logical binding names and inline small values or
+content-addressed leaf references. Large values live in separate leaf nodes. A changed
+root and changed leaves commit in one transaction; unchanged leaves carry references
+without bodies. Cold open must resolve the complete root-plus-leaves set, not merely
+recover the transcript. The committed checkpoint reads `CODEMODE_SNAPSHOT_VERSION = 1`
+(`crates/lash-protocol-rlm/src/executor/snapshot.rs`).
 
 **Why this is not the session-resume scenario.** `workbench-session-resume` proves
 committed *transcript* nodes return after a process replacement. Transcript survival is
 not state survival: a session can render every past message while its bound variables are
 gone. This scenario targets the other half of the checkpoint and deliberately places a
 **no-new-binding turn** between the binding turn and the restart. RLM requires a
-terminating `control.finish`, so every successful turn executes code; "runs no code" is not a
+terminating `chat.reply`, so every successful turn executes code; "runs no code" is not a
 satisfiable condition. The relevant distinction is whether that required code changed
 execution state.
 
@@ -46,7 +42,7 @@ the post-restart code ran — never on the assistant's ability to recall.
    answered correctly" is never sufficient on its own: the marker is also in committed
    history, so prose alone proves nothing about execution state.
 2. **The middle turn must create no new binding.** It will execute at least the required
-   `control.finish`. Gate on the `exec_code_started` source for that turn: it may read values and
+   `chat.reply`. Gate on the `exec_code_started` source for that turn: it may read values and
    terminate, but it must contain no assignment, declaration, or mutation. A new binding
    makes the reference-only shape unproven, so retry once with a simpler prompt; a second
    mutation is a scenario-promptability finding → Abort/RCA.
@@ -78,7 +74,9 @@ the post-restart code ran — never on the assistant's ability to recall.
 - **Do:** in Phase 1, also ask the agent to bind `fig1196_payload` to a string built from
   512 repetitions of the run's unique marker, and `fig1196_counter` to 137. Ask for only
   `stored` as the answer. **Expect:** executed source creates all three bindings; the
-  payload exceeds the 512-byte leaf threshold. Record its expected length
+  payload exceeds `INLINE_TOKEN_MAX` (256 bytes), so it commits as a leaf node — leaves
+  hold at most `LEAF_PAYLOAD_MAX` (65,520) bytes
+  (`crates/lash-core-store/src/checkpoint_graph/node.rs`). Record its expected length
   independently from the operator's marker; save that as `01-payload-oracle.json`.
   Keep `fig636_marker` small for the pre-execution prompt gate.
 - **Do:** after Phase 1, submit a turn that binds a **new** name
@@ -93,7 +91,7 @@ the post-restart code ran — never on the assistant's ability to recall.
   agree on one additional completed pair, and source does not rebind the payload. Save
   `01-dirty-root.png` and `01-dirty-root-exec.json`. Take the Phase-2 trace boundary after
   this turn. The reconstruction gate expects every pre-restart row this row's
-  phases actually committed, counted from `/api/state.messages` before the restart.
+  phases actually committed, counted from `/api/state.transcript` before the restart.
 - **Do:** preserve Phase 2's no-new-binding turn and Phase 3's cold process replacement.
   **Expect:** both the changed root and retained payload leaf resolve after reopen.
 - **Do:** in Phase 4, also ask the agent to read the existing payload and counter, returning
@@ -106,20 +104,20 @@ the post-restart code ran — never on the assistant's ability to recall.
   executed source reads those variables, and the API agrees. The prompt truncates the
   payload; do not require its full contents in the provider request. Capture
   `04-leaf-recall.png`.
-The deterministic `session_lifecycle_growth::flat_commit_growth_after_large_bindings_stabilize`
-test separately observes accepted commit inputs with production budget accounting. Run it as
+The deterministic laws `a_repeated_large_text_kept_across_awaits_is_written_once` and
+`a_fresh_large_text_per_await_is_written_once_per_await` separately observe that a large
+value kept across awaits is written to the store once. Run them as
 
 ```sh
-kiln test --test_output=all //crates/lash:lash__unit_test \
-  --test_arg=session_lifecycle_growth::flat_commit_growth_after_large_bindings_stabilize
+kiln test --test_output=all //crates/lash-durable-test:vertical_crash_proof__test \
+  --test_arg=a_repeated_large_text_kept_across_awaits_is_written_once \
+  --test_arg=a_fresh_large_text_per_await_is_written_once_per_await
 ```
 
-— the `lash-runtime` package's Buck2 unit-test label with the full module path filter. The
-runner refuses a selector that names nothing in the binary, and the run must still report
-exactly one test passed, or the gate is unobserved. It
-checks forty dirty turns retain sixteen large leaf identities, excludes unchanged bodies,
-and requires exactly one submitted leaf body after rebinding one large value. Browser
-traces establish executed operations; they do not expose exact submitted component bodies.
+— the full Buck2 label with exact law-name filters. The
+runner refuses a selector that names nothing in the binary, and the run must report both
+laws passed, or the gate is unobserved. Browser
+traces establish executed operations; they do not expose exact submitted node bodies.
 
 ## Working material
 
@@ -157,9 +155,9 @@ traces establish executed operations; they do not expose exact submitted compone
 The browser/API surface does not expose whether the hydrated execution-state body was
 present in a commit or only its component reference. This runbook uses the no-new-binding
 trace as the public observable that should produce a reference-only commit, then tests the
-result by cold hydration. The deterministic growth test separately asserts the submitted keyed component shape:
-unchanged execution leaves have references and no bodies; rebinding one large value
-submits exactly one new leaf body. No legacy fixed execution-state slot is assumed.
+result by cold hydration. The deterministic large-value laws named above separately assert
+the write-once property on the checkpoint graph: a large text kept across awaits is stored
+once, and a fresh large text per await is stored once per await.
 
 ## Phase 0 — Boot and identify the durable session
 
@@ -177,7 +175,7 @@ exact literal and then finishes with the single word `stored`. Poll until the pi
 and `/api/state.active_turns` is empty.
 
 From trace records after the Phase-1 boundary, require an `exec_code_started` source that
-binds `fig636_marker` to the exact marker. Also require `/api/state.messages` to have
+binds `fig636_marker` to the exact marker. Also require `/api/state.transcript` to have
 gained one ordered user/assistant pair. A failed execution is failed setup, so retry the
 phase once; a second failure → Abort/RCA.
 
@@ -189,14 +187,14 @@ screenshot the settled pair as `01-bound.png`.
 
 Submit a short conversational turn and explicitly require the agent to answer without
 declaring, assigning, or mutating any TypeScript variable. It must still terminate with
-`control.finish`. Poll until idle.
+`chat.reply`. Poll until idle.
 
 Gate all of the following:
 
-- `/api/state.messages` gained exactly one further ordered user/assistant pair;
+- `/api/state.transcript` gained exactly one further ordered user/assistant pair;
 - after the Phase-2 boundary, the turn has at least one `exec_code_started` record;
 - every such record contains no binding declaration, assignment, or mutation, and the
-  terminal record uses `control.finish`.
+  terminal record uses `chat.reply`.
 
 Do not consult the timeline's code-block rows for this gate. If the source creates a
 binding, retry once with a simpler prompt; a second mutation is a promptability finding →
@@ -236,9 +234,9 @@ From trace records written **after** the Phase 2 restart boundary, take the firs
   than the model.
 - **Execution.** The first `exec_code_started` source after that request references
   `fig636_marker`, contains no assignment or declaration of that name, and terminates with
-  `control.finish`.
+  `chat.reply`.
 - **Agreement.** The rendered assistant answer contains the exact marker and
-  `/api/state.messages` matches the rendered transcript.
+  `/api/state.transcript` matches the rendered transcript.
 
 A run where execution and agreement pass while hydration fails is the dangerous case: the
 answer was reconstructed from committed history, not from the checkpoint. Treat it as a

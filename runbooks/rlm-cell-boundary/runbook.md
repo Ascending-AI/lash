@@ -22,7 +22,8 @@ the first complete TypeScript cell, and never executes content after that bounda
      host is `not_requested`. Require that, and require it to be present rather
      than absent.
    - **Request body JSON.** The trace retains exact request JSON only up to
-     `MAX_PROVIDER_REQUEST_BODY_JSON_BYTES` (2 KiB); an RLM system prompt is an
+     `provider_request_body_json_bytes` (default 2048,
+     `crates/lash-trace/src/limits.rs`); an RLM system prompt is an
      order of magnitude larger, so every real row carries
      `raw_json_omitted_reason: "size_limit"` with `raw_len` and
      `raw_sha256`. Gate on those three. Do not treat the omission as a defect
@@ -33,8 +34,12 @@ the first complete TypeScript cell, and never executes content after that bounda
    The two properties this scenario cannot observe live — that a caller's stop
    sequence is suppressed rather than sent, and the exact absence of a stop
    field on the wire — are owned by deterministic laws instead:
-   `protocol_stop_suppression_updates_response_and_attempt_ledger`
-   (`crates/lash-core`, the response-and-attempt ledger) and the streamed
+   `abort_suppression_updates_response_and_attempt_together`
+   (`crates/lash-core`, the response-and-attempt ledger),
+   `protocol_stop_suppression_leaves_unreported_attempts_absent`
+   (`crates/lash-core`, generation reporting), and
+   `rlm_projector_suppresses_every_nonempty_caller_stop_list`
+   (`crates/lash-protocol-rlm`, the projector), plus the streamed
    scenario in golden rule 4. Run them and record the exact commands and exit
    codes, exactly as that rule already requires.
 3. Treat the trajectory and tool activity as execution truth. Only code inside
@@ -50,7 +55,7 @@ the first complete TypeScript cell, and never executes content after that bounda
 
 Boot a fresh Workbench on an available port other than 3056/3057. Extended tracing is
 always on for the Workbench — `TraceLevel::Extended` is set unconditionally at
-`examples/agent-workbench/src/main_sections/bootstrap.rs:300` — so there is no environment
+`examples/agent-workbench/src/main_sections/bootstrap.rs:410` — so there is no environment
 variable or flag to enable, and there is nothing to record as "enabled". Do not invent a
 switch; that is the exact failure mode golden rule 1 warns about for stop sequences.
 Poll `/healthz`, open the browser, record the trace byte offset,
@@ -106,7 +111,7 @@ Stop everything started by this run and confirm teardown. Record PASS/FAIL for:
 | Zero wire stops | | `02-boundary-trace.json` |
 | Honest stop disposition (`not_requested`, present) | | `02-boundary-trace.json` |
 | Request body accounted for (`raw_len` + `raw_sha256`, omission reason when over the cap) | | `02-boundary-trace.json` |
-| Caller-stop suppression law green (deterministic; unreachable live) | | exact test command and exit |
+| Caller-stop suppression laws green (deterministic; unreachable live) | | exact test commands and exits |
 | First cell executed once | | rendered activity + trajectory |
 | Suffix never executed | | rendered activity + trajectory |
 | Typed abort evidence and observed usage retained | | `02-boundary-trace.json` |

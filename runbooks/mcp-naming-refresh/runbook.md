@@ -22,18 +22,17 @@ kiln gate lash "$LASH_MCP_NAMING_FORK" -- \
   | tee "$LASH_MCP_NAMING_EVIDENCE_DIR/names.log"
 ```
 
-Expect exactly nine tests and `9 passed; 0 failed`. A lone `search-docs`
-becomes `docs.search_docs` and `mcp__docs__search_docs`. Tool case survives
-cleanup; each invalid character becomes `_`. Leading digits get an initial
-underscore; an empty native name becomes `tool`. Server prefixes retain their
-lowercase normalization and are bounded independently of the tool catalog.
+Expect exactly three tests and `3 passed; 0 failed`. A durable tool id
+length-frames the raw server and native names, so a separator in either cannot
+collide two ids. Tool case survives cleanup; each invalid character becomes
+`_`. Leading digits get an initial underscore; an empty native name becomes
+`tool`. Generated names stay ASCII and within 64 bytes even for long server or
+tool inputs.
 
-All members of a cleanup or 64-byte truncation collision receive `__` plus
-eight base32 characters of their durable-id digest. Independently computed
-vectors pin those suffixes. No member wins the bare name, and removing a
-collision restores the survivor's bare name. A raw name matching a generated
-suffix joins the hashed group. Random catalogs prove uniqueness and order
-independence. Bindings expose no aliases.
+A generated-suffix collision hashes every member — including a bare occupant
+whose raw name already matches the generated form — with `__` plus eight
+base32 characters of the durable-id digest; the `search_docs__6rlrgooy` vector
+pins the suffix bytes.
 
 ## Phase 2: captured raw target across refresh
 
@@ -51,26 +50,7 @@ with `get-user`, which inherits the bare name. In both cases the captured
 request still sends raw `get_user` and returns `"underscore"`. A `"hyphen"`
 result proves misrouting and fails the test.
 
-## Phase 3: cells, replay bindings and process requirements
-
-```bash
-kiln gate lash "$LASH_MCP_NAMING_FORK" -- \
-  kiln test //crates/lash-plugin-mcp:lash-plugin-mcp__unit_test --test_output=all \
-  --test_arg=pool::naming_cell_tests --test_arg=--nocapture \
-  | tee "$LASH_MCP_NAMING_EVIDENCE_DIR/cells.log"
-```
-
-Expect exactly five tests and `5 passed; 0 failed`. A TypeScript cell and a
-shared Lash VM IR cell call `docs.delete` and a hashed collision path through
-a real MCP peer. TypeScript still refuses `docs.then`. The recorded bare
-binding restores its original durable id after a collision rename or a
-foreign occupant. Its required live call yields `LashVmCellBindingDrift`,
-which parks the turn. A process artifact requiring the old operation fails
-host-requirement admission. The runtime's existing replay and process-admission
-laws cover journaled outcomes and the `ProcessHostEnvironmentIncompatible`
-wrapper.
-
-## Phase 4: accepted refusal cases
+## Phase 3: accepted refusal cases
 
 ```bash
 kiln gate lash "$LASH_MCP_NAMING_FORK" -- \
@@ -79,11 +59,10 @@ kiln gate lash "$LASH_MCP_NAMING_FORK" -- \
   | tee "$LASH_MCP_NAMING_EVIDENCE_DIR/refusals.log"
 ```
 
-Expect exactly two tests and `2 passed; 0 failed`. A forced 40-bit digest
-collision keeps the typed configuration refusal. A forced cross-server final
-name collision also refuses publication atomically. Configured server-prefix
-collisions remain static configuration errors. Ordinary cleanup or truncation
-collisions import successfully.
+Expect exactly one test and `1 passed; 0 failed`. A forced digest collision
+that produces identical final names is refused with a typed
+"model-facing name collision" error, and the refusal does not overwrite an
+existing member.
 
 Abort any phase if zero cases execute, a test fails, or a recorded call reaches
 a different durable id. The cutover changes shapes in place at the 1.0

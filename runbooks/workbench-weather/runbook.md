@@ -10,8 +10,9 @@ whether the agent can turn live web results into a finished, source-backed answe
 entering a repeated execution-error loop. The judged subject is web grounding: whether
 search output becomes parsed values a user can trust, not whether a language works.
 
-This scenario exercises TypeScript today, over the shared IR and VM
-([ADR 0096](../../docs/adr/0096-typescript-is-the-sole-rlm-dialect.md)).
+This scenario exercises the TypeScript dialect, which lowers to the
+dialect-free Lash VM kernel
+([ADR 0139](../../docs/adr/0139-the-lash-vm-is-a-dialect-free-kernel.md)).
 Its grounding, value, conversion and error-loop gates concern this host flow;
 future dialects own their semantics and evidence.
 
@@ -24,9 +25,9 @@ evidence, source-backed values, and rendered answer shape rather than an exact s
 1. **Ask exactly the product question.** Submit only
    `What is the current weather in Utrecht, Netherlands?` Do not add source code, parsing
    advice, a preferred weather site, retry advice, or language hints. The path from
-   search result to parsed values to `control.finish` is what this scenario judges.
+   search result to parsed values to `chat.reply` is what this scenario judges.
 2. **Validation-only authority.** The only agent tool operations permitted are
-   the Parallel web-search and web-fetch MCP tools and `control.finish`. Any process, filesystem, command-execution, messaging,
+   the Parallel web-search and web-fetch MCP tools and `chat.reply`. Any process, filesystem, command-execution, messaging,
    mutation, or other host-affecting operation is a FAIL and triggers Abort/RCA. Browser
    automation and read-only evidence collection by the runbook operator are not agent tool
    operations.
@@ -70,12 +71,13 @@ evidence, source-backed values, and rendered answer shape rather than an exact s
    consecutive failed executions with the same non-empty error are a FAIL; quote the
    repeated error in the scorecard. Do not discard failed iterations once a later one
    succeeds.
-9. **The row proves its own identity.** [ADR 0096](../../docs/adr/0096-typescript-is-the-sole-rlm-dialect.md)
-   left the page with no dialect badge and `/api/state.settings` with no `rlm_dialect` key —
+9. **The row proves its own identity.** [ADR 0139](../../docs/adr/0139-the-lash-vm-is-a-dialect-free-kernel.md)
+   leaves the page with no dialect badge and `/api/state.settings` with no `rlm_dialect` key —
    `examples/agent-workbench/src/main_sections/tests/ui_contract.rs` asserts that absence on
    purpose, because a badge would be a second place a language could be claimed from. Do not
    gate on either. The live witnesses are the transcript's code-block `language` and the
-   transcript disclosure's `<summary>` text (`typescript completed · N tool(s)`). Do **not**
+   transcript disclosure's `<summary>` text (`typescript completed[ in Nms] · N tool(s)`; the
+   duration clause is optional). Do **not**
    look for a language field on `exec_code_completed`: its keys are `context`, `duration_ms`,
    `error`, `id`, `observation_count`, `observation_projections`, `output`, `output_chars`,
    `schema_version`, `terminal_finish`, `timestamp`, `tool_calls`, `type`, and
@@ -97,7 +99,8 @@ credential is a harness gap → Abort. The web tools need no key of their own: t
 mounts the keyless Parallel Search MCP (`WORKBENCH_SEARCH_MCP_SERVER = "parallel"`,
 `https://search.parallel.ai/mcp`), so do not require `TAVILY_API_KEY` or any other search
 credential. Set
-`OPENROUTER_MODEL=openai/gpt-5.6-sol` and `AGENT_WORKBENCH_OPEN=0`. Never log
+`OPENROUTER_MODEL` to this row's `model` in `runbooks/judged-matrix.toml` (the matrix's
+frontier slug) and `AGENT_WORKBENCH_OPEN=0`. Never log
 credential values.
 
 Use these allocations exactly; they are intentionally explicit rather than relying on the
@@ -110,9 +113,7 @@ workbench port-derivation fallback:
 Export all of the following with that table's values before
 `bash scripts/agent-workbench-dev.sh up --port <workbench-port>` (the
 `just agent-workbench <workbench-port>` recipe is the same command, but it does not export
-`CARGO_TARGET_DIR`, so source the fork's `env.sh` first). `LASH_RUNBOOK_DIALECT` is **not**
-in the list: nothing reads it (`scripts/agent-workbench-dev.sh` never references it), so
-exporting it only creates a variable a driver believes in.
+`CARGO_TARGET_DIR`, so source the fork's `env.sh` first).
 
 - `AGENT_WORKBENCH_DATA_DIR=/workspace/tmp/fig2351-weather/<run-id>/typescript/data`;
 - `AGENT_WORKBENCH_RUN_DIR=/workspace/tmp/fig2351-weather/<run-id>/typescript/run`;
@@ -143,7 +144,7 @@ inside `node_json`, and the committed assistant content is the `parts[]` array o
 `node_json.event.Conversation` with `kind: "Text"` entries — not a flat `content` string.
 That shape is what makes the byte comparison below possible. Trace truth is the row's
 `data/trace.jsonl` and `data/lash-vm-execution.jsonl`, filtered by the exact session id.
-The `lash-vm-` filename names the IR and the VM that wrote the records, not an authoring
+The `lash-vm-` filename names the Lash VM kernel's execution records, not an authoring
 language.
 Compare assistant text without conflating Markdown bytes with visible text: API and durable
 message Markdown must agree byte-for-byte, while the DOM must equal that Markdown after the

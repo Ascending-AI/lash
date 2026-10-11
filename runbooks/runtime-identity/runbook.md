@@ -87,12 +87,11 @@ that omitted it.
 ```sh
 kiln test --test_output=all //crates/lash-sansio:lash-sansio__unit_test --test_arg=journal_identity_v2_bytes_remain_unchanged_for_all_scope_variants
 kiln test --test_output=all //crates/lash-core-execution:lash-core-execution__unit_test --test_arg=direct_effect_identity_golden_corpus
-kiln test --test_output=all //crates/lash-trace:schema__test --test_arg=trace_schema_version_is_pinned_at_
+kiln test --test_output=all //crates/lash-trace:schema__test --test_arg=published_trace_record_schema_accepts_every_event_and_payload_sample
 ```
 
-The pin test is named for the version it pins, so it is renamed at every bump. Filter on the
-stable prefix above and score it on its executed count; the fully-spelled
-`trace_schema_version_is_pinned_at_20` was left behind by a bump and matched nothing.
+The published-schema test accepts every event and payload sample the schema must carry;
+the version it pins is `TRACE_SCHEMA_VERSION` in the table below.
 
 Session owner keys use the existing raw nonempty/no-NUL opaque grammar, so a whitespace-only
 session key remains valid. Host owner keys use the existing trimmed nonempty/no-NUL check. The
@@ -106,10 +105,9 @@ wrong. Read the value from the constant:
 | Surface | Constant | Read it at |
 | --- | --- | --- |
 | Trace schema | `TRACE_SCHEMA_VERSION` | `crates/lash-trace/src/lib.rs` |
-| PostgreSQL component | `SCHEMA_VERSION` | `crates/lash-postgres-store/src/lib.rs` |
-| SQLite durable core | `SCHEMA_VERSION` | `crates/lash-sqlite-store/src/schema.rs` |
+| PostgreSQL component | `compat::POSTGRES_SCHEMA_VERSION` | `crates/lash-core-store/src/compat.rs` |
+| SQLite durable core | `compat::SQLITE_CORE_SCHEMA_VERSION` | `crates/lash-core-store/src/compat.rs` |
 | code mode snapshot | `CODEMODE_SNAPSHOT_VERSION` | `crates/lash-protocol-rlm/src/executor/snapshot.rs` |
-| Process wake-delivery format | `PROCESS_WAKE_DELIVERY_FORMAT_VERSION` | `crates/lash-core-store/src/process_identity.rs` |
 | Append-request identity encoding | `APPEND_REQUEST_IDENTITY_ENCODING_VERSION` | `crates/lash-core-store/src/store/commit_identity.rs` |
 | Session-node body | `SESSION_NODE_BODY_SCHEMA_VERSION` | `crates/lash-core-store/src/session_graph.rs` |
 | Durable-read fixture | `DURABLE_READ_FIXTURE_SCHEMA_VERSION` | `crates/lash-core/tests/support/durable_read_fixture.rs` |
