@@ -107,6 +107,28 @@ pub struct SessionHeadPayload {
     pub config: crate::PersistedSessionConfig,
 }
 
+impl SessionHeadPayload {
+    /// Decode the admitted native shape without changing its recorded stamp.
+    /// The payload is content-addressed: re-encoding a decoded head must name
+    /// the same config body, including while the fleet pins older writers.
+    ///
+    /// Integrator class (ADR 0051): **store and durable-substrate implementors**.
+    pub fn decode_for_fleet(json: &str, fleet: FleetFormat) -> Result<Self, StoreError> {
+        let corrupt = |error: serde_json::Error| StoreError::StoredDataCorrupt {
+            record_kind: "SessionHeadMeta",
+            message: error.to_string(),
+        };
+        let value: serde_json::Value = serde_json::from_str(json).map_err(corrupt)?;
+        ensure_supported_record_schema_version_for_fleet(
+            "SessionHeadMeta",
+            &value,
+            crate::surface_format!(SESSION_HEAD_META_SCHEMA_VERSION),
+            fleet,
+        )?;
+        serde_json::from_value(value).map_err(corrupt)
+    }
+}
+
 /// Fully assembled session-head metadata returned by a store.
 ///
 /// This type is intentionally not serializable. Store implementations follow the

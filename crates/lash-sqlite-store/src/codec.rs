@@ -249,17 +249,12 @@ pub(crate) fn assemble_session_head_meta(
     let head_json = head_json.ok_or_else(|| {
         stored_data_corrupt("SessionHeadMeta", "head pointer names a missing revision")
     })?;
-    let payload: SessionHeadPayload =
-        lash_core_execution::store::decode_versioned_json_record_for_fleet(
-            std::str::from_utf8(head_json)
-                .map_err(|error| stored_data_corrupt("SessionHeadMeta", error))?,
-            "SessionHeadMeta",
-            lash_core_execution::surface_format!(
-                lash_core_execution::store::SESSION_HEAD_META_SCHEMA_VERSION
-            ),
-            fleet,
-        )
-        .map_err(|error| map_record_decode_error("SessionHeadMeta", error))?;
+    let payload: SessionHeadPayload = SessionHeadPayload::decode_for_fleet(
+        std::str::from_utf8(head_json)
+            .map_err(|error| stored_data_corrupt("SessionHeadMeta", error))?,
+        fleet,
+    )
+    .map_err(|error| map_record_decode_error("SessionHeadMeta", error))?;
     if let Some(leaf) = &leaf_node_id
         && current_frame_node_id.is_none()
     {

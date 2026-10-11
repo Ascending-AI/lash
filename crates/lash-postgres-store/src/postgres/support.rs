@@ -615,18 +615,13 @@ fn decode_session_head_meta_row(
         })?;
     let leaf_node_id: Option<String> = row.get(2);
     let checkpoint_ref: Option<String> = row.get(3);
-    let payload: SessionHeadPayload =
-        lash_core_execution::store::decode_versioned_json_record_for_fleet(
-            std::str::from_utf8(&head_json).map_err(|error| StoreError::StoredDataCorrupt {
-                record_kind: "SessionHeadMeta",
-                message: error.to_string(),
-            })?,
-            "SessionHeadMeta",
-            lash_core_execution::surface_format!(
-                lash_core_execution::store::SESSION_HEAD_META_SCHEMA_VERSION
-            ),
-            fleet,
-        )?;
+    let payload: SessionHeadPayload = SessionHeadPayload::decode_for_fleet(
+        std::str::from_utf8(&head_json).map_err(|error| StoreError::StoredDataCorrupt {
+            record_kind: "SessionHeadMeta",
+            message: error.to_string(),
+        })?,
+        fleet,
+    )?;
     Ok(Some(SessionHeadMeta::assemble(
         session_id,
         payload,

@@ -157,8 +157,19 @@ fn read_receipt(bytes: &[u8], fleet: FleetFormat) -> Result<String, String> {
         (0, 3),
         fleet,
     )
-    .map(|receipt| format!("{receipt:?}"))
     .map_err(|error| error.to_string())
+    .and_then(|mut receipt| {
+        let encoded = receipt
+            .encode_result_json()
+            .map_err(|error| error.to_string())?;
+        if encoded.as_bytes() != bytes {
+            return Err("receipt decode changed its original answer".to_owned());
+        }
+        // Compare the answer facts across formats only after proving that
+        // each decode preserves its own stored stamp and bytes.
+        receipt.schema_version = RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION;
+        Ok(format!("{receipt:?}"))
+    })
 }
 
 // --- SESSION_HEAD_META_SCHEMA_VERSION: the mutable session head. ---
@@ -184,14 +195,15 @@ fn write_head(fleet: FleetFormat) -> Vec<u8> {
 }
 
 fn read_head(bytes: &[u8], fleet: FleetFormat) -> Result<String, String> {
-    super::decode_versioned_json_record_for_fleet::<SessionHeadPayload>(
-        text(bytes),
-        "SessionHeadMeta",
-        crate::surface_format!(SESSION_HEAD_META_SCHEMA_VERSION),
-        fleet,
-    )
-    .map(|payload| format!("{payload:?}"))
-    .map_err(|error| error.to_string())
+    let mut payload = SessionHeadPayload::decode_for_fleet(text(bytes), fleet)
+        .map_err(|error| error.to_string())?;
+    let encoded = serde_json::to_vec(&payload).map_err(|error| error.to_string())?;
+    if encoded != bytes {
+        return Err("head decode changed its content address".to_owned());
+    }
+    // Compare config facts across formats after verifying stored identity.
+    payload.schema_version = SESSION_HEAD_META_SCHEMA_VERSION;
+    Ok(format!("{payload:?}"))
 }
 
 // --- CURRENT_SESSION_STATE_VERSION: the session-state generation marker. ---

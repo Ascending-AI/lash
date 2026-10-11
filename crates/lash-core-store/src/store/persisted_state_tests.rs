@@ -48,12 +48,7 @@ fn session_head_decode_requires_recorded_identity_even_for_root() {
         "SessionHeadMeta",
         SESSION_HEAD_META_SCHEMA_VERSION,
     );
-    let fleet = decode_versioned_json_record_for_fleet::<SessionHeadPayload>(
-        &json,
-        "SessionHeadMeta",
-        crate::surface_format!(SESSION_HEAD_META_SCHEMA_VERSION),
-        FleetFormat::current(),
-    );
+    let fleet = SessionHeadPayload::decode_for_fleet(&json, FleetFormat::current());
     for result in [exact, fleet] {
         let error = result.expect_err("missing identity must not decode as root");
         assert!(
@@ -344,16 +339,8 @@ fn an_undecodable_versioned_record_is_corrupt_and_never_transient() {
             SESSION_HEAD_META_SCHEMA_VERSION,
         )
         .expect_err("the exact-version decoder refuses the bytes");
-        let fleet = decode_versioned_json_record_for_fleet::<SessionHeadPayload>(
-            json,
-            "SessionHeadMeta",
-            SurfaceFormat::of(
-                "SESSION_HEAD_META_SCHEMA_VERSION",
-                SESSION_HEAD_META_SCHEMA_VERSION,
-            ),
-            FleetFormat::current(),
-        )
-        .expect_err("the fleet decoder refuses the bytes");
+        let fleet = SessionHeadPayload::decode_for_fleet(json, FleetFormat::current())
+            .expect_err("the fleet decoder refuses the bytes");
         for error in [exact, fleet] {
             assert!(
                 matches!(

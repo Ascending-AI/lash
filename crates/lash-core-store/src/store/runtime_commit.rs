@@ -516,8 +516,8 @@ pub fn decode_runtime_commit_receipt(
 /// The fleet leg of [`decode_runtime_commit_receipt`]: the receipt admits the
 /// version `fleet` records for the surface as well as this build's newest —
 /// the `[N-1, N]` reader window of ADR 0106 §2 (FIG-3796). An admitted older
-/// payload climbs to the newest through the surface's [`RecordUpcaster`]
-/// hooks before it decodes.
+/// payload decodes natively, preserving the original answer's version stamp
+/// as well as its facts so replay re-encodes the same answer.
 pub fn decode_runtime_commit_receipt_for_fleet(
     session_id: &SessionId,
     turn_id: &str,
@@ -532,24 +532,12 @@ pub fn decode_runtime_commit_receipt_for_fleet(
                 "session `{session_id}` receipt `{turn_id}` is not valid JSON: {error}"
             ),
         })?;
-    let actual = ensure_supported_record_schema_version_for_fleet(
+    ensure_supported_record_schema_version_for_fleet(
         RUNTIME_COMMIT_RECEIPT_RECORD_KIND,
         &value,
         crate::surface_format!(RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION),
         fleet,
     )?;
-    let window = fleet.read_window(crate::surface_format!(
-        RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION
-    ));
-    if actual != window.newest() {
-        super::upcast_json_record(
-            RUNTIME_COMMIT_RECEIPT_RECORD_KIND,
-            crate::surface_format!(RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION),
-            actual,
-            window.newest(),
-            &mut value,
-        )?;
-    }
     let (committed_at_ms, head_revision) = columns;
     let corrupt = |message: &str| StoreError::StoredDataCorrupt {
         record_kind: RUNTIME_COMMIT_RECEIPT_RECORD_KIND,

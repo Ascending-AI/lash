@@ -330,12 +330,30 @@ async fn sqlite_factory_delete_session_removes_only_the_selected_session() {
         host_ref_count, 1,
         "factory artifact refs without session attribution remain host-owned"
     );
-    let blob_count: i64 = conn
-        .query_row("SELECT COUNT(*) FROM blobs", [], |row| row.get(0))
-        .expect("count retained blobs");
+    let retained_config: String = conn
+        .query_row(
+            "SELECT revision.config_ref FROM session_head AS head
+             JOIN session_revisions AS revision
+               ON revision.session_id = head.session_id
+              AND revision.head_revision = head.head_revision
+             WHERE head.session_id = 'keep/me'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("surviving session config reference");
+    let blobs = conn
+        .prepare("SELECT hash FROM blobs ORDER BY hash")
+        .expect("retained blob query")
+        .query_map([], |row| row.get::<_, String>(0))
+        .expect("retained blobs")
+        .collect::<rusqlite::Result<std::collections::BTreeSet<_>>>()
+        .expect("retained blob identities");
+    // FIG-5948 stores config in blobs too: the surviving session retains its
+    // config while the deleted session releases its entire checkpoint tree.
     assert_eq!(
-        blob_count, 1,
-        "deleting the session must reclaim its checkpoint tree"
+        blobs,
+        std::collections::BTreeSet::from(["host-artifact-blob".to_owned(), retained_config,]),
+        "delete must retain only the host artifact and the surviving session's config"
     );
 }
 

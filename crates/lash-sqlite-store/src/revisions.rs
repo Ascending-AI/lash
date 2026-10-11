@@ -222,15 +222,11 @@ impl RevisionRow {
                 message: "revision names a missing config body".to_owned(),
             })?;
         let payload: lash_core_execution::store::SessionHeadPayload =
-            lash_core_execution::store::decode_versioned_json_record_for_fleet(
+            SessionHeadPayload::decode_for_fleet(
                 std::str::from_utf8(config).map_err(|error| StoreError::StoredDataCorrupt {
                     record_kind: "SessionHeadMeta",
                     message: error.to_string(),
                 })?,
-                "SessionHeadMeta",
-                lash_core_execution::surface_format!(
-                    lash_core_execution::store::SESSION_HEAD_META_SCHEMA_VERSION
-                ),
                 fleet,
             )
             .map_err(|error| crate::map_record_decode_error("SessionHeadMeta", error))?;

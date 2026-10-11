@@ -70,24 +70,6 @@ fn lift_session_checkpoint(value: &mut serde_json::Value) -> Result<(), crate::S
     )
 }
 
-fn lift_runtime_commit_receipt(value: &mut serde_json::Value) -> Result<(), crate::StoreError> {
-    restamp(
-        value,
-        "runtime commit receipt",
-        "schema_version",
-        super::RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION,
-    )
-}
-
-fn lift_session_head_meta(value: &mut serde_json::Value) -> Result<(), crate::StoreError> {
-    restamp(
-        value,
-        "session head meta",
-        "schema_version",
-        super::SESSION_HEAD_META_SCHEMA_VERSION,
-    )
-}
-
 /// `PROCESS_EVENT_VOCABULARY_VERSION` N+1: an effect-summary event carries
 /// its vocabulary under `vocabulary_version`.
 fn lift_process_event_vocabulary(value: &mut serde_json::Value) -> Result<(), crate::StoreError> {
@@ -168,15 +150,15 @@ pub(super) const RECORD_UPCASTERS: &[RecordUpcaster] = &[
         "CHECKPOINT_COMPONENT_ENCODING_VERSION",
         super::CHECKPOINT_COMPONENT_ENCODING_VERSION - 1,
     ),
-    tree(
+    // Receipts retain their original answer and heads retain their content
+    // address. Both native decoders preserve the recorded version stamp.
+    decoder(
         "RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION",
         super::RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION - 1,
-        lift_runtime_commit_receipt,
     ),
-    tree(
+    decoder(
         "SESSION_HEAD_META_SCHEMA_VERSION",
         super::SESSION_HEAD_META_SCHEMA_VERSION - 1,
-        lift_session_head_meta,
     ),
     decoder(
         "CURRENT_SESSION_STATE_VERSION",
