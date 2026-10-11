@@ -14,6 +14,7 @@ roles = ["Assistant", "Event", "Tool", "User"]
 
 
 [sites]
+"crates/lash-durable-test/tests/vertical_crash_proof.rs#a_cold_takeover_reads_the_original_resolved_config_once_on_sqlite_memory" = { reads = 0, outputs = 1, kind = "output-read", reason = "The cold-takeover law reads the original turn's settled reply to prove it completed before asserting once-only configuration resolution (FIG-6019)." }
 "crates/lash/src/turn.rs#assistant_message" = { reads = 0, outputs = 1, kind = "output-read", reason = "assistant_message exposes programmatic execution results or provider data, not a transcript renderer." }
 "crates/lash/src/turn.rs#finished" = { reads = 0, outputs = 1, kind = "output-read", reason = "finished exposes the declared control tool and its completion value." }
 "crates/lash/src/tests/durable_session.rs#a_cell_at_its_tool_call_limit_can_still_finish" = { reads = 0, outputs = 1, kind = "output-read", reason = "Law 5 (FIG-5781) reads the settled finish value of a cell at its tool call limit." }

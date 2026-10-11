@@ -65,6 +65,317 @@ mod sim;
 #[path = "support/matrix.rs"]
 mod matrix;
 
+/// FIG-6019: distinguish a repeated resolver from a config command that
+/// could actually publish while a turn is between owners.
+mod run_config_spike {
+    use super::*;
+    use lash::RunDefinition as _;
+    use lash::config::{
+        ConfigSettlement, ConfigTransaction, ConfigTransactionOutcome, ConfigWrite, SetLlmProfile,
+    };
+
+    const NEXT_MODEL: &str = "takeover-model-y";
+
+    /// No overrides: the snapshot is also the effective resolved config.
+    /// Record every invocation without changing the definition's answer.
+    #[derive(Clone, Default)]
+    struct CountingDefinition(Arc<Mutex<Vec<lash_core::PersistedSessionConfig>>>);
+
+    impl lash::RunDefinition for CountingDefinition {
+        fn reference(&self) -> lash::DefinitionRef {
+            lash::DefinitionRef::new("takeover-config-law", 1)
+        }
+
+        fn resolve(
+            &self,
+            snapshot: &lash_core::PersistedSessionConfig,
+            _context: &serde_json::Value,
+        ) -> Result<lash::RunOverrides, lash::RunDefinitionRefusal> {
+            self.0.lock_recover().push(snapshot.clone());
+            Ok(lash::RunOverrides::default())
+        }
+    }
+
+    fn core(
+        backend: &Backend,
+        definition: CountingDefinition,
+        requests: &Arc<Mutex<Vec<String>>>,
+        world: &Arc<ExternalWorld>,
+        boot: &str,
+    ) -> lash::LashCore {
+        let requests = Arc::clone(requests);
+        let model =
+            lash_core::testing::TestProvider::builder()
+                .kind("takeover-config-scripted")
+                .requires_streaming(true)
+                .complete(move |request: LlmRequest| {
+                    let requests = Arc::clone(&requests);
+                    async move {
+                        requests
+                            .lock_recover()
+                            .push(request.model.key().to_string());
+                        if request.messages.iter().any(|message| {
+                            message.role == lash_core::llm::types::LlmRole::Assistant
+                        }) {
+                            Ok(text(&request, "finished after takeover"))
+                        } else {
+                            Ok(LlmResponse {
+                                parts: vec![LlmOutputPart::ToolCall {
+                                    call_id: "takeover-config-call".to_owned(),
+                                    tool_name: TOOL.to_owned(),
+                                    input_json: r#"{"x":7}"#.to_owned(),
+                                    replay: None,
+                                }],
+                                ..LlmResponse::default()
+                            })
+                        }
+                    }
+                })
+                .build()
+                .into_handle();
+        let models = lash::LlmProfileRegistry::new()
+            .register(
+                MODEL,
+                lash::RegisteredLlmProfile::new(metadata(), model.clone()),
+            )
+            .expect("X registers")
+            .register(
+                NEXT_MODEL,
+                lash::RegisteredLlmProfile::new(
+                    lash_core::LlmProfileMetadata::builder(NEXT_MODEL)
+                        .cache_retention(lash_core::provider::CacheRetention::Short)
+                        .context_window_tokens(200_000)
+                        .build()
+                        .expect("model Y's metadata"),
+                    model,
+                ),
+            )
+            .expect("Y registers beside X");
+        lash::LashCore::standard_builder(backend.clone())
+            .serve_sessions(false)
+            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+            .data_retention(lash::DataRetention::standard())
+            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+            .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
+            .execution_budgets(lash::ExecutionBudgets::recommended())
+            .delta_coalescing(lash::DeltaCoalescing::recommended())
+            .llm_profiles(Arc::new(models))
+            .run_definition(definition)
+            .tools(ext_write(Arc::clone(world)))
+            .build(lash::persistence::LeaseOwnerIdentity::opaque(
+                lash::persistence::LeaseOwnerId::new("takeover-config-deployment"),
+                lash::persistence::LeaseIncarnationId::new(boot),
+            ))
+            .expect("the spike core builds")
+    }
+
+    /// The once-resolved rule promised by run_spec.rs and turn_config.rs.
+    /// Cut after the first model.start commits, before its provider runs;
+    /// submit Y with no live owner, then finish on a fresh core. The public
+    /// command path must retain X through both the pinned request and the
+    /// later, newly composed request. A pending command is not a config
+    /// change: it can publish only after this turn releases the head.
+    #[tokio::test]
+    async fn a_cold_takeover_reads_the_original_resolved_config_once_on_sqlite_memory() {
+        let clock = SimClock::new();
+        let stores = Arc::new(sim::memory(Arc::clone(&clock)).await);
+        let database: Arc<dyn DurableStore> = Arc::new(stores.durable_store());
+        let backend = shipped_backend(stores);
+        let definition = CountingDefinition::default();
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let world = Arc::new(ExternalWorld::default());
+        let first = core(&backend, definition.clone(), &requests, &world, "first");
+        let session = first
+            .session(session())
+            .create(lash::SessionCreation::root(
+                lash::plugins::SessionToolAccess::ambient(),
+                lash::SessionSpec::new(
+                    MODEL,
+                    lash::TurnBudget::Unbounded,
+                    lash::MaxToolCalls::new(8),
+                )
+                .no_progress_budget(lash_core::NoProgressBudget::bounded(12)),
+            ))
+            .await
+            .expect("the session starts on X");
+        let sent = session
+            .send(lash::TurnInput::text("write x, then finish"))
+            .id(run())
+            .run(lash::RunSpec::definition(
+                definition.reference(),
+                serde_json::Value::Null,
+            ))
+            .await
+            .expect("the turn is accepted");
+        let config = SimNodesConfig {
+            lease: Matrix::test_lease(),
+            decodes: backend.formats().decodes(),
+            max_active: 1,
+        };
+        let script = Script::new();
+        script.cut_on("a", CommitLabel::MODEL_START, 1, Fault::CommitThenAbort);
+        let before = SimNodes::new(
+            Arc::clone(&database),
+            Arc::clone(&clock),
+            script,
+            config.clone(),
+            Arc::new(SessionActivation::new(
+                backend.clone(),
+                lash::testing::session_turn_services(&first),
+                Arc::new(Tripwire::default()),
+            )),
+        );
+        before.start("a");
+        before.quiesce().await;
+        while before.script().cuts().is_empty() {
+            assert!(
+                before.step().await.is_some(),
+                "the first model.start never committed"
+            );
+        }
+        before.kill("a");
+        before.quiesce().await;
+        assert_eq!(before.life("a"), Life::Dead);
+        assert!(
+            requests.lock_recover().is_empty(),
+            "the cut precedes the first answer"
+        );
+        let original = definition.0.lock_recover().clone();
+        assert_eq!(original.len(), 1, "the first owner resolved once");
+
+        let live = first
+            .session(super::session())
+            .open()
+            .await
+            .expect("open admin access");
+        let admin = live.admin().config();
+        let revision = admin
+            .revision()
+            .await
+            .expect("the original config revision");
+        let change = admin
+            .submit(
+                ConfigWrite::new("between-owners-model-y", revision),
+                ConfigTransaction::of(SetLlmProfile {
+                    model: NEXT_MODEL.into(),
+                }),
+            )
+            .await
+            .expect("the model change is durably submitted with no owner");
+        assert!(matches!(change, ConfigSettlement::Pending(_)), "{change:?}");
+        assert_eq!(admin.revision().await.unwrap(), revision);
+        drop(live);
+        drop(sent);
+        first
+            .shutdown()
+            .await
+            .expect("drop the first core's runtime state");
+
+        let cold = core(&backend, definition.clone(), &requests, &world, "cold");
+        let after = SimNodes::new(
+            Arc::clone(&database),
+            Arc::clone(&clock),
+            Script::new(),
+            config,
+            Arc::new(SessionActivation::new(
+                backend.clone(),
+                lash::testing::session_turn_services(&cold),
+                Arc::new(Tripwire::default()),
+            )),
+        );
+        after.start("b");
+        let horizon = clock.logical_ms() + 600_000;
+        while !database
+            .actor(&actor())
+            .await
+            .unwrap()
+            .is_some_and(|row| row.state == ActorState::Idle)
+        {
+            assert!(
+                clock.logical_ms() < horizon,
+                "takeover exceeded its virtual watchdog"
+            );
+            assert!(
+                after.step().await.is_some(),
+                "takeover stalled:\n{}",
+                after.script().rendered_trace()
+            );
+        }
+        after.quiesce().await;
+        let durable = cold
+            .session(super::session())
+            .durable()
+            .await
+            .expect("reattach to the original turn on the cold core");
+        let output = durable
+            .attach_id(run())
+            .output()
+            .await
+            .expect("the resumed turn has a committed answer");
+        assert_eq!(output.status(), lash::TurnStatus::Answered);
+        assert_eq!(output.assistant_message(), Some("finished after takeover"));
+        let live = cold
+            .session(super::session())
+            .open()
+            .await
+            .expect("open the cold session");
+        let admin = live.admin().config();
+        let outcome = change
+            .await_outcome(&admin)
+            .await
+            .expect("the command settled after the turn");
+        assert!(
+            matches!(outcome, ConfigTransactionOutcome::Applied { .. }),
+            "{outcome:?}"
+        );
+        let final_revision = admin.revision().await.unwrap();
+        let head = backend
+            .stores()
+            .session_store_factory()
+            .load_session_head_meta(&super::session())
+            .await
+            .unwrap()
+            .unwrap();
+        let resolved = definition.0.lock_recover().clone();
+        let models = requests.lock_recover().clone();
+        let revisions: Vec<_> = resolved
+            .iter()
+            .map(|config| config.config_revision)
+            .collect();
+        let labels: Vec<_> = after
+            .script()
+            .trace()
+            .iter()
+            .filter(|write| write.kind == WriteKind::Actor && write.committed())
+            .map(|write| write.point.label)
+            .collect();
+        eprintln!(
+            "FIG-6019: model calls={models:?}; resolver revisions={revisions:?}; resolver invocations={}; final head model={:?}, revision={final_revision}; takeover commits={labels:?}",
+            resolved.len(),
+            head.config.profile_key()
+        );
+        after.kill("b");
+        after.quiesce().await;
+        cold.shutdown().await.expect("stop the cold core");
+        assert_eq!(
+            models,
+            [MODEL, MODEL],
+            "both the pinned and later call retain X"
+        );
+        assert!(
+            resolved.iter().all(|config| config == &original[0]),
+            "the effective resolved config changed: {resolved:?}"
+        );
+        assert_eq!(head.config.profile_key().unwrap().as_str(), NEXT_MODEL);
+        assert_eq!(final_revision, revision + 1);
+        assert_eq!(
+            resolved.len(),
+            1,
+            "a committed run must read its resolved config instead of invoking its definition again; observed revisions={revisions:?}, model calls={models:?}"
+        );
+    }
+}
+
 use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
 use matrix::MatrixTestExt as _;
 
