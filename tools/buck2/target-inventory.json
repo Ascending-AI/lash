@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 0,
   "cargo_package_count": 70,
-  "cargo_target_count": 216,
+  "cargo_target_count": 217,
   "facade_production_check_targets": [
     "//crates/lash-core-effect:lash-core-effect__fv_969a08f2__metadata[check]",
     "//crates/lash-core-effect:lash-core-effect__fv_d3926888__metadata[check]",
@@ -327,6 +327,8 @@
     "//crates/lash-llm-transport:property__test__fv_bc413b55",
     "//crates/lash-perf:durable-substrate__bin__fv_0c5f4979",
     "//crates/lash-perf:durable-substrate__bin__fv_8dc74a1c",
+    "//crates/lash-perf:durable_substrate__test__fv_0c5f4979",
+    "//crates/lash-perf:durable_substrate__test__fv_8dc74a1c",
     "//crates/lash-perf:lash-perf__bin__fv_0c5f4979",
     "//crates/lash-perf:lash-perf__bin__fv_8dc74a1c",
     "//crates/lash-perf:lash-perf__bin__unit_test__fv_0c5f4979",
@@ -1195,6 +1197,8 @@
     "//crates/lash-llm-transport:property__test__fv_bc413b55__rust_test__metadata[check]",
     "//crates/lash-perf:durable-substrate__bin__fv_0c5f4979__metadata[check]",
     "//crates/lash-perf:durable-substrate__bin__fv_8dc74a1c__metadata[check]",
+    "//crates/lash-perf:durable_substrate__test__fv_0c5f4979__rust_test__metadata[check]",
+    "//crates/lash-perf:durable_substrate__test__fv_8dc74a1c__rust_test__metadata[check]",
     "//crates/lash-perf:lash-perf__bin__fv_0c5f4979__metadata[check]",
     "//crates/lash-perf:lash-perf__bin__fv_8dc74a1c__metadata[check]",
     "//crates/lash-perf:lash-perf__bin__unit_test__fv_0c5f4979__rust_test__metadata[check]",
@@ -2063,6 +2067,8 @@
     "//crates/lash-llm-transport:property__test__fv_bc413b55",
     "//crates/lash-perf:durable-substrate__bin__fv_0c5f4979",
     "//crates/lash-perf:durable-substrate__bin__fv_8dc74a1c",
+    "//crates/lash-perf:durable_substrate__test__fv_0c5f4979",
+    "//crates/lash-perf:durable_substrate__test__fv_8dc74a1c",
     "//crates/lash-perf:lash-perf__bin__fv_0c5f4979",
     "//crates/lash-perf:lash-perf__bin__fv_8dc74a1c",
     "//crates/lash-perf:lash-perf__bin__unit_test__fv_0c5f4979",
@@ -28420,6 +28426,26 @@
       "package": "lash-perf"
     },
     {
+      "build_label": "//crates/lash-perf:durable_substrate__test__fv_0c5f4979",
+      "check_label": "//crates/lash-perf:durable_substrate__test__fv_0c5f4979__rust_test__metadata[check]",
+      "clippy_label": "//crates/lash-perf:durable_substrate__test__fv_0c5f4979__clippy[clippy.txt]",
+      "features": [
+        "dhat-heap"
+      ],
+      "kind": "test",
+      "label": "//crates/lash-perf:durable_substrate__test__fv_0c5f4979",
+      "package": "lash-perf"
+    },
+    {
+      "build_label": "//crates/lash-perf:durable_substrate__test__fv_8dc74a1c",
+      "check_label": "//crates/lash-perf:durable_substrate__test__fv_8dc74a1c__rust_test__metadata[check]",
+      "clippy_label": "//crates/lash-perf:durable_substrate__test__fv_8dc74a1c__clippy[clippy.txt]",
+      "features": [],
+      "kind": "test",
+      "label": "//crates/lash-perf:durable_substrate__test__fv_8dc74a1c",
+      "package": "lash-perf"
+    },
+    {
       "build_label": "//crates/lash-perf:lash-perf__bin__fv_0c5f4979",
       "check_label": "//crates/lash-perf:lash-perf__bin__fv_0c5f4979__metadata[check]",
       "clippy_label": "//crates/lash-perf:lash-perf__bin__fv_0c5f4979__clippy[clippy.txt]",
@@ -51541,6 +51567,8 @@
       "//crates/lash-llm-transport:lash-llm-transport__fv_3dab7306",
       "//crates/lash-perf:durable-substrate__bin__fv_0c5f4979",
       "//crates/lash-perf:durable-substrate__bin__fv_8dc74a1c",
+      "//crates/lash-perf:durable_substrate__test__fv_0c5f4979",
+      "//crates/lash-perf:durable_substrate__test__fv_8dc74a1c",
       "//crates/lash-perf:lash-perf__bin__fv_0c5f4979",
       "//crates/lash-perf:lash-perf__bin__fv_8dc74a1c",
       "//crates/lash-perf:lash-perf__bin__unit_test__fv_0c5f4979",
@@ -52445,7 +52473,7 @@
       "//crates/lash:lash__fv_da373a79"
     ]
   },
-  "generated_label_count": 298,
+  "generated_label_count": 299,
   "main_test_exclusions": {
     "//crates/lash-s3-store:lash-s3-store__unit_test": "requires an external service or credentials"
   },
@@ -52597,6 +52625,9 @@
     "//crates/lash-llm-transport:lash-llm-transport__unit_test__fv_bc413b55",
     "//crates/lash-llm-transport:property__test__fv_bc413b55",
     "//crates/lash-llm-transport:test_batch",
+    "//crates/lash-perf:durable_substrate__test",
+    "//crates/lash-perf:durable_substrate__test__fv_0c5f4979",
+    "//crates/lash-perf:durable_substrate__test__fv_8dc74a1c",
     "//crates/lash-perf:lash-perf__bin__unit_test",
     "//crates/lash-perf:lash-perf__bin__unit_test__fv_0c5f4979",
     "//crates/lash-perf:lash-perf__bin__unit_test__fv_8dc74a1c",
@@ -53138,6 +53169,9 @@
     "//crates/lash-llm-transport:lash-llm-transport__unit_test__fv_bc413b55",
     "//crates/lash-llm-transport:property__test",
     "//crates/lash-llm-transport:property__test__fv_bc413b55",
+    "//crates/lash-perf:durable_substrate__test",
+    "//crates/lash-perf:durable_substrate__test__fv_0c5f4979",
+    "//crates/lash-perf:durable_substrate__test__fv_8dc74a1c",
     "//crates/lash-perf:lash-perf__bin__unit_test",
     "//crates/lash-perf:lash-perf__bin__unit_test__fv_0c5f4979",
     "//crates/lash-perf:lash-perf__bin__unit_test__fv_8dc74a1c",
@@ -53548,7 +53582,7 @@
     "//runbooks/lash-facade-failover:lash-facade-failover__unit_test",
     "//runbooks/rlm-smoke:rlm-smoke__unit_test"
   ],
-  "metadata_target_count": 1132,
+  "metadata_target_count": 1135,
   "packages": [
     {
       "declared_features": [
@@ -55873,6 +55907,15 @@
           "clippy_label": "//crates/lash-perf:postgres-substrate__bin__clippy[clippy.txt]",
           "kind": "bin",
           "label": "//crates/lash-perf:postgres-substrate__bin",
+          "tags": []
+        },
+        {
+          "build_label": "//crates/lash-perf:durable_substrate__test",
+          "cargo": "durable_substrate",
+          "check_label": "//crates/lash-perf:durable_substrate__test__rust_test__metadata[check]",
+          "clippy_label": "//crates/lash-perf:durable_substrate__test__clippy[clippy.txt]",
+          "kind": "test",
+          "label": "//crates/lash-perf:durable_substrate__test",
           "tags": []
         },
         {
@@ -58830,6 +58873,9 @@
     "//crates/lash-llm-transport:property__test": 300,
     "//crates/lash-llm-transport:property__test__fv_bc413b55": 300,
     "//crates/lash-llm-transport:test_batch": 300,
+    "//crates/lash-perf:durable_substrate__test": 300,
+    "//crates/lash-perf:durable_substrate__test__fv_0c5f4979": 300,
+    "//crates/lash-perf:durable_substrate__test__fv_8dc74a1c": 300,
     "//crates/lash-perf:lash-perf__bin__unit_test": 300,
     "//crates/lash-perf:lash-perf__bin__unit_test__fv_0c5f4979": 300,
     "//crates/lash-perf:lash-perf__bin__unit_test__fv_8dc74a1c": 300,
@@ -59386,6 +59432,7 @@
     "//crates/lash-perf:build_script",
     "//crates/lash-perf:build_script__build",
     "//crates/lash-perf:durable-substrate__bin",
+    "//crates/lash-perf:durable_substrate__test",
     "//crates/lash-perf:lash-perf[static]",
     "//crates/lash-perf:lash-perf__bin",
     "//crates/lash-perf:lash-perf__bin__unit_test",
@@ -59703,6 +59750,7 @@
     "//crates/lash-llm-transport:property__test__rust_test__metadata[check]",
     "//crates/lash-perf:build_script__build__metadata[check]",
     "//crates/lash-perf:durable-substrate__bin__metadata[check]",
+    "//crates/lash-perf:durable_substrate__test__rust_test__metadata[check]",
     "//crates/lash-perf:lash-perf__bin__metadata[check]",
     "//crates/lash-perf:lash-perf__bin__unit_test__rust_test__metadata[check]",
     "//crates/lash-perf:lash-perf__metadata[check]",
@@ -60027,6 +60075,7 @@
     "//crates/lash-llm-transport:property__test__clippy[clippy.txt]",
     "//crates/lash-perf:build_script__build__clippy[clippy.txt]",
     "//crates/lash-perf:durable-substrate__bin__clippy[clippy.txt]",
+    "//crates/lash-perf:durable_substrate__test__clippy[clippy.txt]",
     "//crates/lash-perf:lash-perf__clippy[clippy.txt]",
     "//crates/lash-perf:lash-perf__bin__clippy[clippy.txt]",
     "//crates/lash-perf:lash-perf__bin__unit_test__clippy[clippy.txt]",
@@ -60324,6 +60373,7 @@
     "//crates/lash-llm-transport:property__test",
     "//crates/lash-perf:build_script__build",
     "//crates/lash-perf:durable-substrate__bin",
+    "//crates/lash-perf:durable_substrate__test",
     "//crates/lash-perf:lash-perf",
     "//crates/lash-perf:lash-perf__bin",
     "//crates/lash-perf:lash-perf__bin__unit_test",
@@ -60623,6 +60673,7 @@
     "//crates/lash-perf:build_script",
     "//crates/lash-perf:build_script__build",
     "//crates/lash-perf:durable-substrate__bin",
+    "//crates/lash-perf:durable_substrate__test",
     "//crates/lash-perf:lash-perf",
     "//crates/lash-perf:lash-perf__bin",
     "//crates/lash-perf:lash-perf__bin__unit_test",
@@ -60871,6 +60922,7 @@
     "//crates/lash-kernel-vm:lash-kernel-vm__unit_test",
     "//crates/lash-llm-tools:lash-llm-tools__unit_test",
     "//crates/lash-llm-transport:test_batch",
+    "//crates/lash-perf:durable_substrate__test",
     "//crates/lash-perf:lash-perf__bin__unit_test",
     "//crates/lash-perf:lash-perf__unit_test",
     "//crates/lash-perf:latency__test",
@@ -61039,6 +61091,7 @@
     "//crates/lash-kernel-vm:lash-kernel-vm__unit_test",
     "//crates/lash-llm-tools:lash-llm-tools__unit_test",
     "//crates/lash-llm-transport:test_batch",
+    "//crates/lash-perf:durable_substrate__test",
     "//crates/lash-perf:lash-perf__bin__unit_test",
     "//crates/lash-perf:lash-perf__unit_test",
     "//crates/lash-perf:latency__test",
@@ -61229,6 +61282,7 @@
     "//crates/lash-llm-tools:lash-llm-tools__unit_test",
     "//crates/lash-llm-transport:lash-llm-transport__unit_test",
     "//crates/lash-llm-transport:property__test",
+    "//crates/lash-perf:durable_substrate__test",
     "//crates/lash-perf:lash-perf__bin__unit_test",
     "//crates/lash-perf:lash-perf__unit_test",
     "//crates/lash-perf:latency__test",
@@ -61636,6 +61690,7 @@
     "//crates/lash-kernel-vm:lash-kernel-vm__unit_test",
     "//crates/lash-llm-tools:lash-llm-tools__unit_test",
     "//crates/lash-llm-transport:test_batch",
+    "//crates/lash-perf:durable_substrate__test",
     "//crates/lash-perf:lash-perf__bin__unit_test",
     "//crates/lash-perf:lash-perf__unit_test",
     "//crates/lash-perf:latency__test",
@@ -61829,6 +61884,7 @@
     "//crates/lash-llm-tools:lash-llm-tools__unit_test",
     "//crates/lash-llm-transport:lash-llm-transport__unit_test",
     "//crates/lash-llm-transport:property__test",
+    "//crates/lash-perf:durable_substrate__test",
     "//crates/lash-perf:lash-perf__bin__unit_test",
     "//crates/lash-perf:lash-perf__unit_test",
     "//crates/lash-perf:latency__test",

@@ -16,8 +16,9 @@ use lash_core_execution::{
     ProcessRegistry, StoreBindingId, StoreSet,
 };
 use lash_durable::domain::{
-    ExecKey, ExecRootRow, HydratedGraph, OwnerKey, ParkEventRow, ParkEventSeq, ProcessActorRow,
-    RootOwner, RunFacts, ScopeKey, SessionCloseRow, TurnEnd, TurnRow, WaitId, WaitRow,
+    ExecKey, ExecRootRow, HydratedGraph, OwnerKey, ParkEventRow, ParkEventSeq, ParkEventWrite,
+    ProcessActorRow, RootOwner, RunFacts, ScopeKey, SessionCloseRow, TurnEnd, TurnRow, WaitId,
+    WaitRow,
 };
 use lash_durable::{
     ActorCommit, ActorKey, ActorSnapshot, ActorTx, Claimed, CommitLabel, DurableError,
@@ -83,6 +84,8 @@ struct Encoded {
     exec_roots: usize,
     domain_writes: usize,
     nodes: Vec<(lash_core_store::checkpoint_graph::NodeId, usize)>,
+    /// The reason of the park it commits, if it parks its actor.
+    parked: Option<String>,
 }
 
 impl Encoded {
@@ -102,6 +105,12 @@ impl Encoded {
                 })
                 .count(),
             domain_writes: tx.domain().len(),
+            parked: tx.domain().iter().find_map(|write| match write {
+                lash_durable::DomainWrite::ParkEvent(ParkEventWrite::Park { reason_json }) => {
+                    Some(reason_json.clone())
+                }
+                _ => None,
+            }),
             ..Self::default()
         };
         for node in tx.graph().values() {
@@ -135,6 +144,7 @@ pub struct Recorder {
     claims: Mutex<Vec<(Instant, String, String)>>,
     model_calls: Mutex<HashMap<String, Vec<Instant>>>,
     waiters: Mutex<Waiters>,
+    parks: Mutex<HashMap<String, oneshot::Sender<String>>>,
 }
 
 impl Default for Recorder {
@@ -146,6 +156,7 @@ impl Default for Recorder {
             claims: Mutex::default(),
             model_calls: Mutex::default(),
             waiters: Mutex::default(),
+            parks: Mutex::default(),
         }
     }
 }
@@ -166,6 +177,13 @@ impl Recorder {
         self.waiters
             .lock_recover()
             .insert((actor.to_string(), label.as_str()), send);
+        receive
+    }
+
+    /// Resolve with the reason `actor` parks with, when it commits a park.
+    pub fn watch_park(&self, actor: &ActorKey) -> oneshot::Receiver<String> {
+        let (send, receive) = oneshot::channel();
+        self.parks.lock_recover().insert(actor.to_string(), send);
         receive
     }
 
@@ -255,6 +273,12 @@ impl Recorder {
                 .remove(&(transaction.actor.clone(), label));
             if let Some(waiter) = waiter {
                 let _ = waiter.send(ended);
+            }
+            if let Some(reason) = encoded.parked {
+                let waiter = self.parks.lock_recover().remove(&transaction.actor);
+                if let Some(waiter) = waiter {
+                    let _ = waiter.send(reason);
+                }
             }
         }
         self.transactions.lock_recover().push(transaction);

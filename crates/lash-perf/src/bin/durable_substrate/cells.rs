@@ -9,6 +9,7 @@
 //! padding is a new text at each await.
 
 use lash_sansio::llm::types::{StreamBlockEvent, StreamBlockKind};
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -32,8 +33,8 @@ const CELL_TOOL: &str = "ext_echo";
 /// The model every cell session names.
 const MODEL: &str = "durable-substrate-cell-model";
 
-/// A node's cell core over `backend`, running `scripts`, reporting model
-/// calls to `recorder`. It serves no node of its own: the bench's node
+/// A node's cell core over `backend`, its cells run on the `worker`
+/// executable, running `scripts`, reporting model calls to `recorder`. It serves no node of its own: the bench's node
 /// serves its sessions.
 ///
 /// # Errors
@@ -41,6 +42,7 @@ const MODEL: &str = "durable-substrate-cell-model";
 /// The core does not build.
 pub fn core(
     backend: &Backend,
+    worker: &Path,
     scripts: Arc<Scripts>,
     recorder: Arc<Recorder>,
 ) -> Result<lash::LashCore> {
@@ -54,7 +56,7 @@ pub fn core(
                 .build(),
             lash::rlm::CellDialect::typescript(),
         )
-        .with_worker_service(untimed_workers()),
+        .with_worker_service(untimed_workers(worker)),
     )
     .serve_sessions(false)
     .commit_budget(lash::CommitBudget::bounded(64 * 1024 * 1024, 4096))
@@ -99,11 +101,12 @@ pub async fn create_session(core: &lash::LashCore, session: &SessionId) -> Resul
         .map_err(|error| anyhow::anyhow!("create {session}: {error}"))
 }
 
-/// The dialect's worker service with its run deadlines off the clock: the
-/// bench measures the cell, not a deadline.
-fn untimed_workers() -> lash::vm::WorkerService {
+/// The dialect's worker service over the `worker` executable, with its run
+/// deadlines off the clock: the bench measures the cell, not a deadline.
+/// The bench names its worker: a build output has no worker beside it.
+fn untimed_workers(worker: &Path) -> lash::vm::WorkerService {
     const OFF_THE_CLOCK: Duration = Duration::from_secs(365 * 24 * 60 * 60);
-    let mut config = lash::vm::WorkerService::default().config().clone();
+    let mut config = lash::vm::WorkerService::subprocess(worker).config().clone();
     config.deadlines.compute = OFF_THE_CLOCK;
     config.deadlines.serialization = OFF_THE_CLOCK;
     config.deadlines.cumulative_cpu = OFF_THE_CLOCK;

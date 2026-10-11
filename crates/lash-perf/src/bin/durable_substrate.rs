@@ -5,7 +5,7 @@
 //! PostgreSQL. Only the protocol, the model and the tool bodies are the
 //! bench's; see `durable_substrate/README.md`.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::{Context as _, Result, bail};
@@ -52,6 +52,9 @@ struct Args {
     database_url: Option<String>,
     #[arg(long)]
     sqlite_dir: Option<PathBuf>,
+    /// The `lash-vm-worker` executable every node's cells run on.
+    #[arg(long, env = "LASH_VM_WORKER")]
+    vm_worker: PathBuf,
     /// Serving nodes (PostgreSQL only above one).
     #[arg(long, default_value_t = 1)]
     nodes: usize,
@@ -154,18 +157,24 @@ fn case(name: &str) -> Result<Case> {
     })
 }
 
-/// One case's run: its database, nodes, samples and report.
+/// One case's run: its database, nodes, samples, report and VM worker.
 pub struct Run<'a> {
     report: &'a Report,
     database: Database,
     nodes: usize,
     samples: usize,
     pool: PoolSize,
+    worker: &'a Path,
 }
 
 impl Run<'_> {
     fn deployment(&self) -> Deployment {
-        Deployment::new(self.database.clone(), DurableSettings::default(), self.pool)
+        Deployment::new(
+            self.database.clone(),
+            DurableSettings::default(),
+            self.pool,
+            self.worker.to_path_buf(),
+        )
     }
 }
 
@@ -183,6 +192,7 @@ async fn main() -> Result<()> {
             "pool_max": args.pool_max,
             "pool_min": args.pool_min,
             "settings": format!("{:?}", DurableSettings::default()),
+            "vm_worker": args.vm_worker,
             "debug_assertions": cfg!(debug_assertions),
         }),
     )?;
@@ -217,6 +227,7 @@ async fn main() -> Result<()> {
                 max: args.pool_max,
                 min: args.pool_min,
             },
+            worker: &args.vm_worker,
         };
         eprintln!("case {name} on {} x{}", args.store, args.nodes);
         match case.kind {

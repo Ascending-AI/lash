@@ -4,7 +4,7 @@
 
 use std::time::{Duration, Instant};
 
-use anyhow::{Context as _, Result, ensure};
+use anyhow::{Context as _, Result, bail, ensure};
 use futures_util::future::try_join_all;
 use lash_core::runtime::durable::session_close::request_session_close;
 use lash_durable::{ActorKey, CommitLabel};
@@ -65,7 +65,9 @@ struct BatchRecord<'a> {
 }
 
 /// Open the turn of `run` on `session` through producer `index`, and wait
-/// for its `turn.commit`; returns (admission start, commit).
+/// for its `turn.commit`; returns (admission start, commit). A session that
+/// parks first runs nothing more until an operator redrives it, so its turn
+/// is refused at the park, with the park's reason.
 async fn one_turn(
     deployment: &Deployment,
     index: usize,
@@ -74,14 +76,23 @@ async fn one_turn(
 ) -> Result<(Instant, Instant)> {
     let actor = session_actor(session)?;
     let committed = deployment.recorder.watch(&actor, CommitLabel::TURN_COMMIT);
+    let parked = deployment.recorder.watch_park(&actor);
     let started = Instant::now();
     admit(deployment.producer(index), session, run)
         .await
         .with_context(|| format!("admit {run}"))?;
-    let done = tokio::time::timeout(TURN_LIMIT, committed)
+    let settled = async {
+        tokio::select! {
+            done = committed => done.context("the recorder dropped the watch"),
+            reason = parked => {
+                let reason = reason.context("the recorder dropped the park watch")?;
+                bail!("{session} parked before {run} committed: {reason}")
+            }
+        }
+    };
+    let done = tokio::time::timeout(TURN_LIMIT, settled)
         .await
-        .with_context(|| format!("{run} did not commit"))?
-        .context("the recorder dropped the watch")?;
+        .with_context(|| format!("{run} did not commit"))??;
     Ok((started, done))
 }
 

@@ -98,12 +98,20 @@ pub struct Deployment {
     pub pool: PoolSize,
     /// The serving nodes.
     pub nodes: Vec<Node>,
+    /// The `lash-vm-worker` executable every node's cells run on.
+    worker: PathBuf,
     booted: usize,
 }
 
 impl Deployment {
-    /// A deployment over `database` with no node yet.
-    pub fn new(database: Database, settings: DurableSettings, pool: PoolSize) -> Self {
+    /// A deployment over `database` with no node yet, its cells run on
+    /// `worker`.
+    pub fn new(
+        database: Database,
+        settings: DurableSettings,
+        pool: PoolSize,
+        worker: PathBuf,
+    ) -> Self {
         Self {
             database,
             recorder: Arc::default(),
@@ -112,6 +120,7 @@ impl Deployment {
             settings,
             pool,
             nodes: Vec::new(),
+            worker,
             booted: 0,
         }
     }
@@ -181,6 +190,7 @@ impl Deployment {
         let (backend, storage) = self.backend(&name).await?;
         let cells = crate::cells::core(
             &backend,
+            &self.worker,
             Arc::clone(&self.scripts),
             Arc::clone(&self.recorder),
         )?;

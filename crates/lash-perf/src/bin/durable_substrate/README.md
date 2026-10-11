@@ -47,15 +47,22 @@ L12a's teardown did.
 
 Build once, then run SQLite cases through `kiln run` and PostgreSQL cases
 through `bench.py` under `kiln gate`, which gives each case a fresh private
-PostgreSQL 18 cluster with L12a's durable settings:
+PostgreSQL 18 cluster with L12a's durable settings. Every node runs its cells
+on the `lash-vm-worker` that `--vm-worker` (or `LASH_VM_WORKER`) names: a build
+output has no worker beside it. `kiln run` names the built worker; a direct
+run of the binary names it itself. A session that parks before its turn
+commits (a worker that does not start, among others) refuses the case at once
+with the park's reason.
 
 ```sh
 . ./env.sh
 python3 tools/buck2/bootstrap_native_tools.py   # the pinned PostgreSQL tree
-kiln build //crates/lash-perf:durable-substrate__bin --materializations final \
-  --build-report .kiln/FIG-5188/build-report.json
+kiln build //crates/lash-perf:durable-substrate__bin //crates/lash-vm-worker:lash-vm-worker__bin \
+  --materializations final --build-report .kiln/FIG-5188/build-report.json
 B="$(python3 tools/buck2/outputs.py --report .kiln/FIG-5188/build-report.json \
   --label //crates/lash-perf:durable-substrate__bin --single)"
+W="$(python3 tools/buck2/outputs.py --report .kiln/FIG-5188/build-report.json \
+  --label //crates/lash-vm-worker:lash-vm-worker__bin --single)"
 
 kiln run //crates/lash-perf:durable-substrate__bin -- --store sqlite \
   --sqlite-dir "$PWD/.kiln/FIG-5188/final/sqlite/db-a" --case rounds-1 --samples 10 \
@@ -63,7 +70,7 @@ kiln run //crates/lash-perf:durable-substrate__bin -- --store sqlite \
 
 kiln gate lash <fork> -- python3 crates/lash-perf/src/bin/durable_substrate/bench.py \
   --binary "$B" --evidence-dir .kiln/FIG-5188/final/pg \
-  --nodes 1 --case rounds-1 -- --samples 10
+  --nodes 1 --case rounds-1 -- --samples 10 --vm-worker "$W"
 
 python3 crates/lash-perf/src/bin/durable_substrate/report.py \
   --inputs docs/perf/durable-substrate-2026-10.jsonl
