@@ -134,6 +134,14 @@ async fn core() -> lash::LashCore {
 
 /// A node over `stores`, as the incarnation `boot` of the one deployment.
 async fn core_over(stores: Arc<lash_sqlite_store::SqliteStoreSet>, boot: &str) -> lash::LashCore {
+    core_with_process_tools(stores, boot, true).await
+}
+
+async fn core_with_process_tools(
+    stores: Arc<lash_sqlite_store::SqliteStoreSet>,
+    boot: &str,
+    process_tools: bool,
+) -> lash::LashCore {
     lash_core::testing::process_execution_env_fixture(stores.process_env_store().as_ref()).await;
     let backend = lash_conformance::backend_over(stores);
     let workers = lash::vm::WorkerService::default();
@@ -142,16 +150,21 @@ async fn core_over(stores: Arc<lash_sqlite_store::SqliteStoreSet>, boot: &str) -
         memory: 64 * 1024 * 1024,
         ..workers.config().run_bounds
     };
-    lash::LashCore::standard_builder(backend)
+    let builder = lash::LashCore::standard_builder(backend)
         .plugin(Arc::new(lash::vm::KernelProcessPluginFactory::new(
             workers, bounds,
         )))
-        .tools(echo_tool())
-        .plugin(Arc::new(
+        .tools(echo_tool());
+    let builder = if process_tools {
+        builder.plugin(Arc::new(
             lash::process_controls::SessionProcessAdminPluginFactory::new(
                 lash_core::lifetime::session_or_starter,
             ),
         ))
+    } else {
+        builder
+    };
+    builder
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
@@ -694,4 +707,96 @@ async fn a_process_parked_in_its_inner_loop_resumes_on_another_node_and_finishes
         panic!("a kernel process has a document");
     };
     assert_eq!(read.document.identity(), publication.document.identity());
+}
+
+/// FIG-6009: whole-workflow syntax lowers to entries without process tools,
+/// while a front-end defect preserves its byte span at the host boundary.
+#[cfg(feature = "typescript")]
+#[tokio::test]
+async fn typescript_import_reports_front_end_errors_with_source_spans() {
+    use lash::workflow::WorkflowImport;
+    let stores = Arc::new(
+        lash_sqlite_store::SqliteStoreSet::memory()
+            .await
+            .expect("SQLite stores"),
+    );
+    let core = core_with_process_tools(stores, "import", false).await;
+    let artifacts = core.host_artifacts();
+    let environment = environment();
+    let checked = artifacts
+        .workflow_environment(&environment)
+        .await
+        .expect("environment reads")
+        .expect("workflow engine installed");
+    assert!(
+        !checked
+            .effects()
+            .keys()
+            .any(|effect| effect.as_str().starts_with("processes."))
+    );
+    for source in [
+        "export const digest = process(async (inbox: string) => { return inbox; });",
+        "export const digest = async (inbox: string) => { return inbox; };",
+        "export async function digest(inbox: string) { return inbox; }",
+    ] {
+        let WorkflowImport::Imported {
+            document,
+            annotations,
+        } = artifacts
+            .import_typescript_workflow(source, &environment)
+            .await
+            .expect("import answers")
+        else {
+            panic!("the process source imports: {source}");
+        };
+        assert!(
+            document
+                .document()
+                .entries
+                .contains_key(&Name::new("digest"))
+        );
+        assert_eq!(annotations.document, document.identity());
+        lash::workflow::document::validate_annotations(&annotations, document.document())
+            .expect("annotations name the imported document");
+    }
+    let source = "export const broken = ;";
+    let WorkflowImport::Refused(diagnostics) = artifacts
+        .import_typescript_workflow(source, &environment)
+        .await
+        .expect("import answers")
+    else {
+        panic!("a syntax error is refused");
+    };
+    let span = diagnostics[0].span.expect("the syntax error has a span");
+    assert!(
+        span.start < span.end && span.end <= source.len(),
+        "{span:?}"
+    );
+    core.shutdown().await.expect("the node stops");
+}
+
+/// FIG-6009: printed source retains its stated effects; a missing tool is
+/// a checker admission refusal rather than a parsing diagnostic.
+#[cfg(feature = "typescript")]
+#[tokio::test]
+async fn typescript_import_reports_missing_tools_as_admission_refusals() {
+    use lash::workflow::{WorkflowAdmissionRefusal, WorkflowImport};
+    let core = core().await;
+    let document = lash::workflow::document::parse_document(
+        "kernel 1\nnumbers float\neffect missing.tool(input: Any) -> Any\nentry job() -> Any\nfn job() { return null }\nmain { finish null }\n",
+    ).expect("document parses");
+    let source = lash::typescript::print(&document).expect("the printer accepts the document");
+    let WorkflowImport::Admission(WorkflowAdmissionRefusal::Document(refusal)) = core
+        .host_artifacts()
+        .import_typescript_workflow(&source, &environment())
+        .await
+        .expect("import answers")
+    else {
+        panic!("the unavailable effect is refused by admission");
+    };
+    assert!(refusal.errors.iter().any(|error| matches!(
+        error.reason,
+        lash::workflow::graph::RefusalReason::MissingEffect { .. }
+    )));
+    core.shutdown().await.expect("the node stops");
 }

@@ -67,6 +67,29 @@ pub fn lower(source: &str, environment: &Environment<'_>) -> Result<Lowered, Dia
     lower::lower(&program, source, environment)
 }
 
+/// Lowers a host-authored whole workflow, including the exact source the
+/// printer writes. Exported async declarations and const-bound async literals
+/// (optionally wrapped in `process(...)`) become document entries even when
+/// the environment offers no process-start tools. This runs no effect and
+/// returns an unchecked document; a host must admit it before use.
+///
+/// Unlike cell lowering, this trusted source entry accepts the printer's
+/// reserved kernel surface, including `finish`.
+pub fn lower_workflow(source: &str, environment: &Environment<'_>) -> Result<Lowered, Diagnostic> {
+    if let Some(lowered) = intrinsics::lower(source, environment) {
+        return lowered;
+    }
+    lower::check_binding_names(
+        environment
+            .bindings
+            .iter()
+            .map(lash_kernel_doc::Name::as_str),
+        environment.effects,
+    )?;
+    let program = adapter::parse_workflow(source)?;
+    lower::workflow(&program, source, environment)
+}
+
 /// Reads exact kernel text: the reserved source surface a printer writes
 /// ([`print`]), with kernel semantics and no dialect helper. It is a trusted
 /// host entry: kernel text can state forms no cell may write, `finish`

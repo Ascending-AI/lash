@@ -78,10 +78,27 @@
 //! # Source
 //!
 //! No part of reading, editing or publishing prints or parses a language.
+//! With the `typescript` feature,
+//! [`HostArtifacts::import_typescript_workflow`](crate::process::HostArtifacts::import_typescript_workflow)
+//! lowers whole workflow source and admits it against the same environment as
+//! publication. [`WorkflowImport`] distinguishes front-end diagnostics with
+//! source spans, admission refusals and typed unsupported reasons. Import
+//! writes no artifact and runs no effect. Exported async declarations and
+//! const-bound async literals, including `process(async (...) => ...)`, become
+//! entries. The printer's exact source is also accepted.
+//!
 //! With the `typescript` feature, [`WorkflowDocument::typescript`] prints a
 //! document as TypeScript that lowers back to the same behaviour, or
 //! answers the printer's typed refusal. A refusal leaves the document
 //! readable, editable and publishable.
+
+#[cfg(feature = "typescript")]
+pub(crate) mod typescript;
+#[cfg(feature = "typescript")]
+pub use typescript::{
+    WorkflowImport, WorkflowImportUnsupported, WorkflowSourceDiagnostic,
+    WorkflowSourceDiagnosticKind, WorkflowSourceSpan,
+};
 
 /// The kernel document: its statements, expressions, types, data, sites
 /// and identities, and its canonical encoding.

@@ -16,6 +16,8 @@ mod goal;
 pub(crate) mod nesting;
 mod optional_chain;
 mod parser;
+mod workflow;
+pub(crate) use workflow::parse as parse_workflow;
 mod repairs;
 pub(crate) use parser::Parser;
 mod prototype_chain;
@@ -448,19 +450,20 @@ fn guard_source_size(source: &str) -> Result<(), Diagnostic> {
 pub(crate) fn parse(source: &str) -> Result<Program, Diagnostic> {
     guard_source_size(source)?;
     guard_source_nesting(source)?;
-    parse_on_proportional_stack(source)
+    parse_on_proportional_stack(source, false)
 }
 
 fn parse_source(source: &str) -> Result<Program, Diagnostic> {
-    parse_from_goal(source, Goal::Module)
+    parse_from_goal(source, Goal::Module, false)
 }
 
 /// Reads `source` under the first goal, from `first` on, that admits it (see
 /// [`Goal`]), converts it, and checks the early errors of its declarations.
-fn parse_from_goal(source: &str, first: Goal) -> Result<Program, Diagnostic> {
+fn parse_from_goal(source: &str, first: Goal, workflow: bool) -> Result<Program, Diagnostic> {
     let parsed = goal::parse(source, first).map_err(|error| parser_diagnostic(error, source))?;
     let adapter = Adapter {
         source: &parsed.text,
+        workflow,
         goal: parsed.goal,
         respelled_awaits: parsed.respelled_awaits,
         respellings: parsed.respellings,
@@ -470,7 +473,7 @@ fn parse_from_goal(source: &str, first: Goal) -> Result<Program, Diagnostic> {
     let converted = adapter.convert_module_items(&parsed.items);
     if converted.is_err() && adapter.module_goal_await.get() {
         // `await` written as an identifier: the cell is a Script.
-        return parse_from_goal(source, Goal::Script);
+        return parse_from_goal(source, Goal::Script, workflow);
     }
     let early_error =
         matches!(&converted, Err(diagnostic) if diagnostic.kind == DiagnosticKind::ProgramDefect);
@@ -490,6 +493,7 @@ fn parse_from_goal(source: &str, first: Goal) -> Result<Program, Diagnostic> {
 struct Adapter<'a> {
     /// The text SWC read, whose byte offsets every span indexes.
     source: &'a str,
+    workflow: bool,
     goal: Goal,
     /// Where the Script-goal parse read a placeholder for `await`.
     respelled_awaits: BTreeSet<u32>,
@@ -553,6 +557,11 @@ impl Adapter<'_> {
                 .iter()
                 .map(|item| match item {
                     swc::ModuleItem::Stmt(stmt) => self.convert_stmt(stmt),
+                    swc::ModuleItem::ModuleDecl(swc::ModuleDecl::ExportDecl(export))
+                        if self.workflow =>
+                    {
+                        self.convert_stmt(&swc::Stmt::Decl(export.decl.clone()))
+                    }
                     swc::ModuleItem::ModuleDecl(decl) => Err(reject(
                         DiagnosticCode::ImportExportUnsupported,
                         "static import/export declarations",

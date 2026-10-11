@@ -1227,6 +1227,8 @@ PACKAGE_DEPS = {
             "lash_conformance": "//crates/lash-conformance:lash-conformance",
             "lash_core": "//crates/lash-core:lash-core",
             "lash_dialect_python": "//crates/lash-dialect-python:lash-dialect-python",
+            "lash_kernel_conformance": "//crates/lash-kernel-conformance:lash-kernel-conformance",
+            "lash_kernel_vm": "//crates/lash-kernel-vm:lash-kernel-vm",
             "lash_postgres_store": "//crates/lash-postgres-store:lash-postgres-store",
             "lash_protocol_rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm",
             "lash_provider_anthropic": "//crates/lash-provider-anthropic:lash-provider-anthropic",

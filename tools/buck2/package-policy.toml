@@ -594,3 +594,9 @@ compile_data = ["//docs/kernel:package_files", "//crates/lash-kernel-conformance
 packages = ["kernel-embedder"]
 kinds = ["lib"]
 compile_data = ["//examples/kernel-embedder:package_files"]
+
+# FIG-6009: the facade import law embeds the printer's owning document corpus.
+[[rule]]
+packages = ["lash-runtime"]
+kinds = ["unit-test"]
+compile_data = ["//crates/lash-kernel-conformance:package_files", "//crates/lash-kernel-lib:package_files"]

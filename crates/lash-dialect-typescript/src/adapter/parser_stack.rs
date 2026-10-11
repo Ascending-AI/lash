@@ -91,13 +91,16 @@ impl Default for ParserStack {
     }
 }
 
-pub(super) fn parse_on_proportional_stack(source: &str) -> Result<Program, Diagnostic> {
+pub(super) fn parse_on_proportional_stack(
+    source: &str,
+    workflow: bool,
+) -> Result<Program, Diagnostic> {
     let stack_size = parse_stack_size(source.len());
     std::thread::scope(|scope| {
         let handle = std::thread::Builder::new()
             .name("typescript-parse".to_string())
             .stack_size(stack_size)
-            .spawn_scoped(scope, || parse_source(source))
+            .spawn_scoped(scope, || parse_from_goal(source, Goal::Module, workflow))
             .map_err(|error| {
                 // The host could not give us the reservation. That is a
                 // resource failure, not a defect in the program, and it must not

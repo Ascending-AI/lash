@@ -328,12 +328,26 @@ A document can have no TypeScript spelling. The printer then answers a
 diagnostic, and the document stays readable, editable, publishable and
 runnable.
 
-The TypeScript front end lowers source to a kernel document inside a
-session, where cells are written. A host-callable lowering of a whole
-workflow source, with process literals lowered to entries, follows; until
-then a host that wants text entry takes kernel notation. "Open in source"
-is a convenience and must never be the only way your host can change a
-workflow.
+`HostArtifacts::import_typescript_workflow(source, &environment).await` takes
+whole workflow source and the `ProcessExecutionEnvSpec` you pass to
+`workflow_environment` and `publish_workflow`. Lash builds the dialect
+environment from that tool catalogue and the worker's function registry,
+lowers the source, and admits the document. It runs no effect and publishes
+nothing. Exported async declarations and const-bound async literals (including
+`export const digest = process(async (inbox: string) => { return inbox; });`)
+become entries without requiring process-start tools. The printer's exact
+source also imports, preserving its behaviour and entries. The imported
+reference selects `main`; select an entry when publishing the document.
+
+`WorkflowImport::Imported { document, annotations }` carries the admitted
+workflow and source annotations. `Refused(diagnostics)` carries front-end
+diagnostics with byte spans, `Admission(WorkflowAdmissionRefusal)` names a
+checker or catalogue refusal, and `Unsupported(WorkflowImportUnsupported)`
+names a missing kernel workflow engine or an unusable named library. These types live under
+`lash::workflow`. The call requires the `typescript` feature.
+
+"Open in source" is a convenience and must never be the only way your host
+can change a workflow.
 
 ## Namespaces
 

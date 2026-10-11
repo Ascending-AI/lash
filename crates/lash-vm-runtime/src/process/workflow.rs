@@ -60,6 +60,37 @@ impl WorkflowDocument {
         })
     }
 
+    /// Admit an unstored document against a workflow environment and retain
+    /// the view that admission derives. This publishes nothing and runs no
+    /// effect. The supplied entry must exist unless it selects `main`.
+    ///
+    /// # Errors
+    ///
+    /// The checker's refusal or an entry the document does not list.
+    pub fn admit(
+        document: Document,
+        entry: WorkflowDocumentEntry,
+        environment: &Environment<'_>,
+    ) -> Result<Self, WorkflowAdmissionRefusal> {
+        let admitted = lash_kernel_check::admit(&document, environment)
+            .map_err(WorkflowAdmissionRefusal::Document)?;
+        if let WorkflowDocumentEntry::Entry { function } = &entry
+            && !document.entries.contains_key(function)
+        {
+            return Err(WorkflowAdmissionRefusal::NoSuchEntry {
+                entry: function.clone(),
+            });
+        }
+        Ok(Self {
+            reference: WorkflowDocumentRef {
+                document: admitted.identity,
+                entry,
+            },
+            document: Arc::new(document),
+            graph: Arc::new(admitted.graph),
+        })
+    }
+
     /// What an execution of this document names it by.
     pub fn reference(&self) -> &WorkflowDocumentRef {
         &self.reference

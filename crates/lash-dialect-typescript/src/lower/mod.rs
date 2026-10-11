@@ -257,6 +257,7 @@ struct FunctionFrame {
 
 pub(crate) struct Lowerer<'a> {
     source: &'a str,
+    workflow: bool,
     library: &'a dyn Library,
     /// The effects the host supplies: a call of one is a tool call.
     effects: &'a BTreeMap<EffectName, Signature>,
@@ -344,6 +345,23 @@ pub(crate) fn lower(
     source: &str,
     environment: &Environment<'_>,
 ) -> Lowering<Lowered> {
+    lower_program(program, source, environment, false)
+}
+
+pub(crate) fn workflow(
+    program: &ast::Program,
+    source: &str,
+    environment: &Environment<'_>,
+) -> Lowering<Lowered> {
+    lower_program(program, source, environment, true)
+}
+
+fn lower_program(
+    program: &ast::Program,
+    source: &str,
+    environment: &Environment<'_>,
+    workflow: bool,
+) -> Lowering<Lowered> {
     let mut taken: HashSet<String> = source
         .split(|c: char| !(c.is_alphanumeric() || c == '_' || c == '$'))
         .filter(|word| !word.is_empty())
@@ -357,6 +375,7 @@ pub(crate) fn lower(
     );
     let mut lowerer = Lowerer {
         source,
+        workflow,
         library: environment.library,
         effects: environment.effects,
         controls: environment.controls,

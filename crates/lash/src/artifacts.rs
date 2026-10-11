@@ -147,19 +147,117 @@ impl HostArtifacts {
         &self,
         environment: &ProcessExecutionEnvSpec,
     ) -> Result<Option<crate::workflow::WorkflowEnvironment>> {
+        if self
+            .engines
+            .document_provider(lash_vm_runtime::LASH_VM_ENGINE_KIND)
+            .is_none()
+        {
+            return Ok(None);
+        }
+        self.workflow_environment_from_catalog(self.core.process_tool_catalog(environment)?)
+            .await
+    }
+
+    #[cfg(feature = "codemode")]
+    async fn workflow_environment_from_catalog(
+        &self,
+        tool_catalog: Arc<lash_core::ToolCatalog>,
+    ) -> Result<Option<crate::workflow::WorkflowEnvironment>> {
         let Some(provider) = self
             .engines
             .document_provider(lash_vm_runtime::LASH_VM_ENGINE_KIND)
         else {
             return Ok(None);
         };
-        let request = lash_vm_runtime::WorkflowEnvironmentRequest {
-            tool_catalog: self.core.process_tool_catalog(environment)?,
-        };
+        let request = lash_vm_runtime::WorkflowEnvironmentRequest { tool_catalog };
         let answer = provider
             .environment(lash_core::ProcessDocument::new(request))
             .await?;
         Ok(answer.downcast().ok())
+    }
+
+    /// Lower a host-authored TypeScript workflow and admit it against the
+    /// same process environment as [`Self::publish_workflow`]. Exported async
+    /// declarations and const-bound async literals become document entries;
+    /// the printer's exact source is accepted too. The returned reference
+    /// selects `main`, with every entry available for editing and publication.
+    ///
+    /// The host supplies no dialect internals. This reads the tool catalogue
+    /// and worker function registry, runs no effect and publishes nothing.
+    #[cfg(feature = "typescript")]
+    pub async fn import_typescript_workflow(
+        &self,
+        source: &str,
+        environment: &ProcessExecutionEnvSpec,
+    ) -> Result<crate::workflow::WorkflowImport> {
+        use crate::workflow::{
+            WorkflowAdmissionRefusal, WorkflowImport, WorkflowImportUnsupported,
+        };
+        if self
+            .engines
+            .document_provider(lash_vm_runtime::LASH_VM_ENGINE_KIND)
+            .is_none()
+        {
+            return Ok(WorkflowImport::Unsupported(
+                WorkflowImportUnsupported::EngineUnavailable,
+            ));
+        }
+        let catalog = self.core.process_tool_catalog(environment)?;
+        let boundary = match lash_vm_runtime::HostBoundary::of_catalog(&catalog) {
+            Ok(boundary) => boundary,
+            Err(error) => {
+                return Ok(WorkflowImport::Admission(
+                    WorkflowAdmissionRefusal::Boundary {
+                        message: error.to_string(),
+                    },
+                ));
+            }
+        };
+        let Some(checked) = self
+            .workflow_environment_from_catalog(Arc::clone(&catalog))
+            .await?
+        else {
+            return Ok(WorkflowImport::Unsupported(
+                WorkflowImportUnsupported::EngineUnavailable,
+            ));
+        };
+        let library = match lash_kernel_dialect::NamedLibrary::from_registry(checked.functions()) {
+            Ok(library) => library,
+            Err(refusal) => {
+                return Ok(WorkflowImport::Unsupported(
+                    WorkflowImportUnsupported::LibraryUnavailable(refusal),
+                ));
+            }
+        };
+        let mut tool_roots = std::collections::BTreeSet::new();
+        for tool in &catalog.tools {
+            let binding = match lash_vm_runtime::required_tool_executable(&tool.manifest) {
+                Ok(binding) => binding,
+                Err(error) => {
+                    return Ok(WorkflowImport::Admission(
+                        WorkflowAdmissionRefusal::Boundary {
+                            message: error.to_string(),
+                        },
+                    ));
+                }
+            };
+            if let Some(root) = binding.module_path.first() {
+                tool_roots.insert(lash_kernel_doc::Name::new(root));
+            }
+        }
+        let dialect = lash_kernel_dialect::Environment {
+            library: &library,
+            effects: checked.effects(),
+            tool_roots: &tool_roots,
+            controls: &boundary.controls(),
+            bindings: &std::collections::BTreeSet::new(),
+            functions: &std::collections::BTreeMap::new(),
+        };
+        Ok(crate::workflow::typescript::import(
+            source,
+            &dialect,
+            &checked.checker(),
+        ))
     }
 
     /// Admit the document `draft` holds as the definition of its entry

@@ -40,15 +40,30 @@ impl Lowerer<'_> {
     /// The arrow `expr` is, if it is one a process is written as and the
     /// host offers the process effects.
     pub(super) fn process_arrow<'e>(&self, expr: &'e ast::Expr) -> Option<&'e ast::Function> {
+        let expr = if self.workflow {
+            match expr {
+                ast::Expr::Call { callee, args, .. } if matches!(callee.as_ref(), ast::Expr::Ident(name, _) if name == "process") =>
+                {
+                    let [ast::CallArg::Value(function)] = args.as_slice() else {
+                        return None;
+                    };
+                    function
+                }
+                other => other,
+            }
+        } else {
+            expr
+        };
         let ast::Expr::Function(function) = expr else {
             return None;
         };
         (function.is_async
-            && function.is_arrow
-            && self
-                .effects
-                .keys()
-                .any(|effect| effect.as_str().starts_with(PROCESS_EFFECTS)))
+            && (function.is_arrow || self.workflow)
+            && (self.workflow
+                || self
+                    .effects
+                    .keys()
+                    .any(|effect| effect.as_str().starts_with(PROCESS_EFFECTS))))
         .then_some(function)
     }
 
