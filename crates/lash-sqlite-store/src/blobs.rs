@@ -41,35 +41,6 @@ lash_store_sql::statements! {
         select_bodies_by_hash = "SELECT hash, content FROM blobs
              WHERE hash IN (SELECT value FROM json_each(?1))";
 
-        /// Reclaim the blob at `?1` once the artifact pointer that named it
-        /// is gone, if nothing else roots it.
-        ///
-        /// Every predicate is an indexed `NOT EXISTS` over the root catalog
-        /// and the exact edges; no whole-catalog mark/sweep runs in this
-        /// transaction. PostgreSQL has no counterpart: its artifact bytes live
-        /// in `lash_lash_vm_artifacts` and never reach this table.
-        reclaim_unreferenced_artifact = "DELETE FROM blobs AS candidate
-             WHERE candidate.hash = ?1
-               AND NOT EXISTS (
-                   SELECT 1 FROM graph_root_catalog AS root WHERE root.root_ref = candidate.hash
-               )
-               AND NOT EXISTS (SELECT 1 FROM blob_edges AS edge WHERE edge.child_hash = candidate.hash)";
-
-        /// Reclaim the session-delete candidate `?1` if nothing still roots it:
-        /// no source of the root catalog names it and no node references it,
-        /// so it is unreachable (FIG-5887 §8). Its own edges go with it.
-        ///
-        /// Forks from PostgreSQL's counterpart, which locks its candidates
-        /// first and binds them as an array.
-        reclaim_session_candidate = "DELETE FROM blobs AS candidate
-             WHERE candidate.hash = ?1
-               AND NOT EXISTS (
-                   SELECT 1 FROM graph_root_catalog AS root WHERE root.root_ref = candidate.hash
-               )
-               AND NOT EXISTS (
-                   SELECT 1 FROM blob_edges AS edge WHERE edge.child_hash = candidate.hash
-               )";
-
         /// One preflight page of sessions that have published a checkpoint
         /// root, after session `?1`, at most `?2` rows.
         ///
@@ -89,10 +60,9 @@ lash_store_sql::statements! {
              ORDER BY session_head.session_id
              LIMIT ?2";
 
-        /// SQLite alone asks this: it is the session-delete sweep's proof that
-        /// an enumerated reference is not already dangling, taken under the
-        /// write lock. PostgreSQL gets the same proof from the row lock its
-        /// candidate read takes, so it has no separate existence check.
+        /// SQLite alone asks this: it is a fork's proof that the checkpoint
+        /// it copies is stored, taken under the write lock. PostgreSQL gets
+        /// the same proof from the row lock it takes on the checkpoint.
         select_exists = "SELECT EXISTS(SELECT 1 FROM blobs WHERE hash = ?1)";
     }
 }

@@ -1,35 +1,39 @@
 //! The checkpoint graph on PostgreSQL: owner graph installation, hydration
-//! and the reachability collector (FIG-5887 §5, §8; lane G,
-//! FIG-5890). The DDL is in `schema.sql`.
+//! and the peel that reclaims a retired root's closure (FIG-5887 §5;
+//! FIG-5949). The DDL is in `schema.sql`.
 //!
-//! # The gate
+//! # Locks
 //!
-//! Every guarded transaction takes the graph gate shared as its first lock,
-//! in the `BEGIN` prelude ahead of the writer fence
-//! ([`crate::guarded_tx`]); a collection takes it exclusive
-//! ([`crate::guarded_tx::begin_collecting`]). So a commit and a hydration
-//! each run whole beside other shared holders and never beside a collection: a root a reader selected cannot be swept until it ends.
-//! Inside the gate a commit takes the owner's epoch fence, then the write
-//! authority of each session whose history it locks, in session order, then
-//! the external nodes' key-share
-//! locks in digest order, then installs blobs in digest order, then edges
-//! and root rows. The owner fence precedes the history locks, as in every
-//! existing session writer (`lock_session_writes`: actor row, then
-//! history); the design's order puts history first (FIG-5887 §8), which
-//! would invert the order those writers already share.
+//! A commit takes the owner's epoch fence, then the write authority of each
+//! session whose history it locks, in session order, then a key-share lock
+//! on every stored node it names (the external nodes, then the staged nodes
+//! another writer stored), in digest order, then installs blobs in digest
+//! order, then edges and root rows. The owner fence precedes the history
+//! locks, as in every existing session writer (`lock_session_writes`: actor
+//! row, then history).
 //!
-//! A hydration selects the owner's root once and reads every descendant in
-//! the same transaction: READ COMMITTED is enough because nodes are
-//! immutable and the gate keeps the collector out, not because its snapshot
-//! is stable.
+//! # Reclamation
 //!
-//! # Roots
+//! The root catalog (`lash_graph_root_catalog`) is a view of the owning
+//! columns, and the graph is a DAG: a node no root reaches is an orphan (no
+//! root row, no edge to it) or reached only from such nodes. Every
+//! transaction that retires a root peels it before it commits: the level's
+//! candidates no other transaction holds are locked `FOR UPDATE SKIP
+//! LOCKED` in digest order, then one statement deletes every locked
+//! candidate no root names and no edge reaches and returns the children
+//! their edges reached, the next level. A peel never waits, so it is never
+//! part of a lock cycle: a candidate a writer key-share locked first is one
+//! that writer names, and stays (the orphan audit's, should that writer
+//! roll back); a writer that comes after waits for the peel, finds the node
+//! gone, and refuses a missing node or installs its bytes again.
+//! The schema's `RESTRICT` keys stay the backstop.
 //!
-//! The collector enumerates the root catalog (`lash_graph_root_catalog`)
-//! one source at a time, records every source exhausted, and marks from
-//! those roots alone: a missing root or child, a stored edge set that is not
-//! a node's child table, an incomplete source or an exhausted work budget
-//! rolls the whole collection back with nothing swept.
+//! # Reads
+//!
+//! No lock orders a reader against a peel. A hydration is one statement:
+//! the owner's root and everything it reaches, in that statement's
+//! snapshot, so it reads a whole committed root or none. A read of several
+//! statements runs in one `REPEATABLE READ READ ONLY` snapshot.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::LazyLock;
@@ -39,42 +43,44 @@ use futures_util::TryStreamExt;
 use lash_core_store::checkpoint_graph::node::{immutable_catalog_heads, immutable_closure};
 use lash_core_store::checkpoint_graph::{
     BlobEncoding, DecodeDimension, DecodeLimits, GraphRefusal, InstalledGraphMeasurement, NodeId,
-    NodeSource, RootSource, StoredNode, check_envelope,
+    NodeSource, StoredNode, check_envelope,
 };
 use lash_durable::domain::DomainRefusal;
 use lash_durable::domain::graph::{
     EffectAdmissionWrite, HydratedGraph, HydratedNode, ReleasePinWrite, RootOwner,
 };
 use lash_durable::domain::graph_commit::{
-    CheckedGraph, CollectionLimits, EDGE_ROW_LOGICAL_BYTES, GraphCollection, blob_row_logical_bytes,
+    CheckedGraph, EDGE_ROW_LOGICAL_BYTES, blob_row_logical_bytes,
 };
-use lash_durable::{CommitLabel, DurableError, Epoch, StoreFailure, StoreFailureKind};
+use lash_durable::{
+    CommitCapacity, CommitLabel, DurableError, Epoch, StoreFailure, StoreFailureKind,
+};
 use lash_store_sql::durable::graph::GraphStatements;
-use lash_store_sql::durable::run_records::RunRecordStatements;
-use lash_store_sql::durable::snapshots::SnapshotStatements;
-use lash_store_sql::durable::turns::TurnStatements;
 use lash_store_sql::{Dialect, Rendered};
-use sqlx::{PgConnection, Row};
+use sqlx::PgConnection;
 
 use super::steps::{self, Entry, Shape, Step, Ty, Value};
 use super::{Committing, PostgresDurableStore, Tx, integer, sqlx_failure};
-use crate::guarded_tx::begin_collecting;
+
+mod reclaim;
+pub(super) use reclaim::reclaim;
+pub(crate) use reclaim::{audit_page, graph_counts, peel};
 
 lash_store_sql::statements! {
     /// Graph statements only PostgreSQL issues: the artifact bridge's
-    /// column, the row locks a shared-gate writer takes, and the sweep's
-    /// array binding of the mark set.
+    /// column, the row locks a writer and a peel take, the array binding of
+    /// a node list, and the one-statement hydration of each root source.
     pub(crate) struct GraphPostgresStatements @ "durable_graph_postgres" {
-        /// Artifact `?2` of namespace `?1`'s graph node: PostgreSQL's bridge
+        /// Artifact `?3` of namespace `?2`'s graph node: PostgreSQL's bridge
         /// is the artifact row's `graph_ref`, set only for storage kind 1.
         artifact_root = "SELECT graph_ref FROM lash_vm_artifacts
              WHERE namespace = ?1 AND artifact_ref = ?2 AND storage_kind = 1";
 
         /// The encoding of every stored blob among the nodes `?1` a commit
         /// names and the nodes it supplies (`?2`, raw digests: never one it
-        /// names), key-share locked in digest order against a targeted
-        /// reclaim, with the bytes of each supplied one: what the commit
-        /// compares instead of supplying it again.
+        /// names), key-share locked in digest order against a peel, with
+        /// the bytes of each supplied one: what the commit compares instead
+        /// of supplying it again.
         lock_nodes = "SELECT hash, encoding, CASE WHEN hash = ANY(?1::text[]) THEN NULL ELSE content END
              FROM blobs
              WHERE hash = ANY(?1::text[])
@@ -91,8 +97,11 @@ lash_store_sql::statements! {
              ON CONFLICT (hash) DO NOTHING
              RETURNING hash";
 
-        /// The bytes and encoding of every stored blob in `?1`.
-        stored_nodes = "SELECT hash, content, encoding FROM blobs WHERE hash = ANY(?1::text[])";
+        /// The bytes and encoding of every stored blob in `?1`, key-share
+        /// locked in digest order: a staged node another writer stored is
+        /// held against a peel until the commit ends.
+        stored_nodes = "SELECT hash, content, encoding FROM blobs WHERE hash = ANY(?1::text[])
+             ORDER BY hash FOR KEY SHARE";
 
         /// Every edge of freshly installed parents `?1` to children `?2`
         /// (raw digests).
@@ -115,17 +124,6 @@ lash_store_sql::statements! {
              SELECT blobs.hash, blobs.encoding, blobs.content
              FROM blobs JOIN reach ON blobs.hash = reach.hash";
 
-        /// Every hash roots `?1` reach along stored edges, the roots
-        /// included: an owner-scoped delete's reclaim candidates, in one
-        /// statement.
-        reach_from = "WITH RECURSIVE reach AS (
-                 SELECT UNNEST(?1::text[]) AS hash
-                 UNION
-                 SELECT edge.child_hash FROM blob_edges AS edge
-                 JOIN reach ON edge.parent_hash = reach.hash
-             )
-             SELECT hash FROM reach";
-
         /// [`Self::walk_reach`] without any opaque blob's bytes but the
         /// roots' bytes: what a reader of the graph alone reads.
         walk_reach_graph = "WITH RECURSIVE reach AS (
@@ -146,24 +144,113 @@ lash_store_sql::statements! {
                     CASE WHEN NOT ?3::boolean OR encoding = 1 OR hash = ANY(?2::text[]) THEN content END
              FROM blobs WHERE hash = ANY(?1::text[])";
 
-        /// How many edges lead from a parent in `?1` to a child not in it:
-        /// none after a complete closure.
-        dangling_edges = "SELECT count(*) FROM blob_edges
-             WHERE parent_hash = ANY(?1::text[]) AND NOT (child_hash = ANY(?1::text[]))";
+        /// Lock for its delete every candidate of a peel's level `?1` that
+        /// no other transaction holds, in digest order, and answer them as
+        /// one list. A peel never waits: a node a writer holds key-share
+        /// locked is one it is about to name, and one a rolled-back writer
+        /// leaves is the orphan audit's.
+        peel_lock = "SELECT ARRAY(SELECT hash FROM blobs WHERE hash = ANY(?1::text[])
+             ORDER BY hash FOR UPDATE SKIP LOCKED)";
 
-        /// Sweep every edge whose parent is not marked in `?1`.
-        sweep_edges = "DELETE FROM blob_edges WHERE NOT (parent_hash = ANY(?1::text[]))";
+        /// One level of a peel: delete every blob in `?1` no root names and
+        /// no edge reaches, and answer how many it deleted with the
+        /// children their edges reached (read before the delete took them),
+        /// as one row.
+        peel_level = "WITH dead AS (
+                 DELETE FROM blobs AS candidate
+                 WHERE candidate.hash = ANY(?1::text[])
+                   AND NOT EXISTS (
+                       SELECT 1 FROM graph_root_catalog AS root
+                       WHERE root.root_ref = candidate.hash
+                   )
+                   AND NOT EXISTS (
+                       SELECT 1 FROM blob_edges AS edge WHERE edge.child_hash = candidate.hash
+                   )
+                 RETURNING candidate.hash
+             )
+             SELECT (SELECT count(*) FROM dead),
+                 ARRAY(SELECT DISTINCT edge.child_hash
+                     FROM dead JOIN blob_edges AS edge ON edge.parent_hash = dead.hash)";
 
-        /// Sweep every blob not marked in `?1`.
-        sweep_blobs = "DELETE FROM blobs WHERE NOT (hash = ANY(?1::text[]))";
+        /// Execution `?2`'s root, with every blob it reaches along stored
+        /// edges and their bytes, in one statement: the root column (no row
+        /// when the owner is gone), then each node, short of the build
+        /// catalog's heads `?1` (nothing a head reaches is read). Each
+        /// `hydrate_*` statement is this one over its own root source.
+        hydrate_exec = "WITH RECURSIVE root AS (SELECT root_ref AS hash FROM exec_snapshots WHERE exec_key = ?2),
+             reach AS (SELECT root.hash FROM root WHERE root.hash IS NOT NULL UNION
+                 SELECT edge.child_hash FROM blob_edges AS edge JOIN reach ON edge.parent_hash = reach.hash
+                 WHERE NOT (reach.hash = ANY(?1::text[])) AND NOT (edge.child_hash = ANY(?1::text[])))
+             SELECT root.hash, blob.hash, blob.encoding, blob.content
+             FROM root LEFT JOIN (reach JOIN blobs AS blob ON blob.hash = reach.hash) ON TRUE";
+        /// Owner `?2`'s run `?3` fact `?4`'s node, as [`Self::hydrate_exec`] reads an execution's.
+        hydrate_run_fact = "WITH RECURSIVE root AS (SELECT record_ref AS hash FROM run_records WHERE owner_key = ?2 AND run_seq = ?3 AND ordinal = ?4),
+             reach AS (SELECT root.hash FROM root WHERE root.hash IS NOT NULL UNION
+                 SELECT edge.child_hash FROM blob_edges AS edge JOIN reach ON edge.parent_hash = reach.hash
+                 WHERE NOT (reach.hash = ANY(?1::text[])) AND NOT (edge.child_hash = ANY(?1::text[])))
+             SELECT root.hash, blob.hash, blob.encoding, blob.content
+             FROM root LEFT JOIN (reach JOIN blobs AS blob ON blob.hash = reach.hash) ON TRUE";
+        /// Effect `?3` of execution `?2`'s Admission node, as [`Self::hydrate_exec`] reads an execution's.
+        hydrate_admission = "WITH RECURSIVE root AS (SELECT admission_ref AS hash FROM effect_admissions WHERE exec_key = ?2 AND effect_id = ?3),
+             reach AS (SELECT root.hash FROM root WHERE root.hash IS NOT NULL UNION
+                 SELECT edge.child_hash FROM blob_edges AS edge JOIN reach ON edge.parent_hash = reach.hash
+                 WHERE NOT (reach.hash = ANY(?1::text[])) AND NOT (edge.child_hash = ANY(?1::text[])))
+             SELECT root.hash, blob.hash, blob.encoding, blob.content
+             FROM root LEFT JOIN (reach JOIN blobs AS blob ON blob.hash = reach.hash) ON TRUE";
+        /// Run `?3` of session `?2`'s PhaseRoot, as [`Self::hydrate_exec`] reads an execution's.
+        hydrate_phase = "WITH RECURSIVE root AS (SELECT checkpoint_ref AS hash FROM turn_phases WHERE session_id = ?2 AND run = ?3),
+             reach AS (SELECT root.hash FROM root WHERE root.hash IS NOT NULL UNION
+                 SELECT edge.child_hash FROM blob_edges AS edge JOIN reach ON edge.parent_hash = reach.hash
+                 WHERE NOT (reach.hash = ANY(?1::text[])) AND NOT (edge.child_hash = ANY(?1::text[])))
+             SELECT root.hash, blob.hash, blob.encoding, blob.content
+             FROM root LEFT JOIN (reach JOIN blobs AS blob ON blob.hash = reach.hash) ON TRUE";
+        /// Run `?3` of session `?2`'s working execution, as [`Self::hydrate_exec`] reads an execution's.
+        hydrate_working = "WITH RECURSIVE root AS (SELECT working_execution_ref AS hash FROM turn_phases WHERE session_id = ?2 AND run = ?3),
+             reach AS (SELECT root.hash FROM root WHERE root.hash IS NOT NULL UNION
+                 SELECT edge.child_hash FROM blob_edges AS edge JOIN reach ON edge.parent_hash = reach.hash
+                 WHERE NOT (reach.hash = ANY(?1::text[])) AND NOT (edge.child_hash = ANY(?1::text[])))
+             SELECT root.hash, blob.hash, blob.encoding, blob.content
+             FROM root LEFT JOIN (reach JOIN blobs AS blob ON blob.hash = reach.hash) ON TRUE";
+        /// Plugin `?4`'s namespace values for run `?3` of session `?2`, as [`Self::hydrate_exec`] reads an execution's.
+        hydrate_namespace = "WITH RECURSIVE root AS (SELECT graph_root_ref AS hash FROM turn_namespaces WHERE session_id = ?2 AND run = ?3 AND plugin = ?4),
+             reach AS (SELECT root.hash FROM root WHERE root.hash IS NOT NULL UNION
+                 SELECT edge.child_hash FROM blob_edges AS edge JOIN reach ON edge.parent_hash = reach.hash
+                 WHERE NOT (reach.hash = ANY(?1::text[])) AND NOT (edge.child_hash = ANY(?1::text[])))
+             SELECT root.hash, blob.hash, blob.encoding, blob.content
+             FROM root LEFT JOIN (reach JOIN blobs AS blob ON blob.hash = reach.hash) ON TRUE";
+        /// Session `?2`'s revision `?3`'s checkpoint, as [`Self::hydrate_exec`] reads an execution's.
+        hydrate_revision = "WITH RECURSIVE root AS (SELECT checkpoint_ref AS hash FROM session_revisions WHERE session_id = ?2 AND head_revision = ?3),
+             reach AS (SELECT root.hash FROM root WHERE root.hash IS NOT NULL UNION
+                 SELECT edge.child_hash FROM blob_edges AS edge JOIN reach ON edge.parent_hash = reach.hash
+                 WHERE NOT (reach.hash = ANY(?1::text[])) AND NOT (edge.child_hash = ANY(?1::text[])))
+             SELECT root.hash, blob.hash, blob.encoding, blob.content
+             FROM root LEFT JOIN (reach JOIN blobs AS blob ON blob.hash = reach.hash) ON TRUE";
+        /// Session `?2`'s admission base, as [`Self::hydrate_exec`] reads an execution's.
+        hydrate_admission_base = "WITH RECURSIVE root AS (SELECT admission_base_checkpoint_ref AS hash FROM session_meta WHERE session_id = ?2),
+             reach AS (SELECT root.hash FROM root WHERE root.hash IS NOT NULL UNION
+                 SELECT edge.child_hash FROM blob_edges AS edge JOIN reach ON edge.parent_hash = reach.hash
+                 WHERE NOT (reach.hash = ANY(?1::text[])) AND NOT (edge.child_hash = ANY(?1::text[])))
+             SELECT root.hash, blob.hash, blob.encoding, blob.content
+             FROM root LEFT JOIN (reach JOIN blobs AS blob ON blob.hash = reach.hash) ON TRUE";
+        /// Artifact `?3` of namespace `?2`'s graph node, as [`Self::hydrate_exec`] reads an execution's.
+        hydrate_artifact = "WITH RECURSIVE root AS (SELECT graph_ref AS hash FROM lash_vm_artifacts WHERE namespace = ?2 AND artifact_ref = ?3 AND storage_kind = 1),
+             reach AS (SELECT root.hash FROM root WHERE root.hash IS NOT NULL UNION
+                 SELECT edge.child_hash FROM blob_edges AS edge JOIN reach ON edge.parent_hash = reach.hash
+                 WHERE NOT (reach.hash = ANY(?1::text[])) AND NOT (edge.child_hash = ANY(?1::text[])))
+             SELECT root.hash, blob.hash, blob.encoding, blob.content
+             FROM root LEFT JOIN (reach JOIN blobs AS blob ON blob.hash = reach.hash) ON TRUE";
+        /// Release `?2`'s manifest, as [`Self::hydrate_exec`] reads an execution's.
+        hydrate_release = "WITH RECURSIVE root AS (SELECT root_ref AS hash FROM graph_release_pins WHERE release_key = ?2),
+             reach AS (SELECT root.hash FROM root WHERE root.hash IS NOT NULL UNION
+                 SELECT edge.child_hash FROM blob_edges AS edge JOIN reach ON edge.parent_hash = reach.hash
+                 WHERE NOT (reach.hash = ANY(?1::text[])) AND NOT (edge.child_hash = ANY(?1::text[])))
+             SELECT root.hash, blob.hash, blob.encoding, blob.content
+             FROM root LEFT JOIN (reach JOIN blobs AS blob ON blob.hash = reach.hash) ON TRUE";
     }
 }
 
 struct Sql {
     graph: GraphStatements,
-    facts: RunRecordStatements,
-    snapshots: SnapshotStatements,
-    turns: TurnStatements,
     postgres: GraphPostgresStatements,
 }
 
@@ -171,9 +258,6 @@ static SQL: LazyLock<Sql> = LazyLock::new(|| {
     let dialect = Dialect::postgres();
     Sql {
         graph: GraphStatements::render(dialect),
-        facts: RunRecordStatements::render(dialect),
-        snapshots: SnapshotStatements::render(dialect),
-        turns: TurnStatements::render(dialect),
         postgres: GraphPostgresStatements::render(dialect),
     }
 });
@@ -191,20 +275,29 @@ pub(super) fn insert_edges() -> &'static Rendered {
     &SQL.postgres.insert_edges
 }
 
-/// A hydration or a graph row read: a guarded transaction that writes
-/// nothing, for the gate it holds.
-pub(super) const GRAPH_READ: CommitLabel = CommitLabel::new("graph.read");
+/// The key-share lock and read of the staged nodes another writer stored.
+pub(super) fn stored_nodes() -> &'static Rendered {
+    &SQL.postgres.stored_nodes
+}
+
+/// A peel level's lock, and its delete.
+pub(super) fn peel_lock() -> &'static Rendered {
+    &SQL.postgres.peel_lock
+}
+
+pub(super) fn peel_level() -> &'static Rendered {
+    &SQL.postgres.peel_level
+}
+
+/// One page of the orphan audit.
+const GRAPH_AUDIT: CommitLabel = CommitLabel::new("graph.audit");
+
+/// The orphans one audit page reads.
+pub(crate) const AUDIT_PAGE: i64 = 256;
 
 /// A graph answer: a value or a typed refusal that rolls the transaction
 /// back.
 type Answer<T> = Result<T, GraphRefusal>;
-
-/// What a graph transaction's body leaves: commit it, or roll it back and
-/// still answer (a receipt's replay, a read).
-pub(super) enum Settled<T> {
-    Commit(T),
-    Rollback(T),
-}
 
 /// A durable port refusal as a graph refusal: a lost fence stays typed, a
 /// second outcome is a duplicate, another domain write's refusal is a
@@ -252,160 +345,6 @@ fn encoding_of(stored: i16) -> Answer<BlobEncoding> {
     }
 }
 
-/// One stored blob: its bytes and encoding.
-async fn stored_blob(tx: &mut PgConnection, hash: &str) -> Answer<Option<(Vec<u8>, BlobEncoding)>> {
-    let row: Option<(Vec<u8>, i16)> = crate::observed_sql::query_as(SQL.graph.blob.sql())
-        .bind(hash)
-        .fetch_optional(crate::observed_sql::executor(&mut *tx))
-        .await
-        .map_err(db)?;
-    row.map(|(bytes, encoding)| Ok((bytes, encoding_of(encoding)?)))
-        .transpose()
-}
-
-async fn stored_edges(tx: &mut PgConnection, hash: &str) -> Answer<Vec<String>> {
-    crate::observed_sql::query_scalar(SQL.graph.edges_of.sql())
-        .bind(hash)
-        .fetch_all(crate::observed_sql::executor(&mut *tx))
-        .await
-        .map_err(db)
-}
-
-/// One nullable text column of the row `sql` selects, or none.
-async fn one_text(
-    tx: &mut PgConnection,
-    query: crate::observed_sql::Query<'_>,
-) -> Answer<Option<String>> {
-    let row = query
-        .fetch_optional(crate::observed_sql::executor(&mut *tx))
-        .await
-        .map_err(db)?;
-    Ok(match row {
-        None => None,
-        Some(row) => row.try_get::<Option<String>, _>(0).map_err(db)?,
-    })
-}
-
-/// `owner`'s current root, or none when its row is gone or holds none.
-async fn root_of(tx: &mut PgConnection, owner: &RootOwner) -> Answer<Option<NodeId>> {
-    let stored = match owner {
-        RootOwner::Exec(exec) => {
-            let row = crate::observed_sql::query(SQL.snapshots.root.sql())
-                .bind(exec.stored())
-                .fetch_optional(crate::observed_sql::executor(&mut *tx))
-                .await
-                .map_err(db)?;
-            match row {
-                None => None,
-                Some(row) => row.try_get::<Option<String>, _>(1).map_err(db)?,
-            }
-        }
-        RootOwner::RunFact {
-            owner,
-            run,
-            ordinal,
-        } => {
-            one_text(
-                tx,
-                crate::observed_sql::query(SQL.facts.root.sql())
-                    .bind(owner.stored())
-                    .bind(number::<i64>(run.0)?)
-                    .bind(number::<i64>(ordinal.0)?),
-            )
-            .await?
-        }
-        RootOwner::EffectAdmission { exec, effect } => {
-            one_text(
-                tx,
-                crate::observed_sql::query(SQL.graph.admission_root.sql())
-                    .bind(exec.stored())
-                    .bind(effect.0.to_vec()),
-            )
-            .await?
-        }
-        RootOwner::TurnPhase { session, run } => {
-            one_text(
-                tx,
-                crate::observed_sql::query(SQL.turns.phase_root.sql())
-                    .bind(session.as_str())
-                    .bind(run.as_str()),
-            )
-            .await?
-        }
-        RootOwner::WorkingExecution { session, run } => {
-            one_text(
-                tx,
-                crate::observed_sql::query(SQL.turns.working_root.sql())
-                    .bind(session.as_str())
-                    .bind(run.as_str()),
-            )
-            .await?
-        }
-        RootOwner::TurnNamespace {
-            session,
-            run,
-            plugin,
-        } => {
-            one_text(
-                tx,
-                crate::observed_sql::query(SQL.turns.namespace_root.sql())
-                    .bind(session.as_str())
-                    .bind(run.as_str())
-                    .bind(plugin.as_str()),
-            )
-            .await?
-        }
-        RootOwner::SessionRevision { session, revision } => {
-            one_text(
-                tx,
-                crate::observed_sql::query(SQL.graph.revision_root.sql())
-                    .bind(session.as_str())
-                    .bind(number::<i64>(*revision)?),
-            )
-            .await?
-        }
-        RootOwner::SessionAdmissionBase { session } => {
-            one_text(
-                tx,
-                crate::observed_sql::query(SQL.graph.admission_base_root.sql())
-                    .bind(session.as_str()),
-            )
-            .await?
-        }
-        RootOwner::ArtifactBridge {
-            namespace,
-            artifact,
-        } => {
-            one_text(
-                tx,
-                crate::observed_sql::query(SQL.postgres.artifact_root.sql())
-                    .bind(namespace.as_str())
-                    .bind(artifact.as_str()),
-            )
-            .await?
-        }
-        RootOwner::ReleasePin { release } => {
-            one_text(
-                tx,
-                crate::observed_sql::query(SQL.graph.release_root.sql()).bind(release.as_str()),
-            )
-            .await?
-        }
-    };
-    stored.as_deref().map(node_of).transpose()
-}
-
-/// Every node reachable from `root`, checked, within `limits`: a graph
-/// node's children are read from its own child table, never trusted from
-/// stored edges, and an opaque blob is a leaf.
-pub(super) async fn walk(
-    tx: &mut PgConnection,
-    root: NodeId,
-    limits: &DecodeLimits,
-) -> Answer<BTreeMap<NodeId, HydratedNode>> {
-    walk_within(tx, &[root], limits, None).await
-}
-
 /// The graph nodes reachable from `root`, without reading any opaque blob
 /// they reference: what a reader of the graph alone (a session manifest, a
 /// namespace value) decodes from. An opaque blob a node references is known
@@ -446,7 +385,7 @@ async fn walk_within(
     tx: &mut PgConnection,
     roots: &[NodeId],
     limits: &DecodeLimits,
-    mut skipped: Option<&mut BTreeSet<NodeId>>,
+    skipped: Option<&mut BTreeSet<NodeId>>,
 ) -> Answer<BTreeMap<NodeId, HydratedNode>> {
     if roots.is_empty() {
         return Ok(BTreeMap::new());
@@ -463,13 +402,6 @@ async fn walk_within(
         .iter()
         .map(NodeId::to_hex)
         .collect();
-    let member = |id: &NodeId| {
-        if roots.contains(id) {
-            None
-        } else {
-            immutable_closure(*id)
-        }
-    };
     let reach = if skipped.is_some() {
         SQL.postgres.walk_reach_graph.sql()
     } else {
@@ -492,6 +424,51 @@ async fn walk_within(
             found.insert(id, (encoding, bytes));
         }
     }
+    walk_found(
+        Some(tx),
+        roots,
+        found,
+        Budget { count, total },
+        limits,
+        skipped,
+    )
+    .await
+}
+
+/// What a walk has charged against its limits so far.
+struct Budget {
+    count: u64,
+    total: u64,
+}
+
+/// What a walk has read: each node's encoding and, unless skipped, bytes.
+type Found = BTreeMap<NodeId, (BlobEncoding, Option<Vec<u8>>)>;
+
+/// The nodes `roots` reach, checked within `limits`, from the rows `found`
+/// already read and charged to `spent`; a member of the build's catalog,
+/// and all it reaches, is taken from the build. A node they lack is read on
+/// `tx`; with none, the rows were the whole read, and a node they lack is
+/// missing.
+async fn walk_found(
+    mut tx: Option<&mut PgConnection>,
+    roots: &[NodeId],
+    mut found: Found,
+    spent: Budget,
+    limits: &DecodeLimits,
+    mut skipped: Option<&mut BTreeSet<NodeId>>,
+) -> Answer<BTreeMap<NodeId, HydratedNode>> {
+    let Budget {
+        mut count,
+        mut total,
+    } = spent;
+    let roots_hex: Vec<_> = roots.iter().map(NodeId::to_hex).collect();
+    let member = |id: &NodeId| {
+        if roots.contains(id) {
+            None
+        } else {
+            immutable_closure(*id)
+        }
+    };
     let mut nodes = BTreeMap::new();
     let mut level = BTreeSet::new();
     let mut pending_roots = roots.iter();
@@ -510,7 +487,9 @@ async fn walk_within(
             .filter(|id| !found.contains_key(id) && member(id).is_none())
             .map(NodeId::to_hex)
             .collect();
-        if !unread.is_empty() {
+        if !unread.is_empty()
+            && let Some(tx) = tx.as_deref_mut()
+        {
             // A malformed edge table must not hide a child named in the
             // checked envelope. Read the missing level within the same budget.
             let mut rows = crate::observed_sql::query_as::<_, (String, i16, Option<Vec<u8>>)>(
@@ -612,21 +591,99 @@ fn charge_node(
     Ok(())
 }
 
+/// One row of a hydration: the owner's root column, then one blob it
+/// reaches (none when it reaches none).
+type HydrateRow = (Option<String>, Option<String>, Option<i16>, Option<Vec<u8>>);
+
+/// The one statement that hydrates `owner`'s root on `connection`: its root
+/// column and every blob it reaches.
+async fn hydrate_rows(connection: &mut PgConnection, owner: &RootOwner) -> Answer<Vec<HydrateRow>> {
+    let sql = &SQL.postgres;
+    let heads: Vec<String> = immutable_catalog_heads()
+        .iter()
+        .map(NodeId::to_hex)
+        .collect();
+    let query = |statement| {
+        crate::observed_sql::query_as::<sqlx::Postgres, HydrateRow>(statement).bind(heads.clone())
+    };
+    let bound = match owner {
+        RootOwner::Exec(exec) => query(sql.hydrate_exec.sql()).bind(exec.stored()),
+        RootOwner::RunFact {
+            owner,
+            run,
+            ordinal,
+        } => query(sql.hydrate_run_fact.sql())
+            .bind(owner.stored())
+            .bind(number::<i64>(run.0)?)
+            .bind(number::<i64>(ordinal.0)?),
+        RootOwner::EffectAdmission { exec, effect } => query(sql.hydrate_admission.sql())
+            .bind(exec.stored())
+            .bind(effect.0.to_vec()),
+        RootOwner::TurnPhase { session, run } => query(sql.hydrate_phase.sql())
+            .bind(session.as_str())
+            .bind(run.as_str()),
+        RootOwner::WorkingExecution { session, run } => query(sql.hydrate_working.sql())
+            .bind(session.as_str())
+            .bind(run.as_str()),
+        RootOwner::TurnNamespace {
+            session,
+            run,
+            plugin,
+        } => query(sql.hydrate_namespace.sql())
+            .bind(session.as_str())
+            .bind(run.as_str())
+            .bind(plugin.as_str()),
+        RootOwner::SessionRevision { session, revision } => query(sql.hydrate_revision.sql())
+            .bind(session.as_str())
+            .bind(number::<i64>(*revision)?),
+        RootOwner::SessionAdmissionBase { session } => {
+            query(sql.hydrate_admission_base.sql()).bind(session.as_str())
+        }
+        RootOwner::ArtifactBridge {
+            namespace,
+            artifact,
+        } => query(sql.hydrate_artifact.sql())
+            .bind(namespace.as_str())
+            .bind(artifact.as_str()),
+        RootOwner::ReleasePin { release } => {
+            query(sql.hydrate_release.sql()).bind(release.as_str())
+        }
+    };
+    bound
+        .fetch_all(crate::observed_sql::executor(connection))
+        .await
+        .map_err(db)
+}
+
+/// `owner`'s root graph, hydrated in one statement on `connection`: its
+/// snapshot holds the root and everything it reaches, so a root a peel
+/// retires after it began is read whole, and one retired before is gone.
 pub(super) async fn hydrate_in(
-    tx: &mut PgConnection,
+    connection: &mut PgConnection,
     owner: RootOwner,
     expected: Option<NodeId>,
     limits: &DecodeLimits,
 ) -> Answer<HydratedGraph> {
-    // The owner's root is selected once; every descendant is read after it
-    // under the same gate.
-    let Some(root) = root_of(tx, &owner).await? else {
+    let rows = hydrate_rows(connection, &owner).await?;
+    let Some(root) = rows.first().and_then(|(root, ..)| root.as_deref()) else {
         return Err(GraphRefusal::RootRetired);
     };
+    let root = node_of(root)?;
     if expected.is_some_and(|expected| expected != root) {
         return Err(GraphRefusal::RevisionConflict);
     }
-    let nodes = walk(tx, root, limits).await?;
+    let mut found = Found::new();
+    let (mut count, mut total) = (0, 0);
+    for (_, hash, encoding, bytes) in rows {
+        if let (Some(hash), Some(encoding)) = (hash, encoding) {
+            if let Some(bytes) = &bytes {
+                charge_node(limits, &mut count, &mut total, bytes.len())?;
+            }
+            found.insert(node_of(&hash)?, (encoding_of(encoding)?, bytes));
+        }
+    }
+    let spent = Budget { count, total };
+    let nodes = walk_found(None, &[root], found, spent, limits, None).await?;
     Ok(HydratedGraph { owner, root, nodes })
 }
 
@@ -701,29 +758,37 @@ pub(super) fn admission_steps(
             exec,
             effect,
             expected,
-        } => vec![Step::one(
-            &ADMISSION_REMOVE,
-            vec![
-                Value::text(exec.stored()),
-                Value::Bytes(Some(effect.0.to_vec())),
-                Value::text(expected.to_hex()),
-            ],
-        )],
+        } => vec![
+            Step::one(
+                &ADMISSION_REMOVE,
+                vec![
+                    Value::text(exec.stored()),
+                    Value::Bytes(Some(effect.0.to_vec())),
+                    Value::text(expected.to_hex()),
+                ],
+            )
+            .retiring([expected.to_hex()]),
+        ],
     })
 }
 
-pub(super) static CLEAR_ADMISSIONS: Entry =
-    Entry::new(|| &SQL.graph.admissions_clear, &[Ty::Text], Shape::Exec);
+pub(super) static CLEAR_ADMISSIONS: Entry = Entry::new(
+    || &SQL.graph.admissions_clear,
+    &[Ty::Text],
+    Shape::Returning,
+)
+.retiring("admission_ref");
 
 /// Applies an admission write. A second admission of one effect, or the
-/// removal of a lookup that is not the expected one, refuses the commit.
+/// removal of a lookup that is not the expected one, refuses the commit; a
+/// removal retires its Admission node.
 pub(super) async fn apply_admission(
     tx: &mut PgConnection,
     commit: &Committing<'_>,
     write: &EffectAdmissionWrite,
 ) -> Result<(), DurableError> {
     let program = admission_steps(commit.epoch, write)?;
-    match steps::run(tx, &program).await? {
+    match steps::run(tx, &program, &commit.retired).await? {
         None => Ok(()),
         Some(_) => Err(graph_refused(GraphRefusal::RevisionConflict)),
     }
@@ -732,6 +797,7 @@ pub(super) async fn apply_admission(
 /// Applies a release pin write.
 pub(super) async fn apply_release_pin(
     tx: &mut PgConnection,
+    commit: &Committing<'_>,
     write: &ReleasePinWrite,
 ) -> Result<(), DurableError> {
     match write {
@@ -766,6 +832,7 @@ pub(super) async fn apply_release_pin(
             .await
             .map_err(graph_refused)?;
             if retired {
+                commit.retired.closure(expected);
                 Ok(())
             } else {
                 Err(graph_refused(GraphRefusal::RevisionConflict))
@@ -775,14 +842,14 @@ pub(super) async fn apply_release_pin(
 }
 
 /// Installs a checked graph in the caller's guarded transaction. Every node
-/// it names without supplying is locked in digest order against a targeted
-/// reclaim and must exist (a published root as a graph node); the same
+/// it names without supplying is key-share locked in digest order against a
+/// peel and must exist (a published root as a graph node); the same
 /// statement locks every supplied node already stored and reads its bytes
 /// back for comparison, so only the others are bound to the insert and a
 /// node the store holds never crosses the wire twice. A graph that names no
 /// node offers every supplied node to the insert without that read, and
-/// compares those already stored after it. One statement writes the fresh
-/// nodes' edges. Supplied digests are bound as their 32 raw bytes.
+/// locks and compares those already stored after it, installing again any a
+/// peel took in between. One statement writes the fresh nodes' edges. Supplied digests are bound as their 32 raw bytes.
 pub(crate) async fn install(
     tx: &mut PgConnection,
     graph: &CheckedGraph,
@@ -845,13 +912,16 @@ pub(crate) async fn install(
             .into_iter()
             .collect();
     // A node stored before the insert that the lock did not read is
-    // compared now.
-    let held: Vec<&str> = absent
+    // key-share locked and compared now. One a peel deleted between the
+    // insert's conflict and that lock is installed again from the bytes the
+    // commit carries (FIG-5949); each round only shrinks.
+    let mut inserted = inserted;
+    let mut held: Vec<&str> = absent
         .iter()
         .map(|(_, hash)| hash.as_str())
         .filter(|hash| !inserted.contains(*hash))
         .collect();
-    if !held.is_empty() {
+    while !held.is_empty() {
         let rows: Vec<(String, Vec<u8>, i16)> =
             crate::observed_sql::query_as(SQL.postgres.stored_nodes.sql())
                 .bind(&held)
@@ -862,15 +932,38 @@ pub(crate) async fn install(
             .into_iter()
             .map(|(hash, bytes, encoding)| (hash, (bytes, encoding)))
             .collect();
+        let mut peeled = Vec::new();
         for (node, hash) in &absent {
-            if inserted.contains(*hash) {
+            if !held.contains(&hash.as_str()) {
                 continue;
             }
-            let Some((bytes, encoding)) = stored.get(*hash) else {
-                return Err(GraphRefusal::MissingNode(node.id));
-            };
-            compare(node.id, &node.bytes, encoding_of(*encoding)?, Some(bytes))?;
+            match stored.get(*hash) {
+                Some((bytes, encoding)) => {
+                    compare(node.id, &node.bytes, encoding_of(*encoding)?, Some(bytes))?;
+                }
+                None => peeled.push((*node, hash.as_str())),
+            }
         }
+        if peeled.is_empty() {
+            break;
+        }
+        let digests: Vec<&[u8]> = peeled.iter().map(|(node, _)| &node.id.0[..]).collect();
+        let contents: Vec<&[u8]> = peeled.iter().map(|(node, _)| &node.bytes[..]).collect();
+        let fresh: BTreeSet<String> =
+            crate::observed_sql::query_scalar(SQL.postgres.insert_nodes.sql())
+                .bind(&digests)
+                .bind(&contents)
+                .fetch_all(crate::observed_sql::executor(&mut *tx))
+                .await
+                .map_err(db)?
+                .into_iter()
+                .collect();
+        held = peeled
+            .iter()
+            .map(|(_, hash)| *hash)
+            .filter(|hash| !fresh.contains(*hash))
+            .collect();
+        inserted.extend(fresh);
     }
     let mut parents = Vec::new();
     let mut children = Vec::new();
@@ -930,122 +1023,13 @@ pub(crate) async fn install_staged(
     install(tx, &checked).await.map(|_| ())
 }
 
-/// Every blob reachable from `roots` along stored edges, the roots included:
-/// what an owner-scoped delete may reclaim once its roots are gone. One
-/// recursive statement, whatever the graph's size.
-pub(crate) async fn reachable_from(
-    tx: &mut PgConnection,
-    roots: &BTreeSet<String>,
-) -> Answer<BTreeSet<String>> {
-    if roots.is_empty() {
-        return Ok(BTreeSet::new());
-    }
-    let roots: Vec<&str> = roots.iter().map(String::as_str).collect();
-    let reached: Vec<String> = crate::observed_sql::query_scalar(SQL.postgres.reach_from.sql())
-        .bind(&roots)
-        .fetch_all(crate::observed_sql::executor(&mut *tx))
-        .await
-        .map_err(db)?;
-    Ok(reached.into_iter().collect())
-}
-
-/// Marks every blob reachable from the complete root catalog and sweeps the
-/// rest, in the caller's collecting transaction (the graph gate held
-/// exclusive).
-pub(crate) async fn collect_in(
-    tx: &mut PgConnection,
-    limits: CollectionLimits,
-) -> Answer<GraphCollection> {
-    let mut report = GraphCollection::default();
-    let mut stack: Vec<String> = Vec::new();
-    for source in RootSource::ALL {
-        let rows: Vec<String> = crate::observed_sql::query_scalar(SQL.graph.catalog_source.sql())
-            .bind(source.catalog_name())
-            .fetch_all(crate::observed_sql::executor(&mut *tx))
-            .await
-            .map_err(|_| GraphRefusal::RootSourceIncomplete(source))?;
-        report.roots.insert(source, rows.len() as u64);
-        stack.extend(rows);
-    }
-    let mut marked = BTreeSet::new();
-    let mut spent = 0_u64;
-    let envelope_limits = DecodeLimits::within_total(u64::MAX);
-    while let Some(hash) = stack.pop() {
-        if marked.contains(&hash) {
-            continue;
-        }
-        if marked.len() as u64 >= limits.nodes {
-            return Err(GraphRefusal::CollectionIncomplete);
-        }
-        let Some((bytes, encoding)) = stored_blob(tx, &hash).await? else {
-            return Err(match NodeId::from_hex(&hash) {
-                Some(id) => GraphRefusal::MissingNode(id),
-                None => corrupt("blob reference", &hash),
-            });
-        };
-        spent = spent.saturating_add(bytes.len() as u64);
-        if spent > limits.bytes {
-            return Err(GraphRefusal::CollectionIncomplete);
-        }
-        let edges = stored_edges(tx, &hash).await?;
-        match encoding {
-            BlobEncoding::Graph => {
-                let id = NodeId::from_hex(&hash)
-                    .ok_or_else(|| corrupt("graph node reference", &hash))?;
-                let envelope = check_envelope(&bytes, id, &envelope_limits)?;
-                let children: Vec<String> = envelope.children.iter().map(|c| c.to_hex()).collect();
-                if children != edges {
-                    return Err(GraphRefusal::EdgeProjectionMismatch(id));
-                }
-                stack.extend(children);
-            }
-            BlobEncoding::Opaque => {
-                if !edges.is_empty() {
-                    return Err(match NodeId::from_hex(&hash) {
-                        Some(id) => GraphRefusal::EdgeProjectionMismatch(id),
-                        None => corrupt("opaque blob edges", &hash),
-                    });
-                }
-            }
-        }
-        marked.insert(hash);
-    }
-    report.marked = marked.len() as u64;
-    let marks: Vec<String> = marked.into_iter().collect();
-    let dangling: i64 = crate::observed_sql::query_scalar(SQL.postgres.dangling_edges.sql())
-        .bind(&marks)
-        .fetch_one(crate::observed_sql::executor(&mut *tx))
-        .await
-        .map_err(db)?;
-    if dangling != 0 {
-        return Err(GraphRefusal::CollectionIncomplete);
-    }
-    report.swept_edges = sweep(tx, SQL.postgres.sweep_edges.sql(), &marks).await?;
-    report.swept_blobs = sweep(tx, SQL.postgres.sweep_blobs.sql(), &marks).await?;
-    Ok(report)
-}
-
-/// Runs sweep `sql` over the mark set `marks`: how many rows it deleted.
-async fn sweep(tx: &mut PgConnection, sql: &str, marks: &[String]) -> Answer<u64> {
-    Ok(crate::observed_sql::query(sql)
-        .bind(marks)
-        .execute(crate::observed_sql::executor(&mut *tx))
-        .await
-        .map_err(db)?
-        .rows_affected())
-}
-
 impl PostgresDurableStore {
-    /// End a graph transaction as its body settled it: a refusal rolls it
-    /// back.
-    pub(super) async fn settle_graph<T>(tx: Tx, outcome: Answer<Settled<T>>) -> Answer<T> {
+    /// End a graph transaction as its body answered: an answer commits it,
+    /// a refusal rolls it back.
+    pub(super) async fn settle_graph<T>(tx: Tx, outcome: Answer<T>) -> Answer<T> {
         match outcome {
-            Ok(Settled::Commit(value)) => {
+            Ok(value) => {
                 tx.commit().await.map_err(db)?;
-                Ok(value)
-            }
-            Ok(Settled::Rollback(value)) => {
-                tx.rollback().await.map_err(db)?;
                 Ok(value)
             }
             Err(refusal) => {
@@ -1057,121 +1041,93 @@ impl PostgresDurableStore {
         }
     }
 
-    /// `owner`'s root graph, read under the graph gate in one guarded
-    /// transaction that writes nothing.
+    /// `owner`'s root graph, in one statement on a reader connection: no
+    /// transaction, no lock, no write.
     pub(super) async fn hydrate_owner(
         &self,
         owner: RootOwner,
         expected: Option<NodeId>,
         limits: DecodeLimits,
     ) -> Result<HydratedGraph, DurableError> {
-        let label = GRAPH_READ;
-        self.within(label.capacity(), async {
-            let (mut tx, _) = self.open(label).await?;
-            let outcome = hydrate_in(&mut tx, owner, expected, &limits)
+        self.within(CommitCapacity::Work, async {
+            let mut reader = self.reader().await?;
+            hydrate_in(&mut reader, owner, expected, &limits)
                 .await
-                .map(Settled::Rollback);
-            Ok(Self::settle_graph(tx, outcome)
-                .await
-                .map_err(DurableError::Graph))
+                .map_err(DurableError::Graph)
         })
-        .await?
+        .await
     }
 
-    /// Every run fact of `owner` and every node they reach, read under the
-    /// graph gate in one guarded transaction that writes nothing.
+    /// Every run fact of `owner` and every node they reach, read in one
+    /// `REPEATABLE READ READ ONLY` snapshot.
     pub(super) async fn read_run_facts(
         &self,
         owner: &lash_durable::domain::OwnerKey,
         run: Option<lash_durable::domain::RunSeq>,
     ) -> Result<lash_durable::domain::RunFacts, DurableError> {
-        let label = GRAPH_READ;
-        self.within(label.capacity(), async {
-            let (mut tx, _) = self.open(label).await?;
-            let rows = match super::run_records::read(&mut tx, owner, run).await {
-                Ok(rows) => rows,
-                Err(error) => {
-                    let _ = tx.rollback().await;
-                    return Err(error);
-                }
-            };
-            let outcome = async {
+        self.read(|connection| {
+            Box::pin(async move {
+                let mut snapshot = super::snapshot(connection).await?;
+                let rows = super::run_records::read(&mut snapshot, owner, run).await?;
                 let roots: Vec<_> = rows.iter().map(|row| row.record).collect();
                 let nodes = walk_within(
-                    &mut tx,
+                    &mut snapshot,
                     &roots,
                     &lash_durable::domain::graph::OWNER_READ_LIMITS,
                     None,
                 )
-                .await?;
-                Ok(Settled::Rollback(nodes))
-            }
-            .await;
-            let nodes = Self::settle_graph(tx, outcome)
                 .await
                 .map_err(DurableError::Graph)?;
-            Ok(lash_durable::domain::RunFacts { rows, nodes })
+                snapshot.rollback().await.map_err(sqlx_failure)?;
+                Ok(lash_durable::domain::RunFacts { rows, nodes })
+            })
         })
         .await
     }
 
-    /// Collects every blob no root reaches, within `limits`. The collection
-    /// takes the graph gate exclusive; nothing is swept unless every source
-    /// enumerated completely and every reached node checked.
+    /// Runs the orphan audit to its end, a page per guarded transaction:
+    /// peels every blob no root names and no edge reaches, with what only
+    /// it reached. It holds no lock beyond the rows of one page, so commits
+    /// beside it progress. Answers how many blobs it deleted.
     ///
     /// # Errors
     ///
-    /// [`GraphRefusal::RootSourceIncomplete`], [`GraphRefusal::MissingNode`],
-    /// [`GraphRefusal::EdgeProjectionMismatch`], an envelope refusal,
-    /// [`GraphRefusal::CollectionIncomplete`], or a store failure.
-    pub async fn collect_graph(
-        &self,
-        limits: CollectionLimits,
-    ) -> Result<GraphCollection, GraphRefusal> {
-        let capacity = GRAPH_READ.capacity();
-        self.within(capacity, async {
-            let route = self.route(capacity);
-            let mut tx = begin_collecting(route.pool, &self.fence)
+    /// A store failure.
+    pub async fn audit_orphans(&self) -> Result<u64, GraphRefusal> {
+        let mut after = String::new();
+        let mut deleted = 0_u64;
+        loop {
+            let label = GRAPH_AUDIT;
+            let from = after.clone();
+            let (last, gone) = self
+                .within(label.capacity(), async {
+                    let (mut tx, _) = self.open(label).await?;
+                    let outcome = audit_page(&mut tx, &from, AUDIT_PAGE).await;
+                    Ok(Self::settle_graph(tx, outcome).await)
+                })
                 .await
-                .map_err(super::store_failure)?;
-            let outcome = collect_in(&mut tx, limits).await.map(Settled::Commit);
-            Ok(Self::settle_graph(tx, outcome).await)
-        })
-        .await
-        .map_err(from_durable)?
+                .map_err(from_durable)??;
+            deleted += gone as u64;
+            match last {
+                Some(last) => after = last,
+                None => return Ok(deleted),
+            }
+        }
     }
 }
-
-/// The owner row lock a law probes while a commit waits on the gate: the
-/// gate is the commit's first lock, so the row is free.
-#[cfg(test)]
-pub(crate) const OWNER_ROW_NOWAIT: &str =
-    "SELECT 1 FROM lash_actors WHERE actor_key = $1 FOR UPDATE NOWAIT";
 
 #[cfg(test)]
 #[path = "../graph_store_tests.rs"]
 mod graph_store_tests;
 
-/// Drop every admission whose execution key starts with `key`.
+/// Drop every admission whose execution key starts with `key`, answering
+/// the Admission nodes they held: the caller's to peel.
 pub(super) async fn clear_admissions_under(
     tx: &mut PgConnection,
     key: &str,
-) -> Result<(), sqlx::Error> {
-    crate::observed_sql::query(SQL.graph.admissions_clear_under.sql())
-        .bind(key)
-        .execute(crate::observed_sql::executor(tx))
-        .await
-        .map(drop)
-}
-
-/// The Admission node of every admission whose execution key starts with
-/// `prefix`.
-pub(super) async fn admission_roots_under(
-    tx: &mut PgConnection,
-    prefix: &str,
 ) -> Result<Vec<String>, sqlx::Error> {
-    crate::observed_sql::query_scalar(SQL.graph.admission_roots_under.sql())
-        .bind(prefix)
+    crate::observed_sql::query_scalar(SQL.graph.admissions_clear_under.sql())
+        .bind(key)
         .fetch_all(crate::observed_sql::executor(tx))
         .await
 }
@@ -1219,8 +1175,10 @@ mod run_fact_tests {
         install_staged(&mut connection, staging.nodes())
             .await
             .expect("install");
+        let facts =
+            lash_store_sql::durable::run_records::RunRecordStatements::render(Dialect::postgres());
         for (run, ordinal, root) in roots {
-            sqlx::query(SQL.facts.append.sql())
+            sqlx::query(facts.append.sql())
                 .bind(owner.stored())
                 .bind(run as i64)
                 .bind(ordinal as i64)
@@ -1331,14 +1289,14 @@ mod run_fact_tests {
             staging.get(&root).expect("root").bytes.len() as u64 + opaque_bytes.len() as u64;
         let mut limits = DecodeLimits::within_total(total);
         limits.nodes = 2;
-        let nodes = walk(&mut connection, root, &limits)
+        let nodes = walk_within(&mut connection, &[root], &limits, None)
             .await
             .expect("envelope child is hydrated");
         assert_eq!(nodes.len(), 2);
         assert_eq!(nodes[&opaque].bytes.as_ref(), opaque_bytes);
         limits.nodes = 1;
         assert!(matches!(
-            walk(&mut connection, root, &limits).await,
+            walk_within(&mut connection, &[root], &limits, None).await,
             Err(GraphRefusal::DecodeLimit {
                 dimension: DecodeDimension::Nodes,
                 actual: 2,

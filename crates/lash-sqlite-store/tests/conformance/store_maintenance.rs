@@ -9,15 +9,15 @@ use lash_sansio::sync::MutexExt;
 use super::Retained;
 use crate::backend_fixture::TestBackend;
 
-/// Corrupt the live checkpoint manifest so the mark phase cannot decode the
-/// root it must follow. The sweep then has a real failure to report, which is
-/// the arm SQLite used to swallow into `GcReport::default()`.
-struct SqliteCorruptRootedManifest {
+/// Drop the root catalog, so the collection cannot tell a root from an
+/// orphan. The sweep then has a real failure to report, which is the arm
+/// SQLite used to swallow into `GcReport::default()`.
+struct SqliteBreakRootCatalog {
     backend: Arc<Mutex<Option<TestBackend>>>,
 }
 
 #[async_trait::async_trait]
-impl lash_conformance::StoreMaintenanceFaultInjector for SqliteCorruptRootedManifest {
+impl lash_conformance::StoreMaintenanceFaultInjector for SqliteBreakRootCatalog {
     async fn break_gc_scope(&self, _session_id: &SessionId) {
         let conn = self
             .backend
@@ -25,18 +25,8 @@ impl lash_conformance::StoreMaintenanceFaultInjector for SqliteCorruptRootedMani
             .clone()
             .expect("the law makes a factory before breaking it")
             .raw();
-        let corrupted = conn
-            .execute(
-                "UPDATE blobs SET content = X'FFFFFFFF'
-                 WHERE hash IN (SELECT checkpoint_ref FROM session_head JOIN session_revisions USING (session_id, head_revision)
-                                WHERE checkpoint_ref IS NOT NULL)",
-                [],
-            )
-            .expect("corrupt the rooted checkpoint manifest");
-        assert!(
-            corrupted >= 1,
-            "the fault must corrupt at least one rooted manifest"
-        );
+        conn.execute_batch("DROP VIEW graph_root_catalog")
+            .expect("drop the root catalog");
     }
 }
 
@@ -67,6 +57,6 @@ lash_conformance::store_maintenance_fault_tests!({
             *make_backend.lock_recover() = Some(opened.clone());
             opened.blocking_store() as Arc<dyn DeploymentStore>
         },
-        Arc::new(SqliteCorruptRootedManifest { backend }),
+        Arc::new(SqliteBreakRootCatalog { backend }),
     )
 });

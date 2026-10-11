@@ -46,12 +46,15 @@ crate::statements! {
         retire = "DELETE FROM exec_snapshots WHERE exec_key = ?1 AND root_ref = ?2
              RETURNING exec_key";
 
-        /// Delete execution `?1`'s row, whichever root it holds.
-        clear = "DELETE FROM exec_snapshots WHERE exec_key = ?1";
+        /// Delete execution `?1`'s row, whichever root it holds, returning
+        /// that root.
+        clear = "DELETE FROM exec_snapshots WHERE exec_key = ?1 RETURNING root_ref";
 
         /// Delete every row whose execution key starts with `?1`: the cells
         /// one turn stopped in, at its end, or one session's, at its delete.
+        /// Returns each root it held.
         clear_under = "DELETE FROM exec_snapshots
-             WHERE substr(exec_key, 1, length(CAST(?1 AS TEXT))) = CAST(?1 AS TEXT)";
+             WHERE substr(exec_key, 1, length(CAST(?1 AS TEXT))) = CAST(?1 AS TEXT)
+             RETURNING root_ref";
     }
 }

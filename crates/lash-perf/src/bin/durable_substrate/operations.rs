@@ -10,7 +10,6 @@ use anyhow::{Context as _, Result, ensure};
 use lash_core_execution::facade_support::sql::{self, Receipt};
 use lash_core_store::checkpoint_graph::NodeKind;
 use lash_core_store::store::{HistoryAnchor, HistoryBudget};
-use lash_durable::domain::graph_commit::CollectionLimits;
 use std::collections::BTreeMap;
 use std::num::{NonZeroU32, NonZeroU64};
 
@@ -173,9 +172,7 @@ pub async fn run(run: &Run<'_>) -> Result<()> {
                 sql::collect(
                     format!("{session}/gc"),
                     dialect,
-                    stores
-                        .durable_store()
-                        .collect_graph(CollectionLimits::UNBOUNDED),
+                    stores.durable_store().audit_orphans(),
                 )
                 .await
             }
@@ -185,9 +182,7 @@ pub async fn run(run: &Run<'_>) -> Result<()> {
                 let collected = sql::collect(
                     format!("{session}/gc"),
                     dialect,
-                    storage
-                        .durable_store()
-                        .collect_graph(CollectionLimits::UNBOUNDED),
+                    storage.durable_store().audit_orphans(),
                 )
                 .await;
                 storage.pool().close().await;
@@ -198,8 +193,7 @@ pub async fn run(run: &Run<'_>) -> Result<()> {
         record(run, sample, "graph.gc", &receipt, &mut samples)?;
         run.report.write(
             "gc_work",
-            &serde_json::json!({"sample": sample, "marked_nodes": gc.marked,
-            "swept_blobs": gc.swept_blobs, "swept_edges": gc.swept_edges}),
+            &serde_json::json!({"sample": sample, "audited_blobs": gc}),
         )?;
         close(&deployment, std::slice::from_ref(&session)).await?;
     }

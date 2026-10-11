@@ -1,7 +1,8 @@
 //! The checkpoint graph's store laws (`lash_durable::laws::graph`) over
-//! PostgreSQL, each on its own isolated database: PC-ATOMIC, PC-ROOTS,
-//! PC-GC, PC-SIZE, PC-GATE and the collection and fork races; and what
-//! PostgreSQL's graph traffic costs.
+//! PostgreSQL, each on its own isolated database: PC-ATOMIC, PC-ROOTS with
+//! R-LIVE and R-DEAD, the orphan audit, PC-SIZE, the read, audit and fork
+//! (R-RACE) races, the one-statement hydration and the audit under load;
+//! and what PostgreSQL's graph traffic costs.
 
 // FIG-2971: this file is test code; ambient env access is sanctioned here
 // (the workspace clippy ban targets production library code).
@@ -13,19 +14,16 @@ use std::sync::Arc;
 use lash_core_execution::facade_support::sql;
 use lash_core_execution::testing::TestClock;
 use lash_core_store::checkpoint_graph::{
-    EncodeBudget, EncodedNode, ExplicitLimit, GraphRefusal, GraphStaging, NodeId, NodeKind,
-    TokenWriter, TypedBody,
+    DecodeLimits, EncodeBudget, EncodedNode, ExplicitLimit, GraphRefusal, GraphStaging, NodeId,
+    NodeKind, TokenWriter, TypedBody,
 };
-use lash_durable::domain::graph_commit::{CollectionLimits, GraphCollection};
-use lash_durable::laws::graph::{self as laws, ForeignWrite, GateControl, GateHold, GraphTier};
-use lash_durable::{ActorKey, DurableStore};
+use lash_durable::domain::graph::{HydratedGraph, RootOwner};
+use lash_durable::laws::graph::{self as laws, ForeignWrite, GraphTier, LockHold, ServerProbe};
+use lash_durable::{DurableError, DurableReads as _, DurableStore};
 use sqlx::{PgPool, Postgres, Transaction};
 
 use super::super::PostgresDurableStore;
 use crate::testing::IsolatedDatabase;
-
-/// The graph gate's key (`connection_sql`'s `lock_xact_graph_gate`).
-const GATE_KEY: i64 = 5_494_764_590_268_039_504;
 
 struct Tier {
     _database: IsolatedDatabase,
@@ -62,8 +60,8 @@ impl GraphTier for Tier {
         &self.store
     }
 
-    async fn collect(&self, limits: CollectionLimits) -> Result<GraphCollection, GraphRefusal> {
-        self.store.collect_graph(limits).await
+    async fn audit(&self) -> Result<u64, GraphRefusal> {
+        self.store.audit_orphans().await
     }
 
     async fn blob(&self, hash: &str) -> Option<(Vec<u8>, u8)> {
@@ -90,6 +88,22 @@ impl GraphTier for Tier {
             .collect()
     }
 
+    async fn blobs(&self) -> BTreeSet<String> {
+        sqlx::query_scalar("SELECT hash FROM lash_blobs")
+            .fetch_all(&self.pool)
+            .await
+            .expect("a blob listing")
+            .into_iter()
+            .collect()
+    }
+
+    async fn roots(&self) -> Vec<String> {
+        sqlx::query_scalar("SELECT root_ref FROM lash_graph_root_catalog")
+            .fetch_all(&self.pool)
+            .await
+            .expect("a root listing")
+    }
+
     /// Runs past the schema's foreign keys and triggers: foreign data does
     /// not ask them.
     async fn foreign(&self, write: ForeignWrite) {
@@ -108,12 +122,6 @@ impl GraphTier for Tier {
                 sqlx::query("UPDATE lash_blobs SET content = $2 WHERE hash = $1")
                     .bind(hex(node))
                     .bind(bytes.clone())
-            }
-            ForeignWrite::DeleteEdges { parent } => {
-                sqlx::query("DELETE FROM lash_blob_edges WHERE parent_hash = $1").bind(hex(parent))
-            }
-            ForeignWrite::DeleteBlob { node } => {
-                sqlx::query("DELETE FROM lash_blobs WHERE hash = $1").bind(hex(node))
             }
             ForeignWrite::RevisionRoot {
                 config,
@@ -200,7 +208,6 @@ impl GraphTier for Tier {
             } => sqlx::query("DELETE FROM lash_session_runs WHERE session_id = $1 AND run = $2")
                 .bind(session.as_str().to_owned())
                 .bind(run.as_str().to_owned()),
-            ForeignWrite::BreakCatalog => sqlx::query("DROP VIEW lash_graph_root_catalog"),
         };
         query
             .execute(&mut *tx)
@@ -210,53 +217,48 @@ impl GraphTier for Tier {
     }
 }
 
-/// The gate held by a transaction of the law's own.
+/// A row lock held by a transaction of the law's own.
 struct Held {
     tx: Transaction<'static, Postgres>,
 }
 
 #[async_trait::async_trait]
-impl GateHold for Held {
-    async fn owner_unlocked(&mut self, actor: &ActorKey) -> bool {
-        sqlx::query("SAVEPOINT probe")
-            .execute(&mut *self.tx)
-            .await
-            .expect("a probe savepoint");
-        let locked = sqlx::query(super::OWNER_ROW_NOWAIT)
-            .bind(actor.as_str())
-            .fetch_optional(&mut *self.tx)
-            .await;
-        sqlx::query(if locked.is_ok() {
-            "RELEASE SAVEPOINT probe"
-        } else {
-            "ROLLBACK TO SAVEPOINT probe"
-        })
-        .execute(&mut *self.tx)
-        .await
-        .expect("the probe ends");
-        locked.is_ok_and(|row| row.is_some())
-    }
-
+impl LockHold for Held {
     async fn release(self: Box<Self>) {
-        self.tx.commit().await.expect("the gate's holder commits");
+        self.tx.commit().await.expect("the lock's holder commits");
     }
 }
 
 #[async_trait::async_trait]
-impl GateControl for Tier {
-    async fn hold(&self, exclusive: bool) -> Box<dyn GateHold> {
-        let mut tx = self.pool.begin().await.expect("a gate holder");
-        let sql = if exclusive {
-            "SELECT pg_advisory_xact_lock($1)"
-        } else {
-            "SELECT pg_advisory_xact_lock_shared($1)"
-        };
-        sqlx::query(sql)
-            .bind(GATE_KEY)
-            .execute(&mut *tx)
-            .await
-            .expect("the gate is taken");
+impl ServerProbe for Tier {
+    async fn hold(&self, hash: &str) -> Box<dyn LockHold> {
+        let mut tx = self.pool.begin().await.expect("a lock holder");
+        let locked: Option<String> =
+            sqlx::query_scalar("SELECT hash FROM lash_blobs WHERE hash = $1 FOR KEY SHARE")
+                .bind(hash)
+                .fetch_optional(&mut *tx)
+                .await
+                .expect("the blob is locked");
+        assert!(locked.is_some(), "the held blob {hash} is stored");
         Box::new(Held { tx })
+    }
+
+    async fn hydration_round_trips(
+        &self,
+        owner: RootOwner,
+        limits: DecodeLimits,
+    ) -> (Result<HydratedGraph, GraphRefusal>, u64) {
+        let trips = &crate::observed_sql::ROUND_TRIPS;
+        trips
+            .scope(std::cell::Cell::new(0), async {
+                let answer = self.store.hydrate(owner, None, limits).await;
+                let answer = answer.map_err(|error| match error {
+                    DurableError::Graph(refusal) => refusal,
+                    other => panic!("a hydration failed: {other}"),
+                });
+                (answer, trips.with(std::cell::Cell::get))
+            })
+            .await
     }
 }
 
@@ -278,21 +280,29 @@ macro_rules! law {
 law!(a_refused_owner_graph_commit_writes_nothing);
 law!(an_owner_refuses_a_second_outcome_for_one_call);
 law!(every_root_source_retains_its_graph_and_shared_leaves_outlive_one_owner);
-law!(a_collection_sweeps_only_what_it_proved_unreachable);
+law!(the_orphan_audit_peels_only_what_no_root_reaches);
 law!(an_owner_commit_is_admitted_on_its_whole_encoding);
-law!(a_collection_racing_commits_sweeps_nothing_they_rely_on);
+law!(a_read_racing_replacement_and_its_peel_reads_one_whole_root);
+law!(an_audit_racing_commits_peels_nothing_they_rely_on);
 law!(a_reference_racing_its_roots_retirement_installs_whole_or_refuses);
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn the_graph_gate_orders_collection_against_every_guarded_transaction() {
-    let Some(tier) = tier().await else {
-        eprintln!("skipping the graph gate law: database URL is not set");
-        return;
+macro_rules! server_law {
+    ($name:ident) => {
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn $name() {
+            let Some(tier) = tier().await else {
+                eprintln!("skipping {}: database URL is not set", stringify!($name));
+                return;
+            };
+            laws::$name(&tier, &tier)
+                .await
+                .unwrap_or_else(|broken| panic!("{broken}"));
+        }
     };
-    laws::the_graph_gate_orders_collection_against_every_guarded_transaction(&tier, &tier)
-        .await
-        .unwrap_or_else(|broken| panic!("{broken}"));
 }
+
+server_law!(a_hydration_is_one_statement);
+server_law!(commits_and_reads_progress_while_the_audit_runs);
 
 /// Runs `work` on this task, with the SQL it sent and read.
 async fn counted<T>(work: impl std::future::Future<Output = T>) -> (T, sql::Receipt) {

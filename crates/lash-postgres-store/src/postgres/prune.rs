@@ -28,9 +28,12 @@ pub(super) async fn prune_process_rows_tx(
             .map_err(plugin_sqlx_error)?;
     }
     for process_id in process_ids {
-        crate::durable::retire_process_rows(tx, process_id)
+        let facts = crate::durable::retire_process_rows(tx, process_id)
             .await
             .map_err(plugin_sqlx_error)?;
+        crate::durable::peel(tx, facts.into_iter().collect())
+            .await
+            .map_err(crate::support::graph_store_error)?;
         let referrer = ArtifactReferrer::ProcessRecord(process_id.clone());
         crate::observed_sql::query(
             crate::artifact_store::artifact_sql()

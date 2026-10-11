@@ -2,7 +2,7 @@
 //!
 //! The root catalog is a view of the actual owner fields below, never a
 //! separately maintained count. A publication API admits only these
-//! sources, and a collector records every one exhausted before it sweeps.
+//! sources, and a peel keeps every node one of them names.
 //! A new graph-reference column is registered here, with its lifetime,
 //! before anything writes it.
 

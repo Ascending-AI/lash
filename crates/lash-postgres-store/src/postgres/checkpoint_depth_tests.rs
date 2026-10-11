@@ -148,15 +148,16 @@ async fn checkpoint_component_statement_count_is_depth_invariant_when_configured
     }
     storage.pool().close().await;
     drop(isolated_database);
-    // An unchanged commit locks its components; locks, in one statement,
-    // the nodes the graph references without supplying and the supplied
-    // nodes already stored, reading the latter back for comparison, so
-    // nothing is left to insert; and locks the root. A load reads the
-    // root's whole reach and then the component bodies.
+    // An unchanged commit sends two statements: the ordered key-share lock
+    // of its components, then one install read that checks the components
+    // the manifest names and key-share locks the stored root, comparing its
+    // bytes. Nothing is inserted and no separate root lock follows
+    // (FIG-5949). A load reads the root's whole reach and then the component
+    // bodies.
     assert!(
         observed
             .iter()
-            .all(|(_, commit, load)| (*commit, *load) == (3, 2)),
+            .all(|(_, commit, load)| (*commit, *load) == (2, 2)),
         "checkpoint commit/load statement counts must be independent of component depth: {observed:?}"
     );
 }

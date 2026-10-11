@@ -58,10 +58,10 @@ pub struct VacuumReport {
 
 /// Blob outcomes from one session-owner delete cascade.
 ///
-/// `enumerated_blob_count` is the witnessed candidate set reached from the
-/// session edges being severed. `retained_blob_count` counts candidates that
-/// still have an exact edge from a surviving head, anchor, artifact ref, or
-/// checkpoint manifest. The remainder was deleted in the owning transaction.
+/// `enumerated_blob_count` counts the nodes the delete's peel examined: the
+/// roots the session's rows held, then each child of a node it deleted.
+/// `retained_blob_count` counts those a surviving root names or a surviving
+/// node's edge reaches. The remainder was deleted in the owning transaction.
 ///
 /// Integrator class (ADR 0051): **store and durable-substrate implementors**
 /// produce this report from [`SessionCatalogStore::delete_session`](crate::store::SessionCatalogStore::delete_session),

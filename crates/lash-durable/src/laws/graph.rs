@@ -1,12 +1,18 @@
 //! The checkpoint graph's store laws (FIG-5887 §11: PC-ATOMIC, PC-ROOTS,
-//! PC-GC, PC-READ and PC-SIZE), written once and run by each dialect over
-//! its own store through a [`GraphTier`].
+//! PC-READ and PC-SIZE; FIG-5949: R-LIVE, R-DEAD and the orphan audit),
+//! written once and run by each dialect over its own store through a
+//! [`GraphTier`].
 //!
 //! Each law takes a fresh store. Graphs are built from FrozenValue nodes
 //! whose large texts are placed in shared TextLeaf nodes, so two roots that
 //! name one text share one leaf.
+//!
+//! The reachability mark the stores no longer run is the laws' oracle
+//! ([`exactly_the_reachable_nodes_are_stored`]): after a commit, every node
+//! the catalog's roots reach along stored edges is stored (R-LIVE), and
+//! every stored node is one they reach (R-DEAD).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use lash_core_store::checkpoint_graph::{
     CommitId, DecodeLimits, EncodeBudget, EncodedNode, ExplicitLimit, GraphCommitBudget,
@@ -19,7 +25,7 @@ use crate::domain::graph::{
     EffectAdmissionWrite, EffectKey, ExecRootWrite, HydratedGraph, ReleasePinWrite, RootOwner,
     RunFactKind, RunFactWrite,
 };
-use crate::domain::graph_commit::{CollectionLimits, GraphCollection, measure_owner_commit};
+use crate::domain::graph_commit::measure_owner_commit;
 use crate::domain::namespace_value::NamespaceValue;
 use crate::domain::{
     CellId, DomainRefusal, ExecKey, Ordinal, OwnerKey, RunSeq, SnapshotRev, StoredNamespaceWrite,
@@ -38,10 +44,6 @@ pub enum ForeignWrite {
     OpaqueBlob { hash: String, bytes: Vec<u8> },
     /// Replace a stored blob's bytes.
     OverwriteBlob { node: NodeId, bytes: Vec<u8> },
-    /// Drop a node's stored edges.
-    DeleteEdges { parent: NodeId },
-    /// Drop a blob whatever references it.
-    DeleteBlob { node: NodeId },
     /// Point session revision `revision` at `root`, or drop it.
     RevisionRoot {
         config: bool,
@@ -68,20 +70,73 @@ pub enum ForeignWrite {
         run: TurnId,
         root: Option<NodeId>,
     },
-    /// Make the root catalog's enumeration fail.
-    BreakCatalog,
 }
 
-/// One dialect's store, its collector and the raw access the laws need.
+/// One dialect's store, its orphan audit and the raw access the laws need.
 #[async_trait::async_trait]
 pub trait GraphTier: Send + Sync {
     fn store(&self) -> &dyn DurableStore;
-    async fn collect(&self, limits: CollectionLimits) -> Result<GraphCollection, GraphRefusal>;
+    /// Runs the orphan audit to its end: how many blobs it deleted.
+    async fn audit(&self) -> Result<u64, GraphRefusal>;
     /// A stored blob's bytes and encoding.
     async fn blob(&self, hash: &str) -> Option<(Vec<u8>, u8)>;
     /// A node's stored edges, in digest order.
     async fn edges(&self, parent: &NodeId) -> Vec<NodeId>;
+    /// Every stored blob's digest.
+    async fn blobs(&self) -> BTreeSet<String>;
+    /// Every root the catalog names, one per root row.
+    async fn roots(&self) -> Vec<String>;
     async fn foreign(&self, write: ForeignWrite);
+}
+
+/// The nodes the catalog's roots reach along stored edges: the mark the
+/// stores' collector ran, kept here as the laws' oracle.
+async fn reached(tier: &dyn GraphTier) -> BTreeSet<String> {
+    let mut marked = BTreeSet::new();
+    let mut stack = tier.roots().await;
+    while let Some(hash) = stack.pop() {
+        if marked.insert(hash.clone())
+            && let Some(id) = NodeId::from_hex(&hash)
+        {
+            stack.extend(tier.edges(&id).await.iter().map(NodeId::to_hex));
+        }
+    }
+    marked
+}
+
+/// R-LIVE and R-DEAD after `what` committed: every node a root reaches is
+/// stored, and every stored node is one a root reaches, but `orphans`: what
+/// the law expects left for the orphan audit.
+///
+/// # Errors
+///
+/// The first node out of place.
+pub async fn exactly_the_reachable_nodes_are_stored(
+    tier: &dyn GraphTier,
+    what: &str,
+    orphans: &BTreeSet<String>,
+) -> LawOutcome {
+    let live = reached(tier).await;
+    let stored = tier.blobs().await;
+    if let Some(missing) = live.difference(&stored).next() {
+        return Err(LawBroken(format!(
+            "R-LIVE after {what}: {missing} is reachable and not stored"
+        )));
+    }
+    if let Some(dead) = stored
+        .difference(&live)
+        .find(|hash| !orphans.contains(*hash))
+    {
+        return Err(LawBroken(format!(
+            "R-DEAD after {what}: {dead} is stored and no root reaches it"
+        )));
+    }
+    Ok(())
+}
+
+/// [`exactly_the_reachable_nodes_are_stored`] with no orphan expected.
+async fn exact(tier: &dyn GraphTier, what: &str) -> LawOutcome {
+    exactly_the_reachable_nodes_are_stored(tier, what, &BTreeSet::new()).await
 }
 
 fn refused(what: &str, error: impl std::fmt::Display) -> LawBroken {
@@ -364,7 +419,10 @@ pub async fn a_refused_owner_graph_commit_writes_nothing(tier: &dyn GraphTier) -
         answer == Err(DurableError::Graph(GraphRefusal::EncodingConflict(fact))),
         "an opaque blob under a node's identity answered {answer:?}"
     );
-    tier.foreign(ForeignWrite::DeleteBlob { node: fact }).await;
+    // The opaque blob is an orphan no root names: the audit takes it.
+    tier.audit()
+        .await
+        .map_err(|error| refused("the audit", error))?;
     assert_untouched("an encoding conflict").await?;
 
     owner_commit(tier, &owner, nodes.clone(), writes(None))
@@ -438,8 +496,12 @@ pub async fn an_owner_refuses_a_second_outcome_for_one_call(tier: &dyn GraphTier
     Ok(())
 }
 
-/// PC-ROOTS: every root source retains its whole graph on its own, and a
-/// leaf two owners share outlives either one.
+/// PC-ROOTS, R-LIVE and R-DEAD (FIG-5949): every root source retains its
+/// whole graph on its own; the transaction that retires its root peels the
+/// closure only that root reached, so after every commit exactly the
+/// reachable nodes are stored; and a leaf two owners share outlives either
+/// one. A source whose rows no graph commit writes is retired by a foreign
+/// write here, which peels nothing: the orphan audit takes its closure.
 ///
 /// # Errors
 ///
@@ -451,11 +513,6 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
     let shared = big("shared");
     let shared_leaf = leaf(&shared);
     let run = turn("graph-turn");
-    let collect = || async {
-        tier.collect(CollectionLimits::UNBOUNDED)
-            .await
-            .map_err(|error| refused("a collection", error))
-    };
 
     // The anchor shares the leaf with every source's root.
     let mut anchor_nodes = staging();
@@ -705,11 +762,11 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
             .await
             .map_err(|error| refused("the carrier", error))?;
         }
-        let report = collect().await?;
         ensure!(
-            report.roots.get(&source).copied().unwrap_or(0) >= 1,
-            "{source:?} enumerated no root: {report:?}"
+            tier.roots().await.contains(&root.to_hex()),
+            "{source:?}'s root is not in the catalog"
         );
+        exact(tier, &format!("{source:?}'s publication")).await?;
         for id in nodes.keys() {
             ensure!(
                 present(tier, id).await,
@@ -718,6 +775,7 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
         }
         // Retire this source's owner: its own material goes, the shared
         // leaf stays with the anchor.
+        let foreign = retire.is_none() && source != RootSource::TurnPhase;
         match (source, retire) {
             (_, Some(retire)) => {
                 owner_commit(tier, &owner, BTreeMap::new(), vec![retire])
@@ -766,7 +824,7 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
             (RootSource::TurnPhase, ..) => {
                 // The next phase root replaces this one.
                 let mut next = staging();
-                let replacement = value(&mut next, &["next phase"], &[]);
+                let replacement = value(&mut next, &[&big("next phase")], &[]);
                 owner_commit(
                     tier,
                     &owner,
@@ -786,7 +844,19 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
             }
             (source, ..) => return Err(LawBroken(format!("{source:?} has no retirement"))),
         }
-        collect().await?;
+        if foreign {
+            let audited = tier
+                .audit()
+                .await
+                .map_err(|error| refused("the audit", error))?;
+            // Everything but the leaf the anchor shares.
+            let own = nodes.len() as u64 - 1;
+            ensure!(
+                audited == own,
+                "the audit took {audited} of {source:?}'s {own} orphaned blobs"
+            );
+        }
+        exact(tier, &format!("{source:?}'s retirement")).await?;
         ensure!(
             !present(tier, &root).await && !present(tier, &unique_leaf).await,
             "{source:?}'s retired root kept its own material"
@@ -796,6 +866,42 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
             "retiring {source:?} took the leaf the anchor shares"
         );
     }
+    // The turn's end retires its phase row: the PhaseRoot is peeled alone
+    // (C.7), and the turn content beneath it is left for the next turn to
+    // name again, or for the audit.
+    owner_commit(
+        tier,
+        &owner,
+        BTreeMap::new(),
+        vec![DomainWrite::Turn(TurnWrite::Terminal {
+            session: owner.session.clone(),
+            run: run.clone(),
+            cause: Box::new(
+                lash_core_store::store::RunTerminalCause::OperatorCancelled {
+                    intent: lash_core_store::store::ControlIntentId::from_sequence(1),
+                },
+            ),
+            head_revision: None,
+        })],
+    )
+    .await
+    .map_err(|error| refused("the turn's end", error))?;
+    let content = leaf(&big("next phase"));
+    exactly_the_reachable_nodes_are_stored(
+        tier,
+        "the turn's end",
+        &BTreeSet::from([content.to_hex()]),
+    )
+    .await?;
+    let audited = tier
+        .audit()
+        .await
+        .map_err(|error| refused("the audit", error))?;
+    ensure!(
+        audited == 1,
+        "the audit took {audited} blobs, not the turn content"
+    );
+    exact(tier, "the turn content's audit").await?;
     // The last owner goes: so does the shared leaf.
     owner_commit(
         tier,
@@ -808,7 +914,7 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
     )
     .await
     .map_err(|error| refused("the anchor's retirement", error))?;
-    collect().await?;
+    exact(tier, "the anchor's retirement").await?;
     ensure!(
         !present(tier, &shared_leaf).await,
         "a leaf no root reaches outlived its last owner"
@@ -816,41 +922,47 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
     Ok(())
 }
 
-/// PC-GC: an unreachable subgraph is swept edges first, and a collection
-/// that cannot prove its marks (a missing root or child, a corrupt node, a
-/// stored edge set that is not a child table, a source that did not
-/// enumerate, an exhausted budget) sweeps nothing.
+/// The orphan audit (FIG-5949): it peels exactly the closures no root
+/// reaches, an opaque orphan and a graph whose root lost its row alike, and
+/// keeps every node a root still reaches, the leaf an orphan shared with a
+/// live root included. A second audit finds nothing.
 ///
 /// # Errors
 ///
 /// The first rule broken.
-pub async fn a_collection_sweeps_only_what_it_proved_unreachable(
-    tier: &dyn GraphTier,
-) -> LawOutcome {
-    let owner = owned(tier, "graph-gc").await?;
+pub async fn the_orphan_audit_peels_only_what_no_root_reaches(tier: &dyn GraphTier) -> LawOutcome {
+    let owner = owned(tier, "graph-audit").await?;
+    let shared = big("audit-shared");
     let mut nodes = staging();
-    let child = value(&mut nodes, &[&big("gc-child")], &[]);
-    let live = value(&mut nodes, &[&big("gc-live")], &[child]);
-    let mut dead_nodes = staging();
-    let dead = value(&mut dead_nodes, &[&big("gc-dead")], &[]);
-    let dead_leaf = leaf(&big("gc-dead"));
-    let pin = |release: &str, root| {
-        DomainWrite::ReleasePin(ReleasePinWrite::Install {
-            release: release.into(),
-            root,
-        })
-    };
-    owner_commit(tier, &owner, nodes.into_nodes(), vec![pin("live", live)])
-        .await
-        .map_err(|error| refused("the live graph", error))?;
+    let live = value(&mut nodes, &[&shared, &big("audit-live")], &[]);
+    let dead = value(&mut nodes, &[&shared, &big("audit-dead")], &[]);
+    let nodes = nodes.into_nodes();
     owner_commit(
         tier,
         &owner,
-        dead_nodes.into_nodes(),
-        vec![pin("dead", dead)],
+        nodes.clone(),
+        vec![
+            DomainWrite::ReleasePin(ReleasePinWrite::Install {
+                release: "live".into(),
+                root: live,
+            }),
+            DomainWrite::ReleasePin(ReleasePinWrite::Install {
+                release: "dead".into(),
+                root: dead,
+            }),
+        ],
     )
     .await
-    .map_err(|error| refused("the dead graph", error))?;
+    .map_err(|error| refused("the roots", error))?;
+    // The dead root moves to a row no graph commit retires, which then
+    // loses it: nothing peels it.
+    tier.foreign(ForeignWrite::RevisionRoot {
+        config: false,
+        session: owner.session.clone(),
+        revision: 1,
+        root: Some(dead),
+    })
+    .await;
     owner_commit(
         tier,
         &owner,
@@ -861,180 +973,46 @@ pub async fn a_collection_sweeps_only_what_it_proved_unreachable(
         })],
     )
     .await
-    .map_err(|error| refused("the dead graph's retirement", error))?;
-
-    // Each failure leaves the unreachable graph where it is.
-    let aborts = |what: &'static str, expected: GraphRefusal, limits: CollectionLimits| async move {
-        let answer = tier.collect(limits).await;
-        ensure!(
-            answer.as_ref().err() == Some(&expected),
-            "{what}: a collection answered {answer:?}, not {expected:?}"
-        );
-        ensure!(
-            present(tier, &dead).await && present(tier, &dead_leaf).await,
-            "{what}: a failed collection swept"
-        );
-        ensure!(
-            !tier.edges(&dead).await.is_empty(),
-            "{what}: a failed collection swept edges"
-        );
-        Ok::<_, LawBroken>(())
-    };
-    aborts(
-        "an exhausted budget",
-        GraphRefusal::CollectionIncomplete,
-        CollectionLimits {
-            nodes: 2,
-            bytes: u64::MAX,
-        },
-    )
-    .await?;
-    aborts(
-        "an exhausted byte budget",
-        GraphRefusal::CollectionIncomplete,
-        CollectionLimits {
-            nodes: u64::MAX,
-            bytes: 16,
-        },
-    )
-    .await?;
-
-    let (child_bytes, _) = tier
-        .blob(&child.to_hex())
-        .await
-        .ok_or_else(|| LawBroken("the child was not stored".into()))?;
-    let mut corrupt = child_bytes.clone();
-    if let Some(last) = corrupt.last_mut() {
-        *last ^= 1;
-    }
-    tier.foreign(ForeignWrite::OverwriteBlob {
-        node: child,
-        bytes: corrupt,
-    })
-    .await;
-    aborts(
-        "a corrupt node",
-        GraphRefusal::HashMismatch(child),
-        CollectionLimits::UNBOUNDED,
-    )
-    .await?;
-    tier.foreign(ForeignWrite::OverwriteBlob {
-        node: child,
-        bytes: child_bytes,
-    })
-    .await;
-
-    tier.foreign(ForeignWrite::DeleteEdges { parent: live })
-        .await;
-    aborts(
-        "a node whose edges are not its child table",
-        GraphRefusal::EdgeProjectionMismatch(live),
-        CollectionLimits::UNBOUNDED,
-    )
-    .await?;
-    let child_leaf = leaf(&big("gc-child"));
-    tier.foreign(ForeignWrite::DeleteBlob { node: child_leaf })
-        .await;
-    tier.foreign(ForeignWrite::DeleteEdges { parent: child })
-        .await;
-    // The live root's edges are gone too; its child's leaf is missing.
-    let answer = tier.collect(CollectionLimits::UNBOUNDED).await;
-    ensure!(
-        matches!(
-            answer,
-            Err(GraphRefusal::EdgeProjectionMismatch(_) | GraphRefusal::MissingNode(_))
-        ),
-        "a missing child answered {answer:?}"
-    );
-    ensure!(
-        present(tier, &dead).await,
-        "a missing child's collection swept"
-    );
-
-    let missing_root = leaf(&big("gc-missing-root"));
+    .map_err(|error| refused("the release's retirement", error))?;
     tier.foreign(ForeignWrite::RevisionRoot {
         config: false,
         session: owner.session.clone(),
-        revision: 3,
-        root: Some(missing_root),
-    })
-    .await;
-    // Repair the live graph so the missing root is the only fault.
-    tier.foreign(ForeignWrite::DeleteBlob { node: live }).await;
-    tier.foreign(ForeignWrite::DeleteBlob { node: child }).await;
-    let mut repaired = staging();
-    let child = value(&mut repaired, &[&big("gc-child")], &[]);
-    let live = value(&mut repaired, &[&big("gc-live")], &[child]);
-    owner_commit(
-        tier,
-        &owner,
-        repaired.into_nodes(),
-        vec![pin("repaired", live)],
-    )
-    .await
-    .map_err(|error| refused("the repaired graph", error))?;
-    aborts(
-        "a missing root",
-        GraphRefusal::MissingNode(missing_root),
-        CollectionLimits::UNBOUNDED,
-    )
-    .await?;
-    tier.foreign(ForeignWrite::RevisionRoot {
-        config: false,
-        session: owner.session.clone(),
-        revision: 3,
+        revision: 1,
         root: None,
     })
     .await;
+    let opaque = "0".repeat(64);
+    tier.foreign(ForeignWrite::OpaqueBlob {
+        hash: opaque.clone(),
+        bytes: b"orphan".to_vec(),
+    })
+    .await;
+    let orphans = BTreeSet::from([
+        opaque.clone(),
+        dead.to_hex(),
+        leaf(&big("audit-dead")).to_hex(),
+    ]);
+    exactly_the_reachable_nodes_are_stored(tier, "the foreign retirements", &orphans).await?;
 
-    // The proven collection sweeps the dead graph, edges first.
-    let report = tier
-        .collect(CollectionLimits::UNBOUNDED)
+    let audited = tier
+        .audit()
         .await
-        .map_err(|error| refused("the proven collection", error))?;
+        .map_err(|error| refused("the audit", error))?;
     ensure!(
-        !present(tier, &dead).await && !present(tier, &dead_leaf).await,
-        "an unreachable graph survived its collection"
+        audited == orphans.len() as u64,
+        "the audit peeled {audited} blobs, not the {} orphaned",
+        orphans.len()
     );
+    exact(tier, "the audit").await?;
     ensure!(
-        tier.edges(&dead).await.is_empty(),
-        "an unreachable node's edges survived it"
+        present(tier, &live).await && present(tier, &leaf(&shared)).await,
+        "the audit took a node a root reaches"
     );
-    ensure!(
-        report.swept_edges >= 1 && report.swept_blobs >= 2,
-        "the collection reported {report:?}"
-    );
-    for id in [live, child, leaf(&big("gc-child")), leaf(&big("gc-live"))] {
-        ensure!(present(tier, &id).await, "a live node {id} was swept");
-    }
-
-    // A source that cannot enumerate sweeps nothing.
-    let mut more = staging();
-    let doomed = value(&mut more, &[&big("gc-doomed")], &[]);
-    owner_commit(tier, &owner, more.into_nodes(), vec![pin("doomed", doomed)])
+    let again = tier
+        .audit()
         .await
-        .map_err(|error| refused("the doomed graph", error))?;
-    owner_commit(
-        tier,
-        &owner,
-        BTreeMap::new(),
-        vec![DomainWrite::ReleasePin(ReleasePinWrite::Retire {
-            release: "doomed".into(),
-            expected: doomed,
-        })],
-    )
-    .await
-    .map_err(|error| refused("the doomed graph's retirement", error))?;
-    tier.foreign(ForeignWrite::BreakCatalog).await;
-    let answer = tier.collect(CollectionLimits::UNBOUNDED).await;
-    ensure!(
-        matches!(answer, Err(GraphRefusal::RootSourceIncomplete(_))),
-        "a source that cannot enumerate answered {answer:?}"
-    );
-    ensure!(
-        present(tier, &doomed).await,
-        "a collection with an incomplete source swept"
-    );
+        .map_err(|error| refused("a second audit", error))?;
+    ensure!(again == 0, "a second audit peeled {again} blobs");
     Ok(())
 }
 

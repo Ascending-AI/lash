@@ -964,8 +964,7 @@ pub(crate) async fn delete_session_tx(
     }
     // Attachment intents are released before the rest of the session store so
     // a failed transaction cannot leave live-looking state without its owner.
-    // The session advisory fence stabilizes this head read. Do not take its
-    // row lock before the complete hash-sorted blob candidate set below.
+    // The session advisory fence stabilizes this head read.
     let head = crate::observed_sql::query_as::<_, (Option<String>, Option<String>)>(
         session_sql().head.select_reclaim.sql(),
     )
@@ -974,9 +973,10 @@ pub(crate) async fn delete_session_tx(
     .await
     .map_err(store_sqlx_error)?;
     let (leaf_node_id, checkpoint_ref) = head.unwrap_or((None, None));
-    // What the session roots: its head, every revision it still retains and
-    // every window its terminals name. Its pins, revisions and runs go with
-    // it, so each root they held becomes a reclaim candidate here.
+    // What the session roots: its head, every revision it still retains,
+    // every window its terminals name and its admission base. Its pins,
+    // revisions, runs and metadata go with it, so each root they held is
+    // retired here and peeled below.
     let runs = &crate::session_runs::session_runs_sql().runs;
     let mut checkpoint_refs: std::collections::BTreeSet<String> = session_texts(
         tx,
@@ -997,24 +997,17 @@ pub(crate) async fn delete_session_tx(
     .chain(session_texts(tx, runs.select_session_window_leaves.sql(), session_id).await?)
     .collect();
     checkpoint_refs.extend(checkpoint_ref);
-    // Its engine rows go too, every turn's ledger and every cell's working
-    // state, and each root they hold is a candidate.
     checkpoint_refs.extend(
-        crate::durable::session_engine_roots(tx, session_id)
-            .await
-            .map_err(store_sqlx_error)?,
+        crate::observed_sql::query_scalar::<_, Option<String>>(
+            session_sql().meta.select_admission_base.sql(),
+        )
+        .bind(session_id.as_str())
+        .fetch_optional(crate::observed_sql::executor(&mut **tx))
+        .await
+        .map_err(store_sqlx_error)?
+        .flatten(),
     );
     retained_leaves.extend(leaf_node_id);
-    let candidates =
-        crate::session_blob_reclaim::enumerate_checkpoint_blob_candidates_tx(tx, &checkpoint_refs)
-            .await?;
-    crate::session_blob_reclaim::lock_session_blob_candidates_tx(
-        tx,
-        &candidates,
-        &format!("session `{session_id}`"),
-    )
-    .await?;
-    report.enumerated_blob_count = candidates.len();
     for statement in [
         session_sql().head.delete_by_session.sql(),
         session_sql().revisions.delete_by_session.sql(),
@@ -1030,9 +1023,13 @@ pub(crate) async fn delete_session_tx(
     // its ancestry retires: a terminal window roots its leaf while its row
     // lives. A `close_session` intent stays as its deletion tombstone.
     crate::session_runs::delete_session_runs_conn(tx, session_id).await?;
-    crate::durable::retire_session_rows(tx, session_id)
-        .await
-        .map_err(store_sqlx_error)?;
+    // Its engine rows go too, every turn's ledger and every cell's working
+    // state, and each root they held is retired with them.
+    checkpoint_refs.extend(
+        crate::durable::retire_session_rows(tx, session_id)
+            .await
+            .map_err(store_sqlx_error)?,
+    );
     for leaf_node_id in &retained_leaves {
         crate::runtime_persistence::retire_unreachable_ancestry_tx(tx, leaf_node_id).await?;
     }
@@ -1089,8 +1086,15 @@ pub(crate) async fn delete_session_tx(
             .await
             .map_err(store_sqlx_error)?;
     }
-    crate::session_blob_reclaim::reclaim_session_checkpoint_blobs_tx(tx, candidates, report)
-        .await?;
+    // The session's roots are retired: peel them. A node another root
+    // still names or reaches is retained, and the peel stops there; its work
+    // is the session's exclusive closure.
+    let peeled = crate::durable::peel(tx, checkpoint_refs)
+        .await
+        .map_err(crate::support::graph_store_error)?;
+    report.enumerated_blob_count = peeled.examined;
+    report.deleted_blob_count += peeled.deleted;
+    report.retained_blob_count += peeled.retained();
     // Deleting the session is the explicit retention its prompt snapshots
     // wait for: its roots go, and every text no other root shares. Last
     // among the resource locks, so the shared texts' locks are held for the

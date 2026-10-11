@@ -103,6 +103,11 @@ crate::statements! {
         /// of that turn can still read the head it was admitted on.
         retain_admission_base = "UPDATE session_meta SET admission_base_checkpoint_ref = ?2 WHERE session_id = ?1";
 
+        /// The checkpoint session `?1`'s admission base retains: what a
+        /// replacement or the session's deletion retires.
+        select_admission_base = "SELECT admission_base_checkpoint_ref FROM session_meta
+             WHERE session_id = ?1";
+
         /// The recorded lineage of `?1`.
         select_lineage = "SELECT relation_kind, parent_session_id, source_session_id, source_node_id
              FROM session_meta WHERE session_id = ?1";

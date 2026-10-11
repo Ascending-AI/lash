@@ -34,13 +34,21 @@ lash_store_sql::statements! {
     /// The turn statements only PostgreSQL issues: `UNNEST` records a run's
     /// namespace writes as one list.
     struct PostgresTurnStatements @ "durable_turn_postgres" {
-        /// A terminal's phase, namespaces and answered cancel share one end.
+        /// A terminal's phase, namespaces and answered cancel share one end,
+        /// answering the roots they held as one row: the PhaseRoot, the
+        /// working execution and the namespace values (FIG-5949).
         delete_terminal_state = "WITH phase AS (
                  DELETE FROM turn_phases WHERE session_id = ?1 AND run = ?2
+                 RETURNING checkpoint_ref, working_execution_ref
              ), namespaces AS (
                  DELETE FROM turn_namespaces WHERE session_id = ?1 AND run = ?2
+                 RETURNING graph_root_ref
+             ), cancel AS (
+                 DELETE FROM turn_cancel_requests WHERE session_id = ?1 AND turn_id = ?2
              )
-             DELETE FROM turn_cancel_requests WHERE session_id = ?1 AND turn_id = ?2";
+             SELECT (SELECT checkpoint_ref FROM phase),
+                 (SELECT working_execution_ref FROM phase),
+                 ARRAY(SELECT graph_root_ref FROM namespaces WHERE graph_root_ref IS NOT NULL)";
 
         /// Record each plugin `?3[i]`'s namespace entry `?4[i]` for run `?2`
         /// of session `?1` with values root `?5[i]`, as the neutral
@@ -58,6 +66,12 @@ lash_store_sql::statements! {
                            WHERE written.plugin = excluded.plugin)
                      THEN turn_namespaces.graph_root_ref
                      ELSE excluded.graph_root_ref END";
+
+        /// The values root of each plugin `?3[i]`'s namespace row for run
+        /// `?2` of session `?1`: what [`Self::upsert_namespaces`] may
+        /// replace, and so retire (FIG-5949).
+        namespace_roots = "SELECT graph_root_ref FROM turn_namespaces
+             WHERE session_id = ?1 AND run = ?2 AND plugin = ANY(?3::text[])";
     }
 }
 
@@ -139,6 +153,18 @@ pub(super) static WORKING_SET: Entry = Entry::new(
     &[Ty::Text, Ty::Text, Ty::Text, Ty::Text, Ty::Int],
     Shape::Returning,
 );
+/// The PhaseRoot an advance replaces: retired with the advance, and
+/// peeled unless the new phase names it again (FIG-5949).
+pub(super) static PHASE_ROOT: Entry =
+    Entry::new(|| &SQL.phase_root, &[Ty::Text, Ty::Text], Shape::Select).retiring("checkpoint_ref");
+/// The namespace values roots a namespace write may replace: retired with
+/// it, and peeled unless a row still names them (FIG-5949).
+pub(super) static NAMESPACE_ROOTS: Entry = Entry::new(
+    || &POSTGRES_SQL.namespace_roots,
+    &[Ty::Text, Ty::Text, Ty::Texts],
+    Shape::Select,
+)
+.retiring("graph_root_ref");
 
 /// `write`'s step program at `epoch`: each write is guarded on its turn,
 /// the admission on the session having none open. A terminal has none: its
@@ -195,7 +221,10 @@ pub(super) fn steps(epoch: Epoch, write: &TurnWrite) -> Result<Option<Vec<Step>>
                 Value::Int(pin.map(|pin| i64::from(pin.call))),
                 Value::Text(pin.map(|pin| pin.stream_from.clone())),
             ]);
-            vec![Step::one(&ADVANCE_PHASE, values)]
+            vec![
+                Step::any(&PHASE_ROOT, turn(session, run)),
+                Step::one(&ADVANCE_PHASE, values),
+            ]
         }
         TurnWrite::TraceExported { session, run } => {
             let mut values = turn(session, run);
@@ -244,6 +273,19 @@ pub(super) fn steps(epoch: Epoch, write: &TurnWrite) -> Result<Option<Vec<Step>>
                     Value::Texts(written.iter().map(|(_, _, root, _)| root.clone()).collect()),
                     Value::Bools(written.iter().map(|(.., held)| *held).collect()),
                 ]);
+                program.push(Step::any(
+                    &NAMESPACE_ROOTS,
+                    [
+                        turn(session, run),
+                        vec![Value::Texts(
+                            written
+                                .iter()
+                                .map(|(plugin, ..)| Some((*plugin).to_owned()))
+                                .collect(),
+                        )],
+                    ]
+                    .concat(),
+                ));
                 program.push(Step::any(&UPSERT_NAMESPACES, values));
             }
             program
@@ -260,7 +302,10 @@ pub(super) fn steps(epoch: Epoch, write: &TurnWrite) -> Result<Option<Vec<Step>>
                 Value::Text(expected.map(|expected| expected.to_hex())),
                 Value::int(epoch.0),
             ]);
-            vec![Step::one(&WORKING_SET, values)]
+            vec![
+                Step::one(&WORKING_SET, values)
+                    .retiring(expected.map(|expected| expected.to_hex())),
+            ]
         }
         TurnWrite::Terminal { .. } => return Ok(None),
     }))
@@ -274,7 +319,7 @@ pub(super) async fn apply(
     match write {
         TurnWrite::Admit { session, .. } => {
             let program = steps(commit.epoch, write)?.unwrap_or_default();
-            match steps::run(tx, &program).await? {
+            match steps::run(tx, &program, &commit.retired).await? {
                 None => Ok(()),
                 Some(_) => refuse(DomainRefusal::OpenTurnExists {
                     session: session.clone(),
@@ -286,7 +331,7 @@ pub(super) async fn apply(
         | TurnWrite::Namespaces { session, run, .. }
         | TurnWrite::Working { session, run, .. } => {
             let program = steps(commit.epoch, write)?.unwrap_or_default();
-            match steps::run(tx, &program).await? {
+            match steps::run(tx, &program, &commit.retired).await? {
                 None => Ok(()),
                 Some(_) => refuse(DomainRefusal::TurnNotOpen {
                     session: session.clone(),
@@ -355,15 +400,30 @@ pub(super) async fn apply(
             // The cells the turn stopped in are never resumed, and the
             // turn's cancel request is answered by its terminal: neither has
             // a reader left. The turn's own facts stay as its ledger.
-            super::snapshots::retire_under(&mut *tx, &ExecKey::turn_cells(session, run))
-                .await
-                .map_err(sqlx_failure)?;
-            crate::observed_sql::query(POSTGRES_SQL.delete_terminal_state.sql())
-                .bind(session.as_str())
-                .bind(run.as_str())
-                .execute(crate::observed_sql::executor(&mut *tx))
-                .await
-                .map_err(sqlx_failure)?;
+            let cells =
+                super::snapshots::retire_under(&mut *tx, &ExecKey::turn_cells(session, run))
+                    .await
+                    .map_err(sqlx_failure)?;
+            for root in cells {
+                commit.retired.stored(root);
+            }
+            // The turn's phase row and namespaces go with it, and their
+            // roots with them: its working execution and namespace values
+            // whole, its PhaseRoot alone (the TurnContent ordering
+            // constraint, [`super::Retired`]).
+            let (checkpoint, working, namespaces): (Option<String>, Option<String>, Vec<String>) =
+                crate::observed_sql::query_as(POSTGRES_SQL.delete_terminal_state.sql())
+                    .bind(session.as_str())
+                    .bind(run.as_str())
+                    .fetch_one(crate::observed_sql::executor(&mut *tx))
+                    .await
+                    .map_err(sqlx_failure)?;
+            if let Some(checkpoint) = checkpoint {
+                commit.retired.phase_end(checkpoint);
+            }
+            for root in working.into_iter().chain(namespaces) {
+                commit.retired.stored(root);
+            }
             Ok(())
         }
     }

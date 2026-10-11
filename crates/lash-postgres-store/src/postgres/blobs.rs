@@ -1,11 +1,11 @@
 //! The PostgreSQL owner of `lash_blobs`, the content-addressed byte store.
 //!
 //! The table holds no module of its own behaviour: its readers are checkpoint
-//! publication (`support.rs`), the mark/sweep collector
-//! (`runtime_persistence/maintenance.rs`), owner-scoped session reclaim
-//! (`session_blob_reclaim.rs`) and the preflight walk. This module is where
-//! their statements live, so that "one table, one owner" survives having four
-//! callers, and so the lock order the three writers share is written once.
+//! publication (`support.rs`) and the preflight walk, and the checkpoint
+//! graph's peel (`durable/graph.rs`) is what deletes from it. This module is
+//! where the publication and preflight statements live, so that "one table,
+//! one owner" survives having several callers, and so the lock order its
+//! writers share is written once.
 
 use std::sync::LazyLock;
 
@@ -45,32 +45,6 @@ lash_store_sql::statements! {
              WHERE hash = ANY(?1::text[])
              ORDER BY hash
              FOR KEY SHARE";
-
-        /// Lock every reclaim candidate in `?1` for update, in the global hash
-        /// order.
-        ///
-        /// `FOR UPDATE` rather than `FOR KEY SHARE`: this caller is about to
-        /// delete the rows it locks, and it takes them in the same ascending
-        /// hash order publication does so the two cannot deadlock.
-        lock_reclaim_candidates = "SELECT hash FROM blobs
-             WHERE hash = ANY(?1::TEXT[])
-             ORDER BY hash
-             FOR UPDATE";
-
-        /// Reclaim the session-delete candidate `?1` if nothing still roots it:
-        /// no source of the root catalog names it and no node references it,
-        /// so it is unreachable (FIG-5887 §8).
-        ///
-        /// Forks from SQLite's counterpart, which needs no candidate lock: its
-        /// write lock holds the whole database.
-        reclaim_session_candidate = "DELETE FROM blobs AS candidate
-             WHERE candidate.hash = ?1
-               AND NOT EXISTS (
-                   SELECT 1 FROM graph_root_catalog AS root WHERE root.root_ref = candidate.hash
-               )
-               AND NOT EXISTS (
-                   SELECT 1 FROM blob_edges AS edge WHERE edge.child_hash = candidate.hash
-               )";
 
         /// The stored bytes for every content address in `?1`, in one round
         /// trip. The text-array bind is the fork; SQLite binds a JSON array

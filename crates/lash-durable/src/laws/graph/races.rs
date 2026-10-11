@@ -1,37 +1,44 @@
-//! The checkpoint graph's gate law (PC-GATE) and its race laws: reads,
-//! collections and references racing replacement, commits and retirement
-//! (FIG-5887 §8, §11).
+//! The checkpoint graph's race laws: reads, the orphan audit and references
+//! racing replacement, commits and the peel a retirement runs (FIG-5887
+//! §11; FIG-5949). No gate orders any of them.
 
 use std::collections::BTreeMap;
 
 use lash_core_store::checkpoint_graph::{DecodeLimits, EncodedNode, GraphRefusal, NodeId};
 
 use super::{
-    GraphTier, big, hydrate, leaf, owned, owner_commit, present, put_exec, refused, staging, value,
+    ForeignWrite, GraphTier, big, exact, hydrate, leaf, owned, owner_commit, present, put_exec,
+    refused, staging, value,
 };
-use crate::domain::graph::{ExecRootWrite, ReleasePinWrite, RootOwner};
-use crate::domain::graph_commit::CollectionLimits;
+use crate::domain::graph::{ExecRootWrite, HydratedGraph, ReleasePinWrite, RootOwner};
 use crate::laws::{LawBroken, LawOutcome, ensure};
-use crate::{ActorKey, DomainWrite, DurableError};
+use crate::{DomainWrite, DurableError};
 
-/// A held graph gate, taken outside any store operation.
+/// A row lock a law holds in a transaction of its own.
 #[async_trait::async_trait]
-pub trait GateHold: Send {
-    /// Whether `actor`'s row can be locked now: no transaction holds it.
-    async fn owner_unlocked(&mut self, actor: &ActorKey) -> bool;
+pub trait LockHold: Send {
     /// Ends the holding transaction.
     async fn release(self: Box<Self>);
 }
 
-/// Takes the store's graph gate as a collection (`exclusive`) or a guarded
-/// transaction would.
+/// What a law about a server store's locks and statements needs beyond a
+/// [`GraphTier`].
 #[async_trait::async_trait]
-pub trait GateControl: Send + Sync {
-    async fn hold(&self, exclusive: bool) -> Box<dyn GateHold>;
+pub trait ServerProbe: Send + Sync {
+    /// Key-share locks blob `hash`, as a commit that references it does,
+    /// outside any store operation.
+    async fn hold(&self, hash: &str) -> Box<dyn LockHold>;
+    /// Hydrates `owner`'s root, answering the round trips it made to the
+    /// server, the checkout's ping included.
+    async fn hydration_round_trips(
+        &self,
+        owner: RootOwner,
+        limits: DecodeLimits,
+    ) -> (Result<HydratedGraph, GraphRefusal>, u64);
 }
 
-/// How long a law holds the gate while the operation it orders waits.
-const GATE_HOLD: std::time::Duration = std::time::Duration::from_millis(300);
+/// How long a law holds a lock while the operation it blocks waits.
+const HOLD: std::time::Duration = std::time::Duration::from_millis(300);
 
 fn release_pin(release: &str, root: NodeId) -> DomainWrite {
     DomainWrite::ReleasePin(ReleasePinWrite::Install {
@@ -47,145 +54,88 @@ fn retire_release(release: &str, expected: NodeId) -> DomainWrite {
     })
 }
 
-/// PC-GATE: a collection excludes every guarded transaction and they
-/// exclude it, while guarded transactions share the gate. A commit waiting
-/// on a collection holds no owner lock: the gate is its first lock.
-///
-/// # Errors
-///
-/// The first rule broken.
-pub async fn the_graph_gate_orders_collection_against_every_guarded_transaction(
-    tier: &dyn GraphTier,
-    gate: &dyn GateControl,
-) -> LawOutcome {
-    use std::sync::atomic::{AtomicBool, Ordering};
-    let owner = owned(tier, "graph-gate").await?;
-    let limits = DecodeLimits::within_total(1 << 30);
-    let mut nodes = staging();
-    let read = value(&mut nodes, &[&big("gate-read")], &[]);
-    let retired = value(&mut nodes, &[&big("gate-retired")], &[]);
-    owner_commit(
-        tier,
-        &owner,
-        nodes.into_nodes(),
-        vec![release_pin("read", read), release_pin("retired", retired)],
-    )
-    .await
-    .map_err(|error| refused("the gated graph", error))?;
-
-    // A collection holds the gate: a commit and a hydration wait for it,
-    // and the waiting commit has not taken its owner's row.
-    let mut held = gate.hold(true).await;
-    let released = AtomicBool::new(false);
-    let (committed, hydrated, unlocked) = tokio::join!(
-        async {
-            let answer = owner_commit(
-                tier,
-                &owner,
-                BTreeMap::new(),
-                vec![retire_release("retired", retired)],
-            )
-            .await;
-            (answer, released.load(Ordering::SeqCst))
-        },
-        async {
-            let answer = hydrate(
-                tier,
-                RootOwner::ReleasePin {
-                    release: "read".into(),
-                },
-                None,
-                limits,
-            )
-            .await;
-            (answer, released.load(Ordering::SeqCst))
-        },
-        async {
-            tokio::time::sleep(GATE_HOLD).await;
-            let unlocked = held.owner_unlocked(&owner.actor).await;
-            released.store(true, Ordering::SeqCst);
-            held.release().await;
-            unlocked
-        },
-    );
-    ensure!(
-        unlocked,
-        "a commit waiting on the gate held its owner's row: the gate was not its first lock"
-    );
-    let (answer, after) = committed;
-    answer.map_err(|error| refused("the gated commit", error))?;
-    ensure!(after, "a commit ran beside a collection");
-    let (answer, after) = hydrated;
-    ensure!(
-        answer.as_ref().is_ok_and(|graph| graph.root == read),
-        "the gated hydration answered {answer:?}"
-    );
-    ensure!(after, "a hydration ran beside a collection");
-
-    // A guarded transaction holds the gate: another commit shares it.
-    // Test sharing before queuing a collection: an exclusive waiter can
-    // legitimately block a later shared acquisition. ActorTx's begin read
-    // makes that ordering possible even when its future is polled first.
-    let held = gate.hold(false).await;
-    let released = AtomicBool::new(false);
-    let (shared, ()) = tokio::join!(
-        async {
-            let mut more = staging();
-            let root = value(&mut more, &[&big("gate-shared")], &[]);
-            let answer = owner_commit(
-                tier,
-                &owner,
-                more.into_nodes(),
-                vec![release_pin("shared", root)],
-            )
-            .await;
-            (answer, released.load(Ordering::SeqCst))
-        },
-        async {
-            tokio::time::sleep(GATE_HOLD).await;
-            released.store(true, Ordering::SeqCst);
-            held.release().await;
-        },
-    );
-    let (answer, after) = shared;
-    answer.map_err(|error| refused("a commit beside a shared holder", error))?;
-    ensure!(!after, "a commit waited for another guarded transaction");
-
-    // A collection waits for a guarded transaction's shared gate.
-    let held = gate.hold(false).await;
-    let released = AtomicBool::new(false);
-    let (collected, ()) = tokio::join!(
-        async {
-            let answer = tier.collect(CollectionLimits::UNBOUNDED).await;
-            (answer, released.load(Ordering::SeqCst))
-        },
-        async {
-            tokio::time::sleep(GATE_HOLD).await;
-            released.store(true, Ordering::SeqCst);
-            held.release().await;
-        },
-    );
-    let (answer, after) = collected;
-    let report = answer.map_err(|error| refused("the gated collection", error))?;
-    ensure!(after, "a collection ran beside a guarded transaction");
-    ensure!(
-        report.swept_blobs >= 2 && !present(tier, &retired).await && present(tier, &read).await,
-        "the gated collection reported {report:?}"
-    );
-    Ok(())
-}
-
 /// Rounds a race law runs.
 const RACE_ROUNDS: u64 = 16;
 
-/// PC-GC under a race: collections racing commits each prove their marks
-/// and never sweep a node a commit installed or relied on; afterwards only
-/// the last graph remains.
+/// PC-READ under a race: hydrations racing root replacement, the peel it
+/// runs and the orphan audit each read one whole root, never a node peeled
+/// from under them.
 ///
 /// # Errors
 ///
 /// The first rule broken.
-pub async fn a_collection_racing_commits_sweeps_nothing_they_rely_on(
+pub async fn a_read_racing_replacement_and_its_peel_reads_one_whole_root(
+    tier: &dyn GraphTier,
+) -> LawOutcome {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let owner = owned(tier, "graph-read-race").await?;
+    let exec = owner.exec("race");
+    let limits = DecodeLimits::within_total(1 << 30);
+    let graph = |round: u64| {
+        let mut nodes = staging();
+        let unique = big(&format!("read-race-{round}"));
+        let root = value(&mut nodes, &[&big("read-race-shared"), &unique], &[]);
+        (nodes.into_nodes(), root)
+    };
+    let (nodes, first) = graph(0);
+    owner_commit(tier, &owner, nodes, vec![put_exec(&exec, None, first)])
+        .await
+        .map_err(|error| refused("the first root", error))?;
+    let done = AtomicBool::new(false);
+    let writer = async {
+        let rounds = async {
+            let mut current = first;
+            for round in 1..=RACE_ROUNDS {
+                let (nodes, root) = graph(round);
+                owner_commit(
+                    tier,
+                    &owner,
+                    nodes,
+                    vec![put_exec(&exec, Some((round, current)), root)],
+                )
+                .await
+                .map_err(|error| refused("a racing replacement", error))?;
+                current = root;
+                tier.audit()
+                    .await
+                    .map_err(|error| refused("a racing audit", error))?;
+            }
+            Ok::<_, LawBroken>(())
+        }
+        .await;
+        done.store(true, Ordering::SeqCst);
+        rounds
+    };
+    let reader = async {
+        let mut reads = 0_u64;
+        while !done.load(Ordering::SeqCst) || reads == 0 {
+            let hydrated = hydrate(tier, RootOwner::Exec(exec.clone()), None, limits)
+                .await
+                .map_err(|error| refused("a racing hydration", error))?;
+            ensure!(
+                hydrated.nodes.len() == 3,
+                "a racing hydration read {} nodes of a three-node root",
+                hydrated.nodes.len()
+            );
+            reads += 1;
+            tokio::task::yield_now().await;
+        }
+        Ok::<_, LawBroken>(())
+    };
+    let (written, read) = tokio::join!(writer, reader);
+    written?;
+    read?;
+    exact(tier, "the racing replacements").await
+}
+
+/// The orphan audit under a race: audits racing commits, and the peels
+/// their retirements run, never take a node a commit installed or relied
+/// on; afterwards exactly the last graph is stored.
+///
+/// # Errors
+///
+/// The first rule broken.
+pub async fn an_audit_racing_commits_peels_nothing_they_rely_on(
     tier: &dyn GraphTier,
 ) -> LawOutcome {
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -230,40 +180,37 @@ pub async fn a_collection_racing_commits_sweeps_nothing_they_rely_on(
         done.store(true, Ordering::SeqCst);
         rounds
     };
-    let collector = async {
-        let mut collections = 0_u64;
-        while !done.load(Ordering::SeqCst) || collections == 0 {
-            tier.collect(CollectionLimits::UNBOUNDED)
+    let auditor = async {
+        let mut audits = 0_u64;
+        while !done.load(Ordering::SeqCst) || audits == 0 {
+            tier.audit()
                 .await
-                .map_err(|error| refused("a collection racing commits", error))?;
-            collections += 1;
+                .map_err(|error| refused("an audit racing commits", error))?;
+            audits += 1;
             tokio::task::yield_now().await;
         }
         Ok::<_, LawBroken>(())
     };
-    let (written, collected) = tokio::join!(writer, collector);
+    let (written, audited) = tokio::join!(writer, auditor);
     let last = written?.ok_or_else(|| LawBroken("no round ran".into()))?;
-    collected?;
-    tier.collect(CollectionLimits::UNBOUNDED)
-        .await
-        .map_err(|error| refused("the last collection", error))?;
+    audited?;
     ensure!(
         present(tier, &last).await && present(tier, &leaf(&big("gc-race-shared"))).await,
-        "the last graph was swept"
+        "the last graph was peeled"
     );
     for round in 0..RACE_ROUNDS - 1 {
         ensure!(
             !present(tier, &leaf(&unique(round))).await,
-            "round {round}'s retired graph outlived its collection"
+            "round {round}'s retired graph outlived its retirement"
         );
     }
-    Ok(())
+    exact(tier, "the racing commits").await
 }
 
-/// PC-ROOTS under a race: a commit that publishes a reference to another
-/// owner's root while that owner retires it and a collection runs either
-/// installs a whole graph or is refused the missing root; it never
-/// publishes a root whose closure a collection swept.
+/// R-RACE: a commit that publishes a reference to another owner's root
+/// while that owner's retirement peels it either installs a whole graph or
+/// is refused the missing root; it never publishes a root whose closure the
+/// peel deleted, and the peel never leaves the retired closure behind.
 ///
 /// # Errors
 ///
@@ -299,6 +246,10 @@ pub async fn a_reference_racing_its_roots_retirement_installs_whole_or_refuses(
             .collect();
         let (retired, published) = tokio::join!(
             async {
+                // Every other round, the fork's commit starts first.
+                if round % 2 == 1 {
+                    tokio::task::yield_now().await;
+                }
                 owner_commit(
                     tier,
                     &source,
@@ -309,10 +260,7 @@ pub async fn a_reference_racing_its_roots_retirement_installs_whole_or_refuses(
                     })],
                 )
                 .await
-                .map_err(|error| refused("the base's retirement", error))?;
-                tier.collect(CollectionLimits::UNBOUNDED)
-                    .await
-                    .map_err(|error| refused("a collection racing a fork", error))
+                .map_err(|error| refused("the base's retirement", error))
             },
             owner_commit(
                 tier,
@@ -337,14 +285,150 @@ pub async fn a_reference_racing_its_roots_retirement_installs_whole_or_refuses(
             Err(DurableError::Graph(GraphRefusal::MissingNode(missing))) if missing == base => {}
             Err(error) => return Err(refused("a fork racing its base's retirement", error)),
         }
+        exact(tier, &format!("fork round {round}")).await?;
     }
-    // A fork published before every collection still holds its base.
-    tier.collect(CollectionLimits::UNBOUNDED)
-        .await
-        .map_err(|error| refused("the last collection", error))?;
     ensure!(
         installed > 0 || RACE_ROUNDS == 0,
         "no fork ever won its race"
     );
     Ok(())
+}
+
+/// C2 (FIG-5949): a hydration is one statement, with no gate, fence or
+/// transaction around it: a checkout and the statement that reads the
+/// owner's root with everything it reaches.
+///
+/// # Errors
+///
+/// The first rule broken.
+pub async fn a_hydration_is_one_statement(
+    tier: &dyn GraphTier,
+    probe: &dyn ServerProbe,
+) -> LawOutcome {
+    let owner = owned(tier, "graph-one-statement").await?;
+    let exec = owner.exec("one-statement");
+    let mut nodes = staging();
+    let root = value(&mut nodes, &[&big("one-a"), &big("one-b")], &[]);
+    let nodes = nodes.into_nodes();
+    owner_commit(
+        tier,
+        &owner,
+        nodes.clone(),
+        vec![put_exec(&exec, None, root)],
+    )
+    .await
+    .map_err(|error| refused("the root", error))?;
+    let (answer, trips) = probe
+        .hydration_round_trips(
+            RootOwner::Exec(exec.clone()),
+            DecodeLimits::within_total(1 << 30),
+        )
+        .await;
+    let hydrated = answer.map_err(|error| refused("the hydration", error))?;
+    ensure!(
+        hydrated.root == root && hydrated.nodes.len() == nodes.len(),
+        "the hydration read {} of {} nodes",
+        hydrated.nodes.len(),
+        nodes.len()
+    );
+    ensure!(
+        trips <= 2,
+        "a hydration made {trips} round trips, not a checkout and one statement"
+    );
+    Ok(())
+}
+
+/// C2 (FIG-5949): the orphan audit takes no lock that orders commits or
+/// reads against it, and waits on none. While another transaction holds an
+/// orphan, a commit and a hydration beside the audit complete, and the audit
+/// completes too, leaving the held node; once it is released, the next
+/// audit peels it.
+///
+/// # Errors
+///
+/// The first rule broken.
+pub async fn commits_and_reads_progress_while_the_audit_runs(
+    tier: &dyn GraphTier,
+    probe: &dyn ServerProbe,
+) -> LawOutcome {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let owner = owned(tier, "graph-audit-load").await?;
+    let limits = DecodeLimits::within_total(1 << 30);
+    let mut nodes = staging();
+    let read = value(&mut nodes, &[&big("load-read")], &[]);
+    owner_commit(
+        tier,
+        &owner,
+        nodes.into_nodes(),
+        vec![release_pin("read", read)],
+    )
+    .await
+    .map_err(|error| refused("the read root", error))?;
+    let orphan = "f".repeat(64);
+    tier.foreign(ForeignWrite::OpaqueBlob {
+        hash: orphan.clone(),
+        bytes: b"held orphan".to_vec(),
+    })
+    .await;
+    let held = probe.hold(&orphan).await;
+    let released = AtomicBool::new(false);
+    let (audited, beside, ()) = tokio::join!(
+        async {
+            let answer = tier.audit().await;
+            (answer, released.load(Ordering::SeqCst))
+        },
+        async {
+            tokio::time::sleep(HOLD / 4).await;
+            let mut more = staging();
+            let root = value(&mut more, &[&big("load-write")], &[]);
+            let committed = owner_commit(
+                tier,
+                &owner,
+                more.into_nodes(),
+                vec![release_pin("write", root)],
+            )
+            .await;
+            let hydrated = hydrate(
+                tier,
+                RootOwner::ReleasePin {
+                    release: "read".into(),
+                },
+                None,
+                limits,
+            )
+            .await;
+            (committed, hydrated, !released.load(Ordering::SeqCst))
+        },
+        async {
+            tokio::time::sleep(HOLD).await;
+            released.store(true, Ordering::SeqCst);
+            held.release().await;
+        },
+    );
+    let (committed, hydrated, during) = beside;
+    committed.map_err(|error| refused("a commit beside the audit", error))?;
+    ensure!(
+        hydrated.as_ref().is_ok_and(|graph| graph.root == read),
+        "a hydration beside the audit answered {hydrated:?}"
+    );
+    ensure!(during, "a commit and a read waited for the audit");
+    let (answer, after) = audited;
+    let deleted = answer.map_err(|error| refused("the audit", error))?;
+    ensure!(
+        !after,
+        "the audit waited for a transaction that held an orphan"
+    );
+    ensure!(
+        deleted == 0,
+        "the audit peeled {deleted} blobs another transaction held"
+    );
+    let deleted = tier
+        .audit()
+        .await
+        .map_err(|error| refused("the audit after the release", error))?;
+    ensure!(
+        deleted == 1 && tier.blob(&orphan).await.is_none(),
+        "the audit after the release peeled {deleted} blobs, not the orphan"
+    );
+    exact(tier, "the audit under load").await
 }

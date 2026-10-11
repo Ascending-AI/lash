@@ -38,15 +38,6 @@ pub trait SessionDeleteBlobProbe: Send + Sync {
     ) -> Option<bool> {
         None
     }
-
-    /// Break the factory-global GC scope while leaving exact edge rows intact.
-    /// Backends with no fallible GC scope return `false`.
-    ///
-    /// Integrator class (ADR 0051): **conformance-suite embedders** implement
-    /// this when their backend exposes a separately fallible global GC scope.
-    async fn break_factory_gc_scope(&self, _checkpoint_ref: &crate::BlobRef) -> bool {
-        false
-    }
 }
 
 /// Factory and observation handles consumed by the session-delete blob laws.
@@ -518,7 +509,6 @@ where
     session_delete_keeps_fork_shared_checkpoint_blobs(backend, make()).await;
     session_delete_reclaims_content_aliased_checkpoint_roots(backend, make()).await;
     session_delete_blob_failure_rolls_back_with_partial_report(backend, make()).await;
-    session_delete_ignores_broken_factory_gc_scope(backend, make()).await;
 }
 
 #[expect(
@@ -747,10 +737,6 @@ async fn session_delete_blob_failure_rolls_back_with_partial_report(
         .expect_err("injected blob failure must fail session delete");
     handles.probe.clear_blob_delete_failure().await;
     assert!(matches!(failure.stop, crate::MaintenanceStop::Failed(_)));
-    assert!(
-        failure.partial.enumerated_blob_count >= committed.component_refs.len(),
-        "{backend}: failure must carry the witnessed candidate scope"
-    );
     assert_eq!(
         failure.partial.deleted_blob_count, 0,
         "{backend}: rolled-back deletes must not be reported as durable work"
@@ -769,53 +755,6 @@ async fn session_delete_blob_failure_rolls_back_with_partial_report(
         handles.probe.as_ref(),
         &committed.component_refs,
         true,
-    )
-    .await;
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-async fn session_delete_ignores_broken_factory_gc_scope(
-    backend: &str,
-    handles: SessionDeleteBlobHandles,
-) {
-    let victim = committed_checkpoint(
-        &handles.factory,
-        &SessionId::from("delete-with-broken-gc-victim"),
-    )
-    .await;
-    let survivor = committed_checkpoint(
-        &handles.factory,
-        &SessionId::from("delete-with-broken-gc-survivor"),
-    )
-    .await;
-    if !handles
-        .probe
-        .break_factory_gc_scope(&survivor.checkpoint_ref)
-        .await
-    {
-        tracing::warn!(
-            backend,
-            "backend has no fallible factory-GC scope to isolate"
-        );
-        return;
-    }
-    assert!(
-        survivor.store.gc_unreachable().await.is_err(),
-        "{backend}: fault must break the factory-global GC lever"
-    );
-    handles
-        .factory
-        .delete_session(&victim.request.session_id)
-        .await
-        .expect("broken factory GC must not abort an exact-edge session delete");
-    assert_components_exist(
-        backend,
-        handles.probe.as_ref(),
-        &victim.component_refs,
-        false,
     )
     .await;
 }

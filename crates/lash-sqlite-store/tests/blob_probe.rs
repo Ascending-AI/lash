@@ -76,17 +76,4 @@ impl lash_conformance::SessionDeleteBlobProbe for SqliteBlobProbe {
                 .expect("query SQLite checkpoint edge"),
         )
     }
-
-    async fn break_factory_gc_scope(&self, checkpoint_ref: &lash_core_execution::BlobRef) -> bool {
-        let conn = rusqlite::Connection::open(&self.catalog).expect("open SQLite GC fault");
-        assert_eq!(
-            conn.execute(
-                "UPDATE blobs SET content = X'FF' WHERE hash = ?1",
-                rusqlite::params![checkpoint_ref.as_str()],
-            )
-            .expect("corrupt rooted SQLite checkpoint manifest"),
-            1
-        );
-        true
-    }
 }

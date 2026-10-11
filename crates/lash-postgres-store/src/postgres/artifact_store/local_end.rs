@@ -98,6 +98,9 @@ DECLARE
     v_body jsonb;
     item jsonb;
     held record;
+    v_frontier TEXT[];
+    v_locked TEXT[];
+    v_rows BIGINT;
 BEGIN
     IF p_gate IS NOT NULL THEN
         SELECT COALESCE(jsonb_agg(jsonb_build_array(referrer_kind, referrer_id, cleanup_json)
@@ -140,13 +143,20 @@ BEGIN
         DELETE FROM lash_artifact_referrer_edges edge USING jsonb_array_elements(v_refs) ref
             WHERE edge.referrer_kind = ref.value->>0 AND edge.referrer_id = ref.value->>1
                 AND edge.namespace = ANY(p_namespaces);
-        DELETE FROM lash_lash_vm_artifacts artifact USING jsonb_array_elements(v_artifacts) named
+        WITH gone AS (
+            DELETE FROM lash_lash_vm_artifacts artifact USING jsonb_array_elements(v_artifacts) named
             WHERE artifact.namespace = named.value->>0 AND artifact.artifact_ref = named.value->>1
                 AND NOT EXISTS (SELECT 1 FROM lash_artifact_referrer_edges edge
-                    WHERE edge.namespace = artifact.namespace AND edge.artifact_ref = artifact.artifact_ref);
+                    WHERE edge.namespace = artifact.namespace AND edge.artifact_ref = artifact.artifact_ref)
+            RETURNING artifact.graph_ref)
+        SELECT ARRAY(SELECT graph_ref FROM gone WHERE graph_ref IS NOT NULL) INTO v_frontier;
+        -- A bridged artifact's row was its graph node's root: peel it
+        -- (FIG-5949).
+        {PEEL}
     END IF;
     RETURN jsonb_build_object('checks', v_checks, 'plans', v_plans);
 END
 $lash_artifact_end_local$;
-"#.to_owned()
+"#
+    .replace("{PEEL}", &crate::durable::peel_loop())
 }

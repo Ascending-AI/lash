@@ -37,8 +37,10 @@ crate::statements! {
         root = "SELECT record_ref FROM run_records
              WHERE owner_key = ?1 AND run_seq = ?2 AND ordinal = ?3";
 
-        /// Delete owner `?1`'s facts of every run before `?2`.
-        prune = "DELETE FROM run_records WHERE owner_key = ?1 AND run_seq < ?2";
+        /// Delete owner `?1`'s facts of every run before `?2`, returning
+        /// each RoundFact node they rooted.
+        prune = "DELETE FROM run_records WHERE owner_key = ?1 AND run_seq < ?2
+             RETURNING record_ref";
 
         /// Only owner `?1`'s run `?2`, in ordinal order.
         read_of = "SELECT run_seq, ordinal, kind, call_id, record_ref, written_epoch
@@ -46,17 +48,15 @@ crate::statements! {
              ORDER BY ordinal";
 
         /// Delete every fact of owner `?1`: a consumed cell's, or a pruned
-        /// process's.
-        delete_owner = "DELETE FROM run_records WHERE owner_key = ?1";
+        /// process's. Returns each RoundFact node it held.
+        delete_owner = "DELETE FROM run_records WHERE owner_key = ?1 RETURNING record_ref";
 
         /// Delete every fact whose owner key starts with `?1`: the cells of
         /// one turn at its end, or every owner of one session at its delete.
+        /// Returns each RoundFact node it held.
         delete_under = "DELETE FROM run_records
-             WHERE substr(owner_key, 1, length(CAST(?1 AS TEXT))) = CAST(?1 AS TEXT)";
-
-        /// The RoundFact node of every fact whose owner key starts with `?1`.
-        roots_under = "SELECT record_ref FROM run_records
-             WHERE substr(owner_key, 1, length(CAST(?1 AS TEXT))) = CAST(?1 AS TEXT)";
+             WHERE substr(owner_key, 1, length(CAST(?1 AS TEXT))) = CAST(?1 AS TEXT)
+             RETURNING record_ref";
 
         /// Every fact of owner `?1`, by run and ordinal.
         read = "SELECT run_seq, ordinal, kind, call_id, record_ref, written_epoch

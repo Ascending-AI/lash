@@ -78,8 +78,10 @@ crate::statements! {
                AND admission_json IS NOT NULL AND terminal_kind IS NULL
              RETURNING run";
 
-        /// Drop run `?2` of session `?1`'s phase row.
-        delete_phase = "DELETE FROM turn_phases WHERE session_id = ?1 AND run = ?2";
+        /// Drop run `?2` of session `?1`'s phase row, returning its PhaseRoot
+        /// and working execution.
+        delete_phase = "DELETE FROM turn_phases WHERE session_id = ?1 AND run = ?2
+             RETURNING checkpoint_ref, working_execution_ref";
 
         /// Record plugin `?3`'s namespace entry `?4` for run `?2` of session
         /// `?1`, with values root `?5`. `?6` retains the held root for a
@@ -115,8 +117,10 @@ crate::statements! {
                AND working_execution_ref IS NOT DISTINCT FROM ?4
              RETURNING run";
 
-        /// Drop run `?2` of session `?1`'s namespace rows.
-        delete_namespaces = "DELETE FROM turn_namespaces WHERE session_id = ?1 AND run = ?2";
+        /// Drop run `?2` of session `?1`'s namespace rows, returning each
+        /// values root.
+        delete_namespaces = "DELETE FROM turn_namespaces WHERE session_id = ?1 AND run = ?2
+             RETURNING graph_root_ref";
 
         /// Session `?1`'s unfinished turn with its phase row.
         unfinished = "SELECT r.run, r.admission_json, p.phase, p.phase_arg, p.iteration,

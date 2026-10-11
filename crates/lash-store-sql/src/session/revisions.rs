@@ -10,7 +10,7 @@
 //!
 //! **Membership is the retained-revisions relation.** A row exists exactly
 //! while its revision is retained, and every reclaimer roots what it keeps in
-//! this table: the checkpoint mark-and-sweep, the component-edge deletes,
+//! this table: the checkpoint peel and orphan audit, the component-edge deletes,
 //! session-delete blob reclaim, ancestry retirement and frame-artifact
 //! retention. Rows leave it in two ways only: with their session, and through
 //! [`SessionRevisionStatements::prune_unretained`], which is the single
@@ -84,8 +84,8 @@ crate::statements! {
 
         /// The retained-revisions relation, stated once: release every
         /// revision of session `?2` (of every session when `?2` is NULL) that
-        /// nothing retains, and report the leaf each released revision
-        /// published.
+        /// nothing retains, and report the leaf and checkpoint root each
+        /// released revision published.
         ///
         /// A revision is retained while any of these holds:
         ///
@@ -157,6 +157,6 @@ crate::statements! {
                          ))
                      )
                )
-             RETURNING session_id, leaf_node_id";
+             RETURNING session_id, leaf_node_id, checkpoint_ref, config_ref";
     }
 }

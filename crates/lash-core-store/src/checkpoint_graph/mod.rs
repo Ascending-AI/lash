@@ -18,7 +18,7 @@
 //! This module owns the format's fixed seams:
 //!
 //! - [`node`]: the envelope, its digest, and [`check_envelope`], the generic
-//!   check every reader and the collector runs;
+//!   check every reader runs;
 //! - [`registry`]: the explicit node-kind numbers and each kind's body shape
 //!   and size bound;
 //! - [`encode`]: [`GraphStaging`], which places large text and bytes in

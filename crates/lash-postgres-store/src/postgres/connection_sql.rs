@@ -142,17 +142,6 @@ lash_store_sql::statements! {
         /// and every writer that fences after it waits until it commits.
         lock_xact_fleet_fence = "SELECT pg_advisory_xact_lock(715425, 0)";
 
-        /// The checkpoint graph's gate (FIG-5887 §8), shared: every guarded
-        /// transaction takes it first, ahead of the writer fence, so a
-        /// collection never runs beside a writer, a reader or a pin. One
-        /// bigint key (`0x4c41534847524150`, "LASHGRAP"), outside the
-        /// two-int liveness and fence keys.
-        lock_xact_graph_gate_shared = "SELECT pg_advisory_xact_lock_shared(5494764590268039504::bigint)";
-
-        /// The checkpoint graph's gate, exclusive: a collection takes it
-        /// first, waiting for every guarded transaction to end.
-        lock_xact_graph_gate = "SELECT pg_advisory_xact_lock(5494764590268039504::bigint)";
-
         /// Try the session-scoped **exclusive** advisory lock in class `?1`
         /// keyed on text `?2`, answering whether this connection took it.
         ///

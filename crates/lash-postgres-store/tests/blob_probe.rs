@@ -83,17 +83,4 @@ impl lash_conformance::SessionDeleteBlobProbe for PostgresBlobProbe {
             .expect("query Postgres checkpoint edge"),
         )
     }
-
-    async fn break_factory_gc_scope(&self, checkpoint_ref: &lash_core_execution::BlobRef) -> bool {
-        assert_eq!(
-            sqlx::query("UPDATE lash_blobs SET content = '\\xffffffff'::bytea WHERE hash = $1")
-                .bind(checkpoint_ref.as_str())
-                .execute(self.storage.pool())
-                .await
-                .expect("corrupt rooted Postgres checkpoint manifest")
-                .rows_affected(),
-            1
-        );
-        true
-    }
 }

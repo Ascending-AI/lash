@@ -16,7 +16,6 @@ use lash_store_sql::durable::run_records::RunRecordStatements;
 use rusqlite::{Connection, OptionalExtension};
 
 use super::{Answer, Committing, corrupt, integer, node_ref};
-use crate::conn::cached_execute;
 
 static SQL: LazyLock<RunRecordStatements> =
     LazyLock::new(|| RunRecordStatements::render(crate::schema_layout::MAIN));
@@ -75,11 +74,16 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &RunFactWri
             refused(tx, owner, *run, *ordinal, call)
         }
         RunFactWrite::Prune { owner, before } => {
-            cached_execute(
-                tx,
-                SQL.prune.sql(),
-                rusqlite::params![owner.stored(), integer::<i64>(before.0)?],
-            )?;
+            let pruned = tx
+                .prepare_cached(SQL.prune.sql())?
+                .query_map(
+                    rusqlite::params![owner.stored(), integer::<i64>(before.0)?],
+                    |row| row.get::<_, String>(0),
+                )?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            for record in pruned {
+                commit.retired.stored(record);
+            }
             Ok(Ok(()))
         }
     }
@@ -143,19 +147,18 @@ fn refused(
     Ok(Err(DurableError::Domain(refusal)))
 }
 
-/// Delete every fact of the owner stored as `owner_key`.
-pub(super) fn delete_owner(tx: &Connection, owner_key: &str) -> rusqlite::Result<()> {
-    cached_execute(tx, SQL.delete_owner.sql(), [owner_key]).map(drop)
+/// Delete every fact of the owner stored as `owner_key`, answering the
+/// RoundFact nodes they held: the caller's to peel.
+pub(super) fn delete_owner(tx: &Connection, owner_key: &str) -> rusqlite::Result<Vec<String>> {
+    tx.prepare_cached(SQL.delete_owner.sql())?
+        .query_map([owner_key], |row| row.get(0))?
+        .collect()
 }
 
-/// Delete every fact whose owner key starts with `prefix`.
-pub(super) fn delete_under(tx: &Connection, prefix: &str) -> rusqlite::Result<()> {
-    cached_execute(tx, SQL.delete_under.sql(), [prefix]).map(drop)
-}
-
-/// The RoundFact node of every fact whose owner key starts with `prefix`.
-pub(super) fn roots_under(tx: &Connection, prefix: &str) -> rusqlite::Result<Vec<String>> {
-    tx.prepare_cached(SQL.roots_under.sql())?
+/// Delete every fact whose owner key starts with `prefix`, answering the
+/// RoundFact nodes they held: the caller's to peel.
+pub(super) fn delete_under(tx: &Connection, prefix: &str) -> rusqlite::Result<Vec<String>> {
+    tx.prepare_cached(SQL.delete_under.sql())?
         .query_map([prefix], |row| row.get(0))?
         .collect()
 }
@@ -380,6 +383,7 @@ mod tests {
             now: lash_durable::DurableInstant(1),
             fleet: lash_core_execution::FleetFormat::current(),
             blob_profile: crate::BuiltinBlobProfile::default(),
+            retired: super::super::Retired::default(),
         };
         let record = lash_core_store::checkpoint_graph::NodeId([7; 32]);
         conn.execute(

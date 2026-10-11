@@ -1,5 +1,4 @@
 use super::*;
-use crate::guarded_tx::begin_collecting;
 use crate::session_sql::session_sql;
 
 #[async_trait::async_trait]
@@ -13,18 +12,22 @@ impl StoreMaintenance for PostgresStore {
             .map_err(lash_core_execution::MaintenanceFailure::failed_before_any_work)
     }
 
-    /// Reachability mark/sweep over `lash_blobs` from every root the graph
-    /// root catalog names, mirroring the SQLite store's ([`GcReport`] fields
-    /// match). A missing root or child, a corrupt node or an incomplete
-    /// source fails the collection with nothing swept. Lash VM artifact rows
-    /// (`lash_lash_vm_artifacts`) are not swept: only a bridged artifact's
-    /// graph node is a root.
+    /// Release what the host's collection ends, then audit for orphans,
+    /// mirroring the SQLite store's ([`GcReport`] fields match). Every
+    /// transaction that retires a root peels it, so no mark and sweep runs
+    /// and no lock orders this pass against writers or readers. Lash VM
+    /// artifact rows (`lash_lash_vm_artifacts`) are not blobs: only a bridged
+    /// artifact's graph node is a root.
     async fn gc_unreachable(&self) -> lash_core_execution::MaintenanceResult<GcReport> {
-        // One transaction: a failure rolls every delete back, so no work
-        // survived to report.
-        self.gc_unreachable_blobs()
-            .await
-            .map_err(lash_core_execution::MaintenanceFailure::failed_before_any_work)
+        let mut report = GcReport::default();
+        let outcome = self.gc_unreachable_blobs(&mut report).await;
+        outcome.map(|()| report.clone()).map_err(|error| {
+            if report.deleted_blob_count == 0 {
+                lash_core_execution::MaintenanceFailure::failed_before_any_work(error)
+            } else {
+                lash_core_execution::MaintenanceFailure::failed(error, report)
+            }
+        })
     }
 }
 
@@ -79,35 +82,41 @@ impl PostgresStore {
             removed_queued_work_tombstone_count: removed_queued_work_tombstone_count as usize,
         })
     }
-    async fn gc_unreachable_blobs(&self) -> Result<GcReport, StoreError> {
+    /// The body of [`StoreMaintenance::gc_unreachable`]: every peel it
+    /// commits counts into `report` as it commits.
+    async fn gc_unreachable_blobs(&self, report: &mut GcReport) -> Result<(), StoreError> {
+        let graph_error = |refusal| StoreError::Backend(format!("{refusal}"));
         let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         // A host collection is what ends `until_gc`'s hold: release every
-        // revision no head, pin or retention window keeps, in an ordinary
-        // guarded transaction of its own
-        // (FIG-5887 §8). A crash between it and the collection leaves
-        // released roots whose bytes the next collection sweeps.
+        // revision no head, pin or retention window keeps, peeling what
+        // they held, in an ordinary guarded transaction of its own.
         {
             let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
-            crate::revisions::release_unretained_tx(&mut tx, true, None).await?;
+            let released = crate::revisions::release_unretained_tx(&mut tx, true, None).await?;
             tx.commit().await.map_err(store_sqlx_error)?;
+            report.deleted_blob_count += released;
         }
-        // The collection takes the graph gate exclusive ahead of the writer
-        // fence: every writer and hydration holds it shared, so
-        // the root enumeration, the mark and the sweep are one atomic step
-        // against all of them.
-        let mut tx = begin_collecting(&mut *connection, &self.fence).await?;
-        let collection = crate::durable::collect_graph_in(
-            &mut tx,
-            lash_durable::domain::graph_commit::CollectionLimits::UNBOUNDED,
-        )
-        .await
-        .map_err(|refusal| StoreError::Backend(refusal.to_string()))?;
-        tx.commit().await.map_err(store_sqlx_error)?;
-        let as_usize = |count: u64| usize::try_from(count).unwrap_or(usize::MAX);
-        Ok(GcReport {
-            root_count: as_usize(collection.roots.values().sum()),
-            retained_blob_count: as_usize(collection.marked),
-            deleted_blob_count: as_usize(collection.swept_blobs),
-        })
+        // The orphan audit: a page per guarded transaction, each locking
+        // only the rows it deletes, so commits beside it progress.
+        let mut after = String::new();
+        loop {
+            let mut tx = begin_guarded(&mut *connection, &self.fence).await?;
+            let (last, gone) =
+                crate::durable::audit_page(&mut tx, &after, crate::durable::AUDIT_PAGE)
+                    .await
+                    .map_err(graph_error)?;
+            tx.commit().await.map_err(store_sqlx_error)?;
+            report.deleted_blob_count += gone;
+            match last {
+                Some(last) => after = last,
+                None => break,
+            }
+        }
+        let (roots, blobs) = crate::durable::graph_counts(&mut connection)
+            .await
+            .map_err(graph_error)?;
+        report.root_count = roots;
+        report.retained_blob_count = blobs;
+        Ok(())
     }
 }

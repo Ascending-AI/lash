@@ -15,10 +15,13 @@ use crate::*;
 lash_store_sql::statements! {
     pub(crate) struct ReferrerPostgresStatements @ "artifact_referrer_edge" {
         end_local = "SELECT lash_artifact_end_local(?1, ?2, ?3, ?4, ?5, ?6)";
+        /// Delete artifact `?2` of namespace `?1` unless a referrer edge
+        /// names it, returning the graph node a bridged artifact rooted.
         delete_unreferenced = "DELETE FROM lash_vm_artifacts AS artifact
              WHERE artifact.namespace = ?1 AND artifact.artifact_ref = ?2
                AND NOT EXISTS (SELECT 1 FROM artifact_referrer_edges AS edge
-                   WHERE edge.namespace = artifact.namespace AND edge.artifact_ref = artifact.artifact_ref)";
+                   WHERE edge.namespace = artifact.namespace AND edge.artifact_ref = artifact.artifact_ref)
+             RETURNING artifact.graph_ref";
     }
 }
 
@@ -633,10 +636,15 @@ impl PostgresLashVmArtifactStore {
         if !referrers.is_empty() {
             return Ok(());
         }
-        crate::observed_sql::query(artifact_sql().postgres.delete_unreferenced.sql())
-            .bind(namespace)
-            .bind(artifact_ref)
-            .execute(crate::observed_sql::executor(&mut *tx))
+        let bridged: Option<Option<String>> =
+            crate::observed_sql::query_scalar(artifact_sql().postgres.delete_unreferenced.sql())
+                .bind(namespace)
+                .bind(artifact_ref)
+                .fetch_optional(crate::observed_sql::executor(&mut *tx))
+                .await
+                .map_err(backend)?;
+        // A bridged artifact's row was its graph node's root: peel it.
+        crate::durable::peel(tx, bridged.flatten().into_iter().collect())
             .await
             .map_err(backend)?;
         Ok(())

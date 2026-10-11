@@ -14,7 +14,6 @@ use lash_store_sql::durable::snapshots::SnapshotStatements;
 use rusqlite::{Connection, OptionalExtension};
 
 use super::{Answer, Committing, corrupt, integer, node_ref};
-use crate::conn::cached_execute;
 
 static SQL: LazyLock<SnapshotStatements> =
     LazyLock::new(|| SnapshotStatements::render(crate::schema_layout::MAIN));
@@ -89,6 +88,9 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &ExecRootWr
                 _ => None,
             };
             if put.is_some() {
+                if let Some(old) = expected_root.filter(|old| old != root) {
+                    commit.retired.closure(&old);
+                }
                 return Ok(Ok(()));
             }
             // Refused: read the revision it found, for the refusal's account.
@@ -106,16 +108,26 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &ExecRootWr
             if retired.is_none() {
                 return conflict(exec, None, None);
             }
+            commit.retired.closure(expected);
             // The consumer took the cell's report and state: its own facts
             // and admissions have no reader left.
             if let ExecKey::Cell(..) = exec {
-                super::run_records::delete_owner(tx, &exec.stored())?;
-                super::graph::clear_admissions(tx, &exec.stored())?;
+                let facts = super::run_records::delete_owner(tx, &exec.stored())?;
+                let admissions = super::graph::clear_admissions(tx, &exec.stored())?;
+                for root in facts.into_iter().chain(admissions) {
+                    commit.retired.stored(root);
+                }
             }
             Ok(Ok(()))
         }
         ExecRootWrite::Clear { exec } => {
-            cached_execute(tx, SQL.clear.sql(), [exec.stored()])?;
+            let cleared = tx
+                .prepare_cached(SQL.clear.sql())?
+                .query_row([exec.stored()], |row| row.get::<_, String>(0))
+                .optional()?;
+            if let Some(root) = cleared {
+                commit.retired.stored(root);
+            }
             Ok(Ok(()))
         }
     }
@@ -166,18 +178,16 @@ pub(super) fn read(tx: &Connection, exec: &ExecKey) -> Answer<Option<ExecRootRow
 
 /// Delete every execution root whose key starts with `prefix`, with the
 /// admissions and run facts of each: the cells one turn stopped in, at its
-/// end, or one session's, at its delete.
-pub(super) fn retire_under(tx: &Connection, prefix: &str) -> rusqlite::Result<()> {
-    cached_execute(tx, SQL.clear_under.sql(), [prefix])?;
-    super::graph::clear_admissions_under(tx, prefix)?;
-    super::run_records::delete_under(tx, prefix)
-}
-
-/// The root of every execution whose key starts with `prefix`.
-pub(super) fn roots_under(tx: &Connection, prefix: &str) -> rusqlite::Result<Vec<String>> {
-    tx.prepare_cached(SQL.under.sql())?
-        .query_map([prefix], |row| row.get(2))?
-        .collect()
+/// end, or one session's, at its delete. Answers every root they held: the
+/// caller's to peel.
+pub(super) fn retire_under(tx: &Connection, prefix: &str) -> rusqlite::Result<Vec<String>> {
+    let mut roots: Vec<String> = tx
+        .prepare_cached(SQL.clear_under.sql())?
+        .query_map([prefix], |row| row.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    roots.extend(super::graph::clear_admissions_under(tx, prefix)?);
+    roots.extend(super::run_records::delete_under(tx, prefix)?);
+    Ok(roots)
 }
 
 /// Every execution root whose key starts with `prefix`, by key.

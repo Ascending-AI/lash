@@ -14,8 +14,8 @@ use lash_durable::{
 };
 
 use super::{
-    Committing, PostgresDurableStore, SQL, Tx, actor_state, apply_domain, apply_mail, executor,
-    fenced, get, graph, group_members, sqlx_failure, store_failure,
+    Committing, PostgresDurableStore, Retired, SQL, Tx, actor_state, apply_domain, apply_mail,
+    executor, fenced, get, graph, group_members, sqlx_failure, store_failure,
 };
 use crate::guarded_tx::begin_durable;
 use crate::replayable::{Attempt, Settle, Uncommitted, XactId};
@@ -298,6 +298,7 @@ pub(super) async fn apply_owner(
         epoch: write.epoch(),
         now,
         fleet,
+        retired: Retired::default(),
     };
     crate::obligation_ledger::lock_ending_executions_tx(tx, write.domain())
         .await
@@ -305,6 +306,9 @@ pub(super) async fn apply_owner(
     for domain in write.domain() {
         apply_domain(tx, &committing, domain).await?;
     }
+    graph::reclaim(tx, committing.retired)
+        .await
+        .map_err(DurableError::Graph)?;
     if let Some(formats) = write.formats() {
         crate::observed_sql::query(SQL.actor.stamp_formats.sql())
             .bind(actor)

@@ -900,8 +900,6 @@ mod schema;
 mod schema_compat_tests;
 #[path = "postgres/schema_shape.rs"]
 mod schema_shape;
-#[path = "postgres/session_blob_reclaim.rs"]
-mod session_blob_reclaim;
 #[path = "postgres/session_catalog.rs"]
 mod session_catalog;
 #[path = "postgres/session_factory.rs"]

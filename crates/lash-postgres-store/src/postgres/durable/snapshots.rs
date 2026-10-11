@@ -50,7 +50,8 @@ pub(super) static PUT_NEXT: Entry = Entry::new(
 );
 pub(super) static RETIRE: Entry =
     Entry::new(|| &SQL.retire, &[Ty::Text, Ty::Text], Shape::Returning);
-pub(super) static CLEAR: Entry = Entry::new(|| &SQL.clear, &[Ty::Text], Shape::Exec);
+pub(super) static CLEAR: Entry =
+    Entry::new(|| &SQL.clear, &[Ty::Text], Shape::Returning).retiring("root_ref");
 
 /// `write`'s step program at `epoch`: a put is the first root's insert or
 /// the next root's guarded replace, a retire its guarded delete, each
@@ -78,24 +79,30 @@ pub(super) fn steps(
                     Value::int(epoch.0),
                 ],
             )]),
-            (Some(rev), Some(expected_root)) => Some(vec![Step::one(
-                &PUT_NEXT,
-                vec![
-                    Value::text(exec.stored()),
-                    Value::int(integer::<i64>(rev.0)?),
-                    Value::text(root.to_hex()),
-                    Value::Bytes(Some(commit_id.0.to_vec())),
-                    Value::int(epoch.0),
-                    Value::text(expected_root.to_hex()),
-                ],
-            )]),
+            (Some(rev), Some(expected_root)) => Some(vec![
+                Step::one(
+                    &PUT_NEXT,
+                    vec![
+                        Value::text(exec.stored()),
+                        Value::int(integer::<i64>(rev.0)?),
+                        Value::text(root.to_hex()),
+                        Value::Bytes(Some(commit_id.0.to_vec())),
+                        Value::int(epoch.0),
+                        Value::text(expected_root.to_hex()),
+                    ],
+                )
+                .retiring([expected_root.to_hex()]),
+            ]),
             _ => None,
         },
         ExecRootWrite::Retire { exec, expected } => {
-            let mut program = vec![Step::one(
-                &RETIRE,
-                vec![Value::text(exec.stored()), Value::text(expected.to_hex())],
-            )];
+            let mut program = vec![
+                Step::one(
+                    &RETIRE,
+                    vec![Value::text(exec.stored()), Value::text(expected.to_hex())],
+                )
+                .retiring([expected.to_hex()]),
+            ];
             // The consumer took the cell's report and state: its own facts
             // and admissions have no reader left.
             if let ExecKey::Cell(..) = exec {
@@ -124,7 +131,7 @@ pub(super) async fn apply(
     write: &ExecRootWrite,
 ) -> Result<(), DurableError> {
     if let Some(program) = steps(commit.epoch, write)?
-        && steps::run(tx, &program).await?.is_none()
+        && steps::run(tx, &program, &commit.retired).await?.is_none()
     {
         return Ok(());
     }
@@ -214,23 +221,17 @@ pub(super) async fn under(
 
 /// Delete every execution root whose key starts with `prefix`, with the
 /// admissions and run facts of each: the cells one turn stopped in, at its
-/// end, or one session's, at its delete.
-pub(super) async fn retire_under(tx: &mut PgConnection, prefix: &str) -> Result<(), sqlx::Error> {
-    crate::observed_sql::query(SQL.clear_under.sql())
-        .bind(prefix)
-        .execute(crate::observed_sql::executor(&mut *tx))
-        .await?;
-    super::graph::clear_admissions_under(&mut *tx, prefix).await?;
-    super::run_records::delete_under(tx, prefix).await
-}
-
-/// The root of every execution whose key starts with `prefix`.
-pub(super) async fn roots_under(
+/// end, or one session's, at its delete. Answers every root they held: the
+/// caller's to peel.
+pub(super) async fn retire_under(
     tx: &mut PgConnection,
     prefix: &str,
 ) -> Result<Vec<String>, sqlx::Error> {
-    crate::observed_sql::query_scalar::<_, String>(SQL.under.sql())
+    let mut roots: Vec<String> = crate::observed_sql::query_scalar(SQL.clear_under.sql())
         .bind(prefix)
-        .fetch_all(crate::observed_sql::executor(tx))
-        .await
+        .fetch_all(crate::observed_sql::executor(&mut *tx))
+        .await?;
+    roots.extend(super::graph::clear_admissions_under(&mut *tx, prefix).await?);
+    roots.extend(super::run_records::delete_under(tx, prefix).await?);
+    Ok(roots)
 }

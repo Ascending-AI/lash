@@ -364,7 +364,7 @@ async fn checkpoint_component_bodies_tx(
 
 /// Persist the complete checkpoint root and every changed leaf inside the
 /// caller's commit transaction. Keeping both writes under the same transaction
-/// is the GC-safety argument: no collector can observe a git-loose-object-style
+/// is the GC-safety argument: no orphan audit can observe a git-loose-object-style
 /// leaf that is not yet reachable from its root, or a root whose leaf is absent.
 pub(crate) async fn put_checkpoint_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
@@ -429,15 +429,11 @@ pub(crate) async fn put_checkpoint_tx(
         nodes.extend(execution.nodes.iter().map(|(id, node)| (*id, node.clone())));
     }
     let checkpoint_ref = BlobRef(root.to_hex());
+    // The install key-share locks a root that is already stored, and stores
+    // it again from these bytes when a reclaim took it first (FIG-5949).
     crate::durable::install_staged(tx, &nodes)
         .await
         .map_err(graph_store_error)?;
-    // An install that names a node locks a root already stored, and
-    // installs again, whole, one a reclaim removed while it waited; one
-    // that names none skips a stored root without locking it. The root is
-    // held like a component, so a reclaim that wins after the install is a
-    // typed missing root, never a later foreign-key error.
-    lock_checkpoint_blob_tx(tx, checkpoint_ref.as_str(), None).await?;
     Ok((checkpoint_ref, manifest))
 }
 

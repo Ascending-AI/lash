@@ -1217,17 +1217,20 @@ DECLARE
     v_step JSONB;
     v_p JSONB;
     v_state TEXT := 'owned';
+    v_held TEXT[];
+    v_retired TEXT[] := '{}';
+    v_frontier TEXT[];
+    v_locked TEXT[];
 BEGIN
-    -- Generated from this build's statements (registry 3306192f6d61aad7); a call
+    -- Generated from this build's statements (registry 611726565c516a90); a call
     -- built from others is refused, as is any isolation but read committed.
-    IF p_registry IS DISTINCT FROM '3306192f6d61aad7'
+    IF p_registry IS DISTINCT FROM '611726565c516a90'
         OR current_setting('transaction_isolation') <> 'read committed' THEN
         RAISE EXCEPTION 'lash_owner_commit: registry or isolation refused' USING ERRCODE = 'LX000';
     END IF;
     IF p_lock_timeout IS NOT NULL THEN
         PERFORM set_config('lock_timeout', p_lock_timeout, true);
     END IF;
-    PERFORM pg_advisory_xact_lock_shared(5494764590268039504::bigint);
     PERFORM pg_advisory_xact_lock_shared(715425, 0);
     WITH fenced AS (
                  UPDATE lash_actors SET state_revision = state_revision + 1
@@ -1277,6 +1280,11 @@ BEGIN
              ON CONFLICT (hash) DO NOTHING
              RETURNING hash)
         SELECT COALESCE(array_agg(hash), '{}') INTO v_inserted FROM inserted;
+        -- A staged node another writer stored is held against a peel; one a
+        -- peel took first is a conflict, which the explicit form installs
+        -- again (FIG-5949).
+        PERFORM hash, content, encoding FROM lash_blobs WHERE hash = ANY((ARRAY(SELECT encode(staged.digest, 'hex') FROM unnest(p_digests) AS staged(digest) WHERE NOT (encode(staged.digest, 'hex') = ANY(v_inserted))))::text[])
+             ORDER BY hash FOR KEY SHARE;
         SELECT count(*)
              FROM unnest((p_digests)::bytea[], (p_contents)::bytea[]) AS staged(digest, content)
              LEFT JOIN lash_blobs AS stored ON stored.hash = encode(staged.digest, 'hex')
@@ -1313,8 +1321,10 @@ BEGIN
              RETURNING ordinal)
             SELECT count(*) INTO v_rows FROM answered;
         WHEN 'durable_run_record.prune' THEN
-            DELETE FROM lash_run_records WHERE owner_key = (v_p->>0) AND run_seq < ((v_p->>1)::BIGINT);
-            GET DIAGNOSTICS v_rows = ROW_COUNT;
+            WITH answered AS (DELETE FROM lash_run_records WHERE owner_key = (v_p->>0) AND run_seq < ((v_p->>1)::BIGINT)
+             RETURNING record_ref)
+            SELECT count(*), COALESCE(array_agg(answered.record_ref) FILTER (WHERE answered.record_ref IS NOT NULL), '{}') INTO v_rows, v_held FROM answered;
+            v_retired := v_retired || v_held;
         WHEN 'durable_snapshot.put_first' THEN
             WITH answered AS (INSERT INTO lash_exec_snapshots (exec_key, rev, root_ref, commit_id, written_epoch)
              SELECT (v_p->>0), 1, (v_p->>1), (decode(v_p->>2, 'hex')), ((v_p->>3)::BIGINT)
@@ -1332,8 +1342,9 @@ BEGIN
              RETURNING exec_key)
             SELECT count(*) INTO v_rows FROM answered;
         WHEN 'durable_snapshot.clear' THEN
-            DELETE FROM lash_exec_snapshots WHERE exec_key = (v_p->>0);
-            GET DIAGNOSTICS v_rows = ROW_COUNT;
+            WITH answered AS (DELETE FROM lash_exec_snapshots WHERE exec_key = (v_p->>0) RETURNING root_ref)
+            SELECT count(*), COALESCE(array_agg(answered.root_ref) FILTER (WHERE answered.root_ref IS NOT NULL), '{}') INTO v_rows, v_held FROM answered;
+            v_retired := v_retired || v_held;
         WHEN 'durable_turn.admit_run' THEN
             WITH answered AS (INSERT INTO lash_session_runs (session_id, run, admission_json)
              SELECT (v_p->>0), (v_p->>1), (v_p->>2)
@@ -1388,6 +1399,13 @@ BEGIN
                AND working_execution_ref IS NOT DISTINCT FROM (v_p->>3)
              RETURNING run)
             SELECT count(*) INTO v_rows FROM answered;
+        WHEN 'durable_turn.phase_root' THEN
+            SELECT count(*), COALESCE(array_agg(answered.checkpoint_ref) FILTER (WHERE answered.checkpoint_ref IS NOT NULL), '{}') INTO v_rows, v_held FROM (SELECT checkpoint_ref FROM lash_turn_phases WHERE session_id = (v_p->>0) AND run = (v_p->>1)) AS answered;
+            v_retired := v_retired || v_held;
+        WHEN 'durable_turn_postgres.namespace_roots' THEN
+            SELECT count(*), COALESCE(array_agg(answered.graph_root_ref) FILTER (WHERE answered.graph_root_ref IS NOT NULL), '{}') INTO v_rows, v_held FROM (SELECT graph_root_ref FROM lash_turn_namespaces
+             WHERE session_id = (v_p->>0) AND run = (v_p->>1) AND plugin = ANY((ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->2) WITH ORDINALITY AS listed(element, position) ORDER BY position))::text[])) AS answered;
+            v_retired := v_retired || v_held;
         WHEN 'durable_session_mail_postgres.bind_inputs' THEN
             WITH answered AS (UPDATE lash_pending_turn_inputs AS input
              SET admitted_run = (v_p->>2), admitted_by = (v_p->>2)
@@ -1450,11 +1468,14 @@ BEGIN
              RETURNING exec_key)
             SELECT count(*) INTO v_rows FROM answered;
         WHEN 'durable_run_record.delete_owner' THEN
-            DELETE FROM lash_run_records WHERE owner_key = (v_p->>0);
-            GET DIAGNOSTICS v_rows = ROW_COUNT;
+            WITH answered AS (DELETE FROM lash_run_records WHERE owner_key = (v_p->>0) RETURNING record_ref)
+            SELECT count(*), COALESCE(array_agg(answered.record_ref) FILTER (WHERE answered.record_ref IS NOT NULL), '{}') INTO v_rows, v_held FROM answered;
+            v_retired := v_retired || v_held;
         WHEN 'durable_graph.admissions_clear' THEN
-            DELETE FROM lash_effect_admissions WHERE exec_key = (v_p->>0);
-            GET DIAGNOSTICS v_rows = ROW_COUNT;
+            WITH answered AS (DELETE FROM lash_effect_admissions WHERE exec_key = (v_p->>0)
+             RETURNING admission_ref)
+            SELECT count(*), COALESCE(array_agg(answered.admission_ref) FILTER (WHERE answered.admission_ref IS NOT NULL), '{}') INTO v_rows, v_held FROM answered;
+            v_retired := v_retired || v_held;
         WHEN 'durable_actor_park.set_park' THEN
             UPDATE lash_actors
              SET failed_activations = CASE WHEN CAST((v_p->>1) AS TEXT) IS NULL AND park_json IS NOT NULL
@@ -1472,7 +1493,36 @@ BEGIN
             AND clock_timestamp() - statement_timestamp() > p_statement_ms * INTERVAL '1 millisecond' THEN
             RAISE EXCEPTION 'canceling statement due to statement timeout' USING ERRCODE = '57014';
         END IF;
+        IF v_step ? 'r' THEN
+            v_retired := v_retired || ARRAY(SELECT jsonb_array_elements_text(v_step->'r'));
+        END IF;
         v_index := v_index + 1;
+    END LOOP;
+    -- Peel what the steps retired: each level deletes what no root names
+    -- and no edge reaches, skipping what another transaction holds
+    -- (FIG-5949).
+    v_frontier := ARRAY(SELECT DISTINCT unnest(v_retired));
+    WHILE cardinality(v_frontier) > 0 LOOP
+        SELECT ARRAY(SELECT hash FROM lash_blobs WHERE hash = ANY((v_frontier)::text[])
+             ORDER BY hash FOR UPDATE SKIP LOCKED)
+        INTO v_locked;
+        EXIT WHEN cardinality(v_locked) = 0;
+        WITH dead AS (
+                 DELETE FROM lash_blobs AS candidate
+                 WHERE candidate.hash = ANY((v_locked)::text[])
+                   AND NOT EXISTS (
+                       SELECT 1 FROM lash_graph_root_catalog AS root
+                       WHERE root.root_ref = candidate.hash
+                   )
+                   AND NOT EXISTS (
+                       SELECT 1 FROM lash_blob_edges AS edge WHERE edge.child_hash = candidate.hash
+                   )
+                 RETURNING candidate.hash
+             )
+             SELECT (SELECT count(*) FROM dead),
+                 ARRAY(SELECT DISTINCT edge.child_hash
+                     FROM dead JOIN lash_blob_edges AS edge ON edge.parent_hash = dead.hash)
+        INTO v_rows, v_frontier;
     END LOOP;
     IF p_formats IS NOT NULL THEN
         UPDATE lash_actors SET formats = (p_formats) WHERE actor_key = (p_actor);
@@ -1551,6 +1601,9 @@ DECLARE
     v_body jsonb;
     item jsonb;
     held record;
+    v_frontier TEXT[];
+    v_locked TEXT[];
+    v_rows BIGINT;
 BEGIN
     IF p_gate IS NOT NULL THEN
         SELECT COALESCE(jsonb_agg(jsonb_build_array(referrer_kind, referrer_id, cleanup_json)
@@ -1593,10 +1646,37 @@ BEGIN
         DELETE FROM lash_artifact_referrer_edges edge USING jsonb_array_elements(v_refs) ref
             WHERE edge.referrer_kind = ref.value->>0 AND edge.referrer_id = ref.value->>1
                 AND edge.namespace = ANY(p_namespaces);
-        DELETE FROM lash_lash_vm_artifacts artifact USING jsonb_array_elements(v_artifacts) named
+        WITH gone AS (
+            DELETE FROM lash_lash_vm_artifacts artifact USING jsonb_array_elements(v_artifacts) named
             WHERE artifact.namespace = named.value->>0 AND artifact.artifact_ref = named.value->>1
                 AND NOT EXISTS (SELECT 1 FROM lash_artifact_referrer_edges edge
-                    WHERE edge.namespace = artifact.namespace AND edge.artifact_ref = artifact.artifact_ref);
+                    WHERE edge.namespace = artifact.namespace AND edge.artifact_ref = artifact.artifact_ref)
+            RETURNING artifact.graph_ref)
+        SELECT ARRAY(SELECT graph_ref FROM gone WHERE graph_ref IS NOT NULL) INTO v_frontier;
+        -- A bridged artifact's row was its graph node's root: peel it
+        -- (FIG-5949).
+        WHILE cardinality(v_frontier) > 0 LOOP
+        SELECT ARRAY(SELECT hash FROM lash_blobs WHERE hash = ANY((v_frontier)::text[])
+             ORDER BY hash FOR UPDATE SKIP LOCKED)
+        INTO v_locked;
+        EXIT WHEN cardinality(v_locked) = 0;
+        WITH dead AS (
+                 DELETE FROM lash_blobs AS candidate
+                 WHERE candidate.hash = ANY((v_locked)::text[])
+                   AND NOT EXISTS (
+                       SELECT 1 FROM lash_graph_root_catalog AS root
+                       WHERE root.root_ref = candidate.hash
+                   )
+                   AND NOT EXISTS (
+                       SELECT 1 FROM lash_blob_edges AS edge WHERE edge.child_hash = candidate.hash
+                   )
+                 RETURNING candidate.hash
+             )
+             SELECT (SELECT count(*) FROM dead),
+                 ARRAY(SELECT DISTINCT edge.child_hash
+                     FROM dead JOIN lash_blob_edges AS edge ON edge.parent_hash = dead.hash)
+        INTO v_rows, v_frontier;
+    END LOOP;
     END IF;
     RETURN jsonb_build_object('checks', v_checks, 'plans', v_plans);
 END

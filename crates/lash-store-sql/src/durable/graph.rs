@@ -11,8 +11,8 @@
 //! only places their SQL may appear (`scripts/check-durable-sql.py`).
 //!
 //! The catalog is a view of the actual owning columns, never a maintained
-//! cache: a collector enumerates it one source at a time and marks from what
-//! it reads.
+//! cache: a peel or the orphan audit asks it whether anything still names a
+//! node.
 
 /// `blob_edges`: one row per child of an installed graph node, exactly its
 /// envelope's child table. Opaque blobs have none.
@@ -46,9 +46,6 @@ crate::statements! {
         insert_edge = "INSERT INTO blob_edges (parent_hash, child_hash) VALUES (?1, ?2)
              ON CONFLICT (parent_hash, child_hash) DO NOTHING";
 
-        /// Node `?1`'s stored edges, in digest order.
-        edges_of = "SELECT child_hash FROM blob_edges WHERE parent_hash = ?1 ORDER BY child_hash";
-
         /// Admit effect `?2` of execution `?1`, member `?3`/`?4`/`?5`, to
         /// Admission node `?6` at epoch `?7`; nothing when it is admitted.
         admission_put = "INSERT INTO effect_admissions
@@ -69,18 +66,16 @@ crate::statements! {
              WHERE exec_key = ?1 AND effect_id = ?2";
 
         /// Drop every admission of execution `?1`: the cell its consumer
-        /// retired.
-        admissions_clear = "DELETE FROM effect_admissions WHERE exec_key = ?1";
+        /// retired. Returns each Admission node it held.
+        admissions_clear = "DELETE FROM effect_admissions WHERE exec_key = ?1
+             RETURNING admission_ref";
 
         /// Drop every admission whose execution key starts with `?1`: the
         /// cells of one turn at its end, or of one session at its delete.
+        /// Returns each Admission node it held.
         admissions_clear_under = "DELETE FROM effect_admissions
-             WHERE substr(exec_key, 1, length(CAST(?1 AS TEXT))) = CAST(?1 AS TEXT)";
-
-        /// The Admission node of every admission whose execution key starts
-        /// with `?1`.
-        admission_roots_under = "SELECT admission_ref FROM effect_admissions
-             WHERE substr(exec_key, 1, length(CAST(?1 AS TEXT))) = CAST(?1 AS TEXT)";
+             WHERE substr(exec_key, 1, length(CAST(?1 AS TEXT))) = CAST(?1 AS TEXT)
+             RETURNING admission_ref";
 
         /// Every admission of execution `?1`, by effect identity.
         admissions = "SELECT effect_id, owner_key, run_seq, member_ordinal, admission_ref,
@@ -106,7 +101,23 @@ crate::statements! {
         release_retire = "DELETE FROM graph_release_pins WHERE release_key = ?1 AND root_ref = ?2
              RETURNING release_key";
 
-        /// Every root of source `?1`, as the catalog names it.
-        catalog_source = "SELECT root_ref FROM graph_root_catalog WHERE source = ?1";
+        /// Up to `?2` blobs after `?1`, in digest order, that no root names
+        /// and no edge reaches: one page of the orphan audit.
+        orphans_after = "SELECT candidate.hash FROM blobs AS candidate
+             WHERE candidate.hash > ?1
+               AND NOT EXISTS (
+                   SELECT 1 FROM graph_root_catalog AS root WHERE root.root_ref = candidate.hash
+               )
+               AND NOT EXISTS (
+                   SELECT 1 FROM blob_edges AS edge WHERE edge.child_hash = candidate.hash
+               )
+             ORDER BY candidate.hash
+             LIMIT ?2";
+
+        /// How many roots the catalog names.
+        catalog_count = "SELECT count(*) FROM graph_root_catalog";
+
+        /// How many blobs are stored.
+        blob_count = "SELECT count(*) FROM blobs";
     }
 }

@@ -3,12 +3,14 @@
 //! An owner commit whose every domain write is a step program
 //! ([`super::steps`]) is one server call: `lash_owner_commit`, a PL/pgSQL
 //! function generated from this build's statements by [`function_ddl`] and
-//! declared in `schema.sql`. It runs the commit's envelope (the graph gate
-//! and the writer fence shared, the owner fence and its turn-cancel read, the
-//! database clock), installs the commit's graph, runs each step's statement
-//! as static SQL dispatched by the statement's name, then the formats stamp,
-//! the acknowledgement and the release, in one autocommit transaction. Every
-//! statement keeps a cached plan: none is text the function executes.
+//! declared in `schema.sql`. It runs the commit's envelope (the writer fence
+//! shared, the owner fence and its turn-cancel read, the database clock),
+//! installs the commit's graph, key-share locking every staged node another
+//! writer stored, runs each step's statement as static SQL dispatched by the
+//! statement's name, peels the roots the steps retired (FIG-5949), then the
+//! formats stamp, the acknowledgement and the release, in one autocommit
+//! transaction. Every statement keeps a cached plan: none is text the
+//! function executes.
 //!
 //! The function decides nothing a domain owns. A step that answers another
 //! number of rows than it must, an envelope that does not admit the commit
@@ -163,7 +165,7 @@ impl HeldTexts {
 pub(crate) const FUNCTION: &str = "lash_owner_commit";
 
 /// Every statement a step may name: what the function dispatches on.
-pub(super) fn entries() -> [&'static Entry; 25] {
+pub(super) fn entries() -> [&'static Entry; 27] {
     [
         &run_records::APPEND,
         &run_records::PRUNE,
@@ -178,6 +180,8 @@ pub(super) fn entries() -> [&'static Entry; 25] {
         &turns::OPEN_NAMED_RUN,
         &turns::UPSERT_NAMESPACES,
         &turns::WORKING_SET,
+        &turns::PHASE_ROOT,
+        &turns::NAMESPACE_ROOTS,
         &session_mail::BIND_INPUTS,
         &session_mail::BIND_BATCHES,
         &prompts::INSERT_SNAPSHOT,
@@ -244,15 +248,17 @@ pub(crate) static REGISTRY: LazyLock<String> = LazyLock::new(|| {
 fn mechanics() -> Vec<&'static str> {
     let executor = &*EXECUTOR_SQL;
     vec![
-        connection_sql().lock_xact_graph_gate_shared.sql(),
         connection_sql().lock_xact_fleet_fence_shared.sql(),
         SQL.postgres.owner_envelope.sql(),
         graph::lock_nodes().sql(),
         executor.external_absent.sql(),
         graph::insert_nodes().sql(),
+        graph::stored_nodes().sql(),
         executor.held_conflicts.sql(),
         graph::insert_edges().sql(),
         executor.installed_bytes.sql(),
+        graph::peel_lock().sql(),
+        graph::peel_level().sql(),
         SQL.actor.stamp_formats.sql(),
         SQL.postgres.ack_through.sql(),
         SQL.postgres.park_unless_pending.sql(),
@@ -336,6 +342,22 @@ fn branch(entry: &Entry) -> String {
         .collect();
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     let sql = inline(entry.statement().sql(), &args);
+    // A retiring step also collects the roots its rows name (FIG-5949).
+    let (counted, into) = match entry.retires {
+        None => ("count(*)".to_owned(), "v_rows"),
+        Some(column) => (
+            format!(
+                "count(*), COALESCE(array_agg(answered.{column}) \
+                 FILTER (WHERE answered.{column} IS NOT NULL), '{{}}')"
+            ),
+            "v_rows, v_held",
+        ),
+    };
+    let retire = if entry.retires.is_some() {
+        "\n            v_retired := v_retired || v_held;"
+    } else {
+        ""
+    };
     let run = match entry.shape {
         Shape::Exec => format!("{sql};\n            GET DIAGNOSTICS v_rows = ROW_COUNT;"),
         Shape::Returning => {
@@ -345,11 +367,11 @@ fn branch(entry: &Entry) -> String {
                 entry.name()
             );
             format!(
-                "WITH answered AS ({sql})\n            SELECT count(*) INTO v_rows FROM answered;"
+                "WITH answered AS ({sql})\n            SELECT {counted} INTO {into} FROM answered;{retire}"
             )
         }
         Shape::Select => {
-            format!("SELECT count(*) INTO v_rows FROM ({sql}) AS answered;")
+            format!("SELECT {counted} INTO {into} FROM ({sql}) AS answered;{retire}")
         }
     };
     format!("        WHEN '{}' THEN\n            {run}\n", entry.name())
@@ -363,6 +385,25 @@ fn perform(sql: &str) -> String {
         Some(select) if select.eq_ignore_ascii_case("SELECT") => format!("PERFORM{}", &sql[6..]),
         _ => panic!("not a query: {sql}"),
     }
+}
+
+#[cfg(test)]
+/// A function's peel of `v_frontier` (FIG-5949): each level locks what of
+/// it no other transaction holds, then deletes what of that no root names
+/// and no edge reaches, and the children those reached are the next level.
+/// It needs `v_frontier` and `v_locked` (`TEXT[]`) and `v_rows` (`BIGINT`).
+pub(crate) fn peel_loop() -> String {
+    let peel_lock = inline(graph::peel_lock().sql(), &["v_frontier"]);
+    let peel_level = inline(graph::peel_level().sql(), &["v_locked"]);
+    format!(
+        "WHILE cardinality(v_frontier) > 0 LOOP
+        {peel_lock}
+        INTO v_locked;
+        EXIT WHEN cardinality(v_locked) = 0;
+        {peel_level}
+        INTO v_rows, v_frontier;
+    END LOOP;"
+    )
 }
 
 #[cfg(test)]
@@ -384,6 +425,14 @@ pub(crate) fn function_ddl() -> String {
         &["p_digests", "p_contents", "v_inserted"],
     );
     let insert_edges = inline(graph::insert_edges().sql(), &["v_parents", "v_children"]);
+    let lock_held = perform(&inline(
+        graph::stored_nodes().sql(),
+        &[
+            "ARRAY(SELECT encode(staged.digest, 'hex') FROM unnest(p_digests) AS staged(digest) \
+           WHERE NOT (encode(staged.digest, 'hex') = ANY(v_inserted)))",
+        ],
+    ));
+    let peel = peel_loop();
     let installed_bytes = inline(
         executor.installed_bytes.sql(),
         &["p_digests", "p_contents", "v_inserted"],
@@ -420,7 +469,6 @@ pub(crate) fn function_ddl() -> String {
     );
     let branches: String = entries().iter().map(|entry| branch(entry)).collect();
     let registry = &*REGISTRY;
-    let gate = perform(connection_sql().lock_xact_graph_gate_shared.sql());
     let fleet_fence = perform(connection_sql().lock_xact_fleet_fence_shared.sql());
     format!(
         "CREATE OR REPLACE FUNCTION {FUNCTION}(
@@ -457,6 +505,10 @@ DECLARE
     v_step JSONB;
     v_p JSONB;
     v_state TEXT := 'owned';
+    v_held TEXT[];
+    v_retired TEXT[] := '{{}}';
+    v_frontier TEXT[];
+    v_locked TEXT[];
 BEGIN
     -- Generated from this build's statements (registry {registry}); a call
     -- built from others is refused, as is any isolation but read committed.
@@ -467,7 +519,6 @@ BEGIN
     IF p_lock_timeout IS NOT NULL THEN
         PERFORM set_config('lock_timeout', p_lock_timeout, true);
     END IF;
-    {gate};
     {fleet_fence};
     {envelope}
     INTO v_fleet, v_clock, v_xact, v_rev, v_cancel_turn, v_cancel_request, v_cancel_origin,
@@ -489,6 +540,10 @@ BEGIN
     IF cardinality(p_digests) > 0 THEN
         WITH inserted AS ({insert_nodes})
         SELECT COALESCE(array_agg(hash), '{{}}') INTO v_inserted FROM inserted;
+        -- A staged node another writer stored is held against a peel; one a
+        -- peel took first is a conflict, which the explicit form installs
+        -- again (FIG-5949).
+        {lock_held};
         {held_conflicts} INTO v_rows;
         IF v_rows > 0 THEN
             RAISE EXCEPTION 'lash_owner_commit: the graph refused' USING ERRCODE = 'LX004';
@@ -515,8 +570,16 @@ BEGIN
             AND clock_timestamp() - statement_timestamp() > p_statement_ms * INTERVAL '1 millisecond' THEN
             RAISE EXCEPTION 'canceling statement due to statement timeout' USING ERRCODE = '57014';
         END IF;
+        IF v_step ? 'r' THEN
+            v_retired := v_retired || ARRAY(SELECT jsonb_array_elements_text(v_step->'r'));
+        END IF;
         v_index := v_index + 1;
     END LOOP;
+    -- Peel what the steps retired: each level deletes what no root names
+    -- and no edge reaches, skipping what another transaction holds
+    -- (FIG-5949).
+    v_frontier := ARRAY(SELECT DISTINCT unnest(v_retired));
+    {peel}
     IF p_formats IS NOT NULL THEN
         {stamp_formats};
     END IF;
@@ -573,6 +636,9 @@ impl Call {
                 });
                 if let Some(expect) = step.expect {
                     json["n"] = expect.into();
+                }
+                if !step.retired.is_empty() {
+                    json["r"] = step.retired.clone().into();
                 }
                 steps.push(json);
             }

@@ -88,9 +88,9 @@ pub(super) async fn delete_session_from_catalog(
                 )?;
             }
             // What the session roots: its head, every revision it still
-            // retains and every window its terminals name. Its pins,
-            // revisions and runs go with it, so each root they held becomes a
-            // reclaim candidate here.
+            // retains, every window its terminals name and its admission
+            // base. Its pins, revisions, runs and metadata go with it, so
+            // each root they held is retired here and peeled below.
             let text_column = |sql: &str| -> Result<Vec<String>, lash_core_execution::StoreError> {
                 let mut stmt = tx.prepare(sql).map_err(sqlite_error)?;
                 let rows = stmt
@@ -105,10 +105,15 @@ pub(super) async fn delete_session_from_catalog(
                     .chain(text_column(runs.select_session_window_checkpoints.sql())?)
                     .collect();
             roots.extend(checkpoint_ref);
-            // Its engine rows go too, every turn's ledger and every cell's
-            // working state, and each root they held is a candidate.
             roots.extend(
-                crate::durable::session_engine_roots(tx, &session_id).map_err(sqlite_error)?,
+                tx.query_row(
+                    session_sql().meta.select_admission_base.sql(),
+                    params![session_id.as_str()],
+                    |row| row.get::<_, Option<String>>(0),
+                )
+                .optional()
+                .map_err(sqlite_error)?
+                .flatten(),
             );
             let mut retained_leaves: std::collections::BTreeSet<String> =
                 text_column(session_sql().revisions.select_session_leaves.sql())?
@@ -116,28 +121,6 @@ pub(super) async fn delete_session_from_catalog(
                     .chain(text_column(runs.select_session_window_leaves.sql())?)
                     .collect();
             retained_leaves.extend(leaf_node_id);
-            // Every blob the session's roots reach is a candidate: a graph
-            // manifest's nodes and the component blobs they name.
-            let candidates = crate::durable::reachable_from(tx, &roots).map_err(sqlite_error)?;
-            for blob_ref in &candidates {
-                let exists = tx
-                    .query_row(
-                        crate::artifact_store::artifact_sql()
-                            .blobs_sqlite
-                            .select_exists
-                            .sql(),
-                        params![blob_ref],
-                        |row| row.get::<_, bool>(0),
-                    )
-                    .map_err(sqlite_error)?;
-                if !exists {
-                    return Err(stored_data_corrupt(
-                        "session blob reference",
-                        format!("blob `{blob_ref}` is missing"),
-                    ));
-                }
-            }
-            report.enumerated_blob_count = candidates.len();
             for statement in [
                 session_sql().head.delete_by_session.sql(),
                 session_sql().revisions.delete_by_session.sql(),
@@ -151,7 +134,11 @@ pub(super) async fn delete_session_from_catalog(
             // leaf while its row lives. A `close_session` intent stays as
             // its deletion tombstone.
             crate::session_runs::delete_session_runs_conn(tx, &session_id)?;
-            crate::durable::retire_session_rows(tx, &session_id).map_err(sqlite_error)?;
+            // Its engine rows go too, every turn's ledger and every cell's
+            // working state, and each root they held is retired with them.
+            roots.extend(
+                crate::durable::retire_session_rows(tx, &session_id).map_err(sqlite_error)?,
+            );
             for leaf_node_id in &retained_leaves {
                 persistence::retire_unreachable_ancestry_conn(tx, leaf_node_id)?;
             }
@@ -223,21 +210,13 @@ pub(super) async fn delete_session_from_catalog(
             // root shares.
             crate::durable::release_prompt_snapshots(tx, &session_id, None)
                 .map_err(sqlite_error)?;
-            // Every predicate is an indexed NOT EXISTS over the root catalog
-            // and exact edges; no whole-catalog mark/sweep runs in this
-            // transaction. A candidate another root still reaches keeps an
-            // edge from it and is retained.
-            let (deleted, retained) = crate::durable::reclaim_candidates(
-                tx,
-                candidates,
-                crate::artifact_store::artifact_sql()
-                    .blobs_sqlite
-                    .reclaim_session_candidate
-                    .sql(),
-            )
-            .map_err(sqlite_error)?;
-            report.deleted_blob_count += deleted;
-            report.retained_blob_count += retained;
+            // The session's roots are retired: peel them. A node another
+            // root still names or reaches is retained, and the peel stops
+            // there; its work is the session's exclusive closure.
+            let peeled = crate::durable::peel(tx, roots).map_err(sqlite_error)?;
+            report.enumerated_blob_count = peeled.examined;
+            report.deleted_blob_count += peeled.deleted;
+            report.retained_blob_count += peeled.retained();
             tracing::debug!(
                 session_id = session_id.as_str(),
                 enumerated_blob_count = report.enumerated_blob_count,

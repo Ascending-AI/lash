@@ -163,6 +163,15 @@ pub(super) fn apply(
         } => {
             let (stored, argument) = phase.stored();
             let pin = phase.model();
+            // The phase's PhaseRoot it replaces, peeled once the commit's
+            // writes are applied.
+            let replaced = tx
+                .prepare_cached(SQL.phase_root.sql())?
+                .query_row([session.as_str(), run.as_str()], |row| {
+                    row.get::<_, Option<String>>(0)
+                })
+                .optional()?
+                .flatten();
             let advanced = tx
                 .prepare_cached(SQL.advance_phase.sql())?
                 .query_row(
@@ -183,7 +192,13 @@ pub(super) fn apply(
                 )
                 .optional()?;
             match advanced {
-                Some(()) => Ok(Ok(())),
+                Some(()) => {
+                    let next = phase.checkpoint().map(|checkpoint| checkpoint.to_hex());
+                    if let Some(old) = replaced.filter(|old| Some(old) != next.as_ref()) {
+                        commit.retired.stored(old);
+                    }
+                    Ok(Ok(()))
+                }
                 None => refuse(DomainRefusal::TurnNotOpen {
                     session: session.clone(),
                     run: run.clone(),
@@ -228,6 +243,24 @@ pub(super) fn apply(
                         return Ok(Err(corrupt("turn namespace entry", &error.to_string())));
                     }
                 };
+                let values = match &namespace.values {
+                    StoredValues::Root(root) => Some(root.to_hex()),
+                    StoredValues::Base | StoredValues::Held => None,
+                };
+                // A held write keeps the stored root; any other replaces it.
+                if !matches!(namespace.values, StoredValues::Held) {
+                    let replaced = tx
+                        .prepare_cached(SQL.namespace_root.sql())?
+                        .query_row(
+                            [session.as_str(), run.as_str(), namespace.plugin.as_str()],
+                            |row| row.get::<_, Option<String>>(0),
+                        )
+                        .optional()?
+                        .flatten();
+                    if let Some(old) = replaced.filter(|old| Some(old) != values.as_ref()) {
+                        commit.retired.stored(old);
+                    }
+                }
                 cached_execute(
                     tx,
                     SQL.upsert_namespace.sql(),
@@ -236,10 +269,7 @@ pub(super) fn apply(
                         run.as_str(),
                         namespace.plugin,
                         entry,
-                        match &namespace.values {
-                            StoredValues::Root(root) => Some(root.to_hex()),
-                            StoredValues::Base | StoredValues::Held => None,
-                        },
+                        values,
                         matches!(namespace.values, StoredValues::Held),
                     ],
                 )?;
@@ -266,7 +296,12 @@ pub(super) fn apply(
                 )
                 .optional()?;
             match set {
-                Some(()) => Ok(Ok(())),
+                Some(()) => {
+                    if let Some(old) = expected.filter(|old| Some(*old) != *working) {
+                        commit.retired.closure(&old);
+                    }
+                    Ok(Ok(()))
+                }
                 None => refuse(DomainRefusal::TurnNotOpen {
                     session: session.clone(),
                     run: run.clone(),
@@ -337,16 +372,36 @@ pub(super) fn apply(
                 crate::revisions::record_terminal_conn(tx, session, *revision)
                     .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
             }
-            cached_execute(
-                tx,
-                SQL.delete_phase.sql(),
-                rusqlite::params![session.as_str(), run.as_str()],
-            )?;
-            cached_execute(
-                tx,
-                SQL.delete_namespaces.sql(),
-                rusqlite::params![session.as_str(), run.as_str()],
-            )?;
+            // The turn's phase row and namespaces go with it, and their
+            // roots with them: its working execution and namespace values
+            // whole, its PhaseRoot alone (the TurnContent ordering
+            // constraint, [`super::Retired`]).
+            let phase = tx
+                .prepare_cached(SQL.delete_phase.sql())?
+                .query_row([session.as_str(), run.as_str()], |row| {
+                    Ok((
+                        row.get::<_, Option<String>>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                    ))
+                })
+                .optional()?;
+            if let Some((checkpoint, working)) = phase {
+                if let Some(checkpoint) = checkpoint {
+                    commit.retired.phase_end(checkpoint);
+                }
+                if let Some(working) = working {
+                    commit.retired.stored(working);
+                }
+            }
+            let namespaces = tx
+                .prepare_cached(SQL.delete_namespaces.sql())?
+                .query_map([session.as_str(), run.as_str()], |row| {
+                    row.get::<_, Option<String>>(0)
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            for root in namespaces.into_iter().flatten() {
+                commit.retired.stored(root);
+            }
             super::session_mail::settle_held(tx, session, run, commit.now.0)?;
             crate::obligation_ledger::end_execution_tx(
                 tx,
@@ -357,7 +412,9 @@ pub(super) fn apply(
             // The cells the turn stopped in are never resumed, and the
             // turn's cancel request is answered by its terminal: neither has
             // a reader left. The turn's own facts stay as its ledger.
-            super::snapshots::retire_under(tx, &ExecKey::turn_cells(session, run))?;
+            for root in super::snapshots::retire_under(tx, &ExecKey::turn_cells(session, run))? {
+                commit.retired.stored(root);
+            }
             cached_execute(
                 tx,
                 SQL.delete_cancel.sql(),

@@ -26,6 +26,8 @@ async fn postgres_commit_with_changed_component_waits_for_delete_then_refuses_mi
     commit_waits_for_delete(ReuseBranch::ChangedComponent).await;
 }
 
+/// The commit supplies its root's bytes: a reclaim that took the stored
+/// root first leaves the commit to install it again, whole (FIG-5949).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn postgres_commit_with_existing_root_waits_for_delete_then_reinstalls_root_when_configured()
 {

@@ -79,9 +79,10 @@ pub(crate) fn record_terminal_conn(
 }
 
 /// Release every revision nothing retains, of `session_id` or of every
-/// session, and retire the ancestry only a released revision kept alive.
-/// `collecting` is a host collection, which ends `until_gc`'s hold. Answers
-/// how many revisions were released.
+/// session, retire the ancestry only a released revision kept alive, and
+/// peel the checkpoint and config roots they published (FIG-5949). `collecting` is a
+/// host collection, which ends `until_gc`'s hold. Answers how many blobs
+/// the peel deleted.
 pub(crate) fn release_unretained_conn(
     tx: &Connection,
     collecting: bool,
@@ -94,15 +95,28 @@ pub(crate) fn release_unretained_conn(
         let rows = stmt
             .query_map(
                 params![i64::from(collecting), session_id.map(SessionId::as_str)],
-                |row| row.get::<_, Option<String>>(1),
+                |row| {
+                    Ok((
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                    ))
+                },
             )
             .map_err(sqlite_error)?;
         rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)?
     };
-    for leaf_node_id in released.iter().flatten() {
-        persistence::retire_unreachable_ancestry_conn(tx, leaf_node_id)?;
+    let mut roots = std::collections::BTreeSet::new();
+    for (leaf_node_id, checkpoint_ref, config_ref) in released {
+        if let Some(leaf_node_id) = leaf_node_id {
+            persistence::retire_unreachable_ancestry_conn(tx, &leaf_node_id)?;
+        }
+        roots.extend(checkpoint_ref);
+        roots.extend(config_ref);
     }
-    Ok(released.len())
+    crate::durable::peel(tx, roots)
+        .map(|peeled| peeled.deleted)
+        .map_err(sqlite_error)
 }
 
 /// The retention policy recorded for `session_id`, or `None` for a session

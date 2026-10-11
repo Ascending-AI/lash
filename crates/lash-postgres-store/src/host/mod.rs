@@ -294,12 +294,9 @@ pub(crate) const STALE_IDLE: std::time::Duration = std::time::Duration::from_sec
 #[derive(Clone, Debug)]
 pub struct TransactionPrelude {
     begin: Arc<str>,
-    /// The guards, the graph gate and the writer fence's shared locks and
-    /// then `BEGIN`, in one simple query: what a guarded writer begins with.
+    /// The guards and the writer fence's shared lock and then `BEGIN`, in
+    /// one simple query: what a guarded writer begins with.
     fenced: Arc<str>,
-    /// [`Self::fenced`] with the graph gate exclusive: what a collection
-    /// begins with.
-    collecting: Arc<str>,
     deadline: Option<Duration>,
     /// The `lock_timeout` a one-call commit installs, and its statement
     /// budget in milliseconds.
@@ -331,7 +328,6 @@ impl TransactionPrelude {
         Self {
             begin: statement.into(),
             fenced: fenced_begin(&settings).into(),
-            collecting: collecting_begin(&settings).into(),
             deadline: guards.operation_deadline,
             call_guards: (
                 timeout_setting(guards.lock).map(|ms| format!("{ms}ms").into()),
@@ -349,7 +345,6 @@ impl TransactionPrelude {
         Self {
             begin: "BEGIN".into(),
             fenced: fenced_begin("").into(),
-            collecting: collecting_begin("").into(),
             deadline: None,
             call_guards: (None, None),
         }
@@ -367,19 +362,12 @@ impl TransactionPrelude {
         &self.fenced
     }
 
-    /// A collection's `BEGIN`: the guards, then the graph gate exclusive and
-    /// the writer fence shared, then `BEGIN` ([`crate::guarded_tx`]).
-    pub(crate) fn collecting(&self) -> &str {
-        &self.collecting
-    }
-
     /// What a one-call commit installs in place of the `BEGIN`'s guards:
     /// its `lock_timeout`, and the budget of its statements in milliseconds,
     /// which it checks between them.
     pub(crate) fn call_guards(&self) -> (Option<&str>, Option<i64>) {
         (self.call_guards.0.as_deref(), self.call_guards.1)
     }
-
     /// The whole-operation deadline of the profile.
     pub fn deadline(&self) -> Option<Duration> {
         self.deadline
@@ -436,26 +424,10 @@ impl TransactionPrelude {
 /// back whole and leaves the connection outside any transaction, and the
 /// fence's read, the transaction's next statement, takes its snapshot only
 /// once the lock is held: read committed, whatever the deployment's default.
-///
-/// The checkpoint graph's gate comes first, shared (FIG-5887 §8): it orders
-/// every guarded transaction against a collection, which takes it exclusive
-/// in [`collecting_begin`], and no lock may be taken before it.
 fn fenced_begin(settings: &str) -> String {
     let sql = crate::connection_sql::connection_sql();
     format!(
-        "SET TRANSACTION ISOLATION LEVEL READ COMMITTED; {settings}{}; {}; BEGIN",
-        sql.lock_xact_graph_gate_shared.sql(),
-        sql.lock_xact_fleet_fence_shared.sql()
-    )
-}
-
-/// [`fenced_begin`] for a collection: the graph gate exclusive, then the
-/// writer fence shared.
-fn collecting_begin(settings: &str) -> String {
-    let sql = crate::connection_sql::connection_sql();
-    format!(
-        "SET TRANSACTION ISOLATION LEVEL READ COMMITTED; {settings}{}; {}; BEGIN",
-        sql.lock_xact_graph_gate.sql(),
+        "SET TRANSACTION ISOLATION LEVEL READ COMMITTED; {settings}{}; BEGIN",
         sql.lock_xact_fleet_fence_shared.sql()
     )
 }

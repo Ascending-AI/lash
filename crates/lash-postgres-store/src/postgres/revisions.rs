@@ -81,9 +81,10 @@ pub(crate) async fn record_terminal_conn(
 }
 
 /// Release every revision nothing retains, of `session_id` or of every
-/// session, and retire the ancestry only a released revision kept alive.
-/// `collecting` is a host collection, which ends `until_gc`'s hold. Answers
-/// how many revisions were released.
+/// session, retire the ancestry only a released revision kept alive, and
+/// peel the checkpoint and config roots they published (FIG-5949). `collecting` is a
+/// host collection, which ends `until_gc`'s hold. Answers how many blobs the
+/// peel deleted.
 ///
 /// A fork holds its source revision's row share-locked until its own head
 /// commits, so a release that raced one waits and then retires nothing the
@@ -110,7 +111,15 @@ pub(crate) async fn release_unretained_tx(
     for leaf_node_id in &leaves {
         crate::runtime_persistence::retire_unreachable_ancestry_tx(tx, leaf_node_id).await?;
     }
-    Ok(released.len())
+    let roots = released
+        .iter()
+        .flat_map(|row| [row.get::<Option<String>, _>(2), row.get(3)])
+        .flatten()
+        .collect();
+    crate::durable::peel(tx, roots)
+        .await
+        .map(|peeled| peeled.deleted)
+        .map_err(crate::support::graph_store_error)
 }
 
 /// The retention policy recorded for `session_id`, or `None` for a session

@@ -29,7 +29,7 @@ fn unsupported(variant: u32) -> TokenError {
 
 /// Kind 9: raw bytes an owning codec reads, with no graph children inside
 /// them. The bytes are inline (placed in shared leaves when large), or a
-/// declared reference to an opaque blob the collector retains as a leaf.
+/// declared reference to an opaque blob its node keeps as a leaf.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OpaqueLeaf {
     /// The identity of the codec that owns the bytes.

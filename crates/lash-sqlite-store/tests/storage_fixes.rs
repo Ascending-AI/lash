@@ -6,9 +6,7 @@
 //!   false success (the rows-affected check),
 //! * a poisoned connection mutex recovers instead of bricking the store,
 //! * an unsupported compatibility floor reports the recorded version and reader range,
-//! * concurrent first opens do not expose an unstamped store,
-//! * `gc_unreachable` never panics on a corrupt rooted manifest and keeps
-//!   every blob in that conservative case.
+//! * concurrent first opens do not expose an unstamped store.
 
 // FIG-2971: this file is test/tooling/host code; ambient fs/env/process
 // access is sanctioned here (the workspace clippy ban targets production

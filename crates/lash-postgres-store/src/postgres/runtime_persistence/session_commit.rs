@@ -236,12 +236,26 @@ impl SessionCommitStore for PostgresStore {
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
+        let checkpoint = base.checkpoint.as_ref().map(|blob_ref| blob_ref.as_str());
+        let replaced = crate::observed_sql::query_scalar::<_, Option<String>>(
+            session_sql().meta.select_admission_base.sql(),
+        )
+        .bind(session_id.as_str())
+        .fetch_optional(crate::observed_sql::executor(&mut **tx))
+        .await
+        .map_err(store_sqlx_error)?
+        .flatten()
+        .filter(|old| Some(old.as_str()) != checkpoint);
         crate::observed_sql::query(session_sql().meta.retain_admission_base.sql())
             .bind(session_id.as_str())
-            .bind(base.checkpoint.as_ref().map(|blob_ref| blob_ref.as_str()))
+            .bind(checkpoint)
             .execute(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?;
+        // The base it replaced is retired: peel it (FIG-5949).
+        crate::durable::peel(&mut tx, replaced.into_iter().collect())
+            .await
+            .map_err(crate::support::graph_store_error)?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(())
     }

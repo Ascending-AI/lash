@@ -456,7 +456,7 @@ fn every_envelope_refusal_names_its_cause() {
             limit: 4
         })
     );
-    // A future kind passes the generic check, so a collector can follow its
+    // A future kind passes the generic check, so a reader can follow its
     // children, and is refused by an execution decoder.
     let future = raw(1_000, &[], &[0x00]);
     assert!(check_envelope(&future.bytes, future.id, &limits()).is_ok());

@@ -8,13 +8,17 @@
 //! that answers another number of rows refuses the commit, and the domain's
 //! classifier, reading in the same transaction, names the refusal: only this
 //! path classifies, so a refusal the executor meets is run again here.
+//!
+//! A step can retire graph roots (FIG-5949): the roots its statement
+//! answers in a named column, and the roots its writer knew it replaced.
+//! Either path peels them once every step ran, before the commit ends.
 
 use lash_durable::DurableError;
 use lash_store_sql::Rendered;
 use sqlx::PgConnection;
 use sqlx::postgres::PgRow;
 
-use super::sqlx_failure;
+use super::{Retired, sqlx_failure};
 
 /// A step parameter's type, as the executor decodes it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -42,6 +46,8 @@ pub(super) struct Entry {
     statement: fn() -> &'static Rendered,
     pub(super) params: &'static [Ty],
     pub(super) shape: Shape,
+    /// The answered column naming a root each answered row retires.
+    pub(super) retires: Option<&'static str>,
 }
 
 impl Entry {
@@ -54,6 +60,17 @@ impl Entry {
             statement,
             params,
             shape,
+            retires: None,
+        }
+    }
+
+    /// This entry, each answered row of which retires the root its column
+    /// `column` names (none when null): a query or a `RETURNING` write.
+    pub(super) const fn retiring(self, column: &'static str) -> Self {
+        assert!(!matches!(self.shape, Shape::Exec));
+        Self {
+            retires: Some(column),
+            ..self
         }
     }
 
@@ -117,13 +134,14 @@ impl Value {
     }
 }
 
-/// One statement of a step program, with its values and the rows it must
-/// answer (`None`: any number).
+/// One statement of a step program, with its values, the rows it must
+/// answer (`None`: any number) and the roots it retires once it does.
 #[derive(Clone)]
 pub(super) struct Step {
     pub(super) entry: &'static Entry,
     pub(super) values: Vec<Value>,
     pub(super) expect: Option<u64>,
+    pub(super) retired: Vec<String>,
 }
 
 impl Step {
@@ -142,7 +160,14 @@ impl Step {
             entry,
             values,
             expect,
+            retired: Vec::new(),
         }
+    }
+
+    /// This step, which retires `roots` once it answers what it must.
+    pub(super) fn retiring(mut self, roots: impl IntoIterator<Item = String>) -> Self {
+        self.retired.extend(roots);
+        self
     }
 
     /// `entry` run with `values`, refusing unless it answers one row.
@@ -191,15 +216,31 @@ pub(super) struct Refused {
 }
 
 /// Run `steps` in `tx`, in order, until one answers another number
-/// of rows than it must: that step, which ends the run.
+/// of rows than it must: that step, which ends the run. Each step that ran
+/// records the roots it retired in `retired`.
 pub(super) async fn run(
     tx: &mut PgConnection,
     steps: &[Step],
+    retired: &Retired,
 ) -> Result<Option<Refused>, DurableError> {
+    use sqlx::Row as _;
     for (index, step) in steps.iter().enumerate() {
         let (count, rows) = step.run(tx).await?;
         if step.expect.is_some_and(|expect| expect != count) {
             return Ok(Some(Refused { index, rows }));
+        }
+        if let Some(column) = step.entry.retires {
+            for row in &rows {
+                if let Some(root) = row
+                    .try_get::<Option<String>, _>(column)
+                    .map_err(sqlx_failure)?
+                {
+                    retired.stored(root);
+                }
+            }
+        }
+        for root in &step.retired {
+            retired.stored(root.clone());
         }
     }
     Ok(None)

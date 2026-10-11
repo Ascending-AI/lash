@@ -1,5 +1,5 @@
-//! The node envelope, its digest, and the generic check every reader and the
-//! collector runs (FIG-5887 §2).
+//! The node envelope, its digest, and the generic check every reader runs
+//! (FIG-5887 §2).
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -255,7 +255,7 @@ pub(crate) fn envelope_len(kind: NodeKind, children: usize, body: usize) -> usiz
 /// The generic check: verifies `bytes` hash to `expected`, then parses them
 /// with [`parse_envelope`], within `limits`' node-size bound.
 ///
-/// It accepts any nonzero kind, registered or not, so a collector can follow
+/// It accepts any nonzero kind, registered or not, so a reader can follow
 /// a future kind's declared children; an execution decoder refuses kinds it
 /// does not support. Unknown primitive framing is never skipped.
 ///

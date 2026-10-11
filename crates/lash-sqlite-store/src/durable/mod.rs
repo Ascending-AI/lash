@@ -68,10 +68,8 @@ pub(crate) use node_wakes::TABLES as NODE_WAKES_TABLES;
 // each domain's own lane adds its tables beside them.
 pub(crate) use graph::TABLES as GRAPH_TABLES;
 pub(crate) use graph::{
-    GraphClosure, collect_in as collect_graph_in, graph_closure, install_staged, reachable_from,
-    reclaim_candidates,
+    AUDIT_PAGE, GraphClosure, audit_page, graph_closure, graph_counts, install_staged, peel,
 };
-pub(crate) use lash_durable::domain::graph_commit::CollectionLimits;
 pub(crate) use prompts::TABLES as PROMPT_SNAPSHOTS_TABLES;
 pub(crate) use prompts::release as release_prompt_snapshots;
 pub(crate) use run_records::TABLES as RUN_RECORDS_TABLES;
@@ -81,59 +79,44 @@ pub(crate) use turns::TABLES as TURN_PHASES_TABLES;
 pub(crate) use waits::TABLES as WAITS_TABLES;
 
 /// The engine's tables, carried by the durable core.
-/// The graph roots `session`'s engine rows hold: its turns' and cells' run
-/// facts, its cells' roots and admissions. What its delete may reclaim once
-/// [`retire_session_rows`] removed them.
-pub(crate) fn session_engine_roots(
-    tx: &Connection,
-    session: &lash_sansio::SessionId,
-) -> rusqlite::Result<std::collections::BTreeSet<String>> {
-    use lash_durable::domain::{ExecKey, OwnerKey};
-
-    let cells = ExecKey::session_cells(session);
-    let mut roots = std::collections::BTreeSet::new();
-    roots.extend(run_records::roots_under(
-        tx,
-        &OwnerKey::session_turns(session),
-    )?);
-    roots.extend(run_records::roots_under(tx, &cells)?);
-    roots.extend(snapshots::roots_under(tx, &cells)?);
-    roots.extend(graph::admission_roots_under(tx, &cells)?);
-    Ok(roots)
-}
-
 /// Delete every engine row `session` owns, in its physical delete: its
 /// turns' run facts (their tool-call ledgers), its cells' roots, admissions
 /// and facts, the waits its actor owns and its turns' wait tombstones. The
-/// session's actor row stays, its terminal fence.
+/// session's actor row stays, its terminal fence. Answers every graph root
+/// those rows held: the delete's to peel.
 pub(crate) fn retire_session_rows(
     tx: &Connection,
     session: &lash_sansio::SessionId,
-) -> rusqlite::Result<()> {
+) -> rusqlite::Result<Vec<String>> {
     use lash_durable::domain::{ExecKey, OwnerKey, ScopeKey};
 
-    run_records::delete_under(tx, &OwnerKey::session_turns(session))?;
-    snapshots::retire_under(tx, &ExecKey::session_cells(session))?;
+    let mut roots = run_records::delete_under(tx, &OwnerKey::session_turns(session))?;
+    roots.extend(snapshots::retire_under(
+        tx,
+        &ExecKey::session_cells(session),
+    )?);
     if let Ok(actor) = ActorKey::session(session.as_str()) {
         waits::delete_owned(tx, &actor)?;
     }
-    waits::delete_under(tx, &ScopeKey::session_turns(session))
+    waits::delete_under(tx, &ScopeKey::session_turns(session))?;
+    Ok(roots)
 }
 
 /// Delete `process`'s run facts and the waits it owns, in its prune: the
-/// process host API's tool calls go with its record.
+/// process host API's tool calls go with its record, and the RoundFact
+/// nodes they held are peeled.
 pub(crate) fn retire_process_rows(
     tx: &Connection,
     process: &lash_sansio::ProcessId,
 ) -> rusqlite::Result<()> {
-    run_records::delete_owner(
+    let facts = run_records::delete_owner(
         tx,
         &lash_durable::domain::OwnerKey::Process(process.clone()).stored(),
     )?;
     if let Ok(actor) = ActorKey::process(process.as_str()) {
         waits::delete_owned(tx, &actor)?;
     }
-    Ok(())
+    graph::peel(tx, facts.into_iter().collect()).map(drop)
 }
 
 /// Every per-owner engine row in `conn`'s database, one rendered line each:
@@ -317,6 +300,45 @@ pub(crate) struct Committing<'a> {
     pub(crate) fleet: lash_core_execution::FleetFormat,
     /// How the session store a head commit writes keeps its blobs.
     pub(crate) blob_profile: crate::BuiltinBlobProfile,
+    /// The roots its writes retired, peeled before it commits.
+    pub(crate) retired: Retired,
+}
+
+/// The roots a transaction's writes retired: what it peels before it
+/// commits (FIG-5949). A turn's terminal retires its PhaseRoot alone: the
+/// TurnContent under it is the transcript the session's next turn names
+/// again, so it waits for the orphan audit rather than being reinstalled
+/// (the TurnContent ordering constraint).
+#[derive(Default)]
+pub(crate) struct Retired {
+    closures: std::cell::RefCell<std::collections::BTreeSet<String>>,
+    phase_ends: std::cell::RefCell<std::collections::BTreeSet<String>>,
+}
+
+impl Retired {
+    /// `root` was retired: peel its closure.
+    pub(crate) fn closure(&self, root: &lash_core_store::checkpoint_graph::NodeId) {
+        self.closures.borrow_mut().insert(root.to_hex());
+    }
+
+    /// A stored root reference was retired: peel its closure.
+    pub(crate) fn stored(&self, root: impl Into<String>) {
+        self.closures.borrow_mut().insert(root.into());
+    }
+
+    /// An ended turn's PhaseRoot was retired: peel it alone.
+    pub(crate) fn phase_end(&self, root: impl Into<String>) {
+        self.phase_ends.borrow_mut().insert(root.into());
+    }
+
+    pub(crate) fn into_parts(
+        self,
+    ) -> (
+        std::collections::BTreeSet<String>,
+        std::collections::BTreeSet<String>,
+    ) {
+        (self.closures.into_inner(), self.phase_ends.into_inner())
+    }
 }
 
 fn refuse<T>(error: DurableError) -> Flow<T> {
@@ -651,12 +673,14 @@ fn apply_owner(
         now,
         fleet,
         blob_profile,
+        retired: Retired::default(),
     };
     for domain in write.domain() {
         if let Err(refusal) = apply_domain(tx, &committing, domain)? {
             return refuse(refusal);
         }
     }
+    graph::reclaim(tx, committing.retired)?;
     if let Some(formats) = write.formats() {
         cached_execute(
             tx,
@@ -850,7 +874,7 @@ fn apply_domain(tx: &FencedTx<'_>, committing: &Committing<'_>, write: &DomainWr
         DomainWrite::RunFact(write) => run_records::apply(tx, committing, write),
         DomainWrite::ExecRoot(write) => snapshots::apply(tx, committing, write),
         DomainWrite::EffectAdmission(write) => graph::apply_admission(tx, committing, write),
-        DomainWrite::ReleasePin(write) => graph::apply_release_pin(tx, write),
+        DomainWrite::ReleasePin(write) => graph::apply_release_pin(tx, committing, write),
         DomainWrite::Wait(write) => waits::apply(tx, committing, write),
         DomainWrite::Process(write) => processes::apply(tx, committing, write),
         DomainWrite::SessionClose(write) => session_close::apply(tx, committing, write),

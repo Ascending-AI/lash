@@ -383,14 +383,8 @@ impl SqliteStore {
             artifact_sql().refs.delete_unreferenced.sql(),
             params![namespace, artifact_ref],
         )?;
-        crate::conn::cached_execute(
-            tx,
-            artifact_sql()
-                .blobs_sqlite
-                .reclaim_unreferenced_artifact
-                .sql(),
-            params![blob_ref],
-        )?;
+        // The pointer was the blob's root: peel it and what only it reached.
+        crate::durable::peel(tx, std::collections::BTreeSet::from([blob_ref]))?;
         Ok(())
     }
 

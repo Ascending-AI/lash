@@ -1,12 +1,12 @@
 //! The checkpoint graph's store laws (`lash_durable::laws::graph`) over
 //! SQLite, in memory and in a file.
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use lash_core_execution::testing::TestClock;
 use lash_core_store::checkpoint_graph::{GraphRefusal, NodeId};
 use lash_durable::DurableStore;
-use lash_durable::domain::graph_commit::{CollectionLimits, GraphCollection};
 use lash_durable::laws::graph::{self as laws, ForeignWrite, GraphTier};
 
 use crate::{SqliteDurableStore, SqliteStoreSet};
@@ -60,6 +60,21 @@ impl Tier {
     }
 }
 
+impl Tier {
+    /// The one text column `sql` selects, row by row.
+    async fn texts(&self, sql: &'static str) -> Vec<String> {
+        self.store
+            .connection_for_testing()
+            .call(move |conn| {
+                conn.prepare(sql)?
+                    .query_map([], |row| row.get::<_, String>(0))?
+                    .collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .await
+            .expect("a raw read")
+    }
+}
+
 fn text(value: impl Into<String>) -> rusqlite::types::Value {
     rusqlite::types::Value::Text(value.into())
 }
@@ -74,8 +89,8 @@ impl GraphTier for Tier {
         &self.store
     }
 
-    async fn collect(&self, limits: CollectionLimits) -> Result<GraphCollection, GraphRefusal> {
-        self.store.collect_graph(limits).await
+    async fn audit(&self) -> Result<u64, GraphRefusal> {
+        self.store.audit_orphans().await
     }
 
     async fn blob(&self, hash: &str) -> Option<(Vec<u8>, u8)> {
@@ -113,6 +128,17 @@ impl GraphTier for Tier {
             .collect()
     }
 
+    async fn blobs(&self) -> BTreeSet<String> {
+        self.texts("SELECT hash FROM blobs")
+            .await
+            .into_iter()
+            .collect()
+    }
+
+    async fn roots(&self) -> Vec<String> {
+        self.texts("SELECT root_ref FROM graph_root_catalog").await
+    }
+
     async fn foreign(&self, write: ForeignWrite) {
         use rusqlite::types::Value;
         let (sql, params): (&str, Vec<Value>) = match write {
@@ -124,13 +150,6 @@ impl GraphTier for Tier {
                 "UPDATE blobs SET content = ?2 WHERE hash = ?1",
                 vec![hex(&node), Value::Blob(bytes)],
             ),
-            ForeignWrite::DeleteEdges { parent } => (
-                "DELETE FROM blob_edges WHERE parent_hash = ?1",
-                vec![hex(&parent)],
-            ),
-            ForeignWrite::DeleteBlob { node } => {
-                ("DELETE FROM blobs WHERE hash = ?1", vec![hex(&node)])
-            }
             ForeignWrite::RevisionRoot {
                 config,
                 session,
@@ -219,7 +238,6 @@ impl GraphTier for Tier {
                 "DELETE FROM session_runs WHERE session_id = ?1 AND run = ?2",
                 vec![text(session.as_str()), text(run.as_str())],
             ),
-            ForeignWrite::BreakCatalog => ("DROP VIEW graph_root_catalog", Vec::new()),
         };
         self.raw(sql.to_owned(), params).await;
     }
@@ -252,9 +270,10 @@ macro_rules! law {
 law!(a_refused_owner_graph_commit_writes_nothing);
 law!(an_owner_refuses_a_second_outcome_for_one_call);
 law!(every_root_source_retains_its_graph_and_shared_leaves_outlive_one_owner);
-law!(a_collection_sweeps_only_what_it_proved_unreachable);
+law!(the_orphan_audit_peels_only_what_no_root_reaches);
 law!(an_owner_commit_is_admitted_on_its_whole_encoding);
-law!(a_collection_racing_commits_sweeps_nothing_they_rely_on);
+law!(a_read_racing_replacement_and_its_peel_reads_one_whole_root);
+law!(an_audit_racing_commits_peels_nothing_they_rely_on);
 law!(a_reference_racing_its_roots_retirement_installs_whole_or_refuses);
 
 /// FIG-5912: a stored node's member of the build catalog hydrates with all

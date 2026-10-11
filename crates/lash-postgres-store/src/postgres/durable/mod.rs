@@ -57,9 +57,11 @@ use crate::support::store_sqlx_error;
 mod admission;
 mod executor;
 pub(crate) use executor::HeldTexts;
+#[cfg(test)]
+pub(crate) use executor::peel_loop;
 mod graph;
 pub(crate) use graph::{
-    GraphClosure, collect_in as collect_graph_in, graph_closure, install_staged, reachable_from,
+    AUDIT_PAGE, GraphClosure, audit_page, graph_closure, graph_counts, install_staged, peel,
 };
 mod park;
 pub(crate) mod processes;
@@ -96,6 +98,62 @@ pub(crate) struct Committing<'a> {
     /// The fleet format the transaction's fence read: registry rows a
     /// domain write touches are encoded under it.
     pub(crate) fleet: lash_core_execution::FleetFormat,
+    /// The roots its writes retired, peeled before it commits.
+    pub(crate) retired: Retired,
+}
+
+/// The roots a transaction's writes retired: what it peels before it
+/// commits (FIG-5949). A turn's terminal retires its PhaseRoot alone: the
+/// TurnContent under it is the transcript the session's next turn names
+/// again, so it waits for the orphan audit rather than being reinstalled
+/// (the TurnContent ordering constraint).
+#[derive(Default)]
+pub(crate) struct Retired {
+    roots: std::sync::Mutex<(
+        std::collections::BTreeSet<String>,
+        std::collections::BTreeSet<String>,
+    )>,
+}
+
+impl Retired {
+    fn record(&self, phase_end: bool, root: String) {
+        let mut roots = self
+            .roots
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if phase_end {
+            roots.1.insert(root);
+        } else {
+            roots.0.insert(root);
+        }
+    }
+
+    /// `root` was retired: peel its closure.
+    pub(crate) fn closure(&self, root: &lash_core_store::checkpoint_graph::NodeId) {
+        self.record(false, root.to_hex());
+    }
+
+    /// A stored root reference was retired: peel its closure.
+    pub(crate) fn stored(&self, root: impl Into<String>) {
+        self.record(false, root.into());
+    }
+
+    /// An ended turn's PhaseRoot was retired: peel it alone.
+    pub(crate) fn phase_end(&self, root: impl Into<String>) {
+        self.record(true, root.into());
+    }
+
+    /// The retired closures, then the ended PhaseRoots.
+    pub(crate) fn into_parts(
+        self,
+    ) -> (
+        std::collections::BTreeSet<String>,
+        std::collections::BTreeSet<String>,
+    ) {
+        self.roots
+            .into_inner()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
 }
 
 lash_store_sql::statements! {
@@ -308,51 +366,36 @@ impl std::fmt::Debug for PostgresDurableStore {
 
 type Tx = GuardedTx<'static>;
 
-/// The graph roots `session`'s engine rows hold: its turns' and cells' run
-/// facts, its cells' roots and admissions. What its delete may reclaim once
-/// [`retire_session_rows`] removed them.
-pub(crate) async fn session_engine_roots(
-    tx: &mut PgConnection,
-    session: &lash_sansio::SessionId,
-) -> Result<std::collections::BTreeSet<String>, sqlx::Error> {
-    use lash_durable::domain::{ExecKey, OwnerKey};
-
-    let cells = ExecKey::session_cells(session);
-    let mut roots = std::collections::BTreeSet::new();
-    roots.extend(run_records::roots_under(&mut *tx, &OwnerKey::session_turns(session)).await?);
-    roots.extend(run_records::roots_under(&mut *tx, &cells).await?);
-    roots.extend(snapshots::roots_under(&mut *tx, &cells).await?);
-    roots.extend(graph::admission_roots_under(tx, &cells).await?);
-    Ok(roots)
-}
-
 /// Delete every engine row `session` owns, in its physical delete: its
 /// turns' run facts (their tool-call ledgers), its cells' roots, admissions
 /// and facts, the waits its actor owns and its turns' wait tombstones. The
 /// session's actor row stays: its terminal fence, which session write
-/// locking takes first.
+/// locking takes first. Answers every graph root those rows held: the
+/// delete's to peel.
 pub(crate) async fn retire_session_rows(
     tx: &mut PgConnection,
     session: &lash_sansio::SessionId,
-) -> Result<(), sqlx::Error> {
+) -> Result<Vec<String>, sqlx::Error> {
     use lash_durable::domain::{ExecKey, OwnerKey, ScopeKey};
 
     let cells = ExecKey::session_cells(session);
-    run_records::delete_under(&mut *tx, &OwnerKey::session_turns(session)).await?;
-    snapshots::retire_under(&mut *tx, &cells).await?;
+    let mut roots = run_records::delete_under(&mut *tx, &OwnerKey::session_turns(session)).await?;
+    roots.extend(snapshots::retire_under(&mut *tx, &cells).await?);
     if let Ok(actor) = ActorKey::session(session.as_str()) {
         waits::delete_owned(&mut *tx, &actor).await?;
     }
-    waits::delete_under(tx, &ScopeKey::session_turns(session)).await
+    waits::delete_under(tx, &ScopeKey::session_turns(session)).await?;
+    Ok(roots)
 }
 
 /// Delete `process`'s run facts and the waits it owns, in its prune: the
-/// process host API's tool calls go with its record.
+/// process host API's tool calls go with its record. Answers the RoundFact
+/// nodes they held: the prune's to peel.
 pub(crate) async fn retire_process_rows(
     tx: &mut PgConnection,
     process: &lash_sansio::ProcessId,
-) -> Result<(), sqlx::Error> {
-    run_records::delete_owner(
+) -> Result<Vec<String>, sqlx::Error> {
+    let facts = run_records::delete_owner(
         &mut *tx,
         &lash_durable::domain::OwnerKey::Process(process.clone()).stored(),
     )
@@ -360,7 +403,7 @@ pub(crate) async fn retire_process_rows(
     if let Ok(actor) = ActorKey::process(process.as_str()) {
         waits::delete_owned(tx, &actor).await?;
     }
-    Ok(())
+    Ok(facts)
 }
 
 /// Model a shared server's scheduling delay at registration and claim,
@@ -843,7 +886,7 @@ async fn apply_domain(
         DomainWrite::RunFact(write) => run_records::apply(tx, committing, write).await,
         DomainWrite::ExecRoot(write) => snapshots::apply(tx, committing, write).await,
         DomainWrite::EffectAdmission(write) => graph::apply_admission(tx, committing, write).await,
-        DomainWrite::ReleasePin(write) => graph::apply_release_pin(tx, write).await,
+        DomainWrite::ReleasePin(write) => graph::apply_release_pin(tx, committing, write).await,
         DomainWrite::Wait(write) => waits::apply(tx, committing, write).await,
         DomainWrite::Process(write) => processes::apply(tx, committing, write).await,
         DomainWrite::SessionClose(write) => session_close::apply(tx, committing, write).await,
@@ -1401,6 +1444,26 @@ impl PostgresDurableStore {
             .await
             .map_err(sqlx_failure)
     }
+}
+
+/// A `REPEATABLE READ READ ONLY` transaction on `connection`, for an
+/// unfenced read of several statements: one snapshot, so a root a peel
+/// retires during the read is read whole.
+async fn snapshot(
+    connection: &mut PgConnection,
+) -> Result<sqlx::Transaction<'_, sqlx::Postgres>, DurableError> {
+    let mut snapshot = crate::observed_sql::control("BEGIN", sqlx::Connection::begin(connection))
+        .await
+        .map_err(sqlx_failure)?;
+    crate::observed_sql::query(
+        crate::connection_sql::connection_sql()
+            .begin_repeatable_read_read_only
+            .sql(),
+    )
+    .execute(crate::observed_sql::executor(&mut *snapshot))
+    .await
+    .map_err(sqlx_failure)?;
+    Ok(snapshot)
 }
 
 #[cfg(test)]

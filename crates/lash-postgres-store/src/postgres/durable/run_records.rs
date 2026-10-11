@@ -36,8 +36,10 @@ pub(super) static APPEND: Entry = Entry::new(
     ],
     Shape::Returning,
 );
-pub(super) static DELETE_OWNER: Entry = Entry::new(|| &SQL.delete_owner, &[Ty::Text], Shape::Exec);
-pub(super) static PRUNE: Entry = Entry::new(|| &SQL.prune, &[Ty::Text, Ty::Int], Shape::Exec);
+pub(super) static DELETE_OWNER: Entry =
+    Entry::new(|| &SQL.delete_owner, &[Ty::Text], Shape::Returning).retiring("record_ref");
+pub(super) static PRUNE: Entry =
+    Entry::new(|| &SQL.prune, &[Ty::Text, Ty::Int], Shape::Returning).retiring("record_ref");
 
 /// `write`'s step program at `epoch`: an append is one conditional insert
 /// that must answer its row, a prune one delete.
@@ -78,7 +80,7 @@ pub(super) async fn apply(
     write: &RunFactWrite,
 ) -> Result<(), DurableError> {
     let program = steps(commit.epoch, write)?.unwrap_or_default();
-    if steps::run(tx, &program).await?.is_none() {
+    if steps::run(tx, &program, &commit.retired).await?.is_none() {
         return Ok(());
     }
     match write {
@@ -195,31 +197,26 @@ pub(super) async fn read(
         .collect()
 }
 
-/// Delete every fact of the owner stored as `key`.
-pub(super) async fn delete_owner(tx: &mut PgConnection, key: &str) -> Result<(), sqlx::Error> {
-    crate::observed_sql::query(SQL.delete_owner.sql())
-        .bind(key)
-        .execute(crate::observed_sql::executor(tx))
-        .await
-        .map(drop)
-}
-
-/// Delete every fact whose owner key starts with `key`.
-pub(super) async fn delete_under(tx: &mut PgConnection, key: &str) -> Result<(), sqlx::Error> {
-    crate::observed_sql::query(SQL.delete_under.sql())
-        .bind(key)
-        .execute(crate::observed_sql::executor(tx))
-        .await
-        .map(drop)
-}
-
-/// The RoundFact node of every fact whose owner key starts with `prefix`.
-pub(super) async fn roots_under(
+/// Delete every fact of the owner stored as `key`, answering the RoundFact
+/// nodes they held: the caller's to peel.
+pub(super) async fn delete_owner(
     tx: &mut PgConnection,
-    prefix: &str,
+    key: &str,
 ) -> Result<Vec<String>, sqlx::Error> {
-    crate::observed_sql::query_scalar(SQL.roots_under.sql())
-        .bind(prefix)
+    crate::observed_sql::query_scalar(SQL.delete_owner.sql())
+        .bind(key)
+        .fetch_all(crate::observed_sql::executor(tx))
+        .await
+}
+
+/// Delete every fact whose owner key starts with `key`, answering the
+/// RoundFact nodes they held: the caller's to peel.
+pub(super) async fn delete_under(
+    tx: &mut PgConnection,
+    key: &str,
+) -> Result<Vec<String>, sqlx::Error> {
+    crate::observed_sql::query_scalar(SQL.delete_under.sql())
+        .bind(key)
         .fetch_all(crate::observed_sql::executor(tx))
         .await
 }

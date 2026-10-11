@@ -12,10 +12,9 @@ use lash_sansio::ToolCallId;
 pub use lash_vm_protocol::KernelRestoreRefusal;
 
 use super::node::NodeId;
-use super::roots::RootSource;
 use crate::store_failure::StoreFailure;
 
-/// Why a graph encode, check, decode, commit, read or collection refused.
+/// Why a graph encode, check, decode, commit or read refused.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum GraphRefusal {
@@ -56,8 +55,6 @@ pub enum GraphRefusal {
         expected: u32,
         found: u32,
     },
-    #[error("node {0}'s stored edges are not its child table")]
-    EdgeProjectionMismatch(NodeId),
     #[error("node {0} is on a storage cycle")]
     StorageCycle(NodeId),
     #[error("the root's owner binding is not the reader's")]
@@ -84,8 +81,6 @@ pub enum GraphRefusal {
     RevisionConflict,
     #[error("the writer's fence was lost")]
     FenceLost,
-    #[error("root source {0:?} did not enumerate completely")]
-    RootSourceIncomplete(RootSource),
     #[error("the root was retired")]
     RootRetired,
     /// A publication does not match the domain record it names.
@@ -111,8 +106,6 @@ pub enum GraphRefusal {
     },
     #[error("encoding exceeds its memory lease")]
     EncodeMemoryLimit,
-    #[error("collection did not complete")]
-    CollectionIncomplete,
     /// A typed body decoder refused well-formed tokens. (Added by the seam
     /// lane: the typed refusal of a body owned outside the kernel.)
     #[error("invalid body of kind {kind}: {reason}")]

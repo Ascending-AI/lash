@@ -267,12 +267,23 @@ pub(crate) fn load_session_meta_in_tx(
 /// turn was admitted on, replacing the previous admission's (FIG-3682).
 ///
 /// A session with no metadata row yet has committed nothing, so its admission
-/// base names no checkpoint and there is nothing to retain.
+/// base names no checkpoint and there is nothing to retain. The base it
+/// replaces is peeled (FIG-5949).
 pub(crate) fn retain_admission_base_conn(
     conn: &rusqlite::Connection,
     session_id: &SessionId,
     checkpoint_ref: Option<&lash_core_execution::store::BlobRef>,
 ) -> Result<(), StoreError> {
+    let replaced = conn
+        .query_row(
+            session_sql().meta.select_admission_base.sql(),
+            rusqlite::params![session_id.as_str()],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()
+        .map_err(sqlite_error)?
+        .flatten()
+        .filter(|old| Some(old.as_str()) != checkpoint_ref.map(|blob_ref| blob_ref.as_str()));
     crate::conn::cached_execute(
         conn,
         session_sql().meta.retain_admission_base.sql(),
@@ -282,5 +293,6 @@ pub(crate) fn retain_admission_base_conn(
         ],
     )
     .map_err(sqlite_error)?;
+    crate::durable::peel(conn, replaced.into_iter().collect()).map_err(sqlite_error)?;
     Ok(())
 }

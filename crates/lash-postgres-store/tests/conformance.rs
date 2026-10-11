@@ -419,28 +419,19 @@ lash_conformance::artifact_store_reopenable_tests!({
 #[path = "conformance/artifact_retention.rs"]
 mod artifact_retention;
 
-/// Corrupt the live checkpoint manifest so the mark phase cannot decode the
-/// root it must follow, giving the sweep a real failure to report.
-struct PostgresCorruptRootedManifest {
+/// Drop the root catalog, so the collection cannot tell a root from an
+/// orphan, giving the sweep a real failure to report.
+struct PostgresBreakRootCatalog {
     storage: Arc<PostgresStorage>,
 }
 
 #[async_trait::async_trait]
-impl lash_conformance::StoreMaintenanceFaultInjector for PostgresCorruptRootedManifest {
+impl lash_conformance::StoreMaintenanceFaultInjector for PostgresBreakRootCatalog {
     async fn break_gc_scope(&self, _session_id: &SessionId) {
-        let corrupted = sqlx::query(
-            "UPDATE lash_blobs SET content = '\\xffffffff'::bytea
-             WHERE hash IN (SELECT checkpoint_ref FROM lash_session_head JOIN lash_session_revisions USING (session_id, head_revision)
-                            WHERE checkpoint_ref IS NOT NULL)",
-        )
-        .execute(self.storage.pool())
-        .await
-        .expect("corrupt the rooted checkpoint manifest")
-        .rows_affected();
-        assert!(
-            corrupted >= 1,
-            "the fault must corrupt at least one rooted manifest"
-        );
+        sqlx::query("DROP VIEW lash_graph_root_catalog")
+            .execute(self.storage.pool())
+            .await
+            .expect("drop the root catalog");
     }
 }
 
@@ -488,7 +479,7 @@ lash_conformance::store_maintenance_fault_tests!({
                 Arc::new(storage.session_store_factory()) as Arc<dyn DeploymentStore>
             })
         },
-        Arc::new(PostgresCorruptRootedManifest { storage }),
+        Arc::new(PostgresBreakRootCatalog { storage }),
     )
 });
 

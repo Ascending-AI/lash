@@ -337,10 +337,7 @@ mod tests {
         let bytes = graph.nodes()[&root].bytes.len() as u64;
         for (sample, expected) in [bytes, 0, bytes].into_iter().enumerate() {
             if sample == 2 {
-                store
-                    .collect_graph(lash_durable::domain::graph_commit::CollectionLimits::UNBOUNDED)
-                    .await
-                    .unwrap();
+                store.audit_orphans().await.unwrap();
             }
             let mut tx = store.begin(&actor, Epoch(identity.epoch)).await.unwrap();
             tx.stage(graph.nodes().values().cloned());

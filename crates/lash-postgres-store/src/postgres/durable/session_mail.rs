@@ -591,7 +591,7 @@ async fn admit(tx: &mut PgConnection, write: &SessionMailWrite) -> Result<(), Du
         return Ok(());
     };
     let program = steps(write).unwrap_or_default();
-    let Some(refused) = steps::run(tx, &program).await? else {
+    let Some(refused) = steps::run(tx, &program, &super::Retired::default()).await? else {
         return Ok(());
     };
     let bound: std::collections::HashSet<String> = refused

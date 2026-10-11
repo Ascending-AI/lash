@@ -504,6 +504,7 @@ mod tests {
             now: DurableInstant(42),
             fleet: lash_core_execution::FleetFormat::current(),
             blob_profile: crate::BuiltinBlobProfile::default(),
+            retired: Default::default(),
         };
         let scope = ScopeKey::Turn("session".into(), "run".into());
         let (answer, receipt) =
@@ -557,6 +558,7 @@ mod tests {
             let commit = Committing {
                 actor: &actor, epoch: Epoch(1), now: DurableInstant(42),
                 fleet: lash_core_execution::FleetFormat::current(), blob_profile: crate::BuiltinBlobProfile::default(),
+                retired: Default::default(),
             };
             close_scope(conn, &commit, &ScopeKey::Turn("held-session".into(), "held-run".into()))?.expect("close");
             assert_eq!(conn.query_row("SELECT count(*) FROM processes WHERE consumer_hold_key IS NOT NULL", [], |row| row.get::<_, i64>(0))?, 0);

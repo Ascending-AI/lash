@@ -1,29 +1,31 @@
 //! The checkpoint graph on SQLite: the `graph` domain's DDL, the
-//! owner graph installation, hydration, and the reachability
-//! collector (FIG-5887 §5, §7, §8; lane G, FIG-5890).
+//! owner graph installation, hydration, and the peel that reclaims a
+//! retired root's closure (FIG-5887 §5, §7; FIG-5949).
 //!
 //! # One transaction, one lock
 //!
 //! Every graph write runs in [`SqliteConnection::write_flow`]: the
 //! database's write lock (`BEGIN IMMEDIATE`) and the writer fence come
 //! first, then the owner's epoch fence, then the commit in the order of
-//! [`lash_durable::domain::graph`]'s contracts. SQLite has one writer, so
-//! the lock order PostgreSQL spells with its graph gate is the database
-//! lock here: a writer and the collector never interleave.
+//! [`lash_durable::domain::graph`]'s contracts. SQLite has one writer, so a
+//! peel never interleaves with an install.
 //!
 //! A hydration is one read transaction that selects the owner's root first,
 //! fixing its snapshot, and reads every descendant on it, so a writer that
-//! replaces the root or a collector that sweeps it afterwards cannot reach
-//! what it reads.
+//! replaces the root and peels its closure afterwards cannot reach what it
+//! reads.
 //!
-//! # Roots
+//! # Reclamation
 //!
 //! The root catalog (`graph_root_catalog`) is a view of the owning columns.
-//! The collector enumerates it one source at a time, records every source
-//! exhausted, and marks from those roots alone: a missing root or child, a
-//! stored edge set that is not a node's child table, an incomplete source
-//! or an exhausted work budget rolls the whole collection back with nothing
-//! swept.
+//! The graph is a DAG, so a node no root reaches is an orphan (no root row,
+//! no edge to it) or reached only from such nodes: deleting orphans, whose
+//! edges go with them, deletes exactly what nothing reaches. Every
+//! transaction that retires a root peels it before it commits: the root
+//! goes when nothing else names it, then each child its edges no longer
+//! reach, level by level, stopping at a node something still names. The
+//! orphan audit ([`audit_page`]) peels whatever a write outside the peel
+//! left behind.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::LazyLock;
@@ -31,14 +33,14 @@ use std::sync::LazyLock;
 use lash_core_store::checkpoint_graph::node::immutable_closure;
 use lash_core_store::checkpoint_graph::{
     BlobEncoding, DecodeDimension, DecodeLimits, GraphRefusal, InstalledGraphMeasurement, NodeId,
-    NodeSource, RootSource, StoredNode, check_envelope,
+    NodeSource, StoredNode, check_envelope,
 };
 use lash_durable::domain::DomainRefusal;
 use lash_durable::domain::graph::{
     EffectAdmissionWrite, HydratedGraph, HydratedNode, ReleasePinWrite, RootOwner,
 };
 use lash_durable::domain::graph_commit::{
-    CheckedGraph, CollectionLimits, EDGE_ROW_LOGICAL_BYTES, GraphCollection, blob_row_logical_bytes,
+    CheckedGraph, EDGE_ROW_LOGICAL_BYTES, blob_row_logical_bytes,
 };
 use lash_durable::{CommitLabel, DurableError, DurableInstant, StoreFailure, StoreFailureKind};
 use lash_store_sql::durable::graph::GraphStatements;
@@ -47,7 +49,7 @@ use lash_store_sql::durable::snapshots::SnapshotStatements;
 use lash_store_sql::durable::turns::TurnStatements;
 use rusqlite::{Connection, OptionalExtension};
 
-use super::{Answer, Committing, SqliteDurableStore, integer};
+use super::{Answer, Committing, Retired, SqliteDurableStore, integer};
 use crate::conn::{FencedTx, TxOutcome, cached_execute};
 
 /// The graph tables and the root catalog, created after every table the
@@ -114,24 +116,11 @@ CREATE VIEW IF NOT EXISTS graph_root_catalog AS
 lash_store_sql::statements! {
     /// Graph statements only SQLite issues: the artifact bridge's pointer
     /// table and the
-    /// sweep's `json_each` binding of the mark set.
+    /// `json_each` binding of a node list.
     pub(crate) struct GraphSqliteStatements @ "durable_graph_sqlite" {
         /// Artifact `?2` of namespace `?1`'s blob: SQLite's bridge is its
         /// pointer table.
         artifact_root = "SELECT blob_ref FROM artifact_refs WHERE namespace = ?1 AND artifact_ref = ?2";
-
-        /// How many edges lead from a marked parent in JSON `?1` to an
-        /// unmarked child: none after a complete closure.
-        dangling_edges = "SELECT count(*) FROM blob_edges
-             WHERE parent_hash IN (SELECT value FROM json_each(?1))
-               AND child_hash NOT IN (SELECT value FROM json_each(?1))";
-
-        /// Sweep every edge whose parent is not marked in JSON `?1`.
-        sweep_edges = "DELETE FROM blob_edges
-             WHERE parent_hash NOT IN (SELECT value FROM json_each(?1))";
-
-        /// Sweep every blob not marked in JSON `?1`.
-        sweep_blobs = "DELETE FROM blobs WHERE hash NOT IN (SELECT value FROM json_each(?1))";
 
         /// The encoding of every stored blob in JSON `?1`.
         stored_encodings = "SELECT hash, encoding FROM blobs
@@ -145,6 +134,24 @@ lash_store_sql::statements! {
         /// of freshly installed parents.
         insert_edges = "INSERT INTO blob_edges (parent_hash, child_hash)
              SELECT value ->> 0, value ->> 1 FROM json_each(?1)";
+
+        /// Every edge from a parent in JSON `?1`: where a peel descends once
+        /// its parent is gone, read before the delete takes the edges.
+        peel_edges = "SELECT parent_hash, child_hash FROM blob_edges
+             WHERE parent_hash IN (SELECT value FROM json_each(?1))";
+
+        /// One level of a peel: delete every blob in JSON `?1` no root names
+        /// and no edge reaches, and return each one deleted. Its edges go
+        /// with it.
+        peel_orphans = "DELETE FROM blobs AS candidate
+             WHERE candidate.hash IN (SELECT value FROM json_each(?1))
+               AND NOT EXISTS (
+                   SELECT 1 FROM graph_root_catalog AS root WHERE root.root_ref = candidate.hash
+               )
+               AND NOT EXISTS (
+                   SELECT 1 FROM blob_edges AS edge WHERE edge.child_hash = candidate.hash
+               )
+             RETURNING hash";
     }
 }
 
@@ -167,8 +174,11 @@ static SQL: LazyLock<Sql> = LazyLock::new(|| {
     }
 });
 
-/// A reachability collection.
-const GRAPH_COLLECT: CommitLabel = CommitLabel::new("graph.collect");
+/// One page of the orphan audit.
+const GRAPH_AUDIT: CommitLabel = CommitLabel::new("graph.audit");
+
+/// The orphans one audit page reads.
+pub(crate) const AUDIT_PAGE: usize = 256;
 
 /// A statement's answer inside a graph transaction: a value, or a typed
 /// refusal that rolls the transaction back.
@@ -232,12 +242,6 @@ fn stored_encoding(tx: &Connection, node: &NodeId) -> GraphAnswer<Option<BlobEnc
         .query_row([node.to_hex()], |row| row.get::<_, i64>(0))
         .optional()?;
     Ok(row.map(encoding_of).transpose())
-}
-
-fn stored_edges(tx: &Connection, hash: &str) -> rusqlite::Result<Vec<String>> {
-    tx.prepare_cached(SQL.graph.edges_of.sql())?
-        .query_map([hash], |row| row.get::<_, String>(0))?
-        .collect()
 }
 
 /// `owner`'s current root, or none when its row is gone or holds none.
@@ -536,49 +540,118 @@ pub(super) fn hydrate_in(
     Ok(walk(tx, root, limits)?.map(|nodes| HydratedGraph { owner, root, nodes }))
 }
 
-/// Every blob reachable from `roots` along stored edges, the roots included:
-/// what an owner-scoped delete may reclaim once its roots are gone.
-pub(crate) fn reachable_from(
-    tx: &Connection,
-    roots: &BTreeSet<String>,
-) -> rusqlite::Result<BTreeSet<String>> {
-    let mut seen = BTreeSet::new();
-    let mut stack: Vec<String> = roots.iter().cloned().collect();
-    while let Some(hash) = stack.pop() {
-        if seen.insert(hash.clone()) {
-            stack.extend(stored_edges(tx, &hash)?);
-        }
-    }
-    Ok(seen)
+/// What a peel did: the candidates it examined (the retired roots and each
+/// child of a node it deleted), how many it deleted, and how many something
+/// still names.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Peeled {
+    pub(crate) examined: usize,
+    pub(crate) deleted: usize,
 }
 
-/// Deletes every blob of `candidates` nothing roots or references any more,
-/// parents first: a parent's edges go with it, so its children become
-/// deletable in a later round. Answers how many it deleted and how many it
-/// kept.
-pub(crate) fn reclaim_candidates(
-    tx: &Connection,
-    candidates: BTreeSet<String>,
-    reclaim: &str,
-) -> rusqlite::Result<(usize, usize)> {
-    let mut remaining = candidates;
+impl Peeled {
+    /// The candidates something still names.
+    pub(crate) fn retained(self) -> usize {
+        self.examined - self.deleted
+    }
+}
+
+/// Peels `frontier`, the roots the caller's transaction retired: deletes
+/// each one nothing names or reaches any more, then each child the deleted
+/// nodes' edges reached, level by level, stopping wherever something still
+/// names a node. Its work is the newly unreachable nodes and their edges,
+/// never a closure something still roots.
+pub(crate) fn peel(tx: &Connection, frontier: BTreeSet<String>) -> rusqlite::Result<Peeled> {
+    let mut examined = frontier.clone();
+    let mut frontier = frontier;
     let mut deleted = 0;
-    loop {
-        let mut kept = BTreeSet::new();
-        let before = deleted;
-        for hash in remaining {
-            match cached_execute(tx, reclaim, [&hash])? {
-                0 => {
-                    kept.insert(hash);
-                }
-                count => deleted += count,
-            }
-        }
-        remaining = kept;
-        if deleted == before || remaining.is_empty() {
-            return Ok((deleted, remaining.len()));
+    while !frontier.is_empty() {
+        let (gone, children) = peel_level(tx, &frontier)?;
+        deleted += gone;
+        examined.extend(children.iter().cloned());
+        frontier = children;
+    }
+    Ok(Peeled {
+        examined: examined.len(),
+        deleted,
+    })
+}
+
+/// `values` as one JSON array, the binding a `json_each` statement reads.
+fn json_array(values: &impl serde::Serialize) -> String {
+    #[expect(clippy::expect_used, reason = "strings always encode as JSON")]
+    serde_json::to_string(values).expect("a list of digests encodes")
+}
+
+/// One level of [`peel`]: deletes every node of `frontier` nothing names or
+/// reaches, and answers how many with the children their edges reached.
+fn peel_level(
+    tx: &Connection,
+    frontier: &BTreeSet<String>,
+) -> rusqlite::Result<(usize, BTreeSet<String>)> {
+    let list = json_array(frontier);
+    let mut edges: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    {
+        let mut statement = tx.prepare_cached(SQL.sqlite.peel_edges.sql())?;
+        let mut rows = statement.query([&list])?;
+        while let Some(row) = rows.next()? {
+            edges.entry(row.get(0)?).or_default().push(row.get(1)?);
         }
     }
+    let gone = tx
+        .prepare_cached(SQL.sqlite.peel_orphans.sql())?
+        .query_map([&list], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let children = gone
+        .iter()
+        .filter_map(|hash| edges.remove(hash))
+        .flatten()
+        .collect();
+    Ok((gone.len(), children))
+}
+
+/// Peels what `retired` recorded, before its transaction commits: each
+/// retired root's closure, and each ended turn's PhaseRoot alone. Answers
+/// how many blobs it deleted.
+pub(super) fn reclaim(tx: &Connection, retired: Retired) -> rusqlite::Result<usize> {
+    let (closures, phase_ends) = retired.into_parts();
+    let mut deleted = peel(tx, closures)?.deleted;
+    if !phase_ends.is_empty() {
+        deleted += peel_level(tx, &phase_ends)?.0;
+    }
+    Ok(deleted)
+}
+
+/// How many roots the catalog names and how many blobs are stored.
+pub(crate) fn graph_counts(tx: &Connection) -> rusqlite::Result<(usize, usize)> {
+    let count = |sql: &str| -> rusqlite::Result<usize> {
+        let count: i64 = tx.prepare_cached(sql)?.query_row([], |row| row.get(0))?;
+        Ok(usize::try_from(count).unwrap_or(0))
+    };
+    Ok((
+        count(SQL.graph.catalog_count.sql())?,
+        count(SQL.graph.blob_count.sql())?,
+    ))
+}
+
+/// One page of the orphan audit: peels up to `limit` blobs after `after`,
+/// in digest order, that no root names and no edge reaches. Answers the
+/// last orphan the page read (none when it read none) and how many blobs
+/// the peel deleted.
+pub(crate) fn audit_page(
+    tx: &Connection,
+    after: &str,
+    limit: usize,
+) -> rusqlite::Result<(Option<String>, usize)> {
+    let orphans = tx
+        .prepare_cached(SQL.graph.orphans_after.sql())?
+        .query_map(
+            rusqlite::params![after, i64::try_from(limit).unwrap_or(i64::MAX)],
+            |row| row.get::<_, String>(0),
+        )?
+        .collect::<rusqlite::Result<BTreeSet<_>>>()?;
+    let last = orphans.last().cloned();
+    Ok((last, peel(tx, orphans)?.deleted))
 }
 
 fn graph_refused<T>(refusal: GraphRefusal) -> Answer<T> {
@@ -639,34 +712,37 @@ pub(super) fn apply_admission(
             if removed.is_none() {
                 return graph_refused(GraphRefusal::RevisionConflict);
             }
+            commit.retired.closure(expected);
         }
     }
     Ok(Ok(()))
 }
 
-/// Drop every admission of the execution stored as `exec_key`.
-pub(super) fn clear_admissions(tx: &Connection, exec_key: &str) -> rusqlite::Result<()> {
-    cached_execute(tx, SQL.graph.admissions_clear.sql(), [exec_key]).map(drop)
+/// Drop every admission of the execution stored as `exec_key`, answering
+/// the Admission nodes they held: the caller's to peel.
+pub(super) fn clear_admissions(tx: &Connection, exec_key: &str) -> rusqlite::Result<Vec<String>> {
+    tx.prepare_cached(SQL.graph.admissions_clear.sql())?
+        .query_map([exec_key], |row| row.get(0))?
+        .collect()
 }
 
-/// Drop every admission whose execution key starts with `prefix`.
-pub(super) fn clear_admissions_under(tx: &Connection, prefix: &str) -> rusqlite::Result<()> {
-    cached_execute(tx, SQL.graph.admissions_clear_under.sql(), [prefix]).map(drop)
-}
-
-/// The Admission node of every admission whose execution key starts with
-/// `prefix`.
-pub(super) fn admission_roots_under(
+/// Drop every admission whose execution key starts with `prefix`,
+/// answering the Admission nodes they held: the caller's to peel.
+pub(super) fn clear_admissions_under(
     tx: &Connection,
     prefix: &str,
 ) -> rusqlite::Result<Vec<String>> {
-    tx.prepare_cached(SQL.graph.admission_roots_under.sql())?
+    tx.prepare_cached(SQL.graph.admissions_clear_under.sql())?
         .query_map([prefix], |row| row.get(0))?
         .collect()
 }
 
 /// Applies a release pin write.
-pub(super) fn apply_release_pin(tx: &Connection, write: &ReleasePinWrite) -> Answer<()> {
+pub(super) fn apply_release_pin(
+    tx: &Connection,
+    commit: &Committing<'_>,
+    write: &ReleasePinWrite,
+) -> Answer<()> {
     match write {
         ReleasePinWrite::Install { release, root } => {
             let installed = cached_execute(
@@ -691,6 +767,7 @@ pub(super) fn apply_release_pin(tx: &Connection, write: &ReleasePinWrite) -> Ans
             if retired.is_none() {
                 return graph_refused(GraphRefusal::RevisionConflict);
             }
+            commit.retired.closure(expected);
         }
     }
     Ok(Ok(()))
@@ -832,92 +909,6 @@ fn digest_array<'a>(ids: impl IntoIterator<Item = &'a NodeId>) -> String {
     array
 }
 
-/// Marks every blob reachable from the complete root catalog and sweeps the
-/// rest, in the caller's write transaction.
-pub(crate) fn collect_in(
-    tx: &Connection,
-    limits: CollectionLimits,
-) -> GraphAnswer<GraphCollection> {
-    let mut report = GraphCollection::default();
-    let mut stack: Vec<String> = Vec::new();
-    for source in RootSource::ALL {
-        let rows = tx
-            .prepare_cached(SQL.graph.catalog_source.sql())
-            .and_then(|mut statement| {
-                statement
-                    .query_map([source.catalog_name()], |row| row.get::<_, String>(0))?
-                    .collect::<rusqlite::Result<Vec<_>>>()
-            });
-        let Ok(rows) = rows else {
-            return Ok(Err(GraphRefusal::RootSourceIncomplete(source)));
-        };
-        report.roots.insert(source, rows.len() as u64);
-        stack.extend(rows);
-    }
-    let mut marked = BTreeSet::new();
-    let mut spent = 0_u64;
-    let envelope_limits = DecodeLimits::within_total(u64::MAX);
-    while let Some(hash) = stack.pop() {
-        if marked.contains(&hash) {
-            continue;
-        }
-        if marked.len() as u64 >= limits.nodes {
-            return Ok(Err(GraphRefusal::CollectionIncomplete));
-        }
-        let Some((bytes, encoding)) = (match stored_blob(tx, &hash)? {
-            Ok(found) => found,
-            Err(refusal) => return Ok(Err(refusal)),
-        }) else {
-            return Ok(Err(match NodeId::from_hex(&hash) {
-                Some(id) => GraphRefusal::MissingNode(id),
-                None => corrupt("blob reference", &hash),
-            }));
-        };
-        spent = spent.saturating_add(bytes.len() as u64);
-        if spent > limits.bytes {
-            return Ok(Err(GraphRefusal::CollectionIncomplete));
-        }
-        let edges = stored_edges(tx, &hash)?;
-        match encoding {
-            BlobEncoding::Graph => {
-                let id = match NodeId::from_hex(&hash) {
-                    Some(id) => id,
-                    None => return Ok(Err(corrupt("graph node reference", &hash))),
-                };
-                let envelope = match check_envelope(&bytes, id, &envelope_limits) {
-                    Ok(envelope) => envelope,
-                    Err(refusal) => return Ok(Err(refusal)),
-                };
-                let children: Vec<String> = envelope.children.iter().map(|c| c.to_hex()).collect();
-                if children != edges {
-                    return Ok(Err(GraphRefusal::EdgeProjectionMismatch(id)));
-                }
-                stack.extend(children);
-            }
-            BlobEncoding::Opaque => {
-                if !edges.is_empty() {
-                    return Ok(Err(match NodeId::from_hex(&hash) {
-                        Some(id) => GraphRefusal::EdgeProjectionMismatch(id),
-                        None => corrupt("opaque blob edges", &hash),
-                    }));
-                }
-            }
-        }
-        marked.insert(hash);
-    }
-    report.marked = marked.len() as u64;
-    let marks = serde_json::Value::from(marked.into_iter().collect::<Vec<_>>()).to_string();
-    let dangling: i64 = tx
-        .prepare_cached(SQL.sqlite.dangling_edges.sql())?
-        .query_row([&marks], |row| row.get(0))?;
-    if dangling != 0 {
-        return Ok(Err(GraphRefusal::CollectionIncomplete));
-    }
-    report.swept_edges = cached_execute(tx, SQL.sqlite.sweep_edges.sql(), [&marks])? as u64;
-    report.swept_blobs = cached_execute(tx, SQL.sqlite.sweep_blobs.sql(), [&marks])? as u64;
-    Ok(Ok(report))
-}
-
 fn backend(error: DurableError) -> GraphRefusal {
     from_durable(error)
 }
@@ -951,25 +942,29 @@ impl SqliteDurableStore {
         .map_err(backend)?
     }
 
-    /// Collects every blob no root reaches, within `limits`. Nothing is swept
-    /// unless every source enumerated completely and every reached node
-    /// checked.
+    /// Runs the orphan audit to its end, a page per transaction: peels
+    /// every blob no root names and no edge reaches, with what only it
+    /// reached. A write beside it waits for one page at most. Answers how
+    /// many blobs it deleted.
     ///
     /// # Errors
     ///
-    /// [`GraphRefusal::RootSourceIncomplete`], [`GraphRefusal::MissingNode`],
-    /// [`GraphRefusal::EdgeProjectionMismatch`], an envelope refusal,
-    /// [`GraphRefusal::CollectionIncomplete`], or a store failure.
-    pub async fn collect_graph(
-        &self,
-        limits: CollectionLimits,
-    ) -> Result<GraphCollection, GraphRefusal> {
-        self.graph_write(GRAPH_COLLECT, move |tx, _| {
-            Ok(match collect_in(tx, limits)? {
-                Ok(report) => TxOutcome::Commit(Ok(report)),
-                Err(refusal) => TxOutcome::Rollback(Err(refusal)),
-            })
-        })
-        .await
+    /// A store failure.
+    pub async fn audit_orphans(&self) -> Result<u64, GraphRefusal> {
+        let mut after = String::new();
+        let mut deleted = 0_u64;
+        loop {
+            let from = after.clone();
+            let (last, gone) = self
+                .graph_write(GRAPH_AUDIT, move |tx, _| {
+                    Ok(TxOutcome::Commit(Ok(audit_page(tx, &from, AUDIT_PAGE)?)))
+                })
+                .await?;
+            deleted += gone as u64;
+            match last {
+                Some(last) => after = last,
+                None => return Ok(deleted),
+            }
+        }
     }
 }

@@ -41,8 +41,17 @@ impl DurableReads for PostgresDurableStore {
         session: &lash_sansio::SessionId,
         run: &lash_sansio::TurnId,
     ) -> Result<Vec<lash_durable::domain::TurnNamespace>, DurableError> {
-        self.read(|connection| Box::pin(turns::turn_namespaces(connection, session, run)))
-            .await
+        // The rows and the graphs they root are several statements: one
+        // snapshot, so a peel beside the read never leaves it half a graph.
+        self.read(|connection| {
+            Box::pin(async move {
+                let mut snapshot = super::snapshot(connection).await?;
+                let namespaces = turns::turn_namespaces(&mut snapshot, session, run).await?;
+                snapshot.rollback().await.map_err(super::sqlx_failure)?;
+                Ok(namespaces)
+            })
+        })
+        .await
     }
 
     async fn run_facts(&self, owner: &OwnerKey) -> Result<RunFacts, DurableError> {

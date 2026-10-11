@@ -42,13 +42,6 @@
 //! first statement, with the clock and its other envelope reads
 //! ([`Locked`]); every other writer reads it as its first data statement.
 //!
-//! Ahead of the fence, the same `BEGIN` takes the checkpoint graph's gate
-//! shared (FIG-5887 §8): a collection takes it exclusive
-//! ([`begin_collecting`]), so it never marks or sweeps beside a guarded
-//! transaction that publishes, retires or reads a graph root. The gate is
-//! the first lock any guarded transaction takes, so it is never acquired
-//! while a later one is held.
-//!
 //! A transaction stages the change-feed changes it writes; their feed
 //! sequences are assigned after it commits ([`crate::change_feed`]), so no
 //! writer takes a feed clock.
@@ -610,23 +603,6 @@ pub(crate) async fn begin_guarded<'c, 'p>(
     let tx = entry
         .into()
         .begin_with(fence.state.prelude.fenced().to_owned())
-        .await
-        .map_err(|error| fence.refused(store_sqlx_error(error)))?;
-    let mut locked = Locked { tx };
-    let recorded = fence.read(locked.connection()).await?;
-    locked.admit(fence, recorded).await
-}
-
-/// A collection's entry (FIG-5887 §8): [`begin_guarded`] with the graph
-/// gate taken exclusive ahead of the writer fence, so no guarded transaction
-/// (a writer or a hydration) runs beside it.
-pub(crate) async fn begin_collecting<'c, 'p>(
-    entry: impl Into<GuardedEntry<'c, 'p>>,
-    fence: &WriterFence,
-) -> Result<GuardedTx<'c>, StoreError> {
-    let tx = entry
-        .into()
-        .begin_with(fence.state.prelude.collecting().to_owned())
         .await
         .map_err(|error| fence.refused(store_sqlx_error(error)))?;
     let mut locked = Locked { tx };

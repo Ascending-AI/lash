@@ -429,33 +429,3 @@ pub const fn blob_row_logical_bytes(content: u64) -> u64 {
 
 /// See [`blob_row_logical_bytes`].
 pub const EDGE_ROW_LOGICAL_BYTES: u64 = 128;
-
-/// What a collector may spend before it gives up with nothing swept.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct CollectionLimits {
-    /// Blobs it may mark.
-    pub nodes: u64,
-    /// Blob bytes it may read while marking.
-    pub bytes: u64,
-}
-
-impl CollectionLimits {
-    /// No bound but the catalog's own size.
-    pub const UNBOUNDED: Self = Self {
-        nodes: u64::MAX,
-        bytes: u64::MAX,
-    };
-}
-
-/// What one complete collection did.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct GraphCollection {
-    /// Root rows enumerated, per source, every source exhausted.
-    pub roots: BTreeMap<lash_core_store::checkpoint_graph::RootSource, u64>,
-    /// Blobs marked live.
-    pub marked: u64,
-    /// Edge rows swept (each from an unmarked parent).
-    pub swept_edges: u64,
-    /// Blobs swept.
-    pub swept_blobs: u64,
-}
